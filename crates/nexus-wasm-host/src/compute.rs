@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use wasmtime::{ExternType, Instance, Linker, Module, Store, StoreLimitsBuilder, Trap, TypedFunc};
+use wasmtime::{Instance, Linker, Module, Store, StoreLimitsBuilder, Trap, TypedFunc};
 
 use crate::error::{ComputeError, EntryValidationFailure, Result};
 use crate::host::{register_host_imports, InvocationState};
@@ -97,11 +97,10 @@ impl WasmEngine {
         // wasmtime 49.0.1 exposes no typed limiter-denial error: the
         // instantiation-time `StoreLimits` refusal is a formatted string
         // ("memory minimum size of N pages exceeds memory limits"), so the
-        // class cannot be recovered by downcasting. Compare the module's
-        // declared linear-memory minimum against this invocation's cap
-        // instead — a module that starts above the cap can never be
-        // instantiated within it, so the refusal is decided before the store
-        // is built.
+        // class cannot be recovered by downcasting. Compare every declared
+        // linear memory's minimum against this invocation's cap instead — a
+        // module that starts above the cap can never be instantiated within it,
+        // so the refusal is decided before the store is built.
         if declared_memory_minimum_exceeds_cap(&module.module, sandbox.max_memory_bytes) {
             return Err(ComputeError::MemoryCapExceeded);
         }
@@ -626,7 +625,7 @@ pub struct ResolvedSandbox {
 /// particular path.
 ///
 /// The instantiation path is covered *before* instantiation by the
-/// exported-memory-minimum pre-check in [`WasmEngine::run_invocation`] (see
+/// declared-memory-minimum pre-check in [`WasmEngine::run_invocation`] (see
 /// [`declared_memory_minimum_exceeds_cap`]). Trigger for reclassifying this
 /// arm: "wasmtime exposes a typed limiter-denial error".
 fn map_call_result<T>(res: wasmtime::Result<T>) -> Result<T> {
@@ -641,21 +640,33 @@ fn map_call_result<T>(res: wasmtime::Result<T>) -> Result<T> {
     })
 }
 
-/// Whether any linear memory the module exports starts above the invocation's
-/// cap (V1.206 P2 site 2).
+/// The wasm linear-memory page size in bytes (`2**16`). The engine config does
+/// not enable the custom-page-sizes proposal, so every declared memory uses
+/// this page size.
+const WASM_PAGE_SIZE_BYTES: u64 = 65_536;
+
+/// Whether any linear memory the module **declares** starts above the
+/// invocation's cap (V1.206 P2 site 2; Greptile fix — all declared memories,
+/// not only the exports).
 ///
-/// The ABI requires the module to export its linear memory (`memory`); the
-/// check reads each exported memory's declared minimum (pages × page size)
-/// against `max_memory_bytes`, so a module that declares more than the cap is
-/// refused with [`ComputeError::MemoryCapExceeded`] before instantiation.
+/// The ABI requires the module to export its linear memory (`memory`), but a
+/// module may also declare unexported memories. Reading only the exports would
+/// let an oversized unexported memory slip past this check and be refused at
+/// instantiation with a generic [`ComputeError::Wasmtime`] instead of
+/// [`ComputeError::MemoryCapExceeded`]. [`Module::resources_required`] reports
+/// the largest *defined*-memory minimum (pages) across the whole module, so the
+/// refusal is decided before the store is built for every declared memory,
+/// exported or not.
+///
+/// Host-imported memories are not defined by this module (the host linker
+/// supplies them, bounded by the host's own limits) and are not counted;
+/// `StoreLimits` still bounds their runtime growth.
 fn declared_memory_minimum_exceeds_cap(module: &Module, max_memory_bytes: usize) -> bool {
     let cap = u64::try_from(max_memory_bytes).unwrap_or(u64::MAX);
-    module.exports().any(|export| match export.ty() {
-        ExternType::Memory(memory) => {
-            memory.minimum().saturating_mul(memory.page_size()) > cap
-        }
-        _ => false,
-    })
+    module
+        .resources_required()
+        .max_initial_memory_size
+        .is_some_and(|pages| pages.saturating_mul(WASM_PAGE_SIZE_BYTES) > cap)
 }
 
 fn optional_export<Params, Returns>(

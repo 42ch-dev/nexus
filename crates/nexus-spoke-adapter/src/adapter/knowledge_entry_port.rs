@@ -1077,8 +1077,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let mut hidden =
-            KnowledgeEntryRecord::new("wld_1", BlockType::Character, "HiddenPromote");
+        let mut hidden = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "HiddenPromote");
         hidden.entry_id = "kb_hidden_promote".to_string();
         hidden.holder_entry_id = Some(register_creator_holder(&pool).await);
         hidden.disclosure = Some(DISCLOSURE_OWNER_PRIVATE.to_string());

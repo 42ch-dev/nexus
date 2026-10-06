@@ -30,7 +30,7 @@ use nexus_core::execution::capabilities::{
 };
 use nexus_core::execution::compute::{
     accept_compute_run, clear_compute_runs, compute_run, discard_compute_run, get_compute_run,
-    list_compute_runs, run_visibility, ComputeContext, RunVisibility,
+    list_compute_runs, ComputeContext,
 };
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, WorkPatchRequest};
 use nexus_wasm_host::{CachedModule, ModuleCache, ModuleManifest, SandboxConfig, WasmEngine};
@@ -2282,36 +2282,10 @@ async fn run_detail_and_foreign_run_refusals() {
         "an unknown id and a foreign id must close with the same refusal"
     );
 
-    // QC F-001: the opacity collapse is an outward rendering only — the core
-    // must still tell an absent id from a foreign-World row internally.
-    let creator_id = principal.creator_id();
-    assert!(
-        matches!(
-            run_visibility(f.core.pool(), creator_id, "run_does_not_exist")
-                .await
-                .expect("visibility lookup"),
-            RunVisibility::Absent
-        ),
-        "an unknown id must classify as Absent"
-    );
-    assert!(
-        matches!(
-            run_visibility(f.core.pool(), creator_id, &foreign)
-                .await
-                .expect("visibility lookup"),
-            RunVisibility::ForeignDenied
-        ),
-        "a foreign-World run must classify as ForeignDenied"
-    );
-    assert!(
-        matches!(
-            run_visibility(f.core.pool(), creator_id, &run_id)
-                .await
-                .expect("visibility lookup"),
-            RunVisibility::Visible(_)
-        ),
-        "an owned run must classify as Visible"
-    );
+    // QC F-001: the internal Absent / ForeignDenied / Visible distinction is
+    // pinned inside the crate (`execution::compute::tests`) — keeping the
+    // helper (and its SQL pool) off the public surface is the point of that
+    // move, so this test asserts only the outward opacity shape above.
 
     // The foreign row survived every refused operation.
     assert!(

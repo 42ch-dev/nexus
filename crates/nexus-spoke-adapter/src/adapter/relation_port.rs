@@ -2396,9 +2396,9 @@ mod tests {
             .await
         {
             SpokeResult::Ok(r) => r,
-            SpokeResult::Reject(r) => panic!(
-                "a hidden relation must answer the absent-id success shape, got {r:?}"
-            ),
+            SpokeResult::Reject(r) => {
+                panic!("a hidden relation must answer the absent-id success shape, got {r:?}")
+            }
         };
         assert_eq!(phantom.relation_id, "rel_vis");
 
