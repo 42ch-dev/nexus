@@ -210,8 +210,8 @@ impl<K: KbStore> NarrativeGateway for InMemoryNarrativeGateway<K> {
     async fn get_world_state(&self, world_id: &str) -> Result<WorldState, NarrativeError> {
         let state = {
             let worlds = self.read_worlds()?;
-            let world = worlds.get(world_id).ok_or_else(|| {
-                NarrativeError::ValidationError(format!("world not found: {world_id}"))
+            let world = worlds.get(world_id).ok_or_else(|| NarrativeError::NotFound {
+                resource: format!("world {world_id}"),
             })?;
             self.project_world_state(world, true)
         };
@@ -255,7 +255,9 @@ impl<K: KbStore> NarrativeGateway for InMemoryNarrativeGateway<K> {
         events
             .get(event_id)
             .cloned()
-            .ok_or_else(|| NarrativeError::ValidationError(format!("event not found: {event_id}")))
+            .ok_or_else(|| NarrativeError::NotFound {
+                resource: format!("event {event_id}"),
+            })
     }
 
     async fn get_narrative_context(
@@ -265,8 +267,8 @@ impl<K: KbStore> NarrativeGateway for InMemoryNarrativeGateway<K> {
         // Phase 1: resolve world state (drop lock before continuing)
         let (world_state, timeline_head_id) = {
             let worlds = self.read_worlds()?;
-            let world = worlds.get(&query.world_id).ok_or_else(|| {
-                NarrativeError::ValidationError(format!("world not found: {}", query.world_id))
+            let world = worlds.get(&query.world_id).ok_or_else(|| NarrativeError::NotFound {
+                resource: format!("world {}", query.world_id),
             })?;
             let head = world.current_timeline_head_id.clone();
             let state = self.project_world_state(world, query.include_fork_info);
@@ -403,9 +405,10 @@ mod tests {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
         let result = gw.get_world_state("wld_missing").await;
         assert!(result.is_err());
-        assert!(
-            matches!(result.unwrap_err(), NarrativeError::ValidationError(msg) if msg.contains("not found"))
-        );
+        assert!(matches!(
+            result.unwrap_err(),
+            NarrativeError::NotFound { .. }
+        ));
     }
 
     // T3: get_timeline returns events sorted by sequence

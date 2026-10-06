@@ -78,7 +78,8 @@ fn manifest_fuel_override_bounds_compute() {
 }
 
 /// A module whose initial memory already exceeds the invocation's memory cap.
-/// Instantiation hits the `StoreLimits` resource limiter and must surface as
+/// The refusal is decided by the pre-instantiation structured check (the
+/// module's declared memory minimum vs the invocation cap) and must surface as
 /// [`ComputeError::MemoryCapExceeded`], not a generic trap or a host crash.
 fn big_memory_module() -> Vec<u8> {
     wat::parse_str(

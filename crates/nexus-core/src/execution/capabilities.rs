@@ -1195,16 +1195,13 @@ async fn execute_world_snapshot_get(
     let world_state =
         gw.get_world_state(world_id)
             .await
-            .map_err(|e: nexus_narrative::NarrativeError| {
-                if e.to_string().contains("not found") {
-                    NexusApiError::NotFound {
-                        resource: world_id.to_string(),
-                    }
-                } else {
-                    NexusApiError::Internal {
-                        category: format!("NARRATIVE_ERROR: {e}"),
-                    }
+            .map_err(|e: nexus_narrative::NarrativeError| match e {
+                nexus_narrative::NarrativeError::NotFound { resource } => {
+                    NexusApiError::NotFound { resource }
                 }
+                other => NexusApiError::Internal {
+                    category: format!("NARRATIVE_ERROR: {other}"),
+                },
             })?;
 
     Ok(serde_json::to_value(world_state).unwrap_or_else(|_| serde_json::json!({})))

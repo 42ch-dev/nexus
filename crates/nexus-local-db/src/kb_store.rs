@@ -602,9 +602,26 @@ impl SqliteKbStore {
         .execute(&mut **tx)
         .await
         .map_err(|e| {
-            // SQLite UNIQUE constraint violation (owner-scoped partial index).
-            if let sqlx::Error::Database(ref db_err_inner) = e {
-                if db_err_inner.code().as_deref() == Some("2067") {
+            // Duplicate-key violations on this INSERT are one domain fact —
+            // an existing `kb_key_blocks` row collides with this entry — on
+            // either guard:
+            //   * `2067` (SQLITE_CONSTRAINT_UNIQUE) — the owner-scoped
+            //     `kb_key_blocks_active_unique` index;
+            //   * `1555` (SQLITE_CONSTRAINT_PRIMARYKEY) — the `key_block_id`
+            //     primary key, i.e. a caller-supplied entry id already in use
+            //     by a row this caller cannot see (V1.206 P2 R8: the hidden
+            //     foreign promote must answer the already-exists family, not a
+            //     raw storage error).
+            // Any other database error keeps the `db_err` classification.
+            //
+            // Opacity tradeoff (accepted; mirrors R9's documented phantom-success
+            // tradeoff in `relation_port.rs`): answering the already-exists family
+            // for `1555` confirms that SOME row occupies this caller-supplied id.
+            // A raw storage error would confirm the same occupancy while
+            // misclassifying a domain conflict as a fault, so the tradeoff buys a
+            // correct, non-leaking family at no additional disclosure.
+            if let sqlx::Error::Database(db_err_inner) = &e {
+                if matches!(db_err_inner.code().as_deref(), Some("2067" | "1555")) {
                     return KbStoreError::Duplicate {
                         owner: owner.clone(),
                         name: cname,
@@ -3523,6 +3540,31 @@ mod tests {
         let kb2 = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Hero");
         let err = store.insert_knowledge_entry(kb2).await.unwrap_err();
         assert!(matches!(err, KbStoreError::Duplicate { .. }));
+    }
+
+    /// V1.206 P2 R8: a duplicate caller-supplied `key_block_id` collides on the
+    /// primary key (SQLite `1555`), not the owner-scoped unique index. It must
+    /// classify as `Duplicate` too — otherwise the hidden foreign promote
+    /// leaks a raw storage error instead of the already-exists family.
+    #[tokio::test]
+    async fn test_duplicate_entry_id_maps_to_duplicate() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let store = SqliteKbStore::new(pool);
+        let kb1 = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Hero");
+        let entry_id = kb1.entry_id.clone();
+        store.insert_knowledge_entry(kb1).await.unwrap();
+
+        // Different canonical_name (no unique-index collision) + the same
+        // entry id ⇒ the primary key is the only violated guard.
+        let mut kb2 = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Villain");
+        kb2.entry_id = entry_id;
+        let err = store.insert_knowledge_entry(kb2).await.unwrap_err();
+        assert!(
+            matches!(err, KbStoreError::Duplicate { .. }),
+            "a primary-key collision must classify as Duplicate, got: {err:?}"
+        );
     }
 
     #[tokio::test]
