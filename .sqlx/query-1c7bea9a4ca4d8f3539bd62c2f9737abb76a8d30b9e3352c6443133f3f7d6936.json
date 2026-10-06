@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO kb_key_blocks (key_block_id, owner_kind, world_id, character_id, block_type, canonical_name) VALUES ('kb_malformed_owner', 'world', 'wld_1', ?, 'Character', 'Ghost')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "1c7bea9a4ca4d8f3539bd62c2f9737abb76a8d30b9e3352c6443133f3f7d6936"
+}
