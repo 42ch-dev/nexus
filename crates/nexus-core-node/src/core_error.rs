@@ -128,6 +128,41 @@ pub fn napi_error_host_not_started() -> Error {
     napi_error_from_wire(host_not_started_wire())
 }
 
+/// The typed `details.category` naming a principal handle that does not encode
+/// this open's active principal at this generation (V1.206 P2 site 5).
+///
+/// Mirrors [`HOST_NOT_STARTED_CATEGORY`]: the public code/status stay
+/// `invalid_input`/`400` (the retained external shape of the former
+/// `Error::from_reason("invalid principal handle")` bare reason), so the human
+/// `message` must not be read for classification — a wording change would
+/// otherwise silently turn a stale/forged handle refusal into an unmapped
+/// fault.
+pub const INVALID_PRINCIPAL_HANDLE_CATEGORY: &str = "invalid_principal_handle";
+
+/// The ONE wire envelope for a principal handle that fails the shared
+/// verification in `verified_principal`.
+pub fn invalid_principal_handle_wire() -> CoreError {
+    CoreError {
+        code: CoreErrorCode::InvalidInput,
+        message: "invalid principal handle".into(),
+        details: serde_json::Map::from_iter([(
+            "category".into(),
+            Value::String(INVALID_PRINCIPAL_HANDLE_CATEGORY.into()),
+        )]),
+        http_status: Some(400),
+    }
+}
+
+/// Reject an invalid principal handle with the typed envelope for N-API entry
+/// points.
+///
+/// The raw `Error::from_reason("<text>")` shape is deliberately not used here:
+/// a bare reason cannot carry the typed category, so the TS boundary would
+/// classify the refusal by message text.
+pub fn napi_error_invalid_principal_handle() -> Error {
+    napi_error_from_wire(invalid_principal_handle_wire())
+}
+
 fn internal_error_bucket(category: &str) -> &'static str {
     if category.starts_with("config_load:") || category.starts_with("database_error:") {
         "configuration_or_database"
@@ -625,6 +660,18 @@ mod tests {
                 .get("code")
                 .and_then(Value::as_str),
             Some("policy_blocked")
+        );
+    }
+
+    #[test]
+    fn invalid_principal_handle_wire_preserves_the_external_shape() {
+        let wire = invalid_principal_handle_wire();
+        assert_eq!(wire.code, CoreErrorCode::InvalidInput);
+        assert_eq!(wire.message, "invalid principal handle");
+        assert_eq!(wire.http_status, Some(400));
+        assert_eq!(
+            wire.details.get("category").and_then(Value::as_str),
+            Some(INVALID_PRINCIPAL_HANDLE_CATEGORY)
         );
     }
 
