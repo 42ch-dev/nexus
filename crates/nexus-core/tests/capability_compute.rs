@@ -2197,8 +2197,9 @@ async fn list_compute_runs_orders_newest_first() {
 }
 
 /// The detail read returns the proposals and invocation params of a succeeded
-/// run, refuses an unknown run as `not_found`, and refuses EVERY operation on a
-/// foreign-world run as an ownership denial before any lifecycle state leaks.
+/// run, refuses an unknown run as `not_found`, and closes EVERY operation on a
+/// foreign-world run with that SAME `not_found` shape (existence opacity,
+/// V1.206 D4), so no lifecycle state and no run/World ownership fact leaks.
 ///
 /// MIGRATED from `compute_runs_api.rs::get_run_detail_returns_proposals_and_invocation_params`,
 /// `get_run_detail_unknown_run_returns_404` and
@@ -2244,20 +2245,38 @@ async fn run_detail_and_foreign_run_refusals() {
     .unwrap();
 
     let foreign_detail = get_compute_run(&f.core, &principal, &foreign).await;
-    assert!(
-        matches!(foreign_detail, Err(CoreError::WorldOwnerDenied { .. })),
-        "a foreign run detail must be an ownership denial, got {foreign_detail:?}"
-    );
     let foreign_accept =
         accept_compute_run(&f.core, &principal, &foreign, accept_request(json!({}))).await;
-    assert!(
-        matches!(foreign_accept, Err(CoreError::WorldOwnerDenied { .. })),
-        "accepting a foreign run must be an ownership denial, got {foreign_accept:?}"
-    );
     let foreign_discard = discard_compute_run(&f.core, &principal, &foreign).await;
-    assert!(
-        matches!(foreign_discard, Err(CoreError::WorldOwnerDenied { .. })),
-        "discarding a foreign run must be an ownership denial, got {foreign_discard:?}"
+
+    // Existence opacity (V1.206 D4 / compass D4): an unknown run id and a run
+    // of a foreign World close with the SAME 404 `not_found` shape, so a probe
+    // cannot split run existence from World ownership. `WorldOwnerDenied` stays
+    // reserved for the world-scoped routes (invoke / list / clear).
+    fn not_found_resource(err: &CoreError) -> &str {
+        match err {
+            CoreError::NotFound { resource } => resource,
+            other => panic!("a foreign or unknown run must close as NotFound, got {other:?}"),
+        }
+    }
+    assert_eq!(
+        not_found_resource(unknown.as_ref().unwrap_err()),
+        "run run_does_not_exist not found"
+    );
+    assert_eq!(
+        not_found_resource(foreign_detail.as_ref().unwrap_err()),
+        format!("run {foreign} not found"),
+        "an unknown id and a foreign id must close with the same refusal"
+    );
+    assert_eq!(
+        not_found_resource(foreign_accept.as_ref().unwrap_err()),
+        format!("run {foreign} not found"),
+        "an unknown id and a foreign id must close with the same refusal"
+    );
+    assert_eq!(
+        not_found_resource(foreign_discard.as_ref().unwrap_err()),
+        format!("run {foreign} not found"),
+        "an unknown id and a foreign id must close with the same refusal"
     );
 
     // The foreign row survived every refused operation.
@@ -2910,10 +2929,17 @@ async fn compute_facade_history_scopes_to_owned_worlds_and_validates_limit() {
         .get_compute_run(&principal, foreign.clone())
         .await
         .unwrap_err();
-    assert!(
-        matches!(refused, CoreError::WorldOwnerDenied { .. }),
-        "a foreign run must be refused as ownership, got {refused:?}"
-    );
+    // Existence opacity (V1.206 D4): a foreign-World run closes with the same
+    // `not_found` shape as an unknown id, never a distinguishable ownership
+    // denial.
+    match refused {
+        CoreError::NotFound { resource } => assert_eq!(
+            resource,
+            format!("run {foreign} not found"),
+            "a foreign run must close like an unknown id"
+        ),
+        other => panic!("a foreign run must be refused as not_found, got {other:?}"),
+    }
 
     let unscoped = handle
         .list_compute_runs(

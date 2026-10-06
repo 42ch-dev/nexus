@@ -400,10 +400,10 @@ pub async fn compute_run(
 /// refuses the whole accept BEFORE any write; absent/null/empty accepts all.
 ///
 /// # Errors
-/// `Forbidden` when the creator does not own the run's World, `NotFound` for
-/// an unknown run, a coded conflict when the run is already `applied` or
-/// `discarded`, `InvalidInput` for a non-`succeeded` run or an unknown event
-/// id, `Internal` for storage faults.
+/// `NotFound` for an unknown run or a run of a foreign World (existence
+/// opacity — the two close with the same shape), a coded conflict when the
+/// run is already `applied` or `discarded`, `InvalidInput` for a non-`succeeded`
+/// run or an unknown event id, `Internal` for storage faults.
 #[allow(clippy::too_many_lines)] // one linear domain operation
 pub async fn accept_compute_run(
     core: &CoreService,
@@ -417,11 +417,9 @@ pub async fn accept_compute_run(
     let run = compute_runs::get_run(pool, run_id)
         .await
         .map_err(crate::error::local_db_err)?
-        .ok_or_else(|| CoreError::NotFound {
-            resource: format!("run {run_id} not found"),
-        })?;
+        .ok_or_else(|| run_not_found(run_id))?;
 
-    ensure_world_owned(pool, creator_id, &run.world_id).await?;
+    ensure_run_visible(pool, creator_id, run_id, &run.world_id).await?;
 
     match run.status.as_str() {
         "succeeded" => {}
@@ -574,8 +572,9 @@ pub async fn accept_compute_run(
 /// `discarded`. The World is left exactly as it was.
 ///
 /// # Errors
-/// `Forbidden` for a foreign World, `NotFound` for an unknown run, a coded
-/// conflict when the row is not `succeeded`, `Internal` for storage faults.
+/// `NotFound` for an unknown run or a run of a foreign World (existence
+/// opacity — the two close with the same shape), a coded conflict when the
+/// row is not `succeeded`, `Internal` for storage faults.
 pub async fn discard_compute_run(
     core: &CoreService,
     principal: &Principal,
@@ -587,11 +586,9 @@ pub async fn discard_compute_run(
     let run = compute_runs::get_run(pool, run_id)
         .await
         .map_err(crate::error::local_db_err)?
-        .ok_or_else(|| CoreError::NotFound {
-            resource: format!("run {run_id} not found"),
-        })?;
+        .ok_or_else(|| run_not_found(run_id))?;
 
-    ensure_world_owned(pool, creator_id, &run.world_id).await?;
+    ensure_run_visible(pool, creator_id, run_id, &run.world_id).await?;
 
     compute_runs::set_run_discarded(pool, run_id)
         .await
@@ -739,8 +736,9 @@ pub async fn list_compute_runs(
 /// Read one run's detail, including its proposals and error.
 ///
 /// # Errors
-/// `Forbidden` for a foreign World, `NotFound` for an unknown run,
-/// `Internal` for storage or serialization faults.
+/// `NotFound` for an unknown run or a run of a foreign World (existence
+/// opacity — the two close with the same shape), `Internal` for storage or
+/// serialization faults.
 pub async fn get_compute_run(
     core: &CoreService,
     principal: &Principal,
@@ -751,11 +749,9 @@ pub async fn get_compute_run(
     let run = compute_runs::get_run(pool, run_id)
         .await
         .map_err(crate::error::local_db_err)?
-        .ok_or_else(|| CoreError::NotFound {
-            resource: format!("run {run_id} not found"),
-        })?;
+        .ok_or_else(|| run_not_found(run_id))?;
 
-    ensure_world_owned(pool, principal.creator_id(), &run.world_id).await?;
+    ensure_run_visible(pool, principal.creator_id(), run_id, &run.world_id).await?;
 
     serde_json::from_value(json!({
         "run_id": run.run_id,
@@ -969,6 +965,42 @@ async fn ensure_world_owned(
             world_id: world_id.to_string(),
             reason: "you do not own this world".to_string(),
         }),
+        Err(e) => Err(CoreError::Internal {
+            category: format!("world ownership check: {e}"),
+        }),
+    }
+}
+
+/// The single not-found shape for a run the caller may not see (V1.206 P2
+/// site 4; compass D4 existence opacity).
+///
+/// An unknown run id and a run belonging to a foreign World close with this
+/// exact `NotFound` — mirroring how schedules close unknown and foreign ids
+/// (`retained_execution_contracts.rs`) — so a probe cannot split run existence
+/// from World ownership. The external shape is authorized by
+/// `.mstar/iterations/v1.206/specs/compute-run-id-opacity.md`.
+fn run_not_found(run_id: &str) -> CoreError {
+    CoreError::NotFound {
+        resource: format!("run {run_id} not found"),
+    }
+}
+
+/// Ownership fence for the run-ID routes (`accept` / `discard` / detail).
+///
+/// Unlike [`ensure_world_owned`], a foreign World is rendered with the same
+/// [`run_not_found`] shape as an unknown run id instead of
+/// `CoreError::WorldOwnerDenied`: the world-scoped routes keep the 403
+/// convention, while these three stop disclosing whether a run id exists at
+/// all.
+async fn ensure_run_visible(
+    pool: &sqlx::SqlitePool,
+    creator_id: &str,
+    run_id: &str,
+    world_id: &str,
+) -> CoreResult<()> {
+    match nexus_local_db::narrative_write::is_world_owned(pool, creator_id, world_id).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(run_not_found(run_id)),
         Err(e) => Err(CoreError::Internal {
             category: format!("world ownership check: {e}"),
         }),
