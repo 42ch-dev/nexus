@@ -473,7 +473,9 @@ impl NarrativeGateway for SqliteNarrativeGateway {
         .fetch_optional(&*self.pool)
         .await
         .map_err(|e| db_err(&e))?
-        .ok_or_else(|| NarrativeError::ValidationError(format!("world not found: {world_id}")))?;
+        .ok_or_else(|| NarrativeError::NotFound {
+            resource: format!("world {world_id}"),
+        })?;
 
         Ok(row.to_world_state())
     }
@@ -581,7 +583,9 @@ impl NarrativeGateway for SqliteNarrativeGateway {
         .fetch_optional(&*self.pool)
         .await
         .map_err(|e| db_err(&e))?
-        .ok_or_else(|| NarrativeError::ValidationError(format!("event not found: {event_id}")))?;
+        .ok_or_else(|| NarrativeError::NotFound {
+            resource: format!("event {event_id}"),
+        })?;
 
         Ok(row.to_timeline_event())
     }
@@ -773,7 +777,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         let gw = SqliteNarrativeGateway::new(pool);
         let result = gw.get_world_state("wld_missing").await;
-        assert!(result.is_err());
+        assert!(matches!(result, Err(NarrativeError::NotFound { .. })));
     }
 
     #[tokio::test]
@@ -830,7 +834,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         let gw = SqliteNarrativeGateway::new(pool);
         let result = gw.get_event("evt_missing").await;
-        assert!(result.is_err());
+        assert!(matches!(result, Err(NarrativeError::NotFound { .. })));
     }
 
     #[test]

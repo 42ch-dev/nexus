@@ -89,6 +89,19 @@ pub enum NarrativeError {
         max: usize,
     },
 
+    /// Requested entity does not exist.
+    ///
+    /// Typed replacement for the former `ValidationError("… not found: …")`
+    /// convention (V1.206 P2): consumers classify absence on the variant, not
+    /// on message text. `resource` is the opaque identity (e.g. `world wld_1`,
+    /// `event evt_1`) — never a formatted sentence, so the consumer chooses the
+    /// external rendering.
+    #[error("not found: {resource}")]
+    NotFound {
+        /// Opaque identity of the missing entity.
+        resource: String,
+    },
+
     /// Storage backend error (database, I/O, etc.).
     #[error("storage error: {0}")]
     Storage(String),
@@ -108,6 +121,14 @@ mod tests {
     fn test_display_causality_violation() {
         let err = NarrativeError::CausalityViolation("cross-world ref".to_string());
         assert!(err.to_string().contains("causality violation"));
+    }
+
+    #[test]
+    fn test_display_not_found() {
+        let err = NarrativeError::NotFound {
+            resource: "world wld_1".to_string(),
+        };
+        assert_eq!(err.to_string(), "not found: world wld_1");
     }
 
     #[test]
