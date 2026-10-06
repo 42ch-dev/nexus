@@ -78,3 +78,11 @@ Single-residual verification scales; a 37-item cluster deferred across ~55 versi
 3. **Fix a bounded top slice** (visibility-ranked, ≤10) and rewrite the roadmap row with the honest remainder + target + trigger; close the row via the module protocol (delete + shipped-archive entry) only when a cluster fully empties.
 4. **Reclassify honestly**: an item that turns out to need wire/auth/design decisions leaves the nit cluster (defer with register entry + roadmap), it does not get fixed to make counts work.
 5. Expect high fixed/stale rates to be the EXCEPTION, not the rule: v1.182's V1.121-design cluster came back 15/15 valid — stale count intuition from "it's old" is worthless; only per-row evidence counts.
+
+## Register-census field discipline (v1.206 update)
+
+A convergence iteration scoped from a register census must get the **close field** right before counting anything:
+
+- The project register's close state lives in **`lifecycle`** (`open` / `resolved` / `duplicate`; absent = open on legacy rows) — **not** in a `status` field. Filtering on `status` silently mis-classifies every already-resolved row as open: v1.206's first census ("60 open, one surviving high") collapsed to the true **45 open = 42 low + 3 nit** once `lifecycle` was used, and its "surviving high" had been `resolved` weeks earlier.
+- Census recipe: `jq -r '.entries | to_entries[] | .key as $plan | .value[] | select((.lifecycle // "open") == "open") | [.severity, $plan, .id, .title] | @tsv'` over `{PROJECT_DIR}/<id>/residuals.json`, then severity/bucket counts, then per-row HEAD verification (this doc's base discipline) before any selection.
+- A wrong census is a direction-lock defect: v1.206 had to re-position an already-registered plan row in place (the row set is immutable after registration — `workflow-patterns/mstar-engine-lifecycle-seams-and-track-ownership.md`) because its P1 had been scoped from the mis-read field. Census **before** locking a direction, not after.

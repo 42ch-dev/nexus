@@ -19,6 +19,7 @@ tags:
   - tsconfig-error
   - build-order
   - evidence-capture
+last_updated: 2026-10-07
 ---
 
 # A lint/warning baseline is only a baseline if it was measured in a healthy checkout
@@ -122,3 +123,9 @@ oxlint --format json apps/desktop-electron/scripts/proof-contract.mjs   # :264 a
 - Root-cause captures: `apps/{desktop-electron,nexus-service}/node_modules/@types/node` + `packages/nexus-native/node_modules/@types/node` link targets (`test -e` / `readlink -f`), `tsc -p` and `tsgolint --list-files` per project in both checkouts, `md5` of the three `tsconfig.json` across checkouts, dependency-ordered build isolation of the build-order row.
 - Landed state: `.oxlintrc.json` (`options.typeAware: true`, `options.denyWarnings: true`, the 14-file per-file `no-console` exception list, the four pre-existing NRTC file exceptions unchanged, no `apps/web/**` override); `.github/workflows/ci.yml` `typescript-checks` (dependency-ordered type build → Lint; path filter covering 797/797 linted files). Final `pnpm run lint`: zero warnings.
 - Sibling discipline: [deliberate-guard-scope-and-clippy-allow.md](../conventions/deliberate-guard-scope-and-clippy-allow.md) (the Rust-side rule for classifying a lint finding as repair-vs-suppress and for scoping an `#[allow]`), [pnpm-toolchain-pin-and-supply-chain-age.md](../conventions/pnpm-toolchain-pin-and-supply-chain-age.md) (install/toolchain preconditions that change what a local run measures), [capability-parity-receipt.md](../workflow-patterns/capability-parity-receipt.md) (`[UNVERIFIED]` discipline for claims whose evidence was never produced — the same rule that keeps "CI fails on any warning" unverified until a workflow run exists).
+
+## Postscript — the count moved twice more (v1.206, 2026-10-07)
+
+- The registered claim "59 warnings" had already been superseded by v1.194's re-anchor (56 measured; 55 environment-independent). v1.206's hygiene plan then met a further drift: an **unbuilt** worktree reported 113 diagnostics (105 type-aware artifact rows of the class this doc documents), while the **built** tree reported exactly **1** — a real `await-thenable` row introduced after the v1.194 zero state by the v1.202 connection-store work. Fixed → 0; `pnpm lint` exit 0; scoped 26/26 green.
+- Lesson restated: three successive published numbers (59 / 56 / 1) each described a different environment or moment. Re-measure in the CI-equivalent built environment before believing any registered count — including counts written by this very doc's iteration.
+- Bookkeeping footnote: the register row for this residual could not be closed by any exposed engine writer at v1.194 time; v1.206 closed it with the three-factor evidence (prior cleanup / environment delta / this iteration's fix).
