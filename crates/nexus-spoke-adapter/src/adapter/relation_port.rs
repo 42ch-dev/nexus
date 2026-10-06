@@ -583,7 +583,10 @@ impl NexusAdapter<'_> {
             );
         }
 
-        // Project the persisted row to the returned spoke Relation (revision = 1).
+        // Project the returned spoke Relation (revision = 1) from the request
+        // fields — the same projection on both paths: a real create mirrors
+        // what was persisted, and the R9 phantom-success path mirrors what a
+        // successful create would have persisted.
         let row = KbRelationshipRow {
             relationship_id: relation_id,
             world_id,
@@ -1116,6 +1119,18 @@ mod tests {
             }
         }))
         .expect("valid spoke Relation fixture")
+    }
+
+    /// Normalize a created `Relation` for equality (R9 pin, QC2-F-002): the
+    /// per-call fields — the caller-supplied id and the `now`-derived
+    /// timestamps — are dropped so two create projections can be compared.
+    fn normalized_relation(r: &Relation) -> Value {
+        let mut v = serde_json::to_value(r).expect("Relation serializes");
+        let map = v.as_object_mut().expect("Relation serializes to an object");
+        map.remove("relation_id");
+        map.remove("created_at");
+        map.remove("updated_at");
+        v
     }
 
     /// Test helper: unwrap a `SpokeResult::Ok` or panic with the reject payload.
@@ -2370,6 +2385,49 @@ mod tests {
         .await;
     }
 
+    /// R9 (V1.206, strengthened per QC2-F-002 / QC3-003): the hidden-id create
+    /// must answer the FULL absent-id projection shape (nothing persisted), and
+    /// the stored hidden row must be untouched by the rolled-back create.
+    async fn assert_hidden_create_answers_absent_shape(pool: &sqlx::SqlitePool) {
+        let adapter = scoped(pool.clone());
+
+        let phantom = match adapter
+            .put_relation(spoke_relation("rel_vis", "kb_src", "kb_dst"), None)
+            .await
+        {
+            SpokeResult::Ok(r) => r,
+            SpokeResult::Reject(r) => panic!(
+                "a hidden relation must answer the absent-id success shape, got {r:?}"
+            ),
+        };
+        assert_eq!(phantom.relation_id, "rel_vis");
+
+        let genuine = match adapter
+            .put_relation(spoke_relation("rel_probe_absent", "kb_src", "kb_dst"), None)
+            .await
+        {
+            SpokeResult::Ok(r) => r,
+            SpokeResult::Reject(r) => panic!("a genuinely absent id must create, got {r:?}"),
+        };
+        assert_eq!(
+            normalized_relation(&phantom),
+            normalized_relation(&genuine),
+            "the hidden-id shape must equal a genuine absent-id create's projection"
+        );
+
+        let stored_target: String = sqlx::query_scalar(
+            "SELECT target_entity_id FROM kb_relationships WHERE relationship_id = ?",
+        )
+        .bind("rel_vis")
+        .fetch_one(pool)
+        .await
+        .expect("the stored row still exists");
+        assert_eq!(
+            stored_target, "kb_hidden_rel",
+            "the phantom create must not rewrite the stored row"
+        );
+    }
+
     /// v1.191 P1 T8 (durable §4.2): an endpoint hidden from the caller is not
     /// an endpoint. A same-world `owner-private` row of another holder is
     /// rejected by the create path with exactly the shape an absent id
@@ -2446,19 +2504,13 @@ mod tests {
         // written), so neither the reject code nor the write result discloses
         // the hidden row. `RelationAlreadyExists` stays reserved for rows whose
         // endpoints the caller can see.
-        match adapter
-            .put_relation(spoke_relation("rel_vis", "kb_src", "kb_dst"), None)
-            .await
-        {
-            SpokeResult::Ok(r) => {
-                assert_eq!(r.relation_id, "rel_vis");
-                assert_eq!(r.from_id, "kb_src");
-                assert_eq!(r.to_id, "kb_dst");
-            }
-            SpokeResult::Reject(r) => panic!(
-                "a hidden relation must answer the absent-id success shape, got {r:?}"
-            ),
-        }
+        //
+        // QC2-F-002 / QC3-003: the hidden-id answer must be the FULL
+        // absent-id shape, not merely a similar envelope — compare the whole
+        // projection against a genuine absent-id create (normalizing the
+        // per-call id/timestamps) and confirm the stored hidden row is
+        // preserved by the rolled-back create.
+        assert_hidden_create_answers_absent_shape(&pool).await;
 
         // The update path answers the same absent shape as a missing relation
         // (a hidden endpoint must never leak through the reject's shape).
