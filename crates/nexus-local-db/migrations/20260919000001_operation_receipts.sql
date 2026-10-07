@@ -1,7 +1,7 @@
 -- v1.207 P3 (RN-OGA-5): durable operation receipts.
 --
 -- Spec: .mstar/iterations/v1.207/specs/connect-replay-and-operation-receipts.md
--- §B.2 (this table, its CHECKs, and the engine-owned writer-protocol family)
+-- §B.2 (this table, its CHECKs, and the cooperative writer-protocol family)
 -- + §B.3 (the frozen Recover handshake that reads it).
 --
 -- One row per logical operation, first-writer-wins on `operation_id`:
@@ -102,6 +102,23 @@ BEGIN
              )
            )
      );
+
+  -- A settled answer is never deleted-and-reinserted (QC1-C001). An
+  -- `INSERT OR REPLACE` (or `REPLACE INTO`) over a terminal id resolves the
+  -- conflict by DELETING the existing row, and that victim's DELETE trigger
+  -- does NOT fire while `recursive_triggers` is OFF (the default) — so the
+  -- immutability triggers alone cannot see it. This BEFORE INSERT guard fires
+  -- for the replacement attempt itself, BEFORE the victim is destroyed, and
+  -- refuses it. The legitimate `INSERT … ON CONFLICT(operation_id) DO NOTHING`
+  -- replay of a running row is unaffected (its conflict row is `running`), and
+  -- the store never inserts over an existing row at all (it reads first).
+  SELECT RAISE(ABORT, 'OPERATION_RECEIPT_TERMINAL_IMMUTABLE')
+  WHERE EXISTS (
+      SELECT 1
+      FROM operation_receipts existing
+      WHERE existing.operation_id = NEW.operation_id
+        AND existing.status IN ('finished', 'failed', 'cancelled', 'interrupted')
+  );
 END;
 
 CREATE TRIGGER IF NOT EXISTS guard_operation_receipts_update
@@ -168,6 +185,21 @@ FOR EACH ROW
 WHEN OLD.status IN ('finished', 'failed', 'cancelled', 'interrupted')
 BEGIN
   SELECT RAISE(ABORT, 'OPERATION_RECEIPT_TERMINAL_IMMUTABLE');
+END;
+
+-- The receipt KEY is immutable (QC1-C001). `UPDATE … SET operation_id = <other>`
+-- would otherwise MOVE a receipt onto another id — and `UPDATE OR REPLACE` onto
+-- a terminal id resolves that conflict by deleting the terminal victim, whose
+-- DELETE trigger does not fire while `recursive_triggers` is OFF. Refusing any
+-- key change closes both the settlement hijack (a `running` source claiming a
+-- settled id) and the victim deletion at the schema boundary. The legitimate
+-- settlement never touches the key, so it always passes.
+CREATE TRIGGER IF NOT EXISTS immutable_receipt_key_operation_receipts_update
+BEFORE UPDATE ON operation_receipts
+FOR EACH ROW
+WHEN NEW.operation_id IS NOT OLD.operation_id
+BEGIN
+  SELECT RAISE(ABORT, 'OPERATION_RECEIPT_KEY_IMMUTABLE');
 END;
 
 CREATE TRIGGER IF NOT EXISTS immutable_terminal_operation_receipts_delete

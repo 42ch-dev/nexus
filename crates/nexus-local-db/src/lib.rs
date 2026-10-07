@@ -281,11 +281,10 @@ pub use novel_pool_entries::{
 
 // Re-export operation receipt store + Recover handshake (v1.207 P3, RN-OGA-5)
 pub use operation_receipts::{
-    begin_operation, classify_recovery, compute_run_receipt_status, get_operation_receipt,
-    is_known_consumer, is_terminal_status, recover, settle_operation, OperationReceipt,
-    RecoveryDecision, CONSUMER_COMPUTE_RUN, CONSUMER_CONNECT_INVOKE, OPERATION_ID_CONFLICT_CODE,
-    STATUS_CANCELLED, STATUS_FAILED, STATUS_FINISHED, STATUS_INTERRUPTED, STATUS_RUNNING,
-    TERMINAL_STATUSES,
+    begin_operation, classify_recovery, get_operation_receipt, is_known_consumer,
+    is_terminal_status, recover, settle_operation, OperationReceipt, RecoveryDecision,
+    CONSUMER_COMPUTE_RUN, CONSUMER_CONNECT_INVOKE, OPERATION_ID_CONFLICT_CODE, STATUS_CANCELLED,
+    STATUS_FAILED, STATUS_FINISHED, STATUS_INTERRUPTED, STATUS_RUNNING, TERMINAL_STATUSES,
 };
 
 // Re-export inspiration_items types

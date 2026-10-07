@@ -253,17 +253,21 @@ pub async fn compute_run(
     // instead of silence; the boot recovery pass
     // ([`recover_stuck_compute_runs`]) then refuses to re-apply it.
     let run_args = serde_json::to_value(&request).unwrap_or(Value::Null);
-    let operation_scope = OperationScope {
+    // §B.1 + §B.2 in ONE pass: the canonical document is serialized and hashed
+    // once for both the run's durable id and the complete-request fingerprint
+    // (the direct lane's `RunRequest` carries no caller-supplied id, so the
+    // derivation is the only arm `resolve_operation_identity` can take).
+    let identity = operation_id::resolve_operation_identity(&OperationScope {
         actor: creator_id,
         session: &run_id,
         action: COMPUTE_RUN_ACTION,
         args: &run_args,
-    };
-    let operation_id = operation_id::derive_operation_id(&operation_scope);
-    // §B.2: the fingerprint binds the complete logical request (actor,
-    // session, action, args) — the same document the id derives from — so no
-    // scope of a colliding id can ever match another scope's receipt.
-    let request_fingerprint = operation_id::request_fingerprint(&operation_scope);
+    })
+    .map_err(|err| CoreError::Internal {
+        category: format!("compute run operation identity: {err}"),
+    })?;
+    let operation_id = identity.operation_id;
+    let request_fingerprint = identity.request_fingerprint;
     match begin_operation(
         pool,
         &operation_id,

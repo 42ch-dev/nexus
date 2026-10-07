@@ -313,6 +313,57 @@ pub struct ConnectPorts {
     pool: sqlx::SqlitePool,
     modules_dir: Option<PathBuf>,
     host: Arc<NexusAdapter<'static>>,
+    /// The operation ids this host process is executing right now (§B.3
+    /// live-owner signal). See [`InFlightWrites`].
+    in_flight: Arc<InFlightWrites>,
+}
+
+/// The operation ids this host process is currently executing a Connect write
+/// for (v1.207 P3, §B.3 live-owner signal).
+///
+/// §B.3 distinguishes a `running` receipt whose owner is LIVE (typed Busy /
+/// in-progress) from one whose owner is unknown (typed `uncertain`). The store
+/// cannot infer liveness and the receipt carries no owner marker, so the host
+/// answers from this in-process registry: an id registered here is an effect
+/// THIS process is running right now — including a sibling lane closure that
+/// already returned `invoke_deadline_exceeded` to its caller, because the
+/// blocking lane cannot be force-cancelled. A `running` receipt with no
+/// registration belongs to a previous process (or an unknown owner) and stays
+/// `uncertain`.
+#[derive(Debug, Default)]
+pub struct InFlightWrites(std::sync::Mutex<std::collections::HashSet<String>>);
+
+impl InFlightWrites {
+    /// A registry for one host process (one [`ConnectPorts`]).
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Mark an acquired operation as running in this process.
+    pub fn register(&self, operation_id: &str) {
+        if let Ok(mut in_flight) = self.0.lock() {
+            in_flight.insert(operation_id.to_string());
+        }
+    }
+
+    /// Clear the registration once the effect settled (or the lane ended).
+    pub fn release(&self, operation_id: &str) {
+        if let Ok(mut in_flight) = self.0.lock() {
+            in_flight.remove(operation_id);
+        }
+    }
+
+    /// True when this process is running the effect for `operation_id` now.
+    ///
+    /// A poisoned lock reports `false`, which degrades to the `uncertain`
+    /// refusal — never to a claim of live ownership.
+    #[must_use]
+    pub fn is_running(&self, operation_id: &str) -> bool {
+        self.0
+            .lock()
+            .is_ok_and(|in_flight| in_flight.contains(operation_id))
+    }
 }
 
 impl ConnectPorts {
@@ -331,7 +382,14 @@ impl ConnectPorts {
             pool,
             modules_dir,
             host: Arc::new(host),
+            in_flight: Arc::new(InFlightWrites::new()),
         }
+    }
+
+    /// The process-wide in-flight write registry (§B.3 live-owner signal).
+    #[must_use]
+    pub fn in_flight_writes(&self) -> Arc<InFlightWrites> {
+        Arc::clone(&self.in_flight)
     }
 
     /// The host metadata/tools adapter — the two exact `tools.nexus.*` reads
@@ -810,9 +868,19 @@ fn run_in_lane(
             // answered from its receipt HERE, before any execution-only
             // prerequisite is required: an authorized terminal replay must
             // not depend on a module still being installed, and ambiguity
-            // answers the typed `uncertain` refusal.
+            // answers the typed refusal.
+            //
+            // The §B.3 live-owner signal comes from this process's in-flight
+            // registry, not from an unconditional assumption: a `running`
+            // receipt this process is executing right now is the typed Busy
+            // answer; one with no registration (a previous process's row, or
+            // an unknown owner) stays `uncertain`.
+            let in_flight = ports_for_lane.in_flight_writes();
             if let Some(metadata) = &write_receipt {
-                if let Some(answer) = read_write_receipt(ports_for_lane.pool(), metadata).await? {
+                let owner_is_live = in_flight.is_running(&metadata.operation_id);
+                if let Some(answer) =
+                    read_write_receipt(ports_for_lane.pool(), metadata, owner_is_live).await?
+                {
                     return Ok(answer);
                 }
             }
@@ -832,10 +900,14 @@ fn run_in_lane(
             let mut acquired_receipt = None;
             let mut commit_watermark: Option<i64> = None;
             if let Some(metadata) = &write_receipt {
-                if let Some(answer) = acquire_write_receipt(ports_for_lane.pool(), metadata).await?
+                if let Some(answer) =
+                    acquire_write_receipt(ports_for_lane.pool(), metadata, &in_flight).await?
                 {
                     return Ok(answer);
                 }
+                // This process now owns the effect: register it so a re-drive
+                // arriving while it runs gets the §B.3 Busy answer.
+                in_flight.register(&metadata.operation_id);
                 commit_watermark = write_commit_watermark(ports_for_lane.pool()).await;
                 acquired_receipt = Some(metadata.clone());
             }
@@ -860,8 +932,15 @@ fn run_in_lane(
                     Ok(_) => true,
                     Err(_) => write_effect_committed(ports_for_lane.pool(), commit_watermark).await,
                 };
-                settle_write_receipt(ports_for_lane.pool(), result, effect_committed, metadata)
-                    .await
+                let settled =
+                    settle_write_receipt(ports_for_lane.pool(), result, effect_committed, metadata)
+                        .await;
+                // The effect is settled: this process no longer owns it, so a
+                // later re-drive classifies the receipt by its stored status
+                // (terminal ⇒ answered; `running` ⇒ unknown owner ⇒
+                // `uncertain`) instead of claiming live ownership.
+                in_flight.release(&metadata.operation_id);
+                settled
             } else {
                 result
             }
@@ -964,43 +1043,6 @@ const fn is_live_write(route: Route) -> bool {
     matches!(grant_admission(route), GrantAdmission::LiveWrite)
 }
 
-/// One connected invoke's durable operation id (spec §B.1, Connect scope):
-/// `actor` = the caller's stored granted Actor, `session` = the authenticated
-/// peer session id, `action` = the op id, `args` = the invoke payload. A
-/// caller-supplied `operation_id` is used verbatim after shape validation.
-///
-/// # Errors
-/// Returns the `invalid_input` envelope for a malformed caller-supplied id
-/// (the same refusal the core's `OperationIdError` maps to, naming the wire
-/// field the caller used).
-#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of the dispatch
-fn resolve_connect_operation_id(
-    actor: &str,
-    session: &str,
-    op: &str,
-    payload: &Value,
-) -> Result<String, ErrorEnvelope> {
-    operation_id::resolve_operation_id(&OperationScope {
-        actor,
-        session,
-        action: op,
-        args: payload,
-    })
-    .map_err(|err| {
-        let mut details = Map::new();
-        details.insert(
-            "field".to_string(),
-            Value::String("operation_id".to_string()),
-        );
-        ErrorEnvelope {
-            code: "invalid_input".to_string(),
-            message: format!("invalid durable operation id: {err}"),
-            details,
-            extensions: HashMap::default(),
-        }
-    })
-}
-
 /// Strip the caller-supplied `operation_id` from the invoke payload.
 ///
 /// `args.operation_id` is an envelope-level argument of the §B.1 id contract,
@@ -1012,6 +1054,41 @@ fn strip_caller_operation_id(payload: &mut Value) {
         map.remove(operation_id::OPERATION_ID_FIELD);
     }
 }
+
+/// The §B.3 typed Busy / in-progress refusal envelope (spec §B.3 step 3).
+///
+/// §B.3 requires the distinction: a `running` receipt whose owner is KNOWN to
+/// be live is "typed Busy / in-progress", while `uncertain` is for genuinely
+/// unknown ownership. §C freezes the P3 `operation_id_conflict` / `uncertain`
+/// pair and does not name the Busy code, so this surface names it
+/// `operation_in_progress` (rendered 409 by the adapters, like the other two).
+fn operation_in_progress_envelope(operation_id: &str, subject_id: &str) -> ErrorEnvelope {
+    let mut details = Map::new();
+    details.insert(
+        "operation_id".to_string(),
+        Value::String(operation_id.to_string()),
+    );
+    details.insert(
+        "subject_id".to_string(),
+        Value::String(subject_id.to_string()),
+    );
+    details.insert(
+        "state".to_string(),
+        Value::String("in_progress".to_string()),
+    );
+    ErrorEnvelope {
+        code: OPERATION_IN_PROGRESS_CODE.to_string(),
+        message: format!(
+            "operation {operation_id} ({subject_id}) is already running in this host; the call \
+             is not re-applied — wait for it to settle, or ask for its receipt"
+        ),
+        details,
+        extensions: HashMap::default(),
+    }
+}
+
+/// The §B.3 typed Busy / in-progress wire code.
+const OPERATION_IN_PROGRESS_CODE: &str = "operation_in_progress";
 
 /// The typed `uncertain` refusal envelope (spec §B.3 item 4 / §C): the
 /// operation has no terminal receipt, so it is never retried blindly.
@@ -1097,10 +1174,14 @@ fn effect_committed_envelope(
 /// Answer a replay from its stored receipt (spec §B.3 step 3) — never a
 /// second effect run.
 ///
-/// A settled success replays the stored result verbatim; every other terminal
-/// replays the stored error envelope. A stored row that cannot be decoded into
-/// its declared shape is the typed `uncertain` refusal, never a fabricated
-/// success.
+/// A settled success replays the stored result verbatim. Every other terminal
+/// replays the stored payload: this surface always stores a serialized
+/// `ErrorEnvelope` there, so the normal path is an exact typed replay; a
+/// payload that does not decode into that shape (a receipt written by a
+/// different consumer shape, or a tampered row) is NOT dropped — it rides the
+/// typed `uncertain` refusal verbatim in `details.stored_payload`, and a
+/// missing payload is the plain `uncertain` refusal. Success is never
+/// fabricated, and no stored answer is silently discarded.
 #[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of the dispatch
 fn answer_from_receipt(
     receipt: &nexus_local_db::OperationReceipt,
@@ -1116,8 +1197,53 @@ fn answer_from_receipt(
     // Every other terminal status replays its stored reason as the answer.
     receipt.error_json.as_deref().map_or_else(
         || Err(ambiguous()),
-        |json| serde_json::from_str::<ErrorEnvelope>(json).map_or_else(|_| Err(ambiguous()), Err),
+        |json| {
+            serde_json::from_str::<ErrorEnvelope>(json).map_or_else(
+                |_| {
+                    Err(undecodable_stored_answer(
+                        &receipt.operation_id,
+                        subject_id,
+                        json,
+                    ))
+                },
+                Err,
+            )
+        },
     )
+}
+
+/// The typed `uncertain` refusal for a terminal receipt whose stored answer
+/// this surface cannot decode: the stored payload travels verbatim in
+/// `details.stored_payload`, so a replay never silently loses it and never
+/// fabricates a success.
+fn undecodable_stored_answer(
+    operation_id: &str,
+    subject_id: &str,
+    stored_payload: &str,
+) -> ErrorEnvelope {
+    let mut details = Map::new();
+    details.insert(
+        "operation_id".to_string(),
+        Value::String(operation_id.to_string()),
+    );
+    details.insert(
+        "subject_id".to_string(),
+        Value::String(subject_id.to_string()),
+    );
+    details.insert(
+        "stored_payload".to_string(),
+        Value::String(stored_payload.to_string()),
+    );
+    ErrorEnvelope {
+        code: "uncertain".to_string(),
+        message: format!(
+            "operation {operation_id} ({subject_id}) has a terminal receipt whose stored answer \
+             is not a decodable refusal envelope; it is returned verbatim in \
+             details.stored_payload and the operation is not retried"
+        ),
+        details,
+        extensions: HashMap::default(),
+    }
 }
 
 /// The stored receipt a recovery decision was classified from, when the
@@ -1163,26 +1289,54 @@ fn prepare_write_receipt(
     payload: &mut Value,
 ) -> Result<WriteReceiptMetadata, ErrorEnvelope> {
     let session = peer.to_string();
-    let actor = grant.map_or("", PeerGrant::actor_id);
-    let operation_id = resolve_connect_operation_id(actor, &session, op, payload)?;
-    // The caller-supplied id is envelope metadata, not part of the request.
+    // The caller's `operation_id` is envelope metadata of the receipt contract,
+    // not part of the request: extract and shape-validate it, then strip it so
+    // neither the canonical document nor the strict typed route request sees it.
+    let caller_id = match payload.get(operation_id::OPERATION_ID_FIELD) {
+        None => None,
+        Some(Value::String(id)) => {
+            operation_id::validate_operation_id(id)
+                .map_err(|err| invalid_operation_id(&err.to_string()))?;
+            Some(id.clone())
+        }
+        Some(_) => return Err(invalid_operation_id("args.operation_id must be a string")),
+    };
     strip_caller_operation_id(payload);
     // §B.2: the fingerprint binds the COMPLETE logical request — actor,
     // session, action and args — so a caller-supplied id used verbatim in a
     // workspace-global primary key can never let a different caller/session
     // (or a changed grant actor) with identical arguments replay another
-    // owner's receipt; that is the typed `operation_id_conflict` instead.
-    let fingerprint = operation_id::request_fingerprint(&OperationScope {
-        actor,
+    // owner's receipt; that is the typed `operation_id_conflict` instead. One
+    // canonical serialization and one digest yield BOTH the id (§B.1) and the
+    // fingerprint (§B.2).
+    let identity = operation_id::resolve_operation_identity(&OperationScope {
+        actor: grant.map_or("", PeerGrant::actor_id),
         session: &session,
         action: op,
         args: payload,
-    });
-    Ok(WriteReceiptMetadata {
-        operation_id,
-        subject_id: format!("{peer}/{op}"),
-        fingerprint,
     })
+    .map_err(|err| invalid_operation_id(&err.to_string()))?;
+    Ok(WriteReceiptMetadata {
+        operation_id: caller_id.unwrap_or(identity.operation_id),
+        subject_id: format!("{peer}/{op}"),
+        fingerprint: identity.request_fingerprint,
+    })
+}
+
+/// The `invalid_input` envelope for a malformed caller-supplied operation id
+/// (the same refusal the core's `OperationIdError` maps to).
+fn invalid_operation_id(reason: &str) -> ErrorEnvelope {
+    let mut details = Map::new();
+    details.insert(
+        "field".to_string(),
+        Value::String(operation_id::OPERATION_ID_FIELD.to_string()),
+    );
+    ErrorEnvelope {
+        code: "invalid_input".to_string(),
+        message: format!("invalid durable operation id: {reason}"),
+        details,
+        extensions: HashMap::default(),
+    }
 }
 
 /// The §B.3 read half (steps 1–3): ask the receipt store FIRST and decide.
@@ -1198,17 +1352,19 @@ fn prepare_write_receipt(
 ///
 /// # Errors
 /// `operation_id_conflict` (the id is owned by a different logical request),
-/// `uncertain` (no terminal receipt) and `internal` (receipt-store fault).
+/// `operation_in_progress` (a live owner is running it), `uncertain` (no
+/// terminal receipt, ownership unknown) and `internal` (receipt-store fault).
 #[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of the dispatch
 async fn read_write_receipt(
     pool: &sqlx::SqlitePool,
     metadata: &WriteReceiptMetadata,
+    owner_is_live: bool,
 ) -> Result<Option<Value>, ErrorEnvelope> {
-    // `owner_is_live` is `true`: a timed-out lane closure keeps running (the
-    // blocking lane cannot be force-cancelled), so a `running` receipt may
-    // still have a live owner. Either way the answer is the same typed
-    // refusal — the effect is never re-applied here.
-    let decision = match recover(pool, &metadata.operation_id, true).await {
+    // `owner_is_live` is the §B.3 liveness signal — `true` only when this
+    // process is running the effect right now (see [`InFlightWrites`]). It is
+    // never assumed: a `running` receipt left by a previous process must stay
+    // `uncertain`, not claim a live owner the host cannot see.
+    let decision = match recover(pool, &metadata.operation_id, owner_is_live).await {
         Ok(decision) => decision,
         Err(err) => return Err(receipt_store_fault(&err)),
     };
@@ -1229,9 +1385,16 @@ async fn read_write_receipt(
         RecoveryDecision::AnswerFromReceipt(receipt) => {
             Ok(Some(answer_from_receipt(&receipt, &metadata.subject_id)?))
         }
-        RecoveryDecision::InProgress(_) | RecoveryDecision::Uncertain(_) => Err(
-            uncertain_envelope(&metadata.operation_id, &metadata.subject_id),
-        ),
+        // §B.3's two under-way answers stay distinct: Busy names a KNOWN live
+        // owner, `uncertain` an unknown one.
+        RecoveryDecision::InProgress(receipt) => Err(operation_in_progress_envelope(
+            &receipt.operation_id,
+            &metadata.subject_id,
+        )),
+        RecoveryDecision::Uncertain(receipt) => Err(uncertain_envelope(
+            &receipt.operation_id,
+            &metadata.subject_id,
+        )),
     }
 }
 
@@ -1239,15 +1402,18 @@ async fn read_write_receipt(
 /// report whether THIS call acquired the effect.
 ///
 /// `Ok(None)` = acquired (run the effect, then settle it). `Ok(Some(answer))` =
-/// a racing replay, answered from the stored receipt (run nothing).
+/// a racing replay, answered from the stored receipt — with the same liveness
+/// rule as [`read_write_receipt`]: a `running` racing row whose writer is
+/// registered as in-flight is Busy, an unregistered one is `uncertain`.
 ///
 /// # Errors
-/// `operation_id_conflict` (first-writer-wins) and `internal` (receipt-store
-/// fault).
+/// `operation_id_conflict` (first-writer-wins), `operation_in_progress`,
+/// `uncertain` and `internal` (receipt-store fault).
 #[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of the dispatch
 async fn acquire_write_receipt(
     pool: &sqlx::SqlitePool,
     metadata: &WriteReceiptMetadata,
+    in_flight: &InFlightWrites,
 ) -> Result<Option<Value>, ErrorEnvelope> {
     match begin_operation(
         pool,
@@ -1261,7 +1427,19 @@ async fn acquire_write_receipt(
         Ok(BeginOutcome::Acquired(_)) => Ok(None),
         // A racing replay: answer from the stored receipt, never re-apply.
         Ok(BeginOutcome::Existing(stored)) => {
-            Ok(Some(answer_from_receipt(&stored, &metadata.subject_id)?))
+            if nexus_local_db::is_terminal_status(&stored.status) {
+                return Ok(Some(answer_from_receipt(&stored, &metadata.subject_id)?));
+            }
+            if in_flight.is_running(&stored.operation_id) {
+                return Err(operation_in_progress_envelope(
+                    &stored.operation_id,
+                    &metadata.subject_id,
+                ));
+            }
+            Err(uncertain_envelope(
+                &stored.operation_id,
+                &metadata.subject_id,
+            ))
         }
         Err(nexus_local_db::LocalDbError::OperationIdConflict { .. }) => {
             Err(operation_id_conflict_envelope(&metadata.operation_id))
@@ -4153,13 +4331,19 @@ mod tests {
     /// receipt rows are observable next to the invoke.
     async fn receipt_handler(
         peer: PeerId,
-    ) -> (Arc<InvokeHandlerV2>, sqlx::SqlitePool, tempfile::TempDir) {
+    ) -> (
+        Arc<InvokeHandlerV2>,
+        sqlx::SqlitePool,
+        Arc<InFlightWrites>,
+        tempfile::TempDir,
+    ) {
         let scope = scoped_scope(peer);
         let (temp, ports) = test_ports().await;
         let pool = ports.pool().clone();
+        let in_flight = ports.in_flight_writes();
         let (handler, _lane, _serializer) =
             build_handler_with_limits(scope, ports, BridgeLimits::default());
-        (handler, pool, temp)
+        (handler, pool, in_flight, temp)
     }
 
     /// One connected invoke's receipt row, as `(operation_id, status)`.
@@ -4207,7 +4391,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn re_driven_write_is_answered_from_the_receipt() {
         let peer = fixed_keypair(41).public().to_peer_id();
-        let (handler, pool, _temp) = receipt_handler(peer).await;
+        let (handler, pool, _in_flight, _temp) = receipt_handler(peer).await;
         let subject_id = format!("{peer}/upsert");
         let payload = serde_json::json!({
             "knowledge_entries": [entry_fixture("kb_redrive", WORLD_A)],
@@ -4267,7 +4451,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn ambiguous_re_drive_is_refused_uncertain_and_not_reapplied() {
         let peer = fixed_keypair(42).public().to_peer_id();
-        let (handler, pool, _temp) = receipt_handler(peer).await;
+        let (handler, pool, _in_flight, _temp) = receipt_handler(peer).await;
         let subject_id = format!("{peer}/upsert");
         let operation_id = caller_operation_id("ee");
         let payload = serde_json::json!({
@@ -4323,7 +4507,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn conflicting_operation_id_is_refused_and_never_deduped() {
         let peer = fixed_keypair(43).public().to_peer_id();
-        let (handler, pool, _temp) = receipt_handler(peer).await;
+        let (handler, pool, _in_flight, _temp) = receipt_handler(peer).await;
         let subject_id = format!("{peer}/upsert");
         let operation_id = caller_operation_id("ff");
         nexus_local_db::operation_receipts::begin_operation(
@@ -4567,7 +4751,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn partial_upsert_commit_is_observed_and_a_settlement_fault_is_not_retryable() {
         let peer = fixed_keypair(46).public().to_peer_id();
-        let (handler, pool, _temp) = receipt_handler(peer).await;
+        let (handler, pool, _in_flight, _temp) = receipt_handler(peer).await;
 
         // Entry A is unique; entry B repeats A's (entry_type, canonical_name),
         // which the orchestrator refuses AFTER A has already committed.
@@ -4669,7 +4853,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn pruned_outbox_rows_cannot_erase_a_committed_effect() {
         let peer = fixed_keypair(47).public().to_peer_id();
-        let (handler, pool, _temp) = receipt_handler(peer).await;
+        let (handler, pool, _in_flight, _temp) = receipt_handler(peer).await;
 
         // Baseline accuracy: the same watermark against an unchanged outbox
         // reports NO committed effect.
@@ -4722,6 +4906,125 @@ mod tests {
         assert!(
             write_effect_committed(&pool, None).await,
             "an unverifiable observation must resolve to effect-may-have-committed"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // QC1-W001 — §B.3's Busy/in-progress answer vs the uncertain one
+    // -----------------------------------------------------------------------
+
+    /// §B.3's two under-way answers stay distinct: a `running` receipt whose
+    /// owner is KNOWN to be live (this process is running it) is the typed Busy
+    /// answer, while a `running` receipt with no live owner known — what a
+    /// restart or a previous process leaves behind — stays `uncertain`. Neither
+    /// re-applies the effect.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_live_owner_answers_busy_and_an_unknown_owner_uncertain() {
+        let peer = fixed_keypair(48).public().to_peer_id();
+        let (handler, pool, in_flight, _temp) = receipt_handler(peer).await;
+        let subject_id = format!("{peer}/upsert");
+        let operation_id = caller_operation_id("b0");
+        let payload = serde_json::json!({
+            "operation_id": &operation_id,
+            "knowledge_entries": [entry_fixture("kb_busy", WORLD_A)],
+        });
+        nexus_local_db::operation_receipts::begin_operation(
+            &pool,
+            &operation_id,
+            CONSUMER_CONNECT_INVOKE,
+            &subject_id,
+            &connect_fingerprint(&peer, "upsert", &payload),
+        )
+        .await
+        .expect("seed the in-flight receipt");
+
+        // A KNOWN live owner: this process is running the effect.
+        in_flight.register(&operation_id);
+        match handler(&peer, "upsert", payload.clone()) {
+            Err(envelope) => {
+                assert_eq!(
+                    envelope.code, "operation_in_progress",
+                    "a known live owner is the typed Busy answer: {envelope:?}"
+                );
+                assert_eq!(
+                    envelope.details.get("state").and_then(Value::as_str),
+                    Some("in_progress")
+                );
+            }
+            Ok(served) => panic!("a live owner must answer Busy, got {served}"),
+        }
+
+        // The owner is no longer known (the registration is gone, as after a
+        // restart): `uncertain`, never Busy and never a re-apply.
+        in_flight.release(&operation_id);
+        match handler(&peer, "upsert", payload) {
+            Err(envelope) => assert_eq!(
+                envelope.code, "uncertain",
+                "an unknown owner stays uncertain: {envelope:?}"
+            ),
+            Ok(served) => panic!("an unknown owner must answer uncertain, got {served}"),
+        }
+
+        // Nothing was applied either time, and the receipt is untouched.
+        let applied: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = ?")
+                .bind("kb_busy")
+                .fetch_one(&pool)
+                .await
+                .expect("count");
+        assert_eq!(applied, 0);
+        assert_eq!(
+            connect_receipt_rows(&pool, &subject_id).await,
+            vec![(operation_id, "running".to_string())]
+        );
+    }
+
+    /// QC1-W001, the racing-begin half: the caller that loses the
+    /// first-writer-wins insert reads the winner's `running` receipt, and the
+    /// same liveness rule decides — Busy when the winner is registered as a
+    /// live in-process owner, `uncertain` when the registration is gone.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn racing_begin_classifies_the_winner_by_liveness() {
+        let peer = fixed_keypair(49).public().to_peer_id();
+        let (_handler, pool, in_flight, _temp) = receipt_handler(peer).await;
+        let subject_id = format!("{peer}/upsert");
+        let metadata = WriteReceiptMetadata {
+            operation_id: caller_operation_id("b1"),
+            subject_id: subject_id.clone(),
+            fingerprint: "fp-racing-winner".to_string(),
+        };
+        // The winner's row, written by an in-process sibling that is running the
+        // effect right now.
+        nexus_local_db::operation_receipts::begin_operation(
+            &pool,
+            &metadata.operation_id,
+            CONSUMER_CONNECT_INVOKE,
+            &subject_id,
+            &metadata.fingerprint,
+        )
+        .await
+        .expect("seed the winner's running receipt");
+
+        in_flight.register(&metadata.operation_id);
+        let live = acquire_write_receipt(&pool, &metadata, &in_flight)
+            .await
+            .expect_err("the racing loser must not acquire the effect");
+        assert_eq!(
+            live.code, "operation_in_progress",
+            "a known live racer answers Busy: {live:?}"
+        );
+
+        in_flight.release(&metadata.operation_id);
+        let unknown = acquire_write_receipt(&pool, &metadata, &in_flight)
+            .await
+            .expect_err("the racing loser must not acquire the effect");
+        assert_eq!(
+            unknown.code, "uncertain",
+            "an unknown owner stays uncertain: {unknown:?}"
+        );
+        assert_eq!(
+            connect_receipt_rows(&pool, &subject_id).await,
+            vec![(metadata.operation_id.clone(), "running".to_string())]
         );
     }
 }

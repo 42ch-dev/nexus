@@ -265,7 +265,7 @@ fn coded_status(code: &str) -> u16 {
         // operation's state cannot be determined (never retry blindly). An
         // exact 409 keeps both honest instead of degrading them to the 400
         // `invalid_input` fallback.
-        "conflict" | "operation_id_conflict" | "uncertain" => 409,
+        "conflict" | "operation_id_conflict" | "uncertain" | "operation_in_progress" => 409,
         "invalid_state"
         | "invalid_transition"
         | "invalid_input"
@@ -476,6 +476,7 @@ mod tests {
     fn durable_operation_refusals_are_conflicts() {
         assert_eq!(coded_status("operation_id_conflict"), 409);
         assert_eq!(coded_status("uncertain"), 409);
+        assert_eq!(coded_status("operation_in_progress"), 409);
     }
 
     /// A close report that does not confirm cleanup, naming one pending

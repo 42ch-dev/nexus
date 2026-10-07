@@ -254,6 +254,12 @@ pub async fn get_operation_receipt_by_subject(
 /// from the statement's own affected-row count, so exactly one racer is told
 /// it acquired the effect and every other racer is told it did not.
 ///
+/// The store reads the id FIRST and never re-inserts an existing row: the schema
+/// refuses an insert over a terminal id (a settled answer is never
+/// deleted-and-reinserted), so a replay after settlement is answered from the
+/// stored row rather than by attempting an insert that a replacement clause
+/// could turn into a delete.
+///
 /// # Errors
 ///
 /// [`LocalDbError::ValidationError`] for an unknown `consumer`,
@@ -271,6 +277,20 @@ pub async fn begin_operation(
             "unknown operation receipt consumer '{consumer}'"
         )));
     }
+
+    // Read FIRST (QC1-C001): a receipt row is never re-inserted. The schema
+    // refuses an insert over a TERMINAL id, so a replay after settlement must be
+    // answered from the stored row here instead of attempting the insert the
+    // store used to rely on being a no-op.
+    if let Some(stored) = get_operation_receipt(pool, operation_id).await? {
+        if !stored.matches_fingerprint(request_fingerprint) {
+            return Err(LocalDbError::OperationIdConflict {
+                operation_id: operation_id.to_string(),
+            });
+        }
+        return Ok(BeginOutcome::Existing(stored));
+    }
+
     let now = now_rfc3339();
     let inserted = sqlx::query(
         "INSERT INTO operation_receipts \
@@ -414,24 +434,6 @@ pub async fn recover(
 ) -> Result<RecoveryDecision, LocalDbError> {
     let receipt = get_operation_receipt(pool, operation_id).await?;
     Ok(classify_recovery(receipt.as_ref(), owner_is_live))
-}
-
-/// Map a `compute_sessions` direct-lane run status onto the receipt status it
-/// shadows (spec §B.2), or `None` when the transition has no receipt
-/// counterpart.
-///
-/// The shadowed operation transitions are `running → succeeded/failed`.
-/// `applied` / `discarded` are review decisions on an already-settled run, so
-/// Accept/Discard stay behavior-preserving and never touch a receipt — that is
-/// why the `compute_sessions` schema needs no change for receipts.
-#[must_use]
-pub fn compute_run_receipt_status(run_status: &str) -> Option<&'static str> {
-    match run_status {
-        "running" => Some(STATUS_RUNNING),
-        "succeeded" => Some(STATUS_FINISHED),
-        "failed" => Some(STATUS_FAILED),
-        _ => None,
-    }
 }
 
 /// True for the two consumers the `operation_receipts` CHECK admits.
@@ -913,21 +915,6 @@ mod tests {
             .is_none());
     }
 
-    /// Compute Run receipts shadow `running → succeeded/failed`; Accept and
-    /// Discard have no receipt counterpart, which is what keeps them
-    /// behavior-preserving without a `compute_sessions` schema change.
-    #[tokio::test]
-    async fn compute_run_shadow_mapping_leaves_review_states_alone() {
-        assert_eq!(compute_run_receipt_status("running"), Some(STATUS_RUNNING));
-        assert_eq!(
-            compute_run_receipt_status("succeeded"),
-            Some(STATUS_FINISHED)
-        );
-        assert_eq!(compute_run_receipt_status("failed"), Some(STATUS_FAILED));
-        assert_eq!(compute_run_receipt_status("applied"), None);
-        assert_eq!(compute_run_receipt_status("discarded"), None);
-    }
-
     /// The schema is the durable home of §B.2's receipt invariant: the CHECK
     /// requires a terminal stamp plus exactly one terminal payload, and a
     /// settled receipt is IMMUTABLE — no admitted write path can downgrade it,
@@ -994,6 +981,149 @@ mod tests {
         }
 
         // The stored row is byte-identical to the settlement.
+        let stored = get_operation_receipt(&pool, &id).await.unwrap().unwrap();
+        assert_eq!(stored, settled);
+    }
+
+    /// QC1-C001: a settled answer cannot be deleted-and-reinserted. An
+    /// `INSERT OR REPLACE` over a terminal id resolves its conflict by DELETING
+    /// the victim — whose DELETE trigger does not fire while
+    /// `recursive_triggers` is OFF (the SQLite default) — so the DELETE-side
+    /// immutability triggers alone cannot see it. The schema therefore refuses
+    /// the replacement insert itself.
+    #[tokio::test]
+    async fn replacement_insert_cannot_overwrite_a_terminal_receipt() {
+        let (pool, _dir) = admitted_pool().await;
+        let id = op_id("e1");
+        begin_acquired(&pool, &id, CONSUMER_COMPUTE_RUN, "run-e1", "fp-e1").await;
+        let settled = settle_operation(&pool, &id, STATUS_FINISHED, r#"{"ok":true}"#)
+            .await
+            .expect("settle the receipt terminally");
+
+        let err = sqlx::query(
+            "INSERT OR REPLACE INTO operation_receipts \
+                 (operation_id, consumer, subject_id, status, request_fingerprint, \
+                  result_json, error_json, created_at, updated_at, terminal_at, sequence) \
+             VALUES (?, 'compute_run', 'run-replaced', 'running', 'fp-replaced', \
+                     NULL, NULL, '2026-10-07T00:00:00Z', '2026-10-07T00:00:00Z', NULL, 99)",
+        )
+        .bind(&id)
+        .execute(&pool)
+        .await
+        .expect_err("a replacement insert over a terminal receipt must be refused");
+        assert!(
+            err.to_string()
+                .contains("OPERATION_RECEIPT_TERMINAL_IMMUTABLE"),
+            "expected the terminal-immutability abort, got: {err}"
+        );
+
+        // The settled row survived byte-identically (the victim was not
+        // deleted, and nothing was reinserted).
+        let stored = get_operation_receipt(&pool, &id).await.unwrap().unwrap();
+        assert_eq!(stored, settled, "the settled row must be untouched");
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM operation_receipts")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 1, "no replacement row was created");
+    }
+
+    /// QC1-C001, the second half: the receipt KEY is immutable, so a `running`
+    /// source cannot MOVE its row onto a settled id — an `UPDATE OR REPLACE`
+    /// would otherwise delete the terminal victim without firing its DELETE
+    /// trigger, and a plain `UPDATE … SET operation_id` would hijack the
+    /// settled id's answer.
+    #[tokio::test]
+    async fn update_replace_cannot_hijack_a_terminal_receipt() {
+        let (pool, _dir) = admitted_pool().await;
+        let terminal_id = op_id("e2");
+        begin_acquired(&pool, &terminal_id, CONSUMER_COMPUTE_RUN, "run-e2", "fp-e2").await;
+        let settled = settle_operation(&pool, &terminal_id, STATUS_FINISHED, r#"{"ok":true}"#)
+            .await
+            .expect("settle the receipt terminally");
+        let running_id = op_id("e3");
+        let running =
+            begin_acquired(&pool, &running_id, CONSUMER_COMPUTE_RUN, "run-e3", "fp-e3").await;
+        assert_eq!(running.status, STATUS_RUNNING);
+
+        // `UPDATE OR REPLACE` from the running source onto the settled id.
+        let err = sqlx::query(
+            "UPDATE OR REPLACE operation_receipts SET operation_id = ? WHERE operation_id = ?",
+        )
+        .bind(&terminal_id)
+        .bind(&running_id)
+        .execute(&pool)
+        .await
+        .expect_err("UPDATE OR REPLACE must not move a running row onto a settled id");
+        assert!(
+            err.to_string().contains("OPERATION_RECEIPT_KEY_IMMUTABLE"),
+            "expected the key-immutability abort, got: {err}"
+        );
+
+        // A plain key mutation is refused the same way.
+        let err =
+            sqlx::query("UPDATE operation_receipts SET operation_id = ? WHERE operation_id = ?")
+                .bind(&terminal_id)
+                .bind(&running_id)
+                .execute(&pool)
+                .await
+                .expect_err("a plain receipt key mutation must be refused");
+        assert!(
+            err.to_string().contains("OPERATION_RECEIPT_KEY_IMMUTABLE"),
+            "expected the key-immutability abort, got: {err}"
+        );
+
+        // Both rows are byte-identical to their pre-attack state.
+        assert_eq!(
+            get_operation_receipt(&pool, &terminal_id)
+                .await
+                .unwrap()
+                .unwrap(),
+            settled
+        );
+        assert_eq!(
+            get_operation_receipt(&pool, &running_id)
+                .await
+                .unwrap()
+                .unwrap(),
+            running
+        );
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM operation_receipts")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 2, "the terminal victim was not deleted");
+    }
+
+    /// The legitimate replay path is untouched by the replacement guards: after
+    /// settlement, `begin_operation` answers from the stored terminal row (the
+    /// store reads first and never re-inserts), and a conflicting request is
+    /// still the typed refusal.
+    #[tokio::test]
+    async fn replaying_a_terminal_receipt_never_reinserts_it() {
+        let (pool, _dir) = admitted_pool().await;
+        let id = op_id("e4");
+        begin_acquired(&pool, &id, CONSUMER_COMPUTE_RUN, "run-e4", "fp-e4").await;
+        let settled = settle_operation(&pool, &id, STATUS_FINISHED, r#"{"ok":true}"#)
+            .await
+            .expect("settle the receipt terminally");
+
+        match begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-e4", "fp-e4")
+            .await
+            .expect("a terminal replay is answered, never refused")
+        {
+            BeginOutcome::Existing(stored) => assert_eq!(stored, settled),
+            BeginOutcome::Acquired(other) => {
+                panic!("a terminal receipt must never be re-acquired: {other:?}")
+            }
+        }
+        assert!(
+            matches!(
+                begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-e4", "fp-other").await,
+                Err(LocalDbError::OperationIdConflict { .. })
+            ),
+            "a different fingerprint for the settled id stays the typed conflict"
+        );
         let stored = get_operation_receipt(&pool, &id).await.unwrap().unwrap();
         assert_eq!(stored, settled);
     }

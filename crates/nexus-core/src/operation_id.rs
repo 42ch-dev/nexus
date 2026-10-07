@@ -144,11 +144,63 @@ pub fn validate_operation_id(id: &str) -> Result<(), OperationIdError> {
 ///
 /// Same logical call retried/replayed ⇒ identical tuple ⇒ identical id; any
 /// scope difference ⇒ a different id.
+///
+/// Only the retained bytes are hex-encoded: the id keeps the first 128 bits of
+/// the SHA-256 digest, so encoding those 16 bytes yields the same 32 characters
+/// without rendering the other half.
 #[must_use]
 pub fn derive_operation_id(scope: &OperationScope<'_>) -> String {
     let digest = Sha256::digest(canonical_operation_json(scope).as_bytes());
-    let hex = hex::encode(digest);
-    format!("{OPERATION_ID_PREFIX}{}", &hex[..OPERATION_ID_HEX_LEN])
+    format!(
+        "{OPERATION_ID_PREFIX}{}",
+        hex::encode(&digest[..OPERATION_ID_HEX_LEN / 2])
+    )
+}
+
+/// A logical call's durable identity: the id to address its receipt with, and
+/// the fingerprint the store compares first-writer-wins.
+///
+/// Resolved together so the canonical document is serialized, and hashed,
+/// **once** on the write path — the id and the fingerprint are two projections
+/// of the same digest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperationIdentity {
+    /// The durable operation id (`op_<hex32>`, or the caller-supplied id).
+    pub operation_id: String,
+    /// SHA-256 (64 hex chars) of the same canonical logical request.
+    pub request_fingerprint: String,
+}
+
+/// Resolve the id AND the request fingerprint of one logical call in a single
+/// pass (spec §B.1 derivation + §B.2 fingerprint).
+///
+/// # Errors
+///
+/// Returns [`OperationIdError::NotAString`] when `args.operation_id` is
+/// present but not a string, and [`OperationIdError::Malformed`] when a
+/// string-supplied id fails [`validate_operation_id`].
+pub fn resolve_operation_identity(
+    scope: &OperationScope<'_>,
+) -> Result<OperationIdentity, OperationIdError> {
+    // One canonical serialization, one digest: the id keeps its first 16 bytes
+    // and the fingerprint the whole digest.
+    let canonical = canonical_operation_json(scope);
+    let digest = Sha256::digest(canonical.as_bytes());
+    let operation_id = match scope.args.get(OPERATION_ID_FIELD) {
+        None => format!(
+            "{OPERATION_ID_PREFIX}{}",
+            hex::encode(&digest[..OPERATION_ID_HEX_LEN / 2])
+        ),
+        Some(Value::String(id)) => {
+            validate_operation_id(id)?;
+            id.clone()
+        }
+        Some(_) => return Err(OperationIdError::NotAString),
+    };
+    Ok(OperationIdentity {
+        operation_id,
+        request_fingerprint: hex::encode(digest),
+    })
 }
 
 /// Resolve the id for a logical call: a caller-supplied `args.operation_id`
@@ -338,6 +390,45 @@ mod tests {
         assert_eq!(
             resolve_operation_id(&scope).unwrap(),
             derive_operation_id(&scope)
+        );
+    }
+
+    /// A FIXED vector pins the byte-level contract: the canonical JSON, the
+    /// derived id and the fingerprint must not drift across refactors — the id
+    /// and the fingerprint are two projections of this exact document.
+    #[test]
+    fn fixed_canonical_id_and_fingerprint_vector() {
+        let args = json!({"b": 2, "a": 1});
+        let fixed_scope = scope("creator-1", "session-1", "op", &args);
+        assert_eq!(
+            canonical_operation_json(&fixed_scope),
+            r#"{"action":"op","actor":"creator-1","args":{"a":1,"b":2},"session":"session-1"}"#
+        );
+        assert_eq!(
+            derive_operation_id(&fixed_scope),
+            "op_89c4a8b6b29ced2ea04b424c46ec3e78"
+        );
+        assert_eq!(
+            request_fingerprint(&fixed_scope),
+            "89c4a8b6b29ced2ea04b424c46ec3e78b695ee019b5a05c1d8ab0c405422e6ce"
+        );
+
+        // The single-pass identity resolves exactly those two projections.
+        let identity = resolve_operation_identity(&fixed_scope).expect("derived identity");
+        assert_eq!(identity.operation_id, derive_operation_id(&fixed_scope));
+        assert_eq!(
+            identity.request_fingerprint,
+            request_fingerprint(&fixed_scope)
+        );
+
+        // A caller-supplied id is kept verbatim.
+        let supplied = json!({"operation_id": format!("op_{}", "1".repeat(32))});
+        let supplied_scope = scope("creator-1", "session-1", "op", &supplied);
+        assert_eq!(
+            resolve_operation_identity(&supplied_scope)
+                .expect("supplied identity")
+                .operation_id,
+            format!("op_{}", "1".repeat(32))
         );
     }
 

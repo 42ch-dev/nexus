@@ -604,7 +604,7 @@ fn coded_wire_status(code: &str) -> i64 {
         // ownership refusal (§B.1) and `uncertain` is the "no terminal
         // receipt, never retry blindly" answer (§B.3 item 4). Both must be an
         // exact 409 with their coded detail, never the 400 fallback.
-        "operation_id_conflict" | "uncertain" => 409,
+        "operation_id_conflict" | "uncertain" | "operation_in_progress" => 409,
         "invalid_state"
         | "invalid_transition"
         | "invalid_input"
@@ -719,7 +719,11 @@ mod tests {
     /// `details.wire_code`, never the 400 `invalid_input` fallback.
     #[test]
     fn durable_operation_refusals_are_conflicts() {
-        for code in ["operation_id_conflict", "uncertain"] {
+        for code in [
+            "operation_id_conflict",
+            "uncertain",
+            "operation_in_progress",
+        ] {
             let wire = wire_core_error_from_domain(DomainError::Coded {
                 code: code.into(),
                 message: format!("{code} from the receipt store"),
