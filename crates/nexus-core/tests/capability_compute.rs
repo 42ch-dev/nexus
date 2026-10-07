@@ -3138,10 +3138,27 @@ async fn compute_run_receipt_shadows_the_run_transitions() {
         .await
         .unwrap()
         .expect("the run row");
+    // The finished receipt stores the run's EXACT answer (a `RunResponse`), so a
+    // replay is reconstructable from the receipt alone — it must survive Clear
+    // deleting the run row. Its proposals are the run row's own proposals.
+    let stored: serde_json::Value = serde_json::from_str(
+        receipt
+            .result_json
+            .as_deref()
+            .expect("a finished receipt carries its answer"),
+    )
+    .expect("the stored payload is the run response JSON");
+    assert_eq!(stored["run_id"], json!(succeeded));
+    assert_eq!(stored["status"], json!("succeeded"));
+    let row_proposals: serde_json::Value = serde_json::from_str(
+        row.proposals_json
+            .as_deref()
+            .expect("the succeeded row carries proposals"),
+    )
+    .unwrap();
     assert_eq!(
-        receipt.result_json.as_deref(),
-        row.proposals_json.as_deref(),
-        "the receipt's terminal payload is the run row's own proposals payload"
+        stored["proposals"], row_proposals,
+        "the receipt's answer carries the run's own proposals"
     );
 
     // A failed run shadows the other terminal transition.
@@ -3483,5 +3500,127 @@ async fn caller_supplied_operation_id_dedupes_a_retry_and_conflicts_on_a_new_req
         compute_run_rows(f.core.pool(), WORLD).await,
         1,
         "a conflicting request never runs the module"
+    );
+}
+
+/// v1.207 P3 (Greptile #3, C1): a finished receipt's replay must survive Clear
+/// deleting the run row.
+///
+/// The receipt is the durable answer for its whole lifetime; Clear history can
+/// delete the terminal `compute_sessions` row. The identical retry must still be
+/// answered FROM THE RECEIPT — no `NotFound`, no re-execution.
+#[tokio::test]
+async fn finished_receipt_replay_survives_clearing_the_run_history() {
+    let f = fixture().await;
+    let principal = f.core.active_principal().await.unwrap();
+    let op = format!("op_{}", "c".repeat(32));
+
+    let mut request = run_request(WORLD, MODULE);
+    request.operation_id = Some(op);
+    let first = compute_run(&f.core, &f.compute, request.clone())
+        .await
+        .expect("the first call runs the module");
+    assert_eq!(first.status.to_string(), "succeeded");
+
+    // Accept (the row becomes `applied`, terminal) then Clear the World's
+    // terminal history: the run row is deleted, the receipt is not.
+    accept_compute_run(
+        &f.core,
+        &principal,
+        &first.run_id,
+        accept_request(json!({})),
+    )
+    .await
+    .expect("accept succeeds");
+    let cleared = clear_compute_runs(
+        &f.core,
+        &principal,
+        ClearRunsQuery {
+            status: None,
+            world_id: WORLD.to_string(),
+        },
+    )
+    .await
+    .expect("clear succeeds");
+    assert!(cleared.deleted >= 1);
+    assert!(
+        !run_row_survives(f.core.pool(), &first.run_id).await,
+        "only the durable receipt remains after Clear"
+    );
+
+    let replay = compute_run(&f.core, &f.compute, request)
+        .await
+        .expect("the receipt answers the replay with no run row");
+    assert_eq!(replay.run_id, first.run_id);
+    assert_eq!(replay.status.to_string(), "succeeded");
+    assert_eq!(
+        replay.created_at, first.created_at,
+        "the stored answer is byte-identical, timestamp included"
+    );
+    assert_eq!(
+        serde_json::to_value(&replay).unwrap(),
+        serde_json::to_value(&first).unwrap(),
+        "the replay returns the exact stored first-success answer"
+    );
+    assert_eq!(
+        compute_run_rows(f.core.pool(), WORLD).await,
+        0,
+        "the replay never re-executes the module"
+    );
+}
+
+/// v1.207 P3 (Greptile #3, I1): a concurrent first use under one id with
+/// DIFFERENT args yields one typed conflict and leaves no permanent `running`
+/// duplicate.
+#[tokio::test]
+async fn concurrent_conflicting_first_use_leaves_no_running_loser() {
+    let f = fixture().await;
+    let op = format!("op_{}", "b".repeat(32));
+
+    let mut first = run_request(WORLD, MODULE);
+    first.operation_id = Some(op.clone());
+    let mut second = run_request(WORLD, MODULE);
+    second.operation_id = Some(op);
+    // A different logical request => a different fingerprint => a genuine
+    // first-writer-wins conflict (not a replay).
+    second.invocation_params = serde_json::Map::from_iter([
+        ("attacker_id".to_string(), json!("kb_atk")),
+        ("defender_id".to_string(), json!("kb_def")),
+        ("variant".to_string(), json!(2)),
+    ]);
+
+    // Polled concurrently: both pass the receipt pre-check (neither has written
+    // a receipt yet), both insert a run row, and the receipt decides the single
+    // effect owner. The loser must settle its own never-executed run row.
+    let (a, b) = tokio::join!(
+        compute_run(&f.core, &f.compute, first),
+        compute_run(&f.core, &f.compute, second),
+    );
+    assert_eq!(
+        usize::from(a.is_ok()) + usize::from(b.is_ok()),
+        1,
+        "exactly one attempt owns the effect"
+    );
+    for outcome in [&a, &b] {
+        if let Err(err) = outcome {
+            match err {
+                CoreError::Coded { code, .. } => assert_eq!(code, "operation_id_conflict"),
+                other => panic!("expected operation_id_conflict, got {other:?}"),
+            }
+        }
+    }
+
+    let (succeeded, running): (i64, i64) = sqlx::query_as(
+        "SELECT SUM(status = 'succeeded'), SUM(status = 'running') \
+           FROM compute_sessions WHERE world_id = ? AND run_id IS NOT NULL",
+    )
+    .bind(WORLD)
+    .fetch_one(f.core.pool())
+    .await
+    .unwrap();
+    assert_eq!(succeeded, 1, "the module executed exactly once");
+    assert_eq!(
+        running, 0,
+        "the conflicting loser was not left as a permanent `running` row"
     );
 }

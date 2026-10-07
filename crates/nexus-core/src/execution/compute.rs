@@ -295,7 +295,7 @@ pub async fn compute_run(
     };
     let operation_id = identity.operation_id;
     let request_fingerprint = identity.request_fingerprint;
-    match begin_operation(
+    let begin_outcome = match begin_operation(
         pool,
         &operation_id,
         CONSUMER_COMPUTE_RUN,
@@ -303,8 +303,36 @@ pub async fn compute_run(
         &request_fingerprint,
     )
     .await
-    .map_err(crate::error::local_db_err)?
     {
+        Ok(outcome) => outcome,
+        // A concurrent first use under the same id with DIFFERENT args won the
+        // receipt. Our freshly created run row never executed the module: settle
+        // it (never the winner's receipt) so it is not left `running` forever —
+        // an orphan only boot recovery would flag and Clear would never reach —
+        // and then surface the typed conflict verbatim. Unreachable for an
+        // id-less request (its id is derived from the fresh run id, so no
+        // receipt can already own it).
+        Err(nexus_local_db::LocalDbError::OperationIdConflict { .. }) => {
+            let _ = compute_runs::set_run_failed(
+                pool,
+                &run_id,
+                &json!({
+                    "code": "operation_id_conflict",
+                    "message": "a concurrent attempt owns this operation_id with a different \
+                                request; this duplicate did not execute the module",
+                })
+                .to_string(),
+            )
+            .await;
+            return Err(crate::error::local_db_err(
+                nexus_local_db::LocalDbError::OperationIdConflict {
+                    operation_id: operation_id.clone(),
+                },
+            ));
+        }
+        Err(other) => return Err(crate::error::local_db_err(other)),
+    };
+    match begin_outcome {
         BeginOutcome::Acquired(_) => {}
         // Unreachable for a freshly generated run id (the receipt's subject is
         // the id itself). A caller-supplied id can lose a concurrent first-use
@@ -322,7 +350,7 @@ pub async fn compute_run(
                 .to_string(),
             )
             .await;
-            return answer_from_receipt(pool, &stored).await;
+            return answer_from_receipt(&stored);
         }
     }
 
@@ -439,13 +467,30 @@ pub async fn compute_run(
         return Err(crate::error::local_db_err(db_err));
     }
 
-    // §B.3: settle the receipt terminally, mirroring the run row. A failure
-    // here is the effect-committed case: the run DID succeed and is durable on
-    // its row, so the receipt's absence is not a rollback and must not be
-    // retried — the typed refusal names the operation so the caller can
-    // inspect instead of re-running.
+    let proposals_raw: Value = serde_json::from_str(&proposals_json).unwrap_or(Value::Null);
+    let created_at = chrono::Utc::now().to_rfc3339();
+    let response = build_run_response(
+        &run_id,
+        &request.module_id,
+        &module_version,
+        &created_at,
+        &proposals_raw,
+    )?;
+
+    // §B.3: settle the receipt terminally with the EXACT answer the caller got.
+    // The receipt is the durable replay answer that OUTLIVES the run row — Clear
+    // history can delete `compute_sessions`, so a replay must never depend on it
+    // (and never fall back to re-running). Storing the answer also makes a
+    // replayed `created_at` byte-identical to the first success. A failure here
+    // is the effect-committed case: the run DID succeed and is durable on its
+    // row, so the receipt's absence is not a rollback and must not be retried —
+    // the typed refusal names the operation so the caller can inspect instead of
+    // re-running.
+    let response_json = serde_json::to_string(&response).map_err(|err| CoreError::Internal {
+        category: format!("serialize run response for the receipt: {err}"),
+    })?;
     if let Err(settle_err) =
-        settle_operation(pool, &operation_id, STATUS_FINISHED, &proposals_json).await
+        settle_operation(pool, &operation_id, STATUS_FINISHED, &response_json).await
     {
         return Err(effect_committed_refusal(
             &operation_id,
@@ -454,16 +499,7 @@ pub async fn compute_run(
         ));
     }
 
-    let proposals_raw: Value = serde_json::from_str(&proposals_json).unwrap_or(Value::Null);
-    let created_at = chrono::Utc::now().to_rfc3339();
-
-    build_run_response(
-        &run_id,
-        &request.module_id,
-        &module_version,
-        &created_at,
-        &proposals_raw,
-    )
+    Ok(response)
 }
 
 /// Accept a succeeded run's proposals: apply them ATOMICALLY.
@@ -1619,7 +1655,7 @@ async fn replay_from_receipt(
             },
         ));
     }
-    Ok(Some(answer_from_receipt(pool, &receipt).await?))
+    Ok(Some(answer_from_receipt(&receipt)?))
 }
 
 /// The §B.3 answer for a receipt that already owns an operation id.
@@ -1628,14 +1664,9 @@ async fn replay_from_receipt(
 /// is the in-flight Busy answer. The owner-dead `uncertain` answer belongs to
 /// the boot recovery lane, which calls `classify_recovery` with
 /// `owner_is_live = false`.
-async fn answer_from_receipt(
-    pool: &sqlx::SqlitePool,
-    receipt: &OperationReceipt,
-) -> CoreResult<RunResponse> {
+fn answer_from_receipt(receipt: &OperationReceipt) -> CoreResult<RunResponse> {
     match classify_recovery(Some(receipt), true) {
-        RecoveryDecision::AnswerFromReceipt(terminal) => {
-            answer_from_terminal_receipt(pool, &terminal).await
-        }
+        RecoveryDecision::AnswerFromReceipt(terminal) => answer_from_terminal_receipt(&terminal),
         RecoveryDecision::InProgress(_) => {
             Err(operation_in_progress_refusal(&receipt.operation_id))
         }
@@ -1654,34 +1685,30 @@ async fn answer_from_receipt(
 
 /// Rebuild the replay answer from a TERMINAL receipt (§B.3 step 3).
 ///
-/// A `finished` receipt carries the run's proposals in `result_json`; the run
-/// row — read, never re-created — carries the module metadata, so the replay
-/// returns the same `RunResponse` the first call returned. Every other terminal
-/// status is a failure receipt, whose stored `error_json` renders as the same
-/// refusal the first call produced.
-async fn answer_from_terminal_receipt(
-    pool: &sqlx::SqlitePool,
-    receipt: &OperationReceipt,
-) -> CoreResult<RunResponse> {
+/// A `finished` receipt stores the exact `RunResponse` the first call returned,
+/// so the answer is reconstructable from the RECEIPT ALONE for its whole
+/// lifetime — independent of the run row, which Clear history may delete (and
+/// never a re-run). Every other terminal status stores the failure reason in
+/// `error_json`, rendered as the same refusal the first call produced.
+fn answer_from_terminal_receipt(receipt: &OperationReceipt) -> CoreResult<RunResponse> {
     if receipt.status != STATUS_FINISHED {
         return Err(replayed_failure_refusal(receipt));
     }
-    let run = compute_runs::get_run(pool, &receipt.subject_id)
-        .await
-        .map_err(crate::error::local_db_err)?
-        .ok_or_else(|| run_not_found(&receipt.subject_id))?;
-    let proposals_raw: Value = receipt
+    let payload = receipt
         .result_json
         .as_deref()
-        .and_then(|raw| serde_json::from_str(raw).ok())
-        .unwrap_or(Value::Null);
-    build_run_response(
-        &run.run_id,
-        &run.module_id,
-        run.module_version.as_deref().unwrap_or_default(),
-        &run.created_at,
-        &proposals_raw,
-    )
+        .ok_or_else(|| CoreError::Internal {
+            category: format!(
+                "finished operation receipt {} carries no result payload",
+                receipt.operation_id
+            ),
+        })?;
+    serde_json::from_str(payload).map_err(|err| CoreError::Internal {
+        category: format!(
+            "parse replayed run response from receipt {}: {err}",
+            receipt.operation_id
+        ),
+    })
 }
 
 /// Render a terminal non-`finished` receipt as the refusal the first call
