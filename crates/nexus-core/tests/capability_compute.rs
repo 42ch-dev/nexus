@@ -25,9 +25,8 @@ use nexus_contracts::generated::daemon_api::compute::{
     run_request::RunRequest,
 };
 use nexus_contracts::CreateWorkRequest;
-use nexus_core::execution::capabilities::{
-    execute_tool, ToolContext, ToolExecuteRequest, ToolRuntimeFacts,
-};
+use nexus_contracts::ToolsApi;
+use nexus_core::execution::capabilities::{execute_tool, ToolContext, ToolRuntimeFacts};
 use nexus_core::execution::compute::{
     accept_compute_run, clear_compute_runs, compute_run, discard_compute_run, get_compute_run,
     list_compute_runs, ComputeContext,
@@ -407,7 +406,7 @@ async fn unknown_tool_is_refused_with_zero_domain_effect() {
     let f = fixture().await;
     let before = timeline_event_count(f.core.pool()).await;
 
-    let request = ToolExecuteRequest {
+    let request = ToolsApi {
         tool_name: "nexus.does.not.exist".to_string(),
         parameters: json!({}),
         session_id: None,
@@ -536,7 +535,7 @@ async fn schema_invalid_arguments_never_reach_the_capability() {
         nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(registry)),
     ));
 
-    let request = ToolExecuteRequest {
+    let request = ToolsApi {
         tool_name: "t3.requires.thing".to_string(),
         // `thing` is missing, so the declared schema refuses the call before
         // the capability's `run` is ever reached.
@@ -838,7 +837,7 @@ async fn execute_tool_refuses_a_principal_from_another_core() {
     .expect("second core opens");
     let foreign = other_core.active_principal().await.unwrap();
 
-    let request = ToolExecuteRequest {
+    let request = ToolsApi {
         tool_name: "nexus.workspace.info".to_string(),
         parameters: json!({}),
         session_id: None,
@@ -878,7 +877,7 @@ async fn execute_tool_accepts_the_owners_own_principal() {
         .expect("owner starts");
     let principal = f.core.active_principal().await.unwrap();
 
-    let request = ToolExecuteRequest {
+    let request = ToolsApi {
         tool_name: "nexus.workspace.info".to_string(),
         parameters: json!({}),
         session_id: None,
@@ -917,7 +916,7 @@ async fn research_query_is_scoped_to_the_creator() {
     .unwrap();
 
     // Direct id lookup of a FOREIGN row: NotFound, and no existence leak.
-    let request = ToolExecuteRequest {
+    let request = ToolsApi {
         tool_name: "nexus.research.query".to_string(),
         parameters: json!({ "reference_source_id": "ref_foreign" }),
         session_id: None,
@@ -933,7 +932,7 @@ async fn research_query_is_scoped_to_the_creator() {
     );
 
     // The LIST must not surface the foreign row either.
-    let request = ToolExecuteRequest {
+    let request = ToolsApi {
         tool_name: "nexus.research.query".to_string(),
         parameters: json!({}),
         session_id: None,
@@ -981,7 +980,7 @@ async fn reference_refresh_is_refused_under_a_read_only_policy() {
     let mut context = f.context.clone();
     context.set_workspace_path(Some(workspace_dir.to_string_lossy().into_owned()));
 
-    let request = ToolExecuteRequest {
+    let request = ToolsApi {
         tool_name: "nexus.reference.refresh".to_string(),
         parameters: json!({ "reference_source_id": "ref_any" }),
         session_id: None,
@@ -1007,7 +1006,7 @@ async fn reference_refresh_is_refused_under_a_read_only_policy() {
 
     // CONTROL: the same policy still ADMITS a read tool, so the refusal above
     // is the write classification and not the policy denying everything.
-    let request = ToolExecuteRequest {
+    let request = ToolsApi {
         tool_name: "nexus.workspace.info".to_string(),
         parameters: json!({}),
         session_id: None,
@@ -1032,8 +1031,8 @@ async fn reference_refresh_is_refused_under_a_read_only_policy() {
 // ---------------------------------------------------------------------------
 
 /// A `nexus.*` dispatch request with no session/request identity.
-fn tool_request(tool_name: &str, parameters: serde_json::Value) -> ToolExecuteRequest {
-    ToolExecuteRequest {
+fn tool_request(tool_name: &str, parameters: serde_json::Value) -> ToolsApi {
+    ToolsApi {
         tool_name: tool_name.to_string(),
         parameters,
         session_id: None,

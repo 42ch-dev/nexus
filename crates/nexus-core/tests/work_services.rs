@@ -947,7 +947,7 @@ async fn work_lifecycle_mutators_reject_read_only_core() {
         matches!(core.archive_work_pool_entry(&principal, nexus_core::ArchivePoolRequest { entry_id: "entry".into() }).await, Err(CoreError::Forbidden { resource }) if resource == "work: read-only core access")
     );
     assert!(
-        matches!(core.update_finding(&principal, finding.finding_id.clone(), nexus_core::UpdateFindingRequest::default()).await, Err(CoreError::Forbidden { resource }) if resource == "work: read-only core access")
+        matches!(core.update_finding(&principal, finding.finding_id.clone(), nexus_contracts::FindingsApi::default()).await, Err(CoreError::Forbidden { resource }) if resource == "work: read-only core access")
     );
     core.close().await.unwrap();
 }
@@ -1059,8 +1059,8 @@ fn finding_request(severity: &str, title: &str) -> nexus_core::CreateFindingRequ
     }
 }
 
-fn status_set(status: &str) -> nexus_core::UpdateFindingRequest {
-    nexus_core::UpdateFindingRequest {
+fn status_set(status: &str) -> nexus_contracts::FindingsApi {
+    nexus_contracts::FindingsApi {
         status: Some(status.to_string()),
         ..Default::default()
     }

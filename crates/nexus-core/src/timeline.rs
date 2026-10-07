@@ -9,8 +9,9 @@
 //! gap/disconnect handling stay a P5-T4 transport surface. A stream is a
 //! read feed, not a workflow-engine concern.
 
-use nexus_contracts::daemon_api::timeline::list_timeline_events_response::{
-    ListTimelineEventsResponse, TimelineEventInfo, TimelineEventInfoStatus,
+use nexus_contracts::daemon_api::timeline::list_timeline_events_response::ListTimelineEventsResponse;
+use nexus_contracts::daemon_api::timeline::timeline_event_info::{
+    TimelineEventInfo, TimelineEventInfoStatus,
 };
 use nexus_contracts::{TimelineOverviewResponse, TimelineOverviewResponseWorldsItem};
 use nexus_local_db::narrative_gateway::{list_timeline_events_page, TimelineEventPageRow};

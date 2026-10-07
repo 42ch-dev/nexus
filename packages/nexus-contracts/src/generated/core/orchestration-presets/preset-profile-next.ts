@@ -4,6 +4,9 @@
  * Generator: json-schema-to-typescript (tooling/codegen/src/ts-gen.ts)
  */
 
+import type { PresetProfileConditionalRule } from './preset-profile-conditional-rule';
+import type { PresetProfileLabeledNext } from './preset-profile-labeled-next';
+
 /**
  * Next transition form (`linear` / `goNogo` / `labeled` / `conditional` / `branches`).
  */
@@ -16,18 +19,4 @@ export interface PresetProfileNext {
   rules?: PresetProfileConditionalRule[];
   branches?: PresetProfileConditionalRule[];
   default?: string;
-}
-/**
- * A labeled next edge (`labeled` form).
- */
-export interface PresetProfileLabeledNext {
-  label: string;
-  target: string;
-}
-/**
- * A conditional rule (expression -> target edge).
- */
-export interface PresetProfileConditionalRule {
-  when: string;
-  target: string;
 }

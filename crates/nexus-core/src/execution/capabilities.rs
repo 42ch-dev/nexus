@@ -55,9 +55,11 @@ use crate::error::{CoreError, CoreResult};
 use crate::error::CoreError as NexusApiError;
 use crate::service::CoreService;
 // The request DTOs live at the crate root, not in `works`.
-use crate::{
-    ArchivePoolRequest, PromotePoolRequest, UpdateFindingRequest, WorkDetails, WorkPatchRequest,
-};
+use crate::{ArchivePoolRequest, PromotePoolRequest, WorkDetails, WorkPatchRequest};
+// The tool invocation request is the generated `schemas/core/tools-api.schema.json`
+// DTO (the schema lane's authority, item 3); the daemon's handwritten copy it was
+// moved from — plus its response envelope — is deleted, not shadowed.
+use nexus_contracts::{FindingsApi, ToolsApi};
 use nexus_home_layout::active_context::{read_active_creator_id, read_active_workspace_slug};
 use nexus_local_db::works;
 use nexus_narrative::NarrativeGateway;
@@ -70,57 +72,6 @@ use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::LazyLock;
-
-/// A tool invocation request.
-///
-/// Shared by HTTP, the internal agent-host route and schedule dispatch.
-///
-/// NOTE: this type is currently MOVED from the daemon verbatim (P3-T3
-/// decision (B)) because its schema destination
-/// (`schemas/core/tools-api.schema.json`) does not exist yet. When the schema
-/// lane publishes it, this definition is replaced by the generated type and
-/// the move is deleted — tracked as a binding obligation in the task report.
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct ToolExecuteRequest {
-    /// The tool id to dispatch.
-    pub tool_name: String,
-    /// Tool arguments (validated against the capability's declared schema).
-    pub parameters: serde_json::Value,
-    /// Session this call belongs to, when the caller has one.
-    #[serde(default)]
-    pub session_id: Option<String>,
-    /// Caller-supplied request id, for audit correlation.
-    #[serde(default)]
-    pub request_id: Option<String>,
-    /// Who is calling, when it is not the ordinary HTTP path.
-    #[serde(default)]
-    pub caller_kind: Option<HostToolCallerKind>,
-}
-
-/// Who is calling the tool registry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum HostToolCallerKind {
-    /// An in-process schedule tick.
-    Schedule,
-}
-
-impl std::fmt::Display for HostToolCallerKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Schedule => write!(f, "schedule"),
-        }
-    }
-}
-
-/// The tool result envelope.
-#[derive(Debug, serde::Serialize)]
-pub struct ToolExecuteResponse {
-    /// Whether the handler succeeded.
-    pub success: bool,
-    /// The handler's JSON result.
-    pub result: serde_json::Value,
-}
 
 /// Fields allowed in `nexus.work.patch`.
 pub const PATCH_ALLOWED_FIELDS: &[&str] = &["title", "inspiration_log", "stage_metadata"];
@@ -321,7 +272,7 @@ impl ToolContext {
 /// `not_supported` for an id the spine cannot resolve.
 pub async fn execute_tool(
     context: &ToolContext,
-    request: &ToolExecuteRequest,
+    request: &ToolsApi,
 ) -> CoreResult<serde_json::Value> {
     tracing::info!(
         tool_name = %request.tool_name,
@@ -384,7 +335,7 @@ fn err_code(err: &CoreError) -> &str {
 /// Returns `(creator_id, workspace_slug)` if all gates pass.
 #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
 pub(crate) async fn admission_pipeline(
-    req: &ToolExecuteRequest,
+    req: &ToolsApi,
     context: &ToolContext,
 ) -> Result<(String, String), NexusApiError> {
     // Gate 1: tool id allowlist — derived dynamically from the single
@@ -543,7 +494,7 @@ fn check_fs_tool_permission(
 
 /// `nexus.context.whoami` — return active `creator_id` and workspace slug.
 fn execute_context_whoami(
-    _req: &ToolExecuteRequest,
+    _req: &ToolsApi,
     context: &ToolContext,
     creator_id: &str,
 ) -> serde_json::Value {
@@ -557,7 +508,7 @@ fn execute_context_whoami(
 
 /// `nexus.workspace.info` — return workspace roots, flags, linked world ref.
 fn execute_workspace_info(
-    _req: &ToolExecuteRequest,
+    _req: &ToolsApi,
     context: &ToolContext,
     creator_id: &str,
 ) -> serde_json::Value {
@@ -575,7 +526,7 @@ fn execute_workspace_info(
 
 /// `nexus.work.get` — return Work row + stage fields for active creator's work.
 async fn execute_work_get(
-    req: &ToolExecuteRequest,
+    req: &ToolsApi,
     context: &ToolContext,
     creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
@@ -615,7 +566,7 @@ async fn execute_work_get(
 /// requests, shared lock and error boundary); this boundary only validates the
 /// tool payload and maps transport errors (QC1-F-001).
 async fn execute_work_patch(
-    req: &ToolExecuteRequest,
+    req: &ToolsApi,
     context: &ToolContext,
     _creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
@@ -764,7 +715,7 @@ async fn execute_work_patch(
 
 /// `nexus.orchestration.schedule_status` — return schedules linked to `work_id`.
 async fn execute_schedule_status(
-    req: &ToolExecuteRequest,
+    req: &ToolsApi,
     context: &ToolContext,
     creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
@@ -801,7 +752,7 @@ async fn execute_schedule_status(
 
 /// `nexus.context.assemble` — local assemble-moment or `POLICY_BLOCKED` (spec §4.1).
 async fn execute_context_assemble(
-    req: &ToolExecuteRequest,
+    req: &ToolsApi,
     context: &ToolContext,
     creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
@@ -854,7 +805,7 @@ async fn execute_context_assemble(
 /// tokio blocking pool so the async runtime is not stalled by local disk I/O.
 #[allow(clippy::similar_names)] // the paired names are the domain vocabulary here
 async fn execute_read_file(
-    req: &ToolExecuteRequest,
+    req: &ToolsApi,
     context: &ToolContext,
 ) -> Result<serde_json::Value, NexusApiError> {
     let path_str = req.parameters["path"]
@@ -913,7 +864,7 @@ async fn execute_read_file(
 /// tokio blocking pool so the async runtime is not stalled by local disk I/O.
 #[allow(clippy::similar_names)] // the paired names are the domain vocabulary here
 async fn execute_write_file(
-    req: &ToolExecuteRequest,
+    req: &ToolsApi,
     context: &ToolContext,
 ) -> Result<serde_json::Value, NexusApiError> {
     let path_str = req.parameters["path"]
@@ -1095,7 +1046,7 @@ fn load_permission_policy(workspace_path: &str) -> Option<WorkspacePermissionPol
 
 /// Audit tool execution to `SQLite` (Gate 5).
 pub(crate) async fn audit_tool_execution(
-    req: &ToolExecuteRequest,
+    req: &ToolsApi,
     decision: &str,
     error_code: Option<&str>,
     context: &ToolContext,
@@ -1175,7 +1126,7 @@ async fn ensure_world_accessible_for_creator(
 
 /// `nexus.world.snapshot.get` — consistent read of structured world snapshot.
 async fn execute_world_snapshot_get(
-    req: &ToolExecuteRequest,
+    req: &ToolsApi,
     context: &ToolContext,
     creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
@@ -1208,7 +1159,7 @@ async fn execute_world_snapshot_get(
 
 /// `nexus.timeline.recent.get` — fetch recent timeline events for continuity.
 async fn execute_timeline_recent_get(
-    req: &ToolExecuteRequest,
+    req: &ToolsApi,
     context: &ToolContext,
     creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
@@ -1245,7 +1196,7 @@ async fn execute_timeline_recent_get(
 
 /// `nexus.kb_snapshot.read` — focused KB snapshot read for a world.
 async fn execute_kb_snapshot_read(
-    req: &ToolExecuteRequest,
+    req: &ToolsApi,
     context: &ToolContext,
     creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
@@ -1291,7 +1242,7 @@ async fn execute_kb_snapshot_read(
 
 /// `nexus.manuscript.chapter.get` — read a single manuscript chapter record.
 async fn execute_manuscript_chapter_get(
-    req: &ToolExecuteRequest,
+    req: &ToolsApi,
     context: &ToolContext,
     creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
@@ -1360,7 +1311,7 @@ async fn execute_manuscript_chapter_get(
 /// (V1.55+), an additional audit-level policy gate should be added and
 /// `registry_ids` may need to be stripped for low-trust callers.
 fn execute_daemon_health(
-    _req: &ToolExecuteRequest,
+    _req: &ToolsApi,
     context: &ToolContext,
     _creator_id: &str,
 ) -> serde_json::Value {
@@ -1388,7 +1339,7 @@ fn execute_daemon_health(
 
 /// Registry wrapper: `nexus.context.whoami` — sync → async wrapper.
 pub(crate) fn registry_context_whoami<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -1398,7 +1349,7 @@ pub(crate) fn registry_context_whoami<'a>(
 
 /// Registry wrapper: `nexus.workspace.info` — sync → async wrapper.
 pub(crate) fn registry_workspace_info<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -1408,7 +1359,7 @@ pub(crate) fn registry_workspace_info<'a>(
 
 /// Registry wrapper: `nexus.work.get` — async passthrough.
 pub(crate) fn registry_work_get<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -1417,7 +1368,7 @@ pub(crate) fn registry_work_get<'a>(
 
 /// Registry wrapper: `nexus.work.patch` — async passthrough.
 pub(crate) fn registry_work_patch<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -1426,7 +1377,7 @@ pub(crate) fn registry_work_patch<'a>(
 
 /// Registry wrapper: `nexus.orchestration.schedule_status` — async passthrough.
 pub(crate) fn registry_schedule_status<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -1435,7 +1386,7 @@ pub(crate) fn registry_schedule_status<'a>(
 
 /// Registry wrapper: `nexus.context.assemble` — async passthrough.
 pub(crate) fn registry_context_assemble<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -1444,7 +1395,7 @@ pub(crate) fn registry_context_assemble<'a>(
 
 /// Registry wrapper: `fs/read_text_file` — async passthrough (ignores `creator_id`).
 pub(crate) fn registry_read_file<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     _creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -1453,7 +1404,7 @@ pub(crate) fn registry_read_file<'a>(
 
 /// Registry wrapper: `fs/write_text_file` — async passthrough (ignores `creator_id`).
 pub(crate) fn registry_write_file<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     _creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -1464,7 +1415,7 @@ pub(crate) fn registry_write_file<'a>(
 
 /// Registry wrapper: `nexus.world.snapshot.get` — async passthrough.
 pub(crate) fn registry_world_snapshot_get<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -1473,7 +1424,7 @@ pub(crate) fn registry_world_snapshot_get<'a>(
 
 /// Registry wrapper: `nexus.timeline.recent.get` — async passthrough.
 pub(crate) fn registry_timeline_recent_get<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -1482,7 +1433,7 @@ pub(crate) fn registry_timeline_recent_get<'a>(
 
 /// Registry wrapper: `nexus.kb_snapshot.read` — async passthrough.
 pub(crate) fn registry_kb_snapshot_read<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -1491,7 +1442,7 @@ pub(crate) fn registry_kb_snapshot_read<'a>(
 
 /// Registry wrapper: `nexus.manuscript.chapter.get` — async passthrough.
 pub(crate) fn registry_manuscript_chapter_get<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -1500,7 +1451,7 @@ pub(crate) fn registry_manuscript_chapter_get<'a>(
 
 /// Registry wrapper: `nexus.observability.daemon.health` — sync → async wrapper.
 pub(crate) fn registry_daemon_health<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -1517,7 +1468,7 @@ pub(crate) fn registry_daemon_health<'a>(
 /// (home dir + `creator_id`) is wired so the handler can write refreshed body
 /// content to the on-disk `body.md`.
 async fn execute_reference_refresh(
-    req: &ToolExecuteRequest,
+    req: &ToolsApi,
     context: &ToolContext,
     creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
@@ -1537,7 +1488,7 @@ async fn execute_reference_refresh(
 }
 
 pub(crate) fn registry_reference_refresh<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -1548,7 +1499,7 @@ pub(crate) fn registry_reference_refresh<'a>(
 
 /// `nexus.registry.refresh` — return the registry snapshot (synthetic or CDN).
 async fn execute_registry_refresh(
-    _req: &ToolExecuteRequest,
+    _req: &ToolsApi,
     _context: &ToolContext,
     _creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
@@ -1564,7 +1515,7 @@ async fn execute_registry_refresh(
 }
 
 pub(crate) fn registry_registry_refresh<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
 
     // ─── V1.56 P1 + V1.54 P0: registry.refresh + write tools ─────────────────
@@ -1577,7 +1528,7 @@ pub(crate) fn registry_registry_refresh<'a>(
 
 /// `nexus.kb_snapshot.write` — upsert key blocks for a world.
 async fn execute_kb_snapshot_write(
-    req: &ToolExecuteRequest,
+    req: &ToolsApi,
     context: &ToolContext,
     creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
@@ -1650,7 +1601,7 @@ async fn execute_kb_snapshot_write(
 
 /// `nexus.manuscript.chapter.update` — update chapter content and metadata.
 async fn execute_manuscript_chapter_update(
-    req: &ToolExecuteRequest,
+    req: &ToolsApi,
     context: &ToolContext,
     creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
@@ -1931,7 +1882,7 @@ async fn execute_manuscript_chapter_update(
 /// `nexus.world.configure` — update world metadata.
 #[allow(clippy::useless_let_if_seq)] // three independent if-let accumulations on `updated`
 async fn execute_world_configure(
-    req: &ToolExecuteRequest,
+    req: &ToolsApi,
     context: &ToolContext,
     creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
@@ -2040,7 +1991,7 @@ async fn execute_world_configure(
 /// as the patch/finding-resolve/pool executors); the boundary keeps payload
 /// validation and transport error mapping only.
 async fn execute_work_schedule_set(
-    req: &ToolExecuteRequest,
+    req: &ToolsApi,
     context: &ToolContext,
     _creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
@@ -2095,7 +2046,7 @@ async fn execute_work_schedule_set(
 
 /// `nexus.finding.resolve` — resolve/close a finding.
 async fn execute_finding_resolve(
-    req: &ToolExecuteRequest,
+    req: &ToolsApi,
     context: &ToolContext,
     _creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
@@ -2120,7 +2071,7 @@ async fn execute_finding_resolve(
     core.update_finding(
         &principal,
         finding_id.to_string(),
-        UpdateFindingRequest {
+        FindingsApi {
             status: Some("resolved".to_string()),
             description: Some(format!("Resolved via tool: {resolution}")),
             ..Default::default()
@@ -2136,7 +2087,7 @@ async fn execute_finding_resolve(
 
 /// `nexus.pool.entry.manage` — add/remove/promote pool entries.
 async fn execute_pool_entry_manage(
-    req: &ToolExecuteRequest,
+    req: &ToolsApi,
     context: &ToolContext,
     creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
@@ -2214,7 +2165,7 @@ async fn execute_pool_entry_manage(
 
 /// Registry wrapper: `nexus.kb_snapshot.write` — async passthrough.
 pub(crate) fn registry_kb_snapshot_write<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -2223,7 +2174,7 @@ pub(crate) fn registry_kb_snapshot_write<'a>(
 
 /// Registry wrapper: `nexus.manuscript.chapter.update` — async passthrough.
 pub(crate) fn registry_manuscript_chapter_update<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -2232,7 +2183,7 @@ pub(crate) fn registry_manuscript_chapter_update<'a>(
 
 /// Registry wrapper: `nexus.world.configure` — async passthrough.
 pub(crate) fn registry_world_configure<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -2241,7 +2192,7 @@ pub(crate) fn registry_world_configure<'a>(
 
 /// Registry wrapper: `nexus.work.schedule.set` — async passthrough.
 pub(crate) fn registry_work_schedule_set<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -2250,7 +2201,7 @@ pub(crate) fn registry_work_schedule_set<'a>(
 
 /// Registry wrapper: `nexus.finding.resolve` — async passthrough.
 pub(crate) fn registry_finding_resolve<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -2259,7 +2210,7 @@ pub(crate) fn registry_finding_resolve<'a>(
 
 /// Registry wrapper: `nexus.pool.entry.manage` — async passthrough.
 pub(crate) fn registry_pool_entry_manage<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -2287,7 +2238,7 @@ fn phase_index(phase: &str) -> Option<usize> {
 
 /// T1: `nexus.manuscript.list` — list manuscripts (works) for the active creator.
 async fn execute_manuscript_list(
-    _req: &ToolExecuteRequest,
+    _req: &ToolsApi,
     context: &ToolContext,
     creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
@@ -2330,7 +2281,7 @@ async fn execute_manuscript_list(
 /// T2: `nexus.manuscript.read_range` — read a bounded content range from a chapter body.
 #[allow(clippy::similar_names)] // the paired names are the domain vocabulary here
 async fn execute_manuscript_read_range(
-    req: &ToolExecuteRequest,
+    req: &ToolsApi,
     context: &ToolContext,
     creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
@@ -2469,7 +2420,7 @@ async fn execute_manuscript_read_range(
 /// T3: `nexus.manuscript.write` — write manuscript content within size quotas.
 #[allow(clippy::similar_names)] // the paired names are the domain vocabulary here
 async fn execute_manuscript_write(
-    req: &ToolExecuteRequest,
+    req: &ToolsApi,
     context: &ToolContext,
     creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
@@ -2721,7 +2672,7 @@ async fn execute_manuscript_write(
 
 /// T4: `nexus.manuscript.phase.get` — read current manuscript phase.
 async fn execute_manuscript_phase_get(
-    req: &ToolExecuteRequest,
+    req: &ToolsApi,
     context: &ToolContext,
     creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
@@ -2754,7 +2705,7 @@ async fn execute_manuscript_phase_get(
 
 /// T5: `nexus.manuscript.phase.set` — move between brainstorm/draft/review/finalize.
 async fn execute_manuscript_phase_set(
-    req: &ToolExecuteRequest,
+    req: &ToolsApi,
     context: &ToolContext,
     creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
@@ -2828,7 +2779,7 @@ async fn execute_manuscript_phase_set(
 
 /// T6: `nexus.workspace.paths` — enumerate allowed roots from active workspace.
 fn execute_workspace_paths(
-    _req: &ToolExecuteRequest,
+    _req: &ToolsApi,
     context: &ToolContext,
     _creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
@@ -2856,7 +2807,7 @@ fn execute_workspace_paths(
 
 /// T7: `nexus.research.query` — query local-only `ReferenceSource` index.
 async fn execute_research_query(
-    req: &ToolExecuteRequest,
+    req: &ToolsApi,
     context: &ToolContext,
     creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
@@ -2939,7 +2890,7 @@ async fn execute_research_query(
 ///
 /// Returns registry reachability, sync context, and cloud-enabled flag.
 fn execute_runtime_health(
-    _req: &ToolExecuteRequest,
+    _req: &ToolsApi,
     context: &ToolContext,
     _creator_id: &str,
 ) -> serde_json::Value {
@@ -2965,7 +2916,7 @@ fn execute_runtime_health(
 /// Echoes the incoming `correlation_id` (or generates one if absent) so agents
 /// can thread trace context through multi-step tool chains.
 fn execute_trace_correlation(
-    req: &ToolExecuteRequest,
+    req: &ToolsApi,
     _context: &ToolContext,
     _creator_id: &str,
 ) -> serde_json::Value {
@@ -2993,7 +2944,7 @@ fn execute_trace_correlation(
 
 /// Registry wrapper: `nexus.manuscript.list` — async passthrough.
 pub(crate) fn registry_manuscript_list<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -3002,7 +2953,7 @@ pub(crate) fn registry_manuscript_list<'a>(
 
 /// Registry wrapper: `nexus.manuscript.read_range` — async passthrough.
 pub(crate) fn registry_manuscript_read_range<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -3011,7 +2962,7 @@ pub(crate) fn registry_manuscript_read_range<'a>(
 
 /// Registry wrapper: `nexus.manuscript.write` — async passthrough.
 pub(crate) fn registry_manuscript_write<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -3020,7 +2971,7 @@ pub(crate) fn registry_manuscript_write<'a>(
 
 /// Registry wrapper: `nexus.manuscript.phase.get` — async passthrough.
 pub(crate) fn registry_manuscript_phase_get<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -3029,7 +2980,7 @@ pub(crate) fn registry_manuscript_phase_get<'a>(
 
 /// Registry wrapper: `nexus.manuscript.phase.set` — async passthrough.
 pub(crate) fn registry_manuscript_phase_set<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -3038,7 +2989,7 @@ pub(crate) fn registry_manuscript_phase_set<'a>(
 
 /// Registry wrapper: `nexus.workspace.paths` — sync → async wrapper.
 pub(crate) fn registry_workspace_paths<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -3048,7 +2999,7 @@ pub(crate) fn registry_workspace_paths<'a>(
 
 /// Registry wrapper: `nexus.research.query` — async passthrough.
 pub(crate) fn registry_research_query<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -3057,7 +3008,7 @@ pub(crate) fn registry_research_query<'a>(
 
 /// Registry wrapper: `nexus.runtime.health` — sync → async wrapper.
 pub(crate) fn registry_runtime_health<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -3067,7 +3018,7 @@ pub(crate) fn registry_runtime_health<'a>(
 
 /// Registry wrapper: `nexus.trace.correlation` — sync → async wrapper.
 pub(crate) fn registry_trace_correlation<'a>(
-    req: &'a ToolExecuteRequest,
+    req: &'a ToolsApi,
     context: &'a ToolContext,
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
@@ -3086,7 +3037,7 @@ pub(crate) fn registry_trace_correlation<'a>(
 /// Takes references to the tool request, workspace context, and creator id,
 /// returns a boxed future resolving to `Result<serde_json::Value, NexusApiError>`.
 pub type RegistryHandlerFn = for<'a> fn(
-    &'a ToolExecuteRequest,
+    &'a ToolsApi,
     &'a ToolContext,
     &'a str,
 ) -> Pin<
@@ -3341,7 +3292,7 @@ impl CapabilityRegistry {
     /// other error variants (e.g. `Forbidden`, `InvalidInput`).
     pub async fn dispatch(
         &self,
-        req: &ToolExecuteRequest,
+        req: &ToolsApi,
         context: &ToolContext,
         creator_id: &str,
     ) -> Result<serde_json::Value, NexusApiError> {
@@ -3410,7 +3361,7 @@ impl Default for CapabilityRegistry {
 /// the peer's more precise reason.
 async fn dispatch_peer_tool(
     entry: &super::peer_tools::PeerToolEntry,
-    req: &ToolExecuteRequest,
+    req: &ToolsApi,
 ) -> Result<Value, NexusApiError> {
     use super::peer_tools::PeerInvokeError;
     match super::peer_tools::invoke_peer_tool(entry, req.parameters.clone()).await {
@@ -3491,7 +3442,7 @@ fn validate_user_cap_arguments(schema_json: &str, arguments: &Value) -> Result<(
 /// `NexusApiError` variant.
 async fn dispatch_user_cap(
     cap: &dyn nexus_orchestration::capability::Capability,
-    req: &ToolExecuteRequest,
+    req: &ToolsApi,
 ) -> Result<Value, NexusApiError> {
     use nexus_orchestration::capability::CapabilityError;
     // AR-76 #2/#4 (W-A): the structural gate fires before any adapter I/O —

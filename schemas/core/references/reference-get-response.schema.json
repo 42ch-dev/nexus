@@ -1,17 +1,38 @@
 {
  "$schema": "http://json-schema.org/draft-07/schema#",
  "$id": "https://nexus42.invalid/schemas/core/references/reference-get-response.schema.json",
- "schema_version": 1,
+ "schema_version": 2,
  "title": "ReferenceGetResponse",
- "description": "Response for `GET /v1/daemon/references/{reference_id}`; 404 for an unknown id.",
+ "description": "Response for `GET /v1/daemon/references/{reference_id}`; 404 for an unknown id. Carries the registry fields `reference show` renders alongside the lean `reference` projection shared with the list response.",
  "type": "object",
  "required": [
-  "reference"
+  "reference",
+  "workspace_id",
+  "refresh_policy"
  ],
  "additionalProperties": false,
  "properties": {
   "reference": {
    "$ref": "https://nexus42.invalid/schemas/core/references/reference-source-info.schema.json"
+  },
+  "workspace_id": {
+   "type": "string"
+  },
+  "updated_at": {
+   "type": ["string", "null"],
+   "description": "Last registry update timestamp (nullable)."
+  },
+  "tags": {
+   "type": ["string", "null"],
+   "description": "Serialized tag list as stored by the registry (nullable)."
+  },
+  "content_hash": {
+   "type": ["string", "null"],
+   "description": "Hash of the canonical body.md when available (nullable)."
+  },
+  "refresh_policy": {
+   "type": "string",
+   "description": "Refresh policy: `on_change` | `scheduled` | `offline`."
   }
  }
 }

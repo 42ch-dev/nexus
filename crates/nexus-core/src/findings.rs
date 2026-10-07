@@ -4,8 +4,10 @@
 //! (P1-T3); the watcher schedule itself is P3-T2 while mutation/query live
 //! here. HTTP envelopes stay in adapters.
 
+use nexus_contracts::tristate::presence_string;
 use nexus_contracts::{
-    BatchUpdateFindingsRequest, BatchUpdateFindingsResponse, FindingDetailResponse, PaginationInfo,
+    BatchUpdateFindingsRequest, BatchUpdateFindingsResponse, FindingDetailResponse, FindingsApi,
+    PaginationInfo,
 };
 use nexus_local_db::findings::{
     self, Finding, FindingListFilters, FindingPatch, ReviewVerdictFinding,
@@ -90,25 +92,6 @@ pub struct CreateFindingRequest {
     pub kind: String,
     /// V1.47 §8.2: optional prose rule suggestion.
     pub rule_suggestion: Option<String>,
-}
-
-/// Update finding request body (all fields optional; core-owned tri-state).
-///
-/// V1.48 P3 T3 (R-V147P0-03): `rule_suggestion` distinguishes **absent**
-/// (`None` — do not touch the column), **null** (`Some(None)` — clear to SQL
-/// NULL) and **value** (`Some(Some(value))` — set). The generated wire type
-/// cannot carry this distinction, so the tri-state shape lives here until the
-/// `schemas/core/findings-api.schema.json` definition lands (P5-T0).
-#[derive(Debug, Clone, Default)]
-pub struct UpdateFindingRequest {
-    pub severity: Option<String>,
-    pub status: Option<String>,
-    pub title: Option<String>,
-    pub description: Option<String>,
-    pub target_executor: Option<String>,
-    pub kind: Option<String>,
-    #[allow(clippy::option_option)]
-    pub rule_suggestion: Option<Option<String>>,
 }
 
 /// Findings list query (cursor-paginated; F-P2 V1.64).
@@ -230,16 +213,34 @@ fn to_finding_detail(f: Finding) -> FindingDetailResponse {
     }
 }
 
-fn finding_patch_from_update(request: UpdateFindingRequest) -> FindingPatch {
-    FindingPatch {
+/// Project the generated findings PATCH DTO onto the stored patch.
+///
+/// The tri-state `rule_suggestion` rides the generated presence carrier
+/// (`schemas/core/findings-api.schema.json`, `x-nexus-tri-state`): absent keeps
+/// the stored column, `null` clears it to SQL NULL, a string sets it. The
+/// projection is the shared one ([`presence_string`]) — core owns the refusal
+/// shape for its own input, never a second copy of the three-state grammar.
+///
+/// # Errors
+/// [`CoreError::InvalidInput`] naming `rule_suggestion` when the carrier holds
+/// a value that is neither absent, `null` nor a string; that refusal happens
+/// before any stored effect, and before the identity gates, matching the
+/// adapter's previous parse-then-call order.
+fn finding_patch_from_update(request: FindingsApi) -> CoreResult<FindingPatch> {
+    let rule_suggestion =
+        presence_string(request.rule_suggestion).map_err(|reason| CoreError::InvalidInput {
+            field: "rule_suggestion".to_string(),
+            reason,
+        })?;
+    Ok(FindingPatch {
         severity: request.severity,
         status: request.status,
         title: request.title,
         description: request.description,
         target_executor: request.target_executor,
         kind: request.kind,
-        rule_suggestion: request.rule_suggestion,
-    }
+        rule_suggestion,
+    })
 }
 
 impl CoreService {
@@ -478,11 +479,14 @@ impl CoreService {
         &self,
         principal: &Principal,
         finding_id: String,
-        request: UpdateFindingRequest,
+        request: FindingsApi,
     ) -> CoreResult<FindingDetailResponse> {
+        // Payload shape first: the tri-state carrier is a client-shaped input,
+        // so a malformed value is refused before the identity gates — the same
+        // order the adapter's own parse had before the generated DTO replaced it.
+        let patch = finding_patch_from_update(request)?;
         self.verify_principal(principal)?;
         self.require_work_write()?;
-        let patch = finding_patch_from_update(request);
         let now = chrono::Utc::now().timestamp();
         let updated = findings::update_finding(
             &self.inner.pool,

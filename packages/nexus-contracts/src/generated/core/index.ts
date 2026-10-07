@@ -44,6 +44,7 @@ export type { CoreWorkflowSubscribeRequest } from './core-workflow-subscribe-req
 export type { CoreWorkflowSubscription } from './core-workflow-subscription';
 export type { CoreWorkspaceCommitRequest } from './core-workspace-commit-request';
 export type { CoreWorkspaceCommitResponse } from './core-workspace-commit-response';
+export type { FindingsApi } from './findings-api';
 export type { NativeCompatibility } from './native-compatibility';
 export type { NativeOpenOptions } from './native-open-options';
 export type { ProviderCall } from './provider-call';
@@ -51,5 +52,6 @@ export type { ProviderEventBatch } from './provider-event-batch';
 export type { ProviderHostEvent } from './provider-host-event';
 export type { ProviderReply } from './provider-reply';
 export type { RuntimeApi } from './runtime-api';
+export type { ToolsApi } from './tools-api';
 export type { ValidatedProviderRecipe } from './validated-provider-recipe';
 export type { CoreSliceClient } from './CoreSliceClient';

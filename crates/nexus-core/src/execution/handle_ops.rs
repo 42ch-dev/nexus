@@ -72,7 +72,7 @@ use nexus_orchestration::preset_gates::{
 use nexus_orchestration::schedule::supervisor::ScheduleCancelDisposition;
 
 use crate::error::{CoreError, CoreResult};
-use crate::execution::capabilities::{ToolContext, ToolExecuteRequest};
+use crate::execution::capabilities::ToolContext;
 #[cfg(feature = "compute")]
 use crate::execution::compute::ComputeContext;
 use crate::execution::lifecycle::ExecutionHandle;
@@ -81,6 +81,7 @@ use crate::execution::workflow::{RunControlError, RunEventPort, RunSignal};
 use crate::principal::Principal;
 use crate::PresetError;
 use nexus_contracts::generated::core::core_tool_execute_response::CoreToolExecuteResponse;
+use nexus_contracts::ToolsApi;
 
 /// Default page size for a cursorless run-event read.
 const DEFAULT_RUN_EVENT_LIMIT: usize = 64;
@@ -801,7 +802,7 @@ impl ExecutionHandle {
     pub async fn execute_tool(
         &self,
         principal: &Principal,
-        request: ToolExecuteRequest,
+        request: ToolsApi,
     ) -> CoreResult<CoreToolExecuteResponse> {
         self.ensure_admitting()?;
         if principal.creator_id().trim().is_empty() {

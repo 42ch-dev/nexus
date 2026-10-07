@@ -73,18 +73,24 @@ pub use execution::{
 };
 pub use findings::{
     format_routing_hint, CreateFindingRequest, ListFindingsQuery, ListFindingsResponse,
-    PruneFindingsOutcome, StaleFindingEntry, StaleFindingsResponse, UpdateFindingRequest,
+    PruneFindingsOutcome, StaleFindingEntry, StaleFindingsResponse,
 };
 pub use home::CoreHomeService;
 #[cfg(feature = "provider-host")]
 pub use host::HostHandle;
+pub use knowledge::QueueKbExtractParams;
 pub use memory::{
     CharacterTomBeliefRow, CharacterTomListQuery, CharacterTomPage, CharacterTomRecordInput,
     CharacterTomService,
 };
 pub use presets::PresetError;
 pub use principal::Principal;
-pub use references::{GetReferenceResponse, ListReferencesResponse, ReferenceInfo};
+pub use references::{RegisterReferenceParams, REFERENCE_SOURCE_TYPES};
+// Reference read envelopes are schema-owned (core lane); re-exported here so
+// direct-core callers keep naming them through `nexus_core`.
+pub use nexus_contracts::core::references::{
+    ReferenceGetResponse, ReferenceListResponse, ReferenceSourceInfo,
+};
 pub use service::{CoreAccess, CoreOpenOptions, CoreService};
 pub use soul::CoreCharacterMind;
 pub use storage_status::{CoreStorageStatus, CoreStorageVersions};
