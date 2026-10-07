@@ -3138,10 +3138,27 @@ async fn compute_run_receipt_shadows_the_run_transitions() {
         .await
         .unwrap()
         .expect("the run row");
+    // The finished receipt stores the run's EXACT answer (a `RunResponse`), so a
+    // replay is reconstructable from the receipt alone — it must survive Clear
+    // deleting the run row. Its proposals are the run row's own proposals.
+    let stored: serde_json::Value = serde_json::from_str(
+        receipt
+            .result_json
+            .as_deref()
+            .expect("a finished receipt carries its answer"),
+    )
+    .expect("the stored payload is the run response JSON");
+    assert_eq!(stored["run_id"], json!(succeeded));
+    assert_eq!(stored["status"], json!("succeeded"));
+    let row_proposals: serde_json::Value = serde_json::from_str(
+        row.proposals_json
+            .as_deref()
+            .expect("the succeeded row carries proposals"),
+    )
+    .unwrap();
     assert_eq!(
-        receipt.result_json.as_deref(),
-        row.proposals_json.as_deref(),
-        "the receipt's terminal payload is the run row's own proposals payload"
+        stored["proposals"], row_proposals,
+        "the receipt's answer carries the run's own proposals"
     );
 
     // A failed run shadows the other terminal transition.
@@ -3406,4 +3423,229 @@ async fn execution_start_runs_the_compute_receipt_recovery_pass() {
         .expect("the settled row survives the boot pass");
     assert_eq!(settled_row.status, "running");
     assert!(settled_row.proposals_json.is_none());
+}
+
+/// Number of direct-lane compute runs the world holds.
+///
+/// The module is executed only after its run row is inserted, so this count is
+/// the observable proxy for "how many times did the module run": a retry that
+/// re-ran the module would necessarily add a second row.
+async fn compute_run_rows(pool: &sqlx::SqlitePool, world_id: &str) -> i64 {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM compute_sessions WHERE world_id = ? AND run_id IS NOT NULL",
+    )
+    .bind(world_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// v1.207 P3 (Greptile #3): a caller-supplied `operation_id` stabilizes retry
+/// identity.
+///
+/// A retry after a lost response is answered **from the receipt** — the module
+/// is NOT executed a second time (exactly one run row, and the replay carries
+/// the stored run id). A *different* request under the same id is the typed
+/// `operation_id_conflict` refusal, never a silent re-run.
+#[tokio::test]
+async fn caller_supplied_operation_id_dedupes_a_retry_and_conflicts_on_a_new_request() {
+    let f = fixture().await;
+    let op = format!("op_{}", "a".repeat(32));
+
+    let mut request = run_request(WORLD, MODULE);
+    request.operation_id = Some(op.clone());
+
+    let first = compute_run(&f.core, &f.compute, request.clone())
+        .await
+        .expect("the first call runs the module");
+    assert_eq!(first.status.to_string(), "succeeded");
+    assert_eq!(
+        compute_run_rows(f.core.pool(), WORLD).await,
+        1,
+        "the first call runs the module exactly once"
+    );
+
+    // Simulated lost response: the caller retries the IDENTICAL request (same
+    // caller-supplied id). The receipt answers it; the module does not re-run.
+    let replay = compute_run(&f.core, &f.compute, request)
+        .await
+        .expect("the retry is answered from the receipt");
+    assert_eq!(
+        replay.run_id, first.run_id,
+        "the replay answers with the stored run id"
+    );
+    assert_eq!(replay.status.to_string(), "succeeded");
+    assert_eq!(
+        compute_run_rows(f.core.pool(), WORLD).await,
+        1,
+        "the retry must not execute the module again"
+    );
+
+    // A DIFFERENT logical request under the same id is a first-writer-wins
+    // conflict, not a replay.
+    let mut conflicting = run_request(WORLD, MODULE);
+    conflicting.operation_id = Some(op);
+    conflicting.invocation_params = serde_json::Map::from_iter([(
+        "attacker_id".to_string(),
+        serde_json::Value::String("kb_other".to_string()),
+    )]);
+    let err = compute_run(&f.core, &f.compute, conflicting)
+        .await
+        .expect_err("a different request under the same id is refused");
+    match err {
+        CoreError::Coded { code, .. } => assert_eq!(code, "operation_id_conflict"),
+        other => panic!("expected operation_id_conflict, got {other:?}"),
+    }
+    assert_eq!(
+        compute_run_rows(f.core.pool(), WORLD).await,
+        1,
+        "a conflicting request never runs the module"
+    );
+}
+
+/// v1.207 P3 (Greptile #3, C1): a finished receipt's replay must survive Clear
+/// deleting the run row.
+///
+/// The receipt is the durable answer for its whole lifetime; Clear history can
+/// delete the terminal `compute_sessions` row. The identical retry must still be
+/// answered FROM THE RECEIPT — no `NotFound`, no re-execution.
+#[tokio::test]
+async fn finished_receipt_replay_survives_clearing_the_run_history() {
+    let f = fixture().await;
+    let principal = f.core.active_principal().await.unwrap();
+    let op = format!("op_{}", "c".repeat(32));
+
+    let mut request = run_request(WORLD, MODULE);
+    request.operation_id = Some(op);
+    let first = compute_run(&f.core, &f.compute, request.clone())
+        .await
+        .expect("the first call runs the module");
+    assert_eq!(first.status.to_string(), "succeeded");
+
+    // Accept (the row becomes `applied`, terminal) then Clear the World's
+    // terminal history: the run row is deleted, the receipt is not.
+    accept_compute_run(
+        &f.core,
+        &principal,
+        &first.run_id,
+        accept_request(json!({})),
+    )
+    .await
+    .expect("accept succeeds");
+    let cleared = clear_compute_runs(
+        &f.core,
+        &principal,
+        ClearRunsQuery {
+            status: None,
+            world_id: WORLD.to_string(),
+        },
+    )
+    .await
+    .expect("clear succeeds");
+    assert!(cleared.deleted >= 1);
+    assert!(
+        !run_row_survives(f.core.pool(), &first.run_id).await,
+        "only the durable receipt remains after Clear"
+    );
+
+    let replay = compute_run(&f.core, &f.compute, request)
+        .await
+        .expect("the receipt answers the replay with no run row");
+    assert_eq!(replay.run_id, first.run_id);
+    assert_eq!(replay.status.to_string(), "succeeded");
+    assert_eq!(
+        replay.created_at, first.created_at,
+        "the stored answer is byte-identical, timestamp included"
+    );
+    assert_eq!(
+        serde_json::to_value(&replay).unwrap(),
+        serde_json::to_value(&first).unwrap(),
+        "the replay returns the exact stored first-success answer"
+    );
+    assert_eq!(
+        compute_run_rows(f.core.pool(), WORLD).await,
+        0,
+        "the replay never re-executes the module"
+    );
+}
+
+/// v1.207 P3 (Greptile #3, I1): a concurrent first use under one id with
+/// DIFFERENT args yields one typed conflict, one effect owner, and a loser run
+/// row settled `failed` (never left `running`).
+#[tokio::test]
+async fn concurrent_conflicting_first_use_leaves_no_running_loser() {
+    use nexus_core::execution::test_hooks::{set_compute_begin_gate, ComputeBeginGate};
+
+    let f = fixture().await;
+    let op = format!("op_{}", "b".repeat(32));
+
+    let mut first = run_request(WORLD, MODULE);
+    first.operation_id = Some(op.clone());
+    let mut second = run_request(WORLD, MODULE);
+    second.operation_id = Some(op.clone());
+    // A different logical request => a different fingerprint => a genuine
+    // first-writer-wins conflict (not a replay).
+    second.invocation_params = serde_json::Map::from_iter([
+        ("attacker_id".to_string(), json!("kb_atk")),
+        ("defender_id".to_string(), json!("kb_def")),
+        ("variant".to_string(), json!(2)),
+    ]);
+
+    // Deterministic rendezvous: the seam parks each caller AFTER its run-row
+    // insert and the receipt pre-check and BEFORE `begin_operation`. The test is
+    // the barrier's third participant, so NEITHER caller proceeds until BOTH
+    // arrived — the loser's `OperationIdConflict` is therefore always the
+    // post-insert cleanup path under test, never the earlier receipt pre-check.
+    let gate = Arc::new(ComputeBeginGate::new(op, 3));
+    set_compute_begin_gate(Some(Arc::clone(&gate)));
+    let (a, b, _barrier) = tokio::join!(
+        compute_run(&f.core, &f.compute, first),
+        compute_run(&f.core, &f.compute, second),
+        gate.barrier.wait(),
+    );
+    set_compute_begin_gate(None);
+
+    assert_eq!(
+        usize::from(a.is_ok()) + usize::from(b.is_ok()),
+        1,
+        "exactly one attempt owns the effect"
+    );
+    for outcome in [&a, &b] {
+        if let Err(err) = outcome {
+            match err {
+                CoreError::Coded { code, .. } => assert_eq!(code, "operation_id_conflict"),
+                other => panic!("expected operation_id_conflict, got {other:?}"),
+            }
+        }
+    }
+
+    // Durable end state. Contract: the loser's own run row is SETTLED LOCALLY as
+    // `failed` (present, not deleted) — never the winner's receipt, never left
+    // `running` for boot recovery to misreport or Clear to miss.
+    let (succeeded, failed, running): (i64, i64, i64) = sqlx::query_as(
+        "SELECT SUM(status = 'succeeded'), SUM(status = 'failed'), \
+                SUM(status = 'running') \
+           FROM compute_sessions WHERE world_id = ? AND run_id IS NOT NULL",
+    )
+    .bind(WORLD)
+    .fetch_one(f.core.pool())
+    .await
+    .unwrap();
+    assert_eq!(succeeded, 1, "the module executed exactly once");
+    assert_eq!(
+        failed, 1,
+        "the conflicting loser's row is settled `failed` (present, never running)"
+    );
+    assert_eq!(running, 0, "no permanent `running` duplicate");
+
+    let (loser_payload,): (String,) = sqlx::query_as(
+        "SELECT error_json FROM compute_sessions \
+          WHERE world_id = ? AND status = 'failed' AND run_id IS NOT NULL",
+    )
+    .bind(WORLD)
+    .fetch_one(f.core.pool())
+    .await
+    .unwrap();
+    let loser_payload: serde_json::Value = serde_json::from_str(&loser_payload).unwrap();
+    assert_eq!(loser_payload["code"], json!("operation_id_conflict"));
 }

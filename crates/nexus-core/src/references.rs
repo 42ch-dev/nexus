@@ -121,7 +121,8 @@ impl CoreService {
     ///
     /// # Errors
     /// Returns [`CoreError::AuthRequired`] when the principal fails
-    /// verification, [`CoreError::InvalidInput`] for a `source_type` outside
+    /// verification, [`CoreError::Forbidden`] under read-only core access,
+    /// [`CoreError::InvalidInput`] for a `source_type` outside
     /// the contract enum, and the storage carrier (legacy `DATABASE_ERROR`)
     /// when the insert or the body write fails.
     pub async fn register_reference(
@@ -130,6 +131,7 @@ impl CoreService {
         params: RegisterReferenceParams,
     ) -> CoreResult<ReferenceSourceInfo> {
         self.verify_principal(principal)?;
+        self.require_work_write()?;
         if !REFERENCE_SOURCE_TYPES.contains(&params.source_type.as_str()) {
             return Err(CoreError::InvalidInput {
                 field: "source_type".to_string(),

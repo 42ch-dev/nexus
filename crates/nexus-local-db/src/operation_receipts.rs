@@ -26,11 +26,14 @@
 //!
 //! ## Storage/SQL note
 //!
-//! The statements here are built at runtime rather than as
-//! `sqlx::query!` macros: the workspace shares one root `.sqlx` offline cache
-//! across crates, and this change does not regenerate it (the same convention
-//! `js_provider_journal.rs` follows). The SQL is otherwise static, so the
-//! `.sqlx` cache stays untouched.
+//! The store's statements are static SQL against `operation_receipts`, so they
+//! use the compile-time checked `sqlx::query!` / `sqlx::query_as!` macros (crate
+//! guide: `crates/nexus-local-db/AGENTS.md`); their offline metadata is
+//! committed under the workspace-root `.sqlx/` cache. The in-module tests keep
+//! using the runtime API only where a probe is deliberately *not* describable:
+//! a `rowid` reference on the `WITHOUT ROWID` table (a compile-time refusal
+//! under the macro) and a loop over a runtime-selected SQL string. Those sites
+//! carry a `// SAFETY:` note.
 
 use sqlx::SqlitePool;
 
@@ -219,12 +222,13 @@ pub async fn get_operation_receipt(
     pool: &SqlitePool,
     operation_id: &str,
 ) -> Result<Option<OperationReceipt>, LocalDbError> {
-    sqlx::query_as::<_, OperationReceipt>(
+    sqlx::query_as!(
+        OperationReceipt,
         "SELECT operation_id, consumer, subject_id, status, request_fingerprint, \
                 result_json, error_json, created_at, updated_at, terminal_at, sequence \
            FROM operation_receipts WHERE operation_id = ?",
+        operation_id,
     )
-    .bind(operation_id)
     .fetch_optional(pool)
     .await
     .map_err(db_err)
@@ -248,14 +252,15 @@ pub async fn get_operation_receipt_by_subject(
     consumer: &str,
     subject_id: &str,
 ) -> Result<Option<OperationReceipt>, LocalDbError> {
-    sqlx::query_as::<_, OperationReceipt>(
+    sqlx::query_as!(
+        OperationReceipt,
         "SELECT operation_id, consumer, subject_id, status, request_fingerprint, \
                 result_json, error_json, created_at, updated_at, terminal_at, sequence \
            FROM operation_receipts WHERE consumer = ? AND subject_id = ? \
           ORDER BY sequence ASC LIMIT 1",
+        consumer,
+        subject_id,
     )
-    .bind(consumer)
-    .bind(subject_id)
     .fetch_optional(pool)
     .await
     .map_err(db_err)
@@ -314,20 +319,20 @@ pub async fn begin_operation(
     }
 
     let now = now_rfc3339();
-    let inserted = match sqlx::query(
+    let inserted = match sqlx::query!(
         "INSERT INTO operation_receipts \
              (operation_id, consumer, subject_id, status, request_fingerprint, \
               result_json, error_json, created_at, updated_at, terminal_at, sequence) \
          VALUES (?, ?, ?, 'running', ?, NULL, NULL, ?, ?, NULL, \
                  COALESCE((SELECT MAX(sequence) FROM operation_receipts), 0) + 1) \
          ON CONFLICT(operation_id) DO NOTHING",
+        operation_id,
+        consumer,
+        subject_id,
+        request_fingerprint,
+        &now,
+        &now,
     )
-    .bind(operation_id)
-    .bind(consumer)
-    .bind(subject_id)
-    .bind(request_fingerprint)
-    .bind(&now)
-    .bind(&now)
     .execute(pool)
     .await
     {
@@ -407,17 +412,17 @@ pub async fn settle_operation(
     };
 
     let now = now_rfc3339();
-    sqlx::query(
+    sqlx::query!(
         "UPDATE operation_receipts \
             SET status = ?, result_json = ?, error_json = ?, terminal_at = ?, updated_at = ? \
           WHERE operation_id = ? AND status = 'running'",
+        status,
+        result_json,
+        error_json,
+        &now,
+        &now,
+        operation_id,
     )
-    .bind(status)
-    .bind(result_json)
-    .bind(error_json)
-    .bind(&now)
-    .bind(&now)
-    .bind(operation_id)
     .execute(pool)
     .await
     .map_err(db_err)?;
@@ -580,12 +585,13 @@ mod tests {
 
         // Terminal immutability fires for EVERY admitted writer, not just the
         // engine owner: a direct UPDATE of the settled row aborts.
-        let err =
-            sqlx::query("UPDATE operation_receipts SET status = 'running' WHERE operation_id = ?")
-                .bind(&id)
-                .execute(&direct)
-                .await
-                .expect_err("a terminal receipt must be immutable for the direct writer");
+        let err = sqlx::query!(
+            "UPDATE operation_receipts SET status = 'running' WHERE operation_id = ?",
+            &id,
+        )
+        .execute(&direct)
+        .await
+        .expect_err("a terminal receipt must be immutable for the direct writer");
         assert!(
             err.to_string()
                 .contains("OPERATION_RECEIPT_TERMINAL_IMMUTABLE"),
@@ -754,12 +760,13 @@ mod tests {
         assert_eq!(replayed.sequence, settled.sequence);
         assert_eq!(replayed.created_at, settled.created_at);
         let stored = get_operation_receipt(&pool, &id).await.unwrap().unwrap();
-        let count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM operation_receipts WHERE operation_id = ?")
-                .bind(&id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let count: i64 = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM operation_receipts WHERE operation_id = ?",
+            &id,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(count, 1, "a replay never inserts a second receipt");
         assert_eq!(stored.sequence, settled.sequence);
     }
@@ -966,17 +973,17 @@ mod tests {
             ("cb", None, None, Some("2026-10-07T00:00:01Z")),
             ("cc", Some("{}"), Some("{}"), Some("2026-10-07T00:00:01Z")),
         ] {
-            let err = sqlx::query(
+            let err = sqlx::query!(
                 "INSERT INTO operation_receipts \
                      (operation_id, consumer, subject_id, status, request_fingerprint, \
                       result_json, error_json, created_at, updated_at, terminal_at, sequence) \
                  VALUES (?, 'compute_run', 'run-check', 'finished', 'fp-check', \
                          ?, ?, '2026-10-07T00:00:00Z', '2026-10-07T00:00:00Z', ?, 1)",
+                op_id(suffix),
+                result_json,
+                error_json,
+                terminal_at,
             )
-            .bind(op_id(suffix))
-            .bind(result_json)
-            .bind(error_json)
-            .bind(terminal_at)
             .execute(&pool)
             .await
             .expect_err("a malformed terminal shape must be refused");
@@ -1003,6 +1010,9 @@ mod tests {
              WHERE operation_id = ?",
             "DELETE FROM operation_receipts WHERE operation_id = ?",
         ] {
+            // SAFETY: genuinely dynamic SQL — the statement is selected from the
+            // array above at runtime, so it cannot be a compile-time macro. Every
+            // entry is a static probe of the terminal-immutability guard.
             let err = sqlx::query(sql)
                 .bind(&id)
                 .execute(&pool)
@@ -1035,14 +1045,14 @@ mod tests {
             .await
             .expect("settle the receipt terminally");
 
-        let err = sqlx::query(
+        let err = sqlx::query!(
             "INSERT OR REPLACE INTO operation_receipts \
                  (operation_id, consumer, subject_id, status, request_fingerprint, \
                   result_json, error_json, created_at, updated_at, terminal_at, sequence) \
              VALUES (?, 'compute_run', 'run-replaced', 'running', 'fp-replaced', \
                      NULL, NULL, '2026-10-07T00:00:00Z', '2026-10-07T00:00:00Z', NULL, 99)",
+            &id,
         )
-        .bind(&id)
         .execute(&pool)
         .await
         .expect_err("a replacement insert over a terminal receipt must be refused");
@@ -1056,7 +1066,7 @@ mod tests {
         // deleted, and nothing was reinserted).
         let stored = get_operation_receipt(&pool, &id).await.unwrap().unwrap();
         assert_eq!(stored, settled, "the settled row must be untouched");
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM operation_receipts")
+        let count: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM operation_receipts")
             .fetch_one(&pool)
             .await
             .unwrap();
@@ -1082,11 +1092,11 @@ mod tests {
         assert_eq!(running.status, STATUS_RUNNING);
 
         // `UPDATE OR REPLACE` from the running source onto the settled id.
-        let err = sqlx::query(
+        let err = sqlx::query!(
             "UPDATE OR REPLACE operation_receipts SET operation_id = ? WHERE operation_id = ?",
+            &terminal_id,
+            &running_id,
         )
-        .bind(&terminal_id)
-        .bind(&running_id)
         .execute(&pool)
         .await
         .expect_err("UPDATE OR REPLACE must not move a running row onto a settled id");
@@ -1096,13 +1106,14 @@ mod tests {
         );
 
         // A plain key mutation is refused the same way.
-        let err =
-            sqlx::query("UPDATE operation_receipts SET operation_id = ? WHERE operation_id = ?")
-                .bind(&terminal_id)
-                .bind(&running_id)
-                .execute(&pool)
-                .await
-                .expect_err("a plain receipt key mutation must be refused");
+        let err = sqlx::query!(
+            "UPDATE operation_receipts SET operation_id = ? WHERE operation_id = ?",
+            &terminal_id,
+            &running_id,
+        )
+        .execute(&pool)
+        .await
+        .expect_err("a plain receipt key mutation must be refused");
         assert!(
             err.to_string().contains("OPERATION_RECEIPT_KEY_IMMUTABLE"),
             "expected the key-immutability abort, got: {err}"
@@ -1123,7 +1134,7 @@ mod tests {
                 .unwrap(),
             running
         );
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM operation_receipts")
+        let count: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM operation_receipts")
             .fetch_one(&pool)
             .await
             .unwrap();
@@ -1144,6 +1155,10 @@ mod tests {
             .expect("settle the receipt terminally");
         let fresh = op_id("e7");
 
+        // SAFETY: this probe intentionally names the non-existent `rowid` column
+        // of a `WITHOUT ROWID` table — a statement no schema-aware macro can
+        // describe (it is meant to fail). The runtime API is the only way to
+        // assert the schema itself refuses it.
         let err = sqlx::query(
             "INSERT OR REPLACE INTO operation_receipts \
                  (rowid, operation_id, consumer, subject_id, status, request_fingerprint, \
@@ -1191,6 +1206,8 @@ mod tests {
         let running =
             begin_acquired(&pool, &running_id, CONSUMER_COMPUTE_RUN, "run-e9", "fp-e9").await;
 
+        // SAFETY: as above — a `rowid` reference the schema deliberately does not
+        // offer, so the statement is not describable by a compile-time macro.
         let err = sqlx::query(
             "UPDATE OR REPLACE operation_receipts SET rowid = 1 WHERE operation_id = ?",
         )
@@ -1222,7 +1239,7 @@ mod tests {
             "the running row must be untouched"
         );
         assert_eq!(
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM operation_receipts")
+            sqlx::query_scalar!("SELECT COUNT(*) FROM operation_receipts")
                 .fetch_one(&pool)
                 .await
                 .unwrap(),
@@ -1250,15 +1267,15 @@ mod tests {
             (op_id("eb"), "fp-loser", true),
         ] {
             let mut winner = pool.begin().await.expect("winner transaction");
-            sqlx::query(
+            sqlx::query!(
                 "INSERT INTO operation_receipts \
                      (operation_id, consumer, subject_id, status, request_fingerprint, \
                       result_json, error_json, created_at, updated_at, terminal_at, sequence) \
                  VALUES (?, 'compute_run', 'run-race', 'finished', 'fp-race', \
                          '{\"ok\":true}', NULL, '2026-10-07T00:00:00Z', '2026-10-07T00:00:00Z', \
                          '2026-10-07T00:00:00Z', 1)",
+                &id,
             )
-            .bind(&id)
             .execute(&mut *winner)
             .await
             .expect("the winner's terminal row");
@@ -1342,7 +1359,7 @@ mod tests {
         let raw = SqlitePool::connect(&format!("sqlite://{}?mode=rwc", db_path.display()))
             .await
             .expect("raw pool");
-        let err = sqlx::query(
+        let err = sqlx::query!(
             "INSERT INTO operation_receipts \
                  (operation_id, consumer, subject_id, status, request_fingerprint, \
                   result_json, error_json, created_at, updated_at, terminal_at, sequence) \
@@ -1398,12 +1415,13 @@ mod tests {
         assert_eq!(acquired.created_at, existing.created_at);
         assert_eq!(acquired.status, STATUS_RUNNING);
 
-        let count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM operation_receipts WHERE operation_id = ?")
-                .bind(&id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let count: i64 = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM operation_receipts WHERE operation_id = ?",
+            &id,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(count, 1, "the race converges on exactly one receipt");
 
         // A later replay is never an acquirer either.

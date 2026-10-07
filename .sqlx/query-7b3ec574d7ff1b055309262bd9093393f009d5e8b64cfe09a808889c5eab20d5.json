@@ -1,0 +1,146 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT operation_id, consumer, subject_id, status, request_fingerprint, result_json, error_json, created_at, updated_at, terminal_at, sequence FROM operation_receipts WHERE consumer = ? AND subject_id = ? ORDER BY sequence ASC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "operation_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "operation_receipts",
+            "name": "operation_id"
+          }
+        }
+      },
+      {
+        "name": "consumer",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "operation_receipts",
+            "name": "consumer"
+          }
+        }
+      },
+      {
+        "name": "subject_id",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "operation_receipts",
+            "name": "subject_id"
+          }
+        }
+      },
+      {
+        "name": "status",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "operation_receipts",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "name": "request_fingerprint",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "operation_receipts",
+            "name": "request_fingerprint"
+          }
+        }
+      },
+      {
+        "name": "result_json",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "operation_receipts",
+            "name": "result_json"
+          }
+        }
+      },
+      {
+        "name": "error_json",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "operation_receipts",
+            "name": "error_json"
+          }
+        }
+      },
+      {
+        "name": "created_at",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "operation_receipts",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "name": "updated_at",
+        "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "operation_receipts",
+            "name": "updated_at"
+          }
+        }
+      },
+      {
+        "name": "terminal_at",
+        "ordinal": 9,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "operation_receipts",
+            "name": "terminal_at"
+          }
+        }
+      },
+      {
+        "name": "sequence",
+        "ordinal": 10,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "operation_receipts",
+            "name": "sequence"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "7b3ec574d7ff1b055309262bd9093393f009d5e8b64cfe09a808889c5eab20d5"
+}

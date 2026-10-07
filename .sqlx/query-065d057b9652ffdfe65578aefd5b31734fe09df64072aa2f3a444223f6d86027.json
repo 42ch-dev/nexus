@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO operation_receipts (operation_id, consumer, subject_id, status, request_fingerprint, result_json, error_json, created_at, updated_at, terminal_at, sequence) VALUES (?, ?, ?, 'running', ?, NULL, NULL, ?, ?, NULL, COALESCE((SELECT MAX(sequence) FROM operation_receipts), 0) + 1) ON CONFLICT(operation_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "065d057b9652ffdfe65578aefd5b31734fe09df64072aa2f3a444223f6d86027"
+}

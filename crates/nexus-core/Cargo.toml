@@ -43,21 +43,34 @@ execution = [
 # dev-dependency self-reference, exactly as the daemon did before the move.
 test-hooks = []
 compute = ["execution", "dep:nexus-wasm-host", "nexus-spoke-adapter/compute"]
-# Reverse-invoke/peer-control edge (v1.190 P4-T3): the peer/MCP session,
-# visibility, bounded WS transport and watcher ownership moved here; the
-# spoke remote adapter types the WS transport implements. This cohort's
-# public peer API is execution-owned (peer-tool types, capability and
-# async-trait), so `execution` is an explicit prerequisite; the rmcp bridge
-# is a direct edge whose embedded server additionally needs `embedded-mcp`.
-connect-client = [
+# Connect-host product cohort (v1.207 P2): the WS accept loop, per-session
+# monitoring and the peer-tools event lane the shipped `nexus-runtime` /
+# `nexus42 connect start` boot. This is the Connect-host surface only — it
+# carries NO rmcp: the reverse-invoke/operator MCP bridge is not a
+# Connect-host capability, so the product graph stays rmcp-free
+# (architecture §Cohorts; `tooling/check-graph-pins.sh` asserts rmcp ABSENT
+# from the nexus42 connect-host graph). `execution` is an explicit
+# prerequisite: this cohort's public peer API is execution-owned (peer-tool
+# types, capability and async-trait) and the accept loop holds an
+# orchestration capability registry.
+connect-host = [
     "execution",
     "dep:spoke-connect",
     "dep:tokio-tungstenite",
     "dep:futures-util",
+    "dep:getrandom",
+]
+# Reverse-invoke/peer-control edge (v1.190 P4-T3): the full peer/MCP session
+# library = the `connect-host` transport cohort PLUS the rmcp bridge; the
+# spoke remote adapter types the WS transport implements. The rmcp bridge is
+# a direct edge here, and the embedded server (Model B) additionally needs
+# `embedded-mcp`. The shipped Connect-host product does NOT enable this
+# cohort (it links no rmcp); only the app-level MCP/peer library does.
+connect-client = [
+    "connect-host",
     # mcp_bridge's rmcp server surface compiles with connect-client; only
     # the embedded server (Model B) additionally needs embedded-mcp.
     "dep:rmcp",
-    "dep:getrandom",
 ]
 # Model B's sink/stream session channels (futures_channel::mpsc) ride the
 # same rmcp transport module; the shell compiles only under embedded-mcp.

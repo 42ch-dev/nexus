@@ -26,6 +26,9 @@
 // assertions operate on fixed local fixtures where a panic IS the failure
 // signal; `.unwrap()`/`.expect()` keep the tests linear and readable.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+// Lock guards in the socket-driven cases are held across an asserted step on
+// purpose; the drop point is not a contention concern in a local test.
+#![allow(clippy::significant_drop_tightening)]
 
 use parking_lot::Mutex;
 use std::collections::HashMap;

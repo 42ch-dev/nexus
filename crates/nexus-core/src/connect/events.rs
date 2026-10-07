@@ -105,12 +105,13 @@ struct RegistryState {
 }
 
 fn decrement_subscriber_count(state: &mut RegistryState, stream: &str) {
-    let remove_count = if let Some(count) = state.subscriber_counts.get_mut(stream) {
-        *count -= 1;
-        *count == 0
-    } else {
-        false
-    };
+    let remove_count = state
+        .subscriber_counts
+        .get_mut(stream)
+        .is_some_and(|count| {
+            *count -= 1;
+            *count == 0
+        });
     if remove_count {
         state.subscriber_counts.remove(stream);
     }
@@ -254,16 +255,33 @@ impl EventSubscription {
             .streams
             .get(&self.stream)
             .map_or_else(Vec::new, |ring| {
-                ring.events
+                // Retention may have evicted events after the acknowledged
+                // cursor while a batch was outstanding, so the retained front
+                // can stop being contiguous with `cursor`. The same
+                // lost-history check the `subscribe` path applies (front is
+                // more than one past the cursor) must lead the page with a
+                // cursorless `gap` instead of silently skipping the evicted
+                // sequences (§A.4).
+                let lost_history = ring
+                    .events
+                    .front()
+                    .is_some_and(|event| self.cursor < event.sequence.saturating_sub(1));
+                let sequence = if lost_history { 0 } else { self.cursor };
+                let mut frames: Vec<EventFrame> = ring
+                    .events
                     .iter()
-                    .filter(|event| event.sequence > self.cursor)
+                    .filter(|event| event.sequence > sequence)
                     .take(MAX_BATCH)
                     .map(|event| EventFrame {
                         id: Some(format!("{}:{}", ring.epoch, event.sequence)),
                         event: event.event.clone(),
                         data: event.data.clone(),
                     })
-                    .collect()
+                    .collect();
+                if lost_history {
+                    frames.insert(0, Self::gap_frame("history_unavailable"));
+                }
+                frames
             })
     }
 
@@ -274,6 +292,22 @@ impl EventSubscription {
             self.cursor = sequence;
             self.acked.add_permits(1);
         }
+    }
+
+    /// The cursorless reconciliation frame emitted when the read cursor fell
+    /// off the retention window: the client must resync from the transcript
+    /// because the evicted sequences are unrecoverable (§A.4).
+    fn gap_frame(reason: &str) -> EventFrame {
+        Self::control(
+            "gap",
+            serde_json::json!({
+                "reason": reason,
+                "requires_transcript_reconciliation": true,
+                "operation_id": null,
+                "resync_required": true,
+                "inspect_url": ""
+            }),
+        )
     }
 
     pub fn control(event: impl Into<String>, data: Value) -> EventFrame {
@@ -363,6 +397,10 @@ impl ConnectEventRegistry {
     }
     /// Publish retains at most `MAX_STREAMS` rings, evicting an inactive ring
     /// when at capacity; active rings are never evicted.
+    ///
+    /// # Errors
+    /// Returns [`PublishError::StreamLimit`] when every retained ring is
+    /// active, so admitting this stream would evict a live subscriber.
     pub fn publish(
         &self,
         stream: &str,
@@ -425,6 +463,9 @@ impl ConnectEventRegistry {
     /// [`SubscribeError::FutureCursor`] when it is ahead of the ring,
     /// [`SubscribeError::ClosedSession`] when the owning session has closed,
     /// and [`SubscribeError::StreamLimit`] when every retained ring is active.
+    // The admission sequence is frozen: the gate/lifetime guard must span
+    // permit acquisition, so the guard is not tightened early.
+    #[allow(clippy::too_many_lines, clippy::significant_drop_tightening)]
     pub async fn subscribe(
         &self,
         session: &str,
@@ -504,18 +545,16 @@ impl ConnectEventRegistry {
         let mut gap_reason = None;
         let sequence = match cursor {
             Some(cursor) => match parse_cursor(ring, cursor) {
-                Ok(sequence) => {
+                Ok(sequence)
                     if ring
                         .events
                         .front()
-                        .is_some_and(|event| sequence < event.sequence.saturating_sub(1))
-                    {
-                        gap_reason = Some("history_unavailable");
-                        0
-                    } else {
-                        sequence
-                    }
+                        .is_some_and(|event| sequence < event.sequence.saturating_sub(1)) =>
+                {
+                    gap_reason = Some("history_unavailable");
+                    0
                 }
+                Ok(sequence) => sequence,
                 Err(_) => {
                     gap_reason = Some("stale_cursor");
                     0
@@ -535,19 +574,7 @@ impl ConnectEventRegistry {
             })
             .collect();
         if let Some(reason) = gap_reason {
-            replay.insert(
-                0,
-                EventSubscription::control(
-                    "gap",
-                    serde_json::json!({
-                        "reason": reason,
-                        "requires_transcript_reconciliation": true,
-                        "operation_id": null,
-                        "resync_required": true,
-                        "inspect_url": ""
-                    }),
-                ),
-            );
+            replay.insert(0, EventSubscription::gap_frame(reason));
         }
         let epoch = ring.epoch.to_string();
         let active = Arc::new(AtomicBool::new(false));
@@ -648,6 +675,7 @@ impl ConnectEventRegistry {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::significant_drop_tightening)] // tests inspect the registry lock directly; the guard drop point is not a contention concern
     use super::*;
     use serde_json::json;
     use std::time::Duration;
@@ -866,6 +894,36 @@ mod tests {
             .await
             .unwrap();
         assert_generated_gap(&trimmed.replay[0], "history_unavailable");
+    }
+
+    /// Greptile #4: a live page whose acknowledged cursor fell off the
+    /// retention window (an unacked batch outlived a ring overrun) must lead
+    /// with the cursorless `gap` rather than silently skipping the evicted
+    /// sequences.
+    #[tokio::test]
+    async fn live_page_leads_with_gap_when_retention_outruns_the_cursor() {
+        let registry = ConnectEventRegistry::default();
+        registry.open_session("p");
+        let first = registry.publish("s", "one", json!(1)).unwrap();
+        let (_, _, mut subscription) = registry.subscribe("p", "s", None).await.unwrap();
+        registry.activate("p", "s");
+        // Take the first batch, then withhold the ack while the publisher
+        // overruns the ring, evicting every sequence the cursor still points
+        // at (the retained front moves strictly past `cursor + 1`).
+        assert_eq!(subscription.next_batch().await, vec![first.clone()]);
+        for n in 0..=MAX_EVENTS {
+            registry.publish("s", "filler", json!(n)).unwrap();
+        }
+        subscription.ack();
+
+        let batch = subscription.next_batch().await;
+        assert_generated_gap(&batch[0], "history_unavailable");
+        // The gap leads and the page never claims the evicted sequences: the
+        // retained window starts at sequence 3 (1 initial + MAX_EVENTS+1
+        // fillers, ring keeps the last MAX_EVENTS).
+        let epoch = first.id.unwrap().split_once(':').unwrap().0.to_owned();
+        assert_eq!(batch[1].id.as_deref(), Some(format!("{epoch}:3").as_str()));
+        assert_eq!(batch.len(), MAX_BATCH + 1);
     }
     #[test]
     fn generated_gap_contract_rejects_false_literal_flags() {

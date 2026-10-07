@@ -1,6 +1,6 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "core-connect-gap-event.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-connect-gap-event.schema.json",
   "schema_version": 1,
   "title": "Core Connect Gap Event",
   "type": "object",

@@ -220,7 +220,12 @@ cli = [
   "dep:nix",
 ]
 connect-host = [
-  "nexus-core/connect-client",
+  # v1.207 P2: the WS accept loop + peer-tools event lane live in nexus-core's
+  # `connect-host` cohort — the Connect-host surface WITHOUT the rmcp
+  # reverse-invoke bridge. Enabling `nexus-core/connect-client` here would pull
+  # rmcp into the shipped Connect-host graph, which the product graph pins
+  # forbid (`tooling/check-graph-pins.sh` asserts rmcp ABSENT).
+  "nexus-core/connect-host",
   "dep:chrono",
   "dep:nexus-knowledge",
   "dep:nexus-local-db",

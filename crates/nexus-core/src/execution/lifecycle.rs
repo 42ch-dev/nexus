@@ -300,7 +300,7 @@ pub struct ExecutionHandle {
     scheduler_shutdown: Arc<tokio::sync::Notify>,
     /// The peer-control lane this execution owner admits (v1.190 P4-T3).
     /// Empty until `start_peer_control` succeeds; closed with the owner.
-    #[cfg(feature = "connect-client")]
+    #[cfg(feature = "connect-host")]
     pub(crate) peer_control: std::sync::Mutex<Option<Arc<crate::connect::PeerControlLane>>>,
     /// The authorized workflow-event subscriptions this owner minted (P1-T1).
     ///
@@ -1238,7 +1238,7 @@ impl CoreService {
             settled_notify: Arc::new(tokio::sync::Notify::new()),
             scheduler_task: Mutex::new(scheduler_task),
             scheduler_shutdown,
-            #[cfg(feature = "connect-client")]
+            #[cfg(feature = "connect-host")]
             peer_control: std::sync::Mutex::new(None),
             workflow_subscriptions: crate::execution::run_events::WorkflowSubscriptionRegistry::new(
             ),
