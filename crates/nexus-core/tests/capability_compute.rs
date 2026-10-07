@@ -30,7 +30,7 @@ use nexus_core::execution::capabilities::{
 };
 use nexus_core::execution::compute::{
     accept_compute_run, clear_compute_runs, compute_run, discard_compute_run, get_compute_run,
-    list_compute_runs, ComputeContext,
+    list_compute_runs, recover_stuck_compute_runs, ComputeContext, ComputeRunRecoveryOutcome,
 };
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, WorkPatchRequest};
 use nexus_wasm_host::{CachedModule, ModuleCache, ModuleManifest, SandboxConfig, WasmEngine};
@@ -3064,4 +3064,245 @@ async fn compute_facade_is_fenced_once_the_owner_closes() {
         matches!(discard, CoreError::Closing),
         "discard must be fenced after close, got {discard:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// v1.207 P3 — durable operation receipts on the compute Run write path
+// ---------------------------------------------------------------------------
+
+/// The receipt shadowing a stuck run row is reachable from the run row alone
+/// (spec §B.2 `subject_id`), which is the handle boot recovery asks with.
+async fn receipt_for_run(f: &Fixture, run_id: &str) -> Option<nexus_local_db::OperationReceipt> {
+    nexus_local_db::operation_receipts::get_operation_receipt_by_subject(
+        f.core.pool(),
+        nexus_local_db::operation_receipts::CONSUMER_COMPUTE_RUN,
+        run_id,
+    )
+    .await
+    .expect("receipt read")
+}
+
+/// Seed a direct-lane run row left `running` (the crash trace boot recovery
+/// scans for), and optionally its receipt.
+async fn seed_stuck_run(f: &Fixture, with_receipt: Option<&str>) -> String {
+    let run_id = nexus_local_db::compute_runs::insert_run(
+        f.core.pool(),
+        WORLD,
+        MODULE,
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect("insert a stuck run row");
+    if let Some(operation_id) = with_receipt {
+        nexus_local_db::operation_receipts::begin_operation(
+            f.core.pool(),
+            operation_id,
+            nexus_local_db::operation_receipts::CONSUMER_COMPUTE_RUN,
+            &run_id,
+            "fp-stuck",
+        )
+        .await
+        .expect("seed the run's receipt");
+    }
+    run_id
+}
+
+/// The run's durable receipt shadows the `compute_sessions` transitions: the
+/// `running` receipt is written before the effect and settled terminally with
+/// the run, carrying the SAME payload the run row does (spec §B.2).
+#[tokio::test]
+#[serial_test::serial]
+async fn compute_run_receipt_shadows_the_run_transitions() {
+    let f = fixture_with_compute(&[("loop", loop_manifest(), loop_wasm())], None).await;
+    let succeeded = run_succeeded(&f, &f.compute).await;
+
+    let receipt = receipt_for_run(&f, &succeeded)
+        .await
+        .expect("a succeeded run has a durable receipt");
+    assert_eq!(
+        receipt.status,
+        nexus_local_db::operation_receipts::STATUS_FINISHED
+    );
+    assert_eq!(receipt.consumer, "compute_run");
+    assert_eq!(receipt.subject_id, succeeded);
+    assert!(receipt.terminal_at.is_some());
+    assert!(
+        receipt.error_json.is_none(),
+        "a finished receipt carries a result, never an error: {receipt:?}"
+    );
+    nexus_core::execution::operation_id::validate_operation_id(&receipt.operation_id)
+        .expect("the shadowed receipt carries a wire-shaped operation id");
+    let row = nexus_local_db::compute_runs::get_run(f.core.pool(), &succeeded)
+        .await
+        .unwrap()
+        .expect("the run row");
+    assert_eq!(
+        receipt.result_json.as_deref(),
+        row.proposals_json.as_deref(),
+        "the receipt's terminal payload is the run row's own proposals payload"
+    );
+
+    // A failed run shadows the other terminal transition.
+    let _ = compute_run(&f.core, &f.compute, run_request(WORLD, "loop"))
+        .await
+        .expect_err("an exhausted-fuel module fails the run");
+    let (failed_run_id, status, error_json): (String, String, Option<String>) = sqlx::query_as(
+        "SELECT run_id, status, error_json FROM compute_sessions \
+          WHERE module_id = 'loop' AND run_id IS NOT NULL \
+          ORDER BY created_at DESC LIMIT 1",
+    )
+    .fetch_one(f.core.pool())
+    .await
+    .expect("the failed run is persisted");
+    assert_eq!(status, "failed");
+    let failed_receipt = receipt_for_run(&f, &failed_run_id)
+        .await
+        .expect("a failed run has a durable receipt");
+    assert_eq!(
+        failed_receipt.status,
+        nexus_local_db::operation_receipts::STATUS_FAILED
+    );
+    assert_eq!(
+        failed_receipt.error_json, error_json,
+        "the failed receipt carries the run row's own error payload"
+    );
+    assert!(failed_receipt.result_json.is_none());
+}
+
+/// §B.3 item 4, the guard: a run stuck `running` with no terminal receipt is
+/// refused as the typed `uncertain` answer — never re-applied, and no terminal
+/// is fabricated for it. Both ambiguous shapes are covered: a receipt-less run
+/// and a `running` receipt whose owner is gone.
+#[tokio::test]
+#[serial_test::serial]
+async fn boot_recovery_refuses_stuck_runs_uncertain_and_never_reapplies() {
+    let f = fixture().await;
+    let no_receipt = seed_stuck_run(&f, None).await;
+    let with_receipt_operation = format!("op_{}", "c".repeat(32));
+    let with_receipt = seed_stuck_run(&f, Some(&with_receipt_operation)).await;
+
+    let recovered = recover_stuck_compute_runs(f.core.pool())
+        .await
+        .expect("recovery classification");
+
+    let receipt_less = recovered
+        .iter()
+        .find(|entry| entry.run_id == no_receipt)
+        .expect("the receipt-less stuck run is classified");
+    assert!(receipt_less.operation_id.is_none());
+    let live_receipt = recovered
+        .iter()
+        .find(|entry| entry.run_id == with_receipt)
+        .expect("the stuck run with a running receipt is classified");
+    assert_eq!(
+        live_receipt.operation_id.as_deref(),
+        Some(with_receipt_operation.as_str())
+    );
+
+    for entry in [receipt_less, live_receipt] {
+        match &entry.outcome {
+            ComputeRunRecoveryOutcome::Uncertain(error) => {
+                assert!(
+                    matches!(error, CoreError::Coded { code, .. } if code == "uncertain"),
+                    "the refusal must carry the frozen `uncertain` code, got {error:?}"
+                );
+            }
+            other @ ComputeRunRecoveryOutcome::AnsweredFromReceipt { .. } => {
+                panic!("a stuck run must be refused uncertain, got {other:?}")
+            }
+        }
+    }
+
+    // Nothing was re-applied and no terminal was fabricated: both rows are
+    // byte-identical to the state the crash left behind.
+    for run_id in [&no_receipt, &with_receipt] {
+        let row = nexus_local_db::compute_runs::get_run(f.core.pool(), run_id)
+            .await
+            .unwrap()
+            .expect("the stuck row survives recovery");
+        assert_eq!(row.status, "running", "recovery never settles a stuck row");
+        assert!(row.error_json.is_none());
+    }
+    // The orphaned receipt is untouched too — an orphan is never settled.
+    let stored = nexus_local_db::operation_receipts::get_operation_receipt(
+        f.core.pool(),
+        &with_receipt_operation,
+    )
+    .await
+    .unwrap()
+    .expect("the orphaned receipt");
+    assert_eq!(
+        stored.status,
+        nexus_local_db::operation_receipts::STATUS_RUNNING
+    );
+}
+
+/// §B.3 step 3's other half: when the stuck run's receipt is TERMINAL the
+/// replay is answered from the receipt and the effect is never re-applied.
+#[tokio::test]
+#[serial_test::serial]
+async fn boot_recovery_answers_a_terminal_receipt_without_reapplying() {
+    let f = fixture().await;
+    let operation_id = format!("op_{}", "d".repeat(32));
+    let run_id = seed_stuck_run(&f, Some(&operation_id)).await;
+    nexus_local_db::operation_receipts::settle_operation(
+        f.core.pool(),
+        &operation_id,
+        nexus_local_db::operation_receipts::STATUS_FINISHED,
+        r#"{"state_delta":[]}"#,
+    )
+    .await
+    .expect("settle the receipt terminally");
+
+    let recovered = recover_stuck_compute_runs(f.core.pool())
+        .await
+        .expect("recovery classification");
+    let entry = recovered
+        .iter()
+        .find(|entry| entry.run_id == run_id)
+        .expect("the stuck run is classified");
+    match &entry.outcome {
+        ComputeRunRecoveryOutcome::AnsweredFromReceipt { status } => {
+            assert_eq!(status, nexus_local_db::operation_receipts::STATUS_FINISHED);
+        }
+        other @ ComputeRunRecoveryOutcome::Uncertain(_) => {
+            panic!("a terminal receipt must answer the replay, got {other:?}")
+        }
+    }
+    assert_eq!(entry.operation_id.as_deref(), Some(operation_id.as_str()));
+}
+
+/// The boot wiring is real, not just a callable: an execution start over a
+/// workspace holding a stuck run records the receipt-first decision on the
+/// owner, and the handle reports it. Recovery never re-applies, so a decided
+/// run is still exactly as the crash left it.
+#[tokio::test]
+#[serial_test::serial]
+async fn execution_start_runs_the_compute_receipt_recovery_pass() {
+    let f = fixture().await;
+    let run_id = seed_stuck_run(&f, None).await;
+
+    let handle = open_compute_handle(&f).await;
+    let recovered = handle.compute_run_recoveries();
+    let entry = recovered
+        .iter()
+        .find(|entry| entry.run_id == run_id)
+        .expect("the boot pass classified the stuck run");
+    assert!(
+        matches!(
+            entry.outcome,
+            ComputeRunRecoveryOutcome::Uncertain(ref error)
+                if matches!(error, CoreError::Coded { ref code, .. } if code == "uncertain")
+        ),
+        "the boot pass must refuse the stuck run uncertain, got {:?}",
+        entry.outcome
+    );
+    let row = nexus_local_db::compute_runs::get_run(f.core.pool(), &run_id)
+        .await
+        .unwrap()
+        .expect("the stuck row survives the boot pass");
+    assert_eq!(row.status, "running");
 }

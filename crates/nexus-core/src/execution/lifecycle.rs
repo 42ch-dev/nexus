@@ -251,6 +251,15 @@ pub struct ExecutionHandle {
     /// The engine-global invocation serializer (P3-T3).
     #[cfg(feature = "compute")]
     compute_serializer: Arc<tokio::sync::Semaphore>,
+    /// The receipt-first recovery decisions this owner made at start for
+    /// direct-lane compute runs left `running` (v1.207 P3, spec §B.3).
+    ///
+    /// Retained so the §B.3 guarantee is observable rather than log-only: each
+    /// entry says whether the run was answered from a terminal receipt or
+    /// refused as `uncertain`. No entry ever records a re-apply — recovery
+    /// cannot perform one.
+    #[cfg(feature = "compute")]
+    compute_run_recoveries: Vec<crate::execution::compute::ComputeRunRecovery>,
     /// A WEAK link back to the service that established this owner.
     ///
     /// The service stores the handle (`CoreInner::execution`), so a strong
@@ -428,6 +437,18 @@ impl ExecutionHandle {
     #[cfg(feature = "compute")]
     pub fn compute_serializer(&self) -> Arc<tokio::sync::Semaphore> {
         Arc::clone(&self.compute_serializer)
+    }
+
+    /// The receipt-first recovery decisions taken at start for direct-lane
+    /// compute runs left `running` (v1.207 P3, spec §B.3).
+    ///
+    /// Each entry reports whether the run was answered from a terminal receipt
+    /// or refused as the typed `uncertain` one; recovery never re-applies an
+    /// effect, so no entry can record a re-run. Empty when no run was stuck.
+    #[must_use]
+    #[cfg(feature = "compute")]
+    pub fn compute_run_recoveries(&self) -> &[crate::execution::compute::ComputeRunRecovery] {
+        &self.compute_run_recoveries
     }
 
     /// The service that established this owner, if it is still alive.
@@ -1138,6 +1159,39 @@ impl CoreService {
         for d in &decisions {
             tracing::info!(decision = ?d, "execution start: recovery re-drive decision");
         }
+        // v1.207 P3 (§B.3): the receipt-first recovery entry for compute runs
+        // left `running` by a crash. It runs BEFORE the clock starts, asks
+        // each stuck run's durable receipt first, and never re-applies an
+        // effect — a terminal receipt answers the replay, and any other state
+        // is reported as the typed `uncertain` refusal. A read failure is a
+        // warning (the boot continues); it can never license a re-apply. The
+        // decisions are retained on the handle so the boot-time answer stays
+        // observable.
+        #[cfg(feature = "compute")]
+        let compute_run_recoveries = match crate::execution::compute::recover_stuck_compute_runs(
+            &pool,
+        )
+        .await
+        {
+            Ok(recovered) => {
+                for run in &recovered {
+                    tracing::info!(
+                        run_id = %run.run_id,
+                        operation_id = run.operation_id.as_deref().unwrap_or("<none>"),
+                        outcome = ?run.outcome,
+                        "execution start: compute run receipt recovery decision"
+                    );
+                }
+                recovered
+            }
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    "execution start: compute run receipt recovery failed; no run was re-applied"
+                );
+                Vec::new()
+            }
+        };
         // Recovery is complete: start the clock. Until this signal the owned
         // scheduler task cannot tick, so an admission sweep can never race the
         // recovery pass above.
@@ -1168,6 +1222,8 @@ impl CoreService {
             compute_engine: deps_compute_engine,
             #[cfg(feature = "compute")]
             compute_serializer: deps_compute_serializer,
+            #[cfg(feature = "compute")]
+            compute_run_recoveries,
             engine,
             coordinator,
             capability_holder,

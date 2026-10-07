@@ -599,6 +599,12 @@ fn coded_wire_status(code: &str) -> i64 {
         // carries the code; this adapter decides the status
         // (`.mstar/specs/orchestration-engine.md` §human wait).
         "workflow_wait_conflict" | "workflow_state_conflict" => 409,
+        // v1.207 P3 (spec §B.1/§B.3/§C): the durable-operation refusals are
+        // conflicts — `operation_id_conflict` is the first-writer-wins
+        // ownership refusal (§B.1) and `uncertain` is the "no terminal
+        // receipt, never retry blindly" answer (§B.3 item 4). Both must be an
+        // exact 409 with their coded detail, never the 400 fallback.
+        "operation_id_conflict" | "uncertain" => 409,
         "invalid_state"
         | "invalid_transition"
         | "invalid_input"
@@ -706,6 +712,29 @@ mod tests {
             wire.details.get("wire_code").and_then(|v| v.as_str()),
             Some("capability_missing")
         );
+    }
+
+    /// v1.207 P3 (§B.1/§B.3/§C): the two frozen durable-operation refusal
+    /// codes render an exact 409 with their code preserved in
+    /// `details.wire_code`, never the 400 `invalid_input` fallback.
+    #[test]
+    fn durable_operation_refusals_are_conflicts() {
+        for code in ["operation_id_conflict", "uncertain"] {
+            let wire = wire_core_error_from_domain(DomainError::Coded {
+                code: code.into(),
+                message: format!("{code} from the receipt store"),
+            });
+            assert_eq!(
+                wire.http_status,
+                Some(409),
+                "{code} must be a conflict, not a 400 fallback"
+            );
+            assert_eq!(
+                wire.details.get("wire_code").and_then(Value::as_str),
+                Some(code),
+                "{code} travels verbatim in details.wire_code"
+            );
+        }
     }
 
     #[test]

@@ -98,17 +98,23 @@ fn canonicalize(value: &Value) -> Value {
     }
 }
 
+/// Canonical JSON text of any value — the shared serialization of the id and
+/// fingerprint derivations below.
+///
+/// `Value` is always string-keyed, so this serialization cannot fail.
+fn canonical_json(value: &Value) -> String {
+    serde_json::to_string(&canonicalize(value))
+        .expect("serializing a serde_json::Value is infallible")
+}
+
 /// Canonical JSON of the scope tuple `{actor, session, action, args}`.
 fn canonical_operation_json(scope: &OperationScope<'_>) -> String {
-    let tuple = serde_json::json!({
+    canonical_json(&serde_json::json!({
         "actor": scope.actor,
         "session": scope.session,
         "action": scope.action,
         "args": scope.args,
-    });
-    // `Value` is always string-keyed, so this serialization cannot fail.
-    serde_json::to_string(&canonicalize(&tuple))
-        .expect("serializing a serde_json::Value is infallible")
+    }))
 }
 
 /// Validate the `op_<hex32>` shape of a durable operation id.
@@ -163,6 +169,23 @@ pub fn resolve_operation_id(scope: &OperationScope<'_>) -> Result<String, Operat
         }
         Some(_) => Err(OperationIdError::NotAString),
     }
+}
+
+/// SHA-256 (full 64 hex chars) of the canonical request arguments — the
+/// `request_fingerprint` the receipt store compares first-writer-wins
+/// (spec §B.2).
+///
+/// The fingerprint is the replay-vs-conflict discriminator: two callers
+/// carrying the SAME `operation_id` with the SAME canonical arguments are a
+/// replay (the store returns the stored row), while a different canonical
+/// request is the typed `operation_id_conflict` refusal. It is deliberately
+/// the digest of `args` alone and not of the scope tuple
+/// [`derive_operation_id`] hashes: the scope already selects *which* receipt
+/// row is addressed, and the fingerprint answers *whether this is the same
+/// logical request* for that row.
+#[must_use]
+pub fn request_fingerprint(args: &Value) -> String {
+    hex::encode(Sha256::digest(canonical_json(args).as_bytes()))
 }
 
 #[cfg(test)]
@@ -310,6 +333,37 @@ mod tests {
         assert_eq!(
             resolve_operation_id(&scope).unwrap(),
             derive_operation_id(&scope)
+        );
+    }
+
+    /// §B.2 `request_fingerprint`: the canonical-request digest is stable
+    /// across key order and nested reordering, and changes with the request.
+    #[test]
+    fn request_fingerprint_is_canonical_and_content_addressed() {
+        let first = request_fingerprint(&json!({"b": 2, "a": {"y": 1, "x": [1, 2]}}));
+        let reordered = request_fingerprint(&json!({"a": {"x": [1, 2], "y": 1}, "b": 2}));
+        assert_eq!(first, reordered, "canonical key order must not matter");
+        assert_eq!(first.len(), 64, "SHA-256 renders 64 hex chars");
+        assert!(
+            first
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+            "lowercase hex only: {first}"
+        );
+        assert_eq!(
+            first,
+            request_fingerprint(&json!({"a": {"x": [1, 2], "y": 1}, "b": 2})),
+            "the same request fingerprints identically on every attempt"
+        );
+        assert_ne!(
+            first,
+            request_fingerprint(&json!({"a": {"x": [2, 1], "y": 1}, "b": 2})),
+            "a different request must not collide"
+        );
+        assert_ne!(
+            first,
+            request_fingerprint(&json!({"a": {"x": [1, 2], "y": 1}, "b": 3})),
+            "a changed scalar must not collide"
         );
     }
 }

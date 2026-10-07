@@ -29,6 +29,34 @@ fn receipt_internal(what: &str, e: impl std::fmt::Display) -> CoreError {
     }
 }
 
+/// The frozen `uncertain` refusal code (spec §C).
+///
+/// Gated on the cohort that renders it today: the compute Run receipt
+/// recovery entry ([`crate::execution::compute::recover_stuck_compute_runs`]).
+/// The Connect write surface is the other intended consumer; the gate moves
+/// with that wiring.
+#[cfg(feature = "compute")]
+pub const UNCERTAIN_CODE: &str = "uncertain";
+
+/// The typed §B.3 item-4 refusal: a non-idempotent write with no terminal
+/// receipt is **never** retried blindly.
+///
+/// `subject` names the operation as the consumer knows it (a compute `run_id`,
+/// a Connect `<peer_session_id>/<op>`); `reason` says which ambiguity was
+/// observed. The code is the frozen [`UNCERTAIN_CODE`], rendered 409 by the
+/// adapters.
+#[cfg(feature = "compute")]
+#[must_use]
+pub fn uncertain_refusal(subject: &str, reason: &str) -> CoreError {
+    CoreError::Coded {
+        code: UNCERTAIN_CODE.to_string(),
+        message: format!(
+            "operation {subject} cannot be retried: {reason}; with no terminal receipt the \
+             effect may already have been applied, so re-applying it could duplicate the result"
+        ),
+    }
+}
+
 /// Parse one stored RFC 3339 timestamp column into the wire `DateTime<Utc>`.
 fn parse_timestamp(what: &str, value: &str) -> CoreResult<chrono::DateTime<chrono::Utc>> {
     chrono::DateTime::parse_from_rfc3339(value)

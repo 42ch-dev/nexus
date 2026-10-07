@@ -203,6 +203,37 @@ pub async fn get_operation_receipt(
     .map_err(db_err)
 }
 
+/// Read the receipt owned by one consumer subject (`consumer`, `subject_id`).
+///
+/// The §B.2 consumer subject is the recovery-side handle: compute Run keys
+/// `subject_id` on the `run_id`, so a boot pass that finds a run row stuck
+/// `running` can reach its receipt without re-deriving the operation id from
+/// the original request (which is not stored). The `(consumer, subject_id)`
+/// pair is indexed; more than one row for a pair would mean two logical
+/// operations shared one subject — the first (lowest `sequence`) is returned,
+/// and `None` means no receipt was ever written for the subject.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::Sqlx`] if the database query fails.
+pub async fn get_operation_receipt_by_subject(
+    pool: &SqlitePool,
+    consumer: &str,
+    subject_id: &str,
+) -> Result<Option<OperationReceipt>, LocalDbError> {
+    sqlx::query_as::<_, OperationReceipt>(
+        "SELECT operation_id, consumer, subject_id, status, request_fingerprint, \
+                result_json, error_json, created_at, updated_at, terminal_at, sequence \
+           FROM operation_receipts WHERE consumer = ? AND subject_id = ? \
+          ORDER BY sequence ASC LIMIT 1",
+    )
+    .bind(consumer)
+    .bind(subject_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(db_err)
+}
+
 /// Write the `running` receipt for an operation **before** its effect runs
 /// (spec §B.3 step 3), and report who acquired the effect.
 ///
@@ -467,6 +498,73 @@ mod tests {
                 panic!("expected to acquire the effect, got existing receipt {receipt:?}")
             }
         }
+    }
+
+    /// The receipt write path is engine-owned: the cooperative DIRECT
+    /// admission (the one the Connect host opens its workspace DB with —
+    /// `apps/nexus42` `Schema::init` → `nexus_local_db::init_pool`) carries the
+    /// protocol scalars but no engine registration, so it is fenced exactly
+    /// like a raw writer. This is why a receipt-writing consumer must run
+    /// under the engine owner, and why the boot recovery pass only READS.
+    #[tokio::test]
+    async fn direct_admission_is_fenced_from_writing_receipts() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("state.db");
+        let direct = crate::init_pool(&db_path)
+            .await
+            .expect("direct-admission pool");
+        let err = begin_operation(
+            &direct,
+            &op_id("dd"),
+            CONSUMER_COMPUTE_RUN,
+            "run-direct",
+            "fp-direct",
+        )
+        .await
+        .expect_err("the direct (cooperative) admission must not write receipts");
+        let message = err.to_string();
+        assert!(
+            message.contains("WRITER_FENCED") || message.contains("no such function: nexus_writer"),
+            "expected a writer fence, got: {message}"
+        );
+        direct.close().await;
+    }
+
+    /// The subject lookup is the recovery-side handle: the receipt for a
+    /// consumer subject is reachable without re-deriving the operation id,
+    /// and an unknown subject is `None` (never a fabricated receipt).
+    #[tokio::test]
+    async fn receipt_is_reachable_by_consumer_subject() {
+        let (pool, _dir) = admitted_pool().await;
+        let id = op_id("aa");
+        let begun = begin_acquired(&pool, &id, CONSUMER_COMPUTE_RUN, "run-subject", "fp-aa").await;
+        let settled = settle_operation(&pool, &id, STATUS_FINISHED, r#"{"ok":true}"#)
+            .await
+            .expect("settle");
+        assert_eq!(settled.status, STATUS_FINISHED);
+
+        let found = get_operation_receipt_by_subject(&pool, CONSUMER_COMPUTE_RUN, "run-subject")
+            .await
+            .unwrap()
+            .expect("the subject's receipt is reachable");
+        assert_eq!(found, settled, "the subject lookup returns the stored row");
+        assert_eq!(found.operation_id, begun.operation_id);
+
+        // The pair is consumer-scoped: the same subject under the other
+        // consumer is a different receipt (and here, none).
+        assert!(
+            get_operation_receipt_by_subject(&pool, CONSUMER_CONNECT_INVOKE, "run-subject")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            get_operation_receipt_by_subject(&pool, CONSUMER_COMPUTE_RUN, "run-unknown")
+                .await
+                .unwrap()
+                .is_none(),
+            "an unknown subject never fabricates a receipt"
+        );
     }
 
     /// Crash: a `running` receipt whose owner died is ambiguous — the recovery

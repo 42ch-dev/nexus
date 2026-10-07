@@ -258,7 +258,14 @@ pub fn map_core_error(err: CoreError) -> CliError {
 /// transport.
 fn coded_status(code: &str) -> u16 {
     match code {
-        "conflict" => 409,
+        // `conflict` is the retained family 409. v1.207 P3 (spec §B.1/§B.3/§C)
+        // adds the two frozen durable-operation refusal codes to the same
+        // family: the first writer's receipt is durable
+        // (`operation_id_conflict`) and an `uncertain` answer means the
+        // operation's state cannot be determined (never retry blindly). An
+        // exact 409 keeps both honest instead of degrading them to the 400
+        // `invalid_input` fallback.
+        "conflict" | "operation_id_conflict" | "uncertain" => 409,
         "invalid_state"
         | "invalid_transition"
         | "invalid_input"
@@ -458,9 +465,18 @@ fn incomplete_cleanup(report: &CoreCloseReport) -> String {
 /// The close/operation precedence table, without a database.
 #[cfg(test)]
 mod tests {
-    use super::resolve_direct;
+    use super::{coded_status, resolve_direct};
     use crate::errors::CliError;
     use nexus_contracts::{CoreCloseReport, CoreCloseReportState};
+
+    /// v1.207 P3 (§B.1/§B.3/§C): the durable-operation refusal codes are
+    /// conflicts on this transport too — the same 409 the daemon adapter
+    /// assigns, never the 400 fallback.
+    #[test]
+    fn durable_operation_refusals_are_conflicts() {
+        assert_eq!(coded_status("operation_id_conflict"), 409);
+        assert_eq!(coded_status("uncertain"), 409);
+    }
 
     /// A close report that does not confirm cleanup, naming one pending
     /// operation so the report is actionable.
