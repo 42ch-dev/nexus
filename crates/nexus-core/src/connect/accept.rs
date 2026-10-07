@@ -748,14 +748,14 @@ async fn drive_delivery<P, Fut, F>(
 /// `Pin<Box<F>>` keeps `Self` `Unpin` (no `unsafe` projection needed).
 struct PollTracker<F> {
     inner: std::pin::Pin<Box<F>>,
-    started: Arc<AtomicBool>,
+    started: bool,
 }
 
 impl<F> PollTracker<F> {
     fn new(inner: F) -> Self {
         Self {
             inner: Box::pin(inner),
-            started: Arc::new(AtomicBool::new(false)),
+            started: false,
         }
     }
 }
@@ -768,7 +768,7 @@ impl<F: std::future::Future> std::future::Future for PollTracker<F> {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
         let this = self.get_mut();
-        this.started.store(true, Ordering::SeqCst);
+        this.started = true;
         this.inner.as_mut().poll(cx)
     }
 }
@@ -790,7 +790,6 @@ where
     Fut: std::future::Future<Output = nexus_spoke_adapter::SpokeResult<serde_json::Value>> + Send,
     F: Fn() + Sync,
 {
-    let started = Arc::clone(&invoke.started);
     let outcome = tokio::select! {
         biased;
         () = cancelled.notified() => None,
@@ -799,7 +798,7 @@ where
     if let Some(result) = outcome {
         return Some(result);
     }
-    if !started.load(Ordering::SeqCst) {
+    if !invoke.started {
         // Cancelled before the request was ever polled: nothing was
         // allocated on the wire, so dropping it is safe.
         return None;
@@ -1489,10 +1488,7 @@ mod tests {
             !polled.load(Ordering::SeqCst),
             "cancellation before the first poll must not start the request"
         );
-        assert!(
-            !invoke.started.load(Ordering::SeqCst),
-            "the request must remain unstarted"
-        );
+        assert!(!invoke.started, "the request must remain unstarted");
         assert!(!fail_closed_called.load(Ordering::SeqCst));
     }
 

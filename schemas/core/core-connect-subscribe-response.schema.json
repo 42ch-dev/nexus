@@ -1,13 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "core-connect-subscribe-response.schema.json",
+  "schema_version": 1,
   "title": "Core Connect Subscribe Response",
   "type": "object",
   "additionalProperties": false,
   "required": ["stream", "epoch", "resumed_from"],
   "properties": {
     "stream": { "type": "string", "minLength": 1 },
-    "epoch": { "type": "string", "format": "uuid" },
+    "epoch": { "type": "string" },
     "resumed_from": { "type": ["string", "null"] }
   }
 }
