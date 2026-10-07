@@ -343,8 +343,13 @@ export function dedupeRefTargets(source: string, self: SchemaModule, modules: Sc
     const owner = ownerOf(modules, match[1], self);
     if (!owner) continue;
     for (let j = declarationBlockStart(lines, start); j <= end; j++) dropped.add(j);
+    // `path.posix.relative` yields a bare `works` for a descendant directory; a bare
+    // specifier would resolve as a package name, so only `..`-prefixed and empty
+    // results are used verbatim.
     const relativeDir = path.posix.relative(self.relDir, owner.relDir);
-    const from = relativeDir === '' ? `./${owner.base}` : `${relativeDir}/${owner.base}`;
+    const dirPrefix =
+      relativeDir === '' || relativeDir.startsWith('..') ? relativeDir : `./${relativeDir}`;
+    const from = dirPrefix === '' ? `./${owner.base}` : `${dirPrefix}/${owner.base}`;
     imports.push(`import type { ${match[1]} } from '${from}';`);
   }
 

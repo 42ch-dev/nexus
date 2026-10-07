@@ -124,6 +124,29 @@ describe('$ref target dedupe', () => {
     expect(out).not.toContain('One authoring-pool entry.');
   });
 
+  it('prefixes a descendant-directory import with ./', () => {
+    // `path.posix.relative('core', 'core/works')` is a bare `works`; emitting
+    // `works/work-pool-entry` would resolve as a package specifier.
+    const parent = schemaModule('core', 'WorkPoolListResponse', [
+      'WorkPoolListResponse',
+      'WorkPoolEntry',
+    ]);
+    const child = schemaModule('core/works', 'WorkPoolEntry', ['WorkPoolEntry']);
+    const source = [
+      'export interface WorkPoolListResponse {',
+      '  entries: WorkPoolEntry[];',
+      '}',
+      'export interface WorkPoolEntry {',
+      '  entry_id: string;',
+      '}',
+    ].join('\n');
+
+    const out = dedupeRefTargets(source, parent, [parent, child]);
+
+    expect(out).toContain("import type { WorkPoolEntry } from './works/work-pool-entry';");
+    expect(out).not.toContain("from 'works/");
+  });
+
   it('keeps a declaration whose canonical module does not declare it', () => {
     // `Character` prefixes `CharacterActorRef`, but `character.ts` never declares it,
     // so it must not be treated as the canonical home.
