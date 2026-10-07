@@ -19,7 +19,9 @@ fn select_creator(home: &std::path::Path, creator: &str, workspace: &str) {
     .unwrap();
 }
 
-async fn core_with_creator(home: &std::path::Path) -> (CoreService, Principal) {
+/// Materialize the fixture workspace and its creator row, then release the
+/// seed writer so a later open can take the admission.
+async fn seed_workspace(home: &std::path::Path) {
     std::fs::create_dir_all(home.join(".nexus42")).unwrap();
     std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
         home, "author", "default",
@@ -37,6 +39,9 @@ async fn core_with_creator(home: &std::path::Path) -> (CoreService, Principal) {
             .unwrap();
         pool.close().await;
     }
+}
+
+async fn open_core(home: &std::path::Path) -> (CoreService, Principal) {
     let core = CoreService::open(CoreOpenOptions {
         user_home: home.into(),
         access: CoreAccess::DirectWriter,
@@ -45,6 +50,11 @@ async fn core_with_creator(home: &std::path::Path) -> (CoreService, Principal) {
     .unwrap();
     let principal = core.active_principal().await.unwrap();
     (core, principal)
+}
+
+async fn core_with_creator(home: &std::path::Path) -> (CoreService, Principal) {
+    seed_workspace(home).await;
+    open_core(home).await
 }
 
 fn params(tags: Option<&str>) -> RegisterReferenceParams {
@@ -145,4 +155,77 @@ async fn get_unknown_reference_is_not_found() {
         }
         other => panic!("expected NotFound, got {other:?}"),
     }
+}
+
+/// The schema-owned metadata projection omits a NULL optional field (it does
+/// not emit JSON `null`); the list payload therefore stays field-identical but
+/// not byte-identical to the retired hand-written DTO for a row with no
+/// content path.
+#[test]
+fn null_optional_metadata_is_omitted_not_null() {
+    let info = nexus_core::ReferenceSourceInfo {
+        reference_source_id: "ref_x".to_string(),
+        source_type: "note".to_string(),
+        source_mutability: "static".to_string(),
+        uri: "notes/x.md".to_string(),
+        title: "X".to_string(),
+        content_path: None,
+        scan_status: "pending".to_string(),
+        created_at: "2026-01-01T00:00:00Z".to_string(),
+    };
+    let wire = serde_json::to_value(&info).unwrap();
+    let object = wire.as_object().unwrap();
+    assert!(!object.contains_key("content_path"), "{wire}");
+    assert_eq!(object.len(), 7, "{wire}");
+}
+
+/// A registry row updated by the refresh lifecycle carries `updated_at` on the
+/// get wire (the CLI renders it only when present).
+#[tokio::test]
+async fn refreshed_row_populates_updated_at_on_the_wire() {
+    let temp = tempfile::tempdir().unwrap();
+    seed_workspace(temp.path()).await;
+
+    let db = nexus_home_layout::workspace_state_db_path(temp.path(), "author", "default");
+    let reference_id = {
+        let seed = nexus_local_db::writer_protocol::init_guarded_pool(&db, "author")
+            .await
+            .unwrap();
+        let pool = seed.clone_pool();
+        let row = nexus_local_db::register_reference(
+            &pool,
+            nexus_local_db::RegisterParams {
+                home: temp.path(),
+                creator_id: "author",
+                workspace_id: "wrk_default",
+                source_type: "note",
+                source_mutability: nexus_local_db::SourceMutability::Refreshable,
+                uri: "notes/refreshed.md",
+                title: "Refreshed",
+                tags: None,
+                body: "body",
+            },
+        )
+        .await
+        .unwrap();
+        nexus_local_db::reference_source::mark_refreshed(
+            &pool,
+            &row.reference_source_id,
+            row.content_hash.as_deref().unwrap(),
+        )
+        .await
+        .unwrap();
+        pool.close().await;
+        row.reference_source_id
+    };
+
+    let (core, principal) = open_core(temp.path()).await;
+    let response = core
+        .get_reference(&principal, reference_id.clone())
+        .await
+        .unwrap();
+    assert!(response.updated_at.is_some(), "{response:?}");
+    let wire = serde_json::to_value(&response).unwrap();
+    assert!(wire.get("updated_at").is_some(), "{wire}");
+    assert_eq!(wire["reference"]["reference_source_id"], reference_id);
 }

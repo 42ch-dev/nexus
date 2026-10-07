@@ -41,29 +41,57 @@ pub struct RegisterReferenceParams {
 }
 
 /// Project a registry row onto the schema-owned reference metadata DTO.
-fn to_reference_info(row: &ReferenceSourceRow) -> ReferenceSourceInfo {
+fn to_reference_info(row: ReferenceSourceRow) -> ReferenceSourceInfo {
     ReferenceSourceInfo {
-        reference_source_id: row.reference_source_id.clone(),
-        source_type: row.source_type.clone(),
-        source_mutability: row.source_mutability.clone(),
-        uri: row.uri.clone(),
-        title: row.title.clone(),
-        content_path: row.content_path.clone(),
-        scan_status: row.scan_status.clone(),
-        created_at: row.created_at.clone(),
+        reference_source_id: row.reference_source_id,
+        source_type: row.source_type,
+        source_mutability: row.source_mutability,
+        uri: row.uri,
+        title: row.title,
+        content_path: row.content_path,
+        scan_status: row.scan_status,
+        created_at: row.created_at,
     }
 }
 
 /// Project a registry row onto the get envelope, including the show-render
 /// fields the lean metadata projection omits.
-fn to_get_response(row: &ReferenceSourceRow) -> ReferenceGetResponse {
+///
+/// The row is destructured once so every projected field is moved, never
+/// cloned.
+fn to_get_response(row: ReferenceSourceRow) -> ReferenceGetResponse {
+    let ReferenceSourceRow {
+        reference_source_id,
+        workspace_id,
+        source_type,
+        source_mutability,
+        uri,
+        title,
+        tags,
+        content_hash,
+        content_path,
+        scan_status,
+        created_at,
+        updated_at,
+        refresh_policy,
+        ..
+    } = row;
     ReferenceGetResponse {
-        reference: to_reference_info(row),
-        workspace_id: row.workspace_id.clone(),
-        updated_at: row.updated_at.clone(),
-        tags: row.tags.clone(),
-        content_hash: row.content_hash.clone(),
-        refresh_policy: row.refresh_policy.clone(),
+        reference: ReferenceSourceInfo {
+            reference_source_id,
+            source_type,
+            source_mutability,
+            uri,
+            title,
+            content_path,
+            scan_status,
+            created_at,
+        },
+        workspace_id,
+        updated_at,
+        tags,
+        content_hash,
+        refresh_policy,
     }
 }
 
@@ -110,7 +138,7 @@ impl CoreService {
         )
         .await
         .map_err(local_db_err)?;
-        Ok(to_reference_info(&row))
+        Ok(to_reference_info(row))
     }
 
     /// List registered reference sources.
@@ -131,7 +159,7 @@ impl CoreService {
         let rows = nexus_local_db::list_references(&self.inner.pool, None, None, None)
             .await
             .map_err(local_db_err)?;
-        let references = rows.iter().map(to_reference_info).collect();
+        let references = rows.into_iter().map(to_reference_info).collect();
         Ok(ReferenceListResponse { references })
     }
 
@@ -153,6 +181,6 @@ impl CoreService {
             .ok_or_else(|| CoreError::NotFound {
                 resource: format!("reference_source: {reference_id}"),
             })?;
-        Ok(to_get_response(&row))
+        Ok(to_get_response(row))
     }
 }
