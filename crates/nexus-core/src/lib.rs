@@ -85,7 +85,7 @@ pub use memory::{
 };
 pub use presets::PresetError;
 pub use principal::Principal;
-pub use references::RegisterReferenceParams;
+pub use references::{RegisterReferenceParams, REFERENCE_SOURCE_TYPES};
 // Reference read envelopes are schema-owned (core lane); re-exported here so
 // direct-core callers keep naming them through `nexus_core`.
 pub use nexus_contracts::core::references::{

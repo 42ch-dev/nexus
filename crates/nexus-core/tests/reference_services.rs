@@ -179,6 +179,38 @@ fn null_optional_metadata_is_omitted_not_null() {
     assert_eq!(object.len(), 7, "{wire}");
 }
 
+/// A `source_type` outside the contract enum is refused by the core before any
+/// registry row or body file is written.
+#[tokio::test]
+async fn invalid_source_type_is_refused_without_writes() {
+    let temp = tempfile::tempdir().unwrap();
+    let (core, principal) = core_with_creator(temp.path()).await;
+
+    let mut refused = params(None);
+    refused.source_type = "image".to_string();
+    let error = core
+        .register_reference(&principal, refused)
+        .await
+        .unwrap_err();
+    match error {
+        CoreError::InvalidInput { field, .. } => assert_eq!(field, "source_type"),
+        other => panic!("expected InvalidInput, got {other:?}"),
+    }
+
+    // No registry row and no body unit directory were created.
+    let registry = core.list_references(&principal).await.unwrap();
+    assert!(registry.references.is_empty(), "{registry:?}");
+    let units = nexus_home_layout::reference_body_path(temp.path(), "author", "ref_probe")
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    assert!(
+        !units.exists(),
+        "body unit dir written: {}",
+        units.display()
+    );
+}
+
 /// A registry row updated by the refresh lifecycle carries `updated_at` on the
 /// get wire (the CLI renders it only when present).
 #[tokio::test]

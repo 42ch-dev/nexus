@@ -167,6 +167,33 @@ async fn reference_register_list_show_round_trip() {
         "not-found wording changed: {}",
         stderr(&missing)
     );
+
+    // The core owns the source-type grammar; the leaf keeps the legacy wording
+    // for the refusal it renders.
+    let bad_type = fixture
+        .command()
+        .args([
+            "creator",
+            "reference",
+            "register",
+            "--source",
+            "notes/bad.md",
+            "--source-type",
+            "image",
+            "--title",
+            "Bad Source",
+            "--body",
+            "canonical body",
+        ])
+        .output()
+        .expect("run reference register with a bad source type");
+    assert!(!bad_type.status.success());
+    assert!(
+        stderr(&bad_type)
+            .contains("Invalid source type \"image\". Must be one of: file, url, pdf, note."),
+        "source-type refusal wording changed: {}",
+        stderr(&bad_type)
+    );
 }
 
 /// `reference show` renders the nullable `Updated:` line — and, with no tags
@@ -234,5 +261,58 @@ async fn reference_show_renders_updated_at_when_set() {
     assert!(
         !lines.iter().any(|line| line.starts_with("  Tags:")),
         "tags line present for a tagless row: {shown}"
+    );
+}
+
+/// A stored terminal field keeps its own trailing whitespace: the render buffer
+/// is emitted complete (only the appended line delimiter is dropped), where a
+/// blanket trim would have removed field bytes.
+#[tokio::test]
+async fn reference_show_preserves_terminal_field_bytes() {
+    let fixture = DirectFixture::new().await;
+    let reference_id = registered_id(&register_source(
+        &fixture,
+        &[
+            "--source",
+            "notes/padded.md",
+            "--title",
+            "Padded Source",
+            "--body",
+            "canonical body",
+        ],
+    ));
+
+    // Give the row a content path whose trailing bytes are load-bearing.
+    let creator_id = fixture_creator_id(&fixture);
+    let db = workspace_state_db_path(fixture.home.path(), &creator_id, WORKSPACE_SLUG);
+    {
+        let seed = init_guarded_pool(&db, &creator_id)
+            .await
+            .expect("seed writer");
+        let pool = seed.clone_pool();
+        sqlx::query(
+            "UPDATE reference_sources SET content_path = content_path || '  ' \
+             WHERE reference_source_id = ?",
+        )
+        .bind(&reference_id)
+        .execute(&pool)
+        .await
+        .expect("pad content path");
+        pool.close().await;
+    }
+    release_retained_writer_guards(&db);
+
+    let show = fixture
+        .command()
+        .args(["creator", "reference", "show", &reference_id])
+        .output()
+        .expect("run reference show");
+    assert!(show.status.success(), "show failed: {}", stderr(&show));
+    let shown = stdout(&show);
+    assert!(
+        shown.ends_with(&format!(
+            "  Body Path:    references/units/{reference_id}/body.md  \n"
+        )),
+        "terminal field bytes changed: {shown:?}"
     );
 }

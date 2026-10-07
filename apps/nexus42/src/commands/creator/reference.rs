@@ -149,9 +149,6 @@ async fn run_register(
         }
     };
 
-    // Validate source_type
-    validate_source_type(&input.source_type)?;
-
     let reference = core
         .register_reference(
             principal,
@@ -165,7 +162,7 @@ async fn run_register(
             },
         )
         .await
-        .map_err(map_core_error)?;
+        .map_err(|error| classify_register_error(error, &input.source_type))?;
 
     let mut out = String::new();
     let _ = writeln!(
@@ -180,7 +177,7 @@ async fn run_register(
         let _ = writeln!(out, "  Body:   {cp}");
     }
 
-    Ok(Some(out.trim_end().to_string()))
+    Ok(Some(finish_render(out)))
 }
 
 /// `reference list` — show metadata for all references.
@@ -212,7 +209,7 @@ async fn run_list(core: &CoreService, principal: &Principal) -> Result<Option<St
         );
     }
 
-    Ok(Some(out.trim_end().to_string()))
+    Ok(Some(finish_render(out)))
 }
 
 /// `reference show` — display a single reference with details.
@@ -256,7 +253,41 @@ async fn run_show(
         let _ = writeln!(out, "  Body Path:    {cp}");
     }
 
-    Ok(Some(out.trim_end().to_string()))
+    Ok(Some(finish_render(out)))
+}
+
+/// Finish a render buffer.
+///
+/// Every buffer above is written with `writeln!`, so it ends with the line
+/// delimiter the last line appended. Only that one delimiter byte is removed
+/// (the caller's `println!` restores it) — field content is never trimmed, so a
+/// stored value with trailing whitespace keeps every byte.
+fn finish_render(mut out: String) -> String {
+    if out.ends_with('\n') {
+        let _ = out.pop();
+    }
+    out
+}
+
+/// Map a `register_reference` refusal to the CLI taxonomy.
+///
+/// The core owns the `source_type` grammar; this leaf keeps the wording it
+/// rendered when the check lived here.
+fn classify_register_error(error: CoreError, source_type: &str) -> CliError {
+    match error {
+        CoreError::InvalidInput { field, .. } if field == "source_type" => {
+            invalid_source_type(source_type)
+        }
+        other => map_core_error(other),
+    }
+}
+
+/// The refusal wording for a `source_type` outside the contract enum.
+fn invalid_source_type(source_type: &str) -> CliError {
+    CliError::Other(format!(
+        "Invalid source type {source_type:?}. Must be one of: {}.",
+        nexus_core::REFERENCE_SOURCE_TYPES.join(", ")
+    ))
 }
 
 /// Resolve body text from `--file` or `--body` flags.
@@ -292,16 +323,6 @@ fn resolve_body_text(file: Option<&PathBuf>, body: Option<&String>) -> Result<St
     }
 }
 
-/// Validate that the `source_type` is a known contract enum value.
-fn validate_source_type(source_type: &str) -> Result<()> {
-    match source_type {
-        "file" | "url" | "pdf" | "note" => Ok(()),
-        other => Err(CliError::Other(format!(
-            "Invalid source type {other:?}. Must be one of: file, url, pdf, note."
-        ))),
-    }
-}
-
 /// Truncate a string to `max_len` chars with ellipsis if needed.
 fn truncate(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
@@ -321,17 +342,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn validate_source_type_accepts_known_types() {
-        assert!(validate_source_type("file").is_ok());
-        assert!(validate_source_type("url").is_ok());
-        assert!(validate_source_type("pdf").is_ok());
-        assert!(validate_source_type("note").is_ok());
+    fn invalid_source_type_names_the_accepted_grammar() {
+        let message = invalid_source_type("image").to_string();
+        assert!(message.contains("\"image\""), "{message}");
+        assert!(message.contains("file, url, pdf, note"), "{message}");
     }
 
     #[test]
-    fn validate_source_type_rejects_unknown() {
-        assert!(validate_source_type("unknown").is_err());
-        assert!(validate_source_type("image").is_err());
+    fn other_invalid_input_uses_the_shared_mapper() {
+        let mapped = classify_register_error(
+            CoreError::InvalidInput {
+                field: "title".to_string(),
+                reason: "empty".to_string(),
+            },
+            "note",
+        );
+        assert!(
+            mapped.to_string().contains("invalid input (title)"),
+            "{mapped}"
+        );
+    }
+
+    #[test]
+    fn finish_render_drops_only_the_appended_delimiter() {
+        assert_eq!(
+            finish_render("  Body Path:    body.md  \n".to_string()),
+            "  Body Path:    body.md  "
+        );
+        assert_eq!(finish_render("line".to_string()), "line");
     }
 
     #[test]

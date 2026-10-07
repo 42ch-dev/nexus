@@ -19,6 +19,13 @@ use nexus_local_db::SourceMutability;
 use crate::error::local_db_err;
 use crate::{CoreError, CoreResult, CoreService, Principal};
 
+/// Contract enum values accepted for a reference `source_type`.
+///
+/// The grammar is owned here (the producer refuses anything else before the
+/// store is touched); callers that render their own wording read it back
+/// instead of re-declaring the set.
+pub const REFERENCE_SOURCE_TYPES: [&str; 4] = ["file", "url", "pdf", "note"];
+
 /// Input for [`CoreService::register_reference`].
 ///
 /// The creator, workspace binding and body-store home are derived from the
@@ -108,18 +115,31 @@ impl CoreService {
     /// first, then the canonical `body.md` is written under the creator root.
     ///
     /// The workspace binding is the operational `wrk_<slug>` convention the
-    /// registry rows already carry, derived from the verified principal.
+    /// registry rows already carry, derived from the verified principal. The
+    /// `source_type` grammar ([`REFERENCE_SOURCE_TYPES`]) is refused here,
+    /// before the registry or the body store is touched.
     ///
     /// # Errors
     /// Returns [`CoreError::AuthRequired`] when the principal fails
-    /// verification and the storage carrier (legacy `DATABASE_ERROR`) when the
-    /// insert or the body write fails.
+    /// verification, [`CoreError::InvalidInput`] for a `source_type` outside
+    /// the contract enum, and the storage carrier (legacy `DATABASE_ERROR`)
+    /// when the insert or the body write fails.
     pub async fn register_reference(
         &self,
         principal: &Principal,
         params: RegisterReferenceParams,
     ) -> CoreResult<ReferenceSourceInfo> {
         self.verify_principal(principal)?;
+        if !REFERENCE_SOURCE_TYPES.contains(&params.source_type.as_str()) {
+            return Err(CoreError::InvalidInput {
+                field: "source_type".to_string(),
+                reason: format!(
+                    "unknown source type {:?}; expected one of: {}",
+                    params.source_type,
+                    REFERENCE_SOURCE_TYPES.join(", ")
+                ),
+            });
+        }
         let user_home = raw_user_home(&self.inner.nexus_home)?;
         let workspace_id = format!("wrk_{}", principal.workspace_slug());
         let row = nexus_local_db::register_reference(
