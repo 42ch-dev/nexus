@@ -13,6 +13,7 @@ pub mod enum_conversions;
 // so the lint is allowed once at its root.
 #[allow(clippy::unit_arg)]
 pub mod generated;
+pub mod literal_true;
 pub mod local;
 pub mod tristate;
 

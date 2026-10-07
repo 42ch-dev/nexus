@@ -28,10 +28,11 @@
 //! allowlist entry is negotiable for the next handshake without a
 //! restart; tests seed the holder with the ids directly).
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -55,6 +56,8 @@ use crate::connect::watch::{
 use crate::connect::ws_transport::{ws_config, WsTransport};
 use crate::error::{CoreError, CoreResult};
 use nexus_orchestration::CapabilityRegistryHolder;
+const SUBSCRIBE_TOOL: &str = "tools.nexus.subscribe";
+const DELIVER_TOOL: &str = "tools.nexus.deliver_events";
 
 /// Poll interval for the close-observation fallback (`responder.state()`).
 const CLOSE_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -72,35 +75,84 @@ pub struct ObservedTransport {
     inner: Arc<dyn Transport>,
     closed: AtomicBool,
     closed_notify: Notify,
+    pending_subscribe: Mutex<HashMap<String, String>>,
+    session: Mutex<Option<String>>,
 }
 
 impl ObservedTransport {
-    /// Wrap an inner transport.
     #[must_use]
     pub fn new(inner: Arc<dyn Transport>) -> Arc<Self> {
         Arc::new(Self {
             inner,
             closed: AtomicBool::new(false),
             closed_notify: Notify::new(),
+            pending_subscribe: Mutex::new(HashMap::new()),
+            session: Mutex::new(None),
         })
     }
 
-    /// True once the transport has reported an error/close.
+    fn bind_session(&self, peer_id: &str) {
+        *self
+            .session
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(peer_id.to_owned());
+    }
+
+    fn observe_inbound(&self, envelope: &[u8]) {
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(envelope) else {
+            return;
+        };
+        if value.get("op").and_then(serde_json::Value::as_str) != Some(SUBSCRIBE_TOOL) {
+            return;
+        }
+        let Some(request_id) = value.get("request_id").and_then(serde_json::Value::as_str) else {
+            return;
+        };
+        let Some(stream) = value
+            .pointer("/payload/arguments/stream")
+            .and_then(serde_json::Value::as_str)
+        else {
+            return;
+        };
+        self.pending_subscribe
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(request_id.to_owned(), stream.to_owned());
+    }
+
+    fn observe_outbound(&self, envelope: &[u8]) {
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(envelope) else {
+            return;
+        };
+        let Some(request_id) = value.get("request_id").and_then(serde_json::Value::as_str) else {
+            return;
+        };
+        let stream = self
+            .pending_subscribe
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(request_id);
+        let Some(stream) = stream else { return };
+        if value.pointer("/payload/result").is_none() {
+            return;
+        }
+        let session = self
+            .session
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(session) = session {
+            crate::connect::events::connect_event_registry().activate(&session, &stream);
+        }
+    }
+
     #[must_use]
     pub fn is_closed(&self) -> bool {
         self.closed.load(Ordering::SeqCst)
     }
-
-    /// A future that completes when the transport reports its first
-    /// error/close. Re-created per wait so the flag re-check between waits
-    /// is never missed. `tokio::select!` pins the future internally, so no
-    /// `Unpin` bound is needed.
     fn closed_notified(&self) -> impl Future<Output = ()> + '_ {
         self.closed_notify.notified()
     }
-
-    /// Latch the closed flag once; wakes every waiting `notified()` future
-    /// created before the call.
     fn mark_closed(&self) {
         if !self.closed.swap(true, Ordering::SeqCst) {
             self.closed_notify.notify_waiters();
@@ -114,18 +166,22 @@ impl Transport for ObservedTransport {
         let result = self.inner.send(envelope).await;
         if result.is_err() {
             self.mark_closed();
+        } else {
+            self.observe_outbound(envelope);
         }
         result
     }
 
     async fn recv(&self) -> Result<Vec<u8>, TransportError> {
         let result = self.inner.recv().await;
+        if let Ok(envelope) = &result {
+            self.observe_inbound(envelope);
+        }
         if result.is_err() {
             self.mark_closed();
         }
         result
     }
-
     async fn close(&self) -> Result<(), TransportError> {
         self.mark_closed();
         self.inner.close().await
@@ -171,33 +227,31 @@ pub fn ensure_remote_bind_allowed(host: &str) -> CoreResult<()> {
     Ok(())
 }
 
-/// Daemon hello manifest: baseline capabilities (+ any tool ids the test /
-/// T4 wiring chooses to advertise). `host_id` is the installation device id.
+/// WS-lane daemon hello manifest: baseline capabilities, allowlisted tools,
+/// and the fixed subscribe/consumer-delivery capabilities. `host_id` is the
+/// installation device id.
 ///
-/// AR-69 derivation lock: the tool `capabilities[]` derive ONLY from the
-/// operator allowlist (the `tool_ids` argument — connections pass the live
-/// config allowlist, DF-92; tests pass ids directly). No runtime discovery
-/// ever feeds this manifest. `namespaces[]` is derived from the tool ids
-/// (`tools.<ns>.<id>` ⇒ `ns`), deduplicated and order-stable.
+/// The two event capabilities are constants, never allowlist-derived:
+/// `SUBSCRIBE_TOOL` is host-served; `DELIVER_TOOL` is reverse-use only and
+/// authorizes the consumer's reverse-invoke gate. The host registers no
+/// `DELIVER_TOOL` handler.
 ///
 /// # Panics
 /// Panics if the static JSON shape fails to deserialize (programmer error —
 /// the shape is fixed at authoring time).
 #[must_use]
 pub fn daemon_manifest(host_id: &str, tool_ids: &[String]) -> HostCapabilityManifest {
-    // v1.191 P1 T14 (durable §9): the tools-only derivation lives with the
-    // allowlist that feeds it (`config::tools_only_capabilities`) — the
-    // baseline plus exact allowlisted tool ids, and never a KE family. This
-    // responder is composed with `ports: None`, so it advertises no
-    // `ke-ownership` / `ke-extraction`.
-    let capabilities = crate::connect::config::tools_only_capabilities(tool_ids);
-    // Tool grammar is exactly `tools.<ns>.<id>` (3 segments), so `nth(1)`
-    // is the namespace. Dedup keeps the hello stable when the allowlist
-    // names several tools in one namespace (T2 review M-1/M-2).
+    let mut capabilities = crate::connect::config::tools_only_capabilities(tool_ids);
+    for capability in [SUBSCRIBE_TOOL, DELIVER_TOOL] {
+        if !capabilities.iter().any(|id| id == capability) {
+            capabilities.push(capability.to_owned());
+        }
+    }
     let mut namespaces: Vec<String> = tool_ids
         .iter()
         .filter_map(|id| id.split('.').nth(1))
         .map(ToOwned::to_owned)
+        .chain(std::iter::once("nexus".to_owned()))
         .collect();
     namespaces.sort();
     namespaces.dedup();
@@ -439,15 +493,39 @@ async fn monitor_session(
             }
         })
         .unwrap_or_default();
+    let event_session_id = uuid::Uuid::new_v4().to_string();
+    crate::connect::events::connect_event_registry().open_session(&event_session_id);
+    observed.bind_session(&event_session_id);
+    serve_subscribe_tool(
+        &responder,
+        event_session_id.clone(),
+        Duration::from_millis(config.invoke_timeout_ms.max(1000)),
+    );
     let replaced = sessions.register(&peer_id, Arc::clone(&responder), &admitted_ids);
     tracing::info!(%peer_id, replaced, "peer session established");
 
-    // Phase 3: close observation. Primary path = the wrapper's Notify (fires
-    // the same tick the transport reports an error/close); fallback = the
-    // responder state poll (catches a close the wrapper missed, e.g. a
-    // local `close_session` without a transport error). The flag is
-    // re-checked after the future is created to close the notify-counter
-    // race; the poll tick is the belt-and-braces fallback.
+    // Phase 3: close observation (see `wait_for_close`).
+    wait_for_close(&responder, &observed).await;
+    crate::connect::events::connect_event_registry().remove_session(&event_session_id);
+    let evicted = sessions.evict(&peer_id, Some(&responder));
+    if evicted {
+        // AR-68 #8: same tick as close observation — the PeerToolTable rows
+        // for this peer disappear from the spine + catalog. The wrapper
+        // hoisted above (the one the admission stored) is what the registry's
+        // expected-responder guard compares against, so the eviction actually
+        // lands.
+        crate::connect::peer_tool_table().evict_peer(&peer_id, Some(&port));
+        tracing::info!(%peer_id, "peer session evicted after close observation");
+    }
+}
+
+/// Await close observation for one session. Primary path = the wrapper's
+/// `Notify` (fires the same tick the transport reports an error/close);
+/// fallback = the responder state poll (catches a close the wrapper missed,
+/// e.g. a local `close_session` without a transport error). The flag is
+/// re-checked after the future is created to close the notify-counter race;
+/// the poll tick is the belt-and-braces fallback.
+async fn wait_for_close(responder: &Arc<ConnectResponder>, observed: &ObservedTransport) {
     loop {
         if observed.is_closed() || responder.state() == ConnectResponderState::Closed {
             break;
@@ -461,15 +539,293 @@ async fn monitor_session(
             () = tokio::time::sleep(CLOSE_POLL_INTERVAL) => {}
         }
     }
-    let evicted = sessions.evict(&peer_id, Some(&responder));
-    if evicted {
-        // AR-68 #8: same tick as close observation — the PeerToolTable rows
-        // for this peer disappear from the spine + catalog. The wrapper
-        // hoisted above (the one the admission stored) is what the registry's
-        // expected-responder guard compares against, so the eviction actually
-        // lands.
-        crate::connect::peer_tool_table().evict_peer(&peer_id, Some(&port));
-        tracing::info!(%peer_id, "peer session evicted after close observation");
+}
+
+/// Serve `tools.nexus.subscribe` for one session (§A.2a(f)1).
+///
+/// The negotiated subscribe gate is enforced by the responder. The reverse
+/// delivery capability is checked inside the handler before any side effect.
+fn serve_subscribe_tool(
+    responder: &Arc<ConnectResponder>,
+    session_id: String,
+    delivery_deadline: Duration,
+) {
+    register_subscribe_handler(
+        responder,
+        session_id,
+        crate::connect::events::connect_event_registry().clone(),
+        Arc::new(tokio::sync::Mutex::new(())),
+        delivery_deadline,
+    );
+}
+
+/// Register the async `tools.nexus.subscribe` handler on `responder`.
+///
+/// The handler performs the ring's atomic subscribe and drives ack-gated
+/// delivery. Its success response carries `{stream, epoch, resumed_from}` and
+/// no frames; the first delivery push is held back until the
+/// `ObservedTransport` seam observes that response write (§A.2a(f)5).
+///
+/// The closure captures only a [`Weak`] handle to the responder: the handler
+/// is stored inside that same responder, so a strong capture would form an
+/// ownership cycle (`close_session` never clears the handler map) and retain
+/// every eligible disconnected session.
+fn register_subscribe_handler(
+    responder: &Arc<ConnectResponder>,
+    session_id: String,
+    events: crate::connect::events::ConnectEventRegistry,
+    delivery_lock: Arc<tokio::sync::Mutex<()>>,
+    delivery_deadline: Duration,
+) {
+    let weak = Arc::downgrade(responder);
+    let handler: spoke_connect::remote::ToolHandler = Arc::new(move |arguments| {
+        let events = events.clone();
+        let weak = weak.clone();
+        let session = session_id.clone();
+        let delivery_lock = Arc::clone(&delivery_lock);
+        Box::pin(async move {
+            let Some(responder) = weak.upgrade() else {
+                return nexus_spoke_adapter::SpokeResult::Reject(
+                    nexus_spoke_adapter::SpokeReject {
+                        code: nexus_spoke_adapter::SpokeRejectCode::InternalError,
+                        message: "connect session closed before the subscription was admitted"
+                            .to_owned(),
+                        details: None,
+                    },
+                );
+            };
+            if !responder.remote_manifest().is_some_and(|manifest| {
+                manifest
+                    .capabilities
+                    .iter()
+                    .any(|capability| capability == DELIVER_TOOL)
+            }) {
+                return nexus_spoke_adapter::SpokeResult::Reject(
+                    nexus_spoke_adapter::SpokeReject {
+                        code: nexus_spoke_adapter::SpokeRejectCode::CapabilityPortMissing,
+                        message: "consumer does not advertise tools.nexus.deliver_events"
+                            .to_owned(),
+                        details: Some(serde_json::Map::from_iter([(
+                            "wire_code".to_owned(),
+                            serde_json::Value::String("op_unsupported".to_owned()),
+                        )])),
+                    },
+                );
+            }
+            let Some(stream) = arguments
+                .get("stream")
+                .and_then(serde_json::Value::as_str)
+                .filter(|stream| !stream.is_empty())
+                .map(str::to_owned)
+            else {
+                return nexus_spoke_adapter::SpokeResult::Reject(
+                    nexus_spoke_adapter::SpokeReject {
+                        code: nexus_spoke_adapter::SpokeRejectCode::InvalidInput,
+                        message: "subscribe requires a non-empty stream".to_owned(),
+                        details: None,
+                    },
+                );
+            };
+            let cursor = match arguments.get("last_event_id") {
+                None => None,
+                Some(serde_json::Value::String(cursor)) => Some(cursor.clone()),
+                _ => {
+                    return nexus_spoke_adapter::SpokeResult::Reject(
+                        nexus_spoke_adapter::SpokeReject {
+                            code: nexus_spoke_adapter::SpokeRejectCode::InvalidInput,
+                            message: "last_event_id must be a string when provided".to_owned(),
+                            details: None,
+                        },
+                    )
+                }
+            };
+            let (epoch, resumed_from, subscription) =
+                match events.subscribe(&session, &stream, cursor.as_deref()).await {
+                    Ok(result) => result,
+                    Err(error) => {
+                        let message = match error {
+                            crate::connect::events::SubscribeError::ClosedSession => {
+                                "Connect session is closed"
+                            }
+                            crate::connect::events::SubscribeError::StreamLimit => {
+                                "Connect event stream capacity is exhausted"
+                            }
+                            crate::connect::events::SubscribeError::InvalidCursor
+                            | crate::connect::events::SubscribeError::UnknownEpoch
+                            | crate::connect::events::SubscribeError::FutureCursor => {
+                                "invalid or unavailable Connect event cursor"
+                            }
+                        };
+                        return nexus_spoke_adapter::SpokeResult::Reject(
+                            nexus_spoke_adapter::SpokeReject {
+                                code: nexus_spoke_adapter::SpokeRejectCode::InvalidInput,
+                                message: message.to_owned(),
+                                details: None,
+                            },
+                        );
+                    }
+                };
+            let cancelled = subscription.cancellation();
+            let delivery_stream = stream.clone();
+            let push_responder = Arc::clone(&responder);
+            let close_responder = Arc::clone(&responder);
+            tokio::spawn(drive_delivery(
+                subscription,
+                cancelled,
+                Arc::clone(&delivery_lock),
+                session.clone(),
+                delivery_deadline,
+                move || close_responder.close(),
+                move |frames| {
+                    let responder = Arc::clone(&push_responder);
+                    let delivery_stream = delivery_stream.clone();
+                    async move {
+                        responder
+                            .invoke_tool(
+                                DELIVER_TOOL,
+                                serde_json::json!({"stream": delivery_stream, "frames": frames}),
+                            )
+                            .await
+                    }
+                },
+            ));
+            nexus_spoke_adapter::SpokeResult::Ok(serde_json::json!({
+                "stream": stream, "epoch": epoch, "resumed_from": resumed_from
+            }))
+        })
+            as futures_util::future::BoxFuture<
+                'static,
+                nexus_spoke_adapter::SpokeResult<serde_json::Value>,
+            >
+    });
+    let _ = responder.register_tool_handler(SUBSCRIBE_TOOL, handler);
+}
+
+/// Drive ack-gated delivery for one subscription until it is cancelled or a
+/// reverse invoke fails. `push` performs one reverse invocation of
+/// `tools.nexus.deliver_events`.
+///
+/// The ack wait (inside `EventSubscription::next_batch`) and the per-session
+/// send-slot acquisition are cancellation-aware, so a replaced generation
+/// stops promptly without leaving protocol state behind.
+///
+/// The reverse invoke is bounded from its first poll, not only after a
+/// cancellation. The responder allocates an outbound sequence before the
+/// transport send and has no rollback for abandoning it; cancellation drains
+/// an already-started invoke within that same deadline. If either the normal
+/// send or cancellation drain expires, `fail_closed` terminates the session
+/// before the potentially sequence-owning future is discarded.
+async fn drive_delivery<P, Fut, F>(
+    mut subscription: crate::connect::events::EventSubscription,
+    cancelled: Arc<Notify>,
+    delivery_lock: Arc<tokio::sync::Mutex<()>>,
+    session: String,
+    delivery_deadline: Duration,
+    fail_closed: F,
+    push: P,
+) where
+    P: Fn(Vec<crate::connect::events::EventFrame>) -> Fut + Send,
+    Fut: std::future::Future<Output = nexus_spoke_adapter::SpokeResult<serde_json::Value>> + Send,
+    F: Fn() + Send + Sync,
+{
+    loop {
+        let frames = subscription.next_batch().await;
+        if frames.is_empty() {
+            break;
+        }
+        // Send admission: interrupted by cancellation, so a replaced
+        // generation never waits out another stream's send slot.
+        let _guard = tokio::select! {
+            biased;
+            () = cancelled.notified() => break,
+            guard = delivery_lock.lock() => guard,
+        };
+        if subscription.is_cancelled() {
+            break;
+        }
+        let mut invoke = PollTracker::new(push(frames));
+        match race_push(&mut invoke, &cancelled, delivery_deadline, &fail_closed).await {
+            Some(nexus_spoke_adapter::SpokeResult::Ok(_)) => subscription.ack(),
+            _ => break,
+        }
+    }
+    subscription.unregister(&session);
+}
+
+/// A push future that records whether it was ever polled.
+///
+/// The distinction is load-bearing: a cancellation that wins before this
+/// future's first poll means the reverse invoke never ran, so nothing was
+/// allocated on the wire and the request may be dropped untouched. Once it has
+/// been polled, the responder may already hold an allocated outbound sequence,
+/// so the request must be completed or the session failed closed.
+///
+/// `Pin<Box<F>>` keeps `Self` `Unpin` (no `unsafe` projection needed).
+struct PollTracker<F> {
+    inner: std::pin::Pin<Box<F>>,
+    started: bool,
+}
+
+impl<F> PollTracker<F> {
+    fn new(inner: F) -> Self {
+        Self {
+            inner: Box::pin(inner),
+            started: false,
+        }
+    }
+}
+
+impl<F: std::future::Future> std::future::Future for PollTracker<F> {
+    type Output = F::Output;
+
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let this = self.get_mut();
+        this.started = true;
+        this.inner.as_mut().poll(cx)
+    }
+}
+
+/// Race one constructed (never polled) push against cancellation, bounded by
+/// a single deadline from the start of the push.
+///
+/// Returns `Some(result)` when the push completes, `None` on cancellation or
+/// deadline expiry. Cancellation before the future's first poll drops the
+/// request untouched; once started, completion is awaited under the deadline,
+/// or the session is failed closed before the request is discarded.
+async fn race_push<Fut, F>(
+    invoke: &mut PollTracker<Fut>,
+    cancelled: &Arc<Notify>,
+    delivery_deadline: Duration,
+    fail_closed: &F,
+) -> Option<nexus_spoke_adapter::SpokeResult<serde_json::Value>>
+where
+    Fut: std::future::Future<Output = nexus_spoke_adapter::SpokeResult<serde_json::Value>> + Send,
+    F: Fn() + Sync,
+{
+    let outcome = tokio::time::timeout(delivery_deadline, async {
+        tokio::select! {
+            biased;
+            () = cancelled.notified() => {
+                if invoke.started {
+                    let _ = (&mut *invoke).await;
+                }
+                None
+            }
+            result = &mut *invoke => Some(result),
+        }
+    })
+    .await;
+    match outcome {
+        Ok(result) => result,
+        Err(_) => {
+            // Closing synchronously fences the responder before `invoke` is
+            // dropped below; its allocated sequence can never be reused.
+            fail_closed();
+            None
+        }
     }
 }
 
@@ -712,10 +1068,734 @@ mod tests {
         assert!(observed.is_closed(), "wrapper must latch the close flag");
     }
 
+    #[tokio::test]
+    async fn subscribe_response_write_activates_pending_delivery() {
+        let session = format!("ordering-{}", uuid::Uuid::new_v4());
+        let stream = format!("stream-{}", uuid::Uuid::new_v4());
+        let registry = crate::connect::events::connect_event_registry().clone();
+        registry.open_session(&session);
+        registry
+            .publish(&stream, "event", serde_json::json!({"n": 1}))
+            .unwrap();
+        let (_, _, mut subscription) = registry.subscribe(&session, &stream, None).await.unwrap();
+        let pair = spoke_connect::remote::loopback_transport_pair();
+        let observed = ObservedTransport::new(Arc::new(pair.client) as Arc<dyn Transport>);
+        observed.bind_session(&session);
+        pair.server
+            .send(
+                serde_json::to_vec(&serde_json::json!({
+                    "op": SUBSCRIBE_TOOL, "request_id": "subscribe-1",
+                    "payload": {"arguments": {"stream": &stream}}
+                }))
+                .unwrap()
+                .as_slice(),
+            )
+            .await
+            .unwrap();
+        observed.recv().await.unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), subscription.next_batch())
+                .await
+                .is_err()
+        );
+        observed
+            .send(
+                serde_json::to_vec(&serde_json::json!({
+                    "request_id": "subscribe-1", "payload": {"result": {"stream": &stream}}
+                }))
+                .unwrap()
+                .as_slice(),
+            )
+            .await
+            .unwrap();
+        let pushed = tokio::time::timeout(Duration::from_secs(1), subscription.next_batch())
+            .await
+            .unwrap();
+        assert_eq!(pushed.len(), 1);
+        registry.remove_session(&session);
+        pair.server.close().await.unwrap();
+    }
+
+    /// C1: an older subscribe response must never activate a replacement
+    /// generation. With interleaved invokes (two requests observed before
+    /// either response), the first response enables the generation it was
+    /// bound to; the replacement stays dark until its own response write.
+    #[tokio::test]
+    async fn overlapping_subscribe_response_never_activates_the_replacement() {
+        let session = format!("overlap-{}", uuid::Uuid::new_v4());
+        let stream = format!("stream-{}", uuid::Uuid::new_v4());
+        let registry = crate::connect::events::connect_event_registry().clone();
+        registry.open_session(&session);
+        let first_frame = registry
+            .publish(&stream, "event", serde_json::json!({"n": 1}))
+            .unwrap();
+        let pair = spoke_connect::remote::loopback_transport_pair();
+        let observed = ObservedTransport::new(Arc::new(pair.client) as Arc<dyn Transport>);
+        observed.bind_session(&session);
+
+        // Request A observed, then its generation registered (awaiting).
+        send_subscribe_request(&pair.server, &stream, "subscribe-a").await;
+        observed.recv().await.unwrap();
+        let (_, _, mut first) = registry.subscribe(&session, &stream, None).await.unwrap();
+        // Request B observed while A's response is still outstanding.
+        send_subscribe_request(&pair.server, &stream, "subscribe-b").await;
+        observed.recv().await.unwrap();
+
+        // A's response write enables A's generation.
+        send_subscribe_response(observed.as_ref(), &stream, "subscribe-a").await;
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), first.next_batch())
+                .await
+                .expect("A's response must enable A's generation"),
+            vec![first_frame]
+        );
+
+        // B's generation can now register, but B's response is unwritten.
+        let (_, _, mut replacement) = registry.subscribe(&session, &stream, None).await.unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), replacement.next_batch())
+                .await
+                .is_err(),
+            "no replacement delivery may escape before B's own response"
+        );
+        // B's own response write enables it.
+        send_subscribe_response(observed.as_ref(), &stream, "subscribe-b").await;
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), replacement.next_batch())
+                .await
+                .expect("B's response must enable B's generation")
+                .len(),
+            1
+        );
+        registry.remove_session(&session);
+        pair.server.close().await.unwrap();
+    }
+
+    /// C2/C3: cancellation releases a wait for the session send slot, but an
+    /// in-flight reverse invoke is completed on the wire (never abandoned)
+    /// before the slot is handed to another stream — the responder's
+    /// allocated outbound sequence must not be skipped.
+    #[tokio::test]
+    async fn cancellation_completes_the_in_flight_invoke_before_handing_the_slot() {
+        let registry = crate::connect::events::connect_event_registry().clone();
+        let session = format!("slot-{}", uuid::Uuid::new_v4());
+        registry.open_session(&session);
+        let stream_a = format!("stream-a-{}", uuid::Uuid::new_v4());
+        let stream_b = format!("stream-b-{}", uuid::Uuid::new_v4());
+        registry
+            .publish(&stream_a, "event", serde_json::json!({"n": 1}))
+            .unwrap();
+        registry
+            .publish(&stream_b, "event", serde_json::json!({"n": 2}))
+            .unwrap();
+        let delivery_lock = Arc::new(tokio::sync::Mutex::new(()));
+
+        let (_, _, first) = registry.subscribe(&session, &stream_a, None).await.unwrap();
+        registry.activate(&session, &stream_a);
+        let (_, _, second) = registry.subscribe(&session, &stream_b, None).await.unwrap();
+        registry.activate(&session, &stream_b);
+
+        let invoke_started = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let started = Arc::clone(&invoke_started);
+        let blocked = Arc::clone(&release);
+        let first_cancelled = first.cancellation();
+        let fail_closed_called = Arc::new(AtomicBool::new(false));
+        let fail_closed_flag = Arc::clone(&fail_closed_called);
+        let first_driver = tokio::spawn(drive_delivery(
+            first,
+            first_cancelled,
+            Arc::clone(&delivery_lock),
+            session.clone(),
+            Duration::from_secs(5),
+            move || fail_closed_flag.store(true, Ordering::SeqCst),
+            move |_frames| {
+                let started = Arc::clone(&started);
+                let blocked = Arc::clone(&blocked);
+                async move {
+                    started.notify_one();
+                    blocked.notified().await;
+                    nexus_spoke_adapter::SpokeResult::Ok(serde_json::json!({}))
+                }
+            },
+        ));
+        let second_pushed = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&second_pushed);
+        let second_cancelled = second.cancellation();
+        let second_driver = tokio::spawn(drive_delivery(
+            second,
+            second_cancelled,
+            Arc::clone(&delivery_lock),
+            session.clone(),
+            Duration::from_secs(5),
+            || {},
+            move |_frames| {
+                let flag = Arc::clone(&flag);
+                async move {
+                    flag.store(true, Ordering::SeqCst);
+                    nexus_spoke_adapter::SpokeResult::Ok(serde_json::json!({}))
+                }
+            },
+        ));
+
+        // A holds the session slot inside its reverse invoke; B waits for it.
+        invoke_started.notified().await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            !second_pushed.load(Ordering::SeqCst),
+            "the second stream must wait for the session send slot"
+        );
+
+        // Replacing A cancels it, but A's in-flight invoke must complete on
+        // the wire rather than be abandoned (C3): the slot is not yet free.
+        let _replacement = registry.subscribe(&session, &stream_a, None).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            !second_pushed.load(Ordering::SeqCst),
+            "an in-flight reverse invoke must complete before the slot is handed over"
+        );
+
+        // Complete the wire send: A finishes, stops, and releases the slot.
+        release.notify_one();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !second_pushed.load(Ordering::SeqCst) {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the second stream must push once A completes its send");
+
+        first_driver.await.unwrap();
+        assert!(
+            !fail_closed_called.load(Ordering::SeqCst),
+            "a completed send must not trigger fail-closed teardown"
+        );
+        registry.remove_session(&session);
+        second_driver.await.unwrap();
+    }
+
+    /// A transport decorator that can block one `tools.nexus.deliver_events`
+    /// send after the responder allocated its outbound sequence but before
+    /// any byte reaches the inner transport, and records the sequence of
+    /// every send that actually reached the wire.
+    struct GatedTransport {
+        inner: Arc<dyn Transport>,
+        armed: Arc<AtomicBool>,
+        blocked: Arc<Notify>,
+        release: Arc<Notify>,
+        emitted: Arc<std::sync::Mutex<Vec<i64>>>,
+    }
+
+    impl GatedTransport {
+        fn new(inner: Arc<dyn Transport>) -> Arc<Self> {
+            Arc::new(Self {
+                inner,
+                armed: Arc::new(AtomicBool::new(false)),
+                blocked: Arc::new(Notify::new()),
+                release: Arc::new(Notify::new()),
+                emitted: Arc::new(std::sync::Mutex::new(Vec::new())),
+            })
+        }
+    }
+
+    #[async_trait]
+    impl Transport for GatedTransport {
+        async fn send(&self, envelope: &[u8]) -> Result<(), TransportError> {
+            let sequence = serde_json::from_slice::<serde_json::Value>(envelope)
+                .ok()
+                .filter(|doc| {
+                    doc.get("op").and_then(serde_json::Value::as_str) == Some(DELIVER_TOOL)
+                })
+                .and_then(|doc| doc.get("sequence").and_then(serde_json::Value::as_i64));
+            if sequence.is_some() && self.armed.swap(false, Ordering::SeqCst) {
+                // Park after sequence allocation, before emission.
+                self.blocked.notify_one();
+                self.release.notified().await;
+            }
+            let result = self.inner.send(envelope).await;
+            if result.is_ok() {
+                if let Some(sequence) = sequence {
+                    self.emitted
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .push(sequence);
+                }
+            }
+            result
+        }
+
+        async fn recv(&self) -> Result<Vec<u8>, TransportError> {
+            self.inner.recv().await
+        }
+
+        async fn close(&self) -> Result<(), TransportError> {
+            self.inner.close().await
+        }
+    }
+
+    /// Establish a real responder/dialer session where the responder's
+    /// transport can park one delivery send after sequence allocation.
+    async fn gated_tool_session() -> (
+        Arc<ConnectResponder>,
+        Arc<GatedTransport>,
+        Arc<spoke_connect::remote::RemoteAdapter>,
+    ) {
+        use ed25519_dalek::SigningKey;
+        use spoke_connect::core::derive_peer_id_from_ed25519_pubkey;
+        use spoke_connect::remote::{connect_remote_adapter, RemoteAdapterOptions};
+
+        let host_seed = [0x51u8; 32];
+        let client_seed = [0x52u8; 32];
+        let host_pub = SigningKey::from_bytes(&host_seed)
+            .verifying_key()
+            .to_bytes();
+        let client_pub = SigningKey::from_bytes(&client_seed)
+            .verifying_key()
+            .to_bytes();
+        let host_id = derive_peer_id_from_ed25519_pubkey(&host_pub);
+        let client_id = derive_peer_id_from_ed25519_pubkey(&client_pub);
+
+        let manifest = daemon_manifest("host-c3", &[DELIVER_TOOL.to_owned()]);
+        let pair = spoke_connect::remote::loopback_transport_pair();
+        let gated = GatedTransport::new(Arc::new(pair.server) as Arc<dyn Transport>);
+        let responder = connect_responder(ConnectResponderOptions {
+            transport: Arc::clone(&gated) as Arc<dyn Transport>,
+            identity: RemoteIdentity { seed: host_seed },
+            manifest: manifest.clone(),
+            allowlist: vec![client_id.clone()],
+            peer_keys: std::collections::HashMap::from([(client_id.clone(), client_pub)]),
+            ports: None,
+            invoke_timeout_ms: Some(2_000),
+        })
+        .await;
+        let client = connect_remote_adapter(RemoteAdapterOptions {
+            transport: Arc::new(pair.client) as Arc<dyn Transport>,
+            local_identity: RemoteIdentity { seed: client_seed },
+            local_manifest: manifest,
+            remote_pubkey: host_pub,
+            allowlist: vec![host_id],
+            invoke_timeout_ms: Some(2_000),
+            capability_token: None,
+        })
+        .await
+        .expect("dial");
+        client.register_tool_handler(
+            DELIVER_TOOL,
+            Arc::new(|_arguments| {
+                Box::pin(async { nexus_spoke_adapter::SpokeResult::Ok(serde_json::json!({})) })
+            }),
+        );
+        for _ in 0..400 {
+            if responder.state() == ConnectResponderState::Established {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert_eq!(responder.state(), ConnectResponderState::Established);
+        (responder, gated, client)
+    }
+
+    /// C3: cancelling a subscription whose reverse invoke already holds an
+    /// allocated outbound sequence must not abandon that send. Against a REAL
+    /// responder with a transport that parks after allocation, the driver
+    /// completes the request on the wire; the recorded wire sequences stay
+    /// contiguous and the session remains usable.
+    #[tokio::test]
+    async fn cancelled_delivery_never_skips_an_allocated_wire_sequence() {
+        let (responder, gated, _client) = gated_tool_session().await;
+
+        let registry = crate::connect::events::connect_event_registry().clone();
+        let session = format!("c3-{}", uuid::Uuid::new_v4());
+        registry.open_session(&session);
+        let stream = format!("c3-stream-{}", uuid::Uuid::new_v4());
+        registry
+            .publish(&stream, "event", serde_json::json!({"n": 1}))
+            .unwrap();
+        let (_, _, subscription) = registry.subscribe(&session, &stream, None).await.unwrap();
+        registry.activate(&session, &stream);
+        let cancelled = subscription.cancellation();
+
+        // Arm the gate BEFORE the driver sends so the first delivery push
+        // parks after allocation.
+        gated.armed.store(true, Ordering::SeqCst);
+        let fail_closed_called = Arc::new(AtomicBool::new(false));
+        let fail_closed_flag = Arc::clone(&fail_closed_called);
+        let close_responder = Arc::clone(&responder);
+        let push_responder = Arc::clone(&responder);
+        let push_stream = stream.clone();
+        let driver = tokio::spawn(drive_delivery(
+            subscription,
+            cancelled,
+            Arc::new(tokio::sync::Mutex::new(())),
+            session.clone(),
+            Duration::from_millis(2_000),
+            move || {
+                fail_closed_flag.store(true, Ordering::SeqCst);
+                close_responder.close();
+            },
+            move |frames| {
+                let responder = Arc::clone(&push_responder);
+                let stream = push_stream.clone();
+                async move {
+                    responder
+                        .invoke_tool(
+                            DELIVER_TOOL,
+                            serde_json::json!({"stream": stream, "frames": frames}),
+                        )
+                        .await
+                }
+            },
+        ));
+
+        // The invoke holds an allocated sequence and is parked before emission.
+        gated.blocked.notified().await;
+        // Replace the subscription while that send is outstanding.
+        let _replacement = registry.subscribe(&session, &stream, None).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        // Completion is possible, so the session must not be torn down.
+        assert!(!fail_closed_called.load(Ordering::SeqCst));
+        gated.release.notify_one();
+        driver.await.unwrap();
+
+        assert!(
+            !fail_closed_called.load(Ordering::SeqCst),
+            "the completed send must not trigger fail-closed teardown"
+        );
+        assert_eq!(
+            responder.state(),
+            ConnectResponderState::Established,
+            "the session must remain usable after a completed in-flight send"
+        );
+        // A subsequent reverse invoke must be accepted: the cancelled
+        // generation's allocated sequence reached the wire.
+        let follow_up = tokio::time::timeout(
+            Duration::from_secs(2),
+            responder.invoke_tool(DELIVER_TOOL, serde_json::json!({})),
+        )
+        .await
+        .expect("follow-up invoke must resolve");
+        assert!(
+            matches!(follow_up, nexus_spoke_adapter::SpokeResult::Ok(_)),
+            "the next contiguous sequence must be accepted: {follow_up:?}"
+        );
+        let emitted = gated
+            .emitted
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        assert_eq!(
+            emitted.len(),
+            2,
+            "both allocated sequences must reach the wire: {emitted:?}"
+        );
+        assert_eq!(emitted[1], emitted[0] + 1, "sequences must stay contiguous");
+        registry.remove_session(&session);
+        responder.close();
+    }
+
+    #[tokio::test]
+    async fn blocked_started_delivery_expires_closed_without_sequence_reuse() {
+        let (responder, gated, _client) = gated_tool_session().await;
+        let registry = crate::connect::events::connect_event_registry().clone();
+        let session = format!("expiry-{}", uuid::Uuid::new_v4());
+        registry.open_session(&session);
+        let stream = format!("expiry-stream-{}", uuid::Uuid::new_v4());
+        registry
+            .publish(&stream, "event", serde_json::json!({"n": 1}))
+            .unwrap();
+        let (_, _, subscription) = registry.subscribe(&session, &stream, None).await.unwrap();
+        registry.activate(&session, &stream);
+        gated.armed.store(true, Ordering::SeqCst);
+        let close_responder = Arc::clone(&responder);
+        let push_responder = Arc::clone(&responder);
+        let push_stream = stream.clone();
+        let driver = tokio::spawn(drive_delivery(
+            subscription,
+            Arc::new(Notify::new()),
+            Arc::new(tokio::sync::Mutex::new(())),
+            session.clone(),
+            Duration::from_millis(50),
+            move || close_responder.close(),
+            move |frames| {
+                let responder = Arc::clone(&push_responder);
+                let stream = push_stream.clone();
+                async move {
+                    responder
+                        .invoke_tool(
+                            DELIVER_TOOL,
+                            serde_json::json!({"stream": stream, "frames": frames}),
+                        )
+                        .await
+                }
+            },
+        ));
+        gated.blocked.notified().await;
+        tokio::time::timeout(Duration::from_secs(1), driver)
+            .await
+            .expect("driver must complete when the started push expires")
+            .unwrap();
+        assert_eq!(responder.state(), ConnectResponderState::Closed);
+        assert!(gated.emitted.lock().unwrap().is_empty());
+        let follow_up = responder
+            .invoke_tool(DELIVER_TOOL, serde_json::json!({}))
+            .await;
+        assert!(
+            matches!(follow_up, nexus_spoke_adapter::SpokeResult::Reject(_)),
+            "closed responder must reject instead of reusing the allocated sequence"
+        );
+        registry.remove_session(&session);
+    }
+
+    #[tokio::test]
+    async fn cancellation_drain_expiry_closes_started_push() {
+        let (responder, gated, _client) = gated_tool_session().await;
+        let registry = crate::connect::events::connect_event_registry().clone();
+        let session = format!("drain-expiry-{}", uuid::Uuid::new_v4());
+        registry.open_session(&session);
+        let stream = format!("drain-expiry-stream-{}", uuid::Uuid::new_v4());
+        registry
+            .publish(&stream, "event", serde_json::json!({"n": 1}))
+            .unwrap();
+        let (_, _, subscription) = registry.subscribe(&session, &stream, None).await.unwrap();
+        registry.activate(&session, &stream);
+        let cancelled = subscription.cancellation();
+        gated.armed.store(true, Ordering::SeqCst);
+        let close_responder = Arc::clone(&responder);
+        let close_registry = registry.clone();
+        let close_session = session.clone();
+        let push_responder = Arc::clone(&responder);
+        let push_stream = stream.clone();
+        let driver = tokio::spawn(drive_delivery(
+            subscription,
+            cancelled,
+            Arc::new(tokio::sync::Mutex::new(())),
+            session.clone(),
+            Duration::from_millis(150),
+            move || {
+                close_responder.close();
+                close_registry.remove_session(&close_session);
+            },
+            move |frames| {
+                let responder = Arc::clone(&push_responder);
+                let stream = push_stream.clone();
+                async move {
+                    responder
+                        .invoke_tool(
+                            DELIVER_TOOL,
+                            serde_json::json!({"stream": stream, "frames": frames}),
+                        )
+                        .await
+                }
+            },
+        ));
+        gated.blocked.notified().await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        // Replacement cancels the subscription while its allocated send is
+        // still parked. The driver must consume only the original deadline.
+        let replacement = registry.subscribe(&session, &stream, None).await;
+        assert!(replacement.is_ok());
+        let drain_start = tokio::time::Instant::now();
+        tokio::time::timeout(Duration::from_millis(100), driver)
+            .await
+            .expect("cancellation drain must expire on the original deadline")
+            .unwrap();
+        assert!(drain_start.elapsed() < Duration::from_millis(100));
+        assert_eq!(responder.state(), ConnectResponderState::Closed);
+        assert!(gated.emitted.lock().unwrap().is_empty());
+        assert!(matches!(
+            registry.subscribe(&session, "after-close", None).await,
+            Err(crate::connect::events::SubscribeError::ClosedSession)
+        ));
+        let follow_up = responder
+            .invoke_tool(DELIVER_TOOL, serde_json::json!({}))
+            .await;
+        assert!(
+            matches!(follow_up, nexus_spoke_adapter::SpokeResult::Reject(_)),
+            "closed responder must not reuse the allocated sequence"
+        );
+    }
+
+    /// C4: a cancellation that wins before the push future's first poll must
+    /// drop the request untouched — no poll, therefore no allocated sequence.
+    #[tokio::test]
+    async fn cancellation_before_first_poll_leaves_the_request_unstarted() {
+        let cancelled = Arc::new(tokio::sync::Notify::new());
+        cancelled.notify_one();
+        let polled = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&polled);
+        let mut invoke = PollTracker::new(async move {
+            flag.store(true, Ordering::SeqCst);
+            nexus_spoke_adapter::SpokeResult::Ok(serde_json::json!({}))
+        });
+        let fail_closed_called = Arc::new(AtomicBool::new(false));
+        let fail_closed_flag = Arc::clone(&fail_closed_called);
+        let outcome = race_push(
+            &mut invoke,
+            &cancelled,
+            Duration::from_millis(50),
+            &move || fail_closed_flag.store(true, Ordering::SeqCst),
+        )
+        .await;
+        assert!(outcome.is_none());
+        assert!(
+            !polled.load(Ordering::SeqCst),
+            "cancellation before the first poll must not start the request"
+        );
+        assert!(!invoke.started, "the request must remain unstarted");
+        assert!(!fail_closed_called.load(Ordering::SeqCst));
+    }
+
+    /// C4 (end to end): cancelling before the request is polled consumes no
+    /// outbound sequence, and the session stays usable for the next request.
+    #[tokio::test]
+    async fn cancellation_before_the_first_poll_consumes_no_wire_sequence() {
+        let (responder, gated, _client) = gated_tool_session().await;
+        let registry = crate::connect::events::connect_event_registry().clone();
+        let session = format!("c4-{}", uuid::Uuid::new_v4());
+        registry.open_session(&session);
+        let stream = format!("c4-stream-{}", uuid::Uuid::new_v4());
+        registry
+            .publish(&stream, "event", serde_json::json!({"n": 1}))
+            .unwrap();
+        let (_, _, subscription) = registry.subscribe(&session, &stream, None).await.unwrap();
+        registry.activate(&session, &stream);
+        let cancelled = subscription.cancellation();
+
+        let push_registry = registry.clone();
+        let push_session = session.clone();
+        let push_responder = Arc::clone(&responder);
+        let push_stream = stream.clone();
+        let driver = tokio::spawn(drive_delivery(
+            subscription,
+            cancelled,
+            Arc::new(tokio::sync::Mutex::new(())),
+            session.clone(),
+            Duration::from_millis(2_000),
+            || {},
+            move |frames| {
+                // Force the ordering under test: cancel after the retention
+                // check but before the request's first poll.
+                push_registry.remove_session(&push_session);
+                let responder = Arc::clone(&push_responder);
+                let stream = push_stream.clone();
+                async move {
+                    responder
+                        .invoke_tool(
+                            DELIVER_TOOL,
+                            serde_json::json!({"stream": stream, "frames": frames}),
+                        )
+                        .await
+                }
+            },
+        ));
+        driver.await.unwrap();
+        assert!(
+            gated
+                .emitted
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_empty(),
+            "a request cancelled before its first poll must not reach the wire"
+        );
+        assert_eq!(responder.state(), ConnectResponderState::Established);
+        // The first outbound sequence is still available and accepted.
+        let follow_up = tokio::time::timeout(
+            Duration::from_secs(2),
+            responder.invoke_tool(DELIVER_TOOL, serde_json::json!({})),
+        )
+        .await
+        .expect("follow-up invoke must resolve");
+        assert!(
+            matches!(follow_up, nexus_spoke_adapter::SpokeResult::Ok(_)),
+            "the first sequence must be accepted: {follow_up:?}"
+        );
+        let emitted = gated
+            .emitted
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        assert_eq!(
+            emitted.len(),
+            1,
+            "only the follow-up request may be emitted: {emitted:?}"
+        );
+        registry.remove_session(&session);
+        responder.close();
+    }
+
+    async fn send_subscribe_request<T: Transport>(transport: &T, stream: &str, request_id: &str) {
+        transport
+            .send(
+                serde_json::to_vec(&serde_json::json!({
+                    "op": SUBSCRIBE_TOOL, "request_id": request_id,
+                    "payload": {"arguments": {"stream": stream}}
+                }))
+                .unwrap()
+                .as_slice(),
+            )
+            .await
+            .unwrap();
+    }
+
+    async fn send_subscribe_response(
+        transport: &ObservedTransport,
+        stream: &str,
+        request_id: &str,
+    ) {
+        transport
+            .send(
+                serde_json::to_vec(&serde_json::json!({
+                    "request_id": request_id, "payload": {"result": {"stream": stream}}
+                }))
+                .unwrap()
+                .as_slice(),
+            )
+            .await
+            .unwrap();
+    }
+
+    /// I1: the registered handler must not form a strong cycle with its
+    /// responder (it is stored inside that responder and `close_session`
+    /// never clears the handler map). Registering the Weak-capturing handler
+    /// must not raise the responder's strong count.
+    #[tokio::test]
+    async fn subscribe_handler_does_not_retain_the_responder() {
+        let pair = spoke_connect::remote::loopback_transport_pair();
+        let responder = connect_responder(ConnectResponderOptions {
+            transport: Arc::new(pair.client) as Arc<dyn Transport>,
+            identity: RemoteIdentity { seed: [7u8; 32] },
+            manifest: daemon_manifest("host-under-test", &[]),
+            allowlist: Vec::new(),
+            peer_keys: std::collections::HashMap::new(),
+            ports: None,
+            invoke_timeout_ms: Some(1_000),
+        })
+        .await;
+        let before = Arc::strong_count(&responder);
+        register_subscribe_handler(
+            &responder,
+            "session-under-test".to_owned(),
+            crate::connect::events::ConnectEventRegistry::default(),
+            Arc::new(tokio::sync::Mutex::new(())),
+            Duration::from_secs(1),
+        );
+        assert_eq!(
+            Arc::strong_count(&responder),
+            before,
+            "the registered subscribe handler must not retain the responder"
+        );
+        responder.close();
+        drop(pair.server);
+    }
+
     #[test]
     fn daemon_manifest_is_baseline() {
         let manifest = daemon_manifest("device-1", &[]);
         assert!(manifest.capabilities.contains(&"spoke-baseline".to_owned()));
+        assert!(manifest
+            .capabilities
+            .contains(&"tools.nexus.subscribe".to_owned()));
+        assert!(manifest.capabilities.contains(&DELIVER_TOOL.to_owned()));
         assert!(manifest.tools.is_empty());
         assert_eq!(manifest.host_id.as_str(), "device-1");
     }
@@ -806,8 +1886,10 @@ mod tests {
                 "spoke-baseline".to_string(),
                 "tools.acme.lookup".to_string(),
                 "tools.other.ping".to_string(),
+                SUBSCRIBE_TOOL.to_owned(),
+                DELIVER_TOOL.to_owned(),
             ],
-            "the tools-only hello is the baseline plus the exact allowlisted tool ids"
+            "the WS hello is the baseline, allowlisted ids, and fixed event capabilities"
         );
         assert!(
             manifest.tools.is_empty(),
@@ -815,8 +1897,8 @@ mod tests {
         );
         assert_eq!(
             manifest.namespaces.len(),
-            2,
-            "namespaces derive from the tool ids only"
+            3,
+            "namespaces derive from allowlisted ids and fixed event capabilities"
         );
 
         // An operator cannot allowlist a KE name: config load fails with the

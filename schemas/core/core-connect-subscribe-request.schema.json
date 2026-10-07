@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "core-connect-subscribe-request.schema.json",
+  "schema_version": 1,
+  "title": "Core Connect Subscribe Request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["stream"],
+  "properties": {
+    "stream": { "type": "string", "minLength": 1 },
+    "last_event_id": { "type": "string" }
+  }
+}

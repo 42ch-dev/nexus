@@ -299,6 +299,20 @@ async fn start(allow_peer: Vec<String>, listen: Vec<String>) -> Result<()> {
     let node = SpokeConnectNode::start(config)
         .await
         .map_err(|e| CliError::Config(format!("connect node start failed: {e}")))?;
+    let peer_tools_shutdown = std::sync::Arc::new(tokio::sync::Notify::new());
+    let peer_tools_lane = match nexus_core::connect::start_peer_tools_lane(
+        &home,
+        std::sync::Arc::clone(&peer_tools_shutdown),
+        None,
+    )
+    .await
+    {
+        Ok(lane) => Some(lane),
+        Err(error) => {
+            eprintln!("warning: peer-tools event lane unavailable: {error}");
+            None
+        }
+    };
 
     eprintln!("nexus42 connect start: Connect Host (N-C2 E2) listening");
     eprintln!("  peer_id: {}", node.local_peer_id());
@@ -323,6 +337,11 @@ async fn start(allow_peer: Vec<String>, listen: Vec<String>) -> Result<()> {
     node.shutdown()
         .await
         .map_err(|e| CliError::Other(format!("connect node shutdown failed: {e}")))?;
+    peer_tools_shutdown.notify_one();
+    if let Some(lane) = peer_tools_lane {
+        let _ = lane.task.await;
+        let _ = lane.watch_task.await;
+    }
     Ok(())
 }
 
