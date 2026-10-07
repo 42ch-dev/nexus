@@ -3570,17 +3570,19 @@ async fn finished_receipt_replay_survives_clearing_the_run_history() {
 }
 
 /// v1.207 P3 (Greptile #3, I1): a concurrent first use under one id with
-/// DIFFERENT args yields one typed conflict and leaves no permanent `running`
-/// duplicate.
+/// DIFFERENT args yields one typed conflict, one effect owner, and a loser run
+/// row settled `failed` (never left `running`).
 #[tokio::test]
 async fn concurrent_conflicting_first_use_leaves_no_running_loser() {
+    use nexus_core::execution::test_hooks::{set_compute_begin_gate, ComputeBeginGate};
+
     let f = fixture().await;
     let op = format!("op_{}", "b".repeat(32));
 
     let mut first = run_request(WORLD, MODULE);
     first.operation_id = Some(op.clone());
     let mut second = run_request(WORLD, MODULE);
-    second.operation_id = Some(op);
+    second.operation_id = Some(op.clone());
     // A different logical request => a different fingerprint => a genuine
     // first-writer-wins conflict (not a replay).
     second.invocation_params = serde_json::Map::from_iter([
@@ -3589,13 +3591,20 @@ async fn concurrent_conflicting_first_use_leaves_no_running_loser() {
         ("variant".to_string(), json!(2)),
     ]);
 
-    // Polled concurrently: both pass the receipt pre-check (neither has written
-    // a receipt yet), both insert a run row, and the receipt decides the single
-    // effect owner. The loser must settle its own never-executed run row.
-    let (a, b) = tokio::join!(
+    // Deterministic rendezvous: the seam parks each caller AFTER its run-row
+    // insert and the receipt pre-check and BEFORE `begin_operation`. The test is
+    // the barrier's third participant, so NEITHER caller proceeds until BOTH
+    // arrived — the loser's `OperationIdConflict` is therefore always the
+    // post-insert cleanup path under test, never the earlier receipt pre-check.
+    let gate = Arc::new(ComputeBeginGate::new(op, 3));
+    set_compute_begin_gate(Some(Arc::clone(&gate)));
+    let (a, b, _barrier) = tokio::join!(
         compute_run(&f.core, &f.compute, first),
         compute_run(&f.core, &f.compute, second),
+        gate.barrier.wait(),
     );
+    set_compute_begin_gate(None);
+
     assert_eq!(
         usize::from(a.is_ok()) + usize::from(b.is_ok()),
         1,
@@ -3610,8 +3619,12 @@ async fn concurrent_conflicting_first_use_leaves_no_running_loser() {
         }
     }
 
-    let (succeeded, running): (i64, i64) = sqlx::query_as(
-        "SELECT SUM(status = 'succeeded'), SUM(status = 'running') \
+    // Durable end state. Contract: the loser's own run row is SETTLED LOCALLY as
+    // `failed` (present, not deleted) — never the winner's receipt, never left
+    // `running` for boot recovery to misreport or Clear to miss.
+    let (succeeded, failed, running): (i64, i64, i64) = sqlx::query_as(
+        "SELECT SUM(status = 'succeeded'), SUM(status = 'failed'), \
+                SUM(status = 'running') \
            FROM compute_sessions WHERE world_id = ? AND run_id IS NOT NULL",
     )
     .bind(WORLD)
@@ -3620,7 +3633,19 @@ async fn concurrent_conflicting_first_use_leaves_no_running_loser() {
     .unwrap();
     assert_eq!(succeeded, 1, "the module executed exactly once");
     assert_eq!(
-        running, 0,
-        "the conflicting loser was not left as a permanent `running` row"
+        failed, 1,
+        "the conflicting loser's row is settled `failed` (present, never running)"
     );
+    assert_eq!(running, 0, "no permanent `running` duplicate");
+
+    let (loser_payload,): (String,) = sqlx::query_as(
+        "SELECT error_json FROM compute_sessions \
+          WHERE world_id = ? AND status = 'failed' AND run_id IS NOT NULL",
+    )
+    .bind(WORLD)
+    .fetch_one(f.core.pool())
+    .await
+    .unwrap();
+    let loser_payload: serde_json::Value = serde_json::from_str(&loser_payload).unwrap();
+    assert_eq!(loser_payload["code"], json!("operation_id_conflict"));
 }

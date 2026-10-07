@@ -295,6 +295,12 @@ pub async fn compute_run(
     };
     let operation_id = identity.operation_id;
     let request_fingerprint = identity.request_fingerprint;
+    // The receipt-begin rendezvous seam (tests only; compiled out of production
+    // builds). It lets a test force both same-id callers past their run-row
+    // insert and the receipt pre-check before either reaches `begin_operation`,
+    // so the post-insert first-writer-wins conflict is deterministic.
+    #[cfg(any(test, feature = "test-hooks"))]
+    crate::execution::test_hooks::compute_begin_gate_wait(&operation_id).await;
     let begin_outcome = match begin_operation(
         pool,
         &operation_id,
