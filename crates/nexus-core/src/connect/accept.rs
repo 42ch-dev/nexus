@@ -227,33 +227,31 @@ pub fn ensure_remote_bind_allowed(host: &str) -> CoreResult<()> {
     Ok(())
 }
 
-/// Daemon hello manifest: baseline capabilities (+ any tool ids the test /
-/// T4 wiring chooses to advertise). `host_id` is the installation device id.
+/// WS-lane daemon hello manifest: baseline capabilities, allowlisted tools,
+/// and the fixed subscribe/consumer-delivery capabilities. `host_id` is the
+/// installation device id.
 ///
-/// AR-69 derivation lock: the tool `capabilities[]` derive ONLY from the
-/// operator allowlist (the `tool_ids` argument — connections pass the live
-/// config allowlist, DF-92; tests pass ids directly). No runtime discovery
-/// ever feeds this manifest. `namespaces[]` is derived from the tool ids
-/// (`tools.<ns>.<id>` ⇒ `ns`), deduplicated and order-stable.
+/// The two event capabilities are constants, never allowlist-derived:
+/// `SUBSCRIBE_TOOL` is host-served; `DELIVER_TOOL` is reverse-use only and
+/// authorizes the consumer's reverse-invoke gate. The host registers no
+/// `DELIVER_TOOL` handler.
 ///
 /// # Panics
 /// Panics if the static JSON shape fails to deserialize (programmer error —
 /// the shape is fixed at authoring time).
 #[must_use]
 pub fn daemon_manifest(host_id: &str, tool_ids: &[String]) -> HostCapabilityManifest {
-    // v1.191 P1 T14 (durable §9): the tools-only derivation lives with the
-    // allowlist that feeds it (`config::tools_only_capabilities`) — the
-    // baseline plus exact allowlisted tool ids, and never a KE family. This
-    // responder is composed with `ports: None`, so it advertises no
-    // `ke-ownership` / `ke-extraction`.
-    let capabilities = crate::connect::config::tools_only_capabilities(tool_ids);
-    // Tool grammar is exactly `tools.<ns>.<id>` (3 segments), so `nth(1)`
-    // is the namespace. Dedup keeps the hello stable when the allowlist
-    // names several tools in one namespace (T2 review M-1/M-2).
+    let mut capabilities = crate::connect::config::tools_only_capabilities(tool_ids);
+    for capability in [SUBSCRIBE_TOOL, DELIVER_TOOL] {
+        if !capabilities.iter().any(|id| id == capability) {
+            capabilities.push(capability.to_owned());
+        }
+    }
     let mut namespaces: Vec<String> = tool_ids
         .iter()
         .filter_map(|id| id.split('.').nth(1))
         .map(ToOwned::to_owned)
+        .chain(std::iter::once("nexus".to_owned()))
         .collect();
     namespaces.sort();
     namespaces.dedup();
@@ -544,24 +542,13 @@ async fn wait_for_close(responder: &Arc<ConnectResponder>, observed: &ObservedTr
 
 /// Serve `tools.nexus.subscribe` for one session (§A.2a(f)1).
 ///
-/// Registration is gated on the peer advertising the consumer-served
-/// `tools.nexus.deliver_events` capability — the §A.2a(a) reverse-leg check:
-/// without it the native registered-or-deny path answers `op_unsupported`
-/// with zero side effects.
+/// The negotiated subscribe gate is enforced by the responder. The reverse
+/// delivery capability is checked inside the handler before any side effect.
 fn serve_subscribe_tool(
     responder: &Arc<ConnectResponder>,
     session_id: String,
     delivery_deadline: Duration,
 ) {
-    let has_delivery_capability = responder.remote_manifest().is_some_and(|manifest| {
-        manifest
-            .capabilities
-            .iter()
-            .any(|capability| capability == DELIVER_TOOL)
-    });
-    if !has_delivery_capability {
-        return;
-    }
     register_subscribe_handler(
         responder,
         session_id,
@@ -606,6 +593,24 @@ fn register_subscribe_handler(
                     },
                 );
             };
+            if !responder.remote_manifest().is_some_and(|manifest| {
+                manifest
+                    .capabilities
+                    .iter()
+                    .any(|capability| capability == DELIVER_TOOL)
+            }) {
+                return nexus_spoke_adapter::SpokeResult::Reject(
+                    nexus_spoke_adapter::SpokeReject {
+                        code: nexus_spoke_adapter::SpokeRejectCode::CapabilityPortMissing,
+                        message: "consumer does not advertise tools.nexus.deliver_events"
+                            .to_owned(),
+                        details: Some(serde_json::Map::from_iter([(
+                            "wire_code".to_owned(),
+                            serde_json::Value::String("op_unsupported".to_owned()),
+                        )])),
+                    },
+                );
+            }
             let Some(stream) = arguments
                 .get("stream")
                 .and_then(serde_json::Value::as_str)
@@ -1635,6 +1640,10 @@ mod tests {
     fn daemon_manifest_is_baseline() {
         let manifest = daemon_manifest("device-1", &[]);
         assert!(manifest.capabilities.contains(&"spoke-baseline".to_owned()));
+        assert!(manifest
+            .capabilities
+            .contains(&"tools.nexus.subscribe".to_owned()));
+        assert!(manifest.capabilities.contains(&DELIVER_TOOL.to_owned()));
         assert!(manifest.tools.is_empty());
         assert_eq!(manifest.host_id.as_str(), "device-1");
     }
@@ -1725,8 +1734,10 @@ mod tests {
                 "spoke-baseline".to_string(),
                 "tools.acme.lookup".to_string(),
                 "tools.other.ping".to_string(),
+                SUBSCRIBE_TOOL.to_owned(),
+                DELIVER_TOOL.to_owned(),
             ],
-            "the tools-only hello is the baseline plus the exact allowlisted tool ids"
+            "the WS hello is the baseline, allowlisted ids, and fixed event capabilities"
         );
         assert!(
             manifest.tools.is_empty(),
@@ -1734,8 +1745,8 @@ mod tests {
         );
         assert_eq!(
             manifest.namespaces.len(),
-            2,
-            "namespaces derive from the tool ids only"
+            3,
+            "namespaces derive from allowlisted ids and fixed event capabilities"
         );
 
         // An operator cannot allowlist a KE name: config load fails with the

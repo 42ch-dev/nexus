@@ -220,6 +220,7 @@ cli = [
   "dep:nix",
 ]
 connect-host = [
+  "nexus-core/connect-client",
   "dep:chrono",
   "dep:nexus-knowledge",
   "dep:nexus-local-db",

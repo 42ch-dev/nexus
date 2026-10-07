@@ -27,6 +27,7 @@
 // signal; `.unwrap()`/`.expect()` keep the tests linear and readable.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use parking_lot::Mutex;
 use std::collections::HashMap;
 #[cfg(feature = "embedded-mcp")]
 use std::future::Future;
@@ -146,6 +147,60 @@ fn dialer_manifest(host_id: &str, tool_ids: &[&str]) -> HostCapabilityManifest {
         .map(|id| (*id, object.clone(), object.clone()))
         .collect();
     dialer_manifest_with_schemas(host_id, &tools)
+}
+
+const SUBSCRIBE_TOOL: &str = "tools.nexus.subscribe";
+const DELIVER_EVENTS_TOOL: &str = "tools.nexus.deliver_events";
+struct OrderingTransport {
+    inner: Arc<dyn Transport>,
+    subscribe_request_id: Mutex<Option<String>>,
+    subscribe_response_seen: Arc<std::sync::atomic::AtomicBool>,
+    delivery_before_response: Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[async_trait::async_trait]
+impl Transport for OrderingTransport {
+    async fn send(&self, envelope: &[u8]) -> Result<(), TransportError> {
+        if let Ok(value) = serde_json::from_slice::<Value>(envelope) {
+            if value.get("op").and_then(Value::as_str) == Some(SUBSCRIBE_TOOL) {
+                *self.subscribe_request_id.lock() = value
+                    .get("request_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+            }
+        }
+        self.inner.send(envelope).await
+    }
+
+    async fn recv(&self) -> Result<Vec<u8>, TransportError> {
+        let envelope = self.inner.recv().await?;
+        if let Ok(value) = serde_json::from_slice::<Value>(&envelope) {
+            if value.get("op").and_then(Value::as_str) == Some(DELIVER_EVENTS_TOOL)
+                && !self
+                    .subscribe_response_seen
+                    .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                self.delivery_before_response
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+            let request_id = value.get("request_id").and_then(Value::as_str);
+            let mut pending_request = self.subscribe_request_id.lock();
+            let is_subscribe_response = pending_request
+                .as_deref()
+                .is_some_and(|expected| Some(expected) == request_id)
+                && value.pointer("/payload/result").is_some();
+            if is_subscribe_response {
+                pending_request.take();
+                self.subscribe_response_seen
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        Ok(envelope)
+    }
+
+    async fn close(&self) -> Result<(), TransportError> {
+        self.inner.close().await
+    }
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────
@@ -1497,6 +1552,248 @@ async fn boot_lane_with_an_empty_tool_allowlist_admits_nothing() {
     adapter.close();
     shutdown.notify_one();
     let _ = handle.task.await;
+    peer_tool_table().set_config(None);
+}
+
+#[tokio::test]
+#[serial]
+async fn connect_subscribe_replays_after_reconnect_and_preserves_cursor_and_order() {
+    let home = tempfile::TempDir::new().unwrap();
+    let peer_id = peer_id_of(seed_peer(21));
+    write_boot_config(
+        home.path(),
+        &[],
+        &[&peer_id],
+        Some(&format!(
+            r#"{{"peer_keys":{{"{peer_id}":"{}"}}}}"#,
+            hex32(pubkey(seed_peer(21)))
+        )),
+    );
+    let shutdown = Arc::new(Notify::new());
+    let lane = start_peer_tools_lane(home.path(), Arc::clone(&shutdown), None)
+        .await
+        .expect("WS event lane starts");
+    let stream = format!("reconnect-{}", uuid::Uuid::new_v4());
+    let ordering_response_seen = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let delivery_before_response = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let tcp = TcpStream::connect(lane.addr).await.unwrap();
+    let url = format!("ws://{}/connect", lane.addr);
+    let (ws, _) =
+        tokio_tungstenite::client_async_with_config(url, tcp, Some(ws_config_for_tests()))
+            .await
+            .unwrap();
+    let ordering_transport = Arc::new(OrderingTransport {
+        inner: Arc::new(WsTransport::new(ws)),
+        subscribe_request_id: Mutex::new(None),
+        subscribe_response_seen: Arc::clone(&ordering_response_seen),
+        delivery_before_response: Arc::clone(&delivery_before_response),
+    });
+    let first_adapter = connect_remote_adapter(RemoteAdapterOptions {
+        transport: ordering_transport,
+        local_identity: RemoteIdentity {
+            seed: seed_peer(21),
+        },
+        local_manifest: dialer_manifest("dialer", &[SUBSCRIBE_TOOL, DELIVER_EVENTS_TOOL]),
+        remote_pubkey: pubkey(seed_host()),
+        allowlist: vec![derive_peer_id_from_ed25519_pubkey(&pubkey(seed_host()))],
+        invoke_timeout_ms: Some(5000),
+        capability_token: None,
+    })
+    .await
+    .expect("consumer negotiates subscribe and registers its reverse delivery tool");
+    let first_frame = nexus_core::connect::events::connect_event_registry().publish(
+        &stream,
+        "update",
+        json!({"n": 1}),
+    );
+    let cursor_after_first = first_frame.id.clone().unwrap();
+    let (first_tx, mut first_rx) = tokio::sync::mpsc::channel(2);
+    first_adapter.register_tool_handler(
+        DELIVER_EVENTS_TOOL,
+        Arc::new(move |args| {
+            let tx = first_tx.clone();
+            Box::pin(async move {
+                tx.send(args).await.unwrap();
+                SpokeResult::Ok(json!({}))
+            }) as BoxFuture<'static, SpokeResult<Value>>
+        }),
+    );
+    assert!(
+        wait_until(
+            || lane.sessions.get(&peer_id).is_some(),
+            Duration::from_secs(3)
+        )
+        .await,
+        "the accept lane finishes installing its session handler"
+    );
+    let server_session = lane
+        .sessions
+        .get(&peer_id)
+        .expect("accepted server session");
+    assert!(
+        server_session
+            .responder
+            .remote_manifest()
+            .is_some_and(|manifest| {
+                manifest
+                    .capabilities
+                    .iter()
+                    .any(|id| id == DELIVER_EVENTS_TOOL)
+            }),
+        "consumer hello advertises the reverse delivery capability"
+    );
+    let subscribe = first_adapter
+        .invoke_tool(SUBSCRIBE_TOOL, json!({"stream": stream.clone()}))
+        .await;
+    let SpokeResult::Ok(response) = subscribe else {
+        panic!("negotiated subscribe succeeds: {subscribe:?}");
+    };
+    let delivered_first = tokio::time::timeout(Duration::from_secs(3), first_rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(ordering_response_seen.load(std::sync::atomic::Ordering::SeqCst));
+    assert!(!delivery_before_response.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(delivered_first["frames"][0]["id"], cursor_after_first);
+    assert_eq!(response["resumed_from"], Value::Null);
+
+    first_adapter.close();
+    assert!(
+        wait_until(
+            || lane.sessions.get(&peer_id).is_none(),
+            Duration::from_secs(3)
+        )
+        .await,
+        "disconnect removes the prior peer session before reconnect"
+    );
+    nexus_core::connect::events::connect_event_registry().publish(
+        &stream,
+        "update",
+        json!({"n": 2}),
+    );
+
+    let second_adapter = dial(
+        lane.addr,
+        seed_peer(21),
+        &[SUBSCRIBE_TOOL, DELIVER_EVENTS_TOOL],
+    )
+    .await
+    .expect("consumer reconnects on the WS lane");
+    let (second_tx, mut second_rx) = tokio::sync::mpsc::channel(1);
+    second_adapter.register_tool_handler(
+        DELIVER_EVENTS_TOOL,
+        Arc::new(move |args| {
+            let tx = second_tx.clone();
+            Box::pin(async move {
+                tx.send(args).await.unwrap();
+                SpokeResult::Ok(json!({}))
+            }) as BoxFuture<'static, SpokeResult<Value>>
+        }),
+    );
+    assert!(
+        wait_until(
+            || lane.sessions.get(&peer_id).is_some(),
+            Duration::from_secs(3)
+        )
+        .await,
+        "the accept lane installs the reconnected session handler"
+    );
+    let resumed = second_adapter
+        .invoke_tool(
+            SUBSCRIBE_TOOL,
+            json!({"stream": stream, "last_event_id": cursor_after_first}),
+        )
+        .await;
+    let SpokeResult::Ok(resumed) = resumed else {
+        panic!("resubscribe with the verbatim cursor succeeds: {resumed:?}");
+    };
+    assert_eq!(resumed["resumed_from"], cursor_after_first);
+    let replay = tokio::time::timeout(Duration::from_secs(3), second_rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(replay["frames"][0]["data"], json!({"n": 2}));
+
+    second_adapter.close();
+    shutdown.notify_one();
+    let _ = lane.task.await;
+    let _ = lane.watch_task.await;
+    peer_tool_table().evict_peer(&peer_id, None);
+    peer_tool_table().set_config(None);
+}
+
+#[tokio::test]
+#[serial]
+async fn unnegotiated_subscribe_is_refused_without_delivery_side_effects() {
+    let home = tempfile::TempDir::new().unwrap();
+    let peer_id = peer_id_of(seed_peer(22));
+    write_boot_config(
+        home.path(),
+        &[],
+        &[&peer_id],
+        Some(&format!(
+            r#"{{"peer_keys":{{"{peer_id}":"{}"}}}}"#,
+            hex32(pubkey(seed_peer(22)))
+        )),
+    );
+    let shutdown = Arc::new(Notify::new());
+    let lane = start_peer_tools_lane(home.path(), Arc::clone(&shutdown), None)
+        .await
+        .expect("WS event lane starts");
+    let adapter = dial(lane.addr, seed_peer(22), &[DELIVER_EVENTS_TOOL])
+        .await
+        .expect("consumer hello omits subscribe");
+    let (delivered_tx, mut delivered_rx) = tokio::sync::mpsc::channel(1);
+    adapter.register_tool_handler(
+        DELIVER_EVENTS_TOOL,
+        Arc::new(move |args| {
+            let tx = delivered_tx.clone();
+            Box::pin(async move {
+                tx.send(args).await.unwrap();
+                SpokeResult::Ok(json!({}))
+            }) as BoxFuture<'static, SpokeResult<Value>>
+        }),
+    );
+    assert!(
+        wait_until(
+            || lane.sessions.get(&peer_id).is_some(),
+            Duration::from_secs(3)
+        )
+        .await,
+        "the accept lane installs the session handler"
+    );
+    let stream = format!("unnegotiated-{}", uuid::Uuid::new_v4());
+    let response = adapter
+        .invoke_tool(SUBSCRIBE_TOOL, json!({"stream": stream.clone()}))
+        .await;
+    let SpokeResult::Reject(reject) = response else {
+        panic!("unnegotiated subscribe must be refused");
+    };
+    assert_eq!(reject.details.unwrap()["wire_code"], "op_unsupported");
+    nexus_core::connect::events::connect_event_registry().publish(
+        &stream,
+        "event",
+        json!({"must_not_deliver": true}),
+    );
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(
+        delivered_rx.try_recv().is_err(),
+        "refusal has no delivery side effect"
+    );
+
+    adapter.close();
+    assert!(
+        wait_until(
+            || lane.sessions.get(&peer_id).is_none(),
+            Duration::from_secs(3)
+        )
+        .await,
+        "disconnect removes session"
+    );
+    shutdown.notify_one();
+    let _ = lane.task.await;
+    let _ = lane.watch_task.await;
+    peer_tool_table().evict_peer(&peer_id, None);
     peer_tool_table().set_config(None);
 }
 
