@@ -109,7 +109,7 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   ProviderEventBatch: 1,
   ProviderHostEvent: 1,
   ProviderReply: 1,
-  ReferenceGetResponse: 1,
+  ReferenceGetResponse: 2,
   ReferenceListResponse: 1,
   ReferenceSourceInfo: 1,
   RuntimeApi: 1,

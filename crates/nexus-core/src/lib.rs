@@ -84,7 +84,12 @@ pub use memory::{
 };
 pub use presets::PresetError;
 pub use principal::Principal;
-pub use references::{GetReferenceResponse, ListReferencesResponse, ReferenceInfo};
+pub use references::RegisterReferenceParams;
+// Reference read envelopes are schema-owned (core lane); re-exported here so
+// direct-core callers keep naming them through `nexus_core`.
+pub use nexus_contracts::core::references::{
+    ReferenceGetResponse, ReferenceListResponse, ReferenceSourceInfo,
+};
 pub use service::{CoreAccess, CoreOpenOptions, CoreService};
 pub use soul::CoreCharacterMind;
 pub use storage_status::{CoreStorageStatus, CoreStorageVersions};

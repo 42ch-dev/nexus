@@ -1,8 +1,11 @@
 //! Reference source management subcommands.
 //!
-//! CLI surface for the V1.26 reference store (`SQLite` registry + body.md on disk).
-//! Uses `nexus_local_db::reference_source` as the repository layer — the local
-//! registry is the owner of register/list/show, with no loopback HTTP involved.
+//! CLI surface for the V1.26 reference store (`SQLite` registry + body.md on
+//! disk). Every leaf goes through the `nexus-core` reference authority
+//! ([`CoreService::register_reference`], `list_references`, `get_reference`),
+//! which owns the registry writes/reads and the schema-owned response
+//! envelopes, so `reference show` renders the same fields over either
+//! transport. There is no loopback HTTP involved.
 //!
 //! There is deliberately no `reference refresh` leaf: the retired V1.58 P3
 //! entrance only dispatched `nexus.reference.refresh` through the daemon
@@ -10,16 +13,17 @@
 //! refresh helpers (the reference capability and the execution refresh
 //! schedule) remain the real owners.
 //!
-//! The registry stays on the local store, but its pool open is admitted at the
-//! seam ([`crate::core::require_materialized_workspace`]) first: `Schema::init`
-//! migrates — and therefore creates — the selected workspace, so a selection
-//! that names no materialized workspace is refused instead of having one
-//! created for it.
+//! The direct-core open admits the selection at the seam
+//! ([`crate::core::open_direct_core`]) first: the writer pool migrates — and
+//! therefore creates — the selected workspace, so a selection that names no
+//! materialized workspace is refused instead of having one created for it.
 
 use crate::config::CliConfig;
-use crate::core::require_materialized_workspace;
+use crate::core::{finish_direct, map_core_error, open_direct_core};
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
+use nexus_core::{CoreError, CoreService, Principal, RegisterReferenceParams};
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
 /// Reference source subcommands.
@@ -70,36 +74,48 @@ pub enum ReferenceCommand {
 ///
 /// # Errors
 ///
-/// Returns `CliError` if the active creator is not set, the database is unavailable,
-/// or the underlying repository operation fails.
+/// Returns `CliError` if the active creator is not set, the database is
+/// unavailable, or the underlying core operation fails.
 pub async fn run(cmd: ReferenceCommand, config: &CliConfig) -> Result<()> {
-    match cmd {
-        ReferenceCommand::Register {
-            source,
-            source_type,
-            title,
-            tags,
-            mutability,
-            file,
-            body,
-        } => {
-            run_register(
-                config,
-                &RegisterInput {
-                    source,
-                    source_type,
-                    title,
-                    tags,
-                    mutability,
-                    file,
-                    body,
-                },
-            )
-            .await
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        match cmd {
+            ReferenceCommand::Register {
+                source,
+                source_type,
+                title,
+                tags,
+                mutability,
+                file,
+                body,
+            } => {
+                run_register(
+                    &core,
+                    &principal,
+                    &RegisterInput {
+                        source,
+                        source_type,
+                        title,
+                        tags,
+                        mutability,
+                        file,
+                        body,
+                    },
+                )
+                .await
+            }
+            ReferenceCommand::List => run_list(&core, &principal).await,
+            ReferenceCommand::Show { reference_id } => {
+                run_show(&core, &principal, &reference_id).await
+            }
         }
-        ReferenceCommand::List => run_list(config).await,
-        ReferenceCommand::Show { reference_id } => run_show(config, &reference_id).await,
     }
+    .await;
+    if let Some(text) = finish_direct(&core, outcome).await? {
+        println!("{text}");
+    }
+    Ok(())
 }
 
 /// Collected input for the register command.
@@ -113,40 +129,12 @@ struct RegisterInput {
     body: Option<String>,
 }
 
-/// Resolve state.db path and open a pool with migrations.
-///
-/// The seam's admission pre-flight runs before the pool open: this entrance
-/// creates the workspace directory itself and `Schema::init` migrates — and
-/// therefore creates — the selected workspace `state.db`, so a selection that
-/// names no materialized workspace must be refused instead of having one
-/// created for it.
-async fn open_workspace_pool(config: &CliConfig) -> Result<sqlx::SqlitePool> {
-    require_materialized_workspace(config)?;
-    let db_path = crate::config::resolve_state_db_path(config)?;
-    if let Some(parent) = db_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let pool = crate::db::Schema::init(&db_path).await?;
-    Ok(pool)
-}
-
-/// Resolve active creator and workspace context for reference operations.
-fn resolve_creator_context(config: &CliConfig) -> Result<(String, String, PathBuf)> {
-    let creator_id = config
-        .active_creator_id
-        .as_deref()
-        .ok_or(CliError::CreatorNotSelected)?
-        .to_string();
-    let slug = config.workspace_slug_for_creator(&creator_id).to_string();
-    let home = dirs::home_dir()
-        .ok_or_else(|| CliError::Other("Cannot determine home directory".into()))?;
-    Ok((creator_id, slug, home))
-}
-
-/// `reference register` — create SQL row + body.md.
-async fn run_register(config: &CliConfig, input: &RegisterInput) -> Result<()> {
-    let (creator_id, _slug, home) = resolve_creator_context(config)?;
-
+/// `reference register` — create the registry row + body.md through the core.
+async fn run_register(
+    core: &CoreService,
+    principal: &Principal,
+    input: &RegisterInput,
+) -> Result<Option<String>> {
     // Resolve body text
     let body_text = resolve_body_text(input.file.as_ref(), input.body.as_ref())?;
 
@@ -164,54 +152,57 @@ async fn run_register(config: &CliConfig, input: &RegisterInput) -> Result<()> {
     // Validate source_type
     validate_source_type(&input.source_type)?;
 
-    let pool = open_workspace_pool(config).await?;
+    let reference = core
+        .register_reference(
+            principal,
+            RegisterReferenceParams {
+                source_type: input.source_type.clone(),
+                source_mutability,
+                uri: input.source.clone(),
+                title: input.title.clone(),
+                tags: input.tags.clone(),
+                body: body_text,
+            },
+        )
+        .await
+        .map_err(map_core_error)?;
 
-    // Default workspace_id — uses the operational workspace slug convention
-    let workspace_id = format!("wrk_{}", config.workspace_slug_for_creator(&creator_id));
-
-    let params = nexus_local_db::RegisterParams {
-        home: &home,
-        creator_id: &creator_id,
-        workspace_id: &workspace_id,
-        source_type: &input.source_type,
-        source_mutability,
-        uri: &input.source,
-        title: &input.title,
-        tags: input.tags.as_deref(),
-        body: &body_text,
-    };
-
-    let row = nexus_local_db::register_reference(&pool, params).await?;
-
-    println!("✓ Reference registered: {}", row.reference_source_id);
-    println!("  Title:  {}", row.title);
-    println!("  Type:   {}", row.source_type);
-    println!("  URI:    {}", row.uri);
-    if let Some(cp) = &row.content_path {
-        println!("  Body:   {cp}");
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "✓ Reference registered: {}",
+        reference.reference_source_id
+    );
+    let _ = writeln!(out, "  Title:  {}", reference.title);
+    let _ = writeln!(out, "  Type:   {}", reference.source_type);
+    let _ = writeln!(out, "  URI:    {}", reference.uri);
+    if let Some(cp) = &reference.content_path {
+        let _ = writeln!(out, "  Body:   {cp}");
     }
 
-    Ok(())
+    Ok(Some(out.trim_end().to_string()))
 }
 
 /// `reference list` — show metadata for all references.
-async fn run_list(config: &CliConfig) -> Result<()> {
-    let _creator_context = resolve_creator_context(config)?;
-    let pool = open_workspace_pool(config).await?;
+async fn run_list(core: &CoreService, principal: &Principal) -> Result<Option<String>> {
+    let response = core
+        .list_references(principal)
+        .await
+        .map_err(map_core_error)?;
 
-    let rows = nexus_local_db::list_references(&pool, None, None, None).await?;
-
-    if rows.is_empty() {
-        println!("No registered references.");
-        return Ok(());
+    if response.references.is_empty() {
+        return Ok(Some("No registered references.".to_string()));
     }
 
-    println!(
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
         "{:<40} {:<10} {:<12} {:<40} CREATED_AT",
         "ID", "TYPE", "MUTABILITY", "TITLE"
     );
-    for row in &rows {
-        println!(
+    for row in &response.references {
+        let _ = writeln!(
+            out,
             "{:<40} {:<10} {:<12} {:<40} {}",
             row.reference_source_id,
             row.source_type,
@@ -221,40 +212,51 @@ async fn run_list(config: &CliConfig) -> Result<()> {
         );
     }
 
-    Ok(())
+    Ok(Some(out.trim_end().to_string()))
 }
 
 /// `reference show` — display a single reference with details.
-async fn run_show(config: &CliConfig, reference_id: &str) -> Result<()> {
-    let _creator_context = resolve_creator_context(config)?;
-    let pool = open_workspace_pool(config).await?;
+async fn run_show(
+    core: &CoreService,
+    principal: &Principal,
+    reference_id: &str,
+) -> Result<Option<String>> {
+    let response = core
+        .get_reference(principal, reference_id.to_string())
+        .await
+        // The leaf keeps its own not-found wording: the core resource string is
+        // the registry key, and this surface named the reference verbatim.
+        .map_err(|err| match err {
+            CoreError::NotFound { .. } => {
+                CliError::Other(format!("Reference {reference_id} not found."))
+            }
+            other => map_core_error(other),
+        })?;
 
-    let row = nexus_local_db::get_reference_by_id(&pool, reference_id)
-        .await?
-        .ok_or_else(|| CliError::Other(format!("Reference {reference_id} not found.")))?;
-
-    println!("Reference: {}", row.reference_source_id);
-    println!("  Title:        {}", row.title);
-    println!("  Type:         {}", row.source_type);
-    println!("  Mutability:   {}", row.source_mutability);
-    println!("  URI:          {}", row.uri);
-    println!("  Workspace:    {}", row.workspace_id);
-    println!("  Scan Status:  {}", row.scan_status);
-    println!("  Created:      {}", row.created_at);
-    if let Some(updated) = &row.updated_at {
-        println!("  Updated:      {updated}");
+    let reference = &response.reference;
+    let mut out = String::new();
+    let _ = writeln!(out, "Reference: {}", reference.reference_source_id);
+    let _ = writeln!(out, "  Title:        {}", reference.title);
+    let _ = writeln!(out, "  Type:         {}", reference.source_type);
+    let _ = writeln!(out, "  Mutability:   {}", reference.source_mutability);
+    let _ = writeln!(out, "  URI:          {}", reference.uri);
+    let _ = writeln!(out, "  Workspace:    {}", response.workspace_id);
+    let _ = writeln!(out, "  Scan Status:  {}", reference.scan_status);
+    let _ = writeln!(out, "  Created:      {}", reference.created_at);
+    if let Some(updated) = &response.updated_at {
+        let _ = writeln!(out, "  Updated:      {updated}");
     }
-    if let Some(tags) = &row.tags {
-        println!("  Tags:         {tags}");
+    if let Some(tags) = &response.tags {
+        let _ = writeln!(out, "  Tags:         {tags}");
     }
-    if let Some(hash) = &row.content_hash {
-        println!("  Content Hash: {hash}");
+    if let Some(hash) = &response.content_hash {
+        let _ = writeln!(out, "  Content Hash: {hash}");
     }
-    if let Some(cp) = &row.content_path {
-        println!("  Body Path:    {cp}");
+    if let Some(cp) = &reference.content_path {
+        let _ = writeln!(out, "  Body Path:    {cp}");
     }
 
-    Ok(())
+    Ok(Some(out.trim_end().to_string()))
 }
 
 /// Resolve body text from `--file` or `--body` flags.

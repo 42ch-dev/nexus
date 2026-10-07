@@ -108,7 +108,7 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("ProviderCall", 1),
     ("ProviderEventBatch", 1),
     ("ProviderReply", 1),
-    ("ReferenceGetResponse", 1),
+    ("ReferenceGetResponse", 2),
     ("ReferenceListResponse", 1),
     ("ReferenceSourceInfo", 1),
     ("RuntimeApi", 1),
