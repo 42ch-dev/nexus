@@ -10,13 +10,14 @@
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
+use nexus_contracts::tristate::presence_string;
 use nexus_contracts::{
     AddKbEntryRequest, AppendInspirationRequest, AppendInspirationResponse,
     BatchUpdateFindingsRequest, BatchUpdateFindingsResponse, ChapterBody, ChapterDetail,
     ChapterOutline, CoreChapterContentQuery as WireChapterContentQuery,
     CoreTimelineEventsQuery as WireTimelineEventsQuery,
     CoreTimelineOverviewQuery as WireTimelineOverviewQuery, CoreWorkSelection, CreateForkRequest,
-    CreateWorkRequest, FindingDetailResponse, GetKbEntryResponse, ListChaptersQuery,
+    CreateWorkRequest, FindingDetailResponse, FindingsApi, GetKbEntryResponse, ListChaptersQuery,
     ListKbEntriesQuery, ListWorksQuery, ListWorksResponse, PackExportRequest, PackImportRequest,
     PatchChapterRequest, ReadingAnnotation, ReadingAnnotationCreateRequest,
     ReadingAnnotationListQuery, ReadingAnnotationListResponse, ReadingAnnotationPatchRequest,
@@ -34,8 +35,7 @@ use nexus_core::{
     CreateFindingRequest as DomainCreateFindingRequest,
     ListFindingsQuery as DomainListFindingsQuery, ListInspirationQuery, ListPoolQuery,
     PromoteInspirationRequest, PromotePoolRequest, ReconcileDryRunQuery, SetPoolActiveRequest,
-    UpdateFindingRequest as DomainUpdateFindingRequest, WorkPatchRequest,
-    WorkReconcileReport as DomainWorkReconcileReport,
+    WorkPatchRequest, WorkReconcileReport as DomainWorkReconcileReport,
 };
 
 use crate::NativeCore;
@@ -67,41 +67,6 @@ where
                 .map_err(|e| Error::from_reason(format!("invalid {field}: {e}")))
         })
         .transpose()
-}
-
-fn json_kind(value: &serde_json::Value) -> &'static str {
-    match value {
-        serde_json::Value::Null => "null",
-        serde_json::Value::Bool(_) => "a boolean",
-        serde_json::Value::Number(_) => "a number",
-        serde_json::Value::String(_) => "a string",
-        serde_json::Value::Array(_) => "an array",
-        serde_json::Value::Object(_) => "an object",
-    }
-}
-
-/// Decode a tri-state nullable patch field out of the generated carrier.
-///
-/// The wire schemas mark these fields `x-nexus-tri-state`; the generator adds
-/// a presence-preserving deserializer, so an explicit `null` arrives as
-/// `Some(Value::Null)` instead of collapsing into `None`. The three states
-/// therefore survive the single generated-DTO parse: absent → `None` (keep),
-/// `null` → `Some(None)` (clear), string → `Some(Some(_))` (set). Anything
-/// else is a 400 before any stored effect. Regression:
-/// `crates/nexus-contracts/tests/tri_state_presence.rs`.
-fn tri_state_string(
-    value: Option<serde_json::Value>,
-    field: &str,
-) -> Result<Option<Option<String>>> {
-    match value {
-        None => Ok(None),
-        Some(serde_json::Value::Null) => Ok(Some(None)),
-        Some(serde_json::Value::String(text)) => Ok(Some(Some(text))),
-        Some(other) => Err(Error::from_reason(format!(
-            "invalid {field}: expected a string, null, or omission, got {}",
-            json_kind(&other)
-        ))),
-    }
 }
 
 #[napi]
@@ -447,8 +412,13 @@ impl NativeCore {
             creative_brief: request.creative_brief,
             intake_status: request.intake_status,
             status: request.status,
-            world_id: tri_state_string(request.world_id, "world_id")?,
-            story_ref: tri_state_string(request.story_ref, "story_ref")?,
+            // Tri-state binding fields ride the shared carrier grammar
+            // (`nexus_contracts::tristate`, `x-nexus-tri-state`); this boundary
+            // only names the field in its own `invalid <field>: <reason>` refusal.
+            world_id: presence_string(request.world_id)
+                .map_err(|reason| Error::from_reason(format!("invalid world_id: {reason}")))?,
+            story_ref: presence_string(request.story_ref)
+                .map_err(|reason| Error::from_reason(format!("invalid story_ref: {reason}")))?,
             primary_preset_id: request.primary_preset_id,
             current_stage: request.current_stage,
             stage_status: request.stage_status,
@@ -1117,6 +1087,12 @@ impl NativeCore {
     /// `PATCH /v1/daemon/works/{work_id}/findings/{finding_id}` — tri-state
     /// `rule_suggestion` (R-V1190-FINDINGS-TRISTATE-DUP): absent keeps the
     /// stored column, `null` clears it, a string sets it.
+    ///
+    /// The generated `schemas/core/findings-api.schema.json` DTO IS the wire
+    /// authority, so this boundary is a pure pass-through: the presence-aware
+    /// carrier rides it unchanged into the core, which owns the tri-state
+    /// projection (`nexus_contracts::tristate::presence_string`) and its
+    /// refusal. No adapter-side tri-state struct or grammar remains.
     #[napi]
     pub async fn update_finding(
         &self,
@@ -1124,19 +1100,10 @@ impl NativeCore {
         finding_id: String,
         request_json: Buffer,
     ) -> Result<Buffer> {
-        let request: nexus_contracts::UpdateFindingRequest = decode(request_json, "request")?;
-        let domain = DomainUpdateFindingRequest {
-            severity: request.severity,
-            status: request.status,
-            title: request.title,
-            description: request.description,
-            target_executor: request.target_executor,
-            kind: request.kind,
-            rule_suggestion: tri_state_string(request.rule_suggestion, "rule_suggestion")?,
-        };
+        let request: FindingsApi = decode(request_json, "request")?;
         self.json_call(principal_handle, async move |core, principal| {
             let finding: FindingDetailResponse =
-                core.update_finding(&principal, finding_id, domain).await?;
+                core.update_finding(&principal, finding_id, request).await?;
             Ok(finding)
         })
         .await

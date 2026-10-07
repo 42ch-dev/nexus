@@ -161,7 +161,7 @@ export function getFinding(
 export function updateFinding(
   service: ServiceCore,
   findingId: string,
-  request: UpdateFindingWire,
+  request: UpdateFindingRequest,
 ): Promise<FindingDetailResponse> {
   return withPrincipal(service, (principal) =>
     service.core.updateFinding(principal, findingId, request),
@@ -398,7 +398,7 @@ export const KNOWLEDGE_ROUTES: readonly DomainRoute[] = [
       body: await updateFinding(
         service,
         params[1],
-        wirePayload<UpdateFindingWire>(body, 'request'),
+        wirePayload<UpdateFindingRequest>(body, 'request'),
       ),
     }),
   },
@@ -540,11 +540,6 @@ export const KNOWLEDGE_ROUTES: readonly DomainRoute[] = [
 ];
 
 // ── local grammar helpers ──────────────────────────────────────────────────
-
-/** The tri-state PATCH wire carrier (`rule_suggestion` stays unrestricted). */
-export type UpdateFindingWire = Omit<UpdateFindingRequest, 'rule_suggestion'> & {
-  rule_suggestion?: unknown;
-};
 
 /** Bounded `limit` (1..100) for the offset/cursor pages this family serves. */
 function boundedLimit(searchParams: URLSearchParams): { limit?: number } {

@@ -73,7 +73,7 @@ pub use execution::{
 };
 pub use findings::{
     format_routing_hint, CreateFindingRequest, ListFindingsQuery, ListFindingsResponse,
-    PruneFindingsOutcome, StaleFindingEntry, StaleFindingsResponse, UpdateFindingRequest,
+    PruneFindingsOutcome, StaleFindingEntry, StaleFindingsResponse,
 };
 pub use home::CoreHomeService;
 #[cfg(feature = "provider-host")]

@@ -5,7 +5,7 @@
 //! the catalog/call backend and a shutdown signal; the session budget, the
 //! sink/stream session establishment, and the rmcp server lifecycle live
 //! here. The daemon's `WorkspaceState`-backed backend (catalog builder +
-//! `ToolExecuteRequest` dispatch) stays in the daemon as a thin composition
+//! `ToolsApi` dispatch) stays in the daemon as a thin composition
 //! over this shell.
 //!
 //! # Session bounds (GC #8, architect-locked)
