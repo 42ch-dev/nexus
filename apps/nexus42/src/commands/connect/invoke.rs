@@ -830,7 +830,7 @@ fn run_in_lane(
             // run the effect (this call is the acquirer). A racing replay is
             // answered from the stored receipt instead.
             let mut acquired_receipt = None;
-            let mut commit_watermark = 0;
+            let mut commit_watermark: Option<i64> = None;
             if let Some(metadata) = &write_receipt {
                 if let Some(answer) = acquire_write_receipt(ports_for_lane.pool(), metadata).await?
                 {
@@ -1270,41 +1270,72 @@ async fn acquire_write_receipt(
     }
 }
 
-/// The `core_changes` sequence watermark for this call's effect observation.
+/// The durable outbox commit counter (F5).
 ///
-/// Taken AFTER the receipt was acquired (so the receipt's own outbox rows sit
-/// below it) and BEFORE the route runs; see [`write_effect_committed`]. A
-/// failed read degrades to `0`, which reports the conservative "an effect may
-/// have committed" answer instead of the forbidden "no effect" inference.
-async fn write_commit_watermark(pool: &sqlx::SqlitePool) -> i64 {
-    sqlx::query_scalar("SELECT COALESCE(MAX(sequence), 0) FROM core_changes")
-        .fetch_one(pool)
-        .await
-        .unwrap_or(0)
+/// `core_changes.sequence` is an AUTOINCREMENT primary key, so
+/// `sqlite_sequence.seq` is the monotonic high-water mark of every insert ever
+/// made into the outbox — whereas the outbox's bounded retention deletes ROWS
+/// and never lowers the counter. A row-count or `MAX(sequence)` observation can
+/// therefore be erased by retention (or by any admitted writer's prune) while
+/// the effect stays committed; the counter cannot.
+///
+/// `sqlite_sequence` exists from the moment the first AUTOINCREMENT table is
+/// created, so an absent `core_changes` row means the counter is `0` — nothing
+/// was ever inserted into the outbox — not "unreadable".
+async fn outbox_commit_counter(pool: &sqlx::SqlitePool) -> Result<i64, sqlx::Error> {
+    match sqlx::query_scalar::<_, i64>(
+        "SELECT seq FROM sqlite_sequence WHERE name = 'core_changes'",
+    )
+    .fetch_optional(pool)
+    .await
+    {
+        Ok(Some(seq)) => Ok(seq),
+        Ok(None) => Ok(0),
+        Err(err) => Err(err),
+    }
 }
 
-/// Did this call commit a durable effect? (F4)
+/// The `core_changes` commit watermark for this call's effect observation.
+///
+/// Taken AFTER the receipt was acquired (so the receipt's own outbox rows are
+/// already counted) and BEFORE the route runs; see [`write_effect_committed`].
+/// `None` = the counter could not be read, which keeps the observation
+/// conservative.
+async fn write_commit_watermark(pool: &sqlx::SqlitePool) -> Option<i64> {
+    match outbox_commit_counter(pool).await {
+        Ok(counter) => Some(counter),
+        Err(err) => {
+            tracing::warn!(
+                error = %err,
+                "connect invoke: outbox commit counter unreadable; the effect observation will \
+                 stay conservative"
+            );
+            None
+        }
+    }
+}
+
+/// Did this call commit a durable effect? (F4 + F5)
 ///
 /// A write route's `Result::Err` never means "no effect": the pinned upsert
 /// orchestrator commits each entry over an unbound per-invoke port, so a later
 /// entry's rejection can follow an earlier entry's commit. The answer is
-/// therefore OBSERVED from the durable outbox — any `core_changes` row written
-/// by this connection's writer above the acquired watermark is a committed
-/// mutation — and never inferred from the `Result`.
+/// therefore OBSERVED from the durable outbox counter — never inferred from the
+/// `Result`, and never inferred as "no effect" from an unverifiable
+/// observation: an unreadable watermark or an unreadable post-call counter both
+/// resolve to `true`.
 ///
-/// Scoped by writer rather than by resource on purpose: the direction is
-/// conservative, so a concurrent sibling invoke of this process can only turn
-/// the answer into "an effect committed", never into the forbidden "nothing
-/// committed".
-async fn write_effect_committed(pool: &sqlx::SqlitePool, watermark: i64) -> bool {
-    match sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM core_changes WHERE sequence > ? AND writer_id = nexus_writer_id()",
-    )
-    .bind(watermark)
-    .fetch_one(pool)
-    .await
-    {
-        Ok(count) => count > 0,
+/// The conservative direction is the only safe one: it can at worst turn a clean
+/// refusal's settlement fault into the typed not-retryable answer, never the
+/// reverse (a committed effect reported as untouched, which would invite a
+/// duplicate apply). The counter is workspace-global, so a concurrent sibling
+/// invoke can only make the answer "an effect committed" — the same direction.
+async fn write_effect_committed(pool: &sqlx::SqlitePool, watermark: Option<i64>) -> bool {
+    let Some(watermark) = watermark else {
+        return true;
+    };
+    match outbox_commit_counter(pool).await {
+        Ok(counter) => counter > watermark,
         Err(err) => {
             tracing::warn!(
                 error = %err,
@@ -4627,6 +4658,70 @@ mod tests {
         assert_eq!(
             kept.code, expected_code,
             "without a committed effect the original refusal is returned unchanged"
+        );
+    }
+
+    /// F5: the commit observation must survive outbox retention. The counter is
+    /// the AUTOINCREMENT high-water mark, which row deletion never lowers, so
+    /// pruning every post-watermark row (another admitted writer running the
+    /// bounded retention) cannot erase a committed effect — and an unverifiable
+    /// observation resolves to effect-may-have-committed, never to no-effect.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn pruned_outbox_rows_cannot_erase_a_committed_effect() {
+        let peer = fixed_keypair(47).public().to_peer_id();
+        let (handler, pool, _temp) = receipt_handler(peer).await;
+
+        // Baseline accuracy: the same watermark against an unchanged outbox
+        // reports NO committed effect.
+        let watermark = write_commit_watermark(&pool)
+            .await
+            .expect("the outbox commit counter is readable");
+        assert!(
+            !write_effect_committed(&pool, Some(watermark)).await,
+            "nothing was written since the watermark"
+        );
+
+        // A committed effect.
+        let payload = serde_json::json!({
+            "knowledge_entries": [entry_fixture("kb_retention", WORLD_A)],
+        });
+        handler(&peer, "upsert", payload).expect("the write applies");
+        assert!(
+            write_effect_committed(&pool, Some(watermark)).await,
+            "the committed mutation is observed"
+        );
+
+        // Another admitted writer prunes every row above the watermark — exactly
+        // what the outbox's bounded retention does.
+        let pruned = sqlx::query("DELETE FROM core_changes WHERE sequence > ?")
+            .bind(watermark)
+            .execute(&pool)
+            .await
+            .expect("an admitted writer may prune the outbox for retention")
+            .rows_affected();
+        assert!(
+            pruned > 0,
+            "the retention prune really removed the row evidence"
+        );
+        let remaining: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM core_changes WHERE sequence > ?")
+                .bind(watermark)
+                .fetch_one(&pool)
+                .await
+                .expect("count");
+        assert_eq!(remaining, 0, "the row evidence is gone");
+
+        // The observation must stay conservative: the committed effect is still
+        // reported, so the settlement-fault path keeps the typed
+        // not-retryable guarantee.
+        assert!(
+            write_effect_committed(&pool, Some(watermark)).await,
+            "pruned row evidence must never read as 'no effect committed'"
+        );
+        // An UNVERIFIABLE watermark is conservative too.
+        assert!(
+            write_effect_committed(&pool, None).await,
+            "an unverifiable observation must resolve to effect-may-have-committed"
         );
     }
 }
