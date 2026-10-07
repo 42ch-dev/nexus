@@ -664,9 +664,10 @@ fn dispatch(
     //    this gate and the CAS (a second process moved the row to another
     //    world) is denied atomically at the storage layer with the
     //    `world_conflict` wire code. Compute runs its own gate set instead
-    //    ([`verify_compute_gates`] — stored world + module identity +
-    //    module_scope + host-local store + the read-only settle lock, spec
-    //    §2.1–§2.3), all inside the lane, before any WASM execution.
+    //    ([`verify_compute_authorization`] — stored world + module identity +
+    //    module_scope + the read-only settle lock, spec §2.1–§2.3, joined by
+    //    the execution-only [`verify_compute_module_installed`] store check),
+    //    all inside the lane, before any WASM execution.
     let deadline = std::time::Instant::now() + limits.invoke_deadline;
     let permit = acquire_permit(lane, deadline)?;
     run_in_lane(
@@ -713,7 +714,9 @@ fn dispatch(
 // ^ Ten args mirror dispatch's architect-locked pipeline context (route,
 // scope, ports, serializer, caller, op, grant, payload, permit, deadline,
 // limits); bundling them would obscure the explicit fail-closed ordering.
-#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
+#[expect(clippy::result_large_err)]
+// Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
+#[expect(clippy::too_many_lines)] // the numbered fail-closed pipeline (adapter selection, receipt metadata, authorization gates, receipt read, execution prerequisites, acquire, effect, settle) reads as one sequence
 fn run_in_lane(
     route: Route,
     scope: &PeerScope,
@@ -753,55 +756,90 @@ fn run_in_lane(
                     Err(e) => return Err(denied(&e.to_string())),
                 },
             };
-            // Step 8b. Upsert holder narrowing (durable §9): a KE write may
-            // only carry the granted Actor's own resolved holder — the wire
-            // `owner`/`disclosure` pair narrows, never assigns a foreign
-            // holder. Runs before any stored-world read or orchestrator.
-            if route == Route::Upsert {
+            // Step 8b. §B.1 receipt metadata (v1.207 P3), for the
+            // non-idempotent writes only: the caller-supplied `operation_id`
+            // is envelope metadata of the durable receipt contract, NOT part
+            // of the route request (`operation_id` + `request_fingerprint`),
+            // so it is consumed and stripped BEFORE any typed preflight — the
+            // generated route requests are strict and carry no such field.
+            let mut payload = payload;
+            let write_receipt = if is_live_write(route) {
+                Some(prepare_write_receipt(
+                    &peer_id,
+                    grant_for_lane.as_ref(),
+                    &op_for_lane,
+                    &mut payload,
+                )?)
+            } else {
+                None
+            };
+
+            // Step 8c. Route AUTHORIZATION gates (fail-closed, unchanged lock
+            // set): upsert holder narrowing, the compute gate set (stored
+            // world + grant viewpoint + module identity + module scope +
+            // module-id pin), or the stored-world gate for the other writes.
+            // Compute hands back the gated module id so the execution-only
+            // prerequisite can run LATER — after the receipt read — instead of
+            // blocking an authorized terminal replay.
+            let gated_module_id = if route == Route::Upsert {
                 verify_upsert_holder_narrowing(
                     &payload,
                     adapter_for_lane
                         .read_scope()
                         .and_then(|scope| scope.holder_entry_id()),
                 )?;
-            }
-            if route == Route::Compute {
-                verify_compute_gates(
-                    &scope_for_lane,
-                    &adapter_for_lane,
-                    &peer_id,
-                    grant_for_lane.as_ref(),
-                    &payload,
+                None
+            } else if route == Route::Compute {
+                Some(
+                    verify_compute_authorization(
+                        &scope_for_lane,
+                        &adapter_for_lane,
+                        &peer_id,
+                        grant_for_lane.as_ref(),
+                        &payload,
+                    )
+                    .await?,
                 )
-                .await?;
             } else {
                 verify_stored_worlds(&adapter_for_lane, route, &payload).await?;
-            }
-            // Step 8c. §B.3 durable-operation handshake (v1.207 P3) for the
-            // non-idempotent write routes: resolve the id, ask the receipt
-            // store FIRST, write the `running` receipt before the effect, then
-            // settle terminally. A replay is answered from the receipt and
-            // never re-applies; ambiguity is the typed `uncertain` refusal.
-            let mut payload = payload;
-            let mut acquired_receipt = None;
-            if is_live_write(route) {
-                match open_write_receipt(
-                    ports_for_lane.pool(),
-                    &peer_id,
-                    grant_for_lane.as_ref(),
-                    &op_for_lane,
-                    &mut payload,
-                )
-                .await?
-                {
-                    WriteReceipt::Acquired {
-                        operation_id,
-                        subject_id,
-                    } => acquired_receipt = Some((operation_id, subject_id)),
-                    // Answered from the stored receipt: zero side effects.
-                    WriteReceipt::Answered(answer) => return Ok(answer),
+                None
+            };
+
+            // Step 8d. §B.3 step 2 — ask the receipt store FIRST (§B.1
+            // conflict precedence included). An already-answered operation is
+            // answered from its receipt HERE, before any execution-only
+            // prerequisite is required: an authorized terminal replay must
+            // not depend on a module still being installed, and ambiguity
+            // answers the typed `uncertain` refusal.
+            if let Some(metadata) = &write_receipt {
+                if let Some(answer) = read_write_receipt(ports_for_lane.pool(), metadata).await? {
+                    return Ok(answer);
                 }
             }
+
+            // Step 8e. Execution-only prerequisites. No receipt has been
+            // written yet, so a refusal here leaves no `running` receipt
+            // behind: a module that is not installed is refused exactly as
+            // before, and the durable answer of an ALREADY finished operation
+            // was served in step 8d.
+            if let Some(module_id) = &gated_module_id {
+                verify_compute_module_installed(&adapter_for_lane, module_id)?;
+            }
+
+            // Step 8f. §B.3 step 3 — write the `running` receipt FIRST, then
+            // run the effect (this call is the acquirer). A racing replay is
+            // answered from the stored receipt instead.
+            let mut acquired_receipt = None;
+            let mut commit_watermark = 0;
+            if let Some(metadata) = &write_receipt {
+                if let Some(answer) = acquire_write_receipt(ports_for_lane.pool(), metadata).await?
+                {
+                    return Ok(answer);
+                }
+                commit_watermark = write_commit_watermark(ports_for_lane.pool()).await;
+                acquired_receipt = Some(metadata.clone());
+            }
+
             let result = route_orchestrator(
                 route,
                 &adapter_for_lane,
@@ -811,12 +849,21 @@ fn run_in_lane(
                 payload,
             )
             .await;
-            match acquired_receipt {
-                Some((operation_id, subject_id)) => {
-                    settle_write_receipt(ports_for_lane.pool(), result, &operation_id, &subject_id)
-                        .await
-                }
-                None => result,
+
+            if let Some(metadata) = &acquired_receipt {
+                // F4: `Result::Err` never means "no effect" — the pinned
+                // upsert orchestrator commits each entry over an unbound
+                // per-invoke port, so a later entry's rejection can follow
+                // an earlier entry's commit. Observe the durable outbox
+                // instead of inferring.
+                let effect_committed = match &result {
+                    Ok(_) => true,
+                    Err(_) => write_effect_committed(ports_for_lane.pool(), commit_watermark).await,
+                };
+                settle_write_receipt(ports_for_lane.pool(), result, effect_committed, metadata)
+                    .await
+            } else {
+                result
             }
         });
         let _ = tx.send(result);
@@ -1086,38 +1133,35 @@ const fn decision_receipt(
     }
 }
 
-/// The §B.3 decision for one non-idempotent Connect write.
-enum WriteReceipt {
-    /// This invoke acquired the effect: the `running` receipt is durably
-    /// written and this call must run the effect, then settle it.
-    Acquired {
-        operation_id: String,
-        subject_id: String,
-    },
-    /// The operation was already answered from its receipt — run nothing.
-    Answered(Value),
+/// The resolved §B.1/§B.2 receipt metadata of one non-idempotent Connect
+/// write: the durable operation id (caller-supplied or derived), the subject
+/// the receipt is keyed on, and the complete-request fingerprint the store
+/// compares first-writer-wins.
+#[derive(Debug, Clone)]
+struct WriteReceiptMetadata {
+    operation_id: String,
+    subject_id: String,
+    fingerprint: String,
 }
 
-/// Open the durable receipt for one non-idempotent Connect write (spec §B.3
-/// steps 1–3) on the host's own cooperative DIRECT pool.
+/// Consume and strip the caller's `operation_id` metadata (§B.1) and resolve
+/// this write's durable receipt identity.
 ///
-/// Returns [`WriteReceipt::Acquired`] when THIS invoke acquired the effect
-/// (the `running` receipt is durably written first), or
-/// [`WriteReceipt::Answered`] when the operation was already answered — in
-/// which case the carry is the replay's answer and the effect must NOT run.
+/// MUST run before any typed route preflight: the generated route requests are
+/// strict (`deny_unknown_fields`) and carry no `operation_id` field, so a valid
+/// caller-supplied id would otherwise be refused as a malformed payload before
+/// the receipt contract could ever apply it (F3).
 ///
 /// # Errors
-/// The typed refusals: `invalid_input` (malformed caller id),
-/// `operation_id_conflict` (first-writer-wins), `uncertain` (no terminal
-/// receipt) and `internal` (receipt-store fault).
+/// The `invalid_input` envelope for a malformed caller-supplied id (the same
+/// refusal the core's `OperationIdError` maps to).
 #[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of the dispatch
-async fn open_write_receipt(
-    pool: &sqlx::SqlitePool,
+fn prepare_write_receipt(
     peer: &PeerId,
     grant: Option<&PeerGrant>,
     op: &str,
     payload: &mut Value,
-) -> Result<WriteReceipt, ErrorEnvelope> {
+) -> Result<WriteReceiptMetadata, ErrorEnvelope> {
     let session = peer.to_string();
     let actor = grant.map_or("", PeerGrant::actor_id);
     let operation_id = resolve_connect_operation_id(actor, &session, op, payload)?;
@@ -1134,15 +1178,37 @@ async fn open_write_receipt(
         action: op,
         args: payload,
     });
-    let subject_id = format!("{peer}/{op}");
+    Ok(WriteReceiptMetadata {
+        operation_id,
+        subject_id: format!("{peer}/{op}"),
+        fingerprint,
+    })
+}
 
-    // §B.3 step 2: ask the receipt store FIRST — before any re-apply.
-    //
+/// The §B.3 read half (steps 1–3): ask the receipt store FIRST and decide.
+///
+/// `Ok(Some(answer))` = the operation was already answered (a terminal replay
+/// served **from the receipt**); `Ok(None)` = this call may proceed.
+///
+/// This is deliberately separable from [`acquire_write_receipt`] so the caller
+/// can run execution-only prerequisites BETWEEN the read and the acquire: an
+/// authorized terminal replay must be served from its receipt even when the
+/// execution environment (e.g. an installed compute module) is gone, and a
+/// pre-effect refusal must never leave a `running` receipt behind (F3).
+///
+/// # Errors
+/// `operation_id_conflict` (the id is owned by a different logical request),
+/// `uncertain` (no terminal receipt) and `internal` (receipt-store fault).
+#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of the dispatch
+async fn read_write_receipt(
+    pool: &sqlx::SqlitePool,
+    metadata: &WriteReceiptMetadata,
+) -> Result<Option<Value>, ErrorEnvelope> {
     // `owner_is_live` is `true`: a timed-out lane closure keeps running (the
     // blocking lane cannot be force-cancelled), so a `running` receipt may
     // still have a live owner. Either way the answer is the same typed
     // refusal — the effect is never re-applied here.
-    let decision = match recover(pool, &operation_id, true).await {
+    let decision = match recover(pool, &metadata.operation_id, true).await {
         Ok(decision) => decision,
         Err(err) => return Err(receipt_store_fault(&err)),
     };
@@ -1153,84 +1219,156 @@ async fn open_write_receipt(
     // silently deduping it. This is decided before §B.3's status-based answer
     // (the store's frozen `recover` classifies by receipt status alone).
     if let Some(stored) = decision_receipt(&decision) {
-        if !stored.matches_fingerprint(&fingerprint) {
-            return Err(operation_id_conflict_envelope(&operation_id));
+        if !stored.matches_fingerprint(&metadata.fingerprint) {
+            return Err(operation_id_conflict_envelope(&metadata.operation_id));
         }
     }
 
     match decision {
-        RecoveryDecision::ApplyOnce => {}
+        RecoveryDecision::ApplyOnce => Ok(None),
         RecoveryDecision::AnswerFromReceipt(receipt) => {
-            return Ok(WriteReceipt::Answered(answer_from_receipt(
-                &receipt,
-                &subject_id,
-            )?));
+            Ok(Some(answer_from_receipt(&receipt, &metadata.subject_id)?))
         }
-        RecoveryDecision::InProgress(_) | RecoveryDecision::Uncertain(_) => {
-            return Err(uncertain_envelope(&operation_id, &subject_id));
-        }
+        RecoveryDecision::InProgress(_) | RecoveryDecision::Uncertain(_) => Err(
+            uncertain_envelope(&metadata.operation_id, &metadata.subject_id),
+        ),
     }
+}
 
-    // §B.3 step 3: write the `running` receipt FIRST, then run the effect.
+/// The §B.3 acquire half (step 3): write the `running` receipt FIRST and
+/// report whether THIS call acquired the effect.
+///
+/// `Ok(None)` = acquired (run the effect, then settle it). `Ok(Some(answer))` =
+/// a racing replay, answered from the stored receipt (run nothing).
+///
+/// # Errors
+/// `operation_id_conflict` (first-writer-wins) and `internal` (receipt-store
+/// fault).
+#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of the dispatch
+async fn acquire_write_receipt(
+    pool: &sqlx::SqlitePool,
+    metadata: &WriteReceiptMetadata,
+) -> Result<Option<Value>, ErrorEnvelope> {
     match begin_operation(
         pool,
-        &operation_id,
+        &metadata.operation_id,
         CONSUMER_CONNECT_INVOKE,
-        &subject_id,
-        &fingerprint,
+        &metadata.subject_id,
+        &metadata.fingerprint,
     )
     .await
     {
-        Ok(BeginOutcome::Acquired(_)) => Ok(WriteReceipt::Acquired {
-            operation_id,
-            subject_id,
-        }),
+        Ok(BeginOutcome::Acquired(_)) => Ok(None),
         // A racing replay: answer from the stored receipt, never re-apply.
-        Ok(BeginOutcome::Existing(stored)) => Ok(WriteReceipt::Answered(answer_from_receipt(
-            &stored,
-            &subject_id,
-        )?)),
+        Ok(BeginOutcome::Existing(stored)) => {
+            Ok(Some(answer_from_receipt(&stored, &metadata.subject_id)?))
+        }
         Err(nexus_local_db::LocalDbError::OperationIdConflict { .. }) => {
-            Err(operation_id_conflict_envelope(&operation_id))
+            Err(operation_id_conflict_envelope(&metadata.operation_id))
         }
         Err(err) => Err(receipt_store_fault(&err)),
     }
 }
 
-/// Settle the receipt of an acquired Connect write with the invoke's outcome
-/// (spec §B.3 step 3).
+/// The `core_changes` sequence watermark for this call's effect observation.
 ///
-/// A committed success whose settlement fails is the effect-committed
-/// refusal: the effect is durable on its own tables, the reply must not claim
-/// success without its receipt, and a retry could duplicate it.
+/// Taken AFTER the receipt was acquired (so the receipt's own outbox rows sit
+/// below it) and BEFORE the route runs; see [`write_effect_committed`]. A
+/// failed read degrades to `0`, which reports the conservative "an effect may
+/// have committed" answer instead of the forbidden "no effect" inference.
+async fn write_commit_watermark(pool: &sqlx::SqlitePool) -> i64 {
+    sqlx::query_scalar("SELECT COALESCE(MAX(sequence), 0) FROM core_changes")
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0)
+}
+
+/// Did this call commit a durable effect? (F4)
+///
+/// A write route's `Result::Err` never means "no effect": the pinned upsert
+/// orchestrator commits each entry over an unbound per-invoke port, so a later
+/// entry's rejection can follow an earlier entry's commit. The answer is
+/// therefore OBSERVED from the durable outbox — any `core_changes` row written
+/// by this connection's writer above the acquired watermark is a committed
+/// mutation — and never inferred from the `Result`.
+///
+/// Scoped by writer rather than by resource on purpose: the direction is
+/// conservative, so a concurrent sibling invoke of this process can only turn
+/// the answer into "an effect committed", never into the forbidden "nothing
+/// committed".
+async fn write_effect_committed(pool: &sqlx::SqlitePool, watermark: i64) -> bool {
+    match sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM core_changes WHERE sequence > ? AND writer_id = nexus_writer_id()",
+    )
+    .bind(watermark)
+    .fetch_one(pool)
+    .await
+    {
+        Ok(count) => count > 0,
+        Err(err) => {
+            tracing::warn!(
+                error = %err,
+                "connect invoke: effect-commit observation failed; assuming a committed effect"
+            );
+            true
+        }
+    }
+}
+
+/// Settle the receipt of an acquired Connect write with the invoke's outcome
+/// (spec §B.3 step 3 + item 4).
+///
+/// A committed success whose settlement fails is the effect-committed refusal:
+/// the effect is durable on its own tables, the reply must not claim success
+/// without its receipt, and a retry could duplicate it.
+///
+/// A REJECTED write is settled `failed` with its refusal reason — marked
+/// `details.effect_committed = true` when `effect_committed` says a durable
+/// effect (a partially applied batch) had already landed, so a replayed answer
+/// is never mistaken for an untouched request. If that settlement fails and an
+/// effect had committed, the answer is the typed effect-committed/not-retryable
+/// refusal; with no committed effect the original refusal stands and the
+/// `running` receipt left behind makes a later re-drive answer `uncertain` —
+/// the safe direction.
 ///
 /// # Errors
-/// The effect-committed refusal when a successful write's receipt cannot be
+/// The effect-committed refusal when a write whose effect committed cannot be
 /// settled; the original outcome is returned unchanged otherwise.
 #[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of the dispatch
 async fn settle_write_receipt(
     pool: &sqlx::SqlitePool,
     result: Result<Value, ErrorEnvelope>,
-    operation_id: &str,
-    subject_id: &str,
+    effect_committed: bool,
+    metadata: &WriteReceiptMetadata,
 ) -> Result<Value, ErrorEnvelope> {
     match &result {
         Ok(value) => {
             let payload = serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string());
-            if let Err(err) = settle_operation(pool, operation_id, STATUS_FINISHED, &payload).await
+            if let Err(err) =
+                settle_operation(pool, &metadata.operation_id, STATUS_FINISHED, &payload).await
             {
-                return Err(effect_committed_envelope(operation_id, subject_id, &err));
+                return Err(effect_committed_envelope(
+                    &metadata.operation_id,
+                    &metadata.subject_id,
+                    &err,
+                ));
             }
         }
         Err(envelope) => {
-            let payload = serde_json::to_string(envelope).unwrap_or_else(|_| "{}".to_string());
-            if let Err(err) = settle_operation(pool, operation_id, STATUS_FAILED, &payload).await {
-                // The effect did not commit, so the caller keeps the original
-                // refusal; the `running` receipt left behind makes a later
-                // re-drive answer `uncertain` — the safe direction.
+            let payload = reject_settlement_payload(envelope, effect_committed);
+            if let Err(err) =
+                settle_operation(pool, &metadata.operation_id, STATUS_FAILED, &payload).await
+            {
+                if effect_committed {
+                    return Err(effect_committed_envelope(
+                        &metadata.operation_id,
+                        &metadata.subject_id,
+                        &err,
+                    ));
+                }
                 tracing::warn!(
-                    operation_id = %operation_id,
-                    subject_id = %subject_id,
+                    operation_id = %metadata.operation_id,
+                    subject_id = %metadata.subject_id,
                     error = %err,
                     "connect invoke: operation receipt settlement failed after a rejected write"
                 );
@@ -1238,6 +1376,28 @@ async fn settle_write_receipt(
         }
     }
     result
+}
+
+/// The durable payload a rejected write settles with (F4).
+///
+/// A rejection that followed a committed partial effect (a batch whose earlier
+/// entries landed before a later one was refused) is marked
+/// `details.effect_committed = true` — the same detail key the provider-port
+/// `effect_committed_failure` precedent uses — so a replayed answer can never
+/// be mistaken for an untouched request. The live response is unchanged.
+fn reject_settlement_payload(envelope: &ErrorEnvelope, effect_committed: bool) -> String {
+    let mut value = serde_json::to_value(envelope).unwrap_or(Value::Null);
+    if effect_committed {
+        if let Some(map) = value.as_object_mut() {
+            let details = map
+                .entry("details".to_string())
+                .or_insert_with(|| Value::Object(Map::new()));
+            if let Some(details) = details.as_object_mut() {
+                details.insert("effect_committed".to_string(), Value::Bool(true));
+            }
+        }
+    }
+    serde_json::to_string(&value).unwrap_or_else(|_| "{}".to_string())
 }
 
 /// Run one served op through its orchestrator and map the outcome to the
@@ -1332,9 +1492,10 @@ async fn route_orchestrator(
         // `ComputeRequest` / `ComputeResponse` (no third wrapper; the
         // V1.147 generated `RunRequest` / `RunResponse` HTTP pair is the
         // reference mapping only). The read-only lock, world gate, module
-        // identity, module_scope, and host-local store gates all ran in
-        // [`verify_compute_gates`] before this point — zero WASM execution
-        // on denial. The serializer permit is held across the whole
+        // identity and module_scope gates ran in
+        // [`verify_compute_authorization`], and the host-local store gate in
+        // [`verify_compute_module_installed`], before this point — zero WASM
+        // execution on denial. The serializer permit is held across the whole
         // orchestration (one compute invocation at a time, spec §2.4).
         Route::Compute => {
             let request: ComputeRequest = match serde_json::from_value(payload) {
@@ -1556,7 +1717,7 @@ fn payload_world_ids(route: Route, payload: &Value) -> Option<Vec<String>> {
         }
         // Compute carries no world on the wire (P2, spec §2.2): the world is
         // the stored entry's `extensions.nexus.world_id`, resolved inside
-        // the lane by verify_compute_gates. Dispatch skips the raw world
+        // the lane by verify_compute_authorization. Dispatch skips the raw world
         // gate for this route; this arm is unreachable and exists only for
         // match exhaustiveness.
         // Host-level tools (V1.173, AR-49): no world carrier exists (empty
@@ -1752,7 +1913,7 @@ async fn verify_stored_worlds(
         // `check` / `assemble` reach storage only through the
         // orchestrators' own world-scoped `ScopeQueryPort` reads (world
         // gate verified `scope.scope_id` at step 5), and `compute` runs its
-        // own gate set ([`verify_compute_gates`] — stored-world + module
+        // own gate set ([`verify_compute_authorization`] — stored-world + module
         // gates, spec §2).
         // Host-level tools (V1.173) are adapter reads that target no
         // stored row by id.
@@ -1815,17 +1976,24 @@ async fn verify_stored_worlds(
 ///    immutable through the write paths, so the world dimension has no
 ///    equivalent divergence.
 ///
-/// Returns `Ok(())` once every gate passes (the orchestrator route
-/// re-parses the payload for execution); the first denial returns the
+/// Returns the gated `module_id` once every gate passes (the orchestrator
+/// route re-parses the payload for execution); the first denial returns the
 /// mapped envelope.
+///
+/// The module's **installation** is deliberately NOT checked here — see
+/// [`verify_compute_module_installed`]: it is an execution-only prerequisite,
+/// and requiring it in the authorization set would make an authorized terminal
+/// replay depend on the module still being installed (F3). Every existing
+/// security lock is preserved; this split moves nothing out of the fail-closed
+/// path except the host-local store check.
 #[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
-async fn verify_compute_gates(
+async fn verify_compute_authorization(
     scope: &PeerScope,
     adapter: &NexusAdapter<'static>,
     peer: &PeerId,
     grant: Option<&PeerGrant>,
     payload: &Value,
-) -> Result<(), ErrorEnvelope> {
+) -> Result<String, ErrorEnvelope> {
     let request: ComputeRequest = match serde_json::from_value(payload.clone()) {
         Ok(request) => request,
         Err(error) => return Err(map_reject(&invalid_payload("compute", &error))),
@@ -1902,26 +2070,10 @@ async fn verify_compute_gates(
         return Err(module_not_scoped(Some(&module_id)));
     }
 
-    // 5. Host-local store gate (spec §2.1): the module must be installed
-    //    under the configured module store; bytes are never peer-supplied.
-    //    A host without a configured store serves no compute module.
-    let Some(modules_dir) = adapter.user_modules_dir() else {
-        return Err(module_not_found(
-            Some(&module_id),
-            "this host has no module store configured; no compute module can be served",
-        ));
-    };
-    if !module_installed(modules_dir, &module_id) {
-        return Err(module_not_found(
-            Some(&module_id),
-            &format!(
-                "module {module_id:?} is not installed under {}",
-                modules_dir.display()
-            ),
-        ));
-    }
+    // (Stage 5, the host-local store gate, is an EXECUTION-only prerequisite
+    // and lives in `verify_compute_module_installed` — see the doc above.)
 
-    // 6. Module-id pin, KEY-PRESENCE form (L2 review C-1, hardened P2 QC
+    // 5. Module-id pin, KEY-PRESENCE form (L2 review C-1, hardened P2 QC
     //    fix wave FW-1): the adapter's `ComputablePort` merges
     //    request.computable over the session state before re-resolving the
     //    module id, so a request-carried `computable.module_id` that
@@ -1942,6 +2094,42 @@ async fn verify_compute_gates(
         }
     }
 
+    Ok(module_id)
+}
+
+/// The compute route's **execution-only** prerequisite (spec §2.1): the gated
+/// module must be installed under the configured host-local module store.
+/// Bytes are never peer-supplied, and a host without a configured store serves
+/// no compute module.
+///
+/// This runs AFTER the §B.3 receipt read: an authorized terminal replay is
+/// answered from its receipt without needing a module that may since have been
+/// removed (F3), while a first (or ambiguous) call still cannot execute an
+/// uninstalled module.
+///
+/// # Errors
+/// The retained `module_not_found` envelope when the store is unconfigured or
+/// the module is not installed.
+#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of the dispatch
+fn verify_compute_module_installed(
+    adapter: &NexusAdapter<'static>,
+    module_id: &str,
+) -> Result<(), ErrorEnvelope> {
+    let Some(modules_dir) = adapter.user_modules_dir() else {
+        return Err(module_not_found(
+            Some(module_id),
+            "this host has no module store configured; no compute module can be served",
+        ));
+    };
+    if !module_installed(modules_dir, module_id) {
+        return Err(module_not_found(
+            Some(module_id),
+            &format!(
+                "module {module_id:?} is not installed under {}",
+                modules_dir.display()
+            ),
+        ));
+    }
     Ok(())
 }
 
@@ -2708,6 +2896,7 @@ mod tests {
         PeerId,
         tempfile::TempDir,
         tempfile::TempDir,
+        sqlx::SqlitePool,
     ) {
         let peer = fixed_keypair(17).public().to_peer_id();
         let scope = scoped_scope_for(peer, &["compute", "upsert"]);
@@ -2750,7 +2939,7 @@ mod tests {
         .await
         .expect("staged compute session");
         let (handler, lane, serializer) = build_handler_with_limits(scope, ports, limits);
-        (handler, lane, serializer, peer, temp, modules_dir)
+        (handler, lane, serializer, peer, temp, modules_dir, pool)
     }
 
     /// (a) Saturated lane: with the only permit held by a concurrent
@@ -2848,7 +3037,7 @@ mod tests {
     /// its own budget and returned `invoke_busy`.)
     #[tokio::test(flavor = "multi_thread")]
     async fn compute_serializer_waiter_fails_fast_and_releases_lane() {
-        let (handler, lane, serializer, peer, _temp, _modules_dir) =
+        let (handler, lane, serializer, peer, _temp, _modules_dir, _pool) =
             test_compute_handler(BridgeLimits {
                 max_concurrent_invokes: 1,
                 invoke_deadline: Duration::from_millis(400),
@@ -4227,6 +4416,217 @@ mod tests {
                 nexus_local_db::LocalDbError::OperationIdConflict { .. }
             ),
             "expected the typed operation_id_conflict, got {err:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // F3 — compute receipt metadata precedes the typed preflight, and an
+    // authorized terminal replay needs no execution environment
+    // -----------------------------------------------------------------------
+
+    /// F3(a): a `compute` invoke carrying a valid caller-supplied
+    /// `operation_id` is not a malformed payload — the §B.1 metadata is
+    /// consumed and stripped BEFORE the strict typed compute preflight, and the
+    /// id is used verbatim for the receipt.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn compute_accepts_a_caller_supplied_operation_id() {
+        let (handler, _lane, _serializer, peer, _temp, _modules_dir, pool) =
+            test_compute_handler(BridgeLimits::default()).await;
+        let operation_id = caller_operation_id("c0");
+        let payload = serde_json::json!({
+            "operation_id": &operation_id,
+            "session_id": "ses_serializer",
+            "entry_id": "kb_serializer",
+            "computable": {},
+        });
+
+        // The dummy module cannot execute, so the call may succeed or fail —
+        // but it must NEVER be read as a malformed payload, and it must have
+        // taken the supplied id into the receipt contract.
+        if let Err(envelope) = handler(&peer, "compute", payload) {
+            assert_ne!(
+                envelope.code, "invalid_input",
+                "a valid caller-supplied operation_id must be consumed before the typed \
+                 compute preflight: {envelope:?}"
+            );
+        }
+        let receipt =
+            nexus_local_db::operation_receipts::get_operation_receipt(&pool, &operation_id)
+                .await
+                .expect("receipt read")
+                .expect("the supplied id owns a durable receipt");
+        assert_eq!(receipt.consumer, "connect_invoke");
+        assert_eq!(receipt.subject_id, format!("{peer}/compute"));
+    }
+
+    /// F3(b): an AUTHORIZED terminal replay is answered from its receipt before
+    /// any execution-only prerequisite — a module removed from the host store
+    /// must not turn a durable answer into `module_not_found`, and nothing is
+    /// re-applied.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn compute_terminal_replay_survives_a_removed_module() {
+        let (handler, _lane, _serializer, peer, _temp, modules_dir, pool) =
+            test_compute_handler(BridgeLimits::default()).await;
+        let operation_id = caller_operation_id("c1");
+        let payload = serde_json::json!({
+            "operation_id": &operation_id,
+            "session_id": "ses_serializer",
+            "entry_id": "kb_serializer",
+            "computable": {},
+        });
+
+        // The completed attempt's durable answer (the receipt is what a replay
+        // must be served from).
+        nexus_local_db::operation_receipts::begin_operation(
+            &pool,
+            &operation_id,
+            nexus_local_db::operation_receipts::CONSUMER_CONNECT_INVOKE,
+            &format!("{peer}/compute"),
+            &connect_fingerprint(&peer, "compute", &payload),
+        )
+        .await
+        .expect("begin the completed attempt's receipt");
+        nexus_local_db::operation_receipts::settle_operation(
+            &pool,
+            &operation_id,
+            nexus_local_db::operation_receipts::STATUS_FINISHED,
+            r#"{"settled":true}"#,
+        )
+        .await
+        .expect("settle the receipt terminally");
+
+        // The execution environment is GONE: the module is removed from the
+        // host-local store.
+        std::fs::remove_dir_all(modules_dir.path().join("basic-combat"))
+            .expect("remove the module from the store");
+        assert!(
+            !modules_dir.path().join("basic-combat").exists(),
+            "the execution prerequisite is really unavailable"
+        );
+
+        // The authorized replay is answered from the receipt.
+        let served = handler(&peer, "compute", payload).expect(
+            "an authorized terminal replay must be answered from its receipt, not refused \
+             for a missing execution environment",
+        );
+        assert_eq!(
+            served["settled"],
+            Value::Bool(true),
+            "the stored terminal answer is returned verbatim: {served}"
+        );
+
+        // Nothing re-applied: still exactly one receipt, still terminal.
+        assert_eq!(
+            connect_receipt_rows(&pool, &format!("{peer}/compute")).await,
+            vec![(operation_id, "finished".to_string())]
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // F4 — a rejected write is never assumed effect-free
+    // -----------------------------------------------------------------------
+
+    /// F4: `Result::Err` from a write route never means "no effect". The pinned
+    /// upsert orchestrator commits each entry over an unbound per-invoke port,
+    /// so a batch whose first entry lands and whose second is refused leaves a
+    /// durable partial effect. This pins (1) that the durable-outbox
+    /// observation sees it, (2) that the settled receipt marks it, and (3) that
+    /// a settlement fault after a committed effect is the typed
+    /// effect-committed / not-retryable answer with the operation identity.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn partial_upsert_commit_is_observed_and_a_settlement_fault_is_not_retryable() {
+        let peer = fixed_keypair(46).public().to_peer_id();
+        let (handler, pool, _temp) = receipt_handler(peer).await;
+
+        // Entry A is unique; entry B repeats A's (entry_type, canonical_name),
+        // which the orchestrator refuses AFTER A has already committed.
+        let mut first = entry_fixture("kb_partial_a", WORLD_A);
+        first["canonical_name"] = Value::String("Uniqueness Probe".to_string());
+        let mut second = entry_fixture("kb_partial_b", WORLD_A);
+        second["canonical_name"] = Value::String("Uniqueness Probe".to_string());
+        let payload = serde_json::json!({ "knowledge_entries": [first, second] });
+
+        let watermark = write_commit_watermark(&pool).await;
+        let refused = handler(&peer, "upsert", payload).expect_err("the second entry is refused");
+
+        // (1) The partial effect is durable and the observer sees it.
+        let applied: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = ?")
+                .bind("kb_partial_a")
+                .fetch_one(&pool)
+                .await
+                .expect("count the first entry");
+        assert_eq!(
+            applied, 1,
+            "the first entry committed before the second was refused"
+        );
+        assert!(
+            write_effect_committed(&pool, watermark).await,
+            "the durable-outbox observation must see the committed partial effect"
+        );
+
+        // (2) The settled receipt preserves the refusal AND marks the commit.
+        let subject_id = format!("{peer}/upsert");
+        let rows = connect_receipt_rows(&pool, &subject_id).await;
+        assert_eq!(rows.len(), 1, "one logical call owns one receipt");
+        assert_eq!(rows[0].1, "failed");
+        let stored = nexus_local_db::operation_receipts::get_operation_receipt(&pool, &rows[0].0)
+            .await
+            .expect("receipt read")
+            .expect("the settled receipt");
+        let stored_error: Value =
+            serde_json::from_str(stored.error_json.as_deref().expect("error payload"))
+                .expect("the stored error payload is JSON");
+        assert_eq!(
+            stored_error["code"],
+            Value::String(refused.code.clone()),
+            "the refusal envelope is preserved: {stored_error}"
+        );
+        assert_eq!(
+            stored_error["details"]["effect_committed"],
+            Value::Bool(true),
+            "a partially applied batch is marked so a replay can never read it as untouched"
+        );
+
+        // (3) A settlement fault after a committed effect is NOT retryable.
+        let metadata = WriteReceiptMetadata {
+            operation_id: caller_operation_id("f0"),
+            subject_id: subject_id.clone(),
+            fingerprint: "fp-unused-by-settlement".to_string(),
+        };
+        let not_retryable = settle_write_receipt(&pool, Err(refused), true, &metadata)
+            .await
+            .expect_err("a committed effect whose receipt did not settle is not a clean refusal");
+        assert_eq!(not_retryable.code, "internal");
+        assert_eq!(
+            not_retryable.details.get("effect_committed"),
+            Some(&Value::Bool(true))
+        );
+        assert_eq!(
+            not_retryable
+                .details
+                .get("operation_id")
+                .and_then(Value::as_str),
+            Some(metadata.operation_id.as_str()),
+            "the refusal names the operation identity"
+        );
+        assert!(
+            not_retryable.message.contains("not retryable"),
+            "the refusal says it cannot be retried: {}",
+            not_retryable.message
+        );
+
+        // ...while a settlement fault with NO committed effect keeps the
+        // original refusal verbatim (`metadata`'s id owns no receipt row, so
+        // the settlement itself fails).
+        let original = uncertain_envelope("op_00000000000000000000000000000000", &subject_id);
+        let expected_code = original.code.clone();
+        let kept = settle_write_receipt(&pool, Err(original), false, &metadata)
+            .await
+            .expect_err("the original refusal stands");
+        assert_eq!(
+            kept.code, expected_code,
+            "without a committed effect the original refusal is returned unchanged"
         );
     }
 }
