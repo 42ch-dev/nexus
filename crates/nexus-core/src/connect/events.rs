@@ -647,6 +647,26 @@ mod tests {
         assert_eq!(resumed_from.as_deref(), Some(id.as_str()));
         assert_eq!(EventSubscription::control("gap", json!({})).id, None);
     }
+
+    #[test]
+    fn cursor_parser_preserves_typed_malformed_foreign_and_future_errors() {
+        let registry = ConnectEventRegistry::default();
+        registry.publish("s", "event", json!({}));
+        let state = registry
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let ring = state.streams.get("s").unwrap();
+        assert_eq!(parse_cursor(ring, "malformed"), Err(SubscribeError::InvalidCursor));
+        assert_eq!(
+            parse_cursor(ring, &format!("{}:1", Uuid::new_v4())),
+            Err(SubscribeError::UnknownEpoch)
+        );
+        assert_eq!(
+            parse_cursor(ring, &format!("{}:2", ring.epoch)),
+            Err(SubscribeError::FutureCursor)
+        );
+    }
     #[tokio::test]
     async fn stale_cursor_and_trimmed_history_emit_cursorless_gap_first() {
         let registry = ConnectEventRegistry::default();

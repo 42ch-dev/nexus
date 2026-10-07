@@ -144,6 +144,40 @@ spoke gate (capability missing) or by the host scope gate (op not in
 they skip the world-scope gate, and they never require a service host — the
 `connect start` process serves them alone.
 
+## Connect event replay and capability negotiation
+
+The existing Connect WebSocket lane optionally supports event subscriptions.
+This is not an HTTP/SSE listener and does not change the node-lane served-op
+manifest. Optional use is negotiated by exact capability intersection in
+the connection hello; no follow-up negotiation round-trip exists.
+
+- `tools.nexus.subscribe` is host-served. A client that first invokes it
+  without advertising the capability receives `op_unsupported` before the
+  handler runs, with no subscription or delivery side effects.
+- `tools.nexus.deliver_events` is consumer-served and reverse-use-only. The
+  host advertises it on the WS lane to authorize the consumer's reverse
+  invocation, but registers no host-side handler. The consumer must
+  advertise it too; otherwise subscribe is refused before side effects.
+
+Subscribe arguments follow
+`schemas/core/core-connect-subscribe-request.schema.json`:
+`{ "stream": "<stream-id>", "last_event_id": "<epoch>:<decimal-seq>" }`,
+where `last_event_id` is optional. The response follows
+`schemas/core/core-connect-subscribe-response.schema.json`, returning the
+stream, ring epoch and verbatim `resumed_from` cursor; it carries no frames.
+The response write precedes the first push.
+
+The host invokes consumer-served `tools.nexus.deliver_events` with
+`{ "stream": "<stream-id>", "frames": [...] }`. Data frames contain an
+`id` of `<epoch>:<seq>`, an `event` name, and `data`; control frames have no
+`id`. An unrecoverable cursor produces a cursorless first `gap` control
+frame whose data follows `schemas/core/core-connect-gap-event.schema.json`
+and sets `requires_transcript_reconciliation: true`. Reconcile by clearing
+the cursor and subscribing again to replay from the live tail. Delivery is
+ordered and acknowledgement-gated per session. If a started reverse invoke
+cannot finish within its delivery deadline, the host closes the session
+rather than reuse a potentially allocated outbound sequence.
+
 ## Home layout
 
 All state lives under `~/.nexus42/` (path helpers in `nexus-home-layout`):

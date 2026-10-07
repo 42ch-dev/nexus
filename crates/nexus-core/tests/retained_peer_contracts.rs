@@ -1797,6 +1797,105 @@ async fn unnegotiated_subscribe_is_refused_without_delivery_side_effects() {
     peer_tool_table().set_config(None);
 }
 
+#[tokio::test]
+#[serial]
+async fn reverse_leg_requires_delivery_capability_before_subscription() {
+    let home = tempfile::TempDir::new().unwrap();
+    let peer_id = peer_id_of(seed_peer(23));
+    write_boot_config(
+        home.path(),
+        &[],
+        &[&peer_id],
+        Some(&format!(
+            r#"{{"peer_keys":{{"{peer_id}":"{}"}}}}"#,
+            hex32(pubkey(seed_peer(23)))
+        )),
+    );
+    let shutdown = Arc::new(Notify::new());
+    let lane = start_peer_tools_lane(home.path(), Arc::clone(&shutdown), None)
+        .await
+        .expect("WS event lane starts");
+    let adapter = dial(lane.addr, seed_peer(23), &[SUBSCRIBE_TOOL])
+        .await
+        .expect("consumer negotiates subscribe but omits delivery");
+    let (delivered_tx, mut delivered_rx) = tokio::sync::mpsc::channel(1);
+    adapter.register_tool_handler(
+        DELIVER_EVENTS_TOOL,
+        Arc::new(move |args| {
+            let tx = delivered_tx.clone();
+            Box::pin(async move {
+                tx.send(args).await.unwrap();
+                SpokeResult::Ok(json!({}))
+            }) as BoxFuture<'static, SpokeResult<Value>>
+        }),
+    );
+    assert!(wait_until(|| lane.sessions.get(&peer_id).is_some(), Duration::from_secs(3)).await);
+    let stream = format!("missing-delivery-{}", uuid::Uuid::new_v4());
+    let response = adapter
+        .invoke_tool(SUBSCRIBE_TOOL, json!({"stream": stream.clone()}))
+        .await;
+    let SpokeResult::Reject(reject) = response else {
+        panic!("subscribe without negotiated delivery must be refused");
+    };
+    assert_eq!(reject.details.unwrap()["wire_code"], "op_unsupported");
+    nexus_core::connect::events::connect_event_registry().publish(
+        &stream,
+        "event",
+        json!({"must_not_deliver": true}),
+    );
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(delivered_rx.try_recv().is_err());
+    adapter.close();
+    assert!(wait_until(|| lane.sessions.get(&peer_id).is_none(), Duration::from_secs(3)).await);
+    shutdown.notify_one();
+    let _ = lane.task.await;
+    let _ = lane.watch_task.await;
+    peer_tool_table().evict_peer(&peer_id, None);
+    peer_tool_table().set_config(None);
+}
+
+#[tokio::test]
+#[serial]
+async fn consumer_cannot_invoke_reverse_only_delivery_tool_on_host() {
+    let home = tempfile::TempDir::new().unwrap();
+    let peer_id = peer_id_of(seed_peer(24));
+    write_boot_config(
+        home.path(),
+        &[],
+        &[&peer_id],
+        Some(&format!(
+            r#"{{"peer_keys":{{"{peer_id}":"{}"}}}}"#,
+            hex32(pubkey(seed_peer(24)))
+        )),
+    );
+    let shutdown = Arc::new(Notify::new());
+    let lane = start_peer_tools_lane(home.path(), Arc::clone(&shutdown), None)
+        .await
+        .expect("WS event lane starts");
+    let adapter = dial(
+        lane.addr,
+        seed_peer(24),
+        &[SUBSCRIBE_TOOL, DELIVER_EVENTS_TOOL],
+    )
+    .await
+    .expect("both hello capabilities are advertised");
+    assert!(wait_until(|| lane.sessions.get(&peer_id).is_some(), Duration::from_secs(3)).await);
+    let response = adapter
+        .invoke_tool(DELIVER_EVENTS_TOOL, json!({"stream": "unused", "frames": []}))
+        .await;
+    let SpokeResult::Reject(reject) = response else {
+        panic!("host must not serve reverse-use-only delivery");
+    };
+    assert_eq!(reject.details.unwrap()["wire_code"], "op_unsupported");
+    adapter.close();
+    assert!(wait_until(|| lane.sessions.get(&peer_id).is_none(), Duration::from_secs(3)).await);
+    shutdown.notify_one();
+    let _ = lane.task.await;
+    let _ = lane.watch_task.await;
+    peer_tool_table().evict_peer(&peer_id, None);
+    peer_tool_table().set_config(None);
+}
+
 /// MIGRATED from `authz_hello.rs::reload_rotates_grants_at_session_boundaries_only`.
 ///
 /// Preserved (the SESSION-boundary half): an operator rotation is adopted for
