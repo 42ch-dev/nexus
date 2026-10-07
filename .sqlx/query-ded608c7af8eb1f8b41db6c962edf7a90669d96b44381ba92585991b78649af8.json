@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE operation_receipts SET status = ?, result_json = ?, error_json = ?, terminal_at = ?, updated_at = ? WHERE operation_id = ? AND status = 'running'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "ded608c7af8eb1f8b41db6c962edf7a90669d96b44381ba92585991b78649af8"
+}

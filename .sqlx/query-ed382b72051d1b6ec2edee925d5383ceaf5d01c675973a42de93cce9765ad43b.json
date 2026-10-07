@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE OR REPLACE operation_receipts SET operation_id = ? WHERE operation_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "ed382b72051d1b6ec2edee925d5383ceaf5d01c675973a42de93cce9765ad43b"
+}

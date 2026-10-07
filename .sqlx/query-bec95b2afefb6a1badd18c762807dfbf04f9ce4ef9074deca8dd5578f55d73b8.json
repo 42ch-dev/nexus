@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR REPLACE INTO operation_receipts (operation_id, consumer, subject_id, status, request_fingerprint, result_json, error_json, created_at, updated_at, terminal_at, sequence) VALUES (?, 'compute_run', 'run-replaced', 'running', 'fp-replaced', NULL, NULL, '2026-10-07T00:00:00Z', '2026-10-07T00:00:00Z', NULL, 99)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "bec95b2afefb6a1badd18c762807dfbf04f9ce4ef9074deca8dd5578f55d73b8"
+}

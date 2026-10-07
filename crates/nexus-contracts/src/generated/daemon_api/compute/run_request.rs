@@ -14,6 +14,9 @@ pub struct RunRequest {
     pub invocation_params: ::serde_json::Map<::std::string::String, ::serde_json::Value>,
     ///Installed compute module ID (from ModuleCache).
     pub module_id: ::std::string::String,
+    ///Optional caller-supplied durable operation id (v1.207 §B.1, shape op_<32 lowercase hex>). When present it stabilizes retry identity: a retry after a lost response is answered from the stored receipt instead of re-running the module, and the same id with a different request is refused with operation_id_conflict. When omitted the run keeps its run-scoped derived id (unchanged behavior).
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub operation_id: ::std::option::Option<::std::string::String>,
     ///The World to run the module against. Must be owned by the active creator (ownership gate enforced server-side).
     pub world_id: ::std::string::String,
 }
@@ -35,6 +38,10 @@ pub mod builder {
             ::std::string::String,
         >,
         module_id: ::std::result::Result<::std::string::String, ::std::string::String>,
+        operation_id: ::std::result::Result<
+            ::std::option::Option<::std::string::String>,
+            ::std::string::String,
+        >,
         world_id: ::std::result::Result<::std::string::String, ::std::string::String>,
     }
     impl ::std::default::Default for RunRequest {
@@ -43,6 +50,7 @@ pub mod builder {
                 branch_id: Ok(Default::default()),
                 invocation_params: Ok(Default::default()),
                 module_id: Err("no value supplied for module_id".to_string()),
+                operation_id: Ok(Default::default()),
                 world_id: Err("no value supplied for world_id".to_string()),
             }
         }
@@ -86,6 +94,18 @@ pub mod builder {
                 });
             self
         }
+        pub fn operation_id<T>(mut self, value: T) -> Self
+        where
+            T: ::std::convert::TryInto<::std::option::Option<::std::string::String>>,
+            T::Error: ::std::fmt::Display,
+        {
+            self.operation_id = value
+                .try_into()
+                .map_err(|e| {
+                    format!("error converting supplied value for operation_id: {e}")
+                });
+            self
+        }
         pub fn world_id<T>(mut self, value: T) -> Self
         where
             T: ::std::convert::TryInto<::std::string::String>,
@@ -108,6 +128,7 @@ pub mod builder {
                 branch_id: value.branch_id?,
                 invocation_params: value.invocation_params?,
                 module_id: value.module_id?,
+                operation_id: value.operation_id?,
                 world_id: value.world_id?,
             })
         }
@@ -118,6 +139,7 @@ pub mod builder {
                 branch_id: Ok(value.branch_id),
                 invocation_params: Ok(value.invocation_params),
                 module_id: Ok(value.module_id),
+                operation_id: Ok(value.operation_id),
                 world_id: Ok(value.world_id),
             }
         }

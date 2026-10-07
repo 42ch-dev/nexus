@@ -3407,3 +3407,81 @@ async fn execution_start_runs_the_compute_receipt_recovery_pass() {
     assert_eq!(settled_row.status, "running");
     assert!(settled_row.proposals_json.is_none());
 }
+
+/// Number of direct-lane compute runs the world holds.
+///
+/// The module is executed only after its run row is inserted, so this count is
+/// the observable proxy for "how many times did the module run": a retry that
+/// re-ran the module would necessarily add a second row.
+async fn compute_run_rows(pool: &sqlx::SqlitePool, world_id: &str) -> i64 {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM compute_sessions WHERE world_id = ? AND run_id IS NOT NULL",
+    )
+    .bind(world_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// v1.207 P3 (Greptile #3): a caller-supplied `operation_id` stabilizes retry
+/// identity.
+///
+/// A retry after a lost response is answered **from the receipt** — the module
+/// is NOT executed a second time (exactly one run row, and the replay carries
+/// the stored run id). A *different* request under the same id is the typed
+/// `operation_id_conflict` refusal, never a silent re-run.
+#[tokio::test]
+async fn caller_supplied_operation_id_dedupes_a_retry_and_conflicts_on_a_new_request() {
+    let f = fixture().await;
+    let op = format!("op_{}", "a".repeat(32));
+
+    let mut request = run_request(WORLD, MODULE);
+    request.operation_id = Some(op.clone());
+
+    let first = compute_run(&f.core, &f.compute, request.clone())
+        .await
+        .expect("the first call runs the module");
+    assert_eq!(first.status.to_string(), "succeeded");
+    assert_eq!(
+        compute_run_rows(f.core.pool(), WORLD).await,
+        1,
+        "the first call runs the module exactly once"
+    );
+
+    // Simulated lost response: the caller retries the IDENTICAL request (same
+    // caller-supplied id). The receipt answers it; the module does not re-run.
+    let replay = compute_run(&f.core, &f.compute, request)
+        .await
+        .expect("the retry is answered from the receipt");
+    assert_eq!(
+        replay.run_id, first.run_id,
+        "the replay answers with the stored run id"
+    );
+    assert_eq!(replay.status.to_string(), "succeeded");
+    assert_eq!(
+        compute_run_rows(f.core.pool(), WORLD).await,
+        1,
+        "the retry must not execute the module again"
+    );
+
+    // A DIFFERENT logical request under the same id is a first-writer-wins
+    // conflict, not a replay.
+    let mut conflicting = run_request(WORLD, MODULE);
+    conflicting.operation_id = Some(op);
+    conflicting.invocation_params = serde_json::Map::from_iter([(
+        "attacker_id".to_string(),
+        serde_json::Value::String("kb_other".to_string()),
+    )]);
+    let err = compute_run(&f.core, &f.compute, conflicting)
+        .await
+        .expect_err("a different request under the same id is refused");
+    match err {
+        CoreError::Coded { code, .. } => assert_eq!(code, "operation_id_conflict"),
+        other => panic!("expected operation_id_conflict, got {other:?}"),
+    }
+    assert_eq!(
+        compute_run_rows(f.core.pool(), WORLD).await,
+        1,
+        "a conflicting request never runs the module"
+    );
+}
