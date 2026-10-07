@@ -1,9 +1,17 @@
 # v1.207 Spec — Connect Replay/Negotiation Wire + Operation Receipts
 
-> **Status**: frozen 2026-10-07 (Phase 1 Review & Edit pass 2/3, architect;
-> four in-flight amendments during v1.207 delivery). Landed in tracked specs
-> at v1.207 close (PR #367); the gitignored iteration-package copy remains
-> the working record of the amendment rounds.
+> **Status:** shipped (v1.207, PR #367) — the Connect event-delivery + durable
+> operation-receipt surface. Frozen 2026-10-07 (Phase 1 Review & Edit pass 2/3,
+> architect) with four in-flight amendments during delivery. Landed in tracked
+> specs at v1.207 close; the gitignored iteration-package copy remains the
+> working record of the amendment rounds.
+> **Document class:** Master (Connect event surface + operation-receipt store:
+> the durable contract for WS-lane event delivery, gap/reconcile, and the
+> receipt-first recover handshake).
+> **Coordinates with:** [spoke-adapter-architecture.md](spoke-adapter-architecture.md)
+> (the spoke-connect transport + manifest seam), `schemas/core/`
+> (subscribe/gap/receipt schemas), `knowledge/architecture-patterns/connect-event-delivery-and-operation-receipts.md`
+> (the distilled reusable shape).
 > Resolves compass Q1 and the P2/P3 architect markers; referenced by the
 > v1.207 iteration plans (P2 §A/§C, P3 §B/§C). Field names are named **once**
 > here (§C) — the plans point at this file instead of restating them.
@@ -137,7 +145,8 @@ invoke** on the same lane: `ConnectResponder::invoke_tool` (spoke-connect
 contract §6)", `:596`), op id `tools.nexus.deliver_events` (tools grammar
 `tools.<ns>.<id>`, `accept.rs:194`), payload per the spoke §4 tool
 convention `{ "arguments": <delivery> }` (`responder.rs:596-608`). Delivery
-arguments (schema `core-connect-event-delivery.schema.json`):
+arguments (defined in this spec — the serving lane builds the object
+directly; no standalone schema file exists):
 
 ```
 { "stream": "<stream-id>",
