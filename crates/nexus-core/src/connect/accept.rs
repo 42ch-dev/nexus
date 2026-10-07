@@ -639,17 +639,32 @@ fn register_subscribe_handler(
                     )
                 }
             };
-            let Ok((epoch, resumed_from, subscription)) =
-                events.subscribe(&session, &stream, cursor.as_deref()).await
-            else {
-                return nexus_spoke_adapter::SpokeResult::Reject(
-                    nexus_spoke_adapter::SpokeReject {
-                        code: nexus_spoke_adapter::SpokeRejectCode::InvalidInput,
-                        message: "invalid or unavailable Connect event cursor".to_owned(),
-                        details: None,
-                    },
-                );
-            };
+            let (epoch, resumed_from, subscription) =
+                match events.subscribe(&session, &stream, cursor.as_deref()).await {
+                    Ok(result) => result,
+                    Err(error) => {
+                        let message = match error {
+                            crate::connect::events::SubscribeError::ClosedSession => {
+                                "Connect session is closed"
+                            }
+                            crate::connect::events::SubscribeError::StreamLimit => {
+                                "Connect event stream capacity is exhausted"
+                            }
+                            crate::connect::events::SubscribeError::InvalidCursor
+                            | crate::connect::events::SubscribeError::UnknownEpoch
+                            | crate::connect::events::SubscribeError::FutureCursor => {
+                                "invalid or unavailable Connect event cursor"
+                            }
+                        };
+                        return nexus_spoke_adapter::SpokeResult::Reject(
+                            nexus_spoke_adapter::SpokeReject {
+                                code: nexus_spoke_adapter::SpokeRejectCode::InvalidInput,
+                                message: message.to_owned(),
+                                details: None,
+                            },
+                        );
+                    }
+                };
             let cancelled = subscription.cancellation();
             let delivery_stream = stream.clone();
             let push_responder = Arc::clone(&responder);

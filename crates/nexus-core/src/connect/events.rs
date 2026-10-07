@@ -1,7 +1,7 @@
 //! Bounded event retention and ack-gated Connect subscriptions.
 use std::collections::{HashMap, VecDeque};
 use std::future::Future as _;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
 use serde::{Deserialize, Serialize};
@@ -58,14 +58,72 @@ impl Subscriber {
     }
 }
 
+struct AdmissionGate {
+    semaphore: Arc<Semaphore>,
+    users: AtomicUsize,
+}
+
+impl Default for AdmissionGate {
+    fn default() -> Self {
+        Self {
+            semaphore: Arc::new(Semaphore::new(1)),
+            users: AtomicUsize::new(0),
+        }
+    }
+}
+
+/// A subscribe call's reference to its gate. Failed or cancelled admissions
+/// remove unregistered gates once no competing waiter can still use them.
+struct AdmissionGateUse {
+    registry: ConnectEventRegistry,
+    key: (String, String),
+    gate: Arc<AdmissionGate>,
+}
+
+impl Drop for AdmissionGateUse {
+    fn drop(&mut self) {
+        let mut state = self
+            .registry
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.gate.users.fetch_sub(1, Ordering::Relaxed) == 1 {
+            remove_idle_gate(&mut state, &self.key, &self.gate);
+        }
+    }
+}
+
 #[derive(Default)]
 struct RegistryState {
     streams: HashMap<String, StreamRing>,
     subscribers: HashMap<(String, String), Subscriber>,
-    gates: HashMap<(String, String), Arc<Semaphore>>,
+    gates: HashMap<(String, String), Arc<AdmissionGate>>,
+    subscriber_counts: HashMap<String, usize>,
     sessions: HashMap<String, Arc<AtomicBool>>,
     #[cfg(test)]
     gate_waiter: Option<Arc<Notify>>,
+}
+
+fn decrement_subscriber_count(state: &mut RegistryState, stream: &str) {
+    let remove_count = if let Some(count) = state.subscriber_counts.get_mut(stream) {
+        *count -= 1;
+        *count == 0
+    } else {
+        false
+    };
+    if remove_count {
+        state.subscriber_counts.remove(stream);
+    }
+}
+
+fn remove_idle_gate(state: &mut RegistryState, key: &(String, String), gate: &Arc<AdmissionGate>) {
+    if !state.subscribers.contains_key(key)
+        && state.gates.get(key).is_some_and(|current| {
+            Arc::ptr_eq(current, gate) && current.users.load(Ordering::Relaxed) == 0
+        })
+    {
+        state.gates.remove(key);
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SubscribeError {
@@ -239,6 +297,10 @@ impl EventSubscription {
             .is_some_and(|subscriber| Arc::ptr_eq(&subscriber.active, &self.active))
         {
             state.subscribers.remove(&key);
+            decrement_subscriber_count(&mut state, &key.1);
+            if let Some(gate) = state.gates.get(&key).cloned() {
+                remove_idle_gate(&mut state, &key, &gate);
+            }
         }
     }
 }
@@ -282,12 +344,7 @@ fn make_room_for_stream(state: &mut RegistryState, stream: &str) -> bool {
     let evictable = state
         .streams
         .keys()
-        .find(|candidate| {
-            !state
-                .subscribers
-                .keys()
-                .any(|(_, active)| active == *candidate)
-        })
+        .find(|candidate| !state.subscriber_counts.contains_key(candidate.as_str()))
         .cloned();
     evictable.is_some_and(|key| state.streams.remove(&key).is_some())
 }
@@ -390,11 +447,17 @@ impl ConnectEventRegistry {
                 state
                     .gates
                     .entry(key.clone())
-                    .or_insert_with(|| Arc::new(Semaphore::new(1))),
+                    .or_insert_with(|| Arc::new(AdmissionGate::default())),
             );
+            gate.users.fetch_add(1, Ordering::Relaxed);
             (gate, lifetime)
         };
-        let acquire = gate.clone().acquire_owned();
+        let _gate_use = AdmissionGateUse {
+            registry: self.clone(),
+            key: key.clone(),
+            gate: Arc::clone(&gate),
+        };
+        let acquire = Arc::clone(&gate.semaphore).acquire_owned();
         tokio::pin!(acquire);
         let permit = std::future::poll_fn(|cx| {
             let result = acquire.as_mut().poll(cx);
@@ -499,6 +562,11 @@ impl ConnectEventRegistry {
         };
         if let Some(previous) = state.subscribers.insert(key, subscriber) {
             previous.cancel();
+        } else {
+            *state
+                .subscriber_counts
+                .entry(stream.to_owned())
+                .or_default() += 1;
         }
         drop(state);
         Ok((
@@ -538,7 +606,7 @@ impl ConnectEventRegistry {
                 subscriber.changed.notify_one();
             }
             if let Some(gate) = state.gates.get(&key) {
-                gate.add_permits(1);
+                gate.semaphore.add_permits(1);
             }
         }
     }
@@ -560,15 +628,21 @@ impl ConnectEventRegistry {
             .collect();
         for key in &keys {
             if let Some(gate) = state.gates.remove(key) {
-                gate.close();
+                gate.semaphore.close();
             }
         }
-        for ((owner, _), subscriber) in &state.subscribers {
-            if owner == session {
+        let subscriber_keys: Vec<_> = state
+            .subscribers
+            .keys()
+            .filter(|(owner, _)| owner == session)
+            .cloned()
+            .collect();
+        for key in subscriber_keys {
+            if let Some(subscriber) = state.subscribers.remove(&key) {
                 subscriber.cancel();
+                decrement_subscriber_count(&mut state, &key.1);
             }
         }
-        state.subscribers.retain(|(owner, _), _| owner != session);
     }
 }
 
@@ -577,6 +651,20 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::time::Duration;
+
+    fn assert_generated_gap(frame: &EventFrame, expected_reason: &str) {
+        assert_eq!(frame.event, "gap");
+        assert_eq!(frame.id, None);
+        assert_eq!(frame.data["reason"], expected_reason);
+        let gap: nexus_contracts::generated::core::core_connect_gap_event::CoreConnectGapEvent =
+            serde_json::from_value(frame.data.clone()).expect("emitted gap matches generated DTO");
+        assert!(gap.requires_transcript_reconciliation);
+        assert!(gap.resync_required);
+        assert_eq!(
+            serde_json::to_value(gap).expect("generated gap serializes"),
+            frame.data
+        );
+    }
 
     #[tokio::test]
     async fn replay_then_live_is_ack_gated() {
@@ -738,14 +826,7 @@ mod tests {
             .subscribe("p", "s", Some("not-a-cursor"))
             .await
             .unwrap();
-        assert_eq!(stale.replay[0].event, "gap");
-        assert_eq!(stale.replay[0].id, None);
-        assert_eq!(stale.replay[0].data["reason"], "stale_cursor");
-        assert_eq!(
-            stale.replay[0].data["requires_transcript_reconciliation"],
-            true
-        );
-        assert_eq!(stale.replay[0].data["resync_required"], true);
+        assert_generated_gap(&stale.replay[0], "stale_cursor");
 
         registry.publish("foreign", "event", json!(1)).unwrap();
         let foreign_cursor = format!("{}:0", Uuid::new_v4());
@@ -753,14 +834,7 @@ mod tests {
             .subscribe("p", "foreign", Some(&foreign_cursor))
             .await
             .unwrap();
-        assert_eq!(foreign.replay[0].event, "gap");
-        assert_eq!(foreign.replay[0].id, None);
-        assert_eq!(foreign.replay[0].data["reason"], "stale_cursor");
-        assert_eq!(
-            foreign.replay[0].data["requires_transcript_reconciliation"],
-            true
-        );
-        assert_eq!(foreign.replay[0].data["resync_required"], true);
+        assert_generated_gap(&foreign.replay[0], "stale_cursor");
 
         let future_frame = registry.publish("future", "event", json!(1)).unwrap();
         let future_epoch = future_frame
@@ -775,14 +849,7 @@ mod tests {
             .subscribe("p", "future", Some(&future_cursor))
             .await
             .unwrap();
-        assert_eq!(future.replay[0].event, "gap");
-        assert_eq!(future.replay[0].id, None);
-        assert_eq!(future.replay[0].data["reason"], "stale_cursor");
-        assert_eq!(
-            future.replay[0].data["requires_transcript_reconciliation"],
-            true
-        );
-        assert_eq!(future.replay[0].data["resync_required"], true);
+        assert_generated_gap(&future.replay[0], "stale_cursor");
 
         let oldest = registry
             .publish("trimmed", "event", json!(0))
@@ -798,14 +865,7 @@ mod tests {
             .subscribe("p", "trimmed", Some(&cursor))
             .await
             .unwrap();
-        assert_eq!(trimmed.replay[0].event, "gap");
-        assert_eq!(trimmed.replay[0].id, None);
-        assert_eq!(trimmed.replay[0].data["reason"], "history_unavailable");
-        assert_eq!(
-            trimmed.replay[0].data["requires_transcript_reconciliation"],
-            true
-        );
-        assert_eq!(trimmed.replay[0].data["resync_required"], true);
+        assert_generated_gap(&trimmed.replay[0], "history_unavailable");
     }
     #[test]
     fn generated_gap_contract_rejects_false_literal_flags() {
@@ -934,6 +994,7 @@ mod tests {
                         events: VecDeque::new(),
                     },
                 );
+                state.subscriber_counts.insert(stream.clone(), 1);
                 state.subscribers.insert(
                     ("active".to_owned(), stream),
                     Subscriber {
@@ -951,10 +1012,22 @@ mod tests {
             Err(PublishError::StreamLimit)
         );
         registry.open_session("overflow-owner");
-        assert!(matches!(
-            registry.subscribe("overflow-owner", "overflow", None).await,
-            Err(SubscribeError::StreamLimit)
-        ));
+        for n in 0..256 {
+            let stream = format!("overflow-{n}");
+            assert!(matches!(
+                registry.subscribe("overflow-owner", &stream, None).await,
+                Err(SubscribeError::StreamLimit)
+            ));
+            let state = registry
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            assert!(state.sessions.contains_key("overflow-owner"));
+            assert!(
+                state.gates.is_empty(),
+                "rejected admission left gate metadata"
+            );
+        }
         let state = registry
             .0
             .lock()
