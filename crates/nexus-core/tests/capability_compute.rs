@@ -3649,3 +3649,149 @@ async fn concurrent_conflicting_first_use_leaves_no_running_loser() {
     let loser_payload: serde_json::Value = serde_json::from_str(&loser_payload).unwrap();
     assert_eq!(loser_payload["code"], json!("operation_id_conflict"));
 }
+
+/// v1.207 P3 wave 4 (Greptile P1 "Stopped runs appear busy", live branch): the
+/// §B.3 Busy answer requires an ACTUAL live owner.
+///
+/// A retry issued while THIS process is executing the operation (its id is in
+/// the process in-flight registry) is refused `operation_in_progress` — and it
+/// never re-runs the module.
+#[tokio::test]
+#[serial_test::serial]
+async fn retry_against_a_live_owner_is_busy_and_never_reruns() {
+    use nexus_core::execution::test_hooks::{set_compute_in_flight_gate, ComputeInFlightGate};
+
+    let f = fixture().await;
+    let op = format!("op_{}", "d".repeat(32));
+    let mut request = run_request(WORLD, MODULE);
+    request.operation_id = Some(op.clone());
+
+    // The owner registers in the process in-flight registry and parks at the
+    // seam BEFORE the module executes; the second caller is a retry of the
+    // identical request (same id, same fingerprint), so the receipt is the only
+    // thing that can answer it.
+    let gate = Arc::new(ComputeInFlightGate::new(op));
+    set_compute_in_flight_gate(Some(Arc::clone(&gate)));
+    let (owner, retry) = tokio::join!(compute_run(&f.core, &f.compute, request.clone()), async {
+        gate.registered.notified().await;
+        let retry = compute_run(&f.core, &f.compute, request).await;
+        gate.proceed.notify_one();
+        retry
+    });
+    set_compute_in_flight_gate(None);
+
+    owner.expect("the parked owner completes once released");
+    match retry.expect_err("a retry against a live owner is refused") {
+        CoreError::Coded { code, .. } => assert_eq!(code, "operation_in_progress"),
+        other => panic!("a live owner is the Busy refusal, got {other:?}"),
+    }
+    assert_eq!(
+        compute_run_rows(f.core.pool(), WORLD).await,
+        1,
+        "the refused retry never executed the module a second time"
+    );
+}
+
+/// v1.207 P3 wave 4 (Greptile P1 "Stopped runs appear busy", owner-dead
+/// branch): a `running` receipt whose owner is gone is `uncertain` — never the
+/// Busy refusal (which would tell the caller to wait for work that has
+/// stopped), and never a re-run.
+///
+/// The owner registers and parks at the seam, then the caller is DROPPED there
+/// (a crash / cancellation): the durable receipt stays `running` while the
+/// process-local in-flight claim is released — exactly the state a crash
+/// leaves behind.
+#[tokio::test]
+#[serial_test::serial]
+async fn retry_after_its_owner_is_gone_is_uncertain_and_never_reruns() {
+    use nexus_core::execution::test_hooks::{set_compute_in_flight_gate, ComputeInFlightGate};
+
+    let f = fixture().await;
+    let op = format!("op_{}", "e".repeat(32));
+    let mut request = run_request(WORLD, MODULE);
+    request.operation_id = Some(op.clone());
+
+    let gate = Arc::new(ComputeInFlightGate::new(op));
+    set_compute_in_flight_gate(Some(Arc::clone(&gate)));
+    // Selecting on `registered` DROPS the parked owner before the module runs.
+    tokio::select! {
+        _ = compute_run(&f.core, &f.compute, request.clone()) => {
+            panic!("the owner must still be parked at the in-flight seam");
+        }
+        () = gate.registered.notified() => {}
+    }
+    set_compute_in_flight_gate(None);
+
+    // The crash trace: the run row is still `running` and its receipt is still
+    // `running`, but no live owner remains.
+    let (run_id, status): (String, String) = sqlx::query_as(
+        "SELECT run_id, status FROM compute_sessions \
+          WHERE world_id = ? AND run_id IS NOT NULL",
+    )
+    .bind(WORLD)
+    .fetch_one(f.core.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        status, "running",
+        "the abandoned run row is the crash trace"
+    );
+    let receipt = receipt_for_run(&f, &run_id)
+        .await
+        .expect("the abandoned run carries its durable `running` receipt");
+    assert_eq!(
+        receipt.status,
+        nexus_local_db::operation_receipts::STATUS_RUNNING
+    );
+
+    match compute_run(&f.core, &f.compute, request)
+        .await
+        .expect_err("a running receipt with no live owner is refused")
+    {
+        CoreError::Coded { code, .. } => assert_eq!(code, "uncertain"),
+        other => panic!("an owner-dead running receipt is uncertain, got {other:?}"),
+    }
+    assert_eq!(
+        compute_run_rows(f.core.pool(), WORLD).await,
+        1,
+        "the refused retry never re-ran the module"
+    );
+}
+
+/// v1.207 P3 wave 4 (Greptile P1 "Retried errors lose details"): a failed
+/// request's replay restores the ORIGINAL structured refusal from the receipt.
+///
+/// The first call fails manifest validation with `InputValidation` carrying
+/// `details.invalid_entries`; the identical retry (a lost response) must return
+/// that same variant with byte-equal details — never a flattened `Coded` that
+/// loses the entry ids and reasons.
+#[tokio::test]
+#[serial_test::serial]
+async fn failed_request_replay_restores_the_structured_refusal() {
+    let f = fixture().await;
+    seed_broken_character(f.core.pool(), "kb_broken").await;
+    let op = format!("op_{}", "f".repeat(32));
+    let mut request = run_request(WORLD, MODULE);
+    request.operation_id = Some(op);
+
+    let first = match compute_run(&f.core, &f.compute, request.clone()).await {
+        Err(CoreError::InputValidation { details }) => details,
+        other => panic!("a poisoned entry must be an input-validation refusal, got {other:?}"),
+    };
+    assert_eq!(first["invalid_entries"][0]["entry_id"], "kb_broken");
+
+    let replay = match compute_run(&f.core, &f.compute, request).await {
+        Err(CoreError::InputValidation { details }) => details,
+        other => panic!("the replay must restore the input-validation refusal, got {other:?}"),
+    };
+    assert_eq!(
+        serde_json::to_string(&replay).unwrap(),
+        serde_json::to_string(&first).unwrap(),
+        "the replayed details are byte-equal to the first refusal's"
+    );
+    assert_eq!(
+        compute_run_rows(f.core.pool(), WORLD).await,
+        1,
+        "the refused retry never re-ran the module"
+    );
+}

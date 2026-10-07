@@ -181,23 +181,40 @@ impl Drop for RuntimeGuard {
 
 /// Assert the spawned runtime has NO HTTP listener: every TCP listener of
 /// the runtime process must be one of the Connect listen multiaddrs it
-/// printed. (A well-known-port probe would false-fail under the spec's
-/// coexistence model — a creator-facing `nexus42` daemon may legitimately
-/// occupy the daemon port while the runtime runs; the guarantee is about
-/// THIS process, which never boots the daemon router.)
+/// printed, or the Connect **peer-tools event lane**'s own listener.
+///
+/// The lane listener is part of the Connect cohort, not a daemon HTTP / SPA
+/// listener: `nexus-runtime::boot` starts it with
+/// `nexus_core::connect::start_peer_tools_lane`, whose plaintext-WS accept
+/// loop binds the lane's configured `host:port` — the loopback
+/// `DEFAULT_CONNECT_HOST:DEFAULT_CONNECT_PORT` (`connect/config.rs`) when no
+/// `connect/daemon.json` overrides it, which is the hermetic seeded home.
+/// The no-HTTP guarantee is unchanged: this process boots no daemon router
+/// and no embedded SPA, so a listener on any OTHER port (the daemon API
+/// default 8420 included) still fails here.
+///
+/// (A well-known-port probe would false-fail under the spec's coexistence
+/// model — a creator-facing `nexus42` daemon may legitimately occupy the
+/// daemon port while the runtime runs; the guarantee is about THIS process,
+/// which never boots the daemon router.)
 ///
 /// Implemented with `lsof` on unix (present on macOS + Linux CI runners);
 /// on Windows the check is a no-op — the property is structural (the
-/// headless boot binds only `SpokeConnectNode`; there is no axum bind in
-/// the path), and the T2 Windows CI leg smoke-tests `--version`.
+/// headless boot binds only `SpokeConnectNode` + the peer-tools WS lane;
+/// there is no axum bind in the path), and the T2 Windows CI leg smoke-tests
+/// `--version`.
 fn assert_no_http_listener(child_pid: u32, listen_addrs: &[String]) {
     #[cfg(unix)]
     {
-        let ports: Vec<u16> = listen_addrs
+        let mut expected_ports: Vec<u16> = listen_addrs
             .iter()
             .filter_map(|addr| addr.rsplit('/').next())
             .filter_map(|port| port.parse().ok())
             .collect();
+        // The peer-tools event lane's WS listener (see the doc comment): the
+        // seeded home has no `connect/daemon.json`, so the lane takes the
+        // Connect lane's documented default loopback port.
+        expected_ports.push(nexus_core::connect::DEFAULT_CONNECT_PORT);
         let out = Command::new("lsof")
             .args([
                 "-nP",
@@ -220,9 +237,11 @@ fn assert_no_http_listener(child_pid: u32, listen_addrs: &[String]) {
                 continue;
             };
             assert!(
-                ports.contains(&port),
+                expected_ports.contains(&port),
                 "runtime process holds an unexpected TCP listener on port {port} \
-                 (daemon HTTP / SPA listener?):\n{text}"
+                 (neither a printed Connect multiaddr nor the peer-tools WS lane \
+                 default {} — a daemon HTTP / SPA listener?):\n{text}",
+                nexus_core::connect::DEFAULT_CONNECT_PORT
             );
         }
     }

@@ -720,7 +720,7 @@ mod tests {
         let (_, _, mut first) = registry.subscribe("p", "s", None).await.unwrap();
         registry.activate("p", "s");
         let (_, _, mut second) = registry.subscribe("p", "s", None).await.unwrap();
-        assert!(first.next_batch().await.is_empty());
+        assert_eq!(first.next_batch().await, [] as [EventFrame; 0]);
         assert!(!first.is_alive());
         assert!(second.is_alive());
         let frame = registry.publish("s", "one", json!(1)).unwrap();
@@ -746,11 +746,11 @@ mod tests {
                 .is_err()
         );
         let (_, _, mut second) = registry.subscribe("p", "s", None).await.unwrap();
-        assert!(
+        assert_eq!(
             tokio::time::timeout(Duration::from_millis(50), first.next_batch())
                 .await
-                .expect("cancellation must release the ack wait")
-                .is_empty()
+                .expect("cancellation must release the ack wait"),
+            [] as [EventFrame; 0]
         );
         registry.activate("p", "s");
         // Drain `second`'s replay (the frame published before it registered),
@@ -772,11 +772,11 @@ mod tests {
         registry.activate("p", "s");
         assert_eq!(subscription.next_batch().await.len(), 1);
         registry.remove_session("p");
-        assert!(
+        assert_eq!(
             tokio::time::timeout(Duration::from_millis(50), subscription.next_batch())
                 .await
-                .expect("session close must release the ack wait")
-                .is_empty()
+                .expect("session close must release the ack wait"),
+            [] as [EventFrame; 0]
         );
     }
 
@@ -815,7 +815,7 @@ mod tests {
         let frame = registry.publish("s", "one", json!({})).unwrap();
         let id = frame.id.unwrap();
         let (epoch, sequence) = id.rsplit_once(':').unwrap();
-        assert!(!epoch.is_empty());
+        assert_ne!(epoch, "");
         assert_eq!(sequence, "1");
         assert!(sequence.parse::<u64>().is_ok());
         let (_, resumed_from, _) = registry.subscribe("p", "s", Some(&id)).await.unwrap();

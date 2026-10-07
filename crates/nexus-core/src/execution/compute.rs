@@ -77,7 +77,8 @@ use nexus_local_db::operation_receipts::{
 };
 use nexus_orchestration::compute_input_builder::ComputeInputBuilder;
 use serde_json::{json, Value};
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, LazyLock, Mutex};
 
 use crate::execution::operation_id::{self, OperationScope};
 
@@ -99,6 +100,66 @@ const DEFAULT_RUN_LIST_LIMIT: u32 = 20;
 
 /// Hard cap on the run-list page size.
 const MAX_RUN_LIST_LIMIT: u32 = 100;
+
+/// The compute operation ids THIS process is executing right now (v1.207 P3
+/// §B.3 live-owner signal), mirroring the Connect lane's `InFlightWrites`.
+///
+/// §B.3 distinguishes a `running` receipt whose owner is LIVE (the typed Busy
+/// refusal) from one whose owner is unknown (`uncertain`). A receipt carries
+/// no owner marker, and the store cannot infer liveness, so the answer comes
+/// from this process-local registry: an id present here is an effect THIS
+/// process is running right now, while an id left `running` by a process that
+/// died is absent — the retry reads `uncertain` and never re-runs.
+///
+/// One registry per process (not per `CoreService`): a workspace home is
+/// opened once per process by the `SQLite` owner fence, so "this process" is
+/// the right liveness scope for every core serving that home.
+static IN_FLIGHT_RUNS: LazyLock<Mutex<HashSet<String>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
+
+/// True when THIS process is running the effect for `operation_id` now.
+///
+/// A poisoned lock reports `false`, which degrades to the `uncertain`
+/// refusal — never to a claim of live ownership.
+fn receipt_owner_is_live(operation_id: &str) -> bool {
+    IN_FLIGHT_RUNS
+        .lock()
+        .is_ok_and(|in_flight| in_flight.contains(operation_id))
+}
+
+/// RAII registration of an acquired compute operation in the process-local
+/// in-flight registry.
+///
+/// Dropping it ends the live-owner claim — on settlement, on an early return,
+/// and on a dropped (cancelled) future alike — so a retry after the owner is
+/// gone reads the id as owner-unknown rather than as Busy. (The compute effect
+/// itself runs on the blocking pool and is not force-cancellable, so a
+/// caller dropped mid-effect can leave the effect running; that window answers
+/// `uncertain`, the fail-closed direction — never a false live claim and never
+/// a re-run.)
+struct InFlightComputeGuard {
+    operation_id: String,
+}
+
+impl InFlightComputeGuard {
+    /// Mark an acquired operation as running in this process.
+    fn register(operation_id: &str) -> Self {
+        if let Ok(mut in_flight) = IN_FLIGHT_RUNS.lock() {
+            in_flight.insert(operation_id.to_string());
+        }
+        Self {
+            operation_id: operation_id.to_string(),
+        }
+    }
+}
+
+impl Drop for InFlightComputeGuard {
+    fn drop(&mut self) {
+        if let Ok(mut in_flight) = IN_FLIGHT_RUNS.lock() {
+            in_flight.remove(&self.operation_id);
+        }
+    }
+}
 
 /// The daemon-wide compute serialization permit, acquired before every
 /// invocation.
@@ -356,9 +417,20 @@ pub async fn compute_run(
                 .to_string(),
             )
             .await;
-            return answer_from_receipt(&stored);
+            return answer_from_receipt(&stored, receipt_owner_is_live(&stored.operation_id));
         }
     }
+
+    // §B.3 live-owner signal (v1.207 P3 wave 4): from here until the guard
+    // drops, THIS process owns the effect for `operation_id`, so a concurrent
+    // or retried call is answered with the typed Busy refusal instead of
+    // `uncertain`.
+    let _in_flight = InFlightComputeGuard::register(&operation_id);
+    // The live-owner rendezvous seam (tests only; compiled out of production
+    // builds): the registered owner parks here so a test can issue a retry
+    // against a KNOWN live owner deterministically.
+    #[cfg(any(test, feature = "test-hooks"))]
+    crate::execution::test_hooks::compute_in_flight_gate_wait(&operation_id).await;
 
     let engine = context.engine()?;
     let permit = context
@@ -1641,7 +1713,8 @@ fn supplied_operation_identity(
 /// Ask the receipt store FIRST for a caller-supplied id (spec §B.3 steps 1–3).
 ///
 /// `Some(answer)` when a receipt already owns the id (a terminal receipt answers
-/// the replay, a `running` receipt is the typed Busy). `None` when no receipt
+/// the replay, a `running` receipt answers from its ACTUAL ownership — Busy for
+/// this process's live run, `uncertain` otherwise). `None` when no receipt
 /// exists — safe to apply exactly once. A stored receipt with a different
 /// fingerprint is the typed `operation_id_conflict`.
 async fn replay_from_receipt(
@@ -1661,17 +1734,23 @@ async fn replay_from_receipt(
             },
         ));
     }
-    Ok(Some(answer_from_receipt(&receipt)?))
+    Ok(Some(answer_from_receipt(
+        &receipt,
+        receipt_owner_is_live(&receipt.operation_id),
+    )?))
 }
 
 /// The §B.3 answer for a receipt that already owns an operation id.
 ///
-/// A live daemon serving the call is the live-request lane: a `running` receipt
-/// is the in-flight Busy answer. The owner-dead `uncertain` answer belongs to
-/// the boot recovery lane, which calls `classify_recovery` with
-/// `owner_is_live = false`.
-fn answer_from_receipt(receipt: &OperationReceipt) -> CoreResult<RunResponse> {
-    match classify_recovery(Some(receipt), true) {
+/// `owner_is_live` is the caller's ACTUAL ownership knowledge (see
+/// [`receipt_owner_is_live`]), never an assumption: a `running` receipt THIS
+/// process is executing right now is the in-flight Busy answer, while a
+/// `running` receipt whose owner is gone (a crash left it behind) is the
+/// `uncertain` answer — the caller is told to inspect, never to wait for work
+/// that has stopped and never to re-run it. The boot recovery lane passes
+/// `false` directly, because no run owner can still be live at boot.
+fn answer_from_receipt(receipt: &OperationReceipt, owner_is_live: bool) -> CoreResult<RunResponse> {
+    match classify_recovery(Some(receipt), owner_is_live) {
         RecoveryDecision::AnswerFromReceipt(terminal) => answer_from_terminal_receipt(&terminal),
         RecoveryDecision::InProgress(_) => {
             Err(operation_in_progress_refusal(&receipt.operation_id))
@@ -1718,7 +1797,19 @@ fn answer_from_terminal_receipt(receipt: &OperationReceipt) -> CoreResult<RunRes
 }
 
 /// Render a terminal non-`finished` receipt as the refusal the first call
-/// produced: the stored `code`/`message`, never a fabricated success.
+/// produced: the stored `code`/`message` (and structured detail), never a
+/// fabricated success.
+///
+/// The stored payload is the run's durable `error_json` — the EXACT object the
+/// first call persisted and `GET /runs/{id}` serves — so the replay restores
+/// the same variant, not a flattened coded string:
+/// - `invalid_input` carrying a `details` object is the `InputValidation`
+///   refusal (its `details.invalid_entries` holds the entry ids and reasons a
+///   caller who lost the first response must be able to recover);
+/// - `invalid_input` without `details` is the plain coded refusal (a manifest
+///   validation failure stores no per-entry detail);
+/// - `internal` stays internal (never a transport-visible code);
+/// - everything else replays as `Coded` with the stored code.
 fn replayed_failure_refusal(receipt: &OperationReceipt) -> CoreError {
     let payload: Value = receipt
         .error_json
@@ -1733,6 +1824,13 @@ fn replayed_failure_refusal(receipt: &OperationReceipt) -> CoreError {
         .get("message")
         .and_then(Value::as_str)
         .unwrap_or("the compute run failed");
+    if code == "invalid_input" {
+        if let Some(details) = payload.get("details") {
+            return CoreError::InputValidation {
+                details: details.clone(),
+            };
+        }
+    }
     if code == "internal" {
         CoreError::Internal {
             category: format!(
