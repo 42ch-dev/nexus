@@ -17,14 +17,22 @@
 -- the single engine owner, and the outbox family mirrors every mutation onto
 -- `core_changes` (`resource_kind = 'operation_receipts'`).
 --
--- The payload CHECK is the durable half of §B.2's "terminal payload, exactly
--- one set on terminal settlement": `finished` carries `result_json` and no
--- `error_json`, `failed` carries `error_json` and no `result_json`, and the
--- payload-free terminals (`cancelled`, `interrupted`) carry neither.
--- `terminal_at` is set exactly when the receipt is terminal, and a `running`
--- receipt can never carry a terminal payload — so a receipt cannot be
--- laundered back into an unsettled shape, and the no-downgrade trigger below
--- refuses a settled receipt being put back to `running` at all.
+-- Payload contract, verbatim from §B.2 ("terminal payload, exactly one set on
+-- terminal settlement"): a `running` receipt carries neither payload and no
+-- terminal stamp; every terminal receipt carries a terminal stamp and
+-- EXACTLY ONE of `result_json` / `error_json`. Which column a terminal uses
+-- is the store's rendering (`finished` ⇒ `result_json`; `failed` /
+-- `cancelled` / `interrupted` ⇒ `error_json`, the non-success reason), not a
+-- schema-level status constraint.
+--
+-- Terminal receipts are immutable: the `immutable_terminal_operation_receipts`
+-- trigger below refuses EVERY update of an already-terminal row, so the
+-- settled answer a replay is served from can never be rewritten — neither
+-- downgraded back to `running`, nor rewritten from `finished` to `failed`, nor
+-- given a replacement payload. Only the `running` → terminal settlement
+-- transition is possible (`settle_operation` gates its UPDATE on
+-- `status = 'running'`), and the writer-protocol guard below still governs the
+-- insert.
 
 CREATE TABLE IF NOT EXISTS operation_receipts (
     operation_id TEXT PRIMARY KEY,
@@ -40,11 +48,10 @@ CREATE TABLE IF NOT EXISTS operation_receipts (
     sequence INTEGER NOT NULL,
     CHECK (
         (status = 'running' AND result_json IS NULL AND error_json IS NULL AND terminal_at IS NULL)
-        OR (status = 'finished' AND result_json IS NOT NULL AND error_json IS NULL AND terminal_at IS NOT NULL)
-        OR (status = 'failed' AND error_json IS NOT NULL AND result_json IS NULL AND terminal_at IS NOT NULL)
         OR (
-            status IN ('cancelled', 'interrupted')
-            AND result_json IS NULL AND error_json IS NULL AND terminal_at IS NOT NULL
+            status IN ('finished', 'failed', 'cancelled', 'interrupted')
+            AND terminal_at IS NOT NULL
+            AND ((result_json IS NULL) <> (error_json IS NULL))
         )
     )
 );
@@ -132,18 +139,28 @@ BEGIN
      );
 END;
 
--- Terminal is never downgraded back to `running` (§B.2): the schema refuses
--- the downgrade itself, so no writer path — including a future direct one —
--- can resurrect a settled receipt. Settling only ever transitions a
--- `running` row (the store's UPDATE is gated on `status = 'running'`), so
--- this trigger never fires for a legitimate settlement.
-CREATE TRIGGER IF NOT EXISTS no_downgrade_operation_receipts
+-- Terminal immutability: a settled receipt is the durable answer a replay is
+-- served from, so NO subsequent mutation of it is admitted — not a downgrade
+-- back to `running`, not a `finished` → `failed` rewrite, not a payload
+-- replacement under the same status, and not its removal (a deleted receipt
+-- would read as "no receipt" and invite exactly the double-apply §B.3 exists
+-- to prevent). The only reachable transition is `running` → terminal (the
+-- store's UPDATE is gated on `status = 'running'`), so these triggers never
+-- fire for a legitimate settlement.
+CREATE TRIGGER IF NOT EXISTS immutable_terminal_operation_receipts_update
 BEFORE UPDATE ON operation_receipts
 FOR EACH ROW
 WHEN OLD.status IN ('finished', 'failed', 'cancelled', 'interrupted')
-     AND NEW.status = 'running'
 BEGIN
-  SELECT RAISE(ABORT, 'OPERATION_RECEIPT_TERMINAL_DOWNGRADE');
+  SELECT RAISE(ABORT, 'OPERATION_RECEIPT_TERMINAL_IMMUTABLE');
+END;
+
+CREATE TRIGGER IF NOT EXISTS immutable_terminal_operation_receipts_delete
+BEFORE DELETE ON operation_receipts
+FOR EACH ROW
+WHEN OLD.status IN ('finished', 'failed', 'cancelled', 'interrupted')
+BEGIN
+  SELECT RAISE(ABORT, 'OPERATION_RECEIPT_TERMINAL_IMMUTABLE');
 END;
 
 -- Outbox family: one `core_changes` event per receipt mutation, mirroring

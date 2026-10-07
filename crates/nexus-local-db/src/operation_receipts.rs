@@ -121,14 +121,52 @@ pub enum RecoveryDecision {
     /// (spec §B.3: typed Busy). The effect is **not** re-applied here.
     InProgress(OperationReceipt),
     /// No receipt at all: safe to apply exactly once — write the `running`
-    /// receipt FIRST ([`begin_operation`]), run the effect, then
-    /// [`settle_operation`] terminally.
+    /// receipt FIRST ([`begin_operation`]) and only run the effect when that
+    /// call reports [`BeginOutcome::Acquired`], then [`settle_operation`]
+    /// terminally.
     ApplyOnce,
     /// A `running` receipt whose owner is no longer live (crash/restart
     /// ambiguity) on a write with no terminal receipt. Spec §B.3 item 4: the
     /// caller gets a typed uncertain/blocked answer — **never** a blind
     /// retry, and the store never fabricates a terminal for it.
     Uncertain(OperationReceipt),
+}
+
+/// The outcome of [`begin_operation`]: who performed the first (`running`)
+/// write for this operation id.
+///
+/// This is the exclusive-acquisition gate of the recover → begin → effect
+/// sequence (§B.3 step 3): only the [`Self::Acquired`] caller may run the
+/// effect. Every other caller — a same-fingerprint replay, a racing loser, or
+/// a retry against an already-terminal receipt — gets [`Self::Existing`] and
+/// must answer from the stored receipt instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BeginOutcome {
+    /// This call wrote the `running` receipt: the caller owns the effect and
+    /// is the only one allowed to apply it.
+    Acquired(OperationReceipt),
+    /// A receipt for this operation id already existed (this call inserted
+    /// nothing). The effect must **not** be run by this caller; the stored
+    /// receipt — `running`, or terminal if it was already settled — is the
+    /// answer.
+    Existing(OperationReceipt),
+}
+
+impl BeginOutcome {
+    /// The stored receipt, whichever side of the acquisition this call landed
+    /// on.
+    #[must_use]
+    pub const fn receipt(&self) -> &OperationReceipt {
+        match self {
+            Self::Acquired(receipt) | Self::Existing(receipt) => receipt,
+        }
+    }
+
+    /// True only for the caller that acquired the effect (and must run it).
+    #[must_use]
+    pub const fn is_acquired(&self) -> bool {
+        matches!(self, Self::Acquired(_))
+    }
 }
 
 const fn db_err(e: sqlx::Error) -> LocalDbError {
@@ -166,20 +204,24 @@ pub async fn get_operation_receipt(
 }
 
 /// Write the `running` receipt for an operation **before** its effect runs
-/// (spec §B.3 step 3), and return the stored row.
+/// (spec §B.3 step 3), and report who acquired the effect.
 ///
 /// First-writer-wins on `operation_id`:
 ///
-/// - no receipt exists ⇒ insert `running` and return it;
-/// - a receipt exists with the same `request_fingerprint` ⇒ replay: return the
-///   stored row unchanged (whatever status it holds — a terminal row stays
-///   terminal);
+/// - no receipt exists ⇒ this call inserts `running` and returns
+///   [`BeginOutcome::Acquired`] — the caller owns the effect and is the only
+///   one allowed to run it;
+/// - a receipt exists with the same `request_fingerprint` ⇒ replay/racing
+///   loser: [`BeginOutcome::Existing`] with the stored row unchanged
+///   (whatever status it holds — a terminal row stays terminal), and the
+///   effect must NOT be run;
 /// - a receipt exists with a **different** fingerprint ⇒
 ///   [`LocalDbError::OperationIdConflict`], the typed `operation_id_conflict`
 ///   refusal. The existing row is left untouched.
 ///
-/// The insert is `ON CONFLICT DO NOTHING` followed by a read, so two racers
-/// converge on exactly one stored row.
+/// The insert is `ON CONFLICT(operation_id) DO NOTHING` and the outcome comes
+/// from the statement's own affected-row count, so exactly one racer is told
+/// it acquired the effect and every other racer is told it did not.
 ///
 /// # Errors
 ///
@@ -192,14 +234,14 @@ pub async fn begin_operation(
     consumer: &str,
     subject_id: &str,
     request_fingerprint: &str,
-) -> Result<OperationReceipt, LocalDbError> {
+) -> Result<BeginOutcome, LocalDbError> {
     if !is_known_consumer(consumer) {
         return Err(LocalDbError::ValidationError(format!(
             "unknown operation receipt consumer '{consumer}'"
         )));
     }
     let now = now_rfc3339();
-    sqlx::query(
+    let inserted = sqlx::query(
         "INSERT INTO operation_receipts \
              (operation_id, consumer, subject_id, status, request_fingerprint, \
               result_json, error_json, created_at, updated_at, terminal_at, sequence) \
@@ -217,6 +259,12 @@ pub async fn begin_operation(
     .await
     .map_err(db_err)?;
 
+    // `changes()` distinguishes the two sides of the first-writer-wins race:
+    // exactly one racer inserted the `running` row (and owns the effect), the
+    // others inserted nothing and must answer from the stored receipt. Both
+    // sides then read the same stored row back.
+    let acquired = inserted.rows_affected() == 1;
+
     let stored = get_operation_receipt(pool, operation_id)
         .await?
         .ok_or(sqlx::Error::RowNotFound)?;
@@ -225,49 +273,49 @@ pub async fn begin_operation(
             operation_id: operation_id.to_string(),
         });
     }
-    Ok(stored)
+    Ok(if acquired {
+        BeginOutcome::Acquired(stored)
+    } else {
+        BeginOutcome::Existing(stored)
+    })
 }
 
 /// Settle a receipt terminally, and return the stored row.
 ///
-/// `status` must be terminal. The payload shape is enforced here and by the
-/// table CHECK: `finished` requires `Some(result)` (the result payload),
-/// `failed` requires `Some(error)` (the error payload), and `cancelled` /
-/// `interrupted` require `None` (payload-free terminals).
+/// `status` must be terminal and `payload` is required: §B.2's contract is
+/// "terminal payload, exactly one set on terminal settlement", so every
+/// terminal settlement carries exactly one of `result_json` / `error_json`.
+/// The column is this store's rendering — `finished` carries the success
+/// result in `result_json`, and `failed` / `cancelled` / `interrupted` carry
+/// the non-success reason in `error_json`.
 ///
 /// Only a `running` row is settled. A receipt that is already terminal is
-/// **never downgraded** and never re-settled: a late or racing settlement
-/// returns the stored terminal row unchanged (first terminal wins).
+/// immutable — the schema refuses every update of a settled row — so a late
+/// or racing settlement returns the stored terminal row unchanged: the first
+/// terminal wins, and it can never be rewritten.
 ///
 /// # Errors
 ///
-/// [`LocalDbError::ValidationError`] for a non-terminal `status` or a payload
-/// that does not match it, [`LocalDbError::Sqlx`] (with
-/// [`sqlx::Error::RowNotFound`]) when no receipt has been begun for
-/// `operation_id`, and [`LocalDbError::Sqlx`] on database failure.
+/// [`LocalDbError::ValidationError`] for a non-terminal `status`,
+/// [`LocalDbError::Sqlx`] (with [`sqlx::Error::RowNotFound`]) when no receipt
+/// has been begun for `operation_id`, and [`LocalDbError::Sqlx`] on database
+/// failure.
 pub async fn settle_operation(
     pool: &SqlitePool,
     operation_id: &str,
     status: &str,
-    payload: Option<&str>,
+    payload: &str,
 ) -> Result<OperationReceipt, LocalDbError> {
-    let (result_json, error_json) = match (status, payload) {
-        (STATUS_FINISHED, Some(payload)) => (Some(payload), None),
-        (STATUS_FAILED, Some(payload)) => (None, Some(payload)),
-        (STATUS_CANCELLED | STATUS_INTERRUPTED, None) => (None, None),
-        (STATUS_FINISHED | STATUS_FAILED, None) => {
+    let (result_json, error_json) = match status {
+        STATUS_FINISHED => (Some(payload), None),
+        // Non-success termination: the cancellation / interruption reason is
+        // the terminal payload, so the contract's "exactly one set" holds for
+        // every terminal settlement.
+        STATUS_FAILED | STATUS_CANCELLED | STATUS_INTERRUPTED => (None, Some(payload)),
+        other => {
             return Err(LocalDbError::ValidationError(format!(
-                "settling operation '{operation_id}' as '{status}' requires its terminal payload"
-            )));
-        }
-        (STATUS_CANCELLED | STATUS_INTERRUPTED, Some(_)) => {
-            return Err(LocalDbError::ValidationError(format!(
-                "settling operation '{operation_id}' as '{status}' takes no terminal payload"
-            )));
-        }
-        (other, _) => {
-            return Err(LocalDbError::ValidationError(format!(
-                "operation '{operation_id}' cannot be settled as '{other}'"
+                "operation '{operation_id}' cannot be settled as '{other}': \
+                 a settlement is terminal"
             )));
         }
     };
@@ -384,18 +432,41 @@ mod tests {
 
     fn op_id(suffix: &str) -> String {
         // A wire-shaped id (`op_` + 32 lowercase hex), so the rows mirror
-        // production receipts.
-        let hex = format!("{suffix:0>32}")
-            .chars()
-            .map(|c| {
-                if c.is_ascii_hexdigit() && !c.is_ascii_uppercase() {
-                    c
-                } else {
-                    'a'
-                }
-            })
-            .collect::<String>();
-        format!("op_{}", &hex[..32])
+        // production receipts. The suffix must already be lowercase hex: the
+        // helper refuses anything else rather than silently aliasing two
+        // fixture ids onto one row (e.g. `7g` and `7a`).
+        assert!(
+            suffix
+                .chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
+            "fixture id suffix must be lowercase hex: {suffix}"
+        );
+        format!("op_{suffix:0>32}")
+    }
+
+    /// Begin an operation and require that THIS call acquired the effect.
+    async fn begin_acquired(
+        pool: &SqlitePool,
+        operation_id: &str,
+        consumer: &str,
+        subject_id: &str,
+        request_fingerprint: &str,
+    ) -> OperationReceipt {
+        match begin_operation(
+            pool,
+            operation_id,
+            consumer,
+            subject_id,
+            request_fingerprint,
+        )
+        .await
+        .expect("begin operation")
+        {
+            BeginOutcome::Acquired(receipt) => receipt,
+            BeginOutcome::Existing(receipt) => {
+                panic!("expected to acquire the effect, got existing receipt {receipt:?}")
+            }
+        }
     }
 
     /// Crash: a `running` receipt whose owner died is ambiguous — the recovery
@@ -405,9 +476,7 @@ mod tests {
     async fn crashed_running_receipt_is_uncertain_never_reapplied() {
         let (pool, _dir) = admitted_pool().await;
         let id = op_id("1");
-        let begun = begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-1", "fp-1")
-            .await
-            .unwrap();
+        let begun = begin_acquired(&pool, &id, CONSUMER_COMPUTE_RUN, "run-1", "fp-1").await;
         assert_eq!(begun.status, STATUS_RUNNING);
         assert!(begun.terminal_at.is_none());
 
@@ -416,6 +485,14 @@ mod tests {
         match decision {
             RecoveryDecision::Uncertain(receipt) => assert_eq!(receipt.status, STATUS_RUNNING),
             other => panic!("crash ambiguity must be Uncertain, got {other:?}"),
+        }
+        // A replayed begin does NOT re-acquire the effect.
+        match begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-1", "fp-1")
+            .await
+            .unwrap()
+        {
+            BeginOutcome::Existing(receipt) => assert_eq!(receipt.status, STATUS_RUNNING),
+            BeginOutcome::Acquired(receipt) => panic!("a replay must not re-acquire: {receipt:?}"),
         }
         // The store fabricated no terminal for the orphaned receipt.
         assert_eq!(
@@ -434,9 +511,7 @@ mod tests {
     async fn live_running_receipt_is_in_progress_not_reapplied() {
         let (pool, _dir) = admitted_pool().await;
         let id = op_id("2");
-        begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-2", "fp-2")
-            .await
-            .unwrap();
+        begin_acquired(&pool, &id, CONSUMER_COMPUTE_RUN, "run-2", "fp-2").await;
         match recover(&pool, &id, true).await.unwrap() {
             RecoveryDecision::InProgress(receipt) => {
                 assert_eq!(receipt.status, STATUS_RUNNING);
@@ -453,20 +528,31 @@ mod tests {
     async fn cancelled_receipt_answers_the_replay_without_reapplying() {
         let (pool, _dir) = admitted_pool().await;
         let id = op_id("3");
-        begin_operation(
+        begin_acquired(
             &pool,
             &id,
             CONSUMER_CONNECT_INVOKE,
             "peer-1/tools.nexus.x",
             "fp-3",
         )
+        .await;
+        let settled = settle_operation(
+            &pool,
+            &id,
+            STATUS_CANCELLED,
+            "{\"reason\":\"cancel_requested\"}",
+        )
         .await
         .unwrap();
-        let settled = settle_operation(&pool, &id, STATUS_CANCELLED, None)
-            .await
-            .unwrap();
         assert_eq!(settled.status, STATUS_CANCELLED);
         assert!(settled.terminal_at.is_some());
+        // §B.2: a terminal settlement carries exactly one payload. This store
+        // renders a non-success reason (cancel/interruption) in `error_json`.
+        assert_eq!(settled.result_json, None);
+        assert_eq!(
+            settled.error_json.as_deref(),
+            Some("{\"reason\":\"cancel_requested\"}")
+        );
 
         // Even with the owner reported live, a terminal receipt wins.
         match recover(&pool, &id, true).await.unwrap() {
@@ -479,7 +565,7 @@ mod tests {
 
         // Replaying the SAME logical call returns the same terminal row: one
         // receipt, sequence and created_at unchanged — no second apply.
-        let replayed = begin_operation(
+        let replayed = match begin_operation(
             &pool,
             &id,
             CONSUMER_CONNECT_INVOKE,
@@ -487,8 +573,19 @@ mod tests {
             "fp-3",
         )
         .await
-        .unwrap();
+        .unwrap()
+        {
+            BeginOutcome::Existing(receipt) => receipt,
+            BeginOutcome::Acquired(receipt) => {
+                panic!("a replay must not re-acquire the effect: {receipt:?}")
+            }
+        };
         assert_eq!(replayed.status, STATUS_CANCELLED);
+        assert_eq!(
+            replayed.error_json.as_deref(),
+            Some("{\"reason\":\"cancel_requested\"}"),
+            "the terminal payload survives the replay unchanged"
+        );
         assert_eq!(replayed.sequence, settled.sequence);
         assert_eq!(replayed.created_at, settled.created_at);
         let stored = get_operation_receipt(&pool, &id).await.unwrap().unwrap();
@@ -513,9 +610,15 @@ mod tests {
             RecoveryDecision::ApplyOnce
         );
 
-        let begun = begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-4", "fp-4")
+        let begun = match begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-4", "fp-4")
             .await
-            .unwrap();
+            .unwrap()
+        {
+            BeginOutcome::Acquired(receipt) => receipt,
+            BeginOutcome::Existing(receipt) => {
+                panic!("a missing receipt must be acquired, got existing {receipt:?}")
+            }
+        };
         assert_eq!(
             begun.status, STATUS_RUNNING,
             "running is written before the effect"
@@ -523,7 +626,7 @@ mod tests {
         assert_eq!(begun.result_json, None);
         assert_eq!(begun.error_json, None);
 
-        let settled = settle_operation(&pool, &id, STATUS_FINISHED, Some("{\"ok\":true}"))
+        let settled = settle_operation(&pool, &id, STATUS_FINISHED, "{\"ok\":true}")
             .await
             .unwrap();
         assert_eq!(settled.status, STATUS_FINISHED);
@@ -537,22 +640,21 @@ mod tests {
         ));
     }
 
-    /// Terminal is never downgraded: a late settlement and a late `running`
-    /// write both return the stored terminal receipt unchanged.
+    /// Terminal is never downgraded and never rewritten: a late settlement and
+    /// a late `running` write both return the stored terminal receipt
+    /// unchanged.
     #[tokio::test]
     async fn terminal_receipt_is_never_downgraded() {
         let (pool, _dir) = admitted_pool().await;
         let id = op_id("5");
-        begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-5", "fp-5")
-            .await
-            .unwrap();
-        let finished = settle_operation(&pool, &id, STATUS_FINISHED, Some("{\"v\":1}"))
+        begin_acquired(&pool, &id, CONSUMER_COMPUTE_RUN, "run-5", "fp-5").await;
+        let finished = settle_operation(&pool, &id, STATUS_FINISHED, "{\"v\":1}")
             .await
             .unwrap();
         assert_eq!(finished.status, STATUS_FINISHED);
 
         // A late, conflicting terminal settlement loses to the first terminal.
-        let late = settle_operation(&pool, &id, STATUS_FAILED, Some("{\"v\":2}"))
+        let late = settle_operation(&pool, &id, STATUS_FAILED, "{\"v\":2}")
             .await
             .unwrap();
         assert_eq!(late.status, STATUS_FINISHED, "first terminal wins");
@@ -560,10 +662,17 @@ mod tests {
         assert_eq!(late.error_json, None);
         assert_eq!(late.terminal_at, finished.terminal_at);
 
-        // A late `running` write (the crash-recovery shape) cannot resurrect it.
-        let late_begin = begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-5", "fp-5")
+        // A late `running` write (the crash-recovery shape) cannot resurrect
+        // it, and it does not re-acquire the effect either.
+        let late_begin = match begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-5", "fp-5")
             .await
-            .unwrap();
+            .unwrap()
+        {
+            BeginOutcome::Existing(receipt) => receipt,
+            BeginOutcome::Acquired(receipt) => {
+                panic!("a settled operation must not be re-acquired: {receipt:?}")
+            }
+        };
         assert_eq!(late_begin.status, STATUS_FINISHED);
         assert_eq!(late_begin.result_json.as_deref(), Some("{\"v\":1}"));
 
@@ -579,9 +688,7 @@ mod tests {
     async fn conflicting_fingerprint_is_a_typed_operation_id_conflict() {
         let (pool, _dir) = admitted_pool().await;
         let id = op_id("6");
-        let first = begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-6", "fp-first")
-            .await
-            .unwrap();
+        let first = begin_acquired(&pool, &id, CONSUMER_COMPUTE_RUN, "run-6", "fp-first").await;
         let err = begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-6b", "fp-second")
             .await
             .expect_err("a different fingerprint must be refused");
@@ -598,24 +705,43 @@ mod tests {
         assert_eq!(stored.sequence, first.sequence);
     }
 
-    /// The payload invariant spec §B.2 states for terminal settlement.
+    /// §B.2's terminal-payload contract: every terminal settlement carries
+    /// exactly one of `result_json` / `error_json` — including `cancelled` and
+    /// `interrupted`, whose reason IS the payload. A non-terminal (or unknown)
+    /// settlement status is refused and leaves the receipt running.
     #[tokio::test]
-    async fn terminal_settlement_payload_shape_is_enforced() {
+    async fn every_terminal_settlement_carries_exactly_one_payload() {
         let (pool, _dir) = admitted_pool().await;
-        for (suffix, status, payload) in [
-            ("7a", STATUS_FINISHED, None),
-            ("7b", STATUS_FAILED, None),
-            ("7c", STATUS_CANCELLED, Some("{\"x\":1}")),
-            ("7d", STATUS_INTERRUPTED, Some("{\"x\":1}")),
-            ("7e", STATUS_RUNNING, None),
+        for (suffix, status) in [
+            ("7a", STATUS_FINISHED),
+            ("7b", STATUS_FAILED),
+            ("7c", STATUS_CANCELLED),
+            ("7d", STATUS_INTERRUPTED),
         ] {
             let id = op_id(suffix);
-            begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-7", "fp-7")
+            begin_acquired(&pool, &id, CONSUMER_COMPUTE_RUN, "run-7", "fp-7").await;
+            let settled = settle_operation(&pool, &id, status, "{\"x\":1}")
                 .await
                 .unwrap();
-            let err = settle_operation(&pool, &id, status, payload)
+            assert_eq!(settled.status, status);
+            assert!(settled.terminal_at.is_some());
+            assert!(
+                settled.result_json.is_some() ^ settled.error_json.is_some(),
+                "exactly one terminal payload, got {settled:?}"
+            );
+            if status == STATUS_FINISHED {
+                assert_eq!(settled.result_json.as_deref(), Some("{\"x\":1}"));
+            } else {
+                assert_eq!(settled.error_json.as_deref(), Some("{\"x\":1}"));
+            }
+        }
+
+        for (suffix, status) in [("7e", STATUS_RUNNING), ("7f", "not_a_status")] {
+            let id = op_id(suffix);
+            begin_acquired(&pool, &id, CONSUMER_COMPUTE_RUN, "run-7", "fp-7").await;
+            let err = settle_operation(&pool, &id, status, "{\"x\":1}")
                 .await
-                .expect_err("the payload/status combination must be refused");
+                .expect_err("a non-terminal settlement status must be refused");
             assert!(
                 matches!(err, LocalDbError::ValidationError(_)),
                 "got {err:?}"
@@ -633,7 +759,7 @@ mod tests {
 
         // Settling a receipt that was never begun is a caller bug, not a
         // fabricated receipt.
-        let err = settle_operation(&pool, &op_id("7f"), STATUS_CANCELLED, None)
+        let err = settle_operation(&pool, &op_id("7f0"), STATUS_CANCELLED, "{\"x\":1}")
             .await
             .expect_err("settle without begin must fail");
         assert!(
@@ -674,58 +800,74 @@ mod tests {
         assert_eq!(compute_run_receipt_status("discarded"), None);
     }
 
-    /// The schema is the durable home of §B.2's receipt invariant: the table
-    /// CHECK refuses a terminal shape without its terminal stamp, and the
-    /// no-downgrade trigger refuses a settled receipt being put back to
-    /// `running` even by a direct SQL write.
+    /// The schema is the durable home of §B.2's receipt invariant: the CHECK
+    /// requires a terminal stamp plus exactly one terminal payload, and a
+    /// settled receipt is IMMUTABLE — no admitted write path can downgrade it,
+    /// rewrite `finished` → `failed`, or replace its payload under the same
+    /// status, so the answer a replay is served can never be rewritten.
     #[tokio::test]
-    async fn schema_refuses_malformed_and_downgraded_receipt_shapes() {
+    async fn schema_pins_terminal_payload_and_terminal_immutability() {
         let (pool, _dir) = admitted_pool().await;
 
-        // `finished` without its result payload or terminal stamp: refused by
-        // the schema, independently of the store's own validation.
-        let err = sqlx::query(
-            "INSERT INTO operation_receipts \
-                 (operation_id, consumer, subject_id, status, request_fingerprint, \
-                  result_json, error_json, created_at, updated_at, terminal_at, sequence) \
-             VALUES (?, 'compute_run', 'run-check', 'finished', 'fp-check', \
-                     NULL, NULL, '2026-10-07T00:00:00Z', '2026-10-07T00:00:00Z', NULL, 1)",
-        )
-        .bind(op_id("ca"))
-        .execute(&pool)
-        .await
-        .expect_err("a payload-less finished receipt must be refused");
-        assert!(
-            err.as_database_error()
-                .is_some_and(|db| db.to_string().contains("CHECK")),
-            "expected a CHECK refusal, got: {err}"
-        );
+        // Malformed terminal shapes: no payload, no terminal stamp, or two
+        // payloads — all refused by the CHECK itself.
+        for (suffix, result_json, error_json, terminal_at) in [
+            ("ca", None, None, None),
+            ("cb", None, None, Some("2026-10-07T00:00:01Z")),
+            ("cc", Some("{}"), Some("{}"), Some("2026-10-07T00:00:01Z")),
+        ] {
+            let err = sqlx::query(
+                "INSERT INTO operation_receipts \
+                     (operation_id, consumer, subject_id, status, request_fingerprint, \
+                      result_json, error_json, created_at, updated_at, terminal_at, sequence) \
+                 VALUES (?, 'compute_run', 'run-check', 'finished', 'fp-check', \
+                         ?, ?, '2026-10-07T00:00:00Z', '2026-10-07T00:00:00Z', ?, 1)",
+            )
+            .bind(op_id(suffix))
+            .bind(result_json)
+            .bind(error_json)
+            .bind(terminal_at)
+            .execute(&pool)
+            .await
+            .expect_err("a malformed terminal shape must be refused");
+            assert!(
+                err.as_database_error()
+                    .is_some_and(|db| db.to_string().contains("CHECK")),
+                "expected a CHECK refusal, got: {err}"
+            );
+        }
 
-        // A settled receipt cannot be downgraded back to `running`.
-        let id = op_id("cb");
-        begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-check", "fp-cb")
+        // Every mutation of a settled receipt is refused.
+        let id = op_id("cd");
+        begin_acquired(&pool, &id, CONSUMER_COMPUTE_RUN, "run-check", "fp-cd").await;
+        let settled = settle_operation(&pool, &id, STATUS_FINISHED, "{\"v\":1}")
             .await
             .unwrap();
-        settle_operation(&pool, &id, STATUS_FINISHED, Some("{}"))
-            .await
-            .unwrap();
-        let err = sqlx::query(
-            "UPDATE operation_receipts SET status = 'running', result_json = NULL, terminal_at = NULL \
-              WHERE operation_id = ?",
-        )
-        .bind(&id)
-        .execute(&pool)
-        .await
-        .expect_err("a terminal receipt must not be downgradable");
-        assert!(
-            err.to_string()
-                .contains("OPERATION_RECEIPT_TERMINAL_DOWNGRADE"),
-            "expected the no-downgrade abort, got: {err}"
-        );
+        for sql in [
+            "UPDATE operation_receipts SET status = 'running', result_json = NULL, \
+             terminal_at = NULL WHERE operation_id = ?",
+            "UPDATE operation_receipts SET status = 'failed', result_json = NULL, \
+             error_json = '{\"v\":2}' WHERE operation_id = ?",
+            "UPDATE operation_receipts SET result_json = '{\"v\":3}' WHERE operation_id = ?",
+            "UPDATE operation_receipts SET updated_at = '2030-01-01T00:00:00Z' \
+             WHERE operation_id = ?",
+            "DELETE FROM operation_receipts WHERE operation_id = ?",
+        ] {
+            let err = sqlx::query(sql)
+                .bind(&id)
+                .execute(&pool)
+                .await
+                .expect_err("a settled receipt must be immutable");
+            assert!(
+                err.to_string()
+                    .contains("OPERATION_RECEIPT_TERMINAL_IMMUTABLE"),
+                "expected the terminal-immutability abort, got: {err}"
+            );
+        }
+
+        // The stored row is byte-identical to the settlement.
         let stored = get_operation_receipt(&pool, &id).await.unwrap().unwrap();
-        assert_eq!(stored.status, STATUS_FINISHED);
-        assert_eq!(stored.result_json.as_deref(), Some("{}"));
-        assert!(stored.terminal_at.is_some());
+        assert_eq!(stored, settled);
     }
 
     /// The receipt write path runs under the engine-owned writer protocol: the
@@ -735,9 +877,7 @@ mod tests {
     async fn receipts_are_guarded_by_the_writer_protocol() {
         let (pool, dir) = admitted_pool().await;
         let id = op_id("9");
-        begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-9", "fp-9")
-            .await
-            .expect("the engine owner is admitted to the receipt table");
+        begin_acquired(&pool, &id, CONSUMER_COMPUTE_RUN, "run-9", "fp-9").await;
 
         let db_path = dir.path().join("state.db");
         let raw = SqlitePool::connect(&format!("sqlite://{}?mode=rwc", db_path.display()))
@@ -759,5 +899,60 @@ mod tests {
             "expected a writer fence, got: {message}"
         );
         raw.close().await;
+    }
+
+    /// The begin outcome is the exclusive-acquisition gate of the
+    /// recover → begin → effect sequence: of two concurrent same-fingerprint
+    /// callers exactly ONE is told it acquired the effect, and the loser is
+    /// told to answer from the stored receipt instead of running it.
+    #[tokio::test]
+    async fn racing_begin_distinguishes_acquirer_from_loser() {
+        let (pool, _dir) = admitted_pool().await;
+        let id = op_id("ff");
+        let (first, second) = tokio::join!(
+            begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-race", "fp-race"),
+            begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-race", "fp-race"),
+        );
+        let outcomes = [first.unwrap(), second.unwrap()];
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|outcome| outcome.is_acquired())
+                .count(),
+            1,
+            "exactly one racer acquires the effect: {outcomes:?}"
+        );
+        let acquired = outcomes
+            .iter()
+            .find(|outcome| outcome.is_acquired())
+            .unwrap()
+            .receipt()
+            .clone();
+        let existing = outcomes
+            .iter()
+            .find(|outcome| !outcome.is_acquired())
+            .unwrap()
+            .receipt()
+            .clone();
+        assert_eq!(acquired.operation_id, existing.operation_id);
+        assert_eq!(acquired.sequence, existing.sequence);
+        assert_eq!(acquired.created_at, existing.created_at);
+        assert_eq!(acquired.status, STATUS_RUNNING);
+
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM operation_receipts WHERE operation_id = ?")
+                .bind(&id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(count, 1, "the race converges on exactly one receipt");
+
+        // A later replay is never an acquirer either.
+        assert!(
+            !begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-race", "fp-race")
+                .await
+                .unwrap()
+                .is_acquired()
+        );
     }
 }

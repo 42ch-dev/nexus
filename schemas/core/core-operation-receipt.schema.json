@@ -3,7 +3,7 @@
   "$id": "https://nexus42.invalid/schemas/core/core-operation-receipt.schema.json",
   "schema_version": 1,
   "title": "Nexus CoreOperationReceipt",
-  "description": "One durable operation receipt (v1.207 P3, RN-OGA-5). Mirrors one `operation_receipts` row: the first-writer-wins record of a logical operation, asked BEFORE any re-apply so a retry/replay after cancel, timeout or crash is answered from the receipt instead of being applied twice. Status is terminal once finished/failed/cancelled/interrupted and is never downgraded back to running.",
+  "description": "One durable operation receipt (v1.207 P3, RN-OGA-5). Mirrors one `operation_receipts` row: the first-writer-wins record of a logical operation, asked BEFORE any re-apply so a retry/replay after cancel, timeout or crash is answered from the receipt instead of being applied twice. A terminal receipt carries exactly one of `result_json` / `error_json` and is immutable: it is never downgraded back to running and never rewritten.",
   "type": "object",
   "required": [
     "operation_id",
@@ -53,11 +53,11 @@
     },
     "result_json": {
       "type": ["string", "null"],
-      "description": "Terminal result payload (JSON text); set only on `finished`."
+      "description": "Terminal result payload (JSON text); set exactly on a `finished` settlement."
     },
     "error_json": {
       "type": ["string", "null"],
-      "description": "Terminal error payload (JSON text); set only on `failed`."
+      "description": "Terminal error/reason payload (JSON text); set exactly on a `failed`, `cancelled` or `interrupted` settlement."
     },
     "created_at": {
       "type": "string",

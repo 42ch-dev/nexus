@@ -5,7 +5,7 @@
  */
 
 /**
- * One durable operation receipt (v1.207 P3, RN-OGA-5). Mirrors one `operation_receipts` row: the first-writer-wins record of a logical operation, asked BEFORE any re-apply so a retry/replay after cancel, timeout or crash is answered from the receipt instead of being applied twice. Status is terminal once finished/failed/cancelled/interrupted and is never downgraded back to running.
+ * One durable operation receipt (v1.207 P3, RN-OGA-5). Mirrors one `operation_receipts` row: the first-writer-wins record of a logical operation, asked BEFORE any re-apply so a retry/replay after cancel, timeout or crash is answered from the receipt instead of being applied twice. A terminal receipt carries exactly one of `result_json` / `error_json` and is immutable: it is never downgraded back to running and never rewritten.
  */
 export interface CoreOperationReceipt {
   /**
@@ -29,11 +29,11 @@ export interface CoreOperationReceipt {
    */
   request_fingerprint: string;
   /**
-   * Terminal result payload (JSON text); set only on `finished`.
+   * Terminal result payload (JSON text); set exactly on a `finished` settlement.
    */
   result_json?: string | null;
   /**
-   * Terminal error payload (JSON text); set only on `failed`.
+   * Terminal error/reason payload (JSON text); set exactly on a `failed`, `cancelled` or `interrupted` settlement.
    */
   error_json?: string | null;
   /**
