@@ -1533,30 +1533,71 @@ mod tests {
 
     #[tokio::test]
     async fn cancellation_drain_expiry_closes_started_push() {
-        let cancelled = Arc::new(Notify::new());
-        let started = Arc::new(Notify::new());
-        let future_started = Arc::clone(&started);
-        let invoke = async move {
-            future_started.notify_one();
-            std::future::pending::<nexus_spoke_adapter::SpokeResult<serde_json::Value>>().await
-        };
-        let cancel = Arc::clone(&cancelled);
-        tokio::spawn(async move {
-            started.notified().await;
-            cancel.notify_one();
-        });
-        let mut invoke = PollTracker::new(invoke);
-        let closed = Arc::new(AtomicBool::new(false));
-        let close_flag = Arc::clone(&closed);
-        let result = race_push(
-            &mut invoke,
-            &cancelled,
-            Duration::from_millis(30),
-            &move || close_flag.store(true, Ordering::SeqCst),
-        )
-        .await;
-        assert!(result.is_none());
-        assert!(closed.load(Ordering::SeqCst));
+        let (responder, gated, _client) = gated_tool_session().await;
+        let registry = crate::connect::events::connect_event_registry().clone();
+        let session = format!("drain-expiry-{}", uuid::Uuid::new_v4());
+        registry.open_session(&session);
+        let stream = format!("drain-expiry-stream-{}", uuid::Uuid::new_v4());
+        registry
+            .publish(&stream, "event", serde_json::json!({"n": 1}))
+            .unwrap();
+        let (_, _, subscription) = registry.subscribe(&session, &stream, None).await.unwrap();
+        registry.activate(&session, &stream);
+        let cancelled = subscription.cancellation();
+        gated.armed.store(true, Ordering::SeqCst);
+        let close_responder = Arc::clone(&responder);
+        let close_registry = registry.clone();
+        let close_session = session.clone();
+        let push_responder = Arc::clone(&responder);
+        let push_stream = stream.clone();
+        let driver = tokio::spawn(drive_delivery(
+            subscription,
+            cancelled,
+            Arc::new(tokio::sync::Mutex::new(())),
+            session.clone(),
+            Duration::from_millis(150),
+            move || {
+                close_responder.close();
+                close_registry.remove_session(&close_session);
+            },
+            move |frames| {
+                let responder = Arc::clone(&push_responder);
+                let stream = push_stream.clone();
+                async move {
+                    responder
+                        .invoke_tool(
+                            DELIVER_TOOL,
+                            serde_json::json!({"stream": stream, "frames": frames}),
+                        )
+                        .await
+                }
+            },
+        ));
+        gated.blocked.notified().await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        // Replacement cancels the subscription while its allocated send is
+        // still parked. The driver must consume only the original deadline.
+        let replacement = registry.subscribe(&session, &stream, None).await;
+        assert!(replacement.is_ok());
+        let drain_start = tokio::time::Instant::now();
+        tokio::time::timeout(Duration::from_millis(100), driver)
+            .await
+            .expect("cancellation drain must expire on the original deadline")
+            .unwrap();
+        assert!(drain_start.elapsed() < Duration::from_millis(100));
+        assert_eq!(responder.state(), ConnectResponderState::Closed);
+        assert!(gated.emitted.lock().unwrap().is_empty());
+        assert!(matches!(
+            registry.subscribe(&session, "after-close", None).await,
+            Err(crate::connect::events::SubscribeError::ClosedSession)
+        ));
+        let follow_up = responder
+            .invoke_tool(DELIVER_TOOL, serde_json::json!({}))
+            .await;
+        assert!(
+            matches!(follow_up, nexus_spoke_adapter::SpokeResult::Reject(_)),
+            "closed responder must not reuse the allocated sequence"
+        );
     }
 
     /// C4: a cancellation that wins before the push future's first poll must

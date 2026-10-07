@@ -155,9 +155,10 @@ the connection hello; no follow-up negotiation round-trip exists.
   without advertising the capability receives `op_unsupported` before the
   handler runs, with no subscription or delivery side effects.
 - `tools.nexus.deliver_events` is consumer-served and reverse-use-only. The
-  host advertises it on the WS lane to authorize the consumer's reverse
-  invocation, but registers no host-side handler. The consumer must
-  advertise it too; otherwise subscribe is refused before side effects.
+  host advertises it on the WS lane so the consumer's reverse-invoke
+  dispatch gate authorizes the host-originated delivery invocation. The host
+  registers no handler for it; the consumer must advertise it too, otherwise
+  subscribe is refused before side effects.
 
 Subscribe arguments follow
 `schemas/core/core-connect-subscribe-request.schema.json`:
