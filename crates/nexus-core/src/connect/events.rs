@@ -105,12 +105,13 @@ struct RegistryState {
 }
 
 fn decrement_subscriber_count(state: &mut RegistryState, stream: &str) {
-    let remove_count = if let Some(count) = state.subscriber_counts.get_mut(stream) {
-        *count -= 1;
-        *count == 0
-    } else {
-        false
-    };
+    let remove_count = state
+        .subscriber_counts
+        .get_mut(stream)
+        .is_some_and(|count| {
+            *count -= 1;
+            *count == 0
+        });
     if remove_count {
         state.subscriber_counts.remove(stream);
     }
@@ -363,6 +364,10 @@ impl ConnectEventRegistry {
     }
     /// Publish retains at most `MAX_STREAMS` rings, evicting an inactive ring
     /// when at capacity; active rings are never evicted.
+    ///
+    /// # Errors
+    /// Returns [`PublishError::StreamLimit`] when every retained ring is
+    /// active, so admitting this stream would evict a live subscriber.
     pub fn publish(
         &self,
         stream: &str,
@@ -425,6 +430,9 @@ impl ConnectEventRegistry {
     /// [`SubscribeError::FutureCursor`] when it is ahead of the ring,
     /// [`SubscribeError::ClosedSession`] when the owning session has closed,
     /// and [`SubscribeError::StreamLimit`] when every retained ring is active.
+    // The admission sequence is frozen: the gate/lifetime guard must span
+    // permit acquisition, so the guard is not tightened early.
+    #[allow(clippy::too_many_lines, clippy::significant_drop_tightening)]
     pub async fn subscribe(
         &self,
         session: &str,
@@ -504,18 +512,16 @@ impl ConnectEventRegistry {
         let mut gap_reason = None;
         let sequence = match cursor {
             Some(cursor) => match parse_cursor(ring, cursor) {
-                Ok(sequence) => {
+                Ok(sequence)
                     if ring
                         .events
                         .front()
-                        .is_some_and(|event| sequence < event.sequence.saturating_sub(1))
-                    {
-                        gap_reason = Some("history_unavailable");
-                        0
-                    } else {
-                        sequence
-                    }
+                        .is_some_and(|event| sequence < event.sequence.saturating_sub(1)) =>
+                {
+                    gap_reason = Some("history_unavailable");
+                    0
                 }
+                Ok(sequence) => sequence,
                 Err(_) => {
                     gap_reason = Some("stale_cursor");
                     0
@@ -648,6 +654,7 @@ impl ConnectEventRegistry {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::significant_drop_tightening)] // tests inspect the registry lock directly; the guard drop point is not a contention concern
     use super::*;
     use serde_json::json;
     use std::time::Duration;

@@ -59,9 +59,13 @@
 #
 # Feature evidence (resolved feature set on the inverted probe row):
 #   graph-flow MUST resolve with an EMPTY feature set everywhere.
-#   nexus-spoke-adapter MUST resolve feats=[compute,default] for the ordinary
-#     CLI and feats=[compute] (explicit, no defaults) for Connect-only — the
-#     Connect host keeps peer compute + shared WASM cache (AC3/D20).
+#   nexus-spoke-adapter MUST resolve feats=[compute,default] for both cohorts —
+#     the Connect host keeps peer compute + shared WASM cache (AC3/D20). Since
+#     v1.207 P2 the Connect-only lane links `execution` (the peer-tools
+#     registry the subscribe lane serves through), whose `nexus-orchestration`
+#     edge turns spoke-adapter's `default` on; `default` == `compute` there, so
+#     the exact-match assertion still guards against a future heavy default
+#     feature appearing in the Connect-only graph.
 #
 # DEV-DEP CAVEAT (AR-74): `cargo tree -p <crate>` includes dev-dependencies
 # by default. `--edges normal,build` drops them — the pins below therefore
@@ -227,11 +231,20 @@ assert_empty nexus-core "--no-default-features" nexus-acp-host
 assert_empty nexus-core "--no-default-features" nexus-orchestration
 assert_exactly_one nexus-core "--no-default-features" spoke-operations
 
-# --- core MCP/peer library (app-only Model A selectors are gone) -------------
+# --- core MCP/peer library + Connect-host product cohort --------------------
 # v1.196 P1-T1: the cohort's public peer API (peer-tool types, capability and
 # async-trait) is execution-owned, so `connect-client` implies `execution` and
 # the resolved normal feature set is asserted exactly below. Graph structure
 # only — never a version value.
+
+# v1.207 P2: `connect-host` is the Connect-host product cohort — the WS accept
+# loop + peer-tools event lane the shipped `nexus-runtime` boots, carrying NO
+# rmcp (the reverse-invoke/operator bridge is not a Connect-host surface). It
+# is what `apps/nexus42`'s `connect-host` feature links; the app must never
+# select `connect-client` (which would pull rmcp into the product graph).
+assert_empty nexus-core "--no-default-features --features connect-host" rmcp
+assert_exactly_one nexus-core "--no-default-features --features connect-host" spoke-connect
+assert_features nexus-core "--no-default-features --features connect-host" nexus-core "connect-host,execution,operation-id"
 
 for feats in "--no-default-features --features connect-client" "--no-default-features --features embedded-mcp"; do
   assert_exactly_one nexus-core "$feats" rmcp
@@ -240,17 +253,19 @@ for feats in "--no-default-features --features connect-client" "--no-default-fea
   assert_exactly_one nexus-core "$feats" spoke-operations
 done
 
-# The two cohorts resolve distinct feature sets (`embedded-mcp` implies
-# `connect-client` and adds its own edge), so each is asserted separately.
-assert_features nexus-core "--no-default-features --features connect-client" nexus-core "connect-client,execution"
-assert_features nexus-core "--no-default-features --features embedded-mcp" nexus-core "connect-client,embedded-mcp,execution"
+# The cohorts resolve distinct feature sets (`connect-client` = `connect-host`
+# + rmcp; `embedded-mcp` additionally implies `connect-client`), and
+# `execution` implies `operation-id`, so each closure is asserted separately.
+assert_features nexus-core "--no-default-features --features connect-client" nexus-core "connect-client,connect-host,execution,operation-id"
+assert_features nexus-core "--no-default-features --features embedded-mcp" nexus-core "connect-client,connect-host,embedded-mcp,execution,operation-id"
 
 # --- native/TS host (nexus-core-node) ---------------------------------------
 
 # v1.195 P0-T5: the native cohort resolves the hosted production factory's
 # both halves (`execution` + `provider-host`); v1.195 P2-T3 adds the `compute`
 # runtime that same factory installs (ONE WASM engine/cache/serializer).
-assert_features nexus-core-node "" nexus-core "compute,default,execution,provider-host"
+# `execution` implies `operation-id` (v1.207 P3-T1), so it appears in the set.
+assert_features nexus-core-node "" nexus-core "compute,default,execution,operation-id,provider-host"
 # The cohort edge is real, not a feature-flag claim: the Host plane the hosted
 # factory composes resolves in the node cohort.
 assert_exactly_one nexus-core-node "" nexus-agent-host
@@ -262,6 +277,9 @@ for crate in nexus-orchestration nexus42 nexus-core-node; do
 done
 
 assert_features nexus42 "" nexus-spoke-adapter "compute,default"
-assert_features nexus42 "--no-default-features --features connect-host" nexus-spoke-adapter "compute"
+# Since v1.207 P2 the Connect-only lane boots nexus-core's peer-tools event
+# lane, which links `execution` → `nexus-orchestration` → spoke-adapter's
+# `default` (= `compute`); the guard still asserts the exact set.
+assert_features nexus42 "--no-default-features --features connect-host" nexus-spoke-adapter "compute,default"
 
 echo "graph pins OK"

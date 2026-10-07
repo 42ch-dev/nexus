@@ -17,7 +17,7 @@ thiserror.workspace = true
 # `"format": "date-time"` → `chrono::DateTime`; `"format": "regex"` → `regress::Regex`.
 chrono.workspace = true
 regress.workspace = true
-uuid.workspace = true
+uuid = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 serde_yaml.workspace = true

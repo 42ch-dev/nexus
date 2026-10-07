@@ -316,6 +316,32 @@ fn build_schema_map() -> Vec<SchemaEntry> {
         // v1.207 P1 T2 — tools-api DTO replacing the handwritten
         // `ToolExecuteRequest`/`ToolExecuteResponse` pair.
         entry!("schemas/core/tools-api.schema.json", Strict, ToolsApi),
+        // v1.207 P2/P3 — Connect replay/gap + capability negotiation and the
+        // durable operation receipt. These four DTOs are the wire contracts
+        // the peer-tools event lane serves (subscribe request/response and the
+        // cursorless gap event) plus the receipt `CoreOperationReceipt`.
+        // Registered Strict like every other core DTO so a field rename on
+        // either side fails the drift gate.
+        entry!(
+            "schemas/core/core-connect-subscribe-request.schema.json",
+            Strict,
+            CoreConnectSubscribeRequest
+        ),
+        entry!(
+            "schemas/core/core-connect-subscribe-response.schema.json",
+            Strict,
+            CoreConnectSubscribeResponse
+        ),
+        entry!(
+            "schemas/core/core-connect-gap-event.schema.json",
+            Strict,
+            CoreConnectGapEvent
+        ),
+        entry!(
+            "schemas/core/core-operation-receipt.schema.json",
+            Strict,
+            CoreOperationReceipt
+        ),
         // v1.207 P1 T2 — `schemas/core/findings-api.schema.json` is NOT
         // registered here on purpose: it is an `allOf` alias to the
         // daemon-api update-finding-request definition (single tri-state
@@ -1787,6 +1813,7 @@ fn build_test_json(
 ///
 /// typify enforces:
 /// - `format: "date-time"` → `chrono::DateTime<Utc>` (needs valid RFC 3339 string)
+/// - `format: "uuid"` → `::uuid::Uuid` (needs a valid UUID string)
 /// - `pattern: "^prefix_[a-zA-Z0-9]+$"` → newtype with pattern-validated deserializer
 ///
 /// For unconstrained strings, returns `"dummy"`.
@@ -1795,6 +1822,11 @@ fn make_dummy_string(prop_def: &Value) -> Value {
     if let Some(format) = prop_def.get("format").and_then(|f| f.as_str()) {
         if format == "date-time" {
             return Value::String("2024-01-01T00:00:00Z".to_string());
+        }
+        // v1.207 P2: `CoreConnectSubscribeResponse.epoch` is `format: "uuid"`,
+        // which typify maps to `::uuid::Uuid`; the nil UUID round-trips it.
+        if format == "uuid" {
+            return Value::String("00000000-0000-0000-0000-000000000000".to_string());
         }
     }
 

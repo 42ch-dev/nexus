@@ -7,7 +7,10 @@ pub mod actor_sessions;
 mod actors;
 mod changes;
 mod chronology;
-#[cfg(feature = "connect-client")]
+// `connect-host` is the Connect-host product cohort (WS accept loop +
+// peer-tools event lane, no rmcp); `connect-client` is the superset
+// (connect-host + the rmcp reverse-invoke bridge). Either exposes the module.
+#[cfg(any(feature = "connect-client", feature = "connect-host"))]
 pub mod connect;
 mod content;
 mod context;

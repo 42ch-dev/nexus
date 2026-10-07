@@ -570,6 +570,7 @@ fn serve_subscribe_tool(
 /// is stored inside that same responder, so a strong capture would form an
 /// ownership cycle (`close_session` never clears the handler map) and retain
 /// every eligible disconnected session.
+#[allow(clippy::too_many_lines)] // one linear subscribe→ack-gated-delivery handler; splitting would obscure the frozen ordering
 fn register_subscribe_handler(
     responder: &Arc<ConnectResponder>,
     session_id: String,
@@ -818,15 +819,13 @@ where
         }
     })
     .await;
-    match outcome {
-        Ok(result) => result,
-        Err(_) => {
-            // Closing synchronously fences the responder before `invoke` is
-            // dropped below; its allocated sequence can never be reused.
-            fail_closed();
-            None
-        }
-    }
+    let Ok(result) = outcome else {
+        // Closing synchronously fences the responder before `invoke` is
+        // dropped below; its allocated sequence can never be reused.
+        fail_closed();
+        return None;
+    };
+    result
 }
 
 /// Poll the responder state until it leaves `Handshaking`; returns the
