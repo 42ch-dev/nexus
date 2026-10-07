@@ -51,6 +51,9 @@ pub mod compute;
 pub mod executor;
 pub mod handle_ops;
 pub mod lifecycle;
+// v1.207 P3-T1: the stable durable operation id (`op_<hex32>`) derivation and
+// shape validation every receipt consumer resolves through (spec §B.1).
+pub mod operation_id;
 pub mod peer_tools;
 // v1.195 P0-T1: the hosted production composition. It builds the selected-root
 // workspace port bundle for the hosted factory that the NEXT task adds, so it
