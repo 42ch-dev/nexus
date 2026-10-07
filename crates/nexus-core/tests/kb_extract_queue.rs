@@ -124,7 +124,7 @@ async fn queue_get_and_list_round_trip() {
     assert!(job.source_locator.is_none());
     assert!(job.profile_hint.is_none());
     assert!(job.work_id.is_none());
-    assert!(!job.created_at.is_empty());
+    assert_ne!(job.created_at, "");
 
     // Idempotent on `(creator, work_entry_id, world_id)`: the existing
     // non-failed job comes back unchanged.

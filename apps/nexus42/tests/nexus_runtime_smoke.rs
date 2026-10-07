@@ -12,9 +12,11 @@
 //!    reads the advertised manifest (`extensions.nexus.served_ops` =
 //!    upsert/promote/relate/check/assemble/compute — the invoke surface,
 //!    honest by the machine-check);
-//! 3. **no HTTP/SPA listener** — no HTTP port is bound at all: the daemon
-//!    router and the embedded SPA are not even in this cohort's graph
-//!    (v1.193 P2-T13 deleted the daemon-runtime crate).
+//! 3. **no HTTP/SPA listener** — every TCP listener of the runtime process is
+//!    either a printed Connect multiaddr or the Connect peer-tools WS lane's
+//!    own loopback endpoint, and that lane endpoint answers no HTTP request
+//!    (the daemon router and the embedded SPA are not even in this cohort's
+//!    graph — v1.193 P2-T13 deleted the daemon-runtime crate).
 //!
 //! Compiled only with `--features connect-host` (same gate as the bin);
 //! the test itself only spawns processes, so the default test graph stays
@@ -23,6 +25,10 @@
 #![cfg(feature = "connect-host")]
 
 use std::io::{BufRead, BufReader};
+#[cfg(unix)]
+use std::io::{Read, Write};
+#[cfg(unix)]
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
@@ -179,25 +185,51 @@ impl Drop for RuntimeGuard {
     }
 }
 
-/// Assert the spawned runtime has NO HTTP listener: every TCP listener of
-/// the runtime process must be one of the Connect listen multiaddrs it
-/// printed. (A well-known-port probe would false-fail under the spec's
-/// coexistence model — a creator-facing `nexus42` daemon may legitimately
-/// occupy the daemon port while the runtime runs; the guarantee is about
-/// THIS process, which never boots the daemon router.)
+/// Assert the spawned runtime has NO HTTP / SPA listener.
+///
+/// Two independent checks, because a port number alone cannot tell a WS accept
+/// loop from an HTTP router:
+///
+/// 1. **Endpoint allowance** — every TCP listener of the runtime process must
+///    be one of the Connect listen multiaddrs it printed, or the Connect
+///    **peer-tools event lane**'s own endpoint
+///    ([`peer_tools_lane_endpoint`]). The ENDPOINT (host AND port) is compared,
+///    so a listener on an allowed port but a different interface
+///    (`[::1]:8425`, `*:8425`) is not covered by the allowance, and any other
+///    port — the daemon API default 8420 included — still fails.
+/// 2. **Protocol identity** — that lane endpoint must not answer an HTTP/1.1
+///    request ([`answers_plain_http`]): the lane is a plaintext-WS accept loop,
+///    not the daemon data router or the embedded SPA. This is what a port
+///    number cannot express — an HTTP router sitting on the allowed endpoint
+///    would answer the probe and fail the test. The probe is scoped to THIS
+///    PID: it runs only when the `lsof -p <pid>` inspection above shows this
+///    runtime holding the endpoint, so a foreign process occupying
+///    `127.0.0.1:8425` is never attributed to the runtime (spec coexistence).
+///    When the lane is not bound (port collision ⇒ warn-and-skip), the check
+///    asserts only what the contract promises: this PID serves no HTTP.
+///
+/// (A well-known-port probe would false-fail under the spec's coexistence
+/// model — a creator-facing `nexus42` daemon may legitimately occupy the
+/// daemon port while the runtime runs; the guarantee is about THIS process,
+/// which never boots the daemon router.)
 ///
 /// Implemented with `lsof` on unix (present on macOS + Linux CI runners);
 /// on Windows the check is a no-op — the property is structural (the
-/// headless boot binds only `SpokeConnectNode`; there is no axum bind in
-/// the path), and the T2 Windows CI leg smoke-tests `--version`.
+/// headless boot binds only `SpokeConnectNode` + the peer-tools WS lane;
+/// there is no axum bind in the path), and the T2 Windows CI leg smoke-tests
+/// `--version`.
 fn assert_no_http_listener(child_pid: u32, listen_addrs: &[String]) {
     #[cfg(unix)]
     {
-        let ports: Vec<u16> = listen_addrs
+        let mut expected: Vec<Endpoint> = listen_addrs
             .iter()
-            .filter_map(|addr| addr.rsplit('/').next())
-            .filter_map(|port| port.parse().ok())
+            .filter_map(|addr| multiaddr_endpoint(addr))
             .collect();
+        // The peer-tools event lane's WS endpoint (see the doc comment): the
+        // seeded home has no `connect/daemon.json`, so the lane takes the
+        // Connect lane's documented default loopback bind.
+        expected.push(peer_tools_lane_endpoint());
+
         let out = Command::new("lsof")
             .args([
                 "-nP",
@@ -215,14 +247,44 @@ fn assert_no_http_listener(child_pid: u32, listen_addrs: &[String]) {
             String::from_utf8_lossy(&out.stderr)
         );
         let text = String::from_utf8_lossy(&out.stdout);
+        // THIS PID's own listeners, each already checked against the allowance.
+        let mut listeners: Vec<Endpoint> = Vec::new();
         for line in text.lines().skip(1) {
-            let Some(port) = lsof_line_port(line) else {
+            let Some((host, port)) = lsof_line_endpoint(line) else {
                 continue;
             };
             assert!(
-                ports.contains(&port),
-                "runtime process holds an unexpected TCP listener on port {port} \
-                 (daemon HTTP / SPA listener?):\n{text}"
+                expected.iter().any(|(h, p)| h == &host && *p == port),
+                "runtime process holds an unexpected TCP listener on {host}:{port} \
+                 (neither a printed Connect multiaddr nor the peer-tools WS lane \
+                 endpoint {lane_host}:{lane_port} — a daemon HTTP / SPA listener?):\n{text}",
+                lane_host = nexus_core::connect::config::DEFAULT_CONNECT_HOST,
+                lane_port = nexus_core::connect::DEFAULT_CONNECT_PORT,
+            );
+            listeners.push((host, port));
+        }
+
+        // Protocol identity (check 2), attributed to THIS PID only: the probe
+        // runs solely when this runtime actually HOLDS the lane endpoint. If it
+        // does not (the lane warn-and-skipped a port collision, or never bound),
+        // something else may own that endpoint — probing it would test a
+        // foreign process and break the spec's coexistence model (the guarantee
+        // here is about what THIS process serves, which the allowance above
+        // already pins). The lane-down case asserts nothing extra: this PID
+        // serves no HTTP either way.
+        let lane = peer_tools_lane_endpoint();
+        if listeners.iter().any(|(h, p)| *h == lane.0 && *p == lane.1) {
+            let addr = SocketAddr::new(
+                lane.0
+                    .parse()
+                    .expect("DEFAULT_CONNECT_HOST is an IP literal"),
+                lane.1,
+            );
+            assert!(
+                !answers_plain_http(addr, HTTP_PROBE_TIMEOUT),
+                "the runtime's Connect lane endpoint {addr} answered an HTTP/1.1 request: an \
+                 HTTP / SPA listener would, while the peer-tools lane is a WS accept loop and \
+                 must close a non-upgrade request with no response"
             );
         }
     }
@@ -233,35 +295,129 @@ fn assert_no_http_listener(child_pid: u32, listen_addrs: &[String]) {
     }
 }
 
-/// Extract the listening port from a `lsof -sTCP:LISTEN` NAME column line.
+/// One TCP endpoint: a listener's `(host, port)`, or a printed Connect
+/// multiaddr's.
+type Endpoint = (String, u16);
+
+/// How long the HTTP protocol probe waits for a response.
+#[cfg(unix)]
+const HTTP_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// The most response bytes the protocol probe reads before giving up.
+#[cfg(unix)]
+const HTTP_PROBE_CAP: usize = 4096;
+
+/// The Connect **peer-tools event lane**'s listen endpoint.
+///
+/// `nexus-runtime::boot` starts the lane with
+/// `nexus_core::connect::start_peer_tools_lane`, whose plaintext-WS accept loop
+/// binds the lane's configured `host:port`: the loopback
+/// `DEFAULT_CONNECT_HOST:DEFAULT_CONNECT_PORT`
+/// (`crates/nexus-core/src/connect/config.rs`) when no `connect/daemon.json`
+/// overrides it — which is the hermetic seeded home. The bind is loopback-only
+/// by construction: having no TLS, the lane refuses a non-loopback host.
+fn peer_tools_lane_endpoint() -> Endpoint {
+    (
+        nexus_core::connect::config::DEFAULT_CONNECT_HOST.to_string(),
+        nexus_core::connect::DEFAULT_CONNECT_PORT,
+    )
+}
+
+/// `(host, port)` of a printed Connect listen multiaddr
+/// (`/ip4/127.0.0.1/tcp/53843`, or the `/ip6/` form).
+fn multiaddr_endpoint(addr: &str) -> Option<Endpoint> {
+    let rest = addr
+        .split_once("/ip4/")
+        .or_else(|| addr.split_once("/ip6/"))?
+        .1;
+    let (host, rest) = rest.split_once("/tcp/")?;
+    let port = rest.split('/').next()?.parse::<u16>().ok()?;
+    Some((host.to_string(), port))
+}
+
+/// Send one minimal HTTP/1.1 request to `addr` and report whether the peer
+/// answers with a syntactically valid HTTP response.
+///
+/// This is the protocol-identity half a port number cannot make. An HTTP
+/// router / SPA answers a status line; the Connect peer-tools WS accept loop
+/// rejects a non-upgrade request by closing the connection with NO response
+/// (observed against the booted lane: 0 bytes), so "answered HTTP" separates
+/// the two. An endpoint with nothing listening, or one that closes (or times
+/// out) without answering, is not an HTTP listener.
+#[cfg(unix)]
+fn answers_plain_http(addr: SocketAddr, timeout: Duration) -> bool {
+    let Ok(mut stream) = TcpStream::connect_timeout(&addr, timeout) else {
+        // Nothing is listening there: whatever holds the port is not answering.
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(timeout));
+    let _ = stream.set_write_timeout(Some(timeout));
+    if stream
+        .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .is_err()
+    {
+        return false;
+    }
+    let mut response = Vec::new();
+    let mut chunk = [0u8; 256];
+    while response.len() < HTTP_PROBE_CAP {
+        match stream.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => {
+                response.extend_from_slice(&chunk[..read]);
+                if response.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+        }
+    }
+    let text = String::from_utf8_lossy(&response);
+    let status = text.split("\r\n").next().unwrap_or_default();
+    status.starts_with("HTTP/1.1 ") || status.starts_with("HTTP/1.0 ")
+}
+
+/// `(host, port)` of a `lsof -sTCP:LISTEN` NAME column line.
 ///
 /// Real lines end with the state suffix — `TCP 127.0.0.1:62488 (LISTEN)` —
-/// so the port token is the SECOND-TO-LAST whitespace token
+/// so the address token is the SECOND-TO-LAST whitespace token
 /// (`split_whitespace().rev().nth(1)` — `str` has no `rsplit_whitespace`),
-/// NOT `.last()` (which is always `(LISTEN)` and never parses as a port —
+/// NOT `.last()` (which is always `(LISTEN)` and never parses as an address —
 /// the pre-fix parser skipped every line, making the no-HTTP assertion
-/// vacuous).
-fn lsof_line_port(line: &str) -> Option<u16> {
-    line.split_whitespace()
-        .rev()
-        .nth(1)
-        .and_then(|addr| addr.rsplit(':').next())
-        .and_then(|port| port.parse::<u16>().ok())
+/// vacuous). The HOST is kept, not just the port: the lane allowance is one
+/// loopback ENDPOINT, so `[::1]:8425` / `*:8425` must not pass as
+/// `127.0.0.1:8425`.
+fn lsof_line_endpoint(line: &str) -> Option<Endpoint> {
+    let addr = line.split_whitespace().rev().nth(1)?;
+    let (host, port) = addr.rsplit_once(':')?;
+    let port = port.parse::<u16>().ok()?;
+    Some((
+        host.trim_start_matches('[')
+            .trim_end_matches(']')
+            .to_string(),
+        port,
+    ))
 }
 
 #[test]
-fn lsof_line_port_parses_real_listener_lines() {
+fn lsof_line_endpoint_and_multiaddr_parse_real_listener_lines() {
     // Real shapes from `lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>`: IPv4
     // loopback (observed: `TCP 127.0.0.1:62488 (LISTEN)`), wildcard, and
-    // bracketed IPv6.
+    // bracketed IPv6 — the host travels with the port so the endpoint
+    // allowance cannot be satisfied by a different interface.
     assert_eq!(
-        lsof_line_port(
+        lsof_line_endpoint(
             "nexus-runtime 5469 user 14u IPv4 0x8f7d2f5b5e0b4c8f 0t0 TCP 127.0.0.1:62488 (LISTEN)"
         ),
-        Some(62488)
+        Some(("127.0.0.1".to_string(), 62488))
     );
-    assert_eq!(lsof_line_port("TCP *:62086 (LISTEN)"), Some(62086));
-    assert_eq!(lsof_line_port("TCP [::1]:62086 (LISTEN)"), Some(62086));
+    assert_eq!(
+        lsof_line_endpoint("TCP *:62086 (LISTEN)"),
+        Some(("*".to_string(), 62086))
+    );
+    assert_eq!(
+        lsof_line_endpoint("TCP [::1]:62086 (LISTEN)"),
+        Some(("::1".to_string(), 62086))
+    );
 
     // Regression guard: the vacuous pre-fix parser (`.last()` token, i.e.
     // always `(LISTEN)`) extracts no port from ANY real listener line, so
@@ -283,8 +439,100 @@ fn lsof_line_port_parses_real_listener_lines() {
     }
 
     // Malformed / non-listen lines are skipped, never mis-parsed.
-    assert_eq!(lsof_line_port("TCP 127.0.0.1:62488"), None);
-    assert_eq!(lsof_line_port(""), None);
+    assert_eq!(lsof_line_endpoint("TCP 127.0.0.1:62488"), None);
+    assert_eq!(lsof_line_endpoint(""), None);
+
+    // The printed Connect multiaddrs the allowance is derived from.
+    assert_eq!(
+        multiaddr_endpoint("/ip4/127.0.0.1/tcp/53843"),
+        Some(("127.0.0.1".to_string(), 53843))
+    );
+    assert_eq!(
+        multiaddr_endpoint("/ip6/::1/tcp/9"),
+        Some(("::1".to_string(), 9))
+    );
+    assert_eq!(multiaddr_endpoint("/ip4/127.0.0.1/udp/1"), None);
+    assert_eq!(multiaddr_endpoint("not-a-multiaddr"), None);
+
+    // The lane endpoint is the documented loopback default — pinned as a
+    // literal so a silent constant change cannot pass unnoticed.
+    assert_eq!(peer_tools_lane_endpoint(), ("127.0.0.1".to_string(), 8425));
+}
+
+/// What a local control server does with an incoming connection.
+#[cfg(unix)]
+#[derive(Clone, Copy)]
+enum HttpControl {
+    /// Answers every request with a plain HTTP/1.1 response.
+    Http,
+    /// Answers a WebSocket upgrade request with the handshake and drops every
+    /// other request without a response — the shape a WS accept loop
+    /// (tungstenite) takes for a plain GET, which the booted lane shows.
+    Ws,
+}
+
+/// Spin a local control server on an ephemeral `127.0.0.1` port.
+///
+/// The WS arm answers the RFC 6455 §1.3 example pair (the same
+/// `Sec-WebSocket-Accept` the booted lane returns for that key), so the control
+/// really speaks the handshake rather than being a dead socket.
+#[cfg(unix)]
+fn spawn_control_server(behavior: HttpControl) -> SocketAddr {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind control server");
+    let addr = listener.local_addr().expect("control server addr");
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { break };
+            let mut buffer = [0u8; 1024];
+            let read = stream.read(&mut buffer).unwrap_or(0);
+            let request = String::from_utf8_lossy(&buffer[..read]).to_ascii_lowercase();
+            match behavior {
+                HttpControl::Http => {
+                    let _ = stream.write_all(
+                        b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                    );
+                }
+                HttpControl::Ws if request.contains("upgrade: websocket") => {
+                    let _ = stream.write_all(
+                        b"HTTP/1.1 101 Switching Protocols\r\nconnection: Upgrade\r\n\
+                          upgrade: websocket\r\nsec-websocket-accept: \
+                          s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n",
+                    );
+                }
+                // A WS accept loop rejects a non-upgrade request by closing
+                // with no response.
+                HttpControl::Ws => {}
+            }
+        }
+    });
+    addr
+}
+
+/// The probe's own discrimination proof: it must report a plain HTTP server as
+/// HTTP and a WS accept loop as NOT HTTP — the two halves a port number cannot
+/// tell apart.
+#[cfg(unix)]
+#[test]
+fn answers_plain_http_discriminates_an_http_router_from_a_ws_accept() {
+    let http = spawn_control_server(HttpControl::Http);
+    assert!(
+        answers_plain_http(http, Duration::from_secs(5)),
+        "an HTTP responder must be reported as HTTP"
+    );
+    let ws = spawn_control_server(HttpControl::Ws);
+    assert!(
+        !answers_plain_http(ws, Duration::from_secs(5)),
+        "a WS accept loop must not be reported as HTTP"
+    );
+
+    // An endpoint with nothing listening is not an HTTP listener either.
+    let free = TcpListener::bind(("127.0.0.1", 0)).expect("reserve a free port");
+    let unused = free.local_addr().expect("reserved addr");
+    drop(free);
+    assert!(
+        !answers_plain_http(unused, Duration::from_millis(500)),
+        "an unbound endpoint must not be reported as HTTP"
+    );
 }
 
 #[test]

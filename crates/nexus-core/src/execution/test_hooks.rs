@@ -238,3 +238,65 @@ pub(super) async fn compute_begin_gate_wait(operation_id: &str) {
         gate.barrier.wait().await;
     }
 }
+
+/// Rendezvous at a compute run's in-flight registration boundary (v1.207 P3
+/// wave 4).
+///
+/// The acquired owner signals `registered` once it holds the effect AND is
+/// registered in the process in-flight registry (§B.3 live-owner signal), then
+/// waits for `proceed`. Keyed by operation id, so an armed gate parks only the
+/// callers the arming test targets. It lets a test prove the live-owner branch
+/// of the replay answer deterministically — a retry issued while the owner is
+/// parked must be the typed Busy refusal (`operation_in_progress`), and the
+/// same retry after the owner is dropped must be `uncertain` — with no sleeps
+/// and no races.
+#[derive(Debug)]
+pub struct ComputeInFlightGate {
+    /// The operation id whose owner participates in this rendezvous.
+    pub operation_id: String,
+    /// Signalled once the owner has registered and is about to run the effect.
+    pub registered: Arc<tokio::sync::Notify>,
+    /// The owner waits for this before continuing past registration.
+    pub proceed: Arc<tokio::sync::Notify>,
+}
+
+impl ComputeInFlightGate {
+    /// An armed gate for one operation id.
+    #[must_use]
+    pub fn new(operation_id: impl Into<String>) -> Self {
+        Self {
+            operation_id: operation_id.into(),
+            registered: Arc::new(tokio::sync::Notify::new()),
+            proceed: Arc::new(tokio::sync::Notify::new()),
+        }
+    }
+}
+
+static COMPUTE_IN_FLIGHT_GATE: Mutex<Option<Arc<ComputeInFlightGate>>> = Mutex::new(None);
+
+/// Install (or clear) the compute in-flight gate.
+///
+/// # Panics
+///
+/// Panics if the compute in-flight-gate mutex was poisoned by a previous panic.
+pub fn set_compute_in_flight_gate(gate: Option<Arc<ComputeInFlightGate>>) {
+    *COMPUTE_IN_FLIGHT_GATE
+        .lock()
+        .expect("compute in-flight gate lock") = gate;
+}
+
+fn current_compute_in_flight_gate(operation_id: &str) -> Option<Arc<ComputeInFlightGate>> {
+    COMPUTE_IN_FLIGHT_GATE
+        .lock()
+        .expect("compute in-flight gate lock")
+        .as_ref()
+        .filter(|gate| gate.operation_id == operation_id)
+        .map(Arc::clone)
+}
+
+pub(super) async fn compute_in_flight_gate_wait(operation_id: &str) {
+    if let Some(gate) = current_compute_in_flight_gate(operation_id) {
+        gate.registered.notify_one();
+        gate.proceed.notified().await;
+    }
+}
