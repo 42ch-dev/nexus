@@ -16,7 +16,7 @@
 //! plus [`CoreAccess::DirectWriter`] are the whole authority, and the caller
 //! awaits [`finish_direct`] before reporting anything. The one exception is
 //! [`open_engine_owned_core`], which takes the workspace's engine admission for
-//! the leaves whose tables are engine-guarded (`kb_extract_jobs`).
+//! the leaf whose table is engine-guarded (`kb_extract_jobs`).
 //!
 //! Opening refuses a selection that names no materialized workspace before the
 //! writer pool is admitted ([`require_materialized_workspace`]), so an
@@ -55,8 +55,12 @@ pub async fn open_direct_core(config: &CliConfig) -> Result<CoreService> {
 /// Engine-guarded state cannot be written over the direct-writer pool: the
 /// schema's writer guards fence every `kb_extract_jobs` write to a
 /// migration/engine writer, so a leaf that enqueues extract jobs needs this
-/// admission (the world-pack import leaf takes the same one). Reads and
-/// direct-writer writes keep using [`open_direct_core`].
+/// admission. This leaf is the first **production** one to take it — the
+/// engine-owned core open existed only in test fixtures before (the world-pack
+/// fixture in `world/kb/pack.rs` `mod tests`; the local-db / orchestration
+/// tests open `init_engine_pool` directly), while the production pack leaf
+/// opens the direct core. Reads and direct-writer writes keep using
+/// [`open_direct_core`].
 ///
 /// # Errors
 ///
