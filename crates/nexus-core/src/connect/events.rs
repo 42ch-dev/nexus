@@ -338,6 +338,9 @@ impl ConnectEventRegistry {
                 .0
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if state.closed_sessions.contains(session) {
+                return Err(SubscribeError::ClosedSession);
+            }
             Arc::clone(
                 state
                     .gates
@@ -691,6 +694,16 @@ mod tests {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .subscribers
             .contains_key(&("p".to_owned(), "s".to_owned())));
+        assert!(matches!(
+            registry.subscribe("p", "after-close", None).await,
+            Err(SubscribeError::ClosedSession)
+        ));
+        assert!(!registry
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .gates
+            .contains_key(&("p".to_owned(), "after-close".to_owned())));
         for n in 0..MAX_STREAMS + 10 {
             let session = format!("session-{n}");
             let stream = format!("stream-{n}");
