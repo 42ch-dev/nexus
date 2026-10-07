@@ -704,9 +704,9 @@ async fn drive_delivery<P, Fut, F>(
     fail_closed: F,
     push: P,
 ) where
-    P: Fn(Vec<crate::connect::events::EventFrame>) -> Fut,
-    Fut: std::future::Future<Output = nexus_spoke_adapter::SpokeResult<serde_json::Value>>,
-    F: Fn(),
+    P: Fn(Vec<crate::connect::events::EventFrame>) -> Fut + Send,
+    Fut: std::future::Future<Output = nexus_spoke_adapter::SpokeResult<serde_json::Value>> + Send,
+    F: Fn() + Send + Sync,
 {
     loop {
         let frames = subscription.next_batch().await;
@@ -723,31 +723,89 @@ async fn drive_delivery<P, Fut, F>(
         if subscription.is_cancelled() {
             break;
         }
-        let invoke = push(frames);
-        tokio::pin!(invoke);
-        let outcome = tokio::select! {
-            biased;
-            () = cancelled.notified() => None,
-            result = &mut invoke => Some(result),
-        };
-        match outcome {
+        let mut invoke = PollTracker::new(push(frames));
+        match race_push(&mut invoke, &cancelled, delivery_deadline, &fail_closed).await {
             Some(nexus_spoke_adapter::SpokeResult::Ok(_)) => subscription.ack(),
-            Some(nexus_spoke_adapter::SpokeResult::Reject(_)) => break,
-            None => {
-                // Cancelled with the request in flight. Complete it on the
-                // wire (bounded) so any allocated outbound sequence is
-                // transmitted; failing that, fail the session closed.
-                if tokio::time::timeout(delivery_deadline, invoke)
-                    .await
-                    .is_err()
-                {
-                    fail_closed();
-                }
-                break;
-            }
+            _ => break,
         }
     }
     subscription.unregister(&session);
+}
+
+/// A push future that records whether it was ever polled.
+///
+/// The distinction is load-bearing: a cancellation that wins before this
+/// future's first poll means the reverse invoke never ran, so nothing was
+/// allocated on the wire and the request may be dropped untouched. Once it has
+/// been polled, the responder may already hold an allocated outbound sequence,
+/// so the request must be completed or the session failed closed.
+///
+/// `Pin<Box<F>>` keeps `Self` `Unpin` (no `unsafe` projection needed).
+struct PollTracker<F> {
+    inner: std::pin::Pin<Box<F>>,
+    started: Arc<AtomicBool>,
+}
+
+impl<F> PollTracker<F> {
+    fn new(inner: F) -> Self {
+        Self {
+            inner: Box::pin(inner),
+            started: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+impl<F: std::future::Future> std::future::Future for PollTracker<F> {
+    type Output = F::Output;
+
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let this = self.get_mut();
+        this.started.store(true, Ordering::SeqCst);
+        this.inner.as_mut().poll(cx)
+    }
+}
+
+/// Race one constructed (never polled) push against cancellation.
+///
+/// Returns `Some(result)` when the push completed on its own, `None` when
+/// cancellation won. Cancellation that wins before the future's first poll
+/// drops the request untouched; once it has started, the request is completed
+/// on the wire under `delivery_deadline`, or the session is failed closed when
+/// completion cannot be guaranteed.
+async fn race_push<Fut, F>(
+    invoke: &mut PollTracker<Fut>,
+    cancelled: &Arc<Notify>,
+    delivery_deadline: Duration,
+    fail_closed: &F,
+) -> Option<nexus_spoke_adapter::SpokeResult<serde_json::Value>>
+where
+    Fut: std::future::Future<Output = nexus_spoke_adapter::SpokeResult<serde_json::Value>> + Send,
+    F: Fn() + Sync,
+{
+    let started = Arc::clone(&invoke.started);
+    let outcome = tokio::select! {
+        biased;
+        () = cancelled.notified() => None,
+        result = &mut *invoke => Some(result),
+    };
+    if let Some(result) = outcome {
+        return Some(result);
+    }
+    if !started.load(Ordering::SeqCst) {
+        // Cancelled before the request was ever polled: nothing was
+        // allocated on the wire, so dropping it is safe.
+        return None;
+    }
+    if tokio::time::timeout(delivery_deadline, &mut *invoke)
+        .await
+        .is_err()
+    {
+        fail_closed();
+    }
+    None
 }
 
 /// Poll the responder state until it leaves `Handshaking`; returns the
@@ -1396,6 +1454,114 @@ mod tests {
             "both allocated sequences must reach the wire: {emitted:?}"
         );
         assert_eq!(emitted[1], emitted[0] + 1, "sequences must stay contiguous");
+        registry.remove_session(&session);
+        responder.close();
+    }
+
+    /// C4: a cancellation that wins before the push future's first poll must
+    /// drop the request untouched — no poll, therefore no allocated sequence.
+    #[tokio::test]
+    async fn cancellation_before_first_poll_leaves_the_request_unstarted() {
+        let cancelled = Arc::new(tokio::sync::Notify::new());
+        cancelled.notify_one();
+        let polled = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&polled);
+        let mut invoke = PollTracker::new(async move {
+            flag.store(true, Ordering::SeqCst);
+            nexus_spoke_adapter::SpokeResult::Ok(serde_json::json!({}))
+        });
+        let fail_closed_called = Arc::new(AtomicBool::new(false));
+        let fail_closed_flag = Arc::clone(&fail_closed_called);
+        let outcome = race_push(
+            &mut invoke,
+            &cancelled,
+            Duration::from_millis(50),
+            &move || fail_closed_flag.store(true, Ordering::SeqCst),
+        )
+        .await;
+        assert!(outcome.is_none());
+        assert!(
+            !polled.load(Ordering::SeqCst),
+            "cancellation before the first poll must not start the request"
+        );
+        assert!(
+            !invoke.started.load(Ordering::SeqCst),
+            "the request must remain unstarted"
+        );
+        assert!(!fail_closed_called.load(Ordering::SeqCst));
+    }
+
+    /// C4 (end to end): cancelling before the request is polled consumes no
+    /// outbound sequence, and the session stays usable for the next request.
+    #[tokio::test]
+    async fn cancellation_before_the_first_poll_consumes_no_wire_sequence() {
+        let (responder, gated, _client) = gated_tool_session().await;
+        let registry = crate::connect::events::connect_event_registry().clone();
+        let session = format!("c4-{}", uuid::Uuid::new_v4());
+        let stream = format!("c4-stream-{}", uuid::Uuid::new_v4());
+        registry.publish(&stream, "event", serde_json::json!({"n": 1}));
+        let (_, _, subscription) = registry.subscribe(&session, &stream, None).await.unwrap();
+        registry.activate(&session, &stream);
+        let cancelled = subscription.cancellation();
+
+        let push_registry = registry.clone();
+        let push_session = session.clone();
+        let push_responder = Arc::clone(&responder);
+        let push_stream = stream.clone();
+        let driver = tokio::spawn(drive_delivery(
+            subscription,
+            cancelled,
+            Arc::new(tokio::sync::Mutex::new(())),
+            session.clone(),
+            Duration::from_millis(2_000),
+            || {},
+            move |frames| {
+                // Force the ordering under test: cancel after the retention
+                // check but before the request's first poll.
+                push_registry.remove_session(&push_session);
+                let responder = Arc::clone(&push_responder);
+                let stream = push_stream.clone();
+                async move {
+                    responder
+                        .invoke_tool(
+                            DELIVER_TOOL,
+                            serde_json::json!({"stream": stream, "frames": frames}),
+                        )
+                        .await
+                }
+            },
+        ));
+        driver.await.unwrap();
+        assert!(
+            gated
+                .emitted
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_empty(),
+            "a request cancelled before its first poll must not reach the wire"
+        );
+        assert_eq!(responder.state(), ConnectResponderState::Established);
+        // The first outbound sequence is still available and accepted.
+        let follow_up = tokio::time::timeout(
+            Duration::from_secs(2),
+            responder.invoke_tool(DELIVER_TOOL, serde_json::json!({})),
+        )
+        .await
+        .expect("follow-up invoke must resolve");
+        assert!(
+            matches!(follow_up, nexus_spoke_adapter::SpokeResult::Ok(_)),
+            "the first sequence must be accepted: {follow_up:?}"
+        );
+        let emitted = gated
+            .emitted
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        assert_eq!(
+            emitted.len(),
+            1,
+            "only the follow-up request may be emitted: {emitted:?}"
+        );
         registry.remove_session(&session);
         responder.close();
     }
