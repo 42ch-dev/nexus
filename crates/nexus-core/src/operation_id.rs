@@ -171,21 +171,26 @@ pub fn resolve_operation_id(scope: &OperationScope<'_>) -> Result<String, Operat
     }
 }
 
-/// SHA-256 (full 64 hex chars) of the canonical request arguments — the
+/// SHA-256 (full 64 hex chars) of the canonical **logical request** — the
 /// `request_fingerprint` the receipt store compares first-writer-wins
 /// (spec §B.2).
 ///
-/// The fingerprint is the replay-vs-conflict discriminator: two callers
-/// carrying the SAME `operation_id` with the SAME canonical arguments are a
-/// replay (the store returns the stored row), while a different canonical
-/// request is the typed `operation_id_conflict` refusal. It is deliberately
-/// the digest of `args` alone and not of the scope tuple
-/// [`derive_operation_id`] hashes: the scope already selects *which* receipt
-/// row is addressed, and the fingerprint answers *whether this is the same
-/// logical request* for that row.
+/// The fingerprint binds the COMPLETE scope tuple `{actor, session, action,
+/// args}` — the same canonical document [`derive_operation_id`] hashes — not
+/// `args` alone. An operation id MAY be caller-supplied and is then used
+/// verbatim in a workspace-global primary key, so an args-only digest would
+/// let a *different* caller/session (or a changed grant actor) with identical
+/// arguments silently replay another owner's receipt. Binding the scope makes
+/// every scope difference a `operation_id_conflict`, exactly as §B.1
+/// requires. The caller-supplied id is envelope metadata, not part of the
+/// request: callers strip it from `args` before fingerprinting.
+///
+/// Two callers carrying the same canonical scope are a replay (the store
+/// returns the stored row); any scope difference is the typed
+/// `operation_id_conflict` refusal.
 #[must_use]
-pub fn request_fingerprint(args: &Value) -> String {
-    hex::encode(Sha256::digest(canonical_json(args).as_bytes()))
+pub fn request_fingerprint(scope: &OperationScope<'_>) -> String {
+    hex::encode(Sha256::digest(canonical_operation_json(scope).as_bytes()))
 }
 
 #[cfg(test)]
@@ -336,34 +341,56 @@ mod tests {
         );
     }
 
-    /// §B.2 `request_fingerprint`: the canonical-request digest is stable
-    /// across key order and nested reordering, and changes with the request.
+    /// §B.2 `request_fingerprint`: the fingerprint binds the COMPLETE logical
+    /// request scope — so a caller-supplied id can never silence a different
+    /// caller/session/action — is stable under canonical key order, and is
+    /// content-addressed.
     #[test]
-    fn request_fingerprint_is_canonical_and_content_addressed() {
-        let first = request_fingerprint(&json!({"b": 2, "a": {"y": 1, "x": [1, 2]}}));
-        let reordered = request_fingerprint(&json!({"a": {"x": [1, 2], "y": 1}, "b": 2}));
-        assert_eq!(first, reordered, "canonical key order must not matter");
-        assert_eq!(first.len(), 64, "SHA-256 renders 64 hex chars");
+    fn request_fingerprint_binds_the_whole_scope() {
+        let args = json!({"b": 2, "a": {"y": 1, "x": [1, 2]}});
+        let base = scope("creator-1", "session-1", "op", &args);
+        let fingerprint = request_fingerprint(&base);
+        assert_eq!(fingerprint.len(), 64, "SHA-256 renders 64 hex chars");
         assert!(
-            first
+            fingerprint
                 .bytes()
                 .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
-            "lowercase hex only: {first}"
+            "lowercase hex only: {fingerprint}"
         );
         assert_eq!(
-            first,
-            request_fingerprint(&json!({"a": {"x": [1, 2], "y": 1}, "b": 2})),
-            "the same request fingerprints identically on every attempt"
+            fingerprint,
+            request_fingerprint(&scope(
+                "creator-1",
+                "session-1",
+                "op",
+                &json!({"a": {"x": [1, 2], "y": 1}, "b": 2})
+            )),
+            "canonical key order must not matter, and the same request must \
+             fingerprint identically on every attempt"
         );
-        assert_ne!(
-            first,
-            request_fingerprint(&json!({"a": {"x": [2, 1], "y": 1}, "b": 2})),
-            "a different request must not collide"
-        );
-        assert_ne!(
-            first,
-            request_fingerprint(&json!({"a": {"x": [1, 2], "y": 1}, "b": 3})),
-            "a changed scalar must not collide"
-        );
+
+        // Every scope component participates: two peers (or two grant actors)
+        // that share a verbatim caller-supplied id but differ in scope must
+        // NOT collide, or one would silently replay the other's receipt.
+        for (label, other) in [
+            ("actor", scope("creator-2", "session-1", "op", &args)),
+            ("session", scope("creator-1", "session-2", "op", &args)),
+            ("action", scope("creator-1", "session-1", "other-op", &args)),
+            (
+                "args",
+                scope(
+                    "creator-1",
+                    "session-1",
+                    "op",
+                    &json!({"b": 3, "a": {"y": 1, "x": [1, 2]}}),
+                ),
+            ),
+        ] {
+            assert_ne!(
+                fingerprint,
+                request_fingerprint(&other),
+                "a differing {label} must change the fingerprint"
+            );
+        }
     }
 }

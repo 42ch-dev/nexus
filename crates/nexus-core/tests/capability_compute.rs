@@ -3241,38 +3241,103 @@ async fn boot_recovery_refuses_stuck_runs_uncertain_and_never_reapplies() {
 }
 
 /// §B.3 step 3's other half: when the stuck run's receipt is TERMINAL the
-/// replay is answered from the receipt and the effect is never re-applied.
+/// replay is answered **from the receipt** — the complete stored answer
+/// travels out with the decision (success payload and non-success reason
+/// verbatim), and the effect is never re-applied.
 #[tokio::test]
 #[serial_test::serial]
 async fn boot_recovery_answers_a_terminal_receipt_without_reapplying() {
     let f = fixture().await;
-    let operation_id = format!("op_{}", "d".repeat(32));
-    let run_id = seed_stuck_run(&f, Some(&operation_id)).await;
+    let finished_operation = format!("op_{}", "d".repeat(32));
+    let finished_run = seed_stuck_run(&f, Some(&finished_operation)).await;
     nexus_local_db::operation_receipts::settle_operation(
         f.core.pool(),
-        &operation_id,
+        &finished_operation,
         nexus_local_db::operation_receipts::STATUS_FINISHED,
-        r#"{"state_delta":[]}"#,
+        r#"{"state_delta":[],"new_key_blocks":[]}"#,
     )
     .await
     .expect("settle the receipt terminally");
 
+    let failed_operation = format!("op_{}", "e".repeat(32));
+    let failed_run = seed_stuck_run(&f, Some(&failed_operation)).await;
+    nexus_local_db::operation_receipts::settle_operation(
+        f.core.pool(),
+        &failed_operation,
+        nexus_local_db::operation_receipts::STATUS_FAILED,
+        r#"{"code":"compute_fuel_exhausted","message":"out of fuel"}"#,
+    )
+    .await
+    .expect("settle the receipt as failed");
+
     let recovered = recover_stuck_compute_runs(f.core.pool())
         .await
         .expect("recovery classification");
-    let entry = recovered
-        .iter()
-        .find(|entry| entry.run_id == run_id)
-        .expect("the stuck run is classified");
-    match &entry.outcome {
-        ComputeRunRecoveryOutcome::AnsweredFromReceipt { status } => {
-            assert_eq!(status, nexus_local_db::operation_receipts::STATUS_FINISHED);
-        }
-        other @ ComputeRunRecoveryOutcome::Uncertain(_) => {
-            panic!("a terminal receipt must answer the replay, got {other:?}")
+
+    for (run_id, operation_id, expected_status, expected_result, expected_error) in [
+        (
+            &finished_run,
+            &finished_operation,
+            "finished",
+            Some(r#"{"state_delta":[],"new_key_blocks":[]}"#),
+            None,
+        ),
+        (
+            &failed_run,
+            &failed_operation,
+            "failed",
+            None,
+            Some(r#"{"code":"compute_fuel_exhausted","message":"out of fuel"}"#),
+        ),
+    ] {
+        let entry = recovered
+            .iter()
+            .find(|entry| entry.run_id == *run_id)
+            .expect("the stuck run is classified");
+        assert_eq!(entry.operation_id.as_deref(), Some(operation_id.as_str()));
+        match &entry.outcome {
+            ComputeRunRecoveryOutcome::AnsweredFromReceipt { receipt } => {
+                assert_eq!(
+                    receipt.status.to_string(),
+                    expected_status,
+                    "the answer carries the stored terminal status"
+                );
+                assert_eq!(receipt.consumer.to_string(), "compute_run");
+                assert_eq!(receipt.subject_id.to_string(), *run_id);
+                assert_eq!(
+                    receipt.operation_id.to_string(),
+                    *operation_id,
+                    "the answer carries the stored receipt's own id"
+                );
+                assert!(receipt.terminal_at.is_some());
+                assert_eq!(
+                    receipt.result_json.as_deref(),
+                    expected_result,
+                    "the success payload travels verbatim"
+                );
+                assert_eq!(
+                    receipt.error_json.as_deref(),
+                    expected_error,
+                    "the non-success reason travels verbatim"
+                );
+            }
+            other @ ComputeRunRecoveryOutcome::Uncertain(_) => {
+                panic!("a terminal receipt must answer the replay, got {other:?}")
+            }
         }
     }
-    assert_eq!(entry.operation_id.as_deref(), Some(operation_id.as_str()));
+
+    // The replay was answered, not applied: both stuck rows are exactly as the
+    // crash left them — recovery settles nothing and runs no module.
+    for run_id in [&finished_run, &failed_run] {
+        let row = nexus_local_db::compute_runs::get_run(f.core.pool(), run_id)
+            .await
+            .unwrap()
+            .expect("the stuck row survives recovery");
+        assert_eq!(row.status, "running");
+        assert!(row.proposals_json.is_none());
+        assert!(row.error_json.is_none());
+    }
 }
 
 /// The boot wiring is real, not just a callable: an execution start over a
@@ -3284,6 +3349,18 @@ async fn boot_recovery_answers_a_terminal_receipt_without_reapplying() {
 async fn execution_start_runs_the_compute_receipt_recovery_pass() {
     let f = fixture().await;
     let run_id = seed_stuck_run(&f, None).await;
+    // A second stuck run whose receipt already settled terminally: its replay
+    // answer must be served from the receipt through the startup surface.
+    let settled_operation = format!("op_{}", "f".repeat(32));
+    let settled_run = seed_stuck_run(&f, Some(&settled_operation)).await;
+    nexus_local_db::operation_receipts::settle_operation(
+        f.core.pool(),
+        &settled_operation,
+        nexus_local_db::operation_receipts::STATUS_FINISHED,
+        r#"{"state_delta":[{"op":"set"}]}"#,
+    )
+    .await
+    .expect("settle the receipt terminally");
 
     let handle = open_compute_handle(&f).await;
     let recovered = handle.compute_run_recoveries();
@@ -3293,9 +3370,9 @@ async fn execution_start_runs_the_compute_receipt_recovery_pass() {
         .expect("the boot pass classified the stuck run");
     assert!(
         matches!(
-            entry.outcome,
-            ComputeRunRecoveryOutcome::Uncertain(ref error)
-                if matches!(error, CoreError::Coded { ref code, .. } if code == "uncertain")
+            &entry.outcome,
+            ComputeRunRecoveryOutcome::Uncertain(error)
+                if matches!(error, CoreError::Coded { code, .. } if code == "uncertain")
         ),
         "the boot pass must refuse the stuck run uncertain, got {:?}",
         entry.outcome
@@ -3305,4 +3382,29 @@ async fn execution_start_runs_the_compute_receipt_recovery_pass() {
         .unwrap()
         .expect("the stuck row survives the boot pass");
     assert_eq!(row.status, "running");
+
+    let settled = recovered
+        .iter()
+        .find(|entry| entry.run_id == settled_run)
+        .expect("the boot pass classified the settled run");
+    match &settled.outcome {
+        ComputeRunRecoveryOutcome::AnsweredFromReceipt { receipt } => {
+            assert_eq!(
+                receipt.result_json.as_deref(),
+                Some(r#"{"state_delta":[{"op":"set"}]}"#),
+                "the startup surface carries the receipt's terminal answer verbatim"
+            );
+            assert_eq!(receipt.status.to_string(), "finished");
+            assert_eq!(receipt.subject_id.to_string(), settled_run);
+        }
+        other @ ComputeRunRecoveryOutcome::Uncertain(_) => {
+            panic!("a terminal receipt must answer the replay, got {other:?}")
+        }
+    }
+    let settled_row = nexus_local_db::compute_runs::get_run(f.core.pool(), &settled_run)
+        .await
+        .unwrap()
+        .expect("the settled row survives the boot pass");
+    assert_eq!(settled_row.status, "running");
+    assert!(settled_row.proposals_json.is_none());
 }

@@ -927,16 +927,15 @@ const fn is_live_write(route: Route) -> bool {
 /// (the same refusal the core's `OperationIdError` maps to, naming the wire
 /// field the caller used).
 #[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of the dispatch
-fn connect_operation_id(
-    peer: &PeerId,
-    grant: Option<&PeerGrant>,
+fn resolve_connect_operation_id(
+    actor: &str,
+    session: &str,
     op: &str,
     payload: &Value,
 ) -> Result<String, ErrorEnvelope> {
-    let session = peer.to_string();
     operation_id::resolve_operation_id(&OperationScope {
-        actor: grant.map_or("", PeerGrant::actor_id),
-        session: &session,
+        actor,
+        session,
         action: op,
         args: payload,
     })
@@ -1119,10 +1118,23 @@ async fn open_write_receipt(
     op: &str,
     payload: &mut Value,
 ) -> Result<WriteReceipt, ErrorEnvelope> {
-    let operation_id = connect_operation_id(peer, grant, op, payload)?;
+    let session = peer.to_string();
+    let actor = grant.map_or("", PeerGrant::actor_id);
+    let operation_id = resolve_connect_operation_id(actor, &session, op, payload)?;
+    // The caller-supplied id is envelope metadata, not part of the request.
     strip_caller_operation_id(payload);
+    // §B.2: the fingerprint binds the COMPLETE logical request — actor,
+    // session, action and args — so a caller-supplied id used verbatim in a
+    // workspace-global primary key can never let a different caller/session
+    // (or a changed grant actor) with identical arguments replay another
+    // owner's receipt; that is the typed `operation_id_conflict` instead.
+    let fingerprint = operation_id::request_fingerprint(&OperationScope {
+        actor,
+        session: &session,
+        action: op,
+        args: payload,
+    });
     let subject_id = format!("{peer}/{op}");
-    let fingerprint = operation_id::request_fingerprint(payload);
 
     // §B.3 step 2: ask the receipt store FIRST — before any re-apply.
     //
@@ -3950,6 +3962,23 @@ mod tests {
         format!("op_{suffix:0>32}")
     }
 
+    /// The §B.2 fingerprint of one Connect logical request, computed exactly as
+    /// `open_write_receipt` computes it: the complete scope (grant Actor + peer
+    /// session + op + args), with the caller's id argument excluded.
+    fn connect_fingerprint(peer: &PeerId, op: &str, payload: &Value) -> String {
+        let mut request = payload.clone();
+        request
+            .as_object_mut()
+            .expect("payload is an object")
+            .remove(nexus_core::operation_id::OPERATION_ID_FIELD);
+        nexus_core::operation_id::request_fingerprint(&nexus_core::operation_id::OperationScope {
+            actor: CREATOR,
+            session: &peer.to_string(),
+            action: op,
+            args: &request,
+        })
+    }
+
     /// §B.3 on the Connect write surface: a re-driven `LiveWrite` invoke is
     /// answered from its stored receipt, so the effect is never applied twice.
     ///
@@ -4029,17 +4058,12 @@ mod tests {
         // Its fingerprint is the SAME logical call's (the id argument is an
         // envelope argument and is not part of the fingerprinted request), so
         // this is a replay of an unterminated operation — not a conflict.
-        let mut request = payload.clone();
-        request
-            .as_object_mut()
-            .expect("payload object")
-            .remove("operation_id");
         nexus_local_db::operation_receipts::begin_operation(
             &pool,
             &operation_id,
             nexus_local_db::operation_receipts::CONSUMER_CONNECT_INVOKE,
             &subject_id,
-            &nexus_core::operation_id::request_fingerprint(&request),
+            &connect_fingerprint(&peer, "upsert", &payload),
         )
         .await
         .expect("seed the in-flight receipt");
@@ -4113,5 +4137,96 @@ mod tests {
         // The first writer's row is untouched.
         let rows = connect_receipt_rows(&pool, &subject_id).await;
         assert_eq!(rows, vec![(operation_id, "running".to_string())]);
+    }
+
+    /// §B.1 first-writer-wins across SCOPES (Critical 1): a caller-supplied id
+    /// is used verbatim in a workspace-global primary key, so its fingerprint
+    /// must bind the COMPLETE logical request. Two admitted peers sharing one
+    /// supplied id and byte-identical arguments are NOT the same logical call —
+    /// the second gets the typed `operation_id_conflict` and never the first
+    /// peer's stored answer (and the stored subject stays the first peer's).
+    ///
+    /// The racing-begin path applies the same ownership check, because it is
+    /// the same scope-bound fingerprint the store compares.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn caller_supplied_id_is_scope_bound_across_peers() {
+        let peer_a = fixed_keypair(44).public().to_peer_id();
+        let peer_b = fixed_keypair(45).public().to_peer_id();
+        let operation_id = caller_operation_id("ab");
+
+        // ONE workspace (the shared world), two admitted peers over it.
+        let (_temp, ports_a) = test_ports().await;
+        let pool = ports_a.pool().clone();
+        let (handler_a, _lane_a, _ser_a) =
+            build_handler_with_limits(scoped_scope(peer_a), ports_a, BridgeLimits::default());
+        let (handler_b, _lane_b, _ser_b) = build_handler_with_limits(
+            scoped_scope(peer_b),
+            ConnectPorts::new(pool.clone(), None),
+            BridgeLimits::default(),
+        );
+
+        let payload = serde_json::json!({
+            "operation_id": &operation_id,
+            "knowledge_entries": [entry_fixture("kb_scope", WORLD_A)],
+        });
+        let applied =
+            handler_a(&peer_a, "upsert", payload.clone()).expect("peer A's write applies");
+        assert_eq!(applied["knowledge_entries"][0]["entry_id"], "kb_scope");
+        let subject_a = format!("{peer_a}/upsert");
+        let rows_a = connect_receipt_rows(&pool, &subject_a).await;
+        assert_eq!(rows_a.len(), 1, "peer A owns the receipt");
+
+        // The effect's durable trace, captured before peer B's call.
+        let before: (i64, String) =
+            sqlx::query_as("SELECT revision, updated_at FROM kb_key_blocks WHERE key_block_id = ?")
+                .bind("kb_scope")
+                .fetch_one(&pool)
+                .await
+                .expect("entry row");
+
+        // Peer B: the SAME supplied id and identical arguments, a different
+        // authenticated session — a different logical call.
+        match handler_b(&peer_b, "upsert", payload.clone()) {
+            Err(envelope) => assert_eq!(
+                envelope.code, "operation_id_conflict",
+                "a different caller/session must never be answered from peer A's receipt"
+            ),
+            Ok(served) => panic!("a scope-different caller must be refused, got {served}"),
+        }
+
+        // No second effect, no second receipt, and peer A's row is untouched.
+        let after: (i64, String) =
+            sqlx::query_as("SELECT revision, updated_at FROM kb_key_blocks WHERE key_block_id = ?")
+                .bind("kb_scope")
+                .fetch_one(&pool)
+                .await
+                .expect("entry row");
+        assert_eq!(before, after, "peer B applied nothing");
+        assert_eq!(connect_receipt_rows(&pool, &subject_a).await, rows_a);
+        assert!(
+            connect_receipt_rows(&pool, &format!("{peer_b}/upsert"))
+                .await
+                .is_empty(),
+            "the refused call created no receipt for peer B"
+        );
+
+        // The racing-begin path (the store's own first-writer-wins insert)
+        // refuses the same scope difference with the same typed error.
+        let err = nexus_local_db::operation_receipts::begin_operation(
+            &pool,
+            &operation_id,
+            nexus_local_db::operation_receipts::CONSUMER_CONNECT_INVOKE,
+            &format!("{peer_b}/upsert"),
+            &connect_fingerprint(&peer_b, "upsert", &payload),
+        )
+        .await
+        .expect_err("the racing-begin path must refuse a scope-different owner");
+        assert!(
+            matches!(
+                err,
+                nexus_local_db::LocalDbError::OperationIdConflict { .. }
+            ),
+            "expected the typed operation_id_conflict, got {err:?}"
+        );
     }
 }

@@ -70,7 +70,12 @@ fn parse_timestamp(what: &str, value: &str) -> CoreResult<chrono::DateTime<chron
 /// status/payload CHECK), so a row that fails projection means the stored
 /// receipt was tampered with; the error is `internal`, never a fabricated
 /// success and never a fabricated terminal.
-fn project_receipt(row: OperationReceipt) -> CoreResult<CoreOperationReceipt> {
+///
+/// The compute Run recovery pass answers a terminal replay **from the
+/// receipt** (§B.3 step 3), so it needs the same owned projection this
+/// module's read handle returns. (`pub` in this private module = crate-wide;
+/// the module itself is not part of the public surface.)
+pub fn project_receipt(row: OperationReceipt) -> CoreResult<CoreOperationReceipt> {
     let sequence =
         u64::try_from(row.sequence).map_err(|_| receipt_internal("sequence", row.sequence))?;
     Ok(CoreOperationReceipt {

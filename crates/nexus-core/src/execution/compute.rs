@@ -68,6 +68,7 @@ use nexus_contracts::generated::daemon_api::compute::{
     run_request::RunRequest,
     run_response::RunResponse,
 };
+use nexus_contracts::CoreOperationReceipt;
 use nexus_local_db::compute_runs::{self, list_runs, RunListFilters};
 use nexus_local_db::operation_receipts::{
     begin_operation, classify_recovery, get_operation_receipt_by_subject, settle_operation,
@@ -251,9 +252,18 @@ pub async fn compute_run(
     // crash mid-run leaves a durable "the effect may have started" record
     // instead of silence; the boot recovery pass
     // ([`recover_stuck_compute_runs`]) then refuses to re-apply it.
-    let operation_id = compute_run_operation_id(creator_id, &run_id, &request);
-    let request_fingerprint =
-        operation_id::request_fingerprint(&serde_json::to_value(&request).unwrap_or(Value::Null));
+    let run_args = serde_json::to_value(&request).unwrap_or(Value::Null);
+    let operation_scope = OperationScope {
+        actor: creator_id,
+        session: &run_id,
+        action: COMPUTE_RUN_ACTION,
+        args: &run_args,
+    };
+    let operation_id = operation_id::derive_operation_id(&operation_scope);
+    // §B.2: the fingerprint binds the complete logical request (actor,
+    // session, action, args) — the same document the id derives from — so no
+    // scope of a colliding id can ever match another scope's receipt.
+    let request_fingerprint = operation_id::request_fingerprint(&operation_scope);
     match begin_operation(
         pool,
         &operation_id,
@@ -1283,26 +1293,6 @@ fn effect_committed_refusal(
     }
 }
 
-/// The durable operation id of one compute run (spec §B.1/§B.2).
-///
-/// The direct-lane `RunRequest` carries no session correlation, so the run's
-/// own identity is the scope's `session` component: `actor` = the owning
-/// creator, `session` = the `run_id`, `action` = [`COMPUTE_RUN_ACTION`],
-/// `args` = the canonical request. Two distinct runs therefore never share an
-/// id, and the receipt is reachable from the run row through its `subject_id`
-/// (the same `run_id`) — which is exactly the handle
-/// [`recover_stuck_compute_runs`] asks with.
-#[must_use]
-fn compute_run_operation_id(creator_id: &str, run_id: &str, request: &RunRequest) -> String {
-    let args = serde_json::to_value(request).unwrap_or(Value::Null);
-    operation_id::derive_operation_id(&OperationScope {
-        actor: creator_id,
-        session: run_id,
-        action: COMPUTE_RUN_ACTION,
-        args: &args,
-    })
-}
-
 /// One direct-lane compute run that was stuck `running` at boot, and the
 /// receipt-first answer recovery decided for it.
 #[derive(Debug, Clone)]
@@ -1319,11 +1309,17 @@ pub struct ComputeRunRecovery {
 /// The receipt-first decision for a stuck compute run (§B.3 steps 2–4).
 #[derive(Debug, Clone)]
 pub enum ComputeRunRecoveryOutcome {
-    /// A terminal receipt exists: the replay is answered from the receipt and
-    /// the run is **not** re-applied (§B.3 step 3).
+    /// A terminal receipt exists: the replay is answered **from the
+    /// receipt** (§B.3 step 3) and the run is **not** re-applied.
+    ///
+    /// The complete stored receipt travels here — status, the exactly-one
+    /// terminal payload (`result_json` for `finished`, `error_json` for
+    /// `failed`/`cancelled`/`interrupted`), `operation_id`, `subject_id` and
+    /// the timestamps — so a caller inspecting the startup recovery can serve
+    /// the terminal answer without re-deriving or re-applying anything.
     AnsweredFromReceipt {
-        /// The terminal status the receipt settled on.
-        status: String,
+        /// The stored terminal receipt, projected onto the wire DTO.
+        receipt: CoreOperationReceipt,
     },
     /// No terminal receipt: the §B.3 item-4 typed refusal — never a blind
     /// retry, and no terminal is fabricated for the orphaned run.
@@ -1373,8 +1369,11 @@ pub async fn recover_stuck_compute_runs(
         // an orphan by definition.
         let outcome = match classify_recovery(receipt.as_ref(), false) {
             RecoveryDecision::AnswerFromReceipt(terminal) => {
+                // The replay is answered FROM the receipt (§B.3 step 3): the
+                // complete stored terminal receipt travels out with the
+                // decision, so the caller never has to re-derive or re-apply.
                 ComputeRunRecoveryOutcome::AnsweredFromReceipt {
-                    status: terminal.status,
+                    receipt: crate::operation_receipts::project_receipt(terminal)?,
                 }
             }
             RecoveryDecision::InProgress(_)
