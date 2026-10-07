@@ -211,6 +211,43 @@ async fn invalid_source_type_is_refused_without_writes() {
     );
 }
 
+/// Greptile #5: a valid register on a `ReadOnly` core is refused with the
+/// standard forbidden classification before the registry insert is reached,
+/// not reported as an internal storage failure.
+#[tokio::test]
+async fn read_only_access_refuses_register_without_writes() {
+    let temp = tempfile::tempdir().unwrap();
+    seed_workspace(temp.path()).await;
+    let core = CoreService::open(CoreOpenOptions {
+        user_home: temp.path().into(),
+        access: CoreAccess::ReadOnly,
+    })
+    .await
+    .unwrap();
+    let principal = core.active_principal().await.unwrap();
+
+    assert!(matches!(
+        core.register_reference(&principal, params(None)).await,
+        Err(CoreError::Forbidden { ref resource })
+            if resource == "work: read-only core access"
+    ));
+
+    // No registry row and no body unit directory were created.
+    let registry = core.list_references(&principal).await.unwrap();
+    assert!(registry.references.is_empty(), "{registry:?}");
+    let units = nexus_home_layout::reference_body_path(temp.path(), "author", "ref_probe")
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    assert!(
+        !units.exists(),
+        "body unit dir written: {}",
+        units.display()
+    );
+
+    core.close().await.unwrap();
+}
+
 /// A registry row updated by the refresh lifecycle carries `updated_at` on the
 /// get wire (the CLI renders it only when present).
 #[tokio::test]
