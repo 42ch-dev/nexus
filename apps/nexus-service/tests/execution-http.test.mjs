@@ -237,6 +237,117 @@ describe('execution-http (P5-T3)', () => {
     assert.equal(missing.payload.error.code, 'not_found', missing.text);
   });
 
+  // v1.206 P1 Task 2: the public prompt POST's 500 exits are all classified
+  // `internal`, sanitized, and pinned. A provider-only (non-Actor) session
+  // drives the branch that reserves a dispatch, calls the provider, and
+  // registers the row; the provider seam is stubbed per invariant so each
+  // exit at `provider.ts` fires on the real public route.
+  test('the public prompt POST 500 exits are typed internal and sanitized', async () => {
+    const created = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/sessions`, {
+      method: 'POST',
+      body: { provider_id: PROVIDER_IDS[0] },
+    });
+    assert.equal(created.status, 200, created.text);
+    const sessionId = created.payload.session_id;
+    assert.ok(sessionId, created.text);
+
+    const core = service.service.core;
+    const liveBoundary = { providerCall: core.providerCall };
+    const prompt = (content) =>
+      jsonFetch(`${baseUrl}/v1/daemon/agent-host/sessions/${sessionId}/operations`, {
+        method: 'POST',
+        body: { kind: 'prompt', content },
+      });
+
+    try {
+      // E1 (provider.ts:529) — an `ok` execute reply without `operation_id`
+      // violates the provider protocol invariant: typed `internal`/500, never a
+      // fabricated operation.
+      core.providerCall = async (request) => ({
+        request_id: request.request_id,
+        ok: true,
+        session_id: sessionId,
+      });
+      const noOperationId = await prompt('e1-no-operation-id');
+      assert.equal(noOperationId.status, 500, noOperationId.text);
+      assert.equal(noOperationId.payload.error.code, 'internal', noOperationId.text);
+      assert.equal(noOperationId.payload.error.message, 'Internal server error', noOperationId.text);
+
+      // E2 (provider.ts:540) — the reservation taken synchronously by
+      // `beginProviderOperationDispatch` must still be held when the row is
+      // registered; losing it is `internal`/500, not a silent unregistered op.
+      core.providerCall = async (request) => {
+        service.service.providerRegistry.endProviderOperationDispatch(request.request_id);
+        return {
+          request_id: request.request_id,
+          ok: true,
+          operation_id: randomUUID(),
+          session_id: sessionId,
+        };
+      };
+      const lostAdmission = await prompt('e2-lost-admission');
+      assert.equal(lostAdmission.status, 500, lostAdmission.text);
+      assert.equal(lostAdmission.payload.error.code, 'internal', lostAdmission.text);
+      assert.equal(lostAdmission.payload.error.message, 'Internal server error', lostAdmission.text);
+
+      // E3 (errors.ts:90-91) — a native `internal` rejection on the prompt path
+      // is the sanitization boundary: 500 `internal` with a constant message,
+      // and the native detail never crosses the wire.
+      const nativeDetail = '/Users/private-operator/.nexus42/state.db';
+      core.providerCall = async (request) => {
+        throw new Error(
+          JSON.stringify({
+            request_id: request.request_id,
+            code: 'internal',
+            message: `database_error: unable to open ${nativeDetail}`,
+            details: { home: nativeDetail },
+            http_status: 500,
+          }),
+        );
+      };
+      const nativeInternal = await prompt('e3-native-internal');
+      assert.equal(nativeInternal.status, 500, nativeInternal.text);
+      assert.equal(nativeInternal.payload.error.code, 'internal', nativeInternal.text);
+      assert.equal(nativeInternal.payload.error.message, 'Internal server error', nativeInternal.text);
+      assert.equal(
+        nativeInternal.text.includes(nativeDetail),
+        false,
+        'the native detail must not reach the client',
+      );
+      assert.equal(
+        nativeInternal.text.includes('state.db'),
+        false,
+        'the native detail must not reach the client',
+      );
+    } finally {
+      core.providerCall = liveBoundary.providerCall;
+    }
+  });
+
+  // E4 (errors.ts:64) and E5 (errors.ts:111) are classification arms that no
+  // synthetic wire can drive: the parser gate (`CORE_ERROR_CODES`) rejects an
+  // unknown code before the mapper (so E4 is a defensive arm), and E5 catches
+  // the non-native rejections the wire cannot carry. Both are pinned directly
+  // on the exported helpers.
+  test('every mapper 500 fallback arm is classified internal and sanitized', async () => {
+    const { mapNativeError, statusForCode } = await import(join(serviceRoot, 'dist/errors.js'));
+
+    // E4 — a code outside both lookup tables falls back to the defensive 500.
+    assert.equal(statusForCode('internal'), 500);
+    assert.equal(statusForCode('not_supported'), 501);
+    assert.equal(statusForCode('no_such_code'), 500);
+
+    // E5 — a rejection that is neither an `HttpError` nor a parseable native
+    // envelope, nor a pre-wire `invalid ` validation, is the catch-all
+    // `internal`/500 with the constant sanitized message.
+    const unmapped = mapNativeError(
+      new Error('registry exploded at /Users/private-operator/.nexus42'),
+    );
+    assert.equal(unmapped.status, 500);
+    assert.equal(unmapped.code, 'internal');
+    assert.equal(unmapped.message, 'Internal server error');
+  });
+
   test('migrated preset and strategy routes answer from the core authority, not 501', async () => {
     const list = await jsonFetch(`${baseUrl}/v1/daemon/presets`);
     assert.equal(list.status, 200, list.text);

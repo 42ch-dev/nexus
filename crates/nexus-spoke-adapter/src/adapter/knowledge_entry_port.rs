@@ -1061,6 +1061,45 @@ mod tests {
         }
     }
 
+    /// V1.206 P2 R8: promoting into an id that exists only as a row this
+    /// caller cannot see (a foreign holder's `owner-private` row) collides on
+    /// the primary key at INSERT. That collision must answer the
+    /// already-exists family — a raw storage error would both misclassify the
+    /// refusal and confirm the hidden row's existence.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_create_on_hidden_row_answers_already_exists() {
+        use nexus_knowledge::world_kb::knowledge_entry::{
+            KnowledgeEntryRecord, DISCLOSURE_OWNER_PRIVATE,
+        };
+        use nexus_knowledge::world_kb::KbStore;
+        use nexus_local_db::kb_store::SqliteKbStore;
+
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let mut hidden = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "HiddenPromote");
+        hidden.entry_id = "kb_hidden_promote".to_string();
+        hidden.holder_entry_id = Some(register_creator_holder(&pool).await);
+        hidden.disclosure = Some(DISCLOSURE_OWNER_PRIVATE.to_string());
+        SqliteKbStore::new(pool.clone())
+            .insert_knowledge_entry(hidden)
+            .await
+            .unwrap();
+
+        let adapter = scoped(pool);
+        match adapter
+            .put_knowledge_entry(spoke_entry("kb_hidden_promote", "Promoted", None), None)
+            .await
+        {
+            SpokeResult::Reject(r) => assert_eq!(
+                r.code,
+                SpokeRejectCode::KnowledgeEntryAlreadyExists,
+                "a hidden id collision must answer the already-exists family, got {r:?}"
+            ),
+            SpokeResult::Ok(_) => panic!("the id is occupied by the stored row"),
+        }
+    }
+
     // ── put_knowledge_entry update path (CAS) ─────────────────────────
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

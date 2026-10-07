@@ -18,6 +18,7 @@ tags:
   - ownership
   - worktree-cleanup
   - phase-machine
+last_updated: 2026-10-07
 ---
 
 # Engine lifecycle seams: declare the phase you are in, register the tracks you create
@@ -54,6 +55,8 @@ Two measured interactions between the lifecycle and reclamation:
 - **Ignored-only footprints read as dirty.** A checkout whose tracked tree is clean but which holds ignored build outputs is refused as `cleanup.refuse.dirty-worktree`. Do not scaffold builds inside a reviewed checkout when avoidable; when it happens, enumerate the ignored paths/sizes as evidence and reclaim through the documented exact-path non-force route rather than treating the refusal as a defect.
 - **Every track branch you create must be registered, or cleanup refuses it.** The plan row's `metadata.track_branches` is the ownership record the engine and the sweeper read. A branch created without being recorded (an extra fix-round branch, for example) produces `cleanup.refuse... / stale-branch-claim` — the guard is right, the bookkeeping was missing. Register the branch in the same round you create the worktree, not when you clean up.
 - On the plan row's `Done` transition, the ownership producer obligation is to persist `metadata.working_branch`, `metadata.worktree_path` (and keep `track_branches`) **in the same locked update** that sets `Done` and deletes `execution_lease`; only then can the engine plan branch/worktree removal from the retained metadata.
+- **A registered row set is immutable — there is no replace or delete.** `persist snapshot` refuses any plan-row drift (`refusing snapshot write: field(s) plans differ from disk — this writer may only change phase, updated_at`) and `amend-prepare` appends only; the amendment contract explicitly has "no replacement". A mis-scoped registered row is repaired **in place** — re-position its content so the id's name and the delivered work still match (v1.206 P1), never hand-edit the snapshot.
+- **Submodule checkouts and stale locks have exact-path recovery.** `git worktree remove` refuses a checkout carrying submodules and the refusal survives `git submodule deinit`; the documented non-force route is `rm -rf <exact worktree path>` + `git worktree prune` (then let the engine's cleanup judge the branch). A stale empty `.status-write.lockdir` left by an interrupted writer makes the next `mkdir` fail — confirm no writer/merge lease is active, then `rmdir` the empty lock and retry.
 
 ### Row `Done` comes after the serial integration merge, never before it
 

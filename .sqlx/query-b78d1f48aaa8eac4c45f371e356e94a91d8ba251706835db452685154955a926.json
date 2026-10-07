@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT owner_kind, world_id, character_id, actor_world_binding_id FROM kb_key_blocks WHERE key_block_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "owner_kind",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "kb_key_blocks",
+            "name": "owner_kind"
+          }
+        }
+      },
+      {
+        "name": "world_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "kb_key_blocks",
+            "name": "world_id"
+          }
+        }
+      },
+      {
+        "name": "character_id",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "kb_key_blocks",
+            "name": "character_id"
+          }
+        }
+      },
+      {
+        "name": "actor_world_binding_id",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "kb_key_blocks",
+            "name": "actor_world_binding_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "b78d1f48aaa8eac4c45f371e356e94a91d8ba251706835db452685154955a926"
+}

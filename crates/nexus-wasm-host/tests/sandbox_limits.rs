@@ -78,7 +78,8 @@ fn manifest_fuel_override_bounds_compute() {
 }
 
 /// A module whose initial memory already exceeds the invocation's memory cap.
-/// Instantiation hits the `StoreLimits` resource limiter and must surface as
+/// The refusal is decided by the pre-instantiation structured check (the
+/// module's declared memory minimum vs the invocation cap) and must surface as
 /// [`ComputeError::MemoryCapExceeded`], not a generic trap or a host crash.
 fn big_memory_module() -> Vec<u8> {
     wat::parse_str(
@@ -114,6 +115,52 @@ fn memory_cap_is_enforced_at_instantiation() {
     assert!(
         matches!(err, ComputeError::MemoryCapExceeded),
         "expected MemoryCapExceeded, got {err:?}"
+    );
+}
+
+/// V1.206 P2 site 2 (Greptile fix): a module may export an in-cap `memory` and
+/// declare a second, unexported memory above the cap. The pre-check must read
+/// every *declared* memory, not only the exports — otherwise the oversized
+/// unexported memory slips past it and the refusal degrades to a generic
+/// instantiation error instead of [`ComputeError::MemoryCapExceeded`].
+fn oversized_unexported_memory_module() -> Vec<u8> {
+    wat::parse_str(
+        r#"(module
+            (memory (export "memory") 1)
+            (memory 64)
+            (global $heap (mut i32) (i32.const 1024))
+            (func (export "alloc") (param $len i32) (result i32)
+              (local $p i32)
+              (local.set $p (global.get $heap))
+              (global.set $heap (i32.add (global.get $heap) (local.get $len)))
+              (local.get $p))
+            (func (export "init"))
+            (func (export "compute")
+              (param i32 i32 i32 i32) (result i64)
+              (i64.const 0)))
+        "#,
+    )
+    .expect("valid wat")
+}
+
+#[test]
+fn memory_cap_covers_unexported_memories() {
+    let engine = WasmEngine::new().unwrap();
+    // The exported memory (1 page) is inside the 1 MiB cap; only the
+    // unexported memory (64 pages = 4 MiB) exceeds it.
+    let module = engine
+        .load_module(&oversized_unexported_memory_module())
+        .unwrap();
+    let mut manifest = manifest();
+    manifest.max_memory_mib = Some(1);
+
+    let err = engine
+        .compute(&module, &manifest, &empty_input())
+        .expect_err("oversized unexported memory must be rejected");
+
+    assert!(
+        matches!(err, ComputeError::MemoryCapExceeded),
+        "expected MemoryCapExceeded for the unexported memory, got {err:?}"
     );
 }
 

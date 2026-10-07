@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use wasmtime::{Instance, Linker, Store, StoreLimitsBuilder, Trap, TypedFunc};
+use wasmtime::{Instance, Linker, Module, Store, StoreLimitsBuilder, Trap, TypedFunc};
 
 use crate::error::{ComputeError, EntryValidationFailure, Result};
 use crate::host::{register_host_imports, InvocationState};
@@ -93,6 +93,18 @@ impl WasmEngine {
         input_bytes: &[u8],
         sandbox: ResolvedSandbox,
     ) -> Result<ComputeOutput> {
+        // --- 0. Structured memory-cap pre-check (V1.206 P2 site 2) -----------
+        // wasmtime 49.0.1 exposes no typed limiter-denial error: the
+        // instantiation-time `StoreLimits` refusal is a formatted string
+        // ("memory minimum size of N pages exceeds memory limits"), so the
+        // class cannot be recovered by downcasting. Compare every declared
+        // linear memory's minimum against this invocation's cap instead — a
+        // module that starts above the cap can never be instantiated within it,
+        // so the refusal is decided before the store is built.
+        if declared_memory_minimum_exceeds_cap(&module.module, sandbox.max_memory_bytes) {
+            return Err(ComputeError::MemoryCapExceeded);
+        }
+
         // --- 1. Fresh per-invocation store (snapshot + memory cap) ----------
         let limits = StoreLimitsBuilder::new()
             .memory_size(sandbox.max_memory_bytes)
@@ -139,7 +151,7 @@ impl WasmEngine {
 
         let instance = linker
             .instantiate(&mut *store, &module.module)
-            .map_err(map_instantiate_error)?;
+            .map_err(ComputeError::Wasmtime)?;
 
         // Optional one-shot `init`.
         if let Some(init) = optional_export::<(), ()>(&mut *store, &instance, &manifest.init_export)
@@ -600,32 +612,61 @@ pub struct ResolvedSandbox {
 // ---------------------------------------------------------------------------
 
 /// Map a wasmtime call result, translating fuel/epoch traps into typed errors.
+///
+/// # Runtime memory-growth semantics (V1.206 P2 site 2)
+///
+/// There is deliberately no memory predicate here. At wasmtime 49.0.1 a
+/// limiter denial is not a typed trap — the denial is a formatted string
+/// ("memory growth exceeds memory type's limits") handed to the limiter — so
+/// this mapper declines to guess from message text: IF such a denial reaches
+/// it as a wasmtime error, it is classified as the generic
+/// [`ComputeError::Trap`] rather than [`ComputeError::MemoryCapExceeded`].
+/// No claim is made about how any particular denial is surfaced on any
+/// particular path.
+///
+/// The instantiation path is covered *before* instantiation by the
+/// declared-memory-minimum pre-check in [`WasmEngine::run_invocation`] (see
+/// [`declared_memory_minimum_exceeds_cap`]). Trigger for reclassifying this
+/// arm: "wasmtime exposes a typed limiter-denial error".
 fn map_call_result<T>(res: wasmtime::Result<T>) -> Result<T> {
     res.map_err(|e| {
         if e.downcast_ref::<Trap>() == Some(&Trap::OutOfFuel) {
             ComputeError::OutOfFuel
         } else if e.downcast_ref::<Trap>() == Some(&Trap::Interrupt) {
             ComputeError::WallTimeExceeded
-        } else if is_memory_trap(&e) {
-            ComputeError::MemoryCapExceeded
         } else {
             ComputeError::Trap(e.to_string())
         }
     })
 }
 
-fn map_instantiate_error(e: wasmtime::Error) -> ComputeError {
-    if is_memory_trap(&e) {
-        ComputeError::MemoryCapExceeded
-    } else {
-        ComputeError::Wasmtime(e)
-    }
-}
+/// The wasm linear-memory page size in bytes (`2**16`). The engine config does
+/// not enable the custom-page-sizes proposal, so every declared memory uses
+/// this page size.
+const WASM_PAGE_SIZE_BYTES: u64 = 65_536;
 
-fn is_memory_trap(e: &wasmtime::Error) -> bool {
-    let msg = e.to_string().to_lowercase();
-    msg.contains("memory")
-        && (msg.contains("grow") || msg.contains("limit") || msg.contains("exceed"))
+/// Whether any linear memory the module **declares** starts above the
+/// invocation's cap (V1.206 P2 site 2; Greptile fix — all declared memories,
+/// not only the exports).
+///
+/// The ABI requires the module to export its linear memory (`memory`), but a
+/// module may also declare unexported memories. Reading only the exports would
+/// let an oversized unexported memory slip past this check and be refused at
+/// instantiation with a generic [`ComputeError::Wasmtime`] instead of
+/// [`ComputeError::MemoryCapExceeded`]. [`Module::resources_required`] reports
+/// the largest *defined*-memory minimum (pages) across the whole module, so the
+/// refusal is decided before the store is built for every declared memory,
+/// exported or not.
+///
+/// Host-imported memories are not defined by this module (the host linker
+/// supplies them, bounded by the host's own limits) and are not counted;
+/// `StoreLimits` still bounds their runtime growth.
+fn declared_memory_minimum_exceeds_cap(module: &Module, max_memory_bytes: usize) -> bool {
+    let cap = u64::try_from(max_memory_bytes).unwrap_or(u64::MAX);
+    module
+        .resources_required()
+        .max_initial_memory_size
+        .is_some_and(|pages| pages.saturating_mul(WASM_PAGE_SIZE_BYTES) > cap)
 }
 
 fn optional_export<Params, Returns>(

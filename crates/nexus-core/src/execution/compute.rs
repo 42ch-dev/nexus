@@ -400,10 +400,10 @@ pub async fn compute_run(
 /// refuses the whole accept BEFORE any write; absent/null/empty accepts all.
 ///
 /// # Errors
-/// `Forbidden` when the creator does not own the run's World, `NotFound` for
-/// an unknown run, a coded conflict when the run is already `applied` or
-/// `discarded`, `InvalidInput` for a non-`succeeded` run or an unknown event
-/// id, `Internal` for storage faults.
+/// `NotFound` for an unknown run or a run of a foreign World (existence
+/// opacity — the two close with the same shape), a coded conflict when the
+/// run is already `applied` or `discarded`, `InvalidInput` for a non-`succeeded`
+/// run or an unknown event id, `Internal` for storage faults.
 #[allow(clippy::too_many_lines)] // one linear domain operation
 pub async fn accept_compute_run(
     core: &CoreService,
@@ -414,14 +414,7 @@ pub async fn accept_compute_run(
     let pool = &core.inner.pool;
     let creator_id = principal.creator_id();
 
-    let run = compute_runs::get_run(pool, run_id)
-        .await
-        .map_err(crate::error::local_db_err)?
-        .ok_or_else(|| CoreError::NotFound {
-            resource: format!("run {run_id} not found"),
-        })?;
-
-    ensure_world_owned(pool, creator_id, &run.world_id).await?;
+    let run = visible_run_or_hidden(run_visibility(pool, creator_id, run_id).await?, run_id)?;
 
     match run.status.as_str() {
         "succeeded" => {}
@@ -574,8 +567,9 @@ pub async fn accept_compute_run(
 /// `discarded`. The World is left exactly as it was.
 ///
 /// # Errors
-/// `Forbidden` for a foreign World, `NotFound` for an unknown run, a coded
-/// conflict when the row is not `succeeded`, `Internal` for storage faults.
+/// `NotFound` for an unknown run or a run of a foreign World (existence
+/// opacity — the two close with the same shape), a coded conflict when the
+/// row is not `succeeded`, `Internal` for storage faults.
 pub async fn discard_compute_run(
     core: &CoreService,
     principal: &Principal,
@@ -584,14 +578,9 @@ pub async fn discard_compute_run(
     let pool = &core.inner.pool;
     let creator_id = principal.creator_id();
 
-    let run = compute_runs::get_run(pool, run_id)
-        .await
-        .map_err(crate::error::local_db_err)?
-        .ok_or_else(|| CoreError::NotFound {
-            resource: format!("run {run_id} not found"),
-        })?;
-
-    ensure_world_owned(pool, creator_id, &run.world_id).await?;
+    // Existence-opacity gate: an unknown id and a foreign-World run refuse
+    // identically here (QC F-001 keeps the typed distinction internal).
+    visible_run_or_hidden(run_visibility(pool, creator_id, run_id).await?, run_id)?;
 
     compute_runs::set_run_discarded(pool, run_id)
         .await
@@ -739,8 +728,9 @@ pub async fn list_compute_runs(
 /// Read one run's detail, including its proposals and error.
 ///
 /// # Errors
-/// `Forbidden` for a foreign World, `NotFound` for an unknown run,
-/// `Internal` for storage or serialization faults.
+/// `NotFound` for an unknown run or a run of a foreign World (existence
+/// opacity — the two close with the same shape), `Internal` for storage or
+/// serialization faults.
 pub async fn get_compute_run(
     core: &CoreService,
     principal: &Principal,
@@ -748,14 +738,10 @@ pub async fn get_compute_run(
 ) -> CoreResult<RunDetail> {
     let pool = &core.inner.pool;
 
-    let run = compute_runs::get_run(pool, run_id)
-        .await
-        .map_err(crate::error::local_db_err)?
-        .ok_or_else(|| CoreError::NotFound {
-            resource: format!("run {run_id} not found"),
-        })?;
-
-    ensure_world_owned(pool, principal.creator_id(), &run.world_id).await?;
+    let run = visible_run_or_hidden(
+        run_visibility(pool, principal.creator_id(), run_id).await?,
+        run_id,
+    )?;
 
     serde_json::from_value(json!({
         "run_id": run.run_id,
@@ -837,9 +823,10 @@ impl ExecutionHandle {
     ///
     /// # Errors
     /// `Closing` when the owner is shutting down; `AuthRequired` when the
-    /// principal does not belong to this owner's service; `Forbidden` for a
-    /// run of a World the principal's creator does not own; `NotFound` for an
-    /// unknown run; `Internal` for storage faults.
+    /// principal does not belong to this owner's service; `NotFound` for an
+    /// unknown run OR a run of a World the principal's creator does not own
+    /// (existence opacity — the two close with the same shape); `Internal` for
+    /// storage faults.
     pub async fn get_compute_run(
         &self,
         principal: &Principal,
@@ -872,9 +859,10 @@ impl ExecutionHandle {
     ///
     /// # Errors
     /// `Closing` when the owner is shutting down; `AuthRequired` when the
-    /// principal does not belong to this owner's service; `Forbidden` for a
-    /// foreign World; `NotFound` for an unknown run; a coded conflict when the
-    /// row is not `succeeded`; `Internal` for storage faults.
+    /// principal does not belong to this owner's service; `NotFound` for an
+    /// unknown run OR a run of a foreign World (existence opacity — the two
+    /// close with the same shape); a coded conflict when the row is not
+    /// `succeeded`; `Internal` for storage faults.
     pub async fn discard_compute_run(
         &self,
         principal: &Principal,
@@ -972,6 +960,87 @@ async fn ensure_world_owned(
         Err(e) => Err(CoreError::Internal {
             category: format!("world ownership check: {e}"),
         }),
+    }
+}
+
+/// The single not-found shape for a run the caller may not see (V1.206 P2
+/// site 4; compass D4 existence opacity).
+///
+/// An unknown run id and a run belonging to a foreign World close with this
+/// exact `NotFound` — mirroring how schedules close unknown and foreign ids
+/// (`retained_execution_contracts.rs`) — so a probe cannot split run existence
+/// from World ownership. The external shape is authorized by
+/// `.mstar/iterations/v1.206/specs/compute-run-id-opacity.md`.
+fn run_not_found(run_id: &str) -> CoreError {
+    CoreError::NotFound {
+        resource: format!("run {run_id} not found"),
+    }
+}
+
+/// Internal typed visibility of a run id for the calling creator (V1.206 P2
+/// site 4).
+///
+/// The existence-opacity contract (`.mstar/iterations/v1.206/specs/compute-run-id-opacity.md`)
+/// requires the internal distinction between an absent row and a foreign-World
+/// row to survive inside the core even though the outward rendering collapses
+/// both into [`run_not_found`]. Crate-private: this is an implementation detail
+/// of the run-ID routes, pinned by the in-module unit tests below.
+#[derive(Debug)]
+pub(crate) enum RunVisibility {
+    /// The row exists and its World is owned by the caller.
+    Visible(Box<compute_runs::ComputeRunRow>),
+    /// No row exists with this id.
+    Absent,
+    /// The row exists, but its World belongs to another creator.
+    ForeignDenied,
+}
+
+/// Classify a run id for `creator_id` on the run-ID routes (`accept` /
+/// `discard` / detail).
+///
+/// Performs the row lookup and the World-ownership check, keeping the typed
+/// outcome ([`RunVisibility`]) available inside the core. Routes render it
+/// through [`visible_run_or_hidden`], which applies the opacity collapse.
+/// Unlike [`ensure_world_owned`], a foreign World is not refused here: the
+/// caller decides the outward shape.
+///
+/// Crate-private: taking a `sqlx::SqlitePool` keeps this off the public
+/// surface (the crate guide admits no SQL pool there), and callers outside the
+/// core use the typed routes instead.
+pub(crate) async fn run_visibility(
+    pool: &sqlx::SqlitePool,
+    creator_id: &str,
+    run_id: &str,
+) -> CoreResult<RunVisibility> {
+    let Some(run) = compute_runs::get_run(pool, run_id)
+        .await
+        .map_err(crate::error::local_db_err)?
+    else {
+        return Ok(RunVisibility::Absent);
+    };
+    match nexus_local_db::narrative_write::is_world_owned(pool, creator_id, &run.world_id).await {
+        Ok(true) => Ok(RunVisibility::Visible(Box::new(run))),
+        Ok(false) => Ok(RunVisibility::ForeignDenied),
+        Err(e) => Err(CoreError::Internal {
+            category: format!("world ownership check: {e}"),
+        }),
+    }
+}
+
+/// Outward rendering of [`RunVisibility`] on the run-ID routes.
+///
+/// Existence opacity: `Absent` and `ForeignDenied` collapse into the same
+/// [`run_not_found`] shape (an unknown id and a foreign id must be
+/// indistinguishable); only `Visible` yields the stored row. The world-scoped
+/// routes keep the 403 `CoreError::WorldOwnerDenied` convention via
+/// [`ensure_world_owned`].
+fn visible_run_or_hidden(
+    visibility: RunVisibility,
+    run_id: &str,
+) -> CoreResult<compute_runs::ComputeRunRow> {
+    match visibility {
+        RunVisibility::Visible(run) => Ok(*run),
+        RunVisibility::Absent | RunVisibility::ForeignDenied => Err(run_not_found(run_id)),
     }
 }
 
@@ -1260,4 +1329,102 @@ fn parse_rfc3339(raw: &str) -> chrono::DateTime<chrono::Utc> {
     chrono::DateTime::parse_from_rfc3339(raw)
         .unwrap_or_else(|_| chrono::DateTime::UNIX_EPOCH.into())
         .with_timezone(&chrono::Utc)
+}
+
+#[cfg(test)]
+mod tests {
+    //! In-module pins for the run-ID existence-opacity internals (V1.206 P2
+    //! site 4). [`RunVisibility`] is crate-private by design (it must not carry
+    //! a SQL pool onto the public surface), so the three-way distinction is
+    //! asserted here rather than from an integration test.
+    use super::*;
+
+    const CALLER: &str = "ctr_caller";
+    const OTHER: &str = "ctr_other";
+
+    /// A migrated workspace DB held under the engine writer lease — writes are
+    /// fenced to the admitted writer, so the guard must stay alive for the
+    /// whole test.
+    async fn engine_pool() -> (nexus_local_db::GuardedPool, tempfile::TempDir) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("state.db");
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
+            .await
+            .expect("engine pool init");
+        (guarded, dir)
+    }
+
+    async fn seed_world(pool: &sqlx::SqlitePool, world_id: &str, owner: &str) {
+        nexus_local_db::ensure_creator_row(pool, owner, "Test")
+            .await
+            .expect("creator row");
+        sqlx::query(
+            "INSERT OR IGNORE INTO narrative_worlds \
+                (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+                 time_policy, metadata_json, created_at) \
+               VALUES (?, 'ws', ?, 'World', 'world', 'active', 'private', 'manual', '{}', \
+                 datetime('now'))",
+        )
+        .bind(world_id)
+        .bind(owner)
+        .execute(pool)
+        .await
+        .expect("seed world");
+    }
+
+    /// QC F-001: the opacity collapse is an outward rendering only — the core
+    /// must still tell an absent id, a foreign-World row and an owned row
+    /// apart internally.
+    #[tokio::test]
+    async fn run_visibility_keeps_absent_foreign_and_owned_distinct() {
+        let (guarded, _dir) = engine_pool().await;
+        let pool = guarded.pool();
+        seed_world(pool, "wld_mine", CALLER).await;
+        seed_world(pool, "wld_foreign", OTHER).await;
+
+        let owned = nexus_local_db::compute_runs::insert_run(
+            pool, "wld_mine", "mod", None, None, None, None,
+        )
+        .await
+        .expect("insert owned run");
+        let foreign = nexus_local_db::compute_runs::insert_run(
+            pool,
+            "wld_foreign",
+            "mod",
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("insert foreign run");
+
+        assert!(
+            matches!(
+                run_visibility(pool, CALLER, "run_does_not_exist")
+                    .await
+                    .expect("visibility lookup"),
+                RunVisibility::Absent
+            ),
+            "an unknown id must classify as Absent"
+        );
+        assert!(
+            matches!(
+                run_visibility(pool, CALLER, &foreign)
+                    .await
+                    .expect("visibility lookup"),
+                RunVisibility::ForeignDenied
+            ),
+            "a foreign-World run must classify as ForeignDenied"
+        );
+        assert!(
+            matches!(
+                run_visibility(pool, CALLER, &owned)
+                    .await
+                    .expect("visibility lookup"),
+                RunVisibility::Visible(_)
+            ),
+            "an owned run must classify as Visible"
+        );
+    }
 }

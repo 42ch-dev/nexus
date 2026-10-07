@@ -1350,6 +1350,37 @@ mod tests {
                 CoreErrorCode::Busy,
                 503,
             ),
+            // The 500 class: launch/protocol failures and internal host
+            // invariant violations are typed `internal`/500, never reported as
+            // a client error and never collapsed into a generic refusal.
+            (
+                HostError::LaunchFailed {
+                    provider_id: provider.clone(),
+                    message: "spawn failed".into(),
+                    source: None,
+                },
+                CoreErrorCode::Internal,
+                500,
+            ),
+            (
+                HostError::ProviderProtocolError {
+                    provider_id: None,
+                    session_id: None,
+                    op_id: None,
+                    message: "bad frame".into(),
+                    source: None,
+                },
+                CoreErrorCode::Internal,
+                500,
+            ),
+            (
+                HostError::InternalHostError {
+                    message: "invariant broken".into(),
+                    source: None,
+                },
+                CoreErrorCode::Internal,
+                500,
+            ),
             (
                 HostError::CapabilityUnsupported {
                     provider_id: provider,

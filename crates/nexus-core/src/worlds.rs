@@ -72,15 +72,11 @@ impl CoreService {
         gateway
             .get_world_state(&world_id)
             .await
-            .map_err(|e| match &e {
-                nexus_narrative::NarrativeError::ValidationError(msg)
-                    if msg.contains("not found") =>
-                {
-                    CoreError::NotFound {
-                        resource: format!("World {world_id} not found"),
-                    }
+            .map_err(|e| match e {
+                nexus_narrative::NarrativeError::NotFound { resource } => {
+                    CoreError::NotFound { resource }
                 }
-                _ => narrative_internal("worlds.get", &e),
+                other => narrative_internal("worlds.get", &other),
             })
     }
 

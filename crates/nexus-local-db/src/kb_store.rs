@@ -450,8 +450,11 @@ impl SqliteKbStore {
     ///
     /// Returns [`KbStoreError::Validation`] / [`KbStoreError::ValidationLegacy`]
     /// on `canonical_name` or body validation failure, [`KbStoreError::Duplicate`]
-    /// on the `kb_key_blocks_active_unique` violation, or [`KbStoreError::Storage`]
-    /// on database failure.
+    /// on the `kb_key_blocks_active_unique` violation or on a `key_block_id`
+    /// collision with a row in this entry's own container, or
+    /// [`KbStoreError::Storage`] on database failure — including a
+    /// `key_block_id` collision with a FOREIGN container's row, which must not
+    /// be reported as this owner's duplicate.
     pub async fn insert_key_block_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
@@ -497,8 +500,11 @@ impl SqliteKbStore {
     ///
     /// Returns [`KbStoreError::Validation`] / [`KbStoreError::ValidationLegacy`]
     /// on `canonical_name` or body validation failure, [`KbStoreError::Duplicate`]
-    /// on the `kb_key_blocks_active_unique` violation, or [`KbStoreError::Storage`]
-    /// on database failure.
+    /// on the `kb_key_blocks_active_unique` violation or on a `key_block_id`
+    /// collision with a row in this entry's own container, or
+    /// [`KbStoreError::Storage`] on database failure — including a
+    /// `key_block_id` collision with a FOREIGN container's row, which must not
+    /// be reported as this owner's duplicate.
     pub async fn insert_key_block_with_extensions_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
@@ -568,7 +574,7 @@ impl SqliteKbStore {
         let disclosure = kb.disclosure.clone();
         let cname = kb.canonical_name.clone();
         let btype = kb.block_type;
-        sqlx::query(
+        let insert_outcome = sqlx::query(
             r"INSERT INTO kb_key_blocks
                 (key_block_id, owner_kind, world_id, character_id,
                  actor_world_binding_id, holder_entry_id, disclosure, block_type,
@@ -600,20 +606,47 @@ impl SqliteKbStore {
         .bind(&extensions_nexus_json)
         .bind(&modules_json)
         .execute(&mut **tx)
-        .await
-        .map_err(|e| {
-            // SQLite UNIQUE constraint violation (owner-scoped partial index).
-            if let sqlx::Error::Database(ref db_err_inner) = e {
-                if db_err_inner.code().as_deref() == Some("2067") {
-                    return KbStoreError::Duplicate {
-                        owner: owner.clone(),
-                        name: cname,
-                        block_type: btype,
-                    };
-                }
+        .await;
+
+        if let Err(e) = insert_outcome {
+            // Duplicate-key violations on this INSERT are one domain fact —
+            // `owner` already holds a colliding `kb_key_blocks` row — on either
+            // guard:
+            //   * `2067` (SQLITE_CONSTRAINT_UNIQUE) — the owner-scoped
+            //     `kb_key_blocks_active_unique` index (same container by
+            //     construction);
+            //   * `1555` (SQLITE_CONSTRAINT_PRIMARYKEY) — the `key_block_id`
+            //     primary key, i.e. a caller-supplied entry id already in use.
+            //     The primary key is container-blind, so this is a duplicate
+            //     only when the occupying row sits in THIS entry's container
+            //     (V1.206 P2 R8: a same-container hidden row — e.g. another
+            //     holder's `owner-private` entry — answers the already-exists
+            //     family, not a raw storage error).
+            // A clash with a row in a FOREIGN container is not a duplicate of
+            // this owner and stays a generic storage conflict: answering
+            // already-exists would confirm, to a caller scoped to another
+            // container, that the id is occupied (v1.153 N-C1 no-oracle
+            // contract — the cross-world promote denies with zero mutation
+            // through this unmapped carrier). Any other database error keeps
+            // the `db_err` classification.
+            let code = match &e {
+                sqlx::Error::Database(db_err_inner) => db_err_inner.code(),
+                _ => None,
+            };
+            let duplicate = match code.as_deref() {
+                Some("2067") => true,
+                Some("1555") => key_block_owned_by(tx, &key_block_id, &owner).await,
+                _ => false,
+            };
+            if duplicate {
+                return Err(KbStoreError::Duplicate {
+                    owner,
+                    name: cname,
+                    block_type: btype,
+                });
             }
-            db_err(&e)
-        })?;
+            return Err(db_err(&e));
+        }
 
         Ok(KbInsertResult {
             entry_id: key_block_id,
@@ -1407,6 +1440,77 @@ fn parse_block_type(s: &str) -> Result<BlockType, KbStoreError> {
 /// Convert a sqlx error into a `KbStoreError`.
 fn db_err(err: &sqlx::Error) -> KbStoreError {
     KbStoreError::Storage(format!("database error: {err}"))
+}
+
+/// The owner union of one `kb_key_blocks` row (`owner_kind` plus the matching
+/// owner-id column) — a narrow read for identity comparison only.
+#[derive(sqlx::FromRow)]
+struct KeyBlockOwnerRow {
+    owner_kind: String,
+    world_id: Option<String>,
+    character_id: Option<String>,
+    actor_world_binding_id: Option<String>,
+}
+
+/// Whether the `kb_key_blocks` row occupying `key_block_id` belongs to `owner`.
+///
+/// A `1555` (primary key) collision is container-blind, so
+/// `insert_key_block_with_extensions_in_tx` counts it as a
+/// [`KbStoreError::Duplicate`] only when the occupying row shares this entry's
+/// container; a foreign-container clash must stay a generic storage conflict
+/// (v1.153 N-C1 no-oracle contract).
+///
+/// The occupying row must satisfy the **complete** owner union — `owner_kind`
+/// plus its matching id column with the other two NULL (the migration's
+/// `kb_key_blocks` owner CHECK). A malformed row that populates any other
+/// combination (for example two owner-id columns) belongs to no container and
+/// is never attributed to one, so this fails closed on it rather than matching
+/// whichever arm happens to agree. Read errors fail closed the same way.
+async fn key_block_owned_by(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    key_block_id: &str,
+    owner: &KnowledgeOwnerRef,
+) -> bool {
+    let stored = sqlx::query_as!(
+        KeyBlockOwnerRow,
+        "SELECT owner_kind, world_id, character_id, actor_world_binding_id \
+         FROM kb_key_blocks WHERE key_block_id = ?",
+        key_block_id
+    )
+    .fetch_optional(&mut **tx)
+    .await
+    .ok()
+    .flatten();
+    let Some(row) = stored else {
+        return false;
+    };
+    // Exactly one owner arm, and it must be the arm `owner_kind` names.
+    let exclusive_union = matches!(
+        (
+            row.owner_kind.as_str(),
+            row.world_id.is_some(),
+            row.character_id.is_some(),
+            row.actor_world_binding_id.is_some(),
+        ),
+        ("world", true, false, false)
+            | ("character", false, true, false)
+            | ("actor_world_binding", false, false, true)
+    );
+    if !exclusive_union {
+        return false;
+    }
+    match owner {
+        KnowledgeOwnerRef::World(id) => {
+            row.owner_kind == "world" && row.world_id.as_deref() == Some(id)
+        }
+        KnowledgeOwnerRef::Character(id) => {
+            row.owner_kind == "character" && row.character_id.as_deref() == Some(id)
+        }
+        KnowledgeOwnerRef::ActorWorldBinding(id) => {
+            row.owner_kind == "actor_world_binding"
+                && row.actor_world_binding_id.as_deref() == Some(id)
+        }
+    }
 }
 
 /// Convert a `KbError` from validation into a `KbStoreError`.
@@ -3523,6 +3627,132 @@ mod tests {
         let kb2 = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Hero");
         let err = store.insert_knowledge_entry(kb2).await.unwrap_err();
         assert!(matches!(err, KbStoreError::Duplicate { .. }));
+    }
+
+    /// V1.206 P2 R8: a duplicate caller-supplied `key_block_id` collides on the
+    /// primary key (SQLite `1555`), not the owner-scoped unique index. When the
+    /// occupying row is in THIS entry's container it must classify as
+    /// `Duplicate` — a same-container hidden row (another holder's
+    /// `owner-private` entry) then answers the already-exists family instead of
+    /// leaking a raw storage error.
+    #[tokio::test]
+    async fn test_duplicate_entry_id_maps_to_duplicate() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let store = SqliteKbStore::new(pool);
+        let kb1 = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Hero");
+        let entry_id = kb1.entry_id.clone();
+        store.insert_knowledge_entry(kb1).await.unwrap();
+
+        // Different canonical_name (no unique-index collision) + the same
+        // entry id ⇒ the primary key is the only violated guard.
+        let mut kb2 = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Villain");
+        kb2.entry_id = entry_id;
+        let err = store.insert_knowledge_entry(kb2).await.unwrap_err();
+        assert!(
+            matches!(err, KbStoreError::Duplicate { .. }),
+            "a primary-key collision must classify as Duplicate, got: {err:?}"
+        );
+    }
+
+    /// V1.206 P2 R8 fix round: the primary-key guard is container-blind, so the
+    /// `1555` duplicate classification is scoped to THIS entry's container. A
+    /// clash with a row in a FOREIGN container (the N-C1 cross-world promote)
+    /// must stay a generic storage error — answering `Duplicate` would confirm,
+    /// to a caller scoped to another container, that the id is occupied.
+    #[tokio::test]
+    async fn test_foreign_container_entry_id_collision_is_not_duplicate() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+        // Second container for the FK (`kb_key_blocks.world_id`).
+        sqlx::query!(
+            "INSERT INTO narrative_worlds
+                (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json)
+               VALUES ('wld_2', 'wrk_test', 'ctr_test', 'Other World', 'other-world', 'active', 'private', 'manual', '{}')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let store = SqliteKbStore::new(pool);
+        let kb1 = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Hero");
+        let entry_id = kb1.entry_id.clone();
+        store.insert_knowledge_entry(kb1).await.unwrap();
+
+        // Same entry id, different world (and name) ⇒ only the primary key
+        // collides, and it collides with a foreign container's row.
+        let mut kb2 = KnowledgeEntryRecord::new("wld_2", BlockType::Character, "Villain");
+        kb2.entry_id = entry_id;
+        let err = store.insert_knowledge_entry(kb2).await.unwrap_err();
+        assert!(
+            matches!(err, KbStoreError::Storage(_)),
+            "a foreign-container id collision must stay a generic storage error \
+             (no cross-container oracle), got: {err:?}"
+        );
+    }
+
+    /// V1.206 P2 R8 fix round (review I-1): `key_block_owned_by` promises a
+    /// fail-closed **complete-union** check, so a row that populates more than
+    /// one owner arm belongs to no container — the collision must fall back to
+    /// the generic storage error instead of being attributed to whichever arm
+    /// happens to match the requested owner.
+    ///
+    /// The migration's owner CHECK forbids such a row through every ordinary
+    /// write path (and the FKs require the extra id column to be real), so the
+    /// row is planted with the CHECK disabled **for this transaction only**. The
+    /// CHECK itself is NOT weakened: it stays in force for the whole database
+    /// and for every other test, and the malformed row never commits.
+    #[tokio::test]
+    async fn test_malformed_multi_owner_row_is_not_a_duplicate() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        // FK target for the malformed row's extra owner column.
+        let character_id = format!("chr_{}", "0".repeat(32));
+        sqlx::query!(
+            "INSERT INTO characters \
+                (character_id, owner_creator_id, display_name, status, created_at, updated_at) \
+               VALUES (?, 'ctr_test', 'Ghost', 'active', datetime('now'), datetime('now'))",
+            character_id.as_str()
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let store = SqliteKbStore::new(pool.clone());
+        let mut tx = pool.begin().await.unwrap();
+        // SAFETY: PRAGMA statement — no table schema to validate against, and
+        // the crate guide admits runtime `sqlx::query()` for PRAGMAs. The CHECK
+        // it suspends stays in force for the database and every other test.
+        sqlx::query("PRAGMA ignore_check_constraints = 1")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        // owner_kind='world' AND character_id set ⇒ two owner arms populated.
+        sqlx::query!(
+            "INSERT INTO kb_key_blocks \
+                (key_block_id, owner_kind, world_id, character_id, block_type, canonical_name) \
+               VALUES ('kb_malformed_owner', 'world', 'wld_1', ?, 'Character', 'Ghost')",
+            character_id.as_str()
+        )
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+
+        // Same id, same (World) container arm, different canonical name ⇒ the
+        // primary key is the only violated guard, and the occupying row is
+        // malformed — the arm matches, the union does not.
+        let mut kb = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Other");
+        kb.entry_id = "kb_malformed_owner".to_string();
+        let err = store
+            .insert_key_block_with_extensions_in_tx(&mut tx, kb, "{}".to_string())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, KbStoreError::Storage(_)),
+            "a multi-owner row must not be attributed to a container, got: {err:?}"
+        );
     }
 
     #[tokio::test]

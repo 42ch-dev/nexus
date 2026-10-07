@@ -373,7 +373,7 @@ impl NativeCore {
                 .load(std::sync::atomic::Ordering::SeqCst),
         );
         if encoded != principal_handle {
-            return Err(Error::from_reason("invalid principal handle"));
+            return Err(core_error::napi_error_invalid_principal_handle());
         }
         Ok((core, principal))
     }
