@@ -3650,16 +3650,26 @@ async fn concurrent_conflicting_first_use_leaves_no_running_loser() {
     assert_eq!(loser_payload["code"], json!("operation_id_conflict"));
 }
 
-/// Await a `ComputeInFlightGate` registration signal.
+/// How long a test waits for a `ComputeInFlightGate` registration signal.
 ///
 /// Bounded on purpose: if an owner ever returns BEFORE the seam (a wire-shape
 /// refusal, a missing module), the gate never fires, and an unbounded wait
-/// would hang the whole `#[serial]` group instead of failing one test. The
-/// timeout turns that into one loud failure.
+/// would hang the whole `#[serial]` group instead of failing one test. A fired
+/// timeout is ALWAYS a failure — never treated as a registration.
+const GATE_WAIT: Duration = Duration::from_secs(30);
+
+/// Await a `ComputeInFlightGate` registration signal, failing loudly when it
+/// never arrives.
 async fn await_registered(gate: &nexus_core::execution::test_hooks::ComputeInFlightGate) {
-    tokio::time::timeout(Duration::from_secs(30), gate.registered.notified())
+    if tokio::time::timeout(GATE_WAIT, gate.registered.notified())
         .await
-        .expect("the compute owner must reach the in-flight seam");
+        .is_err()
+    {
+        panic!(
+            "the owner for operation {} never reached the in-flight seam within {GATE_WAIT:?}",
+            gate.operation_id
+        );
+    }
 }
 
 /// v1.207 P3 wave 4 (Greptile P1 "Stopped runs appear busy", live branch): the
@@ -3726,13 +3736,19 @@ async fn retry_after_its_owner_is_gone_is_uncertain_and_never_reruns() {
     let gate = Arc::new(ComputeInFlightGate::new(op));
     set_compute_in_flight_gate(Some(Arc::clone(&gate)));
     // Selecting on `registered` DROPS the parked owner before the module runs.
-    // The bounded wait keeps a never-parked owner from hanging the serial group.
-    let registration = tokio::time::timeout(Duration::from_secs(30), gate.registered.notified());
+    // The bounded wait keeps a never-parked owner from hanging the serial group,
+    // and a fired timeout is an explicit FAILURE — never a silent registration.
+    let registration = tokio::time::timeout(GATE_WAIT, gate.registered.notified());
     tokio::select! {
         outcome = compute_run(&f.core, &f.compute, request.clone()) => {
             panic!("the owner returned instead of parking at the in-flight seam: {outcome:?}");
         }
-        _ = registration => {}
+        registered = registration => {
+            assert!(
+                registered.is_ok(),
+                "the owner never reached the in-flight seam within {GATE_WAIT:?}"
+            );
+        }
     }
     set_compute_in_flight_gate(None);
 
@@ -3798,13 +3814,17 @@ async fn in_flight_ownership_is_scoped_to_the_receipt_store() {
     // durable receipt stays).
     let gate_b = Arc::new(ComputeInFlightGate::new(op.clone()));
     set_compute_in_flight_gate(Some(Arc::clone(&gate_b)));
-    let registration_b =
-        tokio::time::timeout(Duration::from_secs(30), gate_b.registered.notified());
+    let registration_b = tokio::time::timeout(GATE_WAIT, gate_b.registered.notified());
     tokio::select! {
         outcome = compute_run(&b.core, &b.compute, b_request.clone()) => {
             panic!("store B's owner returned instead of parking at the seam: {outcome:?}");
         }
-        _ = registration_b => {}
+        registered = registration_b => {
+            assert!(
+                registered.is_ok(),
+                "store B's owner never reached the in-flight seam within {GATE_WAIT:?}"
+            );
+        }
     }
     set_compute_in_flight_gate(None);
 

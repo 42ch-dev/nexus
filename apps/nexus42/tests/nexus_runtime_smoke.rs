@@ -201,7 +201,12 @@ impl Drop for RuntimeGuard {
 ///    request ([`answers_plain_http`]): the lane is a plaintext-WS accept loop,
 ///    not the daemon data router or the embedded SPA. This is what a port
 ///    number cannot express — an HTTP router sitting on the allowed endpoint
-///    would answer the probe and fail the test.
+///    would answer the probe and fail the test. The probe is scoped to THIS
+///    PID: it runs only when the `lsof -p <pid>` inspection above shows this
+///    runtime holding the endpoint, so a foreign process occupying
+///    `127.0.0.1:8425` is never attributed to the runtime (spec coexistence).
+///    When the lane is not bound (port collision ⇒ warn-and-skip), the check
+///    asserts only what the contract promises: this PID serves no HTTP.
 ///
 /// (A well-known-port probe would false-fail under the spec's coexistence
 /// model — a creator-facing `nexus42` daemon may legitimately occupy the
@@ -242,6 +247,8 @@ fn assert_no_http_listener(child_pid: u32, listen_addrs: &[String]) {
             String::from_utf8_lossy(&out.stderr)
         );
         let text = String::from_utf8_lossy(&out.stdout);
+        // THIS PID's own listeners, each already checked against the allowance.
+        let mut listeners: Vec<Endpoint> = Vec::new();
         for line in text.lines().skip(1) {
             let Some((host, port)) = lsof_line_endpoint(line) else {
                 continue;
@@ -254,20 +261,32 @@ fn assert_no_http_listener(child_pid: u32, listen_addrs: &[String]) {
                 lane_host = nexus_core::connect::config::DEFAULT_CONNECT_HOST,
                 lane_port = nexus_core::connect::DEFAULT_CONNECT_PORT,
             );
+            listeners.push((host, port));
         }
 
-        // Protocol identity (check 2): the lane endpoint must not answer HTTP.
-        let (host, port) = peer_tools_lane_endpoint();
-        let lane = SocketAddr::new(
-            host.parse().expect("DEFAULT_CONNECT_HOST is an IP literal"),
-            port,
-        );
-        assert!(
-            !answers_plain_http(lane, HTTP_PROBE_TIMEOUT),
-            "the runtime's Connect lane endpoint {lane} answered an HTTP/1.1 request: an \
-             HTTP / SPA listener would, while the peer-tools lane is a WS accept loop and \
-             must close a non-upgrade request with no response"
-        );
+        // Protocol identity (check 2), attributed to THIS PID only: the probe
+        // runs solely when this runtime actually HOLDS the lane endpoint. If it
+        // does not (the lane warn-and-skipped a port collision, or never bound),
+        // something else may own that endpoint — probing it would test a
+        // foreign process and break the spec's coexistence model (the guarantee
+        // here is about what THIS process serves, which the allowance above
+        // already pins). The lane-down case asserts nothing extra: this PID
+        // serves no HTTP either way.
+        let lane = peer_tools_lane_endpoint();
+        if listeners.iter().any(|(h, p)| *h == lane.0 && *p == lane.1) {
+            let addr = SocketAddr::new(
+                lane.0
+                    .parse()
+                    .expect("DEFAULT_CONNECT_HOST is an IP literal"),
+                lane.1,
+            );
+            assert!(
+                !answers_plain_http(addr, HTTP_PROBE_TIMEOUT),
+                "the runtime's Connect lane endpoint {addr} answered an HTTP/1.1 request: an \
+                 HTTP / SPA listener would, while the peer-tools lane is a WS accept loop and \
+                 must close a non-upgrade request with no response"
+            );
+        }
     }
     #[cfg(not(unix))]
     {
