@@ -494,6 +494,7 @@ async fn monitor_session(
         })
         .unwrap_or_default();
     let event_session_id = uuid::Uuid::new_v4().to_string();
+    crate::connect::events::connect_event_registry().open_session(&event_session_id);
     observed.bind_session(&event_session_id);
     serve_subscribe_tool(
         &responder,
@@ -1057,7 +1058,10 @@ mod tests {
         let session = format!("ordering-{}", uuid::Uuid::new_v4());
         let stream = format!("stream-{}", uuid::Uuid::new_v4());
         let registry = crate::connect::events::connect_event_registry().clone();
-        registry.publish(&stream, "event", serde_json::json!({"n": 1}));
+        registry.open_session(&session);
+        registry
+            .publish(&stream, "event", serde_json::json!({"n": 1}))
+            .unwrap();
         let (_, _, mut subscription) = registry.subscribe(&session, &stream, None).await.unwrap();
         let pair = spoke_connect::remote::loopback_transport_pair();
         let observed = ObservedTransport::new(Arc::new(pair.client) as Arc<dyn Transport>);
@@ -1106,7 +1110,10 @@ mod tests {
         let session = format!("overlap-{}", uuid::Uuid::new_v4());
         let stream = format!("stream-{}", uuid::Uuid::new_v4());
         let registry = crate::connect::events::connect_event_registry().clone();
-        let first_frame = registry.publish(&stream, "event", serde_json::json!({"n": 1}));
+        registry.open_session(&session);
+        let first_frame = registry
+            .publish(&stream, "event", serde_json::json!({"n": 1}))
+            .unwrap();
         let pair = spoke_connect::remote::loopback_transport_pair();
         let observed = ObservedTransport::new(Arc::new(pair.client) as Arc<dyn Transport>);
         observed.bind_session(&session);
@@ -1157,10 +1164,15 @@ mod tests {
     async fn cancellation_completes_the_in_flight_invoke_before_handing_the_slot() {
         let registry = crate::connect::events::connect_event_registry().clone();
         let session = format!("slot-{}", uuid::Uuid::new_v4());
+        registry.open_session(&session);
         let stream_a = format!("stream-a-{}", uuid::Uuid::new_v4());
         let stream_b = format!("stream-b-{}", uuid::Uuid::new_v4());
-        registry.publish(&stream_a, "event", serde_json::json!({"n": 1}));
-        registry.publish(&stream_b, "event", serde_json::json!({"n": 2}));
+        registry
+            .publish(&stream_a, "event", serde_json::json!({"n": 1}))
+            .unwrap();
+        registry
+            .publish(&stream_b, "event", serde_json::json!({"n": 2}))
+            .unwrap();
         let delivery_lock = Arc::new(tokio::sync::Mutex::new(()));
 
         let (_, _, first) = registry.subscribe(&session, &stream_a, None).await.unwrap();
@@ -1379,8 +1391,11 @@ mod tests {
 
         let registry = crate::connect::events::connect_event_registry().clone();
         let session = format!("c3-{}", uuid::Uuid::new_v4());
+        registry.open_session(&session);
         let stream = format!("c3-stream-{}", uuid::Uuid::new_v4());
-        registry.publish(&stream, "event", serde_json::json!({"n": 1}));
+        registry
+            .publish(&stream, "event", serde_json::json!({"n": 1}))
+            .unwrap();
         let (_, _, subscription) = registry.subscribe(&session, &stream, None).await.unwrap();
         registry.activate(&session, &stream);
         let cancelled = subscription.cancellation();
@@ -1468,8 +1483,11 @@ mod tests {
         let (responder, gated, _client) = gated_tool_session().await;
         let registry = crate::connect::events::connect_event_registry().clone();
         let session = format!("expiry-{}", uuid::Uuid::new_v4());
+        registry.open_session(&session);
         let stream = format!("expiry-stream-{}", uuid::Uuid::new_v4());
-        registry.publish(&stream, "event", serde_json::json!({"n": 1}));
+        registry
+            .publish(&stream, "event", serde_json::json!({"n": 1}))
+            .unwrap();
         let (_, _, subscription) = registry.subscribe(&session, &stream, None).await.unwrap();
         registry.activate(&session, &stream);
         gated.armed.store(true, Ordering::SeqCst);
@@ -1578,8 +1596,11 @@ mod tests {
         let (responder, gated, _client) = gated_tool_session().await;
         let registry = crate::connect::events::connect_event_registry().clone();
         let session = format!("c4-{}", uuid::Uuid::new_v4());
+        registry.open_session(&session);
         let stream = format!("c4-stream-{}", uuid::Uuid::new_v4());
-        registry.publish(&stream, "event", serde_json::json!({"n": 1}));
+        registry
+            .publish(&stream, "event", serde_json::json!({"n": 1}))
+            .unwrap();
         let (_, _, subscription) = registry.subscribe(&session, &stream, None).await.unwrap();
         registry.activate(&session, &stream);
         let cancelled = subscription.cancellation();

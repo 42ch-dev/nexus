@@ -1,5 +1,6 @@
 //! Bounded event retention and ack-gated Connect subscriptions.
 use std::collections::{HashMap, VecDeque};
+use std::future::Future as _;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
@@ -10,7 +11,7 @@ use uuid::Uuid;
 
 const MAX_EVENTS: usize = 1024;
 // Ring histories persist across session close for reconnect replay. Once full,
-// subscribe evicts an inactive ring; active rings are never evicted.
+// publish and subscribe evict an inactive ring; active rings are never evicted.
 const MAX_STREAMS: usize = 4096;
 const MAX_BATCH: usize = 64;
 
@@ -62,9 +63,10 @@ struct RegistryState {
     streams: HashMap<String, StreamRing>,
     subscribers: HashMap<(String, String), Subscriber>,
     gates: HashMap<(String, String), Arc<Semaphore>>,
-    closed_sessions: std::collections::HashSet<String>,
+    sessions: HashMap<String, Arc<AtomicBool>>,
+    #[cfg(test)]
+    gate_waiter: Option<Arc<Notify>>,
 }
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SubscribeError {
     InvalidCursor,
@@ -268,13 +270,55 @@ fn parse_cursor(ring: &StreamRing, cursor: &str) -> Result<u64, SubscribeError> 
     }
     Ok(sequence)
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PublishError {
+    StreamLimit,
+}
+
+fn make_room_for_stream(state: &mut RegistryState, stream: &str) -> bool {
+    if state.streams.contains_key(stream) || state.streams.len() < MAX_STREAMS {
+        return true;
+    }
+    let evictable = state
+        .streams
+        .keys()
+        .find(|candidate| {
+            !state
+                .subscribers
+                .keys()
+                .any(|(_, active)| active == *candidate)
+        })
+        .cloned();
+    evictable.is_some_and(|key| state.streams.remove(&key).is_some())
+}
 
 impl ConnectEventRegistry {
-    pub fn publish(&self, stream: &str, event: &str, data: Value) -> EventFrame {
+    /// Track the lifetime of an accepted transport session without retaining
+    /// closed-session tombstones.
+    pub fn open_session(&self, session: &str) {
         let mut state = self
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state
+            .sessions
+            .insert(session.to_owned(), Arc::new(AtomicBool::new(false)));
+    }
+    /// Publish retains at most `MAX_STREAMS` rings, evicting an inactive ring
+    /// when at capacity; active rings are never evicted.
+    pub fn publish(
+        &self,
+        stream: &str,
+        event: &str,
+        data: Value,
+    ) -> Result<EventFrame, PublishError> {
+        let mut state = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !make_room_for_stream(&mut state, stream) {
+            return Err(PublishError::StreamLimit);
+        }
         let ring = state
             .streams
             .entry(stream.to_owned())
@@ -300,11 +344,11 @@ impl ConnectEventRegistry {
             }
         }
         drop(state);
-        EventFrame {
+        Ok(EventFrame {
             id: Some(format!("{epoch}:{sequence}")),
             event: event.to_owned(),
             data,
-        }
+        })
     }
 
     /// Atomically captures the replay page and registers its live tail.
@@ -321,11 +365,9 @@ impl ConnectEventRegistry {
     /// # Errors
     /// Returns [`SubscribeError::InvalidCursor`] when `cursor` is malformed,
     /// [`SubscribeError::UnknownEpoch`] when it names a foreign ring epoch,
-    /// and [`SubscribeError::FutureCursor`] when it is ahead of the ring.
-    ///
-    /// # Panics
-    /// Closed sessions cannot admit new subscriptions; their admission gate
-    /// is closed during teardown so queued waiters terminate immediately.
+    /// [`SubscribeError::FutureCursor`] when it is ahead of the ring,
+    /// [`SubscribeError::ClosedSession`] when the owning session has closed,
+    /// and [`SubscribeError::StreamLimit`] when every retained ring is active.
     pub async fn subscribe(
         &self,
         session: &str,
@@ -333,52 +375,60 @@ impl ConnectEventRegistry {
         cursor: Option<&str>,
     ) -> Result<(String, Option<String>, EventSubscription), SubscribeError> {
         let key = (session.to_owned(), stream.to_owned());
-        let gate = {
+        let (gate, lifetime) = {
             let mut state = self
                 .0
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if state.closed_sessions.contains(session) {
-                return Err(SubscribeError::ClosedSession);
-            }
-            Arc::clone(
+            let lifetime = state
+                .sessions
+                .get(session)
+                .cloned()
+                .filter(|lifetime| !lifetime.load(Ordering::Acquire))
+                .ok_or(SubscribeError::ClosedSession)?;
+            let gate = Arc::clone(
                 state
                     .gates
                     .entry(key.clone())
                     .or_insert_with(|| Arc::new(Semaphore::new(1))),
-            )
+            );
+            (gate, lifetime)
         };
-        let permit = gate
-            .clone()
-            .acquire_owned()
-            .await
-            .map_err(|_| SubscribeError::ClosedSession)?;
+        let mut acquire = Box::pin(gate.clone().acquire_owned());
+        let permit = std::future::poll_fn(|cx| {
+            let result = acquire.as_mut().poll(cx);
+            #[cfg(test)]
+            if result.is_pending() {
+                let waiter = self
+                    .0
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .gate_waiter
+                    .take();
+                if let Some(waiter) = waiter {
+                    waiter.notify_one();
+                }
+            }
+            result
+        })
+        .await
+        .map_err(|_| SubscribeError::ClosedSession)?;
         let mut state = self
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if state.closed_sessions.contains(session) {
+        if lifetime.load(Ordering::Acquire)
+            || !state
+                .sessions
+                .get(session)
+                .is_some_and(|current| Arc::ptr_eq(current, &lifetime))
+        {
             return Err(SubscribeError::ClosedSession);
         }
-        permit.forget();
-        if !state.streams.contains_key(stream) && state.streams.len() >= MAX_STREAMS {
-            let evictable = state
-                .streams
-                .keys()
-                .find(|candidate| {
-                    !state
-                        .subscribers
-                        .keys()
-                        .any(|(_, active)| active == *candidate)
-                })
-                .cloned();
-            if let Some(evictable) = evictable {
-                state.streams.remove(&evictable);
-            } else {
-                gate.add_permits(1);
-                return Err(SubscribeError::StreamLimit);
-            }
+        if !make_room_for_stream(&mut state, stream) {
+            return Err(SubscribeError::StreamLimit);
         }
+        permit.forget();
         let ring = state
             .streams
             .entry(stream.to_owned())
@@ -498,7 +548,9 @@ impl ConnectEventRegistry {
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        state.closed_sessions.insert(session.to_owned());
+        if let Some(lifetime) = state.sessions.remove(session) {
+            lifetime.store(true, Ordering::Release);
+        }
         let keys: Vec<_> = state
             .gates
             .keys()
@@ -528,12 +580,13 @@ mod tests {
     #[tokio::test]
     async fn replay_then_live_is_ack_gated() {
         let registry = ConnectEventRegistry::default();
-        let first = registry.publish("s", "one", json!(1));
+        registry.open_session("p");
+        let first = registry.publish("s", "one", json!(1)).unwrap();
         let (_, _, mut subscription) = registry.subscribe("p", "s", None).await.unwrap();
         registry.activate("p", "s");
         assert_eq!(subscription.replay, vec![first.clone()]);
         assert_eq!(subscription.next_batch().await, vec![first]);
-        let next = registry.publish("s", "two", json!(2));
+        let next = registry.publish("s", "two", json!(2)).unwrap();
         assert!(
             tokio::time::timeout(Duration::from_millis(10), subscription.next_batch())
                 .await
@@ -546,13 +599,14 @@ mod tests {
     #[tokio::test]
     async fn replacement_cancels_the_previous_delivery() {
         let registry = ConnectEventRegistry::default();
+        registry.open_session("p");
         let (_, _, mut first) = registry.subscribe("p", "s", None).await.unwrap();
         registry.activate("p", "s");
         let (_, _, mut second) = registry.subscribe("p", "s", None).await.unwrap();
         assert!(first.next_batch().await.is_empty());
         assert!(!first.is_alive());
         assert!(second.is_alive());
-        let frame = registry.publish("s", "one", json!(1));
+        let frame = registry.publish("s", "one", json!(1)).unwrap();
         registry.activate("p", "s");
         assert_eq!(second.next_batch().await, vec![frame]);
     }
@@ -562,7 +616,8 @@ mod tests {
     #[tokio::test]
     async fn replacement_cancels_an_outstanding_unacked_batch() {
         let registry = ConnectEventRegistry::default();
-        registry.publish("s", "one", json!(1));
+        registry.open_session("p");
+        registry.publish("s", "one", json!(1)).unwrap();
         let (_, _, mut first) = registry.subscribe("p", "s", None).await.unwrap();
         registry.activate("p", "s");
         // Take a batch, then withhold the ack: `next_batch` would otherwise
@@ -586,7 +641,7 @@ mod tests {
         let replay = second.next_batch().await;
         assert_eq!(replay.len(), 1);
         second.ack();
-        let frame = registry.publish("s", "two", json!(2));
+        let frame = registry.publish("s", "two", json!(2)).unwrap();
         assert_eq!(second.next_batch().await, vec![frame]);
     }
 
@@ -594,7 +649,8 @@ mod tests {
     #[tokio::test]
     async fn session_close_cancels_an_outstanding_unacked_batch() {
         let registry = ConnectEventRegistry::default();
-        registry.publish("s", "one", json!(1));
+        registry.open_session("p");
+        registry.publish("s", "one", json!(1)).unwrap();
         let (_, _, mut subscription) = registry.subscribe("p", "s", None).await.unwrap();
         registry.activate("p", "s");
         assert_eq!(subscription.next_batch().await.len(), 1);
@@ -613,6 +669,7 @@ mod tests {
     #[tokio::test]
     async fn same_stream_subscribe_serializes_on_activation() {
         let registry = ConnectEventRegistry::default();
+        registry.open_session("p");
         let (_, _, first) = registry.subscribe("p", "s", None).await.unwrap();
         let mut replacement = tokio::spawn({
             let registry = registry.clone();
@@ -637,7 +694,8 @@ mod tests {
     #[tokio::test]
     async fn cursor_shape_verbatim_echo_and_control_frames() {
         let registry = ConnectEventRegistry::default();
-        let frame = registry.publish("s", "one", json!({}));
+        registry.open_session("p");
+        let frame = registry.publish("s", "one", json!({})).unwrap();
         let id = frame.id.unwrap();
         let (epoch, sequence) = id.rsplit_once(':').unwrap();
         assert!(!epoch.is_empty());
@@ -651,13 +709,16 @@ mod tests {
     #[test]
     fn cursor_parser_preserves_typed_malformed_foreign_and_future_errors() {
         let registry = ConnectEventRegistry::default();
-        registry.publish("s", "event", json!({}));
+        registry.publish("s", "event", json!({})).unwrap();
         let state = registry
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let ring = state.streams.get("s").unwrap();
-        assert_eq!(parse_cursor(ring, "malformed"), Err(SubscribeError::InvalidCursor));
+        assert_eq!(
+            parse_cursor(ring, "malformed"),
+            Err(SubscribeError::InvalidCursor)
+        );
         assert_eq!(
             parse_cursor(ring, &format!("{}:1", Uuid::new_v4())),
             Err(SubscribeError::UnknownEpoch)
@@ -670,7 +731,8 @@ mod tests {
     #[tokio::test]
     async fn stale_cursor_and_trimmed_history_emit_cursorless_gap_first() {
         let registry = ConnectEventRegistry::default();
-        registry.publish("s", "one", json!(1));
+        registry.open_session("p");
+        registry.publish("s", "one", json!(1)).unwrap();
         let (_, _, stale) = registry
             .subscribe("p", "s", Some("not-a-cursor"))
             .await
@@ -678,11 +740,20 @@ mod tests {
         assert_eq!(stale.replay[0].event, "gap");
         assert_eq!(stale.replay[0].id, None);
         assert_eq!(stale.replay[0].data["reason"], "stale_cursor");
+        assert_eq!(
+            stale.replay[0].data["requires_transcript_reconciliation"],
+            true
+        );
+        assert_eq!(stale.replay[0].data["resync_required"], true);
 
-        let oldest = registry.publish("trimmed", "event", json!(0)).id.unwrap();
+        let oldest = registry
+            .publish("trimmed", "event", json!(0))
+            .unwrap()
+            .id
+            .unwrap();
         let epoch = oldest.split_once(':').unwrap().0;
         for n in 1..=MAX_EVENTS {
-            registry.publish("trimmed", "event", json!(n));
+            registry.publish("trimmed", "event", json!(n)).unwrap();
         }
         let cursor = format!("{epoch}:0");
         let (_, _, trimmed) = registry
@@ -692,17 +763,50 @@ mod tests {
         assert_eq!(trimmed.replay[0].event, "gap");
         assert_eq!(trimmed.replay[0].id, None);
         assert_eq!(trimmed.replay[0].data["reason"], "history_unavailable");
+        assert_eq!(
+            trimmed.replay[0].data["requires_transcript_reconciliation"],
+            true
+        );
+        assert_eq!(trimmed.replay[0].data["resync_required"], true);
+    }
+    #[test]
+    fn generated_gap_contract_rejects_false_literal_flags() {
+        let valid = json!({
+            "reason": "stale_cursor",
+            "requires_transcript_reconciliation": true,
+            "operation_id": null,
+            "resync_required": true,
+            "inspect_url": ""
+        });
+        let parse = |value| {
+            serde_json::from_value::<
+                nexus_contracts::generated::core::core_connect_gap_event::CoreConnectGapEvent,
+            >(value)
+        };
+        assert!(parse(valid.clone()).is_ok());
+        for field in ["requires_transcript_reconciliation", "resync_required"] {
+            let mut invalid = valid.clone();
+            invalid[field] = json!(false);
+            assert!(parse(invalid).is_err(), "false {field} must be rejected");
+        }
     }
 
     #[tokio::test]
     async fn close_rejects_queued_admission_and_churn_keeps_streams_bounded() {
         let registry = ConnectEventRegistry::default();
+        registry.open_session("p");
         let _a = registry.subscribe("p", "s", None).await.unwrap();
+        let gate_waiter = Arc::new(Notify::new());
+        registry
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .gate_waiter = Some(Arc::clone(&gate_waiter));
         let queued = tokio::spawn({
             let registry = registry.clone();
             async move { registry.subscribe("p", "s", None).await }
         });
-        tokio::task::yield_now().await;
+        gate_waiter.notified().await;
         registry.remove_session("p");
         assert!(matches!(
             queued.await.unwrap(),
@@ -726,10 +830,85 @@ mod tests {
             .contains_key(&("p".to_owned(), "after-close".to_owned())));
         for n in 0..MAX_STREAMS + 10 {
             let session = format!("session-{n}");
+            registry.open_session(&session);
             let stream = format!("stream-{n}");
             let _ = registry.subscribe(&session, &stream, None).await;
             registry.remove_session(&session);
         }
         assert!(registry.0.lock().unwrap().streams.len() <= MAX_STREAMS);
+        assert!(registry.0.lock().unwrap().sessions.is_empty());
+    }
+    #[tokio::test]
+    async fn publish_uses_stream_cap_and_preserves_subscribed_rings() {
+        let registry = ConnectEventRegistry::default();
+        registry.open_session("active");
+        registry.publish("protected", "event", json!(0)).unwrap();
+        let _active = registry
+            .subscribe("active", "protected", None)
+            .await
+            .unwrap();
+        registry.activate("active", "protected");
+
+        for n in 0..MAX_STREAMS - 1 {
+            registry
+                .publish(&format!("published-{n}"), "event", json!(n))
+                .unwrap();
+        }
+        registry.publish("overflow", "event", json!(1)).unwrap();
+
+        let state = registry
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert_eq!(state.streams.len(), MAX_STREAMS);
+        assert!(state.streams.contains_key("protected"));
+    }
+
+    #[tokio::test]
+    async fn all_active_streams_reject_publish_and_subscribe_overflow() {
+        let registry = ConnectEventRegistry::default();
+        registry.open_session("active");
+        {
+            let mut state = registry
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            for n in 0..MAX_STREAMS {
+                let stream = format!("active-{n}");
+                state.streams.insert(
+                    stream.clone(),
+                    StreamRing {
+                        epoch: Uuid::new_v4(),
+                        next_sequence: 1,
+                        events: VecDeque::new(),
+                    },
+                );
+                state.subscribers.insert(
+                    ("active".to_owned(), stream),
+                    Subscriber {
+                        active: Arc::new(AtomicBool::new(true)),
+                        changed: Arc::new(Notify::new()),
+                        cancelled: Arc::new(Notify::new()),
+                        cancelled_flag: Arc::new(AtomicBool::new(false)),
+                    },
+                );
+            }
+        }
+
+        assert_eq!(
+            registry.publish("overflow", "event", json!({})),
+            Err(PublishError::StreamLimit)
+        );
+        registry.open_session("overflow-owner");
+        assert!(matches!(
+            registry.subscribe("overflow-owner", "overflow", None).await,
+            Err(SubscribeError::StreamLimit)
+        ));
+        let state = registry
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert_eq!(state.streams.len(), MAX_STREAMS);
+        assert!(!state.streams.contains_key("overflow"));
     }
 }

@@ -304,7 +304,11 @@ fn inject_tri_state_deserializers(rust: &str, type_name: &str, fields: &[String]
             _ => {}
         }
     }
-    let (head, body, tail) = (rust[..open].to_string(), rust[open..close].to_string(), rust[close..].to_string());
+    let (head, body, tail) = (
+        rust[..open].to_string(),
+        rust[open..close].to_string(),
+        rust[close..].to_string(),
+    );
     let mut body = body;
     for field in fields {
         let needle = format!("pub {field} :");
@@ -322,6 +326,75 @@ fn inject_tri_state_deserializers(rust: &str, type_name: &str, fields: &[String]
             "\"crate :: tristate :: deserialize_presence\")] ",
         );
         body.insert_str(attr_at, attribute);
+    }
+    format!("{head}{body}{tail}")
+}
+/// Schema extension marker for boolean fields whose accepted wire value is true.
+const LITERAL_TRUE_MARKER: &str = "x-nexus-literal-true";
+
+fn literal_true_fields(src_schema_path: &Path) -> Vec<String> {
+    let Ok(content) = fs::read_to_string(src_schema_path) else {
+        return Vec::new();
+    };
+    let Ok(raw) = serde_json::from_str::<Value>(&content) else {
+        return Vec::new();
+    };
+    raw.get("properties")
+        .and_then(Value::as_object)
+        .map(|props| {
+            props
+                .iter()
+                .filter(|(_, schema)| {
+                    schema.get(LITERAL_TRUE_MARKER).and_then(Value::as_bool) == Some(true)
+                })
+                .map(|(name, _)| name.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn inject_literal_true_deserializers(rust: &str, type_name: &str, fields: &[String]) -> String {
+    if fields.is_empty() {
+        return rust.to_string();
+    }
+    let struct_header = format!("pub struct {type_name} ");
+    let Some(start) = rust.find(&struct_header) else {
+        return rust.to_string();
+    };
+    let Some(open_rel) = rust[start..].find('{') else {
+        return rust.to_string();
+    };
+    let open = start + open_rel;
+    let mut depth = 0i32;
+    let mut close = open;
+    for (offset, ch) in rust[open..].char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    close = open + offset;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let (head, body, tail) = (
+        rust[..open].to_string(),
+        rust[open..close].to_string(),
+        rust[close..].to_string(),
+    );
+    let mut body = body;
+    for field in fields {
+        let needle = format!("pub {field} :");
+        let Some(at) = body.find(&needle) else {
+            continue;
+        };
+        body.insert_str(
+            at,
+            "# [serde (deserialize_with = \"crate :: literal_true :: deserialize\")] ",
+        );
     }
     format!("{head}{body}{tail}")
 }
@@ -642,6 +715,10 @@ fn generate_schema_rust(
     let marked = tri_state_fields(src_schema_path);
     if !marked.is_empty() {
         rust = inject_tri_state_deserializers(&rust, &type_name, &marked);
+    }
+    let literal_true = literal_true_fields(src_schema_path);
+    if !literal_true.is_empty() {
+        rust = inject_literal_true_deserializers(&rust, &type_name, &literal_true);
     }
 
     if let Some(parent) = out_path.parent() {

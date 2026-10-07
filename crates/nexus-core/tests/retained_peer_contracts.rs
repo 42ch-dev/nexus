@@ -1601,11 +1601,9 @@ async fn connect_subscribe_replays_after_reconnect_and_preserves_cursor_and_orde
     })
     .await
     .expect("consumer negotiates subscribe and registers its reverse delivery tool");
-    let first_frame = nexus_core::connect::events::connect_event_registry().publish(
-        &stream,
-        "update",
-        json!({"n": 1}),
-    );
+    let first_frame = nexus_core::connect::events::connect_event_registry()
+        .publish(&stream, "update", json!({"n": 1}))
+        .expect("first frame fits the retained stream limit");
     let cursor_after_first = first_frame.id.clone().unwrap();
     let (first_tx, mut first_rx) = tokio::sync::mpsc::channel(2);
     first_adapter.register_tool_handler(
@@ -1666,11 +1664,9 @@ async fn connect_subscribe_replays_after_reconnect_and_preserves_cursor_and_orde
         .await,
         "disconnect removes the prior peer session before reconnect"
     );
-    nexus_core::connect::events::connect_event_registry().publish(
-        &stream,
-        "update",
-        json!({"n": 2}),
-    );
+    nexus_core::connect::events::connect_event_registry()
+        .publish(&stream, "update", json!({"n": 2}))
+        .expect("second frame fits the retained stream limit");
 
     let second_adapter = dial(
         lane.addr,
@@ -1770,11 +1766,9 @@ async fn unnegotiated_subscribe_is_refused_without_delivery_side_effects() {
         panic!("unnegotiated subscribe must be refused");
     };
     assert_eq!(reject.details.unwrap()["wire_code"], "op_unsupported");
-    nexus_core::connect::events::connect_event_registry().publish(
-        &stream,
-        "event",
-        json!({"must_not_deliver": true}),
-    );
+    nexus_core::connect::events::connect_event_registry()
+        .publish(&stream, "event", json!({"must_not_deliver": true}))
+        .expect("event fits the retained stream limit");
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(
         delivered_rx.try_recv().is_err(),
@@ -1829,7 +1823,13 @@ async fn reverse_leg_requires_delivery_capability_before_subscription() {
             }) as BoxFuture<'static, SpokeResult<Value>>
         }),
     );
-    assert!(wait_until(|| lane.sessions.get(&peer_id).is_some(), Duration::from_secs(3)).await);
+    assert!(
+        wait_until(
+            || lane.sessions.get(&peer_id).is_some(),
+            Duration::from_secs(3)
+        )
+        .await
+    );
     let stream = format!("missing-delivery-{}", uuid::Uuid::new_v4());
     let response = adapter
         .invoke_tool(SUBSCRIBE_TOOL, json!({"stream": stream.clone()}))
@@ -1838,15 +1838,19 @@ async fn reverse_leg_requires_delivery_capability_before_subscription() {
         panic!("subscribe without negotiated delivery must be refused");
     };
     assert_eq!(reject.details.unwrap()["wire_code"], "op_unsupported");
-    nexus_core::connect::events::connect_event_registry().publish(
-        &stream,
-        "event",
-        json!({"must_not_deliver": true}),
-    );
+    nexus_core::connect::events::connect_event_registry()
+        .publish(&stream, "event", json!({"must_not_deliver": true}))
+        .expect("event fits the retained stream limit");
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(delivered_rx.try_recv().is_err());
     adapter.close();
-    assert!(wait_until(|| lane.sessions.get(&peer_id).is_none(), Duration::from_secs(3)).await);
+    assert!(
+        wait_until(
+            || lane.sessions.get(&peer_id).is_none(),
+            Duration::from_secs(3)
+        )
+        .await
+    );
     shutdown.notify_one();
     let _ = lane.task.await;
     let _ = lane.watch_task.await;
@@ -1879,16 +1883,31 @@ async fn consumer_cannot_invoke_reverse_only_delivery_tool_on_host() {
     )
     .await
     .expect("both hello capabilities are advertised");
-    assert!(wait_until(|| lane.sessions.get(&peer_id).is_some(), Duration::from_secs(3)).await);
+    assert!(
+        wait_until(
+            || lane.sessions.get(&peer_id).is_some(),
+            Duration::from_secs(3)
+        )
+        .await
+    );
     let response = adapter
-        .invoke_tool(DELIVER_EVENTS_TOOL, json!({"stream": "unused", "frames": []}))
+        .invoke_tool(
+            DELIVER_EVENTS_TOOL,
+            json!({"stream": "unused", "frames": []}),
+        )
         .await;
     let SpokeResult::Reject(reject) = response else {
         panic!("host must not serve reverse-use-only delivery");
     };
     assert_eq!(reject.details.unwrap()["wire_code"], "op_unsupported");
     adapter.close();
-    assert!(wait_until(|| lane.sessions.get(&peer_id).is_none(), Duration::from_secs(3)).await);
+    assert!(
+        wait_until(
+            || lane.sessions.get(&peer_id).is_none(),
+            Duration::from_secs(3)
+        )
+        .await
+    );
     shutdown.notify_one();
     let _ = lane.task.await;
     let _ = lane.watch_task.await;
