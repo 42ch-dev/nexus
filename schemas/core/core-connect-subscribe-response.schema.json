@@ -8,7 +8,7 @@
   "required": ["stream", "epoch", "resumed_from"],
   "properties": {
     "stream": { "type": "string", "minLength": 1 },
-    "epoch": { "type": "string" },
+    "epoch": { "type": "string", "format": "uuid" },
     "resumed_from": { "type": ["string", "null"] }
   }
 }
