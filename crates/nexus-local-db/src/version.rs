@@ -21,7 +21,8 @@
 // V1.185: 21 → 22 — actor_world_bindings.revision (P1 binding maintenance; migration 20260906000002_binding_revision.sql).
 // V1.185: 22 → 23 — character run capture receipts + pending provenance (P3; migration 20260906000003_character_run_capture.sql).
 // V1.191: 23 → 24 — Actor holder registry, native governance columns on kb_key_blocks (legacy creator_only removed), import quarantine and World/Character knowledge_revision (P1 T3; migration 20260918000001_holder_registry.sql).
-pub const DB_SCHEMA_VERSION: u32 = 24;
+// V1.207 P3: 24 → 25 — operation_receipts table + its writer-protocol guard/outbox family (RN-OGA-5; migration 20260919000001_operation_receipts.sql).
+pub const DB_SCHEMA_VERSION: u32 = 25;
 
 /// Contract schema version from generated wire types
 ///

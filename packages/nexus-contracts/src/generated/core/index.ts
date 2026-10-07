@@ -19,6 +19,7 @@ export type { CoreError } from './core-error';
 export type { CoreHomeConfiguration } from './core-home-configuration';
 export type { CoreHostQuery } from './core-host-query';
 export type { CoreHostQueryResponse } from './core-host-query-response';
+export type { CoreOperationReceipt } from './core-operation-receipt';
 export type { CoreOutboxResolveRequest } from './core-outbox-resolve-request';
 export type { CoreOutboxStatus } from './core-outbox-status';
 export type { CorePeerControlOptions } from './core-peer-control-options';

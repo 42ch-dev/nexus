@@ -23,6 +23,7 @@ pub mod host;
 mod knowledge;
 mod memory;
 mod memory_pipeline;
+mod operation_receipts;
 mod outline;
 mod presets;
 mod principal;
