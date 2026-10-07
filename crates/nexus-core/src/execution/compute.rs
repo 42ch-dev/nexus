@@ -78,6 +78,7 @@ use nexus_local_db::operation_receipts::{
 use nexus_orchestration::compute_input_builder::ComputeInputBuilder;
 use serde_json::{json, Value};
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
 
 use crate::execution::operation_id::{self, OperationScope};
@@ -111,20 +112,39 @@ const MAX_RUN_LIST_LIMIT: u32 = 100;
 /// process is running right now, while an id left `running` by a process that
 /// died is absent — the retry reads `uncertain` and never re-runs.
 ///
-/// One registry per process (not per `CoreService`): a workspace home is
-/// opened once per process by the `SQLite` owner fence, so "this process" is
-/// the right liveness scope for every core serving that home.
-static IN_FLIGHT_RUNS: LazyLock<Mutex<HashSet<String>>> =
+/// A claim is keyed by `(receipt store, operation id)`, never by the id alone:
+/// one process may serve several independent homes/DBs, and a caller-supplied
+/// operation id is only unique WITHIN its store. Keying by the id alone would
+/// let store B read store A's live run as its own Busy refusal, and would let
+/// one store's guard drop erase the other store's claim. The store half is the
+/// workspace `state.db` path — the same key the execution owner registry uses
+/// ([`CoreInner::db_path`]), so every `CoreService` opened over one file in
+/// this process shares ONE live-owner signal.
+static IN_FLIGHT_RUNS: LazyLock<Mutex<HashSet<(PathBuf, String)>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
 
-/// True when THIS process is running the effect for `operation_id` now.
+/// The in-flight claim key for one operation of one receipt store.
+///
+/// The store half is canonicalized so two spellings of the same `state.db`
+/// (a relative and an absolute path) still resolve to one store; a path that
+/// cannot be canonicalized is used verbatim.
+fn in_flight_key(store: &Path, operation_id: &str) -> (PathBuf, String) {
+    let store = std::fs::canonicalize(store).unwrap_or_else(|_| store.to_path_buf());
+    (store, operation_id.to_string())
+}
+
+/// True when THIS process is running the effect for `operation_id` of the
+/// receipt store at `store` now.
 ///
 /// A poisoned lock reports `false`, which degrades to the `uncertain`
 /// refusal — never to a claim of live ownership.
-fn receipt_owner_is_live(operation_id: &str) -> bool {
+fn receipt_owner_is_live(store: &Path, operation_id: &str) -> bool {
+    // The key (and its `canonicalize` syscall) is built BEFORE the lock is
+    // taken: the registry mutex never spans a filesystem call.
+    let key = in_flight_key(store, operation_id);
     IN_FLIGHT_RUNS
         .lock()
-        .is_ok_and(|in_flight| in_flight.contains(operation_id))
+        .is_ok_and(|in_flight| in_flight.contains(&key))
 }
 
 /// RAII registration of an acquired compute operation in the process-local
@@ -136,27 +156,27 @@ fn receipt_owner_is_live(operation_id: &str) -> bool {
 /// itself runs on the blocking pool and is not force-cancellable, so a
 /// caller dropped mid-effect can leave the effect running; that window answers
 /// `uncertain`, the fail-closed direction — never a false live claim and never
-/// a re-run.)
+/// a re-run.) The drop removes exactly its own `(store, operation id)` claim,
+/// so a neighbouring store's claim for the same id is untouched.
 struct InFlightComputeGuard {
-    operation_id: String,
+    key: (PathBuf, String),
 }
 
 impl InFlightComputeGuard {
     /// Mark an acquired operation as running in this process.
-    fn register(operation_id: &str) -> Self {
+    fn register(store: &Path, operation_id: &str) -> Self {
+        let key = in_flight_key(store, operation_id);
         if let Ok(mut in_flight) = IN_FLIGHT_RUNS.lock() {
-            in_flight.insert(operation_id.to_string());
+            in_flight.insert(key.clone());
         }
-        Self {
-            operation_id: operation_id.to_string(),
-        }
+        Self { key }
     }
 }
 
 impl Drop for InFlightComputeGuard {
     fn drop(&mut self) {
         if let Ok(mut in_flight) = IN_FLIGHT_RUNS.lock() {
-            in_flight.remove(&self.operation_id);
+            in_flight.remove(&self.key);
         }
     }
 }
@@ -273,7 +293,7 @@ pub async fn compute_run(
         })
         .transpose()?;
     if let Some(identity) = &supplied_identity {
-        if let Some(answer) = replay_from_receipt(pool, identity).await? {
+        if let Some(answer) = replay_from_receipt(pool, &core.inner.db_path, identity).await? {
             return Ok(answer);
         }
     }
@@ -417,15 +437,18 @@ pub async fn compute_run(
                 .to_string(),
             )
             .await;
-            return answer_from_receipt(&stored, receipt_owner_is_live(&stored.operation_id));
+            return answer_from_receipt(
+                &stored,
+                receipt_owner_is_live(&core.inner.db_path, &stored.operation_id),
+            );
         }
     }
 
     // §B.3 live-owner signal (v1.207 P3 wave 4): from here until the guard
-    // drops, THIS process owns the effect for `operation_id`, so a concurrent
-    // or retried call is answered with the typed Busy refusal instead of
-    // `uncertain`.
-    let _in_flight = InFlightComputeGuard::register(&operation_id);
+    // drops, THIS process owns the effect for `operation_id` in THIS receipt
+    // store, so a concurrent or retried call is answered with the typed Busy
+    // refusal instead of `uncertain`.
+    let _in_flight = InFlightComputeGuard::register(&core.inner.db_path, &operation_id);
     // The live-owner rendezvous seam (tests only; compiled out of production
     // builds): the registered owner parks here so a test can issue a retry
     // against a KNOWN live owner deterministically.
@@ -1712,13 +1735,18 @@ fn supplied_operation_identity(
 
 /// Ask the receipt store FIRST for a caller-supplied id (spec §B.3 steps 1–3).
 ///
+/// `store` is the receipt store's identity (`CoreInner::db_path`), used to read
+/// the live-owner signal for THIS store's in-flight runs — a neighbouring
+/// store's claim for the same id is never this store's answer.
+///
 /// `Some(answer)` when a receipt already owns the id (a terminal receipt answers
 /// the replay, a `running` receipt answers from its ACTUAL ownership — Busy for
-/// this process's live run, `uncertain` otherwise). `None` when no receipt
+/// this store's live run, `uncertain` otherwise). `None` when no receipt
 /// exists — safe to apply exactly once. A stored receipt with a different
 /// fingerprint is the typed `operation_id_conflict`.
 async fn replay_from_receipt(
     pool: &sqlx::SqlitePool,
+    store: &Path,
     identity: &operation_id::OperationIdentity,
 ) -> CoreResult<Option<RunResponse>> {
     let Some(receipt) = get_operation_receipt(pool, &identity.operation_id)
@@ -1736,7 +1764,7 @@ async fn replay_from_receipt(
     }
     Ok(Some(answer_from_receipt(
         &receipt,
-        receipt_owner_is_live(&receipt.operation_id),
+        receipt_owner_is_live(store, &receipt.operation_id),
     )?))
 }
 

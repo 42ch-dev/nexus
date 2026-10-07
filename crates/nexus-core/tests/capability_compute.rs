@@ -3650,6 +3650,18 @@ async fn concurrent_conflicting_first_use_leaves_no_running_loser() {
     assert_eq!(loser_payload["code"], json!("operation_id_conflict"));
 }
 
+/// Await a `ComputeInFlightGate` registration signal.
+///
+/// Bounded on purpose: if an owner ever returns BEFORE the seam (a wire-shape
+/// refusal, a missing module), the gate never fires, and an unbounded wait
+/// would hang the whole `#[serial]` group instead of failing one test. The
+/// timeout turns that into one loud failure.
+async fn await_registered(gate: &nexus_core::execution::test_hooks::ComputeInFlightGate) {
+    tokio::time::timeout(Duration::from_secs(30), gate.registered.notified())
+        .await
+        .expect("the compute owner must reach the in-flight seam");
+}
+
 /// v1.207 P3 wave 4 (Greptile P1 "Stopped runs appear busy", live branch): the
 /// §B.3 Busy answer requires an ACTUAL live owner.
 ///
@@ -3673,7 +3685,7 @@ async fn retry_against_a_live_owner_is_busy_and_never_reruns() {
     let gate = Arc::new(ComputeInFlightGate::new(op));
     set_compute_in_flight_gate(Some(Arc::clone(&gate)));
     let (owner, retry) = tokio::join!(compute_run(&f.core, &f.compute, request.clone()), async {
-        gate.registered.notified().await;
+        await_registered(&gate).await;
         let retry = compute_run(&f.core, &f.compute, request).await;
         gate.proceed.notify_one();
         retry
@@ -3714,11 +3726,13 @@ async fn retry_after_its_owner_is_gone_is_uncertain_and_never_reruns() {
     let gate = Arc::new(ComputeInFlightGate::new(op));
     set_compute_in_flight_gate(Some(Arc::clone(&gate)));
     // Selecting on `registered` DROPS the parked owner before the module runs.
+    // The bounded wait keeps a never-parked owner from hanging the serial group.
+    let registration = tokio::time::timeout(Duration::from_secs(30), gate.registered.notified());
     tokio::select! {
-        _ = compute_run(&f.core, &f.compute, request.clone()) => {
-            panic!("the owner must still be parked at the in-flight seam");
+        outcome = compute_run(&f.core, &f.compute, request.clone()) => {
+            panic!("the owner returned instead of parking at the in-flight seam: {outcome:?}");
         }
-        () = gate.registered.notified() => {}
+        _ = registration => {}
     }
     set_compute_in_flight_gate(None);
 
@@ -3756,6 +3770,130 @@ async fn retry_after_its_owner_is_gone_is_uncertain_and_never_reruns() {
         1,
         "the refused retry never re-ran the module"
     );
+}
+
+/// v1.207 P3 wave 4 review W4-I1 (a): the §B.3 live-owner signal is scoped to
+/// the receipt STORE, not to the operation id alone.
+///
+/// One process serves independent homes/DBs (the two-home fixtures below, an
+/// already-supported direct interface), and a caller-supplied operation id is
+/// unique only WITHIN its store. An id-only registry would let store B read
+/// store A's live run as its own Busy refusal instead of the honest
+/// `uncertain`.
+#[tokio::test]
+#[serial_test::serial]
+async fn in_flight_ownership_is_scoped_to_the_receipt_store() {
+    use nexus_core::execution::test_hooks::{set_compute_in_flight_gate, ComputeInFlightGate};
+
+    // Two independent homes served by ONE process.
+    let a = fixture().await;
+    let b = fixture().await;
+    let op = format!("op_{}", "0".repeat(32));
+
+    let mut b_request = run_request(WORLD, MODULE);
+    b_request.operation_id = Some(op.clone());
+
+    // (1) Store B's receipt is left `running` with NO live owner: its caller is
+    // dropped at the in-flight seam (a crash — the process-local claim goes, the
+    // durable receipt stays).
+    let gate_b = Arc::new(ComputeInFlightGate::new(op.clone()));
+    set_compute_in_flight_gate(Some(Arc::clone(&gate_b)));
+    let registration_b =
+        tokio::time::timeout(Duration::from_secs(30), gate_b.registered.notified());
+    tokio::select! {
+        outcome = compute_run(&b.core, &b.compute, b_request.clone()) => {
+            panic!("store B's owner returned instead of parking at the seam: {outcome:?}");
+        }
+        _ = registration_b => {}
+    }
+    set_compute_in_flight_gate(None);
+
+    // (2) Store A holds a LIVE owner for the SAME caller-supplied id. Store B's
+    // retry must be `uncertain` (B's own owner is gone) — never store A's Busy.
+    let gate_a = Arc::new(ComputeInFlightGate::new(op.clone()));
+    set_compute_in_flight_gate(Some(Arc::clone(&gate_a)));
+    let mut a_request = run_request(WORLD, MODULE);
+    a_request.operation_id = Some(op.clone());
+    let (a_owner, b_retry) = tokio::join!(compute_run(&a.core, &a.compute, a_request), async {
+        await_registered(&gate_a).await;
+        let retry = compute_run(&b.core, &b.compute, b_request).await;
+        gate_a.proceed.notify_one();
+        retry
+    });
+    set_compute_in_flight_gate(None);
+    a_owner.expect("store A's parked owner completes once released");
+    match b_retry.expect_err("store B's owner-dead receipt is refused") {
+        CoreError::Coded { code, .. } => assert_eq!(
+            code, "uncertain",
+            "store B must not read store A's live owner as its own Busy refusal"
+        ),
+        other => panic!("store B's owner-dead running receipt is `uncertain`, got {other:?}"),
+    }
+    assert_eq!(
+        compute_run_rows(b.core.pool(), WORLD).await,
+        1,
+        "store B's retry never re-ran the module (only its abandoned run exists)"
+    );
+}
+
+/// v1.207 P3 wave 4 review W4-I1 (b): dropping one store's in-flight guard must
+/// not erase another store's claim for the SAME caller-supplied id.
+///
+/// Both directions in one test: store B holds a parked live owner while store A
+/// registers and drops the same id, then store A holds one while store B
+/// registers and drops it. Each retry by the holder's OWN store must stay the
+/// typed Busy refusal — an id-only registry would have the dropping store erase
+/// the holder's claim, degrading that retry to `uncertain`.
+#[tokio::test]
+#[serial_test::serial]
+async fn in_flight_claim_drops_are_store_scoped() {
+    use nexus_core::execution::test_hooks::{set_compute_in_flight_gate, ComputeInFlightGate};
+
+    let a = fixture().await;
+    let b = fixture().await;
+
+    for (direction, holder_is_a) in [
+        ("holder=B, dropper=A", false),
+        ("holder=A, dropper=B", true),
+    ] {
+        // A fresh id per direction: the same caller-supplied id in BOTH stores
+        // (the collision an id-only key would suffer). 32 lowercase hex
+        // characters, the wire shape `validate_operation_id` enforces.
+        let op = format!("op_{}", if holder_is_a { "1" } else { "2" }.repeat(32));
+        let holder = if holder_is_a { &a } else { &b };
+        let dropper = if holder_is_a { &b } else { &a };
+        let mut holder_request = run_request(WORLD, MODULE);
+        holder_request.operation_id = Some(op.clone());
+        let mut dropper_request = run_request(WORLD, MODULE);
+        dropper_request.operation_id = Some(op.clone());
+
+        let gate = Arc::new(ComputeInFlightGate::new(op));
+        set_compute_in_flight_gate(Some(Arc::clone(&gate)));
+        let (owner, retry) = tokio::join!(
+            compute_run(&holder.core, &holder.compute, holder_request.clone()),
+            async {
+                await_registered(&gate).await;
+                // Disarm: the OTHER store's call for the same id must not park
+                // on this store's seam — it registers and drops its own claim.
+                set_compute_in_flight_gate(None);
+                compute_run(&dropper.core, &dropper.compute, dropper_request)
+                    .await
+                    .expect("the dropping store completes its own run for the same id");
+                let retry = compute_run(&holder.core, &holder.compute, holder_request).await;
+                gate.proceed.notify_one();
+                retry
+            }
+        );
+        set_compute_in_flight_gate(None);
+        owner.expect("the parked owner completes once released");
+        match retry.expect_err("the holder's own store answers its retry") {
+            CoreError::Coded { code, .. } => assert_eq!(
+                code, "operation_in_progress",
+                "{direction}: the dropping store must not erase the holder's claim"
+            ),
+            other => panic!("{direction}: the live owner is the Busy refusal, got {other:?}"),
+        }
+    }
 }
 
 /// v1.207 P3 wave 4 (Greptile P1 "Retried errors lose details"): a failed
