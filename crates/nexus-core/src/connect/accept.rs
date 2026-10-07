@@ -538,17 +538,12 @@ async fn wait_for_close(responder: &Arc<ConnectResponder>, observed: &ObservedTr
     }
 }
 
-/// Serve `tools.nexus.subscribe` for one session (§A.2a(f)1): register the
-/// async handler that performs the ring's atomic subscribe and drives
-/// ack-gated delivery.
+/// Serve `tools.nexus.subscribe` for one session (§A.2a(f)1).
 ///
 /// Registration is gated on the peer advertising the consumer-served
 /// `tools.nexus.deliver_events` capability — the §A.2a(a) reverse-leg check:
 /// without it the native registered-or-deny path answers `op_unsupported`
-/// with zero side effects. The handler's success response carries
-/// `{stream, epoch, resumed_from}` and no frames; the first delivery push is
-/// held back until the `ObservedTransport` seam observes that response write
-/// (§A.2a(f)5).
+/// with zero side effects.
 fn serve_subscribe_tool(responder: &Arc<ConnectResponder>, session_id: String) {
     let has_delivery_capability = responder.remote_manifest().is_some_and(|manifest| {
         manifest
@@ -559,15 +554,48 @@ fn serve_subscribe_tool(responder: &Arc<ConnectResponder>, session_id: String) {
     if !has_delivery_capability {
         return;
     }
-    let responder_for_handler = Arc::clone(responder);
-    let events = crate::connect::events::connect_event_registry().clone();
-    let delivery_lock = Arc::new(tokio::sync::Mutex::new(()));
+    register_subscribe_handler(
+        responder,
+        session_id,
+        crate::connect::events::connect_event_registry().clone(),
+        Arc::new(tokio::sync::Mutex::new(())),
+    );
+}
+
+/// Register the async `tools.nexus.subscribe` handler on `responder`.
+///
+/// The handler performs the ring's atomic subscribe and drives ack-gated
+/// delivery. Its success response carries `{stream, epoch, resumed_from}` and
+/// no frames; the first delivery push is held back until the
+/// `ObservedTransport` seam observes that response write (§A.2a(f)5).
+///
+/// The closure captures only a [`Weak`] handle to the responder: the handler
+/// is stored inside that same responder, so a strong capture would form an
+/// ownership cycle (`close_session` never clears the handler map) and retain
+/// every eligible disconnected session.
+fn register_subscribe_handler(
+    responder: &Arc<ConnectResponder>,
+    session_id: String,
+    events: crate::connect::events::ConnectEventRegistry,
+    delivery_lock: Arc<tokio::sync::Mutex<()>>,
+) {
+    let weak = Arc::downgrade(responder);
     let handler: spoke_connect::remote::ToolHandler = Arc::new(move |arguments| {
         let events = events.clone();
-        let responder = Arc::clone(&responder_for_handler);
+        let weak = weak.clone();
         let session = session_id.clone();
         let delivery_lock = Arc::clone(&delivery_lock);
         Box::pin(async move {
+            let Some(responder) = weak.upgrade() else {
+                return nexus_spoke_adapter::SpokeResult::Reject(
+                    nexus_spoke_adapter::SpokeReject {
+                        code: nexus_spoke_adapter::SpokeRejectCode::InternalError,
+                        message: "connect session closed before the subscription was admitted"
+                            .to_owned(),
+                        details: None,
+                    },
+                );
+            };
             let Some(stream) = arguments
                 .get("stream")
                 .and_then(serde_json::Value::as_str)
@@ -595,8 +623,8 @@ fn serve_subscribe_tool(responder: &Arc<ConnectResponder>, session_id: String) {
                     )
                 }
             };
-            let Ok((epoch, resumed_from, mut subscription)) =
-                events.subscribe(&session, &stream, cursor.as_deref())
+            let Ok((epoch, resumed_from, subscription)) =
+                events.subscribe(&session, &stream, cursor.as_deref()).await
             else {
                 return nexus_spoke_adapter::SpokeResult::Reject(
                     nexus_spoke_adapter::SpokeReject {
@@ -606,35 +634,26 @@ fn serve_subscribe_tool(responder: &Arc<ConnectResponder>, session_id: String) {
                     },
                 );
             };
+            let cancelled = subscription.cancellation();
             let delivery_stream = stream.clone();
-            let delivery_session = session.clone();
-            let delivery_responder = Arc::clone(&responder);
-            tokio::spawn(async move {
-                loop {
-                    let frames = subscription.next_batch().await;
-                    if frames.is_empty() {
-                        break;
+            tokio::spawn(drive_delivery(
+                subscription,
+                cancelled,
+                Arc::clone(&delivery_lock),
+                session.clone(),
+                move |frames| {
+                    let responder = Arc::clone(&responder);
+                    let delivery_stream = delivery_stream.clone();
+                    async move {
+                        responder
+                            .invoke_tool(
+                                DELIVER_TOOL,
+                                serde_json::json!({"stream": delivery_stream, "frames": frames}),
+                            )
+                            .await
                     }
-                    let _guard = delivery_lock.lock().await;
-                    // A replacement may have cancelled this subscription
-                    // while we waited for the session's send slot — never
-                    // push stale frames after cancellation.
-                    if !subscription.is_alive() {
-                        break;
-                    }
-                    let result = delivery_responder
-                        .invoke_tool(
-                            DELIVER_TOOL,
-                            serde_json::json!({"stream": &delivery_stream, "frames": frames}),
-                        )
-                        .await;
-                    match result {
-                        nexus_spoke_adapter::SpokeResult::Ok(_) => subscription.ack(),
-                        nexus_spoke_adapter::SpokeResult::Reject(_) => break,
-                    }
-                }
-                subscription.unregister(&delivery_session);
-            });
+                },
+            ));
             nexus_spoke_adapter::SpokeResult::Ok(serde_json::json!({
                 "stream": stream, "epoch": epoch, "resumed_from": resumed_from
             }))
@@ -645,6 +664,53 @@ fn serve_subscribe_tool(responder: &Arc<ConnectResponder>, session_id: String) {
             >
     });
     let _ = responder.register_tool_handler(SUBSCRIBE_TOOL, handler);
+}
+
+/// Drive ack-gated delivery for one subscription until it is cancelled or a
+/// reverse invoke fails. `push` performs one reverse invocation of
+/// `tools.nexus.deliver_events`.
+///
+/// Every wait is cancellation-aware: the ack wait (inside
+/// `EventSubscription::next_batch`), the per-session send-slot acquisition
+/// and the reverse invoke itself. A replaced generation therefore stops
+/// promptly, releasing the shared send slot for its replacement or for other
+/// streams of the same session.
+async fn drive_delivery<P, Fut>(
+    mut subscription: crate::connect::events::EventSubscription,
+    cancelled: Arc<Notify>,
+    delivery_lock: Arc<tokio::sync::Mutex<()>>,
+    session: String,
+    push: P,
+) where
+    P: Fn(Vec<crate::connect::events::EventFrame>) -> Fut,
+    Fut: std::future::Future<Output = nexus_spoke_adapter::SpokeResult<serde_json::Value>>,
+{
+    loop {
+        let frames = subscription.next_batch().await;
+        if frames.is_empty() {
+            break;
+        }
+        // Send admission: interrupted by cancellation, so a replaced
+        // generation never waits out another stream's send slot.
+        let _guard = tokio::select! {
+            biased;
+            () = cancelled.notified() => break,
+            guard = delivery_lock.lock() => guard,
+        };
+        if subscription.is_cancelled() {
+            break;
+        }
+        let invoke = push(frames);
+        tokio::select! {
+            biased;
+            () = cancelled.notified() => break,
+            result = invoke => match result {
+                nexus_spoke_adapter::SpokeResult::Ok(_) => subscription.ack(),
+                nexus_spoke_adapter::SpokeResult::Reject(_) => break,
+            },
+        }
+    }
+    subscription.unregister(&session);
 }
 
 /// Poll the responder state until it leaves `Handshaking`; returns the
@@ -892,7 +958,7 @@ mod tests {
         let stream = format!("stream-{}", uuid::Uuid::new_v4());
         let registry = crate::connect::events::connect_event_registry().clone();
         registry.publish(&stream, "event", serde_json::json!({"n": 1}));
-        let (_, _, mut subscription) = registry.subscribe(&session, &stream, None).unwrap();
+        let (_, _, mut subscription) = registry.subscribe(&session, &stream, None).await.unwrap();
         let pair = spoke_connect::remote::loopback_transport_pair();
         let observed = ObservedTransport::new(Arc::new(pair.client) as Arc<dyn Transport>);
         observed.bind_session(&session);
@@ -930,6 +996,201 @@ mod tests {
         registry.remove_session(&session);
         pair.server.close().await.unwrap();
     }
+
+    /// C1: an older subscribe response must never activate a replacement
+    /// generation. With interleaved invokes (two requests observed before
+    /// either response), the first response enables the generation it was
+    /// bound to; the replacement stays dark until its own response write.
+    #[tokio::test]
+    async fn overlapping_subscribe_response_never_activates_the_replacement() {
+        let session = format!("overlap-{}", uuid::Uuid::new_v4());
+        let stream = format!("stream-{}", uuid::Uuid::new_v4());
+        let registry = crate::connect::events::connect_event_registry().clone();
+        let first_frame = registry.publish(&stream, "event", serde_json::json!({"n": 1}));
+        let pair = spoke_connect::remote::loopback_transport_pair();
+        let observed = ObservedTransport::new(Arc::new(pair.client) as Arc<dyn Transport>);
+        observed.bind_session(&session);
+
+        // Request A observed, then its generation registered (awaiting).
+        send_subscribe_request(&pair.server, &stream, "subscribe-a").await;
+        observed.recv().await.unwrap();
+        let (_, _, mut first) = registry.subscribe(&session, &stream, None).await.unwrap();
+        // Request B observed while A's response is still outstanding.
+        send_subscribe_request(&pair.server, &stream, "subscribe-b").await;
+        observed.recv().await.unwrap();
+
+        // A's response write enables A's generation.
+        send_subscribe_response(observed.as_ref(), &stream, "subscribe-a").await;
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), first.next_batch())
+                .await
+                .expect("A's response must enable A's generation"),
+            vec![first_frame]
+        );
+
+        // B's generation can now register, but B's response is unwritten.
+        let (_, _, mut replacement) = registry.subscribe(&session, &stream, None).await.unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), replacement.next_batch())
+                .await
+                .is_err(),
+            "no replacement delivery may escape before B's own response"
+        );
+        // B's own response write enables it.
+        send_subscribe_response(observed.as_ref(), &stream, "subscribe-b").await;
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), replacement.next_batch())
+                .await
+                .expect("B's response must enable B's generation")
+                .len(),
+            1
+        );
+        registry.remove_session(&session);
+        pair.server.close().await.unwrap();
+    }
+
+    /// C2: a replacement must interrupt a reverse invoke that is blocked
+    /// while holding the session send slot, freeing it for another stream's
+    /// subscription already waiting on that slot.
+    #[tokio::test]
+    async fn replacement_releases_a_blocked_send_slot_for_another_stream() {
+        let registry = crate::connect::events::connect_event_registry().clone();
+        let session = format!("slot-{}", uuid::Uuid::new_v4());
+        let stream_a = format!("stream-a-{}", uuid::Uuid::new_v4());
+        let stream_b = format!("stream-b-{}", uuid::Uuid::new_v4());
+        registry.publish(&stream_a, "event", serde_json::json!({"n": 1}));
+        registry.publish(&stream_b, "event", serde_json::json!({"n": 2}));
+        let delivery_lock = Arc::new(tokio::sync::Mutex::new(()));
+
+        let (_, _, first) = registry.subscribe(&session, &stream_a, None).await.unwrap();
+        registry.activate(&session, &stream_a);
+        let (_, _, second) = registry.subscribe(&session, &stream_b, None).await.unwrap();
+        registry.activate(&session, &stream_b);
+
+        let invoke_started = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let started = Arc::clone(&invoke_started);
+        let blocked = Arc::clone(&release);
+        let first_cancelled = first.cancellation();
+        let first_driver = tokio::spawn(drive_delivery(
+            first,
+            first_cancelled,
+            Arc::clone(&delivery_lock),
+            session.clone(),
+            move |_frames| {
+                let started = Arc::clone(&started);
+                let blocked = Arc::clone(&blocked);
+                async move {
+                    started.notify_one();
+                    blocked.notified().await;
+                    nexus_spoke_adapter::SpokeResult::Ok(serde_json::json!({}))
+                }
+            },
+        ));
+        let second_pushed = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&second_pushed);
+        let second_cancelled = second.cancellation();
+        let second_driver = tokio::spawn(drive_delivery(
+            second,
+            second_cancelled,
+            Arc::clone(&delivery_lock),
+            session.clone(),
+            move |_frames| {
+                let flag = Arc::clone(&flag);
+                async move {
+                    flag.store(true, Ordering::SeqCst);
+                    nexus_spoke_adapter::SpokeResult::Ok(serde_json::json!({}))
+                }
+            },
+        ));
+
+        // A is blocked inside its reverse invoke, holding the session slot.
+        invoke_started.notified().await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            !second_pushed.load(Ordering::SeqCst),
+            "the second stream must wait for the session send slot"
+        );
+
+        // Replacing A cancels its blocked invoke and releases the slot.
+        let _replacement = registry.subscribe(&session, &stream_a, None).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !second_pushed.load(Ordering::SeqCst) {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the second stream must push once A releases the send slot");
+
+        first_driver.await.unwrap();
+        registry.remove_session(&session);
+        second_driver.await.unwrap();
+    }
+
+    async fn send_subscribe_request<T: Transport>(transport: &T, stream: &str, request_id: &str) {
+        transport
+            .send(
+                serde_json::to_vec(&serde_json::json!({
+                    "op": SUBSCRIBE_TOOL, "request_id": request_id,
+                    "payload": {"arguments": {"stream": stream}}
+                }))
+                .unwrap()
+                .as_slice(),
+            )
+            .await
+            .unwrap();
+    }
+
+    async fn send_subscribe_response(
+        transport: &ObservedTransport,
+        stream: &str,
+        request_id: &str,
+    ) {
+        transport
+            .send(
+                serde_json::to_vec(&serde_json::json!({
+                    "request_id": request_id, "payload": {"result": {"stream": stream}}
+                }))
+                .unwrap()
+                .as_slice(),
+            )
+            .await
+            .unwrap();
+    }
+
+    /// I1: the registered handler must not form a strong cycle with its
+    /// responder (it is stored inside that responder and `close_session`
+    /// never clears the handler map). Registering the Weak-capturing handler
+    /// must not raise the responder's strong count.
+    #[tokio::test]
+    async fn subscribe_handler_does_not_retain_the_responder() {
+        let pair = spoke_connect::remote::loopback_transport_pair();
+        let responder = connect_responder(ConnectResponderOptions {
+            transport: Arc::new(pair.client) as Arc<dyn Transport>,
+            identity: RemoteIdentity { seed: [7u8; 32] },
+            manifest: daemon_manifest("host-under-test", &[]),
+            allowlist: Vec::new(),
+            peer_keys: std::collections::HashMap::new(),
+            ports: None,
+            invoke_timeout_ms: Some(1_000),
+        })
+        .await;
+        let before = Arc::strong_count(&responder);
+        register_subscribe_handler(
+            &responder,
+            "session-under-test".to_owned(),
+            crate::connect::events::ConnectEventRegistry::default(),
+            Arc::new(tokio::sync::Mutex::new(())),
+        );
+        assert_eq!(
+            Arc::strong_count(&responder),
+            before,
+            "the registered subscribe handler must not retain the responder"
+        );
+        responder.close();
+        drop(pair.server);
+    }
+
     #[test]
     fn daemon_manifest_is_baseline() {
         let manifest = daemon_manifest("device-1", &[]);
