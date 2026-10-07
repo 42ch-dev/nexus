@@ -28,10 +28,11 @@
 //! allowlist entry is negotiable for the next handshake without a
 //! restart; tests seed the holder with the ids directly).
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -55,6 +56,8 @@ use crate::connect::watch::{
 use crate::connect::ws_transport::{ws_config, WsTransport};
 use crate::error::{CoreError, CoreResult};
 use nexus_orchestration::CapabilityRegistryHolder;
+const SUBSCRIBE_TOOL: &str = "tools.nexus.subscribe";
+const DELIVER_TOOL: &str = "tools.nexus.deliver_events";
 
 /// Poll interval for the close-observation fallback (`responder.state()`).
 const CLOSE_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -72,35 +75,84 @@ pub struct ObservedTransport {
     inner: Arc<dyn Transport>,
     closed: AtomicBool,
     closed_notify: Notify,
+    pending_subscribe: Mutex<HashMap<String, String>>,
+    session: Mutex<Option<String>>,
 }
 
 impl ObservedTransport {
-    /// Wrap an inner transport.
     #[must_use]
     pub fn new(inner: Arc<dyn Transport>) -> Arc<Self> {
         Arc::new(Self {
             inner,
             closed: AtomicBool::new(false),
             closed_notify: Notify::new(),
+            pending_subscribe: Mutex::new(HashMap::new()),
+            session: Mutex::new(None),
         })
     }
 
-    /// True once the transport has reported an error/close.
+    fn bind_session(&self, peer_id: &str) {
+        *self
+            .session
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(peer_id.to_owned());
+    }
+
+    fn observe_inbound(&self, envelope: &[u8]) {
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(envelope) else {
+            return;
+        };
+        if value.get("op").and_then(serde_json::Value::as_str) != Some(SUBSCRIBE_TOOL) {
+            return;
+        }
+        let Some(request_id) = value.get("request_id").and_then(serde_json::Value::as_str) else {
+            return;
+        };
+        let Some(stream) = value
+            .pointer("/payload/arguments/stream")
+            .and_then(serde_json::Value::as_str)
+        else {
+            return;
+        };
+        self.pending_subscribe
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(request_id.to_owned(), stream.to_owned());
+    }
+
+    fn observe_outbound(&self, envelope: &[u8]) {
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(envelope) else {
+            return;
+        };
+        let Some(request_id) = value.get("request_id").and_then(serde_json::Value::as_str) else {
+            return;
+        };
+        let stream = self
+            .pending_subscribe
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(request_id);
+        let Some(stream) = stream else { return };
+        if value.pointer("/payload/result").is_none() {
+            return;
+        }
+        let session = self
+            .session
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(session) = session {
+            crate::connect::events::connect_event_registry().activate(&session, &stream);
+        }
+    }
+
     #[must_use]
     pub fn is_closed(&self) -> bool {
         self.closed.load(Ordering::SeqCst)
     }
-
-    /// A future that completes when the transport reports its first
-    /// error/close. Re-created per wait so the flag re-check between waits
-    /// is never missed. `tokio::select!` pins the future internally, so no
-    /// `Unpin` bound is needed.
     fn closed_notified(&self) -> impl Future<Output = ()> + '_ {
         self.closed_notify.notified()
     }
-
-    /// Latch the closed flag once; wakes every waiting `notified()` future
-    /// created before the call.
     fn mark_closed(&self) {
         if !self.closed.swap(true, Ordering::SeqCst) {
             self.closed_notify.notify_waiters();
@@ -114,18 +166,22 @@ impl Transport for ObservedTransport {
         let result = self.inner.send(envelope).await;
         if result.is_err() {
             self.mark_closed();
+        } else {
+            self.observe_outbound(envelope);
         }
         result
     }
 
     async fn recv(&self) -> Result<Vec<u8>, TransportError> {
         let result = self.inner.recv().await;
+        if let Ok(envelope) = &result {
+            self.observe_inbound(envelope);
+        }
         if result.is_err() {
             self.mark_closed();
         }
         result
     }
-
     async fn close(&self) -> Result<(), TransportError> {
         self.mark_closed();
         self.inner.close().await
@@ -439,15 +495,34 @@ async fn monitor_session(
             }
         })
         .unwrap_or_default();
+    let event_session_id = uuid::Uuid::new_v4().to_string();
+    observed.bind_session(&event_session_id);
+    serve_subscribe_tool(&responder, event_session_id.clone());
     let replaced = sessions.register(&peer_id, Arc::clone(&responder), &admitted_ids);
     tracing::info!(%peer_id, replaced, "peer session established");
 
-    // Phase 3: close observation. Primary path = the wrapper's Notify (fires
-    // the same tick the transport reports an error/close); fallback = the
-    // responder state poll (catches a close the wrapper missed, e.g. a
-    // local `close_session` without a transport error). The flag is
-    // re-checked after the future is created to close the notify-counter
-    // race; the poll tick is the belt-and-braces fallback.
+    // Phase 3: close observation (see `wait_for_close`).
+    wait_for_close(&responder, &observed).await;
+    crate::connect::events::connect_event_registry().remove_session(&event_session_id);
+    let evicted = sessions.evict(&peer_id, Some(&responder));
+    if evicted {
+        // AR-68 #8: same tick as close observation — the PeerToolTable rows
+        // for this peer disappear from the spine + catalog. The wrapper
+        // hoisted above (the one the admission stored) is what the registry's
+        // expected-responder guard compares against, so the eviction actually
+        // lands.
+        crate::connect::peer_tool_table().evict_peer(&peer_id, Some(&port));
+        tracing::info!(%peer_id, "peer session evicted after close observation");
+    }
+}
+
+/// Await close observation for one session. Primary path = the wrapper's
+/// `Notify` (fires the same tick the transport reports an error/close);
+/// fallback = the responder state poll (catches a close the wrapper missed,
+/// e.g. a local `close_session` without a transport error). The flag is
+/// re-checked after the future is created to close the notify-counter race;
+/// the poll tick is the belt-and-braces fallback.
+async fn wait_for_close(responder: &Arc<ConnectResponder>, observed: &ObservedTransport) {
     loop {
         if observed.is_closed() || responder.state() == ConnectResponderState::Closed {
             break;
@@ -461,16 +536,115 @@ async fn monitor_session(
             () = tokio::time::sleep(CLOSE_POLL_INTERVAL) => {}
         }
     }
-    let evicted = sessions.evict(&peer_id, Some(&responder));
-    if evicted {
-        // AR-68 #8: same tick as close observation — the PeerToolTable rows
-        // for this peer disappear from the spine + catalog. The wrapper
-        // hoisted above (the one the admission stored) is what the registry's
-        // expected-responder guard compares against, so the eviction actually
-        // lands.
-        crate::connect::peer_tool_table().evict_peer(&peer_id, Some(&port));
-        tracing::info!(%peer_id, "peer session evicted after close observation");
+}
+
+/// Serve `tools.nexus.subscribe` for one session (§A.2a(f)1): register the
+/// async handler that performs the ring's atomic subscribe and drives
+/// ack-gated delivery.
+///
+/// Registration is gated on the peer advertising the consumer-served
+/// `tools.nexus.deliver_events` capability — the §A.2a(a) reverse-leg check:
+/// without it the native registered-or-deny path answers `op_unsupported`
+/// with zero side effects. The handler's success response carries
+/// `{stream, epoch, resumed_from}` and no frames; the first delivery push is
+/// held back until the `ObservedTransport` seam observes that response write
+/// (§A.2a(f)5).
+fn serve_subscribe_tool(responder: &Arc<ConnectResponder>, session_id: String) {
+    let has_delivery_capability = responder.remote_manifest().is_some_and(|manifest| {
+        manifest
+            .capabilities
+            .iter()
+            .any(|capability| capability == DELIVER_TOOL)
+    });
+    if !has_delivery_capability {
+        return;
     }
+    let responder_for_handler = Arc::clone(responder);
+    let events = crate::connect::events::connect_event_registry().clone();
+    let delivery_lock = Arc::new(tokio::sync::Mutex::new(()));
+    let handler: spoke_connect::remote::ToolHandler = Arc::new(move |arguments| {
+        let events = events.clone();
+        let responder = Arc::clone(&responder_for_handler);
+        let session = session_id.clone();
+        let delivery_lock = Arc::clone(&delivery_lock);
+        Box::pin(async move {
+            let Some(stream) = arguments
+                .get("stream")
+                .and_then(serde_json::Value::as_str)
+                .filter(|stream| !stream.is_empty())
+                .map(str::to_owned)
+            else {
+                return nexus_spoke_adapter::SpokeResult::Reject(
+                    nexus_spoke_adapter::SpokeReject {
+                        code: nexus_spoke_adapter::SpokeRejectCode::InvalidInput,
+                        message: "subscribe requires a non-empty stream".to_owned(),
+                        details: None,
+                    },
+                );
+            };
+            let cursor = match arguments.get("last_event_id") {
+                None => None,
+                Some(serde_json::Value::String(cursor)) => Some(cursor.clone()),
+                _ => {
+                    return nexus_spoke_adapter::SpokeResult::Reject(
+                        nexus_spoke_adapter::SpokeReject {
+                            code: nexus_spoke_adapter::SpokeRejectCode::InvalidInput,
+                            message: "last_event_id must be a string when provided".to_owned(),
+                            details: None,
+                        },
+                    )
+                }
+            };
+            let Ok((epoch, resumed_from, mut subscription)) =
+                events.subscribe(&session, &stream, cursor.as_deref())
+            else {
+                return nexus_spoke_adapter::SpokeResult::Reject(
+                    nexus_spoke_adapter::SpokeReject {
+                        code: nexus_spoke_adapter::SpokeRejectCode::InvalidInput,
+                        message: "invalid or unavailable Connect event cursor".to_owned(),
+                        details: None,
+                    },
+                );
+            };
+            let delivery_stream = stream.clone();
+            let delivery_session = session.clone();
+            let delivery_responder = Arc::clone(&responder);
+            tokio::spawn(async move {
+                loop {
+                    let frames = subscription.next_batch().await;
+                    if frames.is_empty() {
+                        break;
+                    }
+                    let _guard = delivery_lock.lock().await;
+                    // A replacement may have cancelled this subscription
+                    // while we waited for the session's send slot — never
+                    // push stale frames after cancellation.
+                    if !subscription.is_alive() {
+                        break;
+                    }
+                    let result = delivery_responder
+                        .invoke_tool(
+                            DELIVER_TOOL,
+                            serde_json::json!({"stream": &delivery_stream, "frames": frames}),
+                        )
+                        .await;
+                    match result {
+                        nexus_spoke_adapter::SpokeResult::Ok(_) => subscription.ack(),
+                        nexus_spoke_adapter::SpokeResult::Reject(_) => break,
+                    }
+                }
+                subscription.unregister(&delivery_session);
+            });
+            nexus_spoke_adapter::SpokeResult::Ok(serde_json::json!({
+                "stream": stream, "epoch": epoch, "resumed_from": resumed_from
+            }))
+        })
+            as futures_util::future::BoxFuture<
+                'static,
+                nexus_spoke_adapter::SpokeResult<serde_json::Value>,
+            >
+    });
+    let _ = responder.register_tool_handler(SUBSCRIBE_TOOL, handler);
 }
 
 /// Poll the responder state until it leaves `Handshaking`; returns the
@@ -712,6 +886,50 @@ mod tests {
         assert!(observed.is_closed(), "wrapper must latch the close flag");
     }
 
+    #[tokio::test]
+    async fn subscribe_response_write_activates_pending_delivery() {
+        let session = format!("ordering-{}", uuid::Uuid::new_v4());
+        let stream = format!("stream-{}", uuid::Uuid::new_v4());
+        let registry = crate::connect::events::connect_event_registry().clone();
+        registry.publish(&stream, "event", serde_json::json!({"n": 1}));
+        let (_, _, mut subscription) = registry.subscribe(&session, &stream, None).unwrap();
+        let pair = spoke_connect::remote::loopback_transport_pair();
+        let observed = ObservedTransport::new(Arc::new(pair.client) as Arc<dyn Transport>);
+        observed.bind_session(&session);
+        pair.server
+            .send(
+                serde_json::to_vec(&serde_json::json!({
+                    "op": SUBSCRIBE_TOOL, "request_id": "subscribe-1",
+                    "payload": {"arguments": {"stream": &stream}}
+                }))
+                .unwrap()
+                .as_slice(),
+            )
+            .await
+            .unwrap();
+        observed.recv().await.unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), subscription.next_batch())
+                .await
+                .is_err()
+        );
+        observed
+            .send(
+                serde_json::to_vec(&serde_json::json!({
+                    "request_id": "subscribe-1", "payload": {"result": {"stream": &stream}}
+                }))
+                .unwrap()
+                .as_slice(),
+            )
+            .await
+            .unwrap();
+        let pushed = tokio::time::timeout(Duration::from_secs(1), subscription.next_batch())
+            .await
+            .unwrap();
+        assert_eq!(pushed.len(), 1);
+        registry.remove_session(&session);
+        pair.server.close().await.unwrap();
+    }
     #[test]
     fn daemon_manifest_is_baseline() {
         let manifest = daemon_manifest("device-1", &[]);

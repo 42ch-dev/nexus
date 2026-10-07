@@ -20,6 +20,7 @@
 
 pub mod accept;
 pub mod config;
+pub mod events;
 pub mod identity;
 pub mod mcp_bridge;
 #[cfg(feature = "embedded-mcp")]
