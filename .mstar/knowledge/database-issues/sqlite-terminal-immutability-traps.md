@@ -124,5 +124,6 @@ Regression pins (v1.207 P3): `replacement_insert_cannot_overwrite_a_terminal_rec
 `begin_resolves_a_racing_settled_insert_instead_of_erroring`,
 `pruned_outbox_rows_cannot_erase_a_committed_effect`.
 
-Source: `.mstar/sdd/2026-10-07-v1.207-p3-operation-receipts/` (task-3 review
-F3/F4/F5 + C001 history); spec §B.1–§B.3.
+Source: v1.207 P3 iteration (PR #367) — task-3 review F3/F4/F5 + C001
+history; see the tracked spec
+`.mstar/specs/architecture/connect-event-delivery-and-operation-receipts.md` §B.1–§B.3.

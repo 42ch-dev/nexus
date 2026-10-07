@@ -43,7 +43,7 @@ v1.207 added two coupled subsystems and their wire contract:
   frozen recover-first handshake for both Connect writes and compute runs.
 
 The frozen contract (four architect amendments during implementation) lives
-in `.mstar/iterations/v1.207/specs/connect-replay-and-operation-receipts.md`;
+in the tracked spec `.mstar/specs/architecture/connect-event-delivery-and-operation-receipts.md`;
 this doc carries the durable, reusable shape.
 
 ## Guidance
@@ -159,4 +159,4 @@ capabilities[] = [tools.nexus.subscribe,          # host-served (registered hand
 ```
 
 Source spec (frozen, four amendments):
-`.mstar/iterations/v1.207/specs/connect-replay-and-operation-receipts.md`.
+`.mstar/specs/architecture/connect-event-delivery-and-operation-receipts.md`.

@@ -93,6 +93,5 @@ use crate::generated::works::work_pool_entry::WorkPoolEntry;
 // the response module no longer declares its own copy
 ```
 
-Source: `.mstar/sdd/2026-10-07-v1.207-p1-codegen-contract-debt/`
-(task-1/2 reports; `tooling/codegen/README.md` + `rust-gen/AGENTS.md` carry
-the in-repo operational notes).
+Source: v1.207 P1 iteration (PR #367) — task-1/2 reports; in-repo
+operational notes: `tooling/codegen/README.md` + `tooling/codegen/rust-gen/AGENTS.md`.
