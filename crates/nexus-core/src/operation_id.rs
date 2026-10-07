@@ -80,41 +80,72 @@ impl From<OperationIdError> for CoreError {
     }
 }
 
-/// Canonicalize a JSON value: object keys are emitted in sorted order at
-/// every level so `{"a":1,"b":2}` and `{"b":2,"a":1}` hash identically.
-fn canonicalize(value: &Value) -> Value {
+/// Append `text` as a canonical JSON string scalar (quoted, escaped exactly as
+/// the tree form would render it) — no intermediate `Value`.
+fn write_canonical_str(text: &str, out: &mut String) {
+    out.push_str(&serde_json::to_string(text).expect("serializing a &str is infallible"));
+}
+
+/// Append the canonical JSON of `value` — object keys sorted at every level, so
+/// `{"a":1,"b":2}` and `{"b":2,"a":1}` render identically — WITHOUT
+/// materializing an owned copy of the value.
+///
+/// Byte-equivalence with the straightforward `to_string(canonicalize(value))`
+/// form is pinned by `canonical_writer_matches_the_reference_canonicalization`,
+/// which keeps that tree-building implementation as an in-test oracle.
+fn write_canonical_json(value: &Value, out: &mut String) {
     match value {
-        Value::Array(items) => Value::Array(items.iter().map(canonicalize).collect()),
+        Value::Null => out.push_str("null"),
+        Value::Bool(true) => out.push_str("true"),
+        Value::Bool(false) => out.push_str("false"),
+        Value::Number(number) => out.push_str(&number.to_string()),
+        Value::String(text) => write_canonical_str(text, out),
+        Value::Array(items) => {
+            out.push('[');
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 {
+                    out.push(',');
+                }
+                write_canonical_json(item, out);
+            }
+            out.push(']');
+        }
         Value::Object(map) => {
             let mut keys: Vec<&String> = map.keys().collect();
             keys.sort_unstable();
-            let mut sorted = serde_json::Map::new();
-            for key in keys {
-                sorted.insert(key.clone(), canonicalize(&map[key]));
+            out.push('{');
+            for (index, key) in keys.into_iter().enumerate() {
+                if index > 0 {
+                    out.push(',');
+                }
+                write_canonical_str(key, out);
+                out.push(':');
+                write_canonical_json(&map[key], out);
             }
-            Value::Object(sorted)
+            out.push('}');
         }
-        other => other.clone(),
     }
 }
 
-/// Canonical JSON text of any value — the shared serialization of the id and
-/// fingerprint derivations below.
-///
-/// `Value` is always string-keyed, so this serialization cannot fail.
-fn canonical_json(value: &Value) -> String {
-    serde_json::to_string(&canonicalize(value))
-        .expect("serializing a serde_json::Value is infallible")
-}
-
 /// Canonical JSON of the scope tuple `{actor, session, action, args}`.
+///
+/// The tuple is written straight into the buffer (keys in sorted order) instead
+/// of materializing a tuple tree and then a full recursive copy of `args` on
+/// every id/fingerprint resolution — the only ownership here is the returned
+/// text.
 fn canonical_operation_json(scope: &OperationScope<'_>) -> String {
-    canonical_json(&serde_json::json!({
-        "actor": scope.actor,
-        "session": scope.session,
-        "action": scope.action,
-        "args": scope.args,
-    }))
+    let mut out = String::new();
+    out.push('{');
+    out.push_str("\"action\":");
+    write_canonical_str(scope.action, &mut out);
+    out.push_str(",\"actor\":");
+    write_canonical_str(scope.actor, &mut out);
+    out.push_str(",\"args\":");
+    write_canonical_json(scope.args, &mut out);
+    out.push_str(",\"session\":");
+    write_canonical_str(scope.session, &mut out);
+    out.push('}');
+    out
 }
 
 /// Validate the `op_<hex32>` shape of a durable operation id.
@@ -391,6 +422,62 @@ mod tests {
             resolve_operation_id(&scope).unwrap(),
             derive_operation_id(&scope)
         );
+    }
+
+    /// The reference canonicalization: build the sorted tree, then serialize it.
+    /// Kept as the in-test oracle for the allocation-light writer.
+    fn reference_canonical_json(value: &Value) -> String {
+        fn canonicalize(value: &Value) -> Value {
+            match value {
+                Value::Array(items) => Value::Array(items.iter().map(canonicalize).collect()),
+                Value::Object(map) => {
+                    let mut keys: Vec<&String> = map.keys().collect();
+                    keys.sort_unstable();
+                    let mut sorted = serde_json::Map::new();
+                    for key in keys {
+                        sorted.insert(key.clone(), canonicalize(&map[key]));
+                    }
+                    Value::Object(sorted)
+                }
+                other => other.clone(),
+            }
+        }
+        serde_json::to_string(&canonicalize(value))
+            .expect("serializing a serde_json::Value is infallible")
+    }
+
+    /// The direct canonical writer must render byte-identically to the
+    /// tree-building reference on every shape, including the escaping corners:
+    /// the id and the fingerprint are digests of this exact text, so a rendering
+    /// difference would silently change every durable id.
+    #[test]
+    fn canonical_writer_matches_the_reference_canonicalization() {
+        for value in [
+            json!(null),
+            json!(true),
+            json!(false),
+            json!(0),
+            json!(-12),
+            json!(1.5),
+            json!(""),
+            json!("plain"),
+            json!("quote\"backslash\\slash/"),
+            json!("control\u{0007}\u{001f}tab\tnewline\n"),
+            json!("unicode: \u{00e9} \u{4e2d}\u{6587} \u{1f600}"),
+            json!([]),
+            json!({}),
+            json!([1, "two", null, [3], {"b": 2, "a": 1}]),
+            json!({"z": {"y": [1, {"b": 2, "a": 3}]}, "a": null, "m": "x"}),
+            json!({"b": 2, "a": 1}),
+        ] {
+            let mut written = String::new();
+            write_canonical_json(&value, &mut written);
+            assert_eq!(
+                written,
+                reference_canonical_json(&value),
+                "the direct writer must match the reference form for {value}"
+            );
+        }
     }
 
     /// A FIXED vector pins the byte-level contract: the canonical JSON, the

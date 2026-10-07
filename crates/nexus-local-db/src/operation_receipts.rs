@@ -180,6 +180,33 @@ fn now_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 
+/// True for the schema's terminal-immutability abort.
+///
+/// SQLite reports a `RAISE(ABORT, …)` message through the statement error, which
+/// is the only channel it offers (the crate's writer-protocol callers match
+/// `WRITER_FENCED` the same way). Anything else is a real fault and propagates.
+fn is_terminal_receipt_refusal(err: &sqlx::Error) -> bool {
+    err.to_string()
+        .contains("OPERATION_RECEIPT_TERMINAL_IMMUTABLE")
+}
+
+/// The begin outcome for a receipt that already owns `operation_id`: `Existing`
+/// for the same logical request (a replay, a racing loser, or a settled id whose
+/// stored answer is the answer), and the typed `operation_id_conflict` for a
+/// different request fingerprint. The stored row is never touched.
+fn existing_begin_outcome(
+    stored: OperationReceipt,
+    operation_id: &str,
+    request_fingerprint: &str,
+) -> Result<BeginOutcome, LocalDbError> {
+    if stored.matches_fingerprint(request_fingerprint) {
+        return Ok(BeginOutcome::Existing(stored));
+    }
+    Err(LocalDbError::OperationIdConflict {
+        operation_id: operation_id.to_string(),
+    })
+}
+
 /// Read one receipt by operation id.
 ///
 /// Returns `Ok(None)` for an unknown id — recovery never fabricates a receipt
@@ -283,16 +310,11 @@ pub async fn begin_operation(
     // answered from the stored row here instead of attempting the insert the
     // store used to rely on being a no-op.
     if let Some(stored) = get_operation_receipt(pool, operation_id).await? {
-        if !stored.matches_fingerprint(request_fingerprint) {
-            return Err(LocalDbError::OperationIdConflict {
-                operation_id: operation_id.to_string(),
-            });
-        }
-        return Ok(BeginOutcome::Existing(stored));
+        return existing_begin_outcome(stored, operation_id, request_fingerprint);
     }
 
     let now = now_rfc3339();
-    let inserted = sqlx::query(
+    let inserted = match sqlx::query(
         "INSERT INTO operation_receipts \
              (operation_id, consumer, subject_id, status, request_fingerprint, \
               result_json, error_json, created_at, updated_at, terminal_at, sequence) \
@@ -308,7 +330,20 @@ pub async fn begin_operation(
     .bind(&now)
     .execute(pool)
     .await
-    .map_err(db_err)?;
+    {
+        Ok(inserted) => inserted,
+        // QC1-C001 race: a racing winner inserted AND settled terminally between
+        // our read and this insert, so the schema refused the insert over its
+        // terminal id. The loser resolves to the stored row (the typed
+        // `Existing` / `operation_id_conflict`), never a raw trigger abort.
+        Err(err) if is_terminal_receipt_refusal(&err) => {
+            let stored = get_operation_receipt(pool, operation_id)
+                .await?
+                .ok_or_else(|| db_err(sqlx::Error::RowNotFound))?;
+            return existing_begin_outcome(stored, operation_id, request_fingerprint);
+        }
+        Err(err) => return Err(db_err(err)),
+    };
 
     // `changes()` distinguishes the two sides of the first-writer-wins race:
     // exactly one racer inserted the `running` row (and owns the effect), the
@@ -1093,6 +1128,171 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(count, 2, "the terminal victim was not deleted");
+    }
+
+    /// QC1-C001 residual: with the table WITHOUT ROWID there is no rowid alias
+    /// to reach a settled receipt through. An `INSERT OR REPLACE` that names an
+    /// explicit rowid cannot even name one, and — whatever the failure mode —
+    /// the settled row must survive byte-identically and no fresh row may appear.
+    #[tokio::test]
+    async fn explicit_rowid_replacement_cannot_overwrite_a_terminal_receipt() {
+        let (pool, _dir) = admitted_pool().await;
+        let id = op_id("e6");
+        begin_acquired(&pool, &id, CONSUMER_COMPUTE_RUN, "run-e6", "fp-e6").await;
+        let settled = settle_operation(&pool, &id, STATUS_FINISHED, r#"{"ok":true}"#)
+            .await
+            .expect("settle the receipt terminally");
+        let fresh = op_id("e7");
+
+        let err = sqlx::query(
+            "INSERT OR REPLACE INTO operation_receipts \
+                 (rowid, operation_id, consumer, subject_id, status, request_fingerprint, \
+                  result_json, error_json, created_at, updated_at, terminal_at, sequence) \
+             VALUES (1, ?, 'compute_run', 'run-fresh', 'running', 'fp-fresh', \
+                     NULL, NULL, '2026-10-07T00:00:00Z', '2026-10-07T00:00:00Z', NULL, 2)",
+        )
+        .bind(&fresh)
+        .execute(&pool)
+        .await
+        .expect_err("the rowid alias must not be a way to replace a settled receipt");
+        let message = err.to_string();
+        assert!(
+            message.contains("rowid") || message.contains("OPERATION_RECEIPT"),
+            "expected the removed rowid alias (or an immutability refusal) to stop the \
+             attack, got: {message}"
+        );
+
+        assert_eq!(
+            get_operation_receipt(&pool, &id).await.unwrap().unwrap(),
+            settled,
+            "the settled row must be untouched"
+        );
+        assert!(
+            get_operation_receipt(&pool, &fresh)
+                .await
+                .unwrap()
+                .is_none(),
+            "the replacement row must not exist"
+        );
+    }
+
+    /// QC1-C001 residual, the UPDATE half: `UPDATE OR REPLACE … SET rowid = …`
+    /// from a running row has no rowid to collide on, and the settled row and the
+    /// running row both survive byte-identically.
+    #[tokio::test]
+    async fn update_replace_set_rowid_cannot_overwrite_a_terminal_receipt() {
+        let (pool, _dir) = admitted_pool().await;
+        let terminal_id = op_id("e8");
+        begin_acquired(&pool, &terminal_id, CONSUMER_COMPUTE_RUN, "run-e8", "fp-e8").await;
+        let settled = settle_operation(&pool, &terminal_id, STATUS_FINISHED, r#"{"ok":true}"#)
+            .await
+            .expect("settle the receipt terminally");
+        let running_id = op_id("e9");
+        let running =
+            begin_acquired(&pool, &running_id, CONSUMER_COMPUTE_RUN, "run-e9", "fp-e9").await;
+
+        let err = sqlx::query(
+            "UPDATE OR REPLACE operation_receipts SET rowid = 1 WHERE operation_id = ?",
+        )
+        .bind(&running_id)
+        .execute(&pool)
+        .await
+        .expect_err("the rowid alias must not be a way to collide with a settled receipt");
+        let message = err.to_string();
+        assert!(
+            message.contains("rowid") || message.contains("OPERATION_RECEIPT"),
+            "expected the removed rowid alias (or an immutability refusal) to stop the \
+             attack, got: {message}"
+        );
+
+        assert_eq!(
+            get_operation_receipt(&pool, &terminal_id)
+                .await
+                .unwrap()
+                .unwrap(),
+            settled,
+            "the settled row must be untouched"
+        );
+        assert_eq!(
+            get_operation_receipt(&pool, &running_id)
+                .await
+                .unwrap()
+                .unwrap(),
+            running,
+            "the running row must be untouched"
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM operation_receipts")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            2,
+            "the terminal victim was not deleted"
+        );
+    }
+
+    /// QC1-C001 race: `begin_operation` reads first, so a racing winner can
+    /// insert AND settle terminally before the loser's insert. The loser must
+    /// resolve to the stored row (`Existing`) or the typed conflict — never the
+    /// raw schema abort.
+    ///
+    /// The race is parked with SQLite's write lock: the winner's terminal row is
+    /// written inside an UNCOMMITTED transaction (invisible to the loser's read),
+    /// the loser's INSERT parks on the write lock (`busy_timeout = 2000`), and
+    /// the commit lets it through to the terminal refusal — which the store now
+    /// translates.
+    #[tokio::test]
+    async fn begin_resolves_a_racing_settled_insert_instead_of_erroring() {
+        let (pool, _dir) = admitted_pool().await;
+
+        for (id, fingerprint, expect_conflict) in [
+            (op_id("ea"), "fp-race", false),
+            (op_id("eb"), "fp-loser", true),
+        ] {
+            let mut winner = pool.begin().await.expect("winner transaction");
+            sqlx::query(
+                "INSERT INTO operation_receipts \
+                     (operation_id, consumer, subject_id, status, request_fingerprint, \
+                      result_json, error_json, created_at, updated_at, terminal_at, sequence) \
+                 VALUES (?, 'compute_run', 'run-race', 'finished', 'fp-race', \
+                         '{\"ok\":true}', NULL, '2026-10-07T00:00:00Z', '2026-10-07T00:00:00Z', \
+                         '2026-10-07T00:00:00Z', 1)",
+            )
+            .bind(&id)
+            .execute(&mut *winner)
+            .await
+            .expect("the winner's terminal row");
+
+            let loser = tokio::spawn({
+                let pool = pool.clone();
+                let id = id.clone();
+                async move {
+                    begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-race", fingerprint).await
+                }
+            });
+            // The loser's read misses (the winner is uncommitted) and its insert
+            // parks on the write lock; then the winner commits.
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            winner.commit().await.expect("winner commits");
+
+            let outcome = loser.await.expect("loser task");
+            if expect_conflict {
+                assert!(
+                    matches!(outcome, Err(LocalDbError::OperationIdConflict { .. })),
+                    "a different fingerprint for the settled id is the typed conflict, got {outcome:?}"
+                );
+                continue;
+            }
+            match outcome.expect("the loser must resolve, not surface the raw schema abort") {
+                BeginOutcome::Existing(stored) => {
+                    assert_eq!(stored.status, STATUS_FINISHED);
+                    assert_eq!(stored.operation_id, id);
+                }
+                BeginOutcome::Acquired(other) => {
+                    panic!("a settled id is never acquired: {other:?}")
+                }
+            }
+        }
     }
 
     /// The legitimate replay path is untouched by the replacement guards: after

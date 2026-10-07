@@ -67,7 +67,15 @@ CREATE TABLE IF NOT EXISTS operation_receipts (
             AND ((result_json IS NULL) <> (error_json IS NULL))
         )
     )
-);
+) WITHOUT ROWID;
+-- WITHOUT ROWID (QC1-C001 residual): a rowid column is an ALIAS for the row's
+-- storage id, and neither an `INSERT OR REPLACE` carrying an explicit rowid nor
+-- an `UPDATE OR REPLACE … SET rowid = …` fires the victim's DELETE trigger while
+-- `recursive_triggers` is OFF — so a rowid alias would be a second, unfenced way
+-- to delete a settled receipt. The table's identity is `operation_id` alone
+-- (nothing in the store, the outbox family or any caller reads a rowid; the
+-- `sequence` column is assigned by the store, not by AUTOINCREMENT), so removing
+-- the alias removes the bypass class outright rather than guarding around it.
 
 CREATE INDEX IF NOT EXISTS idx_operation_receipts_sequence
     ON operation_receipts (sequence);
