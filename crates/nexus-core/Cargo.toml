@@ -19,18 +19,22 @@ default = []
 # pulls none of these; each `dep:` edge stays inert until its feature is
 # requested. `compute` is never enabled by default/domain/Connect-host.
 provider-host = ["dep:nexus-agent-host", "dep:nexus-acp-host", "dep:nexus-provider-ports", "dep:futures-util"]
+# v1.207 P3-T1 (spec §B.1): the stable durable operation id layer alone. It
+# needs only the hashing edge, and the Connect host — which links neither
+# `execution` nor `compute` — resolves ids through it, so it is its own
+# smallest feature rather than an execution-only edge.
+operation-id = ["dep:sha2", "dep:hex"]
 execution = [
     "dep:nexus-orchestration",
     "dep:nexus-provider-ports",
     "dep:graph-flow",
     "dep:tokio-util",
     "dep:async-trait",
+    "operation-id",
     # The durable workspace commit authority moved out of the daemon: the
-    # intent/digest/recovery protocol hashes content (sha2), hex-encodes the
-    # digest, decodes base64 manifest bodies and uses renameat/linkat for the
-    # atomic file apply. All four are execution-only edges.
-    "dep:sha2",
-    "dep:hex",
+    # intent/digest/recovery protocol hashes content (via `operation-id`'s
+    # sha2/hex), decodes base64 manifest bodies and uses renameat/linkat for
+    # the atomic file apply. The rest are execution-only edges.
     "dep:base64",
     "dep:nix",
 ]

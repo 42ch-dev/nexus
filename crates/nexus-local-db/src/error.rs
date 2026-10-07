@@ -101,6 +101,13 @@ pub enum LocalDbError {
     /// `holder_state_invalid` code (mapped from this variant, like the other
     /// payload-carrying API-precision variants above).
     HolderStateInvalid { reason: String },
+    /// v1.207 P3 (§B.1): an `operation_receipts` write carried a different
+    /// `request_fingerprint` for an `operation_id` that is already owned —
+    /// the receipt primary key is first-writer-wins, so a genuine id collision
+    /// is the typed `operation_id_conflict` refusal, never a silent dedupe.
+    /// A replay of the SAME logical operation (identical fingerprint) is not a
+    /// conflict: it resumes from the stored receipt.
+    OperationIdConflict { operation_id: String },
 }
 
 impl LocalDbError {
@@ -417,6 +424,14 @@ impl fmt::Display for LocalDbError {
             }
             Self::HolderStateInvalid { reason } => {
                 write!(f, "holder_state_invalid: {reason}")
+            }
+            Self::OperationIdConflict { operation_id } => {
+                write!(
+                    f,
+                    "operation_id_conflict: operation id '{operation_id}' is already owned by a \
+                     receipt with a different request fingerprint; operation ids are \
+                     first-writer-wins",
+                )
             }
         }
     }

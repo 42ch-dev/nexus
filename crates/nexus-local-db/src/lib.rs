@@ -42,6 +42,7 @@ pub mod moment_directive;
 pub mod narrative_gateway;
 pub mod narrative_write;
 pub mod novel_pool_entries;
+pub mod operation_receipts;
 pub mod peer_hosts;
 pub mod pending_review;
 pub mod prompt_injection;
@@ -276,6 +277,14 @@ pub use novel_pool_entries::{
     archive_pool_entry, count_pool_entries, get_active_pool_entry, get_pool_entry,
     get_pool_entry_by_work, list_pool_entries, mark_pool_entry_completed,
     mark_pool_entry_completed_for_work, promote_to_active, PoolEntry,
+};
+
+// Re-export operation receipt store + Recover handshake (v1.207 P3, RN-OGA-5)
+pub use operation_receipts::{
+    begin_operation, classify_recovery, get_operation_receipt, is_known_consumer,
+    is_terminal_status, recover, settle_operation, OperationReceipt, RecoveryDecision,
+    CONSUMER_COMPUTE_RUN, CONSUMER_CONNECT_INVOKE, OPERATION_ID_CONFLICT_CODE, STATUS_CANCELLED,
+    STATUS_FAILED, STATUS_FINISHED, STATUS_INTERRUPTED, STATUS_RUNNING, TERMINAL_STATUSES,
 };
 
 // Re-export inspiration_items types

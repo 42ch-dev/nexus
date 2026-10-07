@@ -62,6 +62,7 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("CoreHomeConfiguration", 1),
     ("CoreHostQueryResponse", 1),
     ("CoreHostQuery", 1),
+    ("CoreOperationReceipt", 1),
     ("CoreOutboxResolveRequest", 1),
     ("CoreOutboxStatus", 1),
     ("CorePeerControlOptions", 1),

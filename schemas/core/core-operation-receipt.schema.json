@@ -1,0 +1,83 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-operation-receipt.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreOperationReceipt",
+  "description": "One durable operation receipt (v1.207 P3, RN-OGA-5). Mirrors one `operation_receipts` row: the first-writer-wins record of a logical operation, asked BEFORE any re-apply so a retry/replay after cancel, timeout or crash is answered from the receipt instead of being applied twice. A terminal receipt carries exactly one of `result_json` / `error_json` and is immutable: it is never downgraded back to running and never rewritten.",
+  "type": "object",
+  "required": [
+    "operation_id",
+    "consumer",
+    "subject_id",
+    "status",
+    "request_fingerprint",
+    "created_at",
+    "updated_at",
+    "sequence"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "operation_id": {
+      "type": "string",
+      "pattern": "^op_[0-9a-f]{32}$",
+      "description": "Durable operation id: `op_` prefix and exactly 32 lowercase hex characters."
+    },
+    "consumer": {
+      "type": "string",
+      "enum": [
+        "compute_run",
+        "connect_invoke"
+      ],
+      "description": "The consumer lane that owns this receipt (compute Run or Connect invoke)."
+    },
+    "subject_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Consumer-scoped subject: compute Run `run_id`; Connect `<peer_session_id>/<op>`."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "running",
+        "finished",
+        "failed",
+        "cancelled",
+        "interrupted"
+      ],
+      "description": "Receipt status. Terminal once finished/failed/cancelled/interrupted; never downgraded back to running."
+    },
+    "request_fingerprint": {
+      "type": "string",
+      "minLength": 1,
+      "description": "SHA-256 of the canonical request. First-writer-wins: a conflicting write for the same operation id with a different fingerprint is refused `operation_id_conflict`, never silently deduped."
+    },
+    "result_json": {
+      "type": ["string", "null"],
+      "description": "Terminal result payload (JSON text); set exactly on a `finished` settlement."
+    },
+    "error_json": {
+      "type": ["string", "null"],
+      "description": "Terminal error/reason payload (JSON text); set exactly on a `failed`, `cancelled` or `interrupted` settlement."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 UTC timestamp of the receipt's first (running) write."
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 UTC timestamp of the last receipt write."
+    },
+    "terminal_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "RFC 3339 UTC timestamp of the terminal settlement; null while running."
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Monotonic store order assigned at write time."
+    }
+  }
+}
