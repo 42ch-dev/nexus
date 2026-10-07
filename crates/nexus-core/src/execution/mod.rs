@@ -52,8 +52,12 @@ pub mod executor;
 pub mod handle_ops;
 pub mod lifecycle;
 // v1.207 P3-T1: the stable durable operation id (`op_<hex32>`) derivation and
-// shape validation every receipt consumer resolves through (spec §B.1).
-pub mod operation_id;
+// shape validation every receipt consumer resolves through (spec §B.1). It
+// lives at the crate root (feature `operation-id`) because the Connect host
+// resolves ids too and does not link `execution`; this re-export keeps the
+// original `nexus_core::execution::operation_id` path valid.
+#[cfg(feature = "operation-id")]
+pub use crate::operation_id;
 pub mod peer_tools;
 // v1.195 P0-T1: the hosted production composition. It builds the selected-root
 // workspace port bundle for the hosted factory that the NEXT task adds, so it

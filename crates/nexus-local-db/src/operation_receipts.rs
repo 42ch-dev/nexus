@@ -500,33 +500,63 @@ mod tests {
         }
     }
 
-    /// The receipt write path is engine-owned: the cooperative DIRECT
-    /// admission (the one the Connect host opens its workspace DB with —
-    /// `apps/nexus42` `Schema::init` → `nexus_local_db::init_pool`) carries the
-    /// protocol scalars but no engine registration, so it is fenced exactly
-    /// like a raw writer. This is why a receipt-writing consumer must run
-    /// under the engine owner, and why the boot recovery pass only READS.
+    /// The receipt write path is **cooperative** (spec §B.2, third amendment):
+    /// the DIRECT admission — the one the Connect host opens its workspace DB
+    /// with (`apps/nexus42` `Schema::init` → `nexus_local_db::init_pool`) — may
+    /// begin and settle receipts, so the Connect write surface can enforce
+    /// §B.3 on the pool it already has (no engine ownership, no second pool).
+    ///
+    /// Receipt integrity is writer-agnostic and therefore unchanged by the
+    /// admission class: the first terminal wins and the settled row is
+    /// immutable even for the direct writer.
     #[tokio::test]
-    async fn direct_admission_is_fenced_from_writing_receipts() {
+    async fn direct_admission_can_begin_and_settle_receipts() {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("state.db");
         let direct = crate::init_pool(&db_path)
             .await
             .expect("direct-admission pool");
-        let err = begin_operation(
+
+        let id = op_id("dc");
+        let begun = begin_acquired(
             &direct,
-            &op_id("dd"),
-            CONSUMER_COMPUTE_RUN,
-            "run-direct",
+            &id,
+            CONSUMER_CONNECT_INVOKE,
+            "peer-session-1/upsert",
             "fp-direct",
         )
-        .await
-        .expect_err("the direct (cooperative) admission must not write receipts");
-        let message = err.to_string();
+        .await;
+        assert_eq!(begun.status, STATUS_RUNNING);
+
+        let settled = settle_operation(&direct, &id, STATUS_FINISHED, r#"{"ok":true}"#)
+            .await
+            .expect("the direct writer settles the receipt");
+        assert_eq!(settled.status, STATUS_FINISHED);
+        assert!(settled.terminal_at.is_some());
+        assert_eq!(settled.result_json.as_deref(), Some(r#"{"ok":true}"#));
+
+        // First terminal wins for the direct writer too.
+        let late = settle_operation(&direct, &id, STATUS_FAILED, r#"{"late":true}"#)
+            .await
+            .expect("a late settlement reads the stored terminal back");
+        assert_eq!(late, settled, "the settled receipt is never rewritten");
+
+        // Terminal immutability fires for EVERY admitted writer, not just the
+        // engine owner: a direct UPDATE of the settled row aborts.
+        let err =
+            sqlx::query("UPDATE operation_receipts SET status = 'running' WHERE operation_id = ?")
+                .bind(&id)
+                .execute(&direct)
+                .await
+                .expect_err("a terminal receipt must be immutable for the direct writer");
         assert!(
-            message.contains("WRITER_FENCED") || message.contains("no such function: nexus_writer"),
-            "expected a writer fence, got: {message}"
+            err.to_string()
+                .contains("OPERATION_RECEIPT_TERMINAL_IMMUTABLE"),
+            "expected the terminal-immutability abort, got: {err}"
         );
+        let stored = get_operation_receipt(&direct, &id).await.unwrap().unwrap();
+        assert_eq!(stored, settled);
+
         direct.close().await;
     }
 
@@ -968,9 +998,10 @@ mod tests {
         assert_eq!(stored, settled);
     }
 
-    /// The receipt write path runs under the engine-owned writer protocol: the
-    /// engine owner writes, while a raw handle that never received the protocol
-    /// scalars is fenced by SQLite itself.
+    /// The receipt write path runs under the admitted writer protocol: an
+    /// admitted writer (engine owner or cooperative direct) writes, while a raw
+    /// handle that never received the protocol scalars is fenced by SQLite
+    /// itself.
     #[tokio::test]
     async fn receipts_are_guarded_by_the_writer_protocol() {
         let (pool, dir) = admitted_pool().await;

@@ -12,10 +12,23 @@
 -- the receipt) from a genuine id collision (different fingerprint — a
 -- typed `operation_id_conflict` refusal, never a silent dedupe).
 --
--- Engine-owned under the core writer protocol, exactly like
--- `compute_sessions`: the guard family admits only the migration writer and
--- the single engine owner, and the outbox family mirrors every mutation onto
--- `core_changes` (`resource_kind = 'operation_receipts'`).
+-- Writer admission (spec §B.2, ruled 2026-10-07 third amendment): this is a
+-- **cooperative core table**, not an engine-owned one. It is shared by the
+-- compute lane (engine writer) and the Connect host (cooperative DIRECT
+-- writer), so the guard family admits the migration writer, the epoch-matched
+-- single engine owner, AND the cooperative DIRECT admission — byte-for-byte
+-- the `guard_knowledge_entries_*` shape.
+--
+-- Receipt integrity does not rest on the admission class: it is enforced BELOW
+-- the guard and is writer-agnostic — terminal immutability fires for every
+-- admitted writer, first-writer-wins is the `operation_id` PRIMARY KEY plus the
+-- store's fingerprint-conflict check (arbitrated by SQLite's single-writer
+-- serialization), the payload CHECK binds all writers, a raw/unregistered pool
+-- stays fenced (no registration row ⇒ WRITER_FENCED), and a DIRECT
+-- registration pins `migration_epoch` so a writer spanning a migration is
+-- fenced by the cooperative-quiescence protocol. `compute_sessions` stays
+-- engine-owned — its session state machine wants the single-owner CAS
+-- discipline.
 --
 -- Payload contract, verbatim from §B.2 ("terminal payload, exactly one set on
 -- terminal settlement"): a `running` receipt carries neither payload and no
@@ -62,8 +75,10 @@ CREATE INDEX IF NOT EXISTS idx_operation_receipts_sequence
 CREATE INDEX IF NOT EXISTS idx_operation_receipts_consumer_subject
     ON operation_receipts (consumer, subject_id);
 
--- Writer-protocol guards: admitted only for the single engine owner or the
--- migration writer, mirroring `guard_compute_sessions_*`.
+-- Writer-protocol guards: the cooperative core-table shape — admitted for the
+-- migration writer, the cooperative DIRECT admission, or the epoch-matched
+-- single engine owner (mirroring `guard_knowledge_entries_*`; see the
+-- writer-admission note in this file's header).
 CREATE TRIGGER IF NOT EXISTS guard_operation_receipts_insert
 BEFORE INSERT ON operation_receipts
 FOR EACH ROW
@@ -78,7 +93,7 @@ BEGIN
            AND r.migration_epoch = g.migration_epoch
            AND r.migration_epoch = nexus_migration_epoch()
            AND (
-             r.mode = 'migration'
+             r.mode IN ('direct', 'migration')
              OR (
                r.mode = 'engine'
                AND r.engine_epoch IS NOT NULL
@@ -103,7 +118,7 @@ BEGIN
            AND r.migration_epoch = g.migration_epoch
            AND r.migration_epoch = nexus_migration_epoch()
            AND (
-             r.mode = 'migration'
+             r.mode IN ('direct', 'migration')
              OR (
                r.mode = 'engine'
                AND r.engine_epoch IS NOT NULL
@@ -128,7 +143,7 @@ BEGIN
            AND r.migration_epoch = g.migration_epoch
            AND r.migration_epoch = nexus_migration_epoch()
            AND (
-             r.mode = 'migration'
+             r.mode IN ('direct', 'migration')
              OR (
                r.mode = 'engine'
                AND r.engine_epoch IS NOT NULL

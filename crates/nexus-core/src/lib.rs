@@ -24,6 +24,11 @@ mod knowledge;
 mod memory;
 mod memory_pipeline;
 mod operation_receipts;
+// v1.207 P3-T1 (spec §B.1): the stable durable operation id every receipt
+// consumer resolves through. Root-level and gated on its own tiny feature so
+// the Connect host (which links no `execution`) reuses the ONE derivation.
+#[cfg(feature = "operation-id")]
+pub mod operation_id;
 mod outline;
 mod presets;
 mod principal;

@@ -225,6 +225,10 @@ connect-host = [
   "dep:nexus-local-db",
   "dep:nexus-spoke-adapter",
   "nexus-spoke-adapter/compute",
+  # v1.207 P3: the Connect write surface derives the §B.1 durable operation id
+  # and its request fingerprint through nexus-core's ONE implementation. It
+  # pulls the hashing edge only — not `execution`, not `compute`.
+  "nexus-core/operation-id",
   "dep:sqlx",
   "dep:spoke-connect",
   "dep:spoke-schemas",

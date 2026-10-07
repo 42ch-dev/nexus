@@ -188,8 +188,13 @@
 
 use super::allowlist::{GrantAdmission, PeerGrant, PeerScope};
 use libp2p::PeerId;
+use nexus_core::operation_id::{self, OperationScope};
 use nexus_knowledge::world_kb::knowledge_entry::DISCLOSURE_OWNER_PRIVATE;
 use nexus_knowledge::world_kb::KnowledgeReadScope;
+use nexus_local_db::operation_receipts::{
+    begin_operation, recover, settle_operation, BeginOutcome, RecoveryDecision,
+    CONSUMER_CONNECT_INVOKE, STATUS_FAILED, STATUS_FINISHED,
+};
 use nexus_spoke_adapter::extensions::get_world_id;
 use nexus_spoke_adapter::manifest::{CORE_OPS, LOCAL_TOOL_OPS};
 use nexus_spoke_adapter::{
@@ -772,7 +777,32 @@ fn run_in_lane(
             } else {
                 verify_stored_worlds(&adapter_for_lane, route, &payload).await?;
             }
-            route_orchestrator(
+            // Step 8c. §B.3 durable-operation handshake (v1.207 P3) for the
+            // non-idempotent write routes: resolve the id, ask the receipt
+            // store FIRST, write the `running` receipt before the effect, then
+            // settle terminally. A replay is answered from the receipt and
+            // never re-applies; ambiguity is the typed `uncertain` refusal.
+            let mut payload = payload;
+            let mut acquired_receipt = None;
+            if is_live_write(route) {
+                match open_write_receipt(
+                    ports_for_lane.pool(),
+                    &peer_id,
+                    grant_for_lane.as_ref(),
+                    &op_for_lane,
+                    &mut payload,
+                )
+                .await?
+                {
+                    WriteReceipt::Acquired {
+                        operation_id,
+                        subject_id,
+                    } => acquired_receipt = Some((operation_id, subject_id)),
+                    // Answered from the stored receipt: zero side effects.
+                    WriteReceipt::Answered(answer) => return Ok(answer),
+                }
+            }
+            let result = route_orchestrator(
                 route,
                 &adapter_for_lane,
                 &serializer_for_lane,
@@ -780,7 +810,14 @@ fn run_in_lane(
                 &op_for_lane,
                 payload,
             )
-            .await
+            .await;
+            match acquired_receipt {
+                Some((operation_id, subject_id)) => {
+                    settle_write_receipt(ports_for_lane.pool(), result, &operation_id, &subject_id)
+                        .await
+                }
+                None => result,
+            }
         });
         let _ = tx.send(result);
     });
@@ -871,6 +908,324 @@ fn holder_assignment_denied(entry_id: &str, field: &str) -> ErrorEnvelope {
         details,
         extensions: HashMap::default(),
     }
+}
+
+/// True for the non-idempotent write routes the §B.3 receipt guard covers —
+/// exactly the `LiveWrite` admission class (`upsert` / `promote` / `relate` /
+/// `compute`).
+const fn is_live_write(route: Route) -> bool {
+    matches!(grant_admission(route), GrantAdmission::LiveWrite)
+}
+
+/// One connected invoke's durable operation id (spec §B.1, Connect scope):
+/// `actor` = the caller's stored granted Actor, `session` = the authenticated
+/// peer session id, `action` = the op id, `args` = the invoke payload. A
+/// caller-supplied `operation_id` is used verbatim after shape validation.
+///
+/// # Errors
+/// Returns the `invalid_input` envelope for a malformed caller-supplied id
+/// (the same refusal the core's `OperationIdError` maps to, naming the wire
+/// field the caller used).
+#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of the dispatch
+fn connect_operation_id(
+    peer: &PeerId,
+    grant: Option<&PeerGrant>,
+    op: &str,
+    payload: &Value,
+) -> Result<String, ErrorEnvelope> {
+    let session = peer.to_string();
+    operation_id::resolve_operation_id(&OperationScope {
+        actor: grant.map_or("", PeerGrant::actor_id),
+        session: &session,
+        action: op,
+        args: payload,
+    })
+    .map_err(|err| {
+        let mut details = Map::new();
+        details.insert(
+            "field".to_string(),
+            Value::String("operation_id".to_string()),
+        );
+        ErrorEnvelope {
+            code: "invalid_input".to_string(),
+            message: format!("invalid durable operation id: {err}"),
+            details,
+            extensions: HashMap::default(),
+        }
+    })
+}
+
+/// Strip the caller-supplied `operation_id` from the invoke payload.
+///
+/// `args.operation_id` is an envelope-level argument of the §B.1 id contract,
+/// not a field of the route's typed request: it is consumed by
+/// [`connect_operation_id`] and must not reach the orchestrator's
+/// deserialization.
+fn strip_caller_operation_id(payload: &mut Value) {
+    if let Some(map) = payload.as_object_mut() {
+        map.remove(operation_id::OPERATION_ID_FIELD);
+    }
+}
+
+/// The typed `uncertain` refusal envelope (spec §B.3 item 4 / §C): the
+/// operation has no terminal receipt, so it is never retried blindly.
+fn uncertain_envelope(operation_id: &str, subject_id: &str) -> ErrorEnvelope {
+    let mut details = Map::new();
+    details.insert(
+        "operation_id".to_string(),
+        Value::String(operation_id.to_string()),
+    );
+    details.insert(
+        "subject_id".to_string(),
+        Value::String(subject_id.to_string()),
+    );
+    ErrorEnvelope {
+        code: "uncertain".to_string(),
+        message: format!(
+            "operation {operation_id} ({subject_id}) cannot be retried: it has no terminal \
+             receipt, so the effect may already have been applied"
+        ),
+        details,
+        extensions: HashMap::default(),
+    }
+}
+
+/// The typed first-writer-wins refusal (spec §B.1 / §C).
+fn operation_id_conflict_envelope(operation_id: &str) -> ErrorEnvelope {
+    let mut details = Map::new();
+    details.insert(
+        "operation_id".to_string(),
+        Value::String(operation_id.to_string()),
+    );
+    ErrorEnvelope {
+        code: "operation_id_conflict".to_string(),
+        message: format!(
+            "operation id {operation_id} is already owned by a receipt with a different request \
+             fingerprint; the first writer's receipt is durable and is never replaced"
+        ),
+        details,
+        extensions: HashMap::default(),
+    }
+}
+
+/// A receipt-store fault: an `internal` envelope that never fabricates a
+/// success and never licenses a re-apply.
+fn receipt_store_fault(err: &nexus_local_db::LocalDbError) -> ErrorEnvelope {
+    ErrorEnvelope {
+        code: "internal".to_string(),
+        message: format!("durable operation receipt store failed: {err}"),
+        details: Map::new(),
+        extensions: HashMap::default(),
+    }
+}
+
+/// The effect-committed refusal (spec §B.3 item 4): the write's effect landed
+/// but its required durable receipt did not. Not a rollback, not retryable.
+fn effect_committed_envelope(
+    operation_id: &str,
+    subject_id: &str,
+    err: &nexus_local_db::LocalDbError,
+) -> ErrorEnvelope {
+    let mut details = Map::new();
+    details.insert("effect_committed".to_string(), Value::Bool(true));
+    details.insert(
+        "operation_id".to_string(),
+        Value::String(operation_id.to_string()),
+    );
+    details.insert(
+        "subject_id".to_string(),
+        Value::String(subject_id.to_string()),
+    );
+    ErrorEnvelope {
+        code: "internal".to_string(),
+        message: format!(
+            "the effect committed but its durable operation receipt did not: the write is not \
+             rolled back and not retryable; inspect operation_id={operation_id} \
+             subject_id={subject_id}: {err}"
+        ),
+        details,
+        extensions: HashMap::default(),
+    }
+}
+
+/// Answer a replay from its stored receipt (spec §B.3 step 3) — never a
+/// second effect run.
+///
+/// A settled success replays the stored result verbatim; every other terminal
+/// replays the stored error envelope. A stored row that cannot be decoded into
+/// its declared shape is the typed `uncertain` refusal, never a fabricated
+/// success.
+#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of the dispatch
+fn answer_from_receipt(
+    receipt: &nexus_local_db::OperationReceipt,
+    subject_id: &str,
+) -> Result<Value, ErrorEnvelope> {
+    let ambiguous = || uncertain_envelope(&receipt.operation_id, subject_id);
+    if receipt.status == STATUS_FINISHED {
+        return receipt.result_json.as_deref().map_or_else(
+            || Err(ambiguous()),
+            |json| serde_json::from_str::<Value>(json).map_err(|_| ambiguous()),
+        );
+    }
+    // Every other terminal status replays its stored reason as the answer.
+    receipt.error_json.as_deref().map_or_else(
+        || Err(ambiguous()),
+        |json| serde_json::from_str::<ErrorEnvelope>(json).map_or_else(|_| Err(ambiguous()), Err),
+    )
+}
+
+/// The stored receipt a recovery decision was classified from, when the
+/// decision has one (`ApplyOnce` means no receipt exists).
+const fn decision_receipt(
+    decision: &RecoveryDecision,
+) -> Option<&nexus_local_db::OperationReceipt> {
+    match decision {
+        RecoveryDecision::AnswerFromReceipt(receipt)
+        | RecoveryDecision::InProgress(receipt)
+        | RecoveryDecision::Uncertain(receipt) => Some(receipt),
+        RecoveryDecision::ApplyOnce => None,
+    }
+}
+
+/// The §B.3 decision for one non-idempotent Connect write.
+enum WriteReceipt {
+    /// This invoke acquired the effect: the `running` receipt is durably
+    /// written and this call must run the effect, then settle it.
+    Acquired {
+        operation_id: String,
+        subject_id: String,
+    },
+    /// The operation was already answered from its receipt — run nothing.
+    Answered(Value),
+}
+
+/// Open the durable receipt for one non-idempotent Connect write (spec §B.3
+/// steps 1–3) on the host's own cooperative DIRECT pool.
+///
+/// Returns [`WriteReceipt::Acquired`] when THIS invoke acquired the effect
+/// (the `running` receipt is durably written first), or
+/// [`WriteReceipt::Answered`] when the operation was already answered — in
+/// which case the carry is the replay's answer and the effect must NOT run.
+///
+/// # Errors
+/// The typed refusals: `invalid_input` (malformed caller id),
+/// `operation_id_conflict` (first-writer-wins), `uncertain` (no terminal
+/// receipt) and `internal` (receipt-store fault).
+#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of the dispatch
+async fn open_write_receipt(
+    pool: &sqlx::SqlitePool,
+    peer: &PeerId,
+    grant: Option<&PeerGrant>,
+    op: &str,
+    payload: &mut Value,
+) -> Result<WriteReceipt, ErrorEnvelope> {
+    let operation_id = connect_operation_id(peer, grant, op, payload)?;
+    strip_caller_operation_id(payload);
+    let subject_id = format!("{peer}/{op}");
+    let fingerprint = operation_id::request_fingerprint(payload);
+
+    // §B.3 step 2: ask the receipt store FIRST — before any re-apply.
+    //
+    // `owner_is_live` is `true`: a timed-out lane closure keeps running (the
+    // blocking lane cannot be force-cancelled), so a `running` receipt may
+    // still have a live owner. Either way the answer is the same typed
+    // refusal — the effect is never re-applied here.
+    let decision = match recover(pool, &operation_id, true).await {
+        Ok(decision) => decision,
+        Err(err) => return Err(receipt_store_fault(&err)),
+    };
+
+    // §B.1 conflict precedence: a receipt first written for a DIFFERENT
+    // canonical request is not a replay of this call — the id is owned by
+    // another logical operation, and §B.1 refuses that typed rather than
+    // silently deduping it. This is decided before §B.3's status-based answer
+    // (the store's frozen `recover` classifies by receipt status alone).
+    if let Some(stored) = decision_receipt(&decision) {
+        if !stored.matches_fingerprint(&fingerprint) {
+            return Err(operation_id_conflict_envelope(&operation_id));
+        }
+    }
+
+    match decision {
+        RecoveryDecision::ApplyOnce => {}
+        RecoveryDecision::AnswerFromReceipt(receipt) => {
+            return Ok(WriteReceipt::Answered(answer_from_receipt(
+                &receipt,
+                &subject_id,
+            )?));
+        }
+        RecoveryDecision::InProgress(_) | RecoveryDecision::Uncertain(_) => {
+            return Err(uncertain_envelope(&operation_id, &subject_id));
+        }
+    }
+
+    // §B.3 step 3: write the `running` receipt FIRST, then run the effect.
+    match begin_operation(
+        pool,
+        &operation_id,
+        CONSUMER_CONNECT_INVOKE,
+        &subject_id,
+        &fingerprint,
+    )
+    .await
+    {
+        Ok(BeginOutcome::Acquired(_)) => Ok(WriteReceipt::Acquired {
+            operation_id,
+            subject_id,
+        }),
+        // A racing replay: answer from the stored receipt, never re-apply.
+        Ok(BeginOutcome::Existing(stored)) => Ok(WriteReceipt::Answered(answer_from_receipt(
+            &stored,
+            &subject_id,
+        )?)),
+        Err(nexus_local_db::LocalDbError::OperationIdConflict { .. }) => {
+            Err(operation_id_conflict_envelope(&operation_id))
+        }
+        Err(err) => Err(receipt_store_fault(&err)),
+    }
+}
+
+/// Settle the receipt of an acquired Connect write with the invoke's outcome
+/// (spec §B.3 step 3).
+///
+/// A committed success whose settlement fails is the effect-committed
+/// refusal: the effect is durable on its own tables, the reply must not claim
+/// success without its receipt, and a retry could duplicate it.
+///
+/// # Errors
+/// The effect-committed refusal when a successful write's receipt cannot be
+/// settled; the original outcome is returned unchanged otherwise.
+#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of the dispatch
+async fn settle_write_receipt(
+    pool: &sqlx::SqlitePool,
+    result: Result<Value, ErrorEnvelope>,
+    operation_id: &str,
+    subject_id: &str,
+) -> Result<Value, ErrorEnvelope> {
+    match &result {
+        Ok(value) => {
+            let payload = serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string());
+            if let Err(err) = settle_operation(pool, operation_id, STATUS_FINISHED, &payload).await
+            {
+                return Err(effect_committed_envelope(operation_id, subject_id, &err));
+            }
+        }
+        Err(envelope) => {
+            let payload = serde_json::to_string(envelope).unwrap_or_else(|_| "{}".to_string());
+            if let Err(err) = settle_operation(pool, operation_id, STATUS_FAILED, &payload).await {
+                // The effect did not commit, so the caller keeps the original
+                // refusal; the `running` receipt left behind makes a later
+                // re-drive answer `uncertain` — the safe direction.
+                tracing::warn!(
+                    operation_id = %operation_id,
+                    subject_id = %subject_id,
+                    error = %err,
+                    "connect invoke: operation receipt settlement failed after a rejected write"
+                );
+            }
+        }
+    }
+    result
 }
 
 /// Run one served op through its orchestrator and map the outcome to the
@@ -3556,5 +3911,207 @@ mod tests {
             }
         }
         drop(temp);
+    }
+
+    // -----------------------------------------------------------------------
+    // v1.207 P3 — the §B.3 durable-operation handshake on the Connect writes
+    // -----------------------------------------------------------------------
+
+    /// The host's own DIRECT-admission pool plus a handler over it, so the
+    /// receipt rows are observable next to the invoke.
+    async fn receipt_handler(
+        peer: PeerId,
+    ) -> (Arc<InvokeHandlerV2>, sqlx::SqlitePool, tempfile::TempDir) {
+        let scope = scoped_scope(peer);
+        let (temp, ports) = test_ports().await;
+        let pool = ports.pool().clone();
+        let (handler, _lane, _serializer) =
+            build_handler_with_limits(scope, ports, BridgeLimits::default());
+        (handler, pool, temp)
+    }
+
+    /// One connected invoke's receipt row, as `(operation_id, status)`.
+    async fn connect_receipt_rows(
+        pool: &sqlx::SqlitePool,
+        subject_id: &str,
+    ) -> Vec<(String, String)> {
+        sqlx::query_as(
+            "SELECT operation_id, status FROM operation_receipts \
+              WHERE consumer = 'connect_invoke' AND subject_id = ? ORDER BY sequence ASC",
+        )
+        .bind(subject_id)
+        .fetch_all(pool)
+        .await
+        .expect("connect receipt rows")
+    }
+
+    /// A caller-supplied valid operation id for the conflict/ambiguity cases.
+    fn caller_operation_id(suffix: &str) -> String {
+        format!("op_{suffix:0>32}")
+    }
+
+    /// §B.3 on the Connect write surface: a re-driven `LiveWrite` invoke is
+    /// answered from its stored receipt, so the effect is never applied twice.
+    ///
+    /// The host's existing DIRECT-admission pool is the writer (§B.2 third
+    /// amendment) — no engine ownership, no second pool.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn re_driven_write_is_answered_from_the_receipt() {
+        let peer = fixed_keypair(41).public().to_peer_id();
+        let (handler, pool, _temp) = receipt_handler(peer).await;
+        let subject_id = format!("{peer}/upsert");
+        let payload = serde_json::json!({
+            "knowledge_entries": [entry_fixture("kb_redrive", WORLD_A)],
+        });
+
+        let applied = handler(&peer, "upsert", payload.clone()).expect("the first write applies");
+        assert_eq!(applied["knowledge_entries"][0]["entry_id"], "kb_redrive");
+
+        // The governed write left a terminal receipt on the host's own pool.
+        let rows = connect_receipt_rows(&pool, &subject_id).await;
+        assert_eq!(rows.len(), 1, "one logical call owns exactly one receipt");
+        assert_eq!(rows[0].1, "finished");
+        nexus_core::operation_id::validate_operation_id(&rows[0].0)
+            .expect("the derived id is wire-shaped (§B.1)");
+        let stored_blocks: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = ?")
+                .bind("kb_redrive")
+                .fetch_one(&pool)
+                .await
+                .expect("count blocks");
+        assert_eq!(stored_blocks, 1, "the first invoke applied the effect");
+
+        // The effect's durable traces, captured before the re-drive.
+        let changes_before: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM core_changes WHERE resource_id = ?")
+                .bind("kb_redrive")
+                .fetch_one(&pool)
+                .await
+                .expect("count changes");
+
+        // The SAME logical call re-driven (same peer, same op, same args).
+        let replayed = handler(&peer, "upsert", payload).expect("the re-drive is answered");
+        assert_eq!(
+            replayed, applied,
+            "the re-drive returns the receipt's stored result verbatim"
+        );
+
+        let changes_after: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM core_changes WHERE resource_id = ?")
+                .bind("kb_redrive")
+                .fetch_one(&pool)
+                .await
+                .expect("count changes");
+        assert_eq!(
+            changes_before, changes_after,
+            "an answered re-drive must not re-apply the effect"
+        );
+        let rows = connect_receipt_rows(&pool, &subject_id).await;
+        assert_eq!(rows.len(), 1, "the re-drive adds no second receipt");
+        assert_eq!(rows[0].1, "finished");
+    }
+
+    /// §B.3 item 4 on the Connect surface: a non-idempotent write whose
+    /// receipt is still `running` (the cancel/timeout ambiguity) is refused
+    /// with the frozen `uncertain` code — never a blind retry, and no
+    /// terminal is fabricated for the orphan.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn ambiguous_re_drive_is_refused_uncertain_and_not_reapplied() {
+        let peer = fixed_keypair(42).public().to_peer_id();
+        let (handler, pool, _temp) = receipt_handler(peer).await;
+        let subject_id = format!("{peer}/upsert");
+        let operation_id = caller_operation_id("ee");
+        let payload = serde_json::json!({
+            "operation_id": &operation_id,
+            "knowledge_entries": [entry_fixture("kb_ambiguous", WORLD_A)],
+        });
+        // The timed-out attempt's receipt: `running`, its owner possibly alive.
+        // Its fingerprint is the SAME logical call's (the id argument is an
+        // envelope argument and is not part of the fingerprinted request), so
+        // this is a replay of an unterminated operation — not a conflict.
+        let mut request = payload.clone();
+        request
+            .as_object_mut()
+            .expect("payload object")
+            .remove("operation_id");
+        nexus_local_db::operation_receipts::begin_operation(
+            &pool,
+            &operation_id,
+            nexus_local_db::operation_receipts::CONSUMER_CONNECT_INVOKE,
+            &subject_id,
+            &nexus_core::operation_id::request_fingerprint(&request),
+        )
+        .await
+        .expect("seed the in-flight receipt");
+        match handler(&peer, "upsert", payload) {
+            Err(envelope) => {
+                assert_eq!(
+                    envelope.code, "uncertain",
+                    "an unterminated write must answer the frozen `uncertain` code"
+                );
+                assert_eq!(
+                    envelope.details.get("operation_id").and_then(Value::as_str),
+                    Some(operation_id.as_str())
+                );
+            }
+            Ok(served) => panic!("an ambiguous re-drive must be refused, got {served}"),
+        }
+
+        // Zero side effects, and the orphaned receipt is untouched.
+        let applied: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = ?")
+                .bind("kb_ambiguous")
+                .fetch_one(&pool)
+                .await
+                .expect("count blocks");
+        assert_eq!(applied, 0, "a refused re-drive applies nothing");
+        let rows = connect_receipt_rows(&pool, &subject_id).await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].1, "running",
+            "no terminal is fabricated for the orphan"
+        );
+    }
+
+    /// §B.1 first-writer-wins on the Connect surface: a caller-supplied id
+    /// already owned by a receipt with a DIFFERENT request fingerprint is the
+    /// typed `operation_id_conflict`, never a silent dedupe or a second apply.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn conflicting_operation_id_is_refused_and_never_deduped() {
+        let peer = fixed_keypair(43).public().to_peer_id();
+        let (handler, pool, _temp) = receipt_handler(peer).await;
+        let subject_id = format!("{peer}/upsert");
+        let operation_id = caller_operation_id("ff");
+        nexus_local_db::operation_receipts::begin_operation(
+            &pool,
+            &operation_id,
+            nexus_local_db::operation_receipts::CONSUMER_CONNECT_INVOKE,
+            &subject_id,
+            "fp-first-writer",
+        )
+        .await
+        .expect("seed the first writer's receipt");
+
+        let payload = serde_json::json!({
+            "operation_id": &operation_id,
+            "knowledge_entries": [entry_fixture("kb_conflict", WORLD_A)],
+        });
+        match handler(&peer, "upsert", payload) {
+            Err(envelope) => assert_eq!(
+                envelope.code, "operation_id_conflict",
+                "a different fingerprint for an owned id is the frozen conflict refusal"
+            ),
+            Ok(served) => panic!("a conflicting id must be refused, got {served}"),
+        }
+        let applied: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = ?")
+                .bind("kb_conflict")
+                .fetch_one(&pool)
+                .await
+                .expect("count blocks");
+        assert_eq!(applied, 0, "a conflicting id applies nothing");
+        // The first writer's row is untouched.
+        let rows = connect_receipt_rows(&pool, &subject_id).await;
+        assert_eq!(rows, vec![(operation_id, "running".to_string())]);
     }
 }
