@@ -394,7 +394,8 @@ impl ConnectEventRegistry {
             );
             (gate, lifetime)
         };
-        let mut acquire = Box::pin(gate.clone().acquire_owned());
+        let acquire = gate.clone().acquire_owned();
+        tokio::pin!(acquire);
         let permit = std::future::poll_fn(|cx| {
             let result = acquire.as_mut().poll(cx);
             #[cfg(test)]
@@ -746,6 +747,43 @@ mod tests {
         );
         assert_eq!(stale.replay[0].data["resync_required"], true);
 
+        registry.publish("foreign", "event", json!(1)).unwrap();
+        let foreign_cursor = format!("{}:0", Uuid::new_v4());
+        let (_, _, foreign) = registry
+            .subscribe("p", "foreign", Some(&foreign_cursor))
+            .await
+            .unwrap();
+        assert_eq!(foreign.replay[0].event, "gap");
+        assert_eq!(foreign.replay[0].id, None);
+        assert_eq!(foreign.replay[0].data["reason"], "stale_cursor");
+        assert_eq!(
+            foreign.replay[0].data["requires_transcript_reconciliation"],
+            true
+        );
+        assert_eq!(foreign.replay[0].data["resync_required"], true);
+
+        let future_frame = registry.publish("future", "event", json!(1)).unwrap();
+        let future_epoch = future_frame
+            .id
+            .unwrap()
+            .split_once(':')
+            .unwrap()
+            .0
+            .to_owned();
+        let future_cursor = format!("{future_epoch}:2");
+        let (_, _, future) = registry
+            .subscribe("p", "future", Some(&future_cursor))
+            .await
+            .unwrap();
+        assert_eq!(future.replay[0].event, "gap");
+        assert_eq!(future.replay[0].id, None);
+        assert_eq!(future.replay[0].data["reason"], "stale_cursor");
+        assert_eq!(
+            future.replay[0].data["requires_transcript_reconciliation"],
+            true
+        );
+        assert_eq!(future.replay[0].data["resync_required"], true);
+
         let oldest = registry
             .publish("trimmed", "event", json!(0))
             .unwrap()
@@ -783,11 +821,24 @@ mod tests {
                 nexus_contracts::generated::core::core_connect_gap_event::CoreConnectGapEvent,
             >(value)
         };
-        assert!(parse(valid.clone()).is_ok());
+        let gap = parse(valid.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&gap).unwrap(), valid);
         for field in ["requires_transcript_reconciliation", "resync_required"] {
             let mut invalid = valid.clone();
             invalid[field] = json!(false);
             assert!(parse(invalid).is_err(), "false {field} must be rejected");
+            let mut invalid = gap.clone();
+            match field {
+                "requires_transcript_reconciliation" => {
+                    invalid.requires_transcript_reconciliation = false;
+                }
+                "resync_required" => invalid.resync_required = false,
+                _ => unreachable!(),
+            }
+            assert!(
+                serde_json::to_value(invalid).is_err(),
+                "false {field} must not serialize"
+            );
         }
     }
 

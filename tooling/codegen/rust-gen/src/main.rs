@@ -353,7 +353,7 @@ fn literal_true_fields(src_schema_path: &Path) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn inject_literal_true_deserializers(rust: &str, type_name: &str, fields: &[String]) -> String {
+fn inject_literal_true_serde_attributes(rust: &str, type_name: &str, fields: &[String]) -> String {
     if fields.is_empty() {
         return rust.to_string();
     }
@@ -393,7 +393,10 @@ fn inject_literal_true_deserializers(rust: &str, type_name: &str, fields: &[Stri
         };
         body.insert_str(
             at,
-            "# [serde (deserialize_with = \"crate :: literal_true :: deserialize\")] ",
+            concat!(
+                "# [serde (deserialize_with = \"crate :: literal_true :: deserialize\" , ",
+                "serialize_with = \"crate :: literal_true :: serialize\")] ",
+            ),
         );
     }
     format!("{head}{body}{tail}")
@@ -718,7 +721,7 @@ fn generate_schema_rust(
     }
     let literal_true = literal_true_fields(src_schema_path);
     if !literal_true.is_empty() {
-        rust = inject_literal_true_deserializers(&rust, &type_name, &literal_true);
+        rust = inject_literal_true_serde_attributes(&rust, &type_name, &literal_true);
     }
 
     if let Some(parent) = out_path.parent() {
