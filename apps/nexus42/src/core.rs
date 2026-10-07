@@ -12,9 +12,11 @@
 //! variant for variant, so one domain failure reads identically on either
 //! transport.
 //!
-//! No `EngineOwner`, server probe, Node child or live provider is involved:
-//! the raw user home plus [`CoreAccess::DirectWriter`] are the whole authority,
-//! and the caller awaits [`finish_direct`] before reporting anything.
+//! No server probe, Node child or live provider is involved: the raw user home
+//! plus [`CoreAccess::DirectWriter`] are the whole authority, and the caller
+//! awaits [`finish_direct`] before reporting anything. The one exception is
+//! [`open_engine_owned_core`], which takes the workspace's engine admission for
+//! the leaves whose tables are engine-guarded (`kb_extract_jobs`).
 //!
 //! Opening refuses a selection that names no materialized workspace before the
 //! writer pool is admitted ([`require_materialized_workspace`]), so an
@@ -42,6 +44,30 @@ pub async fn open_direct_core(config: &CliConfig) -> Result<CoreService> {
     CoreService::open(CoreOpenOptions {
         user_home,
         access: CoreAccess::DirectWriter,
+    })
+    .await
+    .map_err(map_core_error)
+}
+
+/// The same admission as [`open_direct_core`], over the workspace's
+/// **engine-owned** admission instead of the direct-writer one.
+///
+/// Engine-guarded state cannot be written over the direct-writer pool: the
+/// schema's writer guards fence every `kb_extract_jobs` write to a
+/// migration/engine writer, so a leaf that enqueues extract jobs needs this
+/// admission (the world-pack import leaf takes the same one). Reads and
+/// direct-writer writes keep using [`open_direct_core`].
+///
+/// # Errors
+///
+/// As [`open_direct_core`]; additionally the mapped core error when another
+/// process already owns the workspace's engine admission.
+pub async fn open_engine_owned_core(config: &CliConfig) -> Result<CoreService> {
+    let user_home = user_home_dir().map_err(|e| CliError::Config(e.to_string()))?;
+    require_materialized_workspace_from_home(config, &user_home)?;
+    CoreService::open(CoreOpenOptions {
+        user_home,
+        access: CoreAccess::EngineOwner,
     })
     .await
     .map_err(map_core_error)

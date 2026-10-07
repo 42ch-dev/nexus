@@ -78,6 +78,7 @@ pub use findings::{
 pub use home::CoreHomeService;
 #[cfg(feature = "provider-host")]
 pub use host::HostHandle;
+pub use knowledge::QueueKbExtractParams;
 pub use memory::{
     CharacterTomBeliefRow, CharacterTomListQuery, CharacterTomPage, CharacterTomRecordInput,
     CharacterTomService,
