@@ -582,8 +582,10 @@ impl NativeCore {
         };
         self.json_call(principal_handle, async move |core, principal| {
             let page = core.list_work_pool(&principal, domain).await?;
-            let entries: Vec<nexus_contracts::generated::core::works::work_pool_list_response::WorkPoolEntry> =
-                page.entries.into_iter().map(|e| nexus_contracts::generated::core::works::work_pool_list_response::WorkPoolEntry {
+            let entries: Vec<WorkPoolEntry> = page
+                .entries
+                .into_iter()
+                .map(|e| WorkPoolEntry {
                     entry_id: e.entry_id,
                     work_id: e.work_id,
                     status: e.status,
@@ -697,10 +699,10 @@ impl NativeCore {
         };
         self.json_call(principal_handle, async move |core, principal| {
             let page = core.list_work_inspiration(&principal, domain).await?;
-            let items: Vec<nexus_contracts::generated::core::works::work_inspiration_list_response::WorkInspirationItem> = page
+            let items: Vec<WorkInspirationItem> = page
                 .items
                 .into_iter()
-                .map(|item| nexus_contracts::generated::core::works::work_inspiration_list_response::WorkInspirationItem {
+                .map(|item| WorkInspirationItem {
                     item_id: item.item_id,
                     rel_path: item.rel_path,
                     title: item.title,

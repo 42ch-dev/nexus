@@ -230,6 +230,132 @@ function posix(rel: string): string {
   return rel.split(path.sep).join('/');
 }
 
+/** A generated consumer-scope schema module: its contract type name and file. */
+export interface SchemaModule {
+  /** Basename-derived contract type name (`schemaToTypeName`). */
+  name: string;
+  /** POSIX dir of the module, relative to the generated root. */
+  relDir: string;
+  /** File base name without the extension. */
+  base: string;
+  /** Type names the module declares at its top level, as compiled. */
+  declared: Set<string>;
+}
+
+/**
+ * Canonical owner of a declared type name, or `undefined` when the name has no
+ * single canonical home (it then stays exactly as `json-schema-to-typescript`
+ * emitted it).
+ *
+ * A name is owned when exactly one generated module both *declares* it and is its
+ * family home: the module whose root type *is* the name (`WorkPoolEntry`), or — for
+ * a nested type derived from an inlined `$ref` body — a module whose root type name
+ * prefixes it. Declaring the name is required: a mere prefix match
+ * (`CharacterActorRef` vs the `Character` module, which does not declare it) must
+ * not invent a home. Ambiguous matches and the module itself resolve to `undefined`.
+ */
+function ownerOf(
+  modules: SchemaModule[],
+  typeName: string,
+  self: SchemaModule,
+): SchemaModule | undefined {
+  const candidates = modules.filter(
+    module =>
+      module.declared.has(typeName) &&
+      (module.name === typeName || typeName.startsWith(module.name)),
+  );
+  if (candidates.length !== 1) return undefined;
+  const owner = candidates[0];
+  return owner.base === self.base && owner.relDir === self.relDir ? undefined : owner;
+}
+
+/** Top-level `export` declarations that can carry a `$ref`-target copy. */
+const DECLARATION_START = /^export (?:interface|const enum|enum|type) (\w+)\b/;
+
+/** Type names a compiled module declares at its top level. */
+function declaredNames(source: string): string[] {
+  const names: string[] = [];
+  for (const line of source.split('\n')) {
+    const match = DECLARATION_START.exec(line);
+    if (match) names.push(match[1]);
+  }
+  return names;
+}
+
+/** Last line index of the top-level declaration that starts at `start`. */
+function declarationEnd(lines: string[], start: number): number {
+  const isTypeAlias = /^export type \b/.test(lines[start]);
+  let depth = 0;
+  for (let i = start; i < lines.length; i++) {
+    for (const ch of lines[i]) {
+      if (ch === '{') depth += 1;
+      else if (ch === '}') depth -= 1;
+    }
+    if (depth > 0) continue;
+    if (isTypeAlias ? lines[i].trimEnd().endsWith(';') : lines[i].trimEnd().endsWith('}')) {
+      return i;
+    }
+  }
+  return start;
+}
+
+/** First line index of the doc comment directly above `start` (or `start`). */
+function declarationBlockStart(lines: string[], start: number): number {
+  let i = start;
+  while (i > 0) {
+    const previous = lines[i - 1].trim();
+    if (previous.endsWith('*/')) {
+      i -= 1;
+      while (i > 0 && !lines[i].trimStart().startsWith('/*')) i -= 1;
+      continue;
+    }
+    if (previous.startsWith('//')) {
+      i -= 1;
+      continue;
+    }
+    break;
+  }
+  return i;
+}
+
+/**
+ * Drop the inline copy of every `$ref` target that has a canonical standalone
+ * module, and import the type from that module instead.
+ *
+ * `json-schema-to-typescript` inlines a referenced schema into each referencing
+ * file, so one wire shape ends up declared several times (`WorkPoolEntry` inside
+ * both `work-pool-entry` and `work-pool-list-response`). Keeping exactly one
+ * declaration makes the standalone file the single canonical import path for
+ * consumers. Names with no canonical home are left untouched.
+ */
+export function dedupeRefTargets(source: string, self: SchemaModule, modules: SchemaModule[]): string {
+  const lines = source.split('\n');
+  const dropped = new Set<number>();
+  const imports: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    if (dropped.has(i)) continue;
+    const match = DECLARATION_START.exec(lines[i]);
+    if (!match) continue;
+    const start = i;
+    const end = declarationEnd(lines, start);
+    i = end;
+    const owner = ownerOf(modules, match[1], self);
+    if (!owner) continue;
+    for (let j = declarationBlockStart(lines, start); j <= end; j++) dropped.add(j);
+    const relativeDir = path.posix.relative(self.relDir, owner.relDir);
+    const from = relativeDir === '' ? `./${owner.base}` : `${relativeDir}/${owner.base}`;
+    imports.push(`import type { ${match[1]} } from '${from}';`);
+  }
+
+  if (imports.length === 0) return source;
+
+  const kept = lines.filter((_, index) => !dropped.has(index));
+  while (kept.length > 0 && kept[kept.length - 1].trim() === '') kept.pop();
+  const block = [...new Set(imports)].sort().join('\n');
+  return `${block}\n\n${kept.join('\n')}`;
+}
+
 /**
  * Generate the full TypeScript contract tree under
  * `packages/nexus-contracts/src/generated/`. Assumes `runPrep()` has already built the
@@ -255,6 +381,17 @@ export async function generateTSTypes(): Promise<void> {
   const emitRel = allRel.filter(rel => !SKIP_LIST.has(rel));
   const skipped = allRel.filter(rel => SKIP_LIST.has(rel));
 
+  // Canonical owner index for the `$ref`-target dedupe pass: one entry per emitted
+  // schema, keyed by its basename-derived contract type name. The declared names are
+  // filled in from the compiled output below — the pass may only point a type at a
+  // module that actually declares it.
+  const modules: SchemaModule[] = emitRel.map(rel => ({
+    name: schemaToTypeName(path.basename(rel)),
+    relDir: posix(path.dirname(rel)),
+    base: path.basename(rel, '.schema.json'),
+    declared: new Set<string>(),
+  }));
+
   // Reset the generated tree (regeneration is authoritative).
   fs.rmSync(outDir, { recursive: true, force: true });
   ensureDir(outDir);
@@ -262,17 +399,35 @@ export async function generateTSTypes(): Promise<void> {
   // 1. Synthetic common module: common definitions + SourceAnchor (skip-listed but referenced).
   await generateCommonTypesModule(localizedDir, outDir);
 
-  // 2. Per-schema files.
+  // 2. Per-schema files: compile the whole tree first, so the dedupe pass sees every
+  // module's declarations before any file is written.
+  const compiled = new Map<string, string>();
   const versionRows: Array<{ typeName: string; version: number; relDir: string; base: string; rel: string }> = [];
   for (const rel of emitRel) {
     const fileName = path.basename(rel);
     const base = path.basename(rel, '.schema.json');
     const relDir = posix(path.dirname(rel));
     const typeName = schemaToTypeName(fileName);
+    const self = modules.find(module => module.base === base && module.relDir === relDir);
+    if (!self) {
+      throw new Error(`codegen: no module index entry for ${rel}`);
+    }
     const ts = await compileSchema(localizedDir, rel, typeName);
-    writeFile(path.join(outDir, ...relDir.split('/'), `${base}.ts`), ts);
+    compiled.set(rel, ts);
+    for (const name of declaredNames(ts)) self.declared.add(name);
     const originalSchema = readJSON<Record<string, unknown>>(path.join(srcSchemasDir, rel));
     versionRows.push({ typeName, version: extractSchemaVersion(originalSchema), relDir, base, rel });
+  }
+
+  for (const rel of emitRel) {
+    const base = path.basename(rel, '.schema.json');
+    const relDir = posix(path.dirname(rel));
+    const self = modules.find(module => module.base === base && module.relDir === relDir);
+    if (!self) {
+      throw new Error(`codegen: no module index entry for ${rel}`);
+    }
+    const ts = dedupeRefTargets(compiled.get(rel) ?? '', self, modules);
+    writeFile(path.join(outDir, ...relDir.split('/'), `${base}.ts`), `${BANNER}\n\n${ts}\n`);
   }
 
   // 3. Per-subdir barrel index.ts files (named root exports only).
@@ -294,7 +449,7 @@ async function compileSchema(localizedDir: string, rel: string, typeName: string
   (schema as Record<string, unknown>).title = typeName;
   rewriteExactStringPatterns(schema);
   const ts = await compile(schema, typeName, { ...COMPILE_OPTS, cwd: path.dirname(abs) });
-  return `${BANNER}\n\n${ts.trim()}\n`;
+  return ts.trim();
 }
 
 /**

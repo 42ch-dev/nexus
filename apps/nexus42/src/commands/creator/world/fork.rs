@@ -34,9 +34,8 @@ use crate::config::CliConfig;
 use crate::core::{finish_direct, map_core_error, open_direct_core};
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
-use nexus_contracts::daemon_api::timeline::list_timeline_events_response::{
-    ListTimelineEventsResponse, TimelineEventInfo,
-};
+use nexus_contracts::daemon_api::timeline::list_timeline_events_response::ListTimelineEventsResponse;
+use nexus_contracts::daemon_api::timeline::timeline_event_info::TimelineEventInfo;
 use nexus_contracts::daemon_api::worlds::{
     CreateForkRequest, CreateForkRequestLabel, CreateForkResponse,
 };

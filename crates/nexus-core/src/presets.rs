@@ -8,16 +8,19 @@ use nexus_contracts::{
     ValidatePresetRequest, ValidatePresetResponse,
 };
 use nexus_contracts::{UpdatePresetRequest, UpdatePresetResponse};
-// The canonical preset profile DTOs live in the generated `preset_profile_response`
-// module. Other per-DTO generated files re-declare their own inline copies of the
-// same child types, so the crate-root names resolve to a different (wire-identical
-// but distinct) Rust type than the one `PresetProfileResponse`'s fields actually
-// use. Import the whole family from the response module that owns the composite.
-use nexus_contracts::generated::core::orchestration_presets::preset_profile_response::{
-    PresetProfileConditionalRule, PresetProfileEnterAction, PresetProfileExitWhen,
-    PresetProfileLabeledNext, PresetProfileLanes, PresetProfileNext, PresetProfileResponse,
-    PresetProfileRole, PresetProfileSignal, PresetProfileState,
-};
+// The preset profile family is generated one type per module; the lane de-duplicates
+// every `$ref` target to its standalone module, so import each type from the module
+// that owns it.
+use nexus_contracts::generated::core::orchestration_presets::preset_profile_conditional_rule::PresetProfileConditionalRule;
+use nexus_contracts::generated::core::orchestration_presets::preset_profile_enter_action::PresetProfileEnterAction;
+use nexus_contracts::generated::core::orchestration_presets::preset_profile_exit_when::PresetProfileExitWhen;
+use nexus_contracts::generated::core::orchestration_presets::preset_profile_labeled_next::PresetProfileLabeledNext;
+use nexus_contracts::generated::core::orchestration_presets::preset_profile_lanes::PresetProfileLanes;
+use nexus_contracts::generated::core::orchestration_presets::preset_profile_next::PresetProfileNext;
+use nexus_contracts::generated::core::orchestration_presets::preset_profile_response::PresetProfileResponse;
+use nexus_contracts::generated::core::orchestration_presets::preset_profile_role::PresetProfileRole;
+use nexus_contracts::generated::core::orchestration_presets::preset_profile_signal::PresetProfileSignal;
+use nexus_contracts::generated::core::orchestration_presets::preset_profile_state::PresetProfileState;
 use nexus_contracts::generated::daemon_api::preset_management::list_presets_response::{
     ListPresetsResponse, NexusPresetSummary, NexusPresetSummarySource,
 };

@@ -1622,12 +1622,11 @@ async fn handle_inspiration_archive(
 }
 
 /// Schema-owned pool-list element (`--json` only).
-type PoolListEntry =
-    nexus_contracts::generated::core::works::work_pool_list_response::WorkPoolEntry;
+type PoolListEntry = nexus_contracts::generated::core::works::work_pool_entry::WorkPoolEntry;
 
 /// Schema-owned inspiration-list element (`--json` only).
 type InspirationListItem =
-    nexus_contracts::generated::core::works::work_inspiration_list_response::WorkInspirationItem;
+    nexus_contracts::generated::core::works::work_inspiration_item::WorkInspirationItem;
 
 /// Project a core pool entry onto the wire shape the pool list serves.
 ///
