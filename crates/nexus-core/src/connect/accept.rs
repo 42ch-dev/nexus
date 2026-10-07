@@ -497,7 +497,11 @@ async fn monitor_session(
         .unwrap_or_default();
     let event_session_id = uuid::Uuid::new_v4().to_string();
     observed.bind_session(&event_session_id);
-    serve_subscribe_tool(&responder, event_session_id.clone());
+    serve_subscribe_tool(
+        &responder,
+        event_session_id.clone(),
+        Duration::from_millis(config.invoke_timeout_ms.max(1000)),
+    );
     let replaced = sessions.register(&peer_id, Arc::clone(&responder), &admitted_ids);
     tracing::info!(%peer_id, replaced, "peer session established");
 
@@ -544,7 +548,11 @@ async fn wait_for_close(responder: &Arc<ConnectResponder>, observed: &ObservedTr
 /// `tools.nexus.deliver_events` capability — the §A.2a(a) reverse-leg check:
 /// without it the native registered-or-deny path answers `op_unsupported`
 /// with zero side effects.
-fn serve_subscribe_tool(responder: &Arc<ConnectResponder>, session_id: String) {
+fn serve_subscribe_tool(
+    responder: &Arc<ConnectResponder>,
+    session_id: String,
+    delivery_deadline: Duration,
+) {
     let has_delivery_capability = responder.remote_manifest().is_some_and(|manifest| {
         manifest
             .capabilities
@@ -559,6 +567,7 @@ fn serve_subscribe_tool(responder: &Arc<ConnectResponder>, session_id: String) {
         session_id,
         crate::connect::events::connect_event_registry().clone(),
         Arc::new(tokio::sync::Mutex::new(())),
+        delivery_deadline,
     );
 }
 
@@ -578,6 +587,7 @@ fn register_subscribe_handler(
     session_id: String,
     events: crate::connect::events::ConnectEventRegistry,
     delivery_lock: Arc<tokio::sync::Mutex<()>>,
+    delivery_deadline: Duration,
 ) {
     let weak = Arc::downgrade(responder);
     let handler: spoke_connect::remote::ToolHandler = Arc::new(move |arguments| {
@@ -636,13 +646,17 @@ fn register_subscribe_handler(
             };
             let cancelled = subscription.cancellation();
             let delivery_stream = stream.clone();
+            let push_responder = Arc::clone(&responder);
+            let close_responder = Arc::clone(&responder);
             tokio::spawn(drive_delivery(
                 subscription,
                 cancelled,
                 Arc::clone(&delivery_lock),
                 session.clone(),
+                delivery_deadline,
+                move || close_responder.close(),
                 move |frames| {
-                    let responder = Arc::clone(&responder);
+                    let responder = Arc::clone(&push_responder);
                     let delivery_stream = delivery_stream.clone();
                     async move {
                         responder
@@ -670,20 +684,29 @@ fn register_subscribe_handler(
 /// reverse invoke fails. `push` performs one reverse invocation of
 /// `tools.nexus.deliver_events`.
 ///
-/// Every wait is cancellation-aware: the ack wait (inside
-/// `EventSubscription::next_batch`), the per-session send-slot acquisition
-/// and the reverse invoke itself. A replaced generation therefore stops
-/// promptly, releasing the shared send slot for its replacement or for other
-/// streams of the same session.
-async fn drive_delivery<P, Fut>(
+/// The ack wait (inside `EventSubscription::next_batch`) and the per-session
+/// send-slot acquisition are cancellation-aware, so a replaced generation
+/// stops promptly without leaving protocol state behind.
+///
+/// The reverse invoke itself is NOT abandoned mid-flight: the spoke-connect
+/// responder allocates an outbound sequence before the transport send and has
+/// no rollback for an abandoned send, so dropping the future could skip a
+/// sequence and poison the still-open session. On cancellation the in-flight
+/// request is completed on the wire under `delivery_deadline`; if completion
+/// cannot be guaranteed within it, `fail_closed` terminates the session
+/// rather than reuse a poisoned sequence space.
+async fn drive_delivery<P, Fut, F>(
     mut subscription: crate::connect::events::EventSubscription,
     cancelled: Arc<Notify>,
     delivery_lock: Arc<tokio::sync::Mutex<()>>,
     session: String,
+    delivery_deadline: Duration,
+    fail_closed: F,
     push: P,
 ) where
     P: Fn(Vec<crate::connect::events::EventFrame>) -> Fut,
     Fut: std::future::Future<Output = nexus_spoke_adapter::SpokeResult<serde_json::Value>>,
+    F: Fn(),
 {
     loop {
         let frames = subscription.next_batch().await;
@@ -701,13 +724,27 @@ async fn drive_delivery<P, Fut>(
             break;
         }
         let invoke = push(frames);
-        tokio::select! {
+        tokio::pin!(invoke);
+        let outcome = tokio::select! {
             biased;
-            () = cancelled.notified() => break,
-            result = invoke => match result {
-                nexus_spoke_adapter::SpokeResult::Ok(_) => subscription.ack(),
-                nexus_spoke_adapter::SpokeResult::Reject(_) => break,
-            },
+            () = cancelled.notified() => None,
+            result = &mut invoke => Some(result),
+        };
+        match outcome {
+            Some(nexus_spoke_adapter::SpokeResult::Ok(_)) => subscription.ack(),
+            Some(nexus_spoke_adapter::SpokeResult::Reject(_)) => break,
+            None => {
+                // Cancelled with the request in flight. Complete it on the
+                // wire (bounded) so any allocated outbound sequence is
+                // transmitted; failing that, fail the session closed.
+                if tokio::time::timeout(delivery_deadline, invoke)
+                    .await
+                    .is_err()
+                {
+                    fail_closed();
+                }
+                break;
+            }
         }
     }
     subscription.unregister(&session);
@@ -1049,11 +1086,12 @@ mod tests {
         pair.server.close().await.unwrap();
     }
 
-    /// C2: a replacement must interrupt a reverse invoke that is blocked
-    /// while holding the session send slot, freeing it for another stream's
-    /// subscription already waiting on that slot.
+    /// C2/C3: cancellation releases a wait for the session send slot, but an
+    /// in-flight reverse invoke is completed on the wire (never abandoned)
+    /// before the slot is handed to another stream — the responder's
+    /// allocated outbound sequence must not be skipped.
     #[tokio::test]
-    async fn replacement_releases_a_blocked_send_slot_for_another_stream() {
+    async fn cancellation_completes_the_in_flight_invoke_before_handing_the_slot() {
         let registry = crate::connect::events::connect_event_registry().clone();
         let session = format!("slot-{}", uuid::Uuid::new_v4());
         let stream_a = format!("stream-a-{}", uuid::Uuid::new_v4());
@@ -1072,11 +1110,15 @@ mod tests {
         let started = Arc::clone(&invoke_started);
         let blocked = Arc::clone(&release);
         let first_cancelled = first.cancellation();
+        let fail_closed_called = Arc::new(AtomicBool::new(false));
+        let fail_closed_flag = Arc::clone(&fail_closed_called);
         let first_driver = tokio::spawn(drive_delivery(
             first,
             first_cancelled,
             Arc::clone(&delivery_lock),
             session.clone(),
+            Duration::from_secs(5),
+            move || fail_closed_flag.store(true, Ordering::SeqCst),
             move |_frames| {
                 let started = Arc::clone(&started);
                 let blocked = Arc::clone(&blocked);
@@ -1095,6 +1137,8 @@ mod tests {
             second_cancelled,
             Arc::clone(&delivery_lock),
             session.clone(),
+            Duration::from_secs(5),
+            || {},
             move |_frames| {
                 let flag = Arc::clone(&flag);
                 async move {
@@ -1104,7 +1148,7 @@ mod tests {
             },
         ));
 
-        // A is blocked inside its reverse invoke, holding the session slot.
+        // A holds the session slot inside its reverse invoke; B waits for it.
         invoke_started.notified().await;
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(
@@ -1112,19 +1156,248 @@ mod tests {
             "the second stream must wait for the session send slot"
         );
 
-        // Replacing A cancels its blocked invoke and releases the slot.
+        // Replacing A cancels it, but A's in-flight invoke must complete on
+        // the wire rather than be abandoned (C3): the slot is not yet free.
         let _replacement = registry.subscribe(&session, &stream_a, None).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            !second_pushed.load(Ordering::SeqCst),
+            "an in-flight reverse invoke must complete before the slot is handed over"
+        );
+
+        // Complete the wire send: A finishes, stops, and releases the slot.
+        release.notify_one();
         tokio::time::timeout(Duration::from_secs(1), async {
             while !second_pushed.load(Ordering::SeqCst) {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
         })
         .await
-        .expect("the second stream must push once A releases the send slot");
+        .expect("the second stream must push once A completes its send");
 
         first_driver.await.unwrap();
+        assert!(
+            !fail_closed_called.load(Ordering::SeqCst),
+            "a completed send must not trigger fail-closed teardown"
+        );
         registry.remove_session(&session);
         second_driver.await.unwrap();
+    }
+
+    /// A transport decorator that can block one `tools.nexus.deliver_events`
+    /// send after the responder allocated its outbound sequence but before
+    /// any byte reaches the inner transport, and records the sequence of
+    /// every send that actually reached the wire.
+    struct GatedTransport {
+        inner: Arc<dyn Transport>,
+        armed: Arc<AtomicBool>,
+        blocked: Arc<Notify>,
+        release: Arc<Notify>,
+        emitted: Arc<std::sync::Mutex<Vec<i64>>>,
+    }
+
+    impl GatedTransport {
+        fn new(inner: Arc<dyn Transport>) -> Arc<Self> {
+            Arc::new(Self {
+                inner,
+                armed: Arc::new(AtomicBool::new(false)),
+                blocked: Arc::new(Notify::new()),
+                release: Arc::new(Notify::new()),
+                emitted: Arc::new(std::sync::Mutex::new(Vec::new())),
+            })
+        }
+    }
+
+    #[async_trait]
+    impl Transport for GatedTransport {
+        async fn send(&self, envelope: &[u8]) -> Result<(), TransportError> {
+            let sequence = serde_json::from_slice::<serde_json::Value>(envelope)
+                .ok()
+                .filter(|doc| {
+                    doc.get("op").and_then(serde_json::Value::as_str) == Some(DELIVER_TOOL)
+                })
+                .and_then(|doc| doc.get("sequence").and_then(serde_json::Value::as_i64));
+            if sequence.is_some() && self.armed.swap(false, Ordering::SeqCst) {
+                // Park after sequence allocation, before emission.
+                self.blocked.notify_one();
+                self.release.notified().await;
+            }
+            let result = self.inner.send(envelope).await;
+            if result.is_ok() {
+                if let Some(sequence) = sequence {
+                    self.emitted
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .push(sequence);
+                }
+            }
+            result
+        }
+
+        async fn recv(&self) -> Result<Vec<u8>, TransportError> {
+            self.inner.recv().await
+        }
+
+        async fn close(&self) -> Result<(), TransportError> {
+            self.inner.close().await
+        }
+    }
+
+    /// Establish a real responder/dialer session where the responder's
+    /// transport can park one delivery send after sequence allocation.
+    async fn gated_tool_session() -> (
+        Arc<ConnectResponder>,
+        Arc<GatedTransport>,
+        Arc<spoke_connect::remote::RemoteAdapter>,
+    ) {
+        use ed25519_dalek::SigningKey;
+        use spoke_connect::core::derive_peer_id_from_ed25519_pubkey;
+        use spoke_connect::remote::{connect_remote_adapter, RemoteAdapterOptions};
+
+        let host_seed = [0x51u8; 32];
+        let client_seed = [0x52u8; 32];
+        let host_pub = SigningKey::from_bytes(&host_seed)
+            .verifying_key()
+            .to_bytes();
+        let client_pub = SigningKey::from_bytes(&client_seed)
+            .verifying_key()
+            .to_bytes();
+        let host_id = derive_peer_id_from_ed25519_pubkey(&host_pub);
+        let client_id = derive_peer_id_from_ed25519_pubkey(&client_pub);
+
+        let manifest = daemon_manifest("host-c3", &[DELIVER_TOOL.to_owned()]);
+        let pair = spoke_connect::remote::loopback_transport_pair();
+        let gated = GatedTransport::new(Arc::new(pair.server) as Arc<dyn Transport>);
+        let responder = connect_responder(ConnectResponderOptions {
+            transport: Arc::clone(&gated) as Arc<dyn Transport>,
+            identity: RemoteIdentity { seed: host_seed },
+            manifest: manifest.clone(),
+            allowlist: vec![client_id.clone()],
+            peer_keys: std::collections::HashMap::from([(client_id.clone(), client_pub)]),
+            ports: None,
+            invoke_timeout_ms: Some(2_000),
+        })
+        .await;
+        let client = connect_remote_adapter(RemoteAdapterOptions {
+            transport: Arc::new(pair.client) as Arc<dyn Transport>,
+            local_identity: RemoteIdentity { seed: client_seed },
+            local_manifest: manifest,
+            remote_pubkey: host_pub,
+            allowlist: vec![host_id],
+            invoke_timeout_ms: Some(2_000),
+            capability_token: None,
+        })
+        .await
+        .expect("dial");
+        client.register_tool_handler(
+            DELIVER_TOOL,
+            Arc::new(|_arguments| {
+                Box::pin(async { nexus_spoke_adapter::SpokeResult::Ok(serde_json::json!({})) })
+            }),
+        );
+        for _ in 0..400 {
+            if responder.state() == ConnectResponderState::Established {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert_eq!(responder.state(), ConnectResponderState::Established);
+        (responder, gated, client)
+    }
+
+    /// C3: cancelling a subscription whose reverse invoke already holds an
+    /// allocated outbound sequence must not abandon that send. Against a REAL
+    /// responder with a transport that parks after allocation, the driver
+    /// completes the request on the wire; the recorded wire sequences stay
+    /// contiguous and the session remains usable.
+    #[tokio::test]
+    async fn cancelled_delivery_never_skips_an_allocated_wire_sequence() {
+        let (responder, gated, _client) = gated_tool_session().await;
+
+        let registry = crate::connect::events::connect_event_registry().clone();
+        let session = format!("c3-{}", uuid::Uuid::new_v4());
+        let stream = format!("c3-stream-{}", uuid::Uuid::new_v4());
+        registry.publish(&stream, "event", serde_json::json!({"n": 1}));
+        let (_, _, subscription) = registry.subscribe(&session, &stream, None).await.unwrap();
+        registry.activate(&session, &stream);
+        let cancelled = subscription.cancellation();
+
+        // Arm the gate BEFORE the driver sends so the first delivery push
+        // parks after allocation.
+        gated.armed.store(true, Ordering::SeqCst);
+        let fail_closed_called = Arc::new(AtomicBool::new(false));
+        let fail_closed_flag = Arc::clone(&fail_closed_called);
+        let close_responder = Arc::clone(&responder);
+        let push_responder = Arc::clone(&responder);
+        let push_stream = stream.clone();
+        let driver = tokio::spawn(drive_delivery(
+            subscription,
+            cancelled,
+            Arc::new(tokio::sync::Mutex::new(())),
+            session.clone(),
+            Duration::from_millis(2_000),
+            move || {
+                fail_closed_flag.store(true, Ordering::SeqCst);
+                close_responder.close();
+            },
+            move |frames| {
+                let responder = Arc::clone(&push_responder);
+                let stream = push_stream.clone();
+                async move {
+                    responder
+                        .invoke_tool(
+                            DELIVER_TOOL,
+                            serde_json::json!({"stream": stream, "frames": frames}),
+                        )
+                        .await
+                }
+            },
+        ));
+
+        // The invoke holds an allocated sequence and is parked before emission.
+        gated.blocked.notified().await;
+        // Replace the subscription while that send is outstanding.
+        let _replacement = registry.subscribe(&session, &stream, None).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        // Completion is possible, so the session must not be torn down.
+        assert!(!fail_closed_called.load(Ordering::SeqCst));
+        gated.release.notify_one();
+        driver.await.unwrap();
+
+        assert!(
+            !fail_closed_called.load(Ordering::SeqCst),
+            "the completed send must not trigger fail-closed teardown"
+        );
+        assert_eq!(
+            responder.state(),
+            ConnectResponderState::Established,
+            "the session must remain usable after a completed in-flight send"
+        );
+        // A subsequent reverse invoke must be accepted: the cancelled
+        // generation's allocated sequence reached the wire.
+        let follow_up = tokio::time::timeout(
+            Duration::from_secs(2),
+            responder.invoke_tool(DELIVER_TOOL, serde_json::json!({})),
+        )
+        .await
+        .expect("follow-up invoke must resolve");
+        assert!(
+            matches!(follow_up, nexus_spoke_adapter::SpokeResult::Ok(_)),
+            "the next contiguous sequence must be accepted: {follow_up:?}"
+        );
+        let emitted = gated
+            .emitted
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        assert_eq!(
+            emitted.len(),
+            2,
+            "both allocated sequences must reach the wire: {emitted:?}"
+        );
+        assert_eq!(emitted[1], emitted[0] + 1, "sequences must stay contiguous");
+        registry.remove_session(&session);
+        responder.close();
     }
 
     async fn send_subscribe_request<T: Transport>(transport: &T, stream: &str, request_id: &str) {
@@ -1181,6 +1454,7 @@ mod tests {
             "session-under-test".to_owned(),
             crate::connect::events::ConnectEventRegistry::default(),
             Arc::new(tokio::sync::Mutex::new(())),
+            Duration::from_secs(1),
         );
         assert_eq!(
             Arc::strong_count(&responder),
