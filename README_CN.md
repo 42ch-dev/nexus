@@ -18,59 +18,7 @@ Nexus 是一款本地优先、AI驱动的叙事编排引擎。
 
 ## 快速开始
 
-Nexus 目前没有对外的安装包或更新通道 —— 下面的首次运行就是从源码检出开始、当前产品的真实路径。这是公开的 first workflow 示例：干净的隔离 home、真实 `dsh` 运行时与受控的 loopback 模型协议，端到端跑通一次被准入的 workflow —— 同 run 流式输出与回放、一次受授权的 `workspace.commit` 生效、inspect、cancel，以及重启后生效内容保留且不重复提交。
-
-### 前置条件
-
-- **Node.js 22.22 或更高**（`node --version`）
-- **pnpm** 11 或更高
-- **Rust** stable 工具链（准备步骤会构建 CLI 与 native 附加模块）
-- **受支持的 `dsh` 运行时**位于 `PATH`，或用 `DSH_RUNTIME_BIN=/absolute/path/to/dsh` 指定
-
-### 准备构建产物（首次一次，之后仅在 Rust 或 contract 变更后）
-
-沿用现有项目命令 —— 示例自身不会构建或安装任何东西：
-
-```bash
-pnpm install
-pnpm -F @42ch/nexus-contracts build
-pnpm -F @42ch/nexus-native build
-pnpm -F @42ch/nexus-provider-acp build
-pnpm --dir apps/nexus-service run build         # → apps/nexus-service/dist/main.js
-pnpm run build:cli                              # → target/debug/nexus42
-node packages/nexus-native/scripts/build.mjs    # → packages/nexus-native-<platform>/native/nexus_core_node.node
-```
-
-缺少任一产物、缺少 `nexus42`、或没有可用的 `dsh` 运行时，示例会直接停下（退出码 `2`，`missing_prerequisite`），而不是跳过。
-
-### 运行
-
-```bash
-NEXUS42_BIN="$PWD/target/debug/nexus42" node scripts/public-first-workflow.mjs --mode deterministic
-```
-
-加 `--json` 输出脱敏的机器可读 receipt（重定向到文件即可留存），加 `--keep` 保留临时隔离根目录以便检查：
-
-```bash
-NEXUS42_BIN="$PWD/target/debug/nexus42" node scripts/public-first-workflow.mjs --mode deterministic --json > /tmp/pfw-receipt.json
-```
-
-`NEXUS42_BIN` 指向已构建好的二进制且必须是绝对路径；`target/debug/nexus42` 是 Cargo 默认位置，若你设置了 `CARGO_TARGET_DIR` 请改用对应路径。不设置时，驱动会在 `PATH` 中查找 `nexus42`（`dsh` 同样，可由 `DSH_RUNTIME_BIN` 覆盖）。驱动会自建临时根目录（`home/`、`dsh-home/`、`workspace/` 与证据目录各一份），自行分配 service 与模型端口，并通过公开 CLI/HTTP 接口创建 Creator、workspace 与 preset。它不会触碰你的真实 home、不写入产品数据库、也不发起任何非 loopback 网络请求；形如凭据的环境变量会按 **名称** 从子进程环境中剔除，绝不读取其值。
-
-成功的运行退出码为 `0`，且每一步都是 `ok`：fixture、preflight、隔离、service 启停、Creator/workspace/preset 建立、admission、inspect、steer、stream/replay/refusals、sealed 工具拒绝、已提交的 workspace 文件与其 revision、cancel、restart、请求预算 guard 的 `loaded`/`admitted`/`denied`/`spent` 证据，以及两个自有子进程的确认清理。恰好一次被准入的模型请求发往驱动自有的 loopback 端点，因此整个过程不出网、不消耗凭据。
-
-### 可选的 live 模型请求（仅限明确授权）
-
-驱动还有 `--mode live` 路径，会把同一套流程打到唯一固定的官方 HTTPS 模型源（`https://api.deepseek.com/chat/completions`）：
-
-```bash
-NEXUS42_BIN="$PWD/target/debug/nexus42" node scripts/public-first-workflow.mjs --mode live \
-  --deterministic-receipt /tmp/pfw-receipt.json --attempt-dir /tmp/pfw-attempt-<fresh>
-```
-
-该模式 **不属于** 本快速开始，且没有用户针对该次尝试的明确授权时绝不能运行。它会先核验 deterministic receipt 与当前构建产物/运行时一致，然后 **仅按名称** 观察继承来的凭据通道 —— 驱动从不读取、复制、打印或持久化密钥，取值完全交给 sealed 运行时正常的凭据解析器。遇到继承来的模型源覆盖它只会拒绝，不会悄悄剥离。若环境完全没有命名该通道，运行会在分配任何资源或发起请求之前以 `blocked/credentials_unavailable`（退出码 `2`）停下：零准入、不发请求。没有密钥回退、没有重试、没有第二次尝试；若在准入之后出现传输或认证失败，该次授权即被消耗，只有用户再次明确授权才可重试。本示例不会创建、轮换、复制或检查任何凭据。
-
-**状态（2026-09-24）：** 项目唯一一次用户授权的 live 请求已经执行完毕 —— 对官方源恰好 1 次被准入的请求，`outcome: ok`、25 步 `ok`、guard `loaded_dsh 6` / `admitted 1` / `denied 0` / `spent` / `evidence_integrity: complete`、同 run 回放 4/4、提交 revision、重启不重复提交、service 清理确认。该授权已 **用尽**：不应再次运行 live 模式，后续 live 尝试需要用户新的明确授权。live 不是通用的模型消耗通道，也不构成任何已发布版本的声明。
+TBD — 面向最终用户的体验尚未就绪；请见 [开发](#开发) 从源码构建。
 
 ---
 
@@ -99,7 +47,7 @@ pnpm install
 | `pnpm run dev:desktop` | Electron 桌面端开发 — 宿主加载构建后的 `apps/web` dist（驱动自行构建 TS 依赖闭包与宿主；需已准备的 native payload） |
 | `pnpm run dev:desktop:web` | 桌面端 Vite HMR 开发 — Electron 宿主直连 Vite dev origin，不加载构建产物 |
 
-开发快捷命令对接的是**独立 TypeScript service**（`apps/nexus-service/dist/main.js`，通常以 `--home <home> --host 127.0.0.1 --port <port>` 启动）。已退休的 `nexus42 daemon` 组合已删除，因此没有任何 CLI 命令会启动、停止、查询或代理该 service —— 该生命周期归属开发快捷命令与桌面宿主。`pnpm run dev:backend:refresh` 是唯一运行 Cargo 或 codegen 的常规 DX 路径，且仅在 Rust 或 contract 变更后使用。完整的公开 first workflow 示例（真实 `dsh` 与构建产物前置条件）见 [快速开始](#快速开始)。
+开发快捷命令对接的是**独立 TypeScript service**（`apps/nexus-service/dist/main.js`，通常以 `--home <home> --host 127.0.0.1 --port <port>` 启动）。已退休的 `nexus42 daemon` 组合已删除，因此没有任何 CLI 命令会启动、停止、查询或代理该 service —— 该生命周期归属开发快捷命令与桌面宿主。`pnpm run dev:backend:refresh` 是唯一运行 Cargo 或 codegen 的常规 DX 路径，且仅在 Rust 或 contract 变更后使用。端到端 first workflow 驱动（真实 `dsh` 与构建产物前置条件）见 [`scripts/public-first-workflow.mjs`](scripts/public-first-workflow.mjs) —— 开发者示例，非最终用户流程。
 
 ### 构建
 
