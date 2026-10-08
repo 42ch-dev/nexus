@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import type { ServerResponse } from 'node:http';
 import type { WorldKbPatchEntityRequest } from '@42ch/nexus-contracts';
 import type { ServiceCore } from './lifecycle.js';
@@ -32,6 +33,31 @@ import { PRESET_ROUTES } from './presets.js';
 import { EXECUTION_ROUTES } from './execution.js';
 import { COMPUTE_ROUTES } from './compute.js';
 import { WORKFLOW_OBSERVATION_ROUTES } from './workflow-observation.js';
+
+/** Read the `version` field of `apps/nexus-service/package.json`. */
+function readServiceVersion(): string {
+  const manifest: unknown = JSON.parse(
+    readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+  );
+  if (
+    typeof manifest !== 'object' ||
+    manifest === null ||
+    !('version' in manifest) ||
+    typeof manifest.version !== 'string'
+  ) {
+    throw new Error('nexus-service: package.json is missing a string "version"');
+  }
+  return manifest.version;
+}
+
+/**
+ * Version reported by this daemon's runtime surfaces. Derived from the package
+ * manifest so it stays in lockstep with the governed release version instead of
+ * drifting on a hard-coded literal. The manifest is resolved relative to this
+ * module, so the read works identically from `src/` (tsx) and `dist/`
+ * (compiled).
+ */
+const SERVICE_VERSION: string = readServiceVersion();
 
 /**
  * The World/Work/content/knowledge families self-describe their retained
@@ -195,11 +221,11 @@ type LegacyBody = unknown;
 /** Truthful unguarded runtime liveness/status surface (no API key). */
 function runtimeUnguarded(service: ServiceCore, pathname: string): LegacyBody {
   if (pathname === '/v1/daemon/runtime/health') {
-    return { status: 'ok', version: '0.1.0' };
+    return { status: 'ok', version: SERVICE_VERSION };
   }
   if (pathname === '/v1/daemon/runtime/status') {
     return {
-      version: '0.1.0',
+      version: SERVICE_VERSION,
       uptime_seconds: Math.floor((Date.now() - Date.parse(service.startedAt)) / 1000),
       workspace_initialized: service.workspaceInitialized,
       acp: {
@@ -219,7 +245,7 @@ function runtimeUnguarded(service: ServiceCore, pathname: string): LegacyBody {
     return {
       schema_version: 2,
       lifecycle_state: 'running',
-      version: '0.1.0',
+      version: SERVICE_VERSION,
       implementation_scope: 'standalone-service (P4-T1)',
       uptime_ms: Date.now() - Date.parse(service.startedAt),
       started_at: service.startedAt,

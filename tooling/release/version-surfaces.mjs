@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 /**
- * Release version surfaces — the five-file version SSOT for Nexus.
+ * Release version surfaces — the six-file version SSOT for Nexus.
  *
- * Four hand-written files must always carry the same version:
+ * Five hand-written files must always carry the same version:
  *   - `Cargo.toml` `[workspace.package].version` (all workspace crates inherit it)
  *   - root `package.json`
  *   - `apps/desktop-electron/package.json`
  *   - `apps/desktop-electron/resources/product.json`
+ *   - `apps/nexus-service/package.json`
  *
- * `Cargo.lock` is the fifth file: it pins the resolved version of every
+ * `Cargo.lock` is the sixth file: it pins the resolved version of every
  * workspace member, so the bump regenerates it with
  * `cargo update --workspace --offline` after the manifests are written — Cargo,
  * not a hand-rolled text edit, owns the lockfile. Cargo rewrites exactly the
@@ -51,6 +52,8 @@ export const ROOT_PACKAGE_PATH = "package.json";
 export const ELECTRON_PACKAGE_PATH = "apps/desktop-electron/package.json";
 /** Electron packaging product descriptor (asserted by the packaging preflight). */
 export const PRODUCT_JSON_PATH = "apps/desktop-electron/resources/product.json";
+/** Standalone Node HTTP service manifest — the version its runtime surfaces report. */
+export const SERVICE_PACKAGE_PATH = "apps/nexus-service/package.json";
 /** Cargo lockfile pinning workspace member versions. */
 export const CARGO_LOCK_PATH = "Cargo.lock";
 /**
@@ -62,7 +65,7 @@ const CARGO_LOCK_REGEN_ARGS = ["update", "--workspace", "--offline"];
 export const CARGO_LOCK_REGEN_COMMAND = `cargo ${CARGO_LOCK_REGEN_ARGS.join(" ")}`;
 
 /**
- * The four hand-written surfaces whose versions must be equal.
+ * The five hand-written surfaces whose versions must be equal.
  * @type {readonly string[]}
  */
 export const LOCKSTEP_PATHS = [
@@ -70,6 +73,7 @@ export const LOCKSTEP_PATHS = [
   ROOT_PACKAGE_PATH,
   ELECTRON_PACKAGE_PATH,
   PRODUCT_JSON_PATH,
+  SERVICE_PACKAGE_PATH,
 ];
 
 /**
@@ -380,7 +384,7 @@ function writeFileAtomically(path, contents) {
 }
 
 /**
- * Write the release version into every version surface: the four hand-written
+ * Write the release version into every version surface: the five hand-written
  * lockstep manifests, the five native npm manifests (loader pins included),
  * then `Cargo.lock` through `cargo update --workspace --offline`. A Cargo
  * failure rolls every written file back, so a refused bump leaves the
