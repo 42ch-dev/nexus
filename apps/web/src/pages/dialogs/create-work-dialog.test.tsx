@@ -16,6 +16,7 @@ import { BrowserClient } from '@/lib/nexus';
 import { WORK_PROFILES } from '@/lib/work-profiles';
 import { useHandlers } from '@/test/msw-server';
 import { renderInApp } from '@/test/test-providers';
+import { narrativeWorld, narrativeWorldsList } from '@/test/handlers';
 import { CreateWorkDialog } from '@/pages/dialogs/create-work-dialog';
 
 function renderDialog() {
@@ -32,11 +33,22 @@ function renderDialog() {
   return { onCreated, onOpenChange, container: view.container };
 }
 
+/** The dialog's World selector is fed by `GET /v1/daemon/narrative/worlds`. */
+const ONE_WORLD = [narrativeWorld()];
+
+/** Wait for the single-world preselect (F-01 W1) to land on the selector. */
+async function waitForWorldPreselect() {
+  await waitFor(() =>
+    expect(screen.getByLabelText(/^World$/i)).toHaveValue('world-1'),
+  );
+}
+
 describe('CreateWorkDialog CRUD round-trip', () => {
-  it('submits a well-formed POST /v1/daemon/works and omits work_profile when untouched (W1)', async () => {
+  it('submits a well-formed POST /v1/daemon/works including the required world_id (F-01 W1)', async () => {
     const user = userEvent.setup();
     let postedBody: unknown = null;
     useHandlers(
+      narrativeWorldsList(ONE_WORLD),
       http.post('/v1/daemon/works', async ({ request }) => {
         postedBody = await request.json();
         return HttpResponse.json({ work_id: 'w-new', status: 'intake' });
@@ -44,6 +56,7 @@ describe('CreateWorkDialog CRUD round-trip', () => {
     );
 
     const { onCreated, onOpenChange } = renderDialog();
+    await waitForWorldPreselect();
 
     await user.type(screen.getByLabelText(/Title/i), 'My New Work');
     await user.type(screen.getByLabelText(/Long-term goal/i), 'Finish the first arc');
@@ -57,6 +70,7 @@ describe('CreateWorkDialog CRUD round-trip', () => {
       title: 'My New Work',
       long_term_goal: 'Finish the first arc',
       initial_idea: 'A heist in a floating city',
+      world_id: 'world-1',
     });
     expect(postedBody).not.toHaveProperty('work_profile');
     expect(onOpenChange).toHaveBeenCalledWith(false);
@@ -66,6 +80,7 @@ describe('CreateWorkDialog CRUD round-trip', () => {
     const user = userEvent.setup();
     let postedBody: unknown = null;
     useHandlers(
+      narrativeWorldsList(ONE_WORLD),
       http.post('/v1/daemon/works', async ({ request }) => {
         postedBody = await request.json();
         return HttpResponse.json({ work_id: 'w-essay', status: 'intake' });
@@ -73,6 +88,7 @@ describe('CreateWorkDialog CRUD round-trip', () => {
     );
 
     renderDialog();
+    await waitForWorldPreselect();
 
     await user.type(screen.getByLabelText(/Title/i), 'Essay Work');
     await user.type(screen.getByLabelText(/Long-term goal/i), 'Publish a collection');
@@ -87,6 +103,7 @@ describe('CreateWorkDialog CRUD round-trip', () => {
   it('keeps the dialog open and shows a toast when the daemon returns a 400 envelope (W-1)', async () => {
     const user = userEvent.setup();
     useHandlers(
+      narrativeWorldsList(ONE_WORLD),
       http.post('/v1/daemon/works', () =>
         HttpResponse.json(
           {
@@ -99,6 +116,7 @@ describe('CreateWorkDialog CRUD round-trip', () => {
     );
 
     const { onCreated, onOpenChange } = renderDialog();
+    await waitForWorldPreselect();
 
     await user.type(screen.getByLabelText(/Title/i), 'A Work');
     await user.type(screen.getByLabelText(/Long-term goal/i), 'A goal');
@@ -116,6 +134,7 @@ describe('CreateWorkDialog CRUD round-trip', () => {
   it('blocks submission until all required fields are filled', async () => {
     const user = userEvent.setup();
     useHandlers(
+      narrativeWorldsList(ONE_WORLD),
       http.post('/v1/daemon/works', () => HttpResponse.json({ work_id: 'x', status: 'intake' })),
     );
 
@@ -128,10 +147,65 @@ describe('CreateWorkDialog CRUD round-trip', () => {
     expect(submit).toBeDisabled();
   });
 
+  it('blocks create when no World is available (F-01 W1)', async () => {
+    const user = userEvent.setup();
+    useHandlers(
+      narrativeWorldsList([]),
+      http.post('/v1/daemon/works', () => HttpResponse.json({ work_id: 'x', status: 'intake' })),
+    );
+
+    renderDialog();
+
+    await user.type(screen.getByLabelText(/Title/i), 'Orphan Work');
+    await user.type(screen.getByLabelText(/Long-term goal/i), 'A goal');
+    await user.type(screen.getByLabelText(/Initial idea/i), 'An idea');
+
+    // No Worlds → the selector shows the empty hint and create stays blocked:
+    // the daemon would 400 `world_id_required` anyway.
+    const worldSelect = screen.getByLabelText(/^World$/i);
+    expect(worldSelect).toHaveValue('');
+    expect(screen.getByRole('option', { name: /No Worlds available/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Create$/i })).toBeDisabled();
+  });
+
+  it('lets the author pick a World when several exist and sends its world_id (F-01 W1)', async () => {
+    const user = userEvent.setup();
+    let postedBody: unknown = null;
+    useHandlers(
+      narrativeWorldsList([
+        narrativeWorld(),
+        narrativeWorld({ world_id: 'world-2', title: 'Briar Archive', slug: 'briar-archive' }),
+      ]),
+      http.post('/v1/daemon/works', async ({ request }) => {
+        postedBody = await request.json();
+        return HttpResponse.json({ work_id: 'w-multi', status: 'intake' });
+      }),
+    );
+
+    renderDialog();
+
+    // Two worlds → no preselect; the author must choose explicitly.
+    const worldSelect = screen.getByLabelText(/^World$/i);
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: 'Briar Archive' })).toBeInTheDocument(),
+    );
+    expect(worldSelect).toHaveValue('');
+    await user.selectOptions(worldSelect, 'world-2');
+
+    await user.type(screen.getByLabelText(/Title/i), 'Multi Work');
+    await user.type(screen.getByLabelText(/Long-term goal/i), 'A goal');
+    await user.type(screen.getByLabelText(/Initial idea/i), 'An idea');
+    await user.click(screen.getByRole('button', { name: /^Create$/i }));
+
+    await waitFor(() => expect(postedBody).not.toBeNull());
+    expect(postedBody).toMatchObject({ world_id: 'world-2' });
+  });
+
   it('sends work_profile when the author explicitly selects the default novel (W1)', async () => {
     const user = userEvent.setup();
     let postedBody: unknown = null;
     useHandlers(
+      narrativeWorldsList(ONE_WORLD),
       http.post('/v1/daemon/works', async ({ request }) => {
         postedBody = await request.json();
         return HttpResponse.json({ work_id: 'w-novel', status: 'intake' });
@@ -139,6 +213,7 @@ describe('CreateWorkDialog CRUD round-trip', () => {
     );
 
     renderDialog();
+    await waitForWorldPreselect();
 
     await user.type(screen.getByLabelText(/Title/i), 'Novel Work');
     await user.type(screen.getByLabelText(/Long-term goal/i), 'Finish the draft');
@@ -156,6 +231,7 @@ describe('CreateWorkDialog CRUD round-trip', () => {
     const user = userEvent.setup();
     let postedBody: unknown = null;
     useHandlers(
+      narrativeWorldsList(ONE_WORLD),
       http.post('/v1/daemon/works', async ({ request }) => {
         postedBody = await request.json();
         return HttpResponse.json({ work_id: 'w-gb', status: 'intake' });
@@ -163,6 +239,7 @@ describe('CreateWorkDialog CRUD round-trip', () => {
     );
 
     renderDialog();
+    await waitForWorldPreselect();
 
     await user.type(screen.getByLabelText(/Title/i), 'Game Bible Work');
     await user.type(screen.getByLabelText(/Long-term goal/i), 'Ship the lore bible');
@@ -218,6 +295,7 @@ describe('CreateWorkDialog work_profile wire contract (C1)', () => {
 // native arrow re-appears alongside the overlay → duplicate chevron).
 describe('CreateWorkDialog Select chevron + disabled Create button', () => {
   it('renders a single chevron inside the Work-profile Select control boundary (AC-P1-3)', () => {
+    useHandlers(narrativeWorldsList(ONE_WORLD));
     renderDialog();
 
     const profileSelect = screen.getByLabelText(/Work profile/i);
@@ -228,20 +306,21 @@ describe('CreateWorkDialog Select chevron + disabled Create button', () => {
     expect(profileSelect).toHaveClass('appearance-none');
     expect(profileSelect).toHaveClass('pe-8');
 
-    // Exactly one chevron overlay exists in the dialog (Radix Dialog portals
-    // to document.body, so query via screen, not the render container) — no
-    // duplicate native arrow + overlay.
-    expect(screen.queryAllByTestId('select-chevron')).toHaveLength(1);
+    // The dialog now renders two Select controls (World + Work profile), so
+    // two overlay chevrons exist in the portal — but exactly ONE per control
+    // boundary: no duplicate native arrow + overlay inside the wrapper.
+    expect(screen.queryAllByTestId('select-chevron')).toHaveLength(2);
 
     // The chevron sits inside the same `.relative` control wrapper as the
     // `<select>` (i.e. within the control boundary, not bleeding outside).
     const wrapper = profileSelect.parentElement;
     expect(wrapper).not.toBeNull();
     expect(wrapper).toHaveClass('relative');
-    expect(within(wrapper!).getByTestId('select-chevron')).toBeInTheDocument();
+    expect(within(wrapper!).getAllByTestId('select-chevron')).toHaveLength(1);
   });
 
   it('disabled Create button applies the dark-token disabled-primary classes (AC-P1-5)', () => {
+    useHandlers(narrativeWorldsList([]));
     renderDialog();
 
     // Empty form → primary Create submit is disabled.

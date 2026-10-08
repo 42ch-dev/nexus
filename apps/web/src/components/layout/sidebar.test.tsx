@@ -554,7 +554,7 @@ describe('Sidebar — inline create (V1.136 P1)', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('submits inline Work create via POST /v1/daemon/works without a dialog', async () => {
+  it('submits inline Work create with the required world_id (F-01 W1)', async () => {
     const user = userEvent.setup();
     let postedBody: unknown = null;
     useHandlers(
@@ -565,7 +565,20 @@ describe('Sidebar — inline create (V1.136 P1)', () => {
         }),
       ),
       worksList([]),
-      http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
+      http.get('/v1/daemon/narrative/worlds', () =>
+        HttpResponse.json({
+          worlds: [
+            {
+              world_id: 'world-1',
+              title: 'Ashen Gate',
+              slug: 'ashen-gate',
+              status: 'active',
+              is_fork: false,
+              created_at: '2026-06-25T00:00:00Z',
+            },
+          ],
+        }),
+      ),
       http.post('/v1/daemon/works', async ({ request }) => {
         postedBody = await request.json();
         return HttpResponse.json({ work_id: 'work-new', status: 'draft' });
@@ -591,6 +604,12 @@ describe('Sidebar — inline create (V1.136 P1)', () => {
     await user.type(screen.getByLabelText('Title'), 'Drill Novel');
     await user.type(screen.getByLabelText('Long-term goal'), 'Finish arc one');
     await user.type(screen.getByLabelText('Initial idea'), 'A heist in the sky');
+
+    // Single-world preselect (F-01 W1): the only World is chosen
+    // automatically; the author is not forced through a one-option selector.
+    const worldSelect = screen.getByLabelText('World');
+    await waitFor(() => expect(worldSelect).toHaveValue('world-1'));
+
     await user.click(screen.getByTestId('sidebar-create-submit-work'));
 
     await waitFor(() =>
@@ -598,6 +617,7 @@ describe('Sidebar — inline create (V1.136 P1)', () => {
         title: 'Drill Novel',
         long_term_goal: 'Finish arc one',
         initial_idea: 'A heist in the sky',
+        world_id: 'world-1',
       }),
     );
     await waitFor(() =>

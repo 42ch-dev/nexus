@@ -88,7 +88,7 @@ async fn fresh_env() -> ReadingEnv {
                 story_ref: Some(STORY_REF.to_string()),
                 title: "Reading Test Novel".to_string(),
                 work_profile: Some("novel".to_string()),
-                world_id: Some(world_id),
+                world_id,
             },
         )
         .await

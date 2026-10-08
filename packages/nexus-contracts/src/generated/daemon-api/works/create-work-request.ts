@@ -11,7 +11,7 @@ export interface CreateWorkRequest {
   title: string;
   long_term_goal: string;
   initial_idea: string;
-  world_id?: string;
+  world_id: string;
   story_ref?: string;
   primary_preset_id?: string;
   client_request_id?: string;

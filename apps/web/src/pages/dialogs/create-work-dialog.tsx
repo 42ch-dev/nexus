@@ -7,14 +7,17 @@ import { Input, Label, Select, Textarea } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/lib/use-toast';
 import { WORK_PROFILES, isWorkProfile, type WorkProfile } from '@/lib/work-profiles';
-import { useCreateWork } from '@/api/queries';
+import { useCreateWork, useNarrativeWorlds } from '@/api/queries';
 
 /**
  * Create Work dialog — POST /v1/daemon/works.
  *
  * The contract `CreateWorkRequest` requires title + long_term_goal +
- * initial_idea and accepts an optional `work_profile` (V1.67 G1; the wire
- * field already existed — the daemon assigned profiles internally before).
+ * initial_idea + world_id (F-01 W1: the daemon rejects a missing `world_id`
+ * with 400 `world_id_required`, and the schema now marks it required), and
+ * accepts an optional `work_profile` (V1.67 G1). The World selector is fed by
+ * the narrative-worlds read model; with exactly one World it preselects it,
+ * and create stays blocked until a World is chosen.
  * The selector defaults to `novel` for display, but `work_profile` is only
  * sent when the author explicitly chooses a profile — an untouched form
  * omits the field (daemon stores NULL), preserving the V1.66 wire shape
@@ -36,6 +39,14 @@ export function CreateWorkDialog({
   const create = useCreateWork();
   const { toast } = useToast();
   const { t } = useTranslation('shell');
+  // F-01 W1: Work creation is World-scoped — the daemon 400s without a
+  // `world_id`. The selector is fed by the narrative-worlds read model.
+  const narrativeWorlds = useNarrativeWorlds();
+  const worldOptions = (narrativeWorlds.data ?? []).map((world) => ({
+    value: world.world_id,
+    label: world.title,
+  }));
+  const [worldId, setWorldId] = useState('');
   const [title, setTitle] = useState('');
   const [longTermGoal, setLongTermGoal] = useState('');
   const [initialIdea, setInitialIdea] = useState('');
@@ -51,13 +62,26 @@ export function CreateWorkDialog({
       setTitle('');
       setLongTermGoal('');
       setInitialIdea('');
+      setWorldId('');
       setWorkProfile(WORK_PROFILES[0].value);
       setWorkProfileTouched(false);
       setError(null);
     }
   }, [open]);
 
-  const valid = title.trim().length > 0 && longTermGoal.trim().length > 0 && initialIdea.trim().length > 0;
+  // Single-world preselect (F-01 W1): exactly one World makes the choice
+  // unambiguous — select it automatically instead of forcing the picker.
+  useEffect(() => {
+    if (worldId === '' && worldOptions.length === 1) {
+      setWorldId(worldOptions[0].value);
+    }
+  });
+
+  const valid =
+    title.trim().length > 0 &&
+    longTermGoal.trim().length > 0 &&
+    initialIdea.trim().length > 0 &&
+    worldId !== '';
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -70,6 +94,7 @@ export function CreateWorkDialog({
         title: title.trim(),
         long_term_goal: longTermGoal.trim(),
         initial_idea: initialIdea.trim(),
+        world_id: worldId,
         ...(workProfileTouched ? { work_profile: workProfile } : {}),
       });
       toast({ variant: 'success', title: t('workCreate.toastCreated'), description: res.work_id });
@@ -117,6 +142,28 @@ export function CreateWorkDialog({
               placeholder={t('workCreate.ideaPlaceholder')}
               invalid={Boolean(error) && initialIdea.trim().length === 0}
             />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="work-world">{t('workCreate.worldLabel')}</Label>
+            <Select
+              id="work-world"
+              value={worldId}
+              onChange={(e) => setWorldId(e.target.value)}
+              disabled={narrativeWorlds.isLoading || create.isPending}
+            >
+              {worldOptions.length === 0 ? (
+                <option value="">{t('workCreate.worldEmpty')}</option>
+              ) : (
+                <>
+                  <option value="">{t('workCreate.worldPlaceholder')}</option>
+                  {worldOptions.map((world) => (
+                    <option key={world.value} value={world.value}>
+                      {world.label}
+                    </option>
+                  ))}
+                </>
+              )}
+            </Select>
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="work-profile">{t('workCreate.profileLabel')}</Label>

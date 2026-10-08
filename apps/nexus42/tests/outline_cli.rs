@@ -163,7 +163,7 @@ async fn fresh_env() -> OutlineEnv {
                 story_ref: Some(WORK_REF.to_string()),
                 title: "Outline Test Novel".to_string(),
                 work_profile: Some("novel".to_string()),
-                world_id: Some(world_id),
+                world_id,
             },
         )
         .await
