@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -11,6 +11,7 @@ import {
   assertNoSigningEnvironment,
   assertNoSymlinkEscape,
   assertPreflightFiles,
+  materializeSymlinks,
   assertReceipt,
   parsePackageArgs,
   resolveOutputRoot,
@@ -130,6 +131,23 @@ test('staged inputs reject symlink escape but allow links inside staging root', 
   assert.doesNotThrow(() => assertNoSymlinkEscape(root));
   symlinkSync('/tmp', join(root, 'escape'));
   throwsCode(() => assertNoSymlinkEscape(root), 'package.staging.symlink');
+});
+test('packed app symlinks are materialized and closure scan rejects escapes', () => {
+  const root = mkdtempSync(join(tmpdir(), 'nexus-packed-app-'));
+  const app = join(root, 'Nexus.app');
+  const external = join(root, 'packager', 'Electron Framework');
+  mkdirSync(app);
+  mkdirSync(join(root, 'packager'));
+  writeFileSync(external, 'framework');
+  symlinkSync(external, join(app, 'Framework Alias'));
+  throwsCode(() => assertNoSymlinkEscape(app, { label: 'packed' }), 'package.packed.symlink');
+  materializeSymlinks(app);
+  assert.equal(lstatSync(join(app, 'Framework Alias')).isSymbolicLink(), false);
+  assert.equal(readFileSync(join(app, 'Framework Alias'), 'utf8'), 'framework');
+  assert.deepEqual(assertNoSymlinkEscape(app, { label: 'packed' }), {
+    result: 'pass',
+    detail: `scan found no symlink escaping ${app}`,
+  });
 });
 
 test('receipt is the closed unsigned version-1 shape', () => {

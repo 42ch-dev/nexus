@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, statSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 
 export const PACKAGE_CONTRACT = Object.freeze({
@@ -103,7 +103,23 @@ export function digestTree(root) {
   return hash.digest('hex');
 }
 
-export function assertNoSymlinkEscape(root) {
+export function materializeSymlinks(root) {
+  const queue = [root];
+  while (queue.length > 0) {
+    const current = queue.pop();
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const absolute = join(current, entry.name);
+      if (lstatSync(absolute).isSymbolicLink()) {
+        const target = realpathSync(absolute);
+        rmSync(absolute, { recursive: true, force: true });
+        cpSync(target, absolute, { recursive: true, dereference: true });
+      }
+      if (statSync(absolute).isDirectory()) queue.push(absolute);
+    }
+  }
+}
+
+export function assertNoSymlinkEscape(root, { label = 'staging' } = {}) {
   const absoluteRoot = resolve(root);
   const queue = [absoluteRoot];
   while (queue.length > 0) {
@@ -114,13 +130,14 @@ export function assertNoSymlinkEscape(root) {
       if (stat.isSymbolicLink()) {
         const target = resolve(absolute, '..', readlinkSync(absolute));
         if (target !== absoluteRoot && !target.startsWith(`${absoluteRoot}/`)) {
-          fail(`staging symlink escapes root: ${absolute} -> ${target}`, 'package.staging.symlink');
+          fail(`${label} symlink escapes root: ${absolute} -> ${target}`, `package.${label}.symlink`);
         }
       } else if (stat.isDirectory()) {
         queue.push(absolute);
       }
     }
   }
+  return { result: 'pass', detail: `scan found no symlink escaping ${absoluteRoot}` };
 }
 
 export function assertNativeCompatibility(manifest, { arch, resetBinding } = {}) {

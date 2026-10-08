@@ -6,7 +6,7 @@
  * It never discovers credentials, invokes signing tools, or fetches dependencies.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { closeSync, cpSync, existsSync, fsyncSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, cpSync, existsSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,6 +20,7 @@ import {
   assertReceipt,
   assertRequiredFiles,
   digestTree,
+  materializeSymlinks,
   parsePackageArgs,
   resolveOutputRoot,
   sha256File,
@@ -196,21 +197,6 @@ function verifyLoadedNative(preflightInfo, arch) {
 }
 
 
-function materializeSymlinks(root) {
-  const queue = [root];
-  while (queue.length > 0) {
-    const current = queue.pop();
-    for (const entry of readdirSync(current, { withFileTypes: true })) {
-      const absolute = join(current, entry.name);
-      if (lstatSync(absolute).isSymbolicLink()) {
-        const target = realpathSync(absolute);
-        rmSync(absolute, { recursive: true, force: true });
-        cpSync(target, absolute, { recursive: true, dereference: true });
-      }
-      if (statSync(absolute).isDirectory()) queue.push(absolute);
-    }
-  }
-}
 function copyVirtualPackage(name, destination) {
   const virtualRoot = join(repoRoot, 'node_modules', '.pnpm');
   for (const entry of readdirSync(virtualRoot, { withFileTypes: true })) {
@@ -316,7 +302,7 @@ function gitReceipt() {
   return { revision, dirty };
 }
 
-function createReceipt({ arch, preflightInfo, artifacts, appPath, staging }) {
+function createReceipt({ arch, preflightInfo, artifacts, appPath, staging, symlinkClosure }) {
   const git = gitReceipt();
   const receipt = {
     schema_version: 1,
@@ -360,7 +346,7 @@ function createReceipt({ arch, preflightInfo, artifacts, appPath, staging }) {
       architecture: { result: 'pass', detail: `native darwin/${arch}` },
       native_compatibility: { result: 'pass', detail: 'executed compatibility metadata matched bundled metadata' },
       reset_binding: { result: 'pass', detail: 'resetLocalState binding exported by the native loader' },
-      symlink_closure: { result: 'pass', detail: 'staged app, service, and web inputs contain no escaping symlink' },
+      symlink_closure: symlinkClosure,
       unsigned: { result: 'pass', detail: 'packager received no signing configuration and no signing tool was invoked' },
     },
   };
@@ -504,6 +490,8 @@ async function main() {
     const publishedApp = join(publishStage, 'Nexus.app');
     cpSync(appPath, publishedApp, { recursive: true, dereference: true });
     normalizeAppBundle(publishedApp);
+    materializeSymlinks(publishedApp);
+    const symlinkClosure = assertNoSymlinkEscape(publishedApp, { label: 'packed' });
     rmSync(packageParent, { recursive: true, force: true });
     const dmgName = `Nexus-${version}-darwin-${args.arch}-unsigned.dmg`;
     const zipName = `Nexus-${version}-darwin-${args.arch}-unsigned.app.zip`;
@@ -520,6 +508,7 @@ async function main() {
       ],
       appPath: publishedApp,
       staging: staged,
+      symlinkClosure,
     });
     writeFileSync(join(publishStage, 'receipt.json'), `${JSON.stringify(receipt, null, 2)}\n`);
     writeFileSync(join(publishStage, 'SHA256SUMS'), `${sha256File(zipPath)}  ${zipName}\n${sha256File(dmgPath)}  ${dmgName}\n`);
