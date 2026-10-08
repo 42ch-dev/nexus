@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -8,6 +8,22 @@ import test from 'node:test';
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const verifier = join(scriptsDir, '..', 'scripts', 'verify-package.mjs');
+
+/**
+ * Governed desktop product version from `resources/product.json`. The receipt
+ * and the mocked Info.plist below both carry it, so the verifier's
+ * `CFBundleShortVersionString === receipt.version` check stays anchored to the
+ * real release version instead of a drifting literal.
+ */
+const PRODUCT_VERSION = (() => {
+  const manifest = JSON.parse(
+    readFileSync(new URL('../resources/product.json', import.meta.url), 'utf8'),
+  );
+  if (typeof manifest.version !== 'string' || manifest.version.length === 0) {
+    throw new Error('desktop product.json: missing a string "version"');
+  }
+  return manifest.version;
+})();
 
 function writeExecutable(path, source) {
   writeFileSync(path, source);
@@ -27,7 +43,7 @@ test('missing minimum-macOS load command fails package verification', () => {
       schema_version: 1,
       product_name: 'Nexus',
       bundle_id: 'io.nexus42.desktop',
-      version: '0.1.0',
+      version: PRODUCT_VERSION,
       git_revision: 'fixture',
       dirty: false,
       arch: 'arm64',
@@ -56,7 +72,7 @@ test('missing minimum-macOS load command fails package verification', () => {
     // verifier's real CLI path: file reports Mach-O, otool reports no floor.
     writeExecutable(join(commandBin, 'file'), '#!/bin/sh\nprintf "%s\\n" "Mach-O 64-bit executable arm64"\n');
     writeExecutable(join(commandBin, 'otool'), '#!/bin/sh\nprintf "%s\\n" "Load command 0"\n');
-    writeExecutable(join(commandBin, 'plutil'), '#!/bin/sh\nprintf "%s\\n" \'{"CFBundleIdentifier":"io.nexus42.desktop","CFBundleName":"Nexus","CFBundleShortVersionString":"0.1.0"}\'\n');
+    writeExecutable(join(commandBin, 'plutil'), `#!/bin/sh\nprintf "%s\\n" '{"CFBundleIdentifier":"io.nexus42.desktop","CFBundleName":"Nexus","CFBundleShortVersionString":"${PRODUCT_VERSION}"}'\n`);
 
     const result = spawnSync(process.execPath, [verifier, '--dir', packageDir], {
       encoding: 'utf8',
