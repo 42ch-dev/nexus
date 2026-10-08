@@ -37,3 +37,25 @@ Release body (the surrounding process is documented in
 <!-- Maintenance: keep `## ` headings out of this preamble. The release tooling
      inserts each new section above the first `## ` line and extracts a section
      by matching `## [<version>] - `. `### ` headings are safe. -->
+
+## [0.1.0] - 2026-10-08
+
+First governed release — Nexus 0.1.0.
+
+Nexus is a local-first narrative-orchestration platform: the direct-core nexus42 CLI, the web/Electron reference creator surfaces, the standalone TypeScript service, and the independent nexus-runtime Connect host, on the Rust-core/TypeScript-services boundary with the Actor product model and the Harness / Canvas / Computable pillars.
+
+Every artifact is unsigned; macOS Gatekeeper and Windows SmartScreen warn on first launch, and this release is published as a prerelease until Apple signing lands.
+
+### Fixes
+- **release**: keep the native platform pins version-stable via workspace:* (646eaf1)
+- **release**: include the native npm manifests in the version surface set (e96f376)
+
+### Docs & chores
+- **nexus-native**: derive the platform manifest version in loader-negative (ff00936)
+- **nexus42**: derive the --version assertion from CARGO_PKG_VERSION (4e1b87c)
+- bump react-flow skill submodule to a224eeb (correctness fixes) (e5d3fb5)
+- **deps**: npm minor-patch group (14) + msw 3.0.0 adoption — supersedes #360 #361 (#365) (2d6ac67)
+- **deps**: bump the cargo-minor-patch group across 1 directory with 5 updates (#363) (13bea60)
+- **deps**: bump actions/setup-node from 4.4.0 to 7.0.0 (#357) (ee999ff)
+- **deps**: bump .agents/skills/react-flow from `a224eeb` to `b060a63` (#356) (382b51f)
+- **deps**: bump codex-codes from 0.156.1 to 0.158.0 (#359) (421c794)
