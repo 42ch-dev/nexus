@@ -26,7 +26,6 @@ import {
   parseCargoWorkspaceMembers,
   readWorkspaceMemberPackages,
   replaceJsonVersion,
-  replaceNativeSurfaceVersion,
   replaceWorkspacePackageVersion,
 } from "./version-surfaces.mjs";
 
@@ -260,11 +259,7 @@ function pinFixtureVersion(dir, version) {
 
   for (const path of NATIVE_SURFACE_PATHS) {
     const contents = readFileSync(join(dir, path), "utf8");
-    writeFileSync(
-      join(dir, path),
-      replaceNativeSurfaceVersion(contents, version, path),
-      "utf8",
-    );
+    writeFileSync(join(dir, path), replaceJsonVersion(contents, version, path), "utf8");
   }
 
   const lockPath = join(dir, CARGO_LOCK_PATH);

@@ -19,7 +19,6 @@ import {
   readSurfaceVersions,
   readWorkspaceMemberPackages,
   replaceJsonVersion,
-  replaceNativeSurfaceVersion,
   replaceWorkspacePackageVersion,
   writeReleaseVersion,
 } from "./version-surfaces.mjs";
@@ -45,9 +44,9 @@ test("every declared surface is equal in the real repository", () => {
   assert.equal(readSurfaceVersion(REPO_ROOT, PRODUCT_JSON_PATH), currentVersion);
 });
 
-test("replaceNativeSurfaceVersion moves the loader pins with the version", () => {
+test("native surfaces carry the version and the loader pins stay version-stable", () => {
   const loaderPath = NATIVE_LOADER_PACKAGE_PATH;
-  const updated = replaceNativeSurfaceVersion(
+  const updated = replaceJsonVersion(
     readRepoFile(REPO_ROOT, loaderPath),
     "9.9.9",
     loaderPath,
@@ -59,12 +58,12 @@ test("replaceNativeSurfaceVersion moves the loader pins with the version", () =>
   );
   assert.equal(pins.length, 4);
   for (const name of pins) {
-    assert.equal(data.optionalDependencies[name], "9.9.9", name);
+    assert.equal(data.optionalDependencies[name], "workspace:*", name);
   }
 
   const platformPath = "packages/nexus-native-darwin-arm64/package.json";
   const platform = JSON.parse(
-    replaceNativeSurfaceVersion(readRepoFile(REPO_ROOT, platformPath), "9.9.9", platformPath),
+    replaceJsonVersion(readRepoFile(REPO_ROOT, platformPath), "9.9.9", platformPath),
   );
   assert.equal(platform.version, "9.9.9");
 });

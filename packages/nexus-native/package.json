@@ -26,10 +26,10 @@
     "@types/node": "^26.6.3"
   },
   "optionalDependencies": {
-    "@42ch/nexus-native-darwin-arm64": "0.0.0",
-    "@42ch/nexus-native-darwin-x64": "0.0.0",
-    "@42ch/nexus-native-linux-x64-gnu": "0.0.0",
-    "@42ch/nexus-native-win32-x64-msvc": "0.0.0"
+    "@42ch/nexus-native-darwin-arm64": "workspace:*",
+    "@42ch/nexus-native-darwin-x64": "workspace:*",
+    "@42ch/nexus-native-linux-x64-gnu": "workspace:*",
+    "@42ch/nexus-native-win32-x64-msvc": "workspace:*"
   },
   "engines": {
     "node": ">=22.22"

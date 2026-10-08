@@ -54,15 +54,14 @@ export function checkLockstep(repoRoot) {
         .join(", ")}`,
     );
   } else {
-    const expected = /** @type {string} */ ([...versions][0]);
     const loaderManifest = JSON.parse(
       readFileSync(join(repoRoot, NATIVE_LOADER_PACKAGE_PATH), "utf8"),
     );
     const pins = loaderManifest?.optionalDependencies ?? {};
     for (const [name, pin] of Object.entries(pins)) {
-      if (name.startsWith("@42ch/nexus-native") && pin !== expected) {
+      if (name.startsWith("@42ch/nexus-native") && pin !== "workspace:*") {
         problems.push(
-          `${NATIVE_LOADER_PACKAGE_PATH}: ${name} pin ${pin}, expected ${expected}`,
+          `${NATIVE_LOADER_PACKAGE_PATH}: ${name} pin ${pin}, expected workspace:* (pnpm pack replaces it with the exact platform version)`,
         );
       }
     }

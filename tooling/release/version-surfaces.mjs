@@ -207,36 +207,6 @@ export function replaceJsonVersion(contents, version, path) {
 }
 
 /**
- * Replace a native manifest's version; for the loader package the
- * `@42ch/nexus-native-*` optionalDependency pins move with it, so the platform
- * packages stay resolvable at the release version.
- *
- * @param {string} contents
- * @param {string} version
- * @param {string} path
- * @returns {string}
- */
-export function replaceNativeSurfaceVersion(contents, version, path) {
-  const updated = replaceJsonVersion(contents, version, path);
-  if (path !== NATIVE_LOADER_PACKAGE_PATH) {
-    return updated;
-  }
-  const data = JSON.parse(updated);
-  const pins = data?.optionalDependencies;
-  if (typeof pins !== "object" || pins === null) {
-    return updated;
-  }
-  let touched = false;
-  for (const name of Object.keys(pins)) {
-    if (name.startsWith("@42ch/nexus-native")) {
-      pins[name] = version;
-      touched = true;
-    }
-  }
-  return touched ? `${JSON.stringify(data, null, 2)}\n` : updated;
-}
-
-/**
  * Read the version of one file surface.
  *
  * @param {string} repoRoot
@@ -448,7 +418,7 @@ export function writeReleaseVersion(repoRoot, version) {
     }
     planned.push({
       path,
-      contents: replaceNativeSurfaceVersion(contents, version, path),
+      contents: replaceJsonVersion(contents, version, path),
       from,
       members: 0,
     });

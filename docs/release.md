@@ -37,8 +37,9 @@ Two constraints shape the current flow:
   (`[workspace.package].version`, inherited by every workspace crate), root
   `package.json`, `apps/desktop-electron/package.json`,
   `apps/desktop-electron/resources/product.json`, the native loader
-  `packages/nexus-native/package.json` (version plus the `@42ch/nexus-native-*`
-  platform pins), the four `packages/nexus-native-<platform>/package.json`
+  `packages/nexus-native/package.json` (its `@42ch/nexus-native-*` pins use the
+  version-stable `workspace:*` protocol, which `pnpm pack` replaces with the
+  exact platform version), the four `packages/nexus-native-<platform>/package.json`
   manifests, and the regenerated `Cargo.lock`. The lockfile is written by Cargo
   (`cargo update --workspace --offline`), not by a text edit; the Electron
   packaging preflight asserts that the root, product and Electron versions

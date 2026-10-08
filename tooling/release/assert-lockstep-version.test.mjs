@@ -51,12 +51,12 @@ test("checkLockstep reports a divergent JSON surface", () => {
   }
 });
 
-test("checkLockstep reports a drifted native platform pin", () => {
+test("checkLockstep reports a non-workspace native platform pin", () => {
   const dir = createTempRepo();
   try {
     mutateRepoFile(dir, NATIVE_LOADER_PACKAGE_PATH, (contents) =>
       contents.replace(
-        /"@42ch\/nexus-native-darwin-arm64": "[^"]*"/,
+        /"@42ch\/nexus-native-darwin-arm64": "workspace:\*"/,
         '"@42ch/nexus-native-darwin-arm64": "9.9.9"',
       ),
     );
