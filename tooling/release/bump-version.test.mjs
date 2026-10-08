@@ -4,6 +4,7 @@ import {
   CARGO_LOCK_PATH,
   CARGO_LOCK_REGEN_COMMAND,
   LOCKSTEP_PATHS,
+  NATIVE_SURFACE_PATHS,
   PRODUCT_JSON_PATH,
   ROOT_PACKAGE_PATH,
   parseCargoLockPackageVersion,
@@ -28,7 +29,7 @@ const brokenLockfile = (dir) =>
     "",
   );
 
-test("bumpVersion writes all five surfaces and reports the change", () => {
+test("bumpVersion writes every version surface and reports the change", () => {
   const dir = createTempRepo();
   try {
     const lockBefore = readRepoFile(dir, CARGO_LOCK_PATH);
@@ -37,7 +38,7 @@ test("bumpVersion writes all five surfaces and reports the change", () => {
     assert.equal(report.from, FIXTURE_BASELINE_VERSION);
     assert.deepEqual(
       report.changed.map((entry) => entry.path),
-      [...LOCKSTEP_PATHS, CARGO_LOCK_PATH],
+      [...LOCKSTEP_PATHS, ...NATIVE_SURFACE_PATHS, CARGO_LOCK_PATH],
     );
     for (const surface of readSurfaceVersions(dir)) {
       assert.equal(surface.version, FIXTURE_TARGET_VERSION, surface.path);
@@ -138,7 +139,10 @@ test("CLI reports a broken Cargo.lock with a non-zero exit", () => {
 test("CLI fails loudly and restores the surfaces when cargo is unavailable", () => {
   const dir = createTempRepo();
   try {
-    const before = LOCKSTEP_PATHS.map((path) => [path, readRepoFile(dir, path)]);
+    const before = [...LOCKSTEP_PATHS, ...NATIVE_SURFACE_PATHS].map((path) => [
+      path,
+      readRepoFile(dir, path),
+    ]);
     const lockBefore = readRepoFile(dir, CARGO_LOCK_PATH);
     const run = runReleaseScript("bump-version.mjs", [FIXTURE_TARGET_VERSION], dir, {
       env: { PATH: "/nonexistent-cargo" },

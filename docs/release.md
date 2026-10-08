@@ -33,14 +33,17 @@ Two constraints shape the current flow:
 - While Nexus is pre-1.0: MINOR for a feature increment, PATCH for fixes only.
 - `0.0.0` is the never-released workspace baseline (no release has ever
   shipped). The first governed release is **`0.1.0`**.
-- The version SSOT has five files, all bumped by one commit: root `Cargo.toml`
+- The version SSOT has ten files, all bumped by one commit: root `Cargo.toml`
   (`[workspace.package].version`, inherited by every workspace crate), root
   `package.json`, `apps/desktop-electron/package.json`,
-  `apps/desktop-electron/resources/product.json`, and the regenerated
-  `Cargo.lock`. The lockfile is written by Cargo
-  (`cargo update --workspace --offline`), not by a text edit, and the Electron
+  `apps/desktop-electron/resources/product.json`, the native loader
+  `packages/nexus-native/package.json` (version plus the `@42ch/nexus-native-*`
+  platform pins), the four `packages/nexus-native-<platform>/package.json`
+  manifests, and the regenerated `Cargo.lock`. The lockfile is written by Cargo
+  (`cargo update --workspace --offline`), not by a text edit; the Electron
   packaging preflight asserts that the root, product and Electron versions
-  agree.
+  agree; and the native loader fences each platform manifest against the built
+  artifact's embedded version before the database is opened.
 - Dispatch validation refuses a version that is not strictly greater than the
   root `package.json` version on `origin/main`, and refuses a version whose
   `v<version>` tag already exists.

@@ -21,10 +21,12 @@ import {
   CARGO_LOCK_PATH,
   CARGO_WORKSPACE_PATH,
   LOCKSTEP_PATHS,
+  NATIVE_SURFACE_PATHS,
   parseCargoLockPackageVersion,
   parseCargoWorkspaceMembers,
   readWorkspaceMemberPackages,
   replaceJsonVersion,
+  replaceNativeSurfaceVersion,
   replaceWorkspacePackageVersion,
 } from "./version-surfaces.mjs";
 
@@ -34,7 +36,7 @@ const RELEASE_DIR = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = join(RELEASE_DIR, "../..");
 
 /** Files copied verbatim into every temp repo. */
-const FIXTURE_PATHS = [...LOCKSTEP_PATHS, CARGO_LOCK_PATH];
+const FIXTURE_PATHS = [...LOCKSTEP_PATHS, ...NATIVE_SURFACE_PATHS, CARGO_LOCK_PATH];
 
 /**
  * Version pinned into every fixture repo. Fixed on purpose: a fixture that
@@ -254,6 +256,15 @@ function pinFixtureVersion(dir, version) {
         ? replaceWorkspacePackageVersion(contents, version, path)
         : replaceJsonVersion(contents, version, path);
     writeFileSync(join(dir, path), updated, "utf8");
+  }
+
+  for (const path of NATIVE_SURFACE_PATHS) {
+    const contents = readFileSync(join(dir, path), "utf8");
+    writeFileSync(
+      join(dir, path),
+      replaceNativeSurfaceVersion(contents, version, path),
+      "utf8",
+    );
   }
 
   const lockPath = join(dir, CARGO_LOCK_PATH);

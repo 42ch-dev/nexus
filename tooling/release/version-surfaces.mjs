@@ -73,6 +73,31 @@ export const LOCKSTEP_PATHS = [
 ];
 
 /**
+ * Native npm platform packages whose manifest version is fenced against the
+ * built native artifact's embedded version by the `nexus-native` loader.
+ * @type {readonly string[]}
+ */
+export const NATIVE_PLATFORM_PACKAGE_PATHS = [
+  "packages/nexus-native-darwin-arm64/package.json",
+  "packages/nexus-native-darwin-x64/package.json",
+  "packages/nexus-native-linux-x64-gnu/package.json",
+  "packages/nexus-native-win32-x64-msvc/package.json",
+];
+
+/** Loader package: version plus the `@42ch/nexus-native-*` optionalDependency pins. */
+export const NATIVE_LOADER_PACKAGE_PATH = "packages/nexus-native/package.json";
+
+/**
+ * Native npm surfaces carrying the release version: the loader package
+ * (version + platform pins) first, then the four platform packages.
+ * @type {readonly string[]}
+ */
+export const NATIVE_SURFACE_PATHS = [
+  NATIVE_LOADER_PACKAGE_PATH,
+  ...NATIVE_PLATFORM_PACKAGE_PATHS,
+];
+
+/**
  * @param {string} value
  * @returns {string}
  */
@@ -182,6 +207,36 @@ export function replaceJsonVersion(contents, version, path) {
 }
 
 /**
+ * Replace a native manifest's version; for the loader package the
+ * `@42ch/nexus-native-*` optionalDependency pins move with it, so the platform
+ * packages stay resolvable at the release version.
+ *
+ * @param {string} contents
+ * @param {string} version
+ * @param {string} path
+ * @returns {string}
+ */
+export function replaceNativeSurfaceVersion(contents, version, path) {
+  const updated = replaceJsonVersion(contents, version, path);
+  if (path !== NATIVE_LOADER_PACKAGE_PATH) {
+    return updated;
+  }
+  const data = JSON.parse(updated);
+  const pins = data?.optionalDependencies;
+  if (typeof pins !== "object" || pins === null) {
+    return updated;
+  }
+  let touched = false;
+  for (const name of Object.keys(pins)) {
+    if (name.startsWith("@42ch/nexus-native")) {
+      pins[name] = version;
+      touched = true;
+    }
+  }
+  return touched ? `${JSON.stringify(data, null, 2)}\n` : updated;
+}
+
+/**
  * Read the version of one file surface.
  *
  * @param {string} repoRoot
@@ -200,7 +255,7 @@ export function readSurfaceVersion(repoRoot, path) {
  * @returns {{ path: string; version: string }[]}
  */
 export function readSurfaceVersions(repoRoot) {
-  return LOCKSTEP_PATHS.map((path) => ({
+  return [...LOCKSTEP_PATHS, ...NATIVE_SURFACE_PATHS].map((path) => ({
     path,
     version: readSurfaceVersion(repoRoot, path),
   }));
@@ -355,10 +410,11 @@ function writeFileAtomically(path, contents) {
 }
 
 /**
- * Write the release version into all five surfaces: the four hand-written
- * manifests first, then `Cargo.lock` through `cargo update --workspace
- * `--offline`. A Cargo failure rolls every written file back, so a refused
- * bump leaves the repository untouched.
+ * Write the release version into every version surface: the four hand-written
+ * lockstep manifests, the five native npm manifests (loader pins included),
+ * then `Cargo.lock` through `cargo update --workspace --offline`. A Cargo
+ * failure rolls every written file back, so a refused bump leaves the
+ * repository untouched.
  *
  * @param {string} repoRoot
  * @param {string} version
@@ -382,6 +438,20 @@ export function writeReleaseVersion(repoRoot, version) {
         ? replaceWorkspacePackageVersion(contents, version, path)
         : replaceJsonVersion(contents, version, path);
     planned.push({ path, contents: updated, from, members: 0 });
+  }
+
+  for (const path of NATIVE_SURFACE_PATHS) {
+    const contents = readFileSync(join(repoRoot, path), "utf8");
+    const from = parseJsonVersion(contents, path);
+    if (from === version) {
+      continue;
+    }
+    planned.push({
+      path,
+      contents: replaceNativeSurfaceVersion(contents, version, path),
+      from,
+      members: 0,
+    });
   }
 
   const lockPath = join(repoRoot, CARGO_LOCK_PATH);
