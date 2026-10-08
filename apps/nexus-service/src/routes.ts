@@ -43,7 +43,8 @@ function readServiceVersion(): string {
     typeof manifest !== 'object' ||
     manifest === null ||
     !('version' in manifest) ||
-    typeof manifest.version !== 'string'
+    typeof manifest.version !== 'string' ||
+    manifest.version.length === 0
   ) {
     throw new Error('nexus-service: package.json is missing a string "version"');
   }
