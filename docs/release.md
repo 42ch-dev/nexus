@@ -94,9 +94,11 @@ published until the pull request it opens is merged into `main`.
    `Fetch main, revalidate, and create release branch` re-checks the version
    and starts `release/<version>` from `origin/main`. `Bump version surfaces
    and lockfile` then runs `cargo fetch --locked`,
-   `node tooling/release/bump-version.mjs <version>` (the four manifests, then
-   `cargo update --workspace --offline` for `Cargo.lock`) and a confirming
-   `cargo update --workspace --offline`. `Write dispatch summary` stages the
+   `node tooling/release/bump-version.mjs <version>` (the ten version
+   manifests — the five hand-written lockstep files plus the five native npm
+   files — then `cargo update --workspace --offline` for `Cargo.lock`) and a
+   confirming `cargo update --workspace --offline`. `Write dispatch summary`
+   stages the
    `summary` input, and `Generate and prepend CHANGELOG entry` prepends the
    generated section to `CHANGELOG.md`. `Push GitHub-signed release commit`
    creates the single commit `chore(release): bump version to <version>` —
@@ -130,7 +132,7 @@ Merging the `release`-labeled pull request into `main` starts
 | Stage | Job | Gate | What it does |
 |-------|-----|------|--------------|
 | Tag | `tag` | merged PR carrying the `release` label, or a `v*` tag push | `Ensure annotated tag and resolve prerelease`: resolves the version from `package.json` at the merge commit, creates and pushes the annotated tag `v<version>` at that commit if it is missing (annotation = the first non-empty line in the bump commit body: the summary's first line when provided, otherwise the `Nexus-Prerelease:` trailer), requires an existing tag to be annotated and to point at the same commit, reads the `Nexus-Prerelease` trailer from the merge commit's second parent, and resolves the effective prerelease value. |
-| Verify | `verify-version` | `tag` succeeded | `Assert lockstep version`: checks out `refs/tags/v<version>` and asserts the four hand-written version files are equal (`assert-lockstep-version.mjs`). |
+| Verify | `verify-version` | `tag` succeeded | `Assert lockstep version`: checks out `refs/tags/v<version>` and asserts the five hand-written version files are equal (`Cargo.toml`, root `package.json`, `apps/desktop-electron/package.json`, `apps/desktop-electron/resources/product.json`, and `apps/nexus-service/package.json`; `assert-lockstep-version.mjs`). |
 | Producers | `runtime-build` | `tag` and `verify-version` succeeded | Reusable call into `runtime-build.yml` (job `runtime-build`): the three-platform matrix (`windows-x64`, `macos-arm64`, `linux-x64`) builds `nexus-runtime-<os>-<arch>.zip` plus a `.sha256` sidecar, and smoke-tests `--version` on each runner. |
 | Producers | `desktop-electron-build` | `tag` and `verify-version` succeeded | Reusable call into `desktop-electron-build.yml` (job `package`): the two macOS legs (darwin arm64, darwin x64) package `Nexus-<version>-darwin-<arch>-unsigned.dmg`, `Nexus-<version>-darwin-<arch>-unsigned.app.zip`, `receipt.json` and `SHA256SUMS`, with signing-dispatch sentinels proving no codesign/notarize call ran. |
 | Publish | `publish` | all four jobs succeeded | `Download runtime artifacts` and `Download desktop artifacts` collect the five artifact sets; `Assemble release notes and assets` renders the Release body (changelog section plus the fixed footer) and stages the complete 14-asset set; `Stage, upload, and publish GitHub Release` creates or reconciles the Release as a draft with the effective prerelease value, uploads all assets with `--clobber`, and clears `draft` only after every upload succeeds; on failure an existing Release that the retry returned to draft is restored to the draft/prerelease state it had on entry while no asset has been replaced, and is deliberately left unpublished — never restored to public — once any asset replacement has begun, so a partial old/new asset set is never downloadable. |
@@ -295,7 +297,7 @@ dispatches a producer, pushes a tag, or creates a Release.
    cargo fetch --locked
    NEXUS_REPO_ROOT="$scratch/nexus" node tooling/release/bump-version.mjs 0.1.0
    NEXUS_REPO_ROOT="$scratch/nexus" node tooling/release/assert-lockstep-version.mjs
-   git diff --stat     # four manifests + Cargo.lock; nothing is committed
+   git diff --stat     # ten version manifests + Cargo.lock; nothing is committed
    ```
 
 5. **Render the Release body locally.** The footer is composed by an ordinary

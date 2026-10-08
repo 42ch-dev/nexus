@@ -32,7 +32,16 @@ export function errorEnvelope(status: number, error: ErrorResponse) {
 
 // ── Daemon health ────────────────────────────────────────────────────────────
 
-/** `GET /v1/daemon/runtime/health` → 200 `{ status, version }`. */
+/**
+ * `GET /v1/daemon/runtime/health` → 200 `{ status, version }`.
+ *
+ * The `version` default is an intentional fixed fixture: callers supply the
+ * value they mean to exercise (e.g. `healthOk('0.9.9')` in
+ * `adapter-contract.test.ts`), and no test asserts this default against the
+ * governed daemon version (`apps/nexus-service/package.json`, T1). It is a
+ * shape-valid, self-contained response with no runtime drift path; deriving it
+ * would only add a cross-app manifest read to web test infrastructure.
+ */
 export function healthOk(version = '0.1.0'): RequestHandler {
   return http.get('/v1/daemon/runtime/health', () =>
     HttpResponse.json({ status: 'ok', version }),

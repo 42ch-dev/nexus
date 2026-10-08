@@ -16,11 +16,27 @@ import {
   resolveOutputRoot,
 } from '../scripts/package-contract.mjs';
 
+/**
+ * Governed desktop product version from `resources/product.json` — the file the
+ * packaging preflight pins equal to the root and Electron app manifests. The
+ * native-compatibility and receipt fixtures below mirror it so they track the
+ * real release version instead of a drifting literal.
+ */
+const PRODUCT_VERSION = (() => {
+  const manifest = JSON.parse(
+    readFileSync(new URL('../resources/product.json', import.meta.url), 'utf8'),
+  );
+  if (typeof manifest.version !== 'string' || manifest.version.length === 0) {
+    throw new Error('desktop product.json: missing a string "version"');
+  }
+  return manifest.version;
+})();
+
 const validNative = {
   native_api_version: 1,
   writer_protocol: 1,
   target_triple: 'aarch64-apple-darwin',
-  package_version: '0.1.0',
+  package_version: PRODUCT_VERSION,
   contract_tree_sha256: 'a'.repeat(64),
   db_schema_min: 1,
   db_schema_max: 1,
@@ -121,7 +137,7 @@ test('receipt is the closed unsigned version-1 shape', () => {
     schema_version: 1,
     product_name: PACKAGE_CONTRACT.productName,
     bundle_id: PACKAGE_CONTRACT.bundleId,
-    version: '0.1.0',
+    version: PRODUCT_VERSION,
     git_revision: 'a'.repeat(40),
     dirty: false,
     arch: 'arm64',

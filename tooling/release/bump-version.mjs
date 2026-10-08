@@ -7,6 +7,7 @@
  *   - root `package.json`
  *   - `apps/desktop-electron/package.json`
  *   - `apps/desktop-electron/resources/product.json`
+ *   - `apps/nexus-service/package.json`
  *   - `packages/nexus-native/package.json` (version + `@42ch/nexus-native-*` pins)
  *   - the four `packages/nexus-native-<platform>/package.json` manifests
  *   - `Cargo.lock` (workspace member `[[package]]` versions)

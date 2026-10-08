@@ -11,7 +11,7 @@
  */
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -19,6 +19,22 @@ import test, { after } from 'node:test';
 import { DESKTOP_STATUS_CHANNEL, assertDesktopStatusFrame } from '../dist/desktop-contract.js';
 import { DESKTOP_SERVICE_PORT, buildDesktopServiceOptions, resolveDesktopServicePort } from '../dist/env.js';
 import { DesktopServiceController, SERVICE_CLOSE_BUDGET_MS } from '../dist/service-controller.js';
+
+/**
+ * The version the governed service reports on `GET /v1/daemon/runtime/health`
+ * (T1: `apps/nexus-service/package.json`). The stub below mirrors it and the
+ * controller is asserted to surface exactly it, so the fixture tracks the real
+ * release version instead of a drifting literal.
+ */
+const SERVICE_VERSION = (() => {
+  const manifest = JSON.parse(
+    readFileSync(new URL('../../nexus-service/package.json', import.meta.url), 'utf8'),
+  );
+  if (typeof manifest.version !== 'string' || manifest.version.length === 0) {
+    throw new Error('nexus-service: package.json is missing a string "version"');
+  }
+  return manifest.version;
+})();
 
 const tempDirs = [];
 after(() => {
@@ -111,7 +127,7 @@ async function startStubService({ lazy = false, bindPort = 0 } = {}) {
         return;
       }
       if (req.method === 'GET' && req.url === '/v1/daemon/runtime/health') {
-        send(200, { status: 'ok', version: '0.1.0' });
+        send(200, { status: 'ok', version: SERVICE_VERSION });
         return;
       }
       if (req.method === 'POST' && req.url === '/v1/daemon/runtime/stop') {
@@ -365,7 +381,7 @@ test('start spawns one owner and reports running from authenticated discovery + 
   const running = controller.getStatus();
   assert.equal(running.state, 'running');
   assert.equal(running.port, service.port);
-  assert.equal(running.version, '0.1.0');
+  assert.equal(running.version, SERVICE_VERSION);
   assert.deepEqual(Object.keys(running).sort(), ['port', 'state', 'version']);
   assert.equal(JSON.stringify(running).includes('inst-'), false, 'status never leaks the instance id');
   assert.equal(JSON.stringify(running).includes(home), false, 'status never leaks home');
