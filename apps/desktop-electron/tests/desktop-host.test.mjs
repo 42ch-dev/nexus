@@ -253,6 +253,12 @@ function makeFakeElectron() {
 }
 
 const product = loadProductIdentity(RESOURCES_DIR);
+// The identity version must agree with the package manifest (the packaging
+// preflight enforces the same cross-file agreement); deriving it keeps the
+// suite green across version bumps instead of pinning a literal.
+const electronPackageVersion = JSON.parse(
+  readFileSync(join(RESOURCES_DIR, '..', 'package.json'), 'utf8'),
+).version;
 
 async function makeHost(overrides = {}) {
   const electron = makeFakeElectron();
@@ -360,7 +366,7 @@ test('product identity loads from resources/product.json and applies to the app'
   assert.deepEqual(product, {
     id: 'io.nexus42.desktop',
     name: 'Nexus',
-    version: '0.1.0',
+    version: electronPackageVersion,
     minimumMacos: '13.0',
   });
   const appData = join(root, 'appData');

@@ -31,9 +31,8 @@ Two constraints shape the current flow:
   suffix is rejected: "prerelease" is GitHub Release metadata, never part of a
   version string or a tag.
 - While Nexus is pre-1.0: MINOR for a feature increment, PATCH for fixes only.
-- `0.1.0` is the never-released workspace baseline. The first governed release
-  is expected to be **`0.2.0`** — the smallest version that both clears the
-  baseline and admits the accumulated feature surface.
+- `0.0.0` is the never-released workspace baseline (no release has ever
+  shipped). The first governed release is **`0.1.0`**.
 - The version SSOT has five files, all bumped by one commit: root `Cargo.toml`
   (`[workspace.package].version`, inherited by every workspace crate), root
   `package.json`, `apps/desktop-electron/package.json`,
@@ -56,7 +55,7 @@ published until the pull request it opens is merged into `main`.
 
 | Input | Type | Default | Meaning |
 |-------|------|---------|---------|
-| `version` | string, required | — | Clean SemVer `X.Y.Z`, strictly greater than `origin/main`, no prerelease suffix. Recommended first dispatch: `0.2.0`. |
+| `version` | string, required | — | Clean SemVer `X.Y.Z`, strictly greater than `origin/main`, no prerelease suffix. Recommended first dispatch: `0.1.0`. |
 | `summary` | string, optional | `""` | Human-written framing. It is prepended to the generated changelog in the bump pull request, in the tag annotation and in the Release body — use it to describe the pre-baseline history on the first release. |
 | `prerelease` | boolean, optional | `true` | Requested prerelease marking. While signing is unimplemented the pipeline forces `true` regardless of this value ([below](#prerelease-gate-and-the-nexus-prerelease-trailer)). |
 
@@ -70,8 +69,8 @@ published until the pull request it opens is merged into `main`.
 
    ```sh
    git fetch origin main
-   node tooling/release/assert-version-greater.mjs 0.2.0 --base-ref main
-   # Version OK: 0.2.0 > 0.1.0 (origin/main); v0.2.0 does not exist
+   node tooling/release/assert-version-greater.mjs 0.1.0 --base-ref main
+   # Version OK: 0.1.0 > 0.0.0 (origin/main); v0.1.0 does not exist
    ```
 
 3. **Dispatch.** Actions → *New release* → *Run workflow* on `main` with the
@@ -272,8 +271,8 @@ dispatches a producer, pushes a tag, or creates a Release.
 
    ```sh
    git fetch origin main
-   node tooling/release/assert-version-greater.mjs 0.2.0 --base-ref main
-   node tooling/release/generate-changelog.mjs --version 0.2.0    # stdout; stderr names the resolved base
+   node tooling/release/assert-version-greater.mjs 0.1.0 --base-ref main
+   node tooling/release/generate-changelog.mjs --version 0.1.0    # stdout; stderr names the resolved base
    node tooling/release/effective-prerelease.mjs --toggle false   # forced prerelease today
    ```
 
@@ -290,7 +289,7 @@ dispatches a producer, pushes a tag, or creates a Release.
    git clone --quiet --local . "$scratch/nexus"
    cd "$scratch/nexus"
    cargo fetch --locked
-   NEXUS_REPO_ROOT="$scratch/nexus" node tooling/release/bump-version.mjs 0.2.0
+   NEXUS_REPO_ROOT="$scratch/nexus" node tooling/release/bump-version.mjs 0.1.0
    NEXUS_REPO_ROOT="$scratch/nexus" node tooling/release/assert-lockstep-version.mjs
    git diff --stat     # four manifests + Cargo.lock; nothing is committed
    ```
@@ -309,16 +308,16 @@ dispatches a producer, pushes a tag, or creates a Release.
    done
    for arch in arm64 x64; do
      d="runner/release-artifacts/nexus-desktop-unsigned-darwin-$arch"; mkdir -p "$d"
-     printf 'fake' > "$d/Nexus-0.2.0-darwin-$arch-unsigned.dmg"
-     printf 'fake' > "$d/Nexus-0.2.0-darwin-$arch-unsigned.app.zip"
+     printf 'fake' > "$d/Nexus-0.1.0-darwin-$arch-unsigned.dmg"
+     printf 'fake' > "$d/Nexus-0.1.0-darwin-$arch-unsigned.app.zip"
      printf '{}' > "$d/receipt.json"
-     printf '%s  Nexus-0.2.0-darwin-%s-unsigned.dmg\n%s  Nexus-0.2.0-darwin-%s-unsigned.app.zip\n' \
+     printf '%s  Nexus-0.1.0-darwin-%s-unsigned.dmg\n%s  Nexus-0.1.0-darwin-%s-unsigned.app.zip\n' \
        "$(printf '2%.0s' {1..64})" "$arch" "$(printf '3%.0s' {1..64})" "$arch" > "$d/SHA256SUMS"
    done
-   printf '# Changelog\n\n## [0.2.0] - 2026-09-30\n\n### Features\n- **release**: example (abc1234)\n' > CHANGELOG.md
+   printf '# Changelog\n\n## [0.1.0] - 2026-10-08\n\n### Features\n- **release**: example (abc1234)\n' > CHANGELOG.md
    : > runner/env
    ruby -ryaml -e 'step = YAML.load_file("<repo>/.github/workflows/release.yml")["jobs"]["publish"]["steps"].find { |s| s["name"] == "Assemble release notes and assets" }; File.write("assemble.sh", step["run"])'
-   VERSION=0.2.0 RUNNER_TEMP="$work/runner" GITHUB_ENV="$work/runner/env" bash assemble.sh
+   VERSION=0.1.0 RUNNER_TEMP="$work/runner" GITHUB_ENV="$work/runner/env" bash assemble.sh
    cat runner/release-body.md
    ```
 
