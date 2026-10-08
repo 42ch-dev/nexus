@@ -94,9 +94,11 @@ published until the pull request it opens is merged into `main`.
    `Fetch main, revalidate, and create release branch` re-checks the version
    and starts `release/<version>` from `origin/main`. `Bump version surfaces
    and lockfile` then runs `cargo fetch --locked`,
-   `node tooling/release/bump-version.mjs <version>` (the four manifests, then
-   `cargo update --workspace --offline` for `Cargo.lock`) and a confirming
-   `cargo update --workspace --offline`. `Write dispatch summary` stages the
+   `node tooling/release/bump-version.mjs <version>` (the ten version
+   manifests — the five hand-written lockstep files plus the five native npm
+   files — then `cargo update --workspace --offline` for `Cargo.lock`) and a
+   confirming `cargo update --workspace --offline`. `Write dispatch summary`
+   stages the
    `summary` input, and `Generate and prepend CHANGELOG entry` prepends the
    generated section to `CHANGELOG.md`. `Push GitHub-signed release commit`
    creates the single commit `chore(release): bump version to <version>` —
@@ -295,7 +297,7 @@ dispatches a producer, pushes a tag, or creates a Release.
    cargo fetch --locked
    NEXUS_REPO_ROOT="$scratch/nexus" node tooling/release/bump-version.mjs 0.1.0
    NEXUS_REPO_ROOT="$scratch/nexus" node tooling/release/assert-lockstep-version.mjs
-   git diff --stat     # four manifests + Cargo.lock; nothing is committed
+   git diff --stat     # ten version manifests + Cargo.lock; nothing is committed
    ```
 
 5. **Render the Release body locally.** The footer is composed by an ordinary
