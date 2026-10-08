@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-connect-subscribe-response.schema.json",
+  "schema_version": 1,
+  "title": "Core Connect Subscribe Response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["stream", "epoch", "resumed_from"],
+  "properties": {
+    "stream": { "type": "string", "minLength": 1 },
+    "epoch": { "type": "string", "format": "uuid" },
+    "resumed_from": { "type": ["string", "null"] }
+  }
+}

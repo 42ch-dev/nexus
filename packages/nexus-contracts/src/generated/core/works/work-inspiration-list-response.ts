@@ -4,6 +4,8 @@
  * Generator: json-schema-to-typescript (tooling/codegen/src/ts-gen.ts)
  */
 
+import type { WorkInspirationItem } from './work-inspiration-item';
+
 /**
  * Offset-paginated inspiration page for `GET /v1/daemon/works/pool/inspiration`.
  */
@@ -12,16 +14,4 @@ export interface WorkInspirationListResponse {
   total: number;
   limit: number;
   offset: number;
-}
-/**
- * One inspiration-pool item as served on the wire (stored `creator_id` intentionally not serialized).
- */
-export interface WorkInspirationItem {
-  item_id: string;
-  rel_path: string;
-  title: string;
-  status: string;
-  promoted_work_id?: string;
-  created_at: string;
-  promoted_at?: string;
 }

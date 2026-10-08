@@ -37,12 +37,25 @@ requires.
 - Mirrors the schema tree into `crates/nexus-contracts/src/generated/` with Rust
   module naming (kebab-case → snake_case).
 - Emits one `.rs` per schema; fails the run if any schema errors or zero emit.
+- Formatting pass: `typify`'s `TokenStream::to_string()` is a single-line token dump,
+  so every emitted module is parsed with `syn` and re-printed by `prettyplease` before
+  it is written. In-process on purpose — no `rustfmt` binary or pinned-toolchain
+  coupling in the codegen lane.
+- `$ref`-target dedupe: `typify` emits a standalone type for a referenced schema *and*
+  a wire-identical inline copy inside every referencing module. Each referenced type
+  keeps exactly one home — the standalone module generated for its own schema — and
+  referencing modules import it (`use crate::generated::<module>::<Type>;`), so
+  consumers no longer need path-qualified imports. Only a name with a unique canonical
+  module (which must itself declare the name) is deduped; everything else is emitted
+  untouched.
 
 ## Status (plan v1.138)
 
 - **T1 (this crate):** binary skeleton; emits `.rs` for all non-skipped schemas.
 - **T2:** barrel `mod.rs` generation (export-mode heuristics read from source schemas).
-- **T3:** wire into `tooling/codegen/src/index.ts`; add a `cargo +nightly fmt` pass.
+- **T3:** wire into `tooling/codegen/src/index.ts`; formatting pass (v1.207 P1-T1 landed
+  it in-process via `syn` + `prettyplease` instead of `cargo +nightly fmt`, which would
+  require a pinned rustfmt in the codegen CI job).
 - **T4:** clippy tuning (derives / allows).
 - **T5:** reconcile `crates/nexus-contracts/tests/schema_drift_detection.rs`.
 

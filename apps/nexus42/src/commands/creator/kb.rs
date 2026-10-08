@@ -9,11 +9,19 @@
 //! `add_kb_entry`, `delete_kb_entry`), and the writer is released before
 //! anything is rendered. There is no daemon probe and no HTTP fallback.
 //!
-//! The extract queue (`queue-extract`, `extract-status`) and the refreshable
-//! scan (`rescan`) stay on the existing local stores; both are admitted at the
-//! seam (`crate::core::require_materialized_workspace`) before their pool open,
-//! so no `creator kb` entrance can migrate — and therefore create — a workspace
-//! the selection never had.
+//! The extract queue (`queue-extract`, `extract-status`) runs on the same
+//! direct-call seam: the core KB extract authority
+//! ([`nexus_core::CoreService::queue_kb_extract`],
+//! `list_kb_extract_jobs`, `get_kb_extract_job`) owns the entry-id
+//! sanitization, the `--chapter` locator sugar, the idempotency key and the
+//! creator/workspace binding. The enqueue leaf takes the workspace's
+//! engine-owned admission (`crate::core::open_engine_owned_core`) because
+//! `kb_extract_jobs` is guarded to a migration/engine writer at the schema
+//! level; the status leaf reads over the direct-writer one. The refreshable
+//! scan (`rescan`) stays on the existing local stores; it is admitted at the
+//! seam (`crate::core::require_materialized_workspace`) before its pool open,
+//! so no `creator kb` entrance can migrate — and therefore create — a
+//! workspace the selection never had.
 //!
 //! World-scoped narrative KB lives on the canonical `creator world kb` surface
 //! (`commands::creator::world::kb`); `creator kb` serves the work-scope file
@@ -21,16 +29,14 @@
 //! `creator knowledge`.
 
 use crate::config::CliConfig;
-use crate::core::{
-    finish_direct, map_core_error, open_direct_core, require_materialized_workspace,
-};
+use crate::core::{finish_direct, map_core_error, open_direct_core, open_engine_owned_core};
 use crate::errors::{CliError, Result};
 use crate::paths;
 use nexus_contracts::{
     AddKbEntryRequest, DeleteKbEntryResponse, GetKbEntryResponse, ListKbEntriesQuery,
     ListKbEntriesResponse,
 };
-use nexus_core::Principal;
+use nexus_core::{Principal, QueueKbExtractParams};
 use std::path::PathBuf;
 
 /// Refreshable-scan submodule (V1.50 T-B P2; V1.51 T-A P1 work-scoped).
@@ -363,12 +369,21 @@ async fn kb_remove(config: &CliConfig, entry_id: &str) -> Result<()> {
 
 /// `kb queue-extract` — idempotent enqueue of a work entry for extraction.
 ///
-/// Creates a row in `kb_extract_jobs` with status `queued`.
-/// The actual extraction is performed by the `kb.extract_work` capability
-/// (triggered via preset or daemon orchestration). No LLM calls here.
+/// Creates a row in `kb_extract_jobs` with status `queued` through the core
+/// KB extract authority ([`nexus_core::CoreService::queue_kb_extract`]); the
+/// core owns the entry-id sanitization, the chapter-locator sugar and the
+/// idempotency key, so this leaf only maps its flags onto the typed request
+/// and renders the job. The actual extraction is performed by the
+/// `kb.extract_work` capability (triggered via preset or daemon
+/// orchestration). No LLM calls here.
 ///
-/// When `--chapter N` is provided, sets `source_kind=work_chapter`,
-/// `profile_hint=novel`, and resolves the chapter body path.
+/// The core is opened over the workspace's **engine-owned** admission
+/// ([`crate::core::open_engine_owned_core`]): `kb_extract_jobs` is guarded to a
+/// migration/engine writer, so the direct-writer pool this leaf used to open
+/// could never write the row.
+///
+/// When `--chapter N` is provided, the core sets `source_kind=work_chapter`,
+/// `profile_hint=novel`, and derives the chapter body locator.
 // CLI helper — runs on single-threaded tokio; Send not required.
 #[allow(clippy::future_not_send)]
 async fn kb_queue_extract(
@@ -378,76 +393,53 @@ async fn kb_queue_extract(
     work_id: Option<&str>,
     chapter: Option<i32>,
 ) -> Result<()> {
-    let creator_id = config
-        .active_creator_id
-        .as_deref()
-        .ok_or(CliError::CreatorNotSelected)?
-        .to_string();
-    let slug = config.workspace_slug_for_creator(&creator_id).to_string();
-
-    // Sanitize entry_id before it reaches any path or artifact-locator sink. The
-    // returned borrow shadows the raw argument so the validated value is the only
-    // one that flows on.
-    let work_entry_id = paths::sanitize_entry_id(work_entry_id).map_err(CliError::Other)?;
-
-    // The seam's admission pre-flight runs before the pool open: `Schema::init`
-    // migrates — and therefore creates — the selected workspace, so a selection
-    // that names no materialized workspace must be refused instead of having one
-    // created for it.
-    require_materialized_workspace(config)?;
-    let db_path = crate::config::resolve_state_db_path(config)?;
-    let pool = crate::db::Schema::init(&db_path).await?;
-
-    // Determine artifact locator fields from --chapter sugar.
-    // QC2 W-004: Validate chapter >= 1 to reject negative/zero values.
+    // QC2 W-004: reject negative/zero chapter values before opening the core,
+    // so the legacy refusal wording is the one the caller reads. The producer
+    // refuses the same input fail-closed for every other transport.
     if let Some(ch) = chapter {
         if ch < 1 {
             return Err(CliError::Other("Chapter number must be >= 1".to_string()));
         }
     }
-    let (source_kind, source_locator, profile_hint) = chapter.map_or((None, None, None), |ch| {
-        let ch_label = format!("{ch:02}");
-        // Best-effort: build a locator from chapter number.
-        // The exact path is resolved later by the capability from work_chapters.
-        let locator = format!("chapter:{ch_label}");
-        (
-            Some("work_chapter".to_string()),
-            Some(locator),
-            Some("novel".to_string()),
-        )
-    });
 
-    let job = nexus_local_db::enqueue_extract_job_with_artifact(
-        &pool,
-        &creator_id,
-        &slug,
-        work_entry_id,
-        world_id,
-        source_kind.as_deref(),
-        source_locator.as_deref(),
-        profile_hint.as_deref(),
-        work_id,
-    )
-    .await
-    .map_err(|e| CliError::Other(format!("Failed to enqueue extract job: {e}")))?;
+    // The queue is engine-owned job state (`kb_extract_jobs` is guarded to a
+    // migration/engine writer), so the enqueue leaf takes the engine admission;
+    // the direct-writer pool cannot write that table.
+    let core = open_engine_owned_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        core.queue_kb_extract(
+            &principal,
+            QueueKbExtractParams {
+                work_entry_id: work_entry_id.to_string(),
+                world_id: world_id.to_string(),
+                work_id: work_id.map(std::string::ToString::to_string),
+                chapter,
+            },
+        )
+        .await
+        .map_err(map_core_error)
+    }
+    .await;
+    let job = finish_direct(&core, outcome).await?;
 
     if job.status == "queued" {
         println!("✓ Extract job queued: {}", job.job_id);
     } else {
         println!("ℹ Extract job already exists: {}", job.job_id);
     }
-    println!("  Work entry:  {work_entry_id}");
+    println!("  Work entry:  {}", job.work_entry_id);
     println!("  Target world: {world_id}");
-    if let Some(ref sk) = job.source_kind {
+    if let Some(sk) = &job.source_kind {
         println!("  Source kind:  {sk}");
     }
-    if let Some(ref sl) = job.source_locator {
+    if let Some(sl) = &job.source_locator {
         println!("  Source loc:   {sl}");
     }
-    if let Some(ref ph) = job.profile_hint {
+    if let Some(ph) = &job.profile_hint {
         println!("  Profile:      {ph}");
     }
-    if let Some(ref wid) = job.work_id {
+    if let Some(wid) = &job.work_id {
         println!("  Work ID:      {wid}");
     }
     println!("  Status:       {}", job.status);
@@ -461,59 +453,73 @@ const DEFAULT_EXTRACT_STATUS_LIMIT: u32 = 100;
 /// `kb extract-status` — show extract job(s) for the active creator.
 ///
 /// With `--job-id`, shows a specific job. Without it, lists up to
-/// `DEFAULT_EXTRACT_STATUS_LIMIT` (100) most recent jobs.
+/// `DEFAULT_EXTRACT_STATUS_LIMIT` (100) most recent jobs. Each arm reads
+/// through the core and renders only after [`finish_direct`] released the
+/// writer.
 async fn kb_extract_status(config: &CliConfig, job_id: Option<&str>) -> Result<()> {
-    let creator_id = config
-        .active_creator_id
-        .as_deref()
-        .ok_or(CliError::CreatorNotSelected)?
-        .to_string();
-
-    // The seam's admission pre-flight runs before the pool open: `Schema::init`
-    // migrates — and therefore creates — the selected workspace, so a selection
-    // that names no materialized workspace must be refused instead of having one
-    // created for it.
-    require_materialized_workspace(config)?;
-    let db_path = crate::config::resolve_state_db_path(config)?;
-    let pool = crate::db::Schema::init(&db_path).await?;
-
     if let Some(jid) = job_id {
-        let job = nexus_local_db::get_extract_job(&pool, jid)
+        return show_extract_job(config, jid).await;
+    }
+    list_extract_jobs(config).await
+}
+
+/// `kb extract-status --job-id <id>` — one job in detail.
+async fn show_extract_job(config: &CliConfig, job_id: &str) -> Result<()> {
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        core.get_kb_extract_job(&principal, job_id)
             .await
-            .map_err(|e| CliError::Other(format!("Failed to get extract job: {e}")))?;
+            .map_err(map_core_error)
+    }
+    .await;
+    let job = finish_direct(&core, outcome).await?;
 
-        let Some(job) = job else {
-            return Err(CliError::Other(format!("Extract job '{jid}' not found.")));
-        };
-        print_job_detail(&job);
-    } else {
-        let jobs =
-            nexus_local_db::list_extract_jobs(&pool, &creator_id, DEFAULT_EXTRACT_STATUS_LIMIT)
-                .await
-                .map_err(|e| CliError::Other(format!("Failed to list extract jobs: {e}")))?;
+    let Some(job) = job else {
+        return Err(CliError::Other(format!(
+            "Extract job '{job_id}' not found."
+        )));
+    };
+    print_job_detail(&job);
+    Ok(())
+}
 
-        if jobs.is_empty() {
-            println!("No extract jobs for creator {creator_id}.");
-            return Ok(());
-        }
+/// `kb extract-status` — the creator's most recent jobs.
+async fn list_extract_jobs(config: &CliConfig) -> Result<()> {
+    let core = open_direct_core(config).await?;
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        let creator_id = principal.creator_id().to_string();
+        let jobs = core
+            .list_kb_extract_jobs(&principal, DEFAULT_EXTRACT_STATUS_LIMIT)
+            .await
+            .map_err(map_core_error)?;
+        Ok((creator_id, jobs))
+    }
+    .await;
+    let (creator_id, jobs) = finish_direct(&core, outcome).await?;
 
+    if jobs.is_empty() {
+        println!("No extract jobs for creator {creator_id}.");
+        return Ok(());
+    }
+
+    println!(
+        "Extract jobs for creator {creator_id} (showing up to {DEFAULT_EXTRACT_STATUS_LIMIT}):"
+    );
+    println!(
+        "{:<20} {:<15} {:<20} {:<20} STATUS",
+        "JOB_ID", "WORK_ENTRY", "WORLD", "CREATED"
+    );
+    for job in &jobs {
         println!(
-            "Extract jobs for creator {creator_id} (showing up to {DEFAULT_EXTRACT_STATUS_LIMIT}):"
+            "{:<20} {:<15} {:<20} {:<20} {}",
+            job.job_id,
+            truncate_str(&job.work_entry_id, 15),
+            truncate_str(&job.world_id, 20),
+            job.created_at,
+            job.status,
         );
-        println!(
-            "{:<20} {:<15} {:<20} {:<20} STATUS",
-            "JOB_ID", "WORK_ENTRY", "WORLD", "CREATED"
-        );
-        for job in &jobs {
-            println!(
-                "{:<20} {:<15} {:<20} {:<20} {}",
-                job.job_id,
-                truncate_str(&job.work_entry_id, 15),
-                truncate_str(&job.world_id, 20),
-                job.created_at,
-                job.status,
-            );
-        }
     }
     Ok(())
 }

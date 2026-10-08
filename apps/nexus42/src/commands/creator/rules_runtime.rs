@@ -26,7 +26,8 @@ use crate::commands::creator::works::{active_work_id_core, FindingsCommand, Rule
 use crate::config::CliConfig;
 use crate::core::{finish_direct, map_core_error, open_direct_core};
 use crate::errors::{CliError, Result};
-use nexus_core::{CoreService, ListFindingsQuery, Principal, UpdateFindingRequest};
+use nexus_contracts::FindingsApi;
+use nexus_core::{CoreService, ListFindingsQuery, Principal};
 
 /// Handle `creator works findings …` (V1.48 P2).
 ///
@@ -203,9 +204,9 @@ async fn handle_findings_accept(
         core.update_finding(
             principal,
             finding_id.to_string(),
-            UpdateFindingRequest {
+            FindingsApi {
                 status: Some("resolved".to_string()),
-                ..UpdateFindingRequest::default()
+                ..FindingsApi::default()
             },
         )
         .await
@@ -408,10 +409,10 @@ async fn handle_findings_set_status(
         .update_finding(
             principal,
             finding_id.to_string(),
-            UpdateFindingRequest {
+            FindingsApi {
                 status: Some(status.to_string()),
                 target_executor: target_executor.map(str::to_string),
-                ..UpdateFindingRequest::default()
+                ..FindingsApi::default()
             },
         )
         .await

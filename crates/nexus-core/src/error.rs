@@ -207,6 +207,15 @@ pub fn local_db_err(e: LocalDbError) -> CoreError {
         LocalDbError::WriterFenced { .. } => CoreError::WriterFenced,
         LocalDbError::SchemaMismatch { .. } => CoreError::SchemaMismatch,
         LocalDbError::Sqlx(err) if is_sqlite_busy(&err) => CoreError::Busy,
+        // v1.207 P3 (§B.1/§C): the frozen `operation_id_conflict` refusal for a
+        // receipt write that collides on the first-writer-wins `operation_id`.
+        // The code is the contract; the transport decides its status.
+        LocalDbError::OperationIdConflict { operation_id } => CoreError::Coded {
+            code: nexus_local_db::OPERATION_ID_CONFLICT_CODE.to_string(),
+            message: format!(
+                "operation id '{operation_id}' is already owned by a receipt with a different request fingerprint"
+            ),
+        },
         other => CoreError::Internal {
             category: format!("database_error: {other}"),
         },

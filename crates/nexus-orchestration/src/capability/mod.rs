@@ -222,7 +222,7 @@ pub trait PromptExecutor: Send + Sync {
 ///
 /// Implemented by `nexus-daemon-runtime`'s `DaemonToolDispatchAdapter`, which
 /// dispatches through `HostToolExecutor::dispatch_for_schedule` (the Schedule
-/// caller lane with `HostToolCallerKind::Schedule` audit differentiation).
+/// caller lane with `ToolsApiCallerKind::Schedule` audit differentiation).
 /// Injected into `HostToolCallTask` so the orchestration engine can invoke
 /// `nexus.*` tools on a schedule tick in-process.
 ///

@@ -68,10 +68,27 @@ use nexus_contracts::generated::daemon_api::compute::{
     run_request::RunRequest,
     run_response::RunResponse,
 };
+use nexus_contracts::CoreOperationReceipt;
 use nexus_local_db::compute_runs::{self, list_runs, RunListFilters};
+use nexus_local_db::operation_receipts::{
+    begin_operation, classify_recovery, get_operation_receipt, get_operation_receipt_by_subject,
+    settle_operation, BeginOutcome, OperationReceipt, RecoveryDecision, CONSUMER_COMPUTE_RUN,
+    STATUS_FAILED, STATUS_FINISHED,
+};
 use nexus_orchestration::compute_input_builder::ComputeInputBuilder;
 use serde_json::{json, Value};
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock, Mutex};
+
+use crate::execution::operation_id::{self, OperationScope};
+
+/// The `action` component of a compute run's durable operation scope (spec
+/// §B.1).
+const COMPUTE_RUN_ACTION: &str = "compute.run";
+
+/// The typed §B.3 Busy refusal code for a `running` receipt (spec §C).
+const OPERATION_IN_PROGRESS_CODE: &str = "operation_in_progress";
 
 /// Maximum response size (1 MiB) before the proposals payload is truncated.
 ///
@@ -84,6 +101,85 @@ const DEFAULT_RUN_LIST_LIMIT: u32 = 20;
 
 /// Hard cap on the run-list page size.
 const MAX_RUN_LIST_LIMIT: u32 = 100;
+
+/// The compute operation ids THIS process is executing right now (v1.207 P3
+/// §B.3 live-owner signal), mirroring the Connect lane's `InFlightWrites`.
+///
+/// §B.3 distinguishes a `running` receipt whose owner is LIVE (the typed Busy
+/// refusal) from one whose owner is unknown (`uncertain`). A receipt carries
+/// no owner marker, and the store cannot infer liveness, so the answer comes
+/// from this process-local registry: an id present here is an effect THIS
+/// process is running right now, while an id left `running` by a process that
+/// died is absent — the retry reads `uncertain` and never re-runs.
+///
+/// A claim is keyed by `(receipt store, operation id)`, never by the id alone:
+/// one process may serve several independent homes/DBs, and a caller-supplied
+/// operation id is only unique WITHIN its store. Keying by the id alone would
+/// let store B read store A's live run as its own Busy refusal, and would let
+/// one store's guard drop erase the other store's claim. The store half is the
+/// workspace `state.db` path — the same key the execution owner registry uses
+/// ([`CoreInner::db_path`]), so every `CoreService` opened over one file in
+/// this process shares ONE live-owner signal.
+static IN_FLIGHT_RUNS: LazyLock<Mutex<HashSet<(PathBuf, String)>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
+
+/// The in-flight claim key for one operation of one receipt store.
+///
+/// The store half is canonicalized so two spellings of the same `state.db`
+/// (a relative and an absolute path) still resolve to one store; a path that
+/// cannot be canonicalized is used verbatim.
+fn in_flight_key(store: &Path, operation_id: &str) -> (PathBuf, String) {
+    let store = std::fs::canonicalize(store).unwrap_or_else(|_| store.to_path_buf());
+    (store, operation_id.to_string())
+}
+
+/// True when THIS process is running the effect for `operation_id` of the
+/// receipt store at `store` now.
+///
+/// A poisoned lock reports `false`, which degrades to the `uncertain`
+/// refusal — never to a claim of live ownership.
+fn receipt_owner_is_live(store: &Path, operation_id: &str) -> bool {
+    // The key (and its `canonicalize` syscall) is built BEFORE the lock is
+    // taken: the registry mutex never spans a filesystem call.
+    let key = in_flight_key(store, operation_id);
+    IN_FLIGHT_RUNS
+        .lock()
+        .is_ok_and(|in_flight| in_flight.contains(&key))
+}
+
+/// RAII registration of an acquired compute operation in the process-local
+/// in-flight registry.
+///
+/// Dropping it ends the live-owner claim — on settlement, on an early return,
+/// and on a dropped (cancelled) future alike — so a retry after the owner is
+/// gone reads the id as owner-unknown rather than as Busy. (The compute effect
+/// itself runs on the blocking pool and is not force-cancellable, so a
+/// caller dropped mid-effect can leave the effect running; that window answers
+/// `uncertain`, the fail-closed direction — never a false live claim and never
+/// a re-run.) The drop removes exactly its own `(store, operation id)` claim,
+/// so a neighbouring store's claim for the same id is untouched.
+struct InFlightComputeGuard {
+    key: (PathBuf, String),
+}
+
+impl InFlightComputeGuard {
+    /// Mark an acquired operation as running in this process.
+    fn register(store: &Path, operation_id: &str) -> Self {
+        let key = in_flight_key(store, operation_id);
+        if let Ok(mut in_flight) = IN_FLIGHT_RUNS.lock() {
+            in_flight.insert(key.clone());
+        }
+        Self { key }
+    }
+}
+
+impl Drop for InFlightComputeGuard {
+    fn drop(&mut self) {
+        if let Ok(mut in_flight) = IN_FLIGHT_RUNS.lock() {
+            in_flight.remove(&self.key);
+        }
+    }
+}
 
 /// The daemon-wide compute serialization permit, acquired before every
 /// invocation.
@@ -182,6 +278,26 @@ pub async fn compute_run(
 
     ensure_world_owned(pool, creator_id, &request.world_id).await?;
 
+    // v1.207 P3 (§B.1): a caller that supplies an `operation_id` owns its replay
+    // identity. Resolve it and ask the receipt store FIRST (§B.3 step 2) —
+    // before any run row exists and before the effect runs — so a retry after a
+    // lost response is answered from the stored receipt instead of executing the
+    // module a second time. An id-less request keeps the run-scoped derivation
+    // and this pre-check does nothing.
+    let request_value = serde_json::to_value(&request).unwrap_or(Value::Null);
+    let supplied_identity = request
+        .operation_id
+        .as_deref()
+        .map(|id| {
+            supplied_operation_identity(creator_id, id, &args_without_operation_id(&request_value))
+        })
+        .transpose()?;
+    if let Some(identity) = &supplied_identity {
+        if let Some(answer) = replay_from_receipt(pool, &core.inner.db_path, identity).await? {
+            return Ok(answer);
+        }
+    }
+
     let cache = context.cache()?;
     let cached = cache
         .get(&request.module_id)
@@ -235,6 +351,110 @@ pub async fn compute_run(
     .await
     .map_err(crate::error::local_db_err)?;
 
+    // v1.207 P3 (§B.2/§B.3): the run's durable receipt shadows the
+    // `compute_sessions` transitions. §B.3 step 3 — the `running` receipt is
+    // written BEFORE the effect (WASM execution + outcome persistence), so a
+    // crash mid-run leaves a durable "the effect may have started" record
+    // instead of silence; the boot recovery pass
+    // ([`recover_stuck_compute_runs`]) then refuses to re-apply it.
+    //
+    // §B.1 + §B.2 in ONE pass: the canonical document is serialized and hashed
+    // once for both the run's durable id and the complete-request fingerprint.
+    // A caller-supplied id was resolved (and the receipt consulted) BEFORE the
+    // run row existed; an id-less request derives its run-scoped id here.
+    let identity = match supplied_identity {
+        Some(identity) => identity,
+        None => operation_id::resolve_operation_identity(&OperationScope {
+            actor: creator_id,
+            session: &run_id,
+            action: COMPUTE_RUN_ACTION,
+            args: &request_value,
+        })
+        .map_err(|err| CoreError::Internal {
+            category: format!("compute run operation identity: {err}"),
+        })?,
+    };
+    let operation_id = identity.operation_id;
+    let request_fingerprint = identity.request_fingerprint;
+    // The receipt-begin rendezvous seam (tests only; compiled out of production
+    // builds). It lets a test force both same-id callers past their run-row
+    // insert and the receipt pre-check before either reaches `begin_operation`,
+    // so the post-insert first-writer-wins conflict is deterministic.
+    #[cfg(any(test, feature = "test-hooks"))]
+    crate::execution::test_hooks::compute_begin_gate_wait(&operation_id).await;
+    let begin_outcome = match begin_operation(
+        pool,
+        &operation_id,
+        CONSUMER_COMPUTE_RUN,
+        &run_id,
+        &request_fingerprint,
+    )
+    .await
+    {
+        Ok(outcome) => outcome,
+        // A concurrent first use under the same id with DIFFERENT args won the
+        // receipt. Our freshly created run row never executed the module: settle
+        // it (never the winner's receipt) so it is not left `running` forever —
+        // an orphan only boot recovery would flag and Clear would never reach —
+        // and then surface the typed conflict verbatim. Unreachable for an
+        // id-less request (its id is derived from the fresh run id, so no
+        // receipt can already own it).
+        Err(nexus_local_db::LocalDbError::OperationIdConflict { .. }) => {
+            let _ = compute_runs::set_run_failed(
+                pool,
+                &run_id,
+                &json!({
+                    "code": "operation_id_conflict",
+                    "message": "a concurrent attempt owns this operation_id with a different \
+                                request; this duplicate did not execute the module",
+                })
+                .to_string(),
+            )
+            .await;
+            return Err(crate::error::local_db_err(
+                nexus_local_db::LocalDbError::OperationIdConflict {
+                    operation_id: operation_id.clone(),
+                },
+            ));
+        }
+        Err(other) => return Err(crate::error::local_db_err(other)),
+    };
+    match begin_outcome {
+        BeginOutcome::Acquired(_) => {}
+        // Unreachable for a freshly generated run id (the receipt's subject is
+        // the id itself). A caller-supplied id can lose a concurrent first-use
+        // race here: settle our duplicate run row (never the owned receipt) and
+        // answer from the receipt instead of running the effect twice.
+        BeginOutcome::Existing(stored) => {
+            let _ = compute_runs::set_run_failed(
+                pool,
+                &run_id,
+                &json!({
+                    "code": OPERATION_IN_PROGRESS_CODE,
+                    "message": "a concurrent attempt owns this operation_id; this duplicate did \
+                                not execute the module",
+                })
+                .to_string(),
+            )
+            .await;
+            return answer_from_receipt(
+                &stored,
+                receipt_owner_is_live(&core.inner.db_path, &stored.operation_id),
+            );
+        }
+    }
+
+    // §B.3 live-owner signal (v1.207 P3 wave 4): from here until the guard
+    // drops, THIS process owns the effect for `operation_id` in THIS receipt
+    // store, so a concurrent or retried call is answered with the typed Busy
+    // refusal instead of `uncertain`.
+    let _in_flight = InFlightComputeGuard::register(&core.inner.db_path, &operation_id);
+    // The live-owner rendezvous seam (tests only; compiled out of production
+    // builds): the registered owner parks here so a test can issue a retry
+    // against a KNOWN live owner deterministically.
+    #[cfg(any(test, feature = "test-hooks"))]
+    crate::execution::test_hooks::compute_in_flight_gate_wait(&operation_id).await;
+
     let engine = context.engine()?;
     let permit = context
         .serializer
@@ -265,6 +485,7 @@ pub async fn compute_run(
             // run_id are forbidden by the status guard.
             persist_failure(
                 pool,
+                &operation_id,
                 &run_id,
                 json!({
                     "code": "internal",
@@ -292,6 +513,7 @@ pub async fn compute_run(
             let details = json!({ "invalid_entries": entries_value });
             persist_failure(
                 pool,
+                &operation_id,
                 &run_id,
                 json!({
                     "code": "invalid_input",
@@ -309,6 +531,7 @@ pub async fn compute_run(
             let error_code = compute_error_code(&err);
             persist_failure(
                 pool,
+                &operation_id,
                 &run_id,
                 json!({ "code": error_code, "message": err.to_string() }),
             )
@@ -334,6 +557,7 @@ pub async fn compute_run(
         // are forbidden by the status guard).
         persist_failure(
             pool,
+            &operation_id,
             &run_id,
             json!({
                 "code": "internal",
@@ -345,35 +569,35 @@ pub async fn compute_run(
     }
 
     let proposals_raw: Value = serde_json::from_str(&proposals_json).unwrap_or(Value::Null);
-    let created_at = chrono::Utc::now();
+    let created_at = chrono::Utc::now().to_rfc3339();
+    let response = build_run_response(
+        &run_id,
+        &request.module_id,
+        &module_version,
+        &created_at,
+        &proposals_raw,
+    )?;
 
-    let response: RunResponse = serde_json::from_value(json!({
-        "run_id": &run_id,
-        "status": "succeeded",
-        "module_id": &request.module_id,
-        "module_version": &module_version,
-        "created_at": created_at.to_rfc3339(),
-        "proposals": &proposals_raw,
-    }))
-    .map_err(|err| CoreError::Internal {
-        category: format!("build run response: {err}"),
+    // §B.3: settle the receipt terminally with the EXACT answer the caller got.
+    // The receipt is the durable replay answer that OUTLIVES the run row — Clear
+    // history can delete `compute_sessions`, so a replay must never depend on it
+    // (and never fall back to re-running). Storing the answer also makes a
+    // replayed `created_at` byte-identical to the first success. A failure here
+    // is the effect-committed case: the run DID succeed and is durable on its
+    // row, so the receipt's absence is not a rollback and must not be retried —
+    // the typed refusal names the operation so the caller can inspect instead of
+    // re-running.
+    let response_json = serde_json::to_string(&response).map_err(|err| CoreError::Internal {
+        category: format!("serialize run response for the receipt: {err}"),
     })?;
-
-    // Response cap: when the full payload is over budget, truncate all four
-    // proposal parts. The untruncated output remains durable on the row.
-    if serde_json::to_vec(&response).unwrap_or_default().len() > RESPONSE_BYTE_CAP {
-        return serde_json::from_value(json!({
-            "run_id": run_id,
-            "status": "succeeded",
-            "module_id": request.module_id,
-            "module_version": module_version,
-            "truncated": true,
-            "created_at": created_at.to_rfc3339(),
-            "proposals": build_truncated_proposals(),
-        }))
-        .map_err(|err| CoreError::Internal {
-            category: format!("build truncated run response: {err}"),
-        });
+    if let Err(settle_err) =
+        settle_operation(pool, &operation_id, STATUS_FINISHED, &response_json).await
+    {
+        return Err(effect_committed_refusal(
+            &operation_id,
+            &run_id,
+            &settle_err,
+        ));
     }
 
     Ok(response)
@@ -1166,7 +1390,14 @@ fn select_event_indices(
 /// A failure here is logged, never propagated: the caller is already
 /// returning the ORIGINAL error, and replacing it with a storage error would
 /// hide the real cause.
-async fn persist_failure(pool: &sqlx::SqlitePool, run_id: &str, error: Value) {
+///
+/// v1.207 P3: the run's durable receipt is settled `failed` with the SAME
+/// payload the row carries, so the stored answer a later replay is served
+/// from agrees with the row on the failure reason. A receipt-settlement
+/// failure is logged and leaves the receipt `running`, which the recovery
+/// pass deliberately treats as ambiguous (§B.3 item 4: never a blind retry)
+/// rather than as a licence to re-apply.
+async fn persist_failure(pool: &sqlx::SqlitePool, operation_id: &str, run_id: &str, error: Value) {
     let payload =
         serde_json::to_string(&error).unwrap_or_else(|_| r#"{"code":"internal"}"#.to_string());
     if let Err(db_err) = compute_runs::set_run_failed(pool, run_id, &payload).await {
@@ -1175,7 +1406,147 @@ async fn persist_failure(pool: &sqlx::SqlitePool, run_id: &str, error: Value) {
             error = %db_err,
             "compensating set_run_failed also failed"
         );
+        // The row did not flip, so the run's outcome is not durable: leave the
+        // receipt `running`. Recovery classifies it as ambiguous and never
+        // re-applies — the honest answer, not a fabricated `failed`.
+        return;
     }
+    if let Err(settle_err) = settle_operation(pool, operation_id, STATUS_FAILED, &payload).await {
+        tracing::error!(
+            operation_id = %operation_id,
+            run_id = %run_id,
+            error = %settle_err,
+            "operation receipt settlement failed after the failed run persisted"
+        );
+    }
+}
+
+/// The typed effect-committed refusal (spec §B.3 item 4): the run's effect
+/// already committed but its required durable receipt did not land.
+///
+/// Modelled on the provider-port precedent
+/// (`crates/nexus-core-node/src/admitting_provider_port.rs`
+/// `effect_committed_failure`): this is NOT a rollback and NOT retryable. The
+/// refusal names the operation and the run so a caller can inspect and clean
+/// up deterministically, instead of re-running an effect that already
+/// happened.
+fn effect_committed_refusal(
+    operation_id: &str,
+    run_id: &str,
+    err: &nexus_local_db::LocalDbError,
+) -> CoreError {
+    CoreError::Internal {
+        category: format!(
+            "effect_committed: the compute run succeeded and is durable, but its operation \
+             receipt settlement failed; the effect is not rolled back and the call is not \
+             retryable — inspect operation_id={operation_id} run_id={run_id}: {err}"
+        ),
+    }
+}
+
+/// One direct-lane compute run that was stuck `running` at boot, and the
+/// receipt-first answer recovery decided for it.
+#[derive(Debug, Clone)]
+pub struct ComputeRunRecovery {
+    /// The stuck run row's id.
+    pub run_id: String,
+    /// The receipt's operation id, when a receipt exists for the run.
+    pub operation_id: Option<String>,
+    /// The §B.3 decision. Deliberately a report: recovery never re-applies
+    /// and never fabricates a terminal for an orphan.
+    pub outcome: ComputeRunRecoveryOutcome,
+}
+
+/// The receipt-first decision for a stuck compute run (§B.3 steps 2–4).
+#[derive(Debug, Clone)]
+pub enum ComputeRunRecoveryOutcome {
+    /// A terminal receipt exists: the replay is answered **from the
+    /// receipt** (§B.3 step 3) and the run is **not** re-applied.
+    ///
+    /// The complete stored receipt travels here — status, the exactly-one
+    /// terminal payload (`result_json` for `finished`, `error_json` for
+    /// `failed`/`cancelled`/`interrupted`), `operation_id`, `subject_id` and
+    /// the timestamps — so a caller inspecting the startup recovery can serve
+    /// the terminal answer without re-deriving or re-applying anything.
+    AnsweredFromReceipt {
+        /// The stored terminal receipt, projected onto the wire DTO.
+        receipt: CoreOperationReceipt,
+    },
+    /// No terminal receipt: the §B.3 item-4 typed refusal — never a blind
+    /// retry, and no terminal is fabricated for the orphaned run.
+    Uncertain(CoreError),
+}
+
+/// The §B.3 boot recovery entry point for direct-lane compute runs.
+///
+/// Called once at execution start (before any effect can run), it finds every
+/// direct-lane row still in `running` and asks the receipt store **first** —
+/// the frozen order. It never re-applies an effect:
+///
+/// - a **terminal** receipt answers the replay (the run already settled; the
+///   stuck row is reported, never re-run);
+/// - anything else (a `running` receipt whose owner is gone, or no receipt at
+///   all) is the §B.3 item-4 ambiguity: a non-idempotent run without a
+///   terminal receipt gets a typed [`uncertain`](crate::operation_receipts::UNCERTAIN_CODE)
+///   refusal, never a blind retry.
+///
+/// The "no receipt" arm is deliberately stricter than
+/// [`classify_recovery`]'s `ApplyOnce`: a stuck *run row* means the effect
+/// already started (the row is its durable trace) and its receipt write never
+/// landed, so "apply once" is exactly the double-apply §B.3 forbids.
+///
+/// # Errors
+///
+/// Returns a mapped storage error when the run scan or a receipt read fails.
+pub async fn recover_stuck_compute_runs(
+    pool: &sqlx::SqlitePool,
+) -> CoreResult<Vec<ComputeRunRecovery>> {
+    let stuck: Vec<(String,)> = sqlx::query_as(
+        "SELECT run_id FROM compute_sessions \
+          WHERE status = 'running' AND run_id IS NOT NULL \
+          ORDER BY created_at ASC, run_id ASC",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| crate::error::local_db_err(nexus_local_db::LocalDbError::Sqlx(e)))?;
+
+    let mut recovered = Vec::with_capacity(stuck.len());
+    for (run_id,) in stuck {
+        let receipt = get_operation_receipt_by_subject(pool, CONSUMER_COMPUTE_RUN, &run_id)
+            .await
+            .map_err(crate::error::local_db_err)?;
+        let operation_id = receipt.as_ref().map(|row| row.operation_id.clone());
+        // At boot no run owner can still be live, so a `running` receipt is
+        // an orphan by definition.
+        let outcome = match classify_recovery(receipt.as_ref(), false) {
+            RecoveryDecision::AnswerFromReceipt(terminal) => {
+                // The replay is answered FROM the receipt (§B.3 step 3): the
+                // complete stored terminal receipt travels out with the
+                // decision, so the caller never has to re-derive or re-apply.
+                ComputeRunRecoveryOutcome::AnsweredFromReceipt {
+                    receipt: crate::operation_receipts::project_receipt(terminal)?,
+                }
+            }
+            RecoveryDecision::InProgress(_)
+            | RecoveryDecision::Uncertain(_)
+            | RecoveryDecision::ApplyOnce => {
+                let reason = if receipt.is_some() {
+                    "its receipt is still `running` and its owner is gone"
+                } else {
+                    "no receipt was ever written for the run"
+                };
+                ComputeRunRecoveryOutcome::Uncertain(crate::operation_receipts::uncertain_refusal(
+                    &run_id, reason,
+                ))
+            }
+        };
+        recovered.push(ComputeRunRecovery {
+            run_id,
+            operation_id,
+            outcome,
+        });
+    }
+    Ok(recovered)
 }
 
 /// Map a sandbox error onto its retained lowercase wire code.
@@ -1322,6 +1693,240 @@ fn build_truncated_proposals() -> Value {
             ),
         },
     })
+}
+
+/// The `args` of a caller-supplied-identity scope: the request without its
+/// `operation_id` envelope field.
+///
+/// The id is envelope metadata, not part of the logical request, so it is
+/// excluded from the request fingerprint (§B.1/§B.2): a retry with the same id
+/// and the same logical request fingerprints identically.
+fn args_without_operation_id(request_value: &Value) -> Value {
+    let mut value = request_value.clone();
+    if let Some(map) = value.as_object_mut() {
+        map.remove(operation_id::OPERATION_ID_FIELD);
+    }
+    value
+}
+
+/// Resolve the durable identity of a caller-supplied `operation_id` (spec §B.1).
+///
+/// The id is used verbatim after wire-shape validation — nothing is derived.
+/// The scope is retry-stable: `session` is the id itself (no run id exists yet,
+/// because the receipt is consulted BEFORE a run row is created), so a retry of
+/// the same logical request reproduces the same fingerprint, while a different
+/// request under the same id is the `operation_id_conflict` refusal.
+fn supplied_operation_identity(
+    actor: &str,
+    operation_id: &str,
+    args: &Value,
+) -> CoreResult<operation_id::OperationIdentity> {
+    operation_id::validate_operation_id(operation_id).map_err(CoreError::from)?;
+    Ok(operation_id::OperationIdentity {
+        operation_id: operation_id.to_string(),
+        request_fingerprint: operation_id::request_fingerprint(&OperationScope {
+            actor,
+            session: operation_id,
+            action: COMPUTE_RUN_ACTION,
+            args,
+        }),
+    })
+}
+
+/// Ask the receipt store FIRST for a caller-supplied id (spec §B.3 steps 1–3).
+///
+/// `store` is the receipt store's identity (`CoreInner::db_path`), used to read
+/// the live-owner signal for THIS store's in-flight runs — a neighbouring
+/// store's claim for the same id is never this store's answer.
+///
+/// `Some(answer)` when a receipt already owns the id (a terminal receipt answers
+/// the replay, a `running` receipt answers from its ACTUAL ownership — Busy for
+/// this store's live run, `uncertain` otherwise). `None` when no receipt
+/// exists — safe to apply exactly once. A stored receipt with a different
+/// fingerprint is the typed `operation_id_conflict`.
+async fn replay_from_receipt(
+    pool: &sqlx::SqlitePool,
+    store: &Path,
+    identity: &operation_id::OperationIdentity,
+) -> CoreResult<Option<RunResponse>> {
+    let Some(receipt) = get_operation_receipt(pool, &identity.operation_id)
+        .await
+        .map_err(crate::error::local_db_err)?
+    else {
+        return Ok(None);
+    };
+    if !receipt.matches_fingerprint(&identity.request_fingerprint) {
+        return Err(crate::error::local_db_err(
+            nexus_local_db::LocalDbError::OperationIdConflict {
+                operation_id: identity.operation_id.clone(),
+            },
+        ));
+    }
+    Ok(Some(answer_from_receipt(
+        &receipt,
+        receipt_owner_is_live(store, &receipt.operation_id),
+    )?))
+}
+
+/// The §B.3 answer for a receipt that already owns an operation id.
+///
+/// `owner_is_live` is the caller's ACTUAL ownership knowledge (see
+/// [`receipt_owner_is_live`]), never an assumption: a `running` receipt THIS
+/// process is executing right now is the in-flight Busy answer, while a
+/// `running` receipt whose owner is gone (a crash left it behind) is the
+/// `uncertain` answer — the caller is told to inspect, never to wait for work
+/// that has stopped and never to re-run it. The boot recovery lane passes
+/// `false` directly, because no run owner can still be live at boot.
+fn answer_from_receipt(receipt: &OperationReceipt, owner_is_live: bool) -> CoreResult<RunResponse> {
+    match classify_recovery(Some(receipt), owner_is_live) {
+        RecoveryDecision::AnswerFromReceipt(terminal) => answer_from_terminal_receipt(&terminal),
+        RecoveryDecision::InProgress(_) => {
+            Err(operation_in_progress_refusal(&receipt.operation_id))
+        }
+        RecoveryDecision::Uncertain(_) => Err(crate::operation_receipts::uncertain_refusal(
+            &receipt.operation_id,
+            "its receipt is still `running` and its owner cannot be confirmed",
+        )),
+        // `classify_recovery` never yields `ApplyOnce` for a present receipt;
+        // refusing honestly beats a panic if that invariant ever changes.
+        RecoveryDecision::ApplyOnce => Err(CoreError::Internal {
+            category: "operation receipt classification returned ApplyOnce for a stored receipt"
+                .to_string(),
+        }),
+    }
+}
+
+/// Rebuild the replay answer from a TERMINAL receipt (§B.3 step 3).
+///
+/// A `finished` receipt stores the exact `RunResponse` the first call returned,
+/// so the answer is reconstructable from the RECEIPT ALONE for its whole
+/// lifetime — independent of the run row, which Clear history may delete (and
+/// never a re-run). Every other terminal status stores the failure reason in
+/// `error_json`, rendered as the same refusal the first call produced.
+fn answer_from_terminal_receipt(receipt: &OperationReceipt) -> CoreResult<RunResponse> {
+    if receipt.status != STATUS_FINISHED {
+        return Err(replayed_failure_refusal(receipt));
+    }
+    let payload = receipt
+        .result_json
+        .as_deref()
+        .ok_or_else(|| CoreError::Internal {
+            category: format!(
+                "finished operation receipt {} carries no result payload",
+                receipt.operation_id
+            ),
+        })?;
+    serde_json::from_str(payload).map_err(|err| CoreError::Internal {
+        category: format!(
+            "parse replayed run response from receipt {}: {err}",
+            receipt.operation_id
+        ),
+    })
+}
+
+/// Render a terminal non-`finished` receipt as the refusal the first call
+/// produced: the stored `code`/`message` (and structured detail), never a
+/// fabricated success.
+///
+/// The stored payload is the run's durable `error_json` — the EXACT object the
+/// first call persisted and `GET /runs/{id}` serves — so the replay restores
+/// the same variant, not a flattened coded string:
+/// - `invalid_input` carrying a `details` object is the `InputValidation`
+///   refusal (its `details.invalid_entries` holds the entry ids and reasons a
+///   caller who lost the first response must be able to recover);
+/// - `invalid_input` without `details` is the plain coded refusal (a manifest
+///   validation failure stores no per-entry detail);
+/// - `internal` stays internal (never a transport-visible code);
+/// - everything else replays as `Coded` with the stored code.
+fn replayed_failure_refusal(receipt: &OperationReceipt) -> CoreError {
+    let payload: Value = receipt
+        .error_json
+        .as_deref()
+        .and_then(|raw| serde_json::from_str(raw).ok())
+        .unwrap_or(Value::Null);
+    let code = payload
+        .get("code")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let message = payload
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or("the compute run failed");
+    if code == "invalid_input" {
+        if let Some(details) = payload.get("details") {
+            return CoreError::InputValidation {
+                details: details.clone(),
+            };
+        }
+    }
+    if code == "internal" {
+        CoreError::Internal {
+            category: format!(
+                "replayed compute run {} failed: {message}",
+                receipt.subject_id
+            ),
+        }
+    } else {
+        CoreError::Coded {
+            code: code.to_string(),
+            message: format!("{message} (replayed from the durable operation receipt)"),
+        }
+    }
+}
+
+/// The typed §B.3 Busy refusal for a `running` receipt (spec §C).
+fn operation_in_progress_refusal(operation_id: &str) -> CoreError {
+    CoreError::Coded {
+        code: OPERATION_IN_PROGRESS_CODE.to_string(),
+        message: format!(
+            "operation {operation_id} is already in progress; its effect is in flight, so the \
+             call is not retried"
+        ),
+    }
+}
+
+/// Assemble the run response from the durable run facts and the module output,
+/// applying the 1 MiB response cap (the full output stays durable on the row).
+///
+/// Shared by the first-run path and a receipt replay, so a replay returns the
+/// identical response shape instead of a second hand-written variant.
+fn build_run_response(
+    run_id: &str,
+    module_id: &str,
+    module_version: &str,
+    created_at: &str,
+    proposals_raw: &Value,
+) -> CoreResult<RunResponse> {
+    let response: RunResponse = serde_json::from_value(json!({
+        "run_id": run_id,
+        "status": "succeeded",
+        "module_id": module_id,
+        "module_version": module_version,
+        "created_at": created_at,
+        "proposals": &proposals_raw,
+    }))
+    .map_err(|err| CoreError::Internal {
+        category: format!("build run response: {err}"),
+    })?;
+
+    // Response cap: when the full payload is over budget, truncate all four
+    // proposal parts. The untruncated output remains durable on the row.
+    if serde_json::to_vec(&response).unwrap_or_default().len() > RESPONSE_BYTE_CAP {
+        return serde_json::from_value(json!({
+            "run_id": run_id,
+            "status": "succeeded",
+            "module_id": module_id,
+            "module_version": module_version,
+            "truncated": true,
+            "created_at": created_at,
+            "proposals": build_truncated_proposals(),
+        }))
+        .map_err(|err| CoreError::Internal {
+            category: format!("build truncated run response: {err}"),
+        });
+    }
+
+    Ok(response)
 }
 
 /// Parse an RFC 3339 timestamp, falling back to the Unix epoch.

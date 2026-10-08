@@ -55,7 +55,10 @@ basename-derived PascalCase type name, emitting a nested tree that mirrors `sche
 (an isolated workspace under `rust-gen/`, excluded from the root `[workspace]`) over the
 dereferenced tree produced by stage 1 (`.schemas-dereferenced/`). The orchestrator
 (`src/index.ts`) shells out via `cargo run --release`, passing the prep-resolved paths as
-env vars (`NEXUS_REPO_ROOT`, `NEXUS_DEREF_SCHEMAS_DIR`, `NEXUS_SRC_SCHEMAS_DIR`).
+env vars (`NEXUS_REPO_ROOT`, `NEXUS_DEREF_SCHEMAS_DIR`, `NEXUS_SRC_SCHEMAS_DIR`). Each
+emitted module then takes two in-process passes before it is written (no external
+`rustfmt`): a formatting pass (`syn` → `prettyplease`) and a `$ref`-target dedupe that
+leaves each referenced type in exactly one module.
 
 ## Workflow
 

@@ -34,13 +34,13 @@ use crate::core::{finish_direct, map_core_error, open_direct_core};
 use crate::errors::Result;
 use crate::CliError;
 use clap::Subcommand;
-// The canonical preset profile DTOs live in the generated `preset_profile_response`
-// module; the crate-root names resolve to per-DTO duplicates that are wire-identical
-// but distinct Rust types from the ones `PresetProfileResponse` actually holds.
-// Import the family from the owning response module.
-use nexus_contracts::generated::core::orchestration_presets::preset_profile_response::{
-    PresetProfileExitWhen, PresetProfileLanes, PresetProfileNext, PresetProfileResponse,
-};
+// The preset profile family is generated one type per module; the lane de-duplicates
+// every `$ref` target to its standalone module, so import each type from the module
+// that owns it.
+use nexus_contracts::generated::core::orchestration_presets::preset_profile_exit_when::PresetProfileExitWhen;
+use nexus_contracts::generated::core::orchestration_presets::preset_profile_lanes::PresetProfileLanes;
+use nexus_contracts::generated::core::orchestration_presets::preset_profile_next::PresetProfileNext;
+use nexus_contracts::generated::core::orchestration_presets::preset_profile_response::PresetProfileResponse;
 // Same family note as above, for the grouped listing: the core returns the
 // generated `preset_management` response (its `source` enum displays the real
 // `embedded` / `system` / `user` label), so the CLI reads that type directly
@@ -676,9 +676,8 @@ fn format_next(next: &PresetProfileNext) -> String {
 mod tests {
     use super::*;
     use clap::Parser;
-    use nexus_contracts::generated::core::orchestration_presets::preset_profile_response::{
-        PresetProfileSignal, PresetProfileState,
-    };
+    use nexus_contracts::generated::core::orchestration_presets::preset_profile_signal::PresetProfileSignal;
+    use nexus_contracts::generated::core::orchestration_presets::preset_profile_state::PresetProfileState;
 
     /// Wrapper for parsing `PresetCommand` in tests.
     #[derive(Debug, clap::Parser)]

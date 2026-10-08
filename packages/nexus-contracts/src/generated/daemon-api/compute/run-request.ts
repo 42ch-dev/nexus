@@ -26,4 +26,8 @@ export interface RunRequest {
   invocation_params?: {
     [k: string]: unknown | undefined;
   };
+  /**
+   * Optional caller-supplied durable operation id (v1.207 §B.1, shape op_<32 lowercase hex>). When present it stabilizes retry identity: a retry after a lost response is answered from the stored receipt instead of re-running the module, and the same id with a different request is refused with operation_id_conflict. When omitted the run keeps its run-scoped derived id (unchanged behavior).
+   */
+  operation_id?: string;
 }

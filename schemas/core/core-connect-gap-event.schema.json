@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-connect-gap-event.schema.json",
+  "schema_version": 1,
+  "title": "Core Connect Gap Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["reason", "requires_transcript_reconciliation", "operation_id", "resync_required", "inspect_url"],
+  "properties": {
+    "reason": { "type": "string", "enum": ["lagging", "oversized", "history_unavailable", "interrupted", "stale_cursor"] },
+    "requires_transcript_reconciliation": { "type": "boolean", "const": true, "x-nexus-literal-true": true },
+    "operation_id": { "type": ["string", "null"] },
+    "resync_required": { "type": "boolean", "const": true, "x-nexus-literal-true": true },
+    "inspect_url": { "type": "string" }
+  }
+}

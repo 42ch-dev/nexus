@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO operation_receipts (operation_id, consumer, subject_id, status, request_fingerprint, result_json, error_json, created_at, updated_at, terminal_at, sequence) VALUES ('op_raw', 'compute_run', 'run-raw', 'running', 'fp-raw', NULL, NULL, '2026-10-07T00:00:00Z', '2026-10-07T00:00:00Z', NULL, 1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "8ddbc9b435f588e37394c589263b25168a53e72d672b29de3846d7660b412393"
+}

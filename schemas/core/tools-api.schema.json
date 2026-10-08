@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/tools-api.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ToolsApi",
+  "description": "Host tool invocation request: the typed entry point of the capability spine, shared by HTTP, the internal agent-host route and schedule dispatch. `parameters` stays an unrestricted JSON value because that IS the capability contract — a capability declares a JSON Schema and receives arguments matching it, so the capability schema (never a Rust type per tool) is the authority for the payload.",
+  "type": "object",
+  "required": ["tool_name", "parameters"],
+  "additionalProperties": false,
+  "properties": {
+    "tool_name": {
+      "type": "string",
+      "description": "The tool id to dispatch."
+    },
+    "parameters": {
+      "description": "Tool arguments; any JSON value, validated against the capability's declared schema."
+    },
+    "session_id": {
+      "type": "string",
+      "description": "Session this call belongs to, when the caller has one."
+    },
+    "request_id": {
+      "type": "string",
+      "description": "Caller-supplied request id, for audit correlation."
+    },
+    "caller_kind": {
+      "type": "string",
+      "enum": ["schedule"],
+      "description": "Who is calling, when it is not the ordinary HTTP path."
+    }
+  }
+}

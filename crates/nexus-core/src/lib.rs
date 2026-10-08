@@ -7,7 +7,10 @@ pub mod actor_sessions;
 mod actors;
 mod changes;
 mod chronology;
-#[cfg(feature = "connect-client")]
+// `connect-host` is the Connect-host product cohort (WS accept loop +
+// peer-tools event lane, no rmcp); `connect-client` is the superset
+// (connect-host + the rmcp reverse-invoke bridge). Either exposes the module.
+#[cfg(any(feature = "connect-client", feature = "connect-host"))]
 pub mod connect;
 mod content;
 mod context;
@@ -23,6 +26,12 @@ pub mod host;
 mod knowledge;
 mod memory;
 mod memory_pipeline;
+mod operation_receipts;
+// v1.207 P3-T1 (spec §B.1): the stable durable operation id every receipt
+// consumer resolves through. Root-level and gated on its own tiny feature so
+// the Connect host (which links no `execution`) reuses the ONE derivation.
+#[cfg(feature = "operation-id")]
+pub mod operation_id;
 mod outline;
 mod presets;
 mod principal;
@@ -73,18 +82,24 @@ pub use execution::{
 };
 pub use findings::{
     format_routing_hint, CreateFindingRequest, ListFindingsQuery, ListFindingsResponse,
-    PruneFindingsOutcome, StaleFindingEntry, StaleFindingsResponse, UpdateFindingRequest,
+    PruneFindingsOutcome, StaleFindingEntry, StaleFindingsResponse,
 };
 pub use home::CoreHomeService;
 #[cfg(feature = "provider-host")]
 pub use host::HostHandle;
+pub use knowledge::QueueKbExtractParams;
 pub use memory::{
     CharacterTomBeliefRow, CharacterTomListQuery, CharacterTomPage, CharacterTomRecordInput,
     CharacterTomService,
 };
 pub use presets::PresetError;
 pub use principal::Principal;
-pub use references::{GetReferenceResponse, ListReferencesResponse, ReferenceInfo};
+pub use references::{RegisterReferenceParams, REFERENCE_SOURCE_TYPES};
+// Reference read envelopes are schema-owned (core lane); re-exported here so
+// direct-core callers keep naming them through `nexus_core`.
+pub use nexus_contracts::core::references::{
+    ReferenceGetResponse, ReferenceListResponse, ReferenceSourceInfo,
+};
 pub use service::{CoreAccess, CoreOpenOptions, CoreService};
 pub use soul::CoreCharacterMind;
 pub use storage_status::{CoreStorageStatus, CoreStorageVersions};

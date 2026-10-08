@@ -10,10 +10,10 @@ use nexus_contracts::daemon_api::reading::{
     ReadingAnnotationCreateRequest, ReadingAnnotationListQuery, ReadingAnnotationPatchRequest,
     ReadingProgressQuery, ReadingProgressRequest,
 };
-use nexus_contracts::{BatchUpdateFindingsRequest, CreateWorkRequest, CreateWorldRequest};
-use nexus_core::{
-    CoreAccess, CoreError, CoreOpenOptions, CoreService, Principal, UpdateFindingRequest,
+use nexus_contracts::{
+    BatchUpdateFindingsRequest, CreateWorkRequest, CreateWorldRequest, FindingsApi,
 };
+use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, Principal};
 
 fn select_creator(home: &std::path::Path, creator: &str, workspace: &str) {
     std::fs::write(home.join(".nexus42/config.toml"), format!("active_creator_id = \"{creator}\"\n[active_workspace_slug_by_creator]\n\"{creator}\" = \"{workspace}\"\n")).unwrap();
@@ -444,7 +444,7 @@ async fn findings_update_and_batch_triage_semantics() {
     core.update_finding(
         &principal,
         second.finding_id.clone(),
-        UpdateFindingRequest {
+        FindingsApi {
             status: Some("resolved".into()),
             ..Default::default()
         },
@@ -454,7 +454,7 @@ async fn findings_update_and_batch_triage_semantics() {
     core.update_finding(
         &principal,
         second.finding_id.clone(),
-        UpdateFindingRequest {
+        FindingsApi {
             status: Some("triaged".into()),
             ..Default::default()
         },
@@ -483,24 +483,43 @@ async fn findings_update_and_batch_triage_semantics() {
     assert_eq!(report.conflict, vec![second.finding_id.clone()]);
 
     // Tri-state rule_suggestion: null clears, absent keeps, value sets (R-V147P0-03).
+    // The carrier is the generated presence-aware one, so the three states are
+    // written as the wire JSON value they represent.
     let set = core
         .update_finding(
             &principal,
             first.finding_id.clone(),
-            UpdateFindingRequest {
-                rule_suggestion: Some(Some("prefer active voice".into())),
+            FindingsApi {
+                rule_suggestion: Some(serde_json::json!("prefer active voice")),
                 ..Default::default()
             },
         )
         .await
         .unwrap();
     assert_eq!(set.rule_suggestion.as_deref(), Some("prefer active voice"));
+
+    // Absent keeps the stored column: a patch touching another field must not
+    // clear it. (`description` rather than `status`, whose self-loop is an
+    // illegal transition.)
+    let kept = core
+        .update_finding(
+            &principal,
+            first.finding_id.clone(),
+            FindingsApi {
+                description: Some("keeps the rule suggestion".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(kept.rule_suggestion.as_deref(), Some("prefer active voice"));
+
     let clear = core
         .update_finding(
             &principal,
             first.finding_id.clone(),
-            UpdateFindingRequest {
-                rule_suggestion: Some(None),
+            FindingsApi {
+                rule_suggestion: Some(serde_json::Value::Null),
                 ..Default::default()
             },
         )

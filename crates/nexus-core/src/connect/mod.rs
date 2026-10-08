@@ -1,6 +1,6 @@
 //! Peer-tools Connect client stack (AR-57..77), owned by `nexus-core`
-//! (P4-T3 moved from the daemon transport) behind the `connect-client` /
-//! `embedded-mcp` cohort features.
+//! (P4-T3 moved from the daemon transport) behind the `connect-host` /
+//! `connect-client` / `embedded-mcp` cohort features.
 //!
 //! - WS message-oriented [`ws_transport::Transport`] implementation over
 //!   tokio-tungstenite (AR-66).
@@ -20,7 +20,12 @@
 
 pub mod accept;
 pub mod config;
+pub mod events;
 pub mod identity;
+// The rmcp bridge is the reverse-invoke/operator surface; it compiles only
+// with the rmcp-bearing `connect-client` cohort, never in the Connect-host
+// product cohort (`connect-host`).
+#[cfg(feature = "connect-client")]
 pub mod mcp_bridge;
 #[cfg(feature = "embedded-mcp")]
 pub mod mcp_embedded;
@@ -41,7 +46,8 @@ pub use watch::{
     peer_config_digest, spawn_peer_config_watch, supervise_peer_config_watch, PeerConfigHolder,
     PeerConfigSnapshot,
 };
-// Shared MCP bridge core re-exports.
+// Shared MCP bridge core re-exports (rmcp-bearing `connect-client` cohort).
+#[cfg(feature = "connect-client")]
 pub use mcp_bridge::{
     is_unroutable, CatalogResponse, CatalogRow, McpBackend, McpBridgeHandler, ToolCallOutcome,
 };

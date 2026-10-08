@@ -12,9 +12,11 @@
 //! variant for variant, so one domain failure reads identically on either
 //! transport.
 //!
-//! No `EngineOwner`, server probe, Node child or live provider is involved:
-//! the raw user home plus [`CoreAccess::DirectWriter`] are the whole authority,
-//! and the caller awaits [`finish_direct`] before reporting anything.
+//! No server probe, Node child or live provider is involved: the raw user home
+//! plus [`CoreAccess::DirectWriter`] are the whole authority, and the caller
+//! awaits [`finish_direct`] before reporting anything. The one exception is
+//! [`open_engine_owned_core`], which takes the workspace's engine admission for
+//! the leaf whose table is engine-guarded (`kb_extract_jobs`).
 //!
 //! Opening refuses a selection that names no materialized workspace before the
 //! writer pool is admitted ([`require_materialized_workspace`]), so an
@@ -42,6 +44,34 @@ pub async fn open_direct_core(config: &CliConfig) -> Result<CoreService> {
     CoreService::open(CoreOpenOptions {
         user_home,
         access: CoreAccess::DirectWriter,
+    })
+    .await
+    .map_err(map_core_error)
+}
+
+/// The same admission as [`open_direct_core`], over the workspace's
+/// **engine-owned** admission instead of the direct-writer one.
+///
+/// Engine-guarded state cannot be written over the direct-writer pool: the
+/// schema's writer guards fence every `kb_extract_jobs` write to a
+/// migration/engine writer, so a leaf that enqueues extract jobs needs this
+/// admission. This leaf is the first **production** one to take it — the
+/// engine-owned core open existed only in test fixtures before (the world-pack
+/// fixture in `world/kb/pack.rs` `mod tests`; the local-db / orchestration
+/// tests open `init_engine_pool` directly), while the production pack leaf
+/// opens the direct core. Reads and direct-writer writes keep using
+/// [`open_direct_core`].
+///
+/// # Errors
+///
+/// As [`open_direct_core`]; additionally the mapped core error when another
+/// process already owns the workspace's engine admission.
+pub async fn open_engine_owned_core(config: &CliConfig) -> Result<CoreService> {
+    let user_home = user_home_dir().map_err(|e| CliError::Config(e.to_string()))?;
+    require_materialized_workspace_from_home(config, &user_home)?;
+    CoreService::open(CoreOpenOptions {
+        user_home,
+        access: CoreAccess::EngineOwner,
     })
     .await
     .map_err(map_core_error)
@@ -258,7 +288,14 @@ pub fn map_core_error(err: CoreError) -> CliError {
 /// transport.
 fn coded_status(code: &str) -> u16 {
     match code {
-        "conflict" => 409,
+        // `conflict` is the retained family 409. v1.207 P3 (spec §B.1/§B.3/§C)
+        // adds the two frozen durable-operation refusal codes to the same
+        // family: the first writer's receipt is durable
+        // (`operation_id_conflict`) and an `uncertain` answer means the
+        // operation's state cannot be determined (never retry blindly). An
+        // exact 409 keeps both honest instead of degrading them to the 400
+        // `invalid_input` fallback.
+        "conflict" | "operation_id_conflict" | "uncertain" | "operation_in_progress" => 409,
         "invalid_state"
         | "invalid_transition"
         | "invalid_input"
@@ -458,9 +495,19 @@ fn incomplete_cleanup(report: &CoreCloseReport) -> String {
 /// The close/operation precedence table, without a database.
 #[cfg(test)]
 mod tests {
-    use super::resolve_direct;
+    use super::{coded_status, resolve_direct};
     use crate::errors::CliError;
     use nexus_contracts::{CoreCloseReport, CoreCloseReportState};
+
+    /// v1.207 P3 (§B.1/§B.3/§C): the durable-operation refusal codes are
+    /// conflicts on this transport too — the same 409 the daemon adapter
+    /// assigns, never the 400 fallback.
+    #[test]
+    fn durable_operation_refusals_are_conflicts() {
+        assert_eq!(coded_status("operation_id_conflict"), 409);
+        assert_eq!(coded_status("uncertain"), 409);
+        assert_eq!(coded_status("operation_in_progress"), 409);
+    }
 
     /// A close report that does not confirm cleanup, naming one pending
     /// operation so the report is actionable.

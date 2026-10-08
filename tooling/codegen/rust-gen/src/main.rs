@@ -21,6 +21,20 @@
 //! directory (nested `pub mod` + flat `pub use`, mirroring the sibling spoke
 //! generator), and stamps `SCHEMA_VERSIONS` / `LATEST_SCHEMA_VERSION` into the root.
 //!
+//! # Formatting pass + `$ref` dedupe
+//!
+//! `typify` hands back a `TokenStream`; its `to_string()` is a single-line token
+//! dump. Every generated file is therefore parsed back into a `syn` AST and
+//! re-printed with `prettyplease` before it is written — an in-process formatting
+//! pass with no external `rustfmt` binary or pinned-toolchain coupling.
+//!
+//! The same AST pass removes the duplicate of a `$ref` target that `typify` inlines
+//! into every referencing schema file (a standalone module type plus a wire-identical
+//! copy, e.g. `WorkPoolEntry` inside `work_pool_list_response`). Each referenced type
+//! keeps exactly one canonical home — the standalone module emitted for its own
+//! schema — and referencing modules import it from there, so consumers no longer need
+//! path-qualified workarounds. Names with no unique canonical home are left untouched.
+//!
 //! Orchestrator wiring (T3), clippy tuning (T4) and drift reconciliation (T5) are
 //! handled by later tasks — the emitted struct/enum derives may still differ from
 //! what consumers and the drift test expect.
@@ -28,7 +42,7 @@
 use glob::glob;
 use schemars::Schema;
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -304,7 +318,11 @@ fn inject_tri_state_deserializers(rust: &str, type_name: &str, fields: &[String]
             _ => {}
         }
     }
-    let (head, body, tail) = (rust[..open].to_string(), rust[open..close].to_string(), rust[close..].to_string());
+    let (head, body, tail) = (
+        rust[..open].to_string(),
+        rust[open..close].to_string(),
+        rust[close..].to_string(),
+    );
     let mut body = body;
     for field in fields {
         let needle = format!("pub {field} :");
@@ -322,6 +340,78 @@ fn inject_tri_state_deserializers(rust: &str, type_name: &str, fields: &[String]
             "\"crate :: tristate :: deserialize_presence\")] ",
         );
         body.insert_str(attr_at, attribute);
+    }
+    format!("{head}{body}{tail}")
+}
+/// Schema extension marker for boolean fields whose accepted wire value is true.
+const LITERAL_TRUE_MARKER: &str = "x-nexus-literal-true";
+
+fn literal_true_fields(src_schema_path: &Path) -> Vec<String> {
+    let Ok(content) = fs::read_to_string(src_schema_path) else {
+        return Vec::new();
+    };
+    let Ok(raw) = serde_json::from_str::<Value>(&content) else {
+        return Vec::new();
+    };
+    raw.get("properties")
+        .and_then(Value::as_object)
+        .map(|props| {
+            props
+                .iter()
+                .filter(|(_, schema)| {
+                    schema.get(LITERAL_TRUE_MARKER).and_then(Value::as_bool) == Some(true)
+                })
+                .map(|(name, _)| name.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn inject_literal_true_serde_attributes(rust: &str, type_name: &str, fields: &[String]) -> String {
+    if fields.is_empty() {
+        return rust.to_string();
+    }
+    let struct_header = format!("pub struct {type_name} ");
+    let Some(start) = rust.find(&struct_header) else {
+        return rust.to_string();
+    };
+    let Some(open_rel) = rust[start..].find('{') else {
+        return rust.to_string();
+    };
+    let open = start + open_rel;
+    let mut depth = 0i32;
+    let mut close = open;
+    for (offset, ch) in rust[open..].char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    close = open + offset;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let (head, body, tail) = (
+        rust[..open].to_string(),
+        rust[open..close].to_string(),
+        rust[close..].to_string(),
+    );
+    let mut body = body;
+    for field in fields {
+        let needle = format!("pub {field} :");
+        let Some(at) = body.find(&needle) else {
+            continue;
+        };
+        body.insert_str(
+            at,
+            concat!(
+                "# [serde (deserialize_with = \"crate :: literal_true :: deserialize\" , ",
+                "serialize_with = \"crate :: literal_true :: serialize\")] ",
+            ),
+        );
     }
     format!("{head}{body}{tail}")
 }
@@ -552,16 +642,205 @@ fn rename_identifier_prefix(rust: &str, from: &str, to: &str) -> String {
     out
 }
 
-/// Generate Rust source for a single schema via `typify` and write it to `out_path`.
+/// Canonical home of a generated `$ref` target: the standalone module that owns
+/// the name. `module` is relative to `crate::generated` (e.g.
+/// `core::works::work_pool_entry`).
+struct RefTargetEntry {
+    /// Basename-derived contract name of the schema this module was generated for
+    /// (`WorkPoolEntry`, `TimelineEventInfo`).
+    root: String,
+    /// Module path relative to `crate::generated`.
+    module: String,
+    /// Type names the module declares at its top level, as emitted.
+    declared: BTreeSet<String>,
+}
+
+struct RefTargetIndex {
+    entries: Vec<RefTargetEntry>,
+}
+
+impl RefTargetIndex {
+    /// Resolve the owner module of a declared type name, or `None` when the name has
+    /// no unique canonical home (it then stays exactly as `typify` emitted it).
+    ///
+    /// A name is owned when exactly one generated module both *declares* it and is
+    /// its family home: the module whose root type *is* the name (`WorkPoolEntry`),
+    /// or — for a nested type derived from an inlined `$ref` body — a module whose
+    /// root type name prefixes it (`TimelineEventInfoStatus` →
+    /// `daemon_api::timeline::timeline_event_info`). Declaring the name is required:
+    /// a mere prefix match (`CharacterActorRefActorKind` vs the `Character` module,
+    /// which does not declare it) must not invent a home. Ambiguous matches and the
+    /// file's own module resolve to `None`.
+    fn owner_of(&self, name: &str, self_module: &str) -> Option<&str> {
+        let candidates: Vec<&str> = self
+            .entries
+            .iter()
+            .filter(|entry| {
+                entry.declared.contains(name)
+                    && (entry.root == name || name.starts_with(entry.root.as_str()))
+            })
+            .map(|entry| entry.module.as_str())
+            .collect();
+        if candidates.len() == 1 && candidates[0] != self_module {
+            Some(candidates[0])
+        } else {
+            None
+        }
+    }
+}
+
+/// Module path of a schema's generated file, relative to `crate::generated`
+/// (`core/works/work-pool-entry.schema.json` → `core::works::work_pool_entry`).
+fn generated_module_path(rel: &Path) -> String {
+    let mut segments: Vec<String> = rel
+        .components()
+        .filter_map(|c| match c {
+            Component::Normal(os) => Some(to_rust_module_name(&os.to_string_lossy())),
+            _ => None,
+        })
+        .collect();
+    if let Some(last) = segments.pop() {
+        let stem = last.strip_suffix(".schema.json").unwrap_or(&last).to_string();
+        segments.push(stem);
+    }
+    segments.join("::")
+}
+
+/// The identifier an item declares or implements for: `pub struct X` → `X`,
+/// `impl X { … }` / `impl From<…> for X` → `X`.
+fn item_type_ident(item: &syn::Item) -> Option<String> {
+    match item {
+        syn::Item::Struct(i) => Some(i.ident.to_string()),
+        syn::Item::Enum(i) => Some(i.ident.to_string()),
+        syn::Item::Union(i) => Some(i.ident.to_string()),
+        syn::Item::Type(i) => Some(i.ident.to_string()),
+        syn::Item::Impl(i) => match &*i.self_ty {
+            syn::Type::Path(path) => path.path.segments.last().map(|s| s.ident.to_string()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Type names a module declares at its top level, as emitted.
+fn declared_type_names(items: &[syn::Item]) -> BTreeSet<String> {
+    items
+        .iter()
+        .filter_map(|item| match item {
+            syn::Item::Struct(i) => Some(i.ident.to_string()),
+            syn::Item::Enum(i) => Some(i.ident.to_string()),
+            syn::Item::Union(i) => Some(i.ident.to_string()),
+            syn::Item::Type(i) => Some(i.ident.to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Drop every declaration/impl of a duplicated name, recursing into the generated
+/// submodules: `typify` emits the inline copy's builder (and any nested helper)
+/// there too, so the copy must leave as one unit.
+fn prune_duplicate_items(items: &mut Vec<syn::Item>, duplicates: &BTreeSet<String>) {
+    items.retain(|item| !matches!(item_type_ident(item), Some(ident) if duplicates.contains(&ident)));
+    for item in items.iter_mut() {
+        if let syn::Item::Mod(module) = item {
+            if let Some((_, nested)) = module.content.as_mut() {
+                prune_duplicate_items(nested, duplicates);
+            }
+        }
+    }
+}
+
+/// True when `haystack` mentions `ident` as a whole word.
+fn mentions_ident(haystack: &str, ident: &str) -> bool {
+    let bytes = haystack.as_bytes();
+    let mut from = 0;
+    while let Some(pos) = haystack[from..].find(ident) {
+        let at = from + pos;
+        let end = at + ident.len();
+        let before_ok = at == 0 || !is_ident_byte(bytes[at - 1]);
+        let after_ok = end >= bytes.len() || !is_ident_byte(bytes[end]);
+        if before_ok && after_ok {
+            return true;
+        }
+        from = at + 1;
+    }
+    false
+}
+
+fn is_ident_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+/// Remove the inline duplicates of `$ref` targets from a generated module so the
+/// standalone module stays the single canonical home, then import what the pruned
+/// module still uses.
 ///
-/// `rel` is the schema's path relative to the schemas dir (POSIX or platform); it
-/// is rendered verbatim into the file header as the canonical source pointer.
+/// `typify` emits a standalone type for every referenced schema *and* a
+/// wire-identical copy inside each referencing file. Only names with a unique
+/// canonical home are touched; everything else (including genuinely local nested
+/// types, and names that collide ambiguously) is left alone.
+fn dedupe_ref_targets(
+    file: &mut syn::File,
+    self_module: &str,
+    index: &RefTargetIndex,
+) -> Result<(), String> {
+    let mut duplicates: BTreeMap<String, String> = BTreeMap::new();
+    for item in &file.items {
+        if let Some(ident) = item_type_ident(item) {
+            if let Some(owner) = index.owner_of(&ident, self_module) {
+                duplicates.insert(ident, owner.to_string());
+            }
+        }
+    }
+    if duplicates.is_empty() {
+        return Ok(());
+    }
+
+    let names: BTreeSet<String> = duplicates.keys().cloned().collect();
+    prune_duplicate_items(&mut file.items, &names);
+
+    // A removed copy can be referenced only from another removed item (a nested
+    // helper of the copy); import just the names the pruned module still uses.
+    let pruned = prettyplease::unparse(file);
+    let mut imports: Vec<syn::Item> = Vec::new();
+    for (name, module) in &duplicates {
+        if !mentions_ident(&pruned, name) {
+            continue;
+        }
+        let path = format!("crate::generated::{module}::{name}");
+        imports.push(syn::Item::Use(
+            syn::parse_str::<syn::ItemUse>(&format!("use {path};"))
+                .map_err(|err| format!("invalid generated import `{path}`: {err}"))?,
+        ));
+    }
+    if !imports.is_empty() {
+        imports.append(&mut file.items);
+        file.items = imports;
+    }
+    Ok(())
+}
+
+/// Formatting pass: render a module as pretty Rust after removing any
+/// `$ref`-target duplicate.
+fn render_module_body(
+    file: &mut syn::File,
+    self_module: &str,
+    index: &RefTargetIndex,
+) -> Result<String, String> {
+    dedupe_ref_targets(file, self_module, index)?;
+    Ok(prettyplease::unparse(file))
+}
+
+/// Generate Rust source for a single schema via `typify` and return the module
+/// body (schema header excluded).
+///
+/// `rel` is the schema's path relative to the schemas dir (POSIX or platform); the
+/// caller renders it verbatim into the file header as the canonical source pointer.
 fn generate_schema_rust(
     schema_path: &Path,
     rel: &Path,
-    out_path: &Path,
     src_schema_path: &Path,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let content = fs::read_to_string(schema_path)
         .map_err(|err| format!("failed to read {}: {err}", schema_path.display()))?;
     let mut schema: Schema = serde_json::from_str(&content)
@@ -643,24 +922,12 @@ fn generate_schema_rust(
     if !marked.is_empty() {
         rust = inject_tri_state_deserializers(&rust, &type_name, &marked);
     }
-
-    if let Some(parent) = out_path.parent() {
-        fs::create_dir_all(parent).map_err(|err| {
-            format!(
-                "failed to create output directory {}: {err}",
-                parent.display()
-            )
-        })?;
+    let literal_true = literal_true_fields(src_schema_path);
+    if !literal_true.is_empty() {
+        rust = inject_literal_true_serde_attributes(&rust, &type_name, &literal_true);
     }
 
-    let header = format!(
-        "//! AUTO-GENERATED FROM JSON SCHEMA - DO NOT MODIFY\n//! Source: {}\n//! Generated by: pnpm run codegen\n\n",
-        rel.display()
-    );
-
-    fs::write(out_path, format!("{header}{rust}"))
-        .map_err(|err| format!("failed to write {}: {err}", out_path.display()))?;
-    Ok(())
+    Ok(rust)
 }
 
 /// A generated `.rs` module, tracked so the barrel `mod.rs` files can declare and
@@ -873,6 +1140,16 @@ fn main() {
 
     let mut generated: BTreeSet<PathBuf> = BTreeSet::new();
     let mut generated_modules: Vec<GeneratedModule> = Vec::new();
+    /// One generated module, held in memory until the whole tree generated
+    /// cleanly: the formatting/dedupe pass runs before anything is written.
+    struct PendingModule {
+        out_path: PathBuf,
+        rel: PathBuf,
+        /// Basename-derived contract name of the schema (the module's root type).
+        root_name: String,
+        body: String,
+    }
+    let mut pending: Vec<PendingModule> = Vec::new();
     // `(type_name, schema_version)` pairs in filesystem-walk order (the loop iterates
     // sorted schema paths), matching the committed `SCHEMA_VERSIONS` ordering.
     let mut schema_versions: Vec<(String, u32)> = Vec::new();
@@ -888,21 +1165,29 @@ fn main() {
             continue;
         }
 
+        let file_name = rel
+            .file_name()
+            .and_then(|s| s.to_str())
+            .expect("schema rel path has a file name");
+        let type_name = schema_type_name(file_name);
         let out_path = output_path(&out_root, rel);
-        if let Err(err) = generate_schema_rust(schema_path, rel, &out_path, &src_dir.join(rel)) {
-            failures.push(err);
-            continue;
+        match generate_schema_rust(schema_path, rel, &src_dir.join(rel)) {
+            Ok(body) => pending.push(PendingModule {
+                out_path: out_path.clone(),
+                rel: rel.to_path_buf(),
+                root_name: type_name.clone(),
+                body,
+            }),
+            Err(err) => {
+                failures.push(err);
+                continue;
+            }
         }
 
         // Export mode + schema_version are read from the SOURCE schema (the deref
         // tree loses the top-level `schema_version` stamp and keeps the raw title).
         let src_path = src_dir.join(rel);
         let export_all = export_mode_for_schema(&src_path);
-        let file_name = rel
-            .file_name()
-            .and_then(|s| s.to_str())
-            .expect("schema rel path has a file name");
-        let type_name = schema_type_name(file_name);
         let export_type = if export_all {
             None
         } else {
@@ -931,18 +1216,91 @@ fn main() {
             export_all,
             export_type,
         });
+    }
+
+    eprintln!("skipped {skipped} definition-only / canonical-skip schema(s)");
+
+    if !failures.is_empty() {
+        for err in &failures {
+            eprintln!("error: {err}");
+        }
+        process::exit(1);
+    }
+
+    if generated.is_empty() {
+        eprintln!(
+            "error: generated 0 Rust schema files (deref dir: {})",
+            deref_dir.display()
+        );
+        process::exit(1);
+    }
+
+    // Formatting pass + `$ref` dedupe, then write. Every module is parsed before the
+    // first write, so the owner index sees the type names modules actually declare
+    // and a render failure cannot leave a partially written tree.
+    let mut parsed: Vec<(PathBuf, PathBuf, String, syn::File)> = Vec::new();
+    let mut render_failures: Vec<String> = Vec::new();
+    for module in &pending {
+        match syn::parse_file(&module.body) {
+            Ok(file) => parsed.push((
+                module.out_path.clone(),
+                module.rel.clone(),
+                module.root_name.clone(),
+                file,
+            )),
+            Err(err) => render_failures.push(format!(
+                "{}: parse emitted body: {err}",
+                module.rel.display()
+            )),
+        }
+    }
+    let ref_targets = RefTargetIndex {
+        entries: parsed
+            .iter()
+            .map(|(_, rel, root, file)| RefTargetEntry {
+                root: root.clone(),
+                module: generated_module_path(rel),
+                declared: declared_type_names(&file.items),
+            })
+            .collect(),
+    };
+    let mut rendered: Vec<(PathBuf, PathBuf, String)> = Vec::new();
+    for (out_path, rel, _, mut file) in parsed {
+        let self_module = generated_module_path(&rel);
+        match render_module_body(&mut file, &self_module, &ref_targets) {
+            Ok(body) => rendered.push((out_path, rel, body)),
+            Err(err) => render_failures.push(format!("{}: {err}", rel.display())),
+        }
+    }
+    if !render_failures.is_empty() {
+        for err in &render_failures {
+            eprintln!("error: {err}");
+        }
+        process::exit(1);
+    }
+
+    for (out_path, rel, body) in &rendered {
+        if let Some(parent) = out_path.parent() {
+            fs::create_dir_all(parent).expect("create generated schema output dir");
+        }
+        let header = format!(
+            "//! AUTO-GENERATED FROM JSON SCHEMA - DO NOT MODIFY\n//! Source: {}\n//! Generated by: pnpm run codegen\n\n",
+            rel.display()
+        );
+        fs::write(out_path, format!("{header}{body}")).unwrap_or_else(|err| {
+            eprintln!("error: failed to write {}: {err}", out_path.display());
+            process::exit(1);
+        });
         println!(
             "wrote {}",
             out_root
                 .strip_prefix(&root)
                 .ok()
                 .and_then(|_| out_path.strip_prefix(&root).ok())
-                .unwrap_or(&out_path)
+                .unwrap_or(out_path)
                 .display()
         );
     }
-
-    eprintln!("skipped {skipped} definition-only / canonical-skip schema(s)");
 
     let provider_host_event_src =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("provider_host_event.rs.template");
@@ -971,21 +1329,6 @@ fn main() {
                 .unwrap_or(&provider_host_event_out)
                 .display()
         );
-    }
-
-    if !failures.is_empty() {
-        for err in &failures {
-            eprintln!("error: {err}");
-        }
-        process::exit(1);
-    }
-
-    if generated.is_empty() {
-        eprintln!(
-            "error: generated 0 Rust schema files (deref dir: {})",
-            deref_dir.display()
-        );
-        process::exit(1);
     }
 
     // Write the barrel `mod.rs` for every directory in the tree (root gets the

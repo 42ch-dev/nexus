@@ -5,13 +5,19 @@
 //! preserved — absent (keep) / `null` (clear) / value (set) — and serialize
 //! back without losing the clear state.
 //!
+//! The core-owned consumer type is the core-lane `FindingsApi`
+//! (`schemas/core/findings-api.schema.json`, an `allOf` alias to the
+//! daemon-api definition) and it must keep the SAME carrier: the alias's
+//! `properties` re-declaration of the marker is what keeps `rust-gen`
+//! injecting the presence deserializer, so the seam is pinned here.
+//!
 //! The same file pins the *other* half of the omission contract: a property
 //! that the schema declares both `required` and nullable keeps its required
 //! status (omission is rejected, `null` is a value), which the typify 0.8
 //! cutover tightened rather than relaxed.
 
 use nexus_contracts::{
-    CoreServiceStopRequest, KnowledgeViewItem, PatchWorkRequest, UpdateFindingRequest,
+    CoreServiceStopRequest, FindingsApi, KnowledgeViewItem, PatchWorkRequest, UpdateFindingRequest,
     UpdateKnowledgeEntryRequest, UpdateKnowledgeEntryRequestAudience,
 };
 
@@ -54,6 +60,39 @@ fn update_finding_rejects_unknown_fields() {
     let error = serde_json::from_str::<UpdateFindingRequest>(r#"{"nope":1}"#)
         .expect_err("unknown field must be rejected");
     assert!(error.to_string().contains("unknown field"), "{error}");
+}
+
+/// The core-lane alias carries the SAME presence-aware carrier: the alias must
+/// not re-flatten omission onto null, because the core findings authority
+/// projects exactly this carrier (`nexus_contracts::tristate::presence_string`)
+/// and a flattened field would make "keep the stored column" indistinguishable
+/// from "clear it".
+#[test]
+fn core_lane_findings_alias_keeps_the_three_state_carrier() {
+    let keep: FindingsApi = serde_json::from_str(r#"{"status":"triaged"}"#).expect("keep parses");
+    assert_eq!(keep.rule_suggestion, None);
+    assert_eq!(keep.status.as_deref(), Some("triaged"));
+
+    let clear: FindingsApi =
+        serde_json::from_str(r#"{"rule_suggestion":null}"#).expect("clear parses");
+    assert_eq!(clear.rule_suggestion, Some(serde_json::Value::Null));
+    assert_eq!(
+        serde_json::to_string(&clear).expect("clear serializes"),
+        r#"{"rule_suggestion":null}"#
+    );
+
+    let set: FindingsApi =
+        serde_json::from_str(r#"{"rule_suggestion":"prefer scene breaks"}"#).expect("set parses");
+    assert_eq!(
+        set.rule_suggestion,
+        Some(serde_json::Value::String("prefer scene breaks".into()))
+    );
+
+    let omitted: FindingsApi = serde_json::from_str("{}").expect("omitted parses");
+    assert_eq!(
+        serde_json::to_string(&omitted).expect("omitted serializes"),
+        "{}"
+    );
 }
 
 #[test]

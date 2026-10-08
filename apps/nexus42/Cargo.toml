@@ -220,11 +220,21 @@ cli = [
   "dep:nix",
 ]
 connect-host = [
+  # v1.207 P2: the WS accept loop + peer-tools event lane live in nexus-core's
+  # `connect-host` cohort — the Connect-host surface WITHOUT the rmcp
+  # reverse-invoke bridge. Enabling `nexus-core/connect-client` here would pull
+  # rmcp into the shipped Connect-host graph, which the product graph pins
+  # forbid (`tooling/check-graph-pins.sh` asserts rmcp ABSENT).
+  "nexus-core/connect-host",
   "dep:chrono",
   "dep:nexus-knowledge",
   "dep:nexus-local-db",
   "dep:nexus-spoke-adapter",
   "nexus-spoke-adapter/compute",
+  # v1.207 P3: the Connect write surface derives the §B.1 durable operation id
+  # and its request fingerprint through nexus-core's ONE implementation. It
+  # pulls the hashing edge only — not `execution`, not `compute`.
+  "nexus-core/operation-id",
   "dep:sqlx",
   "dep:spoke-connect",
   "dep:spoke-schemas",

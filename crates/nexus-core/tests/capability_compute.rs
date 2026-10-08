@@ -25,12 +25,11 @@ use nexus_contracts::generated::daemon_api::compute::{
     run_request::RunRequest,
 };
 use nexus_contracts::CreateWorkRequest;
-use nexus_core::execution::capabilities::{
-    execute_tool, ToolContext, ToolExecuteRequest, ToolRuntimeFacts,
-};
+use nexus_contracts::ToolsApi;
+use nexus_core::execution::capabilities::{execute_tool, ToolContext, ToolRuntimeFacts};
 use nexus_core::execution::compute::{
     accept_compute_run, clear_compute_runs, compute_run, discard_compute_run, get_compute_run,
-    list_compute_runs, ComputeContext,
+    list_compute_runs, recover_stuck_compute_runs, ComputeContext, ComputeRunRecoveryOutcome,
 };
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, WorkPatchRequest};
 use nexus_wasm_host::{CachedModule, ModuleCache, ModuleManifest, SandboxConfig, WasmEngine};
@@ -407,7 +406,7 @@ async fn unknown_tool_is_refused_with_zero_domain_effect() {
     let f = fixture().await;
     let before = timeline_event_count(f.core.pool()).await;
 
-    let request = ToolExecuteRequest {
+    let request = ToolsApi {
         tool_name: "nexus.does.not.exist".to_string(),
         parameters: json!({}),
         session_id: None,
@@ -536,7 +535,7 @@ async fn schema_invalid_arguments_never_reach_the_capability() {
         nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(registry)),
     ));
 
-    let request = ToolExecuteRequest {
+    let request = ToolsApi {
         tool_name: "t3.requires.thing".to_string(),
         // `thing` is missing, so the declared schema refuses the call before
         // the capability's `run` is ever reached.
@@ -838,7 +837,7 @@ async fn execute_tool_refuses_a_principal_from_another_core() {
     .expect("second core opens");
     let foreign = other_core.active_principal().await.unwrap();
 
-    let request = ToolExecuteRequest {
+    let request = ToolsApi {
         tool_name: "nexus.workspace.info".to_string(),
         parameters: json!({}),
         session_id: None,
@@ -878,7 +877,7 @@ async fn execute_tool_accepts_the_owners_own_principal() {
         .expect("owner starts");
     let principal = f.core.active_principal().await.unwrap();
 
-    let request = ToolExecuteRequest {
+    let request = ToolsApi {
         tool_name: "nexus.workspace.info".to_string(),
         parameters: json!({}),
         session_id: None,
@@ -917,7 +916,7 @@ async fn research_query_is_scoped_to_the_creator() {
     .unwrap();
 
     // Direct id lookup of a FOREIGN row: NotFound, and no existence leak.
-    let request = ToolExecuteRequest {
+    let request = ToolsApi {
         tool_name: "nexus.research.query".to_string(),
         parameters: json!({ "reference_source_id": "ref_foreign" }),
         session_id: None,
@@ -933,7 +932,7 @@ async fn research_query_is_scoped_to_the_creator() {
     );
 
     // The LIST must not surface the foreign row either.
-    let request = ToolExecuteRequest {
+    let request = ToolsApi {
         tool_name: "nexus.research.query".to_string(),
         parameters: json!({}),
         session_id: None,
@@ -981,7 +980,7 @@ async fn reference_refresh_is_refused_under_a_read_only_policy() {
     let mut context = f.context.clone();
     context.set_workspace_path(Some(workspace_dir.to_string_lossy().into_owned()));
 
-    let request = ToolExecuteRequest {
+    let request = ToolsApi {
         tool_name: "nexus.reference.refresh".to_string(),
         parameters: json!({ "reference_source_id": "ref_any" }),
         session_id: None,
@@ -1007,7 +1006,7 @@ async fn reference_refresh_is_refused_under_a_read_only_policy() {
 
     // CONTROL: the same policy still ADMITS a read tool, so the refusal above
     // is the write classification and not the policy denying everything.
-    let request = ToolExecuteRequest {
+    let request = ToolsApi {
         tool_name: "nexus.workspace.info".to_string(),
         parameters: json!({}),
         session_id: None,
@@ -1032,8 +1031,8 @@ async fn reference_refresh_is_refused_under_a_read_only_policy() {
 // ---------------------------------------------------------------------------
 
 /// A `nexus.*` dispatch request with no session/request identity.
-fn tool_request(tool_name: &str, parameters: serde_json::Value) -> ToolExecuteRequest {
-    ToolExecuteRequest {
+fn tool_request(tool_name: &str, parameters: serde_json::Value) -> ToolsApi {
+    ToolsApi {
         tool_name: tool_name.to_string(),
         parameters,
         session_id: None,
@@ -3063,5 +3062,894 @@ async fn compute_facade_is_fenced_once_the_owner_closes() {
     assert!(
         matches!(discard, CoreError::Closing),
         "discard must be fenced after close, got {discard:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// v1.207 P3 — durable operation receipts on the compute Run write path
+// ---------------------------------------------------------------------------
+
+/// The receipt shadowing a stuck run row is reachable from the run row alone
+/// (spec §B.2 `subject_id`), which is the handle boot recovery asks with.
+async fn receipt_for_run(f: &Fixture, run_id: &str) -> Option<nexus_local_db::OperationReceipt> {
+    nexus_local_db::operation_receipts::get_operation_receipt_by_subject(
+        f.core.pool(),
+        nexus_local_db::operation_receipts::CONSUMER_COMPUTE_RUN,
+        run_id,
+    )
+    .await
+    .expect("receipt read")
+}
+
+/// Seed a direct-lane run row left `running` (the crash trace boot recovery
+/// scans for), and optionally its receipt.
+async fn seed_stuck_run(f: &Fixture, with_receipt: Option<&str>) -> String {
+    let run_id = nexus_local_db::compute_runs::insert_run(
+        f.core.pool(),
+        WORLD,
+        MODULE,
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect("insert a stuck run row");
+    if let Some(operation_id) = with_receipt {
+        nexus_local_db::operation_receipts::begin_operation(
+            f.core.pool(),
+            operation_id,
+            nexus_local_db::operation_receipts::CONSUMER_COMPUTE_RUN,
+            &run_id,
+            "fp-stuck",
+        )
+        .await
+        .expect("seed the run's receipt");
+    }
+    run_id
+}
+
+/// The run's durable receipt shadows the `compute_sessions` transitions: the
+/// `running` receipt is written before the effect and settled terminally with
+/// the run, carrying the SAME payload the run row does (spec §B.2).
+#[tokio::test]
+#[serial_test::serial]
+async fn compute_run_receipt_shadows_the_run_transitions() {
+    let f = fixture_with_compute(&[("loop", loop_manifest(), loop_wasm())], None).await;
+    let succeeded = run_succeeded(&f, &f.compute).await;
+
+    let receipt = receipt_for_run(&f, &succeeded)
+        .await
+        .expect("a succeeded run has a durable receipt");
+    assert_eq!(
+        receipt.status,
+        nexus_local_db::operation_receipts::STATUS_FINISHED
+    );
+    assert_eq!(receipt.consumer, "compute_run");
+    assert_eq!(receipt.subject_id, succeeded);
+    assert!(receipt.terminal_at.is_some());
+    assert!(
+        receipt.error_json.is_none(),
+        "a finished receipt carries a result, never an error: {receipt:?}"
+    );
+    nexus_core::execution::operation_id::validate_operation_id(&receipt.operation_id)
+        .expect("the shadowed receipt carries a wire-shaped operation id");
+    let row = nexus_local_db::compute_runs::get_run(f.core.pool(), &succeeded)
+        .await
+        .unwrap()
+        .expect("the run row");
+    // The finished receipt stores the run's EXACT answer (a `RunResponse`), so a
+    // replay is reconstructable from the receipt alone — it must survive Clear
+    // deleting the run row. Its proposals are the run row's own proposals.
+    let stored: serde_json::Value = serde_json::from_str(
+        receipt
+            .result_json
+            .as_deref()
+            .expect("a finished receipt carries its answer"),
+    )
+    .expect("the stored payload is the run response JSON");
+    assert_eq!(stored["run_id"], json!(succeeded));
+    assert_eq!(stored["status"], json!("succeeded"));
+    let row_proposals: serde_json::Value = serde_json::from_str(
+        row.proposals_json
+            .as_deref()
+            .expect("the succeeded row carries proposals"),
+    )
+    .unwrap();
+    assert_eq!(
+        stored["proposals"], row_proposals,
+        "the receipt's answer carries the run's own proposals"
+    );
+
+    // A failed run shadows the other terminal transition.
+    let _ = compute_run(&f.core, &f.compute, run_request(WORLD, "loop"))
+        .await
+        .expect_err("an exhausted-fuel module fails the run");
+    let (failed_run_id, status, error_json): (String, String, Option<String>) = sqlx::query_as(
+        "SELECT run_id, status, error_json FROM compute_sessions \
+          WHERE module_id = 'loop' AND run_id IS NOT NULL \
+          ORDER BY created_at DESC LIMIT 1",
+    )
+    .fetch_one(f.core.pool())
+    .await
+    .expect("the failed run is persisted");
+    assert_eq!(status, "failed");
+    let failed_receipt = receipt_for_run(&f, &failed_run_id)
+        .await
+        .expect("a failed run has a durable receipt");
+    assert_eq!(
+        failed_receipt.status,
+        nexus_local_db::operation_receipts::STATUS_FAILED
+    );
+    assert_eq!(
+        failed_receipt.error_json, error_json,
+        "the failed receipt carries the run row's own error payload"
+    );
+    assert!(failed_receipt.result_json.is_none());
+}
+
+/// §B.3 item 4, the guard: a run stuck `running` with no terminal receipt is
+/// refused as the typed `uncertain` answer — never re-applied, and no terminal
+/// is fabricated for it. Both ambiguous shapes are covered: a receipt-less run
+/// and a `running` receipt whose owner is gone.
+#[tokio::test]
+#[serial_test::serial]
+async fn boot_recovery_refuses_stuck_runs_uncertain_and_never_reapplies() {
+    let f = fixture().await;
+    let no_receipt = seed_stuck_run(&f, None).await;
+    let with_receipt_operation = format!("op_{}", "c".repeat(32));
+    let with_receipt = seed_stuck_run(&f, Some(&with_receipt_operation)).await;
+
+    let recovered = recover_stuck_compute_runs(f.core.pool())
+        .await
+        .expect("recovery classification");
+
+    let receipt_less = recovered
+        .iter()
+        .find(|entry| entry.run_id == no_receipt)
+        .expect("the receipt-less stuck run is classified");
+    assert!(receipt_less.operation_id.is_none());
+    let live_receipt = recovered
+        .iter()
+        .find(|entry| entry.run_id == with_receipt)
+        .expect("the stuck run with a running receipt is classified");
+    assert_eq!(
+        live_receipt.operation_id.as_deref(),
+        Some(with_receipt_operation.as_str())
+    );
+
+    for entry in [receipt_less, live_receipt] {
+        match &entry.outcome {
+            ComputeRunRecoveryOutcome::Uncertain(error) => {
+                assert!(
+                    matches!(error, CoreError::Coded { code, .. } if code == "uncertain"),
+                    "the refusal must carry the frozen `uncertain` code, got {error:?}"
+                );
+            }
+            other @ ComputeRunRecoveryOutcome::AnsweredFromReceipt { .. } => {
+                panic!("a stuck run must be refused uncertain, got {other:?}")
+            }
+        }
+    }
+
+    // Nothing was re-applied and no terminal was fabricated: both rows are
+    // byte-identical to the state the crash left behind.
+    for run_id in [&no_receipt, &with_receipt] {
+        let row = nexus_local_db::compute_runs::get_run(f.core.pool(), run_id)
+            .await
+            .unwrap()
+            .expect("the stuck row survives recovery");
+        assert_eq!(row.status, "running", "recovery never settles a stuck row");
+        assert!(row.error_json.is_none());
+    }
+    // The orphaned receipt is untouched too — an orphan is never settled.
+    let stored = nexus_local_db::operation_receipts::get_operation_receipt(
+        f.core.pool(),
+        &with_receipt_operation,
+    )
+    .await
+    .unwrap()
+    .expect("the orphaned receipt");
+    assert_eq!(
+        stored.status,
+        nexus_local_db::operation_receipts::STATUS_RUNNING
+    );
+}
+
+/// §B.3 step 3's other half: when the stuck run's receipt is TERMINAL the
+/// replay is answered **from the receipt** — the complete stored answer
+/// travels out with the decision (success payload and non-success reason
+/// verbatim), and the effect is never re-applied.
+#[tokio::test]
+#[serial_test::serial]
+async fn boot_recovery_answers_a_terminal_receipt_without_reapplying() {
+    let f = fixture().await;
+    let finished_operation = format!("op_{}", "d".repeat(32));
+    let finished_run = seed_stuck_run(&f, Some(&finished_operation)).await;
+    nexus_local_db::operation_receipts::settle_operation(
+        f.core.pool(),
+        &finished_operation,
+        nexus_local_db::operation_receipts::STATUS_FINISHED,
+        r#"{"state_delta":[],"new_key_blocks":[]}"#,
+    )
+    .await
+    .expect("settle the receipt terminally");
+
+    let failed_operation = format!("op_{}", "e".repeat(32));
+    let failed_run = seed_stuck_run(&f, Some(&failed_operation)).await;
+    nexus_local_db::operation_receipts::settle_operation(
+        f.core.pool(),
+        &failed_operation,
+        nexus_local_db::operation_receipts::STATUS_FAILED,
+        r#"{"code":"compute_fuel_exhausted","message":"out of fuel"}"#,
+    )
+    .await
+    .expect("settle the receipt as failed");
+
+    let recovered = recover_stuck_compute_runs(f.core.pool())
+        .await
+        .expect("recovery classification");
+
+    for (run_id, operation_id, expected_status, expected_result, expected_error) in [
+        (
+            &finished_run,
+            &finished_operation,
+            "finished",
+            Some(r#"{"state_delta":[],"new_key_blocks":[]}"#),
+            None,
+        ),
+        (
+            &failed_run,
+            &failed_operation,
+            "failed",
+            None,
+            Some(r#"{"code":"compute_fuel_exhausted","message":"out of fuel"}"#),
+        ),
+    ] {
+        let entry = recovered
+            .iter()
+            .find(|entry| entry.run_id == *run_id)
+            .expect("the stuck run is classified");
+        assert_eq!(entry.operation_id.as_deref(), Some(operation_id.as_str()));
+        match &entry.outcome {
+            ComputeRunRecoveryOutcome::AnsweredFromReceipt { receipt } => {
+                assert_eq!(
+                    receipt.status.to_string(),
+                    expected_status,
+                    "the answer carries the stored terminal status"
+                );
+                assert_eq!(receipt.consumer.to_string(), "compute_run");
+                assert_eq!(receipt.subject_id.to_string(), *run_id);
+                assert_eq!(
+                    receipt.operation_id.to_string(),
+                    *operation_id,
+                    "the answer carries the stored receipt's own id"
+                );
+                assert!(receipt.terminal_at.is_some());
+                assert_eq!(
+                    receipt.result_json.as_deref(),
+                    expected_result,
+                    "the success payload travels verbatim"
+                );
+                assert_eq!(
+                    receipt.error_json.as_deref(),
+                    expected_error,
+                    "the non-success reason travels verbatim"
+                );
+            }
+            other @ ComputeRunRecoveryOutcome::Uncertain(_) => {
+                panic!("a terminal receipt must answer the replay, got {other:?}")
+            }
+        }
+    }
+
+    // The replay was answered, not applied: both stuck rows are exactly as the
+    // crash left them — recovery settles nothing and runs no module.
+    for run_id in [&finished_run, &failed_run] {
+        let row = nexus_local_db::compute_runs::get_run(f.core.pool(), run_id)
+            .await
+            .unwrap()
+            .expect("the stuck row survives recovery");
+        assert_eq!(row.status, "running");
+        assert!(row.proposals_json.is_none());
+        assert!(row.error_json.is_none());
+    }
+}
+
+/// The boot wiring is real, not just a callable: an execution start over a
+/// workspace holding a stuck run records the receipt-first decision on the
+/// owner, and the handle reports it. Recovery never re-applies, so a decided
+/// run is still exactly as the crash left it.
+#[tokio::test]
+#[serial_test::serial]
+async fn execution_start_runs_the_compute_receipt_recovery_pass() {
+    let f = fixture().await;
+    let run_id = seed_stuck_run(&f, None).await;
+    // A second stuck run whose receipt already settled terminally: its replay
+    // answer must be served from the receipt through the startup surface.
+    let settled_operation = format!("op_{}", "f".repeat(32));
+    let settled_run = seed_stuck_run(&f, Some(&settled_operation)).await;
+    nexus_local_db::operation_receipts::settle_operation(
+        f.core.pool(),
+        &settled_operation,
+        nexus_local_db::operation_receipts::STATUS_FINISHED,
+        r#"{"state_delta":[{"op":"set"}]}"#,
+    )
+    .await
+    .expect("settle the receipt terminally");
+
+    let handle = open_compute_handle(&f).await;
+    let recovered = handle.compute_run_recoveries();
+    let entry = recovered
+        .iter()
+        .find(|entry| entry.run_id == run_id)
+        .expect("the boot pass classified the stuck run");
+    assert!(
+        matches!(
+            &entry.outcome,
+            ComputeRunRecoveryOutcome::Uncertain(error)
+                if matches!(error, CoreError::Coded { code, .. } if code == "uncertain")
+        ),
+        "the boot pass must refuse the stuck run uncertain, got {:?}",
+        entry.outcome
+    );
+    let row = nexus_local_db::compute_runs::get_run(f.core.pool(), &run_id)
+        .await
+        .unwrap()
+        .expect("the stuck row survives the boot pass");
+    assert_eq!(row.status, "running");
+
+    let settled = recovered
+        .iter()
+        .find(|entry| entry.run_id == settled_run)
+        .expect("the boot pass classified the settled run");
+    match &settled.outcome {
+        ComputeRunRecoveryOutcome::AnsweredFromReceipt { receipt } => {
+            assert_eq!(
+                receipt.result_json.as_deref(),
+                Some(r#"{"state_delta":[{"op":"set"}]}"#),
+                "the startup surface carries the receipt's terminal answer verbatim"
+            );
+            assert_eq!(receipt.status.to_string(), "finished");
+            assert_eq!(receipt.subject_id.to_string(), settled_run);
+        }
+        other @ ComputeRunRecoveryOutcome::Uncertain(_) => {
+            panic!("a terminal receipt must answer the replay, got {other:?}")
+        }
+    }
+    let settled_row = nexus_local_db::compute_runs::get_run(f.core.pool(), &settled_run)
+        .await
+        .unwrap()
+        .expect("the settled row survives the boot pass");
+    assert_eq!(settled_row.status, "running");
+    assert!(settled_row.proposals_json.is_none());
+}
+
+/// Number of direct-lane compute runs the world holds.
+///
+/// The module is executed only after its run row is inserted, so this count is
+/// the observable proxy for "how many times did the module run": a retry that
+/// re-ran the module would necessarily add a second row.
+async fn compute_run_rows(pool: &sqlx::SqlitePool, world_id: &str) -> i64 {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM compute_sessions WHERE world_id = ? AND run_id IS NOT NULL",
+    )
+    .bind(world_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// v1.207 P3 (Greptile #3): a caller-supplied `operation_id` stabilizes retry
+/// identity.
+///
+/// A retry after a lost response is answered **from the receipt** — the module
+/// is NOT executed a second time (exactly one run row, and the replay carries
+/// the stored run id). A *different* request under the same id is the typed
+/// `operation_id_conflict` refusal, never a silent re-run.
+#[tokio::test]
+async fn caller_supplied_operation_id_dedupes_a_retry_and_conflicts_on_a_new_request() {
+    let f = fixture().await;
+    let op = format!("op_{}", "a".repeat(32));
+
+    let mut request = run_request(WORLD, MODULE);
+    request.operation_id = Some(op.clone());
+
+    let first = compute_run(&f.core, &f.compute, request.clone())
+        .await
+        .expect("the first call runs the module");
+    assert_eq!(first.status.to_string(), "succeeded");
+    assert_eq!(
+        compute_run_rows(f.core.pool(), WORLD).await,
+        1,
+        "the first call runs the module exactly once"
+    );
+
+    // Simulated lost response: the caller retries the IDENTICAL request (same
+    // caller-supplied id). The receipt answers it; the module does not re-run.
+    let replay = compute_run(&f.core, &f.compute, request)
+        .await
+        .expect("the retry is answered from the receipt");
+    assert_eq!(
+        replay.run_id, first.run_id,
+        "the replay answers with the stored run id"
+    );
+    assert_eq!(replay.status.to_string(), "succeeded");
+    assert_eq!(
+        compute_run_rows(f.core.pool(), WORLD).await,
+        1,
+        "the retry must not execute the module again"
+    );
+
+    // A DIFFERENT logical request under the same id is a first-writer-wins
+    // conflict, not a replay.
+    let mut conflicting = run_request(WORLD, MODULE);
+    conflicting.operation_id = Some(op);
+    conflicting.invocation_params = serde_json::Map::from_iter([(
+        "attacker_id".to_string(),
+        serde_json::Value::String("kb_other".to_string()),
+    )]);
+    let err = compute_run(&f.core, &f.compute, conflicting)
+        .await
+        .expect_err("a different request under the same id is refused");
+    match err {
+        CoreError::Coded { code, .. } => assert_eq!(code, "operation_id_conflict"),
+        other => panic!("expected operation_id_conflict, got {other:?}"),
+    }
+    assert_eq!(
+        compute_run_rows(f.core.pool(), WORLD).await,
+        1,
+        "a conflicting request never runs the module"
+    );
+}
+
+/// v1.207 P3 (Greptile #3, C1): a finished receipt's replay must survive Clear
+/// deleting the run row.
+///
+/// The receipt is the durable answer for its whole lifetime; Clear history can
+/// delete the terminal `compute_sessions` row. The identical retry must still be
+/// answered FROM THE RECEIPT — no `NotFound`, no re-execution.
+#[tokio::test]
+async fn finished_receipt_replay_survives_clearing_the_run_history() {
+    let f = fixture().await;
+    let principal = f.core.active_principal().await.unwrap();
+    let op = format!("op_{}", "c".repeat(32));
+
+    let mut request = run_request(WORLD, MODULE);
+    request.operation_id = Some(op);
+    let first = compute_run(&f.core, &f.compute, request.clone())
+        .await
+        .expect("the first call runs the module");
+    assert_eq!(first.status.to_string(), "succeeded");
+
+    // Accept (the row becomes `applied`, terminal) then Clear the World's
+    // terminal history: the run row is deleted, the receipt is not.
+    accept_compute_run(
+        &f.core,
+        &principal,
+        &first.run_id,
+        accept_request(json!({})),
+    )
+    .await
+    .expect("accept succeeds");
+    let cleared = clear_compute_runs(
+        &f.core,
+        &principal,
+        ClearRunsQuery {
+            status: None,
+            world_id: WORLD.to_string(),
+        },
+    )
+    .await
+    .expect("clear succeeds");
+    assert!(cleared.deleted >= 1);
+    assert!(
+        !run_row_survives(f.core.pool(), &first.run_id).await,
+        "only the durable receipt remains after Clear"
+    );
+
+    let replay = compute_run(&f.core, &f.compute, request)
+        .await
+        .expect("the receipt answers the replay with no run row");
+    assert_eq!(replay.run_id, first.run_id);
+    assert_eq!(replay.status.to_string(), "succeeded");
+    assert_eq!(
+        replay.created_at, first.created_at,
+        "the stored answer is byte-identical, timestamp included"
+    );
+    assert_eq!(
+        serde_json::to_value(&replay).unwrap(),
+        serde_json::to_value(&first).unwrap(),
+        "the replay returns the exact stored first-success answer"
+    );
+    assert_eq!(
+        compute_run_rows(f.core.pool(), WORLD).await,
+        0,
+        "the replay never re-executes the module"
+    );
+}
+
+/// v1.207 P3 (Greptile #3, I1): a concurrent first use under one id with
+/// DIFFERENT args yields one typed conflict, one effect owner, and a loser run
+/// row settled `failed` (never left `running`).
+#[tokio::test]
+async fn concurrent_conflicting_first_use_leaves_no_running_loser() {
+    use nexus_core::execution::test_hooks::{set_compute_begin_gate, ComputeBeginGate};
+
+    let f = fixture().await;
+    let op = format!("op_{}", "b".repeat(32));
+
+    let mut first = run_request(WORLD, MODULE);
+    first.operation_id = Some(op.clone());
+    let mut second = run_request(WORLD, MODULE);
+    second.operation_id = Some(op.clone());
+    // A different logical request => a different fingerprint => a genuine
+    // first-writer-wins conflict (not a replay).
+    second.invocation_params = serde_json::Map::from_iter([
+        ("attacker_id".to_string(), json!("kb_atk")),
+        ("defender_id".to_string(), json!("kb_def")),
+        ("variant".to_string(), json!(2)),
+    ]);
+
+    // Deterministic rendezvous: the seam parks each caller AFTER its run-row
+    // insert and the receipt pre-check and BEFORE `begin_operation`. The test is
+    // the barrier's third participant, so NEITHER caller proceeds until BOTH
+    // arrived — the loser's `OperationIdConflict` is therefore always the
+    // post-insert cleanup path under test, never the earlier receipt pre-check.
+    let gate = Arc::new(ComputeBeginGate::new(op, 3));
+    set_compute_begin_gate(Some(Arc::clone(&gate)));
+    let (a, b, _barrier) = tokio::join!(
+        compute_run(&f.core, &f.compute, first),
+        compute_run(&f.core, &f.compute, second),
+        gate.barrier.wait(),
+    );
+    set_compute_begin_gate(None);
+
+    assert_eq!(
+        usize::from(a.is_ok()) + usize::from(b.is_ok()),
+        1,
+        "exactly one attempt owns the effect"
+    );
+    for outcome in [&a, &b] {
+        if let Err(err) = outcome {
+            match err {
+                CoreError::Coded { code, .. } => assert_eq!(code, "operation_id_conflict"),
+                other => panic!("expected operation_id_conflict, got {other:?}"),
+            }
+        }
+    }
+
+    // Durable end state. Contract: the loser's own run row is SETTLED LOCALLY as
+    // `failed` (present, not deleted) — never the winner's receipt, never left
+    // `running` for boot recovery to misreport or Clear to miss.
+    let (succeeded, failed, running): (i64, i64, i64) = sqlx::query_as(
+        "SELECT SUM(status = 'succeeded'), SUM(status = 'failed'), \
+                SUM(status = 'running') \
+           FROM compute_sessions WHERE world_id = ? AND run_id IS NOT NULL",
+    )
+    .bind(WORLD)
+    .fetch_one(f.core.pool())
+    .await
+    .unwrap();
+    assert_eq!(succeeded, 1, "the module executed exactly once");
+    assert_eq!(
+        failed, 1,
+        "the conflicting loser's row is settled `failed` (present, never running)"
+    );
+    assert_eq!(running, 0, "no permanent `running` duplicate");
+
+    let (loser_payload,): (String,) = sqlx::query_as(
+        "SELECT error_json FROM compute_sessions \
+          WHERE world_id = ? AND status = 'failed' AND run_id IS NOT NULL",
+    )
+    .bind(WORLD)
+    .fetch_one(f.core.pool())
+    .await
+    .unwrap();
+    let loser_payload: serde_json::Value = serde_json::from_str(&loser_payload).unwrap();
+    assert_eq!(loser_payload["code"], json!("operation_id_conflict"));
+}
+
+/// How long a test waits for a `ComputeInFlightGate` registration signal.
+///
+/// Bounded on purpose: if an owner ever returns BEFORE the seam (a wire-shape
+/// refusal, a missing module), the gate never fires, and an unbounded wait
+/// would hang the whole `#[serial]` group instead of failing one test. A fired
+/// timeout is ALWAYS a failure — never treated as a registration.
+const GATE_WAIT: Duration = Duration::from_secs(30);
+
+/// Await a `ComputeInFlightGate` registration signal, failing loudly when it
+/// never arrives.
+async fn await_registered(gate: &nexus_core::execution::test_hooks::ComputeInFlightGate) {
+    if tokio::time::timeout(GATE_WAIT, gate.registered.notified())
+        .await
+        .is_err()
+    {
+        panic!(
+            "the owner for operation {} never reached the in-flight seam within {GATE_WAIT:?}",
+            gate.operation_id
+        );
+    }
+}
+
+/// v1.207 P3 wave 4 (Greptile P1 "Stopped runs appear busy", live branch): the
+/// §B.3 Busy answer requires an ACTUAL live owner.
+///
+/// A retry issued while THIS process is executing the operation (its id is in
+/// the process in-flight registry) is refused `operation_in_progress` — and it
+/// never re-runs the module.
+#[tokio::test]
+#[serial_test::serial]
+async fn retry_against_a_live_owner_is_busy_and_never_reruns() {
+    use nexus_core::execution::test_hooks::{set_compute_in_flight_gate, ComputeInFlightGate};
+
+    let f = fixture().await;
+    let op = format!("op_{}", "d".repeat(32));
+    let mut request = run_request(WORLD, MODULE);
+    request.operation_id = Some(op.clone());
+
+    // The owner registers in the process in-flight registry and parks at the
+    // seam BEFORE the module executes; the second caller is a retry of the
+    // identical request (same id, same fingerprint), so the receipt is the only
+    // thing that can answer it.
+    let gate = Arc::new(ComputeInFlightGate::new(op));
+    set_compute_in_flight_gate(Some(Arc::clone(&gate)));
+    let (owner, retry) = tokio::join!(compute_run(&f.core, &f.compute, request.clone()), async {
+        await_registered(&gate).await;
+        let retry = compute_run(&f.core, &f.compute, request).await;
+        gate.proceed.notify_one();
+        retry
+    });
+    set_compute_in_flight_gate(None);
+
+    owner.expect("the parked owner completes once released");
+    match retry.expect_err("a retry against a live owner is refused") {
+        CoreError::Coded { code, .. } => assert_eq!(code, "operation_in_progress"),
+        other => panic!("a live owner is the Busy refusal, got {other:?}"),
+    }
+    assert_eq!(
+        compute_run_rows(f.core.pool(), WORLD).await,
+        1,
+        "the refused retry never executed the module a second time"
+    );
+}
+
+/// v1.207 P3 wave 4 (Greptile P1 "Stopped runs appear busy", owner-dead
+/// branch): a `running` receipt whose owner is gone is `uncertain` — never the
+/// Busy refusal (which would tell the caller to wait for work that has
+/// stopped), and never a re-run.
+///
+/// The owner registers and parks at the seam, then the caller is DROPPED there
+/// (a crash / cancellation): the durable receipt stays `running` while the
+/// process-local in-flight claim is released — exactly the state a crash
+/// leaves behind.
+#[tokio::test]
+#[serial_test::serial]
+async fn retry_after_its_owner_is_gone_is_uncertain_and_never_reruns() {
+    use nexus_core::execution::test_hooks::{set_compute_in_flight_gate, ComputeInFlightGate};
+
+    let f = fixture().await;
+    let op = format!("op_{}", "e".repeat(32));
+    let mut request = run_request(WORLD, MODULE);
+    request.operation_id = Some(op.clone());
+
+    let gate = Arc::new(ComputeInFlightGate::new(op));
+    set_compute_in_flight_gate(Some(Arc::clone(&gate)));
+    // Selecting on `registered` DROPS the parked owner before the module runs.
+    // The bounded wait keeps a never-parked owner from hanging the serial group,
+    // and a fired timeout is an explicit FAILURE — never a silent registration.
+    let registration = tokio::time::timeout(GATE_WAIT, gate.registered.notified());
+    tokio::select! {
+        outcome = compute_run(&f.core, &f.compute, request.clone()) => {
+            panic!("the owner returned instead of parking at the in-flight seam: {outcome:?}");
+        }
+        registered = registration => {
+            assert!(
+                registered.is_ok(),
+                "the owner never reached the in-flight seam within {GATE_WAIT:?}"
+            );
+        }
+    }
+    set_compute_in_flight_gate(None);
+
+    // The crash trace: the run row is still `running` and its receipt is still
+    // `running`, but no live owner remains.
+    let (run_id, status): (String, String) = sqlx::query_as(
+        "SELECT run_id, status FROM compute_sessions \
+          WHERE world_id = ? AND run_id IS NOT NULL",
+    )
+    .bind(WORLD)
+    .fetch_one(f.core.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        status, "running",
+        "the abandoned run row is the crash trace"
+    );
+    let receipt = receipt_for_run(&f, &run_id)
+        .await
+        .expect("the abandoned run carries its durable `running` receipt");
+    assert_eq!(
+        receipt.status,
+        nexus_local_db::operation_receipts::STATUS_RUNNING
+    );
+
+    match compute_run(&f.core, &f.compute, request)
+        .await
+        .expect_err("a running receipt with no live owner is refused")
+    {
+        CoreError::Coded { code, .. } => assert_eq!(code, "uncertain"),
+        other => panic!("an owner-dead running receipt is uncertain, got {other:?}"),
+    }
+    assert_eq!(
+        compute_run_rows(f.core.pool(), WORLD).await,
+        1,
+        "the refused retry never re-ran the module"
+    );
+}
+
+/// v1.207 P3 wave 4 review W4-I1 (a): the §B.3 live-owner signal is scoped to
+/// the receipt STORE, not to the operation id alone.
+///
+/// One process serves independent homes/DBs (the two-home fixtures below, an
+/// already-supported direct interface), and a caller-supplied operation id is
+/// unique only WITHIN its store. An id-only registry would let store B read
+/// store A's live run as its own Busy refusal instead of the honest
+/// `uncertain`.
+#[tokio::test]
+#[serial_test::serial]
+async fn in_flight_ownership_is_scoped_to_the_receipt_store() {
+    use nexus_core::execution::test_hooks::{set_compute_in_flight_gate, ComputeInFlightGate};
+
+    // Two independent homes served by ONE process.
+    let a = fixture().await;
+    let b = fixture().await;
+    let op = format!("op_{}", "0".repeat(32));
+
+    let mut b_request = run_request(WORLD, MODULE);
+    b_request.operation_id = Some(op.clone());
+
+    // (1) Store B's receipt is left `running` with NO live owner: its caller is
+    // dropped at the in-flight seam (a crash — the process-local claim goes, the
+    // durable receipt stays).
+    let gate_b = Arc::new(ComputeInFlightGate::new(op.clone()));
+    set_compute_in_flight_gate(Some(Arc::clone(&gate_b)));
+    let registration_b = tokio::time::timeout(GATE_WAIT, gate_b.registered.notified());
+    tokio::select! {
+        outcome = compute_run(&b.core, &b.compute, b_request.clone()) => {
+            panic!("store B's owner returned instead of parking at the seam: {outcome:?}");
+        }
+        registered = registration_b => {
+            assert!(
+                registered.is_ok(),
+                "store B's owner never reached the in-flight seam within {GATE_WAIT:?}"
+            );
+        }
+    }
+    set_compute_in_flight_gate(None);
+
+    // (2) Store A holds a LIVE owner for the SAME caller-supplied id. Store B's
+    // retry must be `uncertain` (B's own owner is gone) — never store A's Busy.
+    let gate_a = Arc::new(ComputeInFlightGate::new(op.clone()));
+    set_compute_in_flight_gate(Some(Arc::clone(&gate_a)));
+    let mut a_request = run_request(WORLD, MODULE);
+    a_request.operation_id = Some(op.clone());
+    let (a_owner, b_retry) = tokio::join!(compute_run(&a.core, &a.compute, a_request), async {
+        await_registered(&gate_a).await;
+        let retry = compute_run(&b.core, &b.compute, b_request).await;
+        gate_a.proceed.notify_one();
+        retry
+    });
+    set_compute_in_flight_gate(None);
+    a_owner.expect("store A's parked owner completes once released");
+    match b_retry.expect_err("store B's owner-dead receipt is refused") {
+        CoreError::Coded { code, .. } => assert_eq!(
+            code, "uncertain",
+            "store B must not read store A's live owner as its own Busy refusal"
+        ),
+        other => panic!("store B's owner-dead running receipt is `uncertain`, got {other:?}"),
+    }
+    assert_eq!(
+        compute_run_rows(b.core.pool(), WORLD).await,
+        1,
+        "store B's retry never re-ran the module (only its abandoned run exists)"
+    );
+}
+
+/// v1.207 P3 wave 4 review W4-I1 (b): dropping one store's in-flight guard must
+/// not erase another store's claim for the SAME caller-supplied id.
+///
+/// Both directions in one test: store B holds a parked live owner while store A
+/// registers and drops the same id, then store A holds one while store B
+/// registers and drops it. Each retry by the holder's OWN store must stay the
+/// typed Busy refusal — an id-only registry would have the dropping store erase
+/// the holder's claim, degrading that retry to `uncertain`.
+#[tokio::test]
+#[serial_test::serial]
+async fn in_flight_claim_drops_are_store_scoped() {
+    use nexus_core::execution::test_hooks::{set_compute_in_flight_gate, ComputeInFlightGate};
+
+    let a = fixture().await;
+    let b = fixture().await;
+
+    for (direction, holder_is_a) in [
+        ("holder=B, dropper=A", false),
+        ("holder=A, dropper=B", true),
+    ] {
+        // A fresh id per direction: the same caller-supplied id in BOTH stores
+        // (the collision an id-only key would suffer). 32 lowercase hex
+        // characters, the wire shape `validate_operation_id` enforces.
+        let op = format!("op_{}", if holder_is_a { "1" } else { "2" }.repeat(32));
+        let holder = if holder_is_a { &a } else { &b };
+        let dropper = if holder_is_a { &b } else { &a };
+        let mut holder_request = run_request(WORLD, MODULE);
+        holder_request.operation_id = Some(op.clone());
+        let mut dropper_request = run_request(WORLD, MODULE);
+        dropper_request.operation_id = Some(op.clone());
+
+        let gate = Arc::new(ComputeInFlightGate::new(op));
+        set_compute_in_flight_gate(Some(Arc::clone(&gate)));
+        let (owner, retry) = tokio::join!(
+            compute_run(&holder.core, &holder.compute, holder_request.clone()),
+            async {
+                await_registered(&gate).await;
+                // Disarm: the OTHER store's call for the same id must not park
+                // on this store's seam — it registers and drops its own claim.
+                set_compute_in_flight_gate(None);
+                compute_run(&dropper.core, &dropper.compute, dropper_request)
+                    .await
+                    .expect("the dropping store completes its own run for the same id");
+                let retry = compute_run(&holder.core, &holder.compute, holder_request).await;
+                gate.proceed.notify_one();
+                retry
+            }
+        );
+        set_compute_in_flight_gate(None);
+        owner.expect("the parked owner completes once released");
+        match retry.expect_err("the holder's own store answers its retry") {
+            CoreError::Coded { code, .. } => assert_eq!(
+                code, "operation_in_progress",
+                "{direction}: the dropping store must not erase the holder's claim"
+            ),
+            other => panic!("{direction}: the live owner is the Busy refusal, got {other:?}"),
+        }
+    }
+}
+
+/// v1.207 P3 wave 4 (Greptile P1 "Retried errors lose details"): a failed
+/// request's replay restores the ORIGINAL structured refusal from the receipt.
+///
+/// The first call fails manifest validation with `InputValidation` carrying
+/// `details.invalid_entries`; the identical retry (a lost response) must return
+/// that same variant with byte-equal details — never a flattened `Coded` that
+/// loses the entry ids and reasons.
+#[tokio::test]
+#[serial_test::serial]
+async fn failed_request_replay_restores_the_structured_refusal() {
+    let f = fixture().await;
+    seed_broken_character(f.core.pool(), "kb_broken").await;
+    let op = format!("op_{}", "f".repeat(32));
+    let mut request = run_request(WORLD, MODULE);
+    request.operation_id = Some(op);
+
+    let first = match compute_run(&f.core, &f.compute, request.clone()).await {
+        Err(CoreError::InputValidation { details }) => details,
+        other => panic!("a poisoned entry must be an input-validation refusal, got {other:?}"),
+    };
+    assert_eq!(first["invalid_entries"][0]["entry_id"], "kb_broken");
+
+    let replay = match compute_run(&f.core, &f.compute, request).await {
+        Err(CoreError::InputValidation { details }) => details,
+        other => panic!("the replay must restore the input-validation refusal, got {other:?}"),
+    };
+    assert_eq!(
+        serde_json::to_string(&replay).unwrap(),
+        serde_json::to_string(&first).unwrap(),
+        "the replayed details are byte-equal to the first refusal's"
+    );
+    assert_eq!(
+        compute_run_rows(f.core.pool(), WORLD).await,
+        1,
+        "the refused retry never re-ran the module"
     );
 }
