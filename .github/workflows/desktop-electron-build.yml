@@ -176,6 +176,26 @@ jobs:
           test -s "${dir}/receipt.json"
           test -s "${dir}/SHA256SUMS"
 
+      # Stage the published files under a flat root before uploading: the
+      # distribution paths carry a version directory, and an upload-artifact
+      # glob with a wildcard in a directory position would root the artifact
+      # at `artifacts/desktop`, nesting `0.1.0/darwin-<arch>/` inside it and
+      # breaking the release publisher's flat-path expectations.
+      - name: Stage flat artifact root
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          dir="artifacts/desktop/${version}/darwin-${TARGET_ARCH}"
+          rm -rf "${RUNNER_TEMP}/desktop-upload"
+          mv "${dir}" "${RUNNER_TEMP}/desktop-upload"
+          test -d "${RUNNER_TEMP}/desktop-upload/Nexus.app"
+          test -s "${RUNNER_TEMP}/desktop-upload/Nexus-${version}-darwin-${TARGET_ARCH}-unsigned.dmg"
+          test -s "${RUNNER_TEMP}/desktop-upload/Nexus-${version}-darwin-${TARGET_ARCH}-unsigned.app.zip"
+          test -s "${RUNNER_TEMP}/desktop-upload/receipt.json"
+          test -s "${RUNNER_TEMP}/desktop-upload/SHA256SUMS"
+
       - name: Upload unsigned distribution artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -183,8 +203,8 @@ jobs:
           retention-days: 90
           if-no-files-found: error
           path: |
-            artifacts/desktop/*/darwin-${{ matrix.arch }}/Nexus.app
-            artifacts/desktop/*/darwin-${{ matrix.arch }}/*.dmg
-            artifacts/desktop/*/darwin-${{ matrix.arch }}/*.app.zip
-            artifacts/desktop/*/darwin-${{ matrix.arch }}/receipt.json
-            artifacts/desktop/*/darwin-${{ matrix.arch }}/SHA256SUMS
+            ${{ runner.temp }}/desktop-upload/Nexus.app
+            ${{ runner.temp }}/desktop-upload/*.dmg
+            ${{ runner.temp }}/desktop-upload/*.app.zip
+            ${{ runner.temp }}/desktop-upload/receipt.json
+            ${{ runner.temp }}/desktop-upload/SHA256SUMS
