@@ -6,6 +6,8 @@ import {
   CARGO_LOCK_PATH,
   ELECTRON_PACKAGE_PATH,
   LOCKSTEP_PATHS,
+  NATIVE_LOADER_PACKAGE_PATH,
+  NATIVE_SURFACE_PATHS,
   PRODUCT_JSON_PATH,
   ROOT_PACKAGE_PATH,
   parseCargoLockPackageVersion,
@@ -30,16 +32,40 @@ import {
 
 const currentVersion = JSON.parse(readRepoFile(REPO_ROOT, ROOT_PACKAGE_PATH)).version;
 
-test("the four declared surfaces are equal in the real repository", () => {
+test("every declared surface is equal in the real repository", () => {
   const surfaces = readSurfaceVersions(REPO_ROOT);
   assert.deepEqual(
     surfaces.map((surface) => surface.path),
-    [...LOCKSTEP_PATHS],
+    [...LOCKSTEP_PATHS, ...NATIVE_SURFACE_PATHS],
   );
   for (const surface of surfaces) {
     assert.equal(surface.version, currentVersion, surface.path);
   }
   assert.equal(readSurfaceVersion(REPO_ROOT, PRODUCT_JSON_PATH), currentVersion);
+});
+
+test("native surfaces carry the version and the loader pins stay version-stable", () => {
+  const loaderPath = NATIVE_LOADER_PACKAGE_PATH;
+  const updated = replaceJsonVersion(
+    readRepoFile(REPO_ROOT, loaderPath),
+    "9.9.9",
+    loaderPath,
+  );
+  const data = JSON.parse(updated);
+  assert.equal(data.version, "9.9.9");
+  const pins = Object.keys(data.optionalDependencies).filter((name) =>
+    name.startsWith("@42ch/nexus-native"),
+  );
+  assert.equal(pins.length, 4);
+  for (const name of pins) {
+    assert.equal(data.optionalDependencies[name], "workspace:*", name);
+  }
+
+  const platformPath = "packages/nexus-native-darwin-arm64/package.json";
+  const platform = JSON.parse(
+    replaceJsonVersion(readRepoFile(REPO_ROOT, platformPath), "9.9.9", platformPath),
+  );
+  assert.equal(platform.version, "9.9.9");
 });
 
 test("parseWorkspacePackageVersion reads [workspace.package] only", () => {
@@ -125,7 +151,7 @@ test("writeReleaseVersion regenerates Cargo.lock through Cargo", () => {
     const changed = writeReleaseVersion(dir, "9.9.9");
     assert.deepEqual(
       changed.map((entry) => entry.path),
-      [...LOCKSTEP_PATHS, CARGO_LOCK_PATH],
+      [...LOCKSTEP_PATHS, ...NATIVE_SURFACE_PATHS, CARGO_LOCK_PATH],
     );
     assert.equal(changed.at(-1).members, readWorkspaceMemberPackages(dir).length);
     for (const surface of readSurfaceVersions(dir)) {

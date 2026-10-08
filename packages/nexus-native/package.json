@@ -1,6 +1,6 @@
 {
   "name": "@42ch/nexus-native",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "private": true,
   "description": "Nexus native core loader and TypeScript facade (v1.189 P2-T1)",
   "type": "module",
@@ -26,10 +26,10 @@
     "@types/node": "^26.6.3"
   },
   "optionalDependencies": {
-    "@42ch/nexus-native-darwin-arm64": "0.1.0",
-    "@42ch/nexus-native-darwin-x64": "0.1.0",
-    "@42ch/nexus-native-linux-x64-gnu": "0.1.0",
-    "@42ch/nexus-native-win32-x64-msvc": "0.1.0"
+    "@42ch/nexus-native-darwin-arm64": "workspace:*",
+    "@42ch/nexus-native-darwin-x64": "workspace:*",
+    "@42ch/nexus-native-linux-x64-gnu": "workspace:*",
+    "@42ch/nexus-native-win32-x64-msvc": "workspace:*"
   },
   "engines": {
     "node": ">=22.22"

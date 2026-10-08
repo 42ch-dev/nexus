@@ -1,5 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   assertCompatibility,
   expectedPlatformPackage,
@@ -17,6 +18,14 @@ import {
   encodeWireBuffer,
   stringifyWire,
 } from '../dist/validate.js';
+
+// The version surfaces must agree: the platform manifest carries the same
+// version as the loader package (the packaging flow asserts the packed pair).
+// Deriving it here keeps this suite green across version bumps instead of
+// pinning the release literal.
+const loaderPackageVersion = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+).version;
 
 const expected = {
   target_triple: expectedTargetTriple(),
@@ -98,7 +107,7 @@ describe('loader negative', () => {
   test('platform package declares required os/cpu (and linux libc) fields', () => {
     const target = expectedPlatformPackage();
     const manifest = readPackageManifest(target.name);
-    assert.equal(manifest.version, '0.1.0');
+    assert.equal(manifest.version, loaderPackageVersion);
     assert.ok(Array.isArray(manifest.os) && manifest.os.length > 0, 'os is required');
     assert.ok(manifest.os.includes(process.platform));
     assert.ok(Array.isArray(manifest.cpu) && manifest.cpu.length > 0, 'cpu is required');

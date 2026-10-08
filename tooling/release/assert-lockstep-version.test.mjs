@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   CARGO_LOCK_PATH,
+  NATIVE_LOADER_PACKAGE_PATH,
+  NATIVE_SURFACE_PATHS,
   PRODUCT_JSON_PATH,
   ROOT_PACKAGE_PATH,
   parseCargoLockPackageVersion,
@@ -24,7 +26,7 @@ test("checkLockstep accepts the fixture surface set", () => {
     const report = checkLockstep(dir);
     assert.equal(report.ok, true, report.problems.join("; "));
     assert.equal(report.version, FIXTURE_BASELINE_VERSION);
-    assert.equal(report.surfaces.length, 4);
+    assert.equal(report.surfaces.length, 4 + NATIVE_SURFACE_PATHS.length);
     assert.equal(report.lockMembers.length, readWorkspaceMemberPackages(dir).length);
   } finally {
     cleanupTempRepo(dir);
@@ -42,6 +44,28 @@ test("checkLockstep reports a divergent JSON surface", () => {
     assert.equal(report.version, null);
     assert.ok(
       report.problems.some((problem) => problem.includes(PRODUCT_JSON_PATH)),
+      report.problems.join("; "),
+    );
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("checkLockstep reports a non-workspace native platform pin", () => {
+  const dir = createTempRepo();
+  try {
+    mutateRepoFile(dir, NATIVE_LOADER_PACKAGE_PATH, (contents) =>
+      contents.replace(
+        /"@42ch\/nexus-native-darwin-arm64": "workspace:\*"/,
+        '"@42ch/nexus-native-darwin-arm64": "9.9.9"',
+      ),
+    );
+    const report = checkLockstep(dir);
+    assert.equal(report.ok, false);
+    assert.ok(
+      report.problems.some((problem) =>
+        problem.includes("@42ch/nexus-native-darwin-arm64"),
+      ),
       report.problems.join("; "),
     );
   } finally {

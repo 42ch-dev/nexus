@@ -470,10 +470,13 @@ for (const dir of [platformPkgRoot, loaderPkgRoot]) {
 const loaderManifest = readJson(join(loaderPkgRoot, 'package.json'));
 const platformManifest = readJson(join(platformPkgRoot, 'package.json'));
 const expectedVersion = platformManifest.version;
-if (loaderManifest.optionalDependencies?.[`@42ch/${platformPkgName}`] !== expectedVersion) {
-  fail('loader optionalDependencies do not pin this platform package exactly', {
-    pin: loaderManifest.optionalDependencies?.[`@42ch/${platformPkgName}`],
-    platform_version: expectedVersion,
+const loaderPin = loaderManifest.optionalDependencies?.[`@42ch/${platformPkgName}`];
+if (loaderPin !== 'workspace:*') {
+  fail('loader must pin this platform package with the workspace:* protocol', {
+    pin: loaderPin,
+    expected: 'workspace:*',
+    reason:
+      'a literal version re-couples pnpm-lock.yaml to the release version; pnpm pack replaces workspace:* with the exact platform version',
   });
 }
 for (const required of ['dist/index.js', 'dist/loader.js']) {
@@ -582,6 +585,13 @@ if (missingLoaderEntries.length > 0) {
 const loaderPackedManifest = JSON.parse(tarRead(loaderPack.tarball, 'package/package.json'));
 if (loaderPackedManifest.main !== loaderManifest.main) {
   fail(`${loaderPack.name} main entry drifted`, { main: loaderPackedManifest.main });
+}
+const packedPlatformPin = loaderPackedManifest.optionalDependencies?.[`@42ch/${platformPkgName}`];
+if (packedPlatformPin !== expectedVersion) {
+  fail(`${loaderPack.name} does not pin this platform package at ${expectedVersion}`, {
+    pin: packedPlatformPin,
+    reason: 'pnpm pack must replace the workspace:* pin with the exact platform version',
+  });
 }
 assertNoHostPaths(
   JSON.stringify(loaderPackedManifest.dependencies ?? {}),

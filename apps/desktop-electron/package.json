@@ -1,6 +1,6 @@
 {
   "name": "nexus-desktop-electron",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "private": true,
   "description": "Nexus unsigned Electron desktop shell for macOS arm64 and x64",
   "type": "module",

@@ -4,8 +4,10 @@
  *
  * Checks the four hand-written surfaces (`Cargo.toml` `[workspace.package]`,
  * root `package.json`, `apps/desktop-electron/package.json`,
- * `apps/desktop-electron/resources/product.json`) plus every workspace member
- * entry in `Cargo.lock`.
+ * `apps/desktop-electron/resources/product.json`), the five native npm
+ * manifests (`packages/nexus-native/package.json` plus the four platform
+ * packages — including the loader's `@42ch/nexus-native-*` pins) and every
+ * workspace member entry in `Cargo.lock`.
  *
  * CLI: node tooling/release/assert-lockstep-version.mjs
  *
@@ -19,6 +21,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CARGO_LOCK_PATH,
+  NATIVE_LOADER_PACKAGE_PATH,
   readSurfaceVersions,
   readWorkspaceMemberPackages,
   resolveRepoRoot,
@@ -50,6 +53,18 @@ export function checkLockstep(repoRoot) {
         .map((surface) => `${surface.path}=${surface.version}`)
         .join(", ")}`,
     );
+  } else {
+    const loaderManifest = JSON.parse(
+      readFileSync(join(repoRoot, NATIVE_LOADER_PACKAGE_PATH), "utf8"),
+    );
+    const pins = loaderManifest?.optionalDependencies ?? {};
+    for (const [name, pin] of Object.entries(pins)) {
+      if (name.startsWith("@42ch/nexus-native") && pin !== "workspace:*") {
+        problems.push(
+          `${NATIVE_LOADER_PACKAGE_PATH}: ${name} pin ${pin}, expected workspace:* (pnpm pack replaces it with the exact platform version)`,
+        );
+      }
+    }
   }
 
   /** @type {{ name: string; version: string | null }[]} */

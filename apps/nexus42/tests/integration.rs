@@ -82,7 +82,10 @@ fn cli_shows_version() {
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("0.1.0"));
+        .stdout(predicate::str::contains(format!(
+            "nexus42 {}",
+            env!("CARGO_PKG_VERSION")
+        )));
 }
 
 /// Test init workspace command (now under `creator init`)

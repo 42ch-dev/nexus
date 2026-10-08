@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 /**
- * Bump the Nexus release version across the five-file SSOT.
+ * Bump the Nexus release version across every version surface.
  *
  * Files written (all in one step, never committed by this script):
  *   - `Cargo.toml` `[workspace.package].version`
  *   - root `package.json`
  *   - `apps/desktop-electron/package.json`
  *   - `apps/desktop-electron/resources/product.json`
+ *   - `packages/nexus-native/package.json` (version + `@42ch/nexus-native-*` pins)
+ *   - the four `packages/nexus-native-<platform>/package.json` manifests
  *   - `Cargo.lock` (workspace member `[[package]]` versions)
  *
  * The changelog entry is a separate step — `generate-changelog.mjs`.
