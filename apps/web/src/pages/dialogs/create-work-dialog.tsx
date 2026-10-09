@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 
 import { useTranslation } from 'react-i18next';
 
@@ -42,10 +42,14 @@ export function CreateWorkDialog({
   // F-01 W1: Work creation is World-scoped — the daemon 400s without a
   // `world_id`. The selector is fed by the narrative-worlds read model.
   const narrativeWorlds = useNarrativeWorlds();
-  const worldOptions = (narrativeWorlds.data ?? []).map((world) => ({
-    value: world.world_id,
-    label: world.title,
-  }));
+  const worldOptions = useMemo(
+    () =>
+      (narrativeWorlds.data ?? []).map((world) => ({
+        value: world.world_id,
+        label: world.title,
+      })),
+    [narrativeWorlds.data],
+  );
   const [worldId, setWorldId] = useState('');
   const [title, setTitle] = useState('');
   const [longTermGoal, setLongTermGoal] = useState('');
@@ -75,7 +79,7 @@ export function CreateWorkDialog({
     if (worldId === '' && worldOptions.length === 1) {
       setWorldId(worldOptions[0].value);
     }
-  });
+  }, [worldOptions, worldId]);
 
   const valid =
     title.trim().length > 0 &&

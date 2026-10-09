@@ -53,6 +53,9 @@ const INLINE_CREATE_LABELS_EN = {
       { value: 'novel', label: 'Novel' },
       { value: 'essay', label: 'Essay' },
     ],
+    worldLabel: 'World',
+    worldPlaceholder: 'Select a World',
+    worldEmpty: 'No Worlds available — create a World first.',
     submit: 'Create',
   },
 } satisfies CreatorShellInlineCreateLabels;
@@ -78,6 +81,9 @@ const INLINE_CREATE_LABELS_ZH = {
       { value: 'novel', label: '小说' },
       { value: 'essay', label: '散文' },
     ],
+    worldLabel: '世界',
+    worldPlaceholder: '选择一个世界',
+    worldEmpty: '暂无可用世界——请先创建一个世界。',
     submit: '创建',
   },
 } satisfies CreatorShellInlineCreateLabels;
@@ -237,6 +243,7 @@ function HubSidebarBrowseFrame({
       mode="create-inline"
       canCreateWorld={false}
       labels={createLabels}
+      worlds={worlds.map((world) => ({ value: world.id, label: world.label }))}
       onWorldSubmit={() => {}}
       onWorkSubmit={() => {}}
       data-testid="sidebar-create-panel"
