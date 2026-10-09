@@ -7,8 +7,9 @@ archives plus the unsigned macOS Electron packages to a GitHub Release.
 
 Release versions are decoupled from the internal iteration numbers: iterations
 (`v1.19x`, `v1.20x`) are development milestones that never appear in a version
-string or artifact name, while a release is a clean semver tag
-`v<major>.<minor>.<patch>`.
+string or artifact name, while a release is a semver tag
+`v<major>.<minor>.<patch>` — optionally carrying an `-alpha.N` / `-rc.N`
+suffix (see [Versioning](#versioning)).
 
 Two constraints shape the current flow:
 
@@ -25,11 +26,32 @@ Two constraints shape the current flow:
 
 ## Versioning
 
-- Release versions are clean `X.Y.Z` with canonical numeric components: no
-  leading zeros (`01.2.3` is rejected), and components are compared without
-  number conversion so very long fields stay distinct. A prerelease or build
-  suffix is rejected: "prerelease" is GitHub Release metadata, never part of a
-  version string or a tag.
+- A release version is `X.Y.Z`, `X.Y.Z-alpha.N` or `X.Y.Z-rc.N`: three
+  canonical numeric components (no leading zeros — `01.2.3` is rejected) with
+  an optional lowercase `alpha`/`rc` suffix whose `N` starts at 1 (`alpha.0`
+  and `alpha.01` are rejected). Build metadata (`+…`), any other label and any
+  case variant are rejected; versions are never normalised. Components are
+  compared without number conversion so very long fields stay distinct.
+- `alpha` marks an explicitly unstable daily build; `rc` a release candidate
+  put in front of testers before the stable of the same core. The conventional
+  ladder within one core is `X.Y.Z-alpha.N` → `X.Y.Z-alpha.(N+1)` →
+  `X.Y.Z-rc.1` → `X.Y.Z-rc.(N+1)` → `X.Y.Z`; a core increment starts a new wave
+  at `<next-core>-alpha.1` (or `X.Y.(Z+1)-alpha.1` for a patch wave). Skipping
+  rungs is allowed — every rung transition is strictly greater under the
+  ordering below, so the tooling accepts it without special cases.
+- Ordering follows SemVer §11 as a single rule set: the core decides first
+  (`0.1.9 < 0.2.0-alpha.1`), and within an equal core a suffixed version is
+  less than the clean one (`0.2.0-alpha.1 < 0.2.0-alpha.2 < 0.2.0-rc.1 <
+  0.2.0`). Dispatch validation and the bump accept any strictly-greater version
+  and refuse an equal or lower one.
+- The tag carries the full version including any suffix
+  (`v0.2.0-alpha.1`, `v0.2.0-rc.1`, `v0.2.0`), so the tag and the download page
+  read honestly; `v0.2.0-rc.1` and the later `v0.2.0` are distinct refs.
+- Each release of any channel covers the range since the previous release:
+  `generate-changelog.mjs` takes the newest `v*` tag as its base, re-derived
+  with the ordering above (never git's version sort, which orders suffixed tags
+  incorrectly), falling back to the commit that introduced `CHANGELOG.md` for
+  the first release.
 - While Nexus is pre-1.0: MINOR for a feature increment, PATCH for fixes only.
 - `0.0.0` is the never-released workspace baseline (no release has ever
   shipped). The first governed release is **`0.1.0`**.
@@ -59,7 +81,7 @@ published until the pull request it opens is merged into `main`.
 
 | Input | Type | Default | Meaning |
 |-------|------|---------|---------|
-| `version` | string, required | — | Clean SemVer `X.Y.Z`, strictly greater than `origin/main`, no prerelease suffix. Recommended first dispatch: `0.1.0`. |
+| `version` | string, required | — | Release SemVer `X.Y.Z`, `X.Y.Z-alpha.N` or `X.Y.Z-rc.N`, strictly greater than `origin/main`. Recommended first dispatch: `0.1.0`. |
 | `summary` | string, optional | `""` | Human-written framing. It is prepended to the generated changelog in the bump pull request, in the tag annotation and in the Release body — use it to describe the pre-baseline history on the first release. |
 | `prerelease` | boolean, optional | `true` | Requested prerelease marking. While signing is unimplemented the pipeline forces `true` regardless of this value ([below](#prerelease-gate-and-the-nexus-prerelease-trailer)). |
 
@@ -88,7 +110,7 @@ published until the pull request it opens is merged into `main`.
    'tooling/release/*.test.mjs'`, Node 22 or newer — the quoted glob needs a
    Node release that expands test-file globs). The cache is needed by the tests'
    real offline Cargo lockfile regeneration path as well as the later bump.
-5. **Validate.** `Validate clean SemVer, greater-than-main, and unused tag`
+5. **Validate.** `Validate SemVer, greater-than-main, and unused tag`
    re-runs `assert-version-greater.mjs` against a full-history checkout.
 6. **Open the signed bump pull request.** In the `create-release-pr` job,
    `Fetch main, revalidate, and create release branch` re-checks the version
@@ -158,13 +180,16 @@ switch asserting whether Apple-signed artifacts exist yet; it is `false` today.
 The effective prerelease value of a Release is:
 
 ```text
-effective prerelease = dispatch toggle OR NOT signingImplemented
+effective prerelease = hasSuffix(version) OR dispatch toggle OR NOT signingImplemented
 ```
 
-so a full (non-prerelease) Release requires **both** an explicit
-`prerelease: false` dispatch **and** `signingImplemented === true`. While the
-export is `false`, every Release is a prerelease no matter what the dispatch
-asked for.
+so a full (non-prerelease) Release requires a clean (unsuffixed) version
+**and** an explicit `prerelease: false` dispatch **and**
+`signingImplemented === true`. A version carrying an `-alpha.N` / `-rc.N`
+suffix is always published as a prerelease: dispatching one with
+`prerelease: false` is accepted but overridden, and that holds even after
+signing lands. While the export is `false`, every Release is a prerelease no
+matter what the dispatch asked for.
 
 The dispatch toggle travels with the bump commit as a `Nexus-Prerelease:
 true|false` trailer, appended by the signed-commit script and read by the `tag`
@@ -173,12 +198,16 @@ job from the merge commit's second parent
 trailer fails closed to prerelease. You can check the trailer before merging:
 
 ```sh
-node tooling/release/effective-prerelease.mjs --message-file <(git show -s --format=%B <head-sha>)
+node tooling/release/effective-prerelease.mjs --message-file <(git show -s --format=%B <head-sha>) --version 0.2.0-rc.1
 node tooling/release/effective-prerelease.mjs --toggle false   # prints true today
+node tooling/release/effective-prerelease.mjs --version 0.2.0-rc.1   # forced prerelease
 ```
 
-The tag is always the clean version `v<version>`: prerelease-ness is Release
-metadata only. The workflow creates a draft with `--draft`, adding
+The `tag` job passes the resolved version through `--version "$version"`, so
+both entry paths (merge and tag push) evaluate the suffix. The tag is
+`v<version>` including any `-alpha.N` / `-rc.N` suffix, so a
+suffixed (always-prerelease) Release never wears a clean-looking tag. The
+workflow creates a draft with `--draft`, adding
 `--prerelease` when the effective value is true; an existing Release is first
 reconciled to draft state and the same prerelease value. Only after every asset
 upload succeeds does the workflow clear `draft`, retaining the effective
@@ -283,7 +312,8 @@ dispatches a producer, pushes a tag, or creates a Release.
    ```
 
    `generate-changelog.mjs` writes nothing unless `--prepend` is passed, and its
-   stderr line states whether the range came from the newest `v*` tag or from
+   stderr line states whether the range came from the previous release tag of
+   any channel (the semver-maximum `v*` tag, never git's version sort) or from
    the first-release fallback.
 
 4. **Run the bump in a scratch checkout**, never in a worktree you intend to
@@ -395,6 +425,8 @@ Signing changes exactly one switch, and the flow around it stays as documented:
    current unsigned state; when signed packages replace them, update the publish
    job's filename patterns and the footer text in `release.yml` to match (this
    page documents the unsigned text it currently renders).
-3. Dispatch with `prerelease: false` to publish a full release. Dispatch inputs,
-   the signed bump PR, the annotated tag, lockstep verification, the producer
-   calls and the publish step are unchanged.
+3. Dispatch with `prerelease: false` to publish a full release. A version
+   carrying an `-alpha.N` / `-rc.N` suffix still publishes as a prerelease
+   regardless of the toggle. Dispatch inputs, the signed bump PR, the annotated
+   tag, lockstep verification, the producer calls and the publish step are
+   unchanged.

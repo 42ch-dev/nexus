@@ -6,15 +6,19 @@
  * `Nexus-Prerelease: true|false` trailer on the bump commit; the tag job reads
  * it from the merge commit's second parent (`git show -s --format=%B`).
  *
- * Effective prerelease = dispatch toggle OR "signing not implemented":
- * a non-prerelease Release requires BOTH an explicit `prerelease=false`
- * dispatch AND `signingImplemented === true` (compass D5/D7).
+ * Effective prerelease = hasSuffix(version) OR dispatch toggle OR
+ * "signing not implemented": a version carrying an `-alpha.N` / `-rc.N` suffix
+ * is always published as a prerelease, and a clean (unsuffixed) full release
+ * additionally requires an explicit `prerelease=false` dispatch AND
+ * `signingImplemented === true` (compass D5/D7).
  *
- * Fail-closed: an absent or unreadable trailer means prerelease.
+ * Fail-closed: an absent or unreadable trailer means prerelease, and an
+ * unreadable `--version` also forces prerelease.
  *
  * CLI:
  *   node tooling/release/effective-prerelease.mjs --toggle true|false
- *   node tooling/release/effective-prerelease.mjs --message-file <path|-> 
+ *   node tooling/release/effective-prerelease.mjs --message-file <path|-> [--version <release-version>]
+ *   node tooling/release/effective-prerelease.mjs --version <release-version>
  *
  * Prints `true` or `false` (single line) to stdout.
  *
@@ -24,6 +28,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { signingImplemented } from "./release-config.mjs";
+import { parseSemVer } from "./semver.mjs";
 
 /** Commit-message trailer read by the release pipeline. */
 export const PRERELEASE_TRAILER = "Nexus-Prerelease";
@@ -77,12 +82,29 @@ export function parsePrereleaseTrailer(message) {
 }
 
 /**
- * @param {boolean} toggle Dispatch toggle from the bump-commit trailer.
- * @param {boolean} [signing] `signingImplemented` (injectable for tests).
+ * A release version carrying an `-alpha.N` / `-rc.N` suffix is always a
+ * prerelease. An absent version contributes nothing; a version the grammar
+ * cannot read fails closed to prerelease, matching the trailer stance.
+ *
+ * @param {string | null} version Resolved release version, or null when absent.
  * @returns {boolean}
  */
-export function effectivePrerelease(toggle, signing = signingImplemented) {
-  return toggle || !signing;
+function versionForcesPrerelease(version) {
+  if (version === null) {
+    return false;
+  }
+  const parsed = parseSemVer(version);
+  return parsed === null || parsed.prerelease !== null;
+}
+
+/**
+ * @param {boolean} toggle Dispatch toggle from the bump-commit trailer.
+ * @param {boolean} [signing] `signingImplemented` (injectable for tests).
+ * @param {string | null} [version] Resolved release version (`--version`).
+ * @returns {boolean}
+ */
+export function effectivePrerelease(toggle, signing = signingImplemented, version = null) {
+  return versionForcesPrerelease(version) || toggle || !signing;
 }
 
 /**
@@ -101,11 +123,11 @@ function parseToggleArgument(value) {
 }
 
 /**
- * @returns {{ toggle: boolean | null; messageFile: string | null; help: boolean }}
+ * @returns {{ toggle: boolean | null; messageFile: string | null; version: string | null; help: boolean }}
  */
 function parseArgs(argv) {
-  /** @type {{ toggle: boolean | null; messageFile: string | null; help: boolean }} */
-  const out = { toggle: null, messageFile: null, help: false };
+  /** @type {{ toggle: boolean | null; messageFile: string | null; version: string | null; help: boolean }} */
+  const out = { toggle: null, messageFile: null, version: null, help: false };
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -121,6 +143,12 @@ function parseArgs(argv) {
         throw new Error("--message-file requires a path");
       }
       out.messageFile = value;
+    } else if (arg === "--version") {
+      const value = argv[++i];
+      if (value === undefined) {
+        throw new Error("--version requires a value");
+      }
+      out.version = value;
     } else if (arg === "--help" || arg === "-h") {
       out.help = true;
     } else {
@@ -132,11 +160,13 @@ function parseArgs(argv) {
 }
 
 const USAGE = `Usage: node tooling/release/effective-prerelease.mjs --toggle <true|false>
-       node tooling/release/effective-prerelease.mjs --message-file <path|->
+       node tooling/release/effective-prerelease.mjs --message-file <path|-> [--version <release-version>]
 
-Prints the effective prerelease value: toggle OR "signing not implemented".
-A message file is read for the Nexus-Prerelease: true|false trailer (absent or
-ambiguous trailer fails closed to prerelease).`;
+Prints the effective prerelease value: a version with an -alpha.N / -rc.N
+suffix OR the dispatch toggle OR "signing not implemented". A message file is
+read for the Nexus-Prerelease: true|false trailer (absent or ambiguous trailer
+fails closed to prerelease); --version takes the resolved release version and
+an unreadable value fails closed to prerelease.`;
 
 function main(argv) {
   const options = parseArgs(argv);
@@ -144,13 +174,13 @@ function main(argv) {
     console.log(USAGE);
     return 0;
   }
-  if (options.toggle === null && options.messageFile === null) {
+  if (options.toggle === null && options.messageFile === null && options.version === null) {
     console.error(USAGE);
     return 1;
   }
 
   let toggle = options.toggle;
-  let source = "toggle";
+  let source = options.toggle === null ? "unset" : "toggle";
   if (options.messageFile !== null) {
     const message =
       options.messageFile === "-"
@@ -169,9 +199,14 @@ function main(argv) {
     }
   }
 
-  const effective = effectivePrerelease(/** @type {boolean} */ (toggle));
+  const effective = effectivePrerelease(
+    /** @type {boolean} */ (toggle),
+    undefined,
+    options.version,
+  );
+  const versionNote = options.version === null ? "" : ` version=${options.version}`;
   console.error(
-    `effective prerelease: ${effective} (${source}=${toggle}, signingImplemented=${signingImplemented})`,
+    `effective prerelease: ${effective} (${source}=${toggle}, signingImplemented=${signingImplemented})${versionNote}`,
   );
   console.log(String(effective));
   return 0;
