@@ -3,13 +3,14 @@
  * Assert a release version is a valid, unused, strictly increasing version.
  *
  * Checks, in order:
- *   1. the target is a clean SemVer (`^\d+\.\d+\.\d+$` — no prerelease/build suffix)
+ *   1. the target is a release SemVer (X.Y.Z, X.Y.Z-alpha.N, or X.Y.Z-rc.N)
  *   2. it is strictly greater than the root `package.json` version on
- *      `origin/<base-ref>` (the release lands on top of main)
+ *      `origin/<base-ref>` (the release lands on top of main; the reference may
+ *      itself be suffixed once an alpha/rc bump has merged)
  *   3. no `v<version>` tag exists yet
  *
  * CLI:
- *   node tooling/release/assert-version-greater.mjs <X.Y.Z> [--base-ref main] [--repo-root <path>]
+ *   node tooling/release/assert-version-greater.mjs <release-version> [--base-ref main] [--repo-root <path>]
  *
  * Exit 0 when all three hold; non-zero otherwise.
  *
@@ -19,7 +20,7 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { ROOT_PACKAGE_PATH, resolveRepoRoot } from "./version-surfaces.mjs";
-import { isCleanSemVer, isSemVerGreater } from "./semver.mjs";
+import { isReleaseSemVer, isSemVerGreater } from "./semver.mjs";
 
 /**
  * @param {string} repoRoot
@@ -59,7 +60,7 @@ export function checkVersionGreater({ repoRoot, target, baseRef = "main" }) {
   let referenceVersion = null;
   let tagExists = false;
 
-  if (!isCleanSemVer(target)) {
+  if (!isReleaseSemVer(target)) {
     return {
       ok: false,
       target,
@@ -68,7 +69,7 @@ export function checkVersionGreater({ repoRoot, target, baseRef = "main" }) {
       tag,
       tagExists,
       problems: [
-        `Invalid version "${target}": expected a clean SemVer (X.Y.Z, no prerelease suffix)`,
+        `Invalid version "${target}": expected a release SemVer (X.Y.Z, X.Y.Z-alpha.N, or X.Y.Z-rc.N)`,
       ],
     };
   }
@@ -93,9 +94,9 @@ export function checkVersionGreater({ repoRoot, target, baseRef = "main" }) {
       problems.push(
         `Version ${target} equals the ${referenceRef} version; a release must advance it`,
       );
-    } else if (!isCleanSemVer(referenceVersion)) {
+    } else if (!isReleaseSemVer(referenceVersion)) {
       problems.push(
-        `${referenceRef}:${ROOT_PACKAGE_PATH} version "${referenceVersion}" is not a clean SemVer`,
+        `${referenceRef}:${ROOT_PACKAGE_PATH} version "${referenceVersion}" is not a release SemVer`,
       );
     } else if (!isSemVerGreater(target, referenceVersion)) {
       problems.push(`Version ${target} must be greater than ${referenceVersion} (${referenceRef})`);
@@ -123,10 +124,10 @@ export function checkVersionGreater({ repoRoot, target, baseRef = "main" }) {
   };
 }
 
-const USAGE = `Usage: node tooling/release/assert-version-greater.mjs <X.Y.Z> [--base-ref main] [--repo-root <path>]
+const USAGE = `Usage: node tooling/release/assert-version-greater.mjs <release-version> [--base-ref main] [--repo-root <path>]
 
-Asserts the target is a clean SemVer, strictly greater than ${ROOT_PACKAGE_PATH} on
-origin/<base-ref>, with no v<version> tag present.`;
+<release-version> is X.Y.Z, X.Y.Z-alpha.N, or X.Y.Z-rc.N. Asserts it is strictly
+greater than ${ROOT_PACKAGE_PATH} on origin/<base-ref>, with no v<version> tag present.`;
 
 function main(argv, env = process.env) {
   /** @type {{ target: string | null; baseRef: string; repoRoot: string | null; help: boolean }} */

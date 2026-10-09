@@ -41,7 +41,8 @@ test("checkVersionGreater rejects invalid, equal, and lower versions", () => {
     for (const target of [
       "9.8",
       `v${FIXTURE_TARGET_VERSION}`,
-      `${FIXTURE_TARGET_VERSION}-rc.1`,
+      `${FIXTURE_TARGET_VERSION}-beta.1`,
+      `${FIXTURE_TARGET_VERSION}-rc.0`,
       `${FIXTURE_TARGET_VERSION}+build.1`,
       FIXTURE_BASELINE_VERSION,
     ]) {
@@ -51,6 +52,76 @@ test("checkVersionGreater rejects invalid, equal, and lower versions", () => {
     const lower = checkVersionGreater({ repoRoot: dir, target: "0.0.1" });
     assert.equal(lower.ok, false);
     assert.ok(lower.problems.some((problem) => problem.includes("must be greater than")));
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("checkVersionGreater accepts a suffixed target over a clean reference", () => {
+  const dir = createTempRepo();
+  try {
+    initGitRepo(dir);
+    commitFile(dir, ROOT_PACKAGE_PATH, packageJsonWith(dir, '"version": "0.1.0"'), "release 0.1.0");
+    gitOk(dir, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
+
+    const report = checkVersionGreater({ repoRoot: dir, target: "0.2.0-alpha.1" });
+    assert.equal(report.ok, true, report.problems.join("; "));
+    assert.equal(report.referenceVersion, "0.1.0");
+    assert.equal(report.tagExists, false);
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("checkVersionGreater orders a suffixed target against a suffixed origin/main reference", () => {
+  const dir = createTempRepo();
+  try {
+    initGitRepo(dir);
+    commitFile(
+      dir,
+      ROOT_PACKAGE_PATH,
+      packageJsonWith(dir, '"version": "0.2.0-alpha.3"'),
+      "alpha 0.2.0-alpha.3",
+    );
+    gitOk(dir, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
+
+    const promotion = checkVersionGreater({ repoRoot: dir, target: "0.2.0-rc.1" });
+    assert.equal(promotion.ok, true, promotion.problems.join("; "));
+    assert.equal(promotion.referenceVersion, "0.2.0-alpha.3");
+
+    const respin = checkVersionGreater({ repoRoot: dir, target: "0.2.0-alpha.4" });
+    assert.equal(respin.ok, true, respin.problems.join("; "));
+
+    const older = checkVersionGreater({ repoRoot: dir, target: "0.2.0-alpha.2" });
+    assert.equal(older.ok, false);
+    assert.ok(
+      older.problems.some((problem) => problem.includes("must be greater than 0.2.0-alpha.3")),
+      older.problems.join("; "),
+    );
+
+    const equal = checkVersionGreater({ repoRoot: dir, target: "0.2.0-alpha.3" });
+    assert.equal(equal.ok, false);
+    assert.ok(equal.problems.some((problem) => problem.includes("equals the origin/main version")));
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("checkVersionGreater refuses an existing suffixed v<version> tag", () => {
+  const dir = createTempRepo();
+  try {
+    initGitRepo(dir);
+    commitFile(dir, ROOT_PACKAGE_PATH, packageJsonWith(dir, '"version": "0.1.0"'), "release 0.1.0");
+    gitOk(dir, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    tagRelease(dir, "v0.2.0-rc.1");
+
+    const report = checkVersionGreater({ repoRoot: dir, target: "0.2.0-rc.1" });
+    assert.equal(report.ok, false);
+    assert.equal(report.tagExists, true);
+    assert.ok(report.problems.some((problem) => problem.includes("already exists")));
+
+    // The later stable of the same core is a distinct ref and stays available.
+    assert.equal(checkVersionGreater({ repoRoot: dir, target: "0.2.0" }).ok, true);
   } finally {
     cleanupTempRepo(dir);
   }

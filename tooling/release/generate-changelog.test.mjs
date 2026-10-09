@@ -159,6 +159,25 @@ test("resolveChangelogBase prefers the newest v* tag, then the CHANGELOG baselin
   }
 });
 
+test("resolveChangelogBase takes the semver maximum, not git's version sort", () => {
+  const dir = createTempRepo();
+  try {
+    initGitRepo(dir);
+    const baseline = commitFile(dir, "CHANGELOG.md", "# Changelog\n", "docs: add changelog");
+    // Both channels share a core: the stable outranks its own rc under the
+    // module comparator even though `git tag --sort=-v:refname` reverses them.
+    tagRelease(dir, "v0.2.0-rc.1", baseline);
+    tagRelease(dir, "v0.2.0", baseline);
+    assert.deepEqual(resolveChangelogBase(dir), { tag: "v0.2.0", source: "tag" });
+
+    // Unparseable `v*` refs are skipped rather than chosen.
+    tagRelease(dir, "vnext", baseline);
+    assert.deepEqual(resolveChangelogBase(dir), { tag: "v0.2.0", source: "tag" });
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
 test("resolveChangelogBase returns null without tags or a CHANGELOG baseline", () => {
   const dir = createTempRepo();
   try {
@@ -254,6 +273,27 @@ test("CLI ranges from the newest tag and prepends into CHANGELOG.md", () => {
   }
 });
 
+test("CLI accepts a suffixed --version and carries it into the header", () => {
+  const dir = createTempRepo();
+  try {
+    initGitRepo(dir);
+    const baseline = commitFile(dir, "CHANGELOG.md", "# Changelog\n", "docs: bootstrap changelog");
+    tagRelease(dir, "v0.1.0", baseline);
+    commitFile(dir, "notes-a.md", "a\n", "feat: alpha");
+
+    const run = runReleaseScript(
+      "generate-changelog.mjs",
+      ["--version", "0.2.0-rc.1", "--date", "2026-09-30"],
+      dir,
+    );
+    assert.equal(run.status, 0, run.stderr);
+    assert.ok(run.stdout.startsWith("## [0.2.0-rc.1] - 2026-09-30\n"), run.stdout);
+    assert.match(run.stdout, /### Features\n- alpha \([0-9a-f]{7}\)\n$/);
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
 test("CLI emits an empty-bodied section when the tag sits at HEAD", () => {
   const dir = createTempRepo();
   try {
@@ -288,6 +328,14 @@ test("CLI fails without a defensible base and on invalid arguments", () => {
     );
     assert.equal(badVersion.status, 1);
     assert.match(badVersion.stderr, /Invalid or missing --version/);
+
+    const badLabel = runReleaseScript(
+      "generate-changelog.mjs",
+      ["--version", "0.2.0-beta.1", "--date", "2026-09-30"],
+      dir,
+    );
+    assert.equal(badLabel.status, 1);
+    assert.match(badLabel.stderr, /Invalid or missing --version/);
 
     const badDate = runReleaseScript(
       "generate-changelog.mjs",
