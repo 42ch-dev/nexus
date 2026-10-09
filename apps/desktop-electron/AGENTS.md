@@ -11,6 +11,7 @@ auto-update, or public-release lane is part of this package.
 | `pnpm run build` | Compile the Electron host and preload into `dist/`; does not package or sign |
 | `pnpm run package -- --arch arm64\|x64` | Build one native-architecture `.app`, `.dmg`, app ZIP, receipt, and checksums under `artifacts/desktop/<version>/darwin-<arch>/` |
 | `node scripts/verify-package.mjs --dir artifacts/desktop/<version>/darwin-<arch>` | Read-only receipt, archive, app-manifest, Mach-O, native-closure, and compiled-host-policy verification |
+| `node scripts/verify-launch.mjs --app artifacts/desktop/<version>/darwin-<arch>/Nexus.app [--timeout-ms 20000]` | Bounded direct-exec launch probe against the published app (never staged inputs); fails closed on any bootstrap exit or `[desktop] bootstrap failed` marker |
 | `pnpm run icons` | Compose the product ICNS from the approved Nexus logo source |
 
 The root aliases `pnpm build:desktop -- --arch <arch>` to the same package driver.

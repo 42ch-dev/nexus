@@ -176,6 +176,20 @@ jobs:
           test -s "${dir}/receipt.json"
           test -s "${dir}/SHA256SUMS"
 
+      - name: Verify published app launches
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          # F-13 lesson: probe the published artifact directory — the same one
+          # verify-package validates and the upload step ships — never staged
+          # inputs. A bootstrap failure here fails the job: no upload, no
+          # release publish.
+          node apps/desktop-electron/scripts/verify-launch.mjs \
+            --app "artifacts/desktop/${version}/darwin-${TARGET_ARCH}/Nexus.app" \
+            --timeout-ms 20000
+
       # Stage the published files under a flat root before uploading: the
       # distribution paths carry a version directory, and an upload-artifact
       # glob with a wildcard in a directory position would root the artifact
