@@ -21,8 +21,7 @@ pub struct CreateWorkRequest {
     pub title: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub work_profile: ::std::option::Option<::std::string::String>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub world_id: ::std::option::Option<::std::string::String>,
+    pub world_id: ::std::string::String,
 }
 impl CreateWorkRequest {
     pub fn builder() -> builder::CreateWorkRequest {
@@ -66,10 +65,7 @@ pub mod builder {
             ::std::option::Option<::std::string::String>,
             ::std::string::String,
         >,
-        world_id: ::std::result::Result<
-            ::std::option::Option<::std::string::String>,
-            ::std::string::String,
-        >,
+        world_id: ::std::result::Result<::std::string::String, ::std::string::String>,
     }
     impl ::std::default::Default for CreateWorkRequest {
         fn default() -> Self {
@@ -83,7 +79,7 @@ pub mod builder {
                 story_ref: Ok(Default::default()),
                 title: Err("no value supplied for title".to_string()),
                 work_profile: Ok(Default::default()),
-                world_id: Ok(Default::default()),
+                world_id: Err("no value supplied for world_id".to_string()),
             }
         }
     }
@@ -198,7 +194,7 @@ pub mod builder {
         }
         pub fn world_id<T>(mut self, value: T) -> Self
         where
-            T: ::std::convert::TryInto<::std::option::Option<::std::string::String>>,
+            T: ::std::convert::TryInto<::std::string::String>,
             T::Error: ::std::fmt::Display,
         {
             self.world_id = value

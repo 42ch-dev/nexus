@@ -137,7 +137,7 @@ describe('DesktopClient transport parity (thin-over-BrowserClient)', () => {
     await client.health();
     await client.listWorks();
     await client.getWork(workId);
-    await client.createWork({ title: '', long_term_goal: '', initial_idea: '' });
+    await client.createWork({ title: '', long_term_goal: '', initial_idea: '', world_id: 'world-1' });
     await client.patchWork(workId, { status: 'draft' });
     await client.listSessions();
     await client.getSession('s1');
@@ -352,7 +352,7 @@ describe('BrowserClient adapter contract', () => {
     );
     const client = new BrowserClient();
     await expect(
-      client.createWork({ title: '', long_term_goal: '', initial_idea: '' }),
+      client.createWork({ title: '', long_term_goal: '', initial_idea: '', world_id: 'world-1' }),
     ).rejects.toMatchObject({
       name: 'NexusClientError',
       status: 400,
@@ -371,7 +371,12 @@ describe('BrowserClient adapter contract', () => {
     const works = await client.listWorks();
     expect(works.items).toEqual([{ work_id: 'w1' }]);
 
-    const created = await client.createWork({ title: 'Hello', long_term_goal: '', initial_idea: '' });
+    const created = await client.createWork({
+      title: 'Hello',
+      long_term_goal: '',
+      initial_idea: '',
+      world_id: 'world-1',
+    });
     expect(created.work_id).toBe('w-new');
     expect(created.status).toBe('draft');
   });

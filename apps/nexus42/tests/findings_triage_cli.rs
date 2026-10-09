@@ -133,7 +133,7 @@ async fn fresh_env(finding_count: usize) -> FindingsEnv {
                 story_ref: Some(STORY_REF.to_string()),
                 title: "Findings Test Novel".to_string(),
                 work_profile: Some("novel".to_string()),
-                world_id: Some(world_id.clone()),
+                world_id: world_id.clone(),
             },
         )
         .await

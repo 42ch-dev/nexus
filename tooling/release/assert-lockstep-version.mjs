@@ -2,9 +2,10 @@
 /**
  * Assert the Nexus version surfaces are in lockstep.
  *
- * Checks the four hand-written surfaces (`Cargo.toml` `[workspace.package]`,
+ * Checks the five hand-written surfaces (`Cargo.toml` `[workspace.package]`,
  * root `package.json`, `apps/desktop-electron/package.json`,
- * `apps/desktop-electron/resources/product.json`), the five native npm
+ * `apps/desktop-electron/resources/product.json`,
+ * `apps/nexus-service/package.json`), the five native npm
  * manifests (`packages/nexus-native/package.json` plus the four platform
  * packages — including the loader's `@42ch/nexus-native-*` pins) and every
  * workspace member entry in `Cargo.lock`.

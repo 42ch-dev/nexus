@@ -63,7 +63,9 @@ describe('BrowserClient cursor list', () => {
     );
 
     const client = new BrowserClient();
-    await expect(client.createWork({ title: '', long_term_goal: '', initial_idea: '' })).rejects
+    await expect(
+      client.createWork({ title: '', long_term_goal: '', initial_idea: '', world_id: 'world-1' }),
+    ).rejects
       .toMatchObject({
         name: 'NexusClientError',
         status: 400,

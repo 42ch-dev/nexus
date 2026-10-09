@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent, type FormEvent } from 'react';
+import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 import { Globe, Plus, type LucideIcon } from 'lucide-react';
 
 import {
@@ -9,6 +9,8 @@ import {
   Select,
   Textarea,
 } from '@42ch/nexus-ui';
+
+import { ErrorState } from '@/components/ui/states';
 
 import { HubTabBar, type HubTab, type HubTabBarLabels } from './hub-tab-bar';
 
@@ -43,6 +45,12 @@ export type CreatorShellInlineCreateLabels = {
     ideaPlaceholder: string;
     profileLabel: string;
     profileOptions: ReadonlyArray<{ value: string; label: string }>;
+    worldLabel: string;
+    worldPlaceholder: string;
+    worldEmpty: string;
+    /** PR #372 (P2): read-error state copy when the World list fails to load. */
+    worldErrorTitle: string;
+    worldErrorDescription: string;
     submit: string;
   };
 };
@@ -51,6 +59,7 @@ export type CreatorShellInlineWorkSubmit = {
   title: string;
   longTermGoal: string;
   initialIdea: string;
+  worldId: string;
   workProfile?: string;
 };
 
@@ -161,10 +170,19 @@ function InlineWorldForm({
 
 function InlineWorkForm({
   labels,
+  worlds,
+  worldsLoading = false,
+  worldsError = false,
+  onWorldsRetry,
   isPending = false,
   onSubmit,
 }: {
   labels: CreatorShellInlineCreateLabels['work'];
+  worlds: ReadonlyArray<{ value: string; label: string }>;
+  worldsLoading?: boolean;
+  /** PR #372 (P2): read error with no cached worlds — show retry, not empty. */
+  worldsError?: boolean;
+  onWorldsRetry?: () => void;
   isPending?: boolean;
   onSubmit?: (payload: CreatorShellInlineWorkSubmit) => void | Promise<void>;
 }) {
@@ -174,11 +192,22 @@ function InlineWorkForm({
   const defaultProfile = labels.profileOptions[0]?.value ?? '';
   const [workProfile, setWorkProfile] = useState(defaultProfile);
   const [workProfileTouched, setWorkProfileTouched] = useState(false);
+  const [worldId, setWorldId] = useState('');
+
+  // Single-world preselect (F-01 W1): when the workspace has exactly one
+  // World, the create is unambiguous — select it automatically so the author
+  // is not forced through a one-option selector.
+  useEffect(() => {
+    if (worldId === '' && worlds.length === 1) {
+      setWorldId(worlds[0].value);
+    }
+  }, [worlds, worldId]);
 
   const valid =
     title.trim().length > 0 &&
     longTermGoal.trim().length > 0 &&
-    initialIdea.trim().length > 0;
+    initialIdea.trim().length > 0 &&
+    worldId !== '';
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -187,6 +216,7 @@ function InlineWorkForm({
       title: title.trim(),
       longTermGoal: longTermGoal.trim(),
       initialIdea: initialIdea.trim(),
+      worldId,
       ...(workProfileTouched ? { workProfile } : {}),
     };
     try {
@@ -196,6 +226,7 @@ function InlineWorkForm({
       setInitialIdea('');
       setWorkProfile(defaultProfile);
       setWorkProfileTouched(false);
+      setWorldId('');
     } catch {
       // Parent handles errors; keep form state for retry.
     }
@@ -242,6 +273,38 @@ function InlineWorkForm({
         />
       </div>
       <div className="flex flex-col gap-1.5">
+        <Label htmlFor="sidebar-create-work-world">{labels.worldLabel}</Label>
+        {worldsError ? (
+          <ErrorState
+            title={labels.worldErrorTitle}
+            description={labels.worldErrorDescription}
+            onRetry={onWorldsRetry}
+          />
+        ) : (
+          <Select
+            id="sidebar-create-work-world"
+            value={worldId}
+            disabled={worldsLoading || isPending}
+            onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+              setWorldId(event.target.value)
+            }
+          >
+            {worlds.length === 0 ? (
+              <option value="">{labels.worldEmpty}</option>
+            ) : (
+              <>
+                <option value="">{labels.worldPlaceholder}</option>
+                {worlds.map((world) => (
+                  <option key={world.value} value={world.value}>
+                    {world.label}
+                  </option>
+                ))}
+              </>
+            )}
+          </Select>
+        )}
+      </div>
+      <div className="flex flex-col gap-1.5">
         <Label htmlFor="sidebar-create-work-profile">{labels.profileLabel}</Label>
         <Select
           id="sidebar-create-work-profile"
@@ -285,6 +348,11 @@ export type CreatorShellContentProps =
       mode: 'create-inline';
       canCreateWorld: boolean;
       labels: CreatorShellInlineCreateLabels;
+      worlds?: ReadonlyArray<{ value: string; label: string }>;
+      worldsLoading?: boolean;
+      /** PR #372 (P2): read error with no cached worlds — show retry, not empty. */
+      worldsError?: boolean;
+      onWorldsRetry?: () => void;
       worldIsPending?: boolean;
       workIsPending?: boolean;
       onWorldSubmit?: (title: string) => void | Promise<void>;
@@ -307,6 +375,10 @@ function CreatorShellInlineCreate({
   testId,
   canCreateWorld,
   labels,
+  worlds,
+  worldsLoading = false,
+  worldsError = false,
+  onWorldsRetry,
   worldIsPending = false,
   workIsPending = false,
   onWorldSubmit,
@@ -315,6 +387,11 @@ function CreatorShellInlineCreate({
   testId: string;
   canCreateWorld: boolean;
   labels: CreatorShellInlineCreateLabels;
+  worlds?: ReadonlyArray<{ value: string; label: string }>;
+  worldsLoading?: boolean;
+  /** PR #372 (P2): read error with no cached worlds — show retry, not empty. */
+  worldsError?: boolean;
+  onWorldsRetry?: () => void;
   worldIsPending?: boolean;
   workIsPending?: boolean;
   onWorldSubmit?: (title: string) => void | Promise<void>;
@@ -355,6 +432,10 @@ function CreatorShellInlineCreate({
         ) : (
           <InlineWorkForm
             labels={labels.work}
+            worlds={worlds ?? []}
+            worldsLoading={worldsLoading}
+            worldsError={worldsError}
+            onWorldsRetry={onWorldsRetry}
             isPending={workIsPending}
             onSubmit={onWorkSubmit}
           />
@@ -378,6 +459,10 @@ export function CreatorShellContent(props: CreatorShellContentProps) {
     const {
       canCreateWorld,
       labels,
+      worlds,
+      worldsLoading,
+      worldsError,
+      onWorldsRetry,
       worldIsPending,
       workIsPending,
       onWorldSubmit,
@@ -389,6 +474,10 @@ export function CreatorShellContent(props: CreatorShellContentProps) {
         testId={testId}
         canCreateWorld={canCreateWorld}
         labels={labels}
+        worlds={worlds}
+        worldsLoading={worldsLoading}
+        worldsError={worldsError}
+        onWorldsRetry={onWorldsRetry}
         worldIsPending={worldIsPending}
         workIsPending={workIsPending}
         onWorldSubmit={onWorldSubmit}

@@ -5,7 +5,7 @@
   "title": "Nexus CreateWorkRequest",
   "description": "Request body for POST /v1/daemon/works.",
   "type": "object",
-  "required": ["title", "long_term_goal", "initial_idea"],
+  "required": ["title", "long_term_goal", "initial_idea", "world_id"],
   "properties": {
     "title": { "type": "string" },
     "long_term_goal": { "type": "string" },

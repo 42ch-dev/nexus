@@ -54,6 +54,11 @@ const INLINE_CREATE_LABELS = {
       { value: 'novel', label: '小说' },
       { value: 'essay', label: '随笔' },
     ],
+    worldLabel: '世界',
+    worldPlaceholder: '选择一个世界',
+    worldEmpty: '暂无可用世界——请先创建一个世界。',
+    worldErrorTitle: '无法加载世界',
+    worldErrorDescription: '世界列表加载失败，请检查连接后重试。',
     submit: '创建作品',
   },
 } satisfies CreatorShellInlineCreateLabels;
@@ -193,6 +198,9 @@ function GongnengquIaShellFrame({
       mode="create-inline"
       canCreateWorld={false}
       labels={INLINE_CREATE_LABELS}
+      // Single World → the selector preselects it (F-01 W1), matching the
+      // shipped sidebar behavior for one-world workspaces.
+      worlds={[{ value: SAMPLE_WORLDS[0].id, label: SAMPLE_WORLDS[0].label }]}
       onWorldSubmit={() => {}}
       onWorkSubmit={() => {}}
       data-testid="sidebar-create-panel"

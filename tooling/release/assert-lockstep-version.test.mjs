@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   CARGO_LOCK_PATH,
+  LOCKSTEP_PATHS,
   NATIVE_LOADER_PACKAGE_PATH,
   NATIVE_SURFACE_PATHS,
   PRODUCT_JSON_PATH,
@@ -26,7 +27,10 @@ test("checkLockstep accepts the fixture surface set", () => {
     const report = checkLockstep(dir);
     assert.equal(report.ok, true, report.problems.join("; "));
     assert.equal(report.version, FIXTURE_BASELINE_VERSION);
-    assert.equal(report.surfaces.length, 4 + NATIVE_SURFACE_PATHS.length);
+    assert.equal(
+      report.surfaces.length,
+      LOCKSTEP_PATHS.length + NATIVE_SURFACE_PATHS.length,
+    );
     assert.equal(report.lockMembers.length, readWorkspaceMemberPackages(dir).length);
   } finally {
     cleanupTempRepo(dir);

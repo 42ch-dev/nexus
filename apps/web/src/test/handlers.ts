@@ -32,7 +32,16 @@ export function errorEnvelope(status: number, error: ErrorResponse) {
 
 // ── Daemon health ────────────────────────────────────────────────────────────
 
-/** `GET /v1/daemon/runtime/health` → 200 `{ status, version }`. */
+/**
+ * `GET /v1/daemon/runtime/health` → 200 `{ status, version }`.
+ *
+ * The `version` default is an intentional fixed fixture: callers supply the
+ * value they mean to exercise (e.g. `healthOk('0.9.9')` in
+ * `adapter-contract.test.ts`), and no test asserts this default against the
+ * governed daemon version (`apps/nexus-service/package.json`, T1). It is a
+ * shape-valid, self-contained response with no runtime drift path; deriving it
+ * would only add a cross-app manifest read to web test infrastructure.
+ */
 export function healthOk(version = '0.1.0'): RequestHandler {
   return http.get('/v1/daemon/runtime/health', () =>
     HttpResponse.json({ status: 'ok', version }),
@@ -40,6 +49,32 @@ export function healthOk(version = '0.1.0'): RequestHandler {
 }
 
 // ── Works ────────────────────────────────────────────────────────────────────
+
+/**
+ * Canonical `NarrativeWorldState` fixture — the read-model projection the
+ * Work-create World selectors consume (F-01 W1). Fields outside the create
+ * path default to empty/NULL-ish values; override what a test asserts on.
+ */
+export function narrativeWorld(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    world_id: 'world-1',
+    title: 'Ashen Gate',
+    slug: 'ashen-gate',
+    status: 'active',
+    is_fork: false,
+    created_at: '2026-06-25T00:00:00Z',
+    ...over,
+  };
+}
+
+/** `GET /v1/daemon/narrative/worlds` → 200 `{ worlds }` (empty list default). */
+export function narrativeWorldsList(
+  worlds: Array<Record<string, unknown>> = [],
+): RequestHandler {
+  return http.get('/v1/daemon/narrative/worlds', () =>
+    HttpResponse.json({ worlds }),
+  );
+}
 
 /** `GET /v1/daemon/works` → 200 `{ items, pagination }` (F-P3 canonical `items` key). */
 export function worksList(

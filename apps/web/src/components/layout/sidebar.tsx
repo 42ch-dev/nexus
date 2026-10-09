@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router';
 
-import { useCreateWork, useCreateWorld } from '@/api/queries';
+import { useCreateWork, useCreateWorld, useNarrativeWorlds } from '@/api/queries';
 import { FooterProfiles } from '@/components/layout/footer-profiles';
 import { useEntrance } from '@/lib/entrance-context';
 import { ENTRANCE_BY_ID } from '@/components/layout/entrance-registry';
@@ -56,6 +56,18 @@ function CreatorCreatePanel() {
   const canCreateWorld = useMemo(() => hasCreateWorldClient(client), [client]);
   const createWorld = useCreateWorld();
   const createWork = useCreateWork();
+  // F-01 W1: Work creation requires a World (the daemon rejects a missing
+  // `world_id` with 400 `world_id_required`). The inline Work form therefore
+  // renders a required World selector fed by the narrative-worlds read model.
+  const narrativeWorlds = useNarrativeWorlds();
+  const worldOptions = useMemo(
+    () =>
+      (narrativeWorlds.data ?? []).map((world) => ({
+        value: world.world_id,
+        label: world.title,
+      })),
+    [narrativeWorlds.data],
+  );
 
   const inlineLabels = useMemo(
     () => ({
@@ -82,6 +94,11 @@ function CreatorCreatePanel() {
           value: profile.value,
           label: tCommon(`status.${profile.value}`),
         })),
+        worldLabel: tShell('workCreate.worldLabel'),
+        worldPlaceholder: tShell('workCreate.worldPlaceholder'),
+        worldEmpty: tShell('workCreate.worldEmpty'),
+        worldErrorTitle: tShell('workCreate.worldErrorTitle'),
+        worldErrorDescription: tShell('workCreate.worldErrorDescription'),
         submit: createWork.isPending ? tShell('workCreate.creating') : tShell('workCreate.create'),
       },
     }),
@@ -98,6 +115,7 @@ function CreatorCreatePanel() {
       title: payload.title,
       long_term_goal: payload.longTermGoal,
       initial_idea: payload.initialIdea,
+      world_id: payload.worldId,
       ...(payload.workProfile && isWorkProfile(payload.workProfile)
         ? { work_profile: payload.workProfile }
         : {}),
@@ -111,6 +129,10 @@ function CreatorCreatePanel() {
       mode="create-inline"
       canCreateWorld={canCreateWorld}
       labels={inlineLabels}
+      worlds={worldOptions}
+      worldsLoading={narrativeWorlds.isLoading}
+      worldsError={narrativeWorlds.isError && worldOptions.length === 0}
+      onWorldsRetry={() => narrativeWorlds.refetch()}
       worldIsPending={createWorld.isPending}
       workIsPending={createWork.isPending}
       onWorldSubmit={(title) => handleWorldSubmit(title)}
