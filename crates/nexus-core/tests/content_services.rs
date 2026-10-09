@@ -631,7 +631,10 @@ async fn ref_less_work_outline_read_degrades_to_default() {
     assert_eq!(outline.work_id, ref_less);
     assert_eq!(outline.outline_revision, 0);
     assert_eq!(outline.volumes.len(), 1);
-    assert_eq!(outline.volumes[0].chapter_ids, [] as [std::num::NonZero<u64>; 0]);
+    assert_eq!(
+        outline.volumes[0].chapter_ids,
+        [] as [std::num::NonZero<u64>; 0]
+    );
     assert!(outline.timeline_events.is_empty());
     assert!(outline.chapter_titles.is_empty());
     assert_ne!(outline.updated_at, "");
