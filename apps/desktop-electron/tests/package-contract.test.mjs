@@ -136,17 +136,27 @@ test('packed app symlinks are materialized and closure scan rejects escapes', ()
   const root = mkdtempSync(join(tmpdir(), 'nexus-packed-app-'));
   const app = join(root, 'Nexus.app');
   const external = join(root, 'packager', 'Electron Framework');
-  mkdirSync(app);
+  const framework = join(app, 'Contents', 'Frameworks', 'Electron Framework.framework');
+  const versions = join(framework, 'Versions');
+  const versionA = join(versions, 'A');
+  const versionResources = join(versionA, 'Resources');
+  mkdirSync(versionResources, { recursive: true });
   mkdirSync(join(root, 'packager'));
   writeFileSync(external, 'framework');
+  writeFileSync(join(versionResources, 'framework.txt'), 'nested framework resource');
   symlinkSync(external, join(app, 'Framework Alias'));
+  symlinkSync('Resources', join(versionA, 'ResourcesAlias'));
+  symlinkSync('A', join(versions, 'Current'));
   throwsCode(() => assertNoSymlinkEscape(app, { label: 'packed' }), 'package.packed.symlink');
   materializeSymlinks(app);
   assert.equal(lstatSync(join(app, 'Framework Alias')).isSymbolicLink(), false);
   assert.equal(readFileSync(join(app, 'Framework Alias'), 'utf8'), 'framework');
+  assert.equal(lstatSync(join(versions, 'Current')).isSymbolicLink(), false);
+  assert.equal(lstatSync(join(versions, 'Current', 'ResourcesAlias')).isSymbolicLink(), false);
+  assert.equal(readFileSync(join(versions, 'Current', 'ResourcesAlias', 'framework.txt'), 'utf8'), 'nested framework resource');
   assert.deepEqual(assertNoSymlinkEscape(app, { label: 'packed' }), {
     result: 'pass',
-    detail: `scan found no symlink escaping ${app}`,
+    detail: 'scan found no symlink escaping packed root',
   });
 });
 

@@ -137,7 +137,7 @@ export function assertNoSymlinkEscape(root, { label = 'staging' } = {}) {
       }
     }
   }
-  return { result: 'pass', detail: `scan found no symlink escaping ${absoluteRoot}` };
+  return { result: 'pass', detail: `scan found no symlink escaping ${label} root` };
 }
 
 export function assertNativeCompatibility(manifest, { arch, resetBinding } = {}) {
