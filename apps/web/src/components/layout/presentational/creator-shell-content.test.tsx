@@ -130,7 +130,7 @@ describe('CreatorShellContent', () => {
     expect(onWorkSubmit).not.toHaveBeenCalled();
   });
 
-  it('shows a read-error state with Retry when the World list fails to load, and keeps create disabled (PR #372)', () => {
+  it('shows a read-error state with Retry when the World list fails to load, and keeps create disabled even with all text fields filled (PR #372)', () => {
     const onWorldsRetry = vi.fn();
     const onWorkSubmit = vi.fn();
 
@@ -154,13 +154,62 @@ describe('CreatorShellContent', () => {
     const alert = screen.getByRole('alert');
     expect(within(alert).getByText('Failed to load worlds')).toBeInTheDocument();
     expect(screen.queryByText('No worlds available')).not.toBeInTheDocument();
-    // Create stays blocked until worlds load.
+
+    // Fill every required text field so submit-readiness is attributable to
+    // the World state alone — the submit must STILL stay blocked under the
+    // read error (not merely because the fields are blank).
+    fireEvent.change(screen.getByLabelText('Work title'), { target: { value: 'Novel' } });
+    fireEvent.change(screen.getByLabelText('Long-term goal'), { target: { value: 'Finish draft' } });
+    fireEvent.change(screen.getByLabelText('Initial idea'), { target: { value: 'A long road' } });
     expect(screen.getByTestId('sidebar-create-submit-work')).toBeDisabled();
     expect(onWorkSubmit).not.toHaveBeenCalled();
 
     // Retry is wired to the parent's refetch.
     fireEvent.click(within(alert).getByRole('button'));
     expect(onWorldsRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers inline Work create after the retry refetch returns worlds (PR #372)', async () => {
+    const onWorldsRetry = vi.fn();
+    const onWorkSubmit = vi.fn();
+
+    const props = {
+      mode: 'create-inline' as const,
+      canCreateWorld: true,
+      labels: INLINE_CREATE_LABELS,
+      onWorldSubmit: () => {},
+      onWorkSubmit,
+    };
+    const { rerender } = render(
+      <CreatorShellContent {...props} worlds={[]} worldsError onWorldsRetry={onWorldsRetry} />,
+    );
+
+    fireEvent.click(screen.getByTestId('sidebar-create-tab-work'));
+    const alert = screen.getByRole('alert');
+
+    // Error → retry: the Retry control asks the parent to refetch.
+    fireEvent.click(within(alert).getByRole('button'));
+    expect(onWorldsRetry).toHaveBeenCalledTimes(1);
+
+    // Recovery: the refetch succeeds, so the parent rerenders with worlds and
+    // no error. Fill the text fields — the single-world preselect plus the
+    // filled fields make the submit enabled and the payload complete.
+    rerender(<CreatorShellContent {...props} worlds={WORLD_OPTIONS} onWorldsRetry={onWorldsRetry} />);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Work title'), { target: { value: 'Novel' } });
+    fireEvent.change(screen.getByLabelText('Long-term goal'), { target: { value: 'Finish draft' } });
+    fireEvent.change(screen.getByLabelText('Initial idea'), { target: { value: 'A long road' } });
+
+    await vi.waitFor(() =>
+      expect(screen.getByTestId('sidebar-create-submit-work')).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByTestId('sidebar-create-submit-work'));
+    expect(onWorkSubmit).toHaveBeenCalledWith({
+      title: 'Novel',
+      longTermGoal: 'Finish draft',
+      initialIdea: 'A long road',
+      worldId: 'world-1',
+    });
   });
 
   it('preselects the only World for inline Work create (F-01 W1)', async () => {
