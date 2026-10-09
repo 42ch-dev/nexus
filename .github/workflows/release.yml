@@ -65,7 +65,7 @@ jobs:
           package_version="$(git show "$merge_sha:package.json" | node -p 'JSON.parse(require("fs").readFileSync(0,"utf8")).version')"
           [[ "$version" == "$package_version" ]] || { echo "::error::tag version $version does not match package.json $package_version"; exit 1; }
           commit_message="$(git show -s --format=%B "$merge_sha^2")"
-          printf '%s' "$commit_message" | node tooling/release/effective-prerelease.mjs --message-file - > "$RUNNER_TEMP/effective-prerelease"
+          printf '%s' "$commit_message" | node tooling/release/effective-prerelease.mjs --message-file - --version "$version" > "$RUNNER_TEMP/effective-prerelease"
           effective="$(cat "$RUNNER_TEMP/effective-prerelease")"
           {
             echo "version=$version"

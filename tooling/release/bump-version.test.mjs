@@ -73,14 +73,15 @@ test("bumpVersion writes every version surface and reports the change", () => {
   }
 });
 
-test("bumpVersion refuses non-clean, equal, and decreasing versions", () => {
+test("bumpVersion refuses malformed, equal, and decreasing versions", () => {
   const dir = createTempRepo();
   try {
     const lockBefore = readRepoFile(dir, CARGO_LOCK_PATH);
     for (const target of [
       "9.8",
       `v${FIXTURE_TARGET_VERSION}`,
-      `${FIXTURE_TARGET_VERSION}-rc.1`,
+      `${FIXTURE_TARGET_VERSION}-beta.1`,
+      `${FIXTURE_TARGET_VERSION}-rc.0`,
       FIXTURE_BASELINE_VERSION,
       "0.0.1",
     ]) {
@@ -93,6 +94,47 @@ test("bumpVersion refuses non-clean, equal, and decreasing versions", () => {
       assert.equal(surface.version, FIXTURE_BASELINE_VERSION, surface.path);
     }
     assert.equal(readRepoFile(dir, CARGO_LOCK_PATH), lockBefore);
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("bumpVersion walks the clean→alpha→rc→stable ladder and refuses a downgrade", () => {
+  const dir = createTempRepo();
+  /** Every surface, `Cargo.lock` members included, must carry `target` in lockstep. */
+  const assertSurfacesAt = (target) => {
+    for (const surface of readSurfaceVersions(dir)) {
+      assert.equal(surface.version, target, `${target} ${surface.path}`);
+    }
+    const lock = readRepoFile(dir, CARGO_LOCK_PATH);
+    for (const member of readWorkspaceMemberPackages(dir)) {
+      assert.equal(parseCargoLockPackageVersion(lock, member.name), target, `${target} ${member.name}`);
+    }
+  };
+  try {
+    for (const target of ["9.8.8-alpha.1", "9.8.8-alpha.2", "9.8.8-rc.1", "9.8.8-rc.2"]) {
+      const report = bumpVersion({ repoRoot: dir, target });
+      assert.equal(report.ok, true, `${target}: ${report.problems.join("; ")}`);
+      assert.equal(report.lockstep?.ok, true, target);
+      assertSurfacesAt(target);
+    }
+
+    // A downgrade within the core (alpha sorts below rc) leaves everything untouched.
+    const downgrade = bumpVersion({ repoRoot: dir, target: "9.8.8-alpha.4" });
+    assert.equal(downgrade.ok, false);
+    assert.deepEqual(downgrade.changed, []);
+    assert.ok(
+      downgrade.problems.some((problem) =>
+        problem.includes("must be greater than the current 9.8.8-rc.2"),
+      ),
+      downgrade.problems.join("; "),
+    );
+    assertSurfacesAt("9.8.8-rc.2");
+
+    // Promotion to the stable of the same core completes the ladder.
+    const stable = bumpVersion({ repoRoot: dir, target: "9.8.8" });
+    assert.equal(stable.ok, true, stable.problems.join("; "));
+    assertSurfacesAt("9.8.8");
   } finally {
     cleanupTempRepo(dir);
   }

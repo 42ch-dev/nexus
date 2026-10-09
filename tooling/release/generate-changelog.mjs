@@ -7,7 +7,11 @@
  * notes never list the release machinery itself.
  *
  * Base ref resolution:
- *   1. the newest `v*` tag (`git tag --list 'v*' --sort=-v:refname`)
+ *   1. the semver-maximum `v*` tag — Git's own version sort is never consulted
+ *      (`git tag --list 'v*' --sort=-v:refname` mis-orders `v0.2.0-rc.1` above
+ *      `v0.2.0` unless `versionsort.suffix` is configured), so each ref is
+ *      parsed with the release grammar and compared via `compareSemVer`, and
+ *      unparseable `v*` refs are skipped
  *   2. first-release fallback (compass D9): the commit that introduced
  *      `CHANGELOG.md` (`git log --diff-filter=A -1 --format=%H -- CHANGELOG.md`),
  *      so the first governed release covers everything merged after the
@@ -15,7 +19,7 @@
  *   3. otherwise the command fails — there is no defensible range
  *
  * CLI:
- *   node tooling/release/generate-changelog.mjs --version <X.Y.Z> [--base <ref>]
+ *   node tooling/release/generate-changelog.mjs --version <release-version> [--base <ref>]
  *     [--head <ref>] [--summary <text> | --summary-file <path>]
  *     [--date YYYY-MM-DD] [--prepend <CHANGELOG.md>] [--repo-root <path>]
  *
@@ -29,7 +33,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveRepoRoot } from "./version-surfaces.mjs";
-import { isCleanSemVer } from "./semver.mjs";
+import { compareSemVer, isReleaseSemVer } from "./semver.mjs";
 import { runGit } from "./assert-version-greater.mjs";
 
 /** Changelog file bootstrapped by the release-flow work (baseline marker). */
@@ -186,11 +190,27 @@ export function collectCommits(repoRoot, baseRef, headRef = "HEAD") {
  * @returns {{ tag: string; source: "tag" } | { commit: string; source: "changelog-baseline" } | null}
  */
 export function resolveChangelogBase(repoRoot) {
-  const tags = runGit(repoRoot, ["tag", "--list", "v*", "--sort=-v:refname"]);
+  const tags = runGit(repoRoot, ["tag", "--list", "v*"]);
   if (tags.status === 0) {
-    const [newest] = tags.stdout.split("\n").filter((line) => line.trim().length > 0);
-    if (newest !== undefined) {
-      return { tag: newest.trim(), source: "tag" };
+    // Re-derive "newest" with the release comparator: Git's version sort ranks
+    // `v0.2.0-rc.1` above `v0.2.0` unless `versionsort.suffix` is configured,
+    // an environment coupling this module refuses to inherit.
+    /** @type {string | null} */
+    const newest = tags.stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .reduce(
+        (best, tag) => {
+          const version = tag.slice(1);
+          if (!isReleaseSemVer(version)) {
+            return best;
+          }
+          return best === null || compareSemVer(version, best) > 0 ? version : best;
+        },
+        /** @type {string | null} */ (null),
+      );
+    if (newest !== null) {
+      return { tag: `v${newest}`, source: "tag" };
     }
   }
 
@@ -227,13 +247,14 @@ export function prependSection(contents, section) {
   return `${before}\n\n${section}\n\n${after}`;
 }
 
-const USAGE = `Usage: node tooling/release/generate-changelog.mjs --version <X.Y.Z> [--base <ref>] [--head <ref>]
+const USAGE = `Usage: node tooling/release/generate-changelog.mjs --version <release-version> [--base <ref>] [--head <ref>]
          [--summary <text> | --summary-file <path>] [--date YYYY-MM-DD]
          [--prepend <CHANGELOG.md>] [--repo-root <path>]
 
-Generates the release section (Features / Fixes / Docs & chores) from
-conventional commits over <base>..<head>. Base defaults to the newest v* tag,
-falling back to the commit that introduced ${CHANGELOG_PATH}.`;
+<release-version> is X.Y.Z, X.Y.Z-alpha.N, or X.Y.Z-rc.N. Generates the release
+section (Features / Fixes / Docs & chores) from conventional commits over
+<base>..<head>. Base defaults to the semver-maximum v* tag, falling back to the
+commit that introduced ${CHANGELOG_PATH}.`;
 
 function main(argv, env = process.env) {
   /** @type {{ version: string | null; base: string | null; head: string; summary: string | null; summaryFile: string | null; date: string | null; prepend: string | null; repoRoot: string | null; help: boolean }} */
@@ -291,8 +312,10 @@ function main(argv, env = process.env) {
     console.log(USAGE);
     return 0;
   }
-  if (options.version === null || !isCleanSemVer(options.version)) {
-    console.error(`Invalid or missing --version: expected a clean SemVer (X.Y.Z)`);
+  if (options.version === null || !isReleaseSemVer(options.version)) {
+    console.error(
+      `Invalid or missing --version: expected a release SemVer (X.Y.Z, X.Y.Z-alpha.N, or X.Y.Z-rc.N)`,
+    );
     console.error(USAGE);
     return 1;
   }
