@@ -467,3 +467,10 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | Document | Description |
 | --- | --- |
 | [build-errors/packed-app-symlink-materialization.md](build-errors/packed-app-symlink-materialization.md) | Packed .app ships absolute staging symlinks → consumer launch fails — `cpSync` `dereference:true` retained aliases (reproduced); receipt `symlink_closure` was a hardcoded staging pass; fix = normalize the packed bundle before archive + scan the produced artifact into the receipt (path-independent detail) + file/dir alias fixtures; verify with a bounded packaging run (single-app layout, 0 symlinks) then an actual launch. |
+
+### v1.209 additions
+
+| Document | Description |
+| --- | --- |
+| [testing-patterns/gui-app-launch-probe-and-process-hygiene.md](testing-patterns/gui-app-launch-probe-and-process-hygiene.md) | GUI-app launch probe pattern — direct-exec (never `open -W`; it returned 0 while the app died 21 ms later); FAIL on any exit within the window + independent stderr-marker arm; marker detection decoupled from retention (streaming carry, not trim-before-scan); process-group cleanup awaited on every exit path (SIGTERM → bounded poll → SIGKILL; no unref'd post-exit timer); fixtures that discriminate (TERM-ignoring descendant with readiness handshake; exit-window sizing vs default-concurrency delays — 500 ms flaked 5/10, 5 s stayed 3×green); red/green fixture discipline + stated coverage boundary. |
+| [build-errors/electron-fetch-chain-blocked-egress.md](build-errors/electron-fetch-chain-blocked-egress.md) | Electron packaging on blocked-egress hosts — the fetch chain fails four ways (mirror checksum routing; python http.server HTTP/1.0/no-Range → undici `assert(!this.paused)`; deterministic short downloads through a verified Range-capable node mirror; cache-hit copy `prefinish` error → fallback re-download); bypass via `@electron/packager` `electronZipDir` (temp `ELECTRON_ZIP_DIR` pass-through when the driver is code-fixed); cache keys are `sha256(dirname(url))`; mirror/transport requirements + provenance duty + launch-probe acceptance. |
