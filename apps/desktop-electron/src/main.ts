@@ -42,6 +42,7 @@ import type {
   IpcMain,
   Menu,
   MenuItemConstructorOptions,
+  NativeImage,
   Session,
   Shell,
   UtilityProcess,
@@ -127,31 +128,44 @@ export function loadProductIdentity(resourcesDir: string): ProductIdentity {
   return { id, name, version, minimumMacos };
 }
 
+/** Minimal `nativeImage` surface the Dock-icon bootstrap needs (injected). */
+export interface NativeImageLoader {
+  createFromPath(path: string): NativeImage;
+}
+
 /** Minimal app surface identity setup needs; the real `App` satisfies this. */
 export interface IdentityApp {
   setName(name: string): void;
   setPath(name: string, value: string): void;
   getPath(name: string): string;
-  dock?: { setIcon(path: string): void };
+  dock?: { setIcon(image: NativeImage): void };
 }
 
 /**
  * Product identity on the app: display name, bundle-id userData (proof
  * identity must never become production state) and the Dock icon from
- * `resources/icons/app.icns`. MUST run before `app.whenReady()` resolves
- * (userData is ready-fixed).
+ * `resources/icons/app-icon.png`. The PNG (not the `.icns` sibling, which the
+ * packager uses for the bundle icon) is the runtime icon because Electron's
+ * `nativeImage` decodes PNG/JPEG only — an `.icns` path yields an empty image
+ * and `dock.setIcon` throws. A missing or undecodable icon is a diagnostic and
+ * bootstrap continues; it must never abort launch. MUST run before
+ * `app.whenReady()` resolves (userData is ready-fixed).
  */
 export function applyProductIdentity(
   app: IdentityApp,
   product: ProductIdentity,
   paths: { userDataDir: string; resourcesDir: string },
+  nativeImage: NativeImageLoader,
 ): void {
   app.setName(product.name);
   app.setPath('userData', paths.userDataDir);
   if (process.platform === 'darwin' && app.dock) {
-    const iconPath = join(paths.resourcesDir, 'icons', 'app.icns');
-    if (existsSync(iconPath)) {
-      app.dock.setIcon(iconPath);
+    const iconPath = join(paths.resourcesDir, 'icons', 'app-icon.png');
+    const icon = nativeImage.createFromPath(iconPath);
+    if (icon.isEmpty()) {
+      process.stderr.write(`[desktop] runtime dock icon unavailable at ${iconPath}; continuing without it\n`);
+    } else {
+      app.dock.setIcon(icon);
     }
   }
 }
@@ -248,6 +262,8 @@ export interface DesktopElectronSurfaces {
   utilityProcess: UtilityProcessFork;
   Menu: typeof Menu;
   safeStorage: SecureStorageAdapter;
+  /** Dock/tray icon image decoding (PNG/JPEG only). */
+  nativeImage: NativeImageLoader;
 }
 
 export interface DesktopHostPaths {
@@ -451,7 +467,7 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
   applyProductIdentity(e.app, product, {
     userDataDir: input.paths.userDataDir,
     resourcesDir: input.paths.resourcesDir,
-  });
+  }, e.nativeImage);
 
   // ── trusted runtime metadata (preload reads it synchronously) ─────────
   const runtimeMetadata = { localEndpoint };
@@ -942,7 +958,7 @@ async function bootstrap(): Promise<void> {
   }
 
   const userDataDir = join(app.getPath('appData'), product.id);
-  applyProductIdentity(app, product, { userDataDir, resourcesDir });
+  applyProductIdentity(app, product, { userDataDir, resourcesDir }, electron.nativeImage);
 
   const env = process.env;
   const devUrl = resolveDevUrl(env, app.isPackaged);
@@ -982,6 +998,7 @@ async function bootstrap(): Promise<void> {
       ipcMain: electron.ipcMain,
       utilityProcess: electron.utilityProcess,
       Menu: electron.Menu,
+      nativeImage: electron.nativeImage,
       safeStorage: {
         isEncryptionAvailable: () => electron.safeStorage.isEncryptionAvailable(),
         encryptString: (plain) => new Uint8Array(electron.safeStorage.encryptString(plain)),
