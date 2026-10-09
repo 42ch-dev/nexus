@@ -9,8 +9,20 @@
  * within the window (a healthy desktop app does not self-exit; success is not
  * pattern-matched on exit codes) or if stderr contains
  * `[desktop] bootstrap failed`. PASS only if the process is still alive at the
- * window's end with no marker, then the process group is terminated
- * SIGTERM→SIGKILL (orphan cleanup best-effort).
+ * window's end with no marker. On EVERY exit path (early exit, marker failure,
+ * window end, spawn error) the process group is terminated SIGTERM→SIGKILL
+ * (best-effort, including when the leader has already exited) and the captured
+ * stdout/stderr pipes are destroyed, so a descendant holding the pipes cannot
+ * keep the bounded probe alive indefinitely.
+ *
+ * The probed binary is `<app>/Contents/MacOS/<CFBundleExecutable>` (fallback
+ * `Nexus`), read from Info.plist exactly as `verify-package.mjs` derives it, so
+ * the two verifiers cannot silently diverge.
+ *
+ * Captured stderr is retained only as a bounded tail (`STDERR_BUFFER_BYTES`,
+ * 64 KiB) so a chatty run cannot grow memory without bound; the bootstrap
+ * marker is latched as it streams in, so a marker older than the retained tail
+ * is not lost.
  *
  * Coverage boundary (plan Design decision (c)): a PASS proves the produced
  * artifact completes bootstrap and stays alive for the window in the invoking
@@ -23,13 +35,14 @@
  * Output: one JSON evidence record (command, timeoutMs, liveness, stderr
  * tail, verdict) on stdout; exit 0 pass / 1 fail.
  */
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, lstatSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const BOOTSTRAP_FAILED_MARKER = '[desktop] bootstrap failed';
 const STDERR_TAIL_BYTES = 4096;
+const STDERR_BUFFER_BYTES = 64 * 1024;
 const KILL_GRACE_MS = 3000;
 const DEFAULT_TIMEOUT_MS = 20000;
 
@@ -93,12 +106,32 @@ function requireExecutable(path, label) {
 }
 
 /**
+ * Resolve the bundle executable from Info.plist `CFBundleExecutable`, using the
+ * same rule as `verify-package.mjs` (fallback `Nexus`) so the two verifiers
+ * cannot silently diverge on the probed binary. A missing or unreadable plist
+ * falls back to the contract name; the executable must still exist, which
+ * `requireExecutable` enforces fail-closed.
+ */
+function resolveBundleExecutable(appPath) {
+  const plistPath = join(appPath, 'Contents', 'Info.plist');
+  if (!existsSync(plistPath)) return 'Nexus';
+  try {
+    const result = spawnSync('plutil', ['-convert', 'json', '-o', '-', '--', plistPath], { encoding: 'utf8' });
+    if (result.status !== 0) return 'Nexus';
+    const plist = JSON.parse(result.stdout);
+    return (plist.CFBundleExecutable ?? '') ? plist.CFBundleExecutable : 'Nexus';
+  } catch {
+    return 'Nexus';
+  }
+}
+
+/**
  * Run the bounded launch probe. `platform` is injectable so headless tests can
  * exercise the fail-closed path; the CLI always passes process.platform.
  * Resolves with the JSON evidence record; never rejects on a probe outcome.
  */
 export function verifyLaunch({ appPath, timeoutMs, platform = process.platform }) {
-  const command = join(appPath, 'Contents', 'MacOS', 'Nexus');
+  const command = join(appPath, 'Contents', 'MacOS', resolveBundleExecutable(appPath));
   const base = { command, timeoutMs, platform, liveness: false, stderrTail: '', verdict: 'FAIL' };
 
   if (platform !== 'darwin') {
@@ -123,47 +156,54 @@ export function verifyLaunch({ appPath, timeoutMs, platform = process.platform }
     child.unref();
 
     let stderr = '';
+    let markerSeen = false;
     let settled = false;
+
+    // Terminate the process group and release the captured pipes on every exit
+    // path. The leader may already have exited, so the group is signalled
+    // best-effort; destroying the streams stops a descendant that inherited the
+    // pipes from keeping this probe pending after the promise resolves.
+    const cleanup = () => {
+      killGroup(child.pid, 'SIGTERM');
+      const force = setTimeout(() => killGroup(child.pid, 'SIGKILL'), KILL_GRACE_MS);
+      force.unref();
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+    };
+
     const finish = (record) => {
       if (settled) return;
       settled = true;
+      clearTimeout(timer);
+      cleanup();
       resolvePromise(record);
     };
 
     child.stdout.resume();
     child.stderr.on('data', (chunk) => {
       stderr += chunk.toString('utf8');
+      if (stderr.length > STDERR_BUFFER_BYTES) stderr = stderr.slice(-STDERR_BUFFER_BYTES);
+      if (!markerSeen && stderr.includes(BOOTSTRAP_FAILED_MARKER)) markerSeen = true;
     });
 
-    const terminate = () => {
-      killGroup(child.pid, 'SIGTERM');
-      const force = setTimeout(() => killGroup(child.pid, 'SIGKILL'), KILL_GRACE_MS);
-      force.unref();
-    };
-
     child.on('error', (error) => {
-      clearTimeout(timer);
       finish({ ...base, reason: `spawn failed: ${error.message}`, stderrTail: tail(stderr) });
     });
 
     child.on('exit', (code, signal) => {
-      clearTimeout(timer);
-      const markerHit = stderr.includes(BOOTSTRAP_FAILED_MARKER);
       finish({
         ...base,
         exitCode: code,
         exitSignal: signal,
         stderrTail: tail(stderr),
-        reason: markerHit
+        reason: markerSeen
           ? `stderr contains "${BOOTSTRAP_FAILED_MARKER}"`
           : `process exited within the ${timeoutMs}ms window (exit code ${code}, signal ${signal}); a healthy desktop app stays alive`,
       });
     });
 
     const timer = setTimeout(() => {
-      const markerHit = stderr.includes(BOOTSTRAP_FAILED_MARKER);
-      terminate();
-      if (markerHit) {
+      if (markerSeen) {
         finish({
           ...base,
           liveness: true,

@@ -179,17 +179,9 @@ test('missing minimum-macOS load command fails package verification', () => {
     writeFileSync(join(appPath, 'Info.plist'), 'fixture plist');
     writeFileSync(join(appPath, 'MacOS', 'Nexus'), 'missing-minos Mach-O fixture');
 
-    // The (e-i) resources layout assertion runs before Mach-O inspection, so
-    // the fixture must carry a valid pinned layout to reach the minos failure.
-    const resourcesDir = join(appPath, 'Resources', 'resources');
-    mkdirSync(join(resourcesDir, 'icons'), { recursive: true });
-    writeFileSync(join(resourcesDir, 'product.json'), JSON.stringify({
-      id: 'io.nexus42.desktop',
-      name: 'Nexus',
-      version: PRODUCT_VERSION,
-      minimum_macos: '13.0',
-    }));
-    writeFileSync(join(resourcesDir, 'icons', 'app.icns'), 'icns fixture');
+    // The app-executable Mach-O header inspection runs BEFORE
+    // `verifyResourcesLayout`, so this fixture trips the minos check without
+    // ever consulting the resources layout — no layout seeding is needed here.
 
     // Keep the fixture independent of host Mach-O tools while preserving the
     // verifier's real CLI path: file reports Mach-O, otool reports no floor.
