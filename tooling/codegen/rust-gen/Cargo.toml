@@ -24,4 +24,4 @@ schemars = "1.2"
 # re-printed by `prettyplease`. In-process on purpose — no external `rustfmt`
 # binary or pinned-toolchain coupling in the codegen lane.
 syn = { version = "2", features = ["full"] }
-prettyplease = "0.2"
+prettyplease = "0.3"
