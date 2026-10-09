@@ -461,3 +461,9 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | Document | Description |
 | --- | --- |
 | [testing-patterns/windows-launch-cohort-remediation-discipline.md](testing-patterns/windows-launch-cohort-remediation-discipline.md) | Windows launch-cohort remediation discipline — baseline-first triage (byte-preserved per-test inventory before any fix); `env::temp_dir()` replaces `/tmp` literals (ERROR_DIRECTORY 267 fires before the fixture starts); LF-normalize `include_str!` asset pins against CRLF checkouts; canonicalize recorded-vs-expected paths + write `PATHEXT`-suffixed stub files; assertions must survive the fix (startup-log ≠ handshake; platform-expectation predicate over full health; real `tasklist` probe, never a constant stub); gate injected setup, not failure-path invariants — the sealed-provisioning failure lifecycle is Windows-reachable because unsupported → `Err`; multi-run provenance discipline (exactly one FINAL = the reviewed tip's green run) (v1.204 P1 distilled; compound v1.204) |
+
+### v1.208 additions
+
+| Document | Description |
+| --- | --- |
+| [build-errors/packed-app-symlink-materialization.md](build-errors/packed-app-symlink-materialization.md) | Packed .app ships absolute staging symlinks → consumer launch fails — `cpSync` `dereference:true` retained aliases (reproduced); receipt `symlink_closure` was a hardcoded staging pass; fix = normalize the packed bundle before archive + scan the produced artifact into the receipt (path-independent detail) + file/dir alias fixtures; verify with a bounded packaging run (single-app layout, 0 symlinks) then an actual launch. |
