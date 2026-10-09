@@ -111,6 +111,18 @@ test("a clean release version keeps today's matrix", () => {
   assert.equal(effectivePrerelease(false, true, null), false);
 });
 
+test("a missing toggle fails closed to prerelease even for a clean version with signing implemented", () => {
+  // Regression (I1): the version-only `--version` path leaves the toggle unset.
+  // A clean version alone must NOT open a full release — that still requires an
+  // explicit `prerelease=false` opt-out, so an unset (null/undefined) toggle
+  // fails closed regardless of signing or the version shape.
+  assert.equal(effectivePrerelease(null, true, "0.2.0"), true);
+  assert.equal(effectivePrerelease(undefined, true, "0.2.0"), true);
+  // The explicit opt-out is the only full-release path, and only for a clean version.
+  assert.equal(effectivePrerelease(false, true, "0.2.0"), false);
+  assert.equal(effectivePrerelease(false, true, "0.2.0-rc.1"), true);
+});
+
 test("an unreadable release version fails closed to prerelease", () => {
   // Not a well-formed release version: refuse to publish it as a full release.
   assert.equal(effectivePrerelease(false, true, "0.2.0-beta.1"), true);

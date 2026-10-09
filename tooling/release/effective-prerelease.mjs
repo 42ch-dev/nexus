@@ -98,13 +98,16 @@ function versionForcesPrerelease(version) {
 }
 
 /**
- * @param {boolean} toggle Dispatch toggle from the bump-commit trailer.
+ * @param {boolean | null} toggle Dispatch toggle from the bump-commit trailer;
+ *   `null` when no explicit toggle was supplied. Only an explicit `false`
+ *   (the `prerelease=false` opt-out) can open the full-release path, so a
+ *   missing toggle fails closed to prerelease.
  * @param {boolean} [signing] `signingImplemented` (injectable for tests).
  * @param {string | null} [version] Resolved release version (`--version`).
  * @returns {boolean}
  */
 export function effectivePrerelease(toggle, signing = signingImplemented, version = null) {
-  return versionForcesPrerelease(version) || toggle || !signing;
+  return versionForcesPrerelease(version) || toggle !== false || !signing;
 }
 
 /**
@@ -200,7 +203,7 @@ function main(argv) {
   }
 
   const effective = effectivePrerelease(
-    /** @type {boolean} */ (toggle),
+    /** @type {boolean | null} */ (toggle),
     undefined,
     options.version,
   );
