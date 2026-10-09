@@ -13,16 +13,20 @@
  * window end, spawn error) the process group is terminated SIGTERM→SIGKILL
  * (best-effort, including when the leader has already exited) and the captured
  * stdout/stderr pipes are destroyed, so a descendant holding the pipes cannot
- * keep the bounded probe alive indefinitely.
+ * keep the bounded probe alive indefinitely. The SIGTERM→SIGKILL escalation is
+ * awaited before the probe resolves, so a standalone CLI cannot exit ahead of a
+ * SIGTERM-resistant descendant still in the owned group.
  *
  * The probed binary is `<app>/Contents/MacOS/<CFBundleExecutable>` (fallback
  * `Nexus`), read from Info.plist exactly as `verify-package.mjs` derives it, so
  * the two verifiers cannot silently diverge.
  *
- * Captured stderr is retained only as a bounded tail (`STDERR_BUFFER_BYTES`,
- * 64 KiB) so a chatty run cannot grow memory without bound; the bootstrap
- * marker is latched as it streams in, so a marker older than the retained tail
- * is not lost.
+ * Captured stderr is retained only as a bounded tail of `STDERR_BUFFER_CHARS`
+ * characters (UTF-16 code units) so a chatty run cannot grow memory without
+ * bound. Marker detection is decoupled from that retention — each chunk is
+ * scanned against a `marker.length - 1` carry from the previous chunk before
+ * the retained buffer is trimmed — so the bootstrap marker still latches when
+ * it is split across chunks or straddles the retention cut.
  *
  * Coverage boundary (plan Design decision (c)): a PASS proves the produced
  * artifact completes bootstrap and stays alive for the window in the invoking
@@ -41,8 +45,8 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const BOOTSTRAP_FAILED_MARKER = '[desktop] bootstrap failed';
-const STDERR_TAIL_BYTES = 4096;
-const STDERR_BUFFER_BYTES = 64 * 1024;
+const STDERR_TAIL_CHARS = 4096;
+const STDERR_BUFFER_CHARS = 64 * 1024;
 const KILL_GRACE_MS = 3000;
 const DEFAULT_TIMEOUT_MS = 20000;
 
@@ -87,7 +91,7 @@ export function usage() {
 }
 
 function tail(text) {
-  return text.length <= STDERR_TAIL_BYTES ? text : text.slice(-STDERR_TAIL_BYTES);
+  return text.length <= STDERR_TAIL_CHARS ? text : text.slice(-STDERR_TAIL_CHARS);
 }
 
 function killGroup(pid, signal) {
@@ -157,33 +161,62 @@ export function verifyLaunch({ appPath, timeoutMs, platform = process.platform }
 
     let stderr = '';
     let markerSeen = false;
+    // Carry the last `marker.length - 1` decoded characters between chunks so a
+    // marker split across a chunk boundary is still latched. Detection is
+    // independent of the bounded retention buffer below: the scan runs before
+    // any trimming, so a marker straddling the retention cut is not lost.
+    let markerCarry = '';
     let settled = false;
+
+    // True while any member of the owned process group is still signalable.
+    const groupAlive = () => {
+      try {
+        process.kill(-child.pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
 
     // Terminate the process group and release the captured pipes on every exit
     // path. The leader may already have exited, so the group is signalled
-    // best-effort; destroying the streams stops a descendant that inherited the
-    // pipes from keeping this probe pending after the promise resolves.
-    const cleanup = () => {
+    // best-effort; a descendant that ignores SIGTERM is escalated to SIGKILL
+    // after a bounded grace wait. The escalation is awaited before the probe
+    // resolves, so a standalone CLI cannot exit before it runs (no unref'd
+    // post-exit timer holds the SIGKILL). Destroying the streams stops a
+    // descendant that inherited the pipes from keeping this probe pending.
+    const cleanup = async () => {
       killGroup(child.pid, 'SIGTERM');
-      const force = setTimeout(() => killGroup(child.pid, 'SIGKILL'), KILL_GRACE_MS);
-      force.unref();
+      const deadline = Date.now() + KILL_GRACE_MS;
+      while (groupAlive() && Date.now() < deadline) {
+        await new Promise((wait) => setTimeout(wait, 25));
+      }
+      if (groupAlive()) killGroup(child.pid, 'SIGKILL');
       child.stdout?.destroy();
       child.stderr?.destroy();
     };
 
-    const finish = (record) => {
+    const finish = async (record) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      cleanup();
+      await cleanup();
       resolvePromise(record);
     };
 
     child.stdout.resume();
     child.stderr.on('data', (chunk) => {
-      stderr += chunk.toString('utf8');
-      if (stderr.length > STDERR_BUFFER_BYTES) stderr = stderr.slice(-STDERR_BUFFER_BYTES);
-      if (!markerSeen && stderr.includes(BOOTSTRAP_FAILED_MARKER)) markerSeen = true;
+      const text = chunk.toString('utf8');
+      stderr += text;
+      if (stderr.length > STDERR_BUFFER_CHARS) stderr = stderr.slice(-STDERR_BUFFER_CHARS);
+      if (!markerSeen) {
+        const scan = markerCarry + text;
+        if (scan.includes(BOOTSTRAP_FAILED_MARKER)) {
+          markerSeen = true;
+        } else {
+          markerCarry = scan.slice(-(BOOTSTRAP_FAILED_MARKER.length - 1));
+        }
+      }
     });
 
     child.on('error', (error) => {

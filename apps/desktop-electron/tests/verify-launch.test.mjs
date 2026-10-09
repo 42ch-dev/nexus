@@ -113,6 +113,73 @@ test('early exit with a descendant holding the pipes: FAIL and the descendant is
   }
 });
 
+test('early exit with a SIGTERM-ignoring descendant: FAIL and the descendant is escalated and reaped', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'nexus-verify-launch-'));
+  try {
+    const readyFile = join(root, 'stubborn.pid');
+    // The descendant installs a SIGTERM handler and only then records its pid,
+    // so by the time the leader exits (after observing the ready file) it is
+    // genuinely SIGTERM-resistant — only the probe's awaited SIGKILL escalation
+    // can reap it. It inherits the captured stderr pipe, and the leader exits
+    // early, so the early-exit FAIL must still resolve promptly and then leave
+    // the owned group member reaped.
+    const descendantSource = 'process.on("SIGTERM", () => {}); '
+      + `require("node:fs").writeFileSync(${JSON.stringify(readyFile)}, String(process.pid)); `
+      + 'setInterval(() => {}, 1000)';
+    const leaderSource = '#!/usr/bin/env node\n'
+      + 'const fs = require("node:fs");\n'
+      + 'const { spawn } = require("node:child_process");\n'
+      + `const ready = ${JSON.stringify(readyFile)};\n`
+      + `spawn(process.execPath, ["-e", ${JSON.stringify(descendantSource)}], { stdio: ["ignore", "ignore", "inherit"] });\n`
+      + 'const wait = () => (fs.existsSync(ready) ? process.exit(1) : setTimeout(wait, 20));\n'
+      + 'wait();\n';
+    const appPath = makeFakeApp(root, 'StubbornDescendant', leaderSource);
+    const startedAt = Date.now();
+    const record = await verifyLaunch({ appPath, timeoutMs: EXIT_WINDOW_MS });
+    const elapsedMs = Date.now() - startedAt;
+    assert.equal(record.verdict, 'FAIL');
+    assert.equal(record.exitCode, 1);
+    // The descendant outlived SIGTERM, so the probe must have taken the bounded
+    // grace wait before escalating — an immediate return would mean the fixture
+    // was reaped by SIGTERM (no escalation exercised).
+    assert.ok(elapsedMs >= 2000, `probe returned in ${elapsedMs}ms, before the SIGKILL escalation`);
+    assert.ok(elapsedMs < EXIT_WINDOW_MS + 5000, `probe returned in ${elapsedMs}ms, not bounded`);
+    const descendantPid = Number(readFileSync(readyFile, 'utf8').trim());
+    assert.ok(Number.isInteger(descendantPid) && descendantPid > 0, 'fixture recorded the descendant pid');
+    assert.ok(
+      await processReaped(descendantPid, 5000),
+      `SIGTERM-resistant descendant ${descendantPid} was not escalated by probe cleanup`,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('bootstrap marker straddling the retention boundary still FAILs (no false PASS)', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'nexus-verify-launch-'));
+  try {
+    // First chunk ends with a partial marker (well under the retention cap, so
+    // the naive append→trim→scan order keeps it); the second chunk completes
+    // the marker at its head but exceeds the cap, so trimming the front before
+    // scanning would drop the split marker entirely and the alive-at-window-end
+    // path would return a false PASS. Detection must survive the retention seam.
+    const appPath = makeFakeApp(
+      root,
+      'StraddlingMarker',
+      '#!/usr/bin/env node\n'
+        + 'process.stderr.write("padding [desktop] boot");\n'
+        + 'setTimeout(() => { process.stderr.write("strap failed" + "x".repeat(65536)); }, 50);\n'
+        + 'setTimeout(() => {}, 30000);\n',
+    );
+    const record = await verifyLaunch({ appPath, timeoutMs: 1500 });
+    assert.equal(record.verdict, 'FAIL');
+    assert.equal(record.liveness, true);
+    assert.match(record.reason, /bootstrap failed/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('derives the probed executable from Info.plist CFBundleExecutable', async () => {
   const root = mkdtempSync(join(tmpdir(), 'nexus-verify-launch-'));
   try {
