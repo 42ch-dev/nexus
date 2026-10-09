@@ -613,7 +613,7 @@ mod tests {
                         story_ref: Some(BOUND_STORY_REF.to_string()),
                         title: BOUND_WORK_TITLE.to_string(),
                         work_profile: Some("novel".to_string()),
-                        world_id: Some(world_id.clone()),
+                        world_id: world_id.clone(),
                     },
                 )
                 .await

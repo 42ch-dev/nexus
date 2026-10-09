@@ -925,7 +925,10 @@ async fn create_work(
     // missing required field. This is consistent with other "field missing" errors
     // in this handler. Semantic 422 is used only for preset_gates_failed.
     // R-V140P0-S4: tracing span for mandatory binding check observability.
-    if req.world_id.is_none() {
+    // F-01 W1: the wire contract now marks `world_id` required (schema +
+    // generated contract), so an absent field fails deserialization upstream;
+    // this guard still rejects the empty-string shape with the same 400.
+    if req.world_id.is_empty() {
         tracing::info!(creator_id = %creator_id, "create_work rejected: missing world_id binding");
         return Err(WorkFault::BadRequest {
             code: "world_id_required".to_string(),
@@ -938,7 +941,8 @@ async fn create_work(
 
     // QC3 W-2: Validate that the provided world_id actually exists in
     // narrative_worlds AND is owned by the requesting creator.
-    if let Some(ref wid) = req.world_id {
+    {
+        let wid = &req.world_id;
         let exists: Option<String> = sqlx::query_scalar!(
             r#"SELECT world_id AS "world_id!" FROM narrative_worlds WHERE world_id = ? AND owner_creator_id = ?"#,
             wid,
@@ -1005,7 +1009,7 @@ async fn create_work(
         initial_idea: req.initial_idea,
         creative_brief: None,
         intake_status: "pending".to_string(),
-        world_id: req.world_id,
+        world_id: Some(req.world_id),
         story_ref: req.story_ref,
         inspiration_log: String::from("[]"),
         primary_preset_id: preset_id,

@@ -123,7 +123,7 @@ async fn seed_bound_work(env: &InspectorEnv) -> String {
                 story_ref: Some(STORY_REF.to_string()),
                 title: "Inspector Test Novel".to_string(),
                 work_profile: Some("novel".to_string()),
-                world_id: Some(env.world_id.clone()),
+                world_id: env.world_id.clone(),
             },
         )
         .await

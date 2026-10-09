@@ -36,9 +36,14 @@ const INLINE_CREATE_LABELS = {
     ideaPlaceholder: 'Start from a scene or concept…',
     profileLabel: 'Work profile (optional)',
     profileOptions: [{ value: 'novel', label: 'Novel' }],
+    worldLabel: 'Work world',
+    worldPlaceholder: 'Pick a world',
+    worldEmpty: 'No worlds available',
     submit: 'Create Work',
   },
 } as const;
+
+const WORLD_OPTIONS = [{ value: 'world-1', label: 'Ashen Gate' }] as const;
 
 describe('CreatorShellContent', () => {
   it('renders create-inline with world form and tab bar testids', () => {
@@ -72,6 +77,7 @@ describe('CreatorShellContent', () => {
         mode="create-inline"
         canCreateWorld
         labels={INLINE_CREATE_LABELS}
+        worlds={WORLD_OPTIONS}
         onWorldSubmit={onWorldSubmit}
         onWorkSubmit={onWorkSubmit}
       />,
@@ -85,12 +91,62 @@ describe('CreatorShellContent', () => {
     fireEvent.change(screen.getByLabelText('Work title'), { target: { value: 'Novel' } });
     fireEvent.change(screen.getByLabelText('Long-term goal'), { target: { value: 'Finish draft' } });
     fireEvent.change(screen.getByLabelText('Initial idea'), { target: { value: 'A long road' } });
+    fireEvent.change(screen.getByLabelText('Work world'), { target: { value: 'world-1' } });
     fireEvent.click(screen.getByTestId('sidebar-create-submit-work'));
     expect(onWorkSubmit).toHaveBeenCalledWith({
       title: 'Novel',
       longTermGoal: 'Finish draft',
       initialIdea: 'A long road',
+      worldId: 'world-1',
     });
+  });
+
+  it('blocks inline Work submit until a World is selected (F-01 W1)', () => {
+    const onWorkSubmit = vi.fn();
+
+    render(
+      <CreatorShellContent
+        mode="create-inline"
+        canCreateWorld
+        labels={INLINE_CREATE_LABELS}
+        // Two worlds → no single-world preselect; the author must choose.
+        worlds={[...WORLD_OPTIONS, { value: 'world-2', label: 'Briar Archive' }]}
+        onWorldSubmit={() => {}}
+        onWorkSubmit={onWorkSubmit}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('sidebar-create-tab-work'));
+    fireEvent.change(screen.getByLabelText('Work title'), { target: { value: 'Novel' } });
+    fireEvent.change(screen.getByLabelText('Long-term goal'), { target: { value: 'Finish draft' } });
+    fireEvent.change(screen.getByLabelText('Initial idea'), { target: { value: 'A long road' } });
+
+    // All text fields filled but no World chosen — the daemon would 400
+    // `world_id_required`, so the submit stays disabled.
+    expect(screen.getByLabelText('Work world')).toHaveValue('');
+    expect(screen.getByTestId('sidebar-create-submit-work')).toBeDisabled();
+    expect(onWorkSubmit).not.toHaveBeenCalled();
+  });
+
+  it('preselects the only World for inline Work create (F-01 W1)', async () => {
+    const onWorkSubmit = vi.fn();
+
+    render(
+      <CreatorShellContent
+        mode="create-inline"
+        canCreateWorld
+        labels={INLINE_CREATE_LABELS}
+        worlds={WORLD_OPTIONS}
+        onWorldSubmit={() => {}}
+        onWorkSubmit={onWorkSubmit}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('sidebar-create-tab-work'));
+    // Exactly one World → preselected automatically.
+    await vi.waitFor(() =>
+      expect(screen.getByLabelText('Work world')).toHaveValue('world-1'),
+    );
   });
 
   it('disables inline submit while world or work mutation is pending', () => {
@@ -99,6 +155,7 @@ describe('CreatorShellContent', () => {
         mode="create-inline"
         canCreateWorld
         labels={INLINE_CREATE_LABELS}
+        worlds={WORLD_OPTIONS}
         worldIsPending
         onWorldSubmit={() => {}}
         onWorkSubmit={() => {}}
@@ -113,6 +170,7 @@ describe('CreatorShellContent', () => {
         mode="create-inline"
         canCreateWorld
         labels={INLINE_CREATE_LABELS}
+        worlds={WORLD_OPTIONS}
         workIsPending
         onWorldSubmit={() => {}}
         onWorkSubmit={() => {}}
