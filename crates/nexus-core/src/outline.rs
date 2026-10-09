@@ -593,9 +593,18 @@ async fn get_work_outline(
     work: &works::WorkRecord,
     workspace_root: &Path,
 ) -> Result<WorkOutline, OutlineFault> {
-    let work_ref = resolve_work_ref(work)?;
     let chapters = list_chapters(service, work_id).await?;
-    let rel_path = outline_rel_path(&work_ref);
+
+    // A freshly created Work carries neither `work_ref` nor `story_ref`. Its
+    // outline read degrades to the same default the missing-file path yields:
+    // the default frontmatter is derived in memory from the Work's chapter
+    // rows, is never persisted, and fabricates no ref or filesystem path.
+    let Some(work_ref) = work.work_ref.as_deref().or(work.story_ref.as_deref()) else {
+        let now = chrono::Utc::now().to_rfc3339();
+        return default_frontmatter(&now, &chapters).to_work_outline(work_id.to_string());
+    };
+
+    let rel_path = outline_rel_path(work_ref);
     let (frontmatter, _body) = read_outline_file(workspace_root, &rel_path, &chapters).await?;
     frontmatter.to_work_outline(work_id.to_string())
 }

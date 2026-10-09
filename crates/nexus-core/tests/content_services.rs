@@ -587,6 +587,59 @@ async fn outline_patch_conflict_and_locked_reread() {
     fx.core.close().await.unwrap();
 }
 
+/// F-06 regression: a Work whose `work_ref` and `story_ref` are both NULL —
+/// the state right after `POST /works` — reads its outline as the in-memory
+/// missing-file default (revision 0, one empty volume) instead of failing with
+/// `WORK_REF_MISSING` (HTTP 500). The read fabricates no ref and no filesystem
+/// path, and persists nothing.
+#[tokio::test]
+async fn ref_less_work_outline_read_degrades_to_default() {
+    let fx = setup().await;
+    let world_id: String = sqlx::query_scalar("SELECT world_id FROM works WHERE work_id = ?")
+        .bind(&fx.work_id)
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    let ref_less = fx
+        .core
+        .create_work(
+            &fx.principal,
+            serde_json::from_value::<CreateWorkRequest>(serde_json::json!({
+                "title": "Fresh Novel", "long_term_goal": "write", "initial_idea": "idea",
+                "world_id": world_id
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap()
+        .work_id;
+
+    // Precondition: the fresh Work really is ref-less (the F-06 repro state).
+    let (work_ref, story_ref): (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT work_ref, story_ref FROM works WHERE work_id = ?")
+            .bind(&ref_less)
+            .fetch_one(&fx.pool)
+            .await
+            .unwrap();
+    assert_eq!((work_ref, story_ref), (None, None));
+
+    let outline = fx
+        .core
+        .work_outline(&fx.principal, ref_less.clone())
+        .await
+        .expect("a ref-less Work's outline read must degrade, not fail");
+    assert_eq!(outline.work_id, ref_less);
+    assert_eq!(outline.outline_revision, 0);
+    assert_eq!(outline.volumes.len(), 1);
+    assert!(outline.volumes[0].chapter_ids.is_empty());
+    assert!(outline.timeline_events.is_empty());
+    assert!(outline.chapter_titles.is_empty());
+    assert!(!outline.updated_at.is_empty());
+
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
 /// Timeline chronology patches: add/link/unlink round-trip with revision
 /// increments, self-foreshadow rejection and missing-edge 404 semantics.
 #[tokio::test]
