@@ -210,6 +210,44 @@ test('non-darwin platform fails closed with an unsupported-platform diagnostic',
   }
 });
 
+test('window-end PASS requires the app to be alive: a late exit event cannot lock in a PASS', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'nexus-verify-launch-'));
+  try {
+    // The stub stays alive, but the injected liveness probe reports the app
+    // already gone at the window end — the exact state a dead app is in while
+    // its `exit` event is still queued behind the window timer (event-loop
+    // lag). The previous implementation ignored liveness and recorded a PASS;
+    // the probe must FAIL instead, so this test is red on the old code.
+    const appPath = makeFakeApp(root, 'DeadAtWindowEnd', SLEEP_SCRIPT);
+    const record = await verifyLaunch({
+      appPath,
+      timeoutMs: WINDOW_MS,
+      isProcessAlive: () => false,
+    });
+    assert.equal(record.verdict, 'FAIL');
+    assert.equal(record.liveness, false);
+    assert.match(record.reason, /not alive at the 500ms window end/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('window-end PASS is still recorded when the liveness probe reports the app alive', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'nexus-verify-launch-'));
+  try {
+    const appPath = makeFakeApp(root, 'AliveProbe', SLEEP_SCRIPT);
+    const record = await verifyLaunch({
+      appPath,
+      timeoutMs: WINDOW_MS,
+      isProcessAlive: () => true,
+    });
+    assert.equal(record.verdict, 'PASS');
+    assert.equal(record.liveness, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('argument contract: --app required, --timeout-ms defaults to 20000', () => {
   const args = parseArgs(['--app', 'Nexus.app']);
   assert.equal(args.app, 'Nexus.app');

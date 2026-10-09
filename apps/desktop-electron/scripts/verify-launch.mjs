@@ -9,7 +9,11 @@
  * within the window (a healthy desktop app does not self-exit; success is not
  * pattern-matched on exit codes) or if stderr contains
  * `[desktop] bootstrap failed`. PASS only if the process is still alive at the
- * window's end with no marker. On EVERY exit path (early exit, marker failure,
+ * window's end with no marker. Because the `exit` event can be delivered after
+ * the window timer under event-loop lag, the window-end PASS is gated on a
+ * system-level liveness probe (`process.kill(pid, 0)`): a process already gone
+ * at that instant FAILs instead of locking in a PASS for a dead app. On EVERY
+ * exit path (early exit, marker failure,
  * window end, spawn error) the process group is terminated SIGTERM→SIGKILL
  * (best-effort, including when the leader has already exited) and the captured
  * stdout/stderr pipes are destroyed, so a descendant holding the pipes cannot
@@ -37,7 +41,7 @@
  * be exec'd at all) this probe FAILS CLOSED — never a skipped or fake pass.
  *
  * Output: one JSON evidence record (command, timeoutMs, liveness, stderr
- * tail, verdict) on stdout; exit 0 pass / 1 fail.
+ * tail, verdict) on stderr; exit 0 pass / 1 fail.
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, lstatSync } from 'node:fs';
@@ -102,6 +106,24 @@ function killGroup(pid, signal) {
   }
 }
 
+/**
+ * System-level liveness probe: true while `pid` still names a live OS process.
+ * `process.kill(pid, 0)` sends no signal but throws `ESRCH` once the process is
+ * gone; any other errno (e.g. `EPERM`) still means the process exists. Used to
+ * gate a window-end PASS so a dead app cannot pass on a late `exit` event.
+ *
+ * @param {number} pid Process id to probe.
+ * @returns {boolean}
+ */
+function processIsAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code !== 'ESRCH';
+  }
+}
+
 function requireExecutable(path, label) {
   if (!existsSync(path)) fail(`${label} missing: ${path}`);
   const stat = lstatSync(path);
@@ -131,10 +153,19 @@ function resolveBundleExecutable(appPath) {
 
 /**
  * Run the bounded launch probe. `platform` is injectable so headless tests can
- * exercise the fail-closed path; the CLI always passes process.platform.
+ * exercise the fail-closed path; `isProcessAlive` is injectable so a test can
+ * drive the window-end dead-process race deterministically. The CLI always
+ * passes the process defaults.
  * Resolves with the JSON evidence record; never rejects on a probe outcome.
+ *
+ * @param {{ appPath: string, timeoutMs: number, platform?: string, isProcessAlive?: (pid: number) => boolean }} options
  */
-export function verifyLaunch({ appPath, timeoutMs, platform = process.platform }) {
+export function verifyLaunch({
+  appPath,
+  timeoutMs,
+  platform = process.platform,
+  isProcessAlive = processIsAlive,
+}) {
   const command = join(appPath, 'Contents', 'MacOS', resolveBundleExecutable(appPath));
   const base = { command, timeoutMs, platform, liveness: false, stderrTail: '', verdict: 'FAIL' };
 
@@ -170,12 +201,24 @@ export function verifyLaunch({ appPath, timeoutMs, platform = process.platform }
 
     // True while any member of the owned process group is still signalable.
     const groupAlive = () => {
+      const pid = child.pid;
+      if (typeof pid !== 'number') return false;
       try {
-        process.kill(-child.pid, 0);
+        process.kill(-pid, 0);
         return true;
       } catch {
         return false;
       }
+    };
+
+    // True while the probed leader is still alive at this instant. The leader
+    // may already be gone even when its `exit` event has not yet been delivered
+    // (event-loop lag), so the window-end PASS consults the OS, not just the
+    // child handle's exit bookkeeping.
+    const childAlive = () => {
+      if (child.exitCode !== null || child.signalCode !== null) return false;
+      const pid = child.pid;
+      return typeof pid === 'number' && isProcessAlive(pid);
     };
 
     // Terminate the process group and release the captured pipes on every exit
@@ -243,6 +286,17 @@ export function verifyLaunch({ appPath, timeoutMs, platform = process.platform }
           stderrTail: tail(stderr),
           reason: `stderr contains "${BOOTSTRAP_FAILED_MARKER}"`,
         });
+      } else if (!childAlive()) {
+        // The app was already gone at the window end even though its `exit`
+        // event may still be pending (event-loop lag). Never record a PASS for
+        // a dead app: fail with the exit bookkeeping available so far.
+        finish({
+          ...base,
+          exitCode: child.exitCode ?? undefined,
+          exitSignal: child.signalCode ?? undefined,
+          stderrTail: tail(stderr),
+          reason: `process not alive at the ${timeoutMs}ms window end (exit code ${child.exitCode}, signal ${child.signalCode}); a healthy desktop app stays alive`,
+        });
       } else {
         finish({ ...base, liveness: true, stderrTail: tail(stderr), verdict: 'PASS', reason: `alive at window end with no bootstrap-failed marker` });
       }
@@ -260,7 +314,7 @@ if (invokedDirectly) {
       usage();
     } else {
       const record = await verifyLaunch({ appPath: resolve(args.app), timeoutMs: args.timeoutMs });
-      console.log(JSON.stringify(record, null, 2));
+      process.stderr.write(`${JSON.stringify(record, null, 2)}\n`);
       process.exitCode = record.verdict === 'PASS' ? 0 : 1;
     }
   } catch (error) {

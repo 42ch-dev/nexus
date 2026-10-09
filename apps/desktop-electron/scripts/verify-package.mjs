@@ -167,6 +167,7 @@ function verifyResourcesLayout(appPath, receipt) {
   if (String(product.version) !== String(receipt.version)) fail(`resources product.json version mismatch: ${product.version}`);
   if (product.minimum_macos !== PACKAGE_CONTRACT.minimumMacos) fail(`resources product.json minimum_macos mismatch: ${product.minimum_macos}`);
   requireFile(join(resourcesRoot, 'icons', 'app.icns'), 'resources app icon');
+  requireFile(join(resourcesRoot, 'icons', 'app-icon.png'), 'resources runtime app icon');
 }
 
 function verifyHostPolicy(appPath) {
