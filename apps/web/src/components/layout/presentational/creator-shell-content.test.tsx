@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CreatorShellContent } from './creator-shell-content';
@@ -39,6 +39,8 @@ const INLINE_CREATE_LABELS = {
     worldLabel: 'Work world',
     worldPlaceholder: 'Pick a world',
     worldEmpty: 'No worlds available',
+    worldErrorTitle: 'Failed to load worlds',
+    worldErrorDescription: 'The world list failed to load.',
     submit: 'Create Work',
   },
 } as const;
@@ -126,6 +128,39 @@ describe('CreatorShellContent', () => {
     expect(screen.getByLabelText('Work world')).toHaveValue('');
     expect(screen.getByTestId('sidebar-create-submit-work')).toBeDisabled();
     expect(onWorkSubmit).not.toHaveBeenCalled();
+  });
+
+  it('shows a read-error state with Retry when the World list fails to load, and keeps create disabled (PR #372)', () => {
+    const onWorldsRetry = vi.fn();
+    const onWorkSubmit = vi.fn();
+
+    render(
+      <CreatorShellContent
+        mode="create-inline"
+        canCreateWorld
+        labels={INLINE_CREATE_LABELS}
+        worlds={[]}
+        worldsError
+        onWorldsRetry={onWorldsRetry}
+        onWorldSubmit={() => {}}
+        onWorkSubmit={onWorkSubmit}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('sidebar-create-tab-work'));
+
+    // Read error (not the genuine empty state) renders an alert with the
+    // error copy instead of the empty "No worlds available" option.
+    const alert = screen.getByRole('alert');
+    expect(within(alert).getByText('Failed to load worlds')).toBeInTheDocument();
+    expect(screen.queryByText('No worlds available')).not.toBeInTheDocument();
+    // Create stays blocked until worlds load.
+    expect(screen.getByTestId('sidebar-create-submit-work')).toBeDisabled();
+    expect(onWorkSubmit).not.toHaveBeenCalled();
+
+    // Retry is wired to the parent's refetch.
+    fireEvent.click(within(alert).getByRole('button'));
+    expect(onWorldsRetry).toHaveBeenCalledTimes(1);
   });
 
   it('preselects the only World for inline Work create (F-01 W1)', async () => {

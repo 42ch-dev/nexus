@@ -97,6 +97,8 @@ function CreatorCreatePanel() {
         worldLabel: tShell('workCreate.worldLabel'),
         worldPlaceholder: tShell('workCreate.worldPlaceholder'),
         worldEmpty: tShell('workCreate.worldEmpty'),
+        worldErrorTitle: tShell('workCreate.worldErrorTitle'),
+        worldErrorDescription: tShell('workCreate.worldErrorDescription'),
         submit: createWork.isPending ? tShell('workCreate.creating') : tShell('workCreate.create'),
       },
     }),
@@ -129,6 +131,8 @@ function CreatorCreatePanel() {
       labels={inlineLabels}
       worlds={worldOptions}
       worldsLoading={narrativeWorlds.isLoading}
+      worldsError={narrativeWorlds.isError && worldOptions.length === 0}
+      onWorldsRetry={() => narrativeWorlds.refetch()}
       worldIsPending={createWorld.isPending}
       workIsPending={createWork.isPending}
       onWorldSubmit={(title) => handleWorldSubmit(title)}

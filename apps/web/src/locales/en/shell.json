@@ -236,6 +236,8 @@
     "worldLabel": "World",
     "worldPlaceholder": "Select a World",
     "worldEmpty": "No Worlds available — create a World first.",
+    "worldErrorTitle": "Couldn't load Worlds",
+    "worldErrorDescription": "The World list failed to load. Check the connection and try again.",
     "validationError": "Title, long-term goal, initial idea, and World are required.",
     "creating": "Creating Work…",
     "create": "Create",
