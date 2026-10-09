@@ -10,6 +10,8 @@ import {
   Textarea,
 } from '@42ch/nexus-ui';
 
+import { ErrorState } from '@/components/ui/states';
+
 import { HubTabBar, type HubTab, type HubTabBarLabels } from './hub-tab-bar';
 
 export type CreatorEntityRef =
@@ -46,6 +48,9 @@ export type CreatorShellInlineCreateLabels = {
     worldLabel: string;
     worldPlaceholder: string;
     worldEmpty: string;
+    /** PR #372 (P2): read-error state copy when the World list fails to load. */
+    worldErrorTitle: string;
+    worldErrorDescription: string;
     submit: string;
   };
 };
@@ -167,12 +172,17 @@ function InlineWorkForm({
   labels,
   worlds,
   worldsLoading = false,
+  worldsError = false,
+  onWorldsRetry,
   isPending = false,
   onSubmit,
 }: {
   labels: CreatorShellInlineCreateLabels['work'];
   worlds: ReadonlyArray<{ value: string; label: string }>;
   worldsLoading?: boolean;
+  /** PR #372 (P2): read error with no cached worlds — show retry, not empty. */
+  worldsError?: boolean;
+  onWorldsRetry?: () => void;
   isPending?: boolean;
   onSubmit?: (payload: CreatorShellInlineWorkSubmit) => void | Promise<void>;
 }) {
@@ -264,27 +274,35 @@ function InlineWorkForm({
       </div>
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="sidebar-create-work-world">{labels.worldLabel}</Label>
-        <Select
-          id="sidebar-create-work-world"
-          value={worldId}
-          disabled={worldsLoading || isPending}
-          onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-            setWorldId(event.target.value)
-          }
-        >
-          {worlds.length === 0 ? (
-            <option value="">{labels.worldEmpty}</option>
-          ) : (
-            <>
-              <option value="">{labels.worldPlaceholder}</option>
-              {worlds.map((world) => (
-                <option key={world.value} value={world.value}>
-                  {world.label}
-                </option>
-              ))}
-            </>
-          )}
-        </Select>
+        {worldsError ? (
+          <ErrorState
+            title={labels.worldErrorTitle}
+            description={labels.worldErrorDescription}
+            onRetry={onWorldsRetry}
+          />
+        ) : (
+          <Select
+            id="sidebar-create-work-world"
+            value={worldId}
+            disabled={worldsLoading || isPending}
+            onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+              setWorldId(event.target.value)
+            }
+          >
+            {worlds.length === 0 ? (
+              <option value="">{labels.worldEmpty}</option>
+            ) : (
+              <>
+                <option value="">{labels.worldPlaceholder}</option>
+                {worlds.map((world) => (
+                  <option key={world.value} value={world.value}>
+                    {world.label}
+                  </option>
+                ))}
+              </>
+            )}
+          </Select>
+        )}
       </div>
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="sidebar-create-work-profile">{labels.profileLabel}</Label>
@@ -332,6 +350,9 @@ export type CreatorShellContentProps =
       labels: CreatorShellInlineCreateLabels;
       worlds?: ReadonlyArray<{ value: string; label: string }>;
       worldsLoading?: boolean;
+      /** PR #372 (P2): read error with no cached worlds — show retry, not empty. */
+      worldsError?: boolean;
+      onWorldsRetry?: () => void;
       worldIsPending?: boolean;
       workIsPending?: boolean;
       onWorldSubmit?: (title: string) => void | Promise<void>;
@@ -356,6 +377,8 @@ function CreatorShellInlineCreate({
   labels,
   worlds,
   worldsLoading = false,
+  worldsError = false,
+  onWorldsRetry,
   worldIsPending = false,
   workIsPending = false,
   onWorldSubmit,
@@ -366,6 +389,9 @@ function CreatorShellInlineCreate({
   labels: CreatorShellInlineCreateLabels;
   worlds?: ReadonlyArray<{ value: string; label: string }>;
   worldsLoading?: boolean;
+  /** PR #372 (P2): read error with no cached worlds — show retry, not empty. */
+  worldsError?: boolean;
+  onWorldsRetry?: () => void;
   worldIsPending?: boolean;
   workIsPending?: boolean;
   onWorldSubmit?: (title: string) => void | Promise<void>;
@@ -408,6 +434,8 @@ function CreatorShellInlineCreate({
             labels={labels.work}
             worlds={worlds ?? []}
             worldsLoading={worldsLoading}
+            worldsError={worldsError}
+            onWorldsRetry={onWorldsRetry}
             isPending={workIsPending}
             onSubmit={onWorkSubmit}
           />
@@ -433,6 +461,8 @@ export function CreatorShellContent(props: CreatorShellContentProps) {
       labels,
       worlds,
       worldsLoading,
+      worldsError,
+      onWorldsRetry,
       worldIsPending,
       workIsPending,
       onWorldSubmit,
@@ -446,6 +476,8 @@ export function CreatorShellContent(props: CreatorShellContentProps) {
         labels={labels}
         worlds={worlds}
         worldsLoading={worldsLoading}
+        worldsError={worldsError}
+        onWorldsRetry={onWorldsRetry}
         worldIsPending={worldIsPending}
         workIsPending={workIsPending}
         onWorldSubmit={onWorldSubmit}

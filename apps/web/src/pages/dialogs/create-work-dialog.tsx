@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { ErrorState } from '@/components/ui/states';
 import { Input, Label, Select, Textarea } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/lib/use-toast';
@@ -50,6 +51,11 @@ export function CreateWorkDialog({
       })),
     [narrativeWorlds.data],
   );
+  // PR #372 (P2): when the World list request fails before any data is
+  // cached, distinguish the read error from the genuine empty state —
+  // show a retry instead of "No Worlds available", and keep create blocked
+  // until worlds load (worldId stays '' so `valid` is false either way).
+  const worldReadError = narrativeWorlds.isError && worldOptions.length === 0;
   const [worldId, setWorldId] = useState('');
   const [title, setTitle] = useState('');
   const [longTermGoal, setLongTermGoal] = useState('');
@@ -149,25 +155,33 @@ export function CreateWorkDialog({
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="work-world">{t('workCreate.worldLabel')}</Label>
-            <Select
-              id="work-world"
-              value={worldId}
-              onChange={(e) => setWorldId(e.target.value)}
-              disabled={narrativeWorlds.isLoading || create.isPending}
-            >
-              {worldOptions.length === 0 ? (
-                <option value="">{t('workCreate.worldEmpty')}</option>
-              ) : (
-                <>
-                  <option value="">{t('workCreate.worldPlaceholder')}</option>
-                  {worldOptions.map((world) => (
-                    <option key={world.value} value={world.value}>
-                      {world.label}
-                    </option>
-                  ))}
-                </>
-              )}
-            </Select>
+            {worldReadError ? (
+              <ErrorState
+                title={t('workCreate.worldErrorTitle')}
+                description={t('workCreate.worldErrorDescription')}
+                onRetry={() => narrativeWorlds.refetch()}
+              />
+            ) : (
+              <Select
+                id="work-world"
+                value={worldId}
+                onChange={(e) => setWorldId(e.target.value)}
+                disabled={narrativeWorlds.isLoading || create.isPending}
+              >
+                {worldOptions.length === 0 ? (
+                  <option value="">{t('workCreate.worldEmpty')}</option>
+                ) : (
+                  <>
+                    <option value="">{t('workCreate.worldPlaceholder')}</option>
+                    {worldOptions.map((world) => (
+                      <option key={world.value} value={world.value}>
+                        {world.label}
+                      </option>
+                    ))}
+                  </>
+                )}
+              </Select>
+            )}
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="work-profile">{t('workCreate.profileLabel')}</Label>

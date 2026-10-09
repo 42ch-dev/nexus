@@ -334,3 +334,58 @@ describe('CreateWorkDialog Select chevron + disabled Create button', () => {
     // task-2-report.md for the contrast citation.
   });
 });
+
+// PR #372 (P2) — when the World list request fails before any data is cached,
+// the dialog must show a read-error state with a Retry wired to
+// `narrativeWorlds.refetch()` instead of the misleading "No Worlds available"
+// empty option, and keep Create disabled until worlds load.
+describe('CreateWorkDialog World read error (PR #372)', () => {
+  it('shows a read-error state with Retry on a failed worlds request, and recovers on retry', async () => {
+    const user = userEvent.setup();
+    let worldsRecovered = false;
+    let worldsRequests = 0;
+    useHandlers(
+      http.get('/v1/daemon/narrative/worlds', () => {
+        worldsRequests += 1;
+        // All reads fail until the test observes the error UI and flips the
+        // latch — the retry (refetch) then succeeds. The test QueryClient
+        // sets `retry: false`, so the initial failure surfaces immediately
+        // without re-firing this handler.
+        return worldsRecovered
+          ? HttpResponse.json({ worlds: ONE_WORLD })
+          : HttpResponse.json(
+              { success: false, error: { code: 'internal', message: 'boom' } },
+              { status: 500 },
+            );
+      }),
+    );
+
+    renderDialog();
+
+    // Read-error state (role="alert" from ErrorState), NOT the empty option.
+    const alert = await screen.findByRole('alert');
+    expect(within(alert).getByText(/couldn't load worlds/i)).toBeInTheDocument();
+    expect(screen.queryByText(/no worlds available/i)).not.toBeInTheDocument();
+    // The World selector is replaced by the error state.
+    expect(screen.queryByLabelText(/^World$/i)).not.toBeInTheDocument();
+
+    // Fill every required text field so submit-readiness is attributable to
+    // the World state alone — Create must STILL stay blocked under the read
+    // error (the button is not disabled merely because the fields are blank).
+    await user.type(screen.getByLabelText(/Title/i), 'My New Work');
+    await user.type(screen.getByLabelText(/Long-term goal/i), 'Finish the first arc');
+    await user.type(screen.getByLabelText(/Initial idea/i), 'A heist in a floating city');
+    expect(screen.getByRole('button', { name: /^Create$/i })).toBeDisabled();
+
+    // Retry refetches the list → recovery: the selector comes back with the
+    // single-world preselect, and Create becomes enabled with every other
+    // required field already filled.
+    worldsRecovered = true;
+    const requestsBeforeRetry = worldsRequests;
+    await user.click(within(alert).getByRole('button', { name: /try again/i }));
+    await waitForWorldPreselect();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(worldsRequests).toBeGreaterThanOrEqual(requestsBeforeRetry + 1);
+    expect(screen.getByRole('button', { name: /^Create$/i })).toBeEnabled();
+  });
+});
