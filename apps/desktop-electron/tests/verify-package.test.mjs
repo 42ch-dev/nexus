@@ -34,7 +34,7 @@ function writeExecutable(path, source) {
  * Minimal published-package fixture honoring the (e-i) resources layout, with
  * per-test overrides for the layout files under test.
  */
-function buildLayoutFixture(root, { productJson, includeIcon = true } = {}) {
+function buildLayoutFixture(root, { productJson, includeIcon = true, includeRuntimeIcon = true } = {}) {
   const packageDir = join(root, 'darwin-arm64');
   const appPath = join(packageDir, 'Nexus.app', 'Contents');
   const commandBin = join(root, 'commands');
@@ -82,6 +82,7 @@ function buildLayoutFixture(root, { productJson, includeIcon = true } = {}) {
       minimum_macos: '13.0',
     }));
     if (includeIcon) writeFileSync(join(resourcesDir, 'icons', 'app.icns'), 'icns fixture');
+    if (includeRuntimeIcon) writeFileSync(join(resourcesDir, 'icons', 'app-icon.png'), 'png fixture');
   }
 
   writeExecutable(join(commandBin, 'file'), '#!/bin/sh\nprintf "%s\\n" "Mach-O 64-bit executable arm64"\n');
@@ -136,6 +137,23 @@ test('resources layout without the app icon fails package verification', () => {
 
     assert.equal(result.status, 1);
     assert.match(result.stderr, /resources app icon missing/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('resources layout without the runtime app icon fails package verification', () => {
+  const root = mkdtempSync(join(tmpdir(), 'nexus-verify-package-'));
+  try {
+    // The packaging-only `.icns` is present, but the decodable runtime PNG the
+    // changed host loads for the Dock image (resources/icons/app-icon.png) is
+    // not: static verification must reject such a package.
+    const { packageDir, commandBin } = buildLayoutFixture(root, { includeRuntimeIcon: false });
+
+    const result = runVerifier(packageDir, commandBin);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /resources runtime app icon missing/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

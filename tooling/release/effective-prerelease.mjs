@@ -94,7 +94,7 @@ function versionForcesPrerelease(version) {
     return false;
   }
   const parsed = parseSemVer(version);
-  return parsed === null || parsed.prerelease !== null;
+  return parsed?.prerelease !== null;
 }
 
 /**
