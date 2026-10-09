@@ -57,6 +57,8 @@ const INLINE_CREATE_LABELS = {
     worldLabel: '世界',
     worldPlaceholder: '选择一个世界',
     worldEmpty: '暂无可用世界——请先创建一个世界。',
+    worldErrorTitle: '无法加载世界',
+    worldErrorDescription: '世界列表加载失败，请检查连接后重试。',
     submit: '创建作品',
   },
 } satisfies CreatorShellInlineCreateLabels;
