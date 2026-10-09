@@ -45,7 +45,7 @@
     "dev": "bash scripts/dev-cli-web.sh"
   },
   "devDependencies": {
-    "oxlint": "^1.86.0",
+    "oxlint": "^1.87.0",
     "oxlint-tsgolint": "7.0.2003",
     "typescript": "7.0.2"
   },
