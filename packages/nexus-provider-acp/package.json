@@ -38,7 +38,7 @@
   },
   "dependencies": {
     "@42ch/nexus-contracts": "workspace:*",
-    "@agentclientprotocol/sdk": "1.5.1",
+    "@agentclientprotocol/sdk": "1.7.0",
     "zod": "4.6.5"
   },
   "devDependencies": {
