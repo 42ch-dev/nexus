@@ -320,6 +320,15 @@ async fn start(allow_peer: Vec<String>, listen: Vec<String>) -> Result<()> {
     for addr in node.listen_addrs() {
         eprintln!("  listen: {addr}");
     }
+    // v1.210 P3: the event lane's own readiness disclosure — the address it
+    // ACTUALLY bound (never the config echo); absent when the lane
+    // warn-and-skipped (see the `event_lane:` warning above).
+    if let Some(lane) = peer_tools_lane.as_ref() {
+        eprintln!(
+            "  {}",
+            nexus_core::connect::event_lane_readiness_line(lane.addr)
+        );
+    }
     eprintln!(
         "  allowlisted peers: {allowlist_len} (fail-closed; add via allowlist.json or --allow-peer)"
     );

@@ -172,6 +172,7 @@ The published Release carries:
 | The same three `.zip.sha256` sidecars | `runtime-build`, unchanged |
 | `Nexus-<version>-darwin-arm64-unsigned.dmg`, `Nexus-<version>-darwin-x64-unsigned.dmg`, `Nexus-<version>-darwin-arm64-unsigned.app.zip`, `Nexus-<version>-darwin-x64-unsigned.app.zip` | `desktop-electron-build`, unchanged (no Windows Electron packaging exists; Windows desktop users are served by the `nexus-runtime` windows-x64 zip) |
 | `Nexus-<version>-darwin-arm64-SHA256SUMS`, `Nexus-<version>-darwin-x64-SHA256SUMS`, `Nexus-<version>-darwin-arm64-receipt.json`, `Nexus-<version>-darwin-x64-receipt.json` | byte-identical copies of each architecture's `SHA256SUMS` and `receipt.json`, published under architecture-specific names so the two legs cannot overwrite each other |
+| `Nexus-<version>-SHA256SUMS` | aggregate checksum manifest assembled from the runtime and desktop producer sidecars |
 
 ## Prerelease gate and the `Nexus-Prerelease` trailer
 
@@ -257,6 +258,7 @@ Nexus-<version>-darwin-arm64-SHA256SUMS
 Nexus-<version>-darwin-arm64-receipt.json
 Nexus-<version>-darwin-x64-SHA256SUMS
 Nexus-<version>-darwin-x64-receipt.json
+Aggregate checksum manifest: Nexus-<version>-SHA256SUMS
 ```
 
 ## Installation

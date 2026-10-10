@@ -131,9 +131,14 @@ fn resolve_work_ref(work: &works::WorkRecord) -> Result<String, OutlineFault> {
     work.work_ref
         .clone()
         .or_else(|| work.story_ref.clone())
-        .ok_or_else(|| OutlineFault::Internal {
-            code: "WORK_REF_MISSING".to_string(),
-            message: format!("work {} has no work_ref or story_ref", work.work_id),
+        .ok_or_else(|| OutlineFault::BadRequest {
+            code: "work_ref_missing".to_string(),
+            message: format!(
+                "work {} has no work_ref or story_ref; set story_ref via \
+                 PATCH /v1/daemon/works/{} (or run the novel-project-init scaffold) \
+                 before outline/timeline writes",
+                work.work_id, work.work_id
+            ),
         })
 }
 

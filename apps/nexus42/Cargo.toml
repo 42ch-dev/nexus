@@ -71,6 +71,14 @@ name = "trpg_probe_bootstrap"
 path = "examples/trpg_probe_bootstrap.rs"
 required-features = ["connect-host"]
 
+# v1.210 P3 T2 (D6): minimal first-party consumer for the v1.207 Connect WS
+# event lane (`tools.nexus.subscribe` → reverse `tools.nexus.deliver_events`
+# → ack). Same feature gate: the default graph stays libp2p/tungstenite-free.
+[[example]]
+name = "connect_event_consumer"
+path = "examples/connect_event_consumer.rs"
+required-features = ["connect-host"]
+
 [dependencies]
 nexus-contracts = { path = "../../crates/nexus-contracts" }
 nexus-home-layout = { path = "../../crates/nexus-home-layout" }
@@ -175,6 +183,19 @@ nexus-wasm-host = { path = "../../crates/nexus-wasm-host" }
 # (stable v1 API only; no unstable protocol features); dev-only,
 # tests-only (graph pins use --edges normal, dev-deps excluded).
 agent-client-protocol = "=2.2.0"
+# v1.210 P3 T2 (D6): the `connect_event_consumer` example opens the WS event
+# lane directly (it is the consumer-side transport seam — `nexus_core`
+# exposes `WsTransport`, not a dialer), so it needs the same
+# `tokio-tungstenite` line the nexus-core connect harness already uses. It is
+# a DEV-dependency only: no runtime dependency is added, examples link it,
+# and the pinned normal graph (--edges normal) is unaffected.
+tokio-tungstenite = { workspace = true }
+# v1.210 P3 T2: the example wraps the WS transport in a local
+# ack-observation decorator (it must prove the signed ack write completed),
+# which means implementing the `spoke_connect::remote::Transport` async
+# trait — the same `async-trait` the nexus-core connect harness uses. Dev-only
+# again; no runtime dependency.
+async-trait = { workspace = true }
 
 # v1.193 P2-T13: the final feature lattice is the two real product
 # cohorts from technical contracts §3. `cli` is the ordinary one-shot
