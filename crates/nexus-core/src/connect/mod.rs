@@ -37,8 +37,8 @@ pub mod watch;
 pub mod ws_transport;
 
 pub use accept::{
-    daemon_manifest, spawn_accept_loop, start_peer_tools_lane, PeerResponderOptions,
-    PeerToolsLaneHandle,
+    daemon_manifest, event_lane_readiness_line, spawn_accept_loop, start_peer_tools_lane,
+    PeerResponderOptions, PeerToolsLaneHandle,
 };
 pub use config::{load_peer_keys, CollisionPolicy, PeerToolsConfig, DEFAULT_CONNECT_PORT};
 pub use identity::load_or_create_identity;
