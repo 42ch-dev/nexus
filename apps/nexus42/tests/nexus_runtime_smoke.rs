@@ -288,13 +288,8 @@ fn assert_no_http_listener(child_pid: u32, listen_addrs: &[String], lane_endpoin
             lane_host = lane_endpoint.0,
             lane_port = lane_endpoint.1,
         );
-        let addr = SocketAddr::new(
-            lane_endpoint
-                .0
-                .parse()
-                .expect("the lane host is an IP literal"),
-            lane_endpoint.1,
-        );
+        let addr =
+            lane_socket_addr(lane_endpoint).expect("the disclosed lane host is an IP literal");
         assert!(
             !answers_plain_http(addr, HTTP_PROBE_TIMEOUT),
             "the runtime's Connect lane endpoint {addr} answered an HTTP/1.1 request: an \
@@ -351,12 +346,35 @@ fn multiaddr_endpoint(addr: &str) -> Option<Endpoint> {
 
 /// Parse the v1.210 P3 `event_lane: ws://<host>:<port>/connect` readiness
 /// line into a `(host, port)` endpoint. `None` for any other shape.
+///
+/// An IPv6 host is unbracketed (`[::1]` → `::1`) so the endpoint matches
+/// `lsof`'s host form (`lsof` never prints the brackets) and every consumer
+/// can parse the host as a bare `IpAddr` — the bracketed literal would panic
+/// an `IpAddr` parse.
 fn event_lane_endpoint(line: &str) -> Option<Endpoint> {
     let url = line.trim().strip_prefix("event_lane: ")?;
     let rest = url.strip_prefix("ws://")?;
     let (host, rest) = rest.rsplit_once(':')?;
     let port = rest.strip_suffix("/connect")?.parse::<u16>().ok()?;
+    let host = host
+        .strip_prefix('[')
+        .and_then(|inner| inner.strip_suffix(']'))
+        .unwrap_or(host);
     Some((host.to_string(), port))
+}
+
+/// `SocketAddr` of a disclosed lane endpoint.
+///
+/// The host is a bare IP literal (IPv4, or the unbracketed IPv6
+/// [`event_lane_endpoint`] yields), so the parse returns `None` instead of
+/// panicking on any unexpected host form (S-2).
+#[cfg(unix)]
+fn lane_socket_addr(endpoint: &Endpoint) -> Option<SocketAddr> {
+    endpoint
+        .0
+        .parse::<std::net::IpAddr>()
+        .ok()
+        .map(|ip| SocketAddr::new(ip, endpoint.1))
 }
 
 /// Send one minimal HTTP/1.1 request to `addr` and report whether the peer
@@ -485,7 +503,9 @@ fn lsof_line_endpoint_and_multiaddr_parse_real_listener_lines() {
 
 /// The v1.210 P3 readiness-line parser accepts the locked shape (IPv4 and
 /// IPv6 hosts) and rejects anything else — it feeds the listener allowance,
-/// so a lax parse would weaken the no-HTTP assertion.
+/// so a lax parse would weaken the no-HTTP assertion. The readiness line
+/// prints a bracketed IPv6 host (`[::1]`), normalized here to `lsof`'s
+/// unbracketed form.
 #[test]
 fn event_lane_endpoint_parses_the_readiness_line() {
     assert_eq!(
@@ -498,7 +518,7 @@ fn event_lane_endpoint_parses_the_readiness_line() {
     );
     assert_eq!(
         event_lane_endpoint("event_lane: ws://[::1]:8425/connect"),
-        Some(("[::1]".to_string(), 8425))
+        Some(("::1".to_string(), 8425))
     );
     assert_eq!(event_lane_endpoint("event_lane: ws://127.0.0.1:8425"), None);
     assert_eq!(
@@ -511,6 +531,23 @@ fn event_lane_endpoint_parses_the_readiness_line() {
     );
     assert_eq!(event_lane_endpoint("listen: /ip4/127.0.0.1/tcp/1"), None);
     assert_eq!(event_lane_endpoint(""), None);
+}
+
+/// The disclosed-endpoint socket parse (S-2) covers both IP families and
+/// fails closed — never panics — on anything but a bare IP host.
+#[cfg(unix)]
+#[test]
+fn lane_socket_addr_covers_both_ip_families() {
+    assert_eq!(
+        lane_socket_addr(&("127.0.0.1".to_string(), 8425)),
+        Some("127.0.0.1:8425".parse::<SocketAddr>().unwrap())
+    );
+    assert_eq!(
+        lane_socket_addr(&("::1".to_string(), 8425)),
+        Some("[::1]:8425".parse::<SocketAddr>().unwrap())
+    );
+    assert_eq!(lane_socket_addr(&("[::1]".to_string(), 8425)), None);
+    assert_eq!(lane_socket_addr(&("not-an-ip".to_string(), 1)), None);
 }
 
 /// What a local control server does with an incoming connection.
