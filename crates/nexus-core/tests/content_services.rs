@@ -643,6 +643,60 @@ async fn ref_less_work_outline_read_degrades_to_default() {
     fx.core.close().await.unwrap();
 }
 
+/// T1 direct proof (D7-A): a Work whose `work_ref` and `story_ref` are both
+/// NULL is refused at the shared `resolve_work_ref` seam with the locked typed
+/// shape — `CoreError::InvalidInput { field: "work_ref_missing" }` (wire 400
+/// `invalid_input` + `details.field`) and a recovery hint naming `story_ref` —
+/// instead of the former opaque `WORK_REF_MISSING` 500. Task 2 owns the full
+/// three-route / ref'd-regression / read-write-chain matrix.
+#[tokio::test]
+async fn ref_less_work_outline_write_refuses_typed() {
+    let fx = setup().await;
+    let world_id: String = sqlx::query_scalar("SELECT world_id FROM works WHERE work_id = ?")
+        .bind(&fx.work_id)
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    let ref_less = fx
+        .core
+        .create_work(
+            &fx.principal,
+            serde_json::from_value::<CreateWorkRequest>(serde_json::json!({
+                "title": "Fresh Novel", "long_term_goal": "write", "initial_idea": "idea",
+                "world_id": world_id
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap()
+        .work_id;
+
+    let err = fx
+        .core
+        .patch_outline_structure(
+            &fx.principal,
+            "http",
+            ref_less.clone(),
+            structure_request(serde_json::json!({
+                "work_id": ref_less, "base_revision": 0,
+                "operation": "move_chapter", "chapter_id": 1, "volume_id": 2
+            })),
+        )
+        .await
+        .expect_err("a ref-less Work's outline write must refuse, never 500");
+    let CoreError::InvalidInput { field, reason } = err else {
+        panic!("expected the typed invalid-input refusal, got {err:?}");
+    };
+    assert_eq!(field, "work_ref_missing");
+    assert!(
+        reason.contains("story_ref"),
+        "the refusal must name the recovery step: {reason}"
+    );
+
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
 /// Timeline chronology patches: add/link/unlink round-trip with revision
 /// increments, self-foreshadow rejection and missing-edge 404 semantics.
 #[tokio::test]
