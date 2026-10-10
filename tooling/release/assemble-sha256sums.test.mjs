@@ -87,3 +87,33 @@ test("refuses a missing desktop artifact line", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("refuses a duplicate desktop manifest line", () => {
+  const root = fixture();
+  const sidecar = join(root, "nexus-desktop-unsigned-darwin-arm64", "SHA256SUMS");
+  try {
+    writeFileSync(sidecar, `${DIGESTS[3]}  ${names[3]}\n${DIGESTS[3]}  ${names[3]}\n${DIGESTS[4]}  ${names[4]}\n`);
+    assert.throws(() => assembleSha256sums({ version: VERSION, artifactsDir: root }), /malformed checksum line for Nexus-0\.1\.1-darwin-arm64-unsigned\.dmg/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI rejects unknown flags, missing values, and a mismatched output basename", () => {
+  const root = fixture();
+  const script = new URL("./assemble-sha256sums.mjs", import.meta.url);
+  const valid = ["--version", VERSION, "--artifacts-dir", root, "--output"];
+  try {
+    for (const args of [
+      [...valid, join(root, `Nexus-${VERSION}-SHA256SUMS`), "--unknown", "value"],
+      ["--version", VERSION, "--artifacts-dir"],
+      ["--version", VERSION, "--artifacts-dir", root, "--output", join(root, "wrong-name")],
+    ]) {
+      const result = spawnSync(process.execPath, [script.pathname, ...args], { encoding: "utf8" });
+      assert.equal(result.status, 2);
+      assert.match(result.stderr, /^Usage: node tooling\/release\/assemble-sha256sums\.mjs /);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
