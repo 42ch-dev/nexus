@@ -15,6 +15,7 @@ const iconDir = path.join(appRoot, 'resources/icons');
 const sourcePath = path.join(iconDir, 'source-1024.png');
 const previewPath = path.join(iconDir, 'app-icon-preview-256.png');
 const icnsPath = path.join(iconDir, 'app.icns');
+const appIconPath = path.join(iconDir, 'app-icon.png');
 const rootPackagePath = path.join(repoRoot, 'package.json');
 const productManifestPath = path.join(appRoot, 'resources/product.json');
 
@@ -99,8 +100,14 @@ try {
   rmSync(iconsetDir, { recursive: true, force: true });
 }
 
+// The runtime dock icon (src/main.ts) loads a decodable PNG, never the
+// packaging-only `.icns`; regenerate it from the icns so a logo change updates
+// both. `sips` converts the icns to the committed 512x512 RGB PNG shape.
+execFileSync('/usr/bin/sips', ['-s', 'format', 'png', '-z', '512', '512', icnsPath, '--out', appIconPath], { stdio: 'inherit' });
+
 console.log(
-  `Composed ${path.relative(repoRoot, sourcePath)}, ${path.relative(repoRoot, previewPath)}, and ` +
-    `${path.relative(repoRoot, icnsPath)} from ${path.relative(repoRoot, logoPath)} ` +
+  `Composed ${path.relative(repoRoot, sourcePath)}, ${path.relative(repoRoot, previewPath)}, ` +
+    `${path.relative(repoRoot, icnsPath)}, and ${path.relative(repoRoot, appIconPath)} ` +
+    `from ${path.relative(repoRoot, logoPath)} ` +
     `(squircle plate inset=${inset}px radius=${cornerRadius}px)`,
 );

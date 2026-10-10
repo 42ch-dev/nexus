@@ -91,6 +91,44 @@ test("effectivePrerelease is toggle OR 'signing unimplemented'", () => {
   assert.equal(effectivePrerelease(false), true);
 });
 
+test("a suffixed release version forces a prerelease regardless of toggle or signing", () => {
+  // The suffix disjunct dominates the full-release path: even with signing
+  // implemented and an explicit `prerelease: false`, alpha/rc stays prerelease.
+  assert.equal(effectivePrerelease(false, true, "0.2.0-alpha.1"), true);
+  assert.equal(effectivePrerelease(false, true, "0.2.0-rc.1"), true);
+  assert.equal(effectivePrerelease(false, false, "0.2.0-rc.1"), true);
+  assert.equal(effectivePrerelease(true, true, "0.2.0-alpha.3"), true);
+});
+
+test("a clean release version keeps today's matrix", () => {
+  // Signing unimplemented (today): every Release is a prerelease.
+  assert.equal(effectivePrerelease(false, false, "0.2.0"), true);
+  // Signing implemented: the dispatch toggle decides.
+  assert.equal(effectivePrerelease(true, true, "0.2.0"), true);
+  assert.equal(effectivePrerelease(false, true, "0.2.0"), false);
+  // An absent version leaves the suffix disjunct inert.
+  assert.equal(effectivePrerelease(false, true), false);
+  assert.equal(effectivePrerelease(false, true, null), false);
+});
+
+test("a missing toggle fails closed to prerelease even for a clean version with signing implemented", () => {
+  // Regression (I1): the version-only `--version` path leaves the toggle unset.
+  // A clean version alone must NOT open a full release — that still requires an
+  // explicit `prerelease=false` opt-out, so an unset (null/undefined) toggle
+  // fails closed regardless of signing or the version shape.
+  assert.equal(effectivePrerelease(null, true, "0.2.0"), true);
+  assert.equal(effectivePrerelease(undefined, true, "0.2.0"), true);
+  // The explicit opt-out is the only full-release path, and only for a clean version.
+  assert.equal(effectivePrerelease(false, true, "0.2.0"), false);
+  assert.equal(effectivePrerelease(false, true, "0.2.0-rc.1"), true);
+});
+
+test("an unreadable release version fails closed to prerelease", () => {
+  // Not a well-formed release version: refuse to publish it as a full release.
+  assert.equal(effectivePrerelease(false, true, "0.2.0-beta.1"), true);
+  assert.equal(effectivePrerelease(false, true, "not-a-version"), true);
+});
+
 test("CLI computes the effective value and prints it alone on stdout", () => {
   const dir = createTempRepo();
   try {
@@ -164,6 +202,42 @@ test("CLI reads the trailer from stdin", () => {
   }
 });
 
+test("CLI --version forces a prerelease for a suffixed version", () => {
+  const dir = createTempRepo();
+  try {
+    const suffixed = runReleaseScript("effective-prerelease.mjs", ["--version", "0.2.0-rc.1"], dir);
+    assert.equal(suffixed.status, 0, suffixed.stderr);
+    assert.equal(suffixed.stdout, "true\n");
+    assert.match(suffixed.stderr, /version=0\.2\.0-rc\.1/);
+
+    const clean = runReleaseScript("effective-prerelease.mjs", ["--version", "0.2.0"], dir);
+    assert.equal(clean.status, 0, clean.stderr);
+    // Signing is unimplemented, so even the clean version is a prerelease today.
+    assert.equal(clean.stdout, "true\n");
+    assert.match(clean.stderr, /version=0\.2\.0/);
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+test("CLI combines the trailer toggle with a suffixed --version", () => {
+  const dir = createTempRepo();
+  try {
+    writeRepoFile(dir, "message.txt", "chore(release): bump version to 0.2.0-rc.1\n\nNexus-Prerelease: false\n");
+    const run = runReleaseScript(
+      "effective-prerelease.mjs",
+      ["--message-file", "message.txt", "--version", "0.2.0-rc.1"],
+      dir,
+    );
+    assert.equal(run.status, 0, run.stderr);
+    assert.equal(run.stdout, "true\n");
+    assert.match(run.stderr, /\(trailer=false,/);
+    assert.match(run.stderr, /version=0\.2\.0-rc\.1/);
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
 test("CLI rejects missing and invalid arguments", () => {
   const dir = createTempRepo();
   try {
@@ -178,6 +252,10 @@ test("CLI rejects missing and invalid arguments", () => {
     const unknown = runReleaseScript("effective-prerelease.mjs", ["--nope"], dir);
     assert.equal(unknown.status, 1);
     assert.match(unknown.stderr, /Unknown argument: --nope/);
+
+    const missingVersion = runReleaseScript("effective-prerelease.mjs", ["--version"], dir);
+    assert.equal(missingVersion.status, 1);
+    assert.match(missingVersion.stderr, /--version requires a value/);
 
     const help = runReleaseScript("effective-prerelease.mjs", ["--help"], dir);
     assert.equal(help.status, 0);

@@ -151,6 +151,25 @@ function inspectArchives(dir, receipt, version, arch) {
   return { names: expected, sha256: Object.fromEntries(Object.entries(expected).map(([kind, name]) => [kind, sumMap.get(name)])) };
 }
 
+function verifyResourcesLayout(appPath, receipt) {
+  const resourcesRoot = join(appPath, 'Contents', 'Resources', 'resources');
+  requireDirectory(resourcesRoot, 'resources layout root');
+  const productPath = join(resourcesRoot, 'product.json');
+  requireFile(productPath, 'resources product manifest');
+  let product;
+  try {
+    product = JSON.parse(readFileSync(productPath, 'utf8'));
+  } catch (error) {
+    fail(`resources product.json is malformed: ${error.message}`);
+  }
+  if (product.id !== PACKAGE_CONTRACT.bundleId) fail(`resources product.json id mismatch: ${product.id}`);
+  if (product.name !== PACKAGE_CONTRACT.productName) fail(`resources product.json name mismatch: ${product.name}`);
+  if (String(product.version) !== String(receipt.version)) fail(`resources product.json version mismatch: ${product.version}`);
+  if (product.minimum_macos !== PACKAGE_CONTRACT.minimumMacos) fail(`resources product.json minimum_macos mismatch: ${product.minimum_macos}`);
+  requireFile(join(resourcesRoot, 'icons', 'app.icns'), 'resources app icon');
+  requireFile(join(resourcesRoot, 'icons', 'app-icon.png'), 'resources runtime app icon');
+}
+
 function verifyHostPolicy(appPath) {
   const asar = join(appPath, 'Contents', 'Resources', 'app.asar');
   requireFile(asar, 'compiled host archive');
@@ -197,6 +216,7 @@ function verifyPackage(dir) {
     headers.push({ path, label: 'native dependency', header: inspectMachO(path, receipt.arch, receipt.minimum_macos, 'native dependency') });
   }
   if (headers.length < 2) fail('no unpacked native .node payload was found');
+  verifyResourcesLayout(appPath, receipt);
   const manifest = appManifest(appPath);
   if (JSON.stringify(manifest) !== JSON.stringify(receipt.inputs.app_file_manifest)) fail('receipt app_file_manifest does not match the published app');
   const archives = inspectArchives(dir, receipt, receipt.version, receipt.arch);
@@ -213,6 +233,7 @@ function verifyPackage(dir) {
       archive_digests: 'pass',
       native_headers: 'pass',
       compiled_host_policy: 'pass',
+      resources_layout: 'pass',
       signing_performed: false,
       notarization_performed: false,
       gui_qualification: 'not claimed',

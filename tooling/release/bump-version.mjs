@@ -14,7 +14,7 @@
  *
  * The changelog entry is a separate step — `generate-changelog.mjs`.
  *
- * CLI: node tooling/release/bump-version.mjs <X.Y.Z> [--repo-root <path>]
+ * CLI: node tooling/release/bump-version.mjs <release-version> [--repo-root <path>]
  *
  * @module tooling/release/bump-version
  */
@@ -29,7 +29,7 @@ import {
   writeReleaseVersion,
 } from "./version-surfaces.mjs";
 import { checkLockstep } from "./assert-lockstep-version.mjs";
-import { isCleanSemVer, isSemVerGreater } from "./semver.mjs";
+import { isReleaseSemVer, isSemVerGreater } from "./semver.mjs";
 
 /**
  * @typedef {object} BumpReport
@@ -49,27 +49,27 @@ export function bumpVersion({ repoRoot, target }) {
   /** @type {string[]} */
   const problems = [];
 
-  if (!isCleanSemVer(target)) {
+  if (!isReleaseSemVer(target)) {
     return {
       ok: false,
       from: "",
       to: target,
       changed: [],
       problems: [
-        `Invalid version "${target}": expected a clean SemVer (X.Y.Z, no prerelease suffix)`,
+        `Invalid version "${target}": expected a release SemVer (X.Y.Z, X.Y.Z-alpha.N, or X.Y.Z-rc.N)`,
       ],
       lockstep: null,
     };
   }
 
   const current = readSurfaceVersion(repoRoot, ROOT_PACKAGE_PATH);
-  if (!isCleanSemVer(current)) {
+  if (!isReleaseSemVer(current)) {
     return {
       ok: false,
       from: current,
       to: target,
       changed: [],
-      problems: [`${ROOT_PACKAGE_PATH}: version "${current}" is not a clean SemVer`],
+      problems: [`${ROOT_PACKAGE_PATH}: version "${current}" is not a release SemVer`],
       lockstep: null,
     };
   }
@@ -108,8 +108,9 @@ export function bumpVersion({ repoRoot, target }) {
   return { ok: problems.length === 0, from: current, to: target, changed, problems, lockstep };
 }
 
-const USAGE = `Usage: node tooling/release/bump-version.mjs <X.Y.Z> [--repo-root <path>]
+const USAGE = `Usage: node tooling/release/bump-version.mjs <release-version> [--repo-root <path>]
 
+<release-version> is X.Y.Z, X.Y.Z-alpha.N, or X.Y.Z-rc.N.
 Bumps ${LOCKSTEP_PATHS.join(", ")} and ${CARGO_LOCK_PATH}, then re-checks lockstep.
 Does not commit, tag, or touch CHANGELOG.md.`;
 

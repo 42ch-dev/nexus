@@ -262,8 +262,10 @@ function stageWorkspacePackage(sourceRoot, destination) {
 function stageWorkspace(stagingRoot, arch) {
   const appStage = join(stagingRoot, 'app');
   const serviceStage = join(stagingRoot, 'service');
+  const resourcesStage = join(stagingRoot, 'resources');
   stageWorkspacePackage(appRoot, appStage);
   stageWorkspacePackage(serviceRoot, serviceStage);
+  cpSync(join(appRoot, 'resources'), resourcesStage, { recursive: true, dereference: true });
   cpSync(join(appRoot, 'resources'), join(appStage, 'resources'), { recursive: true, dereference: true });
   cpSync(webDist, join(stagingRoot, 'web-dist'), { recursive: true, dereference: true });
   const platformCandidates = [
@@ -272,7 +274,7 @@ function stageWorkspace(stagingRoot, arch) {
   ];
   const platformPackage = platformCandidates.find((candidate) => existsSync(candidate));
   if (!platformPackage) assertRequiredFiles([platformCandidates[0]], 'deployed native closure');
-  return { appStage, serviceStage, webStage: join(stagingRoot, 'web-dist') };
+  return { appStage, serviceStage, resourcesStage, webStage: join(stagingRoot, 'web-dist') };
 }
 
 function appFileManifest(appPath) {
@@ -483,7 +485,7 @@ async function main() {
       prune: true,
       asarIntegrityDigest: false,
       asar: { unpack: '**/*.node' },
-      extraResource: [staged.webStage, staged.serviceStage],
+      extraResource: [staged.webStage, staged.serviceStage, staged.resourcesStage],
     });
     if (!artifacts?.length) throw new Error('package.packager: no app artifact returned');
     const appPath = artifacts.find((path) => path.endsWith('.app')) ?? artifacts[0];

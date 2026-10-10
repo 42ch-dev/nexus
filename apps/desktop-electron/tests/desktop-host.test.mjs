@@ -220,6 +220,11 @@ function makeFakeElectron() {
     decryptString: (bytes) => new TextDecoder().decode(bytes).slice(4),
   };
 
+  // Runtime icon decoding surface: real Electron's `nativeImage` decodes
+  // PNG/JPEG only. The default fake reports a decodable image so the identity
+  // path reaches `dock.setIcon`; tests that own the failure case patch it.
+  const nativeImage = { createFromPath: (path) => ({ isEmpty: () => false, path }) };
+
   return {
     app,
     BrowserWindow: FakeBrowserWindow,
@@ -230,6 +235,7 @@ function makeFakeElectron() {
     utilityProcess,
     Menu,
     safeStorage,
+    nativeImage,
     appEvents,
     windows,
     menuSet,
@@ -370,6 +376,8 @@ test('product identity loads from resources/product.json and applies to the app'
     minimumMacos: '13.0',
   });
   const appData = join(root, 'appData');
+  const icon = { isEmpty: () => false };
+  const decoded = [];
   const app = {
     setName: (name) => {
       app.name = name;
@@ -379,13 +387,59 @@ test('product identity loads from resources/product.json and applies to the app'
       app.paths.set(name, value);
     },
     getPath: () => appData,
-    dock: { icons: [], setIcon: (path) => app.dock.icons.push(path) },
+    dock: { icons: [], setIcon: (image) => app.dock.icons.push(image) },
   };
-  applyProductIdentity(app, product, { userDataDir: join(appData, product.id), resourcesDir: RESOURCES_DIR });
+  const nativeImage = {
+    createFromPath: (path) => {
+      decoded.push(path);
+      return icon;
+    },
+  };
+  applyProductIdentity(
+    app,
+    product,
+    { userDataDir: join(appData, product.id), resourcesDir: RESOURCES_DIR },
+    nativeImage,
+  );
   assert.equal(app.name, 'Nexus');
   assert.equal(app.paths.get('userData'), join(appData, 'io.nexus42.desktop'));
   if (process.platform === 'darwin') {
-    assert.deepEqual(app.dock.icons, [join(RESOURCES_DIR, 'icons', 'app.icns')]);
+    // The runtime icon is the decodable PNG; the packing-only `.icns` sibling
+    // is never handed to `dock.setIcon` (nativeImage cannot decode it).
+    assert.deepEqual(decoded, [join(RESOURCES_DIR, 'icons', 'app-icon.png')]);
+    assert.deepEqual(app.dock.icons, [icon]);
+  }
+});
+
+test('a missing or undecodable dock icon is a diagnostic, never a bootstrap crash', () => {
+  const app = {
+    setName: () => {},
+    setPath: () => {},
+    getPath: () => join(root, 'appData'),
+    dock: { icons: [], setIcon: (image) => app.dock.icons.push(image) },
+  };
+  const nativeImage = { createFromPath: () => ({ isEmpty: () => true }) };
+  const originalWrite = process.stderr.write;
+  const written = [];
+  process.stderr.write = (chunk) => {
+    written.push(String(chunk));
+    return true;
+  };
+  try {
+    assert.doesNotThrow(() =>
+      applyProductIdentity(
+        app,
+        product,
+        { userDataDir: join(root, 'appData', product.id), resourcesDir: RESOURCES_DIR },
+        nativeImage,
+      ),
+    );
+  } finally {
+    process.stderr.write = originalWrite;
+  }
+  if (process.platform === 'darwin') {
+    assert.deepEqual(app.dock.icons, []);
+    assert.match(written.join(''), /runtime dock icon unavailable/);
   }
 });
 
