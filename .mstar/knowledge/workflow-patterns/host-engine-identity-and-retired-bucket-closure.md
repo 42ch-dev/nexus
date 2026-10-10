@@ -19,6 +19,7 @@ tags:
   - phase-2-entry
   - residual-register
   - retired-plan-bucket
+last_updated: 2026-10-10
 ---
 
 # Host identity vs engine identity, and residuals in retired plan buckets
@@ -56,7 +57,7 @@ The pending handoff was then cancelled **by the host itself** when an unowned mo
 
 ## Guidance — residuals that live in retired plan buckets
 
-The project's residual register is bucketed **per plan**. The current iteration's deferrals belong in its own bucket and close normally. Entries inherited from a plan that has already been retired are different: no exposed writer can close them.
+The project's residual register is bucketed **per plan**. The current iteration's deferrals belong in its own bucket and close normally. Entries inherited from a plan that has already been retired are different: no **plan-session** writer can close them. **v1.210 update (2026-10-10):** the legacy bucket **can** be closed in place through `mstar status backlog-close --project <id> --key <plan-key> --id <R#> --note "<evidence>"` — verified on the v1.208 sweep bucket while v1.210 was active; evidence rides in the note (this face has no `closure_evidence` field; `R-QC2-TOOLING-001`). Note also that the `persist residuals` face is refused while the register contains any bucket owned by an active coordinated plan (`use residual-add/residual-close`).
 
 Observed refusals from a plan that fixed another plan's entries and tried to record the closures:
 

@@ -18,7 +18,7 @@ tags:
   - ownership
   - worktree-cleanup
   - phase-machine
-last_updated: 2026-10-07
+last_updated: 2026-10-10
 ---
 
 # Engine lifecycle seams: declare the phase you are in, register the tracks you create
@@ -93,3 +93,9 @@ mstar-harness worktree cleanup --workflow v1.197 --harness <harness> --apply
 ```
 
 The row-level Done authority and the ownership obligation are summarised in the plan headers of this iteration; the worktree/branch side is in the worktree-lifecycle doc.
+
+### v1.210 measured updates (2026-10-10)
+
+- **`persist residuals` is blocked once the register holds any bucket owned by an ACTIVE coordinated plan.** The refusal reads `current buckets <plan-id> belong to coordinated plans — use residual-add/residual-close`. Practical consequence: closing a legacy-bucket entry (e.g. `2026-10-08-v1.208-p2-dogfood-sweep`) through the persist face stops working the moment the current iteration creates its own coordinated bucket. Workable closure surfaces, measured: `plan residual-close` for the session's **own** bucket; **`mstar status backlog-close --project <id> --key <plan-key> --id <R#> --note "<evidence>"`** for a legacy bucket (in-place `lifecycle: resolved` + `closed_at`; evidence is carried in the note — this face has no `closure_evidence` field; R-QC2-TOOLING-001). Persist remains usable for documents with no active-coordinated bucket (v1.210 P1/P2 closed three entries that way before P3 created the first one).
+- **Scoped `complete` did not persist the ownership metadata (CLI 3.11.2; measured on v1.209 + v1.210).** All three v1.210 Done rows ended with `metadata` = `iteration_refs`/`spec_integration_branch`/`merge_target` only — no `working_branch`/`worktree_path` — although the branch/worktree existed and the deleted lease had carried them. `worktree cleanup` therefore neither removes nor refuses those worktrees: they are silently unattributable (it lists only other candidates). Treat this as the live instance of the ownership-producing obligation gap (the `R-V1193-CLEANUP-OWNERSHIP` class), not as a per-iteration mistake — the same shape reproduced across two iterations and five plans. Until the writer persists the metadata, expect merged feature worktrees/branches to survive cleanup and carry them as recorded residuals; the manual non-force route for a submodule-bearing checkout (`rm -rf <exact worktree path>` + `git worktree prune`, then let the engine judge the branch) is the escalation path when policy requires physical removal before the writer is fixed.
+- **`plan handoff` requires the row in `InReview`.** It refuses `coordination.invalid-transition` (`it is InProgress`) until a `plan progress` write sets `InReview`; sequence the progress write immediately before the handoff.
