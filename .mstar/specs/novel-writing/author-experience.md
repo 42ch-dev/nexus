@@ -53,7 +53,7 @@ V1.36–V1.45 implemented novel-writing **capabilities** across crates. V1.46 do
 nexus42 system doctor
 nexus42 creator register --name "Your Name"
 nexus42 creator use <handle>
-nexus42 creator workspace init
+nexus42 creator workspace init workspace
 ```
 
 The long-running local service is owned by the **desktop app**: launching the
