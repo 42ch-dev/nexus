@@ -165,6 +165,7 @@ jobs:
           done
           printf '\nDesktop producer sidecars are uploaded unchanged as architecture-specific assets:\n' >> "$body"
           printf '%s\n' "Nexus-${version}-darwin-arm64-SHA256SUMS" "Nexus-${version}-darwin-arm64-receipt.json" "Nexus-${version}-darwin-x64-SHA256SUMS" "Nexus-${version}-darwin-x64-receipt.json" >> "$body"
+          printf '%s\n' "Aggregate checksum manifest: Nexus-${version}-SHA256SUMS" >> "$body"
           cat >> "$body" <<'FOOTER'
           ```
 
@@ -175,6 +176,7 @@ jobs:
           - **Nexus-<version>-darwin-<arch>-unsigned.dmg** (arm64 and x64): Open the DMG and drag `Nexus` to Applications. On first launch, right-click → Open to bypass Gatekeeper for the unsigned app.
           - **Nexus-<version>-darwin-<arch>-unsigned.app.zip** (arm64 and x64): Unzip and run `Nexus.app`; on first launch, use right-click → Open as above.
           FOOTER
+          node tooling/release/assemble-sha256sums.mjs --version "$version" --artifacts-dir "$RUNNER_TEMP/release-artifacts" --output "$RUNNER_TEMP/release-artifacts/Nexus-${version}-SHA256SUMS"
           files=()
           require_file() {
             [[ -f "$1" ]] || { echo "::error::missing release artifact: $1"; exit 1; }
@@ -205,6 +207,9 @@ jobs:
             cp "$dir/SHA256SUMS" "$staged_sums"
             files+=("$staged_sums")
           done
+          aggregate="$assets/Nexus-${version}-SHA256SUMS"
+          require_file "$aggregate"
+          files+=("$aggregate")
           echo "RELEASE_ASSETS<<EOF" >> "$GITHUB_ENV"
           printf '%s\n' "${files[@]}" >> "$GITHUB_ENV"
           echo 'EOF' >> "$GITHUB_ENV"
@@ -267,10 +272,10 @@ jobs:
             asset_replaced=1
             ((asset_count += 1))
           done <<< "$RELEASE_ASSETS"
-          [[ "$asset_count" -eq 14 ]] || { echo "::error::expected 14 release assets, got $asset_count"; exit 1; }
+          [[ "$asset_count" -eq 15 ]] || { echo "::error::expected 15 release assets, got $asset_count"; exit 1; }
           remote_assets="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
           remote_count="$(printf '%s\n' "$remote_assets" | awk 'NF { count++ } END { print count + 0 }')"
-          [[ "$remote_count" -eq 14 ]] || { echo "::error::expected 14 uploaded release assets, got $remote_count"; exit 1; }
+          [[ "$remote_count" -eq 15 ]] || { echo "::error::expected 15 uploaded release assets, got $remote_count"; exit 1; }
           while IFS= read -r asset; do
             [[ -n "$asset" ]] || continue
             asset_name="${asset##*/}"
