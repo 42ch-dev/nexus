@@ -114,6 +114,7 @@ describe('ref-less work write refusal over HTTP (v1.210 P2 T2)', () => {
     assert.equal(read.status, 200, read.text);
     assert.equal(read.payload.outline_revision, 0);
 
+    /** @type {Array<[string, string, object]>} */
     const cases = [
       [
         'outline/patch',

@@ -12,7 +12,7 @@ applies_when:
   - writing acceptance criteria that name a verification the pipeline cannot enforce
 related_components:
   - AGENTS.md (Release Policy — decoupled from development)
-  - .mstar/iterations/v1.210/guides/v011-release-runbook.md
+  - the release runbook (kept as an iteration-local snapshot; process paths stay out of tracked docs)
   - docs/release.md
   - .github/workflows/release.yml
 tags:
@@ -43,7 +43,7 @@ v1.210 turned all three into policy: releases are a standalone process fully dec
 
 A "draft-first" pipeline that auto-clears the draft has no operator pause. The correct reconciliation is not to soften the acceptance criterion into a post-publication audit (reviewers will — correctly — refuse), and not to invent a pause. It is to move the verification to the moment the operator actually controls: **before the release run is triggered**.
 
-The v0.1.1 runbook's gate (`iterations/v1.210/guides/v011-release-runbook.md` §2) does this in five steps, all runnable with shipped tooling:
+The v0.1.1 release runbook's gate (§2 of the iteration-local runbook snapshot) does this in five steps, all runnable with shipped tooling:
 
 1. Dispatch the producer workflows manually as **canary runs** on the release branch (e.g. `release/0.1.1`) — before merging the bump PR.
 2. Require the packaged launch probe to PASS for every architecture (the consumer-facing artifact gate).
@@ -80,12 +80,16 @@ gh workflow run runtime-build.yml --ref release/0.1.1
 gh workflow run desktop-electron-build.yml --ref release/0.1.1
 # ... download artifacts, check receipts dirty:false + family checksums + dual-arch launch PASS ...
 node tooling/release/assemble-sha256sums.mjs --version 0.1.1 \
-  --artifacts-dir ./v011-pretrigger/artifacts --output /tmp/Nexus-0.1.1-SHA256SUMS
-(cd /tmp && shasum -a 256 -c Nexus-0.1.1-SHA256SUMS)   # local aggregate canary must pass
+  --artifacts-dir ./v011-pretrigger/artifacts --output ./v011-pretrigger/canary/Nexus-0.1.1-SHA256SUMS
+# Stage the seven binaries NEXT TO the manifest (the manifest carries bare names) before verifying:
+cp ./v011-pretrigger/artifacts/nexus-runtime-*/nexus-runtime-*.zip ./v011-pretrigger/canary/
+cp ./v011-pretrigger/artifacts/nexus-desktop-unsigned-darwin-*/Nexus-0.1.1-darwin-*.dmg ./v011-pretrigger/canary/
+cp ./v011-pretrigger/artifacts/nexus-desktop-unsigned-darwin-*/Nexus-0.1.1-darwin-*.app.zip ./v011-pretrigger/canary/
+(cd ./v011-pretrigger/canary && shasum -a 256 -c Nexus-0.1.1-SHA256SUMS)   # local aggregate canary must pass
 # Only now merge the bump PR / trigger the release — the merge is the approval point.
 
 # Automatic guard band (inside the publish job, before the draft-clearing PATCH):
 # staged count == 15 && remote count == 15 && every staged asset name present remotely — failure leaves the draft unpublished.
 ```
 
-Source: v1.210 P1 (plan `2026-10-10-v1.210-p1-v011-release-readiness`, QC1-F001/QC3-001 revalidation; runbook `iterations/v1.210/guides/v011-release-runbook.md`); policy rule `AGENTS.md` → Release Policy (introduced by v1.210).
+Source: v1.210 P1 (plan `2026-10-10-v1.210-p1-v011-release-readiness`, QC1-F001/QC3-001 revalidation; the iteration-local release runbook snapshot); policy rule `AGENTS.md` → Release Policy (introduced by v1.210).
