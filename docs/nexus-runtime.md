@@ -72,10 +72,52 @@ nexus-runtime: Connect Host (N-C2 E2) ready
   peer_id: 12D3KooW…
   host_id: <device-id>
   listen: /ip4/127.0.0.1/tcp/4321
+  event_lane: ws://127.0.0.1:8425/connect
   allowlisted peers: 1 (fail-closed; add via allowlist.json or --allow-peer)
   invokes: upsert/promote/relate/check/assemble/compute served (world+module scoped) plus tools.nexus.list_observed_peers / tools.nexus.list_modules (host-level reads); project/unknown refused (op_unsupported)
   press Ctrl-C to stop
 ```
+
+The `event_lane:` line is the Connect WS event lane's readiness disclosure
+(the loopback-only replay/gap surface documented under
+[Connect event replay](#connect-event-replay-and-capability-negotiation)). It
+prints the address the lane **actually bound** — its configured `host:port`
+from `~/.nexus42/connect/daemon.json` (default `127.0.0.1:8425`), or the
+OS-assigned port of an ephemeral bind — never a config echo; the whole line is
+stable and greppable, so absence of `event_lane:` is the machine-detectable
+lane-down signal. `nexus42 connect start` prints the same line on its stderr
+status block.
+
+The event lane is auxiliary: if it cannot start, the node lane keeps running.
+The boot then prints an actionable warning instead of the readiness line,
+naming the configured `host:port`, the failure class (bind conflict /
+non-loopback refusal / malformed `daemon.json`), and the `daemon.json` remedy.
+Neither surface has a `--json` startup envelope or a lane-address override
+flag — the lane address is operator config in `daemon.json`.
+
+A minimal first-party consumer for this lane ships as the
+[`connect_event_consumer`](../apps/nexus42/examples/connect_event_consumer.rs)
+Cargo example. Build it and run it against the printed address:
+
+```sh
+cargo build -p nexus42 --example connect_event_consumer --features connect-host
+./target/debug/examples/connect_event_consumer --print-peer-only
+./target/debug/examples/connect_event_consumer ws://127.0.0.1:8425/connect \
+    --host-pubkey <64-hex event-lane pubkey> --stream demo
+```
+
+Its trust anchor is the **event lane's own** Ed25519 identity
+(`--host-identity-key` defaults to `~/.nexus42/connect/daemon_identity.key`;
+`--host-pubkey` takes the key out of band) — the readiness block's `peer_id:`
+is the node lane's and is not that anchor. Admit the consumer on the event lane
+in `~/.nexus42/connect/daemon.json` (`peer_ids`; the lane refuses an allowlisted
+dialer with no `peer_keys.json` entry) — distinct from
+`connect/allowlist.json` and `connect start --allow-peer`, which govern the
+N-C1 node lane. No capability-token gate applies to the event lane (that policy
+is the node lane's `connect/config.json`). Against a stock host the example
+exercises the shipped replay/gap path (pass a stale `--cursor`); its doc header
+carries the full prerequisite recipe, exit codes, and the no-publisher
+boundary.
 
 The host refuses to boot without a resolvable active workspace (fail-closed).
 
@@ -148,7 +190,11 @@ they skip the world-scope gate, and they never require a service host — the
 
 The existing Connect WebSocket lane optionally supports event subscriptions.
 This is not an HTTP/SSE listener and does not change the node-lane served-op
-manifest. Optional use is negotiated by exact capability intersection in
+manifest. Its bound address is disclosed at boot by the `event_lane:`
+readiness line, and the shipped
+[`connect_event_consumer`](../apps/nexus42/examples/connect_event_consumer.rs)
+example is the runnable consumption path (build/run essentials in
+[Run](#run)). Optional use is negotiated by exact capability intersection in
 the connection hello; no follow-up negotiation round-trip exists.
 
 - `tools.nexus.subscribe` is host-served. A client that first invokes it

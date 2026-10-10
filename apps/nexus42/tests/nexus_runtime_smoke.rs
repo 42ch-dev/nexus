@@ -72,6 +72,13 @@ fn seed_home(tmp: &Path) {
         format!("{{\"peer_ids\": [\"{DIALER_PEER_ID}\"]}}"),
     )
     .expect("write allowlist.json");
+
+    // v1.210 P3: pin the peer-tools event lane to an OS-assigned ephemeral
+    // port. The lane then always binds (no machine-wide 8425 collision
+    // dependence), and the printed `event_lane:` readiness line must name
+    // the REAL bound port — never the configured `0` (the config echo the
+    // locked contract forbids).
+    std::fs::write(connect_dir.join("daemon.json"), "{\"port\": 0}").expect("write daemon.json");
 }
 
 /// The `runtime_smoke_probe` example binary — compiled by cargo (with
@@ -192,21 +199,24 @@ impl Drop for RuntimeGuard {
 ///
 /// 1. **Endpoint allowance** — every TCP listener of the runtime process must
 ///    be one of the Connect listen multiaddrs it printed, or the Connect
-///    **peer-tools event lane**'s own endpoint
-///    ([`peer_tools_lane_endpoint`]). The ENDPOINT (host AND port) is compared,
-///    so a listener on an allowed port but a different interface
-///    (`[::1]:8425`, `*:8425`) is not covered by the allowance, and any other
-///    port — the daemon API default 8420 included — still fails.
-/// 2. **Protocol identity** — that lane endpoint must not answer an HTTP/1.1
-///    request ([`answers_plain_http`]): the lane is a plaintext-WS accept loop,
-///    not the daemon data router or the embedded SPA. This is what a port
-///    number cannot express — an HTTP router sitting on the allowed endpoint
-///    would answer the probe and fail the test. The probe is scoped to THIS
-///    PID: it runs only when the `lsof -p <pid>` inspection above shows this
-///    runtime holding the endpoint, so a foreign process occupying
-///    `127.0.0.1:8425` is never attributed to the runtime (spec coexistence).
-///    When the lane is not bound (port collision ⇒ warn-and-skip), the check
-///    asserts only what the contract promises: this PID serves no HTTP.
+///    **peer-tools event lane**'s own endpoint as disclosed by the v1.210 P3
+///    `event_lane:` readiness line ([`event_lane_endpoint`]). The ENDPOINT
+///    (host AND port) is compared, so a listener on an allowed port but a
+///    different interface (`[::1]:8425`, `*:8425`) is not covered by the
+///    allowance, and any other port — the daemon API default 8420 included —
+///    still fails.
+/// 2. **Protocol identity** — the disclosed lane endpoint must be one THIS
+///    process actually holds, asserted positively (the port-0 fixture makes
+///    the lane always bind, so a readiness line naming a config echo, the
+///    configured `0`, or a foreign endpoint fails instead of skipping the
+///    probe). That held endpoint must then not answer an HTTP/1.1 request
+///    ([`answers_plain_http`]): the lane is a plaintext-WS accept loop, not
+///    the daemon data router or the embedded SPA. This is what a port number
+///    cannot express — an HTTP router sitting on the allowed endpoint would
+///    answer the probe and fail the test. The probe is scoped to THIS PID:
+///    only endpoints `lsof -p <pid>` attributes to this runtime are
+///    considered, so a foreign process occupying `127.0.0.1:8425` is never
+///    attributed to the runtime (spec coexistence).
 ///
 /// (A well-known-port probe would false-fail under the spec's coexistence
 /// model — a creator-facing `nexus42` daemon may legitimately occupy the
@@ -218,7 +228,7 @@ impl Drop for RuntimeGuard {
 /// headless boot binds only `SpokeConnectNode` + the peer-tools WS lane;
 /// there is no axum bind in the path), and the T2 Windows CI leg smoke-tests
 /// `--version`.
-fn assert_no_http_listener(child_pid: u32, listen_addrs: &[String]) {
+fn assert_no_http_listener(child_pid: u32, listen_addrs: &[String], lane_endpoint: &Endpoint) {
     #[cfg(unix)]
     {
         let mut expected: Vec<Endpoint> = listen_addrs
@@ -226,9 +236,9 @@ fn assert_no_http_listener(child_pid: u32, listen_addrs: &[String]) {
             .filter_map(|addr| multiaddr_endpoint(addr))
             .collect();
         // The peer-tools event lane's WS endpoint (see the doc comment): the
-        // seeded home has no `connect/daemon.json`, so the lane takes the
-        // Connect lane's documented default loopback bind.
-        expected.push(peer_tools_lane_endpoint());
+        // seeded home pins `daemon.json` to port 0, so the lane always binds
+        // an OS-assigned port and the readiness line discloses the real one.
+        expected.push((lane_endpoint.0.clone(), lane_endpoint.1));
 
         let out = Command::new("lsof")
             .args([
@@ -258,40 +268,39 @@ fn assert_no_http_listener(child_pid: u32, listen_addrs: &[String]) {
                 "runtime process holds an unexpected TCP listener on {host}:{port} \
                  (neither a printed Connect multiaddr nor the peer-tools WS lane \
                  endpoint {lane_host}:{lane_port} — a daemon HTTP / SPA listener?):\n{text}",
-                lane_host = nexus_core::connect::config::DEFAULT_CONNECT_HOST,
-                lane_port = nexus_core::connect::DEFAULT_CONNECT_PORT,
+                lane_host = lane_endpoint.0,
+                lane_port = lane_endpoint.1,
             );
             listeners.push((host, port));
         }
 
-        // Protocol identity (check 2), attributed to THIS PID only: the probe
-        // runs solely when this runtime actually HOLDS the lane endpoint. If it
-        // does not (the lane warn-and-skipped a port collision, or never bound),
-        // something else may own that endpoint — probing it would test a
-        // foreign process and break the spec's coexistence model (the guarantee
-        // here is about what THIS process serves, which the allowance above
-        // already pins). The lane-down case asserts nothing extra: this PID
-        // serves no HTTP either way.
-        let lane = peer_tools_lane_endpoint();
-        if listeners.iter().any(|(h, p)| *h == lane.0 && *p == lane.1) {
-            let addr = SocketAddr::new(
-                lane.0
-                    .parse()
-                    .expect("DEFAULT_CONNECT_HOST is an IP literal"),
-                lane.1,
-            );
-            assert!(
-                !answers_plain_http(addr, HTTP_PROBE_TIMEOUT),
-                "the runtime's Connect lane endpoint {addr} answered an HTTP/1.1 request: an \
-                 HTTP / SPA listener would, while the peer-tools lane is a WS accept loop and \
-                 must close a non-upgrade request with no response"
-            );
-        }
+        // Protocol identity (check 2), attributed to THIS PID only: the
+        // disclosed endpoint must be one the runtime actually holds. The
+        // port-0 fixture guarantees the lane bound, so a readiness line that
+        // named a config echo, the configured `0`, or a foreign endpoint
+        // fails here instead of silently skipping the probe.
+        assert!(
+            listeners
+                .iter()
+                .any(|(h, p)| *h == lane_endpoint.0 && *p == lane_endpoint.1),
+            "the runtime does not hold the event-lane endpoint {lane_host}:{lane_port} it \
+             disclosed in its readiness line; listeners held: {listeners:?}",
+            lane_host = lane_endpoint.0,
+            lane_port = lane_endpoint.1,
+        );
+        let addr =
+            lane_socket_addr(lane_endpoint).expect("the disclosed lane host is an IP literal");
+        assert!(
+            !answers_plain_http(addr, HTTP_PROBE_TIMEOUT),
+            "the runtime's Connect lane endpoint {addr} answered an HTTP/1.1 request: an \
+             HTTP / SPA listener would, while the peer-tools lane is a WS accept loop and \
+             must close a non-upgrade request with no response"
+        );
     }
     #[cfg(not(unix))]
     {
         // Structural no-op — see the doc comment.
-        let _ = (child_pid, listen_addrs);
+        let _ = (child_pid, listen_addrs, lane_endpoint);
     }
 }
 
@@ -333,6 +342,39 @@ fn multiaddr_endpoint(addr: &str) -> Option<Endpoint> {
     let (host, rest) = rest.split_once("/tcp/")?;
     let port = rest.split('/').next()?.parse::<u16>().ok()?;
     Some((host.to_string(), port))
+}
+
+/// Parse the v1.210 P3 `event_lane: ws://<host>:<port>/connect` readiness
+/// line into a `(host, port)` endpoint. `None` for any other shape.
+///
+/// An IPv6 host is unbracketed (`[::1]` → `::1`) so the endpoint matches
+/// `lsof`'s host form (`lsof` never prints the brackets) and every consumer
+/// can parse the host as a bare `IpAddr` — the bracketed literal would panic
+/// an `IpAddr` parse.
+fn event_lane_endpoint(line: &str) -> Option<Endpoint> {
+    let url = line.trim().strip_prefix("event_lane: ")?;
+    let rest = url.strip_prefix("ws://")?;
+    let (host, rest) = rest.rsplit_once(':')?;
+    let port = rest.strip_suffix("/connect")?.parse::<u16>().ok()?;
+    let host = host
+        .strip_prefix('[')
+        .and_then(|inner| inner.strip_suffix(']'))
+        .unwrap_or(host);
+    Some((host.to_string(), port))
+}
+
+/// `SocketAddr` of a disclosed lane endpoint.
+///
+/// The host is a bare IP literal (IPv4, or the unbracketed IPv6
+/// [`event_lane_endpoint`] yields), so the parse returns `None` instead of
+/// panicking on any unexpected host form (S-2).
+#[cfg(unix)]
+fn lane_socket_addr(endpoint: &Endpoint) -> Option<SocketAddr> {
+    endpoint
+        .0
+        .parse::<std::net::IpAddr>()
+        .ok()
+        .map(|ip| SocketAddr::new(ip, endpoint.1))
 }
 
 /// Send one minimal HTTP/1.1 request to `addr` and report whether the peer
@@ -459,6 +501,55 @@ fn lsof_line_endpoint_and_multiaddr_parse_real_listener_lines() {
     assert_eq!(peer_tools_lane_endpoint(), ("127.0.0.1".to_string(), 8425));
 }
 
+/// The v1.210 P3 readiness-line parser accepts the locked shape (IPv4 and
+/// IPv6 hosts) and rejects anything else — it feeds the listener allowance,
+/// so a lax parse would weaken the no-HTTP assertion. The readiness line
+/// prints a bracketed IPv6 host (`[::1]`), normalized here to `lsof`'s
+/// unbracketed form.
+#[test]
+fn event_lane_endpoint_parses_the_readiness_line() {
+    assert_eq!(
+        event_lane_endpoint("event_lane: ws://127.0.0.1:8425/connect"),
+        Some(("127.0.0.1".to_string(), 8425))
+    );
+    assert_eq!(
+        event_lane_endpoint("  event_lane: ws://127.0.0.1:53127/connect  "),
+        Some(("127.0.0.1".to_string(), 53127))
+    );
+    assert_eq!(
+        event_lane_endpoint("event_lane: ws://[::1]:8425/connect"),
+        Some(("::1".to_string(), 8425))
+    );
+    assert_eq!(event_lane_endpoint("event_lane: ws://127.0.0.1:8425"), None);
+    assert_eq!(
+        event_lane_endpoint("event_lane: wss://127.0.0.1:1/connect"),
+        None
+    );
+    assert_eq!(
+        event_lane_endpoint("event_lane: ws://127.0.0.1:0/connect"),
+        Some(("127.0.0.1".to_string(), 0))
+    );
+    assert_eq!(event_lane_endpoint("listen: /ip4/127.0.0.1/tcp/1"), None);
+    assert_eq!(event_lane_endpoint(""), None);
+}
+
+/// The disclosed-endpoint socket parse (S-2) covers both IP families and
+/// fails closed — never panics — on anything but a bare IP host.
+#[cfg(unix)]
+#[test]
+fn lane_socket_addr_covers_both_ip_families() {
+    assert_eq!(
+        lane_socket_addr(&("127.0.0.1".to_string(), 8425)),
+        Some("127.0.0.1:8425".parse::<SocketAddr>().unwrap())
+    );
+    assert_eq!(
+        lane_socket_addr(&("::1".to_string(), 8425)),
+        Some("[::1]:8425".parse::<SocketAddr>().unwrap())
+    );
+    assert_eq!(lane_socket_addr(&("[::1]".to_string(), 8425)), None);
+    assert_eq!(lane_socket_addr(&("not-an-ip".to_string(), 1)), None);
+}
+
 /// What a local control server does with an incoming connection.
 #[cfg(unix)]
 #[derive(Clone, Copy)]
@@ -580,9 +671,27 @@ fn headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener() {
         );
     }
 
+    // 1b. Event-lane readiness (v1.210 P3 locked contract): the greppable
+    //     `event_lane: ws://<host>:<port>/connect` line names the address
+    //     the lane ACTUALLY bound. The hermetic home pins the lane to port
+    //     0, so the printed port is the OS-assigned one — a config echo
+    //     would print `0` and fail here.
+    let lane_line = ready_lines
+        .iter()
+        .find(|line| line.trim_start().starts_with("event_lane: "))
+        .unwrap_or_else(|| panic!("readiness block missing the event-lane line:\n{ready}"));
+    let lane_endpoint = event_lane_endpoint(lane_line)
+        .unwrap_or_else(|| panic!("unparseable event-lane readiness line: {lane_line:?}"));
+    assert_eq!(lane_endpoint.0, "127.0.0.1", "the lane is loopback-only");
+    assert_ne!(
+        lane_endpoint.1, 0,
+        "the readiness line must name the bound port, not the configured 0"
+    );
+
     // 2. No HTTP/SPA listener: every TCP listener of the runtime process
-    //    is one of its printed Connect listen addrs.
-    assert_no_http_listener(runtime_pid, &listen_addrs);
+    //    is one of its printed Connect listen addrs or the event lane
+    //    endpoint the readiness line disclosed.
+    assert_no_http_listener(runtime_pid, &listen_addrs, &lane_endpoint);
 
     // 3. The reference probe peer dials the host and completes the
     //    signed-hello handshake; the manifest advertises exactly the served
