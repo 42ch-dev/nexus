@@ -12,7 +12,9 @@ use nexus_contracts::{
     OutlinePatchChapterRequest, OutlinePatchStructureRequest, PatchChapterRequest,
     TimelinePatchEventRequest, WorkOutlineBeatsItemStatus, WorkOutlineScenesItemStatus,
 };
-use nexus_core::{CoreAccess, CoreChapterContentQuery, CoreError, CoreOpenOptions, CoreService};
+use nexus_core::{
+    CoreAccess, CoreChapterContentQuery, CoreError, CoreOpenOptions, CoreService, WorkPatchRequest,
+};
 use nexus_local_db::writer_protocol::init_guarded_pool;
 
 fn select_creator(home: &std::path::Path, creator: &str, workspace: &str) {
@@ -638,6 +640,327 @@ async fn ref_less_work_outline_read_degrades_to_default() {
     assert!(outline.timeline_events.is_empty());
     assert!(outline.chapter_titles.is_empty());
     assert_ne!(outline.updated_at, "");
+
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
+/// T1 direct proof (D7-A): a Work whose `work_ref` and `story_ref` are both
+/// NULL is refused at the shared `resolve_work_ref` seam with the locked typed
+/// shape — `CoreError::InvalidInput { field: "work_ref_missing" }` (wire 400
+/// `invalid_input` + `details.field`) and a recovery hint naming `story_ref` —
+/// instead of the former opaque `WORK_REF_MISSING` 500. Task 2 owns the full
+/// three-route / ref'd-regression / read-write-chain matrix.
+#[tokio::test]
+async fn ref_less_work_outline_write_refuses_typed() {
+    let fx = setup().await;
+    let world_id: String = sqlx::query_scalar("SELECT world_id FROM works WHERE work_id = ?")
+        .bind(&fx.work_id)
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    let ref_less = fx
+        .core
+        .create_work(
+            &fx.principal,
+            serde_json::from_value::<CreateWorkRequest>(serde_json::json!({
+                "title": "Fresh Novel", "long_term_goal": "write", "initial_idea": "idea",
+                "world_id": world_id
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap()
+        .work_id;
+
+    let err = fx
+        .core
+        .patch_outline_structure(
+            &fx.principal,
+            "http",
+            ref_less.clone(),
+            structure_request(serde_json::json!({
+                "work_id": ref_less, "base_revision": 0,
+                "operation": "move_chapter", "chapter_id": 1, "volume_id": 2
+            })),
+        )
+        .await
+        .expect_err("a ref-less Work's outline write must refuse, never 500");
+    let CoreError::InvalidInput { field, reason } = err else {
+        panic!("expected the typed invalid-input refusal, got {err:?}");
+    };
+    assert_eq!(field, "work_ref_missing");
+    assert!(
+        reason.contains("story_ref"),
+        "the refusal must name the recovery step: {reason}"
+    );
+
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
+/// Create a Work with neither `work_ref` nor `story_ref` — the F-06 state
+/// right after `POST /works` — and prove it really is ref-less.
+async fn ref_less_work(fx: &Fixture) -> String {
+    let world_id: String = sqlx::query_scalar("SELECT world_id FROM works WHERE work_id = ?")
+        .bind(&fx.work_id)
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    let work_id = fx
+        .core
+        .create_work(
+            &fx.principal,
+            serde_json::from_value::<CreateWorkRequest>(serde_json::json!({
+                "title": "Fresh Novel", "long_term_goal": "write", "initial_idea": "idea",
+                "world_id": world_id
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap()
+        .work_id;
+    let (work_ref, story_ref): (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT work_ref, story_ref FROM works WHERE work_id = ?")
+            .bind(&work_id)
+            .fetch_one(&fx.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        (work_ref, story_ref),
+        (None, None),
+        "the helper's Work must be ref-less"
+    );
+    work_id
+}
+
+/// Assert the locked D7-A refusal shape: `CoreError::InvalidInput` keyed by the
+/// stable `work_ref_missing` discriminator and naming the `story_ref` remedy.
+/// A bare variant match is not enough — the former
+/// `Internal { code: "WORK_REF_MISSING" }` classification (wire 500) must fail
+/// this assertion, which is why it also pins the field and the hint.
+fn assert_work_ref_missing<T: std::fmt::Debug>(context: &str, result: Result<T, CoreError>) {
+    match result {
+        Err(CoreError::InvalidInput { field, reason }) => {
+            assert_eq!(field, "work_ref_missing", "{context}: discriminator");
+            assert!(
+                reason.contains("story_ref"),
+                "{context}: the refusal must name the recovery step: {reason}"
+            );
+        }
+        other => panic!("{context}: expected the typed work_ref_missing refusal, got {other:?}"),
+    }
+}
+
+/// Task 2 matrix (D7-A): all three write routes share the `resolve_work_ref`
+/// seam, so a ref-less Work must refuse **each** with the identical typed shape
+/// before any lock acquisition or filesystem read — never the opaque 500 the
+/// F-06 journey hit.
+#[tokio::test]
+async fn ref_less_work_all_write_routes_refuse_typed() {
+    let fx = setup().await;
+    let ref_less = ref_less_work(&fx).await;
+
+    assert_work_ref_missing(
+        "outline/patch",
+        fx.core
+            .patch_outline_structure(
+                &fx.principal,
+                "http",
+                ref_less.clone(),
+                structure_request(serde_json::json!({
+                    "work_id": ref_less, "base_revision": 0,
+                    "operation": "move_chapter", "chapter_id": 1, "volume_id": 2
+                })),
+            )
+            .await,
+    );
+    assert_work_ref_missing(
+        "chapters/{n}/patch",
+        fx.core
+            .patch_outline_chapter(
+                &fx.principal,
+                "http",
+                ref_less.clone(),
+                "1".into(),
+                chapter_patch_request(serde_json::json!({
+                    "work_id": ref_less, "base_revision": 0, "chapter_id": 1,
+                    "set": {"title": "Refused"}
+                })),
+            )
+            .await,
+    );
+    assert_work_ref_missing(
+        "timeline/patch",
+        fx.core
+            .patch_timeline_event(
+                &fx.principal,
+                "http",
+                ref_less.clone(),
+                timeline_request(serde_json::json!({
+                    "work_id": ref_less, "base_revision": 0,
+                    "operation": "add_event", "title": "Refused"
+                })),
+            )
+            .await,
+    );
+
+    // The ref-less seam fires before any path is constructed: a refused write
+    // must not fabricate a Work directory.
+    assert!(
+        !fx.creative_root.join("Works").exists(),
+        "no refused write may create a Work directory"
+    );
+
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
+/// Task 2 regression control: the same three routes on a Work that does carry
+/// a ref (`work_ref` present, `story_ref` NULL) keep their prior behavior —
+/// success and one revision bump each — so the T1 seam change only
+/// reclassified the ref-less case.
+#[tokio::test]
+async fn refd_work_all_write_routes_keep_prior_behavior() {
+    let fx = setup().await;
+    let (work_ref, story_ref): (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT work_ref, story_ref FROM works WHERE work_id = ?")
+            .bind(&fx.work_id)
+            .fetch_one(&fx.pool)
+            .await
+            .unwrap();
+    assert_eq!(work_ref.as_deref(), Some("test-novel"));
+    assert_eq!(story_ref, None, "the control resolves through work_ref");
+
+    let moved = fx
+        .core
+        .patch_outline_structure(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            structure_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 0,
+                "operation": "move_chapter", "chapter_id": 1, "volume_id": 2
+            })),
+        )
+        .await
+        .expect("ref'd outline/patch must still accept the patch");
+    assert_eq!(moved.new_revision, NonZeroU64::new(1).unwrap());
+
+    let patched = fx
+        .core
+        .patch_outline_chapter(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            "2".into(),
+            chapter_patch_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 1, "chapter_id": 2,
+                "set": {"title": "Ref'd Chapter"}
+            })),
+        )
+        .await
+        .expect("ref'd chapters/{n}/patch must still accept the patch");
+    assert_eq!(patched.new_revision, NonZeroU64::new(2).unwrap());
+
+    let added = fx
+        .core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            timeline_request(serde_json::json!({
+                "work_id": fx.work_id, "base_revision": 2,
+                "operation": "add_event", "title": "Ref'd Event", "realizes_chapter_id": 2
+            })),
+        )
+        .await
+        .expect("ref'd timeline/patch must still accept the patch");
+    assert_eq!(added.new_revision, NonZeroU64::new(3).unwrap());
+
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
+/// Task 2 read-write interaction chain: a ref-less Work still reads its default
+/// outline (the v1.209 P3 regression stays green), its write refuses typed, and
+/// after `PATCH /works/{id}` assigns `story_ref` the same write lands on the
+/// real path derived from that ref — proving the recovery hint's remedy rather
+/// than narrating it.
+#[tokio::test]
+async fn ref_less_work_write_recovers_once_story_ref_is_assigned() {
+    let fx = setup().await;
+    let ref_less = ref_less_work(&fx).await;
+
+    // 1. Read still degrades to the in-memory default (v1.209 P3).
+    let outline = fx
+        .core
+        .work_outline(&fx.principal, ref_less.clone())
+        .await
+        .expect("a ref-less Work's outline read must still degrade");
+    assert_eq!(outline.outline_revision, 0);
+    assert_eq!(outline.volumes.len(), 1);
+
+    // 2. The write refuses with the typed discriminator.
+    assert_work_ref_missing(
+        "timeline/patch",
+        fx.core
+            .patch_timeline_event(
+                &fx.principal,
+                "http",
+                ref_less.clone(),
+                timeline_request(serde_json::json!({
+                    "work_id": ref_less, "base_revision": 0,
+                    "operation": "add_event", "title": "Recovered Beat"
+                })),
+            )
+            .await,
+    );
+
+    // 3. The recovery hint's remedy: assign `story_ref` via PATCH /works/{id}.
+    fx.core
+        .patch_work(
+            &fx.principal,
+            ref_less.clone(),
+            "http",
+            WorkPatchRequest {
+                story_ref: Some(Some("recovered-novel".into())),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("assigning story_ref must succeed");
+
+    // 4. The same write now lands on the ref-derived path.
+    let added = fx
+        .core
+        .patch_timeline_event(
+            &fx.principal,
+            "http",
+            ref_less.clone(),
+            timeline_request(serde_json::json!({
+                "work_id": ref_less, "base_revision": 0,
+                "operation": "add_event", "title": "Recovered Beat"
+            })),
+        )
+        .await
+        .expect("after story_ref the outline write must land");
+    assert_eq!(added.new_revision, NonZeroU64::new(1).unwrap());
+
+    let outline_path = fx
+        .creative_root
+        .join("Works/recovered-novel/Outlines/outline.md");
+    assert!(
+        outline_path.exists(),
+        "the recovered write must persist under the story_ref-derived path"
+    );
+    let outline = fx
+        .core
+        .work_outline(&fx.principal, ref_less.clone())
+        .await
+        .unwrap();
+    assert_eq!(outline.outline_revision, 1);
+    assert_eq!(outline.timeline_events.len(), 1);
 
     fx.pool.close().await;
     fx.core.close().await.unwrap();
