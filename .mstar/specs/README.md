@@ -89,6 +89,7 @@ Specs are organized into **domain subdirectories** (reorganized 2026-09-29 from 
 | [schemas-directory-layout.md](architecture/schemas-directory-layout.md) | Master | Normative — current Daemon API contracts live under `schemas/daemon-api/`; generated authorities: Rust `generated::daemon_api` + TypeScript `generated/daemon-api` (reconciled through V1.183). V1.139 architect §5.2: `domain/key-block.schema.json` deleted (spoke `knowledge-entry.schema.json` is the KB type source) |
 | [schemas-external-consumer-boundary.md](architecture/schemas-external-consumer-boundary.md) | Companion | Active — current external daemon contracts use the Daemon API namespace; V1.64 originally established the bundled Web UI as an external API consumer (moved from knowledge root 2026-08-17) |
 | [world-kb-runtime-architecture.md](architecture/world-kb-runtime-architecture.md) | Master | Normative — World KB implementation SSOT: `nexus-core` service-family authorization/orchestration, `nexus-knowledge` KB domain/validation, `nexus-narrative` narrative aggregates, and `nexus-local-db` persistence. Former daemon HTTP adapters and transitional pack bridge are historical; current pack authority is `CoreService::import_world_pack`. |
+| [connect-event-delivery-and-operation-receipts.md](architecture/connect-event-delivery-and-operation-receipts.md) | Master | **Shipped (v1.207, PR #367)** — Connect replay/negotiation wire + durable operation-receipt surface: WS-lane event delivery, gap/reconcile, and the receipt-first recover handshake. |
 
 ### Runtime
 

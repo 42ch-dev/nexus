@@ -118,6 +118,15 @@ UI work in this repo follows a **studio-first** routing rule. The visual proving
 - Canonical workflow + classification labels (`promoted primitive` / `studio-local fixture` / `web-only wrapper` / `future web product component`): [`.mstar/knowledge/architecture-patterns/ui-component-promotion-workflow.md`](.mstar/knowledge/architecture-patterns/ui-component-promotion-workflow.md)
 - Studio spec: [`.mstar/specs/surfaces/design-studio.md`](.mstar/specs/surfaces/design-studio.md)
 
+## Release Policy (decoupled from development)
+
+Releases are a **standalone process, fully decoupled from development**:
+
+- **Never inside a development flow.** No release action — version-bump PR, tag, release-producer runs, GitHub Release publish — may execute inside an iteration, plan, task, PR lifecycle, or any phase / post-phase step of a development workflow.
+- **Independent trigger.** A release runs only after the development work it ships is fully merged to the target branch, and starts as its own authorized process (a release-pipeline run per [`docs/release.md`](docs/release.md)), never as a development-phase activity.
+- **Iteration Done never depends on a release.** A delivery iteration's acceptance criteria must not include executing a release; at most it delivers release *readiness* (pipeline fixes, runbooks, verification gates).
+- **Verification lives in the release process.** Release-time gates (e.g. the packaged `verify-launch` probe) run within the release process itself, not inside an iteration.
+
 ## Development Policy
 
 **Formatting:** `cargo fmt` must use a **pinned nightly** toolchain so local matches CI exactly (rustfmt formatting rules drift across nightly versions; CI's `Rust fmt & clippy` job pins `FMT_NIGHTLY` in `.github/workflows/ci.yml`). Current pin: **`nightly-2026-06-26`**. Install + use it: `rustup toolchain install nightly-2026-06-26 --component rustfmt` then `cargo +nightly-2026-06-26 fmt --all` (and `--check` to verify). Stable `cargo fmt` ignores `.rustfmt.toml`'s `ignore` field and will **incorrectly reformat** generated code under `crates/nexus-contracts/src/generated/`. When bumping the pin, update both CI and this line.

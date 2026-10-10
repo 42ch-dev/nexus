@@ -358,7 +358,20 @@ The seam (all edit points named):
    plaintext and loopback-only by fail-closed refusal
    (`accept.rs:550-560`): the Connect event surface is loopback-only in
    P2; remote event consumption is a future TLS decision, explicitly out
-   of scope.
+   of scope. **Lane address disclosure (v1.210 P3, architect-locked in the
+   Phase 1 Review & Edit chain, 2026-10-10; ships with v1.210).** Both boot
+   surfaces print the event-lane address they actually bound (from the
+   lane handle's bound address, never the config echo) as one stable,
+   greppable readiness line — `event_lane: ws://<host>:<port>/connect` —
+   alongside the node-lane `listen:` lines: `connect start` on its stderr
+   startup block, `nexus-runtime` on its stdout readiness block (that
+   block is its only liveness surface). Lane startup failure keeps the
+   warn-and-continue policy above, but the warning names the configured
+   `host:port`, the failure class (bind conflict / non-loopback refusal /
+   malformed `daemon.json`), and the `daemon.json` port remedy. Neither
+   surface grows a `--json` envelope (none exists today) or a lane-address
+   override flag — host/port stay `daemon.json` operator config,
+   boot-scoped per DF-92.
 7. **Manifest lockstep (restates the sentence in (d)).**
    `tools.nexus.subscribe` enters NO node-lane set — not `SERVED_OPS`
    (`invoke.rs:230`), not `LOCAL_SERVED_OPS` (`manifest.rs:279`), not the
