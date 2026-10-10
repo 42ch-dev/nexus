@@ -3159,7 +3159,17 @@ mod tests {
     async fn saturated_lane_returns_invoke_busy_then_recovers() {
         let (handler, lane, _serializer, peer, _temp) = test_handler(BridgeLimits {
             max_concurrent_invokes: 1,
-            invoke_deadline: Duration::from_millis(50),
+            // CI-robust per-invoke budget (R-FLAKE-CONNECT-SATURATED). The
+            // asserted semantics do not depend on this value: `invoke_busy`
+            // still fires only once the *held* permit outlives the budget
+            // (the acquire wait consumes the same budget), and the
+            // post-release serve is bounded by the outcome, not the clock.
+            // A 50 ms budget made the recovery call flaky under CI load —
+            // its result wait (`recv_timeout`) could expire before the
+            // blocking-lane upsert returned. A seconds-scale budget keeps
+            // `max_concurrent_invokes: 1` and both assertions intact. (The
+            // zero-budget deadline-simulation path is a separate test.)
+            invoke_deadline: Duration::from_secs(5),
             ..BridgeLimits::default()
         })
         .await;
