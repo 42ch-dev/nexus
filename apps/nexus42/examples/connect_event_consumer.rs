@@ -48,10 +48,14 @@
 //!    - pin its key in `~/.nexus42/connect/peer_keys.json`
 //!      (`{"peer_keys": {"<peer_id>": "<64-hex pubkey>"}}`) — the lane's
 //!      Layer-0 handshake refuses an allowlisted dialer with no pinned key.
-//! 4. Capability token: if the host's `~/.nexus42/connect/daemon.json` sets
-//!    `require_capability_token: true`, every invoke must carry a signed
-//!    proof. This minimal example presents none, so it runs against the
-//!    default (token gate off); a token-requiring host refuses it.
+//! 4. No capability-token gate applies to the event lane. Token policy is a
+//!    N-C1 node-lane concern (`~/.nexus42/connect/config.json` +
+//!    `ConnectConfig.require_capability_token`). The WS lane's responder is
+//!    composed without a token/issuer field, and its own
+//!    `~/.nexus42/connect/daemon.json` (`PeerToolsConfig`) has no token
+//!    setting — it is `deny_unknown_fields`, so a borrowed token switch
+//!    makes the file invalid and the lane refuses to boot. This example
+//!    presents no token proof and needs none on HEAD.
 //!
 //! ## Usage
 //!
@@ -65,9 +69,22 @@
 //!     [--cursor <epoch>:<seq>]
 //! ```
 //!
-//! Exit codes: `0` a batch was delivered and acked; `1` transport/handshake
-//! failure; `2` usage or subscribe refusal; `3` no delivery within
-//! `--timeout-secs`.
+//! Exit codes: `0` a batch was delivered and its ack write completed; `1`
+//! transport/handshake failure; `2` usage or subscribe refusal; `3` no
+//! delivery within `--timeout-secs`; `4` the delivery arrived but the signed
+//! ack response was not confirmed written.
+//!
+//! ## Ack ordering
+//!
+//! Returning `Ok` from the reverse handler only queues the acknowledgment:
+//! the remote adapter signs the response and hands the write to its own task
+//! after the handler returns. The example therefore wraps the WS transport in
+//! a local observation decorator (the same seam the lane's own
+//! `ObservedTransport` uses): it records the delivery request's
+//! `request_id` and prints `ACK_SENT` only once the matching signed response
+//! envelope's transport write has completed — the socket accepted the bytes.
+//! Without that completion the run fails `exit=4` instead of claiming an
+//! acknowledgment.
 //!
 //! ## Delivery note (v1.207 lane, current HEAD)
 //!
@@ -88,11 +105,12 @@ use serde_json::{json, Value};
 use spoke_connect::core::derive_peer_id_from_ed25519_pubkey;
 use spoke_connect::remote::{
     connect_remote_adapter, RemoteAdapter, RemoteAdapterOptions, RemoteIdentity, ToolHandler,
-    Transport,
+    Transport, TransportError,
 };
 use std::future::Future;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::net::TcpStream;
 
@@ -130,6 +148,113 @@ impl Failure {
             code,
             message: message.into(),
         }
+    }
+}
+
+/// Example-local transport-observation seam — the same shape as the lane's
+/// own `ObservedTransport`: it records the delivery request's `request_id`
+/// and then signals only once the matching signed ack response has completed
+/// its transport write. This is what distinguishes "the handler returned
+/// `Ok`" from "the acknowledgement reached the wire".
+#[derive(Default)]
+struct AckObservation {
+    delivery_request_id: Mutex<Option<String>>,
+    ack_response_written: AtomicBool,
+    written: tokio::sync::Notify,
+}
+
+impl AckObservation {
+    /// The delivery request's `request_id`, if a delivery arrived.
+    fn delivery_request_id(&self) -> Option<String> {
+        self.delivery_request_id
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    fn record_delivery_request(&self, envelope: &[u8]) {
+        let Ok(value) = serde_json::from_slice::<Value>(envelope) else {
+            return;
+        };
+        if value.get("op").and_then(Value::as_str) != Some(DELIVER_EVENTS_TOOL) {
+            return;
+        }
+        let Some(request_id) = value.get("request_id").and_then(Value::as_str) else {
+            return;
+        };
+        let mut slot = self
+            .delivery_request_id
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if slot.is_none() {
+            *slot = Some(request_id.to_owned());
+        }
+    }
+
+    fn record_ack_response(&self, envelope: &[u8]) {
+        let Ok(value) = serde_json::from_slice::<Value>(envelope) else {
+            return;
+        };
+        let Some(request_id) = value.get("request_id").and_then(Value::as_str) else {
+            return;
+        };
+        if self.delivery_request_id().as_deref() != Some(request_id)
+            || value.pointer("/payload/result").is_none()
+        {
+            return;
+        }
+        println!("ACK_RESPONSE_WRITTEN request_id={request_id}");
+        self.ack_response_written.store(true, Ordering::SeqCst);
+        self.written.notify_one();
+    }
+}
+
+/// Transport decorator around the WS transport (see [`AckObservation`]).
+struct AckObservedTransport {
+    inner: Arc<dyn Transport>,
+    observation: Arc<AckObservation>,
+}
+
+impl AckObservedTransport {
+    fn new(inner: Arc<dyn Transport>, observation: Arc<AckObservation>) -> Arc<Self> {
+        Arc::new(Self { inner, observation })
+    }
+}
+
+#[async_trait::async_trait]
+impl Transport for AckObservedTransport {
+    async fn send(&self, envelope: &[u8]) -> Result<(), TransportError> {
+        // Observe only AFTER the write resolved: `WsTransport::send` resolves
+        // once the socket accepted the bytes.
+        let result = self.inner.send(envelope).await;
+        if result.is_ok() {
+            self.observation.record_ack_response(envelope);
+        }
+        result
+    }
+
+    async fn recv(&self) -> Result<Vec<u8>, TransportError> {
+        let envelope = self.inner.recv().await?;
+        self.observation.record_delivery_request(&envelope);
+        Ok(envelope)
+    }
+
+    async fn close(&self) -> Result<(), TransportError> {
+        self.inner.close().await
+    }
+}
+
+/// Wait (bounded) for the signed ack response's transport write to complete.
+async fn wait_for_ack_write(observation: &AckObservation, timeout: Duration) -> Option<String> {
+    if !observation.ack_response_written.load(Ordering::SeqCst) {
+        tokio::time::timeout(timeout, observation.written.notified())
+            .await
+            .ok()?;
+    }
+    if observation.ack_response_written.load(Ordering::SeqCst) {
+        observation.delivery_request_id()
+    } else {
+        None
     }
 }
 
@@ -252,7 +377,8 @@ async fn main() {
 
 /// One subscribe → reverse `deliver_events` → ack round-trip.
 async fn run(args: Args) -> Result<(), Failure> {
-    let adapter = connect_lane(&args).await?;
+    let observation = Arc::new(AckObservation::default());
+    let adapter = connect_lane(&args, Arc::clone(&observation)).await?;
 
     let (tx, mut deliveries) = tokio::sync::mpsc::channel::<Value>(4);
     let handler: ToolHandler = Arc::new(move |arguments: Value| -> HandlerFuture {
@@ -329,13 +455,34 @@ async fn run(args: Args) -> Result<(), Failure> {
         }
     }
 
+    // The handler's `Ok` only queues the acknowledgment; the adapter signs
+    // the response and writes it in its own task afterwards. Do not claim (or
+    // exit on) acknowledgment until that write completed.
+    if let Some(request_id) = wait_for_ack_write(&observation, args.timeout()).await {
+        println!("ACK_SENT request_id={request_id} (signed ack response written to the lane)");
+    } else {
+        adapter.close();
+        return Err(Failure::new(
+            4,
+            format!(
+                "delivery received but the signed ack response for request {:?} was not \
+                 confirmed written within {:?}",
+                observation.delivery_request_id(),
+                args.timeout()
+            ),
+        ));
+    }
+
     adapter.close();
     Ok(())
 }
 
 /// Resolve the lane trust anchor, upgrade the address to a WebSocket, and
 /// finish the signed-hello handshake.
-async fn connect_lane(args: &Args) -> Result<Arc<RemoteAdapter>, Failure> {
+async fn connect_lane(
+    args: &Args,
+    observation: Arc<AckObservation>,
+) -> Result<Arc<RemoteAdapter>, Failure> {
     let host_pubkey = resolve_host_pubkey(args)?;
     println!(
         "host_lane_peer_id: {}",
@@ -362,7 +509,8 @@ async fn connect_lane(args: &Args) -> Result<Arc<RemoteAdapter>, Failure> {
     .await
     .map_err(|e| Failure::new(1, format!("WebSocket upgrade to {} failed: {e}", args.addr)))?;
 
-    let transport: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+    let raw: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+    let transport: Arc<dyn Transport> = AckObservedTransport::new(raw, observation);
     connect_remote_adapter(RemoteAdapterOptions {
         transport,
         local_identity: RemoteIdentity {
@@ -457,7 +605,8 @@ fn hex32(text: &str) -> Option<[u8; 32]> {
     Some(out)
 }
 
-/// Print one delivered batch and the ack/cursor outcome.
+/// Print one delivered batch. The acknowledgment outcome is printed by `run`
+/// only after the signed response write completes.
 fn report_delivery(delivery: &Value) {
     let Some(frames) = delivery.get("frames").and_then(Value::as_array) else {
         println!("DELIVERED_WITHOUT_FRAMES {delivery}");
@@ -488,7 +637,6 @@ fn report_delivery(delivery: &Value) {
             println!("CURSOR_UNCHANGED (control frame: the gap/reconcile push carries no cursor)");
         }
     }
-    println!("ACK_SENT");
 }
 
 /// The consumer hello manifest: it opts the session into the host-served
