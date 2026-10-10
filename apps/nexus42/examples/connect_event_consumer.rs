@@ -4,9 +4,11 @@
 //! `tools.nexus.deliver_events` → cursor-ack round-trip against a running
 //! Connect host (`nexus42 connect start` / `nexus-runtime`). It speaks the
 //! shipped peer stack — the `spoke_connect::remote` adapter over the
-//! `nexus_core::connect::WsTransport` WebSocket transport — and uses a
-//! fixed-seed Ed25519 identity so the operator's allowlist entry is stable
-//! across runs.
+//! `nexus_core::connect::WsTransport` WebSocket transport — and presents a
+//! randomly generated Ed25519 identity persisted at `--identity-key`
+//! (default `~/.nexus42/connect/event_consumer_identity.key`, created `0600`
+//! and reused across runs) so the operator's allowlist entry is stable but
+//! NOT reproducible by anyone holding only the example's public constants.
 //!
 //! ## Operator prerequisites (stock, fail-closed host)
 //!
@@ -37,8 +39,10 @@
 //!      file (default `~/.nexus42/connect/daemon_identity.key`); the lane is
 //!      loopback-only by design, so a local consumer running as the host's
 //!      user can read the seed and derive the public key.
-//! 3. Admit this consumer on the event lane (print its identity with
-//!    `--print-peer-only`):
+//! 3. Admit this consumer on the event lane. Its identity is generated and
+//!    persisted on first run (`--identity-key`, default under
+//!    `~/.nexus42/connect/`); print the stable pair with
+//!    `--print-peer-only`, then:
 //!    - add its `consumer_peer_id` to the event lane's dialer allowlist in
 //!      `~/.nexus42/connect/daemon.json`
 //!      (`{"peer_ids": ["<peer_id>"]}`) — this WS-lane config is distinct
@@ -66,8 +70,13 @@
 //!     ws://127.0.0.1:8425/connect \
 //!     --host-pubkey <64-hex event-lane pubkey> \
 //!     --stream demo \
-//!     [--cursor <epoch>:<seq>]
+//!     [--cursor <epoch>:<seq>] [--identity-key <PATH>]
 //! ```
+//!
+//! `--seed <N>` is **test-only**: it forces the deterministic `[N; 32]`
+//! Ed25519 seed so hermetic round-trip tests stay reproducible. The value is
+//! public, so NEVER rely on it for a real operator admission — use the
+//! generated identity (the default) instead.
 //!
 //! Exit codes: `0` a batch was delivered and its ack write completed; `1`
 //! transport/handshake failure; `2` usage or subscribe refusal; `3` no
@@ -99,7 +108,9 @@
 //! cursor.
 
 use libp2p::identity::Keypair;
-use nexus_core::connect::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};
+use nexus_core::connect::{
+    load_or_create_identity_at, ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES,
+};
 use nexus_spoke_adapter::{HostCapabilityManifest, SpokeRejectCode, SpokeResult};
 use serde_json::{json, Value};
 use spoke_connect::core::derive_peer_id_from_ed25519_pubkey;
@@ -121,15 +132,18 @@ const DELIVER_EVENTS_TOOL: &str = "tools.nexus.deliver_events";
 /// arrive before registration and be refused `op_unsupported`. Retry bounded.
 const SUBSCRIBE_ATTEMPTS: u32 = 20;
 const SUBSCRIBE_RETRY_DELAY: Duration = Duration::from_millis(50);
-/// Fixed Ed25519 seed for this consumer's identity — the deterministic
-/// `peer_id` / pubkey the operator allowlists and pins (like `connect_dialer`).
-const DEFAULT_SEED: u8 = 7;
+/// This consumer's persistent Ed25519 identity file, under the
+/// `--home`-selected `connect/` dir. Generated with the OS CSPRNG on first
+/// use and reused thereafter, so the operator's allowlist entry is stable
+/// without shipping a public private key.
+const CONSUMER_IDENTITY_FILE: &str = "event_consumer_identity.key";
 const DEFAULT_STREAM: &str = "demo";
 const DEFAULT_TIMEOUT_SECS: u64 = 15;
 
 const USAGE: &str = "usage: connect_event_consumer <ADDR> \
 [--host-pubkey <64-HEX> | --host-identity-key <PATH>] [--stream <NAME>] \
-[--cursor <EPOCH>:<SEQ>] [--seed <N>] [--timeout-secs <N>] [--print-peer-only]";
+[--cursor <EPOCH>:<SEQ>] [--identity-key <PATH>] [--seed <N> (TEST-ONLY)] \
+[--timeout-secs <N>] [--print-peer-only]";
 
 /// The reverse-invoke handler future: the same boxed shape as
 /// `spoke_connect::remote::ToolHandler` (kept local so the example needs no
@@ -270,8 +284,10 @@ struct Args {
     stream: String,
     /// Optional `last_event_id` cursor (`<epoch>:<seq>`) for replay/resume.
     cursor: Option<String>,
-    /// Local Ed25519 identity seed.
-    seed: u8,
+    /// Persistent identity seed file; default under `~/.nexus42/connect/`.
+    identity_key: Option<PathBuf>,
+    /// TEST-ONLY fixed Ed25519 seed; forces the public `[N; 32]` identity.
+    seed: Option<u8>,
     /// Print the consumer identity and exit (no lane contact).
     print_peer_only: bool,
     /// Delivery wait, in seconds.
@@ -285,7 +301,8 @@ impl Args {
         let mut host_identity_key = None;
         let mut stream = DEFAULT_STREAM.to_owned();
         let mut cursor: Option<String> = None;
-        let mut seed = DEFAULT_SEED;
+        let mut identity_key = None;
+        let mut seed = None;
         let mut print_peer_only = false;
         let mut timeout_secs = DEFAULT_TIMEOUT_SECS;
         while let Some(arg) = argv.next() {
@@ -301,12 +318,18 @@ impl Args {
                 }
                 "--stream" => stream = argv.next().ok_or("--stream needs a value")?,
                 "--cursor" => cursor = Some(argv.next().ok_or("--cursor needs a value")?),
+                "--identity-key" => {
+                    identity_key = Some(PathBuf::from(
+                        argv.next().ok_or("--identity-key needs a value")?,
+                    ));
+                }
                 "--seed" => {
-                    seed = argv
-                        .next()
-                        .ok_or("--seed needs a value")?
-                        .parse()
-                        .map_err(|e| format!("--seed must be a u8: {e}"))?;
+                    seed = Some(
+                        argv.next()
+                            .ok_or("--seed needs a value")?
+                            .parse()
+                            .map_err(|e| format!("--seed must be a u8: {e}"))?,
+                    );
                 }
                 "--timeout-secs" => {
                     timeout_secs = argv
@@ -336,6 +359,7 @@ impl Args {
             host_identity_key,
             stream,
             cursor,
+            identity_key,
             seed,
             print_peer_only,
             timeout_secs,
@@ -361,7 +385,15 @@ async fn main() {
         }
     };
 
-    let pubkey = pubkey_from_seed(&[args.seed; 32]);
+    let identity_seed = match resolve_consumer_seed(&args) {
+        Ok(seed) => seed,
+        Err(failure) => {
+            eprintln!("connect_event_consumer: {}", failure.message);
+            std::process::exit(failure.code);
+        }
+    };
+
+    let pubkey = pubkey_from_seed(&identity_seed);
     let consumer_peer_id = derive_peer_id_from_ed25519_pubkey(&pubkey);
     println!("consumer_peer_id: {consumer_peer_id}");
     println!("consumer_pubkey_hex: {}", hex_lower(&pubkey));
@@ -369,16 +401,16 @@ async fn main() {
         return;
     }
 
-    if let Err(failure) = run(args).await {
+    if let Err(failure) = run(args, identity_seed).await {
         eprintln!("connect_event_consumer: {}", failure.message);
         std::process::exit(failure.code);
     }
 }
 
 /// One subscribe → reverse `deliver_events` → ack round-trip.
-async fn run(args: Args) -> Result<(), Failure> {
+async fn run(args: Args, identity_seed: [u8; 32]) -> Result<(), Failure> {
     let observation = Arc::new(AckObservation::default());
-    let adapter = connect_lane(&args, Arc::clone(&observation)).await?;
+    let adapter = connect_lane(&args, identity_seed, Arc::clone(&observation)).await?;
 
     let (tx, mut deliveries) = tokio::sync::mpsc::channel::<Value>(4);
     let handler: ToolHandler = Arc::new(move |arguments: Value| -> HandlerFuture {
@@ -481,6 +513,7 @@ async fn run(args: Args) -> Result<(), Failure> {
 /// finish the signed-hello handshake.
 async fn connect_lane(
     args: &Args,
+    identity_seed: [u8; 32],
     observation: Arc<AckObservation>,
 ) -> Result<Arc<RemoteAdapter>, Failure> {
     let host_pubkey = resolve_host_pubkey(args)?;
@@ -514,7 +547,7 @@ async fn connect_lane(
     connect_remote_adapter(RemoteAdapterOptions {
         transport,
         local_identity: RemoteIdentity {
-            seed: [args.seed; 32],
+            seed: identity_seed,
         },
         local_manifest: consumer_manifest(),
         remote_pubkey: host_pubkey,
@@ -577,6 +610,50 @@ fn resolve_host_pubkey(args: &Args) -> Result<[u8; 32], Failure> {
 fn default_host_identity_key() -> Option<PathBuf> {
     let base = std::env::var_os("NEXUS42_HOME").or_else(|| std::env::var_os("HOME"))?;
     Some(PathBuf::from(base).join(".nexus42/connect/daemon_identity.key"))
+}
+
+/// This consumer's identity seed file: the explicit `--identity-key`, else
+/// `$NEXUS42_HOME` else `$HOME`, under `~/.nexus42/connect/`.
+fn default_consumer_identity_key() -> Option<PathBuf> {
+    let base = std::env::var_os("NEXUS42_HOME").or_else(|| std::env::var_os("HOME"))?;
+    Some(
+        PathBuf::from(base)
+            .join(".nexus42/connect")
+            .join(CONSUMER_IDENTITY_FILE),
+    )
+}
+
+/// Resolve this consumer's Ed25519 seed: the persisted **generated** identity
+/// by default (created `0600` with the OS CSPRNG on first run, reused
+/// thereafter), or the **TEST-ONLY** fixed `--seed` when explicitly given.
+fn resolve_consumer_seed(args: &Args) -> Result<[u8; 32], Failure> {
+    if let Some(value) = args.seed {
+        eprintln!(
+            "connect_event_consumer: --seed is TEST-ONLY (a deterministic, public identity); \
+             omit it to use the generated persistent identity"
+        );
+        return Ok([value; 32]);
+    }
+    let path = match &args.identity_key {
+        Some(path) => path.clone(),
+        None => default_consumer_identity_key().ok_or_else(|| {
+            Failure::new(
+                2,
+                "no identity path: pass --identity-key <PATH> or set HOME/NEXUS42_HOME".to_owned(),
+            )
+        })?,
+    };
+    let seed = load_or_create_identity_at(&path).map_err(|e| {
+        Failure::new(
+            2,
+            format!(
+                "cannot load or create the consumer identity {}: {e}",
+                path.display()
+            ),
+        )
+    })?;
+    println!("consumer_identity_key: {}", path.display());
+    Ok(seed)
 }
 
 /// The Ed25519 public key for a raw 32-byte secret seed (the same derivation

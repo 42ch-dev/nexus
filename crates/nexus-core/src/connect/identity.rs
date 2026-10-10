@@ -43,9 +43,27 @@ pub fn daemon_identity_key_path(home: &Path) -> std::path::PathBuf {
 /// the file cannot be written, or when an existing file has the wrong
 /// length (corrupt or foreign — fail-closed: never reuse a mis-sized file).
 pub fn load_or_create_identity(home: &Path) -> Result<[u8; 32], IdentityError> {
+    load_or_create_identity_at(&daemon_identity_key_path(home))
+}
+
+/// Load the persisted Ed25519 seed at `path`, or generate + persist a fresh
+/// one on first use.
+///
+/// Shared create/reload body behind [`load_or_create_identity`] and any
+/// first-party consumer that persists its OWN identity under a distinct file
+/// (e.g. the event-lane example's `event_consumer_identity.key`).
+///
+/// The file stores the RAW 32-byte seed — created once with owner-only
+/// permissions (0600 on Unix, applied atomically at creation) and reused
+/// across restarts so the derived peer id is stable.
+///
+/// # Errors
+/// Returns an I/O error when the identity directory cannot be created or the
+/// file cannot be written, or when an existing file has the wrong length
+/// (corrupt or foreign — fail-closed: never reuse a mis-sized file).
+pub fn load_or_create_identity_at(path: &Path) -> Result<[u8; 32], IdentityError> {
     use std::io::Write;
 
-    let path = daemon_identity_key_path(home);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| IdentityError::Io {
             path: parent.display().to_string(),
@@ -68,7 +86,7 @@ pub fn load_or_create_identity(home: &Path) -> Result<[u8; 32], IdentityError> {
         options.mode(0o600);
     }
 
-    match options.open(&path) {
+    match options.open(path) {
         Ok(mut file) => {
             let seed = random_seed();
             file.write_all(&seed).map_err(|e| IdentityError::Io {
@@ -83,7 +101,7 @@ pub fn load_or_create_identity(home: &Path) -> Result<[u8; 32], IdentityError> {
         }
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
             // Reload path: read + validate the persisted seed.
-            let bytes = std::fs::read(&path).map_err(|e| IdentityError::Io {
+            let bytes = std::fs::read(path).map_err(|e| IdentityError::Io {
                 path: path.display().to_string(),
                 source: e,
             })?;
@@ -93,7 +111,7 @@ pub fn load_or_create_identity(home: &Path) -> Result<[u8; 32], IdentityError> {
                 found,
             })?;
             #[cfg(unix)]
-            harden_permissions(&path);
+            harden_permissions(path);
             Ok(seed)
         }
         Err(e) => Err(IdentityError::Io {

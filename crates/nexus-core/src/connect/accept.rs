@@ -861,7 +861,12 @@ pub fn event_lane_readiness_line(addr: std::net::SocketAddr) -> String {
 /// conflict the lane deliberately warn-and-skips (the node lane is primary
 /// and keeps running without the auxiliary event lane).
 #[must_use]
-fn event_lane_bind_warning(host: &str, port: u16, error: &std::io::Error) -> String {
+fn event_lane_bind_warning(
+    host: &str,
+    port: u16,
+    config_path: &Path,
+    error: &std::io::Error,
+) -> String {
     let class = if error.kind() == std::io::ErrorKind::AddrInUse {
         "bind conflict"
     } else {
@@ -869,8 +874,9 @@ fn event_lane_bind_warning(host: &str, port: u16, error: &std::io::Error) -> Str
     };
     format!(
         "peer-tools event lane {class} at {host}:{port}: {error}; the lane is disabled — pick \
-         another free port in ~/.nexus42/connect/daemon.json (the lane address is operator \
-         config; there is no start-time override)"
+         another free port in {} (the lane address is operator config; there is no start-time \
+         override)",
+        config_path.display()
     )
 }
 
@@ -878,11 +884,12 @@ fn event_lane_bind_warning(host: &str, port: u16, error: &std::io::Error) -> Str
 /// (v1.210 P3 locked contract): configured `host:port`, failure class, and
 /// the `daemon.json` remedy.
 #[must_use]
-fn event_lane_non_loopback_warning(host: &str, port: u16) -> String {
+fn event_lane_non_loopback_warning(host: &str, port: u16, config_path: &Path) -> String {
     format!(
         "peer-tools event lane non-loopback refusal at {host}:{port}: the lane is plaintext-only \
          (no TLS) and refuses any host but the loopback default 127.0.0.1; set host back to \
-         127.0.0.1 in ~/.nexus42/connect/daemon.json"
+         127.0.0.1 in {}",
+        config_path.display()
     )
 }
 
@@ -891,15 +898,15 @@ fn event_lane_non_loopback_warning(host: &str, port: u16) -> String {
 /// `host:port` is unknowable here — the file did not parse — so the warning
 /// names the config file instead of a fabricated address.
 #[must_use]
-fn event_lane_config_warning(error: &ConnectConfigError) -> String {
+fn event_lane_config_warning(config_path: &Path, error: &ConnectConfigError) -> String {
     let class = match error {
         ConnectConfigError::Io(_) => "unreadable daemon.json",
         _ => "malformed daemon.json",
     };
     format!(
-        "peer-tools event lane {class}: {error}; the lane is disabled — fix \
-         ~/.nexus42/connect/daemon.json (its host/port are operator config; there is no \
-         start-time override)"
+        "peer-tools event lane {class}: {error}; the lane is disabled — fix {} (its host/port \
+         are operator config; there is no start-time override)",
+        config_path.display()
     )
 }
 
@@ -942,9 +949,14 @@ pub async fn start_peer_tools_lane(
     // the first poll reloads (never absorbed; the capability watcher's
     // W-B rule).
     let boot_digest = peer_config_digest(home);
+    // The effective `daemon.json` path for `home` (`--home` / `NEXUS42_HOME`
+    // select it) — the lane-startup warnings must name THIS file, not a
+    // hardcoded `~/.nexus42/...`, so the remedy points at the file the
+    // operator can actually edit.
+    let config_path = nexus_home_layout::connect_daemon_config_path(home);
     let config = Arc::new(
         PeerToolsConfig::load(home).map_err(|e| CoreError::Internal {
-            category: event_lane_config_warning(&e),
+            category: event_lane_config_warning(&config_path, &e),
         })?,
     );
     // DF-91: wire the live config snapshot into the process-global table
@@ -965,7 +977,7 @@ pub async fn start_peer_tools_lane(
     // closed for non-loopback binds, even when the gate is opened.
     if !is_loopback_host(&config.host) {
         return Err(CoreError::Internal {
-            category: event_lane_non_loopback_warning(&config.host, config.port),
+            category: event_lane_non_loopback_warning(&config.host, config.port, &config_path),
         });
     }
     ensure_remote_bind_allowed(&config.host)?;
@@ -995,7 +1007,7 @@ pub async fn start_peer_tools_lane(
     let listener = TcpListener::bind((config.host.as_str(), config.port))
         .await
         .map_err(|e| CoreError::Internal {
-            category: event_lane_bind_warning(&config.host, config.port, &e),
+            category: event_lane_bind_warning(&config.host, config.port, &config_path, &e),
         })?;
     let addr = listener.local_addr().map_err(|e| CoreError::Internal {
         category: format!("peer-tools local addr: {e}"),
@@ -1120,42 +1132,54 @@ mod tests {
 
     /// v1.210 P3 locked contract: every enumerated lane-startup failure
     /// warning names the configured `host:port` (where knowable), the
-    /// failure class, and the `daemon.json` remedy.
+    /// failure class, and the EFFECTIVE `daemon.json` path — the file the
+    /// `--home` / `NEXUS42_HOME`-selected home actually reads, not a
+    /// hardcoded `~/.nexus42/...`.
     #[test]
     fn event_lane_warnings_name_address_class_and_remedy() {
+        let home = Path::new("/tmp/nexus42-hermetic-home");
+        let config_path = nexus_home_layout::connect_daemon_config_path(home);
+        assert!(
+            config_path.ends_with("connect/daemon.json"),
+            "{}",
+            config_path.display()
+        );
+        let expected = config_path.display().to_string();
+
         let conflict = std::io::Error::from(std::io::ErrorKind::AddrInUse);
-        let text = event_lane_bind_warning("127.0.0.1", 8425, &conflict);
+        let text = event_lane_bind_warning("127.0.0.1", 8425, &config_path, &conflict);
         assert!(text.contains("bind conflict"), "{text}");
         assert!(text.contains("127.0.0.1:8425"), "{text}");
-        assert!(text.contains("~/.nexus42/connect/daemon.json"), "{text}");
+        assert!(text.contains(&expected), "{text}");
 
         let other = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
-        let text = event_lane_bind_warning("127.0.0.1", 8425, &other);
+        let text = event_lane_bind_warning("127.0.0.1", 8425, &config_path, &other);
         assert!(text.contains("bind failure"), "{text}");
         assert!(text.contains("127.0.0.1:8425"), "{text}");
-        assert!(text.contains("~/.nexus42/connect/daemon.json"), "{text}");
+        assert!(text.contains(&expected), "{text}");
 
-        let text = event_lane_non_loopback_warning("0.0.0.0", 8425);
+        let text = event_lane_non_loopback_warning("0.0.0.0", 8425, &config_path);
         assert!(text.contains("non-loopback refusal"), "{text}");
         assert!(text.contains("0.0.0.0:8425"), "{text}");
-        assert!(text.contains("~/.nexus42/connect/daemon.json"), "{text}");
+        assert!(text.contains(&expected), "{text}");
+        // The remedy names the effective file, not the hardcoded default a
+        // non-default home never reads.
+        assert!(!text.contains("~/.nexus42/connect/daemon.json"), "{text}");
 
-        let malformed = event_lane_config_warning(&ConnectConfigError::Malformed("bad".to_owned()));
-        assert!(malformed.contains("malformed daemon.json"), "{malformed}");
-        assert!(
-            malformed.contains("~/.nexus42/connect/daemon.json"),
-            "{malformed}"
+        let malformed = event_lane_config_warning(
+            &config_path,
+            &ConnectConfigError::Malformed("bad".to_owned()),
         );
+        assert!(malformed.contains("malformed daemon.json"), "{malformed}");
+        assert!(malformed.contains(&expected), "{malformed}");
 
-        let unreadable = event_lane_config_warning(&ConnectConfigError::Io("EACCES".to_owned()));
+        let unreadable =
+            event_lane_config_warning(&config_path, &ConnectConfigError::Io("EACCES".to_owned()));
         assert!(
             unreadable.contains("unreadable daemon.json"),
             "{unreadable}"
         );
-        assert!(
-            unreadable.contains("~/.nexus42/connect/daemon.json"),
-            "{unreadable}"
-        );
+        assert!(unreadable.contains(&expected), "{unreadable}");
     }
 
     #[test]

@@ -42,6 +42,7 @@ pub use accept::{
 };
 pub use config::{load_peer_keys, CollisionPolicy, PeerToolsConfig, DEFAULT_CONNECT_PORT};
 pub use identity::load_or_create_identity;
+pub use identity::load_or_create_identity_at;
 pub use watch::{
     peer_config_digest, spawn_peer_config_watch, supervise_peer_config_watch, PeerConfigHolder,
     PeerConfigSnapshot,
