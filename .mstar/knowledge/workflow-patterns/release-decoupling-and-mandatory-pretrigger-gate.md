@@ -79,6 +79,7 @@ A release runbook written against an imagined pipeline fails at the worst moment
 gh workflow run runtime-build.yml --ref release/0.1.1
 gh workflow run desktop-electron-build.yml --ref release/0.1.1
 # ... download artifacts, check receipts dirty:false + family checksums + dual-arch launch PASS ...
+mkdir -p ./v011-pretrigger/canary
 node tooling/release/assemble-sha256sums.mjs --version 0.1.1 \
   --artifacts-dir ./v011-pretrigger/artifacts --output ./v011-pretrigger/canary/Nexus-0.1.1-SHA256SUMS
 # Stage the seven binaries NEXT TO the manifest (the manifest carries bare names) before verifying:
