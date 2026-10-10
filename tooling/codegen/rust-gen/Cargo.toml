@@ -23,5 +23,5 @@ schemars = "1.2"
 # `syn` AST (so duplicated inline copies can be removed structurally) and
 # re-printed by `prettyplease`. In-process on purpose — no external `rustfmt`
 # binary or pinned-toolchain coupling in the codegen lane.
-syn = { version = "2", features = ["full"] }
+syn = { version = "3", features = ["full"] }
 prettyplease = "0.2"
