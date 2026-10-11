@@ -263,8 +263,8 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）。**V1.
 | `nexus42 creator status` | 展示当前激活 **`creator_id`**、Pairing、**`creator_api_key`** 是否已配置 / 有效、可选 **`api_key_ref`** 摘要（不明文打印密钥） |
 | `nexus42 creator use <creator_id_or_handle>` | 将活跃主体设为给定 Creator（内部规范化落盘为 `creator_id`） |
 | `nexus42 creator list` | 在 User 已登录时拉取可见 Creator 列表 |
-| `nexus42 creator pair` | 建立当前 Creator 与当前 User 的 Pairing |
-| `nexus42 creator unpair` | 撤销当前 Creator 与 User 的 Pairing |
+| `nexus42 creator pair` | 命令面保留（v1.212 D6）；Pairing 依赖尚未可用的 platform API——当前始终报错 `creator pairing requires the platform API (not yet available)`，不建立 Pairing |
+| `nexus42 creator unpair` | 命令面保留（v1.212 D6）；Pairing 依赖尚未可用的 platform API——当前始终报错 `creator unpairing requires the platform API (not yet available)`，不撤销 Pairing |
 | `nexus42 creator logout` | 清除本地 Creator 凭证（不默认清除 User 会话） |
 | `nexus42 creator credentials rotate` | 轮换 `creator_api_key` 或重绑 `api_key_ref` |
 
@@ -1349,10 +1349,10 @@ V1.35 将首次使用拆为 **纯本地**（默认，`platform_integration = pau
 在 §7.1 之前或之后增加 Platform 步骤（与 nexus-platform `v1-spec/architecture.md` §10.3 路径 A 对齐）：
 
 1. `nexus42 platform auth login`
-2. `nexus42 creator list` 或 `creator register` + `creator pair`（按需）
+2. `nexus42 creator list` 或 `creator register`（按需）；`creator pair` 当前不可用——Pairing 依赖尚未可用的 platform API（见 §6.2B）
 3. **`nexus42 platform sync pull`** 获取结构化世界基线（canonical；legacy `nexus42 sync pull` alias 已于 v1.193 P2 删除 — §6.5）
 
-**Creator-first 变体**：先完成 §7.1 步骤 3–5，再在需要 cloud 世界时执行 `platform auth login` + `creator pair` + `platform sync pull`（路径 B，见架构 §10.3）。
+**Creator-first 变体**：先完成 §7.1 步骤 3–5，再在需要 cloud 世界时执行 `platform auth login` + `platform sync pull`（路径 B，见架构 §10.3）；`creator pair` 当前不可用——Pairing 依赖尚未可用的 platform API（见 §6.2B）。
 
 ### 7.1 UX 原则
 
