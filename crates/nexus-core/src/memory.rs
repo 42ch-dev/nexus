@@ -962,10 +962,6 @@ pub struct CharacterTomRecordInput {
 #[derive(sqlx::FromRow, Debug, Clone)]
 pub struct ProbeCarrier {
     pub key_block_id: String,
-    /// Projected by the probe query (the row shape is part of the SQL
-    /// contract) but not read by any classifier today.
-    #[allow(dead_code)]
-    pub revision: Option<i64>,
     pub status: String,
     pub character_id: Option<String>,
     pub actor_world_binding_id: Option<String>,
@@ -1611,7 +1607,7 @@ impl CharacterTomService {
         let rows: Vec<ProbeCarrier> = match owner {
             KnowledgeOwnerRef::Character(id) => sqlx::query_as!(
                 ProbeCarrier,
-                r#"SELECT key_block_id AS "key_block_id!", revision, status AS "status!",
+                r#"SELECT key_block_id AS "key_block_id!", status AS "status!",
                           character_id, actor_world_binding_id
                    FROM kb_key_blocks
                    WHERE character_id = ?
@@ -1637,7 +1633,7 @@ impl CharacterTomService {
             .map_err(sqlx_internal)?,
             KnowledgeOwnerRef::ActorWorldBinding(id) => sqlx::query_as!(
                 ProbeCarrier,
-                r#"SELECT key_block_id AS "key_block_id!", revision, status AS "status!",
+                r#"SELECT key_block_id AS "key_block_id!", status AS "status!",
                           character_id, actor_world_binding_id
                    FROM kb_key_blocks
                    WHERE actor_world_binding_id = ?
@@ -1796,7 +1792,7 @@ impl CharacterTomService {
     async fn probe_carrier(&self, carrier_entry_id: &str) -> CoreResult<Option<ProbeCarrier>> {
         let row = sqlx::query_as!(
             ProbeCarrier,
-            r#"SELECT key_block_id AS "key_block_id!", revision, status AS "status!",
+            r#"SELECT key_block_id AS "key_block_id!", status AS "status!",
                       character_id, actor_world_binding_id
                FROM kb_key_blocks
                WHERE key_block_id = ?

@@ -321,7 +321,6 @@ pub async fn resolve_active_identity() -> Result<Option<ResolvedIdentity>> {
 
 /// Resolved identity information for the active session.
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Public API — fields/methods used by tests and future callers
 pub struct ResolvedIdentity {
     pub creator_id: String,
     pub identity_type: LocalIdentityType,
@@ -330,26 +329,6 @@ pub struct ResolvedIdentity {
     pub is_persistent: bool,
     pub platform_linked: bool,
     pub platform_creator_id: Option<String>,
-}
-
-impl ResolvedIdentity {
-    /// Check if this is an ephemeral (anonymous) identity.
-    #[allow(dead_code)]
-    #[must_use]
-    pub const fn is_ephemeral(&self) -> bool {
-        self.is_anonymous
-    }
-
-    /// Warning message for anonymous identities.
-    #[allow(dead_code)]
-    #[must_use]
-    pub const fn ephemeral_warning(&self) -> Option<&'static str> {
-        if self.is_anonymous {
-            Some("Active identity is anonymous — data will be lost when this session ends. Use `nexus42 system identity create --persistent` for a saved identity.")
-        } else {
-            None
-        }
-    }
 }
 
 const fn kind_label(kind: &IdentityKindArg) -> &'static str {
@@ -405,37 +384,6 @@ mod tests {
         let _ = IdentityCommand::Unlink {
             creator_id: "ctr_local1".to_string(),
         };
-    }
-
-    #[test]
-    fn test_resolved_identity_struct_fields() {
-        // Verify ResolvedIdentity can be constructed with LocalIdentityType
-        let resolved = ResolvedIdentity {
-            creator_id: "ctr_test".to_string(),
-            identity_type: LocalIdentityType::Persistent,
-            display_name: Some("Test".to_string()),
-            is_anonymous: false,
-            is_persistent: true,
-            platform_linked: true,
-            platform_creator_id: Some("ctr_plat".to_string()),
-        };
-        assert!(!resolved.is_ephemeral());
-        assert!(resolved.ephemeral_warning().is_none());
-    }
-
-    #[test]
-    fn test_resolved_identity_ephemeral_warning() {
-        let resolved = ResolvedIdentity {
-            creator_id: "ctr_anon123".to_string(),
-            identity_type: LocalIdentityType::Anonymous,
-            display_name: None,
-            is_anonymous: true,
-            is_persistent: false,
-            platform_linked: false,
-            platform_creator_id: None,
-        };
-        assert!(resolved.is_ephemeral());
-        assert!(resolved.ephemeral_warning().is_some());
     }
 
     #[test]
