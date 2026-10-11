@@ -532,8 +532,11 @@ already carries the matching `wasm_sha256`.
 > runtime serves only operator-installed modules under `~/.nexus42/modules/`.
 > Installation is an **execution-only** prerequisite, checked after the
 > durable receipt read: an authorized terminal replay is served even if the
-> module was since removed, while a first or ambiguous execution with an
-> absent/incomplete `<id>.wasm` + `manifest.json` pair still yields
+> module was since removed, and an in-progress or uncertain receipt outcome
+> is returned **before** the installation check — an ambiguous execution
+> never becomes an installation denial. Only an execution permitted to
+> proceed after receipt recovery reaches the installation gate, where an
+> absent/incomplete `<id>.wasm` + `manifest.json` pair yields
 > `module_not_found`.
 
 ### Step 2 — allowlist the module
@@ -670,7 +673,7 @@ world-aware CAS / structured-failure rules — never a forced overwrite).
 
 | `ErrorEnvelope.code` | Meaning |
 |---|---|
-| `module_not_found` | No module identity in the staged session state, an unsafe module id shape (the id-safety check runs first in the store gate), or the module is not installed under `~/.nexus42/modules/<id>/` — installation is an execution-only prerequisite checked after the durable receipt read, so an authorized terminal replay is served even if the module was since removed; a first/ambiguous execution with absent bytes still yields this denial |
+| `module_not_found` | No module identity in the staged session state, an unsafe module id shape (the id-safety check runs first in the store gate), or the module is not installed under `~/.nexus42/modules/<id>/` — installation is an execution-only prerequisite checked after the durable receipt read: an authorized terminal replay is served even if the module was since removed, and an in-progress or uncertain receipt outcome is returned before the installation check, so an ambiguous execution never becomes an installation denial; only an execution permitted to proceed after receipt recovery reaches the installation gate, where an absent/incomplete `<id>.wasm` + `manifest.json` pair yields this denial |
 | `module_not_scoped` | The resolved module is not in the peer's `module_scope` (or the scope is missing/empty) |
 | `settle_not_enabled` | `settle: true` on a read-only compute surface |
 | `invalid_input` | Missing target entry or malformed payload |
