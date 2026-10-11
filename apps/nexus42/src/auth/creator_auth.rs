@@ -6,8 +6,6 @@
 //!
 //! V1.16 adds `creator_auth_headers()` for Creator-context HTTP header selection.
 
-#![allow(dead_code)]
-
 use super::AuthStore;
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};

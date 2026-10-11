@@ -14,183 +14,13 @@ use nexus_acp_host::session_manager::{SessionEntry, SessionManager};
 use chrono::{Duration, Utc};
 use tempfile::TempDir;
 
-// ---------------------------------------------------------------------------
-// E10: ACP session persistence tests
-// ---------------------------------------------------------------------------
-
-/// Test: `SessionManager` saves and loads a session correctly
-#[test]
-fn session_persistence_save_and_load() {
-    let temp_dir = TempDir::new().unwrap();
-    let sessions_file = temp_dir.path().join("sessions.json");
-    let manager = SessionManager::new(sessions_file);
-
-    let entry = SessionEntry {
-        session_id: SessionId::new("sess_persist_001"),
-        agent_id: "claude-acp".to_string(),
-        workspace_hint: PathBuf::from("/tmp/test_workspace"),
-        created_at: Utc::now(),
-        last_used_at: Utc::now(),
-    };
-
-    manager.save_session(&entry).unwrap();
-
-    // Load and verify
-    let sessions = manager.load_sessions().unwrap();
-    assert_eq!(sessions.len(), 1);
-    assert_eq!(sessions[0].session_id, entry.session_id);
-    assert_eq!(sessions[0].agent_id, "claude-acp");
-}
-
-/// Test: `SessionManager` persists multiple sessions
-#[test]
-fn session_persistence_multiple_sessions() {
-    let temp_dir = TempDir::new().unwrap();
-    let sessions_file = temp_dir.path().join("sessions.json");
-    let manager = SessionManager::new(sessions_file);
-
-    let entry1 = SessionEntry {
-        session_id: SessionId::new("sess_multi_001"),
-        agent_id: "claude-acp".to_string(),
-        workspace_hint: PathBuf::from("/tmp/workspace1"),
-        created_at: Utc::now(),
-        last_used_at: Utc::now(),
-    };
-
-    let entry2 = SessionEntry {
-        session_id: SessionId::new("sess_multi_002"),
-        agent_id: "codex-acp".to_string(),
-        workspace_hint: PathBuf::from("/tmp/workspace2"),
-        created_at: Utc::now(),
-        last_used_at: Utc::now(),
-    };
-
-    manager.save_session(&entry1).unwrap();
-    manager.save_session(&entry2).unwrap();
-
-    let sessions = manager.load_sessions().unwrap();
-    assert_eq!(sessions.len(), 2);
-}
-
-/// Test: `SessionManager` updates existing session
-#[test]
-fn session_persistence_update_existing() {
-    let temp_dir = TempDir::new().unwrap();
-    let sessions_file = temp_dir.path().join("sessions.json");
-    let manager = SessionManager::new(sessions_file);
-
-    let original = SessionEntry {
-        session_id: SessionId::new("sess_update_001"),
-        agent_id: "claude-acp".to_string(),
-        workspace_hint: PathBuf::from("/tmp/workspace"),
-        created_at: Utc::now(),
-        last_used_at: Utc::now(),
-    };
-
-    manager.save_session(&original).unwrap();
-
-    // Update with new last_used_at
-    let updated = SessionEntry {
-        session_id: original.session_id.clone(),
-        agent_id: original.agent_id.clone(),
-        workspace_hint: original.workspace_hint.clone(),
-        created_at: original.created_at,
-        last_used_at: Utc::now(),
-    };
-
-    manager.save_session(&updated).unwrap();
-
-    let sessions = manager.load_sessions().unwrap();
-    assert_eq!(sessions.len(), 1);
-    assert!(sessions[0].last_used_at >= original.last_used_at);
-}
-
-// ---------------------------------------------------------------------------
-// E10: ACP session retrieval tests
-// ---------------------------------------------------------------------------
-
-/// Test: `find_recent_session` returns matching session by agent and workspace
-#[test]
-fn session_find_recent_by_agent_and_workspace() {
-    let temp_dir = TempDir::new().unwrap();
-    let sessions_file = temp_dir.path().join("sessions.json");
-    let manager = SessionManager::new(sessions_file);
-
-    let entry = SessionEntry {
-        session_id: SessionId::new("sess_find_001"),
-        agent_id: "claude-acp".to_string(),
-        workspace_hint: PathBuf::from("/tmp/find_workspace"),
-        created_at: Utc::now(),
-        last_used_at: Utc::now(),
-    };
-
-    manager.save_session(&entry).unwrap();
-
-    let found = manager
-        .find_recent_session("claude-acp", &PathBuf::from("/tmp/find_workspace"))
-        .unwrap();
-
-    assert!(found.is_some());
-    assert_eq!(found.unwrap().session_id, entry.session_id);
-}
-
-/// Test: `find_recent_session` returns `None` when no match
-#[test]
-fn session_find_recent_no_match() {
-    let temp_dir = TempDir::new().unwrap();
-    let sessions_file = temp_dir.path().join("sessions.json");
-    let manager = SessionManager::new(sessions_file);
-
-    let entry = SessionEntry {
-        session_id: SessionId::new("sess_nomatch_001"),
-        agent_id: "claude-acp".to_string(),
-        workspace_hint: PathBuf::from("/tmp/workspace_a"),
-        created_at: Utc::now(),
-        last_used_at: Utc::now(),
-    };
-
-    manager.save_session(&entry).unwrap();
-
-    // Search for different workspace
-    let found = manager
-        .find_recent_session("claude-acp", &PathBuf::from("/tmp/workspace_b"))
-        .unwrap();
-
-    assert!(found.is_none());
-}
-
-/// Test: `find_recent_session` returns most recent when multiple matches
-#[test]
-fn session_find_recent_returns_most_recent() {
-    let temp_dir = TempDir::new().unwrap();
-    let sessions_file = temp_dir.path().join("sessions.json");
-    let manager = SessionManager::new(sessions_file);
-
-    let older = SessionEntry {
-        session_id: SessionId::new("sess_old"),
-        agent_id: "claude-acp".to_string(),
-        workspace_hint: PathBuf::from("/tmp/recent_workspace"),
-        created_at: Utc::now() - Duration::hours(2),
-        last_used_at: Utc::now() - Duration::hours(2),
-    };
-
-    let newer = SessionEntry {
-        session_id: SessionId::new("sess_new"),
-        agent_id: "claude-acp".to_string(),
-        workspace_hint: PathBuf::from("/tmp/recent_workspace"),
-        created_at: Utc::now(),
-        last_used_at: Utc::now(),
-    };
-
-    manager.save_session(&older).unwrap();
-    manager.save_session(&newer).unwrap();
-
-    let found = manager
-        .find_recent_session("claude-acp", &PathBuf::from("/tmp/recent_workspace"))
-        .unwrap();
-
-    assert!(found.is_some());
-    assert_eq!(found.unwrap().session_id, SessionId::new("sess_new"));
+/// Seed the sessions file directly.
+///
+/// The production writer (`SessionManager::save_session`) was removed, so tests
+/// of the surviving load/cleanup/delete API set up state themselves.
+fn write_sessions(path: &std::path::Path, sessions: serde_json::Value) {
+    let doc = serde_json::json!({ "sessions": sessions });
+    std::fs::write(path, serde_json::to_string(&doc).unwrap()).unwrap();
 }
 
 // ---------------------------------------------------------------------------
@@ -202,24 +32,25 @@ fn session_find_recent_returns_most_recent() {
 fn session_delete_removes_by_id() {
     let temp_dir = TempDir::new().unwrap();
     let sessions_file = temp_dir.path().join("sessions.json");
-    let manager = SessionManager::new(sessions_file);
+    let manager = SessionManager::new(sessions_file.clone());
 
-    let entry = SessionEntry {
-        session_id: SessionId::new("sess_del_001"),
-        agent_id: "claude-acp".to_string(),
-        workspace_hint: PathBuf::from("/tmp/delete_workspace"),
-        created_at: Utc::now(),
-        last_used_at: Utc::now(),
-    };
-
-    manager.save_session(&entry).unwrap();
+    write_sessions(
+        &sessions_file,
+        serde_json::json!([{
+            "session_id": "sess_del_001",
+            "agent_id": "claude-acp",
+            "workspace_hint": "/tmp/delete_workspace",
+            "created_at": Utc::now().to_rfc3339(),
+            "last_used_at": Utc::now().to_rfc3339(),
+        }]),
+    );
     assert_eq!(manager.load_sessions().unwrap().len(), 1);
 
     let deleted = manager
         .delete_session(&SessionId::new("sess_del_001"))
         .unwrap();
     assert!(deleted.is_some());
-    assert_eq!(deleted.unwrap().session_id, entry.session_id);
+    assert_eq!(deleted.unwrap().session_id, SessionId::new("sess_del_001"));
 
     assert_eq!(manager.load_sessions().unwrap().len(), 0);
 }
@@ -246,28 +77,28 @@ fn session_delete_nonexistent() {
 fn session_cleanup_removes_expired() {
     let temp_dir = TempDir::new().unwrap();
     let sessions_file = temp_dir.path().join("sessions.json");
-    let manager = SessionManager::new(sessions_file);
+    let manager = SessionManager::new(sessions_file.clone());
 
-    // Create an expired session (30 hours old)
-    let expired = SessionEntry {
-        session_id: SessionId::new("sess_expired"),
-        agent_id: "claude-acp".to_string(),
-        workspace_hint: PathBuf::from("/tmp/expired_workspace"),
-        created_at: Utc::now() - Duration::hours(30),
-        last_used_at: Utc::now() - Duration::hours(30),
-    };
-
-    // Create a recent session (1 hour old)
-    let recent = SessionEntry {
-        session_id: SessionId::new("sess_recent"),
-        agent_id: "codex-acp".to_string(),
-        workspace_hint: PathBuf::from("/tmp/recent_workspace"),
-        created_at: Utc::now() - Duration::hours(1),
-        last_used_at: Utc::now() - Duration::hours(1),
-    };
-
-    manager.save_session(&expired).unwrap();
-    manager.save_session(&recent).unwrap();
+    // An expired session (30 hours old) and a recent one (1 hour old).
+    write_sessions(
+        &sessions_file,
+        serde_json::json!([
+            {
+                "session_id": "sess_expired",
+                "agent_id": "claude-acp",
+                "workspace_hint": "/tmp/expired_workspace",
+                "created_at": (Utc::now() - Duration::hours(30)).to_rfc3339(),
+                "last_used_at": (Utc::now() - Duration::hours(30)).to_rfc3339(),
+            },
+            {
+                "session_id": "sess_recent",
+                "agent_id": "codex-acp",
+                "workspace_hint": "/tmp/recent_workspace",
+                "created_at": (Utc::now() - Duration::hours(1)).to_rfc3339(),
+                "last_used_at": (Utc::now() - Duration::hours(1)).to_rfc3339(),
+            },
+        ]),
+    );
 
     let removed = manager.cleanup_expired().unwrap();
     assert_eq!(removed.len(), 1);
@@ -283,18 +114,19 @@ fn session_cleanup_removes_expired() {
 fn session_cleanup_boundary_24_hours() {
     let temp_dir = TempDir::new().unwrap();
     let sessions_file = temp_dir.path().join("sessions.json");
-    let manager = SessionManager::new(sessions_file);
+    let manager = SessionManager::new(sessions_file.clone());
 
-    // Create a session exactly at the boundary (24 hours old)
-    let boundary = SessionEntry {
-        session_id: SessionId::new("sess_boundary"),
-        agent_id: "claude-acp".to_string(),
-        workspace_hint: PathBuf::from("/tmp/boundary_workspace"),
-        created_at: Utc::now() - Duration::hours(24),
-        last_used_at: Utc::now() - Duration::hours(24),
-    };
-
-    manager.save_session(&boundary).unwrap();
+    // A session exactly at the boundary (24 hours old).
+    write_sessions(
+        &sessions_file,
+        serde_json::json!([{
+            "session_id": "sess_boundary",
+            "agent_id": "claude-acp",
+            "workspace_hint": "/tmp/boundary_workspace",
+            "created_at": (Utc::now() - Duration::hours(24)).to_rfc3339(),
+            "last_used_at": (Utc::now() - Duration::hours(24)).to_rfc3339(),
+        }]),
+    );
 
     // Cleanup should remove sessions at exactly 24h (boundary case favors removal)
     let removed = manager.cleanup_expired().unwrap();
@@ -431,29 +263,6 @@ fn session_manager_handles_corrupted_json() {
 
     // Should return error for corrupted JSON
     assert!(result.is_err());
-}
-
-/// Test: `SessionManager` creates parent directory on first save
-#[test]
-fn session_manager_creates_parent_dir() {
-    let temp_dir = TempDir::new().unwrap();
-    let sessions_file = temp_dir.path().join("subdir").join("sessions.json");
-
-    assert!(!sessions_file.exists());
-
-    let sessions_file_path = sessions_file.clone();
-    let manager = SessionManager::new(sessions_file);
-    let entry = SessionEntry {
-        session_id: SessionId::new("sess_mkdir_001"),
-        agent_id: "claude-acp".to_string(),
-        workspace_hint: PathBuf::from("/tmp/mkdir_workspace"),
-        created_at: Utc::now(),
-        last_used_at: Utc::now(),
-    };
-
-    manager.save_session(&entry).unwrap();
-
-    assert!(sessions_file_path.exists());
 }
 
 // ---------------------------------------------------------------------------
