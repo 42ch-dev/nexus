@@ -21,8 +21,14 @@ runs:
         # execution cost each Rust leg 70-140s (android/ghc trees dominate).
         sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
           /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift &
+        rm_pid=$!
         sudo docker image prune --all --force >/dev/null 2>&1 &
-        wait
+        docker_pid=$!
+        # A bare `wait` returns 0 even if a background job failed, so wait for
+        # the rm set explicitly (original set -e semantics); docker prune
+        # stays best-effort.
+        wait "$rm_pid"
+        wait "$docker_pid" || true
 
         echo "Disk after cleanup:"
         df -h /

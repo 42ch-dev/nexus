@@ -109,7 +109,9 @@ jobs:
         run: cargo test -p nexus42 --lib --no-default-features --features connect-host explicit_home
 
       - name: Check discovery & native CLI provider tests
+        if: always()
         # One feature graph, one compile: libtest filters are OR-combined.
+        # always(): keep provider results visible when explicit_home fails.
         run: cargo test -p nexus-agent-host --lib -- 'discovery::' 'providers::native_cli'
 
       # Keep provider semantics unchanged. If any per-test dispositions remain
