@@ -25,7 +25,7 @@ pub mod works;
 pub mod world;
 
 use crate::auth;
-use crate::challenge::{solve_challenge_with_fallback, UnavailableLlmSolver};
+use crate::challenge::solve_challenge;
 use crate::commands::local_creator_bootstrap::{global_db_path, open_global_db_read_only};
 use crate::config::{
     find_workspace_root, nexus_home, user_home_dir, workspace_config_path, workspace_nexus_dir,
@@ -934,20 +934,17 @@ async fn register_creator(
     // --- Step 4: Solve challenge ---
     println!("Solving challenge...");
 
-    let answer: String =
-        match solve_challenge_with_fallback(&verification.challenge_text, &UnavailableLlmSolver)
-            .await
-        {
-            Ok(answer) => {
-                println!("  Answer computed: {answer}");
-                answer
-            }
-            Err(challenge_err) => {
-                return Err(CliError::ChallengeFailed {
-                    reason: challenge_err.to_string(),
-                });
-            }
-        };
+    let answer: String = match solve_challenge(&verification.challenge_text) {
+        Ok(answer) => {
+            println!("  Answer computed: {answer}");
+            answer
+        }
+        Err(challenge_err) => {
+            return Err(CliError::ChallengeFailed {
+                reason: challenge_err.to_string(),
+            });
+        }
+    };
 
     // --- Step 5: Re-check challenge expiry before submit ---
     // Solve may have taken time; re-check to give a clearer error than a
