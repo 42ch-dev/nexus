@@ -19,9 +19,11 @@ warrants extraction, which runs in a separate state.
 
 ## Watermark ownership (read this — it is NOT automatic)
 
-The engine does NOT persist the sweep watermark. Nothing writes `core_context.*`
-session keys at runtime (the schedule seed/input is stored verbatim as
-core_context v0 in the derivation store, never parsed into template context),
+The engine does NOT persist the sweep watermark. Since v1.195 the engine binds
+a committed `core_context` payload into session context by kind — a `Text`
+payload binds `{{core_context.text}}`, a `Struct` payload binds
+`{{core_context.struct.<path>}}` — at admission and at each boundary refresh,
+but it does not parse seed text into arbitrary `core_context.*` child keys,
 and the sweep's `next_watermark` is not written back anywhere by the engine.
 
 The partner's backend owns the watermark:
@@ -36,7 +38,8 @@ The partner's backend owns the watermark:
    core_context for audit/continuity via
    `PATCH /v1/daemon/orchestration/schedules/{id}/core-context`
    (`struct_merge`/`append`) — that store is the versioned derivation trace,
-   not live session context, and templates cannot read it.
+   not live session context; templates see a committed payload only through
+   the two kind-specific bindings above, never as arbitrary per-key writes.
 3. Supply it back on the next sweep run as `preset.input.watermark` (part of
    the schedule input the partner's backend creates).
 

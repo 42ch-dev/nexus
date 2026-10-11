@@ -61,10 +61,13 @@ preset:
   initial: routing
   terminal: done
   # `initial_action: seed_direct` stores the schedule seed/input VERBATIM as
-  # core_context v0 in the derivation store. The engine does NOT parse that
-  # text into session context keys, so templates cannot read it via
-  # {{core_context.*}} — the schedule seed is not a live watermark channel
-  # (see the watermark note in templates/scheduled-sweep.md).
+  # core_context v0 (a Text payload) in the derivation store. Since v1.195 the
+  # engine binds the committed payload into session context by KIND — a Text
+  # payload binds {{core_context.text}}, a Struct payload binds
+  # {{core_context.struct.<path>}} — at admission and at each boundary refresh.
+  # It does NOT parse seed text into arbitrary {{core_context.*}} child keys,
+  # and the schedule seed is not a live watermark channel (see the watermark
+  # note in templates/scheduled-sweep.md).
   initial_action:
     kind: seed_direct
 
