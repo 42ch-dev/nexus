@@ -1,7 +1,6 @@
 //! Context Assembly — CLI-side module.
 //!
 //! Provides:
-//! - Summary generation from local manuscript files
 //! - Request/response types for the platform context assembly contract
 //!
 //! Note (KCA-002 B2): Context assembly runs CLI in-process via
@@ -9,5 +8,4 @@
 //! The daemon `POST /v1/daemon/context/assemble` route is retired; no daemon
 //! proxy is used.
 
-pub mod summary;
 pub mod types;
