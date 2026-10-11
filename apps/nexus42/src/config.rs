@@ -428,6 +428,103 @@ impl CliConfig {
     }
 }
 
+/// Get the nexus42 home directory (`$HOME/.nexus42`).
+///
+/// # Errors
+///
+/// Returns an error if the home directory cannot be resolved.
+pub fn nexus_home() -> anyhow::Result<PathBuf> {
+    let home =
+        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+    Ok(home.join(NEXUS_DIR))
+}
+
+/// User home directory (`$HOME`).
+///
+/// # Errors
+///
+/// Returns an error if the home directory cannot be resolved.
+pub fn user_home_dir() -> anyhow::Result<PathBuf> {
+    dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))
+}
+
+/// Resolve workspace `state.db` under ADR-014 (`creators/<creator_id>/workspaces/<slug>/state.db`).
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The home directory cannot be resolved
+/// - No active creator is configured
+pub fn resolve_state_db_path(config: &CliConfig) -> anyhow::Result<PathBuf> {
+    let user_home = user_home_dir()?;
+    resolve_state_db_path_from_home(config, &user_home)
+}
+
+/// Resolve workspace `state.db` from an explicit user home directory.
+///
+/// # Errors
+///
+/// Returns an error when no active creator is configured.
+pub fn resolve_state_db_path_from_home(
+    config: &CliConfig,
+    user_home: &Path,
+) -> anyhow::Result<PathBuf> {
+    let cid = config.active_creator_id.as_deref().ok_or_else(|| {
+        anyhow::anyhow!(
+            "No active creator configured. Run `nexus42 creator workspace init workspace` or `nexus42 creator use <id>`."
+        )
+    })?;
+    let slug = config.workspace_slug_for_creator(cid);
+    Ok(crate::paths::state_db_path(user_home, cid, slug))
+}
+
+/// Load config and resolve the local `SQLite` database path.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - CLI configuration cannot be loaded
+/// - State DB path cannot be resolved
+pub fn state_db_path() -> anyhow::Result<PathBuf> {
+    resolve_state_db_path(&CliConfig::load()?)
+}
+
+/// Get the path to the auth storage file.
+///
+/// # Errors
+///
+/// Returns an error if the Nexus home directory cannot be resolved.
+pub fn auth_store_path() -> anyhow::Result<PathBuf> {
+    Ok(nexus_home()?.join("auth.json"))
+}
+
+/// Check if the current directory (or any parent) contains a workspace
+#[must_use]
+pub fn find_workspace_root() -> Option<PathBuf> {
+    let mut current = std::env::current_dir().ok()?;
+    loop {
+        let nexus_dir = current.join(NEXUS_DIR);
+        if nexus_dir.is_dir() {
+            return Some(current);
+        }
+        if !current.pop() {
+            return None;
+        }
+    }
+}
+
+/// Get the workspace directory path for a given root
+#[must_use]
+pub fn workspace_nexus_dir(workspace_root: &Path) -> PathBuf {
+    workspace_root.join(NEXUS_DIR)
+}
+
+/// Get workspace config file path
+#[must_use]
+pub fn workspace_config_path(workspace_root: &Path) -> PathBuf {
+    workspace_nexus_dir(workspace_root).join("workspace.json")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -942,101 +1039,4 @@ platform_url = "https://direct.api.io"
         assert_eq!(loaded.active_creator_id.as_deref(), Some("ctr_save_test"));
         assert_eq!(loaded.platform_url, "https://save.test.io");
     }
-}
-
-/// Get the nexus42 home directory (`$HOME/.nexus42`).
-///
-/// # Errors
-///
-/// Returns an error if the home directory cannot be resolved.
-pub fn nexus_home() -> anyhow::Result<PathBuf> {
-    let home =
-        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
-    Ok(home.join(NEXUS_DIR))
-}
-
-/// User home directory (`$HOME`).
-///
-/// # Errors
-///
-/// Returns an error if the home directory cannot be resolved.
-pub fn user_home_dir() -> anyhow::Result<PathBuf> {
-    dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))
-}
-
-/// Resolve workspace `state.db` under ADR-014 (`creators/<creator_id>/workspaces/<slug>/state.db`).
-///
-/// # Errors
-///
-/// Returns an error if:
-/// - The home directory cannot be resolved
-/// - No active creator is configured
-pub fn resolve_state_db_path(config: &CliConfig) -> anyhow::Result<PathBuf> {
-    let user_home = user_home_dir()?;
-    resolve_state_db_path_from_home(config, &user_home)
-}
-
-/// Resolve workspace `state.db` from an explicit user home directory.
-///
-/// # Errors
-///
-/// Returns an error when no active creator is configured.
-pub fn resolve_state_db_path_from_home(
-    config: &CliConfig,
-    user_home: &Path,
-) -> anyhow::Result<PathBuf> {
-    let cid = config.active_creator_id.as_deref().ok_or_else(|| {
-        anyhow::anyhow!(
-            "No active creator configured. Run `nexus42 creator workspace init workspace` or `nexus42 creator use <id>`."
-        )
-    })?;
-    let slug = config.workspace_slug_for_creator(cid);
-    Ok(crate::paths::state_db_path(user_home, cid, slug))
-}
-
-/// Load config and resolve the local `SQLite` database path.
-///
-/// # Errors
-///
-/// Returns an error if:
-/// - CLI configuration cannot be loaded
-/// - State DB path cannot be resolved
-pub fn state_db_path() -> anyhow::Result<PathBuf> {
-    resolve_state_db_path(&CliConfig::load()?)
-}
-
-/// Get the path to the auth storage file.
-///
-/// # Errors
-///
-/// Returns an error if the Nexus home directory cannot be resolved.
-pub fn auth_store_path() -> anyhow::Result<PathBuf> {
-    Ok(nexus_home()?.join("auth.json"))
-}
-
-/// Check if the current directory (or any parent) contains a workspace
-#[must_use]
-pub fn find_workspace_root() -> Option<PathBuf> {
-    let mut current = std::env::current_dir().ok()?;
-    loop {
-        let nexus_dir = current.join(NEXUS_DIR);
-        if nexus_dir.is_dir() {
-            return Some(current);
-        }
-        if !current.pop() {
-            return None;
-        }
-    }
-}
-
-/// Get the workspace directory path for a given root
-#[must_use]
-pub fn workspace_nexus_dir(workspace_root: &Path) -> PathBuf {
-    workspace_root.join(NEXUS_DIR)
-}
-
-/// Get workspace config file path
-#[must_use]
-pub fn workspace_config_path(workspace_root: &Path) -> PathBuf {
-    workspace_nexus_dir(workspace_root).join("workspace.json")
 }
