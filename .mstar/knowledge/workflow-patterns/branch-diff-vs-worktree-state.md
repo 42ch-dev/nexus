@@ -134,8 +134,6 @@ be clean while the evidence still describes the wrong one.
   PM adjudication via `grep -n '^+'` + `sed -n` reads, fix commit
   d2743bd3, three-seat re-verification at worktree HEAD.
 - v1.212 p2: QA spec-truth read via relative paths → false REJECTED, corrected
-  after re-reading the two specs at absolute worktree paths; revalidation in
-  `.mstar/sdd/p2/review/qa.md`.
+  after re-reading the two specs at absolute worktree paths.
 - v1.212 p3: first edit pass written to the control root via relative paths,
-  detected with `git status`, restored before commit; incident disclosure in
-  `.mstar/sdd/p3/task-3-report.md`.
+  detected with `git status`, restored before commit.
