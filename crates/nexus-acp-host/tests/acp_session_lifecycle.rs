@@ -18,7 +18,7 @@ use tempfile::TempDir;
 ///
 /// The production writer (`SessionManager::save_session`) was removed, so tests
 /// of the surviving load/cleanup/delete API set up state themselves.
-fn write_sessions(path: &std::path::Path, sessions: serde_json::Value) {
+fn write_sessions(path: &std::path::Path, sessions: &serde_json::Value) {
     let doc = serde_json::json!({ "sessions": sessions });
     std::fs::write(path, serde_json::to_string(&doc).unwrap()).unwrap();
 }
@@ -36,7 +36,7 @@ fn session_delete_removes_by_id() {
 
     write_sessions(
         &sessions_file,
-        serde_json::json!([{
+        &serde_json::json!([{
             "session_id": "sess_del_001",
             "agent_id": "claude-acp",
             "workspace_hint": "/tmp/delete_workspace",
@@ -82,7 +82,7 @@ fn session_cleanup_removes_expired() {
     // An expired session (30 hours old) and a recent one (1 hour old).
     write_sessions(
         &sessions_file,
-        serde_json::json!([
+        &serde_json::json!([
             {
                 "session_id": "sess_expired",
                 "agent_id": "claude-acp",
@@ -119,7 +119,7 @@ fn session_cleanup_boundary_24_hours() {
     // A session exactly at the boundary (24 hours old).
     write_sessions(
         &sessions_file,
-        serde_json::json!([{
+        &serde_json::json!([{
             "session_id": "sess_boundary",
             "agent_id": "claude-acp",
             "workspace_hint": "/tmp/boundary_workspace",
