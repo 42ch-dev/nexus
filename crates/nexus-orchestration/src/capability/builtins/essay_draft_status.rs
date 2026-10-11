@@ -30,19 +30,10 @@ use tracing::info;
 /// Input for `essay.draft_status.finalize`.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[allow(dead_code)]
 struct FinalizeDraftInput {
     work_ref: String,
     #[serde(default)]
     works_root: Option<String>,
-    #[serde(default)]
-    word_count: Option<WordCount>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum WordCount {
-    Auto,
 }
 
 /// Output from `essay.draft_status.finalize`.

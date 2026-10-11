@@ -33,23 +33,6 @@ pub fn validate_work_ref(s: &str) -> Result<String, CapabilityError> {
     validate_slug_inner(s, "work_ref")
 }
 
-/// Validate a user-supplied chapter / generic slug (e.g. `ch01-foo`).
-///
-/// Same shape as `work_ref` — kebab-case `[a-z0-9][a-z0-9-]{0,63}`.
-///
-/// Exposed alongside `validate_work_ref` for symmetry; used when future
-/// fields (chapter slug, genre slug) accept user-supplied tokens. Currently
-/// not called by the scaffold capability — chapter slugs are auto-derived
-/// from `ch{NN}` — but unit-tested below to lock in semantics.
-///
-/// # Errors
-///
-/// Returns `CapabilityError::InputInvalid` on any validation failure.
-#[allow(dead_code)] // F1: sibling API for future user-supplied slug fields
-pub fn validate_slug(s: &str) -> Result<String, CapabilityError> {
-    validate_slug_inner(s, "slug")
-}
-
 fn validate_slug_inner(s: &str, label: &str) -> Result<String, CapabilityError> {
     if s.is_empty() {
         return Err(CapabilityError::InputInvalid(format!("{label} is empty")));
@@ -164,7 +147,6 @@ mod tests {
         assert_eq!(validate_work_ref("my-novel").unwrap(), "my-novel");
         assert_eq!(validate_work_ref("a").unwrap(), "a");
         assert_eq!(validate_work_ref("0").unwrap(), "0");
-        assert_eq!(validate_slug("ch01-foo").unwrap(), "ch01-foo");
         let max = "a".repeat(SLUG_MAX_LEN);
         assert_eq!(validate_work_ref(&max).unwrap(), max);
     }

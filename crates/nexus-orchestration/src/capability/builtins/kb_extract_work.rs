@@ -30,9 +30,6 @@ struct ExtractResponse {
     /// Body may be a structured JSON object (preferred) or a plain string.
     #[serde(deserialize_with = "deserialize_body")]
     body: String,
-    #[serde(default)]
-    #[allow(dead_code)] // read from LLM response, used for future provenance tracking
-    source_work_entry_id: String,
 }
 
 /// Deserialize `body` from either a JSON object (serialized to string) or a plain string.
@@ -630,7 +627,6 @@ mod tests {
         assert_eq!(resp.block_type, "Character");
         assert_eq!(resp.canonical_name, "Elena");
         assert_eq!(resp.body, "A brave warrior");
-        assert_eq!(resp.source_work_entry_id, "kb_abc");
     }
 
     #[test]
