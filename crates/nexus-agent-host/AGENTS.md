@@ -6,7 +6,7 @@ Hybrid managed-only host core for local agent execution in the Nexus daemon runt
 
 This crate provides the orchestration/facade layer above `nexus-acp-host` and native CLI
 process adapters. It normalizes ACP providers and native CLI providers behind narrow
-`ProviderAdapter`, `HostFacade`, and `ProviderDiscovery` traits.
+`ProviderAdapter` and `HostFacade` traits.
 
 ## Key Rules
 

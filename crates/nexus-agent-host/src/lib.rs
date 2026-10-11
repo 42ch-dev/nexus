@@ -2,7 +2,7 @@
 //!
 //! This crate provides the orchestration/facade layer above `nexus-acp-host` and
 //! native CLI process adapters. It normalizes ACP providers and native CLI providers
-//! behind narrow `ProviderAdapter`, `HostFacade`, and `ProviderDiscovery` traits.
+//! behind narrow `ProviderAdapter` and `HostFacade` traits.
 //!
 //! # Architecture
 //!
@@ -61,7 +61,6 @@ use capability::model::{
     HostStartConfig, LaunchSpec, ManagedSessionHandle, ProbeRequest, ProtocolKind,
     ProviderDescriptor, ProviderHealth,
 };
-use config::AgentHostConfig;
 
 /// Provider adapter trait — the narrow interface each provider implements.
 ///
@@ -176,18 +175,6 @@ pub trait HostFacade: Send + Sync {
         &self,
         session_id: HostSessionId,
     ) -> tokio::sync::broadcast::Receiver<capability::model::HostEvent>;
-}
-
-/// Provider discovery trait.
-///
-/// Discovers available providers from config, PATH scan, and ACP registry.
-#[async_trait]
-pub trait ProviderDiscovery: Send + Sync {
-    /// Discover available providers based on the given configuration.
-    ///
-    /// Returns a catalog of discovered providers with their descriptors,
-    /// capabilities, and health status.
-    async fn discover(&self, config: &AgentHostConfig) -> HostResult<ProviderCatalog>;
 }
 
 /// A single entry in the provider catalog.
