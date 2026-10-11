@@ -261,38 +261,30 @@ absent or incomplete pair is `module_not_found` at invoke time.
 
 Build and install (mirrors `strategy-samples/README.md` §5; `basic-combat` is
 a **standalone crate** — not a member of the nexus workspace, with its own
-`Cargo.lock` — so build from inside the directory):
+`Cargo.lock`) with the repo's own daemon-free module tools. `nexus42 compute
+build` runs cargo for you (resolving `CARGO_TARGET_DIR` itself — the repo's
+`.envrc` relocates the target dir), injects `wasm_sha256` into the staged
+manifest, and stages the pair under `dist/<module_id>/`; `nexus42 compute
+install` re-verifies the pairing and copies the pair into the CLI home's
+module store:
 
 ```bash
-cd modules/basic-combat
 rustup target add wasm32-unknown-unknown      # once per toolchain
-cargo build --release --target wasm32-unknown-unknown
 
-NEXUS_HOME="${NEXUS42_HOME:-$HOME}/.nexus42"
-mkdir -p "$NEXUS_HOME/modules/basic-combat"
-cp target/wasm32-unknown-unknown/release/basic_combat.wasm "$NEXUS_HOME/modules/basic-combat/basic-combat.wasm"
-cp manifest.json "$NEXUS_HOME/modules/basic-combat/"
+nexus42 compute build --manifest modules/basic-combat/manifest.json --release
+# → staged pair: modules/basic-combat/dist/basic-combat/basic-combat.wasm
+#   + modules/basic-combat/dist/basic-combat/manifest.json (wasm_sha256 injected)
+
+nexus42 compute install --module-id basic-combat \
+  --manifest modules/basic-combat/dist/basic-combat/manifest.json \
+  --wasm modules/basic-combat/dist/basic-combat/basic-combat.wasm
 ```
 
-When the runtime runs with `--home <path>`, substitute `<path>/.nexus42` for
-`$NEXUS_HOME` in the block above (the `NEXUS42_HOME` env override is already
-covered).
-
-Note the rename: cargo emits the artifact under the crate name
-(`basic_combat.wasm`), the store expects the module id (`basic-combat.wasm`).
-
-> **Align `wasm_sha256` (optional but recommended).** The repo-source manifest
-> pins the hash of the *embedded* artifact, which differs from any locally
-> compiled `.wasm`. A stale `wasm_sha256` rejects every invocation of that
-> install. After installing a locally built module, set the field to the hash
-> of the installed bytes — or delete it to fall back to the stat fence:
-
-```bash
-shasum -a 256 "$NEXUS_HOME/modules/basic-combat/basic-combat.wasm"
-# → "<hash>  <filename>" — use only the 64 lowercase hex before the
-# two-space filename separator; write it as "wasm_sha256" in the installed
-#   manifest.json, or remove the field entirely
-```
+`compute install` targets the CLI home (`$HOME/.nexus42` — the `nexus42` CLI
+resolves its home from `$HOME` only). When the runtime resolves a different
+home (`--home <path>` or `NEXUS42_HOME=<path>` over a differing `$HOME`),
+copy the staged pair into `<home>/.nexus42/modules/basic-combat/` by hand
+instead — the staged manifest already carries the matching `wasm_sha256`.
 
 On the Connect surface the embedded module set is **not** reachable: the
 runtime serves only operator-installed modules under `~/.nexus42/modules/`.
