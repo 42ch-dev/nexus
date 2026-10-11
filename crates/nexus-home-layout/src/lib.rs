@@ -2,8 +2,6 @@
 //!
 //! Used by `nexus42` CLI and the daemon runtime so `SQLite` and workspace dirs resolve identically.
 
-#![allow(dead_code)]
-
 use std::path::{Path, PathBuf};
 
 /// Device ID generation and persistence (`~/.nexus42/device-id`, UUID v4).

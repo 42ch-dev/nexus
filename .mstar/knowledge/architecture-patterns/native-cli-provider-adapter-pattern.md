@@ -1,7 +1,7 @@
 ---
 module: nexus-agent-host
 date: 2026-07-14
-last_updated: 2026-09-12
+last_updated: 2026-10-11
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
@@ -12,13 +12,14 @@ tags:
   - bare-command
   - protocol-client
   - provider-readiness
-  - retained-cleanup
   - message-level-streaming
+  - retired-implementation
 applies_when:
   - Adding or changing a native provider
   - Diagnosing candidate-versus-ready drift
   - Mapping SDK callbacks to Host events
   - Retaining owned cleanup after caller timeout
+  - Reading the historical ACP bare-command extraction / scan-dedup guidance
 ---
 
 # Native CLI Provider Adapter Pattern + ACP Registry Bare-Command Extraction
@@ -88,9 +89,12 @@ Hard-won rules from the V1.168 replacement (QC findings B-1..B-3, B-1..B-4):
 6. **Honest capability descriptors:** declare only what the client surface supports. As amended in V1.188, dsh uses `CapabilityDescriptor::dsh_limited()` with message-level `streaming: true`, `cancellation: false`, `session_restore: true`, `text_prompt: true` — do not borrow `native_cli_limited()` when the surface differs.
 7. **Test protocol adapters with spawnable mock protocol stubs** (`mock_claude_cli.py`, `mock_codex_app_server.py`, `mock_dsh_agent.py` under `crates/nexus-agent-host/tests/fixtures/native_protocol/`) — real protocol shapes without the vendor binary. Do not fake protocols with `echo` scripts.
 8. **Discovery can have more than one route.** dsh-native resolves an explicit command, `DSH_RUNTIME_BIN`, or PATH `dsh`; catalog and boot must consume the same selected recipe. The old `dsh-jsonrpc-agent` route is retired.
-9. No `NATIVE_PREFERRED_FAMILIES` row unless an ACP twin exists.
+9. No `NATIVE_PREFERRED_FAMILIES` row unless an ACP twin exists. (The table itself was removed with the ACP-host scan subsystem in v1.212, issue #391; catalog dedup at HEAD is per `provider_id` — `crates/nexus-agent-host/src/discovery/catalog.rs`.)
 
-The V1.116 guidance below still applies for ACP bare-command extraction and scan dedup; the session/lifecycle sections there describe the retired self-written adapters and are kept as history.
+The V1.116 guidance below is historical throughout: the session/lifecycle
+sections there describe the retired self-written adapters, and the ACP
+bare-command extraction / scan-dedup material describes the scan subsystem
+removed in v1.212 (issue #391). Both are kept as design guidance.
 
 ## Historical (pre-V1.168): self-written adapters
 
@@ -121,7 +125,10 @@ second; `dsh-native` (V1.168) is the third and first driven by a crates.io SDK c
 
 The following V1.116 adapter-construction/lifecycle notes are historical;
 current native process and protocol ownership follows the SDK rules above.
-ACP bare-command extraction and native/ACP-twin dedup remain applicable.
+The ACP bare-command extraction and native/ACP-twin dedup notes are historical
+too: their helpers (`bare_command_name` / `probe_local_binary`) and the scan
+handler that consumed `NATIVE_PREFERRED_FAMILIES` disappeared with the ACP-host
+scan subsystem removed in v1.212 (issue #391).
 
 ### Adding a new native CLI provider
 
@@ -142,11 +149,11 @@ ACP bare-command extraction and native/ACP-twin dedup remain applicable.
 
 3. **Register in `providers/native_cli/mod.rs`**
 
-4. **Add to `NATIVE_PREFERRED_FAMILIES`** in the scan handler for dedup:
+4. **Add to `NATIVE_PREFERRED_FAMILIES`** in the scan handler for dedup *(historical — the constant and the ACP-host scan handler were removed in v1.212, issue #391; dedup at HEAD is by `provider_id` in the catalog)*:
    - When the native provider is installed, suppress the matching ACP registry entry
    - Example: `codex-native` installed → `codex-acp` suppressed
 
-5. **The scan endpoint automatically includes native providers** (V1.116 merge).
+5. **The scan endpoint automatically includes native providers** (V1.116 merge). *(Historical: the surviving `POST /v1/daemon/agent-host/scan` is served by host provider discovery — `crates/nexus-agent-host/src/discovery/path_scan.rs`.)*
 
 ### Per-invocation vs persistent process
 
@@ -174,9 +181,13 @@ The ACP registry lists binary commands like `./kimi`, `./opencode`,
 `which::which("./kimi")` which looks for a file named `./kimi` in the current
 directory — NOT `kimi` on PATH.
 
-**Fix:** `bare_command_name()` extracts the file-name component using
-`Path::new(cmd).file_name()`. Applied in both the probe-key HashSet and the scan
-handler's `platform_binary_commands()` for consistent matching.
+**Fix (V1.116, historical):** `bare_command_name()` extracted the file-name
+component using `Path::new(cmd).file_name()`, applied in both the probe-key
+HashSet and the scan handler's `platform_binary_commands()` so probe keys and
+matching agreed. That helper and its scan subsystem were removed in v1.212
+(issue #391); the lesson survives as design guidance: a command string that may
+be a path must be reduced to its bare executable name before a PATH probe, and
+every consumer of that command must share the same normalization.
 
 ### 2. codex-acp has no binary distribution
 
@@ -187,10 +198,14 @@ not ACP.
 ## When to Apply
 
 - Adding a 3rd/4th native CLI provider (gemini, cursor-native if needed)
-- Debugging agent detection false negatives (check bare-cmd extraction first)
-- Understanding why ACP registry agents with relative-path cmds are invisible
+- Understanding why ACP registry agents with relative-path commands were invisible to PATH probing before V1.116 (the retired `bare_command_name()` fix)
+- Writing PATH-probe code: reduce a possibly-relative command to its bare executable name
 
 ## Examples
+
+Both snippets below are historical (removed with the ACP-host scan subsystem in
+v1.212, issue #391); they illustrate the normalization and dedup rules that
+still apply to any PATH-probe code.
 
 ### Bare-command extraction
 

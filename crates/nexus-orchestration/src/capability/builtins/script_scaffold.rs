@@ -36,8 +36,9 @@ use tracing::info;
 /// Input for the script scaffold capability.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[allow(dead_code)]
 struct ScaffoldInput {
+    #[allow(dead_code)]
+    // required by the capability input schema; handler patches the works row by work_id
     creator_id: String,
     work_id: String,
     work_ref: String,
@@ -56,9 +57,7 @@ struct ScaffoldOutput {
 }
 
 /// Predefined script template content with YAML frontmatter.
-#[allow(dead_code)]
 struct ScriptTemplate {
-    filename: &'static str,
     section_weight: &'static str,
     title: &'static str,
     comment: &'static str,
@@ -66,19 +65,16 @@ struct ScriptTemplate {
 
 const SCRIPT_TEMPLATES: &[ScriptTemplate] = &[
     ScriptTemplate {
-        filename: "script.md",
         section_weight: "critical",
         title: "Script",
         comment: "Scene headings, dialogue, action lines, parentheticals",
     },
     ScriptTemplate {
-        filename: "beat-sheet.md",
         section_weight: "critical",
         title: "Beat Sheet",
         comment: "Story beats, scene outline, act structure",
     },
     ScriptTemplate {
-        filename: "characters.md",
         section_weight: "important",
         title: "Characters",
         comment: "Character directions, casting notes, arc tracking",
@@ -408,16 +404,14 @@ mod tests {
     fn all_script_templates_render_non_empty() {
         for tmpl in SCRIPT_TEMPLATES {
             let content = render_template(tmpl);
-            assert!(!content.is_empty(), "template {} is empty", tmpl.filename);
+            assert!(!content.is_empty(), "template is empty");
             assert!(
                 content.contains("section_status: draft"),
-                "template {} missing section_status frontmatter",
-                tmpl.filename
+                "template missing section_status frontmatter"
             );
             assert!(
                 content.contains("section_weight:"),
-                "template {} missing section_weight",
-                tmpl.filename
+                "template missing section_weight"
             );
         }
     }
@@ -432,10 +426,10 @@ mod tests {
         let critical: Vec<&str> = SCRIPT_TEMPLATES
             .iter()
             .filter(|t| t.section_weight == "critical")
-            .map(|t| t.filename)
+            .map(|t| t.title)
             .collect();
-        assert!(critical.contains(&"script.md"));
-        assert!(critical.contains(&"beat-sheet.md"));
+        assert!(critical.contains(&"Script"));
+        assert!(critical.contains(&"Beat Sheet"));
     }
 
     #[test]

@@ -15,7 +15,8 @@ use super::env_state::EnvState;
 struct CleanupEntry {
     handle: Option<JoinHandle<()>>,
     /// Ownership retention: the environment stays alive while its registered
-    /// cleanup worker is still running. Read by the registry diagnostic.
+    /// cleanup worker is still running. Only the `#[cfg(test)]` registry
+    /// diagnostic reads it, so non-test builds still need the attribute.
     #[allow(dead_code)]
     state: Arc<EnvState>,
     completed: Arc<AtomicBool>,

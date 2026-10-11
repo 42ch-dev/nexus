@@ -1,7 +1,5 @@
 //! Shared disposable home seeding for wire proofs and lifecycle tests.
 
-#![allow(dead_code)]
-
 use std::path::Path;
 
 use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};

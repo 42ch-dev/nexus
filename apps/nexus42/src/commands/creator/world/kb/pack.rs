@@ -32,8 +32,7 @@
 //! {
 //!   "modules": { "pack": { "title", "version", "creator", "description?" } },
 //!   "entries": [ /* KnowledgeEntry[] ordered by canonical_name ASC */ ],
-//!   "relations": [ /* Relation[] ordered by relationship_id ASC */ ],
-//!   "source_anchors": [ /* optional; omitted unless --include-anchors set */ ]
+//!   "relations": [ /* Relation[] ordered by relationship_id ASC */ ]
 //! }
 //! ```
 //!
@@ -93,12 +92,6 @@ pub struct ExportArgs {
     /// (non-deleted / non-merged / non-deprecated) entries are exported.
     #[arg(long)]
     pub include_deprecated: bool,
-
-    /// Include `source_anchors` in the pack. The nexus local store does not
-    /// yet persist a `SourceAnchor` store, so this flag emits an empty array and
-    /// is accepted for forward-compatibility with the spoke handbook shape.
-    #[arg(long)]
-    pub include_anchors: bool,
 
     /// Explicit author intent to include **owned known-private** material.
     /// Without it the export emits only the rows the exporting Creator's
@@ -251,7 +244,6 @@ async fn export(args: ExportArgs, core: &CoreService, principal: &Principal) -> 
         title: args.title.clone(),
         pack_version: Some(args.pack_version.clone()),
         include_deprecated: args.include_deprecated,
-        include_anchors: args.include_anchors,
         description: None,
         ..Default::default()
     };
@@ -280,16 +272,7 @@ async fn export(args: ExportArgs, core: &CoreService, principal: &Principal) -> 
             })?;
         }
     }
-    let mut pack_value = serde_json::to_value(&response)?;
-    // The generated response type omits an empty anchors list on the wire; the
-    // CLI's documented pack shape keeps the key when `--include-anchors` asked
-    // for it (nexus persists no SourceAnchor store, so it is always empty).
-    if args.include_anchors {
-        if let Some(obj) = pack_value.as_object_mut() {
-            obj.entry("source_anchors".to_string())
-                .or_insert_with(|| serde_json::Value::Array(Vec::new()));
-        }
-    }
+    let pack_value = serde_json::to_value(&response)?;
     let json_str = serde_json::to_string_pretty(&pack_value)?;
     std::fs::write(out_path, json_str.as_bytes()).map_err(|e| {
         CliError::Other(format!(
@@ -320,9 +303,6 @@ async fn export(args: ExportArgs, core: &CoreService, principal: &Principal) -> 
             "  Scope:     shared rows only (pass --include-owned-private for owned private facts)"
                 .to_string(),
         );
-    }
-    if args.include_anchors {
-        lines.push("  Anchors:   0 (no persisted SourceAnchor store in nexus)".to_string());
     }
 
     Ok(lines.join("\n"))
@@ -866,7 +846,6 @@ mod tests {
             title: None,
             pack_version: DEFAULT_PACK_VERSION.to_string(),
             include_deprecated: false,
-            include_anchors: false,
             include_owned_private: false,
         };
 
@@ -881,10 +860,10 @@ mod tests {
         assert!(value.get("modules").is_some(), "modules key must exist");
         assert!(value.get("entries").is_some(), "entries key must exist");
         assert!(value.get("relations").is_some(), "relations key must exist");
-        // Anchors omitted without --include-anchors.
+        // Anchors are never emitted (nexus persists no SourceAnchor store).
         assert!(
             value.get("source_anchors").is_none(),
-            "source_anchors must be omitted when flag is unset"
+            "source_anchors must be omitted"
         );
 
         // modules.pack required metadata.
@@ -917,38 +896,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn export_includes_anchors_key_when_flag_set() {
-        let (fx, _entry_ids, _rel_ids) = seeded_pool().await;
-        let tmp_out = tempfile::NamedTempFile::new().unwrap();
-        let out_path = tmp_out.path().to_path_buf();
-        drop(tmp_out);
-
-        let args = ExportArgs {
-            world_ref: WORLD.to_string(),
-            out: out_path.clone(),
-            title: None,
-            pack_version: DEFAULT_PACK_VERSION.to_string(),
-            include_deprecated: false,
-            include_anchors: true,
-            include_owned_private: false,
-        };
-
-        export(args, &fx.core, &fx.principal)
-            .await
-            .expect("export must succeed");
-
-        let text = std::fs::read_to_string(&out_path).unwrap();
-        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
-        let anchors = value["source_anchors"]
-            .as_array()
-            .expect("source_anchors must be an array when --include-anchors is set");
-        assert!(
-            anchors.is_empty(),
-            "anchors array is empty (no SourceAnchor store)"
-        );
-    }
-
-    #[tokio::test]
     async fn export_surfaces_clean_error_when_world_missing() {
         let fx = fixture().await;
         let out_dir = tempfile::tempdir().unwrap();
@@ -959,7 +906,6 @@ mod tests {
             title: None,
             pack_version: DEFAULT_PACK_VERSION.to_string(),
             include_deprecated: false,
-            include_anchors: false,
             include_owned_private: false,
         };
 
@@ -1025,7 +971,6 @@ mod tests {
             title: None,
             pack_version: DEFAULT_PACK_VERSION.to_string(),
             include_deprecated: false,
-            include_anchors: false,
             include_owned_private: false,
         };
         export(args, &fx.core, &fx.principal)

@@ -3734,7 +3734,6 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "serial_test",
  "sysinfo",
  "tempfile",
  "thiserror 2.0.21",
@@ -3743,7 +3742,6 @@ dependencies = [
  "toml",
  "toml_edit",
  "tracing",
- "which",
  "wiremock",
 ]
 

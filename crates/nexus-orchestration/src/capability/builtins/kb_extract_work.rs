@@ -30,8 +30,9 @@ struct ExtractResponse {
     /// Body may be a structured JSON object (preferred) or a plain string.
     #[serde(deserialize_with = "deserialize_body")]
     body: String,
+    // Value unused for provenance, but its `String` type check rejects a malformed LLM response.
     #[serde(default)]
-    #[allow(dead_code)] // read from LLM response, used for future provenance tracking
+    #[allow(dead_code)]
     source_work_entry_id: String,
 }
 
@@ -631,6 +632,21 @@ mod tests {
         assert_eq!(resp.canonical_name, "Elena");
         assert_eq!(resp.body, "A brave warrior");
         assert_eq!(resp.source_work_entry_id, "kb_abc");
+    }
+
+    #[test]
+    fn test_parse_extraction_response_rejects_wrong_typed_source_id() {
+        // `source_work_entry_id` is a validation carrier: a non-string value must fail
+        // parsing (as it always has), not be silently ignored.
+        for bad in ["null", "123"] {
+            let json = format!(
+                r#"{{"block_type": "Character", "canonical_name": "Elena", "body": "x", "source_work_entry_id": {bad}}}"#
+            );
+            assert!(
+                parse_extraction_response(&json).is_err(),
+                "expected rejection for source_work_entry_id = {bad}"
+            );
+        }
     }
 
     #[test]

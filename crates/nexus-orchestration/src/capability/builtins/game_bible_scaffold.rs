@@ -35,8 +35,9 @@ use tracing::info;
 /// Input for the game-bible scaffold capability.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[allow(dead_code)]
 struct ScaffoldInput {
+    #[allow(dead_code)]
+    // required by the capability input schema; handler patches the works row by work_id
     creator_id: String,
     work_id: String,
     work_ref: String,
