@@ -17,13 +17,12 @@ runs:
 
         # Pattern follows jlumbroso/free-disk-space; kept as a local composite
         # action so we can pin behavior without a third-party action dependency.
-        sudo rm -rf /usr/share/dotnet
-        sudo rm -rf /usr/local/lib/android
-        sudo rm -rf /opt/ghc
-        sudo rm -rf /opt/hostedtoolcache/CodeQL
-        sudo rm -rf /usr/local/share/boost
-        sudo rm -rf /usr/share/swift
-        sudo docker image prune --all --force || true
+        # Parallel: the rm set and the docker prune are independent; serial
+        # execution cost each Rust leg 70-140s (android/ghc trees dominate).
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+          /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift &
+        sudo docker image prune --all --force >/dev/null 2>&1 &
+        wait
 
         echo "Disk after cleanup:"
         df -h /

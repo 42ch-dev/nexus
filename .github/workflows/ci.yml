@@ -114,6 +114,9 @@ jobs:
     env:
       SQLX_OFFLINE: "true"
       CARGO_INCREMENTAL: "0"
+      # CI-only: skip debuginfo for faster codegen/link and far smaller target/.
+      # Behaviour unchanged; local dev profiles untouched.
+      CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       # Free disk before the Rust toolchain + cargo cache: this job now
@@ -176,6 +179,9 @@ jobs:
       # Disable incremental to cap target/debug/incremental growth on ephemeral
       # runners (see rust-tests / ENOSPC mitigation in plan 2026-07-15).
       CARGO_INCREMENTAL: "0"
+      # CI-only: skip debuginfo for faster codegen/link and far smaller target/.
+      # Behaviour unchanged; local dev profiles untouched.
+      CARGO_PROFILE_DEV_DEBUG: "0"
       # Pin the fmt nightly so CI matches local rustfmt exactly. rustfmt
       # formatting rules drift across nightly versions, so an unpinned
       # `nightly` makes CI's `fmt --check` fail on code formatted by a
@@ -216,6 +222,9 @@ jobs:
     env:
       SQLX_OFFLINE: "true"
       CARGO_INCREMENTAL: "0"
+      # CI-only: skip debuginfo for faster codegen/link and far smaller target/.
+      # Behaviour unchanged; local dev profiles untouched.
+      CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: ./.github/actions/free-disk-space
@@ -255,6 +264,9 @@ jobs:
     env:
       SQLX_OFFLINE: "true"
       CARGO_INCREMENTAL: "0"
+      # CI-only: skip debuginfo for faster codegen/link and far smaller target/.
+      # Behaviour unchanged; local dev profiles untouched.
+      CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: ./.github/actions/free-disk-space
@@ -292,6 +304,9 @@ jobs:
     env:
       SQLX_OFFLINE: "true"
       CARGO_INCREMENTAL: "0"
+      # CI-only: skip debuginfo for faster codegen/link and far smaller target/.
+      # Behaviour unchanged; local dev profiles untouched.
+      CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: ./.github/actions/free-disk-space
@@ -447,6 +462,9 @@ jobs:
     env:
       SQLX_OFFLINE: "true"
       CARGO_INCREMENTAL: "0"
+      # CI-only: skip debuginfo for faster codegen/link and far smaller target/.
+      # Behaviour unchanged; local dev profiles untouched.
+      CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: ./.github/actions/free-disk-space
@@ -578,6 +596,9 @@ jobs:
     env:
       SQLX_OFFLINE: "true"
       CARGO_INCREMENTAL: "0"
+      # CI-only: skip debuginfo for faster codegen/link and far smaller target/.
+      # Behaviour unchanged; local dev profiles untouched.
+      CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: ./.github/actions/free-disk-space
@@ -631,6 +652,9 @@ jobs:
     env:
       SQLX_OFFLINE: "true"
       CARGO_INCREMENTAL: "0"
+      # CI-only: skip debuginfo for faster codegen/link and far smaller target/.
+      # Behaviour unchanged; local dev profiles untouched.
+      CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: ./.github/actions/free-disk-space
@@ -698,6 +722,9 @@ jobs:
     env:
       SQLX_OFFLINE: "true"
       CARGO_INCREMENTAL: "0"
+      # CI-only: skip debuginfo for faster codegen/link and far smaller target/.
+      # Behaviour unchanged; local dev profiles untouched.
+      CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: ./.github/actions/free-disk-space

@@ -76,6 +76,9 @@ jobs:
     env:
       SQLX_OFFLINE: "true"
       CARGO_INCREMENTAL: "0"
+      # CI-only: skip debuginfo for faster codegen/link and far smaller target/.
+      # Behaviour unchanged; local dev profiles untouched.
+      CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -105,23 +108,15 @@ jobs:
         if: runner.os == 'macOS'
         run: cargo test -p nexus42 --lib --no-default-features --features connect-host explicit_home
 
-      - name: Check discovery tests
-        run: cargo test -p nexus-agent-host --lib 'discovery::'
+      - name: Check discovery & native CLI provider tests
+        # One feature graph, one compile: libtest filters are OR-combined.
+        run: cargo test -p nexus-agent-host --lib -- 'discovery::' 'providers::native_cli'
 
       # Keep provider semantics unchanged. If any per-test dispositions remain
       # after Task 3, gate them in test sources with a named register row.
-      - name: Check native CLI provider tests (Windows launch cohort)
-        if: always() && runner.os == 'Windows'
-        run: cargo test -p nexus-agent-host --lib providers::native_cli
-
       - name: Check provider readiness acceptance (Windows)
         if: always() && runner.os == 'Windows'
         run: cargo test -p nexus-agent-host --test provider_readiness_acceptance
-
-
-      - name: Check native CLI provider tests
-        if: always() && runner.os == 'macOS'
-        run: cargo test -p nexus-agent-host --lib providers::native_cli
 
       # The integration cohort spawns a Node peer that imports the built
       # `packages/nexus-provider-acp/dist` (the same prerequisite as ci.yml's
