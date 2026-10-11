@@ -20,7 +20,6 @@ pub mod rules_history;
 pub mod rules_layers;
 pub mod run_state;
 pub mod schedule;
-pub mod scheduler;
 pub mod skill_link;
 pub mod skill_sync;
 pub mod stage_gates;
@@ -44,7 +43,6 @@ pub use run_state::{
     PromptAttempt, PromptPhase, RunCheckpoint, RunDescriptorV1, RunFailure, RunRecord, RunStateV1,
     SettlementResult, TerminalSettlementTarget, WaitKind, WaitRecord, WorkflowStateStore,
 };
-pub use scheduler::{ClockSource, MockClock, Scheduler, SystemClock};
 pub use stage_gates::{
     build_preset_input, build_stage_schedule_label, preset_for_stage, WorkFields,
 };
