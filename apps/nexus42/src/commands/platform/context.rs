@@ -10,7 +10,7 @@ use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
 use nexus_contracts::local::domain::RuntimeMode;
-use nexus_moment_context_assembly::cloud_stage::{AssembleResponse, AssemblyRuntimeMode};
+use nexus_moment_context_assembly::cloud_stage::AssembleResponse;
 use nexus_moment_context_assembly::{
     assemble_moment_with_directive, build_inspector_packet, GenerationStage, MomentContext,
     MomentRequest, Stage0Assembly, TwoStageAssembly,
@@ -427,7 +427,7 @@ fn build_two_stage_from_local(
         user_prompt: local.user_prompt.clone(),
         system_prefix: local.system_prefix.clone(),
         max_tokens: local.max_tokens,
-        runtime_mode: AssemblyRuntimeMode::new(*mode.inner()),
+        runtime_mode: *mode.inner(),
     }
 }
 
@@ -1500,10 +1500,7 @@ mod tests {
         assert_eq!(two_stage.experience, "10 years of writing.");
         assert_eq!(two_stage.fragment_keywords, vec!["plot".to_string()]);
         assert_eq!(two_stage.user_prompt, "Write chapter 3.");
-        assert_eq!(
-            two_stage.runtime_mode,
-            AssemblyRuntimeMode::new(RuntimeMode::LocalFirst)
-        );
+        assert_eq!(two_stage.runtime_mode, RuntimeMode::LocalFirst);
     }
 
     /// `create_degradation_guard` restores from persisted snapshot.

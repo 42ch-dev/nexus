@@ -10,8 +10,7 @@
 use nexus_contracts::local::domain::RuntimeMode;
 use nexus_creator_memory::LongTermMemory;
 use nexus_moment_context_assembly::cloud_stage::{
-    AssembleMetadata, AssembleResponse, AssemblyRuntimeMode, KbEntry, MemoryItemRef,
-    TwoStageAssembly,
+    AssembleMetadata, AssembleResponse, KbEntry, MemoryItemRef, TwoStageAssembly,
 };
 
 /// Helper to create a `LongTermMemory` for testing.
@@ -51,7 +50,7 @@ fn two_stage_assembly_with_mock_platform_response() {
         user_prompt: "Write chapter 1".into(),
         system_prefix: String::new(),
         max_tokens: None,
-        runtime_mode: AssemblyRuntimeMode::new(RuntimeMode::CloudEnhanced),
+        runtime_mode: RuntimeMode::CloudEnhanced,
     };
 
     let output = assembly.assemble();
@@ -82,7 +81,7 @@ fn two_stage_fallback_empty_response() {
         user_prompt: "Task".into(),
         system_prefix: String::new(),
         max_tokens: None,
-        runtime_mode: AssemblyRuntimeMode::new(RuntimeMode::LocalFirst),
+        runtime_mode: RuntimeMode::LocalFirst,
     };
 
     let output = assembly.assemble();
@@ -118,7 +117,7 @@ fn dedup_platform_memory_with_local_priority() {
         user_prompt: String::new(),
         system_prefix: String::new(),
         max_tokens: None,
-        runtime_mode: AssemblyRuntimeMode::new(RuntimeMode::CloudEnhanced),
+        runtime_mode: RuntimeMode::CloudEnhanced,
     };
 
     let output = assembly.assemble();
