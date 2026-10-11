@@ -11,8 +11,6 @@
 //! 4. **Math extraction** — extract `{n1, op, n2}` from cleaned text
 //! 5. **Evaluation** — compute result, guard division by zero, ensure non-negative
 
-#![allow(dead_code)]
-
 pub mod eval;
 pub mod noise;
 pub mod numbers;
