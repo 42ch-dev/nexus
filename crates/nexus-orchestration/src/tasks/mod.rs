@@ -728,10 +728,10 @@ impl LlmExtractTask {
 
 /// Millisecond clock source for bounded-join deadlines (DR-06).
 ///
-/// Mirrors the [`crate::scheduler::ClockSource`] pattern (production impl +
-/// mock for hermetic tests) but at millisecond resolution, which the
-/// `timeout_ms` join deadline requires. Time is read as milliseconds since
-/// an arbitrary fixed epoch — only differences are meaningful.
+/// A production impl ([`SystemJoinClock`]) plus a hermetic-test mock
+/// ([`DeterministicClock`]) at millisecond resolution, which the `timeout_ms`
+/// join deadline requires. Time is read as milliseconds since an arbitrary
+/// fixed epoch — only differences are meaningful.
 pub trait JoinClock: Send + Sync {
     /// Current time in milliseconds since an arbitrary fixed epoch.
     fn now_ms(&self) -> u64;

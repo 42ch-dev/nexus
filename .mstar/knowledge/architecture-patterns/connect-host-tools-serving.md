@@ -144,5 +144,5 @@ machine-checked lockstep makes drift loud, not silent.
   `Route::Tool` + `route_tool`, `tool_invalid_input` gates
 - `apps/nexus42/src/commands/connect/interop.rs` —
   `ac_v173_1_two_node_interop_for_each_served_tool` + AR-50 authz tests
-- Lock spec (iteration snapshot): `.mstar/iterations/v1.173/specs/v1.173-connect-tools-lock.md`
+- Lock spec (v1.173 iteration snapshot): `v1.173-connect-tools-lock.md`
 - Companion: `architecture-patterns/connect-host-opt-in-feature-gate.md` (N-C0)

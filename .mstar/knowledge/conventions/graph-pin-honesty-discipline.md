@@ -141,9 +141,9 @@ real regression net for the next iteration that touches the graph.
   graphs; exactly one `rmcp` in every feature-on combination;
   `-F connect-client` single-version libp2p. No probe asserts a version
   value (Guidance §5).
-- V1.174 corrections: `spoke-operations` prior art (§9.2 of
-  `.mstar/iterations/v1.174/specs/v1.174-peer-tools-lock.md`), rmcp default-graph
-  reality (same spec, corrections list #1).
+- V1.174 corrections: `spoke-operations` prior art (§9.2 of the v1.174 lock
+  spec, `v1.174-peer-tools-lock.md`), rmcp default-graph reality (same spec,
+  corrections list #1).
 - Companion docs: `conventions/wire-contracts-frozen-verification.md`
   (sibling gate discipline — wire contracts, not the dependency graph);
   `engineering/spoke-lockstep-upgrade-procedure.md` (lockstep pins +

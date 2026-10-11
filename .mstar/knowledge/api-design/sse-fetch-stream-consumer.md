@@ -20,7 +20,7 @@ related_components:
 
 ## Context
 
-Nexus serves daemon SSE surfaces (`text/event-stream`) that require an `X-API-Key` request header and answer refusals as typed JSON before streaming. The shipped consumption pattern is a fetch-stream async generator on `BrowserClient` (`subscribeAgentHostEvents`, then `subscribeWorkflowEvents` for `/v1/daemon/orchestration/sessions/{id}/events`), not browser `EventSource`. The workflow-observation variant froze its client-side frame union and recovery rules in `.mstar/iterations/v1.201/specs/p1-run-observation-consumption.md` (promoted here).
+Nexus serves daemon SSE surfaces (`text/event-stream`) that require an `X-API-Key` request header and answer refusals as typed JSON before streaming. The shipped consumption pattern is a fetch-stream async generator on `BrowserClient` (`subscribeAgentHostEvents`, then `subscribeWorkflowEvents` for `/v1/daemon/orchestration/sessions/{id}/events`), not browser `EventSource`. The workflow-observation variant froze its client-side frame union and recovery rules in the v1.201 run-observation consumption spec (`p1-run-observation-consumption.md`; promoted here).
 
 ## Guidance
 
