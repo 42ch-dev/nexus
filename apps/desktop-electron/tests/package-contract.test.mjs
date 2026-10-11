@@ -195,3 +195,10 @@ test('driver explicitly disables the packager integrity mutation and has no sign
   assert.doesNotMatch(source, /\bosxSign\b|\bosxNotarize\b|APPLE_SIGNING_IDENTITY|entitlements/);
   assert.match(source, /signing_performed:\s*false/);
 });
+
+test('package contract electron version equals the manifest pin', () => {
+  const manifest = JSON.parse(
+    readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+  );
+  assert.equal(PACKAGE_CONTRACT.electronVersion, manifest.devDependencies.electron);
+});
