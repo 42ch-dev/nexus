@@ -72,28 +72,6 @@ pub struct AssembleMetadata {
     pub token_count_estimate: Option<u32>,
 }
 
-/// Domain wrapper for `RuntimeMode` used in two-stage assembly.
-///
-/// Reuses the contracts enum directly; provides downgrade/upgrade chain
-/// for assembly merge rules.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct AssemblyRuntimeMode(pub RuntimeMode);
-
-impl AssemblyRuntimeMode {
-    /// Create from generated enum.
-    #[must_use]
-    pub const fn new(mode: RuntimeMode) -> Self {
-        Self(mode)
-    }
-}
-
-impl std::fmt::Display for AssemblyRuntimeMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
 /// Two-stage context assembly for `local_first` / `cloud_enhanced` modes.
 ///
 /// Stage-1: Call platform `context/assemble` API.
@@ -116,7 +94,7 @@ pub struct TwoStageAssembly {
     /// Token budget.
     pub max_tokens: Option<usize>,
     /// Current runtime mode (for merge rules).
-    pub runtime_mode: AssemblyRuntimeMode,
+    pub runtime_mode: RuntimeMode,
 }
 
 impl TwoStageAssembly {
@@ -334,7 +312,7 @@ mod tests {
             user_prompt: "Write chapter 3.".to_string(),
             system_prefix: "You are a helpful assistant.".to_string(),
             max_tokens: None,
-            runtime_mode: AssemblyRuntimeMode::new(RuntimeMode::LocalFirst),
+            runtime_mode: RuntimeMode::LocalFirst,
         };
 
         let output = asm.assemble();
@@ -358,7 +336,7 @@ mod tests {
             user_prompt: "Task.".to_string(),
             system_prefix: String::new(),
             max_tokens: None,
-            runtime_mode: AssemblyRuntimeMode::new(RuntimeMode::LocalFirst),
+            runtime_mode: RuntimeMode::LocalFirst,
         };
 
         let output = asm.assemble_with_fallback();
@@ -404,7 +382,7 @@ mod tests {
             user_prompt: String::new(),
             system_prefix: String::new(),
             max_tokens: None,
-            runtime_mode: AssemblyRuntimeMode::new(RuntimeMode::CloudEnhanced),
+            runtime_mode: RuntimeMode::CloudEnhanced,
         };
 
         let output = asm.assemble();

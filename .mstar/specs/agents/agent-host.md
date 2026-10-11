@@ -283,11 +283,6 @@ pub trait HostFacade: Send + Sync {
     async fn health(&self) -> HostResult<HostHealth>;
     async fn shutdown(&self) -> HostResult<()>;
 }
-
-#[async_trait]
-pub trait ProviderDiscovery: Send + Sync {
-    async fn discover(&self, config: &AgentHostConfig) -> HostResult<ProviderCatalog>;
-}
 ```
 
 **Design note (R-002)**: Cancel and Health are control-plane actions, not execution operations. `HostOperation` contains only execution-scoped variants (`Prompt`, `SetModel`, `SetMode`). Cancel flows through `HostFacade::cancel()` / `ProviderAdapter::cancel()`. Health is a separate `HostFacade::health()` query.
