@@ -1,5 +1,8 @@
 name: Electron Desktop Unsigned Build
 
+# Release-only: invoked by release.yml (workflow_call) or run by hand
+# (workflow_dispatch). Never triggered by push/pull_request so the
+# release-grade two-arch packaging stays out of everyday CI.
 on:
   workflow_dispatch:
   workflow_call:
@@ -9,32 +12,6 @@ on:
         required: false
         type: string
         default: ''
-  push:
-    branches: [main, iteration/v1.192]
-    paths:
-      - 'apps/desktop-electron/**'
-      - 'apps/nexus-service/**'
-      - 'apps/web/**'
-      - 'packages/nexus-contracts/**'
-      - 'packages/nexus-native/**'
-      - 'packages/nexus-native-darwin-*/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - '.github/actions/**'
-      - '.github/workflows/desktop-electron-build.yml'
-  pull_request:
-    branches: [main, iteration/v1.192]
-    paths:
-      - 'apps/desktop-electron/**'
-      - 'apps/nexus-service/**'
-      - 'apps/web/**'
-      - 'packages/nexus-contracts/**'
-      - 'packages/nexus-native/**'
-      - 'packages/nexus-native-darwin-*/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - '.github/actions/**'
-      - '.github/workflows/desktop-electron-build.yml'
 
 concurrency:
   group: ${{ inputs.release_run_identity != '' && format('release-{0}', inputs.release_run_identity) || format('{0}-{1}', github.workflow, github.ref) }}
