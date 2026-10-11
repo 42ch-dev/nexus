@@ -34,6 +34,17 @@ struct FinalizeDraftInput {
     work_ref: String,
     #[serde(default)]
     works_root: Option<String>,
+    // Value unused, but deserializing it preserves rejection of a declared-schema input
+    // the handler never supported (integer `word_count`); only `"auto"` is accepted.
+    #[serde(default)]
+    #[allow(dead_code)]
+    word_count: Option<WordCount>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum WordCount {
+    Auto,
 }
 
 /// Output from `essay.draft_status.finalize`.
@@ -338,6 +349,15 @@ mod tests {
         assert_eq!(count_body_words("one two three"), 3);
         assert_eq!(count_body_words(""), 0);
         assert_eq!(count_body_words("a b c d e f g h i j"), 10);
+    }
+
+    #[test]
+    fn finalize_input_rejects_integer_word_count() {
+        // `word_count` is a validation carrier: the declared input schema admits an integer
+        // (capability_catalog.rs), but only `"auto"` is supported, so an integer must be
+        // rejected at deserialization as it always was.
+        let json = r#"{"work_ref":"x","word_count":123}"#;
+        assert!(serde_json::from_str::<FinalizeDraftInput>(json).is_err());
     }
 
     #[test]
