@@ -1,6 +1,7 @@
 ---
 module: repo-wide (obsolete host/composition retirement), CI/lockfile/docs
 date: 2026-09-20
+last_updated: 2026-10-11
 problem_type: workflow_issue
 category: workflow-patterns
 severity: medium
@@ -9,6 +10,8 @@ applies_when:
   - retiring a host, composition, workflow, dependency tree or CLI family and answering "is this actually obsolete?"
   - a residual, roadmap item or task title claims a family is dead code — before acting on that claim
   - writing or reviewing a retirement closeout / documentation sweep
+  - deleting a field, struct member or symbol that looks dead because nothing reads it
+  - a deletion sweep over serde DTOs or schema-validated input types
 related_components:
   - apps/desktop (retired)
   - apps/nexus42
@@ -17,12 +20,12 @@ related_components:
 tags:
   - retirement
   - consumer-inventory
-  - obsolescence
   - deferral
   - closeout-ledger
   - documentation-lag
   - dead-code
   - lockfile
+  - validation-carrier
 ---
 
 # Evidence before retirement — inventory consumers, adjudicate the keeps, ledger the closeout
@@ -90,6 +93,45 @@ For dependency retirements: regenerate with `--lockfile-only`, run it **twice** 
 ### 9. Gate external actions on the verified main merge
 
 Closing dependabot PRs (#310/#312) or any external cleanup executes only **after the retirement verifies merged to `main`** — never because a feature worktree deleted the files. The preconditions are explicit: confirm the PRs still target the retired tree, comment with the reason and the merge SHA, close, record final states/URLs as post-merge receipts. Related post-merge obligations (branch-protection required check names, CI green runs) are recorded at closeout even when they execute later.
+
+### 10. "No callers" ≠ "no contract": an unread field can enforce a type check
+
+The consumer inventory answers *who reads this*. It does not answer *what this
+enforces*. A type check on a trust boundary is a contract even when the value is
+never read, so a zero-caller symbol can still be load-bearing.
+
+v1.212 (p3 T3) deleted two serde fields from `nexus-orchestration` capability
+structs as "unread":
+
+- `FinalizeDraftInput.word_count: Option<WordCount>` — an enum whose only variant is `Auto`
+- `ExtractResponse.source_work_entry_id: String`
+
+Both were **deserialization-time validators**. The declared input schemas admit
+an integer `word_count` and an arbitrary-typed `source_work_entry_id`, so upstream
+schema validation cannot reject those inputs — the Rust types are the only
+rejection point. Deleting the fields silently **widened accepted input**, a
+behaviour change inside a removal-only task, invisible to callers, tests and the
+compiler.
+
+The fix restored both fields (and the enum) with a one-line justified item-level
+`#[allow(dead_code)]`, plus two rejection tests pinning the type-mismatch
+behaviour (an integer `word_count` rejected; a `null` or numeric
+`source_work_entry_id` rejected). Where a field is retained for exactly that
+reason, the `allow(dead_code)` reason must say so — otherwise the next dead-code
+sweep deletes it again.
+
+Keep the rule honest: the same task correctly deleted `validate_slug` (a real
+never-called helper; `validate_work_ref` calls the retained `validate_slug_inner`)
+and `ScriptTemplate.filename` (private template metadata read only by tests). The
+rule is "check what it enforces", not "never delete fields".
+
+Checklist for a field or symbol with no readers:
+
+| Question | Escalate when |
+| --- | --- |
+| Is the declared type stricter than the schema for the same input (single-variant enum, required `String`, custom `deserialize_with`)? | The value is never read, but its *type* rejects inputs the schema permits |
+| If the item were absent, which malformed input becomes accepted? | Any — the deletion widens accepted input |
+| Does a test pin that rejection? | No test covers it; the restore must add one |
 
 ## Why This Matters
 

@@ -1,31 +1,60 @@
 ---
-module: crates/nexus-acp-host + crates/nexus-daemon-runtime + apps/desktop + apps/web (setup-wizard)
+module: crates/nexus-acp-host (implementation retired in v1.212), apps/nexus-service + crates/nexus-agent-host (surviving scan route and discovery)
 date: 2026-07-06
-problem_type: architecture-pattern
+last_updated: 2026-10-11
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: high
-tags: [acp, agent-host, path-scan, security, execution-boundary, subprocess, bounded-concurrency, timeout, setup-wizard]
-applies_when: scanning the local environment for installed tools/agents the daemon could talk to; any feature that probes PATH for binaries; any "auto-detect local X" UX where X is an executable
+tags:
+  - acp
+  - agent-host
+  - path-scan
+  - security
+  - execution-boundary
+  - bounded-concurrency
+  - timeout
+  - retired-implementation
+applies_when:
+  - designing any feature that scans the local environment for installed tools/agents or probes PATH for binaries (auto-detect local X where X is an executable)
+  - reviewing the retired ACP agent-scan implementation
 ---
 
 # Local-Environment Scan Safety Boundary (ACP Agent Detection)
 
 **Track**: Knowledge (durable guidance distilled from V1.94 Desktop App Onboarding & IA Pass).
 
+> **Status — implementation retired (v1.212, issue #391).** The concrete
+> implementation this document was written about no longer exists: the
+> `scan_local_installations` helper family and `LocalInstallation` were deleted
+> from `crates/nexus-acp-host/src/registry.rs` once nothing called them. The five
+> constraints below are retained as **design guidance for a future scan
+> feature**, not as a description of code at HEAD. The
+> `POST /v1/daemon/agent-host/scan` route still exists, but it is served by host
+> provider discovery (`crates/nexus-core` host query → `crates/nexus-agent-host/src/discovery/path_scan.rs`),
+> not by the registry-plus-probe implementation described here; read
+> `specs/surfaces/desktop-shell.md` §14 for the contract that route carries today.
+
 ## Context
 
-V1.94 introduced `POST /v1/daemon/agent-host/scan` — the daemon-side endpoint that powers the Setup Wizard's Step 3 "ACP Agent Detection". The endpoint combines:
+V1.94 shipped `POST /v1/daemon/agent-host/scan` — the daemon-side endpoint powering the Setup Wizard's Step 3 "ACP Agent Detection". That design combined:
 
 1. The existing `RegistryClient` cache (`~/.nexus42/registry/cache.json`, fetched from `https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json`).
-2. A new `scan_local_installations` helper in `crates/nexus-acp-host/src/registry.rs` that probes the user's PATH for each registry-known binary name and reports `installed: bool` + best-effort `version`.
+2. A `scan_local_installations` helper in `crates/nexus-acp-host/src/registry.rs` (deleted in v1.212, issue #391) that probed the user's PATH for each registry-known binary name and reported `installed: bool` + best-effort `version`.
 
-The endpoint's output drives the wizard's default recommendation (first PATH-available agent) and lets the user pick. The user may also supply a custom `launch_command` after the scan, but the scan itself must not execute user input.
+The scan's output drives the wizard's default recommendation (first PATH-available agent) and lets the user pick. The user may also supply a custom `launch_command` after the scan, but the scan itself must not execute user input.
 
-The challenge: **the daemon is executing subprocesses (`<binary> --version`) on behalf of the SPA**, mediated by an HTTP endpoint. The security boundary must be airtight — a malicious actor who can shape the binary name list (e.g. via a compromised registry cache) must not gain arbitrary command execution.
+The challenge the design had to answer — and the one any scan feature faces: **a
+service executing subprocesses (`<binary> --version`) on behalf of the UI**,
+mediated by an HTTP endpoint. The security boundary must be airtight — a
+malicious actor who can shape the binary name list (e.g. via a compromised
+registry cache) must not gain arbitrary command execution.
 
 ## Guidance (the pattern)
 
-The `scan_local_installations` helper enforces **five normative constraints** (codified in `specs/surfaces/desktop-shell.md` §14.3). All five are required; any one missing opens an attack surface.
+The pattern is **five normative constraints** (distilled from the V1.94
+implementation; `specs/surfaces/desktop-shell.md` §14 restates the scan contract
+that remains in force). All five are required; any one missing opens an attack
+surface.
 
 | # | Constraint | Reason |
 |---|------------|--------|
@@ -49,7 +78,7 @@ The `scan_local_installations` helper enforces **five normative constraints** (c
 
 ## Examples
 
-- **ACP Agent Detection (V1.94)** — the canonical application. `crates/nexus-acp-host/src/registry.rs::scan_local_installations` enforces all five constraints; `POST /v1/daemon/agent-host/scan` exposes the combined registry + PATH result.
+- **ACP Agent Detection (V1.94; implementation retired in v1.212, issue #391)** — the design this document distils, and the reference application of the five constraints. `scan_local_installations` and the registry-plus-probe wiring are gone; a future scan feature should apply the same constraints. The surviving `POST /v1/daemon/agent-host/scan` route is backed by host provider discovery (`crates/nexus-agent-host/src/discovery/path_scan.rs`) rather than by this design.
 - **Hypothetical future "linter picker"** — same pattern: registry of known linters, PATH probe with the same five constraints, never execute user-supplied strings during the scan phase.
 
 ## Anti-patterns
@@ -68,4 +97,4 @@ The unit tests should cover:
 - Probe timeout (mock a hanging binary) → returns within 2s with `installed: false` (or `version: None`).
 - Concurrency cap (mock N+1 binaries where N is the cap) → at most N run simultaneously.
 
-qc2 (security lens) is the canonical reviewer for any change to this code path.
+qc2 (security lens) is the canonical reviewer for any change to a scan code path.
