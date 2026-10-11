@@ -588,9 +588,15 @@ jobs:
               -p nexus-narrative
               -p nexus-moment-context-assembly
               -p nexus-wasm-host
-          - group: cli-hosts
+          # Split out of one cli-hosts group: the group's warm Run tests step
+          # measured 8m06s and nexus42's own test targets dominate it, so the
+          # combined row cannot fit the 5 min budget. Each row keeps its exact
+          # package set; both run the peer setup below.
+          - group: cli
             packages: >-
               -p nexus42
+          - group: hosts
+            packages: >-
               -p nexus-acp-host
               -p nexus-agent-host
     env:
@@ -617,12 +623,12 @@ jobs:
           cache-all-crates: false
           cache-on-failure: false
       - name: Setup monorepo for provider-acp tests
-        if: matrix.group == 'cli-hosts'
+        if: matrix.group == 'hosts' || matrix.group == 'cli'
         uses: ./.github/actions/setup-monorepo
         with:
           rust-toolchain: ""
       - name: Build nexus-provider-acp test peer
-        if: matrix.group == 'cli-hosts'
+        if: matrix.group == 'hosts' || matrix.group == 'cli'
         # The peer imports `@42ch/nexus-contracts` from its built `dist`, so the
         # contracts package is built first (same order as the web job).
         run: |
@@ -714,8 +720,13 @@ jobs:
   # actor_services cohort runs separately at `--test-threads=4` on T5's
   # deterministic boundary and repeated concurrent-run evidence.
 
-  rust-core-domain:
-    name: Rust core domain coverage
+  # Split into four jobs (plan: CI <= 5 min). A single job ran every cohort
+  # below serially and measured 11m31s warm — the longest non-CodeQL leg. The
+  # invocations are independent cargo runs on different feature graphs, so they
+  # parallelise without changing any assertion: each cohort keeps its original
+  # target list, feature set and --test-threads value verbatim.
+  rust-core-feature-cohorts:
+    name: Rust core feature cohorts
     runs-on: ubuntu-latest
     needs: changes
     if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.rust == 'true'
@@ -742,7 +753,7 @@ jobs:
         with:
           # Per-job suffix: this job runs multiple feature graphs; keep its cache
           # separate from concurrent Rust legs that may write under another key.
-          shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}-core-domain
+          shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}-core-feature-cohorts
           workspaces: .
           cache-all-crates: false
           cache-on-failure: false
@@ -759,6 +770,37 @@ jobs:
           cargo check -p nexus-core --lib --no-default-features --features execution --locked
           cargo check -p nexus-core --lib --no-default-features --features connect-client --locked
           cargo check -p nexus-core --lib --no-default-features --features connect-client,embedded-mcp --locked
+      - name: Core MCP/peer library owners
+        run: >-
+          cargo test -p nexus-core --features connect-client,embedded-mcp
+          --test retained_peer_contracts --test peer_control
+
+  rust-core-domain-owners:
+    name: Rust core domain owners
+    runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.rust == 'true'
+    env:
+      SQLX_OFFLINE: "true"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: ./.github/actions/free-disk-space
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Read workspace version for cargo cache key
+        id: workspace-version
+        run: |
+          v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae  # v2
+        with:
+          shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}-core-domain-owners
+          workspaces: .
+          cache-all-crates: false
+          cache-on-failure: false
       - name: Core domain owners (no optional features)
         run: >-
           cargo test -p nexus-core
@@ -767,11 +809,74 @@ jobs:
           --test reading_knowledge_services --test context_services
           --test content_services --test timeline_services --test memory_services
           -- --test-threads=2
-      - name: Execution, Host and compute owners
+
+  rust-core-host-execution:
+    name: Rust core host execution owners
+    runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.rust == 'true'
+    env:
+      SQLX_OFFLINE: "true"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: ./.github/actions/free-disk-space
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        with:
+          # nexus-wasm-host's build.rs compiles the embedded modules from
+          # source; the `compute` feature edge puts it in this graph.
+          targets: wasm32-unknown-unknown
+      - name: Read workspace version for cargo cache key
+        id: workspace-version
+        run: |
+          v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae  # v2
+        with:
+          shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}-core-host-execution
+          workspaces: .
+          cache-all-crates: false
+          cache-on-failure: false
+      - name: Execution and lifecycle owners
         run: >-
           cargo test -p nexus-core --features provider-host,compute
           --test retained_execution_contracts --test execution_lifecycle
-          --test handle_ops --test workspace_commit --test capability_compute
+          --test handle_ops
+          -- --test-threads=2
+
+  rust-core-host-state:
+    name: Rust core host state owners
+    runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.rust == 'true'
+    env:
+      SQLX_OFFLINE: "true"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: ./.github/actions/free-disk-space
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        with:
+          # nexus-wasm-host's build.rs compiles the embedded modules from
+          # source; the `compute` feature edge puts it in this graph.
+          targets: wasm32-unknown-unknown
+      - name: Read workspace version for cargo cache key
+        id: workspace-version
+        run: |
+          v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae  # v2
+        with:
+          shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}-core-host-state
+          workspaces: .
+          cache-all-crates: false
+          cache-on-failure: false
+      - name: Host state and compute owners
+        run: >-
+          cargo test -p nexus-core --features provider-host,compute
+          --test workspace_commit --test capability_compute
           --test host_actor_lifecycle
           -- --test-threads=2
       - name: Actor view owners
@@ -779,7 +884,3 @@ jobs:
           cargo test -p nexus-core --features provider-host,compute
           --test actor_services
           -- --test-threads=4
-      - name: Core MCP/peer library owners
-        run: >-
-          cargo test -p nexus-core --features connect-client,embedded-mcp
-          --test retained_peer_contracts --test peer_control
