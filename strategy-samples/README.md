@@ -104,13 +104,14 @@ nexus-runtime: Connect Host (N-C2 E2) ready
   host_id: <device-id>
   listen: /ip4/127.0.0.1/tcp/<port>
   allowlisted peers: <n> (fail-closed; add via allowlist.json or --allow-peer)
-  invokes: upsert/promote/relate/check/assemble/compute served (world+module scoped); project/unknown refused (op_unsupported)
+  invokes: upsert/promote/relate/check/assemble/compute served (world+module scoped) plus tools.nexus.list_observed_peers / tools.nexus.list_modules (host-level reads); project/unknown refused (op_unsupported)
   press Ctrl-C to stop
 ```
 
   `served_ops` is also advertised in the host manifest
-  (`extensions.nexus.served_ops` — the same six ops, machine-checked against
-  the dispatch). Press Ctrl-C to stop.
+  (`extensions.nexus.served_ops` — the same eight ops: the six core ops plus
+  the two `tools.nexus.*` host-level reads, machine-checked against the
+  dispatch). Press Ctrl-C to stop.
 - **`--home` / `NEXUS42_HOME` semantics:** the value is the *home directory
   itself — the parent of the `.nexus42` layout dir* (e.g. `/tmp/nexus-e2` →
   `/tmp/nexus-e2/.nexus42`), not the layout dir. `--home` wins over
@@ -124,8 +125,10 @@ an active workspace** — prepare the home first, either with the creator app's
 first-run setup, or with `nexus42 creator workspace init` (the local FS
 fallback writes the `config.toml` keys the runtime resolves:
 `active_creator_id=local`, the workspace slug, and `state.db`).
-`nexus42 creator register` is optional and platform-only (auth token +
-network, writes `auth.json`) — it is not needed for a local run.
+`nexus42 creator register` is optional: without `--local` it is
+platform-backed (auth token + network, writes `auth.json`); with `--local`
+it registers a local-only creator with no platform involvement. Platform
+registration remains unnecessary for a local run.
 
 **Home binding.** The `nexus42` CLI resolves its home from `$HOME` only
 (`$HOME/.nexus42`); `NEXUS42_HOME` is a nexus-runtime env var. For hermetic/
@@ -274,8 +277,12 @@ Your peer dials that address.
 
 ### The served invoke surface
 
-The runtime serves exactly six ops (everything else — `project`, unknown —
-→ `ErrorEnvelope.code = "op_unsupported"`, zero side effects):
+The runtime serves eight ops: the six core ops in the table below plus two
+host-level tool reads — `tools.nexus.list_observed_peers` and
+`tools.nexus.list_modules` (the two `tools.nexus.*` ops work without a
+knowledge-entry grant — see [Allowlist your peer](#allowlist-your-peer-on-the-host)).
+Anything outside that eight-op set — `project`, unknown — →
+`ErrorEnvelope.code = "op_unsupported"`, zero side effects:
 
 | Op | Surface | Effect |
 |---|---|---|
@@ -325,10 +332,12 @@ Rules for a partner backend:
   `owner`. A foreign holder id, or a private row with no holder, is refused
   (`invalid_input`) with zero writes — a peer can never assign another Actor's
   holder or a management selection.
-- **Governance moves under the same CAS as content.** Setting or clearing
-  governance is part of the entry's `revision` CAS; a stale `revision` is
-  rejected (`stored_revision_stale` / `revision_conflict`) and no partial write
-  is kept.
+- **Governance is set at creation and immutable through the ordinary update
+  path.** A same-world candidate that changes the stored `owner` /
+  `disclosure` pair is refused (`invalid_input`) with zero writes — even with
+  a fresh `revision` — whether it arrives via `upsert`, `promote`, or compute
+  settlement. Governance changes are an authorized host authoring operation,
+  not a Connect `upsert`. (Content OCC is unchanged — see below.)
 - **No legacy bool.** The retired `extensions.nexus.creator_only` key is refused
   by presence — including `"creator_only": false` — with the stable reason
   `legacy_creator_only_unsupported`. It is never folded into governance, ignored,
@@ -408,8 +417,11 @@ The read ops ride the same fail-closed world scoping as writes: the request's
 }
 ```
 
-`CheckRequest` takes the `scope` (required) plus optional `rule_refs` /
-`rules` / `checker_kinds` filters. The response is the findings list:
+`CheckRequest` takes the `scope` (required) plus the optional `rule_refs` /
+`checker_kinds` filters. Embedded `rules` must be absent or empty on this
+host — a nonempty `rules` is refused `invalid_input`. `rule_refs` is the
+supported selector: omit it (or send it empty) and the world's active rules
+are auto-included. The response is the findings list:
 
 ```json
 {
@@ -477,7 +489,7 @@ The authoritative authoring reference — ABI at a glance, marshalling,
 install, read-only compute — is
 [`docs/module-authoring.md`](../docs/module-authoring.md). The normative ABI
 contract is
-[`.mstar/specs/compute-module-abi.md`](../.mstar/specs/compute-module-abi.md)
+[`.mstar/specs/compute/compute-module-abi.md`](../.mstar/specs/compute/compute-module-abi.md)
 (exports `memory` / `alloc` / `compute` / optional `init`, the host-import
 whitelist, the marshalling convention, and the `manifest.json` contract), or
 copy the reference implementation:
@@ -485,37 +497,43 @@ copy the reference implementation:
 `Cargo.toml`, `src/lib.rs`) — its `alloc`/`compute` marshalling is the
 pattern to reuse.
 
-Build with `cargo build --release --target wasm32-unknown-unknown` (install
-the target first: `rustup target add wasm32-unknown-unknown`), then copy the
-artifacts into place. `modules/basic-combat` is a **standalone crate** (not a
-workspace member), so the build runs from inside that directory:
+Build and install with the repo's own daemon-free module tools. `nexus42
+compute build` runs cargo for you (resolving `CARGO_TARGET_DIR` itself — the
+repo's `.envrc` relocates the target dir), injects `wasm_sha256` into the
+staged manifest, and stages the pair under `dist/<module_id>/`; `nexus42
+compute install` re-verifies the pairing and copies the pair into the CLI
+home's module store. `modules/basic-combat` is a **standalone crate** (not a
+workspace member) — pass its `manifest.json` and the builder works from that
+directory:
 
 ```bash
 # run from the repo root (this walkthrough assumes the repo root unless a
 # block says otherwise)
-cd modules/basic-combat
 rustup target add wasm32-unknown-unknown      # once per toolchain
-cargo build --release --target wasm32-unknown-unknown
+
+nexus42 compute build --manifest modules/basic-combat/manifest.json --release
+# → staged pair: modules/basic-combat/dist/basic-combat/basic-combat.wasm
+#   + modules/basic-combat/dist/basic-combat/manifest.json (wasm_sha256 injected)
 
 # operator install: place the module into the runtime's host-local store
-NEXUS_HOME="${NEXUS42_HOME:-$HOME}/.nexus42"
-mkdir -p "$NEXUS_HOME/modules/basic-combat"
-cp target/wasm32-unknown-unknown/release/basic_combat.wasm "$NEXUS_HOME/modules/basic-combat/basic-combat.wasm"
-cp manifest.json "$NEXUS_HOME/modules/basic-combat/"
-
-# Align the manifest hash to the LOCAL build — the repo manifest's
-# wasm_sha256 is pinned to the embedded artifact, so copying it as-is
-# fails verification. Set it to the installed bytes' hash, or delete the
-# field to fall back to the stat fence (docs/module-authoring.md):
-HASH=$(shasum -a 256 "$NEXUS_HOME/modules/basic-combat/basic-combat.wasm" | cut -d' ' -f1)
-# write "wasm_sha256": "$HASH" into the installed manifest.json
-
-cd ../..    # back to the repo root
+# ($HOME/.nexus42/modules/basic-combat/ — the nexus42 CLI resolves its home
+# from $HOME only; see §1's home-binding note)
+nexus42 compute install --module-id basic-combat \
+  --manifest modules/basic-combat/dist/basic-combat/manifest.json \
+  --wasm modules/basic-combat/dist/basic-combat/basic-combat.wasm
 ```
+
+When the runtime resolves a different home than the CLI (`--home <path>` or
+`NEXUS42_HOME=<path>` over a differing `$HOME`), copy the staged pair into
+`<home>/.nexus42/modules/basic-combat/` by hand instead — the staged manifest
+already carries the matching `wasm_sha256`.
 
 > On the Connect surface the embedded module set is **not** reachable: the
 > runtime serves only operator-installed modules under `~/.nexus42/modules/`.
-> An absent/incomplete `<id>.wasm` + `manifest.json` pair is
+> Installation is an **execution-only** prerequisite, checked after the
+> durable receipt read: an authorized terminal replay is served even if the
+> module was since removed, while a first or ambiguous execution with an
+> absent/incomplete `<id>.wasm` + `manifest.json` pair still yields
 > `module_not_found`.
 
 ### Step 2 — allowlist the module
@@ -562,8 +580,11 @@ Then stage the compute session. The `ComputeRequest` wire carries
 `session_id` / `entry_id` / `computable` / `settle` — no world carrier (the
 world is the **stored entry's** `extensions.nexus.world_id`) and no module
 carrier by default. The module id resolves from the **staged compute session
-state** first, then the entry's `body.computable.module_id` (documented
-precedence). The `project` op is not served over Connect, so a session row is
+state** — the usable shipped source. (The resolver also names the entry's
+`body.computable.module_id` as a fallback tier, but that tier is resolver
+logic currently unreachable through the storage/conversion seam: the seam
+preserves `body.computable` only as a bool marker, so no module id ever
+arrives that way.) The `project` op is not served over Connect, so a session row is
 staged out-of-band on the host (workspace SQLite `compute_sessions` table —
 `session_id`, `entry_id`, `state_json` with `module_id`, `created_at`).
 Discover the creator id + workspace slug the runtime resolved, then insert.
@@ -649,7 +670,7 @@ world-aware CAS / structured-failure rules — never a forced overwrite).
 
 | `ErrorEnvelope.code` | Meaning |
 |---|---|
-| `module_not_found` | No module identity (staged state or `body.computable`), an unsafe module id shape (the id-safety check runs first in the store gate), or the module is not installed under `~/.nexus42/modules/<id>/` |
+| `module_not_found` | No module identity in the staged session state, an unsafe module id shape (the id-safety check runs first in the store gate), or the module is not installed under `~/.nexus42/modules/<id>/` — installation is an execution-only prerequisite checked after the durable receipt read, so an authorized terminal replay is served even if the module was since removed; a first/ambiguous execution with absent bytes still yields this denial |
 | `module_not_scoped` | The resolved module is not in the peer's `module_scope` (or the scope is missing/empty) |
 | `settle_not_enabled` | `settle: true` on a read-only compute surface |
 | `invalid_input` | Missing target entry or malformed payload |
@@ -758,11 +779,11 @@ idempotency ledger.
   validator, fork flow): [`../docs/strategy-authoring.md`](../docs/strategy-authoring.md)
 - Runtime usage guide: [`../docs/nexus-runtime.md`](../docs/nexus-runtime.md)
 - Validator wrapper: [`validate.sh`](./validate.sh)
-- WASM compute ABI: [`../.mstar/specs/compute-module-abi.md`](../.mstar/specs/compute-module-abi.md)
+- WASM compute ABI: [`../.mstar/specs/compute/compute-module-abi.md`](../.mstar/specs/compute/compute-module-abi.md)
 - Module authoring guide (ABI at a glance, `manifest.json` incl. `wasm_sha256`, `module_scope`, operator install, read-only compute): [`../docs/module-authoring.md`](../docs/module-authoring.md)
 - Module authoring walkthrough: [`../modules/README.md`](../modules/README.md)
 - Reference module: [`../modules/basic-combat/`](../modules/basic-combat/)
-- Headless runtime boundary spec: [`../.mstar/specs/rust-core-service-boundary.md`](../.mstar/specs/rust-core-service-boundary.md) §4.2 (the retired `daemon-runtime.md` documented the deleted Rust host, not this runtime)
+- Headless runtime boundary spec: [`../.mstar/specs/architecture/rust-core-service-boundary.md`](../.mstar/specs/architecture/rust-core-service-boundary.md) §4.2 (the retired `daemon-runtime.md` documented the deleted Rust host, not this runtime)
 - Connect invoke surface (N-C2 E2): `apps/nexus42/src/commands/connect/invoke.rs`
 - Connect SDK + wire family: `@42ch/spoke-connect` on npm (the pinned upstream lockstep release)
 - SPOKE connect-demo (runnable mock host + third-party RemoteAdapter client):
@@ -795,9 +816,11 @@ idempotency ledger.
   non-zero exit as "could not validate", and prefer `--json` for scripted
   validation of the success shape.
 
-The pre-v1.193 `--offline` flag and the service-backed
-(`POST /v1/daemon/presets:validate`) mode it switched away from are both
-deleted, so there is no second behavior to compare against.
+The CLI's pre-v1.193 `--offline` flag and the service-backed CLI delegation
+(`POST /v1/daemon/presets:validate`) it switched away from were both removed,
+so there is no CLI-level second behavior to compare against. (The standalone
+TS service still serves `POST /v1/daemon/presets:validate`; the CLI simply no
+longer calls it.)
 
 ---
 
