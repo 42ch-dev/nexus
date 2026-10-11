@@ -585,14 +585,8 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
         CreatorCommand::Status { creator_id } => creator_status(config, creator_id),
         CreatorCommand::Use { creator_ref } => use_creator(config, creator_ref.as_str()),
         CreatorCommand::List { json } => list_creators(config, json).await,
-        CreatorCommand::Pair { creator_id } => {
-            pair_creator(config, creator_id.as_str());
-            Ok(())
-        }
-        CreatorCommand::Unpair { creator_id } => {
-            unpair_creator(config, creator_id.as_str());
-            Ok(())
-        }
+        CreatorCommand::Pair { creator_id } => pair_creator(config, creator_id.as_str()),
+        CreatorCommand::Unpair { creator_id } => unpair_creator(config, creator_id.as_str()),
         CreatorCommand::Credentials { action } => match action {
             CredentialsAction::Rotate { creator_id } => {
                 rotate_credentials(config, creator_id).await
@@ -1514,18 +1508,28 @@ async fn list_creators(_config: &CliConfig, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// Initiate pairing flow
-fn pair_creator(_config: &CliConfig, creator_id: &str) {
-    // Platform API integration not yet available
-    println!("⚠ V1.0 skeleton: Creator pairing requires platform API.");
-    println!("  Creator: {creator_id}");
+/// Initiate pairing flow.
+///
+/// # Errors
+///
+/// Always returns `CliError::Other`: pairing requires the platform API,
+/// which is not available yet.
+fn pair_creator(_config: &CliConfig, _creator_id: &str) -> Result<()> {
+    Err(CliError::Other(
+        "creator pairing requires the platform API (not yet available)".into(),
+    ))
 }
 
-/// Remove pairing
-fn unpair_creator(_config: &CliConfig, creator_id: &str) {
-    // Platform API integration not yet available
-    println!("⚠ V1.0 skeleton: Creator unpairing requires platform API.");
-    println!("  Creator: {creator_id}");
+/// Remove pairing.
+///
+/// # Errors
+///
+/// Always returns `CliError::Other`: unpairing requires the platform API,
+/// which is not available yet.
+fn unpair_creator(_config: &CliConfig, _creator_id: &str) -> Result<()> {
+    Err(CliError::Other(
+        "creator unpairing requires the platform API (not yet available)".into(),
+    ))
 }
 
 /// Logout — clear active creator credentials from local config and auth store.
