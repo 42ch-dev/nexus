@@ -112,4 +112,4 @@ worse than no resume, because it is invisible until side effects repeat.
 - Ops E2E: `apps/nexus42/tests/ops_e2e_converge_timeout.rs` (DR-06
   timeout/reroute/typed-fail), `apps/nexus42/tests/ops_e2e_resume_restart.rs`
   (restart no-re-execution, typed-fail skip, downtime elapsed).
-- Promotion source: `.mstar/iterations/v1.180/specs/long-run-checkpoint.md`.
+- Promotion source: v1.180 `long-run-checkpoint.md`.

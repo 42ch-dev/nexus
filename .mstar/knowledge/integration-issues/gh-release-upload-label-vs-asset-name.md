@@ -65,4 +65,4 @@ GitHub keys Release assets by filename; renaming the local file is the only way 
 ## Related
 
 - `gh release upload` manual: <https://cli.github.com/manual/gh_release_upload>
-- Fixed in `1f7a5fb38` (queue) + `9ee32d5aa` (draft-first upload/verify/publish), v1.202 P3; review history in `.mstar/sdd/2026-09-30-v1.202-p3-release-governance/review/qc3.md` (QC3-003 + revalidation round 1).
+- Fixed in `1f7a5fb38` (queue) + `9ee32d5aa` (draft-first upload/verify/publish), v1.202 P3; review history: QC3-003 + revalidation round 1 (v1.202 P3 release-governance review).

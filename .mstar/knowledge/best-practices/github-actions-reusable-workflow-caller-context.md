@@ -47,7 +47,7 @@ Any `workflow_call` producer whose runtime posture must differ between standalon
 ## Examples
 
 - Fixed mechanism: `17fe2e056` (v1.202 P3) — `release_run_identity` inputs on both producers, `github.run_id` wired from both `release.yml` calls.
-- Rejected mechanism (kept as the negative example): `7ebefd33f`, QC3-004 revalidation in `.mstar/sdd/2026-09-30-v1.202-p3-release-governance/review/qc3.md`.
+- Rejected mechanism (kept as the negative example): `7ebefd33f`, QC3-004 revalidation (v1.202 P3 release-governance review).
 
 ## Related
 
