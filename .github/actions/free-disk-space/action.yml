@@ -15,15 +15,41 @@ runs:
         echo "Disk before cleanup:"
         df -h /
 
+        # GitHub's current ubuntu image ships far more free space than the
+        # heaviest leg consumes: measured 2026-10-11, a Rust leg started with
+        # 86 GB free and the cleanup reclaimed 24 GB nothing ever used, at a
+        # cost of 33-195s per leg plus cross-job I/O contention (all legs start
+        # together). This action exists for the ENOSPC failures of an older
+        # ~14 GiB-free image, so keep the deletion but only when the runner is
+        # actually tight. Each leg's split bounds peak target/ well under the
+        # threshold (see the ENOSPC mitigation comments in ci.yml).
+        MIN_AVAIL_GB=30
+        avail_gb=$(df --output=avail -BG / | tail -n1 | tr -dc '0-9')
+        # A misparsed value must never silently disable the ENOSPC protection:
+        # anything non-numeric or absurd (a multi-filesystem line would yield a
+        # seven-digit number) falls back to cleaning.
+        if ! [[ "$avail_gb" =~ ^[0-9]+$ ]] || (( avail_gb > 999 )); then
+          avail_gb=0
+        fi
+        if (( avail_gb >= MIN_AVAIL_GB )); then
+          echo "Skipping cleanup: ${avail_gb} GB available (>= ${MIN_AVAIL_GB} GB)."
+          exit 0
+        fi
+        echo "Cleaning up: only ${avail_gb} GB available (< ${MIN_AVAIL_GB} GB)."
+
         # Pattern follows jlumbroso/free-disk-space; kept as a local composite
         # action so we can pin behavior without a third-party action dependency.
-        sudo rm -rf /usr/share/dotnet
-        sudo rm -rf /usr/local/lib/android
-        sudo rm -rf /opt/ghc
-        sudo rm -rf /opt/hostedtoolcache/CodeQL
-        sudo rm -rf /usr/local/share/boost
-        sudo rm -rf /usr/share/swift
-        sudo docker image prune --all --force || true
+        # Parallel: the rm set and the docker prune are independent.
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+          /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift &
+        rm_pid=$!
+        sudo docker image prune --all --force >/dev/null 2>&1 &
+        docker_pid=$!
+        # A bare `wait` returns 0 even if a background job failed, so wait for
+        # the rm set explicitly (original set -e semantics); docker prune
+        # stays best-effort.
+        wait "$rm_pid"
+        wait "$docker_pid" || true
 
         echo "Disk after cleanup:"
         df -h /
