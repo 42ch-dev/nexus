@@ -1,7 +1,7 @@
 ---
 module: developer worktree lifecycle (submodule metadata, concurrency budget, reclamation)
 date: 2026-09-25
-last_updated: 2026-10-05
+last_updated: 2026-10-11
 problem_type: workflow_issue
 category: workflow-patterns
 severity: high
@@ -96,6 +96,16 @@ git -C "$WT" clean -fdx                    # only after merged + porcelain empty
 mstar worktree cleanup --workflow <id>     # dry-run: expect cleanup.remove.merged
 mstar worktree cleanup --workflow <id> --apply
 ```
+
+## v1.211 update — sweep evidence discipline for squash lineage (measured 2026-10-11)
+
+The v1.211 cleanup sweep (v1.210 merge-commit group removed; nine squash-era branches and four v1.209 worktrees retained under per-item authorization) refined how the evidence must be produced and recorded:
+
+1. **The two legs, spelled out (extends the v1.205 mechanics above).** For each feature/fix branch: leg (a) containment = `git cherry <owning-iteration-branch> <branch>` — containment requires **empty output**; exit 0 with non-empty output does not prove it. `git cherry main <tip>` is the wrong command for squash merges — it systematically false-reports `+`-only (reproduced: 21/21 `+` on `fix/v1.206-pr366`). Leg (b) main-side landing = pin the squash SHA per branch, then `git merge-base --is-ancestor <SHA> main` + `git diff --quiet <SHA> <owning-iteration-branch>`. The grep must yield exactly one candidate (`#366→f4523a5c2`, `#367→02ab92812` unique); v1.209's `4dd62ff74` carries no PR marker and was pinned by manual inspection — on zero/multiple matches resolve by hand, never pick the first match. The three squash-era integration branches (`iteration/v1.20x`) have no owning iteration branch: leg (a) is N/A and leg (b) alone is operative.
+2. **Verdict vocabulary is conservative.** A branch failing a leg is labeled `landing-unproven` (raw outputs + manual note); `diverged` requires positive evidence of unique content — a failed leg is absence of landing proof, not proof of divergence. Nothing in that state is deletion-eligible.
+3. **Merge-commit tips reclaim with `-d`; squash tips keep residual status.** v1.210's four tips were main ancestors — `git branch -d` deleted them with its own merged check as the safety net (the ancestor check, re-run read-only afterwards, is the durable proof; recorded `-d`/`-D` output is textually identical and cannot distinguish the flag). Squash-era tips that are not ancestors stay as registered candidates; deletion waits for per-item user authorization.
+4. **Authorization requests are enumerated per item.** Each branch, each retained worktree, each stale origin-ref candidate, and each `/tmp` advisory item gets its own numbered row with SHA/size; the request states "this request is not itself authorization", names a guard route (non-force `-d`, exact-path removal) and records keep(reason) rows for active caches (canonical `CARGO_TARGET_DIR`, wasm module cache). The evidence doc states plainly which groups **were not** deleted.
+5. **Every sweep evidence doc carries a read-only replay section** — the literal commands with expected exit statuses, separated from the historical destructive actions ("not a replay block; do not rerun"). Record `du -sk` raw per item; keep subtotals honest (allocation estimates ≠ filesystem reclaim; v1.211's combined pre-removal estimate: 68,093,044 KiB ≈ 64.94 GiB).
 
 ## Why This Matters
 
