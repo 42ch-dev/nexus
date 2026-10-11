@@ -37,7 +37,8 @@ use tracing::info;
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 struct ScaffoldInput {
-    #[allow(dead_code)] // required by the capability input schema; handler patches the works row by work_id
+    #[allow(dead_code)]
+    // required by the capability input schema; handler patches the works row by work_id
     creator_id: String,
     work_id: String,
     work_ref: String,

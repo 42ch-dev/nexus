@@ -870,5 +870,4 @@ mod tests {
         let deserialized: Registry = serde_json::from_str(&json).unwrap();
         assert_eq!(original, deserialized);
     }
-
 }

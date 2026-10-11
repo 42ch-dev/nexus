@@ -2644,4 +2644,50 @@ mod tests {
             "the widest id drives the column in a mixed listing"
         );
     }
+
+    // ── creator pair / unpair platform-API guards ──────────────────
+    // Greptile P2 (PR #393): pin that the dispatch surfaces a hard failure
+    // (not a false `Ok`) while the platform API is unavailable.
+
+    #[tokio::test]
+    async fn pair_creator_errors_when_platform_api_unavailable() {
+        let result = run(
+            CreatorCommand::Pair {
+                creator_id: "ctr_platform_pending".to_string(),
+            },
+            &CliConfig::default(),
+        )
+        .await;
+        let err = result.expect_err("pairing must fail while the platform API is unavailable");
+        let display = err.to_string();
+        assert!(
+            matches!(&err, CliError::Other(_)),
+            "expected CliError::Other, got: {err:?}"
+        );
+        assert!(
+            display.contains("platform API"),
+            "error must state the platform API is unavailable; got: {display}"
+        );
+    }
+
+    #[tokio::test]
+    async fn unpair_creator_errors_when_platform_api_unavailable() {
+        let result = run(
+            CreatorCommand::Unpair {
+                creator_id: "ctr_platform_pending".to_string(),
+            },
+            &CliConfig::default(),
+        )
+        .await;
+        let err = result.expect_err("unpairing must fail while the platform API is unavailable");
+        let display = err.to_string();
+        assert!(
+            matches!(&err, CliError::Other(_)),
+            "expected CliError::Other, got: {err:?}"
+        );
+        assert!(
+            display.contains("platform API"),
+            "error must state the platform API is unavailable; got: {display}"
+        );
+    }
 }
