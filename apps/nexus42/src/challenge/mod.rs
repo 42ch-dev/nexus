@@ -21,10 +21,6 @@ pub mod parser;
 use eval::evaluate;
 use thiserror::Error;
 
-/// System prompt content from the challenge-solver skill file, embedded at compile time.
-pub const CHALLENGE_SOLVER_SYSTEM_PROMPT: &str =
-    include_str!("../skills/challenge-solver-skill.md");
-
 /// Errors that can occur during challenge solving.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ChallengeError {
