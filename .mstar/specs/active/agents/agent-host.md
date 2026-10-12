@@ -7,6 +7,7 @@
 | **Status** | Normative — shipped through V1.188: Host-mediated orchestration, configured ACP/native registration, dsh SDK runtime/streaming cutover, and verified provider readiness |
 | **Document class** | Master |
 | **Normative scope** | Host boundaries, provider model, capability contract, security/supervision invariants |
+| **Former filename** | `agent-host-architecture.md` (renamed 2026-05-20, spec hygiene — `-v1` suffix dropped; same document, git history is the record) |
 | **Related** | [daemon-runtime.md](../../archived/runtime/2026-09-21-daemon-runtime.md) (historical host record), [local-runtime-boundary.md](../architecture/local-runtime-boundary.md), [acp-client-tech-spec.md](acp-client-tech-spec.md) |
 
 ---

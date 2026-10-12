@@ -6,6 +6,7 @@
 **Last updated**: 2026-09-29 (authority clarified; V1.179 P2 DR-06 bounded joins remain shipped, §3.3.3)
 **Tracker**: DF-56 (conditional routing / branching engine)  
 **Scope**: Preset `next.kind: conditional` loader + runtime evaluator (shipped)  
+**Supersedes**: `fl-d-conditional-routing-exploration-v1.35-prepare.md` (pre-shipment exploration superseded 2026-06-06; rationale preserved in §4–§7)  
 **Coordinates with**:
 
 - [orchestration-engine.md](orchestration-engine.md) §7.5 — delegates conditional-routing semantics to this file as the shipped normative SSOT, including DR-06 bounded joins (V1.179 P2); it is not a linear-only contract awaiting a future shipment
