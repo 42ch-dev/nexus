@@ -19,7 +19,7 @@ Iteration history that used to live in this file (V1.98–V1.107 task tables, su
 
 ## 1. Purpose
 
-Contributors and frontend implementers need one visual workspace to validate Nexus tokens, brand VI, component states, voice samples, and representative product chrome without running the daemon, Tauri, or live product flows.
+Contributors and frontend implementers need one visual workspace to validate Nexus tokens, brand VI, component states, voice samples, and representative product chrome without running the daemon, the desktop host, or live product flows.
 
 Design Studio is a standalone Vite + React SPA (`apps/design-studio`). It is a **read-only showcase**: token edits happen in repo-root `DESIGN.md` / `DESIGN.dark.md` on disk; refresh the dev server to see updates. App chrome displays **Read-only · edit `DESIGN.md`**.
 
@@ -56,7 +56,7 @@ A contributor, daemon-free, can:
 
 - pnpm workspace member under `apps/*`
 - **Consumer**, not producer — no daemon API, no `NexusClient`, no `@42ch/nexus-contracts` wire types
-- Runs via `pnpm --filter design-studio dev` on port **5174** without daemon or Tauri
+- Runs via `pnpm --filter design-studio dev` on port **5174** without daemon or the native host
 
 ### 3.2 What Studio may import
 
@@ -77,7 +77,7 @@ Four source categories. `@42ch/nexus-ui` and `@web-*` aliases are not interchang
 | `@web-ui/*` | Yes (transitional) | Unpromoted primitives only; each import annotated `transitional` |
 | `@web-setup/*`, `@web-layout/*`, `@web-settings/*`, `@web-canvas/*`, `@web-global-timeline/*`, `@web-shell/*` | Yes | Props-driven extracts; no daemon, routing, or IPC |
 | `@web-lib/utils` | Yes | `cn()` only if still required; prefer `@42ch/nexus-ui` `cn` |
-| `apps/web` screens, routing, `NexusClient`, daemon hooks, providers, Tauri helpers | **No** | Studio must not become a second product shell |
+| `apps/web` screens, routing, `NexusClient`, daemon hooks, providers, desktop helpers | **No** | Studio must not become a second product shell |
 | Direct `apps/web/src/components/layout/**` or `settings/**` | **No** | Extracts only via `@web-*` |
 | Live token override, localStorage theme hacks, YAML write-back | **No** | Read-only invariant |
 | New component families or mass `@web-*` → package promotion | **No** | Out of v1.187 scope unless a later plan names the promotion |
@@ -345,7 +345,7 @@ Focus rings remain visible. Text/control pairings used in the locked language me
 - No Storybook adoption
 - No live token editor, drag-and-drop theme builder, or YAML write-back
 - No unbounded migration of extracts into `@42ch/nexus-ui`
-- No daemon/Tauri integration, schema changes, or `@42ch/nexus-contracts` bump
+- No daemon/native-host integration, schema changes, or `@42ch/nexus-contracts` bump
 - No `apps/web` or `apps/desktop` source, routing, business-flow, or asset edits
 - Not a replacement for `apps/web` product QA — Studio complements it
 - No new product routes or renamed top-level nav labels

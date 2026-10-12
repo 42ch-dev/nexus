@@ -9,12 +9,12 @@
  * authority to the renderer (`get_workspace_root` is a display string only;
  * the guarded OS actions re-resolve the root on every call, P0-T3).
  *
- * Parity source (read-only reference): the retired Tauri host,
- * `apps/desktop/src-tauri/src/lib.rs` — `resolve_workspace_root*`,
+ * Parity source (read-only reference): the retired native desktop host —
+ * `resolve_workspace_root*`,
  * `get_entrance`/`set_entrance`, `read_setup_completed*`/`write_setup_completed*`,
  * `switch_active_creator_at`, `ensure_setup_bootstrap_at`,
- * `read_agent_profile_at`/`write_agent_profile_at`. That tree is P2's deletion
- * target; this module is the Electron replacement.
+ * `read_agent_profile_at`/`write_agent_profile_at`. That tree was deleted in the
+ * v1.192 cutover; this module is the Electron replacement.
  *
  * TOML discipline (plan §"Config, OS actions and secure storage"):
  *  - one maintained parser (`smol-toml`, lockfile-pinned) — no regex parsing;

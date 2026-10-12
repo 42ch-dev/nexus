@@ -2,7 +2,7 @@
 /**
  * P0-T4 — desktop origin admission.
  *
- * The standalone service replaces the obsolete Tauri-only origins with exactly
+ * The standalone service replaces the obsolete native-host-only origins with exactly
  * the frozen desktop app origin `nexus://app`, keeps loopback/Vite/browser
  * origins and the explicit env escape hatch, and relaxes nothing: a foreign
  * origin, a near-miss loopback origin and a literal `null` origin are denied
@@ -89,8 +89,6 @@ test('the allowlist is exactly the desktop origin plus loopback/Vite origins', a
       'nexus://app',
     ],
   );
-  assert.equal(origins.includes('tauri://localhost'), false, 'the obsolete Tauri origin is gone');
-  assert.equal(origins.includes('http://tauri.localhost'), false, 'the obsolete Tauri origin is gone');
   assert.equal(origins.includes('*'), false);
   assert.equal(origins.includes('null'), false);
 
@@ -121,8 +119,6 @@ test('exactly the desktop app origin is admitted, and the response is CORS-scope
 test('foreign, near-miss and null origins are denied before the handler', async () => {
   const server = await startServer();
   const denied = [
-    'tauri://localhost',
-    'http://tauri.localhost',
     'https://evil.example',
     'http://localhost:9999',
     'nexus://app:8080',

@@ -34,7 +34,7 @@ Related: [`nexus-brand-token-hierarchy.md`](nexus-brand-token-hierarchy.md) cove
 
 ### The workflow (4 stages)
 
-1. **Studio composition** — Build pure View fixtures in `apps/design-studio` using root DESIGN tokens and `@nexus/design-tokens`. Iterate visually (light/dark, focus, a11y) without daemon/Tauri cost. Use `@42ch/nexus-ui` for already-promoted primitives; use `@web-ui/*` (transitional alias to `apps/web/src/components/ui/*`) for not-yet-promoted primitives.
+1. **Studio composition** — Build pure View fixtures in `apps/design-studio` using root DESIGN tokens and `@nexus/design-tokens`. Iterate visually (light/dark, focus, a11y) without daemon cost. Use `@42ch/nexus-ui` for already-promoted primitives; use `@web-ui/*` (transitional alias to `apps/web/src/components/ui/*`) for not-yet-promoted primitives.
 
 2. **Visual acceptance** — Before any Web integration: both themes look intentional, keyboard focus visible, no unregistered Tailwind scale steps, copy follows DESIGN.md Voice & Content, fixture communicates its job without daemon data.
 
@@ -48,7 +48,7 @@ Related: [`nexus-brand-token-hierarchy.md`](nexus-brand-token-hierarchy.md) cove
 
 ### Promotion rules (a component may move to `@42ch/nexus-ui` only if ALL are true)
 
-- Pure presentational React — renders without daemon state, routing, `NexusClient`, localStorage, Tauri IPC, or app providers.
+- Pure presentational React — renders without daemon state, routing, `NexusClient`, localStorage, desktop IPC, or app providers.
 - Consumes shared design tokens through classes/CSS variables, not raw one-off values.
 - Does not import from `apps/web`, `apps/design-studio`, or app-local aliases.
 - React stays peer dependency; implementation helpers (cva, radix-slot, clsx, tailwind-merge) are package runtime deps only when imported.
@@ -93,7 +93,7 @@ V1.99 validated this workflow with a focused first batch: **Button, Badge, Card*
 
 V1.100 (P1 + P2) hardened the promotion workflow from reviewer-instruction to **mechanically-enforced** and proved it on a **semantics-first** second slice:
 
-1. **Guardrails are now a shell script + CI job** (`tooling/check-ui-guardrails.sh`), not manual grep. It catches: promoted-wrapper forbidden imports (`clsx`/`cva`/`tailwind-merge`/`@/lib/*`/deep `@42ch/nexus-ui/src/*`), Design Studio boundary violations (web pages/daemon/Tauri), missing/invalid `@web-ui/*` transitional annotations, and cn-SSOT drift. A new primitive auto-enters the guard set upon promotion (wrapper auto-detected by re-export content). **Lesson:** a `set -euo pipefail` grep script modeled on `check-schema-drift.sh` is the right ladder rung — scoped ESLint was overkill; Vitest-only can't catch unintended additions on unmodified files.
+1. **Guardrails are now a shell script + CI job** (`tooling/check-ui-guardrails.sh`), not manual grep. It catches: promoted-wrapper forbidden imports (`clsx`/`cva`/`tailwind-merge`/`@/lib/*`/deep `@42ch/nexus-ui/src/*`), Design Studio boundary violations (web pages/daemon), missing/invalid `@web-ui/*` transitional annotations, and cn-SSOT drift. A new primitive auto-enters the guard set upon promotion (wrapper auto-detected by re-export content). **Lesson:** a `set -euo pipefail` grep script modeled on `check-schema-drift.sh` is the right ladder rung — scoped ESLint was overkill; Vitest-only can't catch unintended additions on unmodified files.
 2. **cn class-merge config has one authority** (`@42ch/nexus-ui/src/lib/cn.ts`). Do NOT move it to `@nexus/design-tokens` while design-tokens depends on the UI package (cycle). Public `cn` export via the barrel; deep imports forbidden.
 3. **Form-field promotion is semantics-first, not lift-and-shift.** V1.99 deferred Input/Label/Textarea because moving code without locking helper/error/required semantics "would only move code." V1.100 P2 locked an explicit contract first: label/control association (`htmlFor`+`id`, **app-owned** id generation), `invalid`→`aria-invalid="true"` (`invalid || undefined` coercion so false/omitted omits the attribute), `aria-describedby` **app-wired**, helper/error/required copy **app-owned**, **no stateful `FormField` package export**. The package owns only the presentational surface + native attribute passthrough. Promote the contract BEFORE the code.
 

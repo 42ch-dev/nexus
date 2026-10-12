@@ -24,7 +24,7 @@ applies_when:
 
 ## Context
 
-macOS GUI apps (including the Tauri desktop shell) inherit a **minimal PATH** such as `/usr/bin:/bin:/usr/sbin:/sbin` — not the user's login-shell PATH. Homebrew, npm-global, cargo, and especially **version-manager** bin directories (`~/.nvm/versions/node/*/bin`, `~/.volta/bin`, etc.) are invisible to `which::which()` during `POST /v1/daemon/agent-host/scan`. Result: **every** agent reports `installed: false`, forcing the user into the custom-launch escape hatch — even though they installed several agent CLIs.
+macOS GUI apps (including the desktop shell) inherit a **minimal PATH** such as `/usr/bin:/bin:/usr/sbin:/sbin` — not the user's login-shell PATH. Homebrew, npm-global, cargo, and especially **version-manager** bin directories (`~/.nvm/versions/node/*/bin`, `~/.volta/bin`, etc.) are invisible to `which::which()` during `POST /v1/daemon/agent-host/scan`. Result: **every** agent reports `installed: false`, forcing the user into the custom-launch escape hatch — even though they installed several agent CLIs.
 
 V1.101 introduced `login_equivalent_bin_dirs()` in `crates/nexus-agent-host/src/discovery/path_enrichment.rs` to merge common user bin dirs into the process PATH at daemon boot. V1.110 (FB-D3) closed the largest remaining gaps: **nvm, volta, fnm, pnpm, yarn**.
 

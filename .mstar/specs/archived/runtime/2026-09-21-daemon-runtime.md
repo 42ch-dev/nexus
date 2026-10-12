@@ -4,7 +4,7 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | **Retired host record (v1.193 P2).** The integrated daemon host documented here is **deleted**: the `nexus-daemon-runtime` crate, the whole `nexus42 daemon` group, hidden `daemon-run` and the `web-embed` embedded-SPA bytes are gone, and no replacement service launcher was introduced. Current owners of the retained contracts: the standalone TypeScript service (`apps/nexus-service`) serves `/v1/daemon/*` for browser/Electron, Electron owns the desktop and its service lifecycle, `nexus-runtime` is the independent Connect host (§4.6), and `nexus42` is a one-shot direct-core/cloud/Connect CLI ([rust-core-service-boundary.md](../../active/architecture/rust-core-service-boundary.md) §7.2, [cli-spec.md](../../active/cli/cli-spec.md) §6.3). Sections below are the **historical record of the retired host** unless they name a retained wire, Connect or checkpoint contract. — Normative — V1.65 Prepare amendment (bundled local Web UI serving + chapter-content Daemon API route family); **V1.66 Phase 2b amendment** (§12: Tauri sidecar mode launch/readiness/lifecycle contract); **V1.86 amendment** (§13: Daemon API trust-boundary security — Origin allowlist, deny-fs-without-workspace, component-wise path guard); **V1.90 amendment** (§14: Daemon API remote bind gate; normative surface renaming from Local API to Daemon API with `/v1/daemon/` path prefix); **V1.92 amendment** (§15–16: transport security (TLS) + remote client connection model); **V1.118 amendment** (§17: no-Profile boot + lazy `state.db` open); **V1.153 amendment** (§4.6: headless `nexus-runtime` profile — second user-facing executable artifact for the integrator channel); **v1.192 amendment** (§12: Tauri desktop host retired — the sidecar section is a historical record; the desktop host is Electron, contract [desktop-shell.md](../../active/surfaces/desktop-shell.md)) |
+| **Status** | **Retired host record (v1.193 P2).** The integrated daemon host documented here is **deleted**: the `nexus-daemon-runtime` crate, the whole `nexus42 daemon` group, hidden `daemon-run` and the `web-embed` embedded-SPA bytes are gone, and no replacement service launcher was introduced. Current owners of the retained contracts: the standalone TypeScript service (`apps/nexus-service`) serves `/v1/daemon/*` for browser/Electron, Electron owns the desktop and its service lifecycle, `nexus-runtime` is the independent Connect host (§4.6), and `nexus42` is a one-shot direct-core/cloud/Connect CLI ([rust-core-service-boundary.md](../../active/architecture/rust-core-service-boundary.md) §7.2, [cli-spec.md](../../active/cli/cli-spec.md) §6.3). Sections below are the **historical record of the retired host** unless they name a retained wire, Connect or checkpoint contract. — Normative — V1.65 Prepare amendment (bundled local Web UI serving + chapter-content Daemon API route family); **V1.66 Phase 2b amendment** (§12: native sidecar mode launch/readiness/lifecycle contract); **V1.86 amendment** (§13: Daemon API trust-boundary security — Origin allowlist, deny-fs-without-workspace, component-wise path guard); **V1.90 amendment** (§14: Daemon API remote bind gate; normative surface renaming from Local API to Daemon API with `/v1/daemon/` path prefix); **V1.92 amendment** (§15–16: transport security (TLS) + remote client connection model); **V1.118 amendment** (§17: no-Profile boot + lazy `state.db` open); **V1.153 amendment** (§4.6: headless `nexus-runtime` profile — second user-facing executable artifact for the integrator channel); **v1.192 amendment** (§12: native desktop host retired — the sidecar section is a historical record; the desktop host is Electron, contract [desktop-shell.md](../../active/surfaces/desktop-shell.md)) |
 | **Document class** | Master |
 | **Normative scope** | Architecture boundaries, process model, subsystem responsibilities, pre-release constraints |
 | **Related** | [cli-spec.md](../../active/cli/cli-spec.md), [local-runtime-boundary.md](../../active/architecture/local-runtime-boundary.md), [agent-host.md](../../active/agents/agent-host.md) |
@@ -528,11 +528,11 @@ Both capabilities receive the `sqlx::SqlitePool` through the standard `with_pool
 
 ---
 
-## 12. Tauri sidecar mode (V1.66 — historical record; desktop sidecar retired in v1.192)
+## 12. Native sidecar mode (V1.66 — historical record; desktop sidecar retired in v1.192)
 
-> **v1.192 host note (RFT-11):** the Tauri desktop host was retired; the repository has exactly one desktop host — Electron ([desktop-shell.md](../../active/surfaces/desktop-shell.md) §7). The Electron host does **not** bundle or launch `nexus42` as a sidecar: it supervises its own TS service (`@42ch/nexus-service`) in an Electron utility process. The app-ownership, launch and asset-serving clauses below are a historical record of V1.66–V1.191. The daemon-side contract they rested on (`nexus42 daemon start [--foreground]`, port resolution explicit → `NEXUS_DAEMON_PORT` → `8420`, readiness = `GET /v1/daemon/runtime/health`) is **retired with the host in v1.193 P2**: the CLI has no service-launch entry, and the retained equivalents are the TS service's own port/discovery contract ([desktop-shell.md](../../active/surfaces/desktop-shell.md) §7.1) plus the runtime health/status routes it serves.
+> **v1.192 host note (RFT-11):** the native desktop host was retired; the repository has exactly one desktop host — Electron ([desktop-shell.md](../../active/surfaces/desktop-shell.md) §7). The Electron host does **not** bundle or launch `nexus42` as a sidecar: it supervises its own TS service (`@42ch/nexus-service`) in an Electron utility process. The app-ownership, launch and asset-serving clauses below are a historical record of V1.66–V1.191. The daemon-side contract they rested on (`nexus42 daemon start [--foreground]`, port resolution explicit → `NEXUS_DAEMON_PORT` → `8420`, readiness = `GET /v1/daemon/runtime/health`) is **retired with the host in v1.193 P2**: the CLI has no service-launch entry, and the retained equivalents are the TS service's own port/discovery contract ([desktop-shell.md](../../active/surfaces/desktop-shell.md) §7.1) plus the runtime health/status routes it serves.
 
-The Tauri desktop shell ([desktop-shell.md](../../active/surfaces/desktop-shell.md)) may bundle the user-facing `nexus42` binary as a sidecar process. This does **not** create a second daemon product binary: the sidecar is still `nexus42`, launched in daemon foreground mode by the desktop app. (Compass: v1.66 §5 #2/#3 LOCKED.)
+The native desktop shell ([desktop-shell.md](../../active/surfaces/desktop-shell.md)) may bundle the user-facing `nexus42` binary as a sidecar process. This does **not** create a second daemon product binary: the sidecar is still `nexus42`, launched in daemon foreground mode by the desktop app. (Compass: v1.66 §5 #2/#3 LOCKED.)
 
 ### 12.1 Launch contract
 
@@ -546,7 +546,7 @@ Optional flags such as `--cdn-url <https-url>` may be passed only when the deskt
 
 **Port resolution** (compass §5 #3 LOCKED; conventions in [daemon-api-surface-conventions.md](../../active/runtime/daemon-api-surface-conventions.md) §9):
 
-1. Explicit configured port (if the Tauri bootstrapper provides one).
+1. Explicit configured port (if the native bootstrapper provides one).
 2. Else `NEXUS_DAEMON_PORT` when present and valid.
 3. Else `8420` (the `boot.rs` default).
 
@@ -572,7 +572,7 @@ The desktop app treats the daemon as ready only after the health endpoint return
 
 ### 12.3 Lifecycle contract
 
-The Tauri app owns the sidecar process while the desktop window/session is alive:
+The native app owns the sidecar process while the desktop window/session is alive:
 
 | Event | Behavior |
 | --- | --- |
@@ -583,11 +583,11 @@ The Tauri app owns the sidecar process while the desktop window/session is alive
 | App quit | Request graceful termination of the owned sidecar; escalate only after bounded timeout |
 | Manual restart | Stop the owned sidecar (if present) → spawn fresh → wait for health |
 
-**Process ownership**: foreground sidecar mode may still write the daemon PID file as part of existing CLI behavior. The desktop app must track the process handle returned by the Tauri sidecar API and prefer that handle for ownership decisions. PID-file or port-based stop paths are CLI-compat mechanisms and must not be used to kill an unrelated daemon without confirming ownership.
+**Process ownership**: foreground sidecar mode may still write the daemon PID file as part of existing CLI behavior. The desktop app must track the process handle returned by the native sidecar API and prefer that handle for ownership decisions. PID-file or port-based stop paths are CLI-compat mechanisms and must not be used to kill an unrelated daemon without confirming ownership.
 
 ### 12.4 Asset serving in desktop mode
 
-In desktop mode, Tauri serves the bundled `apps/web/dist` via `build.frontendDist` (compass §5 #4 LOCKED). The daemon's rust-embed static asset route remains normative for the browser-tab flow and standalone `nexus42 daemon ui`, but it is **not** the desktop shell's asset-serving path.
+In desktop mode, the native host serves the bundled `apps/web/dist` via `build.frontendDist` (compass §5 #4 LOCKED). The daemon's rust-embed static asset route remains normative for the browser-tab flow and standalone `nexus42 daemon ui`, but it is **not** the desktop shell's asset-serving path.
 
 ---
 
@@ -612,14 +612,14 @@ The daemon derives its allowed origins at startup from the following sources (no
 | Origin | Source | Rationale |
 |--------|--------|-----------|
 | `http://127.0.0.1:<port>` | Computed from the resolved daemon port (default 8420, or `NEXUS_DAEMON_PORT`) | Own listening origin — the browser SPA served by the host (historically by the daemon or reached via `nexus42 daemon ui`) |
-| `tauri://localhost` | Hardcoded (historical) | Tauri v2 macOS custom protocol webview origin — **gone with the deleted Rust allowlist;** the TS service admits `nexus://app` instead |
-| `http://tauri.localhost` | Hardcoded (historical) | Tauri v2 Windows/Linux webview origin — **gone with the deleted Rust allowlist** |
+| the former v2 macOS custom-protocol webview origin | Hardcoded (historical) | v2 macOS custom protocol webview origin — **gone with the deleted Rust allowlist;** the TS service admits `nexus://app` instead |
+| the former v2 Windows/Linux webview origin | Hardcoded (historical) | v2 Windows/Linux webview origin — **gone with the deleted Rust allowlist** |
 | `http://localhost:5173` | Hardcoded | Vite dev-server origin (`pnpm dev` frontend development proxy) |
 | (any) | `NEXUS_DAEMON_ALLOWED_ORIGINS` env var (comma-separated list) | Escape hatch for reverse-proxy setups, custom hostnames, and corporate proxy environments |
 
 The Vite dev origin (`http://localhost:5173`) is allowed unconditionally because the dev proxy is a development convenience operated by the same local user; it does not weaken the remote-attack surface since the dev flow requires the user to explicitly run the Vite server.
 
-**Design invariant:** the allowlist is derived from codebase-verified client origins (not guessed). The **current** composition is `apps/nexus-service/src/config.ts::resolveAllowedOrigins` (own loopback origins + `nexus://app` + loopback Vite dev origins + the `NEXUS_DAEMON_ALLOWED_ORIGINS` escape hatch), admitted by `security.ts::checkOrigin`; the Vite origin matches `vite.config.ts`; the own-origin is computed from the resolved port at startup. The `tauri://localhost` / `http://tauri.localhost` entries lived only in the deleted Rust allowlist (`auth_middleware.rs::default_allowed_origins`) and no longer correspond to any shipped desktop runtime.
+**Design invariant:** the allowlist is derived from codebase-verified client origins (not guessed). The **current** composition is `apps/nexus-service/src/config.ts::resolveAllowedOrigins` (own loopback origins + `nexus://app` + loopback Vite dev origins + the `NEXUS_DAEMON_ALLOWED_ORIGINS` escape hatch), admitted by `security.ts::checkOrigin`; the Vite origin matches `vite.config.ts`; the own-origin is computed from the resolved port at startup. Those v2 webview-origin entries lived only in the deleted Rust allowlist (`auth_middleware.rs::default_allowed_origins`) and no longer correspond to any shipped desktop runtime.
 
 #### 13.1.2 Request handling
 
@@ -878,7 +878,7 @@ Example: `SHA256:aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:
 
 ## 16. Remote Client Connection Model (V1.92)
 
-This section codifies the client-side contract for connecting to a remote daemon. It is authoritative for both the web SPA (`BrowserClient`) and the desktop shell (`DesktopClient`, renamed from `TauriClient` in v1.192 without aliases; credential injection is main-owned — [desktop-shell.md](../../active/surfaces/desktop-shell.md) §5). The local same-origin mode is the backwards-compatible default; remote access is opt-in per the setup-screen flow.
+This section codifies the client-side contract for connecting to a remote daemon. It is authoritative for both the web SPA (`BrowserClient`) and the desktop shell (`DesktopClient`, renamed from the legacy host client in v1.192 without aliases; credential injection is main-owned — [desktop-shell.md](../../active/surfaces/desktop-shell.md) §5). The local same-origin mode is the backwards-compatible default; remote access is opt-in per the setup-screen flow.
 
 ### 16.1 Client transport parameterisation
 
@@ -941,12 +941,12 @@ This rationale is codified here so that a future agent or contributor does not "
 
 ### 16.4 Origin-allowlist evolution for remote clients
 
-The daemon's Origin allowlist (§13.1) already covers: own-origin, Tauri webview origins, Vite dev origin, and `NEXUS_DAEMON_ALLOWED_ORIGINS` escape hatch. When a remote web-app or desktop-app client connects from a non-loopback origin:
+The daemon's Origin allowlist (§13.1) already covers: own-origin, native webview origins, Vite dev origin, and `NEXUS_DAEMON_ALLOWED_ORIGINS` escape hatch. When a remote web-app or desktop-app client connects from a non-loopback origin:
 
 - The connecting client's origin MUST be added to `NEXUS_DAEMON_ALLOWED_ORIGINS` — there is **no magic auto-allowlisting** of remote origins.
 - The daemon does not automatically trust the remote bind address as a browser origin; the author controls the allowlist explicitly.
 - A remote client that sends an `Origin` header not in the allowlist will receive `403 Forbidden` (consistent with §13.1.2), regardless of whether it holds a valid API key or a pinned TLS fingerprint.
-- The `tauri://localhost` / `http://tauri.localhost` origins lived only in the deleted Rust allowlist; they are gone and no shipped desktop runtime uses them ([desktop-shell.md](../../active/surfaces/desktop-shell.md) §6 admits exactly `nexus://app`).
+- Those v2 webview-origin entries lived only in the deleted Rust allowlist; they are gone and no shipped desktop runtime uses them ([desktop-shell.md](../../active/surfaces/desktop-shell.md) §6 admits exactly `nexus://app`).
 - A remote web-app (browser SPA connecting to a remote daemon) needs its serving origin in `NEXUS_DAEMON_ALLOWED_ORIGINS`.
 
 ### 16.5 Client key storage

@@ -23,9 +23,9 @@ source: iteration:v1.134/guides/p0-startup-500-rca.md
 
 ## Context
 
-In `pnpm dev:web` / `pnpm dev:desktop` (dist-load on `:5173`), `TauriClient` uses same-origin `/v1/daemon/*` via the Vite proxy to `127.0.0.1:8420`. While the sidecar is still booting, upstream `ECONNREFUSED` was mapped by Vite’s default proxy to **HTTP 500 with an empty body**. Network logs looked like daemon `Internal` failures; the daemon never received the request.
+In `pnpm dev:web` / `pnpm dev:desktop` (dist-load on `:5173`), `DesktopClient` uses same-origin `/v1/daemon/*` via the Vite proxy to `127.0.0.1:8420`. While the sidecar is still booting, upstream `ECONNREFUSED` was mapped by Vite’s default proxy to **HTTP 500 with an empty body**. Network logs looked like daemon `Internal` failures; the daemon never received the request.
 
-Packaged Tauri (non-5173) uses direct loopback — refusal surfaces as fetch failure (status 0), not Vite 500.
+Packaged desktop (non-5173) uses direct loopback — refusal surfaces as fetch failure (status 0), not Vite 500.
 
 ## Invariants
 
@@ -42,5 +42,5 @@ Packaged Tauri (non-5173) uses direct loopback — refusal surfaces as fetch fai
 
 ## See also
 
-- `daemon-ready-gate-pattern.md` — Tauri readiness ownership
+- `daemon-ready-gate-pattern.md` — desktop readiness ownership
 - Iteration guide: `p0-startup-500-rca.md`

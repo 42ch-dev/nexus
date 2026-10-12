@@ -11,7 +11,7 @@
 
 > **Promoted to Draft (2026-06-27 V1.69 P0).** The V1.67 Exploration was promoted to Draft by `@architect` for interface contracts, structured write boundary, and canvas-token contract. Product/UX thesis from the original `@product-manager` contribution remains in §4. This Draft intentionally stops short of schema/codegen or React Flow implementation authority.
 
-> **Host boundary (v1.192/v1.193 P2):** the Tauri desktop shell and the integrated daemon named below are retired — the desktop host is Electron ([desktop-shell.md](desktop-shell.md)) and `/v1/daemon/*` is served by `apps/nexus-service` over `nexus-core`. Tauri/daemon-era hosting, webview and smoke-test wording below is the historical record of those stages; the transport invariants (NexusClient-only access, structured write boundary, no raw-file writes from the webview) carry over unchanged.
+> **Host boundary (v1.192/v1.193 P2):** the native desktop shell and the integrated daemon named below are retired — the desktop host is Electron ([desktop-shell.md](desktop-shell.md)) and `/v1/daemon/*` is served by `apps/nexus-service` over `nexus-core`. Native/daemon-era hosting, webview and smoke-test wording below is the historical record of those stages; the transport invariants (NexusClient-only access, structured write boundary, no raw-file writes from the webview) carry over unchanged.
 
 > **Promoted to Shipped α (V1.70).** V1.70 shipped the first Strategy Canvas slice: read-only Strategy graph projection, canvas visualization, live execution overlay, and Idea-steer affordance. Implementation provenance: parent `079f687f`; feature commits `81cb4256`, `f82bcdd3`, `10edf22f`, `dad35736` on `feature/v1.70-canvas-strategy-read`, merged into `iteration/v1.70`. This promotion is scoped to the α read/overlay/steer slice only; structured write-boundary DTOs, node-granular editing, outline+timeline canvas, and World KB canvas remain Draft for V1.71+.
 
@@ -115,7 +115,7 @@ Use **React Flow v12+ via `@xyflow/react`** as the canvas renderer. Context7 loo
 Feasibility across the two shipped UI containers:
 
 - **Browser tab (Vite SPA)** — React Flow is a DOM/React library, compatible with the current React 19 + Vite stack (V1.157 upgrade) in `apps/web/package.json`. There is no SSR path in this repo; nevertheless React Flow should be imported only in browser-rendered routes/components because it depends on DOM sizing/interaction.
-- **Desktop shell** — the Electron host (since v1.192; the V1.66–V1.191 Tauri shell is historical) loads the same `apps/web/dist`. The historical WKWebView caveat no longer applies — Electron embeds Chromium — but desktop gesture/keyboard smoke tests remain an implement-time obligation for whichever shell is current. (V1.68 implement decision)
+- **Desktop shell** — the Electron host (since v1.192; the V1.66–V1.191 native shell is historical) loads the same `apps/web/dist`. The historical WKWebView caveat no longer applies — Electron embeds Chromium — but desktop gesture/keyboard smoke tests remain an implement-time obligation for whichever shell is current. (V1.68 implement decision)
 - **Bundle/performance** — React Flow is a significant interactive UI dependency. It should be route-split behind the canvas routes, not pulled into the Control Room bootstrap. Large Work/World graphs need lazy detail panes, filtered projections, and possibly virtualized side panels; React Flow renders graph DOM/SVG elements, so the first implementation should cap visible nodes and progressively expand subgraphs rather than attempting to render an entire World at once. (V1.68 implement decision)
 
 ### 3.2 Strategy-DAG ↔ React Flow mapping
@@ -571,7 +571,7 @@ The same mechanism can group volumes/chapters in Work and entity clusters in Wor
 
 #### Browser tab and desktop-shell parity
 
-The canvas must run in both the service-served browser SPA and the desktop shell that embeds the same `apps/web/dist` (Electron since v1.192; the V1.70-era requirement named the Tauri macOS shell and WKWebView — historical). Smoke tests must cover drag, pan/zoom, wheel/pinch gestures, keyboard focus movement, clipboard shortcuts, and inspector focus return in Chromium-like browsers and the desktop shell. Any desktop-only filesystem action still routes through host capabilities and structured service operations; the canvas webview never reads or writes raw local files directly.
+The canvas must run in both the service-served browser SPA and the desktop shell that embeds the same `apps/web/dist` (Electron since v1.192; the V1.70-era requirement named the retired macOS native shell and WKWebView — historical). Smoke tests must cover drag, pan/zoom, wheel/pinch gestures, keyboard focus movement, clipboard shortcuts, and inspector focus return in Chromium-like browsers and the desktop shell. Any desktop-only filesystem action still routes through host capabilities and structured service operations; the canvas webview never reads or writes raw local files directly.
 
 ### 3.5 Structured write boundary (B3) — **Shipped β (V1.71)**
 
@@ -676,7 +676,7 @@ The canvas is a heavy Daemon API consumer: every graph node binds to list/detail
 - **FE1-ORCH error envelope convergence** gives canvas validation, save, and execution toasts one parseable error surface instead of per-handler exceptions.
 - **F-F1 sort convergence** makes node pickers and side panels deterministic (chapters, sessions, capabilities, presets) without bespoke client sorting.
 
-The Canvas Shell must keep the `web-ui.md` §5 transport invariant: React components depend on `NexusClient`, not `fetch`, a host `invoke` bridge (e.g. the retired Tauri `invoke`), or raw filesystem access.
+The Canvas Shell must keep the `web-ui.md` §5 transport invariant: React components depend on `NexusClient`, not `fetch`, a host `invoke` bridge (e.g. the retired native `invoke`), or raw filesystem access.
 
 ## 4. Product / UX
 

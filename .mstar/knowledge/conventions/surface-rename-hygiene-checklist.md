@@ -47,7 +47,7 @@ A surface rename touches schemas, codegen, generated code in two languages, the 
 - [ ] Update CLI client base URL and path builders (`apps/nexus42/src/api/daemon_client.rs`).
 - [ ] Update web client base URL constant (`apps/web/src/lib/nexus/browser-client.ts`).
 - [ ] Update Vite dev proxy (`apps/web/vite.config.ts`).
-- [ ] Update any Tauri/desktop-sidecar path references.
+- [ ] Update any desktop/sidecar path references.
 
 ### 3. Prose and doc-comment sweep
 Run the following regexes over `apps crates docs schemas packages tooling` (excluding `node_modules`, `target/`, `.worktrees/`, `dist/`):

@@ -5,7 +5,7 @@
  * Both modes use the same prepared native payload, service build and host build.
  * Dist mode serves apps/web/dist through the nexus://app scheme; web mode owns
  * a Vite process and passes its loopback origin to the host. No native build,
- * Cargo/Tauri command, signing tool, or release path belongs here.
+ * Cargo/Rust command, signing tool, or release path belongs here.
  */
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';

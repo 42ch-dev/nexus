@@ -24,7 +24,7 @@ applies_when:
 
 ## Context
 
-The Nexus canvas (`apps/web`, React Flow `@xyflow/react`) lets an author steer an AI-autonomous writing process by editing a graph of structured nodes/edges. The daemon owns canonical state (preset YAML, outline markdown, `kb_key_blocks`, `kb_relationships`); the browser/Tauri webview **never writes raw files**. Four surfaces shipped across V1.67–V1.76, each refining the same pattern. V1.75 retired the earlier V1.65 whole-document editor in favor of node-granular canvas edits. This doc distills the reusable implementation contract so the next surface (or any similar structured-authoring surface) lands correctly the first time.
+The Nexus canvas (`apps/web`, React Flow `@xyflow/react`) lets an author steer an AI-autonomous writing process by editing a graph of structured nodes/edges. The daemon owns canonical state (preset YAML, outline markdown, `kb_key_blocks`, `kb_relationships`); the browser webview **never writes raw files**. Four surfaces shipped across V1.67–V1.76, each refining the same pattern. V1.75 retired the earlier V1.65 whole-document editor in favor of node-granular canvas edits. This doc distills the reusable implementation contract so the next surface (or any similar structured-authoring surface) lands correctly the first time.
 
 ## Guidance (the pattern)
 

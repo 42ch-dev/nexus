@@ -1095,7 +1095,7 @@ function main() {
           ? 'Development feasibility gate complete; release signing remains separately gated.'
           : 'Development feasibility gate is not complete.',
       m2: status === 'go' ? 'May proceed after review/QA integration gates.' : 'Blocked by the development feasibility decision.',
-      tauri_default: 'Unchanged until the planned Electron cutover is integrated.',
+      legacy_host_default: 'Unchanged until the planned Electron cutover is integrated.',
       npm_publish: 'Not authorized and not performed.',
     },
     next_external_actions: deriveMissingRows(gatingRows).map(

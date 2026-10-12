@@ -25,9 +25,9 @@ Dogfood after the VI logo upgrade required a **titlebar-first** Chronos chrome: 
 
 ## Guidance
 
-### 1. Desktop-host Overlay — keep decorations (historical: Tauri v2, retired v1.192)
+### 1. Desktop-host Overlay — keep decorations (historical: the native v2 host, retired v1.192)
 
-> **Historical:** the Tauri v2 desktop host was retired in v1.192; Electron (`apps/desktop-electron`) is the only desktop composition now. The host-specific settings below are retained as a historical record; the web-side `data-tauri-drag-region` contract still holds.
+> **Historical:** the native v2 desktop host was retired in v1.192; Electron (`apps/desktop-electron`) is the only desktop composition now. The host-specific settings below are retained as a historical record; the web-side drag-region contract still holds.
 
 | Setting | Value |
 | --- | --- |
@@ -36,7 +36,7 @@ Dogfood after the VI logo upgrade required a **titlebar-first** Chronos chrome: 
 | Decorations | **on** (native traffic lights) |
 | `trafficLightPosition` | Align native controls with the Chronos bar height/inset |
 
-The **web** titlebar paints the ink plane under the native chrome. Logo/title paint and empty spacer use `data-tauri-drag-region`; gear, theme, and health controls are explicit **no-drag** interactive islands.
+The **web** titlebar paints the ink plane under the native chrome. Logo/title paint and empty spacer use the drag-region attribute; gear, theme, and health controls are explicit **no-drag** interactive islands.
 
 ### 2. Layout ownership
 
@@ -46,7 +46,7 @@ The **web** titlebar paints the ink plane under the native chrome. Logo/title pa
 
 ### 3. Maximize / window APIs
 
-Double-click maximize needs explicit Tauri commands (`is_maximized` / `maximize` / `unmaximize`). Missing IPC surfaces fail QC even when Overlay paint is correct.
+Double-click maximize needs explicit host commands (`is_maximized` / `maximize` / `unmaximize`). Missing IPC surfaces fail QC even when Overlay paint is correct.
 
 ### 4. Smoke gates (human vs agent)
 
