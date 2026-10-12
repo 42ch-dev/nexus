@@ -1,14 +1,23 @@
 ---
-module: nexus-daemon-runtime + nexus-local-db + apps/web
+module: apps/nexus-service + nexus-local-db + apps/web
 date: 2026-08-21
+last_updated: 2026-10-12
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
 applies_when:
-  - "Designing a CAS (compare-and-swap) write endpoint whose pre-image is a raw stored blob"
-  - "A stored column treats NULL and empty string as the same 'unset' state"
-  - "A client reconstructs the CAS pre-image from a parsed/derived value instead of the raw stored bytes"
-tags: [cas, optimistic-concurrency, pre-image, empty-string, unset, is-default, 409, sqlite]
+  - '"Designing a CAS (compare-and-swap) write endpoint whose pre-image is a raw stored blob"'
+  - '"A stored column treats NULL and empty string as the same ''unset'' state"'
+  - '"A client reconstructs the CAS pre-image from a parsed/derived value instead of the raw stored bytes"'
+tags:
+  - cas
+  - optimistic-concurrency
+  - pre-image
+  - empty-string
+  - unset
+  - is-default
+  - 409
+  - sqlite
 ---
 
 # CAS Pre-Image Consistency: Empty ≡ Unset, Client Reconstructs From Raw

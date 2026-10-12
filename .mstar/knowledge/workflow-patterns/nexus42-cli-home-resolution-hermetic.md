@@ -2,13 +2,18 @@
 module: nexus42-cli
 date: 2026-08-08
 last_updated: 2026-08-16
-problem_type: developer_experience
+problem_type: workflow_issue
 category: workflow-patterns
 severity: low
 applies_when:
-  - "Writing hermetic/sandboxed walkthroughs that run both the nexus42 CLI and nexus-runtime"
-  - "Debugging why CLI writes land in the real ~/.nexus42 during a temp-home test"
-tags: [nexus42, nexus-runtime, home-resolution, hermetic-testing, quickstart]
+  - '"Writing hermetic/sandboxed walkthroughs that run both the nexus42 CLI and nexus-runtime"'
+  - '"Debugging why CLI writes land in the real ~/.nexus42 during a temp-home test"'
+tags:
+  - nexus42
+  - nexus-runtime
+  - home-resolution
+  - hermetic-testing
+  - quickstart
 ---
 
 # nexus42 CLI resolves home from $HOME; nexus-runtime reads NEXUS42_HOME — hermetic blocks need HOME

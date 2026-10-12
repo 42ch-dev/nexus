@@ -1,10 +1,20 @@
 ---
 title: Codegen optional field callsite coverage
-category: engineering
+category: build-errors
 track: knowledge
-last_updated: 2026-08-19
+last_updated: 2026-10-12
 created: 2026-08-12
 status: active
+problem_type: build_error
+module: contracts-codegen
+date: 2026-08-12
+severity: medium
+symptoms:
+  - "Rust E0063 'missing field' errors appear in a crate whose struct-literal callsites were not updated by codegen"
+  - "a schema-only change (added optional field) passes the contracts crate but breaks a downstream crate's `cargo check --workspace` / `cargo test --all`"
+  - "the breakage surfaces later than the change, in an unrelated task's build"
+root_cause: "typify regenerates the Rust struct with an Option<T> field but does not touch existing struct-literal callsites, so every literal constructing that type must be updated by hand; a task-scoped build that skips the downstream crate hides the breakage until it is compiled."
+resolution_type: workflow_improvement
 ---
 
 # Codegen Optional Field Callsite Coverage
@@ -27,7 +37,7 @@ The "test fixtures remain valid" claim (which is true for TS/JSON test data) is 
 
 ## Why This Matters
 
-A schema change in one crate (`schemas/` → `nexus-contracts`) can silently break compilation in a downstream crate (`nexus-daemon-runtime`) that wasn't part of the task's test scope. If the next task or plan doesn't compile the affected crate, the breakage propagates and blocks unrelated work (observed in V1.163: P1 schema change broke P2's `cargo test --all`).
+A schema change in one crate (`schemas/` → `nexus-contracts`) can silently break compilation in a downstream crate (`nexus-core`, then owned by `nexus-daemon-runtime` before its v1.193 retirement) that wasn't part of the task's test scope. If the next task or plan doesn't compile the affected crate, the breakage propagates and blocks unrelated work (observed in V1.163: P1 schema change broke P2's `cargo test --all`).
 
 ## When to Apply
 
@@ -37,7 +47,7 @@ A schema change in one crate (`schemas/` → `nexus-contracts`) can silently bre
 
 ## Examples
 
-**V1.163 P1**: Added `world_event_id?: string` to `work-outline.schema.json`. Codegen updated `WorkOutlineTimelineEventsItem` in `nexus-contracts` (added `pub world_event_id: Option<String>`). But 5 struct-literal callsites in `crates/nexus-daemon-runtime/src/api/handlers/outline.rs` (1 production `timeline_add_event` + 4 tests) were not updated → `E0063` on `cargo check --workspace`. Fixed in P2 commit `d6af9859` with `world_event_id: None` at each site.
+**V1.163 P1**: Added `world_event_id?: string` to `work-outline.schema.json`. Codegen updated `WorkOutlineTimelineEventsItem` in `nexus-contracts` (added `pub world_event_id: Option<String>`). But 5 struct-literal callsites in `crates/nexus-core/src/outline.rs` (1 production `timeline_add_event` + 4 tests) were not updated → `E0063` on `cargo check --workspace`. Fixed in P2 commit `d6af9859` with `world_event_id: None` at each site.
 
 **V1.169 P1** (typify optional-**array** collapse — semantic quirk, not a compile break): typify renders an optional JSON-Schema array member as `Vec<T>` + `serde(default)`, making **absent ≡ `[]` indistinguishable**. For PATCH DTOs where "not provided" (unchanged) must differ from an explicit empty array (meaningful clear), a plain optional array breaks the contract silently. Fix: `["array","null"]` union on the member → generated `Option<Vec<T>>` where absent/null = unchanged and `Some(vec![])` = clear. Documented in the update schema's description so the union is not "simplified" away later. Observed on `world-rule-update-request.schema.json` `target_entry_types` (AR-1/AR-3 deviation ratified in V1.169).
 

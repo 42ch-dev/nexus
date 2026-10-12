@@ -4,9 +4,18 @@ date: 2026-07-28
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-tags: [spoke, adapter, baseline-ports, orchestration, surface-b, cas, occ, call-boundary-invariant, mock-test-pattern]
-last_updated: 2026-08-08
-applies_when: Consuming SPOKE ≥ 0.3.0 adapter-port + injection-orchestration architecture from a product adapter boundary (Surface B adoption); deciding between pure delegates (Surface A) and port+orchestrator (Surface B); verifying CAS through orchestrators; enforcing call-boundary invariant mechanically
+tags:
+  - spoke
+  - adapter
+  - baseline-ports
+  - orchestration
+  - surface-b
+  - cas
+  - occ
+  - call-boundary-invariant
+last_updated: 2026-10-12
+applies_when:
+  - Consuming SPOKE ≥ 0.3.0 adapter-port + injection-orchestration architecture from a product adapter boundary (Surface B adoption); deciding between pure delegates (Surface A) and port+orchestrator (Surface B); verifying CAS through orchestrators; enforcing call-boundary invariant mechanically
 ---
 
 # SPOKE Adapter Port + Orchestration Adoption (Surface B)
@@ -159,7 +168,7 @@ The remaining stub family (`RuleQueryPort`) is documented per spec §7.4 with a 
 
 ### Orchestrator cutover on write paths (V1.142 P2)
 
-The first production orchestrator consumer is `promote_adopt` in `nexus-daemon-runtime/src/api/handlers/world_kb.rs`, routed through `orchestrate_promote(&NexusAdapter, PromoteRequest)`. Key patterns:
+The first production orchestrator consumer is `promote_adopt` in `crates/nexus-core/src/world_kb.rs`, routed through `orchestrate_promote(&NexusAdapter, PromoteRequest)`. Key patterns:
 
 1. **`orchestrate_promote` handles `stored = None`:** the orchestrator can promote a NEW candidate (not just an existing provisional entry). It skips stored-entry terminal-status checks when `stored = None`, validates `candidate.status == "provisional"`, applies acceptance (`→ confirmed`, revision bump), and calls `put_knowledge_entry(None)` (create path). This means the nexus adopt flow (create + confirm in one step) maps cleanly: build candidate with `status = "provisional"`, let the orchestrator flip it.
 2. **Single-transaction adopt (V1.142 P3):** `promote_adopt` binds a handler-owned `sqlx::Transaction` into `NexusAdapter` via a shared `Arc<std::sync::Mutex<Option<Transaction>>>` for the synchronous `orchestrate_promote` bridge, then flips the extract job in the same transaction before one `COMMIT`. Rollback on any failure — no greploop soft-delete compensation.
@@ -322,7 +331,7 @@ P4 was re-scoped to docs-only (commit `63037b4f`). Key outcomes:
 
 1. **Direct `spoke-operations` deps accepted as standard library usage.** All "TEMP P4" / "cycle-break" annotations in source comments, Cargo descriptions, and AGENTS.md were corrected to "standard spoke-operations library usage".
 2. **Spec §7.4/§8 corrected** to match the post-reversal dep graph (architect commit `67c45629`).
-3. **Narrative-read-via-spoke-adapter deferred to V1.146** (`R-V1145P4-001`). The `get_timeline_ordered` ordering helper is called from `narrative_gateway` (local-db, pure storage) and `gateway` (nexus-narrative), neither of which can depend on `nexus-spoke-adapter` post-P1b reversal without re-introducing the reversed edge. The ordering logic needs to move to a spoke-adapter-dependent layer (or be called from the daemon-runtime handler layer instead). Until then, the direct `spoke-operations` dep is the correct intermediate.
+3. **Narrative-read-via-spoke-adapter deferred to V1.146** (`R-V1145P4-001`). The `get_timeline_ordered` ordering helper is called from `narrative_gateway` (local-db, pure storage) and `gateway` (nexus-narrative), neither of which can depend on `nexus-spoke-adapter` post-P1b reversal without re-introducing the reversed edge. The ordering logic needs to move to a spoke-adapter-dependent layer (or be called from the daemon HTTP handler layer instead). Until then, the direct `spoke-operations` dep is the correct intermediate.
 
 ### The 3 architect Phase-1 errors caught at implement time
 

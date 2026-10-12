@@ -4,8 +4,17 @@ date: 2026-08-08
 problem_type: best_practice
 category: best-practices
 severity: medium
-tags: [wasm-sha256, manifest-json, embedded-module, build-rs, module-install, loader-verification, stat-fence, quickstart]
-applies_when: copying a repo-source module manifest.json alongside a locally-built wasm; teaching module install in docs/quickstarts; authoring modules whose manifest carries a pinned artifact hash
+tags:
+  - wasm-sha256
+  - manifest-json
+  - embedded-module
+  - build-rs
+  - module-install
+  - loader-verification
+  - stat-fence
+  - quickstart
+applies_when:
+  - copying a repo-source module manifest.json alongside a locally-built wasm; teaching module install in docs/quickstarts; authoring modules whose manifest carries a pinned artifact hash
 ---
 
 # Embedded-Pinned `wasm_sha256` — Align or Delete (V1.155 P3/P4 gotcha)

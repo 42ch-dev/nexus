@@ -1,12 +1,25 @@
 ---
-module: apps/web + apps/desktop
+module: apps/web + apps/desktop-electron
 date: 2026-08-21
+last_updated: 2026-10-12
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: high
 plan_id: 2026-08-20-v1.170-p1-entrance-split
-applies_when: [adding a usage-mode axis that filters shell surfaces, adding a new shell surface that renders nav or settings, adding a third first-party client, wiring a persisted client preference across web and desktop]
-tags: [entrance-axis, layout-tree, shell-surface, route-guard, settings-modal, mobile-nav, setup-wizard, tauri-ipc]
+applies_when:
+  - adding a usage-mode axis that filters shell surfaces
+  - adding a new shell surface that renders nav or settings
+  - adding a third first-party client
+  - wiring a persisted client preference across web and desktop
+tags:
+  - entrance-axis
+  - layout-tree
+  - shell-surface
+  - route-guard
+  - settings-modal
+  - mobile-nav
+  - setup-wizard
+  - electron-ipc
 ---
 
 # User-Layer Entrance Split (Orthogonal Usage Axis)
@@ -71,7 +84,7 @@ An axis that changes what is visible must be consumed by **every shell surface t
 
 ## Examples
 
-See §3 table for the four enforcement-path failures and fixes. Structural anchors: `apps/web/src/components/layout/entrance-registry.ts` (registry SSOT), `apps/web/src/lib/entrance-context.tsx` (provider), `apps/web/src/App.tsx` (guard + index redirect), `apps/desktop/src-tauri/src/lib.rs` (`get_entrance`/`set_entrance` + `is_entrance_value` validation).
+See §3 table for the four enforcement-path failures and fixes. Structural anchors: `apps/web/src/components/layout/entrance-registry.ts` (registry SSOT), `apps/web/src/lib/entrance-context.tsx` (provider), `apps/web/src/App.tsx` (guard + index redirect), `apps/desktop-electron/src/desktop-config.ts` (`get_entrance`/`set_entrance` + `is_entrance_value` validation).
 
 ## References
 

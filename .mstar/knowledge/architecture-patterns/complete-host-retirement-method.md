@@ -1,13 +1,13 @@
 ---
 title: "Complete host retirement: evidence-first disposition, closed-operation rule, and cohort collapse"
-module: "apps/nexus42 + crates/nexus-daemon-runtime + crates/nexus-core"
+module: harness
 date: "2026-09-21"
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: high
 source_plan: "iteration:v1.193"
 created_at: 2026-09-21
-last_updated: 2026-09-21
+last_updated: 2026-10-12
 tags:
   - retirement
   - host-removal

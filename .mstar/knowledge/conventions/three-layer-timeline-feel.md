@@ -1,11 +1,20 @@
 ---
 module: canvas
 date: 2026-07-19
-problem_type: design-pattern
+problem_type: convention
 category: conventions
 severity: low
-tags: [canvas, timeline, three-layer, feel, layout, visual-language, semantic-zoom, v1.123]
-applies_when: Designing per-layer visual/layout/zoom feel differentiation for a multi-layer Canvas surface
+tags:
+  - canvas
+  - timeline
+  - three-layer
+  - feel
+  - layout
+  - visual-language
+  - semantic-zoom
+  - v1.123
+applies_when:
+  - Designing per-layer visual/layout/zoom feel differentiation for a multi-layer Canvas surface
 ---
 
 # Three-Layer Timeline Feel Differentiation

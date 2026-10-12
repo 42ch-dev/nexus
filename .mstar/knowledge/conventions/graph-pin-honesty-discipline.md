@@ -4,7 +4,7 @@ date: 2026-08-25
 problem_type: convention
 category: conventions
 severity: medium
-last_updated: 2026-09-24
+last_updated: 2026-10-12
 tags: 
   - cargo-tree
   - feature-gate
@@ -31,7 +31,7 @@ produced **two false claims in one iteration** (V1.174):
    `nexus-spoke-adapter` (since V1.139).
 2. Round-1/compass phrased "rmcp behind `connect-client`" as if the crate
    were gated — false at the time: `rmcp 1.8.0` was **already in the default
-   graph** through `nexus-daemon-runtime → nexus-acp-host →
+   graph** through the then-present `nexus-daemon-runtime` host (retired v1.193) → `nexus-acp-host →
    agent-client-protocol =0.11.1 → rmcp (features=["server"])`.
 
 Both were corrected with machine-verified `cargo tree` evidence, and the
@@ -124,7 +124,7 @@ real regression net for the next iteration that touches the graph.
 
 ## When to Apply
 
-- Adding a feature-gated dependency to `nexus-daemon-runtime` / `nexus42`
+- Adding a feature-gated dependency to `nexus-core` / `nexus42`
   (extend `check-graph-pins.sh` with the new probes).
 - A PR or plan claiming "no new default-graph package" or "dep X gated" —
   demand `cargo tree -i` evidence per package.

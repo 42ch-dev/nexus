@@ -1,11 +1,21 @@
 ---
-module: crates/nexus-daemon-runtime (creators handler) + apps/desktop/src-tauri (config.toml) + apps/web (footer/settings creators)
+module: apps/nexus-service (creators handler) + apps/desktop-electron (config.toml) + apps/web (footer/settings creators)
 date: 2026-07-15
-problem_type: architecture-pattern
+last_updated: 2026-10-12
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-tags: [creator, display_name, ssot, dual-store, identity-cache, sql, config-toml, daemon-api, drift]
-applies_when: adding any write path for creator display_name / identity fields; reading creator name in a new UI surface; touching daemon creators handler
+tags:
+  - creator
+  - display_name
+  - ssot
+  - dual-store
+  - identity-cache
+  - sql
+  - config-toml
+  - daemon-api
+applies_when:
+  - adding any write path for creator display_name / identity fields; reading creator name in a new UI surface; touching daemon creators handler
 ---
 
 # Daemon Creator `display_name` Dual-Store SSOT

@@ -91,7 +91,7 @@ The failure mode is a **silent hang**, not an error: the accept loop simply neve
 
 ## Examples
 
-V1.179 P1 T1 (`crates/nexus-daemon-runtime/src/connect/watch.rs` + `accept.rs`): `PeerToolsLaneHandle` gained a relay task (`_shutdown_relay`) plus per-child Notify; `spawn_peer_config_watch` selects on the child Notify. Post-fix, `authz_hello` 7/7 and the spawned-watcher e2e (real reload without restart) both pass; reviewer verdict on the relay: "no remaining lost-wakeup window on this seam." Red-green evidence: hang reproduced at the naive wiring, pass at BASE, pass after relay.
+V1.179 P1 T1 (`crates/nexus-core/src/connect/watch.rs` + `accept.rs`): `PeerToolsLaneHandle` gained a relay task (`_shutdown_relay`) plus per-child Notify; `spawn_peer_config_watch` selects on the child Notify. Post-fix, `authz_hello` 7/7 and the spawned-watcher e2e (real reload without restart) both pass; reviewer verdict on the relay: "no remaining lost-wakeup window on this seam." Red-green evidence: hang reproduced at the naive wiring, pass at BASE, pass after relay.
 
 V1.195 P0 (`crates/nexus-core-node/src/lifecycle.rs` `await_settled_close`; the same shape in `crates/nexus-core/src/execution/lifecycle.rs` `ExecutionHandle::await_settled`): the close-report waiter registered after checking the in-flight flag, so a settlement could publish between the check and the registration and strand the caller; the confirmed fix is register (`pin!` + `enable()`) then check then loop, with the publisher ordering report → boundary → `notify_waiters`. The whole close contract that depends on it — [cancellation-safe-confirmed-close-settlement.md](cancellation-safe-confirmed-close-settlement.md).
 

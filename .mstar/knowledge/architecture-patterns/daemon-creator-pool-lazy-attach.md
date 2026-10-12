@@ -1,18 +1,27 @@
 ---
-module: nexus-daemon-runtime
+module: apps/nexus-service
 date: 2026-07-16
+last_updated: 2026-10-12
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-tags: [daemon, creator-pool, bootstrap, setup-wizard, lazy-attach, tauri, first-run]
-applies_when: "Editing creator DB pool lifecycle, Setup Continue path, or any handler that accesses creator data before daemon restart"
+tags:
+  - daemon
+  - creator-pool
+  - bootstrap
+  - setup-wizard
+  - lazy-attach
+  - electron
+  - first-run
+applies_when:
+  - '"Editing creator DB pool lifecycle, Setup Continue path, or any handler that accesses creator data before daemon restart"'
 ---
 
 # Daemon creator pool lazy-attach pattern
 
 ## Context
 
-The Nexus daemon (`nexus-daemon-runtime`) boots without a creator SQLite pool when `active_creator_id` is absent from `~/.nexus42/config.toml`. This is **by design** (V1.118 AC-P0-1: boot-without-creator), not a bug. However, the Setup wizard's Continue path calls `ensureSetupBootstrap()` (Tauri command) which **only writes** `active_creator_id` to config.toml — it does not notify the daemon or open the pool. Any subsequent HTTP request that needs the pool will fail with HTTP 409 `uninitialized` unless the handler lazily attaches the pool.
+The Nexus daemon (HTTP surface in `apps/nexus-service`) boots without a creator SQLite pool when `active_creator_id` is absent from `~/.nexus42/config.toml`. This is **by design** (V1.118 AC-P0-1: boot-without-creator), not a bug. However, the Setup wizard's Continue path calls `ensureSetupBootstrap()` (Electron IPC command) which **only writes** `active_creator_id` to config.toml — it does not notify the daemon or open the pool. Any subsequent HTTP request that needs the pool will fail with HTTP 409 `uninitialized` unless the handler lazily attaches the pool.
 
 ## Guidance
 
@@ -56,7 +65,7 @@ Without the lazy-attach, the Setup wizard's Continue button fails on every clean
 
 ### The V1.119 P0 fix
 
-**File:** `crates/nexus-daemon-runtime/src/api/handlers/creators.rs`, `patch_creator`
+**File:** `crates/nexus-core/src/creators.rs`, `patch_creator`
 
 Before the fix, `patch_creator` called `state.pool_or_uninit()?` directly, which returned `Uninitialized` (HTTP 409) on clean first run because the pool was `None`.
 

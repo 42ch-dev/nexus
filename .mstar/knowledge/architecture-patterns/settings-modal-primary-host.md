@@ -4,8 +4,14 @@ date: 2026-07-22
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-tags: [settings-modal, shell-ia, react-router, dirty-guard, studio-first]
-applies_when: Settings is the primary configuration surface (modal, not full-page), with deep links, section registry, and dirty-aware close
+tags:
+  - settings-modal
+  - shell-ia
+  - react-router
+  - dirty-guard
+  - studio-first
+applies_when:
+  - "Settings is the primary configuration surface (modal, not full-page), with deep links, section registry, and dirty-aware close"
 ---
 
 # Settings Modal Primary Host Pattern

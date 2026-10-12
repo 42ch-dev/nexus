@@ -21,10 +21,12 @@ tags:
 related_components:
   - tooling/codegen
   - nexus-contracts
-last_updated: 2026-10-07
+last_updated: 2026-10-12
 ---
 
 # Codegen lane: single-home emission, in-process formatting, byte-stability
+
+> **Status: current.** The v1.207 P1 convergence delivered single-home emission + in-process formatting; the abort-window residual `R-V1190-RUSTGEN-PRETTY-RESET` (prefer stage-and-swap) remains open, not a current defect.
 
 ## Context
 

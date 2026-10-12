@@ -4,11 +4,18 @@ date: 2026-07-18
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-tags: [canvas, surface-extraction, additive-enum, wire-free, canvas-surface-adapter, timeline, projection]
+tags:
+  - canvas
+  - surface-extraction
+  - additive-enum
+  - wire-free
+  - canvas-surface-adapter
+  - timeline
+  - projection
 applies_when:
-  - "Extracting a new Canvas surface from an existing bundled surface (e.g., splitting Timeline from Outline+Timeline)"
-  - "Adding a new CanvasSurfaceKind value that reuses shipped DTOs and routes without wire-contract changes"
-  - "Implementing an additive-frontend iteration that must produce zero schema/codegen/daemon diff"
+  - '"Extracting a new Canvas surface from an existing bundled surface (e.g., splitting Timeline from Outline+Timeline)"'
+  - '"Adding a new CanvasSurfaceKind value that reuses shipped DTOs and routes without wire-contract changes"'
+  - '"Implementing an additive-frontend iteration that must produce zero schema/codegen/daemon diff"'
 ---
 
 # Canvas Surface Extraction Pattern (from Bundled Surface)
@@ -120,7 +127,7 @@ Because the extraction is additive-frontend-only, verify `wire_contracts_changed
 1. `git diff --stat schemas/` → empty
 2. `git diff --stat crates/nexus-contracts/` → empty (or only codegen-regenerated)
 3. `git diff --stat packages/nexus-contracts/` → empty (or only codegen-regenerated)
-4. `git diff --stat crates/nexus-daemon-runtime/src/api/` → empty (no new routes)
+4. `git diff --stat apps/nexus-service/src/` → empty (no new routes)
 5. `pnpm run codegen` → zero diff under `**/generated/`
 6. `jq '.version' packages/nexus-contracts/package.json` → unchanged
 7. Search `schemas/` for the new surface kind name → no new schema entries

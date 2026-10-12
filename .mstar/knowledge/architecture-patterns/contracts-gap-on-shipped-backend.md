@@ -1,20 +1,31 @@
 ---
 module: contracts-codegen
 date: 2026-07-01
-problem_type: architecture-pattern
+last_updated: 2026-10-12
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-tags: [contracts, codegen, json-schema, dto-normalization, sqlx, orphan-rule, daemon-runtime]
-applies_when: [authoring-local-api-surface, normalizing-handwritten-dtos, adding-schemas-to-shipped-handler]
+tags:
+  - contracts
+  - codegen
+  - json-schema
+  - dto-normalization
+  - sqlx
+  - orphan-rule
+  - service-host
+applies_when:
+  - authoring-local-api-surface
+  - normalizing-handwritten-dtos
+  - adding-schemas-to-shipped-handler
 ---
 
 # Contracts-Gap on a Shipped Backend Handler
 
 ## Context
 
-Nexus enforces a strict wire-contract boundary: `schemas/` JSON Schemas are the single source of truth, `tooling/codegen` generates both TypeScript (`@42ch/nexus-contracts`) and Rust (`crates/nexus-contracts`) types, and consumers (the daemon runtime, the web app) **must not hand-write wire DTOs** (`crates/nexus-daemon-runtime/AGENTS.md`: "Contract types: shares generated types from `crates/nexus-contracts`. Do NOT hand-write duplicate DTOs.").
+Nexus enforces a strict wire-contract boundary: `schemas/` JSON Schemas are the single source of truth, `tooling/codegen` generates both TypeScript (`@42ch/nexus-contracts`) and Rust (`crates/nexus-contracts`) types, and consumers (the daemon surface, the web app) **must not hand-write wire DTOs** (the invariant is stated in the root [`AGENTS.md`](../../../AGENTS.md); the daemon host crate that also restated it — "Contract types: shares generated types from `crates/nexus-contracts`. Do NOT hand-write duplicate DTOs." — was retired in v1.193).
 
-Despite this invariant, a handler can ship with **hand-written inline DTOs** if it was added before (or bypassed) the schema pipeline. V1.33 shipped the memory Local API (`crates/nexus-daemon-runtime/src/api/handlers/memory.rs`) with 14 hand-written `serde` structs (`CreatePendingReviewRequest`, `PendingReviewInfo`, `ReviewResponse`, `FragmentInfo`, …). The routes worked at runtime, but there were **no** `schemas/local-api/memory/` files and **no** generated types — the OSS contract surface was missing. V1.78 closed this gap.
+Despite this invariant, a handler can ship with **hand-written inline DTOs** if it was added before (or bypassed) the schema pipeline. V1.33 shipped the memory Local API (`crates/nexus-core/src/memory.rs`) with 14 hand-written `serde` structs (`CreatePendingReviewRequest`, `PendingReviewInfo`, `ReviewResponse`, `FragmentInfo`, …). The routes worked at runtime, but there were **no** `schemas/local-api/memory/` files and **no** generated types — the OSS contract surface was missing. V1.78 closed this gap.
 
 ## Guidance
 
@@ -26,7 +37,7 @@ When you discover (or are asked to consume) a shipped Local API handler whose re
 
 ### The two non-obvious traps
 
-**Trap A — `sqlx::FromRow` orphan rule.** If a hand-written DTO also served as a SQL row projection (it derived both `Serialize` **and** `sqlx::FromRow`), the generated type **cannot** carry `FromRow`: `sqlx::FromRow` and the generated type are both foreign to the daemon-runtime crate (orphan rule), and `nexus-contracts` intentionally does not depend on sqlx. **Resolution**: switch those `query_as!` sites to `query!` + an explicit field map into the generated type. Do **not** introduce a second hand-written SQL-projection struct — that reintroduces the duplication the normalization set out to remove. Centralize the mapping in one helper used by all fetch sites for that row.
+**Trap A — `sqlx::FromRow` orphan rule.** If a hand-written DTO also served as a SQL row projection (it derived both `Serialize` **and** `sqlx::FromRow`), the generated type **cannot** carry `FromRow`: `sqlx::FromRow` and the generated type are both foreign to the then-present daemon host crate (orphan rule), and `nexus-contracts` intentionally does not depend on sqlx. **Resolution**: switch those `query_as!` sites to `query!` + an explicit field map into the generated type. Do **not** introduce a second hand-written SQL-projection struct — that reintroduces the duplication the normalization set out to remove. Centralize the mapping in one helper used by all fetch sites for that row.
 
 **Trap B — `ambiguous_glob_reexports` at the generated crate root.** The Rust codegen emits a flat `pub use local_api::*; pub use domain::*;` at the crate root. If a new `local_api/<name>/` module collides with an existing `domain/<name>` module (e.g. `local_api::memory` vs `domain::memory`), the flat-glob produces an `ambiguous_glob_reexports` warning at the generated crate root — even though the flat **type** names stay unique (only the module namespace collides). **Resolution**: the generator emits `#![allow(ambiguous_glob_reexports)]` at the generated crate root. This is benign (the ambiguity is module-level, not type-level) and durable (future colliding schemas won't reintroduce the warning).
 

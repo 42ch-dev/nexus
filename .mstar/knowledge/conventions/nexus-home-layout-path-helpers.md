@@ -1,7 +1,7 @@
 ---
-module: nexus-home-layout, nexus-spoke-adapter, nexus-daemon-runtime
+module: nexus-home-layout, nexus-spoke-adapter, nexus-core
 date: 2026-08-04
-last_updated: 2026-08-25
+last_updated: 2026-10-12
 problem_type: convention
 category: conventions
 severity: low
@@ -38,7 +38,7 @@ V1.148 P4 dogfood caught **F-1 (medium)**: `get_or_create_device_id(home)` joins
 - The contract belongs in the helper's doc comment (`Callers MUST pass the raw user home; this fn joins .nexus42 internally.`) so the next caller can't get it wrong at the call site.
 - When a helper's parameter is named after the value it expects, name it for the **raw** input (`home`, `user_home`) — not `nexus_home` (that name lies about what to pass and is the exact confusion vector that caused F-1 for the sibling identity/allowlist key paths).
 - **Same-family helpers** (all take raw home, all join `.nexus42` internally): `user_skills_dir`, `user_preset_base_dir`, `user_modules_dir`, `user_capabilities_dir` (`lib.rs` — capabilities is `$HOME/.nexus42/capabilities/<name>/` for the descriptor + manifest + wasm trio). Add a new `~/.nexus42/...` tree as another helper in this family; do not join `.nexus42` at the call site.
-- **Daemon callers** that only have `state.nexus_home()` (`$HOME/.nexus42`) must pass **`state.nexus_home().parent()`**. A parent-less `nexus_home` must not fail boot: warn + scan-nothing (empty outcome), never propagate `?`. V1.172: `user_capabilities_scan_dir` in `crates/nexus-daemon-runtime/src/boot.rs`. CLI callers already have raw home — pass `dirs::home_dir()` (e.g. `nexus42 capability install`).
+- **Daemon callers** that only have `state.nexus_home()` (`$HOME/.nexus42`) must pass **`state.nexus_home().parent()`**. A parent-less `nexus_home` must not fail boot: warn + scan-nothing (empty outcome), never propagate `?`. V1.172: `user_capabilities_scan_dir` in `apps/nexus-service/src/main.ts`. CLI callers already have raw home — pass `dirs::home_dir()` (e.g. `nexus42 capability install`).
 - **V1.174 peer-tools lane (`~/.nexus42/connect/` family):** the daemon accept
   loop adds `connect_daemon_config_path(home)` → `connect/daemon.json`
   (accept-loop config: host/port, `max_sessions`, `invoke_timeout_ms`,
@@ -47,7 +47,7 @@ V1.148 P4 dogfood caught **F-1 (medium)**: `get_or_create_device_id(home)` joins
   dialer Ed25519 public keys; **missing file ⇒ empty map ⇒ fail-closed** — no
   dialer passes the responder handshake without a preconfigured key), and
   the daemon identity seed at `connect/daemon_identity.key`
-  (`daemon_identity_key_path`, `crates/nexus-daemon-runtime/src/connect/identity.rs`
+  (`daemon_identity_key_path`, `crates/nexus-core/src/connect/identity.rs`
   — raw 32-byte Ed25519 seed, created once with `create_new` + mode `0600`; a
   wrong-length existing file is a fail-closed error, never reused). All three
   are called with raw home (`config.rs::load(home)` / `load_peer_keys(home)` /
@@ -86,7 +86,7 @@ V1.148 P4 dogfood caught **F-1 (medium)**: `get_or_create_device_id(home)` joins
 - V1.172 capability scan/install: daemon `user_capabilities_scan_dir` uses `nexus_home().parent()`; CLI `cmd_install` uses `user_capabilities_dir(&dirs::home_dir()?)`. Passing `state.nexus_home()` would scan `~/.nexus42/.nexus42/capabilities` and miss every install.
 - V1.174 peer-tools lane: `connect_daemon_config_path` /
   `connect_peer_keys_path` / `daemon_identity_key_path` with raw-home
-  callers in `crates/nexus-daemon-runtime/src/connect/{config.rs, identity.rs}`;
+  callers in `crates/nexus-core/src/connect/{config.rs, identity.rs}`;
   layout pinned by `connect_path_layout` in `crates/nexus-home-layout/src/lib.rs`;
   format-collision rationale in `connect/identity.rs` module docs.
 - Pre-1.0 note: a path fix that changes the canonical location is accepted without migration (one-time identity churn); record it in `crates/nexus-home-layout/AGENTS.md` path-history so future readers understand.

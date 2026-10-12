@@ -1,5 +1,5 @@
 ---
-module: apps/nexus42, nexus-daemon-runtime, rmcp, nexus-acp-host
+module: apps/nexus42, apps/nexus-service, rmcp, nexus-acp-host
 date: 2026-08-25
 problem_type: architecture_pattern
 category: architecture-patterns
@@ -14,7 +14,7 @@ tags:
   - tools-only
   - listchanged
   - watcher
-last_updated: 2026-08-26
+last_updated: 2026-10-12
 applies_when:
   - "Exposing the daemon tool registry to an external MCP client (ACP agent, native CLI, third-party)"
   - "Choosing the process model for an MCP server (client-spawned child vs in-daemon service)"

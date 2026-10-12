@@ -1,11 +1,18 @@
 ---
-module: apps/desktop + apps/web
+module: apps/desktop-electron + apps/web
 date: 2026-07-22
+last_updated: 2026-10-12
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-tags: [chronos, titlebar, tauri-v2, overlay, drag-region]
-applies_when: shipping a full-width Chronos ink titlebar on web + Tauri v2 macOS with native traffic lights
+tags:
+  - chronos
+  - titlebar
+  - desktop-host
+  - overlay
+  - drag-region
+applies_when:
+  - shipping a full-width Chronos ink titlebar on web + the desktop host on macOS with native traffic lights
 ---
 
 # Chronos Titlebar Overlay Pattern
@@ -18,7 +25,9 @@ Dogfood after the VI logo upgrade required a **titlebar-first** Chronos chrome: 
 
 ## Guidance
 
-### 1. Tauri v2 macOS Overlay — keep decorations
+### 1. Desktop-host Overlay — keep decorations (historical: Tauri v2, retired v1.192)
+
+> **Historical:** the Tauri v2 desktop host was retired in v1.192; Electron (`apps/desktop-electron`) is the only desktop composition now. The host-specific settings below are retained as a historical record; the web-side `data-tauri-drag-region` contract still holds.
 
 | Setting | Value |
 | --- | --- |

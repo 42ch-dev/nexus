@@ -1,10 +1,20 @@
 ---
 title: sqlx migration files are immutable once shipped
-category: engineering
+category: database-issues
 track: knowledge
 last_updated: 2026-08-27
 created: 2026-08-27
 status: active
+problem_type: database_issue
+module: nexus-local-db
+date: 2026-08-27
+severity: high
+symptoms:
+  - "`MigrateError::VersionMismatch(version)` on boot for every existing install after an upgrade"
+  - "fresh installs stay green, so the breakage ships silently until a user upgrades"
+  - "editing even a comment in an already-applied migration file triggers the mismatch"
+root_cause: "`sqlx::migrate!` embeds migration file bytes at compile time and stores each applied file's checksum in `_sqlx_migrations`; any byte edit to an already-applied migration changes the embedded checksum and `Migrator::run` refuses to proceed."
+resolution_type: documentation_update
 ---
 
 # sqlx Migration Files Are Immutable Once Shipped (checksum pinning)

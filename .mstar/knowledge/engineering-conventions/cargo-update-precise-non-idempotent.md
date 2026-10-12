@@ -1,12 +1,19 @@
 ---
 module: nexus (workspace)
 date: 2026-09-18
-problem_type: engineering_convention
-category: engineering-conventions
+problem_type: convention
+category: conventions
 severity: medium
-tags: [cargo, lockfile, resolver, frozen-lock, dependency-sweep, idempotence]
+tags:
+  - cargo
+  - lockfile
+  - resolver
+  - frozen-lock
+  - dependency-sweep
+  - idempotence
 last_updated: 2026-09-18
-applies_when: Dependency sweeps or any workflow that must keep Cargo.lock byte-stable while re-resolving individual pinned packages; QC/QA seats verifying a frozen lock
+applies_when:
+  - Dependency sweeps or any workflow that must keep Cargo.lock byte-stable while re-resolving individual pinned packages; QC/QA seats verifying a frozen lock
 ---
 
 # `cargo update -p <crate> --precise` is not idempotent — freeze the lock, then verify read-only

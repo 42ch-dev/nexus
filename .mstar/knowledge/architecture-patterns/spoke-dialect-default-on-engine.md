@@ -5,8 +5,17 @@ last_updated: 2026-08-05
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-tags: [lore-activation, spoke, modules-activation, mca, assemble-moment, neutral-only, byte-equivalence, default-on, preset-slots, moment-directive, df-75]
-applies_when: consuming a spoke modules.* dialect / promoting a flag-gated engine to default-on / building prompt-control over activated lore
+tags:
+  - lore-activation
+  - spoke
+  - modules-activation
+  - mca
+  - assemble-moment
+  - neutral-only
+  - byte-equivalence
+  - default-on
+applies_when:
+  - consuming a spoke modules.* dialect / promoting a flag-gated engine to default-on / building prompt-control over activated lore
 ---
 
 # Spoke-dialect consumption as a default-on engine — the lore activation pattern

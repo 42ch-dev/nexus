@@ -1,11 +1,20 @@
 ---
 module: apps/web
 date: 2026-07-12
-problem_type: knowledge
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: low
-tags: [i18n, i18next, react-i18next, locale, LocaleProvider, command-registry, format, intl, design-studio, test-setup]
-applies_when: Adding or extending i18n in apps/web; adding user-facing strings; wiring Intl formatters; setting up i18n in test environments that import shared web components
+tags:
+  - i18n
+  - i18next
+  - react-i18next
+  - locale
+  - LocaleProvider
+  - command-registry
+  - format
+  - intl
+applies_when:
+  - Adding or extending i18n in apps/web; adding user-facing strings; wiring Intl formatters; setting up i18n in test environments that import shared web components
 ---
 
 # Web i18n Architecture Pattern

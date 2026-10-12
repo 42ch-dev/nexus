@@ -1,12 +1,21 @@
 ---
-module: apps/desktop/src-tauri + apps/web (setup-gate, daemon-status-bar, main-banner)
+module: apps/desktop-electron + apps/web (setup-gate, daemon-status-bar, main-banner)
 date: 2026-07-06
-last_updated: 2026-07-15
-problem_type: architecture-pattern
+last_updated: 2026-10-12
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-tags: [daemon-runtime, sidecar, health-probe, desktop-shell, setup-wizard, daemon-status-bar, gate, two-consumer-pattern, late-subscription-race, stderr-capture, bounded-timeout, tauri-v2-sidecar-resolution, stopped-initial-state, attach-without-ownership, path-enrichment, agent-scan, daemon-launch-gate, d2-always-start]
-applies_when: gating main-UI entry on daemon readiness; designing any "wait for service X before entering app" UX; wiring observers to a process lifecycle event stream that may fire before subscription; surfacing supervised-process crash reasons to the user
+tags:
+  - service-host
+  - sidecar
+  - health-probe
+  - desktop-shell
+  - setup-wizard
+  - daemon-status-bar
+  - gate
+  - two-consumer-pattern
+applies_when:
+  - 'gating main-UI entry on daemon readiness; designing any "wait for service X before entering app" UX; wiring observers to a process lifecycle event stream that may fire before subscription; surfacing supervised-process crash reasons to the user'
 ---
 
 # Daemon-Ready Gate Pattern (App-Level Launch Gate)
@@ -86,7 +95,7 @@ V1.110 optimized the cold-start path. Previously `start_with_budget` ran the ful
 
 V1.96 () hit a P0 blocker: the setup wizard Step 2 hung indefinitely in "Starting daemon…" on a clean `~/.nexus42/` first launch. RCA revealed **three** consumer-side root causes (pre-V1.118, the daemon also crashed within milliseconds when `WorkspaceState::initialize()` found no `active_creator_id`; the wizard just never learned about it). The fixes distill into four durable rules that apply to **any** observer of a process lifecycle event stream, not just the daemon-ready gate.
 
-> **V1.118 supersession (daemon no-Profile boot):** After V1.118 P0 ships, clean home reaches T0 health without `active_creator_id`; the gate opens on `running` and Profile selection is post-gate business flow. Crash-on-no-creator RCA below is **pre-V1.118** only. See [daemon-runtime.md §17](../../specs/archived/daemon-runtime.md) + [desktop-shell.md §13.11](../../specs/surfaces/desktop-shell.md).
+> **V1.118 supersession (daemon no-Profile boot):** After V1.118 P0 ships, clean home reaches T0 health without `active_creator_id`; the gate opens on `running` and Profile selection is post-gate business flow. Crash-on-no-creator RCA below is **pre-V1.118** only. See [daemon-runtime.md §17 (archived)](../../specs/archived/daemon-runtime.md) + [desktop-shell.md §13.11](../../specs/surfaces/desktop-shell.md).
 
 ### Rule 5: probe current state on mount, BEFORE subscribing
 
@@ -156,6 +165,8 @@ if state == Starting && inner.child.is_some() { return Ok(()); }
 
 ### Rule 11: Tauri v2 `app.shell().sidecar(name)` takes the FILENAME, not the `externalBin` path
 
+> **Historical (host retired v1.192):** this rule documents the Tauri v2 desktop host, which was replaced by the Electron composition (`apps/desktop-electron`). The general lesson — a sidecar/spawn argument must match the registered runtime name byte-for-byte, not the build-time source path — still applies to any host's child-process launch; the concrete `tauri.conf.json` / `tauri-plugin-shell` details below are a historical record.
+
 This was the more severe latent blocker. `bundle.externalBin` in `tauri.conf.json` lists **build-time source paths** (e.g. `["binaries/nexus42"]`); Tauri appends the target-triple suffix (`nexus42-aarch64-apple-darwin`) at bundle time. But the **runtime** Rust API `tauri_plugin_shell::ShellExt::sidecar()` "expects only the filename of the sidecar, not its full path" (Tauri v2 docs, `https://v2.tauri.app/develop/sidecar`). The desktop shell had called `app.shell().sidecar("binaries/nexus42")` since V1.66 — which **never resolves**, so the bundled daemon was never spawnable from the desktop app. The error (`failed to spawn sidecar: No such file or directory (os error 2)`) only appeared once V1.97 actually ran a clean-state smoke.
 
 The matching `tauri-plugin-shell` capability scope (`shell:allow-execute`, `sidecar: true`) registers a `name` that must be **byte-identical** to the `sidecar()` argument — so both must be the bare filename (`"nexus42"`), while `bundle.externalBin` keeps the source-relative path (`"binaries/nexus42"`).
@@ -198,13 +209,13 @@ Rules 9 + 10 fix the supervisor state machine so a real spawn is actually attemp
 
 **Source:** V1.105  + `wizard-ia-reorder` + `portrait-shell-steps`; masters `desktop-shell.md` §13.10 / `web-ui.md` §29.13.
 
-> Residual `R-V197-SMOKE-CLEAN-STATE` was closed by V1.100 P0. V1.105 moves bootstrap **after** Ready (Workspace Continue) while keeping always-start. **V1.118 P0 supersedes the no-creator boot failure:** clean home reaches T0 health without `active_creator_id`; bootstrap remains optional wizard convenience (§13.11 / daemon-runtime §17).
+> Residual `R-V197-SMOKE-CLEAN-STATE` was closed by V1.100 P0. V1.105 moves bootstrap **after** Ready (Workspace Continue) while keeping always-start. **V1.118 P0 supersedes the no-creator boot failure:** clean home reaches T0 health without `active_creator_id`; bootstrap remains optional wizard convenience (§13.11 / daemon-runtime §17, archived).
 
 ### Rule 14 (V1.101): enrich process PATH at daemon boot for agent CLI discovery (Class B) — no schemas/
 
 V1.101 P0 closed `R-V1100P0SMOKE-AGENT-SCAN`: macOS GUI / Tauri-launched daemons often inherit a minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`). Homebrew and user-local ACP agent CLIs under `/opt/homebrew/bin`, `~/.local/bin`, `~/.cargo/bin`, asdf/mise shims, etc. are then invisible to `which::which` during `POST /v1/daemon/agent-host/scan`, so the setup AgentPicker shows empty even when agents are installed in a login shell.
 
-**Pattern:** merge a **login-shell-equivalent** set of common user bin dirs into the **process** `PATH` **once at daemon boot** (before any scan probe). Implementation: `crates/nexus-daemon-runtime/src/path_enrichment.rs`, invoked from `run_daemon`. No shell-out; only existing directories are appended; idempotent merge.
+**Pattern:** merge a **login-shell-equivalent** set of common user bin dirs into the **process** `PATH` **once at daemon boot** (before any scan probe). Implementation: `crates/nexus-agent-host/src/discovery/path_enrichment.rs`, invoked from `run_daemon`. No shell-out; only existing directories are appended; idempotent merge.
 
 | Class | Meaning | Fix locus |
 |-------|---------|-----------|
@@ -214,8 +225,8 @@ V1.101 P0 closed `R-V1100P0SMOKE-AGENT-SCAN`: macOS GUI / Tauri-launched daemons
 
 **Hard stop:** Class B must **not** add wire fields, query params, or `schemas/` changes. Prefer process env enrichment over teaching the SPA about PATH. Exotic layouts still use custom-launch.
 
-**Anti-patterns:** ❌ Proposing a scan schema change for “extra PATH”; ❌ shelling out to `echo $PATH` / login shell on every scan; ❌ duplicating enrichment only in the Tauri sidecar without covering `nexus42 daemon start`.
+**Anti-patterns:** ❌ Proposing a scan schema change for “extra PATH”; ❌ shelling out to `echo $PATH` / login shell on every scan; ❌ duplicating enrichment only in the desktop sidecar without covering the CLI start path.
 
 ### Source
 
-Distilled from V1.97 . Tauri v2 sidecar resolution rule confirmed against `https://v2.tauri.app/develop/sidecar` ("expects only the filename of the sidecar, not its full path"). Iteration-scoped invariants + prototype intake rule: `sidecar-startup-state-machine.md` (snapshot; durable rules promoted here). **Rule 13 distilled from V1.100 P0** . **Rule 14 distilled from V1.101 P0** . **Rule 15 distilled from V1.105** P0–P2 (`DaemonLaunchGate`, D2 always-start, Agent→Workspace→Done, portrait shell).
+Distilled from V1.97 (Tauri v2 host; retired in v1.192). Tauri v2 sidecar resolution rule confirmed against `https://v2.tauri.app/develop/sidecar` ("expects only the filename of the sidecar, not its full path"). Iteration-scoped invariants + prototype intake rule: `sidecar-startup-state-machine.md` (snapshot; durable rules promoted here). **Rule 13 distilled from V1.100 P0** . **Rule 14 distilled from V1.101 P0** . **Rule 15 distilled from V1.105** P0–P2 (`DaemonLaunchGate`, D2 always-start, Agent→Workspace→Done, portrait shell).

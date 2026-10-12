@@ -1,11 +1,18 @@
 ---
 module: harness
 date: 2026-07-20
-problem_type: workflow_convention
+problem_type: workflow_issue
 category: workflow-patterns
 severity: medium
-tags: [harness, predictive-scan, explore, endpoint-verification, ac-reframing, qc]
-applies_when: PM uses an `explore` subagent (or any predictive read-only scan) to surface candidate bugs before manual testing, and the scan claims a user-visible symptom
+tags:
+  - harness
+  - predictive-scan
+  - explore
+  - endpoint-verification
+  - ac-reframing
+  - qc
+applies_when:
+  - "PM uses an `explore` subagent (or any predictive read-only scan) to surface candidate bugs before manual testing, and the scan claims a user-visible symptom"
 ---
 
 # Predictive Scan Must Verify User-Visible Claims Against Actual Endpoints
@@ -16,7 +23,7 @@ In V1.127, the PM dispatched an `explore` subagent to scan V1.126 surfaces for m
 
 One P0 candidate claimed: *"CodexNativeProvider / ClaudeNativeProvider never registered in daemon HostManager... the AgentPicker will show an empty agent list."* The plan (V1.127 P1) was scoped around this framing.
 
-Plan-level QC (qc1 seat 1) caught the real picture: the AgentPicker does **not** use `HostManager::list_providers()`. It calls `POST /v1/daemon/agent-host/scan` (`crates/nexus-daemon-runtime/src/api/handlers/agent_host.rs:577`), which runs `scan_path_in(...)` directly — an independent PATH scan that does NOT consult the registered providers in HostManager.
+Plan-level QC (qc1 seat 1) caught the real picture: the AgentPicker does **not** use `HostManager::list_providers()`. It calls `POST /v1/daemon/agent-host/scan` (`crates/nexus-core/src/host.rs:577`), which runs `scan_path_in(...)` directly — an independent PATH scan that does NOT consult the registered providers in HostManager.
 
 The original V1.116 residual `R-V1116P0QA-001` note already said: *"Discovery works (scan shows installed), but session creation fails."* The `explore` subagent missed this and framed the bug as "empty agent list" instead of "session-create failure".
 

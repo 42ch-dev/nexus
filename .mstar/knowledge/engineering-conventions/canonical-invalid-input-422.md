@@ -1,8 +1,9 @@
 ---
-module: nexus-daemon-runtime-api
+module: apps/nexus-service
 date: 2026-09-07
+last_updated: 2026-10-12
 problem_type: convention
-category: engineering-conventions
+category: conventions
 severity: high
 plan_id: 2026-09-06-v1.185-p3-run-memory-capture
 applies_when:
@@ -20,7 +21,7 @@ tags:
   - axum
   - spec-alignment
 related_components:
-  - nexus-daemon-runtime
+  - apps/nexus-service
   - nexus-local-db
   - schemas
   - nexus-contracts
@@ -32,7 +33,7 @@ related_components:
 
 The v1.185 Actor plan drafts used `400 invalid_input` in three places — §11.1 (invalid wire structure), §11.5 (World-owned summary reject), §11.6 (Creator/legacy `remember:true` reject) — while the daemon's canonical mapping for the stable code `invalid_input` is `422 Unprocessable Entity`. All three were reconciled to `HTTP 422 invalid_input` before implementation. The drift was possible because the codebase carries **two constructors that emit the same stable code with different statuses**, and because spec prose and the error-mapping table are separate documents that are not mechanically linked.
 
-The mapping SSOT is `crates/nexus-daemon-runtime/src/api/errors.rs` — read its `status_code()` and `error_code()` match arms, not your memory of a spec line, before coding a status code.
+The mapping SSOT is `apps/nexus-service/src/errors.ts` — read its `status_code()` and `error_code()` match arms, not your memory of a spec line, before coding a status code.
 
 ## Guidance
 
@@ -61,7 +62,7 @@ JSON Schema `maxLength` counts Unicode codepoints. The durable v1.185 cap on kno
 
 ### 4. Manual query parsing where Axum extractors bypass the envelope
 
-DELETE `/v1/daemon/characters/{character_id}/knowledge/{entry_id}` requires `expected_revision` in the query string. A typed `Query<T>`/`Path<T>` extractor rejection is framework-shaped (its own 400/404 body) and does not carry the canonical envelope. The handler therefore parses the raw `Uri` query manually — `parse_delete_expected_revision(&Uri)` in `crates/nexus-daemon-runtime/src/api/handlers/actor_knowledge.rs` — producing `knowledge_delete_invalid_input(...)` → 422 `invalid_input` with precise reasons: missing, duplicate param, unexpected key, non-integer, out of range.
+DELETE `/v1/daemon/characters/{character_id}/knowledge/{entry_id}` requires `expected_revision` in the query string. A typed `Query<T>`/`Path<T>` extractor rejection is framework-shaped (its own 400/404 body) and does not carry the canonical envelope. The handler therefore parses the raw `Uri` query manually — `parse_delete_expected_revision(&Uri)` in `crates/nexus-core/src/actor_knowledge.rs` — producing `knowledge_delete_invalid_input(...)` → 422 `invalid_input` with precise reasons: missing, duplicate param, unexpected key, non-integer, out of range.
 
 - For query-parameter positions with wire-contract semantics (required CAS tokens, closed param sets), parse the raw query string when you need envelope-consistent errors; do not rely on the extractor's default rejection.
 - Error `details` remain a closed vocabulary mapped 1:1 onto what a caller can fix (`field`/`reason` or `invalid_entries`); no raw framework text.
@@ -105,4 +106,4 @@ Clients branch on the stable code, but tests, SDKs, and ops dashboards frequentl
 - Creator/legacy sessions reject HTTP 422 `invalid_input` before Host execution.
 ```
 
-Durable authority: [Actor Product Model §11.1/§11.5/§11.6](../../specs/architecture/actor-product-model.md); mapping: `crates/nexus-daemon-runtime/src/api/errors.rs`. Related: [conventions/cli-surface-honesty-discipline](../conventions/cli-surface-honesty-discipline.md) (render the actual `error_code()`, never OR-match status strings), [api-design/field-level-error-envelope-for-generated-dtos.md](../api-design/field-level-error-envelope-for-generated-dtos.md) (closed `details` vocabulary, member-aware validation).
+Durable authority: [Actor Product Model §11.1/§11.5/§11.6](../../specs/architecture/actor-product-model.md); mapping: `apps/nexus-service/src/errors.ts`. Related: [conventions/cli-surface-honesty-discipline](../conventions/cli-surface-honesty-discipline.md) (render the actual `error_code()`, never OR-match status strings), [api-design/field-level-error-envelope-for-generated-dtos.md](../api-design/field-level-error-envelope-for-generated-dtos.md) (closed `details` vocabulary, member-aware validation).

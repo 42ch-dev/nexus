@@ -1,14 +1,20 @@
 ---
 module: apps/web
 date: 2026-07-12
-problem_type: architecture-pattern
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-tags: [command-palette, action-registry, useSyncExternalStore, useHotkey, discoverability, a11y]
+tags:
+  - command-palette
+  - action-registry
+  - useSyncExternalStore
+  - useHotkey
+  - discoverability
+  - a11y
 applies_when:
-  - "adding a global ⌘K/Ctrl+K command palette or keyboard-driven action surface"
-  - "registering surface-local actions without coupling them to the palette component"
-  - "avoiding React context re-render storms for a global action list"
+  - '"adding a global ⌘K/Ctrl+K command palette or keyboard-driven action surface"'
+  - '"registering surface-local actions without coupling them to the palette component"'
+  - '"avoiding React context re-render storms for a global action list"'
 ---
 
 # Action Registry + Command Palette Pattern

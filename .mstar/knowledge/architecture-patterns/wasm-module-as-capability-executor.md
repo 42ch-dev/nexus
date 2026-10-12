@@ -1,6 +1,7 @@
 ---
-module: nexus-orchestration + nexus-daemon-runtime + nexus42 CLI + nexus-wasm-host
+module: nexus-orchestration + nexus-core + nexus42 CLI + nexus-wasm-host
 date: 2026-08-22
+last_updated: 2026-10-12
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: high

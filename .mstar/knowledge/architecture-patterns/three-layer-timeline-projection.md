@@ -1,11 +1,20 @@
 ---
 module: canvas
 date: 2026-07-19
-problem_type: architecture-pattern
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: low
-tags: [canvas, timeline, three-layer, adapter, brief, narrative, moment, world, work, v1.123]
-applies_when: Extending a Canvas surface with multiple zoom layers (Brief/Narrative/Moment) or projecting a domain timeline at multiple granularities
+tags:
+  - canvas
+  - timeline
+  - three-layer
+  - adapter
+  - brief
+  - narrative
+  - moment
+  - world
+applies_when:
+  - Extending a Canvas surface with multiple zoom layers (Brief/Narrative/Moment) or projecting a domain timeline at multiple granularities
 ---
 
 # Three-Layer Timeline Projection Pattern

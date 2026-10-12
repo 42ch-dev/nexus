@@ -1,11 +1,20 @@
 ---
-module: daemon-runtime-transport
+module: apps/nexus-service
 date: 2026-07-05
-problem_type: integration-pattern
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-tags: [tls, rustls, rcgen, axum-server, self-signed-cert, san, tofu, remote-bind, listener]
-applies_when: adding TLS to an axum-based local-first daemon that must serve trusted-LAN clients via a self-signed cert + TOFU pinning
+tags:
+  - tls
+  - rustls
+  - rcgen
+  - axum-server
+  - self-signed-cert
+  - san
+  - tofu
+  - remote-bind
+applies_when:
+  - adding TLS to an axum-based local-first daemon that must serve trusted-LAN clients via a self-signed cert + TOFU pinning
 ---
 
 # Self-Signed TLS Listener Integration (rcgen + rustls + axum-server)

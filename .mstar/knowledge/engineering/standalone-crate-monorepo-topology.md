@@ -2,11 +2,22 @@
 module: Cargo workspace + modules/
 date: 2026-08-21
 problem_type: convention
-category: engineering
+category: conventions
 severity: medium
 plan_id: 2026-08-20-v1.170-p0-computable-dx-spine
-applies_when: [adding a publishable non-workspace crate to the repo, converting a workspace crate to standalone, path-depending on a crate from a workspace member, reviewing Cargo.toml topology changes]
-tags: [cargo-workspace, standalone-crate, path-dependency, crate-topology, publish, modules, workspace-exclude]
+applies_when:
+  - adding a publishable non-workspace crate to the repo
+  - converting a workspace crate to standalone
+  - path-depending on a crate from a workspace member
+  - reviewing Cargo.toml topology changes
+tags:
+  - cargo-workspace
+  - standalone-crate
+  - path-dependency
+  - crate-topology
+  - publish
+  - modules
+  - workspace-exclude
 ---
 
 # Standalone Crate Topology in a Cargo Workspace

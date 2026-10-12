@@ -1,11 +1,23 @@
 ---
-module: apps/nexus42, nexus-spoke-adapter, nexus-daemon-runtime
+module: apps/nexus42, nexus-spoke-adapter, apps/nexus-service
 date: 2026-08-07
-problem_type: best_practice
+last_updated: 2026-10-12
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: high
-applies_when: [reviewing or building a scoped or multi-tenant write path, adding OCC/CAS updates on rows keyed by id+revision only, adding create paths for relations or other endpoint-bearing rows, exposing OCC reject details to a peer or client]
-tags: [connect, scope-verification, occ, cas, world-scope, security-review, cross-scope-write]
+applies_when:
+  - reviewing or building a scoped or multi-tenant write path
+  - adding OCC/CAS updates on rows keyed by id+revision only
+  - adding create paths for relations or other endpoint-bearing rows
+  - exposing OCC reject details to a peer or client
+tags:
+  - connect
+  - scope-verification
+  - occ
+  - cas
+  - world-scope
+  - security-review
+  - cross-scope-write
 ---
 
 # Verify the Stored Row's Scope Before an Optimistic-Concurrency Write

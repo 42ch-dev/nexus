@@ -1,11 +1,20 @@
 ---
 module: apps/web (agent-picker) + crates/nexus-acp-host (registry) + apps/web/src/pages (hosts)
 date: 2026-07-11
-problem_type: architecture-pattern
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-tags: [agent-picker, acp-registry, registry_agent_id, matching, display-name, priority, common-first, partition, false-negative]
-applies_when: matching UI elements against the ACP CDN registry; any "priority" or "pinned" list of agents; ordering agents by user preference
+tags:
+  - agent-picker
+  - acp-registry
+  - registry_agent_id
+  - matching
+  - display-name
+  - priority
+  - common-first
+  - partition
+applies_when:
+  - 'matching UI elements against the ACP CDN registry; any "priority" or "pinned" list of agents; ordering agents by user preference'
 ---
 
 # ACP Registry Matching: id vs Display Name

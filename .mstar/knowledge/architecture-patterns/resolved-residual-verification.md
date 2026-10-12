@@ -2,11 +2,18 @@
 module: harness-process
 date: 2026-07-03
 last_updated: 2026-07-06
-problem_type: process-convention
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-tags: [residual, lifecycle, verification, regression-of-resolution, security, deferred-already-satisfied]
-applies_when: treating a prior residual's `lifecycle` field (either `resolved` OR `deferred`) as evidence about the current code state
+tags:
+  - residual
+  - lifecycle
+  - verification
+  - regression-of-resolution
+  - security
+  - deferred-already-satisfied
+applies_when:
+  - "treating a prior residual's `lifecycle` field (either `resolved` OR `deferred`) as evidence about the current code state"
 ---
 
 # Resolved Residual Is a Claim, Not a Guarantee

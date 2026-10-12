@@ -1,3 +1,20 @@
+---
+module: nexus (Rust workspace)
+date: 2026-04-17
+last_updated: 2026-10-12
+problem_type: best_practice
+category: best-practices
+severity: medium
+tags:
+  - crate-selection
+  - dependency-hygiene
+  - version-pinning
+  - feature-flags
+  - workspace
+applies_when:
+  - Choosing or replacing a third-party Rust crate
+  - Adding a dependency to the workspace
+---
 # Crate Selection Best Practices v1
 
 **Status**: Active — authoritative guidance for third-party Rust crate selection across `nexus` OSS crates.
@@ -19,7 +36,7 @@ This document does **not** override:
 
 - `AGENTS.md` — release discipline, codegen rules, reachability rules.
 - `v1-spec/` (ADRs / codegen strategy / wire schemas) — wire and protocol decisions (e.g. `agent-client-protocol` SDK pin) remain owned there.
-- Architecture SSOTs — **`specs/archived/local-cloud-crate-architecture.md`** (crate graph & local/cloud lines), `orchestration-engine.md`, `daemon-runtime.md`, [`creator-schedule-and-core-context.md`](../specs/orchestration/creator-schedule-and-core-context.md), [`acp-client-tech-spec.md`](../specs/agents/acp-client-tech-spec.md), [`schemas-external-consumer-boundary.md`](../specs/architecture/schemas-external-consumer-boundary.md).
+- Architecture SSOTs — [`local-runtime-boundary.md`](../specs/architecture/local-runtime-boundary.md) and [`rust-core-service-boundary.md`](../specs/architecture/rust-core-service-boundary.md) (current crate/service boundary), [`orchestration-engine.md`](../specs/orchestration/orchestration-engine.md), [`creator-schedule-and-core-context.md`](../specs/orchestration/creator-schedule-and-core-context.md), [`acp-client-tech-spec.md`](../specs/agents/acp-client-tech-spec.md), [`schemas-external-consumer-boundary.md`](../specs/architecture/schemas-external-consumer-boundary.md). Historical (archived, not current SSOTs): `specs/archived/local-cloud-crate-architecture.md` (crate graph & local/cloud lines) and `specs/archived/daemon-runtime.md`.
 
 **Conflict order**: `AGENTS.md` > `v1-spec` / ADR > architecture SSOTs > this document > other knowledge.
 
@@ -70,9 +87,9 @@ Changing a decision in §2 follows the flow in §4. Do not silently swap crates,
 | 2.2 | **Orchestration SessionStorage** | `sqlx` (sqlite + runtime-tokio + macros + migrate + chrono + uuid) on the unified **`state.db`** via the `Arc<SqlitePool>` exposed by `nexus-local-db` (post-WS8). `orchestration_sessions` table added through the same `sqlx migrate` pipeline. | Keep `rusqlite` + `deadpool-sqlite`; separate `.db` file; `sea-orm` |  Task 3 (depends on WS8) |
 | 2.3 | **`nexus-local-db` / `state.db` engine** | **Migrated from `rusqlite` + `deadpool-sqlite` + bespoke sequential migrations → to `sqlx` (sqlite + runtime-tokio + macros + migrate)** as **V1.4 WS8** (done). Bespoke `Migration` registry replaced by `sqlx::migrate!`-driven `.sql` files. | Keep rusqlite (A-4 rejected by PM 2026-04-17) |  (new plan row); `local-db-refactor.md` revised at WS8 T9 |
 | 2.4 | **Platform user auth / JWT** | `jsonwebtoken` only | `oauth2` v5.x (deferred — not rejected) | TD-10 deferral (retired device-flow exploration) |
-| 2.5 | **Challenge arithmetic evaluator** | Hand-rolled shunting-yard (current implementation under `crates/nexus42/src/challenge/`) | `meval`; `evalexpr` | §3.5 below (DoS guard TODOs tracked here) |
-| 2.6 | **File watcher** (deferred) | Recommended stack when implemented: `notify` 8 + `notify-debouncer-full` + async mpsc | Raw `RecommendedWatcher` only | `crates/nexus42d/src/workspace/mod.rs` (deferral note) |
-| 2.7 | **Cron / scheduler** (V1.5 — implemented) | **V1.5 WS-D implemented** a hand-rolled clock poller in `crates/nexus-orchestration/src/scheduler/` using `cron` + `chrono-tz`. The four constraints from §3.7 are satisfied. See [`creator-schedule-and-core-context.md`](../specs/orchestration/creator-schedule-and-core-context.md) for the full design. | `tokio-cron-scheduler` 0.15.x (rejected); hand-rolled `cron` + `chrono-tz` + `sleep_until` (**selected & shipped**) | [`creator-schedule-and-core-context.md`](../specs/orchestration/creator-schedule-and-core-context.md) |
+| 2.5 | **Challenge arithmetic evaluator** | Hand-rolled shunting-yard (current implementation under `apps/nexus42/src/challenge/`) | `meval`; `evalexpr` | §3.5 below (DoS guard TODOs tracked here) |
+| 2.6 | **File watcher** (deferred) | Recommended stack when implemented: `notify` 8 + `notify-debouncer-full` + async mpsc | Raw `RecommendedWatcher` only | (deferral note; the legacy workspace module that carried it no longer exists) |
+| 2.7 | **Cron / scheduler** (implemented) | A hand-rolled clock poller on `cron` + `chrono-tz`. The daemon-side evaluator lives in `crates/nexus-orchestration/src/schedule/` (`cron_supervisor.rs`, `supervisor.rs`, `admission.rs`, `work_schedule.rs`); the core-facing scheduled-work lane lives in `crates/nexus-core/src/execution/schedules/` (`cron.rs`, `hosted_scheduler.rs`, `refresh.rs`). The four constraints in §3.7 are satisfied. See [`creator-schedule-and-core-context.md`](../specs/orchestration/creator-schedule-and-core-context.md) for the design. | `tokio-cron-scheduler` 0.15.x (rejected); hand-rolled `cron` + `chrono-tz` + `sleep_until` (**selected & shipped**) | [`creator-schedule-and-core-context.md`](../specs/orchestration/creator-schedule-and-core-context.md) |
 | 2.8 | **Layered config** (future) | `figment` + `secrecy` for redaction (when needed) | `config-rs`; hand-rolled | — (not yet scheduled) |
 | 2.9 | **Snapshot testing** (dev) | Recommended: `insta` + redactions for new CLI/HTTP integration tests | Hand-rolled golden files | — (optional; per-test-author discretion) |
 
@@ -195,7 +212,7 @@ sqlx = { version = "0.8", default-features = false, features = [
 
 ### 3.5 Challenge arithmetic evaluator
 
-**Decision**: retain the hand-written evaluator at `crates/nexus42/src/challenge/` (`parser.rs`, `eval.rs`, `noise.rs`, `numbers.rs`). No crate added.
+**Decision**: retain the hand-written evaluator at `apps/nexus42/src/challenge/` (`parser.rs`, `eval.rs`, `noise.rs`, `numbers.rs`). No crate added.
 
 **Rationale**: inputs are post-de-obfuscation, still adversarial. A whitelisting lexer is the only mechanism that can guarantee no letters, no function names, no scientific notation. Both `meval` and `evalexpr` require careful outer guards and are weaker along those dimensions.
 
@@ -211,7 +228,7 @@ sqlx = { version = "0.8", default-features = false, features = [
 
 ### 3.6 File watcher (deferred)
 
-**Current state**: `crates/nexus42d/src/workspace/mod.rs` explicitly defers a real watcher, using a best-effort staleness check. This section is guidance for whoever lands the real thing.
+**Current state**: no real watcher is implemented; the legacy workspace module that carried the deferral note no longer exists. This section is guidance for whoever lands the real thing.
 
 **Recommended stack**: `notify` 8 + `notify-debouncer-full` (~0.4) + async `mpsc` channel (`tokio::sync::mpsc` or `flume`).
 
@@ -229,27 +246,18 @@ sqlx = { version = "0.8", default-features = false, features = [
 
 ---
 
-### 3.7 Cron / scheduler — V1.4 defers; V1.5 decides
+### 3.7 Cron / scheduler — implemented (one current conclusion)
 
-**Decision**: V1.4 does **not** select a scheduler crate. `orchestration-engine.md` defers wall-clock cron to V1.5+; [`creator-schedule-and-core-context.md`](../specs/orchestration/creator-schedule-and-core-context.md) (WS7) delivers only the data model + state machine.
+**Decision (current):** the scheduler is implemented as a hand-rolled clock poller on `cron` + `chrono-tz`. The daemon-side evaluator is `crates/nexus-orchestration/src/schedule/` (`cron_supervisor.rs`, `supervisor.rs`, `admission.rs`, `work_schedule.rs`); the core-facing scheduled-work lane is `crates/nexus-core/src/execution/schedules/` (`cron.rs`, `hosted_scheduler.rs`, `refresh.rs`). `tokio-cron-scheduler` 0.15.x was considered and rejected (DST and per-key serialisation require wrappers).
 
-**Constraints any future implementation must satisfy** (binding on V1.5 design):
+**Constraints the implementation satisfies** (kept for review):
 
-1. **Wall-clock + tz-aware**: use `chrono::DateTime<Tz>` (or equivalent) — not `Instant`.
-2. **Per-key serialisation**: same creator + same Schedule MUST NOT double-run.
-3. **Graceful shutdown**: shutdown path waits for the currently-running orchestration node to finish (or forces abort after a configured timeout).
-4. **DST / clock-jump safety**: recompute next-run timestamps when wall-clock discontinuities are detected (compare `SystemTime` vs `Instant` elapsed deltas).
+1. **Wall-clock + tz-aware** — `chrono::DateTime<Tz>` (IANA tz via `chrono-tz`), not `Instant`.
+2. **Per-key serialisation** — the same creator + same Schedule does not double-run.
+3. **Graceful shutdown** — the shutdown path waits for the currently-running orchestration node (or forces abort after a configured timeout).
+4. **DST / clock-jump safety** — next-run timestamps are recomputed on wall-clock discontinuities.
 
-**V1.4 artefact**: a `trait Scheduler` placeholder (or, minimally, a module doc-comment enumerating the four constraints) in `nexus-orchestration` so V1.5 implementors have a stable call site to swap into.
-
-**V1.5 candidates**:
-
-- `tokio-cron-scheduler` 0.15.x — quickest to integrate; DST risk must be mitigated with external recompute logic; per-key serialisation and graceful shutdown require wrappers.
-- Hand-rolled `cron` + `chrono-tz` + `tokio::time::sleep_until` — ~150 LOC for the scheduler loop, but full control over all four constraints.
-
-Full comparison will be re-run in the V1.5 plan; do not pre-decide.
-
----
+> This section previously deferred the choice to a future V1.5 decision while the §2 ledger row already recorded it implemented; that split is resolved here. The scheduler is implemented — §2.7 and this section now state the same conclusion.
 
 ### 3.8 Layered configuration — `figment` (when needed)
 

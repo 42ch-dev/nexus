@@ -1,7 +1,7 @@
 ---
-module: nexus-daemon-runtime, nexus-acp-host, apps/nexus42, spoke-connect
+module: apps/nexus-service, nexus-acp-host, apps/nexus42, spoke-connect
 date: 2026-08-25
-last_updated: 2026-09-02
+last_updated: 2026-10-12
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: high
@@ -39,7 +39,7 @@ native CLI `--mcp-config`, third-party).
 The load-bearing reality that shaped the design: **two registries exist**.
 The **orchestration** registry (`nexus-orchestration/src/capability/mod.rs`,
 V1.172 graph capabilities + boot-scanned user WASM capabilities) and the
-**daemon host-tool registry** (`nexus-daemon-runtime/src/capability_registry.rs`,
+**daemon host-tool registry** (`crates/nexus-core/src/execution/peer_tools.rs`,
 `LazyLock`-frozen static rows with plain `fn` pointer handlers). The MCP
 catalog is neither of them — it is a read face over the **single dispatch
 spine** that resolves across all three origins. The `origin` vocabulary is
@@ -190,7 +190,7 @@ makes the honesty lockstep family machine-checkable in both directions:
 admitted ⇄ derivation, catalog ⇄ spine, `tools/list` ⇄ catalog, listing ⇄
 table, hello ⇄ allowlist, default-deny, named negatives, duplicate collision,
 eviction, reconnect lockstep, static-table pins, and the MCP refusal mapping
-(`crates/nexus-daemon-runtime/tests/honesty_lockstep.rs` +
+(`crates/nexus-core/src/connect/watch.rs` +
 `apps/nexus42/tests/e2e_peer_mcp.rs`). A second dispatch table or an MCP-only
 allowlist would silently re-open the authorization surface; the four-layer
 chain keeps all policy daemon-side.
@@ -221,11 +221,11 @@ chain keeps all policy daemon-side.
 
 ## Examples
 
-- Spine + admission: `crates/nexus-daemon-runtime/src/capability_registry.rs`
+- Spine + admission: `crates/nexus-core/src/execution/peer_tools.rs`
   (`dispatch_peer_tool` / `dispatch_user_cap` / `user_cap_catalog_admission`),
   `src/api/handlers/host_tool_executor.rs` (5-gate admission,
   `dispatch_from_worker`), `src/api/handlers/tools.rs` (catalog route).
-- Peer lane: `crates/nexus-daemon-runtime/src/connect/{accept.rs, session.rs,
+- Peer lane: `crates/nexus-core/src/connect/{accept.rs, session.rs,
   table.rs, config.rs, identity.rs}`; `connect/table.rs`
   (`McpCatalogRefusal::InputSchemaNotRootObject`).
 - Proof suites (all behind `connect-client`): `tests/peer_session.rs` (7),

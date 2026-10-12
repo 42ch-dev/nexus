@@ -1,6 +1,7 @@
 ---
 module: apps/desktop-electron packaging (electron packager → .app → zip/dmg) + CI
 date: 2026-10-09
+last_updated: 2026-10-12
 problem_type: build_error
 category: build-errors
 severity: high
@@ -28,6 +29,8 @@ tags:
 ---
 
 # Packed .app ships absolute staging symlinks → consumer launch fails
+
+> **Status: fixed** — v1.208 P2 W2 (commits `213b5eef2` + `96a62dfb6`). Regression: `apps/desktop-electron/tests/package-contract.test.mjs` pins both materialization branches (escaping file alias + directory alias) and the packed-app scan-to-receipt wiring.
 
 ## Problem
 

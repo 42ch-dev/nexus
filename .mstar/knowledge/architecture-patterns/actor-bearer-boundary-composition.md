@@ -1,6 +1,7 @@
 ---
 module: actor-runtime
 date: 2026-09-05
+last_updated: 2026-10-12
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: high
@@ -19,7 +20,6 @@ tags:
   - theory-of-mind
 related_components:
   - nexus-local-db
-  - nexus-daemon-runtime
   - nexus-moment-context-assembly
   - nexus-creator-memory
   - nexus-spoke-adapter

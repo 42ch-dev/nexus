@@ -1,6 +1,7 @@
 ---
-module: crates/nexus-daemon-runtime
+module: apps/nexus-service
 date: 2026-07-05
+last_updated: 2026-10-12
 problem_type: api_design
 category: api-design
 severity: low
@@ -158,8 +159,8 @@ Keep CSV helpers in a dedicated module so the page stays under the project modul
 
 ## Related
 
-- `crates/nexus-daemon-runtime/src/api/handlers/findings.rs` — `batch_update_findings_handler`
-- `crates/nexus-daemon-runtime/tests/findings_api.rs`
+- `crates/nexus-core/src/findings.rs` — `batch_update_findings_handler`
+- `crates/nexus-core/src/findings.rs`
 - `schemas/daemon-api/findings/batch-update-findings-request.schema.json`
 - `schemas/daemon-api/findings/batch-update-findings-response.schema.json`
 - `apps/web/src/pages/findings-page.tsx`

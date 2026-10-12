@@ -2,7 +2,7 @@
 module: nexus workspace (spoke-* crate + npm pins, libp2p lockstep)
 date: 2026-08-19
 problem_type: convention
-category: engineering
+category: conventions
 severity: medium
 source_iteration: V1.169
 created: 2026-08-19
@@ -17,9 +17,9 @@ tags:
   - lockfile
   - upgrade-procedure
 applies_when:
-  - "Bumping any spoke-* pin (Cargo + npm + drift-gate + docs pins must move together)"
-  - "A spoke release moves libp2p or another dependency that nexus42's feature-gated CLI shares types with"
-  - "Planning or reviewing a lockstep upgrade round end to end"
+  - '"Bumping any spoke-* pin (Cargo + npm + drift-gate + docs pins must move together)"'
+  - '"A spoke release moves libp2p or another dependency that nexus42''s feature-gated CLI shares types with"'
+  - '"Planning or reviewing a lockstep upgrade round end to end"'
 ---
 
 # Spoke Lockstep Upgrade Procedure

@@ -5,9 +5,15 @@ problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
 applies_when:
-  - "Bridging a synchronous callback (libp2p/network event loop) to async orchestrators"
-  - "Replacing block_in_place + block_on bridges with a bounded execution model"
-tags: [async-bridge, spawn-blocking, semaphore, deadline, tokio, event-loop]
+  - '"Bridging a synchronous callback (libp2p/network event loop) to async orchestrators"'
+  - '"Replacing block_in_place + block_on bridges with a bounded execution model"'
+tags:
+  - async-bridge
+  - spawn-blocking
+  - semaphore
+  - deadline
+  - tokio
+  - event-loop
 ---
 
 # Bounded sync→async bridge for event-loop handlers (Semaphore + spawn_blocking + deadline)

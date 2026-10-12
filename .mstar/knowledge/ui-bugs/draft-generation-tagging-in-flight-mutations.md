@@ -1,6 +1,7 @@
 ---
 module: apps/web (Outline canvas event inspector)
 date: 2026-09-30
+last_updated: 2026-10-12
 problem_type: ui_bug
 category: ui-bugs
 severity: medium
@@ -24,6 +25,8 @@ related_components:
 ---
 
 # Draft-state races on in-flight mutations: tag by (control, scope) generation
+
+> **Status: fixed** — v1.201 P2. Regression: `apps/web/src/components/canvas/outline-canvas/inspectors/event-inspector.test.tsx` (`002/R4` retype-back, other-control, and crossed-World cases).
 
 ## Symptoms
 

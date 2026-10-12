@@ -1,6 +1,7 @@
 ---
 module: actor-runtime
 date: 2026-09-07
+last_updated: 2026-10-12
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: high
@@ -21,7 +22,6 @@ tags:
   - sqlite
 related_components:
   - nexus-local-db
-  - nexus-daemon-runtime
   - nexus-agent-host
   - nexus-creator-memory
 ---
@@ -118,9 +118,9 @@ Each mechanism covers what the others cannot. Row CAS protects the SQLite truth;
 ## Examples
 
 - Revision CAS + epoch + active gate ordering — `crates/nexus-local-db/src/character.rs` (`update_character`, `transition_character`, `map_actor_constraint`, `check_expected_revision`), mirror in `crates/nexus-local-db/src/actor_world_binding.rs`.
-- Fence guards, epoch keys, phase machine — `crates/nexus-daemon-runtime/src/workspace/actor_sessions.rs` (`admit_character_activity`, `try_character_transition`, `retire_character_sessions`, `request_operation_cancel`, `begin_operation_finalizing`; tests `archive_try_refuses_while_activity_outstanding`, `transition_guard_rereads_epoch_under_exclusive_fence`, `retire_character_sessions_tombstones_owner_and_fresh_epoch_reuses_nothing`).
-- Transition ordering under fence — `crates/nexus-daemon-runtime/src/api/handlers/characters.rs` (`execute_character_lifecycle` ordering comment).
-- Drain, digest, persist — `crates/nexus-daemon-runtime/src/actor_run_capture.rs` (`drain_and_finalize_character_operation`, `try_persist_capture`, `DrainAccumulator`, `build_capture_digest`).
+- Fence guards, epoch keys, phase machine — `crates/nexus-core/src/actor_sessions.rs` (`admit_character_activity`, `try_character_transition`, `retire_character_sessions`, `request_operation_cancel`, `begin_operation_finalizing`; tests `archive_try_refuses_while_activity_outstanding`, `transition_guard_rereads_epoch_under_exclusive_fence`, `retire_character_sessions_tombstones_owner_and_fresh_epoch_reuses_nothing`).
+- Transition ordering under fence — `crates/nexus-core/src/actors.rs` (`execute_character_lifecycle` ordering comment).
+- Drain, digest, persist — `crates/nexus-core/src/execution/lifecycle.rs` (`drain_and_finalize_character_operation`, `try_persist_capture`, `DrainAccumulator`, `build_capture_digest`).
 - Receipt dedup, provenance — `crates/nexus-local-db/src/character_pending_review.rs` (`capture_character_run`, `capture_character_run_in_tx`, `receipt_matches_input`), migration `crates/nexus-local-db/migrations/20260906000003_character_run_capture.sql`.
-- Stale-session rejection and session admission order — `crates/nexus-daemon-runtime/src/api/handlers/agent_host.rs` (`prepare_prompt`, retired-session paths).
+- Stale-session rejection and session admission order — `crates/nexus-core/src/host.rs` (`prepare_prompt`, retired-session paths).
 - Published slice — the v1.185 iteration package is a local process artifact (not tracked at HEAD); the durable authorities are [§11](../../specs/architecture/actor-product-model.md) plus the sources above.

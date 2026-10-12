@@ -1,11 +1,21 @@
 ---
-module: crates/nexus-daemon-runtime (path_enrichment) + crates/nexus-acp-host (registry scan) + apps/desktop (sidecar)
+module: crates/nexus-agent-host (path_enrichment) + crates/nexus-acp-host (registry scan) + apps/desktop-electron (sidecar)
 date: 2026-07-11
-problem_type: architecture-pattern
+last_updated: 2026-10-12
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: high
-tags: [path-enrichment, agent-scan, gui-process, version-managers, nvm, volta, fnm, pnpm, yarn, which, login-shell, detection, false-negative]
-applies_when: any feature that probes PATH for binaries from a GUI-launched process; any "agents/tools show as not installed despite being installed" report; extending login_equivalent_bin_dirs()
+tags:
+  - path-enrichment
+  - agent-scan
+  - gui-process
+  - version-managers
+  - nvm
+  - volta
+  - fnm
+  - pnpm
+applies_when:
+  - 'any feature that probes PATH for binaries from a GUI-launched process; any "agents/tools show as not installed despite being installed" report; extending login_equivalent_bin_dirs()'
 ---
 
 # GUI-Process PATH Enrichment for Agent CLI Discovery
@@ -16,7 +26,7 @@ applies_when: any feature that probes PATH for binaries from a GUI-launched proc
 
 macOS GUI apps (including the Tauri desktop shell) inherit a **minimal PATH** such as `/usr/bin:/bin:/usr/sbin:/sbin` — not the user's login-shell PATH. Homebrew, npm-global, cargo, and especially **version-manager** bin directories (`~/.nvm/versions/node/*/bin`, `~/.volta/bin`, etc.) are invisible to `which::which()` during `POST /v1/daemon/agent-host/scan`. Result: **every** agent reports `installed: false`, forcing the user into the custom-launch escape hatch — even though they installed several agent CLIs.
 
-V1.101 introduced `login_equivalent_bin_dirs()` in `crates/nexus-daemon-runtime/src/path_enrichment.rs` to merge common user bin dirs into the process PATH at daemon boot. V1.110 (FB-D3) closed the largest remaining gaps: **nvm, volta, fnm, pnpm, yarn**.
+V1.101 introduced `login_equivalent_bin_dirs()` in `crates/nexus-agent-host/src/discovery/path_enrichment.rs` to merge common user bin dirs into the process PATH at daemon boot. V1.110 (FB-D3) closed the largest remaining gaps: **nvm, volta, fnm, pnpm, yarn**.
 
 ## Guidance
 

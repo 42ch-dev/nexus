@@ -1,6 +1,7 @@
 ---
-module: apps/nexus42 (CLI leaves), nexus-daemon-runtime (error contract)
+module: apps/nexus42 (CLI leaves), apps/nexus-service (error contract)
 date: 2026-08-26
+last_updated: 2026-10-12
 problem_type: convention
 category: conventions
 severity: medium
@@ -34,7 +35,7 @@ the daemon actually delivers — not with what the docs guessed it delivers.
 
 ### 1. Error-code honesty — document and test the ACTUAL public code
 
-The daemon error envelope is two-tier (`crates/nexus-daemon-runtime/src/api/errors.rs`):
+The daemon error envelope is two-tier (`apps/nexus-service/src/errors.ts`):
 
 - `error_code()` returns a **coarse public code** from an allowlist
   (`bad_request`, `not_found`, `invalid_input`, `strategy_conflict`,

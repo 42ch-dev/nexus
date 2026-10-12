@@ -1,6 +1,7 @@
 ---
 module: apps/design-studio
 date: 2026-09-10
+last_updated: 2026-10-12
 problem_type: test_failure
 category: test-failures
 severity: medium
@@ -19,6 +20,8 @@ tags:
 ---
 
 # jsdom regressions: a browser-only API constructed unconditionally
+
+> **Status: fixed** — the construction is guarded (`if (typeof ResizeObserver === 'undefined') return;`) after the initial measurement in `apps/design-studio/src/App.tsx`, so the App suite renders the shell again.
 
 ## Problem
 

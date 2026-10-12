@@ -1,6 +1,7 @@
 ---
 module: .github/workflows/release.yml
 date: 2026-09-30
+last_updated: 2026-10-12
 problem_type: integration_issue
 category: integration-issues
 severity: medium
@@ -21,6 +22,8 @@ tags:
 ---
 
 # `gh release upload <file>#<label>` sets a display label, not the asset name
+
+> **Status: fixed** — `1f7a5fb38` (queue) + `9ee32d5aa` (draft-first upload/verify/publish). Current `.github/workflows/release.yml` stages architecture-specific basenames (`Nexus-${version}-darwin-${arch}-SHA256SUMS`) and verifies the remote asset set before publishing.
 
 ## Problem
 

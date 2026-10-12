@@ -1,14 +1,22 @@
 ---
-module: nexus-orchestration + nexus42 CLI + nexus-daemon-runtime
+module: nexus-orchestration + nexus42 CLI + nexus-core
 date: 2026-08-21
+last_updated: 2026-10-12
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
 applies_when:
-  - "Moving a validation/model core out of a CLI binary so a daemon can consume it"
-  - "Two surfaces (CLI + HTTP) must share one validator with byte-identical error messages"
-  - "A daemon crate cannot depend on the CLI crate (dependency direction is CLI → daemon)"
-tags: [shared-core, validation, cli, daemon, dependency-direction, stable-error-codes, re-export]
+  - '"Moving a validation/model core out of a CLI binary so a daemon can consume it"'
+  - '"Two surfaces (CLI + HTTP) must share one validator with byte-identical error messages"'
+  - '"A daemon crate cannot depend on the CLI crate (dependency direction is CLI → daemon)"'
+tags:
+  - shared-core
+  - validation
+  - cli
+  - daemon
+  - dependency-direction
+  - stable-error-codes
+  - re-export
 ---
 
 # Shared Validation Core Migration (CLI → Library Crate)
@@ -21,7 +29,7 @@ V1.171 P2 (AR-29) added daemon HTTP endpoints for per-Work cron config
 (`apps/nexus42/src/commands/creator/works/cron.rs`) with stable error codes
 (`E_CRON_INVALID_EXPR`, `E_CRON_INVALID_TZ`, `E_CRON_ALL_ROLES_DISABLED`,
 `E_CRON_CONFLICTING_FLAGS`). The daemon cannot depend on `nexus42`
-(nexus42 → daemon-runtime direction), so the validation core had to move to a
+(nexus42 → daemon HTTP layer direction, before that host was retired in v1.193), so the validation core had to move to a
 library crate both can import.
 
 ## Guidance

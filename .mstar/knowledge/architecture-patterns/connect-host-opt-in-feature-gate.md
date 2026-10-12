@@ -1,5 +1,5 @@
 ---
-module: nexus-spoke-adapter, nexus-daemon-runtime, apps/nexus42
+module: nexus-spoke-adapter, apps/nexus-service, apps/nexus42
 date: 2026-08-04
 problem_type: architecture_pattern
 category: architecture-patterns
@@ -13,7 +13,7 @@ tags:
   - op-refusal
   - fl-r
   - n-c0
-last_updated: 2026-09-24
+last_updated: 2026-10-12
 applies_when:
   - "Adopting a heavy optional transport/network dependency behind a feature gate"
   - "Building an honest capability manifest for a peer-facing surface"

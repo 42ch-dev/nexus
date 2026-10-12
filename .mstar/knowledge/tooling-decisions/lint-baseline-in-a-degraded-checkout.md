@@ -19,7 +19,7 @@ tags:
   - tsconfig-error
   - build-order
   - evidence-capture
-last_updated: 2026-10-07
+last_updated: 2026-10-12
 ---
 
 # A lint/warning baseline is only a baseline if it was measured in a healthy checkout
@@ -45,7 +45,7 @@ Root cause of the artifacts (observed chain, with one labelled inference): the m
 
 The single healthy-environment row had a different cause again: `apps/desktop-electron/src/utility-host.ts:41` imports a type from `@42ch/nexus-service`, whose `types` point at `dist/index.d.ts`; in a CI-equivalent checkout that package's declarations are not built, so the import resolves to an error type. Building the workspace type dependencies in dependency order removes the row — no rule and no file has to be disabled for it.
 
-Decisions taken from the measurement (and the reason this is a *decision* record, not a war story): the React/ReactFlow `error`-type family is **not** a tool false positive on valid input and gets no override (`apps/web/src/components/ui/table.tsx`, the representative file, has five rows in the degraded capture and zero in the healthy one); the close-out baseline is the measured 56, not the 88; the single build-order row is repaired at the build step; the 28 `no-console` rows are the existing bounded tooling/CLI stdout policy extended **per exact file** (a 14-path `overrides[].files` list under the single `no-console` rule — no directory or workspace glob); the main checkout's `node_modules` needs a reinstall, which is an environment repair outside the lint work's write scope and is reported, not edited.
+Decisions taken from the measurement (and the reason this is a *decision* record, not a war story): the React/ReactFlow `error`-type family is **not** a tool false positive on valid input and gets no override (`apps/web/src/components/ui/table.tsx`, the representative file, has five rows in the degraded capture and zero in the healthy one); the close-out baseline is the current CI gate — root `pnpm run lint` with `options.denyWarnings: true`, i.e. zero warnings — not the 88; the single build-order row is repaired at the build step; the 28 `no-console` rows are the existing bounded tooling/CLI stdout policy extended **per exact file** (a 14-path `overrides[].files` list under the single `no-console` rule — no directory or workspace glob); the main checkout's `node_modules` needs a reinstall, which is an environment repair outside the lint work's write scope and is reported, not edited.
 
 Landed gate (`typescript-checks` job): build workspace type dependencies in dependency order, then `pnpm run lint` (root `oxlint .`) with `options.denyWarnings: true`, so any warning fails the job; the path filter was widened until 797/797 linted files are covered.
 
@@ -81,7 +81,7 @@ Landed gate (`typescript-checks` job): build workspace type dependencies in depe
 ```bash
 pnpm install --frozen-lockfile
 pnpm --filter @42ch/nexus-contracts run build        # exactly the step CI runs before Lint
-pnpm exec oxlint --format json . > evidence.json    # authoritative: 56 warnings, 0 errors, exit 0
+pnpm exec oxlint --format json . > evidence.json    # authoritative target: the CI gate — zero warnings, 0 errors, exit 0
 pnpm run lint                                       # same run, human-readable
 ```
 
@@ -119,7 +119,7 @@ oxlint --format json apps/desktop-electron/scripts/proof-contract.mjs   # :264 a
 
 ## Evidence
 
-- Measurement: `pnpm exec oxlint --format json .` at `c74e0274e91d65a131def0fbb0e39a742dad7a0b` — healthy 56 warnings / 0 errors / 24 files / exit 0; main checkout 156 rows (88 warnings / 68 errors) / exit 1; toolchain pins and the tool's 797-file scope recorded with each capture.
+- Measurement: `pnpm exec oxlint --format json .` at `c74e0274e91d65a131def0fbb0e39a742dad7a0b` — healthy 0 errors / exit 0 (warnings 56 at that moment; superseded, see Postscript); main checkout 156 rows (88 warnings / 68 errors) / exit 1; toolchain pins and the tool's 797-file scope recorded with each capture.
 - Root-cause captures: `apps/{desktop-electron,nexus-service}/node_modules/@types/node` + `packages/nexus-native/node_modules/@types/node` link targets (`test -e` / `readlink -f`), `tsc -p` and `tsgolint --list-files` per project in both checkouts, `md5` of the three `tsconfig.json` across checkouts, dependency-ordered build isolation of the build-order row.
 - Landed state: `.oxlintrc.json` (`options.typeAware: true`, `options.denyWarnings: true`, the 14-file per-file `no-console` exception list, the four pre-existing NRTC file exceptions unchanged, no `apps/web/**` override); `.github/workflows/ci.yml` `typescript-checks` (dependency-ordered type build → Lint; path filter covering 797/797 linted files). Final `pnpm run lint`: zero warnings.
 - Sibling discipline: [deliberate-guard-scope-and-clippy-allow.md](../conventions/deliberate-guard-scope-and-clippy-allow.md) (the Rust-side rule for classifying a lint finding as repair-vs-suppress and for scoping an `#[allow]`), [pnpm-toolchain-pin-and-supply-chain-age.md](../conventions/pnpm-toolchain-pin-and-supply-chain-age.md) (install/toolchain preconditions that change what a local run measures), [capability-parity-receipt.md](../workflow-patterns/capability-parity-receipt.md) (`[UNVERIFIED]` discipline for claims whose evidence was never produced — the same rule that keeps "CI fails on any warning" unverified until a workflow run exists).

@@ -2,11 +2,25 @@
 module: modules/nexus-module-sdk + nexus-module-manifest + nexus-module-test
 date: 2026-08-21
 problem_type: architecture_pattern
-category: engineering
+category: architecture-patterns
 severity: high
 plan_id: 2026-08-20-v1.170-p0-computable-dx-spine
-applies_when: [evolving the official module SDK surface, adding SDK types or accessor helpers, adding validation rules to the manifest contract, adding a host import, authoring new module crates, extending the drift-guard tooling]
-tags: [wasm-sdk, compute-module, abi, drift-guard, manifest, nexus-entry, golden-fixtures, byte-compat]
+applies_when:
+  - evolving the official module SDK surface
+  - adding SDK types or accessor helpers
+  - adding validation rules to the manifest contract
+  - adding a host import
+  - authoring new module crates
+  - extending the drift-guard tooling
+tags:
+  - wasm-sdk
+  - compute-module
+  - abi
+  - drift-guard
+  - manifest
+  - nexus-entry
+  - golden-fixtures
+  - byte-compat
 ---
 
 # Compute Module SDK Authoring Pattern

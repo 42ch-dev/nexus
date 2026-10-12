@@ -1,12 +1,19 @@
 ---
-module: crates/nexus-daemon-runtime
+module: apps/nexus-service
 date: 2026-07-22
-problem_type: architecture-pattern
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: high
-tags: [daemon, axum, matchit, routing, 404, orchestration]
-applies_when: adding or changing parametric HTTP routes under crates/nexus-daemon-runtime; diagnosing empty-body framework 404 vs handler envelope 404
-last_updated: 2026-07-23
+tags:
+  - daemon
+  - axum
+  - matchit
+  - routing
+  - 404
+  - orchestration
+applies_when:
+  - adding or changing parametric HTTP routes under apps/nexus-service; diagnosing empty-body framework 404 vs handler envelope 404
+last_updated: 2026-10-12
 ---
 
 # Daemon API matchit colon capture
@@ -21,7 +28,7 @@ Creator routes were fixed earlier; orchestration presets/sessions/modules were f
 
 ## Guidance
 
-1. **Register parametric routes with `:param` only** in `crates/nexus-daemon-runtime/src/api/mod.rs` (and any new route modules).
+1. **Register parametric routes with `:param` only** in `apps/nexus-service/src/routes.ts` (and any new route modules).
 2. **Never use `{param}`** in Axum/matchit path templates in this crate.
 3. **Distinguish failure signatures:**
    - Framework miss -> empty 404 body -> route pattern / registration defect.

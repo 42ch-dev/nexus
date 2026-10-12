@@ -1,11 +1,20 @@
 ---
 module: local-api, web-ui
 date: 2026-07-01
-problem_type: knowledge
+last_updated: 2026-10-12
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: low
-tags: [pagination, cursor, has-more, count-ui, wire-contract, local-api, nexus-contracts]
-applies_when: building a UI count/badge affordance over a Nexus cursor-paginated list endpoint
+tags:
+  - pagination
+  - cursor
+  - has-more
+  - count-ui
+  - wire-contract
+  - local-api
+  - nexus-contracts
+applies_when:
+  - building a UI count/badge affordance over a Nexus cursor-paginated list endpoint
 ---
 
 # Cursor pagination without `total` — render honest "N+" lower-bound count labels via `has_more`
@@ -60,7 +69,7 @@ least this many" rather than misreporting an exact number that is wrong.
 ## When to Apply
 
 - Any "N items" badge, count chip, or summary stat in `apps/web` (or
-  `apps/desktop`) that consumes a cursor-paginated Local API list endpoint.
+  `apps/desktop-electron`) that consumes a cursor-paginated Local API list endpoint.
 - Confirmed paginated (no `total`): `listWorks`, `listChapters`, `listFindings`,
   `listPendingReviews`, `getWorldKbGraph` (entity list portion), and any future
   endpoint returning `PaginationInfo`.

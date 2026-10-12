@@ -6,6 +6,10 @@ source_iteration: V1.169
 created: 2026-08-19
 last_updated: 2026-08-19
 status: active
+problem_type: api_design
+module: apps/nexus-service
+date: 2026-08-19
+severity: medium
 ---
 
 # Field-Level Error Envelope for Generated-DTO Write Surfaces

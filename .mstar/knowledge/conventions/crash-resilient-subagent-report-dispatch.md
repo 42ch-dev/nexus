@@ -1,12 +1,18 @@
 ---
 module: tooling
 date: 2026-08-15
-problem_type: knowledge
+problem_type: convention
 category: conventions
 severity: low
-tags: [subagent-crash, evidence-preservation, report-skeleton, qa-dispatch, redispatch]
+tags:
+  - subagent-crash
+  - evidence-preservation
+  - report-skeleton
+  - qa-dispatch
+  - redispatch
 last_updated: 2026-08-15
-applies_when: Dispatching long-running verification/review subagents (QA gates, large test suites); any subagent that crashed mid-run before writing its output artifact
+applies_when:
+  - "Dispatching long-running verification/review subagents (QA gates, large test suites); any subagent that crashed mid-run before writing its output artifact"
 ---
 
 # Crash-Resilient Subagent Report Dispatch (Skeleton-First)

@@ -1,6 +1,7 @@
 ---
-module: nexus-orchestration, nexus-daemon-runtime, graph-flow
+module: nexus-orchestration, nexus-core, graph-flow
 date: 2026-09-02
+last_updated: 2026-10-12
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
@@ -105,9 +106,9 @@ worse than no resume, because it is invisible until side effects repeat.
 
 ## Examples
 
-- Driver + resume: `crates/nexus-daemon-runtime/src/preset_run.rs`
+- Driver + resume: `crates/nexus-orchestration/src/resume_rules.rs`
   (`drive_preset_run`, `resume_driven_sessions`, `ResumeDecision`).
-- Boot wiring: `crates/nexus-daemon-runtime/src/boot.rs` (recover +
+- Boot wiring: `apps/nexus-service/src/main.ts` (recover +
   spawn + CancellationToken watcher).
 - Ops E2E: `apps/nexus42/tests/ops_e2e_converge_timeout.rs` (DR-06
   timeout/reroute/typed-fail), `apps/nexus42/tests/ops_e2e_resume_restart.rs`

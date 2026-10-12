@@ -1,10 +1,18 @@
 ---
-module: daemon-runtime
+module: apps/nexus-service
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: high
 date: 2026-07-05
-tags: [daemon-api, remote-bind, security, loopback, api-key, axum, boot]
+last_updated: 2026-10-12
+tags:
+  - daemon-api
+  - remote-bind
+  - security
+  - loopback
+  - api-key
+  - axum
+  - boot
 ---
 
 # Daemon API Remote-Bind Gate
@@ -83,7 +91,7 @@ Use this pattern whenever a local-first service adds an opt-in remote listener. 
 
 ## V1.90 references
 
-- Implementation: `crates/nexus-daemon-runtime/src/boot.rs`
-- Auth middleware: `crates/nexus-daemon-runtime/src/api/auth_middleware.rs`
-- Spec: `.mstar/specs/archived/daemon-runtime.md`
-- Surface conventions: `.mstar/specs/runtime/daemon-api-surface-conventions.md`
+- Implementation: `apps/nexus-service/src/main.ts`
+- Auth middleware: `apps/nexus-service/src/security.ts`
+- Spec (historical, V1.90; superseded): `.mstar/specs/archived/daemon-runtime.md`
+- Surface conventions (current): `.mstar/specs/runtime/daemon-api-surface-conventions.md`

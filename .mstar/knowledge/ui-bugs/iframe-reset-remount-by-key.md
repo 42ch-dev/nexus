@@ -1,6 +1,7 @@
 ---
 module: apps/design-studio
 date: 2026-09-10
+last_updated: 2026-10-12
 problem_type: ui_bug
 category: ui-bugs
 severity: medium
@@ -20,6 +21,8 @@ tags:
 ---
 
 # Iframe reset/retry must remount by key, not just recompute the URL
+
+> **Status: fixed** — frames are keyed on the effective reset counter in `apps/design-studio/src/components/gallery-comparison.tsx`; Reset and Retry both route through the same `resetFrames()`.
 
 ## Problem
 

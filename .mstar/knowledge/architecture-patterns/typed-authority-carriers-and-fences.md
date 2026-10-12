@@ -1,6 +1,7 @@
 ---
 module: nexus-core (actor admission, activity fencing, host authority, execution ownership)
 date: 2026-09-17
+last_updated: 2026-10-12
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: high
@@ -12,7 +13,6 @@ applies_when:
   - enforcing one owner per workspace DB across processes and within one process
 related_components:
   - nexus-core
-  - nexus-daemon-runtime
   - nexus-local-db
   - nexus-agent-host
 tags:

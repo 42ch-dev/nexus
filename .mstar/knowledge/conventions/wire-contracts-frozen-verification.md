@@ -1,7 +1,7 @@
 ---
-module: schemas + crates/nexus-contracts + packages/nexus-contracts + crates/nexus-daemon-runtime
+module: schemas + crates/nexus-contracts + packages/nexus-contracts + apps/nexus-service
 date: 2026-07-18
-last_updated: 2026-08-25
+last_updated: 2026-10-12
 problem_type: convention
 category: conventions
 severity: medium
@@ -47,7 +47,7 @@ Run these commands against the plan branch (compared to the iteration base branc
 | 1 | `git diff --stat schemas/` | **empty** | New schema files or edits to existing schemas |
 | 2 | `git diff --stat crates/nexus-contracts/` | **empty** (or only codegen-regenerated changes from unchanged schemas) | Rust generated type changes, hand-written DTO changes |
 | 3 | `git diff --stat packages/nexus-contracts/` | **empty** (or only codegen-regenerated changes from unchanged schemas) | npm TypeScript generated type changes |
-| 4 | `git diff --stat crates/nexus-daemon-runtime/src/api/` | **empty** | New HTTP route registrations, handler additions, router wiring changes |
+| 4 | `git diff --stat apps/nexus-service/src/` | **empty** | New HTTP route registrations, handler additions, router wiring changes |
 | 5 | `pnpm run codegen` on a clean checkout -> `git status` under `**/generated/` | **no untracked, no modified** | Codegen drift — regenerated output that differs from committed state |
 | 6 | `jq '.version' packages/nexus-contracts/package.json` | matches pre-iteration version | Accidental npm version bump |
 | 7 | Search `schemas/` for the new surface kind name (e.g., `rg -n '"timeline"' schemas/`) | only existing pre-shipped entries present | New schema entries for the frontend-only kind |
@@ -101,7 +101,7 @@ exemptions**:
 | 1 | `schemas/` diff | **EMPTY — binding, no exemption** |
 | 2 | `crates/nexus-contracts/src/generated/**` diff | **EMPTY — binding** (no codegen regen) |
 | 3 | `packages/nexus-contracts/**` diff + npm version | **EMPTY — binding** |
-| 4 | `crates/nexus-daemon-runtime/src/api/` diff | = **only** the sanctioned route registrations/handlers named in the plan's architecture locks (e.g. AR-20/AR-29) |
+| 4 | `apps/nexus-service/src/` diff | = **only** the sanctioned route registrations/handlers named in the plan's architecture locks (e.g. AR-20/AR-29) |
 | 5 | codegen clean on clean checkout | binding |
 
 New DTOs land in `crates/nexus-contracts/src/local/**` (hand-coded local tier,
@@ -124,7 +124,7 @@ are the point of the plan and stay audited:
 | 1 | `schemas/` | **only** the named additive field (e.g. `origin` enum `["builtin","user"]` + `"default": "builtin"`). Nothing else. `schema_version` stays. `additionalProperties` stays. |
 | 2 | `crates/nexus-contracts/src/generated/**` | regenerated via `pnpm run codegen` |
 | 3 | `packages/nexus-contracts/**` | regenerated TS + **npm minor bump** |
-| 4 | `crates/nexus-daemon-runtime/src/api/` | no new routes unless named; handler populates the new field from a domain marker |
+| 4 | `apps/nexus-service/src/` | no new routes unless named; handler populates the new field from a domain marker |
 | 5 | codegen clean on clean checkout | binding |
 | 6 | `crates/nexus-contracts/src/local/**` | local DTO may add a `String` (serialized camelCase). The domain enum (`CapabilityOrigin`) must **not** cross into `nexus-contracts` (dependency direction); the handler maps. |
 

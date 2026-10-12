@@ -1,13 +1,23 @@
 ---
 module: nexus-contracts, rust-workspace
 date: 2026-08-07
-problem_type: test_failure
+problem_type: workflow_issue
 category: workflow-patterns
 severity: medium
-symptoms: ["schema_drift_detection (crates/nexus-contracts/tests) fails with 199 \"Cannot read schemas/…: No such file or directory\" errors", "all 225 schema files exist on disk and in git (git status clean)", "re-running without source changes keeps failing — the same cached binary is reused"]
+symptoms:
+  - '"schema_drift_detection (crates/nexus-contracts/tests) fails with 199 \"Cannot read schemas/…: No such file or directory\" errors"'
+  - '"all 225 schema files exist on disk and in git (git status clean)"'
+  - '"re-running without source changes keeps failing — the same cached binary is reused"'
 root_cause: a stale test binary in the shared CARGO_TARGET_DIR was compiled while a since-removed git worktree was active, baking in that worktree's CARGO_MANIFEST_DIR; Cargo fingerprinting sees unchanged sources and reuses the binary, so the env!()-derived workspace_root points at the deleted worktree directory and every relative schemas/ read fails with ENOENT
 resolution_type: environment_setup
-tags: [cargo, cargo-target-dir, git-worktree, stale-binary, manifest-dir, schema-drift-detection, test-failure]
+tags:
+  - cargo
+  - cargo-target-dir
+  - git-worktree
+  - stale-binary
+  - manifest-dir
+  - schema-drift-detection
+  - test-failure
 ---
 
 # Shared CARGO_TARGET_DIR + Worktree Removal Poisons Compiled Test Binaries with a Stale CARGO_MANIFEST_DIR

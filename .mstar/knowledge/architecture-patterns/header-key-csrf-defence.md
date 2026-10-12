@@ -1,11 +1,20 @@
 ---
-module: daemon-runtime-security
+module: apps/nexus-service
 date: 2026-07-05
-problem_type: architecture-decision
+last_updated: 2026-10-12
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-tags: [csrf, security, auth, origin-allowlist, header-key, remote-bind, local-first]
-applies_when: considering adding a CSRF token framework (double-submit cookie / synchronizer token / SameSite session) to a Daemon API that authenticates remote clients via a custom request header
+tags:
+  - csrf
+  - security
+  - auth
+  - origin-allowlist
+  - header-key
+  - remote-bind
+  - local-first
+applies_when:
+  - considering adding a CSRF token framework (double-submit cookie / synchronizer token / SameSite session) to a Daemon API that authenticates remote clients via a custom request header
 ---
 
 # Header-Key Auth Is Its Own CSRF Defence — Don't Add a Token Framework
@@ -31,7 +40,7 @@ This is the complete CSRF defence for the header-key model. Adding a double-subm
 
 ## Why This Matters
 
-A future agent or reviewer seeing "no CSRF tokens" on a remotely-reachable API will reach for the familiar remedy. Recording the rationale here (and in `daemon-runtime.md` §16.3) prevents a well-intentioned but redundant CSRF layer from being added — which would imply a session model the daemon deliberately does not have, and would muddy the auth boundary.
+A future agent or reviewer seeing "no CSRF tokens" on a remotely-reachable API will reach for the familiar remedy. Recording the rationale here (and in the archived `daemon-runtime.md` §16.3) prevents a well-intentioned but redundant CSRF layer from being added — which would imply a session model the daemon deliberately does not have, and would muddy the auth boundary.
 
 ## When to Apply
 
@@ -46,4 +55,4 @@ A future agent or reviewer seeing "no CSRF tokens" on a remotely-reachable API w
 
 ## Source
 
-V1.92 iteration (Remote-Access Hardening), grill-me direction-lock + `daemon-runtime.md` §16.3 (CSRF defence by header-key). QC2 (security lens) independently confirmed: "Custom header triggers CORS preflight; `require_allowed_origin` runs before `require_api_key`; no state-changing mutation reachable without the header in KeyedAll mode."
+V1.92 iteration (Remote-Access Hardening), grill-me direction-lock + `daemon-runtime.md` §16.3 (archived; CSRF defence by header-key). QC2 (security lens) independently confirmed: "Custom header triggers CORS preflight; `require_allowed_origin` runs before `require_api_key`; no state-changing mutation reachable without the header in KeyedAll mode."

@@ -18,7 +18,7 @@ applies_when:
   - "defining any button background/text colour combination"
   - "choosing between the ink pigment (brand-deep-blue) and the cobalt interaction signal"
   - "extending elevation/motion, or registering a structural (non-color) CSS variable family"
-last_updated: 2026-09-10
+last_updated: 2026-10-12
 ---
 
 # Nexus Brand & Design Token Hierarchy
@@ -156,7 +156,7 @@ After a scale reinterpretation, surfaces that still meant **deep structure** but
 1. **H1 (retain):** Canvas must stay **fully opaque RGB** (`hasAlpha: false`) — never transparent margins/`INSET_RATIO` alpha that defeat the macOS squircle mask.
 2. **H6:** Bake a **visible squircle plate** in `compose-app-icon.mjs` — opaque plate-colour canvas + ~6% opaque inset + ~22% corner radius clip (margin pixels remain plate colour, not alpha).
 3. **H6 contrast (V1.136):** Margin/plate **must not share the same hex** — same-colour bakes yield 0 non-plate border pixels (geometry exists but is invisible). Use a contrasting margin and verify with a border-pixel scan before claiming compose success.
-4. **H7:** `pnpm dev:desktop` must run `icons:generate` before `tauri dev`.
+4. **H7:** `pnpm dev:desktop` must run `icons:generate` before the Electron desktop dev launch.
 5. **Done gate:** a live Dock squircle confirm — Studio VI-004 / PNG opacity alone are **not** Dock-done.
 
 **Removed:** `logo-color.svg` / `logoVariants.color` — redundant; do not resurrect.
