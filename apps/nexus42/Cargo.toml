@@ -180,10 +180,13 @@ nexus-wasm-host = { path = "../../crates/nexus-wasm-host" }
 # V1.174 P1 T0 (AR-75 C-1): scripted in-process ACP agent probe
 # (`tests/mcp_acp_probe.rs`) — the SDK's Agent/Client roles + Channel
 # duplex run the full newSession.mcp_servers round trip without a live
-# LLM. Same =2.2.0 pin already in the shipped graph via nexus-acp-host
-# (stable v1 API only; no unstable protocol features); dev-only,
-# tests-only (graph pins use --edges normal, dev-deps excluded).
-agent-client-protocol = "=2.2.0"
+# LLM. Same `=3.2.0` pin as the shipped graph via nexus-acp-host; the v3
+# SDK enables no features by default (`default = []`; `process`, `stdio`,
+# `schemars` are opt-in and none is enabled), stable protocol v1 only;
+# dev-only, tests-only (graph pins use --edges normal, dev-deps excluded).
+# None enabled: Nexus owns child-process lifecycle with Tokio + ByteStreams
+# and its wire schemas in `schemas/` (rationale: crates/nexus-acp-host/Cargo.toml).
+agent-client-protocol = "=3.2.0"
 # v1.210 P3 T2 (D6): the `connect_event_consumer` example opens the WS event
 # lane directly (it is the consumer-side transport seam — `nexus_core`
 # exposes `WsTransport`, not a dialer), so it needs the same

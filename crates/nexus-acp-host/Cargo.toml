@@ -11,10 +11,14 @@ description = "ACP client host library (registry + transport + adapter) — prov
 workspace = true
 
 [dependencies]
-# 2026-09-10 dependency sweep (#281): 0.11.1 → 2.1.0. Stable v1 API only
-# (`schema::v1`, `ProtocolVersion::V1`); no unstable_protocol_v2 features.
-# ACP 2.2.0 core no longer depends on rmcp (companion to #280).
-agent-client-protocol = "=2.2.0"
+# 2026-09-10 dependency sweep (#281): 0.11.1 → 2.1.0. Pinned `=3.2.0`;
+# stable protocol v1 only (`schema::v1`, `ProtocolVersion::V1`).
+# The v3 SDK enables no features by default (`default = []`): its native
+# transports (`process`, `stdio`) and JSON-Schema generation (`schemars`)
+# are opt-in, and Nexus enables none of them — it owns child-process
+# lifecycle with Tokio + `ByteStreams` and owns its wire schemas in
+# `schemas/`. No `unstable_*` feature is enabled.
+agent-client-protocol = "=3.2.0"
 tokio = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
