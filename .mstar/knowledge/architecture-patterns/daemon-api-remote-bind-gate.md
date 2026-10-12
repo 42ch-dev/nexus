@@ -31,7 +31,7 @@ The Nexus service serves the **Daemon API** over HTTP. By default it binds to lo
 
 ## Decision
 
-Enforce the gate **before the listener is opened** and again on every request, failing closed with a clear error. Do not rely on the auth middleware alone: middleware runs per-request and can be bypassed by network-level mistakes or misconfigured proxies. A startup gate prevents accidental exposure entirely.
+Enforce the gate **before the listener is opened** and again on every *guarded* request, failing closed with a clear error. Do not rely on the auth middleware alone: middleware runs per-request and can be bypassed by network-level mistakes or misconfigured proxies. A startup gate prevents accidental exposure entirely.
 
 ## Implementation
 
@@ -42,7 +42,7 @@ Enforce the gate **before the listener is opened** and again on every request, f
 - non-loopback without `--tls-cert`/`--tls-key` → `403 forbidden`;
 - non-loopback without an API key → `401 auth_required`.
 
-**Request gate** — `checkApiKey` (`apps/nexus-service/src/security.ts:113-120`) re-checks on each request via `validateBindPolicy` (`security.ts:44-58`): a non-loopback peer without `--allow-remote` is `403 forbidden`, and non-loopback without TLS cert/key is `403 forbidden`. Keyed mode (`authMode == 'keyed_all'`) requires the `x-api-key` header to constant-time-match `config.apiKey`; in keyless mode a non-loopback peer is refused `403 forbidden`, so loopback bypass can never leak to a remote address.
+**Request gate** — `checkApiKey` (`apps/nexus-service/src/security.ts:83-89`) re-checks on each **guarded** request via `validateBindPolicy` (`security.ts:44-58`): a non-loopback peer without `--allow-remote` is `403 forbidden`, and non-loopback without TLS cert/key is `403 forbidden`. Keyed mode (`authMode == 'keyed_all'`) requires the `x-api-key` header to constant-time-match `config.apiKey`; in keyless mode a non-loopback peer is refused `403 forbidden`, so loopback bypass can never leak to a remote address. The service invokes it only for routes whose tier is not `unguarded` (`apps/nexus-service/src/server.ts:377-389`); explicitly unguarded runtime surfaces (e.g. the cert-fingerprint route, `apps/nexus-service/src/routes.ts:294-301`) stay unauthenticated **by design**.
 
 **Serving** — when both PEMs are present the listener is `node:https` (`createHttpsServer`, `apps/nexus-service/src/server.ts:461-467`); otherwise `node:http`.
 
@@ -55,7 +55,7 @@ The original V1.90 gate lived in the Rust daemon: a pure function `ensure_remote
 - **Fail-closed**: a missing flag, cert/key, or key stops the service before a socket is opened, and the request gate refuses too.
 - **Loopback unaffected**: local development and Tauri/desktop default paths require no extra flags.
 - **TLS mandatory off-loopback**: an opt-in remote listener can never run in cleartext, so the API key and manuscript bytes are not exposed on the LAN.
-- **Auth middleware remains**: the startup gate protects against accidental bind; the request gate still enforces key presence on every non-loopback request.
+- **Auth middleware remains**: the startup gate protects against accidental bind; the request gate still enforces key presence on every non-loopback **guarded** request.
 
 ## Testing pattern
 
