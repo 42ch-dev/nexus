@@ -84,7 +84,7 @@ An axis that changes what is visible must be consumed by **every shell surface t
 
 ## Examples
 
-See §3 table for the four enforcement-path failures and fixes. Structural anchors: `apps/web/src/components/layout/entrance-registry.ts` (registry SSOT), `apps/web/src/lib/entrance-context.tsx` (provider), `apps/web/src/App.tsx` (guard + index redirect), `apps/desktop-electron/src/desktop-config.ts` (`get_entrance`/`set_entrance` + `is_entrance_value` validation).
+See §3 table for the four enforcement-path failures and fixes. Structural anchors: `apps/web/src/components/layout/entrance-registry.ts` (registry SSOT), `apps/web/src/lib/entrance-context.tsx` (provider), `apps/web/src/App.tsx` (guard + index redirect), `apps/desktop-electron/src/desktop-config.ts` (`get_entrance`/`set_entrance`, each validating against `ENTRANCE_VALUES.includes`).
 
 ## References
 

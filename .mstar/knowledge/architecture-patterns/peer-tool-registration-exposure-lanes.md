@@ -190,7 +190,7 @@ makes the honesty lockstep family machine-checkable in both directions:
 admitted ⇄ derivation, catalog ⇄ spine, `tools/list` ⇄ catalog, listing ⇄
 table, hello ⇄ allowlist, default-deny, named negatives, duplicate collision,
 eviction, reconnect lockstep, static-table pins, and the MCP refusal mapping
-(`crates/nexus-core/src/connect/watch.rs` +
+(`crates/nexus-core/src/connect/table.rs` +
 `apps/nexus42/tests/e2e_peer_mcp.rs`). A second dispatch table or an MCP-only
 allowlist would silently re-open the authorization surface; the four-layer
 chain keeps all policy daemon-side.
@@ -221,8 +221,9 @@ chain keeps all policy daemon-side.
 
 ## Examples
 
-- Spine + admission: `crates/nexus-core/src/execution/peer_tools.rs`
-  (`dispatch_peer_tool` / `dispatch_user_cap` / `user_cap_catalog_admission`),
+- Spine + admission: `crates/nexus-core/src/execution/capabilities.rs`
+  (`dispatch_peer_tool`:3362 / `dispatch_user_cap`:3443 / `user_cap_catalog_admission`:3483);
+  the peer registry itself is `crates/nexus-core/src/execution/peer_tools.rs` (`PeerToolRegistry`),
   `src/api/handlers/host_tool_executor.rs` (5-gate admission,
   `dispatch_from_worker`), `src/api/handlers/tools.rs` (catalog route).
 - Peer lane: `crates/nexus-core/src/connect/{accept.rs, session.rs,

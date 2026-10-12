@@ -14,70 +14,59 @@ tags:
   - electron
   - first-run
 applies_when:
-  - '"Editing creator DB pool lifecycle, Setup Continue path, or any handler that accesses creator data before daemon restart"'
+  - "Editing the Setup Continue path or any handler that accesses creator data before a creator/workspace exists"
 ---
 
-# Daemon creator pool lazy-attach pattern
+# Creator data access without a boot-time pool
 
 ## Context
 
-The Nexus daemon (HTTP surface in `apps/nexus-service`) boots without a creator SQLite pool when `active_creator_id` is absent from `~/.nexus42/config.toml`. This is **by design** (V1.118 AC-P0-1: boot-without-creator), not a bug. However, the Setup wizard's Continue path calls `ensureSetupBootstrap()` (Electron IPC command) which **only writes** `active_creator_id` to config.toml — it does not notify the daemon or open the pool. Any subsequent HTTP request that needs the pool will fail with HTTP 409 `uninitialized` unless the handler lazily attaches the pool.
+The Nexus service boots without a creator SQLite pool when `active_creator_id` is absent from `~/.nexus42/config.toml`. This is **by design** (V1.118 AC-P0-1: boot-without-creator), not a bug. The Setup wizard's Continue path calls `ensureSetupBootstrap()` (an Electron IPC command) which **only writes** `active_creator_id` to config.toml — it does not notify the service or pre-open anything. A subsequent request that needs creator data must therefore resolve the workspace store on demand.
+
+The current core does **not** keep a long-lived creator pool with a lazy-open entry point. Each creator write resolves its own store: `patch_creator` (`crates/nexus-core/src/creators.rs:272`) calls `active_workspace_db_path()` (`creators.rs:504-508`, which reads `active_creator_id` and returns the state DB path only if it exists), opens a short-lived pool with `nexus_local_db::init_pool`, performs the upsert, and closes it (`pool.close().await`, `creators.rs:331-338`). A missing `active_creator_id` makes the DB resolution fail closed (`CoreError::Uninitialized`).
 
 ## Guidance
 
-### When you need the creator pool after `ensureSetupBootstrap` but before daemon restart
+- **Resolve the store per operation; do not assume a boot-held pool.** Read `active_creator_id`, resolve the state DB path (`active_workspace_db_path`), open a pool for the write, and close it. This mirrors `patch_creator`.
+- **Fail closed when unresolved.** No `active_creator_id` (or a missing DB file) → `Uninitialized` (HTTP 409) before any write; do not fabricate a store. The caller should bootstrap first via the Setup wizard.
+- **Never keep a global mutable pool** keyed by a config value that changes underneath it — a second creator activation would silently retarget writes.
 
-Call `state.ensure_creator_pool().await` before `state.pool_or_uninit()?`. This is idempotent:
-- If pool is already open: fast no-op (`OnceLock::get` check)
-- If pool is closed but `active_creator_id` exists: opens + migrates the DB
-- If no `active_creator_id`: returns error (correct — caller should bootstrap first)
+## Historical (retired Rust daemon, deleted v1.193 P2)
 
-### Pattern (from `patch_creator`)
-
-```rust
-// In handler, before pool access:
-if state.pool().is_none() {
-    if let Some(_id) = read_active_creator_id(state.nexus_home()).ok().flatten() {
-        state.ensure_creator_pool().await;
-    }
-}
-// Now pool_or_uninit() will succeed if bootstrap was done
-```
-
-### Do NOT attempt web-only fixes
-
-The following were verified as dead ends during V1.119 P0 investigation:
-- `client.setActiveCreator()` → 404 `not_found` (fresh creator not in `auth_store` or `creator_identity_cache.json`)
-- `client.createCreator()` → 405 (POST route not registered)
-- `desktop.startDaemon()` (restart) → racy, conflicts with Tauri `.setup()` sidecar ownership (V1.105 D2)
+The daemon-host pattern this doc originally recorded — a boot-held optional pool with `state.ensure_creator_pool().await` (idempotent lazy open + migrate) guarded by `state.pool_or_uninit()?`, and the "call `ensure_creator_pool().await` before pool access" rule for Tier-1 handlers — is **retired**. `ensure_creator_pool` and `pool_or_uninit` exist nowhere at HEAD; the `state`-owned pool and the Tier-1/Tier-2 middleware (`require_active_creator`) went with the daemon host. Keep the lesson (boot-without-creator is intentional; a write before bootstrap must fail closed), not the retired entry points.
 
 ## Why This Matters
 
-Without the lazy-attach, the Setup wizard's Continue button fails on every clean first run. The error surfaces as HTTP 409 `uninitialized` ("Workspace not initialized"), which is a `soft_display_name` class error — not migration-class. The web-side error classifier (`classifySetupContinueError`) correctly classifies this as soft (no Reset shown), but the user cannot advance until the pool is attached.
+Without per-operation resolution, the Setup wizard's Continue button would fail on every clean first run with HTTP 409 `uninitialized` ("Workspace not initialized"). The web-side error classifier (`classifySetupContinueError`) correctly classifies this as a soft error (no Reset shown), but the user cannot advance until a workspace/creator exists.
 
 ## When to Apply
 
-- Any new Tier-1 handler (not behind `require_active_creator` middleware) that accesses creator data
-- Any Setup wizard code path that runs after `ensureSetupBootstrap` but before daemon restart
-- Any test that simulates a clean first run (no `active_creator_id` at daemon boot)
+- Any handler that accesses creator data before a creator/workspace has been activated.
+- Any Setup wizard code path that runs after `ensureSetupBootstrap` but before a workspace exists.
+- Any test that simulates a clean first run (no `active_creator_id` at boot).
 
 ## Examples
 
-### The V1.119 P0 fix
+### Writing the display name without a boot pool (current)
 
-**File:** `crates/nexus-core/src/creators.rs`, `patch_creator`
+`patch_creator` (`crates/nexus-core/src/creators.rs:272`) materializes the membership SSOT (`ensure_profile_home_ssot`), then — only when a display name is supplied — resolves the DB and writes through a short-lived pool:
 
-Before the fix, `patch_creator` called `state.pool_or_uninit()?` directly, which returned `Uninitialized` (HTTP 409) on clean first run because the pool was `None`.
-
-After the fix, `patch_creator` calls `state.ensure_creator_pool().await` first, which opens + migrates the DB, then `pool_or_uninit()` succeeds.
+```rust
+let db_path = self.active_workspace_db_path().ok_or(CoreError::Uninitialized)?;
+let pool = nexus_local_db::init_pool(&db_path).await.map_err(crate::error::local_db_err)?;
+let upsert = upsert_creator_display_name(&pool, creator_id, display_name).await;
+if let Err(err) = upsert {
+    pool.close().await;
+    return Err(err);
+}
+pool.close().await;
+```
 
 ### Migration error propagation
 
-When `ensure_creator_pool()` runs `Schema::init` and migration fails, the error message now contains "migration" (via `CreatorDbOutcome.open_error`), so the web classifier's `/migration/i` regex can detect it and show Reset (AC-P0-3).
+When `init_pool` runs schema init and migration fails, the error message contains "migration" (via the local-db open error), so the web classifier's `/migration/i` regex can detect it and show Reset (AC-P0-3).
 
 ## Prevention
 
-- Any new handler that accesses `state.pool()` or `state.pool_or_uninit()` should either:
-  1. Be behind `require_active_creator` middleware (Tier-2), OR
-  2. Call `ensure_creator_pool().await` before pool access (Tier-1)
-- Tests should include a "clean first run" scenario (no `active_creator_id` at boot)
+- Any new handler that touches creator data must resolve the store itself (per-operation pool) or fail closed with `Uninitialized` before writing.
+- Tests should include a "clean first run" scenario (no `active_creator_id` at boot).

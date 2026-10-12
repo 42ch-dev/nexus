@@ -211,11 +211,11 @@ Rules 9 + 10 fix the supervisor state machine so a real spawn is actually attemp
 
 > Residual `R-V197-SMOKE-CLEAN-STATE` was closed by V1.100 P0. V1.105 moves bootstrap **after** Ready (Workspace Continue) while keeping always-start. **V1.118 P0 supersedes the no-creator boot failure:** clean home reaches T0 health without `active_creator_id`; bootstrap remains optional wizard convenience (§13.11 / daemon-runtime §17, archived).
 
-### Rule 14 (V1.101): enrich process PATH at daemon boot for agent CLI discovery (Class B) — no schemas/
+### Rule 14 (V1.101): enrich process PATH at startup for agent CLI discovery (Class B) — no schemas/
 
 V1.101 P0 closed `R-V1100P0SMOKE-AGENT-SCAN`: macOS GUI / Tauri-launched daemons often inherit a minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`). Homebrew and user-local ACP agent CLIs under `/opt/homebrew/bin`, `~/.local/bin`, `~/.cargo/bin`, asdf/mise shims, etc. are then invisible to `which::which` during `POST /v1/daemon/agent-host/scan`, so the setup AgentPicker shows empty even when agents are installed in a login shell.
 
-**Pattern:** merge a **login-shell-equivalent** set of common user bin dirs into the **process** `PATH` **once at daemon boot** (before any scan probe). Implementation: `crates/nexus-agent-host/src/discovery/path_enrichment.rs`, invoked from `run_daemon`. No shell-out; only existing directories are appended; idempotent merge.
+**Pattern:** merge a **login-shell-equivalent** set of common user bin dirs into the **process** `PATH` **once at startup** (before any scan probe). Implementation: `crates/nexus-agent-host/src/discovery/path_enrichment.rs` (`apply_process_path_enrichment`, `:333`, built on `login_equivalent_bin_dirs`, `:165`), called from the CLI's synchronous `main` **before Tokio starts** — `apps/nexus42/src/main.rs:27`. No shell-out; only existing directories are appended; idempotent merge. (Historical: the former caller was the deleted Rust daemon's `run_daemon`; it is gone with the daemon host in v1.193 P2.)
 
 | Class | Meaning | Fix locus |
 |-------|---------|-----------|

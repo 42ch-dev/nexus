@@ -62,7 +62,7 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 
 ### V1.119 additions
 
-| [daemon-creator-pool-lazy-attach.md](architecture-patterns/daemon-creator-pool-lazy-attach.md) | Daemon creator pool lazy-attach pattern - `ensure_creator_pool()` before pool access on Tier-1 handlers after `ensureSetupBootstrap`; web-only fixes are dead ends (V1.119 P0 distilled; compound V1.119) |
+| [daemon-creator-pool-lazy-attach.md](architecture-patterns/daemon-creator-pool-lazy-attach.md) | Creator data access without a boot-time pool — boot-without-creator is intentional (V1.118 AC-P0-1); the current core resolves the store per operation (`patch_creator` opens + closes a short-lived pool, `crates/nexus-core/src/creators.rs:272`) and fails closed `Uninitialized` when unresolved; the retired Rust daemon lazy-attach entry points are historical (V1.119 P0 distilled; compound V1.119) |
 
 ### V1.102 additions
 

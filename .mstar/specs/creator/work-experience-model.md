@@ -270,7 +270,7 @@ V1.34 extends Work with:
 | `current_stage` | enum | `intake` \| `research` \| `produce` \| `review` \| `persist` |
 | `stage_status` | enum or map | Per-stage `pending` \| `active` \| `complete` \| `skipped` \| `failed` |
 
-Stage progression is **explicit** — the V1.33 dispatch entry was `creator run <preset_id>` (the preset runner validates stage gates and PATCHes Work stage fields before enqueue — not default auto-chain; see DF-53). The runner was retired in v1.193 P2; stage-gate validation and Work stage mutation now happen inside the engine/core on schedule admission, with no CLI dispatch entry.
+Stage progression is **explicit** — the V1.33 dispatch entry was `creator run <preset_id>` (the preset runner validated stage gates and PATCHed Work stage fields before enqueue — not default auto-chain; see DF-53). The runner was retired in v1.193 P2; schedule admission (`add_schedule`, `crates/nexus-core/src/execution/handle_ops.rs:115`) now checks the preset's gate policy and inserts a **pending** schedule with no CLI dispatch entry, but it does **not** mutate `current_stage`/`stage_status` — Work stage fields change only through the Work patch path (`crates/nexus-core/src/works.rs`), separately from schedule admission.
 
 FL-E reused V1.33 `creator bootstrap` (composite onboarding) and `creator run <preset_id>` (strategy execution) and did not replace `daemon schedule` (V1.33–v1.192 arrangement; all three entries were retired in v1.193 P2).
 

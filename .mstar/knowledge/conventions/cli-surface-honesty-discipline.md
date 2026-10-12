@@ -35,20 +35,13 @@ the daemon actually delivers — not with what the docs guessed it delivers.
 
 ### 1. Error-code honesty — document and test the ACTUAL public code
 
-The daemon error envelope is two-tier (`apps/nexus-service/src/errors.ts`):
+The service error envelope is the generated `CoreError` shape (`apps/nexus-service/src/errors.ts`):
 
-- `error_code()` returns a **coarse public code** from an allowlist
-  (`bad_request`, `not_found`, `invalid_input`, `strategy_conflict`,
-  `outline_conflict`, `world_kb_conflict`, `strategy_validation_failed`,
-  `outline_validation_failed`, `world_kb_validation_failed`,
-  `invalid_transition`, `conflict`, …). `BadRequest` inner codes **outside
-  the allowlist are remapped** to the generic `bad_request` — e.g. the
-  strategy handlers raise `strategy_invalid` (400) internally, but the wire
-  delivers `bad_request`. `Internal.code` is never the wire code.
-- CLI docs (cli-spec rows, `--help`) and tests must state the **public**
-  code, not the inner one. Listing a remapped code teaches consumers a
-  contract the wire never delivers.
-- **Render exactly the `error_details()` keys per family**: strategy /
+- `mapNativeError` passes `wire.code` through **unchanged** (`errors.ts:83-109`) and only derives the HTTP status, from an explicit `wire.http_status` or the `statusForCode` table (`errors.ts:58-64`). The observed code is exactly what the native producer emitted.
+- CLI docs (cli-spec rows, `--help`) and tests must state the **observed** code, not a guessed or renamed one. The service does **not** remap an inner/`BadRequest` code to a generic public code.
+
+> **Historical (retired Rust daemon, deleted v1.193 P2):** the former `NexusApiError::error_code()` returned a **coarse public code** from an allowlist (`bad_request`, `not_found`, `invalid_input`, `strategy_conflict`, `outline_conflict`, `world_kb_conflict`, `strategy_validation_failed`, `outline_validation_failed`, `world_kb_validation_failed`, `invalid_transition`, `conflict`, …) and remapped `BadRequest` inner codes outside it — e.g. `strategy_invalid` (400) delivered as `bad_request`; `Internal.code` was never the wire code. Do not test the service against that contract.
+- **Render exactly the per-family `details` keys**: strategy /
   outline 409 → `current_revision` + `node_id` + `conflicting_path` +
   `recovery_hint`; world-kb 409 → `current_version` + `entity_id` +
   `conflicting_path` + `recovery_hint` (NOT `current_revision` — verified
@@ -57,7 +50,7 @@ The daemon error envelope is two-tier (`apps/nexus-service/src/errors.ts`):
   `(validation: <rule>)`, never swallow the generic top-level message.
 - **Tests pin `[code]` + structured fields, never OR-matched status
   strings.** Asserting stderr contains "409" / "not found" accepts
-  fabricated text and misses remap regressions. Pin `[strategy_conflict]`
+  fabricated text and misses mapping regressions. Pin `[strategy_conflict]`
   + `current_revision=…`, `[outline_validation_failed]` + the rule text,
   `[world_kb_conflict]` + `current_version`.
 - 204 deletes (`progress clear`, `annotation remove`) print **empty stdout
@@ -104,7 +97,7 @@ enum OutlineOp {
 ## Why This Matters
 
 The CLI is the developer surface for the author/orchestration loop. A doc
-or test that names `strategy_invalid` teaches a contract the wire remaps;
+or test that names an invented or renamed code teaches a contract the wire does not deliver;
 an OR-matched status assertion can stay green while the code regresses to
 fabricated output; a human default that hides `has_more` presents data
 loss as completeness. Each rule is cheap at authoring time and expensive
@@ -112,9 +105,9 @@ as a downstream debugging session.
 
 ## When to Apply
 
-- New CLI leaf consuming a daemon route: check `error_code()` and
-  `error_details()` for the exact public surface before writing cli-spec
-  rows, `--help`, or tests.
+- New CLI leaf consuming a daemon route: read the actual wire `code` (passed
+  through unchanged) and its `details` for the exact public surface before
+  writing cli-spec rows, `--help`, or tests.
 - New clap enum flag whose values cross the wire: pin `#[value(name)]`.
 - New paginated/capped read surface with a human default: decide the note
   text up front, keep `--json` verbatim.
