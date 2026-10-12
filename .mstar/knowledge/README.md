@@ -4,7 +4,7 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 
 | Subtree | Role |
 | --- | --- |
-| **[`../specs/`](../specs/README.md)** | Normative OSS specifications |
+| **[`../specs/`](../specs/README.md)** | Normative OSS spec corpus — lifecycle/class tree (`{active|proposed|archived}/<class>/`) with a directory note, not an index |
 | **[`architecture-patterns/`](architecture-patterns/)** | Distilled reusable patterns (compound output) — [sub-index](architecture-patterns/README.md) |
 | **[`api-design/`](api-design/)** | Distilled reusable API design patterns (compound output) |
 | **This directory (root files)** | Cross-cutting policy, boundaries |
@@ -58,7 +58,7 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | [database-issues/sqlite-terminal-immutability-traps.md](database-issues/sqlite-terminal-immutability-traps.md) | SQLite terminal-immutability + effect-observation traps — REPLACE deletes the conflict victim without firing its DELETE trigger (`recursive_triggers` OFF); rowid is a second reachable key ⇒ `WITHOUT ROWID` + BEFORE-INSERT/key-immutability guards + typed resolution of the induced race; commit observation via the AUTOINCREMENT high-water (prune-proof) with a conservative may-have-committed fallback (v1.207 P3 QC distillation; compound v1.207) |
 | [tooling-decisions/codegen-owned-emission-and-stability.md](tooling-decisions/codegen-owned-emission-and-stability.md) | Codegen lane discipline — single-home `$ref` emission (the declaring module owns the name), in-process `syn`+`prettyplease` formatting (no rustfmt binary), render-before-write hardening (not atomic; abort-window prune tracked as `R-V1190-RUSTGEN-PRETTY-RESET`), byte-stability via double-run sha256 manifests, and bidirectional literal-`const` marker pins (v1.207 P1 distilled; compound v1.207) |
 
-**All OSS feature specs:** [`../specs/README.md`](../specs/README.md) (full lifecycle index).
+**All OSS feature specs:** the `specs/` corpus — organized by lifecycle/class path (`specs/{active|proposed|archived}/<class>/`), rules in [`../specs/AGENTS.md`](../specs/AGENTS.md); there is no central index by design.
 
 ### V1.119 additions
 
