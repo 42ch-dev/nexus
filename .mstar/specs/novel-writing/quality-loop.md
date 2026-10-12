@@ -9,7 +9,7 @@
 
 - [workflow-profile.md](workflow-profile.md) — layout, preset gates, completion (quality-loop detail in sibling spec)
 - [creator-workflow.md](../creator/creator-workflow.md) — FL-E `review` stage and auto-chain
-- [orchestration-engine.md](../orchestration/orchestration-engine.md) — presets, daemon scheduled tasks
+- [orchestration-engine.md](../orchestration/orchestration-engine.md) — presets, scheduled tasks
 - [cli-spec.md](../cli/cli-spec.md) — status/banner surfaces
 - [manuscript-audit.md](manuscript-audit.md) — DF-69 on-demand audit (V1.44 P0)
 - [author-experience.md](author-experience.md) — quickstart §5 cross-refs (V1.43 shipped)
@@ -106,11 +106,11 @@ Existing rows remain valid. No automatic status rewrite on migration. Default fo
 | `novel-review-master` | Master decision surface (V1.39 P2) |
 | `novel-manuscript-audit` | On-demand chapter audit — review and/or extract (V1.44 P0; see [manuscript-audit.md](manuscript-audit.md)) |
 
-### 3.4 Review-master CLI surface (V1.45 P0–P2 — generic preset dispatch)
+### 3.4 Review-master CLI surface (V1.45 P0–P2 — generic preset dispatch; **runner retired in v1.193 P2**)
 
-V1.44 shipped a dedicated `review-master` subcommand. V1.45 replaces it with the generic `creator run <preset_id>` entry — `creator run novel-review-master` is the preset-id form. Findings listing moves to `creator works status` (P4 enhancement).
+V1.44 shipped a dedicated `review-master` subcommand. V1.45 replaced it with the generic `creator run <preset_id>` entry — `creator run novel-review-master` was the preset-id form. **Both entries were removed in v1.193 P2**: no CLI preset-dispatch entrance exists today ([creator-run-preset-entry.md](../archived/creator-run-preset-entry.md) is the historical Master). Preset admission goes through the core execution surface (schedule add via `POST /v1/daemon/orchestration/schedules`, served by `apps/nexus-service`); the retained CLI scheduling surface is `creator works cron` declaration editing. Findings listing lives on `creator works status`.
 
-**Normative CLI** (Shipped V1.45):
+**Normative CLI (Shipped V1.45 — historical record, entry removed in v1.193 P2):**
 
 ```bash
 nexus42 creator run novel-review-master [<work_id>] [--finding-id <id>] [--auto-schedule]
@@ -125,8 +125,8 @@ nexus42 creator run novel-review-master [<work_id>] [--finding-id <id>] [--auto-
 **Presentation** (minimum):
 
 - Use `creator works status` to list open findings with severity breakdown
-- Quickstart §5 updated to cite `creator run novel-review-master` as primary path (V1.45 P3)
-- On empty findings: `creator works status [<work_id>]` surfaces a clear "no findings yet" message and suggests `creator run novel-review-master` to enqueue a master-decision review
+- Quickstart §5 updated to cite `creator run novel-review-master` as primary path (V1.45 P3 — historical; that cite was retired with the runner in v1.193 P2)
+- On empty findings: `creator works status [<work_id>]` surfaces a clear "no findings yet" message (rendered as `none open`); the former suggestion to `creator run novel-review-master` went with the removed runner in v1.193 P2 — master-decision review admission is via the execution surface (schedule add), not a CLI entry
 
 **Residual**: R-V143P0-002 — resolved V1.44 P1; close in P-last hygiene.
 
@@ -225,7 +225,7 @@ Each candidate uses its own transaction with a CAS version guard (`kb_extract_jo
 
 Heading preserved for back-compat with existing inbound cross-refs; the canonical preset id is `novel-chapter-review` (renamed in V1.47 P0).
 
-**Scope**: Normative behavior for the FL-E `review` preset after P0 implement. Applies to **both** auto-chain review stage and on-demand `creator run <preset_id>`.
+**Scope**: Normative behavior for the FL-E `review` preset after P0 implement. Applies to **both** auto-chain review stage and on-demand preset admission (the on-demand CLI entry was `creator run <preset_id>`, retired in v1.193 P2).
 
 ### 8.1 Inputs (minimum)
 

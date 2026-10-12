@@ -314,7 +314,7 @@ Algorithm:
 
 This uses the W-002 defense-in-depth authority in `crates/nexus-core/src/content.rs` (`resolve_guarded_path` / `resolve_guarded_path_async`), including guarded resolution for outline writes where the target may not exist yet.
 
-## 8. Tauri-ready frontend boundary
+## 8. Host-agnostic frontend boundary (V1.65 title: "Tauri-ready frontend boundary" — Tauri retired in v1.192)
 
 The Web UI must consume this surface through `NexusClient` methods such as:
 
@@ -326,7 +326,7 @@ patchChapter(workId, chapter, patch, query)
 getChapterBody(workId, chapter, query)
 ```
 
-The contract deliberately returns markdown strings and relative workspace paths; it does not require browser filesystem access. Browser-only APIs such as clipboard writes are UI affordances around `Copy path`, not transport semantics. V1.66 can therefore implement `TauriClient` with the same method signatures and add native `open with` / `reveal` affordances outside this API.
+The contract deliberately returns markdown strings and relative workspace paths; it does not require browser filesystem access. Browser-only APIs such as clipboard writes are UI affordances around `Copy path`, not transport semantics. The V1.66 plan implemented `TauriClient` with the same method signatures plus native `open with` / `reveal` affordances outside this API (historical: the Tauri shell was retired in v1.192; the desktop host is Electron, which consumes this surface through the same `NexusClient` boundary).
 
 ## 9. Schema placement
 

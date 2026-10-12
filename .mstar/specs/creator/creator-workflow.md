@@ -152,7 +152,7 @@ Does **not** advance `current_stage`; merges into `inspiration_log` and schedule
 
 ### 5.3 Power user
 
-`daemon schedule` remains valid; schedules created via `creator run <preset>` **must** record `work_id` and stage id in schedule seed/metadata (wire key `fl_e_stage` in V1.34 implementation).
+(Historical — retired in v1.193 P2.) `daemon schedule` was the power-user surface; the group is deleted. Schedules created for a Work **must** record `work_id` and stage id in schedule seed/metadata (wire key `fl_e_stage` in V1.34 implementation) — this metadata rule survives on the retained execution surface (schedule add via `apps/nexus-service`; CLI declaration via `creator works cron`).
 
 ### 5.4 Daemon-attached auto-chain (V1.39 shipped history; retired v1.193 P2-T1)
 
@@ -173,7 +173,7 @@ Insertions during an active auto-chain **must not** fork or cancel the driver sc
 
 | Insertion | Behavior |
 | --- | --- |
-| `creator run continue --note` | Appends `inspiration_log`; visible in `creator works status`; merged into prompt context at **next** preset state transition |
+| `creator works inspire --note` (V1.45 P2 path; V1.39 form was `creator run continue --note`, retired in v1.193 P2) | Appends `inspiration_log`; visible in `creator works status`; merged into prompt context at **next** preset state transition |
 | `nexus.work.patch` (agent) | Same append-only inspiration surface per agent-nexus-tool-bridge |
 | Research stage side effects | KB/reference artifacts written during chain; consumed by downstream produce/review via existing assembly (P0.5) |
 

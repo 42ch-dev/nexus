@@ -67,27 +67,29 @@ schemas/
 
 ## 2. Folder ↔ product line ↔ consumers
 
-| Directory | Product line | External consumer | Primary Rust consumer | npm `@42ch/nexus-contracts` |
+| Directory | Product line | External consumer | Primary serving consumer (post-v1.193 P2) | npm `@42ch/nexus-contracts` |
 | --- | --- | --- | --- | --- |
 | **`platform/http-bff/`** | Cloud enhancement (platform HTTP) | `nexus-platform` | `nexus-cloud-sync` (HTTP client), platform TS | **Yes** |
 | **`platform/sync/`** | Cloud enhancement (bundle / pull / conflict) | `nexus-platform` | `nexus-cloud-sync` (`legacy-sync`) | **Yes** |
 | **`domain/`** | Wire entities embedded in bundles & platform bodies | `nexus-platform` (transitive via `$ref`) | All cloud-line crates + generated imports | **Yes** |
 | **`common/`** | Shared wire value objects | `nexus-platform` (when `$ref`'d) | Generated | **Yes** |
-| **`daemon-api/compute/`** | Daemon API — compute module ABI | External WASM modules + Web UI | `nexus-wasm-host` (re-exports), compute modules | **Yes** |
-| **`daemon-api/common/`** | Daemon API — shared contract detail | Bundled Web UI + external Daemon API clients | `nexus-daemon-runtime` handlers via generated contracts | **Yes** |
-| **`daemon-api/works/`** | Daemon API — works CRUD | Web UI / desktop shell | `nexus-daemon-runtime` | **Yes** |
-| **`daemon-api/works/chapters/`** | Daemon API — chapter content and structure | Web UI / desktop shell | `nexus-daemon-runtime` chapter handlers | **Yes** |
-| **`daemon-api/kb/`** | Daemon API — KB entries CRUD | Web UI / desktop shell | `nexus-daemon-runtime` | **Yes** |
-| **`daemon-api/findings/`** | Daemon API — quality findings CRUD | Web UI / desktop shell | `nexus-daemon-runtime` | **Yes** |
-| **`daemon-api/schedule/`** | Daemon API — schedule + core-context CRUD | Web UI / desktop shell | `nexus-daemon-runtime` | **Yes** |
-| **`daemon-api/workspace/`** | Daemon API — workspace management CRUD | Web UI / desktop shell | `nexus-daemon-runtime` | **Yes** |
-| **`daemon-api/creators/`** | Daemon API — creator management CRUD | Web UI / desktop shell | `nexus-daemon-runtime` | **Yes** |
-| **`daemon-api/orchestration/`** | Daemon API — orchestration engine READ | Web UI / desktop shell | `nexus-daemon-runtime` | **Yes** |
-| **`daemon-api/preset-management/`** | Daemon API — preset management full surface | Web UI / desktop shell | `nexus-daemon-runtime` | **Yes** |
-| **`daemon-api/agent-host/`** | Daemon API — provider discovery and sessions | Web UI / desktop shell | `nexus-daemon-runtime` agent-host handlers | **Yes** |
-| **`daemon-api/{canvas,check,inspector,reading}/`** | Daemon API — authoring and diagnostics | Web UI / desktop shell | `nexus-daemon-runtime` | **Yes** |
-| **`daemon-api/{memory,timeline,worlds}/`** | Daemon API — narrative resources | Web UI / desktop shell | `nexus-daemon-runtime` | **Yes** |
-| **`daemon-api/{runtime,tools}/`** | Daemon API — runtime and tool bridge | Web UI / desktop shell | `nexus-daemon-runtime` | **Yes** |
+| **`daemon-api/compute/`** | Daemon API — compute module ABI | External WASM modules + Web UI | `nexus-wasm-host` (re-exports), compute modules; routes served by `apps/nexus-service` `compute.ts` | **Yes** |
+| **`daemon-api/common/`** | Daemon API — shared contract detail | Bundled Web UI + external Daemon API clients | `apps/nexus-service` route families via generated contracts (shared envelope in `src/errors.ts`) | **Yes** |
+| **`daemon-api/works/`** | Daemon API — works CRUD | Web UI / desktop shell | `apps/nexus-service` `works.ts` family over `nexus-core` | **Yes** |
+| **`daemon-api/works/chapters/`** | Daemon API — chapter content and structure | Web UI / desktop shell | `apps/nexus-service` `content.ts` family over `nexus-core` content/outline services | **Yes** |
+| **`daemon-api/kb/`** | Daemon API — KB entries CRUD | Web UI / desktop shell | `apps/nexus-service` `knowledge.ts` family | **Yes** |
+| **`daemon-api/findings/`** | Daemon API — quality findings CRUD | Web UI / desktop shell | `apps/nexus-service` `knowledge.ts` findings routes over `nexus-core`/`nexus-local-db` | **Yes** |
+| **`daemon-api/schedule/`** | Daemon API — schedule + core-context CRUD | Web UI / desktop shell | `apps/nexus-service` `execution.ts` schedule family | **Yes** |
+| **`daemon-api/workspace/`** | Daemon API — workspace management CRUD | Web UI / desktop shell | `nexus-core` workspace/home services (`src/home.rs` consumes the generated types); no dedicated TS route family today | **Yes** |
+| **`daemon-api/creators/`** | Daemon API — creator management CRUD | Web UI / desktop shell | `apps/nexus-service` `actors.ts` creators routes | **Yes** |
+| **`daemon-api/orchestration/`** | Daemon API — orchestration engine READ | Web UI / desktop shell | `apps/nexus-service` `execution.ts` + `workflow-observation.ts` families | **Yes** |
+| **`daemon-api/preset-management/`** | Daemon API — preset management full surface | Web UI / desktop shell | `apps/nexus-service` `presets.ts` family | **Yes** |
+| **`daemon-api/agent-host/`** | Daemon API — provider discovery and sessions | Web UI / desktop shell | `apps/nexus-service` agent-host routes (`routes.ts` + `provider.ts`/`discovery.ts`) over `nexus-core` `provider-host` | **Yes** |
+| **`daemon-api/{canvas,check,inspector,reading}/`** | Daemon API — authoring and diagnostics | Web UI / desktop shell | `apps/nexus-service` `content.ts` / `context.ts` / `knowledge.ts` families | **Yes** |
+| **`daemon-api/{memory,timeline,worlds}/`** | Daemon API — narrative resources | Web UI / desktop shell | `apps/nexus-service` `memory.ts` / `worlds.ts` families | **Yes** |
+| **`daemon-api/{runtime,tools}/`** | Daemon API — runtime and tool bridge | Web UI / desktop shell | runtime: inline `apps/nexus-service` runtime routes; tools: no HTTP execute route — tool dispatch is the in-process `nexus-core` `execute_tool` surface | **Yes** |
+
+> **Ownership note (v1.193 P2):** `daemon-api/` is a retained **wire-family** name only — it no longer implies runtime ownership. The `nexus-daemon-runtime` handlers named in this column before v1.193 were deleted with the crate in v1.193 P2; serving ownership moved to the `apps/nexus-service` route families above over `nexus-core` / `nexus-core-node`.
 
 **Local product line** (daemon, orchestration, agent-host internal DTOs) MUST NOT add new subtrees under `schemas/` unless an **external** client (separate process or language boundary) consumes them. Add internal types under `crates/nexus-contracts/src/local/`. The `daemon-api/` tree is reserved for cross-language Daemon API contracts.
 

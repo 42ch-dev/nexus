@@ -13,7 +13,7 @@
 
 ## 1. Purpose
 
-Define **`nexus-agent-host`**: the orchestration/facade above ACP and native CLI adapters, hosted by daemon runtime under **Managed-only** supervision.
+Define **`nexus-agent-host`**: the orchestration/facade above ACP and native CLI adapters, hosted by the core/service composition (`nexus-core` + `nexus-core-node`, served by `apps/nexus-service`; historically the daemon runtime, retired in v1.193 P2) under **Managed-only** supervision.
 
 ---
 
@@ -22,7 +22,7 @@ Define **`nexus-agent-host`**: the orchestration/facade above ACP and native CLI
 1. **Managed-only** — every session and provider process is host-owned, observable and cleanup-supervised; cancellation is advertised only when the provider supports it. No unmanaged attach in v1 scope.
 2. **Hybrid providers** — ACP-backed adapters **and** selected native CLI adapters under a narrower capability contract.
 3. **ACP-first preferred** — native CLI is supplementary, not a second control plane.
-4. **Daemon is not an ACP Server** — hosting agents does not make the daemon runtime an ACP Agent advertised on Registry.
+4. **Host is not an ACP Server** — hosting agents does not make the local host (the pre-v1.193 "daemon runtime") an ACP Agent advertised on Registry.
 5. **Tool execution is mediated** — external clients never speak raw provider protocol; normalized host operations only.
 
 ---
@@ -31,17 +31,21 @@ Define **`nexus-agent-host`**: the orchestration/facade above ACP and native CLI
 
 ```text
 OSS CLI (cli-spec)
-  └─ nexus-daemon-runtime
-       ├─ /v1/daemon/agent-host/*  (Daemon API — normative surface per [daemon-runtime.md §2 layered surface](../archived/daemon-runtime.md))
-       └─ Arc<dyn HostFacade>
-            └─ nexus-agent-host
-                 ├─ core: sessions, operations, lifecycle
-                 ├─ capability: negotiation, risk classes
-                 ├─ discovery: config, PATH, ACP registry
-                 ├─ policy: admission, permissions
-                 ├─ providers/acp → nexus-acp-host
-                 └─ providers/native_cli → managed processes
+  └─ apps/nexus-service (TS host — serves /v1/daemon/agent-host/* over core)
+       ├─ /v1/daemon/agent-host/*  (Daemon API wire family — retained surface; the
+       │    normative host-side layering record is [daemon-runtime.md §2](../archived/daemon-runtime.md), historical)
+       └─ crates/nexus-core (`provider-host` feature) / crates/nexus-core-node
+            └─ Arc<dyn HostFacade>
+                 └─ nexus-agent-host
+                      ├─ core: sessions, operations, lifecycle
+                      ├─ capability: negotiation, risk classes
+                      ├─ discovery: config, PATH, ACP registry
+                      ├─ policy: admission, permissions
+                      ├─ providers/acp → nexus-acp-host
+                      └─ providers/native_cli → managed processes
 ```
+
+> **Historical host note (v1.193 P2):** the pre-retirement topology ran this tree under the `nexus-daemon-runtime` crate; that host was deleted in v1.193 P2 and the composition above is the current owner.
 
 Multica / OpenDesign are **reference architectures only**, not runtime dependencies.
 
@@ -97,7 +101,7 @@ Existing non-interactive permission denial remains; no new Ask UI is implied.
 Nexus remains ACP Client and the daemon is not an ACP Server. CLI-only
 `nexus42 acp run` remains separate from workflow execution and recovery.
 
-**Runtime rule**: `nexus-daemon-runtime` depends only on **`HostFacade` traits**, never on provider-specific crates.
+**Runtime rule**: the serving host (`apps/nexus-service` over `nexus-core` / `nexus-core-node`) depends only on **`HostFacade` traits**, never on provider-specific crates. (The rule originally bound the `nexus-daemon-runtime` crate, deleted in v1.193 P2; the boundary itself is retained.)
 
 ---
 
@@ -223,10 +227,13 @@ crates/nexus-agent-host/
   (`nexus-acp-host`), Nexus contracts/home layout, Tokio/streaming and serde
   support, discovery/risk helpers, and the three native-provider SDK crates
   (`claude-codes`, `codex-codes`, `deepseek-harness-sdk`).
-- `nexus-daemon-runtime/Cargo.toml`: depends on `nexus-agent-host` as the
-  facade implementation; provider-specific Rust modules do not cross the
-  `HostFacade` call boundary.
-- `nexus42/Cargo.toml`: no direct dependency on `nexus-agent-host`.
+- `nexus-core/Cargo.toml`: depends on `nexus-agent-host` as the
+  facade implementation behind the optional `provider-host` feature
+  (`nexus-core-node` depends on `nexus-agent-host` directly for the napi
+  projection); provider-specific Rust modules do not cross the
+  `HostFacade` call boundary. (Pre-v1.193 P2 this edge was
+  `nexus-daemon-runtime` → `nexus-agent-host`; the crate is deleted.)
+- `nexus42/Cargo.toml`: `nexus-agent-host` is an optional dependency enabled by the `cli` cohort feature set; the CLI still holds no direct provider-crate dependency.
 
 ### 2.3 DTO sourcing
 
@@ -796,6 +803,8 @@ Wave 1 uses in-memory session tracking only. ACP sessions may optionally use `ne
 
 ## 10. Daemon-Runtime Integration
 
+> **Host note (v1.193 P2):** the §10.1 boot/`WorkspaceState` wiring is a historical record of the deleted `nexus-daemon-runtime` crate. The facade boundary rule survives: the serving host reaches the agent host through `HostFacade` only. The §10.2 route family is retained wire, now served by `apps/nexus-service` (`routes.ts` + `provider.ts`/`discovery.ts`) over `nexus-core` (`provider-host` feature) / `nexus-core-node`.
+
 ### 10.1 Facade boundary
 
 Integration is via narrow facade only:
@@ -831,6 +840,8 @@ V1.20 redesign extends these routes with additional agent-host endpoints (see V1
 
 ## 11. Reference: Multica
 
+> **Historical mapping note (v1.193 P2):** the Nexus-side mappings below were written against the deleted `nexus-daemon-runtime` host. The current owner of the mapped runtime role is `apps/nexus-service` over `nexus-core` / `nexus-core-node`, with `nexus-agent-host` unchanged below the `HostFacade` boundary.
+
 **Source**: <https://github.com/multica-ai/multica> (Go server + local daemon)
 
 Multica is an open-source AI-native team collaboration platform that wraps multiple coding agents (Claude Code, Codex, Gemini CLI, etc.) with a Linear-style Kanban UI.
@@ -858,7 +869,7 @@ Multica is an open-source AI-native team collaboration platform that wraps multi
 
 | Pattern | Nexus mapping |
 |---|---|
-| Local daemon as session orchestrator | `nexus-daemon-runtime` + `HostManager` |
+| Local daemon as session orchestrator | `apps/nexus-service` + `nexus-core` orchestration over `nexus-agent-host` `HostManager` (pre-v1.193 mapping: `nexus-daemon-runtime` + `HostManager`) |
 | PATH scan discovery for known CLI commands | `discovery/path_scan.rs` |
 | Provider catalog with trust metadata | `ProviderCatalogEntry` |
 | Managed task/session state with deterministic terminal events | Session state machine (§6.1) |
@@ -870,7 +881,8 @@ Multica is an open-source AI-native team collaboration platform that wraps multi
 ### 11.4 Architecture mapping
 
 ```
-Multica Runtime          ≈ nexus-daemon-runtime  (Daemon API + lifecycle)
+Multica Runtime          ≈ apps/nexus-service + nexus-core  (Daemon API wire family + lifecycle;
+                            pre-v1.193 P2 mapping: nexus-daemon-runtime, deleted)
 Multica Agent Protocol   ≈ ProviderAdapter        (ACP SDK / native CLI)
 Multica event model     ≈ HostEvent + SSE relay  (unified event stream)
 Multica task lifecycle   ≈ HostSession state machine (managed-only)

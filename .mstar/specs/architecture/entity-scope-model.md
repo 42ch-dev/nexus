@@ -244,7 +244,7 @@ When the conditional routing engine (DF-56) evaluates a state's `next: { kind: c
 Branch inputs do **not** redefine entity ownership. The following API wiring is a **V1.56 historical snapshot**; the former daemon handlers are not current implementation anchors:
 
 - Registry refresh input: `nexus-orchestration::tasks::inject_registry_refresh_context()` → reads `nexus.registry.refresh` capability output via existing capability registry machinery.
-- Workspace input: `nexus-orchestration::tasks::inject_workspace_context()` → reads active workspace session via existing `nexus-daemon-runtime` workspace handlers.
+- Workspace input: `nexus-orchestration::tasks::inject_workspace_context()` → reads active workspace session via its injected `workspace_state_provider` (`crates/nexus-orchestration/src/tasks/mod.rs`); the V1.56 wiring read the `nexus-daemon-runtime` workspace handlers, deleted with the crate in v1.193 P2.
 
 This amendment exists to clarify that DF-56 conditional routing branch inputs are **derived from**, not **owners of**, the entity scope. The entity ownership hierarchy (Creator > World > Timeline > Event > Moment) is unchanged; routing inputs are projections.
 

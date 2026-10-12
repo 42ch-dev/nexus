@@ -10,7 +10,7 @@
 - [quality-loop.md](quality-loop.md) — findings lifecycle; review routing
 - [workflow-profile.md](workflow-profile.md) — chapter paths, `Logs/review/`, 五问 baseline
 - [creator-workflow.md](../creator/creator-workflow.md) — FL-E stages (audit is **out-of-band**)
-- [cli-spec.md](../cli/cli-spec.md) — `creator run audit-chapter` IA (P0 implement)
+- [cli-spec.md](../cli/cli-spec.md) — historical `creator run audit-chapter` IA (P0 implement; the runner entry was removed in v1.193 P2 — see §4)
 - [entity-scope-model.md](../architecture/entity-scope-model.md) — World-bound extract mode
 - [world-kb-runtime-architecture.md](../architecture/world-kb-runtime-architecture.md) — `kb.extract_work` on-demand path
 
@@ -84,13 +84,15 @@ V1.79's manuscript reading surface is distinct from this on-demand audit line: r
 
 ## 4. CLI entry (normative sketch — P0 locks single IA)
 
-**Preferred** (compass grill-me 2026-06-13):
+> **Entry retired (v1.193 P2).** Both surfaces sketched below were deleted with the v1.193 P2 command-surface cutover: the `creator run` runner and the whole `daemon` group are gone, and no current CLI audit entry is provided. The §3 modes and §5 preset contract are unchanged; audit admission goes through the core execution surface (schedule add via `POST /v1/daemon/orchestration/schedules`, served by `apps/nexus-service`).
+
+**Preferred** (compass grill-me 2026-06-13; historical):
 
 ```bash
 nexus42 creator run audit-chapter <work_id> --mode review|extract [--chapter N] [--volume V]
 ```
 
-**Alternatives** (document only; P0 plan picks one):
+**Alternatives** (document only; P0 plan picks one; both retired in v1.193 P2):
 
 - `nexus42 daemon schedule add --preset novel-manuscript-audit --input '{"mode":"review",...}'`
 - Subcommand under `creator run` with `audit-chapter` as a run intent
@@ -98,7 +100,7 @@ nexus42 creator run audit-chapter <work_id> --mode review|extract [--chapter N] 
 **Invariants**:
 
 - Command must **not** set `fl_e_stage` driver fields or enqueue auto-chain continuation.
-- Command must respect `runtime_lock_holder` when Work is locked (same as other mutating `creator run` paths).
+- Admission must respect `runtime_lock_holder` when Work is locked (same as other mutating Work paths).
 
 ---
 

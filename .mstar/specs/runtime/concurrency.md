@@ -16,20 +16,20 @@
 
 ## 1. Problem Statement
 
-V1.42 P0 shipped the DB-level `works.runtime_lock_holder` column + `RuntimeLockGuard` RAII in `nexus_local_db::runtime_lock` — a single-process concurrency guard using SQLite's transactional semantics. V1.49 chose a single-writer daemon model with atomic temp+rename as the safe default (single `nexus42 daemon start` instance).
+V1.42 P0 shipped the DB-level `works.runtime_lock_holder` column + `RuntimeLockGuard` RAII in `nexus_local_db::runtime_lock` — a single-process concurrency guard using SQLite's transactional semantics. V1.49 chose a single-writer daemon model with atomic temp+rename as the safe default (single `nexus42 daemon start` instance — the daemon host was retired in v1.193 P2; the single-writer service model carries over to `apps/nexus-service` over `nexus-core`).
 
 V1.50 introduced cron staggering (three-role per-Work automated scheduling), which creates **real multi-writer contention**:
 
-- The daemon cron evaluator fires `novel-brainstorm` / `novel-write` / `novel-review-master` on a 1-minute tick.
-- The author concurrently runs CLI commands like `creator works cron set` or `creator run outline-chapter`.
+- The cron evaluator (`nexus-orchestration` cron supervisor; V1.50-era host was the daemon, retired in v1.193 P2) fires `novel-brainstorm` / `novel-write` / `novel-review-master` on a 1-minute tick.
+- The author concurrently runs CLI commands like `creator works cron set` or `creator works reconcile-chapters`.
 
-The DB-level lock (`runtime_lock_holder`) is process-local — it cannot protect against two independent `nexus42` processes (daemon + CLI) racing on `works.schedule_json`. The V1.50 P0 CAS fix (`set_schedule_json_tx`) added transactional compare-and-swap on `schedule_json`, but the broader class of cross-process races remains:
+The DB-level lock (`runtime_lock_holder`) is process-local — it cannot protect against two independent processes (service/scheduler + CLI) racing on `works.schedule_json`. The V1.50 P0 CAS fix (`set_schedule_json_tx`) added transactional compare-and-swap on `schedule_json`, but the broader class of cross-process races remains:
 
 | Race class | Source | Risk |
 |------------|--------|------|
-| `schedule_json` read-modify-write | CLI `cron set` vs daemon cron-fire enqueue | Lost update |
-| `kb_extract_jobs` status mutation | CLI `kb adopt` vs daemon review-time extract | Duplicate extract |
-| `works` row mutation | CLI `creator run` vs daemon auto-chain | Inconsistent state |
+| `schedule_json` read-modify-write | CLI `cron set` vs scheduler cron-fire enqueue | Lost update |
+| `kb_extract_jobs` status mutation | CLI `kb adopt` vs scheduler-driven review-time extract | Duplicate extract |
+| `works` row mutation | CLI `creator works` mutations vs scheduler auto-chain | Inconsistent state |
 
 A **hard cross-process advisory lock** (`flock` on `Works/<work_ref>/.lock`) is the V1.51 fix.
 

@@ -485,6 +485,8 @@ When V1.5 lights up the `context.summarize` capability and points one or two pre
 
 ## 12. Migration / Implementation Steps
 
+> **Historical delivery record (v1.193 P2 supersession):** the steps below follow the V1.4 delivery compass WS7 ordering and name the pre-retirement host. The daemon-crate handler path in Step 5 and the `nexus42 schedule`/`daemon schedule` CLI group in Step 4 were deleted in v1.193 P2. Current owners: the HTTP endpoints are the retained `/v1/daemon/orchestration/schedules*` family served by `apps/nexus-service` (`src/execution.ts`) over `nexus-core`; the retained CLI scheduling surface is `creator works cron` declaration editing. Steps 1–3 (contracts, `nexus-orchestration` supervisor, core_context engine) name surviving crates.
+
 Follows the V1.4 delivery compass WS7 ordering.
 
 ### Step 1 — Data-model crate
@@ -517,7 +519,7 @@ Follows the V1.4 delivery compass WS7 ordering.
 
 ### Step 5 — HTTP endpoints
 
-- Axum handlers under `crates/nexus-daemon-runtime/src/api/handlers/orchestration/schedules.rs`.
+- Axum handlers under `crates/nexus-daemon-runtime/src/api/handlers/orchestration/schedules.rs` (**historical** — deleted with the crate in v1.193 P2; the retained family is now served by `apps/nexus-service/src/execution.ts`).
 - All endpoints per §9.
 - **Evidence**: HTTP smoke tests (add → list → edit → signal → history).
 

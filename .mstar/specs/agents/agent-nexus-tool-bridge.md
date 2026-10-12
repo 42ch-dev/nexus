@@ -41,7 +41,7 @@ Preset orchestration drives **multi-step** creative work via schedules and capab
 
 | # | Decision |
 | --- | --- |
-| 1 | **Execution surface** = `nexus-daemon-runtime` `HostToolExecutor` + Daemon API handlers |
+| 1 | **Execution surface** = `nexus-daemon-runtime` `HostToolExecutor` + Daemon API handlers (**retired in v1.193 P2** — current authority: `nexus-core` `execution/capabilities.rs` `execute_tool` over the generated `ToolsApi` DTO, §0) |
 | 2 | **Tool IDs** = `nexus.<domain>.<action>` aligned with [acp-capability-set.md](acp-capability-set.md) where applicable |
 | 3 | **CLI** is not an agent tool transport |
 | 4 | **Orchestration capabilities** and **host tools** may share handler implementations (registry) but different admission paths |
@@ -228,16 +228,16 @@ DF-47 row in the deferred tracker is narrowed. Full DF-46 capability matrix (all
 
 ### 7.4 Production caller wiring (V1.42 P3)
 
-**Status**: **Shipped** (V1.42 P3 — 2026-06-11)
+**Status**: **Shipped** (V1.42 P3 — 2026-06-11); **superseded in part by v1.193 P2** — the daemon-side adapter/boot rows below name the deleted `nexus-daemon-runtime` crate and are historical. The surviving owner of schedule-side `nexus.*` dispatch is the `DaemonToolDispatch` trait in `nexus-orchestration` plus the core execution authority (§0).
 
-**Shipped scope**:
+**Shipped scope (V1.42 P3 record):**
 
-1. `DaemonToolDispatch` trait in `nexus-orchestration` for daemon-side `nexus.*` tool dispatch.
-2. `DaemonToolDispatchAdapter` in `nexus-daemon-runtime` using `HostToolExecutor::dispatch_for_schedule` (in-process, no worker IPC).
+1. `DaemonToolDispatch` trait in `nexus-orchestration` for daemon-side `nexus.*` tool dispatch. (Trait survives in `crates/nexus-orchestration/src/capability/mod.rs`.)
+2. `DaemonToolDispatchAdapter` in `nexus-daemon-runtime` using `HostToolExecutor::dispatch_for_schedule` (in-process, no worker IPC). (**Historical** — adapter and `HostToolExecutor` were deleted with the crate in v1.193 P2; dispatch now runs through `nexus-core` `execute_tool`.)
 3. `HostToolCallTask` graph-flow task for schedule-initiated tool calls with template rendering.
 4. Chosen tool: `nexus.orchestration.schedule_status` (read-only, spec §4).
 5. Hermetic E2E tests: 5 tests covering round-trip, stub mode, cross-creator rejection, and Schedule vs HTTP equivalence.
-6. `WorkspaceState.daemon_tool_dispatch` wired at daemon boot.
+6. `WorkspaceState.daemon_tool_dispatch` wired at daemon boot. (**Historical** — `WorkspaceState`/daemon boot were deleted in v1.193 P2; the orchestration engine receives its dispatch handle via `nexus-core` composition today.)
 
 **Authz/locks**: read-only tool respects completion-lock; mutating tools must follow `runtime_lock_holder` (P0).
 
@@ -380,25 +380,25 @@ Required side effects: no platform HTTP attempt; audit row recorded with `audit_
 
 This section is informational for P3 and documents current contract gaps. P3 does **not** add schemas or run codegen. The future codegen envelope work (gap table below) is DR-23.
 
-Current repo snapshot checked for this spec:
+Current repo snapshot checked for this spec (V1.34-era record; owner mapping updated 2026-10-12):
 
-- `crates/nexus-daemon-runtime/src/api/handlers/host_tool_executor.rs` defines handwritten `ToolExecuteRequest` / `ToolExecuteResponse` for the existing `fs/*` host tool executor.
-- `crates/nexus-contracts/src/generated/context_assembly_v1.rs` already contains generated `ContextAssembleRequestV1` / `ContextAssembleResponseV1` from `schemas/platform/context-assembly-v1.schema.json`, but its comments mark the shape as deferred/direct platform cloud + CLI local assembly, not the V1.34 daemon tool wrapper.
+- The handwritten `ToolExecuteRequest` / `ToolExecuteResponse` lived in the deleted `crates/nexus-daemon-runtime/src/api/handlers/host_tool_executor.rs` (v1.193 P2). The current tool-execute request/response are the **generated** contracts `ToolsApi` (`schemas/core/tools-api.schema.json` → `crates/nexus-contracts/src/generated/core/tools_api.rs`) and `CoreToolExecuteResponse` (`schemas/core/core-tool-execute-response.schema.json`), dispatched by `nexus-core::execution::capabilities::execute_tool` (§0).
+- `crates/nexus-contracts/src/generated/context_assembly_v1.rs` (now `generated/platform/http_bff/context_assembly_v1.rs`) already contains generated `ContextAssembleRequestV1` / `ContextAssembleResponseV1` from `schemas/platform/context-assembly-v1.schema.json`, but its comments mark the shape as deferred/direct platform cloud + CLI local assembly, not the V1.34 daemon tool wrapper.
 - `crates/nexus-contracts/src/local/acp/types.rs` contains Nexus-owned ACP session/protocol DTOs, not host tool execution DTOs.
 
-**Tracked DR-23** — the gap table below documents current contract gaps; the codegen closure is tracked in future work.
+**Tracked DR-23** — the gap table below is a historical P3 record; the request/response envelope rows have since been closed by the generated `schemas/core/` `ToolsApi` / `CoreToolExecuteResponse` contracts above.
 
 | Spec §5 / handler shape | Current `nexus-contracts` status | Gap / future codegen note |
 | --- | --- | --- |
-| `ToolExecutionRequest` / execute request `{ tool_name, parameters, session_id? }` | **Not codegen'd.** Existing shape is handwritten daemon runtime `ToolExecuteRequest`. | Add JSON Schema before replacing handwritten request DTO in P4/P5+ follow-up. Preserve compatibility with existing `fs/*` fields. |
-| `ToolExecutionResponse` / success `{ success, result }` | **Not codegen'd.** Existing shape is handwritten daemon runtime `ToolExecuteResponse`. | Add generated wrapper that can carry arbitrary handler result JSON while keeping stable `success`. |
-| `ToolExecutionError` / failure `{ success: false, error: { code, reason?, message?, details? } }` | **Not codegen'd.** Existing Daemon API error code enums live in runtime error handling, not generated contracts. | Add generated error envelope or reuse a future shared Daemon API error schema; include `FORBIDDEN`, `POLICY_BLOCKED`, `NOT_SUPPORTED`, `INVALID_INPUT`. |
-| `WorkerAgentToolRequest` `{ tool_name, args, request_id }` | **Removed (M-007).** The worker `agent_tool_request` IPC lane was removed; the schedule lane normalizes `{ tool_name, args, request_id }` in-process via `HostToolExecutor::dispatch_for_schedule`. | No future schema needed for a removed lane. |
+| `ToolExecutionRequest` / execute request `{ tool_name, parameters, session_id? }` | **Closed (post-V1.34).** Now codegen'd as `ToolsApi` from `schemas/core/tools-api.schema.json` (the P3 record named the handwritten daemon runtime `ToolExecuteRequest`, deleted in v1.193 P2). | Historical gap note: schema landed before the handwritten DTO was retired. |
+| `ToolExecutionResponse` / success `{ success, result }` | **Closed (post-V1.34).** Now codegen'd as `CoreToolExecuteResponse` from `schemas/core/core-tool-execute-response.schema.json`. | Historical gap note. |
+| `ToolExecutionError` / failure `{ success: false, error: { code, reason?, message?, details? }` } | **Not codegen'd as a tool-specific envelope.** Daemon API error code enums live in service/core error handling, not generated contracts. | Historical gap note; include `FORBIDDEN`, `POLICY_BLOCKED`, `NOT_SUPPORTED`, `INVALID_INPUT` if a shared envelope is ever schema'd. |
+| `WorkerAgentToolRequest` `{ tool_name, args, request_id }` | **Removed (M-007).** The worker `agent_tool_request` IPC lane was removed; the schedule lane then normalized `{ tool_name, args, request_id }` in-process via the daemon `HostToolExecutor::dispatch_for_schedule` (itself deleted in v1.193 P2; schedule-side dispatch is now the `DaemonToolDispatch` trait under core execution — §0/§7.4). | No future schema needed for a removed lane. |
 | `WorkerAgentToolRequestResult` `{ request_id, grant, output? }` | **Removed (M-007).** Same lane removal. | No future schema needed for a removed lane. |
 | `nexus.context.assemble` local result subset | **Partially present.** `ContextAssembleRequestV1` / `ContextAssembleResponseV1` exist, but are cloud/deferred and not the daemon tool response envelope. | P4 may reference local assembly domain types internally; generated tool contract still needs the wrapper + `POLICY_BLOCKED` behavior. |
 | Tool-specific parameters for six `nexus.*` ids | **Not codegen'd.** No per-tool parameter schemas in `schemas/`. | Future schemas should cover `whoami`, `workspace.info`, `work.get`, `work.patch`, `schedule_status`, and `context.assemble` minimal params/results. |
 
-Until the gap is closed, P4 must keep the runtime DTO boundary localized in `HostToolExecutor` and avoid creating parallel handwritten DTOs outside the daemon runtime.
+(P3-era rule, historical:) until the gap was closed, P4 was to keep the runtime DTO boundary localized in `HostToolExecutor` and avoid creating parallel handwritten DTOs outside the daemon runtime. The envelope gap is now closed by the generated `schemas/core/` DTOs and the daemon host is deleted; no parallel handwritten wire DTOs may be introduced outside `nexus-contracts`.
 
 ---
 

@@ -4,7 +4,7 @@
 | --- | --- |
 | **Status** | Normative — V1.77 amendment (§11 findings PATCH route as a non-OCC resource PATCH; last-writer-wins, no revision/version, no conflict modal; cross-profile consumption). Prior: V1.74 amendment (§7.6 World KB relationship patch route extending the V1.73 World KB route pattern; additive relationship DTOs; per-row OCC with `expected_version`/`version` against `kb_relationships.revision`), V1.73 amendment (§7 World KB canvas structured patch/read routes extending the V1.71/V1.72 patch-route convention; additive World KB DTOs; per-row OCC with `expected_version`/`version`), V1.72 amendment (§7 outline/timeline structured patch routes extending the V1.71 patch-route convention; additive outline DTOs; `@42ch/nexus-contracts` 0.7.0 → 0.8.0 by default), V1.71 amendment (§7 structured patch-route convention for canvas-like surfaces; Strategy β patch routes; `@42ch/nexus-contracts` 0.6.0 → 0.7.0 by default), V1.67 amendment (§3.2 casing ratification + §4 `items` enforcement + §5 sort-param contract; `@42ch/nexus-contracts` 0.5.0 → 0.6.0), V1.64 cursor/error/`items` conventions + V1.65 chapter-content file-backed route rules. |
 | **Document class** | Master |
-| **Scope** | Cross-resource Daemon API response/query conventions for schemas under `schemas/daemon-api/` and handlers under `nexus-daemon-runtime` |
+| **Scope** | Cross-resource Daemon API response/query conventions for schemas under `schemas/daemon-api/` and the serving route families in `apps/nexus-service` over `nexus-core` (pre-v1.193 references to `nexus-daemon-runtime` handlers below are historical) |
 | **Coordinates with** | [schemas-directory-layout.md](../architecture/schemas-directory-layout.md), [schemas-external-consumer-boundary.md](../architecture/schemas-external-consumer-boundary.md), [daemon-runtime.md](../archived/daemon-runtime.md), [findings-lifecycle.md](../contracts/findings-lifecycle.md) |
 | **Evidence** | `surface-audit.md` |
 
@@ -68,9 +68,10 @@ When converting a legacy endpoint:
 
 ### 3.1 Canonical wire shape
 
-All Daemon API JSON error responses are emitted by the daemon runtime as a
-**wrapped envelope** (see `ApiErrorResponse` in
-`crates/nexus-daemon-runtime/src/api/errors.rs`):
+All Daemon API JSON error responses are emitted by the serving host as a
+**wrapped envelope** — today `apps/nexus-service` (`src/errors.ts`,
+`mapNativeError`); the pre-v1.193 emitter was `ApiErrorResponse` in
+`crates/nexus-daemon-runtime/src/api/errors.rs` (deleted with the crate):
 
 ```json
 {
@@ -90,8 +91,10 @@ All Daemon API JSON error responses are emitted by the daemon runtime as a
   (`schemas/daemon-api/common/error-response.schema.json`); the schema describes
   the **inner detail**, not the full wire body.
 - `error.request_id`: correlation ID injected by the request-tracing middleware
-  when active (`crates/nexus-daemon-runtime/src/api/middleware.rs`); absent when
-  the middleware is not installed. It lives under `error`, not at the top level.
+  when active (today the `apps/nexus-service` error mapping in `src/errors.ts`;
+  the pre-v1.193 injector was `crates/nexus-daemon-runtime/src/api/middleware.rs`);
+  absent when the middleware is not installed. It lives under `error`, not at
+  the top level.
 
 Inner detail fields:
 
@@ -227,9 +230,11 @@ through the canvas patch route
 [canvas-strategy-surface.md](../surfaces/canvas-strategy-surface.md) §3.5. The atomic-write
 invariants that this section historically attached to the removed PUT are still
 normative; they are re-anchored to the PATCH content path below and enforced by
-`crates/nexus-daemon-runtime/src/api/handlers/outline.rs::apply_chapter_patch`
+`crates/nexus-core/src/outline.rs::apply_chapter_patch`
 (the `atomic_write_outline` call: sibling temp + rename + file fsync + directory
-fsync, run while the caller holds a `RuntimeLockGuard`).
+fsync, run while the caller holds a `RuntimeLockGuard`). The pre-v1.193 enforcer
+was `crates/nexus-daemon-runtime/src/api/handlers/outline.rs`, deleted with the
+crate; the route is served today by `apps/nexus-service` (`content.ts`).
 
 When `set.content` is present on an `outline.patch_chapter` request, the handler
 MUST:
@@ -407,7 +412,7 @@ V1.73 World KB canvas surface reuses this convention with per-row OCC rather tha
 3. Daemon validates path identifiers, row identifiers, entity-scope-model §5.5 promotion-state invariants, merge/adopt/reject rules, and entity patch payloads.
 4. Daemon persists atomically and returns the updated row `version`, or rejects stale writes with 409 and structured recovery data.
 
-This convention does **not** authorize direct browser/Tauri webview writes to raw files. File-backed routes remain domain-specific and must be separately specified like the V1.65 chapter-content routes in §6.
+This convention does **not** authorize direct browser/desktop-webview writes to raw files. File-backed routes remain domain-specific and must be separately specified like the V1.65 chapter-content routes in §6.
 
 ### 7.5 World KB canvas β routes (V1.73)
 
@@ -585,7 +590,7 @@ This is the correct shape for a simple CRUD PATCH on a non-OCC resource. Future 
 
 - **Schema on disk**: `schemas/daemon-api/findings/update-finding-request.schema.json` (unchanged since V1.49).
 - **Codegen**: `UpdateFindingRequest` + `CreateFindingRequest` are fully codegen'd into both Rust and TypeScript and barrel-exported by `@42ch/nexus-contracts` (confirmed `generated/index.ts:66,71`).
-- **Handler**: `update_finding_handler` in `crates/nexus-daemon-runtime/src/api/handlers/findings.rs:380-451`.
+- **Handler**: the findings PATCH is served today by `apps/nexus-service` (`src/knowledge.ts` findings routes) over the `nexus-core-node` `update_finding` projection (`src/domain.rs`); the pre-v1.193 handler was `update_finding_handler` in `crates/nexus-daemon-runtime/src/api/handlers/findings.rs:380-451` (deleted with the crate).
 - **DAO enforcement**: `update_finding` in `crates/nexus-local-db/src/findings.rs:927-1042` (enum validation + transition enforcement + dynamic SET clause builder).
 - **`wire_contracts_changed`**: `FALSE` for V1.77 — the route, schema, codegen, and handler are unchanged. Only consumer-side consumption is additive.
 - **Spec cross-reference**: [findings-lifecycle.md](../contracts/findings-lifecycle.md) — the 6-state lifecycle, `target_executor` routing, and UI remediation surface.

@@ -345,7 +345,7 @@ A Tauri v2 desktop wrapper layered around the transport-unchanged V1.65 SPA, plu
 - **Body full-text editor + per-chapter edit lock** — **rejected** (2026-06-26 V1.67 re-discussion). Nexus is an AI-autonomous executor — the AI owns prose; a manual rich-text body editor is the wrong direction. The V1.68 lead is the **Canvas Strategy Surface**. See §15.3.
 - **UI productivity wave** — **V1.67**. Drag-reorder, bulk ops, reconcile trigger, outline templates.
 - **Windows + Linux + signing + notarization + GitHub Releases + auto-update** — **V1.67+**. The unsigned `.app` is the V1.66 deliverable. (Until signing lands, the no-Gatekeeper-friction author win is not realized — V1.66's user is the developer/contributor; see §14.4.)
-- **In-process `nexus-daemon-runtime` lib link; system tray / menu-bar / hotkeys / notifications; mobile** — **V1.67+ / post-V1.67**.
+- **In-process `nexus-daemon-runtime` lib link; system tray / menu-bar / hotkeys / notifications; mobile** — **V1.67+ / post-V1.67**. (Superseded: the in-process lib-link item named the crate deleted in v1.193 P2; the desktop host is Electron supervising the TS service — see §0 host boundary. Tray/hotkeys/mobile remain unscheduled.)
 
 ### 14.4 User stories (V1.66 slice)
 

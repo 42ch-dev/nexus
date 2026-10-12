@@ -126,7 +126,9 @@ The runtime/preset contracts remain authoritative for the retained crates above.
 
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
-│ nexus-daemon-runtime                                            │
+│ nexus-daemon-runtime  (historical host — deleted in v1.193 P2;  │
+│  current host composition: nexus-core under apps/nexus-service, │
+│  with the supervisor in crates/nexus-orchestration)             │
 │  ┌──────────────┐   ┌──────────────────┐   ┌─────────────────┐ │
 │  │ lifecycle HSM│   │ orchestration    │   │ capability      │ │
 │  │              │◀──┤ engine + SQLite  │◀──┤ registry        │ │
@@ -151,8 +153,8 @@ The runtime/preset contracts remain authoritative for the retained crates above.
 | ------------------------------------------------- | ---- | -------------- | ------------------------------------------------------------------------------------------ |
 | `crates/nexus-acp-host`                           | New  | Yes            | ACP transport and owned-process lifecycle behind the Host ACP provider                       |
 | `crates/nexus-orchestration`                      | New  | No             | graph-flow adapter, capability trait, preset loader, SQLite `SessionStorage`                  |
-| `crates/nexus-daemon-runtime`                     | Ext. | No             | Orchestration engine host, lifecycle HSM, `HostFacade` prompt executor, HTTP trigger/query    |
-| `apps/nexus42`                                    | Ext. | Yes (via host) | Interactive `acp run` and schedule command groups                                             |
+| `crates/nexus-daemon-runtime`                     | Ext. | No             | **Deleted in v1.193 P2** — was: orchestration engine host, lifecycle HSM, `HostFacade` prompt executor, HTTP trigger/query. Current owners: engine/supervisor in `crates/nexus-orchestration`, host composition in `crates/nexus-core`, HTTP family in `apps/nexus-service` |
+| `apps/nexus42`                                    | Ext. | Yes (via host) | Interactive `acp run`; the schedule command groups were retired in v1.193 P2 (retained scheduling CLI surface: `creator works cron` declaration editing) |
 | `crates/nexus-contracts`, `nexus-creator`, `nexus-cloud-domain`, … | Ext. | No | Application crates per [local-cloud-crate-architecture.md](../archived/local-cloud-crate-architecture.md); legacy monolith `nexus-domain` retired after V1.21 |
 
 ### 3.3 Data flow for one strategy tick

@@ -1,13 +1,14 @@
 # Work Experience Model — Normative Specification v1
 
 **Status**: Shipped (V1.33 — Work loop + Creative Brief Intake + `creator run` + `run_intents`)  
+**Current authority (v1.193 P2)**: the Work/entity/journey model below is retained; the `creator run` runner, `creator bootstrap`, and the `daemon schedule` group were removed in v1.193 P2. Where the body names those entries, read them as the V1.33-era contract: the surviving CLI equivalents are the `creator works` atomic operations (`inspire` ← `run continue`, `reopen` ← `run resume --reopen`, `reconcile-chapters`, `status`/`list`); preset admission has no CLI entry and goes through the core execution surface (`POST /v1/daemon/orchestration/schedules`, served by `apps/nexus-service`), with `creator works cron` as the retained CLI scheduling declaration surface.  
 **Document class**: Feature line  
 **Created**: 2026-06-04  
 **Shipped**: 2026-06-04 (compass  — 5 plans P1–P5 all Done)  
 **Scope**: Product-level **Work** container, user journey, Creative Brief Intake, preset run intents, and relationship to workspace / World / schedules  
 **Coordinates with**:
 
-- [cli-spec.md](../cli/cli-spec.md) — `creator run`, `system preset`
+- [cli-spec.md](../cli/cli-spec.md) — `creator works` / `preset` (current); `creator run`, `system preset` (retired in v1.193 P2)
 - [orchestration-engine.md](../orchestration/orchestration-engine.md) — presets, schedules, `llm_judge`, run_intents
 - [creator-schedule-and-core-context.md](../orchestration/creator-schedule-and-core-context.md) — schedule + core_context
 - [entity-scope-model.md](../architecture/entity-scope-model.md) — Creator / World hierarchy
@@ -25,7 +26,7 @@ Nexus OSS needs a **first-class Work** concept so creators can:
 3. **Continue** the same piece of work with additional inspiration and direction tweaks without starting a new schedule from scratch.
 4. Run **appropriate presets** only in contexts where they are allowed (init vs continue vs maintenance).
 
-Without Work, users must understand `daemon schedule`, preset IDs, seed strings, and `core_context` — which is correct for power users but not for a complete product cycle.
+Without Work, users must understand `daemon schedule`, preset IDs, seed strings, and `core_context` — which is correct for power users but not for a complete product cycle. (V1.33 problem statement; the `daemon schedule` group itself was retired in v1.193 P2.)
 
 ---
 
@@ -166,9 +167,9 @@ Policy: only presets with `work_init` appear in the default bootstrap intake lis
 
 ### 6.1 Prerequisites
 
-Same as [cli-spec.md](../cli/cli-spec.md) §7: workspace init, daemon start, ACP agent use, active creator.
+Same as [cli-spec.md](../cli/cli-spec.md) §7: workspace init, active creator, ACP agent use (the V1.33 list named `daemon start`; the daemon group was retired in v1.193 P2 and no service-launch step exists).
 
-### 6.2 Start Work (`creator bootstrap`)
+### 6.2 Start Work (`creator bootstrap`) — **entry retired in v1.193 P2** (historical contract)
 
 ```text
 creator bootstrap --idea "<text>" [--preset novel-writing] [--world-id <id>]
@@ -182,31 +183,33 @@ Behavior:
 4. Enqueue primary preset (default `novel-writing`) with seed derived from brief + `initial_idea`.
 5. Print `work_id`, schedule ids, next-step hints.
 
-### 6.3 Continue Work (`creator run continue`)
+### 6.3 Continue Work (`creator works inspire`; V1.33 entry was `creator run continue`, retired in v1.193 P2)
 
 ```text
-creator run continue <work_id> [--note "<supplement>"] [--preset <id>]
+creator works inspire [<work_id>] --note "<supplement>"
 ```
 
 Behavior:
 
 1. Append `note` to `inspiration_log`.
-2. Merge note into schedule `core_context` (via existing `daemon schedule edit --append` semantics).
-3. Optionally start/resume preset with `work_continue` intent.
+2. (Historical V1.33 step, retired:) the note was merged into the schedule `core_context` via `daemon schedule edit --append` semantics; that group was removed in v1.193 P2 and the current `inspire` command is a pure side-input lane that does not touch schedules.
+3. (Historical V1.33 step, retired:) optionally start/resume preset with `work_continue` intent — preset admission now goes through the core execution surface, not a CLI flag (`--preset` was dropped in the V1.45 P2 migration).
 4. Do **not** create a new Work.
 
 ### 6.4 Inspect Work
 
 ```text
-creator run list [--status active]
-creator run status <work_id>
+creator works list [--status active]
+creator works status <work_id>
 ```
+
+(V1.41 command paths; the V1.33 forms were `creator run list` / `creator run status`, retired in v1.193 P2.)
 
 Shows: intake status, linked schedules, last session state, world binding.
 
 ### 6.5 Power-user escape hatch
 
-`daemon schedule ...` remains valid; schedules created via `creator run` must record `work_id` in schedule metadata (P1).
+(Historical — V1.33.) `daemon schedule ...` was the power-user escape hatch; the group was deleted in v1.193 P2. Today the retained scheduling surfaces are `creator works cron` declaration editing (CLI) and the `/v1/daemon/orchestration/schedules` add/signal/list/inspect routes served by `apps/nexus-service`. Schedules created for a Work must record `work_id` in schedule metadata (P1).
 
 ---
 
@@ -236,7 +239,7 @@ Shows: intake status, linked schedules, last session state, world binding.
 V1.33 requires runtime alignment with [orchestration-engine.md](../orchestration/orchestration-engine.md):
 
 - `exit_when.kind: llm_judge` must invoke declared `judge_capability` (default `judge.llm`) with `template_file`.
-- Until **conditional routing** ships, NOGO results in `WaitForInput` on the **same** linear edge (user may `daemon schedule advance` or append context via `creator run continue`).
+- Until **conditional routing** ships, NOGO results in `WaitForInput` on the **same** linear edge (the V1.33 recovery verbs were `daemon schedule advance` / `creator run continue`, both retired in v1.193 P2; today the author appends context via `creator works inspire --note` and the next admission comes from the execution surface).
 
 Presets relying on quality loops: `novel-writing` (gathering exit), `novel-chapter-review` (review/revise).
 
@@ -267,9 +270,9 @@ V1.34 extends Work with:
 | `current_stage` | enum | `intake` \| `research` \| `produce` \| `review` \| `persist` |
 | `stage_status` | enum or map | Per-stage `pending` \| `active` \| `complete` \| `skipped` \| `failed` |
 
-Stage progression is **explicit** via `creator run <preset_id>` (the preset runner validates stage gates and PATCHes Work stage fields before enqueue — not default auto-chain; see DF-53).
+Stage progression is **explicit** — the V1.33 dispatch entry was `creator run <preset_id>` (the preset runner validates stage gates and PATCHes Work stage fields before enqueue — not default auto-chain; see DF-53). The runner was retired in v1.193 P2; stage-gate validation and Work stage mutation now happen inside the engine/core on schedule admission, with no CLI dispatch entry.
 
-FL-E reuses V1.33 `creator bootstrap` (composite onboarding) and `creator run <preset_id>` (strategy execution) and does not replace `daemon schedule`.
+FL-E reused V1.33 `creator bootstrap` (composite onboarding) and `creator run <preset_id>` (strategy execution) and did not replace `daemon schedule` (V1.33–v1.192 arrangement; all three entries were retired in v1.193 P2).
 
 ---
 

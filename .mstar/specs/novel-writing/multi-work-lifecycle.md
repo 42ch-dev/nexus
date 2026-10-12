@@ -69,8 +69,8 @@ Minimum schema:
 
 | Rule | Behavior |
 | --- | --- |
-| Presence | Daemon **must not** start new auto-chain ticks on this Work while lock exists |
-| Mutating CLI/API | `creator run <preset_id>` (preset dispatch), `creator works resume-chain` (without prior release), `nexus.work.patch`, schedule enqueue **fail closed** |
+| Presence | The scheduler (`nexus-orchestration` supervisor, hosted via `nexus-core`) **must not** start new auto-chain ticks on this Work while lock exists |
+| Mutating CLI/API | `creator works reopen`, `nexus.work.patch`, schedule enqueue **fail closed** (the retired `creator run <preset_id>` dispatch and `creator works resume-chain` entries were removed in v1.193 P2) |
 | Read-only | `creator works status`, `creator works list` always allowed |
 
 ### 3.1 Release
@@ -78,7 +78,7 @@ Minimum schema:
 `creator works completion-lock release <work_id>`:
 
 1. Removes file + clears `works.completion_locked_at`.
-2. Enables **`creator run resume`** on the **same** `work_id` (grill-me B).
+2. Enables **`creator works reopen`** on the **same** `work_id` (grill-me B; V1.45 P2 — migrated from the retired `creator run resume`).
 3. Does **not** auto-change pool row status (remains `completed` until operator `works use` / promote).
 
 ### 3.2 Source-of-truth declaration
@@ -90,16 +90,18 @@ DB column `works.completion_locked_at` is the authoritative lock state. The `.co
 When `works.status == completed` after lock release:
 
 ```text
-creator run resume <work_id> --reopen --reason "<text>"
+creator works reopen [<work_id>] --reason "<text>"
 ```
+
+(V1.45 P2 command path — migrated from the retired `creator run resume <work_id> --reopen --reason "<text>"`, removed with the runner in v1.193 P2.)
 
 1. `--reason` **required** (audited).
 2. Sets `works.status = active`, clears `novel_completion_status`.
 3. Re-enables auto-chain per V1.39 rules (does not delete `work_chapters` rows).
-4. If §6 completion criteria still hold (all chapters `finalized` and `current_chapter >= total`), **`--extend-chapters <new_total>`** is **required** where `new_total > total_planned_chapters`; seeds new `work_chapters` rows before resume enqueue.
-5. Distinct from `creator bootstrap --from-work` (new Work + `lineage_from_work_id`).
+4. If §6 completion criteria still hold (all chapters `finalized` and `current_chapter >= total`), the retired `run resume --reopen` carried a **required** `--extend-chapters <new_total>` flag (`new_total > total_planned_chapters`) that seeded new `work_chapters` rows before resume enqueue; the current `creator works reopen` has **no** such flag — extend-then-reopen has no shipped CLI path today.
+5. Distinct from `creator bootstrap --from-work` (new Work + `lineage_from_work_id`; the `creator bootstrap` entry itself was removed in v1.193 P2 — the lineage contract remains the historical record).
 
-**OUT**: silent reopen without `--reopen`.
+**OUT**: silent reopen without `--reason`.
 
 ---
 
@@ -134,11 +136,11 @@ Daemon API and `nexus.work.patch` **must** use the same acquire/release paths as
 
 | Path | Acquire before mutate | Release |
 | --- | --- | --- |
-| `creator run` mutating subcommands | **Required** (P0) | On command return (RAII) |
-| Daemon `patch_work` / schedule enqueue | **Required** (P0) | On schedule terminal |
+| `creator works` mutating subcommands (V1.45 P2 migration; the `creator run` runner rows were removed in v1.193 P2) | **Required** (P0) | On command return (RAII) |
+| Service `patch_work` / schedule enqueue (`apps/nexus-service` over `nexus-core`; historically daemon handlers) | **Required** (P0) | On schedule terminal |
 | Auto-chain tick | Skip if foreign holder | N/A |
 
-**Stale recovery (R-V141P0-01)**: If `runtime_lock_acquired_at` older than **2h** (default; env/config override allowed), daemon **may** clear holder before new acquire. Hermetic tests required.
+**Stale recovery (R-V141P0-01)**: If `runtime_lock_acquired_at` older than **2h** (default; env/config override allowed), the scheduler owner (`nexus-orchestration` supervisor under `nexus-core`; historically the daemon) **may** clear holder before new acquire. Hermetic tests required.
 
 ---
 
@@ -146,13 +148,17 @@ Daemon API and `nexus.work.patch` **must** use the same acquire/release paths as
 
 Full flags in [cli-spec.md](../cli/cli-spec.md) §6.2D / §6.2H.
 
-### 5.1 `creator run <preset_id>` — strategy execution
+### 5.1 ~~`creator run <preset_id>`~~ — strategy execution (**retired in v1.193 P2**, historical record)
 
-- Generic preset dispatch via `creator run <preset_id> [<work_id>]` (V1.45).
-- Optional `work_id`: omit → pool `active` → bound `work_id`; if none, fail → `creator works use`.
+The generic preset dispatch entry `creator run <preset_id> [<work_id>]` (V1.45) was removed in v1.193 P2; there is no current CLI preset-dispatch entrance. Historical rules of that entry:
+
+- Optional `work_id`: omit → pool `active` → bound `work_id`; if none, fail → `creator works use`. (This resolution rule survives on the retained `creator works` atomic commands.)
 - **No** `list` / `status` on `run` (hard-removed V1.41); use `creator works list` / `creator works status`.
+- Current preset admission: schedule add via the core execution surface (`POST /v1/daemon/orchestration/schedules`, served by `apps/nexus-service`); the retained CLI scheduling surface is `creator works cron` declaration editing.
 
-### 5.2 `creator bootstrap --from-work <completed_work_id>`
+### 5.2 ~~`creator bootstrap --from-work <completed_work_id>`~~ (**retired in v1.193 P2**, historical record)
+
+The `creator bootstrap` entry was removed in v1.193 P2; no current CLI scaffold/lineage entry exists. Its historical contract:
 
 - Creates **new** Work; sets `works.lineage_from_work_id` on the new row.
 - **Validation (shipped `12753eb8`)**: `completed_work_id` must exist, belong to the active creator, and be in `completed` status; otherwise **422** before INSERT.

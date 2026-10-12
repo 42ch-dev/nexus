@@ -11,6 +11,8 @@
 
 > **Promoted to Draft (2026-06-27 V1.69 P0).** The V1.67 Exploration was promoted to Draft by `@architect` for interface contracts, structured write boundary, and canvas-token contract. Product/UX thesis from the original `@product-manager` contribution remains in §4. This Draft intentionally stops short of schema/codegen or React Flow implementation authority.
 
+> **Host boundary (v1.192/v1.193 P2):** the Tauri desktop shell and the integrated daemon named below are retired — the desktop host is Electron ([desktop-shell.md](desktop-shell.md)) and `/v1/daemon/*` is served by `apps/nexus-service` over `nexus-core`. Tauri/daemon-era hosting, webview and smoke-test wording below is the historical record of those stages; the transport invariants (NexusClient-only access, structured write boundary, no raw-file writes from the webview) carry over unchanged.
+
 > **Promoted to Shipped α (V1.70).** V1.70 shipped the first Strategy Canvas slice: read-only Strategy graph projection, canvas visualization, live execution overlay, and Idea-steer affordance. Implementation provenance: parent `079f687f`; feature commits `81cb4256`, `f82bcdd3`, `10edf22f`, `dad35736` on `feature/v1.70-canvas-strategy-read`, merged into `iteration/v1.70`. This promotion is scoped to the α read/overlay/steer slice only; structured write-boundary DTOs, node-granular editing, outline+timeline canvas, and World KB canvas remain Draft for V1.71+.
 
 > **Promoted to Shipped β (V1.71).** V1.71 ships the Strategy write-boundary slice: schema-backed patch DTOs, 3 node-granular Strategy patch routes, YAML `revision:` graphRevision conflict detection, daemon validation, atomic persistence, and UI retry/merge conflict handling. This promotion is scoped to the Strategy surface only; outline+timeline and World KB canvas surfaces remain Draft for V1.72+.
@@ -113,7 +115,7 @@ Use **React Flow v12+ via `@xyflow/react`** as the canvas renderer. Context7 loo
 Feasibility across the two shipped UI containers:
 
 - **Browser tab (Vite SPA)** — React Flow is a DOM/React library, compatible with the current React 19 + Vite stack (V1.157 upgrade) in `apps/web/package.json`. There is no SSR path in this repo; nevertheless React Flow should be imported only in browser-rendered routes/components because it depends on DOM sizing/interaction.
-- **Tauri v2 macOS desktop shell** — the shell loads the same `apps/web/dist` in a system webview (`web-ui.md` §14). On macOS that means WKWebView (the macOS system webview, also used by Safari). React Flow's interaction model is standard DOM/SVG/HTML pointer + keyboard work, so it should run in the WKWebView as the same SPA. V1.68 must still smoke-test drag, wheel/pinch zoom, focus rings, and clipboard/keyboard shortcuts inside the Tauri shell because desktop webviews can differ from Chromium in gesture details. (V1.68 implement decision)
+- **Desktop shell** — the Electron host (since v1.192; the V1.66–V1.191 Tauri shell is historical) loads the same `apps/web/dist`. The historical WKWebView caveat no longer applies — Electron embeds Chromium — but desktop gesture/keyboard smoke tests remain an implement-time obligation for whichever shell is current. (V1.68 implement decision)
 - **Bundle/performance** — React Flow is a significant interactive UI dependency. It should be route-split behind the canvas routes, not pulled into the Control Room bootstrap. Large Work/World graphs need lazy detail panes, filtered projections, and possibly virtualized side panels; React Flow renders graph DOM/SVG elements, so the first implementation should cap visible nodes and progressively expand subgraphs rather than attempting to render an entire World at once. (V1.68 implement decision)
 
 ### 3.2 Strategy-DAG ↔ React Flow mapping
@@ -136,7 +138,7 @@ The mapping is a projection of the runtime model, not a separate design language
 All four surfaces share a **Canvas Shell** and specialize by data adapter + node/edge registry:
 
 - Shared shell: React Flow provider, pan/zoom controls, minimap/overview, selection model, command palette, side inspector, validation/errors panel, dirty-state guard, keyboard shortcuts, screen-reader graph summary, and `NexusClient` transport injection (`web-ui.md` §5).
-- Per-surface adapters: convert Daemon API domain DTOs into `nodes`/`edges`, and convert user edits into structured operations (§3.4). No surface may read/write files directly from the browser/Tauri webview.
+- Per-surface adapters: convert Daemon API domain DTOs into `nodes`/`edges`, and convert user edits into structured operations (§3.4). No surface may read/write files directly from the browser/desktop webview.
 
 | Surface | Graph nodes | Graph edges | Custom node types | Primary Daemon API needs |
 | --- | --- | --- | --- | --- |
@@ -280,7 +282,7 @@ The Timeline surface is **World-scoped**. It projects a World's history — even
   - `POST /v1/daemon/works/{work_id}/timeline/patch` (`timeline.patch_event`) — Work-scoped; operates on outline markdown, not World entities. P1 regression tests MUST assert non-invocation.
   - `POST /v1/daemon/worlds/{world_id}/kb/patch-relationship` (`world_kb.patch_relationship`) — read-only on the Timeline surface in V1.122 (deferred to post-MVP; relationship edits remain on the World KB peer surface).
   - `POST /v1/daemon/worlds/{world_id}/kb/promote-candidate` (`kb.promote_candidate`) — candidate workflow belongs to the World KB surface.
-  - Any raw-file write (`PUT` to a file route, Tauri `invoke` writing to disk) — §2 invariant preserved.
+  - Any raw-file write (`PUT` to a file route, a host `invoke` bridge writing to disk) — §2 invariant preserved.
 - **No new Daemon API routes** in V1.122.
 
 #### Conflict policy (LOCKED — reuse only)
@@ -567,9 +569,9 @@ Strategy is a graph-of-graphs per `orchestration-engine.md` §3: outer Strategy 
 
 The same mechanism can group volumes/chapters in Work and entity clusters in World KB, but Strategy is the canonical nested-flow case.
 
-#### Browser tab and Tauri WKWebView parity
+#### Browser tab and desktop-shell parity
 
-The canvas must run in both the daemon-served browser SPA and the Tauri macOS shell that embeds the same `apps/web/dist`. V1.70 smoke tests must cover drag, pan/zoom, wheel/pinch gestures, keyboard focus movement, clipboard shortcuts, and inspector focus return in Chromium-like browsers and WKWebView. Any desktop-only filesystem action still routes through Tauri/native capabilities and structured daemon operations; the canvas webview never reads or writes raw local files directly.
+The canvas must run in both the service-served browser SPA and the desktop shell that embeds the same `apps/web/dist` (Electron since v1.192; the V1.70-era requirement named the Tauri macOS shell and WKWebView — historical). Smoke tests must cover drag, pan/zoom, wheel/pinch gestures, keyboard focus movement, clipboard shortcuts, and inspector focus return in Chromium-like browsers and the desktop shell. Any desktop-only filesystem action still routes through host capabilities and structured service operations; the canvas webview never reads or writes raw local files directly.
 
 ### 3.5 Structured write boundary (B3) — **Shipped β (V1.71)**
 
@@ -674,7 +676,7 @@ The canvas is a heavy Daemon API consumer: every graph node binds to list/detail
 - **FE1-ORCH error envelope convergence** gives canvas validation, save, and execution toasts one parseable error surface instead of per-handler exceptions.
 - **F-F1 sort convergence** makes node pickers and side panels deterministic (chapters, sessions, capabilities, presets) without bespoke client sorting.
 
-The Canvas Shell must keep the `web-ui.md` §5 transport invariant: React components depend on `NexusClient`, not `fetch`, Tauri `invoke`, or raw filesystem access.
+The Canvas Shell must keep the `web-ui.md` §5 transport invariant: React components depend on `NexusClient`, not `fetch`, a host `invoke` bridge (e.g. the retired Tauri `invoke`), or raw filesystem access.
 
 ## 4. Product / UX
 
