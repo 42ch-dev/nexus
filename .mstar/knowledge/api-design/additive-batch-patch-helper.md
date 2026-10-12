@@ -163,7 +163,8 @@ Keep CSV helpers in a dedicated module so the page stays under the project modul
 
 ## Related
 
-- `crates/nexus-core/src/findings.rs` — `batch_update_findings` (the bulk handler, `:583`) and `update_finding` (the single-row DAO it delegates to, `:478`)
+- `crates/nexus-core/src/findings.rs` — `batch_update_findings` (the bulk handler, `:583`; delegates to the local-db DAO at `:651-659`) and its `CoreService::update_finding` wrapper (`:478`)
+- `crates/nexus-local-db/src/findings.rs` — `update_finding` (the single-row DAO the bulk loop reuses, `:927`)
 - `schemas/daemon-api/findings/batch-update-findings-request.schema.json`
 - `schemas/daemon-api/findings/batch-update-findings-response.schema.json`
 - `apps/web/src/pages/findings-page.tsx`

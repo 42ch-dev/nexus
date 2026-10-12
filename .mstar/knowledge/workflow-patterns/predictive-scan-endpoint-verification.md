@@ -23,7 +23,7 @@ In V1.127, the PM dispatched an `explore` subagent to scan V1.126 surfaces for m
 
 One P0 candidate claimed: *"CodexNativeProvider / ClaudeNativeProvider never registered in daemon HostManager... the AgentPicker will show an empty agent list."* The plan (V1.127 P1) was scoped around this framing.
 
-Plan-level QC (qc1 seat 1) caught the real picture: the AgentPicker does **not** use `HostManager::list_providers()`. It calls `POST /v1/daemon/agent-host/scan` (now `apps/nexus-service/src/routes.ts:336-341`), which runs an independent PATH scan — `scan_path_in` (`crates/nexus-agent-host/src/discovery/path_scan.rs:83`) — that does NOT consult the registered providers in HostManager. (In the V1.127 Rust daemon this route lived in `crates/nexus-core/src/host.rs`; that line number is gone with the retired daemon.)
+Plan-level QC (qc1 seat 1) caught the real picture: the AgentPicker does **not** use `HostManager::list_providers()`. It calls `POST /v1/daemon/agent-host/scan` (now `apps/nexus-service/src/routes.ts:336-341`), which runs an independent PATH scan — `scan_path_in` (`crates/nexus-agent-host/src/discovery/path_scan.rs:83`) — that does NOT consult the registered providers in HostManager. (In the V1.127 Rust daemon this route was `crates/nexus-daemon-runtime/src/api/handlers/agent_host.rs:577`; the file was deleted with the crate in v1.193 P2.)
 
 The original V1.116 residual `R-V1116P0QA-001` note already said: *"Discovery works (scan shows installed), but session creation fails."* The `explore` subagent missed this and framed the bug as "empty agent list" instead of "session-create failure".
 

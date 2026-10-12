@@ -21,7 +21,7 @@ last_updated: 2026-10-12
 
 ## Context
 
-Path parameters must be a **real RegExp capture group** in the route pattern, not a framework template placeholder. A pattern that contains a literal `:id` or `{id}` matches those literal characters and never a real id, so the request falls through to an **empty-body framework 404** (`content-length: 0`). The web client then surfaces a generic `Request failed with status 404` - which looks like a client bug but is a daemon registration defect.
+Path parameters must be a **real RegExp capture group** in the route pattern, not a framework template placeholder. A pattern that contains a literal `:id` or `{id}` matches those literal characters and never a real id, so the request matches no retained route and the service answers `HttpError(501, 'route_not_migrated', …)` — an unmatched path is refused without side effects (`apps/nexus-service/src/server.ts:371-375`). Historical (retired v1.193 P2) Axum/matchit instead fell through to an **empty-body framework 404** (`content-length: 0`); against the current service a client showing a generic `Request failed with status 404` is a client/proxy artifact, not a route registration signature.
 
 The current owner is the standalone TypeScript service. `apps/nexus-service/src/routes.ts:96-113` defines one retained route family identity:
 
@@ -47,10 +47,10 @@ Historical (retired v1.193 P2): the Rust daemon used Axum 0.7 whose router is **
 1. **Register a parametric route as an anchored `RegExp` with a capture group** in the owning family's `*_ROUTES` array (for example `EXECUTION_ROUTES` in `apps/nexus-service/src/execution.ts:127-146`). A single path segment param is `([^/]+)`; `matchRoute` hands the groups to the handler as positional `params`.
 2. **Never write a template placeholder inside the pattern.** `/^\/v1\/…\/:id$/` and `/^\/v1\/…\/\{id\}$/` both match the literal characters and never a real id. Imagine the old Axum/matchit colon convention only as historical context - do not carry it into a TypeScript pattern.
 3. **Distinguish failure signatures:**
-   - Framework miss -> empty 404 body (`content-length: 0`) -> route pattern / registration defect.
+   - Framework miss (no pattern matched) -> `501 route_not_migrated` JSON envelope (`apps/nexus-service/src/server.ts:371-375`) -> route pattern / registration defect. (Historical Axum/matchit miss produced an empty 404 body.)
    - Handler reached -> JSON envelope (`success:false`, `code:not_found` / `service_unavailable`) -> business/engine path.
 4. **Regression:** cover each parametric surface with a `TestServer` integration check that curls the exact client URL against the daemon loopback.
-5. **RCA before client changes:** curl the daemon loopback with the exact client URL. If empty 404, fix daemon routes first - do not rewrite client paths or invent wire changes.
+5. **RCA before client changes:** curl the daemon loopback with the exact client URL. If the envelope is `501 route_not_migrated`, the route pattern did not match — fix daemon routes first; do not rewrite client paths or invent wire changes.
 6. **Edge case - verb suffixes:** the retired matcher could not express a param followed by a verb suffix (`:a:b` was rejected); the current RegExp pattern has no such limit. Encode the suffix directly, e.g. `/^\/v1\/daemon\/agent-host\/sessions\/([^/]+)\/operations$/` (`routes.ts:422`), and read the id from `params[0]`.
 
 ## What did not work

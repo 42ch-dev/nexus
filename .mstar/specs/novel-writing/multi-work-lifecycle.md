@@ -96,7 +96,7 @@ Current command path (`handle_reopen`, `apps/nexus42/src/commands/creator/works/
 1. `--reason` **required** (audited).
 2. The Work **must** be completion-locked; the core refuses a Work whose `completion_locked_at` is NULL with `not_locked` instead of accepting a no-op patch.
 3. The release clears `works.completion_locked_at` (SSOT), sets `novel_completion_status = 'reopened'`, and deletes the derived `.completion-lock.json`. It does **not** change `works.status` — the row stays `completed`; the Work is writable again because the completion-lock gate no longer blocks it, not because a column flipped to `active`.
-4. Re-enables auto-chain per V1.39 rules (does not delete `work_chapters` rows).
+4. Does **not** re-enable auto-chain: the release leaves `works.status = completed`, and auto-chain returns `ChainAction::NoAction` whenever `work.status == 'completed'` (`crates/nexus-orchestration/src/auto_chain.rs:691-694`). It does not delete `work_chapters` rows.
 5. `--extend-chapters` has no shipped path: the retired `run resume --reopen` flag is gone with the runner.
 
 **Historical (retired runner, removed in v1.193 P2):** the old two-step semantics — `creator works completion-lock release` merely *enabling* a separate `creator run resume --reopen` that set `works.status = active` and cleared `novel_completion_status`, carrying a **required** `--extend-chapters <new_total>` flag that seeded new `work_chapters` rows before resume enqueue — belonged to the retired `creator run` runner. The retained atomic `creator works reopen` performs the release in one core call and never sets `works.status = active`.
@@ -186,7 +186,7 @@ The `creator bootstrap` entry was removed in v1.193 P2; no current CLI scaffold/
 | --- | --- |
 | `.completion-lock.json` present | `Blocked(CompletionLock)` |
 | `runtime_lock_holder` foreign | Skip competing enqueue |
-| `status == completed` | No chain until `creator works reopen` releases the completion-lock (§3.3) |
+| `status == completed` | No auto-chain (`ChainAction::NoAction`, `crates/nexus-orchestration/src/auto_chain.rs:691-694`); `creator works reopen` clears the completion-lock but leaves `status = completed` (§3.3) |
 | Otherwise | V1.39 rules unchanged |
 
 ---

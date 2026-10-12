@@ -67,10 +67,13 @@ The fence table `character_fences: ActorFenceTable` (`crates/nexus-core/src/serv
 
 The lease must be **held through every DB, file, provider, and terminal effect** of the admitted activity. Real gaps: mutation handlers that admit then drop the lease and continue, returning `character_busy` only for the next activity, and binding add/remove handlers left entirely unfenced.
 
-Ordering for a lifecycle transition (composed by `CoreService::transition_character`, `actors.rs:446`):
+Ordering for a lifecycle transition. `CoreService::transition_character` (`actors.rs:436-456`) is the one-call convenience that **only** acquires the exclusive lease and commits the transition — its doc comment explicitly excludes Host session retirement. A host that must retire old-epoch sessions composes the same two steps and then continues:
 
 1. `acquire_character_transition` exclusive lease (busy refusal + epoch/ownership re-read, before DB),
-2. `commit_character_transition` (`actors.rs:375`) — the revision-checked `BEGIN IMMEDIATE` commit (revision and epoch each increment once on the material UPDATE),
+2. `commit_character_transition` (`actors.rs:375`) — the revision-checked `BEGIN IMMEDIATE` commit (revision and epoch each increment once on the material UPDATE).
+
+Steps 3–4 are the **caller/Host integration requirement**, not behaviour of `transition_character` itself:
+
 3. while the lease is still held, `retire_character_sessions` **only when** the committed epoch differs from the lease's pre-transition epoch (a same-state CAS no-op must not discard a currently reusable session),
 4. drop the exclusive lease, then one Host shutdown attempt per retired id outside registry locks (failure is logged and cannot undo the commit).
 
