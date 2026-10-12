@@ -1143,7 +1143,7 @@ The `FingerprintGate` adds `/setup` to its bypass routes (alongside `/connect`),
 
 #### 29.10.4 ClientProvider immediate DesktopClient for desktop
 
-On desktop builds, `ClientProvider` returns `DesktopClient` + `ElectronDesktopCapabilities` immediately in the `!loaded` branch (no temporary `BrowserClient`), avoiding the "Request failed: The string did not match the expected pattern" error from same‑origin `/v1/daemon/runtime/health` calls in the desktop webview.
+On desktop builds, `ClientProvider` returns the desktop bridge client and its desktop capabilities immediately in the `!loaded` branch (no temporary `BrowserClient`), avoiding the "Request failed: The string did not match the expected pattern" error from same‑origin `/v1/daemon/runtime/health` calls in the desktop webview.
 
 #### 29.10.5 Daemon error surfacing + migration‑mismatch recovery
 
