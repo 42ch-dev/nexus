@@ -63,7 +63,7 @@
     "@radix-ui/react-slot": "^1.4.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "lucide-react": "^1.48.0",
+    "lucide-react": "^1.54.0",
     "tailwind-merge": "^3.7.0"
   },
   "peerDependencies": {
