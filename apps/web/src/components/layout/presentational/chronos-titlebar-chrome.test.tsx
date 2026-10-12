@@ -26,7 +26,7 @@ describe('ChronosTitlebarChrome', () => {
     expect(screen.getByTestId('chronos-titlebar-title')).toHaveClass('text-brand-cyan');
   });
 
-  it('marks logo/title chrome and empty paint draggable on desktop without tagging controls', () => {
+  it('renders desktop safe inset at native width with untaggable title paint', () => {
     render(
       <ChronosTitlebarChrome
         title="Works"
@@ -40,33 +40,9 @@ describe('ChronosTitlebarChrome', () => {
     );
 
     const inset = screen.getByTestId('chronos-titlebar-desktop-inset');
-    expect(inset).toHaveAttribute('data-tauri-drag-region');
     expect(inset).toHaveStyle({ width: `${CHRONOS_TITLEBAR_DESKTOP_INSET_PX}px` });
 
-    expect(screen.getByTestId('chronos-titlebar-drag-spacer')).toHaveAttribute(
-      'data-tauri-drag-region',
-    );
-    expect(screen.getByTestId('chronos-titlebar-logo-slot')).toHaveAttribute(
-      'data-tauri-drag-region',
-    );
-    expect(screen.getByTestId('chronos-titlebar-title')).toHaveAttribute(
-      'data-tauri-drag-region',
-    );
     expect(screen.getByTestId('chronos-titlebar-title')).toHaveClass('select-none');
-    expect(screen.getByTestId('chronos-titlebar-controls')).toHaveAttribute(
-      'data-tauri-drag-region',
-      'false',
-    );
-    expect(screen.getByRole('button', { name: 'Logo' })).not.toHaveAttribute(
-      'data-tauri-drag-region',
-    );
-    expect(screen.getByRole('button', { name: 'Gear' })).not.toHaveAttribute(
-      'data-tauri-drag-region',
-    );
-    expect(screen.getByRole('button', { name: 'Theme' })).not.toHaveAttribute(
-      'data-tauri-drag-region',
-    );
-    expect(screen.getByText('Health')).not.toHaveAttribute('data-tauri-drag-region');
   });
 
   it('prevents native image drag in logo slot via draggable={false}', () => {
@@ -82,7 +58,7 @@ describe('ChronosTitlebarChrome', () => {
     expect(screen.getByRole('img', { name: 'Nexus' })).toHaveAttribute('draggable', 'false');
   });
 
-  it('omits drag regions in browser mode', () => {
+  it('omits desktop safe inset in browser mode', () => {
     render(
       <ChronosTitlebarChrome
         title="Works"
@@ -93,18 +69,7 @@ describe('ChronosTitlebarChrome', () => {
     );
 
     expect(screen.queryByTestId('chronos-titlebar-desktop-inset')).toBeNull();
-    expect(screen.getByTestId('chronos-titlebar-drag-spacer')).not.toHaveAttribute(
-      'data-tauri-drag-region',
-    );
-    expect(screen.getByTestId('chronos-titlebar-logo-slot')).not.toHaveAttribute(
-      'data-tauri-drag-region',
-    );
-    expect(screen.getByTestId('chronos-titlebar-title')).not.toHaveAttribute(
-      'data-tauri-drag-region',
-    );
-    expect(screen.getByTestId('chronos-titlebar-controls')).not.toHaveAttribute(
-      'data-tauri-drag-region',
-    );
+    expect(screen.getByTestId('chronos-titlebar-logo-slot')).toBeInTheDocument();
   });
 
   it('fires onEmptyPaintDoubleClick from safe inset and drag spacer only', async () => {

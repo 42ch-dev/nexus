@@ -44,7 +44,7 @@ export interface SetupCompletedProviderProps {
  * Browser build: always `completed: true` with no loading state — browser users
  * run their own daemon and skip the wizard.
  *
- * Desktop build: reads the `get_setup_completed` Tauri command on mount and
+ * Desktop build: reads the `get_setup_completed` desktop command on mount and
  * writes back via `set_setup_completed` when the user finishes the wizard or
  * re-runs setup from Settings.
  */

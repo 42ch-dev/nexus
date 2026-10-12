@@ -11,8 +11,7 @@
  * (see {@link ./desktop-bridge.ts}). Per desktop-shell.md §5 there is
  * deliberately NO build-env override: `NEXUS_DESKTOP` flags, Vite `define`
  * injection and runtime globals cannot select desktop mode — the bridge is
- * the only signal. No Tauri runtime marker remains: the Tauri baseline is
- * rollback source until P2, not a supported concurrent runtime.
+ * the only signal; there is no legacy runtime marker to disambiguate.
  *
  * Browser build → `false` → `BrowserClient`. Desktop build → `true` →
  * `DesktopClient` + `ElectronDesktopCapabilities`.

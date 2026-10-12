@@ -584,7 +584,7 @@ export function SurfacesSetupPage() {
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           components.setup-wizard-surface
         </code>
-        . Static — no Tauri IPC, no daemon wiring, no App page imports.
+        . Static — no daemon wiring, no App page imports.
       </p>
       <FixtureBoundary>
         <SetupWizardChromeFixtures />
@@ -882,7 +882,7 @@ export function SurfacesLaunchPage() {
           @web-setup/daemon-ready-splash
         </code>
         . Props-driven variants: waiting, error + Restart Nexus, and error +
-        Reset local database. No daemon IPC, no Tauri commands.
+        Reset local database. No daemon IPC or commands.
       </p>
       <FixtureBoundary>
         <LaunchDaemonFixtures />

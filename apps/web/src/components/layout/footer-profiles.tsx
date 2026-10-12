@@ -21,7 +21,7 @@ import { FooterProfilesChrome } from './presentational/footer-profiles-chrome';
  * active-creator context, and the create-creator dialog. The chrome owns the
  * presentational markup and data-testid SSOT.
  *
- * Desktop build: selecting a different Profile invokes the Tauri
+ * Desktop build: selecting a different Profile invokes the desktop
  * `switch_active_creator` command, mirrors the target workspace path, and
  * refreshes the cached workspace root so the footer can show restart-honesty
  * copy when the new path differs from the running daemon's startup-captured root

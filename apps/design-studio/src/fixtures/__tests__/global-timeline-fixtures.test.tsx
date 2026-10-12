@@ -51,7 +51,6 @@ describe('global-timeline-fixtures presentational boundary', () => {
     expect(imports.join('\n')).not.toMatch(/useTranslation/);
     expect(imports.join('\n')).not.toMatch(/lib\/nexus/);
     expect(imports.join('\n')).not.toMatch(/NexusClient/);
-    expect(imports.join('\n')).not.toMatch(/@tauri-apps/);
   });
 
   it('imports the shared extract with transitional annotation', () => {

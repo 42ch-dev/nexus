@@ -3,8 +3,8 @@
 Daemon-served, local-first **Control Room + Setup** SPA for the Nexus runtime.
 React 19 + Vite + TypeScript + TailwindCSS + shadcn/ui primitives + TanStack
 Query + React Router. Transport-agnostic via the `NexusClient` adapter
-(`BrowserClient` today; `TauriClient` in V1.65). This is an OSS local-first
-surface — **not** the private cloud SaaS.
+(`BrowserClient` today; `DesktopClient` in the Electron shell). This is an OSS
+local-first surface — **not** the private cloud SaaS.
 
 - Product contract: [`.mstar/specs/active/surfaces/web-ui.md`](../../.mstar/specs/active/surfaces/web-ui.md)
 - Design tokens (SSOT): [`DESIGN.md`](../../DESIGN.md)
@@ -52,19 +52,17 @@ are **keyless on loopback** (V1.20 model); the browser client sends no
 credentials. In release the daemon serves the embedded SPA at `/` and the Local
 API at `/v1/daemon/*` on the same port, so the client stays same-origin.
 
-## Roadmap (Tauri-ready boundary)
+## Roadmap (desktop-ready boundary)
 
 The `NexusClient` interface (`src/lib/nexus/`) is the single transport boundary.
-Screens depend only on the interface, never on `fetch`/`invoke` directly.
+Screens depend only on the interface, never on `fetch`/IPC directly.
 
 - **V1.64 (this package)** — `BrowserClient` (`fetch` same-origin). The desktop
-  shell does **not** ship; `TauriClient` exists as a documented stub that throws
-  `not_implemented_in_browser_build`.
-- **V1.65** — `apps/desktop` Tauri v2 shell loads this `dist`, swaps in
-  `TauriClient` (Tauri `invoke`), and hosts the daemon (sidecar first). No screen
-  rewrite — only the active client implementation changes.
-- **V1.66+** — mobile (Tauri v2 mobile targets), structural preset/findings
-  closures, DESIGN.md → Production completeness.
+  shell ships separately in `apps/desktop-electron`; `DesktopClient`
+  (`src/lib/nexus/desktop-client.ts`) implements the same interface over the
+  Electron preload bridge.
+- **V1.65+** — structural preset/findings closures, DESIGN.md → Production
+  completeness.
 
 See `web-ui.md` §9 for the full roadmap.
 

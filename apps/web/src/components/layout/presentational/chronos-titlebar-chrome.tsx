@@ -24,8 +24,8 @@ export interface ChronosTitlebarChromeProps {
  * Presentational Chronos titlebar — full-width ink strip (DESIGN.md §desktop-window-chrome).
  *
  * Props-driven slots only: no routing, theme hooks, or daemon clients.
- * `data-tauri-drag-region` covers non-interactive chrome (safe inset, logo/title paint,
- * flex spacer). Gear, theme, and health controls opt out via explicit no-drag markers.
+ * Non-interactive chrome (safe inset, logo/title paint, flex spacer) is plain paint;
+ * gear, theme, and health controls are interactive slots.
  */
 export function ChronosTitlebarChrome({
   title,
@@ -49,7 +49,6 @@ export function ChronosTitlebarChrome({
         <div
           className="shrink-0"
           style={{ width: CHRONOS_TITLEBAR_DESKTOP_INSET_PX }}
-          data-tauri-drag-region
           data-testid="chronos-titlebar-desktop-inset"
           onDoubleClick={onEmptyPaintDoubleClick}
           aria-hidden
@@ -59,7 +58,6 @@ export function ChronosTitlebarChrome({
       {logo ? (
         <div
           className="flex shrink-0 items-center px-3"
-          data-tauri-drag-region={desktopSafeInset ? true : undefined}
           data-testid="chronos-titlebar-logo-slot"
         >
           {logo}
@@ -71,7 +69,6 @@ export function ChronosTitlebarChrome({
           'shrink-0 select-none truncate px-2 text-heading-20 font-heading tracking-tight',
           labelClass,
         )}
-        data-tauri-drag-region={desktopSafeInset ? true : undefined}
         data-testid="chronos-titlebar-title"
       >
         {title}
@@ -79,7 +76,6 @@ export function ChronosTitlebarChrome({
 
       <div
         className="min-w-4 flex-1"
-        data-tauri-drag-region={desktopSafeInset ? true : undefined}
         data-testid="chronos-titlebar-drag-spacer"
         onDoubleClick={onEmptyPaintDoubleClick}
         aria-hidden
@@ -87,7 +83,6 @@ export function ChronosTitlebarChrome({
 
       <div
         className="flex shrink-0 items-center gap-2 px-4"
-        data-tauri-drag-region={desktopSafeInset ? 'false' : undefined}
         data-testid="chronos-titlebar-controls"
       >
         {healthIndicator}

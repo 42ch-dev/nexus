@@ -63,7 +63,6 @@ describe('timeline-canvas-fixtures presentational boundary', () => {
     expect(imports.join('\n')).not.toMatch(/useTranslation/);
     expect(imports.join('\n')).not.toMatch(/lib\/nexus/);
     expect(imports.join('\n')).not.toMatch(/NexusClient/);
-    expect(imports.join('\n')).not.toMatch(/@tauri-apps/);
   });
 
   it('imports the shared timeline-node-chrome extract with transitional annotation', () => {

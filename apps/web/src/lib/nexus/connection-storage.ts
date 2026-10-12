@@ -59,7 +59,7 @@ const STORAGE_KEY = 'nexus-connection-config-v1';
  * - This is an accepted trade-off for the local-first web build: the API key
  *   is user-entered and the trust boundary is the SPA itself.
  * - The desktop build stores this value in the OS keychain / credential
- *   manager instead; see `apps/desktop/src-tauri/src/connection_config.rs`.
+ *   manager instead; see the desktop shell's connection-config module.
  */
 class WebConnectionStorage implements ConnectionStorage {
   async load(): Promise<ConnectionConfig | null> {

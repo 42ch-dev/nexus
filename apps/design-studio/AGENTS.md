@@ -64,7 +64,6 @@ Surfaces pages label each section with badges (`surface-source-badge-*` test ids
 - `apps/web/src/(providers|contexts)/**` — no app providers
 - `@42ch/nexus-contracts` — no wire DTOs
 - `@42ch/nexus-ui/src/*` — deep import; use public package API only
-- `@tauri-apps/*` — desktop-only; studio is a browser SPA
 - `@web-ui/button`, `@web-ui/badge`, `@web-ui/card`, `@web-ui/input`, `@web-ui/label`, `@web-ui/textarea`, `@web-ui/select`, `@web-ui/tabs` — already-promoted; import from `@42ch/nexus-ui`
 - Inventing design tokens not in root DESIGN pair
 - **Any `@web-ui/*` import without a transitional annotation** (`// transitional — …` or `// @web-ui/<name> — transitional …`)
@@ -91,7 +90,7 @@ Gallery **displays** shadcn primitives from `apps/web/src/components/ui/*` witho
 | Build | `pnpm --filter design-studio build` |
 | Test | `pnpm --filter design-studio test` |
 
-No daemon or Tauri required.
+No daemon required.
 
 ## Conventions
 

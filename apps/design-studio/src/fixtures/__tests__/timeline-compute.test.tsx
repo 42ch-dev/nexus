@@ -67,7 +67,6 @@ describe('timeline-compute fixtures presentational boundary', () => {
     expect(imports.join('\n')).not.toMatch(/useTranslation/);
     expect(imports.join('\n')).not.toMatch(/lib\/nexus/);
     expect(imports.join('\n')).not.toMatch(/NexusClient/);
-    expect(imports.join('\n')).not.toMatch(/@tauri-apps/);
   });
 
   it('imports promoted compute primitives from @42ch/nexus-ui and the shared extracts', () => {

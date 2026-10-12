@@ -50,7 +50,7 @@ export interface ActiveCreatorProviderProps {
 /**
  * Provides the active creator id selected by the footer profile switcher.
  *
- * The value is persisted to `localStorage` (browser) / the Tauri store
+ * The value is persisted to `localStorage` (browser) / the desktop store
  * equivalent (desktop) and restored on reload. Components that need the active
  * creator read from {@link useActiveCreatorId}; components that change it read
  * from {@link useSetActiveCreatorId}.

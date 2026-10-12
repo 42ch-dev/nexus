@@ -952,7 +952,7 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
    *   - `client.worldKbPatchRelationship` (relationships read-only on
    *     Timeline in V1.122).
    *   - `client.worldKbPromoteCandidate` (World KB surface).
-   *   - Raw file writes (no `fetch PUT` to a file route, no Tauri `invoke`
+   *   - Raw file writes (no `fetch PUT` to a file route, no desktop IPC
    *     to disk).
    */
   async function handlePatchEntity(

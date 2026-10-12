@@ -9,9 +9,9 @@
  * (carries V1.65 §5.3 rule forward).
  *
  * Desktop actions are surfaced only when {@link useDesktopCapabilities} returns a
- * non-null capability object (i.e. inside the Tauri webview). The authoritative
- * runtime path guard lives in the Tauri `open_with` / `reveal_in_finder` commands
- * (`apps/desktop/src-tauri/src/lib.rs`); a rejection is surfaced here as
+ * non-null capability object (i.e. inside the desktop shell). The authoritative
+ * runtime path guard lives in the desktop `open_with` / `reveal_in_finder`
+ * commands (`apps/desktop-electron`); a rejection is surfaced here as
  * plain-language copy (`Path not opened. The file is outside the active workspace.`).
  *
  * `useContextMenu` extracts the open/close + Escape/click-away handling so both

@@ -507,7 +507,7 @@ function OutboundLink({
   onExternalUrlError?: () => void;
 }) {
   // On desktop the link must NEVER let the native `href` load the external
-  // page inside the Tauri webview — every activation routes through the
+  // page inside the desktop webview — every activation routes through the
   // validated system-browser opener. Middle-click / aux-click bypasses
   // `onClick`, so it is intercepted separately (PR#148 Greptile P2).
   const isDesktop = Boolean(desktop?.openExternalUrl);

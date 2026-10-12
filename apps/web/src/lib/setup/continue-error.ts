@@ -4,7 +4,7 @@ import { NexusClientError } from '@/lib/nexus/errors';
 /**
  * Class of a Setup Continue-path failure (spec §Architecture contract).
  *
- * - `soft_workspace_path` — `setWorkspacePath` failed (Tauri config/IO).
+ * - `soft_workspace_path` — `setWorkspacePath` failed (desktop config/IO).
  * - `soft_bootstrap` — `ensureSetupBootstrap` failed for a non-migration reason.
  * - `soft_display_name` — `updateCreator(display_name)` failed after a
  *   successful bootstrap (e.g. the historical HTTP 409 `uninitialized`).

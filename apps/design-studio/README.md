@@ -1,7 +1,7 @@
 # Nexus Design Studio
 
 A standalone read-only visual gallery for the Nexus DESIGN SSOT, brand VI, and
-UI primitives. Built as a Vite + React SPA — no daemon, no Tauri, no
+UI primitives. Built as a Vite + React SPA — no daemon, no
 `@42ch/nexus-contracts` required.
 
 ## Quick start
@@ -128,7 +128,7 @@ only by the explicit generate command below.
 | Build | `pnpm --filter design-studio build` |
 | Test | `pnpm --filter design-studio test` |
 
-No daemon or Tauri required for any command.
+No daemon required for any command.
 
 ## Architecture
 
