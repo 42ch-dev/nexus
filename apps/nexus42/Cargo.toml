@@ -183,7 +183,7 @@ nexus-wasm-host = { path = "../../crates/nexus-wasm-host" }
 # LLM. Same =2.2.0 pin already in the shipped graph via nexus-acp-host
 # (stable v1 API only; no unstable protocol features); dev-only,
 # tests-only (graph pins use --edges normal, dev-deps excluded).
-agent-client-protocol = "=2.2.0"
+agent-client-protocol = "=3.2.0"
 # v1.210 P3 T2 (D6): the `connect_event_consumer` example opens the WS event
 # lane directly (it is the consumer-side transport seam — `nexus_core`
 # exposes `WsTransport`, not a dialer), so it needs the same
