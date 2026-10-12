@@ -19,7 +19,7 @@
 # must move together with SPOKE_PIN in tooling/check-wire-drift.sh. Dependabot
 # cannot group across ecosystems, so each ecosystem keeps its own `spoke-*` group
 # and those PRs MUST be reviewed and merged as one coordinated lockstep set
-# (see .mstar/knowledge/engineering/spoke-lockstep-upgrade-procedure.md). Never
+# (see .mstar/knowledge/conventions/spoke-lockstep-upgrade-procedure.md). Never
 # merge a lone SPOKE group PR.
 #
 # pnpm: the npm ecosystem handles pnpm workspaces. GitHub's supported-ecosystem
