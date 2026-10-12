@@ -19,7 +19,7 @@ Parent rules: [`../knowledge/AGENTS.md`](../knowledge/AGENTS.md). Repo root: [`.
 - **New specs** land in the matching class dir under `active/` or `proposed/` per their `Status`; a spec that fits no class goes to the closest one and the README index flags it. Retired or deprecated records move to `archived/`.
 - **Moves require the full link-migration sweep**: every spec-to-spec relative link, `knowledge/**` spec-links, root `AGENTS.md`/`DESIGN.md`/`CONCEPTS.md`/`STRATEGY.md`, `docs/**`, `schemas/**`, source-tree comments, and per-directory `AGENTS.md` files are retargeted in the same change; the README two-way index/disk diff and a 100% relative-link check must pass before commit.
 - **Lifecycle change = `git mv` + `Status`/index sync + sweep rerun**: moving a spec between `active/`, `proposed/`, and `archived/` is a `git mv` **in the same change** as its `Status` header update and the [README.md](README.md) index update, and **must** rerun the link-migration sweep above — a stale pre-lifecycle path is a dangling reference.
-- **Exploration and draft overlays** live in `proposed/<class>/` with explicit header status — not under `knowledge/` root.
+- **Exploration and draft overlays** live in `proposed/<class>/` with explicit header status — not under `knowledge/` root; a Draft overlay whose defined behavior is already implemented and owned by its spec stays in `active/` (classification test above).
 - *Authorization:* the maintainer authorized replacing the former flat-layout invariant with the domain-subdirectory taxonomy on **2026-09-29**, then that layout with the **lifecycle tree** (`active/` / `proposed/` / `archived/`) on **2026-10-12** (each executed as one bulk `git mv` + scripted link rewrite).
 
 ---
