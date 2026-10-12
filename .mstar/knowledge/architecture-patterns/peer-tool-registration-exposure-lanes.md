@@ -232,7 +232,7 @@ chain keeps all policy daemon-side.
   `tests/peer_tool.rs` (11), `tests/authz_hello.rs` (7),
   `tests/honesty_lockstep.rs` (4), `tests/worker_spine_peer.rs` (8),
   `apps/nexus42/tests/e2e_peer_mcp.rs` (8).
-- Lock spec (iteration snapshot): `.mstar/iterations/v1.174/specs/v1.174-peer-tools-lock.md` (AR-66..77).
+- Lock spec (v1.174 iteration snapshot): `v1.174-peer-tools-lock.md` (AR-66..77).
 - Companions: `architecture-patterns/connect-host-tools-serving.md` (serving
   side, separate process — frozen), `architecture-patterns/wasm-module-as-capability-executor.md`
   (user-cap trio + admission), `architecture-patterns/stateless-mcp-bridge-child.md`

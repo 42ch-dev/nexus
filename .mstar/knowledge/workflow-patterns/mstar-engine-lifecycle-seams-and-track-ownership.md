@@ -18,7 +18,7 @@ tags:
   - ownership
   - worktree-cleanup
   - phase-machine
-last_updated: 2026-10-11
+last_updated: 2026-10-12
 ---
 
 # Engine lifecycle seams: declare the phase you are in, register the tracks you create
@@ -46,7 +46,7 @@ The installed harness CLI owns a small set of coordinated writes (snapshot, root
 
 ### A cancelled model handoff is terminal — verify readiness facts yourself
 
-`mstar_model_handoff {operation:"phase1-complete"}` refuses with `not-pending` when the earlier `direction-lock` binding was cancelled (for example by an unowned model change) — a terminal binding is never re-armed for that workflow. The phase-1-lock gate is therefore informational for **this** session only: the substantive readiness facts (three specialist returns, `compass status: locked`, PM-confirmed Prepare gates, a distinct integration checkout, remote tip == integration HEAD) still have to be true, and they can be verified directly. Model fallback is allowed; do not retry the handoff in a loop, and do not read the refusal as "Phase 1 failed".
+`mstar_model_handoff {operation:"phase1-complete"}` refuses with `not-pending` when the earlier `direction-lock` binding was cancelled (for example by an unowned model change) — a terminal binding is never re-armed for that workflow. With native `modelHandoff` off (v1.213), the same terminal state arrives without a cancellation: the earlier `direction-lock` call never arms a binding — it answers `modelHandoff is off in native settings; this session is not armed …` — and `phase1-complete` then answers `no pending model handoff exists for this coordinator session: no binding`. The phase-1-lock gate is therefore informational for **this** session only: the substantive readiness facts (three specialist returns, `compass status: locked`, PM-confirmed Prepare gates, a distinct integration checkout, remote tip == integration HEAD) still have to be true, and they can be verified directly. Model fallback is allowed; do not retry the handoff in a loop, and do not read the refusal as "Phase 1 failed".
 
 ### The engine's "dirty" includes ignored outputs, and its cleanup needs your bookkeeping
 

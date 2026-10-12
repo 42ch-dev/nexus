@@ -78,7 +78,7 @@ Three layers, each machine-checked:
 
 ### 6. Validator mirroring with a shared corpus
 
-`ModuleManifest::validate()` exists **twice** (SDK + `nexus-module-manifest`). The V1.170 P0 fix-wave lesson (see `.mstar/sdd/2026-08-20-v1.170-p0-computable-dx-spine/review/qc2.md`): `compute validate` ran only `manifest.validate()` while `build`/`install` also ran the path-safety guard (`validate_run_id_safe` on `module_id`) — a manifest with `module_id: "../evil"` reported `valid: true`. **Rule:** every validation rule must live at (a) the CLI command guard, (b) `ModuleManifest::validate()` in `nexus-module-manifest`, and (c) the SDK mirror — defense in depth, aligned by a shared test corpus. Sandbox default constants (`DEFAULT_FUEL`/`DEFAULT_MEMORY_MIB`/`DEFAULT_WALL_TIME_MS`) are public SDK constants so manifest generators and validators agree with the host by construction.
+`ModuleManifest::validate()` exists **twice** (SDK + `nexus-module-manifest`). The V1.170 P0 fix-wave lesson (QC2 review of the v1.170 P0 computable-DX spine): `compute validate` ran only `manifest.validate()` while `build`/`install` also ran the path-safety guard (`validate_run_id_safe` on `module_id`) — a manifest with `module_id: "../evil"` reported `valid: true`. **Rule:** every validation rule must live at (a) the CLI command guard, (b) `ModuleManifest::validate()` in `nexus-module-manifest`, and (c) the SDK mirror — defense in depth, aligned by a shared test corpus. Sandbox default constants (`DEFAULT_FUEL`/`DEFAULT_MEMORY_MIB`/`DEFAULT_WALL_TIME_MS`) are public SDK constants so manifest generators and validators agree with the host by construction.
 
 ### 7. Host-import wrappers and sentinel mapping
 
@@ -146,4 +146,4 @@ pub struct WorldRef {
 - Manifest-hash gotcha: [../best-practices/embedded-pinned-wasm-sha256-alignment.md](../best-practices/embedded-pinned-wasm-sha256-alignment.md)
 - Consumption side (daemon route + Runs): [../architecture-patterns/compute-pillar-invoke-and-runs-history.md](../architecture-patterns/compute-pillar-invoke-and-runs-history.md)
 - Crate topology: [standalone-crate-monorepo-topology.md](standalone-crate-monorepo-topology.md)
-- Iteration spec: `.mstar/iterations/v1.170/specs/v1.170-computable-dx-locks.md` AR-2..AR-12
+- Iteration spec: v1.170 (`v1.170-computable-dx-locks.md`) AR-2..AR-12

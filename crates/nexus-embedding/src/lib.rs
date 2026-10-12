@@ -10,7 +10,7 @@
 //! This crate owns the contract types + protocol logic only — it compiles and
 //! tests with zero I/O. No daemon route, no DB migration, no runtime caller
 //! this iteration; index *storage* lands with the first platform-era
-//! consumer. Normative spec: `.mstar/specs/embedding-readiness.md`.
+//! consumer. Normative spec: `.mstar/specs/runtime/embedding-readiness.md`.
 
 mod identity;
 mod protocol;

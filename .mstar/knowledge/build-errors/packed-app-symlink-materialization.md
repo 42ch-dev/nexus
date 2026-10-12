@@ -65,5 +65,5 @@ The published v0.1.0 darwin-arm64 app (both the `.app.zip` and the `.dmg`) could
 ## Evidence
 
 - `apps/desktop-electron/scripts/package.mjs` (packed-app normalization + scan-to-receipt wiring), `scripts/package-contract.mjs` (`materializeSymlinks` / `assertNoSymlinkEscape` / path-independent detail), `tests/package-contract.test.mjs` (file-alias + directory-alias fixtures).
-- Fix commits `213b5eef2` + `96a62dfb6` (v1.208 P2 W2); raw evidence: `.mstar/sdd/2026-10-08-v1.208-p2-dogfood-sweep/task-w2-evidence.md` (dyld transcript, symlink targets, final-order packaging run).
-- Related: [unsigned-macos-packaging-lane.md](../tooling-decisions/unsigned-macos-packaging-lane.md) (§ recorded-vs-verified discipline); open residuals `R-V1208-P2-11` (F-16 bootstrap blocker) and the re-release roadmap row in `.mstar/projects/_default/roadmap.md`.
+- Fix commits `213b5eef2` + `96a62dfb6` (v1.208 P2 W2); raw evidence from the v1.208 P2 W2 dogfood sweep (dyld transcript, symlink targets, final-order packaging run).
+- Related: [unsigned-macos-packaging-lane.md](../tooling-decisions/unsigned-macos-packaging-lane.md) (§ recorded-vs-verified discipline); open residuals `R-V1208-P2-11` (F-16 bootstrap blocker) and the re-release roadmap row.

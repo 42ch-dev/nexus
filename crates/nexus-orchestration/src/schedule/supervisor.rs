@@ -266,7 +266,10 @@ impl ScheduleSupervisor {
     /// Like `tick()` but only admits schedules where `scheduled_at <= now`
     /// (or `scheduled_at IS NULL` for on-demand schedules).
     ///
-    /// **Used by**: `Scheduler::tick()` for clock-triggered admission.
+    /// **Used by**: the clock-driven schedule loops in `nexus-core`
+    /// (`execution::schedules::cron` and `execution::schedules::hosted_scheduler`),
+    /// which call `ScheduleSupervisor::tick_clocked(clock_now: i64)` with an
+    /// explicit wall-clock timestamp for clock-triggered admission.
     /// **Not used by**: `on_schedule_terminal()` cascade (which uses `tick()`).
     ///
     /// **Idempotency guard (H4)**: Shared with `tick()` — if either is in progress,
