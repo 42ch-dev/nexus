@@ -6,7 +6,7 @@
 **平台侧对照**: nexus-platform `v1-spec/platform/creator-agent-registration-v1.md` §3–§4  
 **实现仓库**: `nexus`（CLI），**非** `nexus-platform`  
 **CLI Spec**: [`cli-spec.md`](../cli/cli-spec.md) §6.2B  
-**集成边界**: [`local-cloud-crate-architecture.md`](../archived/architecture/2026-09-21-local-cloud-crate-architecture.md) §6 — registration via **`nexus-cloud-sync`** (CLI → platform HTTP), **not** Daemon API.
+**集成边界**: registration via **`nexus-cloud-sync`** (CLI → platform HTTP), **not** Daemon API — cloud-line rule in [`cli-spec.md`](../cli/cli-spec.md) §6.5; historical split record: [`local-cloud-crate-architecture.md`](../archived/architecture/2026-09-21-local-cloud-crate-architecture.md) §6.
 **当前实现锚点**: solver 编排在 [`apps/nexus42/src/challenge/mod.rs`](../../../apps/nexus42/src/challenge/mod.rs)（`solve_challenge`），由 [`apps/nexus42/src/commands/creator/mod.rs`](../../../apps/nexus42/src/commands/creator/mod.rs) 的 `register_creator` 导入并调用；[`crates/nexus-creator/src/creator.rs`](../../../crates/nexus-creator/src/creator.rs) 仅承载 Creator aggregate / local-identity 域逻辑，不是 Challenge solver 或注册流程编排的实现 owner。  
 
 > **权威说明**：本文档是 CLI 侧 Challenge 解题逻辑的**独立冻结规格**（原 V1.3 程序提取）。CLI 实现若有分歧，以本文档为准。平台侧 Challenge 生成与验证逻辑见 nexus-platform `v1-spec/platform/creator-agent-registration-v1.md`。

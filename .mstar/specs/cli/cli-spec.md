@@ -19,8 +19,8 @@
 **Amendment log — historical surfaces** (retired in v1.193 P2 — records only, not current setup steps):
 **V1.35 shipped supplements:** [cli-command-ia.md](../archived/cli/2026-06-07-cli-command-ia.md) (§6 IA rationale), [creator-centric-entry-model.md](../archived/creator/2026-06-07-creator-centric-entry-model.md) (§7 entry paths)
 **V1.44 Shipped amendments:** §6.2D `creator run audit-chapter` (DF-69): dual-mode review/extract, embedded `novel-manuscript-audit` preset, `--mode`/`--chapter`/`--volume`/`--json` flags; does NOT enter FL-E auto-chain driver (**the runner itself was removed in v1.193 P2**).  
-**V1.45 Shipped amendments:** §6.2D generic `creator run <preset_id>` — see [creator-run-preset-entry.md](../archived/creator/2026-09-21-creator-run-preset-entry.md) (**Shipped Master**); legacy subcommand enum removed from clap surface (**the runner lost its CLI entry in v1.193 P2; the Master is the version history of that pre-retirement surface**).  
-**V1.46 Shipped amendment:** §6.2E FL-E stage subcommand block deleted (superseded by V1.45 generic preset runner — see changelog). Normative CLI IA: [creator-run-preset-entry.md](../archived/creator/2026-09-21-creator-run-preset-entry.md).  
+**V1.45 Shipped amendments:** §6.2D generic `creator run <preset_id>` — see [creator-run-preset-entry.md](../archived/creator/2026-09-21-creator-run-preset-entry.md) (**Shipped Master, retained as version history**); legacy subcommand enum removed from clap surface (**the runner lost its CLI entry in v1.193 P2; the Master is the version history of that pre-retirement surface**).  
+**V1.46 Shipped amendment:** §6.2E FL-E stage subcommand block deleted (superseded by V1.45 generic preset runner — see changelog). Historical IA record: [creator-run-preset-entry.md](../archived/creator/2026-09-21-creator-run-preset-entry.md) (pre-v1.193 P2 surface).  
 **V1.64 P3 Draft overlay (retired in v1.193 P2):** §6.3 daemon Web UI serving — `daemon start` logged the Web UI URL; the `daemon ui`/`daemon web` convenience command and the §7.1 first-run step are deleted. See also [web-ui.md](../surfaces/web-ui.md) §11 and [daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md) §4.4 (historical host spec — its crate was deleted in v1.193 P2).
 **V1.185 P3 amendment (entry retired in v1.193 P2):** §6.2I.3 — `nexus42 creator character run --remember` + owner outcome observation (thin daemon-HTTP leaves).
 **V1.189 P1 amendment (both cohorts retired in v1.193 P2):** §6.2G.7 — `basic-cli` / `legacy-cli` feature cohorts on the same `nexus42` binary/parser; `creator world kb graph` + `entity patch` called `nexus-core` directly (no daemon HTTP) in both cohorts. That direct path is now the ordinary `cli` cohort; the cohort selectors themselves are deleted.
@@ -64,7 +64,7 @@ Ordinary CLI uses the shipped `cli` default cohort; optional `connect-host` is i
 ### 0.1 品牌、CLI 名称与版本节奏
 
 - **产品名**：对外统一为 **Nexus**。
-- **CLI 可执行名**：**`nexus42`**（与 **42ch / Creative Hub** 品牌同源；下文命令示例一律使用 `nexus42`）。**Retired (v1.193 P2):** 本地 daemon 的 single-binary runtime mode（`nexus42 daemon start` → hidden `daemon-run`）已删除；不引入第二个 CLI 产品二进制（`nexus-runtime` 仍是同一 `nexus42` crate 的独立 Connect-host 二进制，见 [daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md) §4.6）；Electron/TS 持有长期运行的服务进程。
+- **CLI 可执行名**：**`nexus42`**（与 **42ch / Creative Hub** 品牌同源；下文命令示例一律使用 `nexus42`）。**Retired (v1.193 P2):** 本地 daemon 的 single-binary runtime mode（`nexus42 daemon start` → hidden `daemon-run`）已删除；不引入第二个 CLI 产品二进制（`nexus-runtime` 仍是同一 `nexus42` crate 的独立 Connect-host 二进制，见 [rust-core-service-boundary.md](../architecture/rust-core-service-boundary.md) §4.1–§4.2；历史记录：[daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md) §4.6）；Electron/TS 持有长期运行的服务进程。
 - **`v1-notes/ideas/` 与 `v1-notes/` 的扩展需求**：视为路线图输入。CLI 必须保证：**协议与 schema 的可扩展字段**、保留的 `/v1/daemon/*` wire 家族（由 TS 服务提供，见 §6.7）/ ACP 能力面的**演进位**、以及已写入合同的能力（如 **`research.*` 等 ACP 能力名**、context assembly、`manuscript_phase` 等）的**最小可用实现或安全默认（no-op）**，避免把后续实现空间钉死。
 
 ### 0.2 V2 重定位（pre-release）
@@ -220,7 +220,7 @@ CLI 不默认同步：
 
 ### 6.0B V2 命令信息架构（权威）
 
-V2 命令面按以下顶层执行（pre-release 允许破坏性调整）。**V1.35 SSOT**：[cli-command-ia.md](../archived/cli/2026-06-07-cli-command-ia.md)。
+V2 命令面按以下顶层执行（pre-release 允许破坏性调整）。**V1.35 SSOT（历史记录）**：[cli-command-ia.md](../archived/cli/2026-06-07-cli-command-ia.md)。
 
 - `nexus42 creator`：**Creator 身份 hub** — Work（`works` 子命令组）、workspace、SOUL、memory、kb/knowledge、world（默认用户创意入口）。**v1.193 target:** `creator run` / `creator bootstrap` 执行入口删除；Work/World/Character 的直连 core 读写保留
 - `nexus42 daemon`：**Retired (v1.193 P2)** — 整组删除（生命周期与编排运行控制、`schedule` 控制面），无 launcher / status / ui 别名
@@ -1183,7 +1183,7 @@ command refuses with remediation to `creator works use <work_id>`.
 
 **OUT V1.41:** `creator work switch` / global switch mutex (grill-me 2026-06-10).
 
-**Entry path pointer (no standalone quickstart in V1.41):** multi-book flow extends [creator-centric-entry-model.md](../archived/creator/2026-06-07-creator-centric-entry-model.md) §3.1 step 7 — 
+**Entry path pointer (no standalone quickstart in V1.41; historical entry-model record):** multi-book flow extends [creator-centric-entry-model.md](../archived/creator/2026-06-07-creator-centric-entry-model.md) §3.1 step 7 — 
 
 **Target (V1.41):** .
 
@@ -1296,7 +1296,7 @@ Implementation authorities: `apps/nexus42/src/commands/ops.rs`,
 
 操作主体：`sync` 的 `creator_id` 与 `workspace_slug` 必须对应当前活跃上下文；HTTP 优先 `Authorization: Bearer <creator_api_key>`，User 代操时使用 `Authorization: Bearer <user_access_token>` + `X-Creator-Id`。
 
-**架构边界（长期）**：`sync` 属于 **cloud 产品线**，由 CLI 调用 **`nexus-cloud-sync`** 完成 platform HTTP；Daemon API **不得**承载 `/v1/daemon/sync/*` 或注册代理。见 [local-cloud-crate-architecture.md](../archived/architecture/2026-09-21-local-cloud-crate-architecture.md) §5–§6。
+**架构边界（长期）**：`sync` 属于 **cloud 产品线**，由 CLI 调用 **`nexus-cloud-sync`** 完成 platform HTTP；Daemon API **不得**承载 `/v1/daemon/sync/*` 或注册代理。（见 §6.5–§6.6；历史拆分记录：[local-cloud-crate-architecture.md](../archived/architecture/2026-09-21-local-cloud-crate-architecture.md) §5–§6。）
 
 ### 6.6 `nexus42 platform`（平台能力命令组）
 
@@ -1330,7 +1330,7 @@ Implementation authorities: `apps/nexus42/src/commands/ops.rs`,
 
 ## 7. 首次使用路径
 
-V1.35 将首次使用拆为 **纯本地**（默认，`platform_integration = paused` 时）与 **挂载 Platform** 两条路径。Creator 中心化规则见 [creator-centric-entry-model.md](../archived/creator/2026-06-07-creator-centric-entry-model.md)。
+V1.35 将首次使用拆为 **纯本地**（默认，`platform_integration = paused` 时）与 **挂载 Platform** 两条路径。Creator 中心化规则见 §6.0B；V1.35 历史记录：[creator-centric-entry-model.md](../archived/creator/2026-06-07-creator-centric-entry-model.md)。
 
 ### 7.1 纯本地路径（Local-first）
 
@@ -1876,7 +1876,7 @@ v1 至少应保证：
 
 **Superseded by**: [creator-run-preset-entry.md](../archived/creator/2026-09-21-creator-run-preset-entry.md) (Shipped Master V1.45). The §6.2D/E `creator run` preset-entry table, FL-E stage advance mapping, preset-id examples, and global flags on `creator run` are now part of the canonical Master body.
 
-> **Note on §6.2D/E body**: The §6.2D/E body now defers to the Shipped Master [creator-run-preset-entry.md](../archived/creator/2026-09-21-creator-run-preset-entry.md) (V1.45) for the canonical `creator run` surface — see the authoritative-surface pointer at the top of §6.2D and the supersession note in §6.2E. The V1.33–V1.44 bespoke subcommand table was replaced by the generic dispatch entry in commit `4aa5aa53` (V1.45 P-last); the stale `creator run stage` section was deleted in V1.46 P1. Closes residual `R-V145B3-001`.
+> **Note on §6.2D/E body**: The §6.2D/E body now defers to the Shipped Master [creator-run-preset-entry.md](../archived/creator/2026-09-21-creator-run-preset-entry.md) (V1.45) for the pre-retirement canonical `creator run` surface — see the authoritative-surface pointer at the top of §6.2D and the supersession note in §6.2E. The V1.33–V1.44 bespoke subcommand table was replaced by the generic dispatch entry in commit `4aa5aa53` (V1.45 P-last); the stale `creator run stage` section was deleted in V1.46 P1. Closes residual `R-V145B3-001`.
 >
 > **v1.193 P2:** `creator run` and `creator run stage` have no CLI entry — the §6.2D/E bodies are historical records of the removed runner, and the V1.45 promotion above is the version history of that pre-retirement surface.
 

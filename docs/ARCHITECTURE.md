@@ -10,7 +10,7 @@ This document is for **orientation and decision-making**. It does not inventory 
 | Domain vocabulary | [`CONCEPTS.md`](../CONCEPTS.md) |
 | Day-to-day commands | [`README.md`](../README.md) → Development; [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 | Entity ownership & naming | [`.mstar/specs/architecture/entity-scope-model.md`](../.mstar/specs/architecture/entity-scope-model.md) |
-| Local vs cloud crate rules | [`.mstar/specs/archived/architecture/2026-09-21-local-cloud-crate-architecture.md`](../.mstar/specs/archived/architecture/2026-09-21-local-cloud-crate-architecture.md) |
+| Local vs cloud crate rules | [`.mstar/specs/architecture/rust-core-service-boundary.md`](../.mstar/specs/architecture/rust-core-service-boundary.md) §4.2 (dependency cohorts + forbidden edges); historical origin: archived [`local-cloud-crate-architecture.md`](../.mstar/specs/archived/architecture/2026-09-21-local-cloud-crate-architecture.md) |
 | Local trust / API classes | [`.mstar/specs/architecture/local-runtime-boundary.md`](../.mstar/specs/architecture/local-runtime-boundary.md), [`.mstar/specs/architecture/rust-core-service-boundary.md`](../.mstar/specs/architecture/rust-core-service-boundary.md) |
 | Per-directory invariants | Root [`AGENTS.md`](../AGENTS.md) and each subtree’s `AGENTS.md` |
 
@@ -168,7 +168,7 @@ When designing or reviewing a change:
 1. Root [`AGENTS.md`](../AGENTS.md) — repo invariants
 2. This file — orientation
 3. [`entity-scope-model.md`](../.mstar/specs/architecture/entity-scope-model.md) — ownership
-4. [`local-cloud-crate-architecture.md`](../.mstar/specs/archived/architecture/2026-09-21-local-cloud-crate-architecture.md) — line split & forbidden edges
+4. [`rust-core-service-boundary.md`](../.mstar/specs/architecture/rust-core-service-boundary.md) §4.2 — dependency cohorts, local/cloud line split & forbidden accidental edges (historical origin: archived [`local-cloud-crate-architecture.md`](../.mstar/specs/archived/architecture/2026-09-21-local-cloud-crate-architecture.md))
 5. Domain Master for the subsystem (local-runtime-boundary, rust-core-service-boundary, orchestration, CLI, web-ui, desktop-shell, …) under [`.mstar/specs/`](../.mstar/specs/)
 
 Iteration plans and audit compasses record delivery history; they are not architecture SSOT. Prefer Master specs over dated gap tables when deciding what “should” be true.

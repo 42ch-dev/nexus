@@ -7,7 +7,7 @@
 **Scope**: Consolidation of dual-outbox architecture into a single unified outbox schema in `nexus-local-db`. Defines single-writer rule, schema ownership boundary, migration path, and flush/compact semantics.
 **Coordinates with**:
 - [orchestration-engine.md](../orchestration/orchestration-engine.md) §5.2 (capability roster — `outbox.flush` / `outbox.compact` rows move from Deferred wiring → Shipped)
-- [daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md) §11 (flush/compact invocation path)
+- [daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md) §11 (historical record; flush/compact invocation path)
 
 ---
 

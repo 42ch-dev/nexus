@@ -10,7 +10,7 @@
 - `cron-staggering.md` — §4 daemon cron evaluator (archived; folded into workflow-profile.md §11)
 - [novel-writing/workflow-profile.md](../novel-writing/workflow-profile.md) — completion locking
 - [cli-spec.md](../cli/cli-spec.md) — `creator works cron set`, `creator run`, `creator world kb adopt`
-- [daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md) — daemon tick / cron supervisor
+- [daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md) (historical record) — daemon tick / cron supervisor
 
 ---
 

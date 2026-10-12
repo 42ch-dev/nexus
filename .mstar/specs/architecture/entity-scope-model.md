@@ -8,7 +8,7 @@
 | **Document class** | Master |
 | **Scope** | Global/User/Creator/World/Timeline/Event/Moment hierarchy; entity ownership; `kb`/`knowledge` naming boundaries; scope transition rules |
 | **Last updated** | 2026-08-12 — V1.162 Review & Edit chain (architect pass 2): §6.6 fork-creation write boundary + lineage projection contract (PD-01 local-vs-platform reconciliation; carrier approach B locked). |
-| **Related** | [local-cloud-crate-architecture.md](../archived/architecture/2026-09-21-local-cloud-crate-architecture.md), [cli-spec.md](../cli/cli-spec.md), [daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md), [orchestration-engine.md](../orchestration/orchestration-engine.md), [compute-module-abi.md](../compute/compute-module-abi.md), [wasm-host.md](../compute/wasm-host.md), [local-db-schema.md](../runtime/local-db-schema.md), [spoke-adapter-architecture.md](spoke-adapter-architecture.md), [`docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md) |
+| **Related** | [local-cloud-crate-architecture.md](../archived/architecture/2026-09-21-local-cloud-crate-architecture.md) (historical record), [cli-spec.md](../cli/cli-spec.md), [daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md) (historical host record), [orchestration-engine.md](../orchestration/orchestration-engine.md), [compute-module-abi.md](../compute/compute-module-abi.md), [wasm-host.md](../compute/wasm-host.md), [local-db-schema.md](../runtime/local-db-schema.md), [spoke-adapter-architecture.md](spoke-adapter-architecture.md), [`docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md) |
 
 This file is normative for V1.23 crate wiring and naming alignment. When this file
 overlaps older wording in prior specs, keep the locked decisions here and update the

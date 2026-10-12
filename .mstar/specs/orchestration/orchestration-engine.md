@@ -351,7 +351,7 @@ All capabilities below are registered at daemon runtime startup. Adding a new ca
 
 Each capability ships its `input_schema` and `output_schema` as constants (JSON Schema draft 2020-12) in Rust. **These schemas are local** (per [schemas-external-consumer-boundary.md](../architecture/schemas-external-consumer-boundary.md)) and live under `crates/nexus-contracts/src/local/orchestration/` (or adjacent module), **not** under `schemas/` — they are not wire contracts.
 
-> **Daemon builds:** `sync.*` MUST NOT call `nexus-cloud-sync` on the daemon hot path; see [local-cloud-crate-architecture.md](../archived/architecture/2026-09-21-local-cloud-crate-architecture.md) §7. `outbox.flush` / `outbox.compact` (V1.59) are local-only pool-backed capabilities that operate directly on `outbox_entries` via `nexus-local-db` — they do not depend on `nexus-cloud-sync`.
+> **Historical (daemon builds; the Rust host was deleted in v1.193 P2):** `sync.*` MUST NOT have crossed into `nexus-cloud-sync` on the daemon hot path — historical edge record: [local-cloud-crate-architecture.md](../archived/architecture/2026-09-21-local-cloud-crate-architecture.md) §7. `outbox.flush` / `outbox.compact` (V1.59) are local-only pool-backed capabilities that operate directly on `outbox_entries` via `nexus-local-db` — they do not depend on `nexus-cloud-sync`.
 
 ### 5.4 Capability errors
 
@@ -1077,7 +1077,7 @@ Compass WS5 (`schemas/` boundary refactor) is fully parallel and has no dependen
 
 ### 10.5 Phase 4 — statig daemon lifecycle (S+; 1 agent session; parallel with Phase 2)
 
-Owned by the daemon lifecycle state machine (6-state; see [daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md) §10); A-track just consumes it. Entry/exit actions, event catalogue, and the HTTP surface migration live with the lifecycle owner (status field exposes real 6-state values).
+**Historical (daemon-era; the daemon lifecycle was deleted in v1.193 P2):** owned by the daemon lifecycle state machine (6-state; historical record: [daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md) §10); A-track just consumes it. Entry/exit actions, event catalogue, and the HTTP surface migration live with the lifecycle owner (status field exposes real 6-state values).
 
 **Integration point with engine**: HSM `Running.entry` calls `engine.start()`; `Stopping.entry` cancels active runs through the shared token/Host finalization path before `engine.shutdown(grace_ms)`. `Degraded` reflects sustained failures of retained subsystems such as sync, ACP registry, and the Agent Host.
 
@@ -1166,7 +1166,7 @@ External (stable, public):
 
 ---
 
-*End of specification. The companion documents ([acp-client-tech-spec.md](../agents/acp-client-tech-spec.md), [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md), [daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md)) fill in details that would otherwise clutter this document; read them together when extending orchestration.*
+*End of specification. The companion documents ([acp-client-tech-spec.md](../agents/acp-client-tech-spec.md), [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md)) — plus the historical host record [daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md) — fill in details that would otherwise clutter this document; read them together when extending orchestration.*
 
 ---
 
@@ -1195,4 +1195,4 @@ External (stable, public):
 - Once cancel admission wins, step-in-flight and prompt Dispatching/Active fences reject later work. Failed-step cleanup retains its original revision/graph/attempt/process witness rather than rebasing onto a newer owner. Ordinary cancel uses its bounded eight-attempt retry.
 - Unconfirmed cleanup remains actionable Interrupted, even when a convenience `is_terminal` helper includes it. A retry can publish the later confirmed outcome. HTTP/CLI/inspect/events project the same durable winner; restart cannot resurrect cancelled work.
 - An admitted workspace intent completes or rolls back through its retained workspace owner. Cancellation prevents subsequent steps without aborting files midway; the coordinator does not create a second workspace recovery state machine.
-- Run-bound Host events and durable run-state projections use bounded same-run SSE replay, not a second workflow clock or durable activity journal. Admission, authorization, gaps and retention are defined in [daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md) §20.2.
+- Run-bound Host events and durable run-state projections use bounded same-run SSE replay, not a second workflow clock or durable activity journal. Admission, authorization, gaps and retention are owned by the active retained contract [principal-bound-run-event-subscription.md](../../knowledge/architecture-patterns/principal-bound-run-event-subscription.md) (authorize the stored owner before the ring/cursor; `<epoch>:<sequence>` cursors; bounded rings with typed busy; explicit `gap` / `history_unavailable`) and by the route boundary in [rust-core-service-boundary.md](../architecture/rust-core-service-boundary.md) §7.5.1; [daemon-runtime.md §20.2](../archived/runtime/2026-09-21-daemon-runtime.md) is the historical record of the original daemon writer.

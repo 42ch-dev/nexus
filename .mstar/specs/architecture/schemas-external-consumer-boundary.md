@@ -60,7 +60,7 @@ V1.62 reorganized `schemas/` along consumer-scope lines and first moved compute 
 
 ## Related
 
-- [local-cloud-crate-architecture.md](../archived/architecture/2026-09-21-local-cloud-crate-architecture.md) — local vs cloud product lines, crate graph, daemon API classes
+- [local-cloud-crate-architecture.md](../archived/architecture/2026-09-21-local-cloud-crate-architecture.md) — historical record: local vs cloud product lines, crate graph, daemon API classes
 
 ---
 

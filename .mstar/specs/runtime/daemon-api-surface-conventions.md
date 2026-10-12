@@ -5,7 +5,7 @@
 | **Status** | Normative — V1.77 amendment (§11 findings PATCH route as a non-OCC resource PATCH; last-writer-wins, no revision/version, no conflict modal; cross-profile consumption). Prior: V1.74 amendment (§7.6 World KB relationship patch route extending the V1.73 World KB route pattern; additive relationship DTOs; per-row OCC with `expected_version`/`version` against `kb_relationships.revision`), V1.73 amendment (§7 World KB canvas structured patch/read routes extending the V1.71/V1.72 patch-route convention; additive World KB DTOs; per-row OCC with `expected_version`/`version`), V1.72 amendment (§7 outline/timeline structured patch routes extending the V1.71 patch-route convention; additive outline DTOs; `@42ch/nexus-contracts` 0.7.0 → 0.8.0 by default), V1.71 amendment (§7 structured patch-route convention for canvas-like surfaces; Strategy β patch routes; `@42ch/nexus-contracts` 0.6.0 → 0.7.0 by default), V1.67 amendment (§3.2 casing ratification + §4 `items` enforcement + §5 sort-param contract; `@42ch/nexus-contracts` 0.5.0 → 0.6.0), V1.64 cursor/error/`items` conventions + V1.65 chapter-content file-backed route rules. |
 | **Document class** | Master |
 | **Scope** | Cross-resource Daemon API response/query conventions for schemas under `schemas/daemon-api/` and the serving route families in `apps/nexus-service` over `nexus-core` (pre-v1.193 references to `nexus-daemon-runtime` handlers below are historical) |
-| **Coordinates with** | [schemas-directory-layout.md](../architecture/schemas-directory-layout.md), [schemas-external-consumer-boundary.md](../architecture/schemas-external-consumer-boundary.md), [daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md), [findings-lifecycle.md](../contracts/findings-lifecycle.md) |
+| **Coordinates with** | [schemas-directory-layout.md](../architecture/schemas-directory-layout.md), [schemas-external-consumer-boundary.md](../architecture/schemas-external-consumer-boundary.md), [daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md) (historical host record), [findings-lifecycle.md](../contracts/findings-lifecycle.md) |
 | **Evidence** | `surface-audit.md` |
 
 ---
@@ -537,7 +537,7 @@ V1.66 desktop-shell convention:
    ```text
    GET http://127.0.0.1:<resolved_port>/v1/daemon/runtime/health
    ```
-   (NOT stdout parsing — see [daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md) §12.2).
+   (NOT stdout parsing — rationale in the historical host record [daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md) §12.2).
 5. Clients MUST treat health-probe failure as transport/lifecycle failure, not as a schema mismatch.
 6. **V1.66 does not introduce a dynamic port handshake endpoint or daemon-lifecycle Daemon API schema** (`wire_contracts_changed: false`).
 
