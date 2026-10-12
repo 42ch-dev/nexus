@@ -15,7 +15,7 @@
  *
  * Original purpose (kept for context): the "新建 era" entry point for the
  * World Timeline Brief layer (spec
- * `.mstar/specs/canvas-strategy-surface.md` §3.3.3 V1.159 amendment —
+ * `.mstar/specs/active/surfaces/canvas-strategy-surface.md` §3.3.3 V1.159 amendment —
  * "Create entry"). Opens from the Brief-layer header chrome and creates a
  * new `block_type=era` KnowledgeEntry via the existing World KB write
  * boundary:

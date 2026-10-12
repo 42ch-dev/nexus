@@ -695,7 +695,7 @@ describe('AgentPicker', () => {
 
   // -------------------------------------------------------------------------
   // P2 acceptance criteria (component layer)
-  // Spec: .mstar/iterations/v1.119/specs/setup-agent-picker-catalog.md
+  // Spec: the v1.119 `setup-agent-picker-catalog` record (local).
   // -------------------------------------------------------------------------
 
   it('AC-P2-3: installed cards render no Install/Docs links', () => {

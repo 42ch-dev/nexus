@@ -4,8 +4,8 @@
 # a clean, child-isolated home over the public preset HTTP surface
 # (`POST /v1/daemon/presets` then `PATCH /v1/daemon/presets/{id}`), after the
 # Creator/workspace were created through the public CLI. It uses only supported
-# preset grammar from `.mstar/iterations/v1.195/specs/current-host-contracts.md`
-# §6.1:
+# preset grammar: `.mstar/specs/active/orchestration/orchestration-engine.md` §7
+# (§7.2 `preset.yaml` schema + §7.5 converge state kinds):
 #
 #   * ONE bounded pre-effect converge gate: a dedicated `converge:` state with a
 #     `timeout_ms` deadline and an `on_timeout` reroute. Exactly one of its two

@@ -54,8 +54,8 @@ use serde_json::{Map, Value};
 /// Canonical A7 recovery classification (v1.186 P0, Task 2).
 ///
 /// Single precedence shared by daemon boot/resume ([`resume_driven_sessions`])
-/// and daemon-free `nexus42 ops inspect` (`.mstar/iterations/v1.186/guides/architecture-decisions.md`
-/// A7). The v1 durable status is authoritative; v0 rows are legacy/unverified.
+/// and daemon-free `nexus42 ops inspect` (`.mstar/specs/active/cli/cli-spec.md` §6.3B;
+/// v1.186 A7, local record). The v1 durable status is authoritative; v0 rows are legacy/unverified.
 ///
 /// Precedence (first rule that fires):
 /// 1. Authoritative v1 terminal status (`completed`/`failed`/`cancelled`) — never re-driven.

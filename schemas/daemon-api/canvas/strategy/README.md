@@ -21,6 +21,6 @@ V1.71 — promoted from the Draft write-boundary contract in `canvas-strategy-su
 ## Related
 
 - **Consumer:** `@42ch/nexus-contracts` (npm) — generated TypeScript types
-- **Handlers:** `crates/nexus-daemon-runtime/src/api/handlers/strategy.rs`
-- **Specs:** `.mstar/specs/canvas-strategy-surface.md` §3.5, `.mstar/specs/daemon-api-surface-conventions.md` §7
-- **Compass:** `.mstar/iterations/v1.71/delivery-compass.md` §1.1 Track A
+- **Handlers:** `apps/nexus-service/src/presets.ts` — strategy patch routes over the core `CoreService` authority (the Rust-host handler this line used to name was deleted with its crate in v1.193 P2).
+- **Specs:** `.mstar/specs/active/surfaces/canvas-strategy-surface.md` §3.5, `.mstar/specs/active/runtime/daemon-api-surface-conventions.md` §7
+- **Compass:** v1.71 §1.1 Track A (local record)

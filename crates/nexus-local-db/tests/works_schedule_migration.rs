@@ -1,7 +1,7 @@
 //! Hermetic migration test for `works.schedule_json` (V1.50 T-A P0 T1).
 //!
-//! Plan: `.mstar/plans/2026-06-18-v1.50-cron-foundation.md`
-//! Spec: `.mstar/specs/novel-writing/cron-staggering.md` §2.
+//! Plan: `2026-06-18-v1.50-cron-foundation` (local plan record)
+//! Spec: `.mstar/specs/active/novel-writing/workflow-profile.md` §11.1.
 //!
 //! Covers:
 //! - **Forward**: `run_migrations` adds the column; existing Works get NULL

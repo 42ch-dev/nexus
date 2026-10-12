@@ -1,6 +1,7 @@
 ---
 module: crates/nexus-local-db (kb_store keyset query) + crates/nexus-core (ActorView pagination)
 date: 2026-09-21
+last_updated: 2026-10-12
 problem_type: database_issue
 category: database-issues
 severity: medium
@@ -26,6 +27,8 @@ related_components:
 ---
 
 # Keyset cursor and the in-process merge key must share one truncating rule
+
+> **Status: fixed** — `0e9f5771f`. Regression: `crates/nexus-core/tests/actor_services.rs` → `v1191_holder_visibility_actor_view_boundary_fraction_pages_every_row` (RED at the pre-fix revision, GREEN after).
 
 ## Problem
 

@@ -597,7 +597,7 @@ fn coded_wire_status(code: &str) -> i64 {
         // durable winner is safe and the losing call must be an exact 409 with
         // its coded detail, never a 400 "bad request" or a 500. The core
         // carries the code; this adapter decides the status
-        // (`.mstar/specs/orchestration-engine.md` §human wait).
+        // (`.mstar/specs/active/orchestration/orchestration-engine.md` §human wait).
         "workflow_wait_conflict" | "workflow_state_conflict" => 409,
         // v1.207 P3 (spec §B.1/§B.3/§C): the durable-operation refusals are
         // conflicts — `operation_id_conflict` is the first-writer-wins

@@ -20,7 +20,7 @@
  * alt-view's selection path.
  *
  * @see `iterations/v1.122/specs/timeline-canvas-architecture.md` §7 + §9
- * @see `specs/canvas-strategy-surface.md` §4.4 a11y requirements
+ * @see `.mstar/specs/active/surfaces/canvas-strategy-surface.md` §4.4 a11y requirements
  */
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen } from '@testing-library/react';

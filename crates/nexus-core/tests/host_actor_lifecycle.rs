@@ -507,7 +507,7 @@ async fn journal_status_update_preserves_stored_identity() {
 
 // ── v1.191 P1 T5 — knowledge fences and session-key revision binding ──────
 //
-// Durable contract: `.mstar/specs/holder-governance.md` §4.3. The Actor session
+// Durable contract: `.mstar/specs/active/architecture/holder-governance.md` §4.3. The Actor session
 // key carries the read-policy kind and the stored World/Character
 // `knowledge_revision` pair; a session whose admitted fingerprint no longer
 // matches stored state is retired through the existing tombstone machinery
@@ -906,8 +906,8 @@ async fn retained_same_state_transition_no_op_keeps_the_indexed_session_reusable
 
 // ── v1.196 P0-T2 — authoritative Character terminal outcomes ─────────────
 //
-// Durable contract: `.mstar/iterations/v1.196/specs/current-host-actor-contract.md`
-// §5 (D8/D9). The core drain of the ORIGINAL `HostFacade::exec` stream settles
+// Durable contract: `.mstar/specs/active/architecture/actor-product-model.md` §6.1
+// (v1.196 D8/D9, local record). The core drain of the ORIGINAL `HostFacade::exec` stream settles
 // the FIRST matching terminal/fault of the exact `(session_id, operation_id)`,
 // releases that operation's knowledge fences at settlement — not at unrelated
 // trailing producer events — and never infers success from EOF, a generic
@@ -1663,8 +1663,8 @@ async fn actor_echo_keeps_the_actor_pair_for_live_and_retired_sessions() {
 
 // ── v1.196 P0-T1 — attached core authority lifetime ──────────────────────
 //
-// Durable contract: `.mstar/iterations/v1.196/specs/current-host-actor-contract.md`
-// §2/§3 (D8). The core authority attaches ONCE to an already-started native
+// Durable contract: `.mstar/specs/active/architecture/actor-product-model.md` §6.1
+// (v1.196 D8, local record). The core authority attaches ONCE to an already-started native
 // `HostManager` (the manager the native open owns) instead of constructing a
 // second Host. Both constructors share the single established-owner slot, the
 // exact supplied manager/port are retained, every authority carries its own
@@ -2179,9 +2179,9 @@ async fn attached_host_close_accounts_for_an_admitted_execute() {
 
 // ── v1.196 P0-T3 — close observation, cancel and shutdown ─────────────────
 //
-// Durable contract: `.mstar/iterations/v1.196/specs/current-host-actor-contract.md`
-// §2 (control methods), §3 (one lifecycle owner, including the close order) and
-// §5 (delivery versus authority). The authority observes the SAME Host it
+// Durable contract: `.mstar/specs/active/architecture/actor-product-model.md` §6.1
+// (v1.196 control methods / single lifecycle owner / delivery versus authority,
+// local record). The authority observes the SAME Host it
 // executes on (its own drain keeps the original exec stream), cancels through
 // that same manager only after the stored owner and the session/operation
 // association are verified and the provider's negotiated capability allows it,

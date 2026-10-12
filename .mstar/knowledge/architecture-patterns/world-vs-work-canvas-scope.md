@@ -1,14 +1,21 @@
 ---
-module: apps/web + crates/nexus-daemon-runtime
+module: apps/web + apps/nexus-service
 date: 2026-07-18
+last_updated: 2026-10-12
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-tags: [canvas, scope, world-vs-work, data-composition, spine-projection, timeline]
+tags:
+  - canvas
+  - scope
+  - world-vs-work
+  - data-composition
+  - spine-projection
+  - timeline
 applies_when:
-  - "Deciding which data sources a Canvas surface should compose"
-  - "Reviewing whether a surface should ingest World-scoped vs Work-scoped data"
-  - "Adding a new Canvas surface and determining its scope boundary"
+  - '"Deciding which data sources a Canvas surface should compose"'
+  - '"Reviewing whether a surface should ingest World-scoped vs Work-scoped data"'
+  - '"Adding a new Canvas surface and determining its scope boundary"'
 ---
 
 # World vs Work Scope Discipline for Canvas Surfaces

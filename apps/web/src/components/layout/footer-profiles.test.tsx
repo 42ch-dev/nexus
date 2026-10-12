@@ -267,7 +267,7 @@ describe('FooterProfiles', () => {
 // headline + body + CTA from the spec table. We drive each kind by injecting a
 // stub NexusClient whose `createCreator` rejects with a pre-classified error,
 // so the dialog UX is tested independently of the classifier (covered in
-// browser-client.test.ts). See `.mstar/iterations/v1.129/specs/profile-create-reliability.md`
+// browser-client.test.ts). See the v1.129 `profile-create-reliability` record (local).
 // § Dialog UX contract for the locked copy + CTA table.
 
 /**

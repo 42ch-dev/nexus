@@ -139,7 +139,7 @@ pub enum Commands {
     /// group carries no `connect-host` feature dependency.
     ///
     /// Hidden from `--help` for the current release: the V1.35 command-
-    /// surface lock (`.mstar/specs/cli-spec.md` §6) fixes the visible
+    /// surface lock (`.mstar/specs/active/cli/cli-spec.md` §6) fixes the visible
     /// top-level groups to `creator|acp|platform|system` (the `daemon` group
     /// was retired by v1.193 P2-T2) — same posture as `preset` (V1.35 lock
     /// resolution, AR-41).
@@ -172,7 +172,7 @@ pub enum Commands {
     /// Canonical developer-facing preset group (PL-5, AR-24).
     ///
     /// Hidden from `--help` for the current release: the V1.35 command-surface
-    /// lock (`.mstar/specs/cli-spec.md` §6) fixes the visible top-level groups
+    /// lock (`.mstar/specs/active/cli/cli-spec.md` §6) fixes the visible top-level groups
     /// to `creator|acp|platform|system` (the `daemon` group was retired by
     /// v1.193 P2-T2) — no new parallel top-level groups. The `preset` group is
     /// a deliberate resolution of AR-24 (new canonical group) vs that lock:

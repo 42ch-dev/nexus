@@ -1,11 +1,19 @@
 ---
 module: apps/web shell + apps/design-studio
 date: 2026-07-22
-problem_type: architecture-pattern
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-tags: [shell, sidebar, workspace, footer, creator-hub, ia, inline-create]
-applies_when: changing Control Room left shell, creator hub, mode switch 创作/编排, or 工作区 footer gating
+tags:
+  - shell
+  - sidebar
+  - workspace
+  - footer
+  - creator-hub
+  - ia
+  - inline-create
+applies_when:
+  - "changing Control Room left shell, creator hub, mode switch 创作/编排, or 工作区 footer gating"
 last_updated: 2026-07-23
 ---
 

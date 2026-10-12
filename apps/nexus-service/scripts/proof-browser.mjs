@@ -29,7 +29,7 @@
  *
  * Usage:
  *   node apps/nexus-service/scripts/proof-browser.mjs --samples 30 --port 18421 \
- *     --out .mstar/iterations/v1.189/guides/evidence/browser
+ *     --out <evidence-dir>/browser
  *
  * The process exits nonzero and retains evidence on any failed criterion, and
  * always tears down its child processes and temp fixture on success, failure,
@@ -2151,7 +2151,7 @@ function collectProvenance(fixtureHome) {
     libc = null;
   }
   // Contract hash: hash the contract revision this checkout actually carries.
-  // A feature worktree does not mirror `.mstar/iterations/`, so the harness
+  // A feature worktree does not mirror the harness process corpus, so the
   // control root (the parent of `.worktrees/`) is the fallback source; the
   // hashed path is always recorded next to the hash.
   const controlRoot = resolve(repoRoot, '..', '..');

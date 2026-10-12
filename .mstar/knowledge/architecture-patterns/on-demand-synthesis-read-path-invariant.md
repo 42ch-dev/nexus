@@ -1,11 +1,21 @@
 ---
-module: local-api, daemon-runtime, web-ui, qa
+module: local-api, apps/nexus-service, web-ui, qa
 date: 2026-07-02
-problem_type: knowledge
+last_updated: 2026-10-12
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: high
-tags: [on-demand-synthesis, llm-gating, read-path-invariant, poll-side-effects, headless-qa-gap, static-analysis-review, greptile, local-api, reliability, correctness]
-applies_when: designing (or reviewing) an on-demand LLM/agent-call endpoint where a client polls for status and synthesis must fire only on explicit user intent
+tags:
+  - on-demand-synthesis
+  - llm-gating
+  - read-path-invariant
+  - poll-side-effects
+  - headless-qa-gap
+  - static-analysis-review
+  - greptile
+  - local-api
+applies_when:
+  - designing (or reviewing) an on-demand LLM/agent-call endpoint where a client polls for status and synthesis must fire only on explicit user intent
 ---
 
 # On-demand synthesis read-path invariant — gate every LLM call behind explicit intent; verify the poll path never reaches the synthesizer

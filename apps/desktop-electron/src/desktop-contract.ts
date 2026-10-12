@@ -7,7 +7,7 @@
  * dependency on the host. All bounds, operation names, envelope shapes and
  * parsers live here; `desktop-ipc.ts` (main) and `preload.ts` (bridge) consume
  * them. Frozen by the plan's "IPC and trust boundary" table and
- * `.mstar/specs/desktop-shell.md` (Electron rewrite target, P0-T9).
+ * `.mstar/specs/active/surfaces/desktop-shell.md` (Electron rewrite target, P0-T9).
  */
 
 // ---------------------------------------------------------------------------

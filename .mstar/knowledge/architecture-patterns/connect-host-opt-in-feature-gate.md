@@ -1,5 +1,5 @@
 ---
-module: nexus-spoke-adapter, nexus-daemon-runtime, apps/nexus42
+module: nexus-spoke-adapter, apps/nexus-service, apps/nexus42
 date: 2026-08-04
 problem_type: architecture_pattern
 category: architecture-patterns
@@ -13,7 +13,7 @@ tags:
   - op-refusal
   - fl-r
   - n-c0
-last_updated: 2026-09-24
+last_updated: 2026-10-12
 applies_when:
   - "Adopting a heavy optional transport/network dependency behind a feature gate"
   - "Building an honest capability manifest for a peer-facing surface"
@@ -90,5 +90,5 @@ V1.148 P3 adopted `spoke-connect` (libp2p + noise + yamux + Ed25519 signed-hello
 ## Examples
 
 - V1.148 P3 `crates/nexus-spoke-adapter/src/manifest.rs` (shared builder), `apps/nexus42/src/commands/connect/{mod,identity,allowlist,interop}.rs` (Connect Host + interop), `crates/nexus-home-layout/src/device_id.rs` (host_id SSOT).
-- Spec: `.mstar/specs/architecture/spoke-adapter-architecture.md` §10 (Connect Host N-C0 normative surface).
+- Spec: `.mstar/specs/active/architecture/spoke-adapter-architecture.md` §10 (Connect Host N-C0 normative surface).
 - The N-C series shipped end-to-end: **N-C1 (V1.153)** — write-op exchange; **N-C2 (V1.154)**; **N-C3 (V1.155)**. Capability-token production (issuance CLI + `config.json` enforcement + PeerScope intersection) shipped in **V1.155 P1**.

@@ -1,6 +1,7 @@
 ---
 module: actor-runtime
 date: 2026-09-05
+last_updated: 2026-10-12
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: high
@@ -19,7 +20,6 @@ tags:
   - theory-of-mind
 related_components:
   - nexus-local-db
-  - nexus-daemon-runtime
   - nexus-moment-context-assembly
   - nexus-creator-memory
   - nexus-spoke-adapter
@@ -31,7 +31,7 @@ related_components:
 
 A Character crosses identity, World membership, knowledge, execution, memory, and mental-state storage. Isolation is sound only when every layer derives scope from stored rows and passes an admitted capability forward. Rechecking only the route payload, revision, or provider session id leaves cross-Actor seams.
 
-Normative product semantics live in [Actor Product Model](../../specs/architecture/actor-product-model.md). This document captures the reusable implementation pattern validated by the shipped v1.184 Actor vertical ([Actor Product Model §10](../../specs/architecture/actor-product-model.md)); the v1.184 iteration package is a local process artifact and is not tracked at HEAD.
+Normative product semantics live in [Actor Product Model](../../specs/active/architecture/actor-product-model.md). This document captures the reusable implementation pattern validated by the shipped v1.184 Actor vertical ([Actor Product Model §10](../../specs/active/architecture/actor-product-model.md)); the v1.184 iteration package is a local process artifact and is not tracked at HEAD.
 
 ## Guidance
 
@@ -87,8 +87,8 @@ Apply this pattern when adding an Actor kind, widening World/binding visibility,
 
 Durable spec/source authority for each shipped slice (the v1.184 package files behind these remain historical provenance only):
 
-- Actor identity and binding — [Actor Product Model §2/§4.2](../../specs/architecture/actor-product-model.md)
-- Actor knowledge ownership and view — [Actor Product Model §5](../../specs/architecture/actor-product-model.md)
-- Actor execution and session isolation — [Actor Product Model §6](../../specs/architecture/actor-product-model.md), [agent-host.md](../../specs/agents/agent-host.md)
-- Character SOUL and Memory — [Actor Product Model §4.1](../../specs/architecture/actor-product-model.md), [creator-memory-soul-lifecycle.md](../../specs/creator/creator-memory-soul-lifecycle.md)
-- Character ToM L1/L2 — [Actor Product Model §4.1](../../specs/architecture/actor-product-model.md), [spoke-adapter-architecture.md](../../specs/architecture/spoke-adapter-architecture.md)
+- Actor identity and binding — [Actor Product Model §2/§4.2](../../specs/active/architecture/actor-product-model.md)
+- Actor knowledge ownership and view — [Actor Product Model §5](../../specs/active/architecture/actor-product-model.md)
+- Actor execution and session isolation — [Actor Product Model §6](../../specs/active/architecture/actor-product-model.md), [agent-host.md](../../specs/active/agents/agent-host.md)
+- Character SOUL and Memory — [Actor Product Model §4.1](../../specs/active/architecture/actor-product-model.md), [creator-memory-soul-lifecycle.md](../../specs/active/creator/creator-memory-soul-lifecycle.md)
+- Character ToM L1/L2 — [Actor Product Model §4.1](../../specs/active/architecture/actor-product-model.md), [spoke-adapter-architecture.md](../../specs/active/architecture/spoke-adapter-architecture.md)

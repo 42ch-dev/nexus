@@ -1,6 +1,7 @@
 ---
 module: packages/nexus-ui
 date: 2026-09-10
+last_updated: 2026-10-12
 problem_type: test_failure
 category: test-failures
 severity: low
@@ -19,6 +20,8 @@ tags:
 ---
 
 # A reader/tool footer leaked into a committed source file
+
+> **Status: fixed** — dedicated one-line follow-up commit (no assertion or behavior change); the plan diff was swept for other reader/report markers. `packages/nexus-ui/src/components/transport-error-block.test.tsx` parses clean again.
 
 ## Problem
 

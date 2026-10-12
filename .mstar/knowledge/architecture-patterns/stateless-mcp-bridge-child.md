@@ -1,5 +1,5 @@
 ---
-module: apps/nexus42, nexus-daemon-runtime, rmcp, nexus-acp-host
+module: crates/nexus-core, nexus-acp-host, rmcp
 date: 2026-08-25
 problem_type: architecture_pattern
 category: architecture-patterns
@@ -8,214 +8,218 @@ plan_id: 2026-08-24-v1.174-p0-peer-tools-transport-registry
 tags:
   - mcp
   - rmcp
-  - stdio
-  - bridge-child
   - serverhandler
   - tools-only
-  - listchanged
-  - watcher
-last_updated: 2026-08-26
+  - visibility
+  - embedded-server
+  - transport-neutral
+  - catalog
+last_updated: 2026-10-12
 applies_when:
-  - "Exposing the daemon tool registry to an external MCP client (ACP agent, native CLI, third-party)"
-  - "Choosing the process model for an MCP server (client-spawned child vs in-daemon service)"
-  - "Implementing a rmcp ServerHandler with a dynamic, registry-backed tool catalog"
+  - "Exposing a nexus tool registry to an external MCP client over rmcp"
+  - "Choosing the process model for an MCP server (client-spawned child vs in-process service)"
+  - "Implementing an rmcp ServerHandler with a dynamic, backend-supplied tool catalog"
   - "Mapping non-MCP error vocabularies onto MCP protocol vs tool-result errors"
 ---
 
-# Stateless MCP bridge child (Model A) — client-spawned stdio proxy, lockstep by construction
+# Transport-neutral MCP bridge core + embedded Model B server (lockstep by construction)
 
 ## Context
 
-V1.174 exposes nexus's tool registry to external MCP clients through a
-**tools-only MCP server**. The process-model question came first: who spawns
-the MCP server? Evidence from the consumption stories settled it — ACP
-`McpServerStdio::new(name, command)` passes a command for the **agent binary**
-to spawn as its own stdio child (`nexus-acp-host/src/client.rs` L203-218), and
-CLI `--mcp-config` semantics are the same. An in-daemon embedded MCP service
-has no stdio channel to those external children. The locked model is
-therefore **Model A: the MCP client spawns `nexus42 mcp serve` as its own
-stdio child**, and the child is a thin, stateless proxy.
+V1.174 P0 asked who spawns the MCP server that exposes nexus's tool registry
+to external MCP clients. The delivered answer was **Model A — an MCP client
+spawns `nexus42 mcp serve` as its own stdio child** (AR-71). That entry is now
+**historical**: the whole `nexus42 daemon` group, hidden `daemon-run`, and the
+Model A `mcp serve` child were deleted in **v1.193 P2** (see
+`.mstar/specs/active/cli/cli-spec.md` §V1.193 delivered), and the
+`nexus-acp-host::mcp::nexus_mcp_stdio_server()` ACP descriptor factory that
+bound it to ACP was deleted earlier in **v1.193 P1-T6**. No `nexus42` command
+spawns an MCP server any more, and `apps/nexus42/src/` has no `mcp` command
+group.
+
+What survives — and what this note documents — is the **transport-neutral core
+library** under `nexus_core::connect`, compiled behind the `connect-client` /
+`embedded-mcp` cohort features:
+
+- the **shared rmcp bridge core** (`crates/nexus-core/src/connect/mcp_bridge.rs`)
+  — a `ServerHandler` generic over a host-supplied `McpBackend`; and
+- the **embedded Model B server shell**
+  (`crates/nexus-core/src/connect/mcp_embedded.rs`) — an in-process rmcp
+  instance over a sink/stream transport.
+
+The retired daemon supplied the concrete `WorkspaceState`-backed backend;
+native/TS consumers compose the shell directly. A core-side regression must
+supply its own `McpBackend` — see `crates/nexus-core/tests/retained_peer_contracts.rs`
+(the embedded-only half of that target uses a `PeerRegistryBackend`).
 
 ## Guidance
 
-### 1. The child holds nothing; every request is a live daemon round trip
+### 1. The bridge core is generic over a backend, not a transport
 
-- `nexus42 mcp serve` (behind `connect-client`): an rmcp `ServerHandler`
-  with **no registry, no allowlist, no policy, no cache**.
-  `tools/list` → live `GET /v1/daemon/tools`; `tools/call` → live
-  `POST /v1/daemon/agent-host/internal/tool-executions` (the spine's existing
-  HTTP face — no new dispatch route).
-- Daemon transport resolution **reuses the CLI daemon-client rules** (Unix
-  `socket_path` → `NEXUS_DAEMON_PORT` → `127.0.0.1:8420`) — no new discovery
-  mechanism.
-- **Lockstep by construction:** the child never caches, so `tools/list`
-  cannot drift from the registry.
-- **stdout is the JSON-RPC channel** — route all tracing to stderr
-  (`init_logging` takes `stderr_only` for the child).
-- **Security note:** the child grants nothing new — a local process that
-  could spawn `nexus42 mcp serve` could already call the daemon's loopback
-  HTTP directly; all policy stays daemon-side.
+`McpBridgeHandler<B: McpBackend>` owns no catalog, allowlist, policy, or cache
+of its own; it delegates both directions to the backend:
 
-### 2. rmcp 3.2.0 realities (source-verified; the 1.8.0 corrections still stand)
+- `list_tools()` → the backend's **live** catalog rows (`CatalogRow`);
+- `call_tool(name, params)` → the backend executes one tool through the spine
+  and maps the outcome into the `ToolCallOutcome` vocabulary.
 
-- **Runtime-dynamic handler.** `ServerHandler`'s `list_tools`/`call_tool`
-  are plain async trait methods — the handler builds the tool list at call
-  time from any source. The `#[tool_handler]` macro router is optional and
-  static-only; our registry-dynamic catalog maps natively. **schemars stays
-  off our surface** — `Tool.input_schema` is an `Arc<JsonObject>` constructed
-  directly.
-- **Default lists are empty, not errors.** rmcp's default
-  `prompts/list` and `resources/list` return `Ok(default())` — **empty
-  result lists** — and the service layer does not gate by advertised
-  capabilities. The tools-only boundary is enforced by **absence**: only
-  `get_info`/`list_tools`/`call_tool` overrides exist; unroutable
-  `prompts/get` / `resources/read` remain `METHOD_NOT_FOUND`. Machine-check
-  with grep + a protocol probe
-  (`prompts_and_resources_are_empty_lists_not_errors`).
-- **Two-class error mapping** (SDK-documented semantics), now through the
-  rmcp 3.2 `CallToolResponse` union: the shared bridge handler's `call_tool`
-  returns `Result<CallToolResponse, McpError>` and Nexus implements **only**
-  the `Complete(CallToolResult)` variant (`InputRequired`/`Task` are never
-  produced; no tasks/sampling/roots/elicitation are advertised):
-  - *Unroutable* ⇒ JSON-RPC protocol error `Err(McpError)` —
-    `METHOD_NOT_FOUND` for never-admitted/evicted/non-exposable ids (name
-    the refusal class); `INTERNAL_ERROR` for daemon unreachable / auth
-    rejected, **bounded** by the daemon client's connect/request timeouts —
-    never a hang.
-  - *Executed-but-failed* ⇒ `Ok(Complete(CallToolResult::error(...)))` with
-    content naming the spine code: structural argument failure
-    (`invalid_input`), peer deny (`op_unsupported`/`capability_missing` with
-    the lowercase `wire_code` preserved), invoke timeout, transport closed
-    mid-invoke, user-cap `run()` error. Success ⇒ text content +
-    `structured_content` = the spine result value when it is a JSON object
-    (else text-only). Conversion happens once at the handler boundary via
-    `.map(CallToolResponse::from)`; inner mapping still produces
-    `CallToolResult`.
-- **Pin** `rmcp = { version = "=3.2.0", default-features = false, features =
-  ["server", "transport-io"] }` behind `connect-client` (CLI) and
-  `features = ["server"]` behind daemon `connect-client`; dev/test lanes use
-  `client` + `transport-async-rw`. ACP 2.1.0 core no longer carries an rmcp
-  edge, so the default graph is now rmcp-free and these pins ARE the graph
-  introduction — feature-gated, exactly one 3.2.0 per shipped graph (see
-  `conventions/graph-pin-honesty-discipline.md`). No streamable-HTTP, no
-  child-process, no auth features in the normal graph.
-- Advertisement: **tools + `tools.listChanged`** — delivered V1.175
-  (DF-90 / AR-79) by the child-side watch in section 6; still no
-  daemon→child push channel.
+**Lockstep by construction:** the handler never caches, so `tools/list` cannot
+drift from the backend's live source. Model A's backend was loopback HTTP
+(`GET /v1/daemon/tools`, `POST …/tool-executions`); Model B's backend is
+in-process function calls (DF-88). The handler is identical for both — only the
+backend differs.
 
-### 3. Schema mapping (descriptors → rmcp `Tool`)
+- **Per-consumer visibility seam** (V1.180 P1, RN-OGA-2): an optional
+  `VisibilityPolicy` filters `tools/list` and short-circuits a hidden-tool
+  `tools/call` at the seam **before** the backend, minting the distinct
+  `tool_not_authorized` refusal (`METHOD_NOT_FOUND`), separate from unroutable
+  (the spine cannot resolve the id at all). Absent policy ⇒ byte-identical
+  unfiltered behavior.
+- **Tools-only boundary by absence:** the handler overrides only
+  `get_info` / `list_tools` / `call_tool`; it advertises `enable_tools()` (plus
+  `tools.listChanged` only when the backend delivers it — §2). The
+  `prompts/*` / `resources/*` families stay at rmcp's defaults (§3).
+
+### 2. Embedded Model B server shell (`embedded-mcp` feature)
+
+`mcp_embedded` was moved out of the (now-deleted) daemon in **v1.190 P4-T3**;
+it is transport-neutral and generic over `McpBackend` via the shared bridge. A
+host composition supplies the catalog/call backend and a shutdown signal; the
+session budget, sink/stream session establishment, and the rmcp lifecycle live
+in the shell.
+
+- **Session bound:** a documented exemption from the remote WS accept path's
+  `PeerSessionManager::max_sessions` (AR-67). An in-process consumer presents
+  no remote dial surface, so it must not consume peer-session counters. The
+  shell carries its own compile-time bound `EMBEDDED_MCP_MAX_SESSIONS` (= 4);
+  the (N+1)-th concurrent establish is refused with the honest discriminator
+  `embedded_mcp_session_limit`. The budget is **process-global** — every server
+  handle in the process shares one registry, so a second instance cannot bypass
+  it. A slot is held by the session's server-side serve task for the whole
+  connection lifetime (not by the client-side `EmbeddedSession` handle).
+- **Lifecycle:** each session's serve task selects on the owner's shutdown
+  signal, so live sessions end with the run that spawned them and release their
+  slots. `establish` refuses with `EmbeddedMcpError::Shutdown` once the signal
+  is set.
+- **`listChanged`:** the shell runs **no** catalog watcher, so a backend over it
+  leaves `advertise_tool_list_changed()` at the default `false` and the handler
+  must not advertise a capability it never delivers. Model A's child-side 2 s
+  poll watch (DF-90 / AR-79) is **historical** — deleted with the child.
+
+Exports (`nexus_core::connect`): `start_embedded_mcp_server`,
+`EmbeddedMcpServer`, `EmbeddedSession`, `EmbeddedShutdown`, `EmbeddedMcpError`,
+`EMBEDDED_MCP_MAX_SESSIONS`.
+
+### 3. rmcp realities (source-verified against the pin)
+
+- **Pin:** `rmcp = { version = "=3.5.1", default-features = false, features =
+  ["server", "client"] }`, optional, behind `connect-client` (which
+  `embedded-mcp` composes). Feature-gated — exactly one rmcp per shipped graph
+  (see `.mstar/knowledge/conventions/graph-pin-honesty-discipline.md`). The
+  shipped Connect-host product does **not** enable the rmcp-bearing cohort
+  (`tooling/check-graph-pins.sh` asserts rmcp absent for `connect-host`).
+- **Runtime-dynamic handler.** `ServerHandler`'s `list_tools` / `call_tool` are
+  plain async trait methods — the handler builds the tool list at call time
+  from the backend. The `#[tool_handler]` macro router is optional and
+  static-only; a backend-supplied catalog maps natively. `Tool.input_schema` is
+  an `Arc<JsonObject>` constructed directly (no schemars on this surface).
+- **Default lists are empty, not errors.** rmcp's default `prompts/list` and
+  `resources/list` return `Ok(default())` — empty result lists — and the
+  service layer does not gate by advertised capabilities. The tools-only
+  boundary is enforced by **absence** of overrides; unroutable `prompts/get` /
+  `resources/read` remain `METHOD_NOT_FOUND`.
+- **Two-class error mapping** through the rmcp `CallToolResponse` union: the
+  handler's `call_tool` returns `Result<CallToolResponse, McpError>` and
+  produces **only** the `Complete(CallToolResult)` variant:
+  - *Unroutable* ⇒ `Err(McpError)`: `METHOD_NOT_FOUND` for
+    never-admitted / evicted / non-exposable ids, plus the `tool_not_authorized`
+    discriminator for a policy-hidden id; `INTERNAL_ERROR` (`internal_error`)
+    for a backend transport failure.
+  - *Executed-but-failed* ⇒ `Ok(Complete(CallToolResult::error(...)))` naming
+    the spine code, with the lowercase `wire_code` preserved verbatim when the
+    spine supplies one (peer deny). Success ⇒ text content plus
+    `structured_content` when the result is a JSON object, else text-only.
+  - `is_unroutable(code, wire_code)` encodes the typed split: `not_supported`
+    **without** a `wire_code` is unroutable; `not_supported` **with** a wire
+    code is a peer deny (executed-but-failed) — matched structurally, never by
+    message text.
+
+### 4. Schema mapping (descriptor rows → rmcp `Tool`)
+
+The catalog gates live in `crates/nexus-core/src/connect/table.rs`
+(`mcp_catalog_admission`, `mcp_catalog_output_root_object`):
 
 | Source | `input_schema` | `output_schema` |
 |--------|----------------|-----------------|
-| Peer tools (manifest) | carried **verbatim** after catalog root-object filter (`mcp_catalog: input_schema not root-object` = named refusal from the MCP catalog; registration lane unaffected) | included iff present **and** root-object; else omitted — never invented, never wrapped |
-| User capabilities | parsed draft-2020-12; unparseable ⇒ named catalog refusal | same parse rule |
-| Builtin `nexus.*` | real authored draft-2020-12 schemas from the registry row (`CatalogDescriptor`, DF-89 — the uniform placeholder is retired); named `$comment: nexus42:schema-pending` fallback only for a hypothetical schema-less row | pinned where the success shape is a stable object; omitted otherwise |
+| Peer tools (descriptor) | carried **verbatim** after the catalog root-object filter (`mcp_catalog: input_schema not root-object` is the named refusal) | included iff present **and** root-object; else omitted — never invented, never wrapped |
+| Builtin `nexus.*` | authored draft-2020-12 schema on the registry row (`CatalogDescriptor`, DF-89); named `$comment: nexus42:schema-pending` fallback only for a hypothetical schema-less row (`SCHEMA_REMAINDER_LEDGER`, currently empty) | pinned where the success shape is a stable object; omitted otherwise |
 
-No schema is ever synthesized from a non-schema source; builtin rows carry
-authored descriptors (DF-89, `descriptive-first-builtin-schema-authoring.md`)
-and the named `schema-pending` placeholder is the machine-distinguishable
-no-schema fallback only.
+No schema is ever synthesized from a non-schema source. See
+`.mstar/knowledge/architecture-patterns/descriptive-first-builtin-schema-authoring.md`.
 
-### 4. Alternatives evaluated (roadmap, not leftovers)
+### 5. Process-model alternatives (mixed)
 
-- **Model B — in-daemon embedded rmcp service** over an in-memory
-  (sink/stream) transport: technically feasible (verified) but serves only
-  in-daemon MCP clients, which do not exist → DF-88.
-- **Model C — daemon spawns and owns the child:** structurally incoherent
-  for stdio (the stdio parent must be the MCP client) → rejected without a
-  roadmap row.
+- **Model A — client-spawned stdio child** (the Model A `mcp serve` entry):
+  the V1.174 delivered design; **historical, deleted v1.193 P2**. Its stateless
+  child held no registry / allowlist / policy / cache and made live daemon HTTP
+  round trips, with stdout as the JSON-RPC channel and stderr-only logging;
+  none of that surface exists now.
+- **Model B — in-process embedded rmcp service** over a sink/stream transport:
+  **retained** and relocated to the core library (§2), generic over
+  `McpBackend`.
+- **Model C — host spawns and owns the child:** structurally incoherent for
+  stdio (the stdio parent must be the MCP client) → rejected without a roadmap
+  row.
 - **Streamable HTTP + remote consumers:** a different trust class (network
   exposure) → DF-87, never "leftover stdio work".
 
-### 5. Gotchas discovered in the first implementation
+### 6. ACP generic `mcp_servers` descriptors (retained)
 
-- **Message-match discriminators:** the daemon's `BadRequest` Display wraps
-  the spine error as `"Bad request: unsupported tool: {id}"` — match with
-  `contains`, not `starts_with`, or unroutable ids surface as
-  `Ok(CallToolResult::error)` instead of `METHOD_NOT_FOUND` (caught by the
-  three-process E2E).
-- **Args must survive the ACP mapping:** the `NexusMcpServer::Stdio` → SDK
-  mapping must carry `args` (`["mcp", "serve"]`); a hand-built stdio entry
-  that drops args spawns the CLI without the serve subcommand. Pin with a
-  unit test on the propagation.
-### 6. Child-side `listChanged` watch (DF-90 / AR-79, shipped V1.175)
-
-`tools.listChanged` is **not** a daemon push — the child polls and digests:
-
-- **2 s poll** (`MCP_CATALOG_WATCH_INTERVAL`, not configurable this
-  iteration) of `GET /v1/daemon/tools`; digest = the raw `serde_json::Value`
-  body. Object keys are order-insensitive in the comparison; the `items`
-  array is order-sensitive **by design** — the route's id-sort is the
-  documented invariant that makes an unchanged catalog compare equal.
-- **Baseline without notify:** the first successful poll establishes the
-  baseline digest; no notification. `notify_tool_list_changed()` fires only
-  when the digest changes **between successful polls**.
-- **Notify-retry on failure:** `last_digest` advances only after a
-  successful notify (or the baseline poll). On notify `Err` the previous
-  digest is kept, so the next poll retries the idempotent notification — a
-  lost `listChanged` on notify failure was a blocking QC finding; the
-  retry semantics live in a generic `catalog_watch_loop_inner(interval,
-  poll, notify, should_stop)` seam so they are unit-testable without a
-  daemon or MCP transport.
-- **Poll errors never notify:** they keep the last digest and log to stderr
-  once per error-state transition (bounded, no per-poll spam).
-- **Lifecycle:** the watcher spawns after `serve_server` returns
-  (post-initialize — notifications only inside an initialized session); a
-  `WatcherGuard` scope guard aborts the task on EVERY exit path (success,
-  `waiting()` Err, panic unwinding).
-- **Advertisement:** `get_info` builds
-  `enable_tools().enable_tool_list_changed()` (order pinned — the builder
-  only touches an existing `tools` capability).
-- **Model A preserved:** the child holds a digest + interval — no registry,
-  no allowlist, no policy, no read cache. Every `tools/list` remains a live
-  daemon round trip; zero daemon-side change, zero wire change.
-- Delivery bound = interval + one request timeout (bounded, never a hang).
-- Proof: `apps/nexus42/tests/mcp_serve_e2e.rs` —
-  `list_changed_advertised_and_delivered` (three legs: peer admission, peer
-  eviction, user-cap content change; each asserts exactly one
-  notification), `no_list_changed_when_catalog_unchanged` (≥ 2 intervals,
-  zero notifications); unit pins `get_info_advertises_tools_list_changed`
-  and `notify_failure_retries_on_next_poll`; docs `docs/mcp-server.md`.
+ACP sessions still carry arbitrary `mcp_servers` descriptors (`Stdio` / `Http`
+/ `Sse`) on `newSession`; `crates/nexus-acp-host/src/client.rs` maps the nexus
+DTO to the SDK types verbatim (unit-pinned by
+`new_session_request_propagates_mcp_servers`), and
+`apps/nexus42/tests/mcp_acp_probe.rs` pins the generic round trip. The nexus
+DTO → SDK mapping must carry `args` — a hand-built `NexusMcpServer::Stdio`
+entry that drops args spawns a command without its subcommand. What is gone is
+the nexus-owned `nexus` descriptor factory, not the generic descriptor path.
 
 ## Why This Matters
 
-## Why This Matters
-
-The child is the entire MCP surface for external consumers. If it cached or
-held policy, it would be a second authorization domain and a drift surface —
-both prohibited by the honesty lockstep. The stateless design moves every
-decision daemon-side (where the allowlist, admission, and dispatch live) and
-makes `tools/list` ⇄ catalog lockstep **true by construction** instead of by
-test. The rmcp 1.8.0 corrections (dynamic handler, empty-list defaults)
+The bridge core is the entire MCP surface nexus exposes to external consumers.
+If it cached a catalog or held policy, it would be a second authorization
+domain and a drift surface. Keeping it generic over a host-supplied backend
+moves every decision to that backend (where admission and dispatch live) and
+makes `tools/list` ⇄ live-source lockstep **true by construction** instead of
+by test. The early rmcp corrections (dynamic handler, empty-list defaults)
 matter because they were documented wrongly once and cost a spec-correction
-round; the empty-lists reality is the honest boundary for a tools-only
-server.
+round; the empty-lists reality is the honest boundary for a tools-only server.
 
 ## When to Apply
 
-- Building any MCP server whose catalog is a live registry (never a cached
+- Building any MCP server whose catalog is a live source (never a cached
   snapshot).
-- Choosing between child-process and embedded MCP — ask first who owns the
-  stdio channel; if the client spawns, the child must be stateless.
+- Choosing between a child process and an in-process service — ask first who
+  owns the stdio/transport channel.
 - Mapping a domain error vocabulary onto MCP: unroutable ⇒ protocol error,
   executed-but-failed ⇒ `is_error` result; keep the split typed, not
   text-matched.
-- Extending the exposure lane (HTTP transport, embedded Model B) — reuse
-  this child's daemon-round-trip + resolution rules; `listChanged` is
-  delivered by the child-side watch (section 6), not a daemon push.
+- Extending the exposure lane: reuse this bridge core's backend contract and
+  the `VisibilityPolicy` seam rather than forking a second handler.
 
 ## Examples
 
-- `apps/nexus42/src/commands/mcp/mod.rs` — the `ServerHandler` impl,
-  stderr-only logging, `contains`-based unroutable discriminator.
-- `apps/nexus42/src/api/daemon_client.rs` — `post_execution_raw` preserving
-  the spine's structured error body (unroutable vs executed-failure vs
-  auth-refused distinguishable).
-- Proof suites: `apps/nexus42/tests/mcp_serve_e2e.rs` (7, incl.
-  `call_tool_daemon_down_is_bounded_internal_error` and the empty-lists
-  probe), `mcp_acp_probe.rs` (C-1 ACP stdio injection), `mcp_session_wiring.rs`,
-  `apps/nexus42/tests/e2e_peer_mcp.rs` (three-process journeys).
-- Consumer docs: `docs/mcp-server.md` (integrator/operator duties, native
-  `--mcp-config` story).
+- `crates/nexus-core/src/connect/mcp_bridge.rs` — `McpBackend`,
+  `McpBridgeHandler`, `map_outcome`, `is_unroutable`, `CatalogRow`.
+- `crates/nexus-core/src/connect/mcp_embedded.rs` — embedded Model B shell
+  (`start_embedded_mcp_server`, session bound, shutdown).
+- `crates/nexus-core/src/connect/table.rs` — catalog admission / output-root
+  gates.
+- `crates/nexus-core/src/connect/visibility.rs` — `VisibilityPolicy` seam.
+- Proof suites: `crates/nexus-core/tests/retained_peer_contracts.rs`
+  (embedded-Model-B half behind `embedded-mcp`),
+  `apps/nexus42/tests/mcp_acp_probe.rs` (generic ACP descriptor round trip).
+- Consumer docs: `docs/mcp-server.md` (historical record + retained-contract
+  pointer).
 - Companion: `architecture-patterns/peer-tool-registration-exposure-lanes.md`
-  (the spine + admission the child proxies).
+  (the spine + admission the bridge proxies).

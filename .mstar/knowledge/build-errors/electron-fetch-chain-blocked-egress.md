@@ -1,6 +1,7 @@
 ---
 module: apps/desktop-electron packaging (@electron/packager + @electron/get fetch chain)
 date: 2026-10-09
+last_updated: 2026-10-12
 problem_type: build_error
 category: build-errors
 severity: high
@@ -32,6 +33,8 @@ tags:
 ---
 
 # Electron packaging on blocked-egress hosts: the fetch chain fails four ways; bypass it with electronZipDir
+
+> **Status: environment workaround, not an application fix.** The `electronZipDir` bypass is **not** wired into `apps/desktop-electron/scripts/package.mjs` today (the driver has no `electronZipDir` / `ELECTRON_ZIP_DIR` reference), so the workaround below still needs a temporary local dependency patch — re-verify it against the current driver before relying on it.
 
 ## Problem
 

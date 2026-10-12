@@ -1,6 +1,7 @@
 ---
-module: nexus-orchestration, nexus-daemon-runtime, graph-flow
+module: nexus-orchestration, nexus-core, graph-flow
 date: 2026-09-02
+last_updated: 2026-10-12
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
@@ -99,17 +100,20 @@ worse than no resume, because it is invisible until side effects repeat.
   filter first; today only converge/merge chains with live join keys).
 - Adding new boot-time background tasks (use the same
   CancellationToken + shutdown-notify watcher pattern).
-- Writing ops E2E for orchestration flows (hermetic `LiveDaemon` fixture
-  wires a production-shaped engine pre-router; restart tests use a real
-  sqlite pool boundary).
+- Adding coverage for resume/restart behavior at the in-crate level
+  (`crates/nexus-core/src/execution/workflow.rs` resume tests) or the ops
+  E2E level (`apps/nexus42/tests/`, when present).
 
 ## Examples
 
-- Driver + resume: `crates/nexus-daemon-runtime/src/preset_run.rs`
-  (`drive_preset_run`, `resume_driven_sessions`, `ResumeDecision`).
-- Boot wiring: `crates/nexus-daemon-runtime/src/boot.rs` (recover +
-  spawn + CancellationToken watcher).
-- Ops E2E: `apps/nexus42/tests/ops_e2e_converge_timeout.rs` (DR-06
-  timeout/reroute/typed-fail), `apps/nexus42/tests/ops_e2e_resume_restart.rs`
-  (restart no-re-execution, typed-fail skip, downtime elapsed).
-- Promotion source: v1.180 `long-run-checkpoint.md`.
+- Driver + resume: `crates/nexus-core/src/execution/workflow.rs`
+  (`drive_preset_run`:203, `ResumeDecision`:670, `resume_driven_sessions`:782).
+- Resume classifiers: `crates/nexus-orchestration/src/resume_rules.rs`
+  (`classify_recovery`, `is_converge_merge_chain`:235) — shared by the core drive and the `ops inspect` CLI.
+- Boot wiring: `crates/nexus-core/src/execution/workflow.rs`
+  (`recover_persisted`:1304 spawns the `CancellationToken` + shutdown-notify watcher, then drives via `recover_driving`:2075).
+- Resume tests (in-crate, not ops E2E): `crates/nexus-core/src/execution/workflow.rs`
+  (`resume_re_drives_converge_merge_chain_session`:4715, `resume_skips_typed_failed_session`:4578,
+  `resume_skips_non_converge_merge_class_session`:4623, `resume_skips_session_without_runner`:4653,
+  `resume_skips_unreadable_session`:4688).
+- Promotion source: v1.180 `long-run-checkpoint.md` (`{ITERATION_DIR}/v1.180/specs/long-run-checkpoint.md`).

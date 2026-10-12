@@ -4,9 +4,17 @@ date: 2026-07-26
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: low
-tags: [spoke, adapter, conversion-seam, extensions, knowledge-entry, wire-boundary, surface-a]
+tags:
+  - spoke
+  - adapter
+  - conversion-seam
+  - extensions
+  - knowledge-entry
+  - wire-boundary
+  - surface-a
 last_updated: 2026-09-18
-applies_when: Consuming SPOKE protocol packages in a product whose domain type must round-trip body content plus product-local identity through the spoke wire type; using SPOKE pure-helper delegates (Surface A) where the caller manages its own storage
+applies_when:
+  - Consuming SPOKE protocol packages in a product whose domain type must round-trip body content plus product-local identity through the spoke wire type; using SPOKE pure-helper delegates (Surface A) where the caller manages its own storage
 ---
 
 # SPOKE Adapter Conversion-Seam Pattern (Surface A)

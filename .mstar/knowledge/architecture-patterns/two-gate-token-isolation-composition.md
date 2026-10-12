@@ -4,8 +4,17 @@ date: 2026-08-08
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: high
-tags: [capability-token, tenant-isolation, enforcement-composition, spoke-connect, peer-scope, fail-closed, issuer-key, intersection]
-applies_when: enforcing capability tokens or authz claims on a multi-tenant boundary; composing an external gate with an existing in-app scope gate; adding an issuance path for signed credentials
+tags:
+  - capability-token
+  - tenant-isolation
+  - enforcement-composition
+  - spoke-connect
+  - peer-scope
+  - fail-closed
+  - issuer-key
+  - intersection
+applies_when:
+  - enforcing capability tokens or authz claims on a multi-tenant boundary; composing an external gate with an existing in-app scope gate; adding an issuance path for signed credentials
 ---
 
 # Two-Gate Token Isolation Composition (V1.155 P1 pattern)

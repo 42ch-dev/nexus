@@ -1,6 +1,6 @@
 /**
- * P3-T3 upstream request-budget guard — contract §6.3 of
- * `.mstar/iterations/v1.195/specs/current-host-contracts.md`.
+ * P3-T3 upstream request-budget guard — v1.195 current-host contracts §6.3 (local
+ * record); tracked pattern: `.mstar/knowledge/workflow-patterns/single-live-action-request-guard.md`.
  *
  * This file is a **Node ESM preload**, not a library: loading it installs the
  * ceiling in the current process, and it exports nothing. The supported load

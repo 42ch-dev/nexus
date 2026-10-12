@@ -1,6 +1,7 @@
 ---
 module: apps/design-studio
 date: 2026-09-10
+last_updated: 2026-10-12
 problem_type: ui_bug
 category: ui-bugs
 severity: medium
@@ -20,6 +21,8 @@ tags:
 ---
 
 # Studio sticky header: wrapped nav must be allowed to grow
+
+> **Status: fixed** — the header is no longer fixed-height and focus compensation reads the measured `--studio-sticky-header-offset` (`apps/design-studio/src/index.css`, kept current by the guarded ResizeObserver in `App.tsx`). The narrow-viewport (390×844) pointer hit-test is a real-browser check, not a jsdom unit.
 
 ## Problem
 

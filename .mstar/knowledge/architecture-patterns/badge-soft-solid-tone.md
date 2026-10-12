@@ -1,3 +1,19 @@
+---
+module: packages/nexus-ui
+date: 2026-10-12
+last_updated: 2026-10-12
+problem_type: architecture_pattern
+category: architecture-patterns
+severity: low
+tags:
+  - badge
+  - tone
+  - cva
+  - design-tokens
+  - contrast
+applies_when:
+  - Adding a soft/solid emphasis axis to a shared component
+---
 # Badge soft / solid tone axis
 
 **Status:** crystallized from V1.102  

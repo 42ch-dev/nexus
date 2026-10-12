@@ -1,6 +1,24 @@
+---
+module: apps/nexus-service + crates/nexus-wasm-host + crates/nexus-local-db + apps/web
+date: 2026-10-12
+last_updated: 2026-10-12
+problem_type: architecture_pattern
+category: architecture-patterns
+severity: medium
+tags:
+  - compute
+  - runs-history
+  - wasm
+  - canon
+  - timeline
+  - invoke
+applies_when:
+  - Adding or reviewing a compute invoke lane and its persisted run history
+  - Deciding retention (retain-by-default vs auto-TTL) for an append-only history surface
+---
 # Compute pillar: daemon invoke route + Runs history semantics
 
-**Status:** shipped (V1.147) · **Category:** architecture-patterns · **Applies to:** nexus-daemon-runtime, nexus-wasm-host, nexus-local-db, apps/web
+**Status:** shipped (V1.147) · **Category:** architecture-patterns · **Applies to:** apps/nexus-service, nexus-wasm-host, nexus-local-db, apps/web
 
 ## Problem
 
@@ -11,7 +29,7 @@ mutable history.
 
 ## Decision
 
-1. **Route + projection model**: `POST /v1/daemon/worlds/:world_id/compute/run` (ACP client
+1. **Route + projection model**: `POST /v1/daemon/compute/run` (ACP client
    call → direct lane) writes a canon-only projection `compute_result` (never full memory/
    session state). Related: accept/discard/list/detail + `DELETE /compute/runs` (world-gated).
 2. **Canon append**: Accept paths write via `append_event_canon_with_extensions_in_tx`

@@ -17,7 +17,7 @@
 //! failure, chain class — which the retained resume driver applies to
 //! v0/no-store rows only.
 //!
-//! Contract: `.mstar/sdd/2026-09-03-v1.182-p1-bl04-checkpoint-resume-ux/inspect-contract.md`.
+//! Contract: `.mstar/specs/active/cli/cli-spec.md` §6.3B.
 //!
 //! Honesty discipline:
 //! - `db_status` is the raw DB column. For **v1 rows** (`execution_version == 1`)

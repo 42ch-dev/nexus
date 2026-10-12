@@ -147,7 +147,8 @@ regex = { version = "1", optional = true }
 base64 = { version = "0.23", optional = true }
 cron = { workspace = true, optional = true }
 chrono-tz = { workspace = true, optional = true }
-# ACP SDK consumed via nexus-acp-host (worker-only linkage — see spec §11.3)
+# ACP SDK consumed via nexus-acp-host (provider-host cohort linkage — see
+# .mstar/specs/active/agents/acp-client-tech-spec.md §1.1)
 # agent-client-protocol = "=0.10.4"  — REMOVED: consumed through nexus-acp-host
 # tokio-util, async-trait, async-broadcast — consumed through nexus-acp-host
 # nix was used directly by the deleted daemon.rs process management; no

@@ -5,18 +5,24 @@ problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
 plan_id: 2026-09-03-v1.182-p1-bl04-checkpoint-resume-ux
-tags: [decision-rules, single-source, cli-projection, drift-risk, shared-projection, verdict]
+tags:
+  - decision-rules
+  - single-source
+  - cli-projection
+  - drift-risk
+  - shared-projection
+  - verdict
 applies_when:
-  - a CLI/GUI/inspection surface must restate engine decision rules (resume eligibility, gate outcomes, admission verdicts)
+  - "a CLI/GUI/inspection surface must restate engine decision rules (resume eligibility, gate outcomes, admission verdicts)"
   - a second consumer needs the same rule outcome as the engine but cannot invoke the engine
-  - QC flags "rule duplication drift risk" between an engine module and a projection surface
+  - 'QC flags "rule duplication drift risk" between an engine module and a projection surface'
 ---
 
 # Decision-rule projection: single source, many surfaces
 
 ## Context
 
-The v1.182 BL-04 inspect CLI had to answer "can this checkpointed run resume?" outside the daemon. The authoritative rules live in `resume_driven_sessions` (`crates/nexus-daemon-runtime/src/preset_run.rs`, rules 1–3 decide; rule 4 — engine/runner availability — is boot-time only). The first implementation copied those rules into `apps/nexus42/src/commands/ops.rs`, and plan QC (seat 1) flagged the drift risk; seat 3 then caught the projection omitting rule 1 (terminal/cancelled rows kept live join keys → CLI said `resumable: yes` while boot's recovery filter would never re-drive them). The fix extracted `crates/nexus-orchestration/src/resume_rules.rs` as the single projection source consumed by BOTH the daemon resume path and the CLI detail/list surfaces.
+The v1.182 BL-04 inspect CLI had to answer "can this checkpointed run resume?" outside the daemon. The authoritative rules live in `resume_driven_sessions` (`crates/nexus-orchestration/src/resume_rules.rs`, rules 1–3 decide; rule 4 — engine/runner availability — is boot-time only). The first implementation copied those rules into `apps/nexus42/src/commands/ops.rs`, and plan QC (seat 1) flagged the drift risk; seat 3 then caught the projection omitting rule 1 (terminal/cancelled rows kept live join keys → CLI said `resumable: yes` while boot's recovery filter would never re-drive them). The fix extracted `crates/nexus-orchestration/src/resume_rules.rs` as the single projection source consumed by BOTH the daemon resume path and the CLI detail/list surfaces.
 
 ## Guidance
 

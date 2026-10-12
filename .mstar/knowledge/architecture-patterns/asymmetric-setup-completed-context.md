@@ -1,7 +1,24 @@
+---
+module: apps/web + apps/desktop-electron
+date: 2026-10-12
+last_updated: 2026-10-12
+problem_type: architecture_pattern
+category: architecture-patterns
+severity: medium
+tags:
+  - setup-gate
+  - react-context
+  - electron-ipc
+  - race-condition
+  - settings-rerun
+applies_when:
+  - Exposing one setter with opposite timing semantics per call site
+  - Mirroring a durable marker through a React context across an IPC boundary
+---
 # Asymmetric Setup-Completed Context (Optimistic True / Await False)
 
 **Status:** Active  
-**Tags:** setup-gate, react-context, tauri-ipc, race-condition, settings-rerun  
+**Tags:** setup-gate, react-context, electron-ipc, race-condition, settings-rerun  
 **Source:** V1.103 P3 Settings Re-run Setup (QC2/QC3 F-001)
 
 ## Problem

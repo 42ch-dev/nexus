@@ -1,11 +1,17 @@
 ---
 module: apps/web
 date: 2026-07-07
-problem_type: build-config
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: low
-tags: [tailwind, design-tokens, css, setup-wizard, theme-config]
-applies_when: adding sizing/spacing/maxWidth tokens that the JSX consumes as max-w-*/p-*/h-*/w-* utilities
+tags:
+  - tailwind
+  - design-tokens
+  - css
+  - setup-wizard
+  - theme-config
+applies_when:
+  - adding sizing/spacing/maxWidth tokens that the JSX consumes as max-w-*/p-*/h-*/w-* utilities
 ---
 
 # Tailwind theme-key routing for sizing tokens

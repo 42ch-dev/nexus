@@ -5,8 +5,8 @@
 //! V1.146 spike is promoted to a consumer of the spoke `modules.activation`
 //! dialect — the handbook field table is
 //! `spoke/.mstar/specs/domain-profile-lore-activation.md` §"`modules.activation`
-//! — portable subset" (product detail + acceptance:
-//! `.mstar/iterations/v1.149/specs/fl-l-w4-activation.md` §1–§4). Nexus parses
+//! — portable subset" (normative contract:
+//! `.mstar/specs/active/architecture/spoke-adapter-architecture.md` §7.4). Nexus parses
 //! the portable subset, never invents nexus-private portable fields, and keeps
 //! all matching/scan logic product-local — no `spoke-operations` matchers
 //! (spoke owns the dialect wire only).
@@ -68,8 +68,8 @@
 //! true` entries are always-on seeds, sorted first by the engine (V1.149 P0 T3
 //! ordering — constant band first, spec §4).
 //!
-//! # Relation hops (V1.149 P1 — spec §5; iteration spec:
-//! `.mstar/iterations/v1.149/specs/fl-l-w4-activation.md` §5)
+//! # Relation hops (V1.149 P1 — spec §5; normative contract:
+//! `.mstar/specs/active/architecture/spoke-adapter-architecture.md` §7.4)
 //!
 //! When a primary-matched or `constant`-seed entry fires, the engine BFS-
 //! expands **up to 2** graph hops over the world's confirmed relation graph

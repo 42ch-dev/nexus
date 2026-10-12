@@ -1,10 +1,18 @@
 ---
-module: daemon-runtime
+module: apps/nexus-service
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: high
 date: 2026-07-05
-tags: [daemon-api, remote-bind, security, loopback, api-key, axum, boot]
+last_updated: 2026-10-12
+tags:
+  - daemon-api
+  - remote-bind
+  - security
+  - loopback
+  - api-key
+  - tls
+  - boot
 ---
 
 # Daemon API Remote-Bind Gate
@@ -13,67 +21,52 @@ Pattern for allowing the Nexus daemon to bind to a non-loopback interface only w
 
 ## Context
 
-The Nexus daemon serves the **Daemon API** over HTTP. By default it binds to loopback (`127.0.0.1`, `::1`, `localhost`) so that only local clients can reach it. V1.90 made the daemon "remote-ready": an author may choose to bind to a non-loopback address, but only when both of the following are true:
+The Nexus service serves the **Daemon API** over HTTP. By default it binds to loopback (`127.0.0.1`, `::1`, `localhost`) so that only local clients can reach it. A non-loopback bind is opt-in and fail-closed: it requires **all** of
 
-1. An API key is configured (`NEXUS42_DAEMON_API_KEY`).
-2. Remote bind is explicitly enabled (`NEXUS_DAEMON_REMOTE_BIND=1`).
+1. `--allow-remote` (explicit intent),
+2. `--tls-cert` + `--tls-key` (TLS is mandatory off-loopback — a cleartext non-loopback listener is refused),
+3. an API key in `NEXUS42_DAEMON_API_KEY` (`apps/nexus-service/src/config.ts:373-374`).
 
-Without both conditions, the daemon must refuse to start before opening the listener.
+`--allow-remote` / `--tls-cert` / `--tls-key` are parsed in `apps/nexus-service/src/config.ts:439-446` (cert and key must be supplied together, `config.ts:476-477`). The gate is enforced both at startup and per request; neither depends on `NEXUS_DAEMON_REMOTE_BIND`.
 
 ## Decision
 
-Enforce the gate at **transport resolution time**, immediately before `TcpListener::bind`, and fail closed with a clear error. Do not rely on the auth middleware alone: middleware runs per-request and can be bypassed by network-level mistakes or misconfigured proxies. A boot-time gate prevents accidental exposure entirely.
+Enforce the gate **before the listener is opened** and again on every *guarded* request, failing closed with a clear error. Do not rely on the auth middleware alone: middleware runs per-request and can be bypassed by network-level mistakes or misconfigured proxies. A startup gate prevents accidental exposure entirely.
 
 ## Implementation
 
-```rust
-fn is_loopback_host(host: &str) -> bool {
-    host == "localhost"
-        || host.trim().parse::<IpAddr>().map(|ip| ip.is_loopback()).unwrap_or(false)
-}
+**Startup gate** — `validateStartupBind` (`apps/nexus-service/src/bind.ts:31-48`) runs before native open/listen. A unix transport is exempt (no TCP bind; its socket file is chmod'd and its parent dir enforced). For HTTP:
 
-fn ensure_remote_bind_allowed(host: &str) -> anyhow::Result<()> {
-    if is_loopback_host(host) {
-        return Ok(());
-    }
-    let key_set = std::env::var("NEXUS42_DAEMON_API_KEY").map(|s| !s.is_empty()).unwrap_or(false);
-    let remote_enabled = std::env::var("NEXUS_DAEMON_REMOTE_BIND").as_deref() == Ok("1");
-    if key_set && remote_enabled {
-        Ok(())
-    } else {
-        Err(anyhow::anyhow!(
-            "remote bind to {host} requires both NEXUS42_DAEMON_API_KEY and NEXUS_DAEMON_REMOTE_BIND=1"
-        ))
-    }
-}
-```
+- loopback bind host (`isLoopbackBindHost`, `bind.ts:6-25`) → allowed;
+- non-loopback without `--allow-remote` → `403 forbidden`;
+- non-loopback without `--tls-cert`/`--tls-key` → `403 forbidden`;
+- non-loopback without an API key → `401 auth_required`.
 
-Call site in `run_daemon`:
+**Request gate** — `checkApiKey` (`apps/nexus-service/src/security.ts:83-89`) re-checks on each **guarded** request via `validateBindPolicy` (`security.ts:44-58`): a non-loopback peer without `--allow-remote` is `403 forbidden`, and non-loopback without TLS cert/key is `403 forbidden`. Keyed mode (`authMode == 'keyed_all'`) requires the `x-api-key` header to constant-time-match `config.apiKey`; in keyless mode a non-loopback peer is refused `403 forbidden`, so loopback bypass can never leak to a remote address. The service invokes it only for routes whose tier is not `unguarded` (`apps/nexus-service/src/server.ts:377-389`); explicitly unguarded runtime surfaces (e.g. the cert-fingerprint route, `apps/nexus-service/src/routes.ts:294-301`) stay unauthenticated **by design**.
 
-```rust
-if let Transport::Http { ref host, port } = transport {
-    ensure_remote_bind_allowed(host)?;
-    let listener = TcpListener::bind((host.as_str(), port)).await?;
-    ...
-}
-```
+**Serving** — when both PEMs are present the listener is `node:https` (`createHttpsServer`, `apps/nexus-service/src/server.ts:461-467`); otherwise `node:http`.
+
+## Historical (retired Rust daemon boot gate, deleted v1.193 P2)
+
+The original V1.90 gate lived in the Rust daemon: a pure function `ensure_remote_bind_allowed(host)` checked `NEXUS42_DAEMON_API_KEY` **and** `NEXUS_DAEMON_REMOTE_BIND=1` immediately before `TcpListener::bind` and refused a non-loopback bind otherwise. That HTTP-service path is gone. The **same** env-var pairing survives only in the core **Connect peer-tools lane**, `crates/nexus-core/src/connect/accept.rs:204-228` (`ensure_remote_bind_allowed`): a non-loopback peer-tools bind is permitted only when both `NEXUS42_DAEMON_API_KEY` and `NEXUS_DAEMON_REMOTE_BIND=1` are set. It does **not** gate the Daemon API HTTP surface.
 
 ## Why this works
 
-- **Fail-closed**: a missing key or flag stops the daemon before a socket is opened.
-- **Loopback unaffected**: local development and Tauri/desktop default paths require no extra env vars.
-- **Dual signal**: requiring both a secret (API key) and an explicit intent flag (`=1`) prevents a single misconfiguration from opening the surface.
-- **Auth middleware remains**: the gate protects against accidental bind; the existing `AuthMode::KeyedAll` vs `KeylessLocalhost` middleware still enforces key presence on non-loopback requests.
+- **Fail-closed**: a missing flag, cert/key, or key stops the service before a socket is opened, and the request gate refuses too.
+- **Loopback unaffected**: local development and Tauri/desktop default paths require no extra flags.
+- **TLS mandatory off-loopback**: an opt-in remote listener can never run in cleartext, so the API key and manuscript bytes are not exposed on the LAN.
+- **Auth middleware remains**: the startup gate protects against accidental bind; the request gate still enforces key presence on every non-loopback **guarded** request.
 
 ## Testing pattern
 
-1. **Pure-function unit test** covering the truth table:
-   - loopback host → allowed regardless of env
-   - non-loopback host, no key → rejected
-   - non-loopback host, key only → rejected
-   - non-loopback host, key + flag → allowed
-2. **Boot-path integration test** that calls `run_daemon()` with `host: "0.0.0.0"` and asserts the daemon fails before listening when env vars are missing, then succeeds when both are set.
-3. **Env-var serialization**: guard `std::env::set_var` / `remove_var` in tests with a `LazyLock<Mutex<()>>` to prevent parallel tests from observing torn values.
+1. **Pure-function unit test** for `isLoopbackBindHost`: `localhost`, `127.x`, `::1` → true; a public/LAN IP → false.
+2. **Startup-gate unit test** for `validateStartupBind`:
+   - loopback host → allowed with no flags;
+   - non-loopback, no `--allow-remote` → refused;
+   - non-loopback, `--allow-remote` but no cert/key → refused;
+   - non-loopback, `--allow-remote` + cert/key but no `NEXUS42_DAEMON_API_KEY` → refused;
+   - non-loopback with all three → allowed.
+3. **Env-var serialization**: read `NEXUS42_DAEMON_API_KEY` once at config resolution (`config.ts:373-374`); tests set it before building the config rather than mutating process env mid-test.
 
 ## When to apply
 
@@ -81,9 +74,11 @@ Use this pattern whenever a local-first service adds an opt-in remote listener. 
 - Services that are intended to be public by default (different model).
 - Features that need fine-grained network ACLs (use a reverse proxy or firewall instead).
 
-## V1.90 references
+## References
 
-- Implementation: `crates/nexus-daemon-runtime/src/boot.rs`
-- Auth middleware: `crates/nexus-daemon-runtime/src/api/auth_middleware.rs`
-- Spec: `.mstar/specs/archived/daemon-runtime.md`
-- Surface conventions: `.mstar/specs/runtime/daemon-api-surface-conventions.md`
+- Startup gate: `apps/nexus-service/src/bind.ts`
+- Request gate: `apps/nexus-service/src/security.ts`
+- Config flags/key: `apps/nexus-service/src/config.ts`
+- Core Connect peer-tools env gate (live): `crates/nexus-core/src/connect/accept.rs`
+- Spec (historical, V1.90; superseded): `.mstar/specs/archived/runtime/2026-09-21-daemon-runtime.md`
+- Surface conventions (current): `.mstar/specs/active/runtime/daemon-api-surface-conventions.md`

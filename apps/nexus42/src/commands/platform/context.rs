@@ -101,8 +101,8 @@ pub enum ContextCommand {
         /// `intake|research|produce|review|persist|work_maintenance|system_maintenance|unspecified`.
         /// Default (absent) = unspecified = all slots on (current behavior,
         /// inspector path). The preset runner / schedule threads the
-        /// executing stage through this flag (see
-        /// `.mstar/iterations/v1.150/guides/generation-trigger-wiring.md`).
+        /// executing stage through this flag (V1.150 generation-trigger wiring;
+        /// local record).
         #[arg(long)]
         stage: Option<String>,
     },

@@ -1,7 +1,7 @@
 //! Core-owned read handle over the durable operation receipts store
 //! (v1.207 P3 / RN-OGA-5).
 //!
-//! Spec: `.mstar/iterations/v1.207/specs/connect-replay-and-operation-receipts.md`
+//! Spec: `.mstar/specs/active/architecture/connect-event-delivery-and-operation-receipts.md`
 //! §B.2 (the `operation_receipts` read path) and §B.3 step 2 ("ask the receipt
 //! store first"). The storage half lives in `nexus_local_db::operation_receipts`
 //! (the store + the frozen Recover handshake); this module is the narrow

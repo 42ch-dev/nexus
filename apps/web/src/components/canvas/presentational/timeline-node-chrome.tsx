@@ -6,8 +6,8 @@
  * only (icon + title + badge row + optional summary/meta). RF wrappers stay
  * App-local (handles, selected/dragging, i18n resolution, wire labels).
  *
- * Presentational boundary (architect contract,
- * `.mstar/iterations/v1.124/specs/studio-timeline-fixture-boundaries.md`):
+ * Presentational boundary (architect contract; fixture family in
+ * `.mstar/specs/active/surfaces/design-studio.md` §7.5):
  *   No React Flow package, no wire-contract package, no i18n hook, no
  *   react-router, no NexusClient, no app providers. Props are resolved strings
  *   (and plain numbers) only — Studio fixtures pass static English product

@@ -49,7 +49,7 @@ Edit those files in your IDE, then refresh the studio to see the effect.
 | Studio-local | `@/fixtures/*`, `@/pages/*`, `@/components/*`, `@/lib/*` | Gallery composition only |
 
 Surfaces nested routes: Overview, Setup, Shell, AgentPicker, Canvas, Daemon,
-Launch, Selection Submenu — see `.mstar/specs/design-studio.md` §6–§7.
+Launch, Selection Submenu — see `.mstar/specs/active/surfaces/design-studio.md` §6–§7.
 
 
 ## Visual review (surfaces)
@@ -141,7 +141,7 @@ For detailed rules see [`AGENTS.md`](./AGENTS.md).
 
 ## Docs
 
-- [Studio spec](../../.mstar/specs/design-studio.md) — normative target contract, audiences, boundaries, gallery inventory
+- [Studio spec](../../.mstar/specs/active/surfaces/design-studio.md) — normative target contract, audiences, boundaries, gallery inventory
 - [DESIGN.md SSOT](../../DESIGN.md) — sole normative design token source (light/default)
 - [DESIGN.dark.md](../../DESIGN.dark.md) — dark companion with identical token paths
 - [Import boundaries and conventions](./AGENTS.md) — Studio-specific agent rules

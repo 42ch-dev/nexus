@@ -1,7 +1,7 @@
 ---
 module: nexus-agent-host
 date: 2026-07-14
-last_updated: 2026-10-11
+last_updated: 2026-10-12
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
@@ -63,9 +63,11 @@ these boundaries when changing the adapter, boot path or public catalog:
    exit proof does not justify a process-tree/restart no-leak claim or a blind
    PID kill. A sealed deny-all profile is model-tool denial, not an OS sandbox.
 
-Durable contracts: [agent-host](../../specs/agents/agent-host.md) §§5–8,
-[workspace OCC/recovery](../../specs/runtime/concurrency.md) §9 and
-[run settlement/replay](../../specs/archived/daemon-runtime.md) §20.
+Durable contracts: [agent-host](../../specs/active/agents/agent-host.md) §§5–8,
+[workspace OCC/recovery](../../specs/active/runtime/concurrency.md) §9 and
+[run settlement / same-run replay](../../specs/active/orchestration/orchestration-engine.md) §15–§15.1 with
+[principal-bound run-event subscription](principal-bound-run-event-subscription.md);
+the original daemon-writer record is archived ([daemon-runtime.md](../../specs/archived/runtime/2026-09-21-daemon-runtime.md) §20).
 Derived from verified V1.188 P0–P4 runtime, recovery and review evidence;
 the public first-run/Quick Start/live-model composition was explicitly deferred.
 

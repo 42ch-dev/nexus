@@ -1,14 +1,14 @@
 ---
 module: wire-contracts
 date: 2026-08-27
-problem_type: architecture_pattern
+problem_type: convention
 category: conventions
 severity: medium
 applies_when:
-  - "Adding an additive optional field to a Rust contract type that crosses the daemon API without a JSON Schema carrier"
-  - "Filling the plan frontmatter `wire_contracts_changed` for a preset/orchestration-facing change"
-  - "Deciding whether `pnpm run codegen` / check-wire-drift must run for a change"
-  - "Reviewing a plan whose GC says 'wire changes ONLY these fields' and the schema diff is empty"
+  - '"Adding an additive optional field to a Rust contract type that crosses the daemon API without a JSON Schema carrier"'
+  - '"Filling the plan frontmatter `wire_contracts_changed` for a preset/orchestration-facing change"'
+  - '"Deciding whether `pnpm run codegen` / check-wire-drift must run for a change"'
+  - '"Reviewing a plan whose GC says ''wire changes ONLY these fields'' and the schema diff is empty"'
 tags:
   - wire-contracts
   - json-schema

@@ -1,11 +1,21 @@
 ---
-module: local-api, daemon-runtime, web-ui
+module: local-api, apps/nexus-service, web-ui
 date: 2026-07-01
-problem_type: knowledge
+last_updated: 2026-10-12
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-tags: [drain-loop, has-more, bounded-processing, partial-progress, deadline, in-flight-serialization, local-api, reliability, nexus-contracts]
-applies_when: designing a bounded/serialized/deadline-aware synchronous processing endpoint whose client must drain a queue via repeated calls
+tags:
+  - drain-loop
+  - has-more
+  - bounded-processing
+  - partial-progress
+  - deadline
+  - in-flight-serialization
+  - local-api
+  - reliability
+applies_when:
+  - designing a bounded/serialized/deadline-aware synchronous processing endpoint whose client must drain a queue via repeated calls
 ---
 
 # Bounded drain-completion contract — `has_more` must reflect queue advancement, not rows attempted
@@ -111,5 +121,5 @@ All three must **FAIL** on the anti-pattern code and **PASS** on the fix — ver
 ## See also
 
 - [`pagination-cursor-without-total-count-labels.md`](pagination-cursor-without-total-count-labels.md) — the read-side `has_more` cousin (cursor pagination count labels; no `total`). Related but distinct: that one is about *displaying* a count over a list; this one is about *draining* a processing queue.
-- `crates/nexus-daemon-runtime/src/api/handlers/memory.rs` — `process_review_batch` + the `any_row_remained_pending` flag (V1.80 REL-01 reference implementation).
+- `crates/nexus-core/src/memory.rs` — `process_review_batch` + the `any_row_remained_pending` flag (V1.80 REL-01 reference implementation).
 - `apps/web/src/api/queries.ts` `useReviewMemory` — the client drain loop + max-iterations cap + zero-progress guard.

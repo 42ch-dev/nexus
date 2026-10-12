@@ -1,7 +1,7 @@
 //! `cron_supervisor` — daemon background task for novel-writing cron staggering
 //! (V1.50 T-A P1).
 //!
-//! Spec: `.mstar/specs/novel-writing/cron-staggering.md` §4.
+//! Spec: `.mstar/specs/active/novel-writing/workflow-profile.md` §11.2.
 //!
 //! ## Role
 //!

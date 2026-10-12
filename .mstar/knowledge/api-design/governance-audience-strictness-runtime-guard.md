@@ -1,6 +1,25 @@
+---
+module: apps/nexus-service + packages/nexus-native
+date: 2026-09-28
+last_updated: 2026-10-12
+problem_type: api_design
+category: api-design
+severity: medium
+tags:
+  - governance
+  - audience
+  - oneof
+  - runtime-guard
+  - additional-properties
+  - validation
+applies_when:
+  - Enforcing a wire schema's closed-arm strictness at a real runtime guard instead of trusting the schema
+  - Validating adjacent-tag oneOf arms produced by the code generator
+  - Wiring one native-validator guard across a schema family (create and patch verbs)
+---
 # Governance-Audience Strictness Needs a Runtime Guard
 
-**Source:** v1.199 medium-residual convergence (`R4-audience-oneOf`, plan `2026-09-28-medium-residual-convergence`). SSOT for the audience contract: [holder-governance.md](../../specs/architecture/holder-governance.md).
+**Source:** v1.199 medium-residual convergence (`R4-audience-oneOf`, plan `2026-09-28-medium-residual-convergence`). SSOT for the audience contract: [holder-governance.md](../../specs/active/architecture/holder-governance.md).
 
 ## Failure shape
 

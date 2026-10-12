@@ -1,12 +1,20 @@
 ---
 module: nexus-spoke-adapter
 date: 2026-08-14
-problem_type: knowledge
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-tags: [spoke, adapter-boundary, layering, validate-gate, pure-storage, sole-consumer, mind-state]
+tags:
+  - spoke
+  - adapter-boundary
+  - layering
+  - validate-gate
+  - pure-storage
+  - sole-consumer
+  - mind-state
 last_updated: 2026-08-14
-applies_when: Adding any storage that is written through a spoke-operation validator (validate_* helpers, future mind-axis ops); deciding where a validate gate belongs; any PR that would add spoke-schemas/spoke-operations to a crate other than nexus-spoke-adapter
+applies_when:
+  - "Adding any storage that is written through a spoke-operation validator (validate_* helpers, future mind-axis ops); deciding where a validate gate belongs; any PR that would add spoke-schemas/spoke-operations to a crate other than nexus-spoke-adapter"
 consolidation_review: spoke-adapter-port-orchestration-adoption.md (Surface B) + spoke-adapter-conversion-seam.md (Surface A) — same adapter-boundary family; review together at next compound-refresh
 ---
 
@@ -18,8 +26,8 @@ consolidation_review: spoke-adapter-port-orchestration-adoption.md (Surface B) +
 
 V1.164 P2 added the `mind_states` table. The first implementation (a10d5e4e) put `spoke_operations::validate_mind_state` **inside `nexus-local-db`** (new direct dep) — "the validator gates the write path, so it lives with the writer." That violated the normative layering, which is easy to miss because it is stated in **three places, none of which is the crate itself**:
 
-- `.mstar/specs/architecture/entity-scope-model.md` — nexus-spoke-adapter is "**the sole crate that directly depends on spoke-operations**"
-- `.mstar/specs/architecture/spoke-adapter-architecture.md` — nexus-local-db = "**Pure storage** ... no spoke types or dep on spoke-adapter"
+- `.mstar/specs/active/architecture/entity-scope-model.md` — nexus-spoke-adapter is "**the sole crate that directly depends on spoke-operations**"
+- `.mstar/specs/active/architecture/spoke-adapter-architecture.md` — nexus-local-db = "**Pure storage** ... no spoke types or dep on spoke-adapter"
 - `crates/nexus-local-db/AGENTS.md` — records V1.146 **removing** exactly this dep once before
 
 ## Guidance

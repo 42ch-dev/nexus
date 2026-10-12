@@ -1,6 +1,7 @@
 ---
-module: nexus-core + nexus-daemon-runtime (ActorSessionRegistry transitional duplicate)
+module: nexus-core (ActorSessionRegistry transitional duplicate — the nexus-daemon-runtime copy was deleted with the crate in v1.193)
 date: 2026-09-17
+last_updated: 2026-10-12
 problem_type: build_error
 category: build-errors
 severity: high
@@ -9,7 +10,7 @@ symptoms:
   - "a whole-tree text rewrite of one registry method's call shape produces E0308 'expected Snapshot, found &Snapshot' at every call site in the other crate"
   - "the rewrite compiles clean in the crate that owns the changed signature and fails only in the crate that still has the old one"
   - "grep for the symbol returns definitions in two crates, so a match count cannot tell which signature a hit targets"
-root_cause: a migration left the same-named type (ActorSessionRegistry, CharacterOperationSnapshot) and the same-named method in both the new nexus-core authority and the not-yet-rewired nexus-daemon-runtime shim; the two definitions had already diverged in parameter mode and error type, so any cross-crate text-level edit is applied to two incompatible signatures at once
+root_cause: a migration left the same-named type (ActorSessionRegistry, CharacterOperationSnapshot) and the same-named method in both the new nexus-core authority and the not-yet-rewired nexus-daemon-runtime shim (crate retired in v1.193); the two definitions had already diverged in parameter mode and error type, so any cross-crate text-level edit is applied to two incompatible signatures at once
 resolution_type: code_fix
 tags:
   - duplicate-symbol
@@ -63,7 +64,7 @@ Attribute every hit to its owning crate **before** editing, and scope the rewrit
 grep -rn "fn reserve_character_operation" crates/ --include=*.rs
 
 #   crates/nexus-core/src/actor_sessions.rs:309            snapshot: &CharacterOperationSnapshot  -> CoreResult<()>
-#   crates/nexus-daemon-runtime/src/workspace/actor_sessions.rs:385  snapshot: CharacterOperationSnapshot -> Result<(), NexusApiError>
+#   crates/nexus-daemon-runtime/src/workspace/actor_sessions.rs:385 (retired v1.193)  snapshot: CharacterOperationSnapshot -> Result<(), NexusApiError>
 
 # 2. Call sites, grouped by crate — count per crate, not in total
 grep -rn "reserve_character_operation" crates/ apps/ --include=*.rs \
@@ -95,7 +96,7 @@ The reason the class is worth recording rather than treating as a one-off: a par
 
 ## Evidence
 
-- Duplicate definitions at HEAD — `crates/nexus-core/src/actor_sessions.rs` (`pub struct ActorSessionRegistry`, `pub struct CharacterOperationSnapshot`, `pub fn reserve_character_operation` taking `&CharacterOperationSnapshot -> CoreResult<()>`) and `crates/nexus-daemon-runtime/src/workspace/actor_sessions.rs` (same type names, `pub fn reserve_character_operation` taking `CharacterOperationSnapshot -> Result<(), NexusApiError>`). Both are compiled: `crates/nexus-daemon-runtime/src/workspace/mod.rs` declares `pub mod actor_sessions;` and the daemon handlers call `state.actor_sessions()` throughout.
+- Duplicate definitions at the time of the incident (v1.190) — `crates/nexus-core/src/actor_sessions.rs` (`pub struct ActorSessionRegistry`, `pub struct CharacterOperationSnapshot`, `pub fn reserve_character_operation` taking `&CharacterOperationSnapshot -> CoreResult<()>`) and the then-present `crates/nexus-daemon-runtime/src/workspace/actor_sessions.rs` (same type names, `pub fn reserve_character_operation` taking `CharacterOperationSnapshot -> Result<(), NexusApiError>`). Both compiled at that time (the daemon crate declared `pub mod actor_sessions;` and its handlers called `state.actor_sessions()`); the daemon copy was deleted with the crate in v1.193, leaving `nexus-core` the sole definition.
 - Divergence origin — the by-reference core signature was introduced by the core-lib clippy pass (`refactor(lint): resolve the core-lib clippy findings under -D warnings`). That commit's diff changes the core definition and one core call site (`crates/nexus-core/src/host.rs`, `snap.clone()` → `&snap`); its message's "net: 13 call sites stop cloning a CharacterOperationSnapshot" counts the daemon sites that clone, which were not in the diff. The daemon copy's definition dates from the earlier actor-maintenance work and was not touched by that commit.
 - Failure signature reproduced — a two-crate fixture with one by-reference and one by-value definition of the same method over same-named types emits `E0308 mismatched types … expected Snapshot, found &Snapshot` at the by-value crate's call sites when the reference form is applied to them.
 - Transitional-copy disclosure — the extraction task that created the core authority recorded that the daemon HTTP handlers and `workspace/actor_sessions.rs` were not rewired onto the new authority in that task, i.e. the duplicate was deliberate and its removal deferred.

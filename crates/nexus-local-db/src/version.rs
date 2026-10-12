@@ -1,7 +1,7 @@
 //! Local database schema version constants
 //!
 //! DB schema version is independent from contract `schema_version`.
-//! See `.mstar/archived/knowledge/local-db-refactor-legacy.md` for version line separation.
+//! Version-line separation follows the retired local-db-refactor-legacy baseline (local record).
 
 /// Current local database schema version
 ///

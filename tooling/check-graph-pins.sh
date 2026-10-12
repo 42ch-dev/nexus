@@ -13,7 +13,7 @@
 # the app-only `connect-client` / `embedded-mcp` Model A selectors. The pins
 # below therefore target the products that exist: ordinary CLI, Connect-only
 # runtime, optional CLI Connect, core domain, core MCP/peer library and the
-# native/TS host. Cohorts: `.mstar/specs/rust-core-service-boundary.md` §4.2.
+# native/TS host. Cohorts: `.mstar/specs/active/architecture/rust-core-service-boundary.md` §4.2.
 #
 # Pins (--edges normal,build):
 #   -p nexus42 (cli,default):

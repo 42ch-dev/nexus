@@ -1,12 +1,21 @@
 ---
 module: contracts-codegen
 date: 2026-07-24
-last_updated: 2026-07-24
-problem_type: architecture-pattern
+last_updated: 2026-10-12
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: high
-tags: [contracts, codegen, json-schema, typify, json-schema-to-typescript, jstt, nexus-contracts, wire-drift, common-types]
-applies_when: adopting or upgrading third-party schema-to-code generators; regenerating wire types after a codegen engine swap; diagnosing consumer breakage after `pnpm run codegen`
+tags:
+  - contracts
+  - codegen
+  - json-schema
+  - typify
+  - json-schema-to-typescript
+  - jstt
+  - nexus-contracts
+  - wire-drift
+applies_when:
+  - adopting or upgrading third-party schema-to-code generators; regenerating wire types after a codegen engine swap; diagnosing consumer breakage after `pnpm run codegen`
 ---
 
 # Third-Party Codegen Adoption (jstt + typify)
@@ -89,13 +98,13 @@ Typify derives `Display` and `FromStr` on string enums. Hand-written duplicate i
 
 Typify maps `format: date-time` to `chrono::DateTime<…>`. Serde's default serialization for `DateTime` can differ from the bespoke generator's `String` RFC3339 fields — affecting canonical hash fixtures in cloud-sync specs.
 
-**Residual (closed 2026-08-08):** `R-V1138P1-001` — spec golden hashes updated after the new serialization was verified wire-correct (no behavioral regression); see [`../../specs/contracts/canonical-hash.md`](../../specs/contracts/canonical-hash.md).
+**Residual (closed 2026-08-08):** `R-V1138P1-001` — spec golden hashes updated after the new serialization was verified wire-correct (no behavioral regression); see [`../../specs/active/contracts/canonical-hash.md`](../../specs/active/contracts/canonical-hash.md).
 
 ### 4. Consumer adaptation is mechanical but cross-crate
 
 Typify inlines a distinct struct copy for every schema that references a shared definition (e.g. each daemon-api response gets its own `NexusSourceAnchor` copy, not `common_types::SourceAnchor`). Adapting consumers requires JSON round-trip bridges (`handlers/mod.rs` `wire_convert`), `NonZeroU64::new(…).unwrap()` at boundaries, and `DateTime::parse_from_rfc3339` in domain mappers.
 
-**Rule:** land drift green first, then schedule a fix wave across `nexus-daemon-runtime`, `nexus-narrative`, `nexus-knowledge` (merged from `nexus-kb` V1.139), `nexus-orchestration`, and integration tests. Do not block codegen merge on every call-site polish if drift + clippy are green.
+**Rule:** land drift green first, then schedule a fix wave across `nexus-core`, `nexus-narrative`, `nexus-knowledge` (merged from `nexus-kb` V1.139), `nexus-orchestration`, and integration tests. Do not block codegen merge on every call-site polish if drift + clippy are green.
 
 ## Anti-patterns
 
@@ -124,7 +133,7 @@ Typify inlines a distinct struct copy for every schema that references a shared 
 | [`schemas/AGENTS.md`](../../../schemas/AGENTS.md) | Schema authoring + codegen flow |
 | [`contracts-gap-on-shipped-backend.md`](contracts-gap-on-shipped-backend.md) | Closing schema gaps on shipped handlers (orthogonal but same contracts boundary) |
 | Residuals `R-V1138P0-*` | Closed 2026-08-08 (V1.155 P2 residual sweep) |
-| Residual `R-V1138P1-001` | Canonical-hash spec golden sync — closed 2026-08-08; spec at [`../../specs/contracts/canonical-hash.md`](../../specs/contracts/canonical-hash.md) |
+| Residual `R-V1138P1-001` | Canonical-hash spec golden sync — closed 2026-08-08; spec at [`../../specs/active/contracts/canonical-hash.md`](../../specs/active/contracts/canonical-hash.md) |
 
 ## Evidence
 

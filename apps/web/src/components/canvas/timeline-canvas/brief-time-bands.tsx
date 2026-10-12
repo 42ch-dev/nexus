@@ -3,7 +3,7 @@
  *
  * Renders the `EraTreeNode[]` forest (Task 1 — `buildEraTree`) as vertical
  * time bands (geological-strata metaphor) per
- * `.mstar/specs/canvas-strategy-surface.md` §3.3.3 (V1.159 amendment):
+ * `.mstar/specs/active/surfaces/canvas-strategy-surface.md` §3.3.3 (V1.159 amendment):
  *   - Each era = one horizontal band; nested eras = indented sub-bands
  *     (`padding-left` = `depth × INDENT_UNIT_PX`).
  *   - Per-`era_type` band coloring. The spec's `--color-era-type-*` DESIGN.md

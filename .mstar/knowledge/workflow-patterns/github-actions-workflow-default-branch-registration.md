@@ -4,8 +4,17 @@ date: 2026-08-07
 problem_type: workflow_issue
 category: workflow-patterns
 severity: medium
-applies_when: [adding a new GitHub Actions workflow file on a non-default branch, iterating on trigger configuration for a workflow that does not yet exist on the default branch, writing a plan whose verification gate relies on a brand-new CI workflow]
-tags: [github-actions, ci, workflow-registration, default-branch, runtime-build, headless-runtime]
+applies_when:
+  - adding a new GitHub Actions workflow file on a non-default branch
+  - iterating on trigger configuration for a workflow that does not yet exist on the default branch
+  - writing a plan whose verification gate relies on a brand-new CI workflow
+tags:
+  - github-actions
+  - ci
+  - workflow-registration
+  - default-branch
+  - runtime-build
+  - headless-runtime
 ---
 
 # GitHub Actions Workflow Registration Is Default-Branch-Only

@@ -1,4 +1,4 @@
-//! Hand-written local types per `.mstar/archived/knowledge/schemas-boundary.md` §3.
+//! Hand-written local types per `.mstar/specs/active/architecture/schemas-external-consumer-boundary.md`.
 //! These types are NOT codegen'd; edit by hand.
 //!
 //! Local types are those that `nexus-platform` never observes over any wire channel.

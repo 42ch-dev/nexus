@@ -8,7 +8,7 @@
 //! `upsert` / `promote` / `relate` / `check` / `assemble` / `compute`
 //! through the production `NexusAdapter` orchestrators (re-exported via
 //! `nexus_spoke_adapter`). Contract sources:
-//! `.mstar/specs/spoke-adapter-architecture.md` §10.6 and the P1 spec
+//! `.mstar/specs/active/architecture/spoke-adapter-architecture.md` §10.6 and the P1 spec
 //! § OCC + error mapping / § World scoping, plus the P2 spec
 //! §2 compute-over-Connect.
 //!

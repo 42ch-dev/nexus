@@ -1,10 +1,18 @@
 ---
-module: nexus-daemon-runtime
+module: apps/nexus-service
 date: 2026-07-17
+last_updated: 2026-10-12
 problem_type: convention
 category: conventions
 severity: medium
-tags: [presets, system-preset, qualified-id, locate_preset, daemon, path-resolution, sessions-filter]
+tags:
+  - presets
+  - system-preset
+  - qualified-id
+  - locate_preset
+  - daemon
+  - path-resolution
+  - sessions-filter
 ---
 
 # System preset qualified-id resolution (`_system.*`)
@@ -13,7 +21,7 @@ tags: [presets, system-preset, qualified-id, locate_preset, daemon, path-resolut
 
 System presets ship inside the app bundle under `presets/_system/<name>/preset.yaml`. Their ids are **qualified** with the `_system.` prefix (e.g. `_system.maintenance`). The on-disk directory is the **stripped** name (`maintenance`), not the qualified id. Two subsystems rely on this mapping:
 
-- **Preset handlers** (`crates/nexus-daemon-runtime/src/api/handlers/preset_management.rs`): `locate_preset` / `reload_preset` resolve an id to a filesystem bundle.
+- **Preset handlers** (`crates/nexus-core/src/presets.rs`): `locate_preset` / `reload_preset` resolve an id to a filesystem bundle.
 - **Sessions list** (`handlers/orchestration/sessions.rs`): daemon auto-starts `_system.*` sessions at boot (`boot.rs` WS-D); these are hidden from the author-facing Sessions list via a `preset_id.starts_with("_system.")` filter (daemon primary + `filterVisibleSessions` client defensive).
 
 ## Guidance

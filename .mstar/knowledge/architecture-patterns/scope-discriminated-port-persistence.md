@@ -1,10 +1,18 @@
 ---
 module: nexus-spoke-adapter
 date: 2026-08-15
-problem_type: knowledge
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-tags: [spoke, findings, extensions-discriminator, dual-table, world-scope, work-scope, routing, wrapper-seam, manifest-guard]
+tags:
+  - spoke
+  - findings
+  - extensions-discriminator
+  - dual-table
+  - world-scope
+  - work-scope
+  - routing
+  - wrapper-seam
 last_updated: 2026-08-15
 ---
 

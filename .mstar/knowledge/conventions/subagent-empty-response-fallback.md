@@ -1,11 +1,18 @@
 ---
 module: harness
 date: 2026-07-20
-problem_type: workflow_convention
+problem_type: convention
 category: conventions
 severity: medium
-tags: [harness, subagents, dispatch, openCode, fallback, sdd]
-applies_when: PM dispatches a specialist subagent (frontend-dev / qc-specialist* / etc.) for SDD task implementation or review and receives an empty / no-content response
+tags:
+  - harness
+  - subagents
+  - dispatch
+  - openCode
+  - fallback
+  - sdd
+applies_when:
+  - PM dispatches a specialist subagent (frontend-dev / qc-specialist* / etc.) for SDD task implementation or review and receives an empty / no-content response
 ---
 
 # Subagent Empty-Response Fallback Pattern

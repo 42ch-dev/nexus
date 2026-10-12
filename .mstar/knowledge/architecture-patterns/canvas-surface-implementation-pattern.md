@@ -1,12 +1,21 @@
 ---
-module: apps/web + crates/nexus-daemon-runtime + schemas
+module: apps/web + apps/nexus-service + schemas
 date: 2026-06-30
-last_updated: 2026-07-13
-problem_type: architecture-pattern
+last_updated: 2026-10-12
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-tags: [canvas, write-boundary, occ, conflict-modal, react-flow, design-tokens, local-api, projection-completeness, pagination, spatial-edge-editing, fixture-projection, viewport-preservation, command-palette, sidebar-ia, studio-first, surface-adapter, dagre-auto-layout, contract-convergence, surface-inventory, dagre-compound-limitation]
-applies_when: implementing a new graph-editing surface on the Nexus canvas (or any structured-authoring surface with concurrent daemon + human edits)
+tags:
+  - canvas
+  - write-boundary
+  - occ
+  - conflict-modal
+  - react-flow
+  - design-tokens
+  - local-api
+  - projection-completeness
+applies_when:
+  - implementing a new graph-editing surface on the Nexus canvas (or any structured-authoring surface with concurrent daemon + human edits)
 ---
 
 # Canvas Surface Implementation Pattern

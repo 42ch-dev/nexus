@@ -1,7 +1,7 @@
 //! Durable operation receipts — the receipt store and the frozen Recover
 //! handshake (v1.207 P3 / RN-OGA-5).
 //!
-//! Spec: `.mstar/iterations/v1.207/specs/connect-replay-and-operation-receipts.md`
+//! Spec: `.mstar/specs/active/architecture/connect-event-delivery-and-operation-receipts.md`
 //! §B.2 (the `operation_receipts` table this module reads and writes) and
 //! §B.3 (the frozen recovery order implemented by [`recover`]).
 //!

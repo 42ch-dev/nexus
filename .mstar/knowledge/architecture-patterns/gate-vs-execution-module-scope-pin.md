@@ -1,15 +1,20 @@
 ---
 module: nexus-spoke-adapter
 date: 2026-08-08
-problem_type: security_issue
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: high
 symptoms:
-  - "A peer scoped only for module A could run WASM for any installed module B"
-  - "Gate verified one module id while the executor resolved a different one"
+  - '"A peer scoped only for module A could run WASM for any installed module B"'
+  - '"Gate verified one module id while the executor resolved a different one"'
 root_cause: "The gate checked the id from session/entry state, but the orchestrator merged the request's computable map and re-resolved the module id after the gate — the gated id and the executed id diverged."
 resolution_type: code_fix
-tags: [wasm, module-scope, security, gate-vs-execution, key-presence-pin]
+tags:
+  - wasm
+  - module-scope
+  - security
+  - gate-vs-execution
+  - key-presence-pin
 ---
 
 # Module-scope gate bypass: gate id ≠ executed id (fix: key-presence pin)

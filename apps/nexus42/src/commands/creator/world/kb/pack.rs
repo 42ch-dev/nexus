@@ -5,9 +5,8 @@
 //!
 //! # Why under `creator world kb pack`
 //!
-//! Per the pack-IO product behavior doc (`.mstar/iterations/v1.146/specs/
-//! pack-io-product-behavior.md`): "Pack is a World-lore transport, not a
-//! platform/user knowledge surface and not a top-level `pack` command." World
+//! **Pack is a World-lore transport**, not a platform/user knowledge surface and
+//! not a top-level `pack` command. World
 //! KB already lives under `creator world kb *` (list/show/edit/...), so pack
 //! I/O is a nested subcommand here.
 //!

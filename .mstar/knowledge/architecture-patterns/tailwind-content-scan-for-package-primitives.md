@@ -1,11 +1,18 @@
 ---
 module: apps/web
 date: 2026-07-17
-problem_type: build-config
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: low
-tags: [tailwind, content-scan, jit, nexus-ui, css, monorepo]
-applies_when: an app's Tailwind build consumes class utilities that only appear in `packages/nexus-ui/src` (shared primitives)
+tags:
+  - tailwind
+  - content-scan
+  - jit
+  - nexus-ui
+  - css
+  - monorepo
+applies_when:
+  - "an app's Tailwind build consumes class utilities that only appear in `packages/nexus-ui/src` (shared primitives)"
 ---
 
 # Tailwind `content` scan must cover `packages/nexus-ui/src`

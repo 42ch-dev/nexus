@@ -2867,7 +2867,7 @@ async fn hosted_schedule_drives_once_and_closes() {
 /// "Boot/tick/cron exclude legacy never-started pending/running/paused rows;
 /// missing session ID or creation time is not automatic opt-in. Explicit public
 /// schedule start revalidates and opts only that row in."
-/// (`.mstar/specs/daemon-runtime.md` §3). Both production paths therefore refuse
+/// (`.mstar/specs/archived/runtime/2026-09-21-daemon-runtime.md` §3). Both production paths therefore refuse
 /// it — the direct coordinator gate AND the coordinator-backed starter the
 /// owned clock drives — and nothing is minted: no owned session, no run row, no
 /// prompt.

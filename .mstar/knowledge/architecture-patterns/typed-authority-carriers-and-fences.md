@@ -1,6 +1,7 @@
 ---
 module: nexus-core (actor admission, activity fencing, host authority, execution ownership)
 date: 2026-09-17
+last_updated: 2026-10-12
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: high
@@ -12,7 +13,6 @@ applies_when:
   - enforcing one owner per workspace DB across processes and within one process
 related_components:
   - nexus-core
-  - nexus-daemon-runtime
   - nexus-local-db
   - nexus-agent-host
 tags:
@@ -177,4 +177,4 @@ Generated wire request/response DTOs remain the transport contract; `AdmittedAct
 - Single-owner reservation — `crates/nexus-core/src/execution/lifecycle.rs` (`OWNERS`, `OwnerReservation`, `claim`/`install`/`Drop`, `release_owner_slot` with `Arc::ptr_eq`).
 - Established-owner slot — `crates/nexus-core/src/host.rs` (`open_host` admission, failure-clears-slot, confirmed-close release); duplicate-open refusal covered by `crates/nexus-core/tests/host_actor_lifecycle.rs`.
 - Single session-index owner — `crates/nexus-core/src/actor_sessions.rs` (`ActorSessionRegistry` delegating activity admission to the P2 lease rather than keeping a second fence table).
-- Durable semantics this implements — [specs/architecture/actor-product-model.md](../../specs/architecture/actor-product-model.md) §11.
+- Durable semantics this implements — [specs/active/architecture/actor-product-model.md](../../specs/active/architecture/actor-product-model.md) §11.

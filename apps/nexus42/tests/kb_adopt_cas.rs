@@ -1,6 +1,6 @@
 //! V1.51 T-B P1 — `creator world kb adopt` CAS version-mismatch test.
 //!
-//! Plan: `.mstar/plans/2026-06-18-v1.51-per-row-occ.md`
+//! Plan: `2026-06-18-v1.51-per-row-occ` (local plan record)
 //! Spec: `concurrency.md` §7.4
 //!
 //! Verifies that `kb_adopt` returns `E_VERSION` (exit 76) when the

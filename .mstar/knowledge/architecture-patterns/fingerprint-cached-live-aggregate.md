@@ -1,11 +1,21 @@
 ---
-module: local-api, daemon-runtime, local-db
+module: local-api, apps/nexus-service, local-db
 date: 2026-07-02
-problem_type: knowledge
+last_updated: 2026-10-12
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-tags: [read-path-cost, live-aggregate, fingerprint-cache, polling, bounded-endpoint, sound-count, local-api, reliability, nexus-contracts]
-applies_when: a polled local endpoint's response contract requires a live "current" aggregate that is expensive to compute exactly, under a small-write / large-read ratio
+tags:
+  - read-path-cost
+  - live-aggregate
+  - fingerprint-cache
+  - polling
+  - bounded-endpoint
+  - sound-count
+  - local-api
+  - reliability
+applies_when:
+  - 'a polled local endpoint''s response contract requires a live "current" aggregate that is expensive to compute exactly, under a small-write / large-read ratio'
 ---
 
 # Fingerprint-cached live aggregate — decouple read-path cost from sound exact counts

@@ -307,7 +307,7 @@ describe('resolveCatalogItems / picker id collision (PR#148 Greptile P1)', () =>
 
 // ---------------------------------------------------------------------------
 // P2 acceptance criteria (catalog layer)
-// Spec: .mstar/iterations/v1.119/specs/setup-agent-picker-catalog.md
+// Spec: the v1.119 `setup-agent-picker-catalog` record (local).
 // ---------------------------------------------------------------------------
 
 describe('P2 acceptance criteria (catalog layer)', () => {

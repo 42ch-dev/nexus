@@ -1,12 +1,21 @@
 ---
 module: packages/nexus-ui + apps/web
 date: 2026-07-03
-problem_type: architecture-pattern
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-tags: [nexus-ui, react-component-library, tsup, esbuild, bundler-agnostic, svg, vite, peer-deps, presentational-component, logo-system]
-applies_when: adding an asset-consuming React component to a publishable workspace package built with tsup/esbuild, or promoting an assets-only package to a component library
-last_updated: 2026-07-22 (V1.132: shell plate uses logo-primary-square; titlebar uses plain logo-white at logoCompactMarkHeightPx)
+tags:
+  - nexus-ui
+  - react-component-library
+  - tsup
+  - esbuild
+  - bundler-agnostic
+  - svg
+  - vite
+  - peer-deps
+applies_when:
+  - "adding an asset-consuming React component to a publishable workspace package built with tsup/esbuild, or promoting an assets-only package to a component library"
+last_updated: 2026-07-22
 ---
 
 # Bundler-Agnostic Component Library Assets

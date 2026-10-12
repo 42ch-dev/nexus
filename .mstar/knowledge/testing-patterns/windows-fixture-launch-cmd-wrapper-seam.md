@@ -1,6 +1,7 @@
 ---
 module: nexus-agent-host
 date: 2026-10-01
+last_updated: 2026-10-12
 problem_type: testing_pattern
 category: testing-patterns
 severity: medium
@@ -21,6 +22,8 @@ applies_when:
 ---
 
 # Windows Fixture-Launch `.cmd` Wrapper Seam (Native-CLI Provider Fixtures)
+
+> **Status: current pattern.** The seam is implemented in `crates/nexus-agent-host/src/lib.rs` (`test_support::fixture_launch`); Windows proof is CI-owned by the `windows-latest` leg of `.github/workflows/platform-behaviour.yml`, with the named-trigger dispositions (R-V1202-P1T3-001, R-V1203P3QC3-S001) still tracked rather than silently closed.
 
 ## Context
 

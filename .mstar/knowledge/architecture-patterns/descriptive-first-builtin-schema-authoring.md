@@ -1,6 +1,7 @@
 ---
-module: nexus-daemon-runtime (capability registry, catalog route, MCP child)
+module: nexus-core (capability registry, catalog route, MCP child)
 date: 2026-08-26
+last_updated: 2026-10-12
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium

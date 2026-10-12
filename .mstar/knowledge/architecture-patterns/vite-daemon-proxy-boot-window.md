@@ -1,11 +1,18 @@
 ---
 module: apps/web (vite.config + DaemonLaunchGate + query mount)
 date: 2026-07-23
-problem_type: architecture-pattern
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-tags: [vite, proxy, daemon, ECONNREFUSED, startup, desktop-dev]
-applies_when: debugging desktop/web startup HTTP 500s; wiring Vite proxy to local daemon; placing queries outside DaemonLaunchGate
+tags:
+  - vite
+  - proxy
+  - daemon
+  - ECONNREFUSED
+  - startup
+  - desktop-dev
+applies_when:
+  - debugging desktop/web startup HTTP 500s; wiring Vite proxy to local daemon; placing queries outside DaemonLaunchGate
 last_updated: 2026-07-23
 source: iteration:v1.134/guides/p0-startup-500-rca.md
 ---

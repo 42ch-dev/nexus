@@ -19,9 +19,9 @@
 //! ## Outbox schema and migrations
 //!
 //! The sync `outbox_entries` table, its relationship to the daemon `outbox` queue,
-//! and the planned `schema_version` rollout are documented under the repository
-//! root at `.mstar/plans/archived/knowledge/outbox-schema.md` (v1.1 → v1.2 steps, safety rules,
-//! and future evolution).
+//! and the `schema_version` rollout are documented by the tracked outbox
+//! consolidation spec (`.mstar/specs/active/runtime/outbox-consolidation.md`);
+//! the v1.1 → v1.2 steps are historical.
 
 use std::path::Path;
 use std::str::FromStr;

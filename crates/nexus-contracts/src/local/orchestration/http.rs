@@ -1,7 +1,7 @@
 //! HTTP request/response types for the `/v1/daemon/orchestration/*` endpoints.
 //!
 //! Hand-coded local types — NOT codegen'd, NOT in `schemas/`.
-//! Design: `.mstar/archived/knowledge/schemas-boundary.md` §3.
+//! Design: `.mstar/specs/active/architecture/schemas-external-consumer-boundary.md`.
 //!
 //! The daemon exposes these as local-only HTTP; `nexus-platform` never
 //! observes them over any wire channel.

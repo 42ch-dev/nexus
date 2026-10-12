@@ -1,7 +1,7 @@
 //! `nexus.llm.extract` capability — extract World KB candidates from chapter
 //! prose using a judge-style agent call.
 //!
-//! Design: `.mstar/specs/llm-extract.md`, compass §0.1 #7.
+//! Design: `.mstar/specs/active/orchestration/llm-extract.md`, compass §0.1 #7.
 //!
 //! Sibling to `judge.llm`: both reuse the production prompt executor. Where
 //! `judge.llm` emits a GO/NOGO verdict, `nexus.llm.extract` emits a

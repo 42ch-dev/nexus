@@ -1193,8 +1193,8 @@ async fn ensure_world_owned(
 /// An unknown run id and a run belonging to a foreign World close with this
 /// exact `NotFound` — mirroring how schedules close unknown and foreign ids
 /// (`retained_execution_contracts.rs`) — so a probe cannot split run existence
-/// from World ownership. The external shape is authorized by
-/// `.mstar/iterations/v1.206/specs/compute-run-id-opacity.md`.
+/// from World ownership. The external shape follows the resource-refusal
+/// opacity contract (`.mstar/knowledge/api-design/resource-refusal-opacity.md`).
 fn run_not_found(run_id: &str) -> CoreError {
     CoreError::NotFound {
         resource: format!("run {run_id} not found"),
@@ -1204,7 +1204,7 @@ fn run_not_found(run_id: &str) -> CoreError {
 /// Internal typed visibility of a run id for the calling creator (V1.206 P2
 /// site 4).
 ///
-/// The existence-opacity contract (`.mstar/iterations/v1.206/specs/compute-run-id-opacity.md`)
+/// The existence-opacity contract (`.mstar/knowledge/api-design/resource-refusal-opacity.md`)
 /// requires the internal distinction between an absent row and a foreign-World
 /// row to survive inside the core even though the outward rendering collapses
 /// both into [`run_not_found`]. Crate-private: this is an implementation detail

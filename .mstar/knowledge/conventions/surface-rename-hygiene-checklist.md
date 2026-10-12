@@ -4,8 +4,16 @@ problem_type: convention
 category: conventions
 severity: medium
 date: 2026-07-05
-last_updated: 2026-07-06
-tags: [rename, hygiene, grep, local-api, daemon-api, codegen, docs, anchor, stutter]
+last_updated: 2026-10-12
+tags:
+  - rename
+  - hygiene
+  - grep
+  - local-api
+  - daemon-api
+  - codegen
+  - docs
+  - anchor
 ---
 
 # Surface-Rename Hygiene Checklist
@@ -35,7 +43,7 @@ A surface rename touches schemas, codegen, generated code in two languages, the 
 - [ ] Run `cargo test -p nexus-contracts --test schema_drift_detection`.
 
 ### 2. Runtime route and clients
-- [ ] Update daemon router path prefix (`crates/nexus-daemon-runtime/src/api/mod.rs`).
+- [ ] Update daemon router path prefix (`apps/nexus-service/src/routes.ts`).
 - [ ] Update CLI client base URL and path builders (`apps/nexus42/src/api/daemon_client.rs`).
 - [ ] Update web client base URL constant (`apps/web/src/lib/nexus/browser-client.ts`).
 - [ ] Update Vite dev proxy (`apps/web/vite.config.ts`).
@@ -80,7 +88,7 @@ Review every hit. Allowed exceptions:
 
 ## V1.90 lesson
 
-The first implementation pass left `/v1/local/` and "Local API" references in 11+ files across `crates/nexus-agent-host`, `crates/nexus-orchestration`, `crates/nexus-local-db`, `apps/AGENTS.md`, `apps/desktop/src-tauri/src/lib.rs`, and an embedded preset prompt. A dedicated grep sweep in P-last caught them before merge. The fix was text-only but required three QC rounds; running the sweep as part of the initial rename would have saved the extra review cycles.
+The first implementation pass left `/v1/local/` and "Local API" references in 11+ files across `crates/nexus-agent-host`, `crates/nexus-orchestration`, `crates/nexus-local-db`, `apps/AGENTS.md`, `apps/desktop-electron/src/main.ts`, and an embedded preset prompt. A dedicated grep sweep in P-last caught them before merge. The fix was text-only but required three QC rounds; running the sweep as part of the initial rename would have saved the extra review cycles.
 
 ## V1.93 lesson (naming-sweep stragglers — R-V192HYG-001)
 

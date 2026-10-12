@@ -9,7 +9,7 @@ import {
 /**
  * Unit tests for the V1.119 P1 Profile path-segment slug helper.
  *
- * Spec (normative): `.mstar/iterations/v1.119/specs/setup-workspace-profile-path.md`
+ * Spec (normative): the v1.119 `setup-workspace-profile-path` record (local).
  * § Slug rule + § Architecture contract → Slug helper. The slug applies to the
  * **path last segment only**; the Profile display name is kept verbatim.
  */

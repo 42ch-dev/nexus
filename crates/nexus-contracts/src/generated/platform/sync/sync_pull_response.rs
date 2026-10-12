@@ -42,7 +42,7 @@ pub struct NexusDeltaBundleEnvelope {
     pub bundle_id: NexusDeltaBundleEnvelopeBundleId,
     ///world_sync | memory_sync | publish_metadata
     pub bundle_type: NexusDeltaBundleEnvelopeBundleType,
-    ///Bundle content digest per v1-spec ADR-006: SHA-256 over JSON bytes of `deltas` only (Rust ref: serde_json::to_vec). Wire: `sha256:` + 64 lowercase hex. OSS companion: .mstar/specs/canonical-hash.md; golden vector in nexus-sync tests.
+    ///Bundle content digest per v1-spec ADR-006: SHA-256 over JSON bytes of `deltas` only (Rust ref: serde_json::to_vec). Wire: `sha256:` + 64 lowercase hex. OSS companion: .mstar/specs/active/contracts/canonical-hash.md; golden vector in nexus-sync tests.
     pub canonical_hash: ::std::string::String,
     ///Attributing SyncCommand ID
     pub command_id: NexusDeltaBundleEnvelopeCommandId,

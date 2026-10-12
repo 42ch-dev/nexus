@@ -26,7 +26,7 @@ End-user docs stay in repo-root `docs/`.
 
 Normative OSS specs live in **[`../specs/`](../specs/)**. Rules: [`../specs/AGENTS.md`](../specs/AGENTS.md).
 
-When implementing runtime behavior, read [`../specs/README.md`](../specs/README.md), then the cited spec bodies.
+When implementing runtime behavior, read the rules in [`../specs/AGENTS.md`](../specs/AGENTS.md) plus the lifecycle tree (`specs/active/<class>/`), then the cited spec bodies.
 
 **Do not silently diverge** from a cited spec; record change via spec revision or ADR.
 

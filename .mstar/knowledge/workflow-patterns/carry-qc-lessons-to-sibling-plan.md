@@ -1,11 +1,18 @@
 ---
 module: process
 date: 2026-08-10
-problem_type: workflow-pattern
+problem_type: workflow_issue
 category: workflow-patterns
 severity: low
-tags: [process, qc, sibling-plan, carry-forward, fix-wave, proactive]
-applies_when: An iteration ships multiple sibling plans that mirror each other (same pattern, different surface/scope) and the first plan's QC produces reusable lessons
+tags:
+  - process
+  - qc
+  - sibling-plan
+  - carry-forward
+  - fix-wave
+  - proactive
+applies_when:
+  - "An iteration ships multiple sibling plans that mirror each other (same pattern, different surface/scope) and the first plan's QC produces reusable lessons"
 ---
 
 # Carry QC Lessons to Sibling Plans Proactively

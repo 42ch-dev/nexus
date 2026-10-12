@@ -477,7 +477,7 @@ pub enum CreatorCommand {
     /// Hidden debug group (PL-6): the packet is a daemon contract — a
     /// headless developer debugging assembly must reach it, but it is
     /// deliberately absent from root `--help`. Documented in
-    /// `.mstar/specs/cli-spec.md` and `creator inspector --help`.
+    /// `.mstar/specs/active/cli/cli-spec.md` and `creator inspector --help`.
     #[command(hide = true)]
     Inspector {
         #[command(subcommand)]

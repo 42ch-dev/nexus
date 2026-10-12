@@ -4,7 +4,7 @@
  * Dot-state matrix (documentation strip) + live `@web-setup/agent-picker` for
  * ready/interactive frames (AC-10 validates shipped component post-T3).
  *
- * SSOT: `.mstar/iterations/v1.134/guides/p2-agent-picker-vi-rca.md`
+ * SSOT: `.mstar/specs/active/surfaces/design-studio.md` §7.5 (AgentPicker family; V1.134 VI retune — local record)
  */
 
 import { useState, type ReactNode } from 'react';

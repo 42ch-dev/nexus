@@ -13,7 +13,7 @@
 //!
 //! The record additionally carries the two native governance columns
 //! [`KnowledgeEntryRecord::holder_entry_id`] and
-//! [`KnowledgeEntryRecord::disclosure`] (`.mstar/specs/holder-governance.md`
+//! [`KnowledgeEntryRecord::disclosure`] (`.mstar/specs/active/architecture/holder-governance.md`
 //! §§1, 3). They are *not* a second owner: [`KnowledgeOwnerRef`] stays the
 //! closed narrative container, and the holder pair is the disclosure policy
 //! applied on top of it. [`KnowledgeAudience`] is the closed author-facing
@@ -41,7 +41,7 @@ use serde::{Deserialize, Serialize};
 /// `Character`, `Item`, `Faction`, `Ability`, `Species`. Per-module
 /// attribute/state shapes are declared by each compute module's
 /// `manifest.json` `schemas` block (V1.62 — see `modules/README.md` and
-/// `.mstar/specs/compute-module-abi.md`). `environment` is NOT
+/// `.mstar/specs/active/compute/compute-module-abi.md`). `environment` is NOT
 /// a valid `BlockType` enum variant and is not included.
 ///
 /// When [`computable`](Self::computable) is `Some(true)`, the body SHOULD
@@ -778,8 +778,8 @@ pub fn reject_reserved_authoring_keys(raw: &serde_json::Value) -> Result<(), Res
 // activation.rs`): serde types over the handbook shape where the
 // authoritative source is `modules_json` JSON — parse what the handbook
 // names, leave the rest in the raw JSON. Handbook:
-// spoke `domain-profile-mental-state.md`; field-vocabulary copy in
-// `.mstar/iterations/v1.164/specs/v1.164-mental-layer-product-locks.md`.
+// spoke `domain-profile-mental-state.md`; field-vocabulary copy frozen by the
+// V1.164 mental-layer product locks (local record).
 //
 // Handbook field names are LOCKED (TL-5 / PD-5): `holder` / `access` /
 // `source` — never the OmniToM paper aliases `actor` / `knowledge_access` /
