@@ -23,9 +23,10 @@
 #                               removed connect-client/embedded-mcp selectors)
 #     spoke-operations exactly one version   (via nexus-spoke-adapter, prior art)
 #     agent-client-protocol exactly one version  (via nexus-acp-host normal
-#                             edge). SDK opt-in contract: the pin enables no
-#                             opt-in capability feature, so its native
-#                             transports stay out of the graph —
+#                             edge), resolved feature set the EMPTY default
+#                             (`feats=[default]`). SDK opt-in contract: the
+#                             pin enables no opt-in capability feature, so its
+#                             native transports stay out of the graph —
 #                             async-process (SDK `process`) and blocking
 #                             (SDK `stdio`) ABSENT
 #     graph-flow      exactly one version, EMPTY feature set (no postgres/rig)
@@ -204,6 +205,10 @@ assert_exactly_one nexus42 "" spoke-operations
 # ACP rides the unconditional nexus-acp-host normal edge of the local
 # ACP spawning the ordinary CLI keeps. Exactly one stable-v1 core.
 assert_exactly_one nexus42 "" agent-client-protocol
+# Resolved set stays the empty default: the SDK declares `default = []` and
+# the probe prints that default feature's name; any opt-in capability appends
+# to the list and fails this probe — that is what the assertion is for.
+assert_features nexus42 "" agent-client-protocol "default"
 # v3 opt-in contract: the pin enables no opt-in capability feature, so the
 # crates the SDK's `process` / `stdio` features would pull stay absent.
 assert_empty nexus42 "" async-process
