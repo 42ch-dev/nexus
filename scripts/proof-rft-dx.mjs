@@ -37,7 +37,6 @@ const DEFAULT_DAEMON_PORT = 8420;
 const DX1_SAMPLE_INTERVAL_MS = 50;
 
 const CARGO_FAMILY = /(?:^|\/)(cargo|rustc|rustup|cc1|clang\+\+?|ld\.lld)(?:\s|$)/i;
-const TAURI_FAMILY = /(?:^|\/)(tauri|cargo-tauri)(?:\s|$)/i;
 const NATIVE_BUILD = /(?:^|\/)(cmake|ninja|make|meson)(?:\s|$)/i;
 const VITE_ORIGIN_RE = /Local:\s+(https?:\/\/[^\s]+)/;
 
@@ -107,7 +106,6 @@ export function evaluateDx3(samples) {
 }
 
 export function isCargoFamilyCommand(commandLine) { return CARGO_FAMILY.test(commandLine) || NATIVE_BUILD.test(commandLine); }
-export function isTauriFamilyCommand(commandLine) { return TAURI_FAMILY.test(commandLine); }
 
 export function parsePsLines(output) {
   return output.split('\n').map(l => l.trim()).filter(Boolean).map(line => {
@@ -128,8 +126,7 @@ export function countCargoTraces(rootPid, psOutput) {
   const rows = parsePsLines(psOutput); const descendants = collectDescendants(rootPid, rows);
   const traced = rows.filter(r => descendants.has(r.pid));
   const cargoHits = traced.filter(r => isCargoFamilyCommand(r.command));
-  const tauriHits = traced.filter(r => isTauriFamilyCommand(r.command));
-  return { processCount: traced.length, cargoCount: cargoHits.length, tauriCount: tauriHits.length, cargoCommands: cargoHits.map(r => r.command), tauriCommands: tauriHits.map(r => r.command), tracedPids: [...descendants].sort((a, b) => a - b) };
+  return { processCount: traced.length, cargoCount: cargoHits.length, cargoCommands: cargoHits.map(r => r.command), tracedPids: [...descendants].sort((a, b) => a - b) };
 }
 
 export function isPidInForest(pid, rootPids, psOutput) {
@@ -143,7 +140,6 @@ export function isPidInForest(pid, rootPids, psOutput) {
 
 export function summarizeIntervalSamples(samples) {
   const cargoCommands = new Set();
-  const tauriCommands = new Set();
   const tracedPids = new Set();
   let maxProcessCount = 0;
   let cargoPositiveSamples = 0;
@@ -151,7 +147,6 @@ export function summarizeIntervalSamples(samples) {
     if (sample.cargoCount > 0) cargoPositiveSamples += 1;
     maxProcessCount = Math.max(maxProcessCount, sample.processCount ?? 0);
     for (const cmd of sample.cargoCommands ?? []) cargoCommands.add(cmd);
-    for (const cmd of sample.tauriCommands ?? []) tauriCommands.add(cmd);
     for (const pid of sample.tracedPids ?? []) tracedPids.add(pid);
   }
   return {
@@ -159,12 +154,9 @@ export function summarizeIntervalSamples(samples) {
     cargoPositiveSamples,
     processCount: maxProcessCount,
     cargoCount: cargoCommands.size,
-    tauriCount: tauriCommands.size,
     cargoCommands: [...cargoCommands],
-    tauriCommands: [...tauriCommands],
     tracedPids: [...tracedPids].sort((a, b) => a - b),
     anyCargo: cargoPositiveSamples > 0,
-    anyTauri: tauriCommands.size > 0,
   };
 }
 
@@ -613,7 +605,6 @@ export async function runSurfaceLoop(options) {
       if (i >= 3) warmSamples.push(markerResult.elapsedMs);
     }
     const dx1CargoTotal = dx1Traces.reduce((sum, trace) => sum + (trace.anyCargo ? 1 : 0), 0);
-    const dx1TauriTotal = dx1Traces.reduce((sum, trace) => sum + (trace.anyTauri ? 1 : 0), 0);
     const dx2 = evaluateDx2(warmSamples); const dx3 = evaluateDx3(coldSampleValues);
     const dx1Pass = dx1Traces.every(trace => !trace.anyCargo);
     const payload = {
@@ -623,7 +614,6 @@ export async function runSurfaceLoop(options) {
         'DX-1': {
           pass: dx1Pass,
           cargoTraceCount: dx1CargoTotal,
-          tauriTraceCount: dx1TauriTotal,
           sampling: { mode: 'interval', intervalMs: DX1_SAMPLE_INTERVAL_MS, rootPidsTracked: rootPids },
           samples: dx1Traces,
         },

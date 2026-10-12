@@ -167,11 +167,6 @@ else
     "import\s+.*from\s+['\"]@42ch\/nexus-ui\/src\/" \
     "${STUDIO_FILES[@]}"
 
-  # Tauri helpers (studio is browser-only SPA)
-  forbid "Studio: imports @tauri-apps/*" \
-    "import\s+.*from\s+['\"]@tauri-apps\/" \
-    "${STUDIO_FILES[@]}"
-
   # ── @web-ui/* annotation enforcement ──
   echo ""
   echo "   Checking @web-ui/* transitional annotations..."

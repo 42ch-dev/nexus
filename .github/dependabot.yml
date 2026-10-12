@@ -9,7 +9,7 @@
 #   github-actions /.github/actions/setup-monorepo  composite action with external `uses:`
 #     (.github/actions/free-disk-space has no external `uses:` refs, so it needs no entry.)
 #   gitsubmodule   /                                .agents/skills/react-flow (only declared
-#     submodule; tauri-v2 and the other skill dirs are plain tracked files, not gitlinks)
+#     submodule; the other skill dirs are plain tracked files, not gitlinks)
 #
 # Grouping is weekly and limited to minor + patch. Major updates are never
 # grouped, so they stay individually reviewable.
