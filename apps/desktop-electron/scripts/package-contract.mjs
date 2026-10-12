@@ -2,12 +2,15 @@ import { createHash } from 'node:crypto';
 import { cpSync, existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 
+// Toolchain pins follow the app manifest so a dependency bump cannot leave a stale literal behind.
+const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+
 export const PACKAGE_CONTRACT = Object.freeze({
   schemaVersion: 1,
   productName: 'Nexus',
   bundleId: 'io.nexus42.desktop',
-  electronVersion: '44.5.1',
-  packagerVersion: '20.3.0',
+  electronVersion: manifest.devDependencies.electron,
+  packagerVersion: manifest.devDependencies['@electron/packager'],
   minimumMacos: '13.0',
   supportedArchitectures: Object.freeze(['arm64', 'x64']),
 });
