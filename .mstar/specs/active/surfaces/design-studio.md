@@ -1,6 +1,6 @@
 # Design Studio — Specification
 
-**Status**: Normative target contract (v1.187) — implementation and visual acceptance are separate  
+**Status**: Normative target contract (v1.187) — the token-projection semantics defined here are implemented and owned by this spec (§3.5; `tooling/design-tokens`); implementation beyond tokens and visual/runtime acceptance remain unverified (§11)  
 **Document class**: Feature line  
 **Created**: 2026-07-08 (`@product-manager`)  
 **Revised**: 2026-09-09 (product, architecture and writing Review & Edit)  
