@@ -30,7 +30,7 @@ A prolific author may run **multiple** `work_profile: novel` Works over time —
 | Multiple Works in flight | **Allowed** — different `work_id` values may each have active schedules / auto-chain |
 | Pool `active` row | **CLI default only** — `creator run` subcommands omitting `work_id` resolve to pool `active`; does **not** block other Works |
 | Same Work, two processes | **Forbidden** for mutating operations — enforced by `works.runtime_lock_holder` (§4) |
-| Completed Work | **Write-protected while completion-lock present** (§3); may **reopen** same `work_id` after release (§3.4) |
+| Completed Work | **Write-protected while completion-lock present** (§3); `creator works reopen` releases the lock atomically (§3.3) |
 
 **OUT**: novels-system “switch” semantics (pause all other novels, Redis `novel:active` mutex, 2h cron).
 
@@ -70,7 +70,7 @@ Minimum schema:
 | Rule | Behavior |
 | --- | --- |
 | Presence | The scheduler (`nexus-orchestration` supervisor, hosted via `nexus-core`) **must not** start new auto-chain ticks on this Work while lock exists |
-| Mutating CLI/API | `creator works reopen`, `nexus.work.patch`, schedule enqueue **fail closed** (the retired `creator run <preset_id>` dispatch and `creator works resume-chain` entries were removed in v1.193 P2) |
+| Mutating CLI/API | `nexus.work.patch` and schedule enqueue **fail closed** while the lock is present; `creator works reopen` is the audited command that releases it (§3.3) (the retired `creator run <preset_id>` dispatch and `creator works resume-chain` entries were removed in v1.193 P2) |
 | Read-only | `creator works status`, `creator works list` always allowed |
 
 ### 3.1 Release
@@ -78,28 +78,30 @@ Minimum schema:
 `creator works completion-lock release <work_id>`:
 
 1. Removes file + clears `works.completion_locked_at`.
-2. Enables **`creator works reopen`** on the **same** `work_id` (grill-me B; V1.45 P2 — migrated from the retired `creator run resume`).
+2. Runs the same core release as `creator works reopen` (§3.3): clears `works.completion_locked_at`, sets `novel_completion_status = reopened`, and removes the derived file. It does **not** change `works.status`.
 3. Does **not** auto-change pool row status (remains `completed` until operator `works use` / promote).
 
 ### 3.2 Source-of-truth declaration
 
 DB column `works.completion_locked_at` is the authoritative lock state. The `.completion-lock.json` file is a derived artifact for cross-tool observation. The supervisor gates ticks on the DB column. If the file exists but the DB column is NULL, the supervisor treats the work as unlocked. If the file is missing but the DB column is set, the supervisor treats the work as locked.
 
-### 3.3 Reopen (resume on completed Work)
-
-When `works.status == completed` after lock release:
+### 3.3 Reopen (completion-lock release)
 
 ```text
 creator works reopen [<work_id>] --reason "<text>"
 ```
 
-(V1.45 P2 command path — migrated from the retired `creator run resume <work_id> --reopen --reason "<text>"`, removed with the runner in v1.193 P2.)
+Current command path (`handle_reopen`, `apps/nexus42/src/commands/creator/works/mod.rs:1005-1043`): it runs the core's completion-lock release (`CoreService::release_work_completion_lock`, `crates/nexus-core/src/works.rs:1581-1613`). `creator works completion-lock release` is the sibling alias for the same core call (`apps/nexus42/src/commands/creator/works/mod.rs:1274-1295`).
 
 1. `--reason` **required** (audited).
-2. Sets `works.status = active`, clears `novel_completion_status`.
-3. Re-enables auto-chain per V1.39 rules (does not delete `work_chapters` rows).
-4. If §6 completion criteria still hold (all chapters `finalized` and `current_chapter >= total`), the retired `run resume --reopen` carried a **required** `--extend-chapters <new_total>` flag (`new_total > total_planned_chapters`) that seeded new `work_chapters` rows before resume enqueue; the current `creator works reopen` has **no** such flag — extend-then-reopen has no shipped CLI path today.
-5. Distinct from `creator bootstrap --from-work` (new Work + `lineage_from_work_id`; the `creator bootstrap` entry itself was removed in v1.193 P2 — the lineage contract remains the historical record).
+2. The Work **must** be completion-locked; the core refuses a Work whose `completion_locked_at` is NULL with `not_locked` instead of accepting a no-op patch.
+3. The release clears `works.completion_locked_at` (SSOT), sets `novel_completion_status = 'reopened'`, and deletes the derived `.completion-lock.json`. It does **not** change `works.status` — the row stays `completed`; the Work is writable again because the completion-lock gate no longer blocks it, not because a column flipped to `active`.
+4. Re-enables auto-chain per V1.39 rules (does not delete `work_chapters` rows).
+5. `--extend-chapters` has no shipped path: the retired `run resume --reopen` flag is gone with the runner.
+
+**Historical (retired runner, removed in v1.193 P2):** the old two-step semantics — `creator works completion-lock release` merely *enabling* a separate `creator run resume --reopen` that set `works.status = active` and cleared `novel_completion_status`, carrying a **required** `--extend-chapters <new_total>` flag that seeded new `work_chapters` rows before resume enqueue — belonged to the retired `creator run` runner. The retained atomic `creator works reopen` performs the release in one core call and never sets `works.status = active`.
+
+Distinct from `creator bootstrap --from-work` (new Work + `lineage_from_work_id`; the `creator bootstrap` entry itself was removed in v1.193 P2 — the lineage contract remains the historical record).
 
 **OUT**: silent reopen without `--reason`.
 
@@ -184,7 +186,7 @@ The `creator bootstrap` entry was removed in v1.193 P2; no current CLI scaffold/
 | --- | --- |
 | `.completion-lock.json` present | `Blocked(CompletionLock)` |
 | `runtime_lock_holder` foreign | Skip competing enqueue |
-| `status == completed` | No chain until `resume --reopen` after lock release |
+| `status == completed` | No chain until `creator works reopen` releases the completion-lock (§3.3) |
 | Otherwise | V1.39 rules unchanged |
 
 ---

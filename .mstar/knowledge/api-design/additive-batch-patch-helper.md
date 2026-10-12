@@ -39,14 +39,22 @@ The single-finding remediation UI worked, but authors with dozens of findings pa
 The bulk handler should not reimplement authz, enum validation, or lifecycle-transition enforcement. Delegate each ID to the same DAO used by the single-finding endpoint:
 
 ```rust
-for finding_id in &body.finding_ids {
-    match findings::update_finding(state.pool(), &creator_id, finding_id, &finding_patch, now).await {
+for finding_id in &request.finding_ids {
+    match findings::update_finding(
+        &self.inner.pool, principal.creator_id(), finding_id, &finding_patch, now,
+    ).await {
         Ok(true) => updated += 1,
         Ok(false) => not_found.push(finding_id.clone()),
         Err(LocalDbError::IllegalTransition { .. }) => conflict.push(finding_id.clone()),
         Err(other) => {
-            tracing::warn!(...);
-            return Err(other.into());
+            tracing::warn!(creator_id = %principal.creator_id(), finding_id = %finding_id, error = %other, "…");
+            return Err(match other {
+                LocalDbError::ValidationError(message) => FindingsFault::BadRequest {
+                    code: "invalid_input".to_string(), message,
+                },
+                other => FindingsFault::Core(local_db_err(other)),
+            }
+            .into());
         }
     }
 }
@@ -56,16 +64,17 @@ Reusing the DAO guarantees that bulk and single-finding behavior cannot drift.
 
 ### 2. Enforce a hard cap before touching the database
 
-Return a typed 422 if the request exceeds the cap so the client can chunk or warn:
+Return a typed validation refusal (`FindingsFault::BadRequest` → `CoreError::InvalidInput`, code `invalid_input`) if the request exceeds the cap so the client can chunk or warn:
 
 ```rust
 const BATCH_CAP: usize = 100;
 
-if body.finding_ids.len() > BATCH_CAP {
-    return Err(NexusApiError::BadRequest {
+if request.finding_ids.len() > BATCH_CAP {
+    return Err(FindingsFault::BadRequest {
         code: "too_many_findings".to_string(),
-        message: format!("batch update is capped at {BATCH_CAP} findings; received {}", body.finding_ids.len()),
-    });
+        message: format!("batch update is capped at {BATCH_CAP} findings; received {}", request.finding_ids.len()),
+    }
+    .into());
 }
 ```
 
@@ -76,25 +85,20 @@ This keeps worst-case latency predictable on the local SQLite pool.
 For `not_found` and `conflict` (illegal transition), collect IDs and return them in the success response. The client can decide whether to toast, retry, or surface a persistent banner:
 
 ```rust
-Ok(Json(BatchUpdateFindingsResponse {
+Ok(BatchUpdateFindingsResponse {
     updated,
-    not_found: if not_found.is_empty() { None } else { Some(not_found) },
-    conflict: if conflict.is_empty() { None } else { Some(conflict) },
-}))
+    not_found,
+    conflict,
+})
 ```
+
+The wire shape omits empty arrays (`not_found`/`conflict` are only meaningful when non-empty); the core returns them directly and the HTTP layer serializes them.
 
 Unexpected internal errors still abort and return 5xx, because they indicate a problem the client cannot reconcile locally.
 
 ### 4. Keep the patch shape additive and versioned
 
-The request body should accept only the fields the bulk action supports. In V1.91 this was `status` and `target_executor`; other finding fields stayed on the single-finding PATCH. If the generated contract widens the patch sub-object (for example, codegen emits `serde_json::Value`), add a small runtime deserializer that enforces the concrete shape:
-
-```rust
-let patch: BatchFindingPatch = serde_json::from_value(body.patch)
-    .map_err(|e| NexusApiError::BadRequest { code: "invalid_input".to_string(), message: ... })?;
-```
-
-Document the codegen gap and plan to replace the hand-rolled struct with a generated type once the schema/codegen pipeline supports the shape.
+The request body should accept only the fields the bulk action supports. In V1.91 this was `status` and `target_executor`; other finding fields stayed on the single-finding PATCH. The patch sub-object is typed by the generated contract (`batch-update-findings-request.schema.json` / `finding-batch-patch.schema.json` on the core side; `wirePayload<BatchUpdateFindingsRequest>` on the service side), so an unsupported field shape is rejected at the boundary instead of being silently widened.
 
 ### 5. Wire the UI for idempotent retry
 
@@ -159,8 +163,7 @@ Keep CSV helpers in a dedicated module so the page stays under the project modul
 
 ## Related
 
-- `crates/nexus-core/src/findings.rs` — `batch_update_findings_handler`
-- `crates/nexus-core/src/findings.rs`
+- `crates/nexus-core/src/findings.rs` — `batch_update_findings` (the bulk handler, `:583`) and `update_finding` (the single-row DAO it delegates to, `:478`)
 - `schemas/daemon-api/findings/batch-update-findings-request.schema.json`
 - `schemas/daemon-api/findings/batch-update-findings-response.schema.json`
 - `apps/web/src/pages/findings-page.tsx`
