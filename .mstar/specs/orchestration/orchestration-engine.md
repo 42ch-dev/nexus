@@ -10,7 +10,7 @@
 **Supersedes**: — (new topic)
 **Coordinates with**:
 
-- [local-cloud-crate-architecture.md](../archived/local-cloud-crate-architecture.md) — crate owners for sync/memory capabilities (§5.2 target names; legacy `nexus-sync` / `nexus-domain` until V1.21)
+- [local-cloud-crate-architecture.md](../archived/architecture/2026-09-21-local-cloud-crate-architecture.md) — crate owners for sync/memory capabilities (§5.2 target names; legacy `nexus-sync` / `nexus-domain` until V1.21)
 - [acp-client-tech-spec.md](../agents/acp-client-tech-spec.md) — ACP transport/provider contract and `nexus-acp-host` crate spec
 - TD-9 closed: full 6-state HSM lifecycle (status moves from "gap" to "closed")
 
@@ -155,7 +155,7 @@ The runtime/preset contracts remain authoritative for the retained crates above.
 | `crates/nexus-orchestration`                      | New  | No             | graph-flow adapter, capability trait, preset loader, SQLite `SessionStorage`                  |
 | `crates/nexus-daemon-runtime`                     | Ext. | No             | **Deleted in v1.193 P2** — was: orchestration engine host, lifecycle HSM, `HostFacade` prompt executor, HTTP trigger/query. Current owners: engine/supervisor in `crates/nexus-orchestration`, host composition in `crates/nexus-core`, HTTP family in `apps/nexus-service` |
 | `apps/nexus42`                                    | Ext. | Yes (via host) | Interactive `acp run`; the schedule command groups were retired in v1.193 P2 (retained scheduling CLI surface: `creator works cron` declaration editing) |
-| `crates/nexus-contracts`, `nexus-creator`, `nexus-cloud-domain`, … | Ext. | No | Application crates per [local-cloud-crate-architecture.md](../archived/local-cloud-crate-architecture.md); legacy monolith `nexus-domain` retired after V1.21 |
+| `crates/nexus-contracts`, `nexus-creator`, `nexus-cloud-domain`, … | Ext. | No | Application crates per [local-cloud-crate-architecture.md](../archived/architecture/2026-09-21-local-cloud-crate-architecture.md); legacy monolith `nexus-domain` retired after V1.21 |
 
 ### 3.3 Data flow for one strategy tick
 
@@ -351,7 +351,7 @@ All capabilities below are registered at daemon runtime startup. Adding a new ca
 
 Each capability ships its `input_schema` and `output_schema` as constants (JSON Schema draft 2020-12) in Rust. **These schemas are local** (per [schemas-external-consumer-boundary.md](../architecture/schemas-external-consumer-boundary.md)) and live under `crates/nexus-contracts/src/local/orchestration/` (or adjacent module), **not** under `schemas/` — they are not wire contracts.
 
-> **Daemon builds:** `sync.*` MUST NOT call `nexus-cloud-sync` on the daemon hot path; see [local-cloud-crate-architecture.md](../archived/local-cloud-crate-architecture.md) §7. `outbox.flush` / `outbox.compact` (V1.59) are local-only pool-backed capabilities that operate directly on `outbox_entries` via `nexus-local-db` — they do not depend on `nexus-cloud-sync`.
+> **Daemon builds:** `sync.*` MUST NOT call `nexus-cloud-sync` on the daemon hot path; see [local-cloud-crate-architecture.md](../archived/architecture/2026-09-21-local-cloud-crate-architecture.md) §7. `outbox.flush` / `outbox.compact` (V1.59) are local-only pool-backed capabilities that operate directly on `outbox_entries` via `nexus-local-db` — they do not depend on `nexus-cloud-sync`.
 
 ### 5.4 Capability errors
 
@@ -1077,7 +1077,7 @@ Compass WS5 (`schemas/` boundary refactor) is fully parallel and has no dependen
 
 ### 10.5 Phase 4 — statig daemon lifecycle (S+; 1 agent session; parallel with Phase 2)
 
-Owned by the daemon lifecycle state machine (6-state; see [daemon-runtime.md](../archived/daemon-runtime.md) §10); A-track just consumes it. Entry/exit actions, event catalogue, and the HTTP surface migration live with the lifecycle owner (status field exposes real 6-state values).
+Owned by the daemon lifecycle state machine (6-state; see [daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md) §10); A-track just consumes it. Entry/exit actions, event catalogue, and the HTTP surface migration live with the lifecycle owner (status field exposes real 6-state values).
 
 **Integration point with engine**: HSM `Running.entry` calls `engine.start()`; `Stopping.entry` cancels active runs through the shared token/Host finalization path before `engine.shutdown(grace_ms)`. `Degraded` reflects sustained failures of retained subsystems such as sync, ACP registry, and the Agent Host.
 
@@ -1166,13 +1166,13 @@ External (stable, public):
 
 ---
 
-*End of specification. The companion documents ([acp-client-tech-spec.md](../agents/acp-client-tech-spec.md), [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md), [daemon-runtime.md](../archived/daemon-runtime.md)) fill in details that would otherwise clutter this document; read them together when extending orchestration.*
+*End of specification. The companion documents ([acp-client-tech-spec.md](../agents/acp-client-tech-spec.md), [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md), [daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md)) fill in details that would otherwise clutter this document; read them together when extending orchestration.*
 
 ---
 
 ## V1.45 supersession (P-last promotion)
 
-**Superseded by**: [creator-run-preset-entry.md](../archived/creator-run-preset-entry.md) (Shipped Master V1.45). The `run_intents` dispatch via generic `creator run <preset_id>` and `--force-gates --reason` semantics are now part of the canonical Master body.
+**Superseded by**: [creator-run-preset-entry.md](../archived/creator/2026-09-21-creator-run-preset-entry.md) (Shipped Master V1.45). The `run_intents` dispatch via generic `creator run <preset_id>` and `--force-gates --reason` semantics are now part of the canonical Master body.
 
 
 
@@ -1195,4 +1195,4 @@ External (stable, public):
 - Once cancel admission wins, step-in-flight and prompt Dispatching/Active fences reject later work. Failed-step cleanup retains its original revision/graph/attempt/process witness rather than rebasing onto a newer owner. Ordinary cancel uses its bounded eight-attempt retry.
 - Unconfirmed cleanup remains actionable Interrupted, even when a convenience `is_terminal` helper includes it. A retry can publish the later confirmed outcome. HTTP/CLI/inspect/events project the same durable winner; restart cannot resurrect cancelled work.
 - An admitted workspace intent completes or rolls back through its retained workspace owner. Cancellation prevents subsequent steps without aborting files midway; the coordinator does not create a second workspace recovery state machine.
-- Run-bound Host events and durable run-state projections use bounded same-run SSE replay, not a second workflow clock or durable activity journal. Admission, authorization, gaps and retention are defined in [daemon-runtime.md](../archived/daemon-runtime.md) §20.2.
+- Run-bound Host events and durable run-state projections use bounded same-run SSE replay, not a second workflow clock or durable activity journal. Admission, authorization, gaps and retention are defined in [daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md) §20.2.

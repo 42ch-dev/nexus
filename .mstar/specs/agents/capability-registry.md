@@ -5,7 +5,7 @@
 **Created**: 2026-06-20 (V1.53 P-1 Draft)  
 **Last updated**: 2026-09-29 — retained core dispatch, static roster and historical authority labels
 **Scope**: Runtime SSOT for the retained Nexus host-tool registry and dispatch spine — **30 static host tools (28 `nexus.*` + 2 `fs/*`)**, peer/user-capability resolution, admission and audit ownership. Former daemon worker allowlists and three-caller wrappers are historical.
-**Coordinates with**: [acp-capability-set.md](acp-capability-set.md), [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md), [acp-client-tech-spec.md](acp-client-tech-spec.md), [orchestration-engine.md](../orchestration/orchestration-engine.md) (separate orchestration registry), [daemon-runtime.md](../archived/daemon-runtime.md) (retired three-caller topology), [local-runtime-boundary.md](../architecture/local-runtime-boundary.md) (current host boundaries)
+**Coordinates with**: [acp-capability-set.md](acp-capability-set.md), [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md), [acp-client-tech-spec.md](acp-client-tech-spec.md), [orchestration-engine.md](../orchestration/orchestration-engine.md) (separate orchestration registry), [daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md) (retired three-caller topology), [local-runtime-boundary.md](../architecture/local-runtime-boundary.md) (current host boundaries)
 
 ---
 

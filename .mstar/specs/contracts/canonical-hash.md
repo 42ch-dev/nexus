@@ -49,6 +49,6 @@ sha256:23f370c5ec4797f194b9fbbdba556c4de1d7c18c60b14a64898b1919486969fe
 ## References
 
 - `crates/nexus-cloud-sync/src/canonical_hash.rs`
-- [local-cloud-crate-architecture.md](../archived/local-cloud-crate-architecture.md) §3.7 — `nexus-sync` → `nexus-cloud-sync`
+- [local-cloud-crate-architecture.md](../archived/architecture/2026-09-21-local-cloud-crate-architecture.md) §3.7 — `nexus-sync` → `nexus-cloud-sync`
 - `schemas/platform/sync/bundle.schema.json`
 - nexus-platform `v1-spec/shared/schema/bundle-envelope-schema-v1.md`, `v1-spec/cli-sync/sync-contract-v1.md`, `v1-spec/consistency/consistency-rules-v1.md`

@@ -7,12 +7,12 @@
 **Scope**: Historical author-facing **`nexus42 creator run <preset_id> [<work_id>]`** — removed generic preset dispatch and its former relationship to `creator bootstrap`, atomic `creator works`, and `daemon schedule`  
 **Coordinates with**:
 
-- [cli-spec.md](../cli/cli-spec.md) — per-flag detail (§6.2D implement amendment)
-- [cli-command-ia.md](cli-command-ia.md) — three-plane IA
-- [orchestration-engine.md](../orchestration/orchestration-engine.md) — presets, gates, `run_intents`
-- [work-experience-model.md](../creator/work-experience-model.md) — Work lifecycle
-- [creator-workflow.md](../creator/creator-workflow.md) — FL-E stage ↔ preset mapping
-- [novel-writing/work-pool.md](../novel-writing/work-pool.md) — pool `active` default
+- [cli-spec.md](../../cli/cli-spec.md) — per-flag detail (§6.2D implement amendment)
+- [cli-command-ia.md](../cli/2026-06-07-cli-command-ia.md) — three-plane IA
+- [orchestration-engine.md](../../orchestration/orchestration-engine.md) — presets, gates, `run_intents`
+- [work-experience-model.md](../../creator/work-experience-model.md) — Work lifecycle
+- [creator-workflow.md](../../creator/creator-workflow.md) — FL-E stage ↔ preset mapping
+- [novel-writing/work-pool.md](../../novel-writing/work-pool.md) — pool `active` default
 
 **Tracker**: BL-12
 
@@ -22,7 +22,7 @@
 
 The generic runner shipped in **V1.45** and was removed in **v1.193 P2-T1** with the incomplete Creator execution entrances. **No replacement CLI preset-dispatch entrance was introduced.** Sections §1–§8 preserve the retired runner's shipped contract, grammar, flows, and acceptance history; none is a current setup or execution instruction.
 
-Current Work operations belong to the retained **`nexus42 creator works`** families: selection/status/pool, `inspire`, `reopen`, `reconcile-chapters`, completion-lock, findings, and rules. They are atomic operations, **not** a replacement generic runner. See [cli-spec.md](../cli/cli-spec.md) for the current CLI contract and [`apps/nexus42/src/commands/creator/works/mod.rs`](../../../apps/nexus42/src/commands/creator/works/mod.rs) for `WorksCommand`, the retirement header, the migrated atomic handlers, and `print_findings_summary` (which no longer advertises `creator run novel-review-master`).
+Current Work operations belong to the retained **`nexus42 creator works`** families: selection/status/pool, `inspire`, `reopen`, `reconcile-chapters`, completion-lock, findings, and rules. They are atomic operations, **not** a replacement generic runner. See [cli-spec.md](../../cli/cli-spec.md) for the current CLI contract and [`apps/nexus42/src/commands/creator/works/mod.rs`](../../../../apps/nexus42/src/commands/creator/works/mod.rs) for `WorksCommand`, the retirement header, the migrated atomic handlers, and `print_findings_summary` (which no longer advertises `creator run novel-review-master`).
 
 ---
 
@@ -71,7 +71,7 @@ nexus42 creator run <preset_id> [<work_id>] [--json] [--force-gates --reason "<t
 | `<preset_id>` | Yes | Resolved via orchestration preset registry (embedded, user, `_system.*`) |
 | `<work_id>` | No | Optional **positional** `wrk_…`. Omitted → pool **`active`** Work (same resolution as `creator works status`) |
 | `--json` | No | Machine-readable schedule response |
-| `--force-gates --reason` | No | Audited gate bypass ([orchestration-engine.md](../orchestration/orchestration-engine.md) §7.9). `--reason` required when `--force-gates` set |
+| `--force-gates --reason` | No | Audited gate bypass ([orchestration-engine.md](../../orchestration/orchestration-engine.md) §7.9). `--reason` required when `--force-gates` set |
 
 **Not supported on `creator run`:** `--work-id` flag (use positional); `stage advance --force` (Removed in V1.45; see changelog).
 
@@ -161,11 +161,11 @@ Hard delete legacy subcommands — **no deprecated aliases** (pre-release).
 
 **Historical V1.45 supersession:** this Master superseded the V1.44 cli-spec §6.2D/E bespoke subcommand tables and the V1.45 Draft overlay sections in the following specs. That promotion does not restore dispatch authority after the v1.193 P2-T1 retirement (§0).
 
-- [creator-workflow.md](../creator/creator-workflow.md) (FL-E CLI overlay)
-- [novel-writing/quality-loop.md](../novel-writing/quality-loop.md) (preset-id commands overlay; applied P3)
-- [novel-writing/manuscript-audit.md](../novel-writing/manuscript-audit.md) (CLI entry overlay; split presets)
-- [work-experience-model.md](../creator/work-experience-model.md) (side-input + run_intents overlay)
-- [orchestration-engine.md](../orchestration/orchestration-engine.md) (`run_intents` dispatch overlay)
-- [cli-spec.md](../cli/cli-spec.md) (creator run preset entry overlay)
+- [creator-workflow.md](../../creator/creator-workflow.md) (FL-E CLI overlay)
+- [novel-writing/quality-loop.md](../../novel-writing/quality-loop.md) (preset-id commands overlay; applied P3)
+- [novel-writing/manuscript-audit.md](../../novel-writing/manuscript-audit.md) (CLI entry overlay; split presets)
+- [work-experience-model.md](../../creator/work-experience-model.md) (side-input + run_intents overlay)
+- [orchestration-engine.md](../../orchestration/orchestration-engine.md) (`run_intents` dispatch overlay)
+- [cli-spec.md](../../cli/cli-spec.md) (creator run preset entry overlay)
 
 **Promotion date**: 2026-06-14 (P-last closeout)

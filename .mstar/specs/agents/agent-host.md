@@ -7,7 +7,7 @@
 | **Status** | Normative — shipped through V1.188: Host-mediated orchestration, configured ACP/native registration, dsh SDK runtime/streaming cutover, and verified provider readiness |
 | **Document class** | Master |
 | **Normative scope** | Host boundaries, provider model, capability contract, security/supervision invariants |
-| **Related** | [daemon-runtime.md](../archived/daemon-runtime.md), [local-runtime-boundary.md](../architecture/local-runtime-boundary.md), [acp-client-tech-spec.md](acp-client-tech-spec.md) |
+| **Related** | [daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md), [local-runtime-boundary.md](../architecture/local-runtime-boundary.md), [acp-client-tech-spec.md](acp-client-tech-spec.md) |
 
 ---
 
@@ -33,7 +33,7 @@ Define **`nexus-agent-host`**: the orchestration/facade above ACP and native CLI
 OSS CLI (cli-spec)
   └─ apps/nexus-service (TS host — serves /v1/daemon/agent-host/* over core)
        ├─ /v1/daemon/agent-host/*  (Daemon API wire family — retained surface; the
-       │    normative host-side layering record is [daemon-runtime.md §2](../archived/daemon-runtime.md), historical)
+       │    normative host-side layering record is [daemon-runtime.md §2](../archived/runtime/2026-09-21-daemon-runtime.md), historical)
        └─ crates/nexus-core (`provider-host` feature) / crates/nexus-core-node
             └─ Arc<dyn HostFacade>
                  └─ nexus-agent-host

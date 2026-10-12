@@ -55,7 +55,7 @@ Owns:
 - Long-lived agent session supervision
 - Local IPC listener
 
-Does **not** own platform sync or registration (see [local-cloud-crate-architecture.md](../archived/local-cloud-crate-architecture.md)).
+Does **not** own platform sync or registration (see [local-cloud-crate-architecture.md](../archived/architecture/2026-09-21-local-cloud-crate-architecture.md)).
 
 Does not own:
 
@@ -88,7 +88,7 @@ ACP is for agent integration. Nexus still needs a stable internal interface for:
 Here “Daemon API” names the retained wire namespace, not the retired Rust process. Exact current route identities and auth tiers come from `apps/nexus-service/src/routes.ts` and its family modules; the inventory below preserves its historical release annotations.
 
 - Loopback-only by default
-- Minimal surface: workspace status, daemon health, orchestration/agent-host, local KB/memory — **no** sync or platform registration proxy (see [local-cloud-crate-architecture.md](../archived/local-cloud-crate-architecture.md))
+- Minimal surface: workspace status, daemon health, orchestration/agent-host, local KB/memory — **no** sync or platform registration proxy (see [local-cloud-crate-architecture.md](../archived/architecture/2026-09-21-local-cloud-crate-architecture.md))
 - Auth: OS user boundary, with optional token / IPC artifacts under **`$HOME/.nexus42/run/`** (or workspace-scoped subpaths still rooted at `$HOME/.nexus42/`, never under `<workspace>/`)
 - Versioned schema: all stable endpoints live under `/v1/daemon/*` so TS / Rust codegen can share one contract
 

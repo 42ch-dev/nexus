@@ -3,7 +3,7 @@
 > **Status:** Normative — V1.181 P0 (readiness-contract form; posture user-locked 2026-09-02 grill-me). Promoted from the iteration-package draft in the v1.181 package (historical provenance; iteration packages are local process artifacts, not tracked at HEAD). Review-chain locks (product-manager → architect, 2026-09-02) are recorded inline as **Lock** notes.
 > **Document class:** Master
 > **Scope:** the embedding identity tuple, the fail-closed derived-index protocol, the `EmbeddingProvider` trait seam, the `NoEmbeddings` OSS posture, and the platform injection contract. Governs the `crates/nexus-embedding/` contract crate. **No OSS embedding execution.**
-> **Coordinates with:** [local-cloud-crate-architecture.md](../archived/local-cloud-crate-architecture.md), [world-kb-runtime-architecture.md](../architecture/world-kb-runtime-architecture.md), [spoke-adapter-architecture.md](../architecture/spoke-adapter-architecture.md)
+> **Coordinates with:** [local-cloud-crate-architecture.md](../archived/architecture/2026-09-21-local-cloud-crate-architecture.md), [world-kb-runtime-architecture.md](../architecture/world-kb-runtime-architecture.md), [spoke-adapter-architecture.md](../architecture/spoke-adapter-architecture.md)
 
 ## 0. Document Position
 

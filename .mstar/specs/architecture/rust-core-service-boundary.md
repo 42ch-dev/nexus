@@ -3,7 +3,7 @@
 **Status:** Accepted target — locked 2026-09-13; **v1.193 overlay delivered (P2 complete 2026-09-21).** The **M1 subset is exercised** (v1.189 PR #306, merge `71e01cf9`, 2026-09-15). **v1.192** delivered the Electron desktop cutover and retired Tauri. **v1.193 P2 delivered the remaining cutover:** the whole `nexus42 daemon` group, hidden `daemon-run`, Model A `mcp serve`/`host-call`, the app-only `legacy-cli` / `basic-cli` / `web-embed` / `connect-client` / `embedded-mcp` selectors, the `nexus-daemon-runtime` crate and the DaemonClient CLI leaves are **deleted** — retained leaves call core/cloud/Connect directly, with no TS-launcher alias and no permanent legacy fallback. This document is normative for that boundary and is self-contained; the per-leaf command inventory for the iteration is process material, not a tracked contract. Do **not** describe the `Current:` records below as the shipped state — they are the pre-cutover migration record.
 **Document class:** Master
 **Pillar (V1.122):** Cross-cutting — Harness, Canvas, and Computable consumption ends keep their product identities; this spec only locks the service-boundary target those pillars run on.
-**Coordinates with:** [local-runtime-boundary.md](local-runtime-boundary.md), [daemon-runtime.md](../archived/daemon-runtime.md) (historical host spec — its crate was deleted in v1.193 P2), [cli-spec.md](../cli/cli-spec.md), [desktop-shell.md](../surfaces/desktop-shell.md), [web-ui.md](../surfaces/web-ui.md), [agent-host.md](../agents/agent-host.md), [concurrency.md](../runtime/concurrency.md), [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md), [local-cloud-crate-architecture.md](../archived/local-cloud-crate-architecture.md), [daemon-api-surface-conventions.md](../runtime/daemon-api-surface-conventions.md), [schemas-directory-layout.md](schemas-directory-layout.md)
+**Coordinates with:** [local-runtime-boundary.md](local-runtime-boundary.md), [daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md) (historical host spec — its crate was deleted in v1.193 P2), [cli-spec.md](../cli/cli-spec.md), [desktop-shell.md](../surfaces/desktop-shell.md), [web-ui.md](../surfaces/web-ui.md), [agent-host.md](../agents/agent-host.md), [concurrency.md](../runtime/concurrency.md), [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md), [local-cloud-crate-architecture.md](../archived/architecture/2026-09-21-local-cloud-crate-architecture.md), [daemon-api-surface-conventions.md](../runtime/daemon-api-surface-conventions.md), [schemas-directory-layout.md](schemas-directory-layout.md)
 
 ## 0. Authority
 
@@ -55,7 +55,7 @@ These names and roles stay. The refactor does not invent a second CLI, a second 
 
 ### Current workspace boundary inventory
 
-These six workspace crates extend the frozen 2026-05 inventory in [local-cloud-crate-architecture.md](../archived/local-cloud-crate-architecture.md); they support the authority graph in §4.2, not another product or host. Membership is declared in root `Cargo.toml`; the linked per-crate `AGENTS.md` files own their detailed rules.
+These six workspace crates extend the frozen 2026-05 inventory in [local-cloud-crate-architecture.md](../archived/architecture/2026-09-21-local-cloud-crate-architecture.md); they support the authority graph in §4.2, not another product or host. Membership is declared in root `Cargo.toml`; the linked per-crate `AGENTS.md` files own their detailed rules.
 
 | Workspace crate | Boundary role |
 | --- | --- |

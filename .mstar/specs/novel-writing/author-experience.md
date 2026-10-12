@@ -8,8 +8,8 @@
 **Coordinates with**:
 
 - [cli-spec.md](../cli/cli-spec.md) — §6.0B current command IA + §7 first-run UX principles
-- [creator-run-preset-entry.md](../archived/creator-run-preset-entry.md) — historical V1.45 CLI IA (its generic preset runner was retired in v1.193 P2; kept for provenance)
-- [creator-centric-entry-model.md](../archived/creator-centric-entry-model.md) — historical §3.1 local bootstrap (≤7 steps)
+- [creator-run-preset-entry.md](../archived/creator/2026-09-21-creator-run-preset-entry.md) — historical V1.45 CLI IA (its generic preset runner was retired in v1.193 P2; kept for provenance)
+- [creator-centric-entry-model.md](../archived/creator/2026-06-07-creator-centric-entry-model.md) — historical §3.1 local bootstrap (≤7 steps)
 - [workflow-profile.md](workflow-profile.md) — artifact layout + completion §6
 - [quality-loop.md](quality-loop.md) — findings + review visibility
 - [creator-workflow.md](../creator/creator-workflow.md) — FL-E stage names in narrative

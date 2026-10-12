@@ -10,9 +10,9 @@
 **Coordinates with**:
 
 - [cli-spec.md](../cli/cli-spec.md) — current CLI contract; its former daemon Web UI launcher is historical
-- [rust-core-service-boundary.md](../architecture/rust-core-service-boundary.md) — current core / TS service boundary; [daemon-runtime.md](../archived/daemon-runtime.md) retains the retired axum/static-asset topology
+- [rust-core-service-boundary.md](../architecture/rust-core-service-boundary.md) — current core / TS service boundary; [daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md) retains the retired axum/static-asset topology
 - [schemas-external-consumer-boundary.md](../architecture/schemas-external-consumer-boundary.md) — the bundled UI is a first-class external consumer of `@42ch/nexus-contracts`
-- [local-cloud-crate-architecture.md](../archived/local-cloud-crate-architecture.md) §1 — strict local-product vs cloud-product separation
+- [local-cloud-crate-architecture.md](../archived/architecture/2026-09-21-local-cloud-crate-architecture.md) §1 — strict local-product vs cloud-product separation
 - Repo-root [`DESIGN.md`](../../../DESIGN.md) + [`DESIGN.dark.md`](../../../DESIGN.dark.md) — sole normative DESIGN pair *(V1.98: supersedes former `apps/web/DESIGN*.md` — see §30)*
 - [daemon-api-surface-conventions.md](../runtime/daemon-api-surface-conventions.md) (NEW, `@architect`-authored Master) — cursor pagination / `ErrorResponse` / naming conventions the UI data layer relies on
 

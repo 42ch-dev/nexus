@@ -88,7 +88,7 @@ struct ChapterContent {
 - The module constructs local `StoryBundle`s containing full chapter text; it does not serialize a platform request or call HTTP.
 - **Current cloud path:** [`nexus42 platform sync push`](../cli/cli-spec.md#142-默认模式) delegates to [`commands/sync/mod.rs`](../../../apps/nexus42/src/commands/sync/mod.rs), which constructs a schema-generated `Bundle` via `nexus-cloud-sync::delta_bundle::BundleBuilder` and passes it to `SyncClient::push_bundle`. It does not invoke this chapter scanner or accept its `StoryBundle`.
 - **Historical target (DR-54):** connecting the chapter library to cloud transport was a separate proposal, not evidence of shipped upload integration. Default sync must not upload full manuscript text; an explicit publication path is distinct from structured sync ([CLI Master §14.2](../cli/cli-spec.md#142-默认模式)).
-- **Legacy (pre–V1.21):** the `nexus-sync` crate and daemon `POST /v1/local/sync/push` path are retired; they are not alternate scanner owners (see [local-cloud-crate-architecture.md](../archived/local-cloud-crate-architecture.md) §5–§6).
+- **Legacy (pre–V1.21):** the `nexus-sync` crate and daemon `POST /v1/local/sync/push` path are retired; they are not alternate scanner owners (see [local-cloud-crate-architecture.md](../archived/architecture/2026-09-21-local-cloud-crate-architecture.md) §5–§6).
 - Platform wire types remain schema-generated contracts; the local `StoryBundle` and `ChapterContent` above are not generated DTOs. Platform publish (DF-59) remains outside this module contract.
 
 ---
@@ -175,6 +175,6 @@ struct ChapterContent {
 
 - The sync module produces `StoryBundle`s
 - **Target (long-term):** platform upload is handled by **`nexus-cloud-sync`** when the CLI runs `nexus42 sync push` (cloud product line). The module does **not** call platform HTTP directly. **Durable roadmap:** DR-54.
-- **Legacy (pre–V1.21):** some builds still route upload through the `nexus-sync` crate and `POST /v1/local/sync/push` on the daemon; that path is **retired** per [local-cloud-crate-architecture.md](../archived/local-cloud-crate-architecture.md) §5–§6.
+- **Legacy (pre–V1.21):** some builds still route upload through the `nexus-sync` crate and `POST /v1/local/sync/push` on the daemon; that path is **retired** per [local-cloud-crate-architecture.md](../archived/architecture/2026-09-21-local-cloud-crate-architecture.md) §5–§6.
 - Wire bundles use types from `@42ch/nexus-contracts` / `schemas/domain/` + `schemas/platform/sync/` (no duplicate DTOs)
 - **V1.36 scope**: structured sync only; platform publish (DF-59) is explicitly OUT

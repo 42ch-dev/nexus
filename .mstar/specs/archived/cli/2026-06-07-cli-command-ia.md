@@ -4,15 +4,15 @@
 **Document class**: Master (historical V1.35 lock; retained rationale supplement)  
 **Created**: 2026-06-06  
 **Shipped**: 2026-06-07 (V1.35 P5 spec-tracker-hygiene)  
-**Supersedes**: pre-V1.35 [cli-spec.md](../cli/cli-spec.md) §6.0B six-group lock
-**Merged into**: [cli-spec.md](../cli/cli-spec.md) §6.0B in V1.35 P5; retained as shipped IA rationale and acceptance supplement
+**Supersedes**: pre-V1.35 [cli-spec.md](../../cli/cli-spec.md) §6.0B six-group lock
+**Merged into**: [cli-spec.md](../../cli/cli-spec.md) §6.0B in V1.35 P5; retained as shipped IA rationale and acceptance supplement
 **Scope**: Top-level `nexus42` command groups, deprecation rules, creator-centric entry  
-**Supersession (v1.193 P2)**: Current command authority is [cli-spec.md](../cli/cli-spec.md) §6.0B plus its delivered v1.193 P2 overlay, checked against `apps/nexus42/src/cli.rs`. The daemon group (including lifecycle/schedule controls and hidden `daemon-run`), `web-embed`, DaemonClient leaves, `creator run` / `creator bootstrap` and the other incomplete runner entries, and the top-level `sync` alias were removed. `platform sync` is canonical; the direct-core `cli` cohort is the ordinary default (`apps/nexus42/Cargo.toml`). The V1.35 rationale and later pre-retirement amendments below are historical, not current command or onboarding rules.
+**Supersession (v1.193 P2)**: Current command authority is [cli-spec.md](../../cli/cli-spec.md) §6.0B plus its delivered v1.193 P2 overlay, checked against `apps/nexus42/src/cli.rs`. The daemon group (including lifecycle/schedule controls and hidden `daemon-run`), `web-embed`, DaemonClient leaves, `creator run` / `creator bootstrap` and the other incomplete runner entries, and the top-level `sync` alias were removed. `platform sync` is canonical; the direct-core `cli` cohort is the ordinary default (`apps/nexus42/Cargo.toml`). The V1.35 rationale and later pre-retirement amendments below are historical, not current command or onboarding rules.
 **Coordinates with**:
 
-- [cli-spec.md](../cli/cli-spec.md) — per-command detail (§6 subsections remain authoritative for flags)
-- [creator-centric-entry-model.md](creator-centric-entry-model.md) — entry semantics
-- [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md) — local vs cloud split
+- [cli-spec.md](../../cli/cli-spec.md) — per-command detail (§6 subsections remain authoritative for flags)
+- [creator-centric-entry-model.md](../creator/2026-06-07-creator-centric-entry-model.md) — entry semantics
+- [local-cloud-crate-architecture.md](../architecture/2026-09-21-local-cloud-crate-architecture.md) — local vs cloud split
 
 ---
 
@@ -64,7 +64,7 @@ No sixth top-level group in V1.35. Pre-release allows deprecation aliases (see �
 
 | Entry | Role |
 | --- | --- |
-| `creator run <preset_id> [<work_id>]` (retired v1.193 P2) | Historical generic preset dispatch; see [creator-run-preset-entry.md](creator-run-preset-entry.md) |
+| `creator run <preset_id> [<work_id>]` (retired v1.193 P2) | Historical generic preset dispatch; see [creator-run-preset-entry.md](../creator/2026-09-21-creator-run-preset-entry.md) |
 | `creator bootstrap …` (retired v1.193 P2) | Historical composite Work onboarding (V1.45 generic runner; see creator-run-preset-entry.md) |
 | `creator works …` | Atomic Work ops only (`inspire`, `reopen`, `resume-chain`, `reconcile-chapters`, …) |
 

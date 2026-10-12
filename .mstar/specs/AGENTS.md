@@ -10,12 +10,24 @@ Parent rules: [`../knowledge/AGENTS.md`](../knowledge/AGENTS.md). Repo root: [`.
 
 - **Domain subdirectories** — each spec lives in the domain dir that owns it: `architecture/`, `runtime/`, `compute/`, `cli/`, `orchestration/`, `agents/`, `creator/`, `surfaces/`, `contracts/`. One spec file per kebab-case basename; no version suffix in filenames.
 - **`novel-writing/` subtree** — all `work_profile: novel` Feature line specs and Draft overlays (index: [novel-writing/README.md](novel-writing/README.md)); unchanged by the 2026-09-29 reorganization.
-- **`archived/`** — retired, deprecated, and historical records only (retired host records, historical rationale supplements, legacy acceptance records, redirect stubs). Archived records are cited for history; they are never implement authority and do not grow new normative sections.
+- **`archived/`** — retired, deprecated, and historical records only (retired host records, historical rationale supplements, legacy acceptance records, redirect stubs), stored as `archived/{class}/yyyy-mm-dd-<topic-title>.md` (**Archived naming** below). Files under archived/ are frozen historical snapshots: never edit them or treat them as current authority. Archived records are cited for history and do not grow new normative sections. `specs/archived/**` is **git-tracked** (`.gitignore` re-includes `.mstar/specs/**`), so the snapshots persist with the repository and are the archive of record; the harness-root `.mstar/archived/**` is gitignored process material and is **not** an archive of record.
 - **Root** keeps only [README.md](README.md) (index) and this file (rules).
 - **New specs** land in the matching domain dir; a spec that fits no dir goes to the closest one and the README index flags it. Retired or deprecated records move to `archived/`.
 - **Moves require the full link-migration sweep**: every spec-to-spec relative link, `knowledge/**` spec-links, root `AGENTS.md`/`DESIGN.md`/`CONCEPTS.md`/`STRATEGY.md`, `docs/**`, and per-directory `AGENTS.md` files are retargeted in the same change; the README two-way index/disk diff and a 100% relative-link check must pass before commit.
 - **Exploration and draft overlays** live in their domain dir with explicit header status — not under `knowledge/` root.
 - *Authorization:* the maintainer authorized replacing the former flat-layout invariant with this domain-subdirectory taxonomy on **2026-09-29** (executed as one bulk `git mv` + scripted link rewrite).
+
+---
+
+## Archived naming
+
+Archived paths are **`archived/{class}/yyyy-mm-dd-<topic-title>.md`** — never flat in the `archived/` root:
+
+- **`{class}`** — the domain directory the record originally belonged to: `architecture/`, `runtime/`, `cli/`, `orchestration/`, `agents/`, `creator/`, `surfaces/`, `contracts/`, `compute/`, `novel-writing/`.
+- **`yyyy-mm-dd`** — the record's **evidenced** retirement/supersession date, taken from its own header (`Status`, iteration, or version record) and resolved against the repository's iteration history when the header names a version but no date. When no date can be evidenced, use the repository archival-move date and state that basis in the README row.
+- **`<topic-title>`** — the original topic in kebab-case, with **no version suffix**.
+
+An archiving change is the `git mv` **plus** the full link-migration sweep above **plus** the README two-way index/disk check (archived-table rows ↔ `archived/**` files); a frozen record gains no new normative sections afterwards.
 
 ---
 

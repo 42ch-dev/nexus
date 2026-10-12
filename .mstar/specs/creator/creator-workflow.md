@@ -20,7 +20,7 @@
 
 The stage vocabulary and stored Work state remain: `current_stage`, `stage_status`, `current_chapter`, `auto_chain_enabled`, `driver_schedule_id`, and `auto_chain_interrupted` are retained in [`crates/nexus-local-db/src/works.rs`](../../../crates/nexus-local-db/src/works.rs) (`WorkRecord`, `WORKS_COLUMNS`). Retained `creator works` commands expose Work state and atomic operations; **field persistence or visibility does not promise automatic stage dispatch, a live driver, or restart resume**.
 
-[`apps/nexus42/src/commands/creator/works/mod.rs`](../../../apps/nexus42/src/commands/creator/works/mod.rs) records the v1.193 P2-T1 removal of the incomplete Creator runner and `works intake` / `works resume-chain`. Its status output still reports `auto_chain_enabled`, `driver_schedule_id`, and interrupted state, but deliberately advertises no resume remediation command. The generic `creator run <preset_id>` entry is also retired, with no replacement CLI preset-dispatch entrance; see [creator-run-preset-entry.md](../archived/creator-run-preset-entry.md) §0.
+[`apps/nexus42/src/commands/creator/works/mod.rs`](../../../apps/nexus42/src/commands/creator/works/mod.rs) records the v1.193 P2-T1 removal of the incomplete Creator runner and `works intake` / `works resume-chain`. Its status output still reports `auto_chain_enabled`, `driver_schedule_id`, and interrupted state, but deliberately advertises no resume remediation command. The generic `creator run <preset_id>` entry is also retired, with no replacement CLI preset-dispatch entrance; see [creator-run-preset-entry.md](../archived/creator/2026-09-21-creator-run-preset-entry.md) §0.
 
 **Reading boundary:** the execution rules, command journeys, automatic full-stage/chapter progression, and daemon restart continuation in §1–§7 are preserved as shipped history, not present-day scheduling instructions. The stage/field vocabulary and §5.6 SOUL read contract remain distinct from those retired execution claims.
 
@@ -165,7 +165,7 @@ When `auto_chain_enabled` on a Work (default true for new starts):
 
 `creator run resume <work_id>` recovers when auto-resume did not run or user disabled auto-chain.
 
-**Retirement boundary:** the V1.39 list above is historical shipped behavior. Both the old `creator run resume` spelling and its later `creator works resume-chain` entrance are removed; no current Work restart-continuation command is claimed. The retained checkpoint fields are observable state only (§0), not evidence of a resumed chain. [daemon-runtime.md](../archived/daemon-runtime.md) is itself a retired-host record and does not restore this execution path.
+**Retirement boundary:** the V1.39 list above is historical shipped behavior. Both the old `creator run resume` spelling and its later `creator works resume-chain` entrance are removed; no current Work restart-continuation command is claimed. The retained checkpoint fields are observable state only (§0), not evidence of a resumed chain. [daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md) is itself a retired-host record and does not restore this execution path.
 
 ### 5.5 Side-input lane (V1.39 extension)
 
@@ -222,7 +222,7 @@ Wire contract: `schemas/daemon-api/memory/memory-fragment-info.schema.json` exte
 
 ## V1.45 supersession (P-last promotion)
 
-**Historical supersession:** [creator-run-preset-entry.md](../archived/creator-run-preset-entry.md) shipped as the V1.45 Master and superseded the FL-E CLI table with preset-id grammar and three-plane IA. That runner was retired in v1.193 P2-T1; its historical promotion is not current dispatch authority. Current workflow scope is §0.
+**Historical supersession:** [creator-run-preset-entry.md](../archived/creator/2026-09-21-creator-run-preset-entry.md) shipped as the V1.45 Master and superseded the FL-E CLI table with preset-id grammar and three-plane IA. That runner was retired in v1.193 P2-T1; its historical promotion is not current dispatch authority. Current workflow scope is §0.
 
 ---
 

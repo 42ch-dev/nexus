@@ -5,7 +5,7 @@
 | **Status** | Shipped — V1.65 chapter surface; V1.75 retired whole-document outline PUT in favor of the canvas patch route |
 | **Document class** | Feature line |
 | **Scope** | Chapter list/detail, outline read, structure PATCH, and body read-only Daemon API contracts under `/v1/daemon/works/{work_id}/chapters/*` |
-| **Coordinates with** | [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md), [daemon-runtime.md](../archived/daemon-runtime.md), [schemas-directory-layout.md](../architecture/schemas-directory-layout.md), [web-ui.md](../surfaces/web-ui.md), repo-root [`DESIGN.md`](../../../DESIGN.md) |
+| **Coordinates with** | [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md), [daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md), [schemas-directory-layout.md](../architecture/schemas-directory-layout.md), [web-ui.md](../surfaces/web-ui.md), repo-root [`DESIGN.md`](../../../DESIGN.md) |
 | **Implementation owner** | `crates/nexus-core/src/content.rs` (chapter content/metadata service) + `crates/nexus-core/src/outline.rs` (outline/structure operations), exposed through `crates/nexus-core-node/src/domain.rs`; metadata persistence: `crates/nexus-local-db/src/work_chapters.rs`. Web UI consumes only through `NexusClient`. |
 
 ---

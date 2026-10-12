@@ -108,7 +108,7 @@ Existing rows remain valid. No automatic status rewrite on migration. Default fo
 
 ### 3.4 Review-master CLI surface (V1.45 P0–P2 — generic preset dispatch; **runner retired in v1.193 P2**)
 
-V1.44 shipped a dedicated `review-master` subcommand. V1.45 replaced it with the generic `creator run <preset_id>` entry — `creator run novel-review-master` was the preset-id form. **Both entries were removed in v1.193 P2**: no CLI preset-dispatch entrance exists today ([creator-run-preset-entry.md](../archived/creator-run-preset-entry.md) is the historical Master). Preset admission goes through the core execution surface (schedule add via `POST /v1/daemon/orchestration/schedules`, served by `apps/nexus-service`); the retained CLI scheduling surface is `creator works cron` declaration editing. Findings listing lives on `creator works status`.
+V1.44 shipped a dedicated `review-master` subcommand. V1.45 replaced it with the generic `creator run <preset_id>` entry — `creator run novel-review-master` was the preset-id form. **Both entries were removed in v1.193 P2**: no CLI preset-dispatch entrance exists today ([creator-run-preset-entry.md](../archived/creator/2026-09-21-creator-run-preset-entry.md) is the historical Master). Preset admission goes through the core execution surface (schedule add via `POST /v1/daemon/orchestration/schedules`, served by `apps/nexus-service`); the retained CLI scheduling surface is `creator works cron` declaration editing. Findings listing lives on `creator works status`.
 
 **Normative CLI (Shipped V1.45 — historical record, entry removed in v1.193 P2):**
 
@@ -301,4 +301,4 @@ V1.48 closes the novel quality loop: durable findings enrich the writing prompt,
 
 ## V1.45 supersession (P-last promotion)
 
-**Superseded by**: [creator-run-preset-entry.md](../archived/creator-run-preset-entry.md) (Shipped Master V1.45). The `novel-review-master` preset id + enqueue-only semantics + audit preset ids are now part of the canonical Master body.
+**Superseded by**: [creator-run-preset-entry.md](../archived/creator/2026-09-21-creator-run-preset-entry.md) (Shipped Master V1.45). The `novel-review-master` preset id + enqueue-only semantics + audit preset ids are now part of the canonical Master body.

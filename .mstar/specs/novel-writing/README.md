@@ -61,7 +61,7 @@ manuscript-audit.md     → DF-69 on-demand audit (out-of-band)
 | Multi-work completion + locks | `multi-work-lifecycle.md` |
 | Pool / default Work | `work-pool.md` |
 | Sync scan roots | `sync-contract.md` (layout SSOT: `workflow-profile.md` §3, §7) |
-| Top-level CLI groups / preset dispatch | Current authority: [cli-spec.md §6.0B](../cli/cli-spec.md#60b-v2-命令信息架构权威). [creator-run-preset-entry.md](../archived/creator-run-preset-entry.md) is historical: generic runner retired v1.193 P2-T1; no replacement CLI preset-dispatch entrance. |
+| Top-level CLI groups / preset dispatch | Current authority: [cli-spec.md §6.0B](../cli/cli-spec.md#60b-v2-命令信息架构权威). [creator-run-preset-entry.md](../archived/creator/2026-09-21-creator-run-preset-entry.md) is historical: generic runner retired v1.193 P2-T1; no replacement CLI preset-dispatch entrance. |
 
 ---
 

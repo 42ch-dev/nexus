@@ -83,7 +83,7 @@ Without Work, users must understand `daemon schedule`, preset IDs, seed strings,
 
 - **Creator aggregate / local identity:** [`crates/nexus-creator/src/creator.rs`](../../../crates/nexus-creator/src/creator.rs) defines `Creator`, its identity/status, and user linkage. `nexus-creator` does **not** implement the Work store or Work operations.
 - **Work persistence:** each `(creator_id, workspace_slug)` has its `state.db` Work store. `nexus-local-db` owns the `works` tables/migrations (starting with [`20260604_works_table.sql`](../../../crates/nexus-local-db/migrations/20260604_works_table.sql)) and the [`works.rs` DAO / `WorkRecord`](../../../crates/nexus-local-db/src/works.rs); chapter persistence is in [`work_chapters.rs`](../../../crates/nexus-local-db/src/work_chapters.rs). Work is not a nested field of the Creator aggregate.
-- **Work operations / CLI:** [`crates/nexus-core/src/works.rs`](../../../crates/nexus-core/src/works.rs) owns the typed Work service operations used by the retained [`creator works` command families](../../../apps/nexus42/src/commands/creator/works/mod.rs), including selection/status/pool, inspiration, reopening, completion-lock, and chapter reconciliation. Historical `creator run` spellings in this spec are not current implementation owners or dispatch entrances; see [creator-run-preset-entry.md](../archived/creator-run-preset-entry.md) §0 for the v1.193 P2-T1 retirement.
+- **Work operations / CLI:** [`crates/nexus-core/src/works.rs`](../../../crates/nexus-core/src/works.rs) owns the typed Work service operations used by the retained [`creator works` command families](../../../apps/nexus42/src/commands/creator/works/mod.rs), including selection/status/pool, inspiration, reopening, completion-lock, and chapter reconciliation. Historical `creator run` spellings in this spec are not current implementation owners or dispatch entrances; see [creator-run-preset-entry.md](../archived/creator/2026-09-21-creator-run-preset-entry.md) §0 for the v1.193 P2-T1 retirement.
 
 ### 3.4 Invariants
 
@@ -293,4 +293,4 @@ FL-E reused V1.33 `creator bootstrap` (composite onboarding) and `creator run <p
 
 ## V1.45 supersession (P-last promotion)
 
-**Superseded by**: [creator-run-preset-entry.md](../archived/creator-run-preset-entry.md) (Shipped Master V1.45). The side-input lane (`creator works inspire`), `run_intents` enforcement at schedule creation, and the `creator bootstrap`-only new-Work rule are now part of the canonical Master body.
+**Superseded by**: [creator-run-preset-entry.md](../archived/creator/2026-09-21-creator-run-preset-entry.md) (Shipped Master V1.45). The side-input lane (`creator works inspire`), `run_intents` enforcement at schedule creation, and the `creator bootstrap`-only new-Work rule are now part of the canonical Master body.

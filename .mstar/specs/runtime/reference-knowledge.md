@@ -5,7 +5,7 @@
 **Created**: 2026-06-22 (Draft at P1)
 **Promoted to Master**: 2026-06-22 (V1.58 P-last)
 **Scope**: Reference body externalization — refreshable scan pipeline for DF-44
-**Coordinates with**: [acp-capability-set.md](../agents/acp-capability-set.md) §4, [capability-registry.md](../agents/capability-registry.md) §2.8, [daemon-runtime.md](../archived/daemon-runtime.md) §10, [entity-scope-model.md](../architecture/entity-scope-model.md)
+**Coordinates with**: [acp-capability-set.md](../agents/acp-capability-set.md) §4, [capability-registry.md](../agents/capability-registry.md) §2.8, [daemon-runtime.md](../archived/runtime/2026-09-21-daemon-runtime.md) §10, [entity-scope-model.md](../architecture/entity-scope-model.md)
 
 ---
 

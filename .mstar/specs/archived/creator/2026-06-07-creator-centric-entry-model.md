@@ -4,15 +4,15 @@
 **Document class**: Master (historical V1.35 lock; retained entry-model supplement)  
 **Created**: 2026-06-06  
 **Shipped**: 2026-06-07 (V1.35 P5 spec-tracker-hygiene)  
-**Merged into**: [cli-spec.md](../cli/cli-spec.md) §7 in V1.35 P5; retained as shipped entry-model supplement
+**Merged into**: [cli-spec.md](../../cli/cli-spec.md) §7 in V1.35 P5; retained as shipped entry-model supplement
 **Scope**: Product-level rules for **when** users enter via `creator` vs `platform` vs `system`  
-**Supersession (v1.193 P2)**: Current entry semantics are defined by [cli-spec.md](../cli/cli-spec.md) §6.0B and its delivered v1.193 P2 overlay, not this V1.35 onboarding record. `daemon start`, `creator bootstrap`, `creator run`, and all daemon scheduling controls were retired; the steps below that use them are historical, not current entry rules. The direct-core `cli` cohort is now the ordinary default (`apps/nexus42/src/cli.rs`, `apps/nexus42/src/commands/creator/mod.rs`, `apps/nexus42/Cargo.toml`).
+**Supersession (v1.193 P2)**: Current entry semantics are defined by [cli-spec.md](../../cli/cli-spec.md) §6.0B and its delivered v1.193 P2 overlay, not this V1.35 onboarding record. `daemon start`, `creator bootstrap`, `creator run`, and all daemon scheduling controls were retired; the steps below that use them are historical, not current entry rules. The direct-core `cli` cohort is now the ordinary default (`apps/nexus42/src/cli.rs`, `apps/nexus42/src/commands/creator/mod.rs`, `apps/nexus42/Cargo.toml`).
 **Coordinates with**:
 
-- [cli-command-ia.md](cli-command-ia.md) — top-level IA
-- [cli-spec.md](../cli/cli-spec.md) — command detail
-- [work-experience-model.md](../creator/work-experience-model.md) — Work journey
-- [entity-scope-model.md](../architecture/entity-scope-model.md) — KB / knowledge scopes
+- [cli-command-ia.md](../cli/2026-06-07-cli-command-ia.md) — top-level IA
+- [cli-spec.md](../../cli/cli-spec.md) — command detail
+- [work-experience-model.md](../../creator/work-experience-model.md) — Work journey
+- [entity-scope-model.md](../../architecture/entity-scope-model.md) — KB / knowledge scopes
 
 ---
 

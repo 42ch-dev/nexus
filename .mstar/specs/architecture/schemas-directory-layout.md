@@ -8,7 +8,7 @@
 | **Document class** | Master |
 | **Scope** | Folder names, consumer-scope mapping, README rules, rename policy; **not** field-level DTO definitions (those stay in platform `v1-spec` + `data-model-v1`) |
 | **Last updated** | 2026-09-04 — reconciled current Daemon API schema and generated-module names through V1.183. |
-| **Related** | [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md), [local-cloud-crate-architecture.md](../archived/local-cloud-crate-architecture.md), [compute-module-abi.md](../compute/compute-module-abi.md) §4–§5, [wasm-host.md](../compute/wasm-host.md) §6–§7, [spoke-adapter-architecture.md](spoke-adapter-architecture.md), [schemas/AGENTS.md](../../../schemas/AGENTS.md), [tooling/AGENTS.md](../../../tooling/AGENTS.md) |
+| **Related** | [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md), [local-cloud-crate-architecture.md](../archived/architecture/2026-09-21-local-cloud-crate-architecture.md), [compute-module-abi.md](../compute/compute-module-abi.md) §4–§5, [wasm-host.md](../compute/wasm-host.md) §6–§7, [spoke-adapter-architecture.md](spoke-adapter-architecture.md), [schemas/AGENTS.md](../../../schemas/AGENTS.md), [tooling/AGENTS.md](../../../tooling/AGENTS.md) |
 
 **Do not confuse:**
 
