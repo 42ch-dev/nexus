@@ -100,7 +100,7 @@ The static shell (HTML/JS/CSS assets) is **unauthenticated** by design: it carri
 
 ### 4.2 Auth model (historical daemon boundary)
 
-The Web UI introduces **no new auth surface**. It inherits the daemon's existing loopback model (V1.20 compass): Daemon API data endpoints are reachable on `localhost` and are **keyless on loopback**; the static shell needs no credential because it holds no data. The UI does not add login, sessions, or tokens. Any future remote (non-loopback) access is explicitly opt-in (§8) and would require both `NEXUS42_DAEMON_API_KEY` and `NEXUS_DAEMON_REMOTE_BIND=1`; loopback remains the default.
+The Web UI introduces **no new auth surface**. It inherits the daemon's existing loopback model (V1.20 compass): Daemon API data endpoints are reachable on `localhost` and are **keyless on loopback**; the static shell needs no credential because it holds no data. The UI does not add login, sessions, or tokens. Any future remote (non-loopback) access is explicitly opt-in (§8): the HTTP service requires `--allow-remote` plus `--tls-cert`/`--tls-key` and an API key (`NEXUS42_DAEMON_API_KEY`); `NEXUS_DAEMON_REMOTE_BIND=1` is the separate core Connect peer-tools gate, not this HTTP surface. Loopback remains the default.
 
 > Implementation note for `daemon-api-surface-conventions.md`: the shared `ErrorResponse` (F-E1) is what the UI's toast/notification layer parses; the UI must never have to special-case per-handler error shapes.
 
