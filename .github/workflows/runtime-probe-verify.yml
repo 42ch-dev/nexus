@@ -24,7 +24,7 @@ jobs:
       BUILD_RUN_ID: ${{ inputs.build_run_id }}
       EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: trpg-nexus-context-probe-windows-x64
           path: artifact
