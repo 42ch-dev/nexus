@@ -120,7 +120,7 @@ hickory-proto block → next `cargo metadata` re-writes it).
 
 ## Update (v1.195, 2026-09-24): the upstream unblock this doc named as "unreleased" has since been adopted — re-triage, do not assume closure
 
-The ≥0.57 libp2p line this doc cited as the unblock for the hickory-proto family is no longer unreleased: the v1.195 SPOKE lockstep moved the workspace to `spoke-connect 0.14.1` with the companion `libp2p` pin at `=0.57.0` (see [../engineering/spoke-lockstep-upgrade-procedure.md](../engineering/spoke-lockstep-upgrade-procedure.md)). Two consequences for triage:
+The ≥0.57 libp2p line this doc cited as the unblock for the hickory-proto family is no longer unreleased: the v1.195 SPOKE lockstep moved the workspace to `spoke-connect 0.14.1` with the companion `libp2p` pin at `=0.57.0` (see [../conventions/spoke-lockstep-upgrade-procedure.md](../conventions/spoke-lockstep-upgrade-procedure.md)). Two consequences for triage:
 
 - **The earlier alert dispositions are now stale inputs, not results.** Whether the yamux/hickory-proto entries (and their activated-under-`connect-host` reachability) still exist is a property of the *new* resolve, so re-run the four probes above against the upgraded graph. Nothing in this document is evidence that an alert closed — only the probes are.
 - **A pin move is not a security review.** The lockstep round proved build and behaviour parity for the pins it changed; it did not re-triage the advisory backlog, and it did not remove the optional-dependency entries that keep lockfile-based alerts open while `spoke-connect` stays in the tree.

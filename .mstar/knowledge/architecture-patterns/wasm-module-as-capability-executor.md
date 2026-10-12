@@ -180,7 +180,7 @@ engine.compute(&module, &manifest, &compute_input)?;
 
 ## References
 
-- Module authoring (the wasm half): [../engineering/compute-module-sdk-authoring-pattern.md](../engineering/compute-module-sdk-authoring-pattern.md)
+- Module authoring (the wasm half): [compute-module-sdk-authoring-pattern.md](compute-module-sdk-authoring-pattern.md)
 - Embedded-pin hash gotcha: [../best-practices/embedded-pinned-wasm-sha256-alignment.md](../best-practices/embedded-pinned-wasm-sha256-alignment.md)
 - Raw-home helpers: [../conventions/nexus-home-layout-path-helpers.md](../conventions/nexus-home-layout-path-helpers.md)
 - Wire gate (AR-40 sanctioned diffs): [../conventions/wire-contracts-frozen-verification.md](../conventions/wire-contracts-frozen-verification.md)

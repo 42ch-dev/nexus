@@ -146,7 +146,7 @@ real regression net for the next iteration that touches the graph.
   corrections list #1).
 - Companion docs: `conventions/wire-contracts-frozen-verification.md`
   (sibling gate discipline — wire contracts, not the dependency graph);
-  `engineering/spoke-lockstep-upgrade-procedure.md` (lockstep pins +
+  `conventions/spoke-lockstep-upgrade-procedure.md` (lockstep pins +
   feature-graph evidence); `workflow-patterns/cargo-lockfile-feature-independent-dependabot.md`
   (lockfile presence ≠ compile reachability);
   `architecture-patterns/connect-host-opt-in-feature-gate.md` (N-C0 pattern:

@@ -27,7 +27,7 @@ V1.166 shipped world-rules read-only; V1.169 P1/P2 added the write surface (DF-8
 3. **Member-aware validator seam, one grammar.** When the shared validator returns string errors, add an additive member-aware variant (`parse_carrier_json_member -> CarrierError { member, reason }`) and delegate the legacy function to it (`map_err(|e| e.reason)`) — CLI messages stay byte-identical; the API projects `format!("{}.{}", prefix, member)`. Never string-sniff messages at the call site.
 4. **Validation order is contract.** Addressing errors (404, no cross-world existence leak) precede payload errors on PATCH; a foreign id must learn nothing about validation behavior. Pin it with a **discriminating test**: invalid payload → unknown/cross-world id must still 404, not 400.
 5. **Fail-closed storage corruption.** Malformed stored JSON on a mutation path → 500 `internal`, no write; pin with a seeded-corruption test.
-6. **Schema-level null-union when absence must differ from empty** (typify quirk, see [codegen-optional-field-callsite-coverage.md](../engineering/codegen-optional-field-callsite-coverage.md)): typify collapses optional arrays (absent ≡ `[]`); a `["array","null"]` union on the update schema yields `Option<Vec<_>>` where absent/null = unchanged and explicit `[]` = meaningful clear.
+6. **Schema-level null-union when absence must differ from empty** (typify quirk, see [codegen-optional-field-callsite-coverage.md](../build-errors/codegen-optional-field-callsite-coverage.md)): typify collapses optional arrays (absent ≡ `[]`); a `["array","null"]` union on the update schema yields `Option<Vec<_>>` where absent/null = unchanged and explicit `[]` = meaningful clear.
 
 ## Why This Matters
 

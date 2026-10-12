@@ -159,5 +159,5 @@ pub struct WorldRef {
 - Normative ABI: `.mstar/specs/compute/compute-module-abi.md` (ABI §6.3 sentinels, §7 manifest contract, §9.1 versioning)
 - Manifest-hash gotcha: [../best-practices/embedded-pinned-wasm-sha256-alignment.md](../best-practices/embedded-pinned-wasm-sha256-alignment.md)
 - Consumption side (daemon route + Runs): [../architecture-patterns/compute-pillar-invoke-and-runs-history.md](../architecture-patterns/compute-pillar-invoke-and-runs-history.md)
-- Crate topology: [standalone-crate-monorepo-topology.md](standalone-crate-monorepo-topology.md)
+- Crate topology: [../conventions/standalone-crate-monorepo-topology.md](../conventions/standalone-crate-monorepo-topology.md)
 - Iteration spec: v1.170 (`v1.170-computable-dx-locks.md`) AR-2..AR-12
