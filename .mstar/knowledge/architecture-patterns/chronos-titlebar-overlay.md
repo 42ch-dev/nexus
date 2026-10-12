@@ -27,7 +27,7 @@ Dogfood after the VI logo upgrade required a **titlebar-first** Chronos chrome: 
 
 ### 1. Desktop-host Overlay — keep decorations (historical: the native v2 host, retired v1.192)
 
-> **Historical:** the native v2 desktop host was retired in v1.192; Electron (`apps/desktop-electron`) is the only desktop composition now. The host-specific settings below are retained as a historical record; the web-side drag-region contract still holds.
+> **Historical:** the native v2 desktop host was retired in v1.192; Electron (`apps/desktop-electron`) is the only desktop composition now. The host-specific settings below are retained as a historical record; the web-side drag-region attribute contract was retired in v1.214 — the attribute was removed as dead (no consumer). What the web titlebar retains is the plain ink chrome, the macOS safe inset, and the empty-paint double-click callback.
 
 | Setting | Value |
 | --- | --- |
@@ -36,7 +36,7 @@ Dogfood after the VI logo upgrade required a **titlebar-first** Chronos chrome: 
 | Decorations | **on** (native traffic lights) |
 | `trafficLightPosition` | Align native controls with the Chronos bar height/inset |
 
-The **web** titlebar paints the ink plane under the native chrome. Logo/title paint and empty spacer use the drag-region attribute; gear, theme, and health controls are explicit **no-drag** interactive islands.
+The **web** titlebar paints the ink plane under the native chrome. Logo/title paint and the empty spacer are plain ink chrome; the drag-region attribute was retired in v1.214 (removed as dead — no consumer), and what remains is the macOS safe inset plus the empty-paint double-click callback. Gear, theme, and health controls are explicit interactive islands.
 
 ### 2. Layout ownership
 

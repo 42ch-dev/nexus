@@ -116,7 +116,7 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | Document | Description |
 | --- | --- |
 | [architecture-patterns/settings-modal-primary-host.md](architecture-patterns/settings-modal-primary-host.md) | Settings modal primary host — one `SettingsModalHost`, section-descriptor SSOT, deep links over safe background, BrowserRouter dirty leave (restore URL + host confirm), Studio chrome fixtures (V1.131 P0+P2 distilled) |
-| [architecture-patterns/chronos-titlebar-overlay.md](architecture-patterns/chronos-titlebar-overlay.md) | Chronos titlebar Overlay — the retired native host's `titleBarStyle: Overlay` + native traffic lights, web ink bar, non-interactive drag regions only, maximize IPC, human Overlay smoke gate (V1.131 P0 distilled; **desktop-host half historical — the native host retired in v1.192, Electron `apps/desktop-electron` is the sole desktop host; the web-side drag-region contract still holds**) |
+| [architecture-patterns/chronos-titlebar-overlay.md](architecture-patterns/chronos-titlebar-overlay.md) | Chronos titlebar Overlay — the retired native host's `titleBarStyle: Overlay` + native traffic lights, web ink bar, non-interactive drag regions only, maximize IPC, human Overlay smoke gate (V1.131 P0 distilled; **desktop-host half historical — the native host retired in v1.192, Electron `apps/desktop-electron` is the sole desktop host; the web-side drag-region attribute contract is retired in v1.214 — the attribute was removed as dead (no consumer), and the retained parts are the plain ink chrome, the macOS safe inset, and the empty-paint double-click callback**) |
 
 ### V1.137 additions
 

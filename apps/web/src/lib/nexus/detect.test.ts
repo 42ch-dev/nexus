@@ -55,4 +55,11 @@ describe('isDesktopBuild (capability detection — §5 #7)', () => {
     legacyWindow.NEXUS_DESKTOP = true;
     expect(isDesktopBuild()).toBe(false);
   });
+
+  it('does not flip on unrelated global properties (defends against false positives)', () => {
+    // Test seam: inject an unrelated global to prove detection ignores it.
+    (window as unknown as { __UNRELATED_GLOBAL__?: unknown }).__UNRELATED_GLOBAL__ = {};
+    expect(isDesktopBuild()).toBe(false);
+    delete (window as unknown as { __UNRELATED_GLOBAL__?: unknown }).__UNRELATED_GLOBAL__;
+  });
 });
