@@ -52,4 +52,4 @@ After any edit under `schemas/`, run **codegen** and commit `crates/nexus-contra
 | **Daemon API** (external WASM modules; future WebApp/Web-UI) | **Yes** — `daemon-api/compute/` (V1.62), `daemon-api/common/` (F-E1 V1.64), `daemon-api/{works,kb,findings,schedule,workspace,creators}/` (V1.63 P1), `daemon-api/{orchestration,preset-management}/` (V1.63 P3), `daemon-api/agent-host/` (v1.184 P2) |
 | **Local** (daemon `/v1/daemon/*`, orchestration, ACP) | **No** — `nexus-contracts/src/local/` |
 
-See [local-cloud-crate-architecture.md](../.mstar/specs/archived/architecture/2026-09-21-local-cloud-crate-architecture.md).
+Line split and cohort boundaries are owned by [`rust-core-service-boundary.md`](../.mstar/specs/architecture/rust-core-service-boundary.md) §4.2; historical split record: [local-cloud-crate-architecture.md](../.mstar/specs/archived/architecture/2026-09-21-local-cloud-crate-architecture.md).

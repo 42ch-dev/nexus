@@ -10,7 +10,7 @@
 **Supersedes**: — (new topic)
 **Coordinates with**:
 
-- [local-cloud-crate-architecture.md](../archived/architecture/2026-09-21-local-cloud-crate-architecture.md) — crate owners for sync/memory capabilities (§5.2 target names; legacy `nexus-sync` / `nexus-domain` until V1.21)
+- [local-cloud-crate-architecture.md](../archived/architecture/2026-09-21-local-cloud-crate-architecture.md) (historical record) — crate owners for sync/memory capabilities (§5.2 target names; legacy `nexus-sync` / `nexus-domain` until V1.21)
 - [acp-client-tech-spec.md](../agents/acp-client-tech-spec.md) — ACP transport/provider contract and `nexus-acp-host` crate spec
 - TD-9 closed: full 6-state HSM lifecycle (status moves from "gap" to "closed")
 
@@ -155,7 +155,7 @@ The runtime/preset contracts remain authoritative for the retained crates above.
 | `crates/nexus-orchestration`                      | New  | No             | graph-flow adapter, capability trait, preset loader, SQLite `SessionStorage`                  |
 | `crates/nexus-daemon-runtime`                     | Ext. | No             | **Deleted in v1.193 P2** — was: orchestration engine host, lifecycle HSM, `HostFacade` prompt executor, HTTP trigger/query. Current owners: engine/supervisor in `crates/nexus-orchestration`, host composition in `crates/nexus-core`, HTTP family in `apps/nexus-service` |
 | `apps/nexus42`                                    | Ext. | Yes (via host) | Interactive `acp run`; the schedule command groups were retired in v1.193 P2 (retained scheduling CLI surface: `creator works cron` declaration editing) |
-| `crates/nexus-contracts`, `nexus-creator`, `nexus-cloud-domain`, … | Ext. | No | Application crates per [local-cloud-crate-architecture.md](../archived/architecture/2026-09-21-local-cloud-crate-architecture.md); legacy monolith `nexus-domain` retired after V1.21 |
+| `crates/nexus-contracts`, `nexus-creator`, `nexus-cloud-domain`, … | Ext. | No | Application crates — current boundaries: [rust-core-service-boundary.md](../architecture/rust-core-service-boundary.md) §4.1–§4.2; legacy monolith `nexus-domain` retired after V1.21 (historical inventory: [local-cloud-crate-architecture.md](../archived/architecture/2026-09-21-local-cloud-crate-architecture.md)) |
 
 ### 3.3 Data flow for one strategy tick
 

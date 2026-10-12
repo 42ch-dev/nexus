@@ -65,7 +65,9 @@ these boundaries when changing the adapter, boot path or public catalog:
 
 Durable contracts: [agent-host](../../specs/agents/agent-host.md) §§5–8,
 [workspace OCC/recovery](../../specs/runtime/concurrency.md) §9 and
-[run settlement/replay (archived daemon-runtime spec)](../../specs/archived/runtime/2026-09-21-daemon-runtime.md) §20.
+[run settlement / same-run replay](../../specs/orchestration/orchestration-engine.md) §15–§15.1 with
+[principal-bound run-event subscription](principal-bound-run-event-subscription.md);
+the original daemon-writer record is archived ([daemon-runtime.md](../../specs/archived/runtime/2026-09-21-daemon-runtime.md) §20).
 Derived from verified V1.188 P0–P4 runtime, recovery and review evidence;
 the public first-run/Quick Start/live-model composition was explicitly deferred.
 
