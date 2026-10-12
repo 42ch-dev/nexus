@@ -98,3 +98,18 @@ V1.93 ran a "Local API" → "Daemon API" straggler sweep (135 line changes acros
 - **W-002 — broken anchor**: a TOC entry's text was renamed ("Local API Contract Analysis" → "Daemon API Contract Analysis") but the anchor slug `#4-local-api-contract-analysis` was not updated to `#4-daemon-api-contract-analysis`. The §3 anchor-link verification gate above did not yet exist in this checklist; it was added as a result of V1.93.
 
 Takeaways: (1) the §3 greps + anchor check are a **mandatory pre-commit self-check** for any rename sweep, not optional; (2) where a construction is "renaming from X to Y", the *X* side is the historical name and must stay — the replace must be context-aware, not a blind token swap; (3) a fix-wave correcting the stutters + anchors landed in the same iteration (commit `ef1b4efa`) before merge.
+
+## Retiring a surface (not renaming)
+
+Deleting a surface is not a rename: there is no new name to point at, so the sweep must additionally clear four classes that a rename leaves alone.
+
+1. **Static guardrail rules that name the surface.** A `forbid`/assertion that blocks the retired name protects an object that no longer exists and has no reintroduction path. First-principles test before keeping one: *is the protected object still a live threat, and is the invariant already covered by a stronger assertion in the same file?* If not, delete the rule — do not keep an "anti-X" literal for sentimental coverage. When the underlying invariant **is** still live (e.g. "a browser-only app must not import desktop-shell internals"), rewrite the rule against the *current* implementation, not the retired one.
+2. **Docs that still present the surface as live.** Durable knowledge/spec prose often ends with a clause like "the web-side `<surface>` contract still holds". That clause is a claim about the present and must be retired with the surface; keep the historical record, drop the present-tense claim.
+3. **Test assertions of the surface's markers.** Assertions on a deleted attribute/flag/global must be removed in the same commit as the marker. If removing the only case that proved a *general* property (e.g. "detection ignores an unrelated global"), restore that property with a neutral fixture name rather than losing the coverage.
+4. **Dead runtime attributes and keys.** An attribute with no reader (grep both JS/CSS consumers and the current host) is dead code even if a previous host used it. Where a *serialized key* literally contains the retired name, that is an output-shape change, not a pure deletion: authorize it explicitly and record the consumer disposition (who reads it, and that no in-repo reader keys on it).
+
+**Acceptance for a retirement:** `git grep -i <retired-name>` over **tracked** files returns nothing — the gitignored process/history tree is out of scope by construction.
+
+## V1.214 lesson (retired-surface sweep — native desktop host)
+
+The native desktop host was retired at v1.192, but its tokens survived in 85 tracked files: a dedicated agent skill for that host, dead comment/path references to its removed source tree, a host-prefixed drag-region attribute with **no consumer**, and static literals whose only purpose was to forbid the retired host. Two dispositions generalise: (a) the retired host's package-scope import ban and the service-origin negative assertions were **dead rules** — their object was gone and the same files carried stronger assertions (an exact-set `deepEqual`, other `forbid` rules), so they were deleted rather than preserved; (b) the one serialized receipt key that literally contained the token was renamed under explicit authorization with a recorded consumer disposition, because that is a shape change rather than a deletion.
