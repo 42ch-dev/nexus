@@ -50,7 +50,7 @@ The shipped boundary is:
 The shipped Rust ACP SDK is **`agent-client-protocol` 3.2.0**, exact-pinned
 (`=3.2.0`) in `crates/nexus-acp-host/Cargo.toml`. ACP crate major 3 does not
 put the wire on protocol v2 — the adapter stays on stable v1 and does not pull
-`rmcp` (the dependency graph is rmcp-free; see `tooling/check-graph-pins.sh`).
+`rmcp` (the ordinary-CLI ACP graph is rmcp-free; see `tooling/check-graph-pins.sh`).
 v3 makes the SDK's capabilities opt-in: the SDK declares `default = []`, so
 its native transports (`process`, `stdio`) and JSON-Schema generation
 (`schemars`) ship only when explicitly enabled, and Nexus intentionally
