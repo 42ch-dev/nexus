@@ -17,8 +17,8 @@ File names in the latter two groups carry the `.schema.json` suffix. The ABI is 
 ## Related
 
 - **Module authoring + `manifest.json` `schemas` block:** [modules/README.md](../../../modules/README.md)
-- **Compute ABI normative spec:** [compute-module-abi.md](../../../.mstar/specs/compute-module-abi.md)
+- **Compute ABI normative spec:** [compute-module-abi.md](../../../.mstar/specs/compute/compute-module-abi.md)
 - **Runtime host:** `crates/nexus-wasm-host/` (re-exports `ComputeInput` / `ComputeOutput` from `nexus-contracts`)
-- **Layout spec:** [schemas-directory-layout.md](../../../.mstar/specs/schemas-directory-layout.md) §3.5
+- **Layout spec:** [schemas-directory-layout.md](../../../.mstar/specs/architecture/schemas-directory-layout.md) §3.5
 
 **Consumers:** `@42ch/nexus-contracts` (npm), `nexus-wasm-host` Rust crate (ABI envelope re-exports), the native service and Web client (run/discovery DTOs), and external WASM compute modules (ABI envelopes).

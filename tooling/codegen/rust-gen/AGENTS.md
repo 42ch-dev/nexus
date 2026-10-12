@@ -67,4 +67,4 @@ before `add_root_schema`, so the emitted root struct/enum matches the TS contrac
 and the drift-test `entry!` registrations (`World`, `WorkSummary`, `KnowledgeEntry`, …).
 Only the in-memory title is touched; source schema files are never mutated.
 
-See [`../AGENTS.md`](../AGENTS.md) for the codegen pipeline and drift detection.
+See [`tooling/AGENTS.md`](../../AGENTS.md) for the codegen pipeline and drift detection.

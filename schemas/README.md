@@ -1,6 +1,6 @@
 # `schemas/` — External-Consumer JSON Schema Tree
 
-**Authority:** [`.mstar/specs/schemas-directory-layout.md`](../.mstar/specs/schemas-directory-layout.md) (folder layout) + [`.mstar/knowledge/schemas-external-consumer-boundary.md`](../.mstar/knowledge/schemas-external-consumer-boundary.md) (external-consumer vs local-only rule).
+**Authority:** [`.mstar/specs/architecture/schemas-directory-layout.md`](../.mstar/specs/architecture/schemas-directory-layout.md) (folder layout) + [`.mstar/specs/architecture/schemas-external-consumer-boundary.md`](../.mstar/specs/architecture/schemas-external-consumer-boundary.md) (external-consumer vs local-only rule).
 
 **Local-only types** live in `crates/nexus-contracts/src/local/` — not under `schemas/`.
 
