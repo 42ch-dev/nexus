@@ -34,11 +34,15 @@ When implementing runtime behavior, read the rules in [`../specs/AGENTS.md`](../
 
 ## Archiving superseded knowledge
 
-When any knowledge or spec document is superseded:
+The two tracked trees retire differently — the rules split by directory.
 
-1. Remove it from tracked `knowledge/` / `specs/` **entirely** — no archive-pointer stubs. Record supersession in the README index.
+**In `knowledge/`** (indexed tree):
+
+1. Remove the superseded document from tracked `knowledge/` **entirely** — no archive-pointer stubs. Record the supersession in [`README.md`](README.md): its index rows are validated, so a retired document's row is updated in the same change.
 2. Fix all **tracked** in-repo links in the same change.
-3. Update **README indexes only** — not AGENTS files.
+3. Update that README index only — not AGENTS files.
+
+**In `specs/`** (no index — the path is the state): no README row is added or updated. A superseded spec records its supersession in the **merge-target / successor spec's `Supersedes:` provenance line**; a retired record is **frozen** at `archived/{class}/<date>-<topic>.md` and never edited afterwards; a rename or retirement is discovered from **git history**, not from a maintained list.
 
 Do not archive while a crate AGENTS or a shipped spec still treats the path as normative authority.
 
