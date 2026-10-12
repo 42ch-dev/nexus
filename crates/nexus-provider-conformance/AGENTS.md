@@ -42,5 +42,4 @@ fixture CLIs; this crate stays provider-neutral.
 
 ## Design Reference
 
-See `.mstar/plans/2026-09-02-v1.180-p0-provider-conformance-runner.md` and
-`.mstar/specs/active/agents/agent-host.md` §3.4.
+See `.mstar/specs/active/agents/agent-host.md` §3.4.

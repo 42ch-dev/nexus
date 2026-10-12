@@ -8,7 +8,7 @@ surface — **not** the private cloud SaaS.
 
 - Product contract: [`.mstar/specs/active/surfaces/web-ui.md`](../../.mstar/specs/active/surfaces/web-ui.md)
 - Design tokens (SSOT): [`DESIGN.md`](../../DESIGN.md)
-- Plan: [`2026-06-24-v1.64-web-app-scaffold.md`](../../.mstar/plans/2026-06-24-v1.64-web-app-scaffold.md)
+- Plan: `2026-06-24-v1.64-web-app-scaffold` (local plan record)
 - Frontend conventions: [`AGENTS.md`](./AGENTS.md)
 
 ## Scripts

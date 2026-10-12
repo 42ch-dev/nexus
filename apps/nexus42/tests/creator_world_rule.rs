@@ -1,8 +1,8 @@
 //! Server-free tests for the `creator world rule add|list|deactivate|archive`
 //! CLI (V1.166 PD-1 / AR-2 / AR-3, DR-64; direct-core retarget v1.193 P0-T3).
 //!
-//! Plan: `.mstar/plans/2026-08-15-v1.166-p1-rules-driven-check-evaluator.md`
-//! Spec: `.mstar/iterations/v1.166/specs/v1.166-quality-locks.md` §PD-1 / §AR-2 / §AR-3
+//! Plan: `2026-08-15-v1.166-p1-rules-driven-check-evaluator` (local plan record)
+//! Spec: `v1.166-quality-locks` §PD-1 / §AR-2 / §AR-3 (local record)
 //!
 //! Drives the leaf functions (`rule_add` / `rule_list` / `rule_deactivate` / `rule_archive`)
 //! against a hermetic direct-core home — no `$HOME`, no daemon, no Node child

@@ -119,4 +119,4 @@ No additional consumer is in scope. CLI, daemon, and MCA paths must not call `em
 
 ## 8. Roadmap close (product)
 
-When this contract ships, [`harness` RN-OGA-3](../../../projects/harness/roadmap.md) is closeable: Done-definition (identity invalidates index; mismatch fail-closed; lexical fallback explicit) is satisfied in contract form. [`harness` DF-78](../../../projects/harness/roadmap.md) stays open; annotate its gate to "RN-OGA-3 contract locked v1.181". Runtime trigger moves with DF-78 to the platform era.
+When this contract ships, the harness RN-OGA-3 roadmap item is closeable: Done-definition (identity invalidates index; mismatch fail-closed; lexical fallback explicit) is satisfied in contract form. the harness DF-78 roadmap item stays open; annotate its gate to "RN-OGA-3 contract locked v1.181". Runtime trigger moves with DF-78 to the platform era.

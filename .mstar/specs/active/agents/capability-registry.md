@@ -166,7 +166,7 @@ named remainder placeholder
 route (`GET /v1/daemon/tools`) carries those strings verbatim. Schemas
 are descriptive — the builtin dispatch path gains no schema-validation
 gate this iteration. See
-[v1.175 lock spec AR-78](../../../iterations/v1.175/specs/v1.175-catalog-and-cli-lock.md).
+the V1.175 catalog-and-cli lock AR-78 (local record).
 
 **Cross-reference**: `acp-capability-set.md` is the logical catalog
 (one-liner per ID). The daemon catalog is the runtime emission of

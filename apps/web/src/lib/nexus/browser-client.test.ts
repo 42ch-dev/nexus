@@ -700,7 +700,7 @@ describe('BrowserClient compute runs (V1.147 P1)', () => {
 // The classifier is a pure function of `(baseUrl, cause)` plus the
 // `http_fallback` response detector. Each kind is exercised once with the
 // minimal signal shape so a regression in the classifier ordering surfaces
-// immediately. See `.mstar/iterations/v1.129/specs/profile-create-reliability.md`
+// immediately. See the v1.129 `profile-create-reliability` record (local).
 // § Classification algorithm for the locked ordering.
 describe('BrowserClient transport classification (V1.129 P0)', () => {
   /** Build a client with a fetchImpl stub that rejects with the given cause. */
@@ -833,7 +833,7 @@ describe('BrowserClient transport classification (V1.129 P0)', () => {
 // ── Workflow observation stream (v1.201 P1 T1) ─────────────────────────────
 //
 // The same-run observation route's frozen client contract
-// (.mstar/iterations/v1.201/specs/p1-run-observation-consumption.md §2/§5):
+// (`.mstar/knowledge/api-design/sse-fetch-stream-consumer.md`):
 // `{id, event, data}` triples whose control frames are first-class values
 // (a data-less `gap` and an `id`-less `history_unavailable` must survive — the
 // data-only agent-host parser drops both), streaming decoding is chunk-split

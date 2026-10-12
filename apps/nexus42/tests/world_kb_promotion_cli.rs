@@ -1,6 +1,6 @@
 //! V1.50 T-B P1 — `creator world kb pending|adopt|reject` hermetic round-trip.
 //!
-//! Plan: `.mstar/plans/2026-06-18-v1.50-kb-auto-promotion.md`
+//! Plan: `2026-06-18-v1.50-kb-auto-promotion` (local plan record)
 //! Spec: `.mstar/specs/active/architecture/entity-scope-model.md` §5.5
 //!
 //! Drives `nexus42::commands::creator::world::kb` logic functions directly

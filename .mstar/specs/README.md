@@ -160,6 +160,7 @@ Specs are organized **lifecycle first, then class**: `specs/{active|proposed|arc
 | [game-bible-profile.md](active/creator/game-bible-profile.md) | Feature line | Master (V1.56 P-last) — section-status auto-transition closure; V1.55 P2 shipped design-writing preset, quality rubric, section completion, and KB extraction |
 | [script-profile.md](active/creator/script-profile.md) | Feature line | Master (V1.60 P-last promotion from Draft V1.60 P1) — `work_profile: script` artifact layout, stage/preset chain, quality rubric, KB taxonomy, and completion semantics |
 | [creator-challenge-solver.md](active/creator/creator-challenge-solver.md) | Master | Frozen (normative for shipped CLI registration path) — solver orchestration: `apps/nexus42/src/challenge/`; registration caller: CLI Creator commands; `nexus-creator` owns aggregate/local identity, not the solver |
+| [creator-memory-soul-lifecycle.md](active/creator/creator-memory-soul-lifecycle.md) | Draft overlay | Draft (V1.82 amendment) — per-(creator, world) narrative lifecycle; the `memory_soul_narratives` cache-table + stale/fingerprint-check semantics it defines are implemented and owned by it (`crates/nexus-local-db/src/soul_narrative.rs`; exercised by `crates/nexus-local-db/tests/soul_narrative_per_world.rs`) |
 
 ### Surfaces
 
@@ -188,7 +189,6 @@ Not implement authority until promoted: update the spec's `Status` header, `git 
 
 | Document | Class | Status |
 | --- | --- | --- |
-| [creator-memory-soul-lifecycle.md](proposed/creator/creator-memory-soul-lifecycle.md) | Draft overlay | Draft (V1.82 amendment) — per-(creator, world) narrative lifecycle |
 | [web-ui-design-requirements.md](proposed/surfaces/web-ui-design-requirements.md) | Companion | Input brief (V1.64/V1.65 Prepare Phase 2b) for repo-root `DESIGN.md` — product/design intent, not token authority; the root DESIGN pair is the sole SSOT since `apps/web/DESIGN*.md` retired (V1.98) |
 
 ---

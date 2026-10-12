@@ -2221,7 +2221,7 @@ pub(crate) fn registry_pool_entry_manage<'a>(
 //
 // 9 catalog-only → shipped host tools (Track A). Each handler follows the
 // existing execute_* + registry_* wrapper pattern. See
-// `.mstar/plans/2026-06-22-v1.59-df47-manuscript-and-misc-capabilities.md`.
+// the v1.59 DF-47 manuscript-and-misc capability batch (local plan record).
 
 /// Maximum body size for a single `nexus.manuscript.write` call (1 MiB).
 const MANUSCRIPT_WRITE_MAX_BYTES: usize = 1024 * 1024;

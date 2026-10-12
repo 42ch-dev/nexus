@@ -227,7 +227,7 @@ export interface WorkflowRunStatePayload {
  * One frame of the frozen same-run workflow observation stream
  * (`GET /v1/daemon/orchestration/sessions/{run_id}/events`).
  *
- * Frozen client-side contract: `.mstar/iterations/v1.201/specs/p1-run-observation-consumption.md`
+ * Frozen client-side contract: `.mstar/knowledge/api-design/sse-fetch-stream-consumer.md`
  * §2. Data frames carry their `<epoch>:<sequence>` `id` verbatim; `gap` and
  * `history_unavailable` are first-class control values (a data-less control
  * frame is never dropped, and `history_unavailable` carries no `id` — the

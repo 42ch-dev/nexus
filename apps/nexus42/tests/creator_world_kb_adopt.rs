@@ -1,6 +1,6 @@
 //! V1.51 T-A P0 — `creator world kb adopt` surfaces LLM extraction metadata.
 //!
-//! Plan: `.mstar/plans/2026-06-18-v1.51-llm-extraction.md` (T6)
+//! Plan: `2026-06-18-v1.51-llm-extraction` (local plan record) (T6)
 //! Spec: `.mstar/specs/active/cli/cli-spec.md` §6.2G (V1.51 amendment),
 //!       `.mstar/specs/active/orchestration/llm-extract.md` §3.2
 //!

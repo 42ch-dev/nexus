@@ -2,7 +2,7 @@
 
 **Status**: Active — current external daemon contracts use the Daemon API namespace; V1.64 originally established the bundled Web UI as an external API consumer
 **Document class**: Companion
-**Supersedes**: `schemas-wire-platform-sync-boundary.md` (renamed 2026-06-23, V1.62 P0; same file, expanded scope). Companion to archived [`schemas-boundary.md`](../../../archived/knowledge/schemas-boundary.md).
+**Supersedes**: `schemas-wire-platform-sync-boundary.md` (renamed 2026-06-23, V1.62 P0; same file, expanded scope). Companion to the retired `schemas-boundary.md` (local process record).
 **Aligned with**: `nexus` `schemas/AGENTS.md`, `crates/nexus-contracts/src/local/`
 **Last reconciled**: 2026-09-04 — current schema tree, generated module names, and Daemon API namespace through V1.183.
 
@@ -56,7 +56,7 @@ V1.62 reorganized `schemas/` along consumer-scope lines and first moved compute 
 - **Stale path risk**: do not reference `schemas/cli-sync/`, `schemas/meta/`, `schemas/acp-runtime/`, `schemas/cloud-sync/`, or `schemas/compute/` — removed or renamed (see layout spec §1 + §5 historical renames).
 - **Codegen**: only files under `schemas/` generate TS in `@42ch/nexus-contracts`; platform upgrades follow npm semver + `schema_version`.
 - **Promoted Daemon API handlers**: handlers must return generated contract shapes for promoted schemas; strict drift detection is required before a schema-promoted route is considered consumer-safe.
-- **Historical audit table**: [archived `schemas-boundary.md` §5.2](../../../archived/knowledge/schemas-boundary.md) (53 wire / 10 local at audit time). Re-run an equivalent source scan before further moves; search `<TypeName>` in `nexus-platform` before deleting generated TypeScript.
+- **Historical audit (pre-rename paths)**: retired `schemas-boundary.md` §5.2 — 53 wire / 10 local at audit time (local process record). Re-run an equivalent source scan before further moves; search `<TypeName>` in `nexus-platform` before deleting generated TypeScript.
 
 ## Related
 

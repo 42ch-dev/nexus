@@ -1,7 +1,7 @@
 //! nexus-acp-host — ACP client host library.
 //!
 //! This crate is intentionally **worker-only** linkable. See
-//! `.mstar/archived/knowledge/acp-client-tech-spec.md` §11 for the rules.
+//! `.mstar/specs/active/agents/acp-client-tech-spec.md` for the ACP host boundaries.
 
 #![deny(clippy::unwrap_used)]
 // Test modules use ergonomic `.unwrap()`/`.expect()`; production keeps the strict deny.

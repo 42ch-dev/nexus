@@ -6,8 +6,8 @@
 **Scope**: Creator memory review lifecycle, SOUL fragments, and on-demand Creator-SOUL + per-World narrative cache semantics.
 **Coordinates with**:
 
-- [creator-workflow.md](../../active/creator/creator-workflow.md) §5.6 — SOUL visualization contract over memory fragments
-- [web-ui.md](../../active/surfaces/web-ui.md) §26–§27 — Creator SOUL Maturation (V1.81) + SOUL Completion per-World narrative (V1.82)
+- [creator-workflow.md](creator-workflow.md) §5.6 — SOUL visualization contract over memory fragments
+- [web-ui.md](../surfaces/web-ui.md) §26–§27 — Creator SOUL Maturation (V1.81) + SOUL Completion per-World narrative (V1.82)
 - [`schemas/daemon-api/memory/`](../../../../schemas/daemon-api/memory) — wire contract schemas
 - [on-demand-synthesis-read-path-invariant.md](../../../knowledge/architecture-patterns/on-demand-synthesis-read-path-invariant.md) — read-path LLM gating (applies per world)
 - [fingerprint-cached-live-aggregate.md](../../../knowledge/architecture-patterns/fingerprint-cached-live-aggregate.md) — read-path cost (cache key per (creator, world))

@@ -8,7 +8,7 @@
 //! - `db_schema_version`: Local `SQLite` structure version (managed by migrations)
 //! - `schema_version`: Contract schema version (from nexus-contracts, network compatibility)
 //!
-//! See `.mstar/archived/knowledge/local-db-refactor-legacy.md` for design baseline.
+//! See the retired local-db-refactor-legacy baseline (local record) for the design.
 
 // V1.153 P2 T2: cas is pure SQL (OCC helpers — no unix APIs); the former
 // `#[cfg(unix)]` gate was wrong and broke `kb_relationships` (which imports

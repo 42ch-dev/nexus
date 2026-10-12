@@ -18,8 +18,8 @@ use crate::ids::{HostOperationId, HostSessionId};
 /// Map a batch of Claude stream-json frames into host events.
 ///
 /// One turn = one batch, ending at the CLI's `Result` frame. Emits at most
-/// one terminal event; see the map table in
-/// `.mstar/iterations/v1.168/specs/v1.168-native-host-locks.md` (AR-1).
+/// one terminal event; the frame→event map table is the v1.168 native-host
+/// lock AR-1 (local record).
 ///
 /// Decode contract (PD-3 + AR-1 correction): unknown **nested** variants the
 /// crate downgrades (`ContentBlock::Unknown`, `ResultSubtype::Unknown`, …)

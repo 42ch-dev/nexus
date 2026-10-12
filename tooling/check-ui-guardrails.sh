@@ -3,8 +3,7 @@
 # Mirrors `.github/workflows/ci.yml` job `ui-guardrails`.
 # Usage (from repository root): bash tooling/check-ui-guardrails.sh
 #
-# Implements:
-#   .mstar/iterations/v1.100/specs/ui-guardrails-cn-ssot.md
+# Implements the V1.100 UI-guardrails CN SSOT checklist (local record):
 #   § Guardrail implementation
 #   § Promoted-wrapper forbidden imports
 #   § Design Studio forbidden imports + transitional @web-ui/* annotation policy

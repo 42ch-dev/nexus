@@ -1,6 +1,6 @@
 //! V1.50 T-B P1 — review-time KB candidate extraction integration tests.
 //!
-//! Plan: `.mstar/plans/2026-06-18-v1.50-kb-auto-promotion.md`
+//! Plan: `2026-06-18-v1.50-kb-auto-promotion` (local plan record)
 //! Spec: `.mstar/specs/active/novel-writing/workflow-profile.md` §11.4,
 //!       `.mstar/specs/active/architecture/entity-scope-model.md` §5.5
 //!

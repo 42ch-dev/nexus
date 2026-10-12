@@ -5,7 +5,7 @@
 //! failure state, and the transactional store that persists root+child
 //! checkpoints under a root revision compare-and-swap.
 //!
-//! Design: `.mstar/iterations/v1.186/guides/architecture-decisions.md` A2/A4/A5.
+//! Design: `.mstar/specs/active/orchestration/orchestration-engine.md` §15 (V1.186 A2/A4/A5, local record).
 
 use std::collections::HashMap;
 use std::path::PathBuf;

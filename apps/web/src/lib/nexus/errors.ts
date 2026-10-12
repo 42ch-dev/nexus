@@ -30,7 +30,7 @@ export interface NexusErrorBody {
  * so `tls` falls open to `network` rather than over-claiming a cert rejection.
  *
  * The instance-field shape (vs a discriminated union of subclasses) was locked
- * by Seat 2 — see `.mstar/iterations/v1.129/specs/profile-create-reliability.md`
+ * by Seat 2 — see the v1.129 `profile-create-reliability` record (local).
  * § Interfaces.
  *
  * Ordering of classification is also locked (spec § Classification algorithm):

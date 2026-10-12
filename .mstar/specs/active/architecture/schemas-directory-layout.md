@@ -244,7 +244,7 @@ Do not hand-maintain an exact total here; `schemas/README.md` and `pnpm run vali
 
 **Not in tree:** `acp-runtime/`, `meta/`, `cli-sync/`, `cloud-sync/`, `compute/` (all removed/renamed).
 
-Historical audit (pre-rename paths): [archived `schemas-boundary.md` §5.2](../../../archived/knowledge/schemas-boundary.md) — use this section for current paths.
+Historical audit (pre-rename paths): see the audit note in [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md) — use this section for current paths.
 
 ---
 

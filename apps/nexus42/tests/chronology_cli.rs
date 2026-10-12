@@ -1,6 +1,6 @@
 //! Hermetic CLI integration tests for `creator works chronology` (V1.50 T-A P3 T7).
 //!
-//! Plan: `.mstar/plans/2026-06-18-v1.50-auto-chronology.md`
+//! Plan: `2026-06-18-v1.50-auto-chronology` (local plan record)
 //! Spec: `.mstar/specs/active/novel-writing/workflow-profile.md` §11.5.3.
 //!
 //! Covers set/show/advance round-trip (AC §8). Two test layers, all hermetic

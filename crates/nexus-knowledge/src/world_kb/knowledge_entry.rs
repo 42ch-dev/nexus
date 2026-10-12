@@ -778,8 +778,8 @@ pub fn reject_reserved_authoring_keys(raw: &serde_json::Value) -> Result<(), Res
 // activation.rs`): serde types over the handbook shape where the
 // authoritative source is `modules_json` JSON — parse what the handbook
 // names, leave the rest in the raw JSON. Handbook:
-// spoke `domain-profile-mental-state.md`; field-vocabulary copy in
-// `.mstar/iterations/v1.164/specs/v1.164-mental-layer-product-locks.md`.
+// spoke `domain-profile-mental-state.md`; field-vocabulary copy frozen by the
+// V1.164 mental-layer product locks (local record).
 //
 // Handbook field names are LOCKED (TL-5 / PD-5): `holder` / `access` /
 // `source` — never the OmniToM paper aliases `actor` / `knowledge_access` /

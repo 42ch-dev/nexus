@@ -1,6 +1,6 @@
 //! V1.51 T-A P2 — finalize-time missing-KB detection integration tests.
 //!
-//! Plan: `.mstar/plans/2026-06-18-v1.51-missing-kb-detection.md`
+//! Plan: `2026-06-18-v1.51-missing-kb-detection` (local plan record)
 //! Spec: `.mstar/specs/active/novel-writing/quality-loop.md` §5.5
 //!
 //! Covers:

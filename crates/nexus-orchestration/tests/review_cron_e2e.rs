@@ -1,7 +1,7 @@
 //! V1.50 T-A P2 — end-to-end review cron → review-master schedule → T-B P1
 //! KB-extraction hook chain test.
 //!
-//! Plan: `.mstar/plans/2026-06-18-v1.50-cron-review-staggering.md`
+//! Plan: `2026-06-18-v1.50-cron-review-staggering` (local plan record)
 //! Spec: `.mstar/specs/active/novel-writing/workflow-profile.md` §11.2 / §11.4,
 //!       `.mstar/specs/active/novel-writing/quality-loop.md` §3
 //!

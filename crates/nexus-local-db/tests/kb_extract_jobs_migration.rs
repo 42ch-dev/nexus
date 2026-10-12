@@ -1,8 +1,8 @@
 //! Hermetic migration + DAO test for the V1.50 T-B P1 `kb_extract_jobs` promotion
 //! lifecycle extension, and the V1.51 T-A P0 LLM payload extension.
 //!
-//! Plan: `.mstar/plans/2026-06-18-v1.50-kb-auto-promotion.md` (V1.50),
-//!       `.mstar/plans/2026-06-18-v1.51-llm-extraction.md` (V1.51 T-A P0)
+//! Plan: `2026-06-18-v1.50-kb-auto-promotion` (local plan record) (V1.50),
+//!       `2026-06-18-v1.51-llm-extraction` (local plan record) (V1.51 T-A P0)
 //! Spec: `.mstar/specs/active/architecture/entity-scope-model.md` §5.5 + §5.5.6,
 //!       `.mstar/specs/active/orchestration/llm-extract.md` §3.2
 //!

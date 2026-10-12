@@ -687,7 +687,7 @@ describe('AC-P0-* acceptance (setup-continue-unblock)', () => {
  * AC-P1-* acceptance verification for plan 2026-07-15-v1.119-setup-workspace-profile-path.
  *
  * Each test maps one acceptance criterion from the P1 spec
- * (`.mstar/iterations/v1.119/specs/setup-workspace-profile-path.md`):
+ * (the v1.119 `setup-workspace-profile-path` record, local):
  * default name, focus layout, unpicked name→path sync, picked path freeze,
  * and Continue enabled on first paint. The slug pipeline itself is covered
  * exhaustively in `src/lib/workspace-profile-slug.test.ts`.

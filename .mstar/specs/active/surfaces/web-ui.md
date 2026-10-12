@@ -1309,7 +1309,7 @@ Token tuning: edit repo-root [`DESIGN.md`](../../../../DESIGN.md) pair on disk �
 
 ### 29.14 V1.106 Amendments — Studio-first pipeline + first-launch polish
 
-**Iteration SSOT:**  + `v1.106/specs/`. **Implement authority** for Stretch Settings IA: `ui-continuity.md` (P2 — may defer).
+**Iteration SSOT:** the local V1.106 iteration record. **Implement authority** for Stretch Settings IA: `ui-continuity.md` (P2 — may defer).
 
 #### 29.14.1 TopStepIndicator SSOT (P1 Must)
 
@@ -1376,7 +1376,7 @@ Prefer `wire_contracts_changed: false`. Studio-first invariant: `studio-first-in
 
 ### 29.16 V1.112 Amendments — Frontend i18n (shipped)
 
-**Iteration SSOT:**  + `v1.112/specs/`. Normative product detail for this slice lives in the iteration workspace until P5 merge.
+**Iteration SSOT:** the local V1.112 iteration record. Normative product detail for this slice lives in the iteration workspace until P5 merge.
 
 **Implement authority (iteration workspace):**
 

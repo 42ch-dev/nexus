@@ -6,7 +6,7 @@
  * (the last folder of `workspaceRoot`) and apply it to a path. Display name ↛
  * slug is one-way and applies to the path last segment only.
  *
- * Spec (normative): `.mstar/iterations/v1.119/specs/setup-workspace-profile-path.md`
+ * Spec (normative): the v1.119 `setup-workspace-profile-path` record (local).
  * § Architecture contract → Slug helper.
  */
 

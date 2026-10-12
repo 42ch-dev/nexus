@@ -1,6 +1,6 @@
 //! Hermetic CLI integration tests for `creator works cron` (V1.50 T-A P0 T6).
 //!
-//! Plan: `.mstar/plans/2026-06-18-v1.50-cron-foundation.md`
+//! Plan: `2026-06-18-v1.50-cron-foundation` (local plan record)
 //! Spec: `.mstar/specs/active/novel-writing/workflow-profile.md` §11.1.
 //!
 //! Covers AC #3 (set/show/list), AC #4 (round-trip through DAO), and AC #5

@@ -13,7 +13,7 @@
 //! The Layer 2 *read* path lives in
 //! [`crate::stage_gates::read_rules_layers`](../stage_gates/fn.read_rules_layers.html).
 //!
-//! Spec: [archived/knowledge/novel-findings-maturity.md §3 / §4](../../../.mstar/archived/knowledge/novel-findings-maturity.md),
+//! Spec: [novel-writing/quality-loop.md §9.3](../../../.mstar/specs/active/novel-writing/quality-loop.md) (rules runtime),
 //! [novel-writing/workflow-profile.md §5.5.4](../../../.mstar/specs/active/novel-writing/workflow-profile.md).
 
 use std::io::Write;

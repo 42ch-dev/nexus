@@ -20,8 +20,8 @@ use crate::ids::{HostOperationId, HostSessionId};
 /// Map a batch of codex app-server frames into host events.
 ///
 /// One turn = one batch, ending at `TurnCompleted`. Emits at most one
-/// terminal event; see the map table in
-/// `.mstar/iterations/v1.168/specs/v1.168-native-host-locks.md` (AR-1).
+/// terminal event; the frame→event map table is the v1.168 native-host
+/// lock AR-1 (local record).
 ///
 /// Decode contract (PD-3): unknown methods arrive as
 /// `Notification::Unknown` (crate passthrough) — skipped with a debug line;

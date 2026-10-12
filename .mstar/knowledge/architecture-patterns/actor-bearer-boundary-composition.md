@@ -90,5 +90,5 @@ Durable spec/source authority for each shipped slice (the v1.184 package files b
 - Actor identity and binding — [Actor Product Model §2/§4.2](../../specs/active/architecture/actor-product-model.md)
 - Actor knowledge ownership and view — [Actor Product Model §5](../../specs/active/architecture/actor-product-model.md)
 - Actor execution and session isolation — [Actor Product Model §6](../../specs/active/architecture/actor-product-model.md), [agent-host.md](../../specs/active/agents/agent-host.md)
-- Character SOUL and Memory — [Actor Product Model §4.1](../../specs/active/architecture/actor-product-model.md), [creator-memory-soul-lifecycle.md](../../specs/proposed/creator/creator-memory-soul-lifecycle.md)
+- Character SOUL and Memory — [Actor Product Model §4.1](../../specs/active/architecture/actor-product-model.md), [creator-memory-soul-lifecycle.md](../../specs/active/creator/creator-memory-soul-lifecycle.md)
 - Character ToM L1/L2 — [Actor Product Model §4.1](../../specs/active/architecture/actor-product-model.md), [spoke-adapter-architecture.md](../../specs/active/architecture/spoke-adapter-architecture.md)
