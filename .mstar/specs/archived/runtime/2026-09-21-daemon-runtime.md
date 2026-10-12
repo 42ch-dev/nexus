@@ -4,10 +4,10 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | **Retired host record (v1.193 P2).** The integrated daemon host documented here is **deleted**: the `nexus-daemon-runtime` crate, the whole `nexus42 daemon` group, hidden `daemon-run` and the `web-embed` embedded-SPA bytes are gone, and no replacement service launcher was introduced. Current owners of the retained contracts: the standalone TypeScript service (`apps/nexus-service`) serves `/v1/daemon/*` for browser/Electron, Electron owns the desktop and its service lifecycle, `nexus-runtime` is the independent Connect host (§4.6), and `nexus42` is a one-shot direct-core/cloud/Connect CLI ([rust-core-service-boundary.md](../../architecture/rust-core-service-boundary.md) §7.2, [cli-spec.md](../../cli/cli-spec.md) §6.3). Sections below are the **historical record of the retired host** unless they name a retained wire, Connect or checkpoint contract. — Normative — V1.65 Prepare amendment (bundled local Web UI serving + chapter-content Daemon API route family); **V1.66 Phase 2b amendment** (§12: Tauri sidecar mode launch/readiness/lifecycle contract); **V1.86 amendment** (§13: Daemon API trust-boundary security — Origin allowlist, deny-fs-without-workspace, component-wise path guard); **V1.90 amendment** (§14: Daemon API remote bind gate; normative surface renaming from Local API to Daemon API with `/v1/daemon/` path prefix); **V1.92 amendment** (§15–16: transport security (TLS) + remote client connection model); **V1.118 amendment** (§17: no-Profile boot + lazy `state.db` open); **V1.153 amendment** (§4.6: headless `nexus-runtime` profile — second user-facing executable artifact for the integrator channel); **v1.192 amendment** (§12: Tauri desktop host retired — the sidecar section is a historical record; the desktop host is Electron, contract [desktop-shell.md](../../surfaces/desktop-shell.md)) |
+| **Status** | **Retired host record (v1.193 P2).** The integrated daemon host documented here is **deleted**: the `nexus-daemon-runtime` crate, the whole `nexus42 daemon` group, hidden `daemon-run` and the `web-embed` embedded-SPA bytes are gone, and no replacement service launcher was introduced. Current owners of the retained contracts: the standalone TypeScript service (`apps/nexus-service`) serves `/v1/daemon/*` for browser/Electron, Electron owns the desktop and its service lifecycle, `nexus-runtime` is the independent Connect host (§4.6), and `nexus42` is a one-shot direct-core/cloud/Connect CLI ([rust-core-service-boundary.md](../../active/architecture/rust-core-service-boundary.md) §7.2, [cli-spec.md](../../active/cli/cli-spec.md) §6.3). Sections below are the **historical record of the retired host** unless they name a retained wire, Connect or checkpoint contract. — Normative — V1.65 Prepare amendment (bundled local Web UI serving + chapter-content Daemon API route family); **V1.66 Phase 2b amendment** (§12: Tauri sidecar mode launch/readiness/lifecycle contract); **V1.86 amendment** (§13: Daemon API trust-boundary security — Origin allowlist, deny-fs-without-workspace, component-wise path guard); **V1.90 amendment** (§14: Daemon API remote bind gate; normative surface renaming from Local API to Daemon API with `/v1/daemon/` path prefix); **V1.92 amendment** (§15–16: transport security (TLS) + remote client connection model); **V1.118 amendment** (§17: no-Profile boot + lazy `state.db` open); **V1.153 amendment** (§4.6: headless `nexus-runtime` profile — second user-facing executable artifact for the integrator channel); **v1.192 amendment** (§12: Tauri desktop host retired — the sidecar section is a historical record; the desktop host is Electron, contract [desktop-shell.md](../../active/surfaces/desktop-shell.md)) |
 | **Document class** | Master |
 | **Normative scope** | Architecture boundaries, process model, subsystem responsibilities, pre-release constraints |
-| **Related** | [cli-spec.md](../../cli/cli-spec.md), [local-runtime-boundary.md](../../architecture/local-runtime-boundary.md), [agent-host.md](../../agents/agent-host.md) |
+| **Related** | [cli-spec.md](../../active/cli/cli-spec.md), [local-runtime-boundary.md](../../active/architecture/local-runtime-boundary.md), [agent-host.md](../../active/agents/agent-host.md) |
 | **Last reconciled** | 2026-09-12 — shipped V1.186 authoritative run/recovery contract plus V1.188 truthful readiness, retained workspace authority, settle-once cleanup and bounded run SSE (§20) |
 
 ---
@@ -24,7 +24,7 @@ Pre-release posture: no compatibility migration layer required; local state may 
 
 ## 2. Normative layering
 
-> **Historical (retired in v1.193 P2).** The `nexus-daemon-runtime` library layer below no longer exists; the retained layering is `nexus42` (one-shot `cli` cohort) / independent `nexus-runtime` (Connect) over the Rust authority, with TypeScript for the HTTP/transport host ([rust-core-service-boundary.md](../../architecture/rust-core-service-boundary.md) §4). The platform-sync/daemon-runtime separation rule at the end of this section still holds for the retained crates.
+> **Historical (retired in v1.193 P2).** The `nexus-daemon-runtime` library layer below no longer exists; the retained layering is `nexus42` (one-shot `cli` cohort) / independent `nexus-runtime` (Connect) over the Rust authority, with TypeScript for the HTTP/transport host ([rust-core-service-boundary.md](../../active/architecture/rust-core-service-boundary.md) §4). The platform-sync/daemon-runtime separation rule at the end of this section still holds for the retained crates.
 
 ```text
 nexus42 (CLI — entry, routing, UX)
@@ -61,7 +61,7 @@ Platform sync and registration **must not** live in daemon-runtime. See [local-c
 
 ## 4. Process model
 
-> **Historical (retired in v1.193 P2) — §4.1–§4.4 are not runnable.** `nexus42 daemon start|stop|restart|status|logs|doctor|ui|web` are unknown commands and the embedded-SPA serving model was deleted with the crate. The retained host contract is: the TS service owns its own process/readiness/discovery lifecycle under Electron ([rust-core-service-boundary.md](../../architecture/rust-core-service-boundary.md) §8.1, [desktop-shell.md](../../surfaces/desktop-shell.md) §7), and the `nexus42 desktop bundle` entry still delegates to the desktop packaging driver.
+> **Historical (retired in v1.193 P2) — §4.1–§4.4 are not runnable.** `nexus42 daemon start|stop|restart|status|logs|doctor|ui|web` are unknown commands and the embedded-SPA serving model was deleted with the crate. The retained host contract is: the TS service owns its own process/readiness/discovery lifecycle under Electron ([rust-core-service-boundary.md](../../active/architecture/rust-core-service-boundary.md) §8.1, [desktop-shell.md](../../active/surfaces/desktop-shell.md) §7), and the `nexus42 desktop bundle` entry still delegates to the desktop packaging driver.
 
 ### 4.1 Foreground
 
@@ -77,7 +77,7 @@ Default `nexus42 daemon start`: preflight → spawn internal daemon-run mode →
 
 ### 4.4 Bundled local Web UI static assets (V1.64 — **retired in v1.193 P2**)
 
-> **Retired.** The daemon no longer serves the SPA and the `web-embed` / `rust-embed` static-asset path is deleted (no embedded SPA bytes exist in the retained graph). Current owner: the standalone TS service serves `apps/web/dist` for browser and Electron; the desktop host loads the same build through its own `nexus://app` protocol ([desktop-shell.md](../../surfaces/desktop-shell.md) §6). What survives is the **retained wire family** — the `/v1/daemon/*` routes, their auth tiers and the client-origin admission rules (§13–§16). Everything below is the historical serving model.
+> **Retired.** The daemon no longer serves the SPA and the `web-embed` / `rust-embed` static-asset path is deleted (no embedded SPA bytes exist in the retained graph). Current owner: the standalone TS service serves `apps/web/dist` for browser and Electron; the desktop host loads the same build through its own `nexus://app` protocol ([desktop-shell.md](../../active/surfaces/desktop-shell.md) §6). What survives is the **retained wire family** — the `/v1/daemon/*` routes, their auth tiers and the client-origin admission rules (§13–§16). Everything below is the historical serving model.
 
 The daemon runtime may serve the bundled local Web UI SPA from the same loopback listener as the Daemon API. The Web UI is a local product surface, not a cloud platform application.
 
@@ -87,7 +87,7 @@ Normative serving model:
 2. **SPA shell route**: the static Web UI shell (`index.html` plus assets) is unauthenticated so a local browser can load the app and present setup/auth guidance. This does not grant data access.
 3. **Data boundary**: all `/v1/daemon/*` data routes remain protected according to the existing `require_api_key` model except the explicitly unguarded runtime/daemon health and status routes listed in §2/§4 acceptance. The SPA obtains data only through those Daemon API routes.
 4. **Dev mode**: during frontend development, Vite serves `apps/web` and proxies `/v1/daemon/*` to a running daemon. Dev proxy behavior is a development convenience only; release behavior is daemon-served embedded static assets.
-5. **Desktop readiness**: the desktop host loads the same `apps/web` build output and swaps the frontend transport implementation behind the `NexusClient` boundary. The desktop host is Electron since v1.192 ([desktop-shell.md](../../surfaces/desktop-shell.md)) and supervises its own service — see §12's retirement note; the daemon runtime remains the local supervisor for the CLI/browser flows and is still not an ACP Agent/Server.
+5. **Desktop readiness**: the desktop host loads the same `apps/web` build output and swaps the frontend transport implementation behind the `NexusClient` boundary. The desktop host is Electron since v1.192 ([desktop-shell.md](../../active/surfaces/desktop-shell.md)) and supervises its own service — see §12's retirement note; the daemon runtime remains the local supervisor for the CLI/browser flows and is still not an ACP Agent/Server.
 
 The router integration point is the top-level `create_router` composition in `crates/nexus-daemon-runtime/src/api/mod.rs`: static serving is added beside the unguarded runtime routes and protected Daemon API route tree, without moving the auth middleware boundary for data endpoints.
 
@@ -172,7 +172,7 @@ sibling temp file + flush + atomic rename and updates `outline_path`/`updated_at
 through the same finalization path. The body writer remains the orchestration
 host-tool path — the AI owns prose writing; there is no manual body editor
 (the body-editor direction was rejected 2026-06-26; see
-[canvas-strategy-surface.md](../../surfaces/canvas-strategy-surface.md)). If a future canvas
+[canvas-strategy-surface.md](../../active/surfaces/canvas-strategy-surface.md)). If a future canvas
 surface flushes structured node-edits to chapter files, the write coordination
 (no-raw-file-editing principle; structured/node-granular operations) will be
 designed in the V1.68 canvas context; until then orchestration remains the
@@ -202,9 +202,9 @@ under the default `~/.nexus42` home.
 
 ## 5. ACP role invariant
 
-> **Historical (the daemon runtime is deleted).** The retained invariant: no Nexus local host or CLI advertises itself as an ACP Agent or ACP Server, and the ACP Client role stays on the Nexus control-plane path ([local-runtime-boundary](../../architecture/local-runtime-boundary.md) §1). Provider SDK adapters in the TS service sit behind Rust ports rather than becoming ACP servers ([rust-core-service-boundary.md](../../architecture/rust-core-service-boundary.md) §6).
+> **Historical (the daemon runtime is deleted).** The retained invariant: no Nexus local host or CLI advertises itself as an ACP Agent or ACP Server, and the ACP Client role stays on the Nexus control-plane path ([local-runtime-boundary](../../active/architecture/local-runtime-boundary.md) §1). Provider SDK adapters in the TS service sit behind Rust ports rather than becoming ACP servers ([rust-core-service-boundary.md](../../active/architecture/rust-core-service-boundary.md) §6).
 
-Daemon runtime is a **local supervisor**. It is **not** an ACP Agent or ACP Server and must **not** be advertised via ACP Registry as an agent. ACP Client role stays on the Nexus control plane path ([local-runtime-boundary](../../architecture/local-runtime-boundary.md) §1).
+Daemon runtime is a **local supervisor**. It is **not** an ACP Agent or ACP Server and must **not** be advertised via ACP Registry as an agent. ACP Client role stays on the Nexus control plane path ([local-runtime-boundary](../../active/architecture/local-runtime-boundary.md) §1).
 
 ---
 
@@ -220,7 +220,7 @@ Daemon runtime is a **local supervisor**. It is **not** an ACP Agent or ACP Serv
 1. Specs and docs do not **require** a standalone daemon runtime product binary.
 2. Health endpoint reachable after foreground and background start.
 3. Stop/restart leaves no orphan runtime without documented force path.
-4. Agent-host subsystem can start under Managed-only rules ([agent-host](../../agents/agent-host.md)).
+4. Agent-host subsystem can start under Managed-only rules ([agent-host](../../active/agents/agent-host.md)).
 
 ---
 
@@ -236,7 +236,7 @@ Daemon runtime is a **local supervisor**. It is **not** an ACP Agent or ACP Serv
 
 ## 9. Implementation batches
 
-> **Historical (executed record).** These are the V1.55-era build batches that produced the (now deleted) host crate; they are kept as the delivery record. Current cohorts: `cli` (default) and independent `connect-host` ([rust-core-service-boundary.md](../../architecture/rust-core-service-boundary.md) §4.2).
+> **Historical (executed record).** These are the V1.55-era build batches that produced the (now deleted) host crate; they are kept as the delivery record. Current cohorts: `cli` (default) and independent `connect-host` ([rust-core-service-boundary.md](../../active/architecture/rust-core-service-boundary.md) §4.2).
 
 ### Batch 1: Runtime extraction
 
@@ -501,7 +501,7 @@ The scheduler path does NOT set creator context — therefore body.md on-disk wr
 
 ### 11.1 Overview
 
-The orchestration engine's `outbox.flush` and `outbox.compact` capabilities are invoked through the standard capability dispatch path (see [orchestration-engine.md](../../orchestration/orchestration-engine.md) §5.7). Both are local-only, pool-backed capabilities that operate directly on the unified `outbox_entries` table in `state.db`.
+The orchestration engine's `outbox.flush` and `outbox.compact` capabilities are invoked through the standard capability dispatch path (see [orchestration-engine.md](../../active/orchestration/orchestration-engine.md) §5.7). Both are local-only, pool-backed capabilities that operate directly on the unified `outbox_entries` table in `state.db`.
 
 ### 11.2 Dispatch path
 
@@ -514,7 +514,7 @@ CapabilityRegistry::get("outbox.flush") / get("outbox.compact")
 
 ### 11.3 Single-writer enforcement
 
-The unified outbox follows a single-writer rule per event type (see [outbox-consolidation.md](../../runtime/outbox-consolidation.md) §2):
+The unified outbox follows a single-writer rule per event type (see [outbox-consolidation.md](../../active/runtime/outbox-consolidation.md) §2):
 
 - **Sync push/pull commands**: written exclusively by `nexus-cloud-sync::outbox::Outbox` (`append`, `stage`, `stage_if_absent`).
 - **Flush/compact operations**: written exclusively by `nexus-orchestration` capability layer (`OutboxFlush`, `OutboxCompact`).
@@ -530,9 +530,9 @@ Both capabilities receive the `sqlx::SqlitePool` through the standard `with_pool
 
 ## 12. Tauri sidecar mode (V1.66 — historical record; desktop sidecar retired in v1.192)
 
-> **v1.192 host note (RFT-11):** the Tauri desktop host was retired; the repository has exactly one desktop host — Electron ([desktop-shell.md](../../surfaces/desktop-shell.md) §7). The Electron host does **not** bundle or launch `nexus42` as a sidecar: it supervises its own TS service (`@42ch/nexus-service`) in an Electron utility process. The app-ownership, launch and asset-serving clauses below are a historical record of V1.66–V1.191. The daemon-side contract they rested on (`nexus42 daemon start [--foreground]`, port resolution explicit → `NEXUS_DAEMON_PORT` → `8420`, readiness = `GET /v1/daemon/runtime/health`) is **retired with the host in v1.193 P2**: the CLI has no service-launch entry, and the retained equivalents are the TS service's own port/discovery contract ([desktop-shell.md](../../surfaces/desktop-shell.md) §7.1) plus the runtime health/status routes it serves.
+> **v1.192 host note (RFT-11):** the Tauri desktop host was retired; the repository has exactly one desktop host — Electron ([desktop-shell.md](../../active/surfaces/desktop-shell.md) §7). The Electron host does **not** bundle or launch `nexus42` as a sidecar: it supervises its own TS service (`@42ch/nexus-service`) in an Electron utility process. The app-ownership, launch and asset-serving clauses below are a historical record of V1.66–V1.191. The daemon-side contract they rested on (`nexus42 daemon start [--foreground]`, port resolution explicit → `NEXUS_DAEMON_PORT` → `8420`, readiness = `GET /v1/daemon/runtime/health`) is **retired with the host in v1.193 P2**: the CLI has no service-launch entry, and the retained equivalents are the TS service's own port/discovery contract ([desktop-shell.md](../../active/surfaces/desktop-shell.md) §7.1) plus the runtime health/status routes it serves.
 
-The Tauri desktop shell ([desktop-shell.md](../../surfaces/desktop-shell.md)) may bundle the user-facing `nexus42` binary as a sidecar process. This does **not** create a second daemon product binary: the sidecar is still `nexus42`, launched in daemon foreground mode by the desktop app. (Compass: v1.66 §5 #2/#3 LOCKED.)
+The Tauri desktop shell ([desktop-shell.md](../../active/surfaces/desktop-shell.md)) may bundle the user-facing `nexus42` binary as a sidecar process. This does **not** create a second daemon product binary: the sidecar is still `nexus42`, launched in daemon foreground mode by the desktop app. (Compass: v1.66 §5 #2/#3 LOCKED.)
 
 ### 12.1 Launch contract
 
@@ -544,7 +544,7 @@ nexus42 daemon start --foreground --port <resolved_port>
 
 Optional flags such as `--cdn-url <https-url>` may be passed only when the desktop app has an explicit configuration source for them. **V1.66 does not add a new daemon-lifecycle Daemon API route** (`wire_contracts_changed: false`).
 
-**Port resolution** (compass §5 #3 LOCKED; conventions in [daemon-api-surface-conventions.md](../../runtime/daemon-api-surface-conventions.md) §9):
+**Port resolution** (compass §5 #3 LOCKED; conventions in [daemon-api-surface-conventions.md](../../active/runtime/daemon-api-surface-conventions.md) §9):
 
 1. Explicit configured port (if the Tauri bootstrapper provides one).
 2. Else `NEXUS_DAEMON_PORT` when present and valid.
@@ -593,7 +593,7 @@ In desktop mode, Tauri serves the bundled `apps/web/dist` via `build.frontendDis
 
 ## 13. Daemon API Trust-Boundary Security (V1.86)
 
-> **Current owner (v1.193 P2).** The security contract in this section is **retained**; it is enforced today by the standalone TS service — origin allowlist in `apps/nexus-service/src/security.ts::checkOrigin` over the configured list from `config.ts::resolveAllowedOrigins` (own loopback origins, `nexus://app`, loopback Vite dev origins, the `NEXUS_DAEMON_ALLOWED_ORIGINS` escape hatch) — plus the Electron host's exact-origin CSP and IPC sender checks ([desktop-shell.md](../../surfaces/desktop-shell.md) §4/§6). The Rust host that originally enforced it (`api/auth_middleware.rs`, `api/path_guard.rs`) was deleted with the crate, so implementation anchors below are historical.
+> **Current owner (v1.193 P2).** The security contract in this section is **retained**; it is enforced today by the standalone TS service — origin allowlist in `apps/nexus-service/src/security.ts::checkOrigin` over the configured list from `config.ts::resolveAllowedOrigins` (own loopback origins, `nexus://app`, loopback Vite dev origins, the `NEXUS_DAEMON_ALLOWED_ORIGINS` escape hatch) — plus the Electron host's exact-origin CSP and IPC sender checks ([desktop-shell.md](../../active/surfaces/desktop-shell.md) §4/§6). The Rust host that originally enforced it (`api/auth_middleware.rs`, `api/path_guard.rs`) was deleted with the crate, so implementation anchors below are historical.
 
 > **V1.90 note:** The surface was renamed to **Daemon API** and the path prefix to `/v1/daemon/*` in V1.90. The security rules described below apply unchanged to the renamed surface. References to "Local API" in this section title and in V1.86 iteration names are historical only.
 
@@ -707,7 +707,7 @@ Both the read (existing-file) and write (non-existing-file) branches MUST be cov
 
 ## 14. Daemon API Remote Bind Gate (V1.90)
 
-> **Current owner (v1.193 P2).** §14–§16 are **retained transport contracts** for the `/v1/daemon/*` wire family; the standalone TS service enforces the bind gate, TLS listener and remote-client rules today, and Electron/`DesktopClient` remain the desktop consumer ([desktop-shell.md](../../surfaces/desktop-shell.md) §5–§7). Implementation anchors named in these sections belonged to the deleted Rust host.
+> **Current owner (v1.193 P2).** §14–§16 are **retained transport contracts** for the `/v1/daemon/*` wire family; the standalone TS service enforces the bind gate, TLS listener and remote-client rules today, and Electron/`DesktopClient` remain the desktop consumer ([desktop-shell.md](../../active/surfaces/desktop-shell.md) §5–§7). Implementation anchors named in these sections belonged to the deleted Rust host.
 
 This section codifies the security contract for optional non-loopback binding of the Daemon API listener. The Daemon API is local-first by default; remote access is opt-in only and subject to a two-condition gate.
 
@@ -878,7 +878,7 @@ Example: `SHA256:aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:
 
 ## 16. Remote Client Connection Model (V1.92)
 
-This section codifies the client-side contract for connecting to a remote daemon. It is authoritative for both the web SPA (`BrowserClient`) and the desktop shell (`DesktopClient`, renamed from `TauriClient` in v1.192 without aliases; credential injection is main-owned — [desktop-shell.md](../../surfaces/desktop-shell.md) §5). The local same-origin mode is the backwards-compatible default; remote access is opt-in per the setup-screen flow.
+This section codifies the client-side contract for connecting to a remote daemon. It is authoritative for both the web SPA (`BrowserClient`) and the desktop shell (`DesktopClient`, renamed from `TauriClient` in v1.192 without aliases; credential injection is main-owned — [desktop-shell.md](../../active/surfaces/desktop-shell.md) §5). The local same-origin mode is the backwards-compatible default; remote access is opt-in per the setup-screen flow.
 
 ### 16.1 Client transport parameterisation
 
@@ -946,7 +946,7 @@ The daemon's Origin allowlist (§13.1) already covers: own-origin, Tauri webview
 - The connecting client's origin MUST be added to `NEXUS_DAEMON_ALLOWED_ORIGINS` — there is **no magic auto-allowlisting** of remote origins.
 - The daemon does not automatically trust the remote bind address as a browser origin; the author controls the allowlist explicitly.
 - A remote client that sends an `Origin` header not in the allowlist will receive `403 Forbidden` (consistent with §13.1.2), regardless of whether it holds a valid API key or a pinned TLS fingerprint.
-- The `tauri://localhost` / `http://tauri.localhost` origins lived only in the deleted Rust allowlist; they are gone and no shipped desktop runtime uses them ([desktop-shell.md](../../surfaces/desktop-shell.md) §6 admits exactly `nexus://app`).
+- The `tauri://localhost` / `http://tauri.localhost` origins lived only in the deleted Rust allowlist; they are gone and no shipped desktop runtime uses them ([desktop-shell.md](../../active/surfaces/desktop-shell.md) §6 admits exactly `nexus://app`).
 - A remote web-app (browser SPA connecting to a remote daemon) needs its serving origin in `NEXUS_DAEMON_ALLOWED_ORIGINS`.
 
 ### 16.5 Client key storage
@@ -954,7 +954,7 @@ The daemon's Origin allowlist (§13.1) already covers: own-origin, Tauri webview
 | Platform | Storage mechanism | Notes |
 |----------|-------------------|-------|
 | Web SPA | `localStorage` | SPA trust boundary equal to the app itself. Key is always user-entered, never compiled in. |
-| Desktop (Electron) | Main-process encrypted store (Electron `safeStorage`; atomic replace, owner-only permissions) with a one-time import of the legacy keychain/app-data entry | No plaintext-write fallback; see [desktop-shell.md](../../surfaces/desktop-shell.md) §5. |
+| Desktop (Electron) | Main-process encrypted store (Electron `safeStorage`; atomic replace, owner-only permissions) with a one-time import of the legacy keychain/app-data entry | No plaintext-write fallback; see [desktop-shell.md](../../active/surfaces/desktop-shell.md) §5. |
 
 The API key is always **user-entered** — never compiled into the binary, never stored in version control, never embedded in build artifacts. Full secret-store hardening (hardware-backed keystore, biometric unlock) is a future concern. **Durable roadmap:** DR-05 (secret-store hardening).
 
@@ -1035,7 +1035,7 @@ Implement **`require_active_creator`** (or equivalent) on Tier-2 route groups. T
 exposure) is locked in V1.174 (AR-66..77); this section is an ADDITIVE
 V1.179 P0 overlay — it does not rewrite the lock history.
 
-> **Local retirement note (v1.193 P2) — two CLI spellings below are not current instructions.** The Model A bridge `nexus42 mcp serve` (§18.1 item 2) and the enablement flag `nexus42 daemon start --embedded-mcp` (§18.1 item 3) are **deleted**: the whole `nexus42 daemon` group went with the obsolete Rust host, and Model A lost its CLI entry. Both invocations are clap's "unrecognized subcommand" error (exit 2) — the `mcp serve` half asserted by `retired_operator_entrances_are_unknown` (`apps/nexus42/tests/command_surface_contract.rs`, which drives `mcp serve` and `mcp --help`), while the `daemon start --embedded-mcp` half has no test naming it and is **subsumed by the deleted group's assertion**, not asserted by name: `daemon_tree_is_unknown` (same file) drives `daemon start` — among `daemon --help|stop|restart|status|logs|doctor|ui|web`, the `orchestrate run` / `schedule …` leaves, and `daemon-run` — as an unknown subcommand (exit 2), and since `daemon` is already the unknown first token the trailing flag cannot change the outcome. Both deleted names are recorded in [rust-core-service-boundary.md](../../architecture/rust-core-service-boundary.md) §7.2. The rest of this section is retained: the WS registration lane, the `PeerToolsConfig` keys and the core `embedded-mcp` **library** feature survive (only the app-only selector was deleted). Model B enablement is therefore the config key (`~/.nexus42/connect/daemon.json` key `embedded_mcp`, restart-scoped per §18.3) or the TS service's own `--embedded-mcp` argument (`apps/nexus-service/src/config.ts`) — never a `nexus42` operator leaf.
+> **Local retirement note (v1.193 P2) — two CLI spellings below are not current instructions.** The Model A bridge `nexus42 mcp serve` (§18.1 item 2) and the enablement flag `nexus42 daemon start --embedded-mcp` (§18.1 item 3) are **deleted**: the whole `nexus42 daemon` group went with the obsolete Rust host, and Model A lost its CLI entry. Both invocations are clap's "unrecognized subcommand" error (exit 2) — the `mcp serve` half asserted by `retired_operator_entrances_are_unknown` (`apps/nexus42/tests/command_surface_contract.rs`, which drives `mcp serve` and `mcp --help`), while the `daemon start --embedded-mcp` half has no test naming it and is **subsumed by the deleted group's assertion**, not asserted by name: `daemon_tree_is_unknown` (same file) drives `daemon start` — among `daemon --help|stop|restart|status|logs|doctor|ui|web`, the `orchestrate run` / `schedule …` leaves, and `daemon-run` — as an unknown subcommand (exit 2), and since `daemon` is already the unknown first token the trailing flag cannot change the outcome. Both deleted names are recorded in [rust-core-service-boundary.md](../../active/architecture/rust-core-service-boundary.md) §7.2. The rest of this section is retained: the WS registration lane, the `PeerToolsConfig` keys and the core `embedded-mcp` **library** feature survive (only the app-only selector was deleted). Model B enablement is therefore the config key (`~/.nexus42/connect/daemon.json` key `embedded_mcp`, restart-scoped per §18.3) or the TS service's own `--embedded-mcp` argument (`apps/nexus-service/src/config.ts`) — never a `nexus42` operator leaf.
 
 ### 18.1 Serving & transport topology
 
@@ -1202,7 +1202,7 @@ were deleted with the crate in v1.193 P2.）
 
 ## 20. V1.186 product lock — truthful runs and bounded boot recovery
 
-> **Retained contract (v1.193 P2).** These run/recovery rules are **retained product semantics** — they were never daemon-specific, and the engine/storage owners (`nexus-orchestration`, `nexus-local-db`) are unchanged. Only the *host* that performed boot/lazy attach changed: today the standalone TS service under Electron performs readiness and Creator-DB attach ([desktop-shell.md](../../surfaces/desktop-shell.md) §7), and `nexus42 ops inspect` is the retained read-only operator surface ([cli-spec.md](../../cli/cli-spec.md) §6.3B). The `/v1/daemon/orchestration/sessions/{run-id}/events` route in §20.2 is part of the retained wire family served by the TS service.
+> **Retained contract (v1.193 P2).** These run/recovery rules are **retained product semantics** — they were never daemon-specific, and the engine/storage owners (`nexus-orchestration`, `nexus-local-db`) are unchanged. Only the *host* that performed boot/lazy attach changed: today the standalone TS service under Electron performs readiness and Creator-DB attach ([desktop-shell.md](../../active/surfaces/desktop-shell.md) §7), and `nexus42 ops inspect` is the retained read-only operator surface ([cli-spec.md](../../active/cli/cli-spec.md) §6.3B). The `/v1/daemon/orchestration/sessions/{run-id}/events` route in §20.2 is part of the retained wire family served by the TS service.
 
 **Status:** Shipped V1.186; V1.188 reliability amendments are recorded below.
 
@@ -1215,7 +1215,7 @@ Runtime responsibilities:
 1. **Durable store and inspect.** `orchestration_sessions.status` is authoritative for versioned new-run records, with revision-fenced atomic status/checkpoint/metadata transitions; position saves never force running over newer terminal/wait state. Legacy/unreadable records are distinguished, not silently upgraded to success. Existing daemon-free `ops inspect` remains read-only and shares the recovery classifier with boot; public session lookup reads persisted terminals even without a live runner.
 2. **One coordinator, including lazy attach.** Public session creation and schedule admission enqueue the same bounded drive owner. Boot and lazy Creator-DB attach publish a matching storage/engine/coordinator bundle before readiness. User runs require a durable Creator DB; do not fall back to an in-memory user workflow. Descriptor/input/core seed and schedule→session association commit before enqueue. Repeated admission returns the same owned run, and terminal reconciliation does not duplicate auto-chain children.
 3. **Explicit cutover.** An additive schedule execution_policy defaults historical rows to legacy_inert; new user/cron/auto-chain admissions explicitly select driven_v1. Boot/tick/cron exclude legacy never-started pending/running/paused rows; missing session ID or creation time is not automatic opt-in. Explicit public schedule start revalidates and opts only that row in. `_system.maintenance` is system_inert, never queued for user Host work, and generic public start cannot opt it in.
-4. **Wait and cancellation.** Human wait_id and root/child checkpoint survive restart with no implicit approval. Token consumption and terminal/cancel races use one durable revision fence. Cancel reaches the actual Host operation independently of a long-running step lock, fences subsequent work and performs bounded owned-child cleanup. Only confirmed stop yields cancelled; unconfirmed cleanup stays interrupted. Wire errors and wait semantics are owned by [orchestration-engine.md](../../orchestration/orchestration-engine.md) §15; Host process ownership by [agent-host.md](../../agents/agent-host.md) §4.
+4. **Wait and cancellation.** Human wait_id and root/child checkpoint survive restart with no implicit approval. Token consumption and terminal/cancel races use one durable revision fence. Cancel reaches the actual Host operation independently of a long-running step lock, fences subsequent work and performs bounded owned-child cleanup. Only confirmed stop yields cancelled; unconfirmed cleanup stays interrupted. Wire errors and wait semantics are owned by [orchestration-engine.md](../../active/orchestration/orchestration-engine.md) §15; Host process ownership by [agent-host.md](../../active/agents/agent-host.md) §4.
 5. **Recovery before drive.** In-flight dispatch intent/uncertain effects take precedence over old join keys and are not replayed. Terminal rows do not run; waits stay waiting; shipped converge/merge deadlines retain downtime-aware bounded resume. Supported new embedded/user/system presets reconstruct existing IDs/cursors from frozen matching source/template identity with production dependencies. Changed/missing source or unsupported child identity refuses with an actionable reason, not an embedded fallback or fresh run. Checkpoint position is not an effects ledger; exactly-once arbitrary effects remain a non-goal.
 6. **Honest isolated live QA.** Nexus CLI home resolves through `HOME/.nexus42`; `NEXUS_HOME` in a recipe denotes that path, not a newly supported CLI environment override. All Nexus processes in QA must resolve the same temp config/DB tree; any runtime NEXUS42_HOME override must equal it. External omp gets a separate temporary HOME/XDG/profile and the admitted Creator workspace cwd through generic ProviderConfig `omp acp` argv. No user-global config/auth reads or writes; use auth already in the isolated profile or injected by the harness. Only installed live-provider output through public workflow admission proves live success; deterministic protocol processes prove races/failures/restarts.
 
@@ -1226,14 +1226,14 @@ into Host start and binds the same verified Creator/canonical-workspace context
 used by admission. Malformed structural configuration fails closed. Config,
 PATH and registry candidates share one factory and manager health authority;
 no ambient-only registration or blanket-ready projection remains. Bounded
-no-model probes and safe diagnostics are defined in [agent-host.md](../../agents/agent-host.md)
+no-model probes and safe diagnostics are defined in [agent-host.md](../../active/agents/agent-host.md)
 §6–§8.
 
 The daemon binds one retained workspace authority to HTTP and orchestration.
 It recovers durable content intents before new writes and keeps admitted
 recovery alive across request/workflow cancellation. The target-content wire,
 pre-image OCC, stable revision and exceptional conflict boundary are defined
-in [concurrency.md](../../runtime/concurrency.md) §9.
+in [concurrency.md](../../active/runtime/concurrency.md) §9.
 
 ### 20.2 V1.188 bounded same-run event replay
 

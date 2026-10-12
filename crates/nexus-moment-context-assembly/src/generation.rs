@@ -6,9 +6,9 @@
 //! ([`slots`](crate::slots)) consults it to apply the spec §4 fill matrix.
 //!
 //! The enum mirrors the shipped creator-workflow `stage` identifiers
-//! (`.mstar/specs/creator-workflow.md` §3.1 — `intake`/`research`/`produce`/
+//! (`.mstar/specs/active/creator/creator-workflow.md` §3.1 — `intake`/`research`/`produce`/
 //! `review`/`persist`) **plus** the maintenance preset `run_intents`
-//! (`.mstar/specs/work-experience-model.md` §5.1 — `work_maintenance` /
+//! (`.mstar/specs/active/creator/work-experience-model.md` §5.1 — `work_maintenance` /
 //! `system_maintenance`, which have no workflow-stage counterpart and must
 //! be expressible for the spec §4 matrix rows), plus `Unspecified`.
 //!

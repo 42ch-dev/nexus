@@ -653,7 +653,7 @@ async fn admitted_view_rejects_when_hard_cap_exceeded() {
 
 // ── v1.191 P1 T4 — holder lifecycle provisioning ────────────────────────
 //
-// Durable contract: `.mstar/specs/holder-governance.md` §2.1 (one stable holder
+// Durable contract: `.mstar/specs/active/architecture/holder-governance.md` §2.1 (one stable holder
 // per stored Creator/Character, committed with the subject) and §2.2 (rename/
 // archive/restore keep the holder, retained archived reads resolve it, and a
 // normal read never provisions a missing/corrupt registry row).
@@ -878,7 +878,7 @@ async fn v1191_holder_lifecycle_missing_registry_read_fails_closed() {
 
 // ── v1.191 P1 T5 — trusted knowledge admission and typed knowledge fences ──
 //
-// Durable contract: `.mstar/specs/holder-governance.md` §4.1 (the two
+// Durable contract: `.mstar/specs/active/architecture/holder-governance.md` §4.1 (the two
 // server-chosen policies, minted only after principal / stored-owner / admitted
 // Actor checks) and §4.3 (World-then-Character shared effect leases, exclusive
 // governance lease, knowledge revisions read under the leases).
@@ -1586,7 +1586,7 @@ async fn v1191_knowledge_admission_fence_blocks_and_releases_partial_plan() {
 
 // ── v1.191 P1 T6 — pre-limit native read visibility ─────────────────────────
 //
-// Durable contract: `.mstar/specs/holder-governance.md` §4.2 (the visibility
+// Durable contract: `.mstar/specs/active/architecture/holder-governance.md` §4.2 (the visibility
 // rule is an eligibility predicate applied before the keyset cursor, LIMIT,
 // count and snippet observation; a hidden read-by-id is indistinguishable from
 // a missing one) and §4.1 (CreatorManagement reviews owned known-private rows;

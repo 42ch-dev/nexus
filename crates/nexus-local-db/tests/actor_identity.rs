@@ -1597,7 +1597,7 @@ async fn noop_binding_clear_still_checks_revision() {
 
 // ── v1.191 P1 T4 — holder lifecycle provisioning ───────────────────────
 //
-// Durable contract: `.mstar/specs/holder-governance.md` §2.1 (subject and
+// Durable contract: `.mstar/specs/active/architecture/holder-governance.md` §2.1 (subject and
 // registry row commit together; one stable holder per stored identity) and
 // §2.2 (identity stability across rename/archive/restore, retained archived
 // reads, fail-closed missing/corrupt registry on a normal read,

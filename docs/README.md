@@ -25,4 +25,4 @@ compute, fork + validate).
 
 ## Normative sources
 
-The ABI spec stays authoritative for the module contract: [`.mstar/specs/compute/compute-module-abi.md`](../.mstar/specs/compute/compute-module-abi.md).
+The ABI spec stays authoritative for the module contract: [`.mstar/specs/active/compute/compute-module-abi.md`](../.mstar/specs/active/compute/compute-module-abi.md).

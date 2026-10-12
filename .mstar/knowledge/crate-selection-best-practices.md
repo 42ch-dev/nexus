@@ -36,7 +36,7 @@ This document does **not** override:
 
 - `AGENTS.md` — release discipline, codegen rules, reachability rules.
 - `v1-spec/` (ADRs / codegen strategy / wire schemas) — wire and protocol decisions (e.g. `agent-client-protocol` SDK pin) remain owned there.
-- Architecture SSOTs — [`local-runtime-boundary.md`](../specs/architecture/local-runtime-boundary.md) and [`rust-core-service-boundary.md`](../specs/architecture/rust-core-service-boundary.md) (current crate/service boundary), [`orchestration-engine.md`](../specs/orchestration/orchestration-engine.md), [`creator-schedule-and-core-context.md`](../specs/orchestration/creator-schedule-and-core-context.md), [`acp-client-tech-spec.md`](../specs/agents/acp-client-tech-spec.md), [`schemas-external-consumer-boundary.md`](../specs/architecture/schemas-external-consumer-boundary.md). Historical (archived, not current SSOTs): `specs/archived/architecture/2026-09-21-local-cloud-crate-architecture.md` (crate graph & local/cloud lines) and `specs/archived/runtime/2026-09-21-daemon-runtime.md`.
+- Architecture SSOTs — [`local-runtime-boundary.md`](../specs/active/architecture/local-runtime-boundary.md) and [`rust-core-service-boundary.md`](../specs/active/architecture/rust-core-service-boundary.md) (current crate/service boundary), [`orchestration-engine.md`](../specs/active/orchestration/orchestration-engine.md), [`creator-schedule-and-core-context.md`](../specs/active/orchestration/creator-schedule-and-core-context.md), [`acp-client-tech-spec.md`](../specs/active/agents/acp-client-tech-spec.md), [`schemas-external-consumer-boundary.md`](../specs/active/architecture/schemas-external-consumer-boundary.md). Historical (archived, not current SSOTs): `specs/archived/architecture/2026-09-21-local-cloud-crate-architecture.md` (crate graph & local/cloud lines) and `specs/archived/runtime/2026-09-21-daemon-runtime.md`.
 
 **Conflict order**: `AGENTS.md` > `v1-spec` / ADR > architecture SSOTs > this document > other knowledge.
 
@@ -89,7 +89,7 @@ Changing a decision in §2 follows the flow in §4. Do not silently swap crates,
 | 2.4 | **Platform user auth / JWT** | `jsonwebtoken` only | `oauth2` v5.x (deferred — not rejected) | TD-10 deferral (retired device-flow exploration) |
 | 2.5 | **Challenge arithmetic evaluator** | Hand-rolled shunting-yard (current implementation under `apps/nexus42/src/challenge/`) | `meval`; `evalexpr` | §3.5 below (DoS guard TODOs tracked here) |
 | 2.6 | **File watcher** (deferred) | Recommended stack when implemented: `notify` 8 + `notify-debouncer-full` + async mpsc | Raw `RecommendedWatcher` only | (deferral note; the legacy workspace module that carried it no longer exists) |
-| 2.7 | **Cron / scheduler** (implemented) | A hand-rolled clock poller on `cron` + `chrono-tz`. The daemon-side evaluator lives in `crates/nexus-orchestration/src/schedule/` (`cron_supervisor.rs`, `supervisor.rs`, `admission.rs`, `work_schedule.rs`); the core-facing scheduled-work lane lives in `crates/nexus-core/src/execution/schedules/` (`cron.rs`, `hosted_scheduler.rs`, `refresh.rs`). The four constraints in §3.7 are satisfied. See [`creator-schedule-and-core-context.md`](../specs/orchestration/creator-schedule-and-core-context.md) for the design. | `tokio-cron-scheduler` 0.15.x (rejected); hand-rolled `cron` + `chrono-tz` + `sleep_until` (**selected & shipped**) | [`creator-schedule-and-core-context.md`](../specs/orchestration/creator-schedule-and-core-context.md) |
+| 2.7 | **Cron / scheduler** (implemented) | A hand-rolled clock poller on `cron` + `chrono-tz`. The daemon-side evaluator lives in `crates/nexus-orchestration/src/schedule/` (`cron_supervisor.rs`, `supervisor.rs`, `admission.rs`, `work_schedule.rs`); the core-facing scheduled-work lane lives in `crates/nexus-core/src/execution/schedules/` (`cron.rs`, `hosted_scheduler.rs`, `refresh.rs`). The four constraints in §3.7 are satisfied. See [`creator-schedule-and-core-context.md`](../specs/active/orchestration/creator-schedule-and-core-context.md) for the design. | `tokio-cron-scheduler` 0.15.x (rejected); hand-rolled `cron` + `chrono-tz` + `sleep_until` (**selected & shipped**) | [`creator-schedule-and-core-context.md`](../specs/active/orchestration/creator-schedule-and-core-context.md) |
 | 2.8 | **Layered config** (future) | `figment` + `secrecy` for redaction (when needed) | `config-rs`; hand-rolled | — (not yet scheduled) |
 | 2.9 | **Snapshot testing** (dev) | Recommended: `insta` + redactions for new CLI/HTTP integration tests | Hand-rolled golden files | — (optional; per-test-author discretion) |
 
@@ -321,8 +321,8 @@ Before editing any of the above in a way that changes crate selection, update **
 
 ## 6. References
 
-- Orchestration engine SSOT: [`orchestration-engine.md`](../specs/orchestration/orchestration-engine.md)
-- Schedule / core context SSOT: [`creator-schedule-and-core-context.md`](../specs/orchestration/creator-schedule-and-core-context.md)
+- Orchestration engine SSOT: [`orchestration-engine.md`](../specs/active/orchestration/orchestration-engine.md)
+- Schedule / core context SSOT: [`creator-schedule-and-core-context.md`](../specs/active/orchestration/creator-schedule-and-core-context.md)
 - Repository-wide rules: [`AGENTS.md`](AGENTS.md) — §"Documentation & plans", dependency / release discipline.
 
 ---

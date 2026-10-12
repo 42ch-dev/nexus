@@ -25,7 +25,7 @@ tags:
 
 # Compute Module SDK Authoring Pattern
 
-How the official WASM module SDK (`nexus-module-sdk` + `nexus-module-manifest` + `nexus-module-test`, V1.170 P0) is designed so third-party module authors write zero ABI code and the SDK drifts neither from the wire nor from the host. The normative ABI contract lives in `.mstar/specs/compute/compute-module-abi.md` — this doc captures the **authoring pattern**, not the wire spec.
+How the official WASM module SDK (`nexus-module-sdk` + `nexus-module-manifest` + `nexus-module-test`, V1.170 P0) is designed so third-party module authors write zero ABI code and the SDK drifts neither from the wire nor from the host. The normative ABI contract lives in `.mstar/specs/active/compute/compute-module-abi.md` — this doc captures the **authoring pattern**, not the wire spec.
 
 ## Context
 
@@ -156,7 +156,7 @@ pub struct WorldRef {
 
 ## References
 
-- Normative ABI: `.mstar/specs/compute/compute-module-abi.md` (ABI §6.3 sentinels, §7 manifest contract, §9.1 versioning)
+- Normative ABI: `.mstar/specs/active/compute/compute-module-abi.md` (ABI §6.3 sentinels, §7 manifest contract, §9.1 versioning)
 - Manifest-hash gotcha: [../best-practices/embedded-pinned-wasm-sha256-alignment.md](../best-practices/embedded-pinned-wasm-sha256-alignment.md)
 - Consumption side (daemon route + Runs): [../architecture-patterns/compute-pillar-invoke-and-runs-history.md](../architecture-patterns/compute-pillar-invoke-and-runs-history.md)
 - Crate topology: [../conventions/standalone-crate-monorepo-topology.md](../conventions/standalone-crate-monorepo-topology.md)

@@ -78,7 +78,7 @@ export interface NexusDeltaBundleEnvelope {
    */
   idempotency_key: string;
   /**
-   * Bundle content digest per v1-spec ADR-006: SHA-256 over JSON bytes of `deltas` only (Rust ref: serde_json::to_vec). Wire: `sha256:` + 64 lowercase hex. OSS companion: .mstar/specs/canonical-hash.md; golden vector in nexus-sync tests.
+   * Bundle content digest per v1-spec ADR-006: SHA-256 over JSON bytes of `deltas` only (Rust ref: serde_json::to_vec). Wire: `sha256:` + 64 lowercase hex. OSS companion: .mstar/specs/active/contracts/canonical-hash.md; golden vector in nexus-sync tests.
    */
   canonical_hash: string;
   /**

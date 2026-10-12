@@ -22,6 +22,6 @@ sweep).
 
 ## Related
 
-- **Convention spec:** `.mstar/specs/runtime/daemon-api-surface-conventions.md` (§3 error envelope, §2 pagination)
+- **Convention spec:** `.mstar/specs/active/runtime/daemon-api-surface-conventions.md` (§3 error envelope, §2 pagination)
 - **Consumer:** `@42ch/nexus-contracts` (npm) — generated TypeScript types
-- **Layout spec:** `.mstar/specs/architecture/schemas-directory-layout.md`
+- **Layout spec:** `.mstar/specs/active/architecture/schemas-directory-layout.md`

@@ -1,6 +1,6 @@
 //! Auto-chronology advance engine (V1.50 T-A P3, T2–T6).
 //!
-//! Spec: `.mstar/specs/novel-writing/auto-chronology.md` §3 / §4.
+//! Spec: `.mstar/specs/active/novel-writing/workflow-profile.md` §11.5 / §11.5.1.
 //!
 //! ## Role
 //!

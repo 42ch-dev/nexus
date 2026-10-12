@@ -81,4 +81,4 @@ Use this pattern whenever a local-first service adds an opt-in remote listener. 
 - Config flags/key: `apps/nexus-service/src/config.ts`
 - Core Connect peer-tools env gate (live): `crates/nexus-core/src/connect/accept.rs`
 - Spec (historical, V1.90; superseded): `.mstar/specs/archived/runtime/2026-09-21-daemon-runtime.md`
-- Surface conventions (current): `.mstar/specs/runtime/daemon-api-surface-conventions.md`
+- Surface conventions (current): `.mstar/specs/active/runtime/daemon-api-surface-conventions.md`

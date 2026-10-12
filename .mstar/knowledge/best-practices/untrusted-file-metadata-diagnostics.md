@@ -42,4 +42,4 @@ Any diagnostic that quotes content read back from disk or from a wire peer: lock
 ## Examples
 
 - `crates/nexus-local-db/src/file_lock.rs` — `diagnostic_holder_name` (unconditional `<fp:…>`), 4097-byte capped prior-body read, `stale_holder_warning_redacts_secret_bearing_identity` test.
-- Spec anchor: `.mstar/specs/runtime/concurrency.md` §6.2 (restated four-case decision table, diagnostics-only).
+- Spec anchor: `.mstar/specs/active/runtime/concurrency.md` §6.2 (restated four-case decision table, diagnostics-only).

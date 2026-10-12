@@ -2721,7 +2721,7 @@ impl WorkflowRunCoordinator {
         // never-started pending/running/paused rows; missing session ID or
         // creation time is not automatic opt-in. Explicit public schedule
         // start revalidates and opts only that row in."
-        // (`.mstar/specs/daemon-runtime.md` §1217). A `driven_v1` row cannot
+        // (`.mstar/specs/archived/runtime/2026-09-21-daemon-runtime.md` §1217). A `driven_v1` row cannot
         // legitimately reach that state either — its claim writes the status
         // and the session identity in ONE transaction — so admitting it here
         // would mint a fresh run for a lost/foreign claim on exactly the paths

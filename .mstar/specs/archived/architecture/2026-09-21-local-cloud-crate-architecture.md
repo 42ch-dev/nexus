@@ -4,13 +4,13 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | **Historical crate-graph record (v1.193 P2).** The integrated daemon host and `nexus-daemon-runtime` crate were deleted; current topology authority is [rust-core-service-boundary.md](../../architecture/rust-core-service-boundary.md). |
+| **Status** | **Historical crate-graph record (v1.193 P2).** The integrated daemon host and `nexus-daemon-runtime` crate were deleted; current topology authority is [rust-core-service-boundary.md](../../active/architecture/rust-core-service-boundary.md). |
 | **Document class** | Master |
 | **Scope** | Historical local/cloud rules, crate responsibilities, contracts usage, dependency edges, current-vs-target wiring, and Daemon API classes; not the current workspace inventory or host topology. |
-| **Scope model SSOT** | [entity-scope-model.md](../../architecture/entity-scope-model.md) — authoritative for scope hierarchy, crate ownership, and `kb`/`knowledge` naming boundaries |
-| **Related** | [entity-scope-model.md](../../architecture/entity-scope-model.md), [local-runtime-boundary.md](../../architecture/local-runtime-boundary.md), [daemon-runtime.md](../runtime/2026-09-21-daemon-runtime.md), [cli-spec.md](../../cli/cli-spec.md), [schemas-directory-layout.md](../../architecture/schemas-directory-layout.md), [schemas-external-consumer-boundary.md](../../architecture/schemas-external-consumer-boundary.md) |
+| **Scope model SSOT** | [entity-scope-model.md](../../active/architecture/entity-scope-model.md) — authoritative for scope hierarchy, crate ownership, and `kb`/`knowledge` naming boundaries |
+| **Related** | [entity-scope-model.md](../../active/architecture/entity-scope-model.md), [local-runtime-boundary.md](../../active/architecture/local-runtime-boundary.md), [daemon-runtime.md](../runtime/2026-09-21-daemon-runtime.md), [cli-spec.md](../../active/cli/cli-spec.md), [schemas-directory-layout.md](../../active/architecture/schemas-directory-layout.md), [schemas-external-consumer-boundary.md](../../active/architecture/schemas-external-consumer-boundary.md) |
 
-> **Historical as of v1.193 P2.** Sections §1–§9 retain the earlier crate-graph and product-integration record; “current”, “target”, and daemon ownership below refer to that record, not today's implementation. The retained `/v1/daemon/*` wire families are served by the standalone TypeScript service, `apps/nexus-service`, over Rust core authority, not by `nexus42 daemon`. Current topology: [rust-core-service-boundary.md](../../architecture/rust-core-service-boundary.md). Current crate inventory and responsibilities: root [`AGENTS.md`](../../../../AGENTS.md) and each crate's `AGENTS.md`, with workspace membership in root `Cargo.toml`.
+> **Historical as of v1.193 P2.** Sections §1–§9 retain the earlier crate-graph and product-integration record; “current”, “target”, and daemon ownership below refer to that record, not today's implementation. The retained `/v1/daemon/*` wire families are served by the standalone TypeScript service, `apps/nexus-service`, over Rust core authority, not by `nexus42 daemon`. Current topology: [rust-core-service-boundary.md](../../active/architecture/rust-core-service-boundary.md). Current crate inventory and responsibilities: root [`AGENTS.md`](../../../../AGENTS.md) and each crate's `AGENTS.md`, with workspace membership in root `Cargo.toml`.
 
 **This file is not an implementation checklist.** Do not add migration batches, branch names, or “done by V1.21” task tables here — put those in the matching **iteration compass** and local plan documents (harness process artifacts, not tracked specs).
 
@@ -39,7 +39,7 @@
 
 ## 2. Contracts boundary (frozen)
 
-External wire shapes come from the **`nexus-contracts`** crate's generated modules under `src/generated/`, sourced from `schemas/` (layout: [schemas-directory-layout.md](../../architecture/schemas-directory-layout.md)). Shared Rust-only DTOs live under `src/local/` per [schemas-external-consumer-boundary.md](../../architecture/schemas-external-consumer-boundary.md).
+External wire shapes come from the **`nexus-contracts`** crate's generated modules under `src/generated/`, sourced from `schemas/` (layout: [schemas-directory-layout.md](../../active/architecture/schemas-directory-layout.md)). Shared Rust-only DTOs live under `src/local/` per [schemas-external-consumer-boundary.md](../../active/architecture/schemas-external-consumer-boundary.md).
 
 | Rule | Detail |
 | --- | --- |
@@ -57,9 +57,9 @@ External wire shapes come from the **`nexus-contracts`** crate's generated modul
 
 > **Historical inventory.** Preserve this inventory and the 2026-05-22 Cargo snapshot in §4 as recorded, including the now-deleted daemon crate; neither is a current workspace list.
 
-Post-2026-05 workspace additions — `nexus-core`, `nexus-core-node`, `nexus-preset`, `nexus-provider-conformance`, `nexus-provider-ports`, and `nexus-storage-guard` — are indexed with their per-crate `AGENTS.md` roles in [rust-core-service-boundary.md §2](../../architecture/rust-core-service-boundary.md#current-workspace-boundary-inventory); they are not backfilled into this frozen inventory.
+Post-2026-05 workspace additions — `nexus-core`, `nexus-core-node`, `nexus-preset`, `nexus-provider-conformance`, `nexus-provider-ports`, and `nexus-storage-guard` — are indexed with their per-crate `AGENTS.md` roles in [rust-core-service-boundary.md §2](../../active/architecture/rust-core-service-boundary.md#current-workspace-boundary-inventory); they are not backfilled into this frozen inventory.
 
-This table follows [entity-scope-model.md §4](../../architecture/entity-scope-model.md#4-crate-ownership-map). If older wording conflicts with that model, the entity scope model is authoritative.
+This table follows [entity-scope-model.md §4](../../active/architecture/entity-scope-model.md#4-crate-ownership-map). If older wording conflicts with that model, the entity scope model is authoritative.
 
 ### 3.1 Foundation (types & paths)
 
@@ -90,7 +90,7 @@ These crates are **not** split by the local/cloud program; they sit **under** al
 
 ### 3.2A Local Web UI app (V1.64)
 
-> **Historical serving model (retired in v1.193 P2).** The `rust-embed`/daemon-router edge below is deleted, not a current build or serving instruction. Current browser/desktop host boundaries are in [rust-core-service-boundary.md](../../architecture/rust-core-service-boundary.md) and [desktop-shell.md](../../surfaces/desktop-shell.md).
+> **Historical serving model (retired in v1.193 P2).** The `rust-embed`/daemon-router edge below is deleted, not a current build or serving instruction. Current browser/desktop host boundaries are in [rust-core-service-boundary.md](../../active/architecture/rust-core-service-boundary.md) and [desktop-shell.md](../../active/surfaces/desktop-shell.md).
 
 | App | Product line | Responsibility boundary | Cloud/platform dep? |
 | --- | --- | --- | --- |
@@ -135,7 +135,7 @@ The legacy crate name `nexus-domain` is **not** retained after the split program
 
 ### 3.6 `nexus-moment-context-assembly`
 
-> **Historical product status.** The daemon route/default-build claims below belong to the retired host; retained TS-service context routes and Rust owners are described in [rust-core-service-boundary.md §7.5](../../architecture/rust-core-service-boundary.md#75-family-destinations-program-keys-not-extra-iterations).
+> **Historical product status.** The daemon route/default-build claims below belong to the retired host; retained TS-service context routes and Rust owners are described in [rust-core-service-boundary.md §7.5](../../active/architecture/rust-core-service-boundary.md#75-family-destinations-program-keys-not-extra-iterations).
 
 - **Shipped local four-domain Moment path (V1.26+, SSOT V1.28):** `assemble_moment` depends on `nexus-creator-memory`, `nexus-narrative`, `nexus-knowledge`, and `nexus-contracts`. (The former `nexus-kb` crate was merged into `nexus-knowledge` in V1.139.) `nexus42 platform context assemble-moment` is the **single** local assembly command; it calls `assemble_moment` in-process with persistent narrative / World KB / User knowledge stores (SQLite User knowledge since V1.27).
 - **Stage0 / TwoStage on assemble-moment (V1.28):** `--max-tokens`, `--no-fragments`, `--hint`, and runtime/degradation routing are flags on `assemble-moment`, not a separate subcommand.
@@ -307,7 +307,7 @@ These are runtime/product gaps after Cargo alignment, not missing dependency edg
 
 ## 7. CLI integration (principles)
 
-> **Historical CLI assignment.** The daemon-control row below records the deleted CLI/API integration; current CLI disposition is [rust-core-service-boundary.md §7.2](../../architecture/rust-core-service-boundary.md#72-operator--service-lifecycle), with no TS-service launcher alias.
+> **Historical CLI assignment.** The daemon-control row below records the deleted CLI/API integration; current CLI disposition is [rust-core-service-boundary.md §7.2](../../active/architecture/rust-core-service-boundary.md#72-operator--service-lifecycle), with no TS-service launcher alias.
 
 | Concern | Owner |
 | --- | --- |
@@ -322,7 +322,7 @@ These are runtime/product gaps after Cargo alignment, not missing dependency edg
 
 ## 8. Orchestration
 
-> **Historical daemon-build policy.** No daemon build survives v1.193 P2; current execution/transport ownership is defined in [rust-core-service-boundary.md](../../architecture/rust-core-service-boundary.md).
+> **Historical daemon-build policy.** No daemon build survives v1.193 P2; current execution/transport ownership is defined in [rust-core-service-boundary.md](../../active/architecture/rust-core-service-boundary.md).
 
 Built-in `sync.*` / `outbox.flush` capabilities on **daemon builds** MUST NOT call cloud-sync; stubs or explicit “cloud line disabled” results are acceptable until cloud orchestration is redesigned.
 
@@ -338,4 +338,4 @@ Workspace file writes remain agent-mediated (agent-host internal tool execution)
 
 ---
 
-*Historical local/cloud crate and Daemon API boundary record; current topology SSOT: [rust-core-service-boundary.md](../../architecture/rust-core-service-boundary.md).*
+*Historical local/cloud crate and Daemon API boundary record; current topology SSOT: [rust-core-service-boundary.md](../../active/architecture/rust-core-service-boundary.md).*

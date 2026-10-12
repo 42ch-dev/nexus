@@ -4,7 +4,7 @@
 //! surface. The daemon `auto_chronology_tick` task (5-min interval) performs
 //! the automatic advance; this CLI surfaces set/show/advance.
 //!
-//! Spec: `.mstar/specs/novel-writing/auto-chronology.md` §2.2.
+//! Spec: `.mstar/specs/active/novel-writing/workflow-profile.md` §11.5.3.
 //!
 //! ## Architecture
 //!

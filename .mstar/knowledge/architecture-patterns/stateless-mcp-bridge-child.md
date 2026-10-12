@@ -31,7 +31,7 @@ to external MCP clients. The delivered answer was **Model A — an MCP client
 spawns `nexus42 mcp serve` as its own stdio child** (AR-71). That entry is now
 **historical**: the whole `nexus42 daemon` group, hidden `daemon-run`, and the
 Model A `mcp serve` child were deleted in **v1.193 P2** (see
-`.mstar/specs/cli/cli-spec.md` §V1.193 delivered), and the
+`.mstar/specs/active/cli/cli-spec.md` §V1.193 delivered), and the
 `nexus-acp-host::mcp::nexus_mcp_stdio_server()` ACP descriptor factory that
 bound it to ACP was deleted earlier in **v1.193 P1-T6**. No `nexus42` command
 spawns an MCP server any more, and `apps/nexus42/src/` has no `mcp` command

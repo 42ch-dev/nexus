@@ -17,7 +17,7 @@
 //! The holder axis is never model-chosen: the model output reaches only
 //! [`ExtractPrepareInput`]'s body/name/block-type fields, and the governance
 //! pair enters through [`ExtractPrepareInput::governance`], which the service
-//! resolves from the job policy (`.mstar/specs/holder-governance.md` §§3, 8).
+//! resolves from the job policy (`.mstar/specs/active/architecture/holder-governance.md` §§3, 8).
 //!
 //! The caller is responsible for job lifecycle (mark running/done/failed).
 

@@ -126,4 +126,4 @@ Regression pins (v1.207 P3): `replacement_insert_cannot_overwrite_a_terminal_rec
 
 Source: v1.207 P3 iteration (PR #367) — task-3 review F3/F4/F5 + C001
 history; see the tracked spec
-`.mstar/specs/architecture/connect-event-delivery-and-operation-receipts.md` §B.1–§B.3.
+`.mstar/specs/active/architecture/connect-event-delivery-and-operation-receipts.md` §B.1–§B.3.

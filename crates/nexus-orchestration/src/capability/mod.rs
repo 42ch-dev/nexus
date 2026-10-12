@@ -1,6 +1,6 @@
 //! Capability trait + registry.
 //!
-//! Design: `.mstar/specs/orchestration-engine.md` §5.1–5.2.
+//! Design: `.mstar/specs/active/orchestration/orchestration-engine.md` §5.1–5.2.
 
 pub mod admission;
 pub mod builtins;

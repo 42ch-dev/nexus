@@ -1,7 +1,7 @@
 /**
  * Adapter boundary — the `NexusClient` interface.
  *
- * Spec: `.mstar/specs/web-ui.md` §5. All daemon access from the UI
+ * Spec: `.mstar/specs/active/surfaces/web-ui.md` §5. All daemon access from the UI
  * goes through this interface; core screen logic never calls `fetch`/`invoke`
  * directly. This is what makes the desktop shell a one-impl swap
  * (`BrowserClient` → `DesktopClient`) instead of a rewrite.

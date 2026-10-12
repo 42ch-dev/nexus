@@ -507,7 +507,7 @@ async fn journal_status_update_preserves_stored_identity() {
 
 // ── v1.191 P1 T5 — knowledge fences and session-key revision binding ──────
 //
-// Durable contract: `.mstar/specs/holder-governance.md` §4.3. The Actor session
+// Durable contract: `.mstar/specs/active/architecture/holder-governance.md` §4.3. The Actor session
 // key carries the read-policy kind and the stored World/Character
 // `knowledge_revision` pair; a session whose admitted fingerprint no longer
 // matches stored state is retired through the existing tombstone machinery

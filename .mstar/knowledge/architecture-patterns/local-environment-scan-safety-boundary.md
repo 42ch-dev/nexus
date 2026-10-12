@@ -32,7 +32,7 @@ applies_when:
 > `POST /v1/daemon/agent-host/scan` route still exists, but it is served by host
 > provider discovery (`crates/nexus-core` host query → `crates/nexus-agent-host/src/discovery/path_scan.rs`),
 > not by the registry-plus-probe implementation described here; read
-> `specs/surfaces/desktop-shell.md` §14 for the contract that route carries today.
+> `specs/active/surfaces/desktop-shell.md` §14 for the contract that route carries today.
 
 ## Context
 
@@ -52,7 +52,7 @@ registry cache) must not gain arbitrary command execution.
 ## Guidance (the pattern)
 
 The pattern is **five normative constraints** (distilled from the V1.94
-implementation; `specs/surfaces/desktop-shell.md` §14 restates the scan contract
+implementation; `specs/active/surfaces/desktop-shell.md` §14 restates the scan contract
 that remains in force). All five are required; any one missing opens an attack
 surface.
 

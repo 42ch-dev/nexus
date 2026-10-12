@@ -18,7 +18,7 @@
  *   type DesignPair      = { light: Record<string, unknown>; dark: Record<string, unknown> }
  *   type TokenProjection = { css: string; brandCss: string; brandTokens: string }
  *
- * Projection semantics follow .mstar/specs/design-studio.md §3.5:
+ * Projection semantics follow .mstar/specs/active/surfaces/design-studio.md §3.5:
  *   - Reject duplicate YAML keys, light/dark leaf-path mismatches, unresolved
  *     {path} references, and reference cycles.
  *   - Resolve references recursively, including refs embedded in color-mix

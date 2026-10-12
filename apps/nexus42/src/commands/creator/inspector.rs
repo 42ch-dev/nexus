@@ -4,7 +4,7 @@
 //! **Hidden group** (clap `hide = true`, PL-6): the packet is a core
 //! contract; a headless developer debugging assembly must reach it, but it
 //! is deliberately absent from root `--help`. It is documented in
-//! `.mstar/specs/cli-spec.md` and in `creator inspector --help`.
+//! `.mstar/specs/active/cli/cli-spec.md` and in `creator inspector --help`.
 //!
 //! Direct-core leaf over the retained typed seam
 //! ([`CoreService::inspect_moment`], `context.rs`). The call **observes**

@@ -3,7 +3,7 @@
 //! `NexusAdapter` is the production spoke port impl backing spoke
 //! orchestrators against `nexus-local-db`'s `SQLite` storage. The port-family
 //! matrix (which families are production vs stub) lives in
-//! `.mstar/specs/spoke-adapter-architecture.md` §7.4.
+//! `.mstar/specs/active/architecture/spoke-adapter-architecture.md` §7.4.
 //!
 //! V1.145 P1b rehome: this module moved from
 //! `nexus-local-db/src/spoke_adapter/` so that `nexus-local-db` is pure
@@ -51,7 +51,7 @@ use crate::{Scope, SpokeReject, SpokeRejectCode};
 /// Production `BaselinePorts` impl backing spoke orchestrators against nexus
 /// `SQLite` storage.
 ///
-/// See `.mstar/specs/spoke-adapter-architecture.md` §7.4 for the family
+/// See `.mstar/specs/active/architecture/spoke-adapter-architecture.md` §7.4 for the family
 /// matrix (which families are production vs stub). Construct per-request from
 /// a [`SqlitePool`] (cheap handle clone); the port methods are natively
 /// `async fn` (spoke-operations 0.9.1 surface) and await `SQLite` I/O on the
