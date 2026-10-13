@@ -212,6 +212,41 @@ describe('actor-http (P5-T2)', () => {
     }
   });
 
+  test('actor-knowledge create fails closed on an audience kind the allowmap does not list', async () => {
+    for (const audience of [
+      { kind: 'squad-private', character_id: 'chr_' + 'a'.repeat(32) },
+      { kind: 42 },
+      { character_id: 'chr_' + 'a'.repeat(32) },
+    ]) {
+      const response = await jsonFetch(`${baseUrl}/v1/daemon/actor-knowledge/entries`, {
+        method: 'POST',
+        body: {
+          owner_kind: 'world',
+          world_id: 'wld_owned',
+          block_type: 'character',
+          canonical_name: 'Unlisted audience test',
+          audience,
+        },
+      });
+      assert.equal(response.status, 400, response.text);
+      assert.equal(response.payload.error.code, 'invalid_input');
+      assert.equal(response.payload.error.message, 'audience kind is not allowed');
+    }
+  });
+
+  test('actor-knowledge patch fails closed on an audience kind the allowmap does not list', async () => {
+    const response = await jsonFetch(
+      `${baseUrl}/v1/daemon/characters/chr_${'a'.repeat(32)}/knowledge/kb_missing`,
+      {
+        method: 'PATCH',
+        body: { expected_revision: 0, audience: { kind: 'squad-private' } },
+      },
+    );
+    assert.equal(response.status, 400, response.text);
+    assert.equal(response.payload.error.code, 'invalid_input');
+    assert.equal(response.payload.error.message, 'audience kind is not allowed');
+  });
+
   test('foreign actor and stale binding are denied by the real store with zero effect, and a valid Actor gets context', async () => {
     // 1. A legal owned Character + binding is created through the surface.
     const created = await jsonFetch(`${baseUrl}/v1/daemon/characters`, {

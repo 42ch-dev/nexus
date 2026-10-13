@@ -181,7 +181,13 @@ function assertKnowledgeAudienceKeys(audience: unknown): void {
   const allowed = Object.hasOwn(KNOWLEDGE_AUDIENCE_KEYS, kind)
     ? KNOWLEDGE_AUDIENCE_KEYS[kind]
     : undefined;
-  if (allowed && Object.keys(audience).some((key) => !allowed.includes(key))) {
+  // An unlisted kind is failed closed rather than skipped: the allowmap is a
+  // string-keyed mirror of the generated union, so a silent skip would let a
+  // future arm cross this boundary with only the Rust gate behind it.
+  if (allowed === undefined) {
+    throw new HttpError(400, 'invalid_input', 'audience kind is not allowed');
+  }
+  if (Object.keys(audience).some((key) => !allowed.includes(key))) {
     throw new HttpError(400, 'invalid_input', 'audience contains unknown fields');
   }
 }
