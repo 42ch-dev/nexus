@@ -180,6 +180,13 @@ target
 tooling/codegen/.schemas-localized/
 tooling/codegen/.schemas-dereferenced/
 
+# Codegen publication lock files (stage-and-swap; tooling/codegen)
+# TS adds transient `.reclaim` gate / `.tmp` claim-file siblings a crash can leave;
+# Rust's persistent advisory lock has no such siblings.
+/packages/nexus-contracts/src/generated.lock
+/packages/nexus-contracts/src/generated.lock.*
+/crates/nexus-contracts/src/generated.lock
+
 # Git worktrees (isolation for parallel branch development)
 .worktrees/
 

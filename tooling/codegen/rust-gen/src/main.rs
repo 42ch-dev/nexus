@@ -21,6 +21,15 @@
 //! directory (nested `pub mod` + flat `pub use`, mirroring the sibling spoke
 //! generator), and stamps `SCHEMA_VERSIONS` / `LATEST_SCHEMA_VERSION` into the root.
 //!
+//! The tree is built in a sibling staging directory and published by two renames — the
+//! committed tree is retired to a sibling `.backup`, then the staged tree is landed —
+//! so a failed, aborted or crashed run never prunes or partially regenerates the tree
+//! in place. Publication is *recoverable*, not atomic: `std::fs` exposes no portable
+//! directory exchange, so `out_root` is briefly absent between the two renames, and a
+//! hard kill in that window leaves it absent until the next run restores the `.backup`.
+//! Overlapping runs of this binary against the same output directory are refused by a
+//! per-output advisory lock rather than allowed to share the staging/backup siblings.
+//!
 //! # Formatting pass + `$ref` dedupe
 //!
 //! `typify` hands back a `TokenStream`; its `to_string()` is a single-line token
@@ -1101,6 +1110,14 @@ fn write_barrels(out_root: &Path, modules: &[GeneratedModule], schema_versions: 
 }
 
 fn main() {
+    if let Err(err) = run() {
+        eprintln!("error: {err}");
+        process::exit(1);
+    }
+}
+
+/// Resolve the lane inputs, then regenerate the Rust contract tree via stage-and-swap.
+fn run() -> Result<(), String> {
     let root = repo_root();
     let deref_dir = deref_schemas_dir(&root);
     let src_dir = source_schemas_dir(&root);
@@ -1113,22 +1130,33 @@ fn main() {
     eprintln!("  out:   {}", out_root.display());
 
     if !deref_dir.is_dir() {
-        eprintln!(
-            "error: dereferenced schema tree not found — run `pnpm run codegen` (stage 1) first, \
+        return Err(
+            "dereferenced schema tree not found — run `pnpm run codegen` (stage 1) first, \
              or set NEXUS_DEREF_SCHEMAS_DIR"
+                .to_string(),
         );
-        process::exit(1);
     }
 
-    // Replace any prior generated tree (bespoke or stale) with a clean typify output,
-    // mirroring the sibling spoke generator. Stray files from a previous generator
-    // (e.g. a definitions-only emit like `common_types.rs`) would otherwise linger
-    // as unmounted orphans on disk.
-    if out_root.exists() {
-        fs::remove_dir_all(&out_root).expect("remove stale generated tree");
-    }
-    fs::create_dir_all(&out_root).expect("create generated tree root");
+    // Stage-and-swap: generate the tree under a sibling staging dir and replace the
+    // committed tree (bespoke, stale or partial) only once every write succeeded. A
+    // failed or aborted run therefore leaves the previous generated tree intact instead
+    // of pruning it mid-window; stray files from a previous generator (e.g. a
+    // definitions-only emit like `common_types.rs`) still disappear with the swap.
+    stage_and_swap(&out_root, |stage_root| {
+        generate_tree(&root, &deref_dir, &src_dir, &out_root, stage_root)
+    })
+}
 
+/// Generate every schema module and barrel `mod.rs` into `stage_root`, keeping the
+/// bookkeeping paths (`out_path` / `out_rel`) relative to the final `out_root` so the
+/// swap stays a plain directory rename.
+fn generate_tree(
+    root: &Path,
+    deref_dir: &Path,
+    src_dir: &Path,
+    out_root: &Path,
+    stage_root: &Path,
+) -> Result<(), String> {
     let pattern = deref_dir.join("**/*.schema.json");
     let mut schema_paths: Vec<PathBuf> = glob(pattern.to_str().expect("glob pattern is literal"))
         .expect("glob pattern compiles")
@@ -1221,18 +1249,14 @@ fn main() {
     eprintln!("skipped {skipped} definition-only / canonical-skip schema(s)");
 
     if !failures.is_empty() {
-        for err in &failures {
-            eprintln!("error: {err}");
-        }
-        process::exit(1);
+        return Err(failures.join("\nerror: "));
     }
 
     if generated.is_empty() {
-        eprintln!(
-            "error: generated 0 Rust schema files (deref dir: {})",
+        return Err(format!(
+            "generated 0 Rust schema files (deref dir: {})",
             deref_dir.display()
-        );
-        process::exit(1);
+        ));
     }
 
     // Formatting pass + `$ref` dedupe, then write. Every module is parsed before the
@@ -1273,32 +1297,28 @@ fn main() {
         }
     }
     if !render_failures.is_empty() {
-        for err in &render_failures {
-            eprintln!("error: {err}");
-        }
-        process::exit(1);
+        return Err(render_failures.join("\nerror: "));
     }
 
     for (out_path, rel, body) in &rendered {
-        if let Some(parent) = out_path.parent() {
-            fs::create_dir_all(parent).expect("create generated schema output dir");
+        let dest = stage_root.join(
+            out_path
+                .strip_prefix(out_root)
+                .expect("output path sits under the output root"),
+        );
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|err| format!("create generated schema output dir: {err}"))?;
         }
         let header = format!(
             "//! AUTO-GENERATED FROM JSON SCHEMA - DO NOT MODIFY\n//! Source: {}\n//! Generated by: pnpm run codegen\n\n",
             rel.display()
         );
-        fs::write(out_path, format!("{header}{body}")).unwrap_or_else(|err| {
-            eprintln!("error: failed to write {}: {err}", out_path.display());
-            process::exit(1);
-        });
+        fs::write(&dest, format!("{header}{body}"))
+            .map_err(|err| format!("failed to write {}: {err}", out_path.display()))?;
         println!(
             "wrote {}",
-            out_root
-                .strip_prefix(&root)
-                .ok()
-                .and_then(|_| out_path.strip_prefix(&root).ok())
-                .unwrap_or(out_path)
-                .display()
+            out_path.strip_prefix(root).unwrap_or(out_path).display()
         );
     }
 
@@ -1306,10 +1326,11 @@ fn main() {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("provider_host_event.rs.template");
     let provider_host_event_out = out_root.join("core").join("provider_host_event.rs");
     if provider_host_event_src.exists() {
-        fs::create_dir_all(provider_host_event_out.parent().expect("core parent"))
-            .expect("create core output dir");
-        fs::copy(&provider_host_event_src, &provider_host_event_out)
-            .expect("copy provider_host_event template");
+        let dest = stage_root.join("core").join("provider_host_event.rs");
+        fs::create_dir_all(dest.parent().expect("core parent"))
+            .map_err(|err| format!("create core output dir: {err}"))?;
+        fs::copy(&provider_host_event_src, &dest)
+            .map_err(|err| format!("copy provider_host_event template: {err}"))?;
         generated.insert(provider_host_event_out.clone());
         generated_modules.push(GeneratedModule {
             out_rel: PathBuf::from("core").join("provider_host_event.rs"),
@@ -1333,7 +1354,7 @@ fn main() {
 
     // Write the barrel `mod.rs` for every directory in the tree (root gets the
     // `#![allow(...)]` attr + `SCHEMA_VERSIONS` / `LATEST_SCHEMA_VERSION`).
-    write_barrels(&out_root, &generated_modules, &schema_versions);
+    write_barrels(stage_root, &generated_modules, &schema_versions);
 
     let latest = schema_versions.iter().map(|(_, v)| *v).max().unwrap_or(0);
     println!(
@@ -1341,4 +1362,285 @@ fn main() {
         generated.len(),
         schema_versions.len()
     );
+    Ok(())
+}
+
+/// Sibling staging directory for `out_root`: same parent, so the final swap is a single
+/// rename within one filesystem.
+fn staging_root(out_root: &Path) -> PathBuf {
+    let name = out_root
+        .file_name()
+        .expect("generated tree root has a file name");
+    out_root.with_file_name(format!("{}.staging", name.to_string_lossy()))
+}
+
+/// Sibling path holding the committed tree while it is retired for a swap: same parent,
+/// so retiring it and dropping it are renames/removals within one filesystem.
+fn backup_root(out_root: &Path) -> PathBuf {
+    let name = out_root
+        .file_name()
+        .expect("generated tree root has a file name");
+    out_root.with_file_name(format!("{}.backup", name.to_string_lossy()))
+}
+
+/// Sibling advisory lock file guarding one output directory's whole publication
+/// lifecycle, so overlapping invocations cannot share its staging/backup siblings.
+fn lock_root(out_root: &Path) -> PathBuf {
+    let name = out_root
+        .file_name()
+        .expect("generated tree root has a file name");
+    out_root.with_file_name(format!("{}.lock", name.to_string_lossy()))
+}
+
+/// Take the exclusive per-output-directory publication lock, or fail when another run
+/// holds it. Backed by the OS advisory file lock (`std::fs::File::try_lock`), which the
+/// OS releases when the holder exits — so a crashed run cannot wedge the next one. Only
+/// the advisory lock is stateful; the zero-byte lock file is kept beside the output.
+fn acquire_publication_lock(out_root: &Path) -> Result<fs::File, String> {
+    let lock_path = lock_root(out_root);
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .map_err(|err| format!("open publication lock {}: {err}", lock_path.display()))?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(fs::TryLockError::WouldBlock) => Err(format!(
+            "another codegen run is active for {}; refusing to share its staging tree",
+            out_root.display()
+        )),
+        Err(fs::TryLockError::Error(err)) => Err(format!("lock {}: {err}", lock_path.display())),
+    }
+}
+
+/// Generate into a sibling staging tree and swap it into place only after `build`
+/// succeeds, so a failed, aborted or crashed run cannot prune the existing tree.
+///
+/// Replacement is *recoverable*, not atomic — `std::fs` exposes no portable directory
+/// exchange, so this is two operations with a documented window. The committed tree is
+/// retired to the sibling `.backup` path via rename (never a recursive delete of the
+/// only copy), the staging tree is renamed into place, and the retired copy is dropped
+/// last. A hard kill therefore leaves `out_root` in one of three states, all
+/// recoverable on the next run: before the swap → `out_root` absent, the committed tree
+/// at `.backup`, restored by `recover_interrupted_publication`; after the swap → the new
+/// tree committed, the stale backup dropped; mid-swap → the backup restored in place.
+/// `out_root` is thus briefly absent during a swap, but the tree is never observably
+/// pruned or partially deleted.
+///
+/// The whole recover → build → publish lifecycle is serialized per `out_root` by
+/// [`acquire_publication_lock`], so a second run targeting the same output fails before
+/// it can clear this run's staging tree.
+fn stage_and_swap<F>(out_root: &Path, build: F) -> Result<(), String>
+where
+    F: FnOnce(&Path) -> Result<(), String>,
+{
+    let _lock = acquire_publication_lock(out_root)?;
+    let stage_root = staging_root(out_root);
+    // Recover (or clear) whatever a previous interrupted publication left behind before
+    // this run could overwrite the recovery material.
+    recover_interrupted_publication(out_root)?;
+    if stage_root.exists() {
+        fs::remove_dir_all(&stage_root)
+            .map_err(|err| format!("clear staging tree {}: {err}", stage_root.display()))?;
+    }
+    fs::create_dir_all(&stage_root)
+        .map_err(|err| format!("create staging tree {}: {err}", stage_root.display()))?;
+
+    if let Err(err) = build(&stage_root) {
+        let _ = fs::remove_dir_all(&stage_root);
+        return Err(err);
+    }
+
+    publish(&stage_root, out_root)
+}
+
+/// Restore or clear the recovery material a previous interrupted publication left, so a
+/// later run never removes it unrecovered. No-op when no backup exists.
+fn recover_interrupted_publication(out_root: &Path) -> Result<(), String> {
+    let backup_root = backup_root(out_root);
+    if !backup_root.exists() {
+        return Ok(());
+    }
+    if out_root.exists() {
+        // The replacement landed; the retired tree is stale litter.
+        return fs::remove_dir_all(&backup_root)
+            .map_err(|err| format!("remove retired generated tree: {err}"));
+    }
+    // Killed before the replacement landed; the retired tree is the committed one.
+    fs::rename(&backup_root, out_root).map_err(|err| {
+        format!(
+            "restore previous generated tree from {}: {err}",
+            backup_root.display()
+        )
+    })
+}
+
+/// Retire the committed tree, land the staged one, then drop the retired copy. A failed
+/// swap restores the retired tree before returning the error.
+fn publish(stage_root: &Path, out_root: &Path) -> Result<(), String> {
+    let backup_root = backup_root(out_root);
+    if out_root.exists() {
+        fs::rename(out_root, &backup_root).map_err(|err| {
+            format!(
+                "retire previous generated tree to {}: {err}",
+                backup_root.display()
+            )
+        })?;
+    }
+    if let Err(err) = fs::rename(stage_root, out_root) {
+        if backup_root.exists() {
+            let _ = fs::rename(&backup_root, out_root);
+        }
+        return Err(format!("swap staging tree into place: {err}"));
+    }
+    if backup_root.exists() {
+        fs::remove_dir_all(&backup_root)
+            .map_err(|err| format!("remove retired generated tree: {err}"))?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Scratch dir under the system temp dir — same filesystem as the staged tree, so
+    /// the swap is a real rename.
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!("nexus-rust-gen-{tag}-{}", process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("create scratch dir");
+        dir
+    }
+
+    #[test]
+    fn failed_build_keeps_the_existing_tree() {
+        let sandbox = scratch("abort");
+        let out_root = sandbox.join("generated");
+        fs::create_dir_all(&out_root).unwrap();
+        fs::write(out_root.join("kept.rs"), "// committed").unwrap();
+
+        let err = stage_and_swap(&out_root, |stage_root| {
+            // A build that dies mid-write must not prune the committed tree.
+            fs::write(stage_root.join("half.rs"), "// partial").unwrap();
+            Err("boom".to_string())
+        })
+        .unwrap_err();
+
+        assert_eq!(err, "boom");
+        assert!(
+            out_root.join("kept.rs").exists(),
+            "existing tree was pruned"
+        );
+        assert!(!out_root.join("half.rs").exists());
+        assert!(
+            !staging_root(&out_root).exists(),
+            "staging tree left behind"
+        );
+        let _ = fs::remove_dir_all(&sandbox);
+    }
+
+    #[test]
+    fn successful_build_replaces_the_tree() {
+        let sandbox = scratch("swap");
+        let out_root = sandbox.join("generated");
+        fs::create_dir_all(&out_root).unwrap();
+        fs::write(out_root.join("stale.rs"), "// stale").unwrap();
+
+        stage_and_swap(&out_root, |stage_root| {
+            fs::write(stage_root.join("fresh.rs"), "// fresh").unwrap();
+            Ok(())
+        })
+        .unwrap();
+
+        assert!(
+            !out_root.join("stale.rs").exists(),
+            "stale file survived the swap"
+        );
+        assert!(out_root.join("fresh.rs").exists());
+        let _ = fs::remove_dir_all(&sandbox);
+    }
+
+    #[test]
+    fn failed_publish_restores_the_previous_tree() {
+        let sandbox = scratch("publish");
+        let out_root = sandbox.join("generated");
+        fs::create_dir_all(&out_root).unwrap();
+        fs::write(out_root.join("kept.rs"), "// committed").unwrap();
+
+        // Force the swap rename to fail: the staged tree is absent when publication runs.
+        let err = publish(&staging_root(&out_root), &out_root).unwrap_err();
+        assert!(
+            err.contains("swap staging tree into place"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            out_root.join("kept.rs").exists(),
+            "previous tree was not restored"
+        );
+        assert!(!backup_root(&out_root).exists());
+        let _ = fs::remove_dir_all(&sandbox);
+    }
+
+    #[test]
+    fn recovers_an_interrupted_publication() {
+        let sandbox = scratch("recover");
+        let out_root = sandbox.join("generated");
+        // Simulate a kill after the old tree was retired but before the swap landed.
+        fs::create_dir_all(backup_root(&out_root)).unwrap();
+        fs::write(backup_root(&out_root).join("kept.rs"), "// committed").unwrap();
+
+        let err = stage_and_swap(&out_root, |_| Err("boom".to_string())).unwrap_err();
+
+        assert_eq!(err, "boom");
+        assert!(
+            out_root.join("kept.rs").exists(),
+            "recovery material was not restored"
+        );
+        assert!(!backup_root(&out_root).exists());
+        let _ = fs::remove_dir_all(&sandbox);
+    }
+
+    #[test]
+    fn overlapping_runs_refuse_to_share_the_output() {
+        let sandbox = scratch("overlap");
+        let out_root = sandbox.join("generated");
+        fs::create_dir_all(&out_root).unwrap();
+
+        let (locked_tx, locked_rx) = std::sync::mpsc::channel::<()>();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let holder_root = out_root.clone();
+        let holder = std::thread::spawn(move || {
+            stage_and_swap(&holder_root, |stage_root| {
+                fs::write(stage_root.join("first.rs"), "// first").unwrap();
+                locked_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                Ok(())
+            })
+        });
+
+        // The first run holds the lock across its whole build; the second must fail
+        // rather than clear the staging tree out from under it.
+        locked_rx.recv().unwrap();
+        let err = stage_and_swap(&out_root, |_| Ok(())).unwrap_err();
+        assert!(
+            err.contains("another codegen run is active"),
+            "overlap must fail visibly, got: {err}"
+        );
+
+        release_tx.send(()).unwrap();
+        holder.join().unwrap().unwrap();
+        assert!(out_root.join("first.rs").exists());
+
+        // The lock is released with its holder, so the next run proceeds normally.
+        stage_and_swap(&out_root, |stage_root| {
+            fs::write(stage_root.join("second.rs"), "// second").unwrap();
+            Ok(())
+        })
+        .unwrap();
+        assert!(out_root.join("second.rs").exists());
+        assert!(!out_root.join("first.rs").exists());
+        let _ = fs::remove_dir_all(&sandbox);
+    }
 }

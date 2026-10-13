@@ -32,6 +32,7 @@
  */
 import { compile } from 'json-schema-to-typescript';
 import { glob } from 'glob';
+import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -282,17 +283,68 @@ function declaredNames(source: string): string[] {
   return names;
 }
 
-/** Last line index of the top-level declaration that starts at `start`. */
-function declarationEnd(lines: string[], start: number): number {
+/**
+ * Last line index of the top-level declaration that starts at `start`.
+ *
+ * Braces inside string / template literals (`close: "}"`, `` raw: `a}b` ``) are data,
+ * not structure — as are braces inside comments, which property-level JSDoc emits
+ * freely — so the scan tracks quote / block-comment state across lines and only counts
+ * the braces outside both. A template literal's `${ … }` re-enters code, so its braces
+ * (and any nested template/quote inside it) are tracked on a stack rather than treated
+ * as template text; that keeps comment-looking text in a nested template literal — e.g.
+ * `` `outer${`/*`}` `` — literal instead of an unterminated comment.
+ */
+export function declarationEnd(lines: string[], start: number): number {
   const isTypeAlias = /^export type \b/.test(lines[start]);
   let depth = 0;
+  let inBlockComment = false;
+  // Delimiter of the literal the scan is inside (`'`, `"` or a backtick), if any.
+  let quote: string | undefined;
+  // One entry per open template `${`: the count of `{` opened inside it, so its own
+  // matching `}` resumes the template instead of closing the declaration.
+  const interpolations: number[] = [];
   for (let i = start; i < lines.length; i++) {
-    for (const ch of lines[i]) {
-      if (ch === '{') depth += 1;
-      else if (ch === '}') depth -= 1;
+    const line = lines[i];
+    for (let j = 0; j < line.length; j++) {
+      const ch = line[j];
+      const next = line[j + 1];
+      if (inBlockComment) {
+        if (ch === '*' && next === '/') {
+          inBlockComment = false;
+          j += 1;
+        }
+      } else if (quote) {
+        if (ch === '\\') j += 1;
+        else if (quote === '`' && ch === '$' && next === '{') {
+          interpolations.push(0);
+          quote = undefined;
+          j += 1;
+        } else if (ch === quote) quote = undefined;
+      } else if (ch === '/' && next === '/') {
+        break;
+      } else if (ch === '/' && next === '*') {
+        inBlockComment = true;
+        j += 1;
+      } else if (ch === "'" || ch === '"' || ch === '`') {
+        quote = ch;
+      } else if (ch === '{') {
+        const open = interpolations.length - 1;
+        if (open >= 0) interpolations[open] += 1;
+        depth += 1;
+      } else if (ch === '}') {
+        const open = interpolations.length - 1;
+        if (open < 0) depth -= 1;
+        else if (interpolations[open] > 0) {
+          interpolations[open] -= 1;
+          depth -= 1;
+        } else {
+          interpolations.pop();
+          quote = '`';
+        }
+      }
     }
     if (depth > 0) continue;
-    if (isTypeAlias ? lines[i].trimEnd().endsWith(';') : lines[i].trimEnd().endsWith('}')) {
+    if (isTypeAlias ? line.trimEnd().endsWith(';') : line.trimEnd().endsWith('}')) {
       return i;
     }
   }
@@ -371,6 +423,164 @@ export async function generateTSTypes(): Promise<void> {
   const outDir = resolveFromRoot('packages', 'nexus-contracts', 'src', 'generated');
   logger.info(`Generating TypeScript types to: ${outDir}`);
 
+  await stageAndSwap(outDir, stageDir => buildGeneratedTree(localizedDir, srcSchemasDir, stageDir));
+}
+
+/**
+ * Build `outDir` in a sibling staging directory and swap it into place only after
+ * `build` succeeds, so a failed or aborted run cannot prune the existing tree.
+ *
+ * Replacement is *recoverable*, not atomic — Node exposes no portable directory
+ * exchange, so this is two operations with a documented window. The committed tree is
+ * retired to a sibling `.backup` path via rename (never a recursive delete of the only
+ * copy), the staged tree is renamed into place, and the retired copy is dropped last.
+ * Concretely, a hard kill leaves one of three states, all recoverable on the next run:
+ * the kill happens before the swap → `outDir` is absent and the committed tree sits at
+ * `.backup` (restored by `recoverInterruptedPublication`); after the swap → the new
+ * tree is committed and the stale backup is dropped; or mid-swap → the backup is
+ * restored in place. The committed path is thus briefly absent during a swap, but the
+ * tree is never observably pruned or partially deleted.
+ *
+ * The entire recover → build → publish lifecycle is serialized per `outDir` by
+ * `acquirePublicationLock`: two runs targeting the same output cannot share the
+ * staging/backup siblings, and the loser fails visibly instead of publishing the
+ * other run's incomplete tree.
+ */
+export async function stageAndSwap(
+  outDir: string,
+  build: (stageDir: string) => Promise<void> | void,
+): Promise<void> {
+  const releaseLock = acquirePublicationLock(outDir);
+  try {
+    const stageDir = `${outDir}.staging`;
+    recoverInterruptedPublication(outDir);
+    fs.rmSync(stageDir, { recursive: true, force: true });
+    ensureDir(stageDir);
+    try {
+      await build(stageDir);
+    } catch (err) {
+      fs.rmSync(stageDir, { recursive: true, force: true });
+      throw err;
+    }
+    publishTree(stageDir, outDir);
+  } finally {
+    releaseLock();
+  }
+}
+
+/** Owner record written inside the lock directory: `<pid>:<nonce>:<startedAt>`. */
+type LockOwner = string;
+
+/**
+ * Read the owner record from a lock directory, or `undefined` when it is missing or
+ * unreadable (the directory was just created, or a run died before writing it). Used
+ * only to name the holder in the failure message and to guard release — never to decide
+ * whether a lock may be reclaimed.
+ */
+function readOwner(lockDir: string): LockOwner | undefined {
+  try {
+    return fs.readFileSync(path.join(lockDir, 'owner'), 'utf8').trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Publish a claim atomically: `mkdir` is the portable atomic-exclusive primitive
+ * (`EEXIST` = held). The owner record is written inside the claimed directory
+ * immediately after, so a live claim is always identifiable.
+ *
+ * @returns true when this claim now owns `lockDir`.
+ */
+function tryMkdirClaim(lockDir: string, token: string): boolean {
+  try {
+    fs.mkdirSync(lockDir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') return false;
+    throw err;
+  }
+  try {
+    fs.writeFileSync(path.join(lockDir, 'owner'), `${token}\n`);
+  } catch (err) {
+    // We own the directory but recorded no token, so nothing could ever release it —
+    // drop it rather than strand the lock for manual removal.
+    fs.rmSync(lockDir, { recursive: true, force: true });
+    throw err;
+  }
+  return true;
+}
+
+/** Remove the lock directory only while it still carries this claim's owner record. */
+function releaseOwned(lockDir: string, token: string): void {
+  if (readOwner(lockDir) === token) {
+    fs.rmSync(lockDir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Take the exclusive per-output-directory publication lock, or fail visibly when any
+ * run already holds it. Node exposes no advisory file lock, so the lock directory
+ * itself is the lock: acquisition is a single atomic `mkdir` and nothing else. There is
+ * no stale takeover — a lock left behind by a crashed run (or one whose owner record is
+ * missing) is never removed automatically, because no liveness check can exclude the
+ * race between observing an owner and removing it. Any such lock fails the run visibly
+ * and is removed by an operator, deliberately, once no codegen run is active.
+ *
+ * @returns the release hook; it only removes a lock this claim still owns.
+ */
+export function acquirePublicationLock(outDir: string): () => void {
+  const lockDir = `${outDir}.lock`;
+  const token = `${process.pid}:${randomUUID()}:${Date.now()}`;
+  if (tryMkdirClaim(lockDir, token)) {
+    return () => releaseOwned(lockDir, token);
+  }
+  const owner = readOwner(lockDir);
+  throw new Error(
+    `codegen: another codegen run holds the publication lock for ${outDir} ` +
+      `(recorded owner ${owner ?? 'unknown'}); it serializes recover→build→publish and ` +
+      `is never reclaimed automatically — if no codegen run is active, remove ${lockDir} manually`,
+  );
+}
+
+/**
+ * Restore or clear the recovery material a previous interrupted publication left, so a
+ * later run never removes it unrecovered. No-op unless a backup exists.
+ */
+function recoverInterruptedPublication(outDir: string): void {
+  const backupDir = `${outDir}.backup`;
+  if (!fs.existsSync(backupDir)) return;
+  if (fs.existsSync(outDir)) {
+    // The replacement landed; the retired tree is stale litter.
+    fs.rmSync(backupDir, { recursive: true, force: true });
+    return;
+  }
+  // Killed before the replacement landed; the retired tree is the committed one.
+  fs.renameSync(backupDir, outDir);
+}
+
+/** Retire the committed tree, land the staged one, then drop the retired copy. */
+function publishTree(stageDir: string, outDir: string): void {
+  const backupDir = `${outDir}.backup`;
+  if (fs.existsSync(outDir)) fs.renameSync(outDir, backupDir);
+  try {
+    fs.renameSync(stageDir, outDir);
+  } catch (err) {
+    if (fs.existsSync(backupDir)) fs.renameSync(backupDir, outDir);
+    throw err;
+  }
+  fs.rmSync(backupDir, { recursive: true, force: true });
+}
+
+/**
+ * Build the tree under `outDir`, which is the staging dir during a normal run.
+ * Regeneration is authoritative — the caller swaps the whole directory in, so a
+ * failure here leaves the previously generated tree untouched.
+ */
+async function buildGeneratedTree(
+  localizedDir: string,
+  srcSchemasDir: string,
+  outDir: string,
+): Promise<void> {
   // v1.184 P1 T3 fix1: rewrite exact-string pattern discriminants across the
   // whole localized tree BEFORE compiling. compile() resolves cross-file $ref
   // bodies from disk, so rewriting only the root schema left nested oneOf
@@ -396,10 +606,6 @@ export async function generateTSTypes(): Promise<void> {
     base: path.basename(rel, '.schema.json'),
     declared: new Set<string>(),
   }));
-
-  // Reset the generated tree (regeneration is authoritative).
-  fs.rmSync(outDir, { recursive: true, force: true });
-  ensureDir(outDir);
 
   // 1. Synthetic common module: common definitions + SourceAnchor (skip-listed but referenced).
   await generateCommonTypesModule(localizedDir, outDir);

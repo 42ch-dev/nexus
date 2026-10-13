@@ -640,6 +640,13 @@ pub mod patch {
         // V1.203 P2: the authored module dialects are validated in-place
         // (post-extraction, pre-write, after the addressing/status/OCC checks
         // above), joining the same 422 `validation_summary.errors` array.
+        //
+        // D8 (v1.214 P1-S2): this seam deliberately stays **before** the
+        // durable no-op short-circuit below. Re-supplying an unchanged but
+        // drifted dialect is therefore still refused with this 422 — the
+        // no-op path only absorbs content that passes the write surface's own
+        // validation. Fix the dialect, then re-submit; do not reorder these
+        // two blocks.
         let module_errors = validate_authored_modules(&req.patch);
         if !module_errors.is_empty() {
             return Err(CoreError::world_kb_validation_failed(&module_errors, &[]));

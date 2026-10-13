@@ -298,7 +298,7 @@ export const WORLD_KB_ENTITY_PATCH_SHAPE: Shape = {
         {
           fields: {
             kind: { kind: 'string', enum: ['character-private'] },
-            character_id: { kind: 'string' },
+            character_id: { kind: 'string', pattern: /^chr_[0-9a-f]{32}$/ },
           },
           required: ['kind', 'character_id'],
         },

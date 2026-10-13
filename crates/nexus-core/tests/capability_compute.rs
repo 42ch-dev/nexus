@@ -3425,6 +3425,47 @@ async fn execution_start_runs_the_compute_receipt_recovery_pass() {
     assert!(settled_row.proposals_json.is_none());
 }
 
+/// v1.214 S3: a boot recovery READ failure must be distinguishable from
+/// "no stuck run" on the handle.
+///
+/// The receipt-first pass decides nothing when its stuck-run read fails — the
+/// slice stays empty — but that empty slice must not be indistinguishable from
+/// "nothing was stuck". The handle carries the failure explicitly; a read
+/// failure never licenses a re-apply and never fabricates a decision.
+#[tokio::test]
+#[serial_test::serial]
+async fn boot_recovery_read_failure_is_reported_on_the_handle() {
+    // A clean boot over zero stuck runs: empty decisions AND no failure.
+    let clean = fixture().await;
+    let clean_handle = open_compute_handle(&clean).await;
+    assert!(clean_handle.compute_run_recoveries().is_empty());
+    assert!(
+        clean_handle.compute_run_recovery_error().is_none(),
+        "a pass that read successfully is not a failure"
+    );
+
+    // Break the read the pass performs (`compute_sessions` is the only table
+    // it scans), then boot: the decisions are still empty, but the failure is
+    // now explicit rather than silently looking like "nothing was stuck".
+    let broken = fixture().await;
+    sqlx::query("DROP TABLE compute_sessions")
+        .execute(broken.core.pool())
+        .await
+        .expect("drop the run table to break the recovery read");
+    let failed_handle = open_compute_handle(&broken).await;
+    assert!(
+        failed_handle.compute_run_recoveries().is_empty(),
+        "a failed read yields no decision — never a fabricated one"
+    );
+    let error = failed_handle
+        .compute_run_recovery_error()
+        .expect("the boot read failure is reported on the handle");
+    assert!(
+        matches!(error, CoreError::Internal { .. }),
+        "the reported failure is the mapped storage fault, got {error:?}"
+    );
+}
+
 /// Number of direct-lane compute runs the world holds.
 ///
 /// The module is executed only after its run row is inserted, so this count is

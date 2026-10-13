@@ -299,6 +299,46 @@ describe('facade wire validation', () => {
     );
   });
 
+  test('rejects a character-private audience whose character_id is not chr_ + 32 lowercase hex', () => {
+    for (const character_id of [
+      '',
+      'chr_short',
+      `chr_${'a'.repeat(31)}`,
+      `chr_${'a'.repeat(33)}`,
+      `chr_${'A'.repeat(32)}`,
+      `chr_${'g'.repeat(32)}`,
+    ]) {
+      assert.throws(
+        () =>
+          stringifyWire(
+            {
+              entity_id: 'kb_abc123',
+              expected_version: 0,
+              patch: { audience: { kind: 'character-private', character_id } },
+            },
+            WORLD_KB_PATCH_ENTITY_SHAPE,
+            'request',
+          ),
+        /does not match an allowed arm/,
+        `character_id ${JSON.stringify(character_id)} must be rejected`,
+      );
+    }
+  });
+
+  test('accepts a character-private audience whose character_id is chr_ + 32 lowercase hex', () => {
+    assert.doesNotThrow(() =>
+      stringifyWire(
+        {
+          entity_id: 'kb_abc123',
+          expected_version: 0,
+          patch: { audience: { kind: 'character-private', character_id: `chr_${'a1'.repeat(16)}` } },
+        },
+        WORLD_KB_PATCH_ENTITY_SHAPE,
+        'request',
+      ),
+    );
+  });
+
   test('rejects a host query without a discriminator', () => {
     assert.throws(() => stringifyWire({}, CORE_HOST_QUERY_SHAPE, 'request'), /required/);
   });
