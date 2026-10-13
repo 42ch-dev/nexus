@@ -1,6 +1,6 @@
 # Novel Multi-Work Lifecycle — Normative Specification v1
 
-**Status**: Shipped (V1.41 — PR #53; post-merge `156e669d` / `12753eb8`)  
+**Status**: Shipped — multi-Work completion, runtime/concurrency locks, and CLI default Work  
 **Document class**: Feature line (profile overlay extension)  
 **Created**: 2026-06-10  
 **Scope**: Creator-scoped **multi-novel Work completion**, **runtime/concurrency locks**, and **CLI default Work** — DF-60 Medium ceremony  
@@ -9,26 +9,24 @@
 - [workflow-profile.md](workflow-profile.md) — §6 completion criteria
 - [work-pool.md](work-pool.md) — default Work pointer (`novel_pool_entries.status = active`)
 - [creator-workflow.md](../creator/creator-workflow.md) — auto-chain pause during completion-lock; runtime lock on mutating paths
-- [cli-spec.md](../cli/cli-spec.md) — `creator works`, `creator bootstrap --from-work`, resume reopen
+- [cli-spec.md](../cli/cli-spec.md) — `creator works`, completion-lock release, reopen
 - [work-experience-model.md](../creator/work-experience-model.md) — Work is single-Work; pool `active` is CLI default only
 - [agent-nexus-tool-bridge.md](../agents/agent-nexus-tool-bridge.md) — `nexus.work.patch` obeys same locks
-
-**V1.42 amend**: §4.2 production acquire gap —  P0
 
 ---
 
 ## 1. Purpose
 
-A prolific author may run **multiple** `work_profile: novel` Works over time — including **concurrent** auto-chain on different Works. V1.39–V1.40 automate chapter production per Work. This spec defines how OSS **completes** a Work, **locks** it from further mutation, and how CLI picks a **default** Work — without Redis, InStreet APIs, novels-system 8-step ceremony, or a global “switch” mutex.
+A prolific author may run **multiple** `work_profile: novel` Works over time — including **concurrent** auto-chain on different Works. This spec defines how OSS **completes** a Work, **locks** it from further mutation, and how CLI picks a **default** Work — without Redis, InStreet APIs, novels-system 8-step ceremony, or a global “switch” mutex.
 
 **Pre-1.0 policy**: Local-only; `metadata.platform_integration = paused`.
 
-### 1.1 Concurrency model (grill-me locked)
+### 1.1 Concurrency model
 
 | Concept | Rule |
 | --- | --- |
 | Multiple Works in flight | **Allowed** — different `work_id` values may each have active schedules / auto-chain |
-| Pool `active` row | **CLI default only** — `creator run` subcommands omitting `work_id` resolve to pool `active`; does **not** block other Works |
+| Pool `active` row | **CLI default only** — `creator works` subcommands omitting `work_id` resolve to pool `active`; does **not** block other Works |
 | Same Work, two processes | **Forbidden** for mutating operations — enforced by `works.runtime_lock_holder` (§4) |
 | Completed Work | **Write-protected while completion-lock present** (§3); `creator works reopen` releases the lock atomically (§3.3) |
 
@@ -70,7 +68,7 @@ Minimum schema:
 | Rule | Behavior |
 | --- | --- |
 | Presence | The scheduler (`nexus-orchestration` supervisor, hosted via `nexus-core`) **must not** start new auto-chain ticks on this Work while lock exists |
-| Mutating CLI/API | `nexus.work.patch` and schedule enqueue **fail closed** while the lock is present; `creator works reopen` is the audited command that releases it (§3.3) (the retired `creator run <preset_id>` dispatch and `creator works resume-chain` entries were removed in v1.193 P2) |
+| Mutating CLI/API | `nexus.work.patch` and schedule enqueue **fail closed** while the lock is present; `creator works reopen` is the audited command that releases it (§3.3) |
 | Read-only | `creator works status`, `creator works list` always allowed |
 
 ### 3.1 Release
@@ -97,11 +95,7 @@ Current command path (`handle_reopen`, `apps/nexus42/src/commands/creator/works/
 2. The Work **must** be completion-locked; the core refuses a Work whose `completion_locked_at` is NULL with `not_locked` instead of accepting a no-op patch.
 3. The release clears `works.completion_locked_at` (SSOT), sets `novel_completion_status = 'reopened'`, and deletes the derived `.completion-lock.json`. It does **not** change `works.status` — the row stays `completed`; the Work is writable again because the completion-lock gate no longer blocks it, not because a column flipped to `active`.
 4. Does **not** re-enable auto-chain: the release leaves `works.status = completed`, and auto-chain returns `ChainAction::NoAction` whenever `work.status == 'completed'` (`crates/nexus-orchestration/src/auto_chain.rs:691-694`). It does not delete `work_chapters` rows.
-5. `--extend-chapters` has no shipped path: the retired `run resume --reopen` flag is gone with the runner.
-
-**Historical (retired runner, removed in v1.193 P2):** the old two-step semantics — `creator works completion-lock release` merely *enabling* a separate `creator run resume --reopen` that set `works.status = active` and cleared `novel_completion_status`, carrying a **required** `--extend-chapters <new_total>` flag that seeded new `work_chapters` rows before resume enqueue — belonged to the retired `creator run` runner. The retained atomic `creator works reopen` performs the release in one core call and never sets `works.status = active`.
-
-Distinct from `creator bootstrap --from-work` (new Work + `lineage_from_work_id`; the `creator bootstrap` entry itself was removed in v1.193 P2 — the lineage contract remains the historical record).
+5. `--extend-chapters` has no shipped path.
 
 **OUT**: silent reopen without `--reason`.
 
@@ -114,7 +108,7 @@ Distinct from `creator bootstrap --from-work` (new Work + `lineage_from_work_id`
 | `runtime_lock_holder` | `TEXT` nullable | See holder formats below |
 | `runtime_lock_acquired_at` | `TEXT` nullable | ISO-8601 |
 
-### 4.1 Holder formats (grill-me A)
+### 4.1 Holder formats
 
 | Holder | When | Release |
 | --- | --- | --- |
@@ -130,42 +124,25 @@ Rules:
 
 Daemon API and `nexus.work.patch` **must** use the same acquire/release paths as CLI.
 
-### 4.2 Production acquire contract (V1.42 P0 — Implemented)
+### 4.2 Production acquire contract
 
-~~**Gap (PR #53 security re-review)**: V1.41 shipped DB columns and spec rules but **production paths do not yet acquire** `runtime_lock_holder`.~~
-
-**Resolved (V1.42 P0)**: All mutating paths now acquire/release `runtime_lock_holder` via `RuntimeLockGuard` RAII + `nexus_local_db::runtime_lock` module. .
+All mutating paths acquire/release `runtime_lock_holder` via `RuntimeLockGuard` RAII + `nexus_local_db::runtime_lock` module.
 
 | Path | Acquire before mutate | Release |
 | --- | --- | --- |
-| `creator works` mutating subcommands (V1.45 P2 migration; the `creator run` runner rows were removed in v1.193 P2) | **Required** (P0) | On command return (RAII) |
-| Service `patch_work` / schedule enqueue (`apps/nexus-service` over `nexus-core`; historically daemon handlers) | **Required** (P0) | On schedule terminal |
+| `creator works` mutating subcommands | **Required** | On command return (RAII) |
+| Service `patch_work` / schedule enqueue (`apps/nexus-service` over `nexus-core`) | **Required** | On schedule terminal |
 | Auto-chain tick | Skip if foreign holder | N/A |
 
-**Stale recovery (R-V141P0-01)**: If `runtime_lock_acquired_at` older than **2h** (default; env/config override allowed), the scheduler owner (`nexus-orchestration` supervisor under `nexus-core`; historically the daemon) **may** clear holder before new acquire. Hermetic tests required.
+**Stale recovery (R-V141P0-01)**: If `runtime_lock_acquired_at` older than **2h** (default; env/config override allowed), the scheduler owner (`nexus-orchestration` supervisor under `nexus-core`) **may** clear holder before new acquire. Hermetic tests required.
 
 ---
 
 ## 5. CLI surfaces (summary)
 
-Full flags in [cli-spec.md](../cli/cli-spec.md) §6.2D / §6.2H.
+Full flags in [cli-spec.md](../cli/cli-spec.md) §6.2H.
 
-### 5.1 ~~`creator run <preset_id>`~~ — strategy execution (**retired in v1.193 P2**, historical record)
-
-The generic preset dispatch entry `creator run <preset_id> [<work_id>]` (V1.45) was removed in v1.193 P2; there is no current CLI preset-dispatch entrance. Historical rules of that entry:
-
-- Optional `work_id`: omit → pool `active` → bound `work_id`; if none, fail → `creator works use`. (This resolution rule survives on the retained `creator works` atomic commands.)
-- **No** `list` / `status` on `run` (hard-removed V1.41); use `creator works list` / `creator works status`.
-- Current preset admission: schedule add via the core execution surface (`POST /v1/daemon/orchestration/schedules`, served by `apps/nexus-service`); the retained CLI scheduling surface is `creator works cron` declaration editing.
-
-### 5.2 ~~`creator bootstrap --from-work <completed_work_id>`~~ (**retired in v1.193 P2**, historical record)
-
-The `creator bootstrap` entry was removed in v1.193 P2; no current CLI scaffold/lineage entry exists. Its historical contract:
-
-- Creates **new** Work; sets `works.lineage_from_work_id` on the new row.
-- **Validation (shipped `12753eb8`)**: `completed_work_id` must exist, belong to the active creator, and be in `completed` status; otherwise **422** before INSERT.
-- Copies optional `creative_brief` defaults from completed Work metadata (not filesystem tree).
-- Does **not** mutate or resume the completed Work.
+Commands that accept an omitted `<work_id>` resolve it through the selection-pool `active` entry's bound `work_id`; an explicit `<work_id>` always wins, and with no pool `active` entry the command refuses with remediation to `creator works use <work_id>` ([cli-spec.md](../cli/cli-spec.md) §6.2H). There is no CLI preset-dispatch entrance; schedule add goes through the core execution surface (`POST /v1/daemon/orchestration/schedules`, served by `apps/nexus-service`), with `creator works cron` declaration editing as the retained CLI scheduling surface.
 
 ### 5.3 `creator works use <work_id>`
 
@@ -176,18 +153,18 @@ The `creator bootstrap` entry was removed in v1.193 P2; no current CLI scaffold/
 
 ### 5.4 Agent tools
 
-`nexus.work.patch`: append inspiration only; blocked under completion-lock; must acquire runtime lock like CLI `continue`.
+`nexus.work.patch`: append inspiration only; blocked under completion-lock; must acquire runtime lock like CLI `inspire`.
 
 ---
 
-## 6. Daemon behavior
+## 6. Auto-chain gating
 
 | Condition | Auto-chain |
 | --- | --- |
 | `.completion-lock.json` present | `Blocked(CompletionLock)` |
 | `runtime_lock_holder` foreign | Skip competing enqueue |
 | `status == completed` | No auto-chain (`ChainAction::NoAction`, `crates/nexus-orchestration/src/auto_chain.rs:691-694`); `creator works reopen` clears the completion-lock but leaves `status = completed` (§3.3) |
-| Otherwise | V1.39 rules unchanged |
+| Otherwise | Auto-chain rules per [workflow-profile.md](workflow-profile.md) |
 
 ---
 
@@ -195,9 +172,5 @@ The `creator bootstrap` entry was removed in v1.193 P2; no current CLI scaffold/
 
 1. Completion §6 + completion-lock + runtime lock testable without publish.
 2. `creator works status` shows `completion_lock`, `runtime_lock_holder`, pool binding.
-3. Release + `resume --reopen` path documented and tested.
+3. Release + `reopen` path documented and tested.
 4. No global switch mutex in CLI or specs.
-
----
-
-*Shipped V1.41. §4.2 production wiring is V1.42 P0.*

@@ -1,13 +1,13 @@
 # Creator Memory SOUL Lifecycle — Specification v1
 
-**Status**: Draft (V1.82 amendment — §7.2.4 per-(creator, world) narrative lifecycle added)
+**Status**: Draft
 **Document class**: Draft overlay
 **Created**: 2026-07-01
 **Scope**: Creator memory review lifecycle, SOUL fragments, and on-demand Creator-SOUL + per-World narrative cache semantics.
 **Coordinates with**:
 
 - [creator-workflow.md](creator-workflow.md) §5.6 — SOUL visualization contract over memory fragments
-- [web-ui.md](../surfaces/web-ui.md) §26–§27 — Creator SOUL Maturation (V1.81) + SOUL Completion per-World narrative (V1.82)
+- [web-ui.md](../surfaces/web-ui.md) §26–§27 — Creator SOUL Maturation + SOUL Completion per-World narrative
 - [`schemas/daemon-api/memory/`](../../../../schemas/daemon-api/memory) — wire contract schemas
 - [on-demand-synthesis-read-path-invariant.md](../../../knowledge/architecture-patterns/on-demand-synthesis-read-path-invariant.md) — read-path LLM gating (applies per world)
 - [fingerprint-cached-live-aggregate.md](../../../knowledge/architecture-patterns/fingerprint-cached-live-aggregate.md) — read-path cost (cache key per (creator, world))
@@ -43,7 +43,7 @@ The Creator SOUL is the whole, not the `NULL` subset. Consumers must not treat
 
 The Daemon API may expose an optional `world_id` filter for read-side projection.
 Omitting the filter returns the whole Creator SOUL. Supplying a `world_id` returns
-only fragments whose nullable `world_id` equals that value. V1.81 does not expose
+only fragments whose nullable `world_id` equals that value. The Daemon API does not expose
 a public query value for `world_id IS NULL`; core-only filtering can be added in
 a future contract if a user-facing need appears.
 
@@ -77,10 +77,10 @@ If the insufficient-data gate fails, the API returns an insufficient-data state
 with current counts and thresholds instead of invoking the LLM or caching a thin
 narrative.
 
-#### 7.2.4 per-(creator, world) Narrative lifecycle (V1.82 amendment)
+#### 7.2.4 per-(creator, world) Narrative lifecycle
 
-V1.82 extends the on-demand narrative to per-World: each world's fragment subset
-gets its **own** narrative — the Creator SOUL's inclination *within that world*
+The on-demand narrative model covers per-World scope: each world's fragment
+subset gets its **own** narrative — the Creator SOUL's inclination *within that world*
 — distinct from the world-agnostic Creator-level narrative above. Both
 coexist; the cache key and lifecycle are scoped per (creator, world).
 
@@ -89,7 +89,7 @@ coexist; the cache key and lifecycle are scoped per (creator, world).
 
 | Cache row | `world_id` value | Meaning |
 | --- | --- | --- |
-| Creator-level narrative | `NULL` | The V1.81 world-agnostic narrative over ALL the creator's fragments. Behavior unchanged. |
+| Creator-level narrative | `NULL` | The world-agnostic narrative over ALL the creator's fragments. Behavior unchanged. |
 | per-World narrative | `<world_id>` | The narrative over that world's fragment subset only. |
 
 `NULL world_id` on `memory_soul_narratives` = Creator-level narrative (the whole,
@@ -128,7 +128,7 @@ WHERE world_id IS NULL` guarantees exactly one Creator-level row per creator
 (`force_regenerate=false` + a `world_id`) returns the state enum
 (`ungenerated` / `current` / `stale` / `insufficient_data`) **without invoking
 the LLM** — synthesis is gated behind `force_regenerate=true` only (the
-`on-demand-synthesis-read-path-invariant` lesson). A per-World narrative may be
+`on-demand-synthesis-read-path-invariant` knowledge note). A per-World narrative may be
 `insufficient_data` or `ungenerated` even when the Creator-level narrative is `current`;
 the states are independent per scope.
 

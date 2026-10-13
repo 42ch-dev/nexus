@@ -4,10 +4,10 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — current Daemon API contracts live under `schemas/daemon-api/`. **V1.139 architect §5.2**: §3.3 domain/ table — `key-block.schema.json` **deleted** (V1.139 SPOKE adoption; KB entry type now sourced from spoke `knowledge-entry.schema.json`). |
+| **Status** | Normative — current Daemon API contracts live under `schemas/daemon-api/`. Domain table: `key-block.schema.json` is **deleted**; the KB entry type is sourced from spoke `knowledge-entry.schema.json`. |
 | **Document class** | Master |
 | **Scope** | Folder names, consumer-scope mapping, README rules, rename policy; **not** field-level DTO definitions (those stay in platform `v1-spec` + `data-model-v1`) |
-| **Last updated** | 2026-09-04 — reconciled current Daemon API schema and generated-module names through V1.183. |
+| **Last updated** | 2026-09-04 |
 | **Related** | [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md), [local-cloud-crate-architecture.md](../../archived/architecture/2026-09-21-local-cloud-crate-architecture.md) (historical record), [compute-module-abi.md](../compute/compute-module-abi.md) §4–§5, [wasm-host.md](../compute/wasm-host.md) §6–§7, [spoke-adapter-architecture.md](spoke-adapter-architecture.md), [schemas/AGENTS.md](../../../../schemas/AGENTS.md), [tooling/AGENTS.md](../../../../tooling/AGENTS.md) |
 
 **Do not confuse:**
@@ -17,7 +17,7 @@
 
 ---
 
-## 1. Normative tree (2026-09, current through V1.183)
+## 1. Normative tree
 
 All paths are under repository root `schemas/`. Only **external-consumer** files belong here (see boundary doc): platform wire OR Daemon API cross-language contracts.
 
@@ -58,16 +58,16 @@ schemas/
 
 - `schemas/acp-runtime/` — → `crates/nexus-contracts/src/local/acp_runtime/`
 - `schemas/meta/` — → `crates/nexus-contracts/src/local/meta.rs`
-- `schemas/cli-sync/` — renamed `cloud-sync/` (2026-05-20); `cloud-sync/` folded into `platform/sync/` (2026-06-23, V1.62 P0)
-- `schemas/cloud-sync/` — → `platform/sync/` (2026-06-23, V1.62 P0)
-- `schemas/compute/` — compute envelopes now live under `daemon-api/compute/`; entity-attributes/entity-state **deleted** (per-module shapes → `modules/<id>/manifest.json`, V1.62 P1)
+- `schemas/cli-sync/` — → `platform/sync/` (via the former `cloud-sync/`)
+- `schemas/cloud-sync/` — → `platform/sync/`
+- `schemas/compute/` — compute envelopes now live under `daemon-api/compute/`; entity-attributes/entity-state **deleted** (per-module shapes → `modules/<id>/manifest.json`)
 - Daemon `/v1/daemon/*` DTOs consumed across the TypeScript boundary live under `schemas/daemon-api/<concern>/`. Internal types (orchestration internals, ACP registry, daemon status) remain in `crates/nexus-contracts/src/local/`.
 
 ---
 
 ## 2. Folder ↔ product line ↔ consumers
 
-| Directory | Product line | External consumer | Primary serving consumer (post-v1.193 P2) | npm `@42ch/nexus-contracts` |
+| Directory | Product line | External consumer | Primary serving consumer | npm `@42ch/nexus-contracts` |
 | --- | --- | --- | --- | --- |
 | **`platform/http-bff/`** | Cloud enhancement (platform HTTP) | `nexus-platform` | `nexus-cloud-sync` (HTTP client), platform TS | **Yes** |
 | **`platform/sync/`** | Cloud enhancement (bundle / pull / conflict) | `nexus-platform` | `nexus-cloud-sync` (`legacy-sync`) | **Yes** |
@@ -89,7 +89,7 @@ schemas/
 | **`daemon-api/{memory,timeline,worlds}/`** | Daemon API — narrative resources | Web UI / desktop shell | `apps/nexus-service` `memory.ts` / `worlds.ts` families | **Yes** |
 | **`daemon-api/{runtime,tools}/`** | Daemon API — runtime and tool bridge | Web UI / desktop shell | runtime: inline `apps/nexus-service` runtime routes; tools: no HTTP execute route — tool dispatch is the in-process `nexus-core` `execute_tool` surface | **Yes** |
 
-> **Ownership note (v1.193 P2):** `daemon-api/` is a retained **wire-family** name only — it no longer implies runtime ownership. The `nexus-daemon-runtime` handlers named in this column before v1.193 were deleted with the crate in v1.193 P2; serving ownership moved to the `apps/nexus-service` route families above over `nexus-core` / `nexus-core-node`.
+> **Ownership note:** `daemon-api/` is a retained **wire-family** name only — it does not imply runtime ownership. Serving ownership sits with the `apps/nexus-service` route families above, over `nexus-core` / `nexus-core-node`.
 
 **Local product line** (daemon, orchestration, agent-host internal DTOs) MUST NOT add new subtrees under `schemas/` unless an **external** client (separate process or language boundary) consumes them. Add internal types under `crates/nexus-contracts/src/local/`. The `daemon-api/` tree is reserved for cross-language Daemon API contracts.
 
@@ -100,7 +100,7 @@ schemas/
 ### 3.1 `platform/http-bff/`
 
 - One schema file per **platform HTTP** request or response shape (or shared response fragment), kebab-case basename.
-- **Not** Daemon API proxies (V1.20 removed world/explore **daemon** routes; platform HTTP contracts **remain** wire here).
+- **Not** Daemon API proxies — platform HTTP contracts stay wire here.
 - Grouping is **flat** (no `http-bff/explore/` subfolders) — use filename prefix: `explore-*`, `world-*`, `publish-*`, `notifications-*`, `context-assembly-v1`, etc.
 - `$id` / `$ref` URIs use `https://nexus42.invalid/schemas/platform/http-bff/...`.
 - Maintain [`platform/http-bff/README.md`](../../../../schemas/platform/http-bff/README.md) index when adding files.
@@ -109,7 +109,7 @@ schemas/
 
 - CLI ↔ platform sync protocol: bundle envelope (codegen canonical), delta, sync-command, pull request/response, conflict response.
 - **`bundle.schema.json`** is the **codegen canonical** `Bundle` type. **`bundle-refinement.schema.json`** is a **validation refinement** (allOf of the canonical bundle with CLI-specific constraints) — codegen skips it (see `tooling/codegen/src/ts-gen.ts` `SKIP_LIST` / `tooling/codegen/rust-gen/src/main.rs` `SKIP_SCHEMAS`).
-- `delta.schema.json` and `sync-command.schema.json` moved here from `domain/` (V1.62 P0) because they are sync-protocol payloads, not wire entities.
+- `delta.schema.json` and `sync-command.schema.json` are sync-protocol payloads, not wire entities.
 - `$id` / `$ref` URIs use `https://nexus42.invalid/schemas/platform/sync/...`.
 - Maintain [`platform/sync/README.md`](../../../../schemas/platform/sync/README.md).
 
@@ -123,11 +123,11 @@ Wire entities aligned with platform `data-model-v1` §5–§10. Current inventor
 | `user.schema.json`, `pairing.schema.json` | Account bridge | `nexus-cloud-domain` (logic) |
 | `world.schema.json`, `world-membership.schema.json`, `fork-branch.schema.json` | Narrative graph | `nexus-narrative` / bundles |
 | `timeline-event.schema.json` | Narrative Timeline on wire | `nexus-narrative` + sync bundles |
-| `key-block.schema.json` | **DELETED (V1.139).** Replaced by spoke `knowledge-entry.schema.json` — nexus consumes `KnowledgeEntry` from `@42ch/spoke-schemas` / `spoke-schemas`. See [`spoke-adapter-architecture.md`](spoke-adapter-architecture.md) §3. | Nexus KB type now sourced from spoke |
+| `key-block.schema.json` | **Deleted.** Replaced by spoke `knowledge-entry.schema.json` — nexus consumes `KnowledgeEntry` from `@42ch/spoke-schemas` / `spoke-schemas`. See [`spoke-adapter-architecture.md`](spoke-adapter-architecture.md) §3. | Nexus KB type now sourced from spoke |
 | `memory.schema.json` | Memory on wire | `nexus-creator-memory` |
 | `story-manifest.schema.json` | Story summary on wire | `nexus-narrative`, novel-writing sync |
 
-(bundle/delta/sync-command moved to `platform/sync/` in V1.62 P0 — they are sync payloads, not wire entities.)
+(bundle/delta/sync-command live in `platform/sync/` — sync payloads, not wire entities.)
 
 [`domain/README.md`](../../../../schemas/domain/README.md) MUST list only files that exist under `schemas/domain/*.json`.
 
@@ -137,7 +137,7 @@ Wire entities aligned with platform `data-model-v1` §5–§10. Current inventor
 - `source-anchor.schema.json`, `version-ref.schema.json` — value objects §6. `SourceAnchor` is emitted into `common_types`.
 - Do not add local-only enums here; if no external client observes an enum, put it in `src/local/`.
 
-**Meta schema (local, not a `schemas/` folder):** `crates/nexus-contracts/src/local/meta.rs`. Removed `schemas/meta/` (V1.4 WS5 + V1.21 cleanup).
+**Meta schema (local, not a `schemas/` folder):** `crates/nexus-contracts/src/local/meta.rs`.
 
 ### 3.5 `daemon-api/compute/`
 
@@ -180,40 +180,24 @@ is historical.
 | Check | Action |
 | --- | --- |
 | README vs disk | Every `schemas/**/README.md` matches `*.json` in that folder |
-| Stale `acp-runtime` / `cloud-sync` / `compute` references | Remove from active plans/docs; types moved/deleted (see §1 + §5) |
+| Stale `acp-runtime` / `cloud-sync` / `compute` references | Remove from active plans/docs; types moved/deleted (see §1) |
 | `OutboxEntry` | **Local only** — must not reappear in `schemas/domain/` |
 | `key-block` on wire | **Deleted from `schemas/domain/`.** Knowledge-entry contracts come from spoke `knowledge-entry.schema.json`; do not recreate `key-block.schema.json` |
-| Per-module entity shapes | **Not** in `schemas/` — declare in `modules/<id>/manifest.json` (V1.62 P1) |
+| Per-module entity shapes | **Not** in `schemas/` — declare in `modules/<id>/manifest.json` |
 | Platform grep before delete | `rg <TypeName>` on `nexus-platform` before removing any schema file |
+| Rename `platform/` | **Do not rename** `platform/` → `cloud-platform/` (platform HTTP naming is stable in v1-spec) |
 
-**Re-audit:** add a dated appendix under §5 when moving or renaming folders.
-
----
-
-## 5. Historical renames
-
-| Old path | Current | Done |
-| --- | --- | --- |
-| `schemas/cli-sync/` | `schemas/cloud-sync/` | 2026-05-20 — `$id` URIs updated |
-| `schemas/acp-runtime/` | `src/local/acp_runtime/` | V1.4 WS5 |
-| `schemas/meta/` | `src/local/meta.rs` | V1.4 WS5; directory removed V1.21 |
-| `schemas/cloud-sync/` | `schemas/platform/sync/` | 2026-06-23 (V1.62 P0) — folded into consumer-scope `platform/sync/`; `bundle.schema.json` renamed `bundle-refinement.schema.json` |
-| `schemas/compute/` | `schemas/daemon-api/compute/` (+ entity-* deleted) | 2026-06-23 (V1.62 P0) moved first to historical `schemas/local-api/compute/`; the later Daemon API rename produced the current path |
-| `schemas/local-api/` | `schemas/daemon-api/` | Daemon API namespace rename; current generated modules are Rust `generated::daemon_api` and TypeScript `generated/daemon-api` |
-| `schemas/domain/{bundle,delta,sync-command}` | `schemas/platform/sync/` | 2026-06-23 (V1.62 P0) — sync payloads, not wire entities |
-| `schemas/platform/*.schema.json` (flat) | `schemas/platform/http-bff/*.schema.json` | 2026-06-23 (V1.62 P0) — consumer-scope split into `http-bff/` + `sync/` |
-
-**Do not rename** `platform/` → `cloud-platform/` (platform HTTP naming is stable in v1-spec).
+**Re-audit:** when moving or renaming folders, record the rename in the audit note of [`schemas-external-consumer-boundary.md`](schemas-external-consumer-boundary.md).
 
 ---
 
-## 6. Related platform paths
+## 5. Related platform paths
 
 Platform prose may still say `v1-spec/cli-sync/` for sync **protocol** documents. That is the **platform repo folder name**, independent of OSS `schemas/platform/sync/`. Coordinate `@42ch/nexus-contracts` semver when platform consumes regenerated types after URI path changes.
 
 ---
 
-## 7. Wire file inventory (2026-09, current through V1.183)
+## 6. Wire file inventory
 
 The table records expected directory membership and deliberately avoids a
 hand-maintained aggregate count. `schemas/README.md` and
@@ -222,7 +206,7 @@ hand-maintained aggregate count. `schemas/README.md` and
 | Directory | Files | Notes |
 | --- | --- | --- |
 | `common/` | 3 | `common`, `source-anchor`, `version-ref` |
-| `domain/` | 10 → **9** (V1.139: `key-block.schema.json` deleted) | Wire entities (see §3.3 table) |
+| `domain/` | 9 | Wire entities (see §3.3 table) |
 | `platform/http-bff/` | Current disk inventory | Platform HTTP bodies (flat; prefix grouping in [http-bff/README.md](../../../../schemas/platform/http-bff/README.md)) |
 | `platform/sync/` | Current disk inventory | Bundle, pull, delta, command, and conflict contracts |
 | `daemon-api/common/` | Current disk inventory | Shared error/envelope contracts |
@@ -240,7 +224,7 @@ hand-maintained aggregate count. `schemas/README.md` and
 | `daemon-api/{memory,timeline,worlds}/` | Current disk inventory | Narrative resource surfaces |
 | `daemon-api/{runtime,tools}/` | Current disk inventory | Runtime and tool-bridge surfaces |
 
-Do not hand-maintain an exact total here; `schemas/README.md` and `pnpm run validate-schemas` are the count authorities. This inventory records expected directory membership and notable V1.64 deltas.
+Do not hand-maintain an exact total here; `schemas/README.md` and `pnpm run validate-schemas` are the count authorities. This inventory records expected directory membership.
 
 **Not in tree:** `acp-runtime/`, `meta/`, `cli-sync/`, `cloud-sync/`, `compute/` (all removed/renamed).
 

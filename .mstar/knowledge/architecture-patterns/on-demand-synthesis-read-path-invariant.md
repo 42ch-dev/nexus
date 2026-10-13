@@ -22,28 +22,15 @@ applies_when:
 
 ## Context
 
-V1.81 shipped `POST /v1/local/memory/soul/reflect` — an **on-demand** LLM
-synthesis endpoint (Creator-SOUL Narrative). The web UI **polls** it every ~30s
-with `force_regenerate: false` to render status (ungenerated / current / stale /
-insufficient); the author explicitly opts into the expensive synthesis by
-sending `force_regenerate: true` (the "Reflect on my SOUL" CTA). This on-demand
-discipline is the same proportional-to-local-only model V1.80 established (no
-background jobs; synchronous, user-triggered).
+`POST /v1/local/memory/soul/reflect` is an **on-demand** LLM synthesis endpoint (Creator-SOUL Narrative). The web UI **polls** it every ~30s with `force_regenerate: false` to render status (ungenerated / current / stale / insufficient); the author explicitly opts into the expensive synthesis by sending `force_regenerate: true` (the "Reflect on my SOUL" CTA). This on-demand discipline is a proportional-to-local-only model (no background jobs; synchronous, user-triggered).
 
-The Morning Star QC tri-review (3/3 Approve) and the headless QA gate (full
-suite green) both **passed** this endpoint. Then the Greptile static-analysis
-review (greploop) found a **critical** bug at confidence 3/5: the handler never
-returned `state: "ungenerated"`, so a creator who passed the data gate but had
-never generated a narrative fell straight through to **LLM synthesis on every
-30s background poll** — silently, without user intent, unbounded. The frontend's
-explicit "Reflect" CTA was unreachable.
+A status/poll endpoint that can silently reach an LLM/agent call is the failure this doc guards against: a creator who passes the data gate but has never generated a narrative must return `ungenerated`, and must never fall through to **LLM synthesis on every 30s background poll** — silently, without user intent, unbounded.
 
-This doc captures the two lessons: the read-path invariant that was violated,
-and the verification gap that let QC + QA miss it.
+This doc captures two lessons: the read-path invariant that a poll path must honour, and the verification gap that lets QC + QA miss a violation.
 
 ## Guidance
 
-### The invariant (the part that was violated)
+### The invariant
 
 > **An on-demand synthesis endpoint must reach the synthesizer ONLY via the
 > explicit-intent code path. The read/poll path (`force=false` / GET-style) is
@@ -61,28 +48,25 @@ if !force:
 synthesize → persist → state: "current"
 ```
 
-The V1.81 bug: the `!force && !stale` block returned `current` only `if let
-Some(cached)`; when `cached` was `None` (ungenerated) it **fell through** past
+The failure shape: the `!force && !stale` block returns `current` only `if let
+Some(cached)`; when `cached` is `None` (ungenerated) it **falls through** past
 the stale block (stale is false when there's no cache) into the synthesis block.
-A single missing `else → ungenerated` return made the poll path fire the LLM.
+A single missing `else → ungenerated` return makes the poll path fire the LLM.
 
 **Anti-pattern name**: *the fall-through-to-synthesis gap*. It is one missing
 `else`/early-return away in a status-branching handler, and it is silent — there
 is no crash, no test failure (headless), no log that distinguishes "poll" from
 "explicit reflect."
 
-### The verification gap (why QC + headless QA missed it)
+### The verification gap
 
 > **Headless QA cannot exercise a live LLM/agent-call path** (no configured
 > worker / ACP registry in the test environment), so a "synthesis silently fires
 > on poll" bug is invisible to runtime tests — the buggy path either no-ops (no
 > registry → error mapped away) or is never asserted as "must NOT be reached."
 
-V1.81's QA report explicitly noted the scope limit: *"Live ACP synthesis
-(`acp.prompt`) not exercisable headless without a configured worker. Seam, input
-builder, cache, error paths, and gates are verified."* That limit is exactly
-where the bug hid: the gate (force vs !force) was not verified end-to-end
-because the synthesis side could not run.
+The limit is exactly where the bug hides: the gate (force vs !force) is not
+verified end-to-end because the synthesis side cannot run.
 
 **Mitigations (apply ≥1 to any on-demand synthesis endpoint):**
 
@@ -90,7 +74,7 @@ because the synthesis side could not run.
    In test mode the capability registry is `None`; a `force_regenerate: false`
    + above-gate + no-cache request must **succeed** (return `ungenerated`) —
    *not* error with "capability registry not available." If the read path
-   reaches the registry lookup at all, the test fails. V1.81's G1 fix added
+   reaches the registry lookup at all, the test fails. The fix adds
    exactly this test (`force=false` → `ungenerated` succeeds without registry;
    `force=true` → `ServiceUnavailable` proves the synth path is reached only
    for `force=true`). This is the cheap, deterministic, headless-friendly guard.
@@ -104,7 +88,7 @@ because the synthesis side could not run.
    be reachable by some input combination — and a test must assert each is
    reachable. An unreachable enum value is the signature of a fall-through gap.
 
-### Why this matters beyond V1.81
+### Why this matters
 
 Any "poll for status, act on explicit intent" endpoint repeats this shape:
 on-demand generation (narratives, summaries, reports), trigger-vs-status action
@@ -114,11 +98,11 @@ run in CI. The negative-path "synthesizer not reached" test is the portable fix.
 
 ## Examples
 
-- **V1.81 `POST /soul/reflect`** — the bug itself. `force=false` poll fell
-  through to `acp.prompt` for ungenerated creators. Fixed by gating synthesis
-  behind `force=true` + adding the `ungenerated` return + the negative-path
-  test. Caught by Greptile (greploop iteration 1, 3/5); missed by QC tri-review
-  + headless QA.
+- **Status-branching synthesis handler** (`POST /soul/reflect`) — a `force=false`
+  poll fell through to `acp.prompt` for ungenerated creators. The fix gates
+  synthesis behind `force=true`, adds the `ungenerated` return, and adds the
+  negative-path test. A static-analysis review caught it; QC tri-review and
+  headless QA missed it.
 - **Hypothetical**: any future `POST /generate-report` with a `?watch=true` poll
   mode — same trap if the watch path can reach the generator.
 
@@ -133,11 +117,8 @@ gating** lesson. The three together cover the endpoint's read-cost /
 write-drain / read-gating axes; a future unifying "local on-demand endpoint
 contract" doc could consolidate them.
 
-## Detection-history note
+## QC checklist note
 
-This bug survived a full Morning Star QC tri-review (3/3 Approve) and a headless
-QA gate (full suite green) before Greptile's static-analysis review flagged it.
-The lesson for the QC process: for endpoints whose side effect (LLM/agent call)
-is not CI-exercisable, add an explicit "read path does not reach the side-effect
-site" assertion to the QC checklist — do not rely on the implementer's
-self-check or headless tests alone.
+For endpoints whose side effect (LLM/agent call) is not CI-exercisable, add an
+explicit "read path does not reach the side-effect site" assertion to the QC
+checklist — do not rely on the implementer's self-check or headless tests alone.

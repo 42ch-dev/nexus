@@ -1,12 +1,12 @@
 # Findings Lifecycle — Cross-Profile Master
 
-**Status**: Normative — V1.77 Phase 2b (promoted from `novel-writing/findings-lifecycle.md` stub)  
+**Status**: Normative  
 **Document class**: Master  
 **Scope**: Cross-profile findings lifecycle — 6-state status machine, `target_executor` routing semantics, and the UI remediation surface consuming the Daemon API PATCH route. Quality-loop produce side (review verdicts, finding creation, orchestration hooks) is owned by [novel-writing/quality-loop.md](../novel-writing/quality-loop.md) §2 and is not duplicated here.  
 **Coordinates with**:
 - [novel-writing/quality-loop.md](../novel-writing/quality-loop.md) — producer side (review verdicts, finding creation, orchestration hooks, retention/prune)
-- [daemon-api-surface-conventions.md §11](../runtime/daemon-api-surface-conventions.md#11-findings-patch-route-v177--non-occ-resource-patch) — findings PATCH surface conventions
-- [web-ui.md](../surfaces/web-ui.md) — Control-Room findings view and V1.77 remediation surface
+- [daemon-api-surface-conventions.md §11](../runtime/daemon-api-surface-conventions.md#11-findings-patch-route-non-occ-resource-patch) — findings PATCH surface conventions
+- [web-ui.md](../surfaces/web-ui.md) — Control-Room findings view and remediation surface
 - [`crates/nexus-local-db/src/findings.rs`](../../../../crates/nexus-local-db/src/findings.rs) — DAO enforcement (canonical `is_valid_transition`, `VALID_STATUSES`, `enforce_status_transition`)
 - [`crates/nexus-core/src/findings.rs`](../../../../crates/nexus-core/src/findings.rs) — PATCH handler error mapping
 
@@ -16,7 +16,7 @@
 
 ## 1. Purpose
 
-The findings lifecycle is a cross-profile 6-state status machine that all Work profiles consume. The backend (V1.49+) enforces the lifecycle server-side on every `PATCH /v1/local/works/{work_id}/findings/{finding_id}`, rejecting illegal transitions with HTTP 422 `INVALID_TRANSITION`. The V1.77 UI promotion adds a remediation authoring surface that consumes this existing PATCH route.
+The findings lifecycle is a cross-profile 6-state status machine that all Work profiles consume. The backend enforces the lifecycle server-side on every `PATCH /v1/local/works/{work_id}/findings/{finding_id}`, rejecting illegal transitions with HTTP 422 `INVALID_TRANSITION`. The remediation authoring surface consumes this PATCH route.
 
 This Master documents the lifecycle adjacency rules, `target_executor` routing semantics, and the UI remediation surface. The produce side — how findings are created (review verdicts, `from-review` hooks, orchestration-synthesized findings) — is owned by the quality-loop spec ([novel-writing/quality-loop.md](../novel-writing/quality-loop.md) §2) and is not repeated here.
 
@@ -79,7 +79,7 @@ Invalid enum values → `LocalDbError::InvalidEnum` → HTTP 422 `INVALID_INPUT`
 
 ---
 
-## 4. UI remediation surface (V1.77)
+## 4. UI remediation surface
 
 ### 4.1 Route consumed
 
@@ -113,8 +113,8 @@ Request body fields (all optional on the wire):
 
 ---
 
-## 5. Non-goals (V1.77)
+## 5. Non-goals
 
 - **No one-click orchestration re-trigger from a finding** — re-running a preset stays a deliberate canvas/CLI action. `target_executor` is an assignment hint, not an auto-trigger.
 - **No findings producer changes** — this Master documents the *consumer* side (triage/remediation). Finding creation, review verdicts, and orchestration hooks are owned by [novel-writing/quality-loop.md](../novel-writing/quality-loop.md).
-- **No create/delete from the UI** — the V1.77 lead surface is update-only. `createFinding`/`deleteFinding` remain CLI/producer-only for now; the web app can add them in a follow-up if UX demands in-UI finding creation.
+- **No create/delete from the UI** — the lead surface is update-only. `createFinding`/`deleteFinding` remain CLI/producer-only for now; the web app can add them in a follow-up if UX demands in-UI finding creation.

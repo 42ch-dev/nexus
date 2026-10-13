@@ -1,16 +1,16 @@
 # Novel Manuscript Audit — Normative Specification v1
 
-**Status**: Shipped (V1.44 — 2026-06-13)  
+**Status**: Shipped  
 **Document class**: Feature line (DF-69 audit supplement)  
 **Created**: 2026-06-13  
-**Last updated**: 2026-06-13 (V1.44 P-last — promoted from Draft overlay to Shipped Feature line; DF-69 shipped)  
+**Last updated**: 2026-10-13  
 **Scope**: On-demand chapter audit for `work_profile: novel` — structured review report and/or World KB extract **without** entering the full FL-E auto-chain driver  
 **Coordinates with**:
 
 - [quality-loop.md](quality-loop.md) — findings lifecycle; review routing
 - [workflow-profile.md](workflow-profile.md) — chapter paths, `Logs/review/`, 五问 baseline
 - [creator-workflow.md](../creator/creator-workflow.md) — FL-E stages (audit is **out-of-band**)
-- [cli-spec.md](../cli/cli-spec.md) — historical `creator run audit-chapter` IA (P0 implement; the runner entry was removed in v1.193 P2 — see §4)
+- [cli-spec.md](../cli/cli-spec.md) — CLI surface authority (no audit CLI entry; see §4)
 - [entity-scope-model.md](../architecture/entity-scope-model.md) — World-bound extract mode
 - [world-kb-runtime-architecture.md](../architecture/world-kb-runtime-architecture.md) — `kb.extract_work` on-demand path
 
@@ -20,11 +20,9 @@
 
 ## 1. Purpose
 
-V1.39–V1.43 shipped inline finalize `llm_judge`, FL-E `reflection-loop`, `novel-review-master` on **existing findings**, and queue-based `kb-extract`. Authors still lack a **single on-demand entry** to audit an already-written chapter body (`Works/<work_ref>/Stories/ch*.md`) outside the auto-chain driver.
+The FL-E chain covers inline finalize `llm_judge`, `novel-chapter-review`, `novel-review-master` on **existing findings**, and queue-based `kb-extract`. This spec adds a **single on-demand entry** to audit an already-written chapter body (`Works/<work_ref>/Stories/ch*.md`) outside the auto-chain driver: **DF-69**, a dual-mode embedded preset (or preset pair) plus an audit entry.
 
-V1.44 P0 implements **DF-69**: a dual-mode embedded preset (or preset pair) plus CLI entry.
-
-V1.79's manuscript reading surface is distinct from this on-demand audit line: reading is a read-only consumption surface for authors, while manuscript audit remains an out-of-band quality/extract tool that may create reports, findings, or KnowledgeEntries.
+The manuscript reading surface is distinct from this on-demand audit line: reading is a read-only consumption surface for authors, while manuscript audit remains an out-of-band quality/extract tool that may create reports, findings, or KnowledgeEntries.
 
 ---
 
@@ -57,13 +55,13 @@ V1.79's manuscript reading surface is distinct from this on-demand audit line: r
 **Behavior**:
 
 1. Read chapter body from resolved `body_path`.
-2. Run structured review (五问 baseline per [workflow-profile.md §5.1](workflow-profile.md#51-v136-chapter-finalize-quality-gate); optional extended checks in preset prompts).
+2. Run structured review (五问 baseline per [workflow-profile.md §5.1](workflow-profile.md#51-chapter-finalize-quality-gate); optional extended checks in preset prompts).
 3. Write human-readable report under `Works/<work_ref>/Logs/review/` (filename includes chapter + volume label).
 4. Optionally upsert `findings` rows when review detects actionable issues (`upsert_findings: true` default for review mode).
 
 **Output artifacts**:
 
-- `Logs/review/audit-ch{nn}-v{vol}-{timestamp}.md` (or equivalent stable naming locked in P0 plan)
+- `Logs/review/audit-ch{nn}-v{vol}-{timestamp}.md` (or equivalent stable naming locked in the implement plan)
 - Optional `findings` rows with `target_executor` per [quality-loop.md §2.2](quality-loop.md#22-executor-routing)
 
 ### 3.2 `mode=extract`
@@ -82,39 +80,29 @@ V1.79's manuscript reading surface is distinct from this on-demand audit line: r
 
 ---
 
-## 4. CLI entry (normative sketch — P0 locks single IA)
+## 4. CLI entry
 
-> **Entry retired (v1.193 P2).** Both surfaces sketched below were deleted with the v1.193 P2 command-surface cutover: the `creator run` runner and the whole `daemon` group are gone, and no current CLI audit entry is provided. The §3 modes and §5 preset contract are unchanged; audit admission goes through the core execution surface (schedule add via `POST /v1/daemon/orchestration/schedules`, served by `apps/nexus-service`).
-
-**Preferred** (compass grill-me 2026-06-13; historical):
-
-```bash
-nexus42 creator run audit-chapter <work_id> --mode review|extract [--chapter N] [--volume V]
-```
-
-**Alternatives** (document only; P0 plan picks one; both retired in v1.193 P2):
-
-- `nexus42 daemon schedule add --preset novel-manuscript-audit --input '{"mode":"review",...}'`
-- Subcommand under `creator run` with `audit-chapter` as a run intent
+> **No CLI audit entry.** The `creator run` runner and the `daemon` group do not exist; no CLI audit entry is provided. The §3 modes and §5 preset contract are unchanged; audit admission goes through the core execution surface (schedule add via `POST /v1/daemon/orchestration/schedules`, served by `apps/nexus-service`). The pre-retirement `creator run` IA is recorded as history in [creator-run-preset-entry.md](../../archived/creator/2026-09-21-creator-run-preset-entry.md).
 
 **Invariants**:
 
-- Command must **not** set `fl_e_stage` driver fields or enqueue auto-chain continuation.
+- Audit admission must **not** set `fl_e_stage` driver fields or enqueue auto-chain continuation.
 - Admission must respect `runtime_lock_holder` when Work is locked (same as other mutating Work paths).
 
 ---
 
 ## 5. Preset contract (embedded)
 
-| Preset ID | Mode | Notes |
+Two shipped embedded presets, one per mode:
+
+| Preset ID | Mode | Declared `cli_args` |
 | --- | --- | --- |
-| `novel-manuscript-audit` | `review` + `extract` | Single preset with `mode` input **or** two thin presets; P0 plan decides |
+| `novel-manuscript-audit-review` | `review` | `chapter` (integer, required); `volume` (integer, optional, default 1) |
+| `novel-manuscript-audit-extract` | `extract` | `chapter` (integer, required); `volume` (integer, optional, default 1) |
 
-Minimum preset surface:
+`cli_args` is a field of the preset manifest; its schema is owned by [orchestration-engine.md](../orchestration/orchestration-engine.md) §7.
 
-- `preset.input.mode`: `review` | `extract`
-- `preset.input.work_id`, `chapter`, optional `volume`, optional `body_path`
-- `preset.input.upsert_findings`: boolean (review mode only; default true)
+Input locators (both presets): `work_id`, `chapter`, optional `volume`, optional `body_path`. Review mode additionally accepts `upsert_findings` (boolean, default true).
 
 ---
 
@@ -124,22 +112,4 @@ Minimum preset surface:
 2. Hermetic test: extract mode on World-bound Work promotes at least one KnowledgeEntry path (mock LLM acceptable).
 3. Hermetic test: extract on worldless Work fails closed with documented error.
 4. No regression: auto-chain driver invariants unchanged (one active FL-E driver per Work).
-5. CLI help cites [docs/README.md](../../../../docs/README.md) § novel-writing quickstart after P1 merge.
-
----
-
-## 7. Promotion (iteration close)
-
-At V1.44 P-last hygiene:
-
-- [ ] Promote Status to **Shipped (V1.44)** or merge into `novel-writing/quality-loop.md` §3 if section stabilizes.
-
----
-
-*Draft overlay for V1.44 P0. P0 implement plan is scope authority for preset YAML and exact CLI flags.*
-
----
-
-## V1.45 supersession (P-last promotion)
-
-**Superseded by**: [creator-run-preset-entry.md](../../archived/creator/2026-09-21-creator-run-preset-entry.md) (Shipped Master V1.45). The split preset ids (`novel-manuscript-audit-review` / `novel-manuscript-audit-extract`), DEPRECATED parent dir deletion, and `cli_args` declaration are now part of the canonical Master body.
+5. CLI help cites [docs/README.md](../../../../docs/README.md).

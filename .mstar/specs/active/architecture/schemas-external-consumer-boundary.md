@@ -1,10 +1,10 @@
 # Schemas — External-Consumer Boundary
 
-**Status**: Active — current external daemon contracts use the Daemon API namespace; V1.64 originally established the bundled Web UI as an external API consumer
+**Status**: Active — current external daemon contracts use the Daemon API namespace; the bundled Web UI is an external API consumer
 **Document class**: Companion
-**Supersedes**: `schemas-wire-platform-sync-boundary.md` (renamed 2026-06-23, V1.62 P0; same file, expanded scope). Companion to the retired `schemas-boundary.md` (local process record).
+**Supersedes**: `schemas-wire-platform-sync-boundary.md` (same file, expanded scope).
 **Aligned with**: `nexus` `schemas/AGENTS.md`, `crates/nexus-contracts/src/local/`
-**Last reconciled**: 2026-09-04 — current schema tree, generated module names, and Daemon API namespace through V1.183.
+**Last reconciled**: 2026-09-04 — current schema tree, generated module names, and Daemon API namespace.
 
 ---
 
@@ -34,29 +34,28 @@ Folder names, consumer-scope tree, and product-line mapping:
 **[schemas-directory-layout.md](schemas-directory-layout.md)**. On-disk index:
 [schemas/README.md](../../../../schemas/README.md).
 
-## What still lives in `schemas/` today (2026-09, current through V1.183)
+## What still lives in `schemas/` today
 
 | Tree | External consumer? | Notes |
 | --- | --- | --- |
-| `schemas/platform/http-bff/*` | **Yes** — `nexus-platform` | Platform HTTP request/response contracts (was flat `schemas/platform/*` pre-V1.62) |
+| `schemas/platform/http-bff/*` | **Yes** — `nexus-platform` | Platform HTTP request/response contracts |
 | `schemas/platform/sync/*` | **Yes** — `nexus-platform` | CLI ↔ platform sync wire: bundle envelope (codegen canonical), pull request/response, conflict, delta, sync-command. `bundle-refinement.schema.json` is a validation-only refinement (codegen-skipped). |
 | `schemas/domain/*` | **Yes** — `nexus-platform` (transitive via `$ref`) | Wire entities embedded in sync bundles & platform bodies — **not** the Rust `nexus-domain`/`nexus-cloud-domain` logic crates |
 | `schemas/common/*` | **Yes** (when `$ref`'d by wire) | Shared identifiers, enums, value objects (`SourceAnchor`, `VersionRef`) |
 | `schemas/daemon-api/compute/*` | **Yes** — external WASM modules + generated clients | Compute module ABI envelopes (`ComputeInput`/`ComputeOutput`). |
 | `schemas/daemon-api/<concern>/*` | **Yes** — cross-language Daemon API consumers | Current concern inventory is normative in [schemas-directory-layout.md](schemas-directory-layout.md) §1; it includes agent-host, authoring/diagnostic, narrative-resource, runtime/tool, CRUD, orchestration, preset, compute, and common surfaces. |
-| *(removed from `schemas/`)* | **No** | `cli-sync/` (→ `cloud-sync/` → `platform/sync/`), `acp-runtime/`, `meta/`, `cloud-sync/`, `compute/` (entity-attributes/entity-state → `modules/<id>/manifest.json` in P1), `outbox_entry`, daemon/orchestration types → `src/local/` |
 
-V1.20 removed **daemon local HTTP proxies** for `world/*` and `explore/*`; those operations use **platform HTTP** directly. The `schemas/platform/http-bff/world-*` and `.../explore-*` files remain **wire** for platform — they were never "daemon-only" contracts.
+There are no **daemon local HTTP proxies** for `world/*` and `explore/*`; those operations use **platform HTTP** directly. The `schemas/platform/http-bff/world-*` and `.../explore-*` files are **wire** for platform — never "daemon-only" contracts.
 
-V1.62 reorganized `schemas/` along consumer-scope lines and first moved compute envelopes to the historical `local-api/compute/` tree. The later Daemon API namespace rename moved all such external contracts to the current `schemas/daemon-api/` tree. Per-module entity shape schemas remain deleted; module-local shapes live in `modules/<id>/manifest.json`.
+Per-module entity shape schemas do not exist; module-local shapes live in `modules/<id>/manifest.json`.
 
 ## Drift / housekeeping
 
 - **README SSOT**: [schemas/README.md](../../../../schemas/README.md) + per-folder READMEs; layout rules in [schemas-directory-layout.md](schemas-directory-layout.md). Re-verify after moves.
-- **Stale path risk**: do not reference `schemas/cli-sync/`, `schemas/meta/`, `schemas/acp-runtime/`, `schemas/cloud-sync/`, or `schemas/compute/` — removed or renamed (see layout spec §1 + §5 historical renames).
+- **Stale path risk**: do not reference `schemas/cli-sync/`, `schemas/meta/`, `schemas/acp-runtime/`, `schemas/cloud-sync/`, or `schemas/compute/` — removed or renamed (see layout spec §1).
 - **Codegen**: only files under `schemas/` generate TS in `@42ch/nexus-contracts`; platform upgrades follow npm semver + `schema_version`.
 - **Promoted Daemon API handlers**: handlers must return generated contract shapes for promoted schemas; strict drift detection is required before a schema-promoted route is considered consumer-safe.
-- **Historical audit (pre-rename paths)**: retired `schemas-boundary.md` §5.2 — 53 wire / 10 local at audit time (local process record). Re-run an equivalent source scan before further moves; search `<TypeName>` in `nexus-platform` before deleting generated TypeScript.
+- **Before further moves**: re-run an equivalent source scan; search `<TypeName>` in `nexus-platform` before deleting generated TypeScript.
 
 ## Related
 
@@ -64,4 +63,4 @@ V1.62 reorganized `schemas/` along consumer-scope lines and first moved compute 
 
 ---
 
-*Created: 2026-05-20 (as `schemas-wire-platform-sync-boundary.md`). Renamed + scope expanded 2026-06-23 (V1.62 P0). V1.64 expands external Local API consumer scope to the bundled local Web UI and records the strict handler DTO drift-closure criterion. Pointer doc; do not duplicate the archived audit table here.*
+*Pointer doc; do not duplicate the archived audit table here.*

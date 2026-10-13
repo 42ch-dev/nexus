@@ -17,7 +17,7 @@ applies_when:
 
 # Chronos Titlebar Overlay Pattern
 
-**Track**: Knowledge (durable guidance, distilled from V1.131 P0 Chronos titlebar chrome).
+**Track**: Knowledge (durable guidance).
 
 ## Context
 
@@ -25,18 +25,9 @@ Dogfood after the VI logo upgrade required a **titlebar-first** Chronos chrome: 
 
 ## Guidance
 
-### 1. Desktop-host Overlay — keep decorations (historical: the native v2 host, retired v1.192)
+### 1. Desktop-host Overlay — keep decorations
 
-> **Historical:** the native v2 desktop host was retired in v1.192; Electron (`apps/desktop-electron`) is the only desktop composition now. The host-specific settings below are retained as a historical record; the web-side drag-region attribute contract was retired in v1.214 — the attribute was removed as dead (no consumer). What the web titlebar retains is the plain ink chrome, the macOS safe inset, and the empty-paint double-click callback.
-
-| Setting | Value |
-| --- | --- |
-| `titleBarStyle` | `"Overlay"` |
-| `hiddenTitle` | `true` |
-| Decorations | **on** (native traffic lights) |
-| `trafficLightPosition` | Align native controls with the Chronos bar height/inset |
-
-The **web** titlebar paints the ink plane under the native chrome. Logo/title paint and the empty spacer are plain ink chrome; the drag-region attribute was retired in v1.214 (removed as dead — no consumer), and what remains is the macOS safe inset plus the empty-paint double-click callback. Gear, theme, and health controls are explicit interactive islands.
+The desktop shell keeps native traffic lights; `decorations: false` is not an accepted delivery path. The **web** titlebar paints the ink plane under the native chrome. Logo/title paint and the empty spacer are plain ink chrome; there is no drag-region attribute (it carries no consumer), and what remains is the macOS safe inset plus the empty-paint double-click callback. Gear, theme, and health controls are explicit interactive islands.
 
 ### 2. Layout ownership
 
@@ -55,17 +46,14 @@ Double-click maximize needs explicit host commands (`is_maximized` / `maximize` 
 | Compile, H1 ink paint, gear → Settings modal, automated drag-contract (A1–A4) | Agent / CI |
 | Traffic lights (H2), logo/title/spacer drag (H3–H5), control click islands (H6), dist/HMR parity (D1), double-click maximize (D2), logo/title maximize guard (D3) | **Human** when Screen Recording / Accessibility TCC block agent capture |
 
-Do **not** mark Overlay live-smoke residuals resolved without human evidence for **H2–H6 + D1–D3**. Product code can still Profile-B Done with an open residual and the durable V1.132 protocol (`titlebar-window-drag-overlay-smoke.md`).
+Do **not** mark Overlay live-smoke residuals resolved without human evidence for **H2–H6 + D1–D3**. Product code can still Profile-B Done with an open residual and the durable smoke protocol.
 
 ## What did not work
 
 - Treating `decorations: false` as a shortcut for full-bleed ink (loses native controls).
-- Claiming Dock/titlebar live visuals from compose/preview alone (same class of error as premature `R-VI-003` archive).
+- Claiming Dock/titlebar live visuals from compose/preview alone.
 
 ## See also
 
-- Spec (V1.132): `titlebar-window-drag.md`
-- Smoke protocol (V1.132): `titlebar-window-drag-overlay-smoke.md`
-- V1.131 baseline: `chronos-titlebar-chrome.md`
 - Brand tokens: [nexus-brand-token-hierarchy.md](nexus-brand-token-hierarchy.md)
 - Settings gear target: [settings-modal-primary-host.md](settings-modal-primary-host.md)

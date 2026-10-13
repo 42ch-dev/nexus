@@ -6,7 +6,7 @@ annotated tag, and the pipeline attaches the three-platform `nexus-runtime`
 archives plus the unsigned macOS Electron packages to a GitHub Release.
 
 Release versions are decoupled from the internal iteration numbers: iterations
-(`v1.19x`, `v1.20x`) are development milestones that never appear in a version
+are development milestones that never appear in a version
 string or artifact name, while a release is a semver tag
 `v<major>.<minor>.<patch>` — optionally carrying an `-alpha.N` / `-rc.N`
 suffix (see [Versioning](#versioning)).

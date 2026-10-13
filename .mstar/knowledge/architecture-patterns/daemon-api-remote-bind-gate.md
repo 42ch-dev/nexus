@@ -46,9 +46,9 @@ Enforce the gate **before the listener is opened** and again on every *guarded* 
 
 **Serving** — when both PEMs are present the listener is `node:https` (`createHttpsServer`, `apps/nexus-service/src/server.ts:461-467`); otherwise `node:http`.
 
-## Historical (retired Rust daemon boot gate, deleted v1.193 P2)
+## Connect peer-tools env gate
 
-The original V1.90 gate lived in the Rust daemon: a pure function `ensure_remote_bind_allowed(host)` checked `NEXUS42_DAEMON_API_KEY` **and** `NEXUS_DAEMON_REMOTE_BIND=1` immediately before `TcpListener::bind` and refused a non-loopback bind otherwise. That HTTP-service path is gone. The **same** env-var pairing survives only in the core **Connect peer-tools lane**, `crates/nexus-core/src/connect/accept.rs:204-228` (`ensure_remote_bind_allowed`): a non-loopback peer-tools bind is permitted only when both `NEXUS42_DAEMON_API_KEY` and `NEXUS_DAEMON_REMOTE_BIND=1` are set. It does **not** gate the Daemon API HTTP surface.
+The core **Connect peer-tools lane** (`crates/nexus-core/src/connect/accept.rs:204-228`, `ensure_remote_bind_allowed`) permits a non-loopback peer-tools bind only when both `NEXUS42_DAEMON_API_KEY` and `NEXUS_DAEMON_REMOTE_BIND=1` are set. It does **not** gate the Daemon API HTTP surface.
 
 ## Why this works
 
@@ -80,5 +80,4 @@ Use this pattern whenever a local-first service adds an opt-in remote listener. 
 - Request gate: `apps/nexus-service/src/security.ts`
 - Config flags/key: `apps/nexus-service/src/config.ts`
 - Core Connect peer-tools env gate (live): `crates/nexus-core/src/connect/accept.rs`
-- Spec (historical, V1.90; superseded): `.mstar/specs/archived/runtime/2026-09-21-daemon-runtime.md`
 - Surface conventions (current): `.mstar/specs/active/runtime/daemon-api-surface-conventions.md`

@@ -21,23 +21,23 @@ last_updated: 2026-09-10
 
 # Self-Hosted OFL Font Wiring Pattern (currently inactive)
 
-**Refreshed 2026-09-10** — v1.187 v0.5: no self-hosted font is active; the V1.121 Source Serif 4 instance is retired from the pipeline, and the generated `tokens.css` must never be hand-edited to re-add one.
+**No self-hosted font is active.** The generated `tokens.css` must never be hand-edited to re-add one.
 
-**Track**: Knowledge (durable procedure distilled from the V1.121 v0.4 display-tier implementation; amended for the v1.187 generated-token pipeline).
+**Track**: Knowledge (durable procedure for reintroducing a self-hosted OFL font).
 
-## Status in the current language (v0.5)
+## Status
 
-**No self-hosted font is active.** The v1.187 "Precision Creative Tool" language resolves interface *and* content display to the offline OS sans stack (`system-ui` + Apple/Segoe UI + CJK system fallbacks). Consequences to keep straight:
+**No self-hosted font is active.** The "Precision Creative Tool" language resolves interface *and* content display to the offline OS sans stack (`system-ui` + Apple/Segoe UI + CJK system fallbacks). Consequences to keep straight:
 
 - The generated `tooling/design-tokens/src/tokens.css` carries **no `@font-face`** declarations and no font URLs; the projection gate rejects stale `Source Serif 4` / `source-serif-4-latin-*` pins if they reappear in generated output.
-- Unused packaged font files and app `public/fonts/**` copies may still exist on disk from V1.121 — they are inert remains, not an active typography authority. Do not treat their presence as evidence that a font is wired.
+- Unused packaged font files and app `public/fonts/**` copies may still exist on disk — they are inert remains, not an active typography authority. Do not treat their presence as evidence that a font is wired.
 - DESIGN states the policy: do not introduce a font dependency solely for visual novelty. Reintroducing one is a design-language decision, not a styling tweak.
 
-**The pipeline change that matters most if you do reintroduce one:** `tokens.css` is now a **generated artifact**. The V1.121 procedure below placed `@font-face` blocks in that file by hand; doing that today would be overwritten by the next `pnpm --filter @nexus/design-tokens generate` (and would fail the byte-compare gate). A future font must be wired either by teching the compiler to emit it from a DESIGN source field, or by adding a separate handwritten shared CSS module imported alongside the generated one by each app. Never hand-edit generated output.
+**The pipeline change that matters most if you do reintroduce one:** `tokens.css` is a **generated artifact**. Placing `@font-face` blocks in that file by hand would be overwritten by the next `pnpm --filter @nexus/design-tokens generate` (and would fail the byte-compare gate). A future font must be wired either by teaching the compiler to emit it from a DESIGN source field, or by adding a separate handwritten shared CSS module imported alongside the generated one by each app. Never hand-edit generated output.
 
-## Context (the original problem, still the pattern's rationale)
+## Context (the pattern's rationale)
 
-V1.121 needed a literary serif (Source Serif 4) as the content-voice typeface. Nexus is a local-first product — no webfont CDN dependency. The font also had to respect the `@42ch/nexus-ui` bundler-agnostic asset boundary (see [bundler-agnostic-component-library-assets.md](bundler-agnostic-component-library-assets.md)): a tsup-built React component library cannot import `.woff2` binaries in source.
+A content-voice typeface needs self-hosting: Nexus is a local-first product — no webfont CDN dependency. The font must also respect the `@42ch/nexus-ui` bundler-agnostic asset boundary (see [bundler-agnostic-component-library-assets.md](bundler-agnostic-component-library-assets.md)): a tsup-built React component library cannot import `.woff2` binaries in source.
 
 The pattern spans five layers — canonical provenance → package boundary → app vendoring → shared CSS declarations → preload — plus a measurable bundle gate so the pattern cannot silently bloat the shipped bundle.
 
@@ -63,7 +63,7 @@ Each consuming app **must not** import font binaries from package source (`packa
 
 ### Step 4 — `@font-face` declarations + token variable
 
-- **v0.5 amendment:** declarations cannot live in the generated `tokens.css`. Emit them through the compiler (preferred, keeps one pipeline) or place them in a handwritten shared CSS import that every app loads next to the generated file.
+- Declarations cannot live in the generated `tokens.css`. Emit them through the compiler (preferred, keeps one pipeline) or place them in a handwritten shared CSS import that every app loads next to the generated file.
 - Each weight gets its own block with `font-display: swap`; the `--font-<role>` variable must be projected from the DESIGN pair like every other token (do not hand-define a parallel variable).
 - URLs are served-root-relative (e.g. `url('/fonts/<family>/…-latin-400-normal.woff2')`).
 
@@ -73,7 +73,7 @@ Each consuming app **must not** import font binaries from package source (`packa
 
 ### Step 6 — Bundle gate (measurable cost)
 
-- Gate the gzipped `.woff2` size per weight (V1.121 used ≤ 80 KB gz/weight and measured 19.7 KB gz (400) / 21.1 KB gz (600) for a Latin subset).
+- Gate the gzipped `.woff2` size per weight (a ≤ 80 KB gz/weight gate fits a Latin subset; a Latin subset measured 19.7 KB gz (400) / 21.1 KB gz (600)).
 - CJK subsets are far larger — expect a per-script tuning decision and a explicit threshold; if a subset exceeds its gate, fall back to the OS stack and record the follow-up instead of shipping it.
 
 ### Step 7 — Preset + twMerge wiring
@@ -94,18 +94,6 @@ Each consuming app **must not** import font binaries from package source (`packa
 - Adding a mono companion for code/terminal surfaces.
 - Adding a CJK companion (expect the larger-subset tuning above).
 - Any future self-hosted font in a local-first, bundler-agnostic workspace.
-
-## Examples
-
-### V1.121 (historical — retired by v1.187)
-
-| Layer | Path | Note |
-|-------|------|------|
-| Canonical + OFL | `packages/nexus-ui/assets/fonts/source-serif-4/` | LFS-tracked binary + `OFL.txt` |
-| App vendored subset | `apps/web/public/fonts/source-serif-4/`, `apps/design-studio/public/fonts/source-serif-4/` | `*.woff2` + `PROVENANCE.md` (files may remain on disk, unused) |
-| `@font-face` + `--font-display` | `tooling/design-tokens/src/tokens.css` | Removed from the generated pipeline; must not be re-added by hand |
-| Preload | app `index.html` | Removed from the active pipeline |
-| Bundle gate | V1.121 plan AC-P0-5 | 19.7 / 21.1 KiB gz — PASS (≤ 80 KB) |
 
 ## Do NOT
 

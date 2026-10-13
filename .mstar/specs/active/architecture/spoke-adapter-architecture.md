@@ -1,8 +1,8 @@
 # Spoke Adapter Architecture
 
-> **Status:** Normative (v0.19 — V1.155 P1 capability-token production + tenant isolation: `nexus42 connect token issue` CLI (issuer.key Ed25519 create-once 0600, `claims.iss` MUST equal issuer-derived peer id), operator config `~/.nexus42/connect/config.json` (`trusted_issuers` / `require_capability_token` / `capability_token_provider{enabled, issuer_key_path}`, deny-unknown-fields, absent ⇒ pre-V1.155 defaults, malformed ⇒ fail-closed boot error, require-without-issuers ⇒ boot error); enforcement spoke-side fail-closed (`evaluate_invoke_token_gate` ⇒ `auth_failed` before the nexus handler, zero side effects) + nexus `PeerScope` intersection — token can never widen allowlist scope; all opt-in, defaults unchanged; §10.4 row → production + §10.6 row; residual `R-V1148P3-001` closed; v0.18 — V1.155 P0 N-C3 multi-host production: `HostManifestPort.list_peer_host_capability_manifests` is production — the last adapter stub is gone; `peer_hosts` table records manifest-backed outbound observations at `connect()` return (lock #1 fallback: inbound-only peers not recorded), empty → `Ok(vec![])` preserved, corrupt stored row → `InternalError`; adapter read `list_observed_peer_hosts` (manifest + `last_seen`) backs the `connect peers list` CLI; §7.3 matrix + §10.6 N-C3 row delivered; residual `R-V1142P1-002` closed; v0.17 — V1.154 P2 QC fix wave: module-id pin hardened to key-presence (any request-carried `computable.module_id` — differing string or non-string value — must equal the gated id else `module_not_scoped`), Connect compute reuses the `nexus_wasm_host::ModuleCache` compiled-module cache (id + bytes-hash keying, overwrite-on-change eviction), missing compute target entry maps to the `invalid_input` family, shared `is_safe_module_id` + `module_identity_missing` marker — §10.6 compute row; v0.16 — V1.154 P2 N-C2 compute half + world-aware CAS: `compute` served over Connect (host-local modules under `~/.nexus42/modules/`, per-peer `module_scope` fail-closed, read-only `settle:false`, module-id pin against request override) + fixed `world_conflict` wire code on world-aware CAS write predicates + semantic reasoning-complete milestone via roles `computable-engine` + capabilities `l2-computable` (literal string absent), §10.3/§10.4/§10.6); v0.15 — V1.154 P1 N-C2 read-half QC fix wave: response byte cap (2 MiB, envelope `response_too_large`) + scope-batch-array entry caps + concurrency-model/single-deadline clarity in the §10.6 bridge row, `connect_host_slice` → `"n-c2"` §10.3); v0.14 — V1.154 P0 spoke lockstep pin 0.9.1→0.9.2: Connect session-peer invoke identity (`InvokeHandlerV2`; payload `extensions.nexus.peer_id` informational-only, hard deny on mismatch, §10.4/§10.6); spoke-connect `mdns` feature removed upstream); v0.13 — V1.153 P0 spoke lockstep pin 0.8.2→0.9.1: `spoke-operations` port traits + `orchestrate_*` sync→async (adapter adapted signature-level; durable note §7.3); v0.12 — V1.152 DF-77 §11 Narrative Knowledge Pack I/O: shipped P0+P1; P2 dogfood-confirmed — additive daemon export/import routes + all three conflict policies (skip/rename/overwrite) + CLI↔daemon shared `import_pack` module + Control Room panel; v0.11 — V1.151 DF-76 §7.4 inspector packet field surface (shipped P0+P1; P2 dogfood-confirmed against the spoke assemble-module recipe handbook); v0.10 — V1.150 DF-75 §7.4 slot + Moment Directive + generation-stage matrix shipped at P2 close; v0.9 was V1.149 lore activation §7.4 production matrix: default-on engine + Relation hop expand; v0.8 was V1.148 spoke pin 0.6.1→0.8.2 + RuleQueryPort production + orchestrate_check daemon route + Connect Host N-C0 surface; v0.7 was V1.146 spoke InternalError reject code: pin bump 0.6.0→0.6.1; v0.6 was V1.145 spoke consumer alignment: adapter rehome to spoke-adapter + dep reversal + WorldKB/timeline read via ScopeQuery + scope-pushdown contract; v0.5 was V1.144 spoke 0.5.0 upgrade + RelationPort OCC extension + orchestrate_relate cutover)
-> **Current reconciliation (V1.183):** V1.181 shipped DF-79 lore-emission hygiene and the DF-80 clean-room SillyTavern lorebook importer; their durable contracts are folded into §7.4 and §11 below.
-> **Holder amendment (v1.191 P1 — shipped):** [holder-governance.md](holder-governance.md) owns the complete Actor-holder registry, native disclosure, trusted read policies, cutover and production extraction contract. The package pins moved together to the iteration's pinned upstream lockstep release (version SSOT: the manifest pins; compass D17 records the adoption decision). `creator_only` was removed only by that complete migration, not by a wire-only version bump.
+> **Status:** Normative — `nexus-spoke-adapter` boundary, `extensions.nexus` namespace contract, spoke-operations delegation rules, Connect Host N-C0 + capability tokens, and Narrative Knowledge Pack I/O.
+> **DF-79 / DF-80:** lore-emission hygiene and the clean-room SillyTavern lorebook importer live in §7.4 and §11 below.
+> **Holder amendment:** [holder-governance.md](holder-governance.md) owns the complete Actor-holder registry, native disclosure, trusted read policies, cutover and production extraction contract. The package pins move together to the pinned upstream lockstep release (version SSOT: the manifest pins; compass D17 records the adoption decision). `creator_only` is removed only by that complete migration, not by a wire-only version bump.
 > **Document class:** Master
 > **Scope:** The `nexus-spoke-adapter` crate boundary, `extensions.nexus` namespace contract, spoke-operations delegation rules, daemon-api envelope strategy, drift detection adaptation, the `/kb/` HTTP route stability decision, the opt-in Connect Host N-C0 surface (DF-72), lore emission hygiene (DF-79), and Narrative Knowledge Pack I/O including the clean-room SillyTavern importer (DF-77/DF-80).
 > **Related:** [entity-scope-model.md](entity-scope-model.md), [actor-product-model.md](actor-product-model.md), [holder-governance.md](holder-governance.md), [local-db-schema.md](../runtime/local-db-schema.md), [schemas-directory-layout.md](schemas-directory-layout.md), and upstream SPOKE data/operations/Connect specifications.
@@ -22,11 +22,9 @@ nexus depends on spoke's published packages directly:
 - **TypeScript:** `@42ch/spoke-schemas` + `@42ch/spoke-operations` (npm, lockstep exact pin on the same release — the two root `package.json` pins)
 - **Rust (opt-in Connect Host only):** `spoke-connect` (crates.io, lockstep exact pin on the same release) — workspace dep consumed **only** behind cargo feature `connect-host` on `apps/nexus42`. The ordinary `nexus42` (`cli`) build MUST NOT link `spoke-connect`. See §10.
 
-**Lockstep cutover (shipped, v1.191 P1):** all three Rust and both root npm pins, `tooling/check-wire-drift.sh::SPOKE_PIN`, and the strategy sample pin references moved together, in one custodian checkpoint. `libp2p` did not move in this cutover; it moved to `=0.57.0` with the v1.195 `spoke-connect` 0.14.1 lockstep and was re-verified against the integrated lock graph by v1.198 P3 (anchor commit `d73ab1855921a9a222d315b8de5d4ab44b57c000`). Both `connect-host` and `connect-client` feature consumers were verified; no default-build linkage expansion was introduced.
+**Lockstep cutover:** all three Rust and both root npm pins, `tooling/check-wire-drift.sh::SPOKE_PIN`, and the strategy sample pin references move together in one custodian checkpoint. The `libp2p` companion pin sits at `=0.57.0`, moving with the `spoke-connect` 0.14.1 lockstep and verified against the integrated lock graph. Both `connect-host` and `connect-client` feature consumers are covered; no default-build linkage expansion is introduced.
 
-> **Historical:** V1.139 shipped at `0.1.1`; V1.140 bumped to `0.2.0`. V1.141 jumped to `0.4.0` (covering both the `0.3.0` capability-sliced port architecture and `0.4.0` additive `HostCapabilityManifest` + body helpers + UTF-8 peer sort). V1.144 bumped to `0.5.0` (additive `Relation.revision` + OCC-aware `RelationPort` + `RelationAlreadyExists`/`RelationNotFound` reject codes + relate-gate explicit mode). V1.145 bumped to `0.6.0` (additive `Scope.extensions` + `KnowledgeEntry.modules`). V1.146 bumped to `0.6.1` (additive `InternalError` 500-class reject code, PR #35). **V1.148 bumped to `0.8.2`** (spoke-connect surface 0.7.0–0.8.2 additive; 0.7.0 demote pack catalog from ModuleMap — pack catalog is product transport envelope, not `modules.pack` on KE/AssemblePacket; connect family schemas additive). **V1.153 bumped to `0.9.1`** (lockstep re-baseline on the connect v2 wire; 0.9.0's dial-bound hello + envelope-auth v2 are internal to `spoke-connect`; `spoke-operations` 0.9.1 additionally converted the adapter port traits + `orchestrate_*` to native async — nexus adapted signature-level, see §7.3). **V1.154 bumped to `0.9.2`** (additive release: `InvokeHandlerV2` session-peer handler API + removal of the never-enabled `mdns` feature). **V1.164 bumped to `0.10.0`** (l5-mind release: `MindState` wire + `TimelineEvent.modules` additive field — struct-literal break adapted in nexus-narrative; rest additive). **V1.169 bumped to `0.11.1`** (lockstep across all three crates: schemas `ToolDescriptor` + optional `HostCapabilityManifest.tools[]`; operations `tools` module + `regress` dep; connect responder / serve_ports / reverse-invoke + `required_capability` lifetime loosening — nexus consumes none of the new surface, declares `tools: Vec::new()`, see §10.3 manifest honesty). **v1.191 P1 bumped to the pinned upstream lockstep release** (holder governance: `KnowledgeEntry.owner` / `.disclosure` + `Scope.viewpoint`, the extraction surface, and the Connect `ke-ownership` / `ke-extraction` capability families — see the holder amendment note above; the exact version lives in the manifests and compass D17, deliberately not restated here).
-
-The bespoke `schemas/domain/key-block.schema.json` is deleted. No nexus-local copy of spoke schemas exists. The atomic KB wire type is `KnowledgeEntry` from spoke.
+`schemas/domain/key-block.schema.json` does not exist, and no nexus-local copy of spoke schemas exists. The atomic KB wire type is `KnowledgeEntry` from spoke.
 
 ### 1.2 Prefer spoke; minimal nexus customization
 
@@ -38,13 +36,13 @@ Where spoke already provides a type, field, op, or lifecycle invariant, nexus us
 
 ### 1.3 Full terminology rename
 
-`KeyBlock` is retired across the codebase, schemas, specs, and docs. The wire type is `KnowledgeEntry` from spoke. The `nexus-platform` private repo's consumer concerns are out of scope for this OSS repo.
+`KeyBlock` is not used anywhere in the codebase, schemas, specs, or docs. The wire type is `KnowledgeEntry` from spoke. The `nexus-platform` private repo's consumer concerns are out of scope for this OSS repo.
 
 ### 1.4 Crate topology
 
-- **New:** `crates/nexus-spoke-adapter/` — the only boundary that constructs spoke objects with a **lean** `extensions.nexus` populated and delegates lifecycle ops to `spoke-operations`. Capability aggregation (Q13, refined V1.145).
+- **New:** `crates/nexus-spoke-adapter/` — the only boundary that constructs spoke objects with a **lean** `extensions.nexus` populated and delegates lifecycle ops to `spoke-operations`. Capability aggregation (Q13).
 - **Merge:** `crates/nexus-kb/` is merged INTO the **existing** `crates/nexus-knowledge/` (which today owns User-scoped global knowledge + reference sources). After merger, `nexus-knowledge` consolidates three knowledge tiers in one crate:
-  1. **World KnowledgeEntry** (formerly `nexus-kb`'s domain — narrative KB entries tied to a World)
+  1. **World KnowledgeEntry** (narrative KB entries tied to a World)
   2. **User knowledge** (existing — tag-driven global knowledge entries indexed per `user_id`)
   3. **reference sources** (existing — local-only research/reference registration)
   
@@ -74,13 +72,13 @@ The `extensions.nexus` namespace carries all nexus-local fields that spoke delib
 | `world_id` | string | World owner only | `KnowledgeEntryRecord.owner::World` |
 | `character_id` | string | Character owner only | `KnowledgeEntryRecord.owner::Character` |
 | `actor_world_binding_id` | string | Binding owner only | `KnowledgeEntryRecord.owner::ActorWorldBinding` |
-| ~~`creator_only`~~ | ~~boolean~~ | **Retired (v1.191 P1)**: the key is refused on raw input (`legacy_creator_only_unsupported`, `false` included) and removed by every typed write | ~~`KnowledgeEntryRecord.creator_only`~~ |
+| ~~`creator_only`~~ | ~~boolean~~ | **Retired**: the key is refused on raw input (`legacy_creator_only_unsupported`, `false` included) and removed by every typed write | ~~`KnowledgeEntryRecord.creator_only`~~ |
 | `created_from_command_id` | string | optional | Same-named native provenance |
 | `source_work_id` | string | optional | Same-named native provenance |
 | `source_chapter` | integer | optional | Same-named native provenance |
 | `source_provenance_kind` | string | optional | Same-named native provenance |
 
-Exactly one narrative owner key is emitted; Character/binding entries never fabricate `world_id`. **Shipped (v1.191 P1):** native `holder_entry_id` maps to SPOKE core `owner`, and native `disclosure` maps to core `disclosure`; neither is an extension. The seven nexus keys keep their container/provenance meaning. The retired `creator_only` key is explicitly rejected on raw input, never preserved as an unknown key.
+Exactly one narrative owner key is emitted; Character/binding entries never fabricate `world_id`. **Native:** `holder_entry_id` maps to SPOKE core `owner`, and native `disclosure` maps to core `disclosure`; neither is an extension. The seven nexus keys keep their container/provenance meaning. The retired `creator_only` key is explicitly rejected on raw input, never preserved as an unknown key.
 
 **Wire example:**
 ```json
@@ -107,11 +105,11 @@ Exactly one narrative owner key is emitted; Character/binding entries never fabr
 
 ### 2.3 SQLite storage shape
 
-Current persistence retains indexed native container/provenance columns and `extensions_nexus_json` for unknown nexus extras. `KnowledgeEntryRecord` and `KnowledgeOwnerRef` are the current native names; historical KeyBlock terminology elsewhere does not define a new type. Since Actor ownership shipped, `world_id` is populated only for World-owned rows; Character and binding owner columns carry their own closed discriminator. Do not impose the earlier World-only required-column assumption on Actor rows.
+Current persistence retains indexed native container/provenance columns and `extensions_nexus_json` for unknown nexus extras. `KnowledgeEntryRecord` and `KnowledgeOwnerRef` are the current native names; the legacy KeyBlock terminology does not define a new type. Since Actor ownership shipped, `world_id` is populated only for World-owned rows; Character and binding owner columns carry their own closed discriminator. Do not impose the earlier World-only required-column assumption on Actor rows.
 
-The adapter merges known columns with unknown extras on read and writes both consistently. Unknown module/extension preservation remains mandatory. The shipped governance adds authoritative `holder_entry_id`/`disclosure` columns and a separate service-managed holder registry; storage constraints, pre-limit filtering, the offline `creator_only` removal, writer fences and rollback are owned solely by [holder-governance.md §§2–6](holder-governance.md#2-registry-identity-stability-and-lifecycle). A clean wipe is not an acceptable migration of authored data.
+The adapter merges known columns with unknown extras on read and writes both consistently. Unknown module/extension preservation remains mandatory. The governance model adds authoritative `holder_entry_id`/`disclosure` columns and a separate service-managed holder registry; storage constraints, pre-limit filtering, the offline `creator_only` removal, writer fences and rollback are owned solely by [holder-governance.md §§2–6](holder-governance.md#2-registry-identity-stability-and-lifecycle). A clean wipe is not an acceptable migration of authored data.
 
-### 2.4 Ownership and extraction boundaries (shipped v1.191 P1)
+### 2.4 Ownership and extraction boundaries
 
 Creator management review is a local admitted policy, not `Scope.viewpoint=None`. Character and Connect reads bind a resolved holder to the authorized container selection, filtering before pagination/search/relationship expansion. A client-supplied wire viewpoint never grants authority. See [holder-governance.md §4](holder-governance.md#4-trusted-reads-filtering-and-invalidation).
 
@@ -121,10 +119,10 @@ Connect's six existing KE operations plus exact local tools are retained only be
 
 ## 3. Daemon-API Envelope Strategy (Q8)
 
-### 3.1 Decision: active V1.139 opaque-object fallback
+### 3.1 Decision: opaque-object fallback
 
 The active daemon-api contract does **not** `$ref` the SPOKE `KnowledgeEntry`
-schema. V1.139 shipped the following local schema shapes:
+schema. The following local schema shapes are active:
 
 | Surface | Active schema shape |
 |---------|---------------------|
@@ -160,7 +158,7 @@ filesystem path and then feed the resolved schema through the existing
 `https://nexus42.invalid/schemas/` references, disables HTTP(S) resolution, and
 confines file reads to Nexus's localized schema tree.
 
-Promotion from the V1.139 fallback therefore requires both an upstream package
+Promotion from that fallback therefore requires both an upstream package
 that ships its `schemas/` sources and an explicit Nexus resolver mapping from
 `https://spoke42.invalid/schemas/` to that pinned package content. Until then,
 §3.4 is the current contract.
@@ -172,12 +170,12 @@ that ships its `schemas/` sources and an explicit Nexus resolver mapping from
 | `schemas/domain/key-block.schema.json` | Exists; owns `KeyBlock` type | **Deleted** |
 | `schemas/common/common.schema.json` | Defines `KeyBlockId`, `BlockType`, `KeyBlockStatus` | `KeyBlockId` removed (spoke uses `entry_id`); `BlockType` and `KeyBlockStatus` **retained** as nexus-local definitions for daemon-api envelope fields and query parameters that still carry the legacy enum values (status transition maps to spoke core vocab internally) |
 | `schemas/daemon-api/canvas/world-kb/world-kb-graph-response.schema.json` | References `KeyBlock` from `key-block.schema.json` | References the local `WorldKbEntityProjection` via `world-kb-entity-projection.schema.json`; it does not expose or externally `$ref` a raw SPOKE `KnowledgeEntry` |
-| `schemas/daemon-api/compute/compute-input.schema.json` | Carries `KeyBlock` in `key_blocks` array | Carries serialized SPOKE `KnowledgeEntry` values as open objects under the active V1.139 fallback; the canonical SPOKE URI is descriptive only |
-| `schemas/daemon-api/compute/compute-output.schema.json` | References `KeyBlock` in state_delta target | Keeps the target entry identifier as an opaque string and carries `new_key_blocks` as open objects under the active V1.139 fallback |
+| `schemas/daemon-api/compute/compute-input.schema.json` | Carries `KeyBlock` in `key_blocks` array | Carries serialized SPOKE `KnowledgeEntry` values as open objects under the active opaque-object fallback; the canonical SPOKE URI is descriptive only |
+| `schemas/daemon-api/compute/compute-output.schema.json` | References `KeyBlock` in state_delta target | Keeps the target entry identifier as an opaque string and carries `new_key_blocks` as open objects under the active opaque-object fallback |
 
 ### 3.4 Active fallback and promotion condition
 
-The V1.139 fallback remains active because the published SPOKE packages provide
+The opaque-object fallback remains active because the published SPOKE packages provide
 compiled types but not the schema sources needed by Nexus's confined codegen
 pipeline. Compute input `key_blocks[]` and compute output `new_key_blocks[]`
 therefore use `type: object` with `additionalProperties: true`; generated Nexus
@@ -214,7 +212,7 @@ not generation-time validation.
 
 ### 4.2 App import pattern
 
-**Current reality (v1.195 P4):** no application imports these packages — a repo-wide search finds no `import`/`require` of `@42ch/spoke-schemas` or `@42ch/spoke-operations`; the packages are referenced only by the root `package.json` pins and generated-comment text. The pattern below is the intended consumer shape, not a site that exists today.
+**Current reality:** no application imports these packages — a repo-wide search finds no `import`/`require` of `@42ch/spoke-schemas` or `@42ch/spoke-operations`; the packages are referenced only by the root `package.json` pins and generated-comment text. The pattern below is the intended consumer shape, not a site that exists today.
 
 ```typescript
 // KB entry data type — from spoke
@@ -229,7 +227,7 @@ import { validatePromoteRequest } from "@42ch/spoke-operations";
 
 ### 4.3 SemVer bump
 
-`@42ch/nexus-contracts` bumps to the next minor in the pre-1.0 series (e.g., `0.8.0` → `0.9.0`). The package no longer exports `KeyBlock` — this is a breaking change per pre-1.0 SemVer; a minor bump is sufficient (not a major to 1.0, since the package is pre-1.0 and the spire speaks 0.x).
+`@42ch/nexus-contracts` bumps to the next minor in the pre-1.0 series (e.g., `0.8.0` → `0.9.0`). The package does not export `KeyBlock` — this is a breaking change per pre-1.0 SemVer; a minor bump is sufficient (not a major to 1.0, since the package is pre-1.0 and the spire speaks 0.x).
 
 ## 5. Drift Detection Adaptation (Q10)
 
@@ -267,7 +265,7 @@ resolution become a codegen/CI failure proving the SPOKE field shape.
 
 ### 6.1 Decision: keep `/kb/` and `/kb/key-blocks/`
 
-The daemon API HTTP route paths under `/v1/daemon/.../kb/` are **not renamed** in V1.139. Rationale:
+The daemon API HTTP route paths under `/v1/daemon/.../kb/` are **not renamed** by the KnowledgeEntry migration. Rationale:
 
 | Reason | Detail |
 |--------|--------|
@@ -278,7 +276,7 @@ The daemon API HTTP route paths under `/v1/daemon/.../kb/` are **not renamed** i
 
 **Affected paths (keep as-is):**
 
-| Current path | V1.139 behavior |
+| Current path | Behavior |
 |--------------|-----------------|
 | `/v1/daemon/kb/entries` | Keep |
 | `/v1/daemon/kb/entries/:entry_id` | Keep |
@@ -391,8 +389,7 @@ pub fn merge_extensions(
 /// Delegate to `spoke_operations::assert_revision_match`.
 pub fn assert_revision(expected: u64, actual: u64) -> SpokeResult<()>;
 
-// ── Conversion seam (V1.145 P1a — sole KnowledgeEntryRecord ↔ KnowledgeEntry seam;
-//    renamed with the v1.184 owner-aware aggregate) ─
+// ── Conversion seam (sole KnowledgeEntryRecord ↔ KnowledgeEntry seam) ─
 
 /// Forward: nexus domain `KnowledgeEntryRecord` → spoke standard `KnowledgeEntry`.
 /// Borrows the domain entry (owned fields are cloned internally).
@@ -501,32 +498,32 @@ When a consumer calls an optional orchestrator (`orchestrate_project`, `orchestr
 
 **General rule:** if the consumer already has a transaction open and the mutation is a single helper call, Surface A is simpler. If the mutation composes multiple helpers across port families and OCC is required, Surface B encapsulates the sequencing.
 
-**Surface B production storage boundary (out of scope for V1.141):** wiring nexus SQLite tables behind the six `BaselinePorts` families is **next-iteration roadmap** (compass Roadmap items 1–2). V1.141 ships the port traits, orchestration re-exports, a reference in-memory mock, and adoption tests — sufficient to prove the boundary works. Production `KnowledgeEntryPort` implementations against `nexus-local-db` ship in a downstream iteration triggered by the first write-path cutover. See iteration compass "Roadmap Position" for the staged cutover plan.
+**Surface B production storage boundary:** wiring nexus SQLite tables behind the six `BaselinePorts` families is roadmap (compass Roadmap items 1–2). The adapter ships the port traits, orchestration re-exports, a reference in-memory mock, and adoption tests — sufficient to prove the boundary works; production `KnowledgeEntryPort` implementations against `nexus-local-db` ship with the write-path cutover. See iteration compass "Roadmap Position" for the staged cutover plan.
 
-**Production adapter shipped (V1.142):** the production `BaselinePorts` implementation (`NexusAdapter`, V1.146 rename) was first shipped in `nexus-local-db/src/spoke_adapter/`, replacing the V1.141 reference in-memory mock for the four storage-backed families. The mock remains the reference shape for tests. See §7.4 for the production adapter home, family matrix, and CAS contract reuse.
+**Production adapter:** the production `BaselinePorts` implementation (`NexusAdapter`) replaces the reference in-memory mock for the four storage-backed families; the mock remains the reference shape for tests. See §7.4 for the production adapter home, family matrix, and CAS contract reuse.
 
-### 7.4 Production Adapter Home — `NexusAdapter` in `nexus-spoke-adapter` (V1.146 rename)
+### 7.4 Production Adapter Home — `NexusAdapter` in `nexus-spoke-adapter`
 
-The production `BaselinePorts` implementation (`NexusAdapter`, V1.146 rename) lives in **`nexus-spoke-adapter/src/adapter/`** (V1.145 rehome). The V1.142 placement in `nexus-local-db/src/spoke_adapter/` was a pragmatic ship for write-path speed; V1.145 corrects the topology to match the durable layering vision:
+The production `BaselinePorts` implementation (`NexusAdapter`) lives in **`nexus-spoke-adapter/src/adapter/`**, matching the durable layering:
 
 | Layer | Role | Dependency direction |
 |-------|------|---------------------|
 | `nexus-local-db` | **Pure storage** — DB CRUD primitives (`SqliteKbStore`, `open_pool`, `run_migrations`); no spoke types or dep on spoke-adapter | ← `nexus-spoke-adapter` depends on these primitives |
 | `nexus-spoke-adapter` | **Capability aggregation** — owns `NexusAdapter` + 8 port impls; maps spoke ↔ storage primitives; re-exports Surface A/B | → depends on `nexus-local-db`, `nexus-knowledge`, `spoke-schemas`, `spoke-operations` |
-| Business crates (`nexus-core`, `nexus-narrative`, MCA, `nexus-orchestration`, `apps/nexus42`; pre-v1.193 also the deleted `nexus-daemon-runtime`) | **Spoke consumers** — call adapter/orchestrators; do not host port impls or spoke serialization | → depend on `nexus-spoke-adapter` + `nexus-knowledge` |
+| Business crates (`nexus-core`, `nexus-narrative`, MCA, `nexus-orchestration`, `apps/nexus42`) | **Spoke consumers** — call adapter/orchestrators; do not host port impls or spoke serialization | → depend on `nexus-spoke-adapter` + `nexus-knowledge` |
 
-The adapter converts between nexus storage rows and spoke wire types using the V1.145 P1a conversion seam, now owned by `nexus-spoke-adapter` as free functions in `src/conversion/` (`knowledge_record_to_spoke` / `spoke_to_knowledge_record`) plus the `KnowledgeEntryRecordSpokeExt` lifecycle trait. The seam moved out of `nexus-knowledge` (orphan rule: both `KnowledgeEntryRecord` and `KnowledgeEntry` are foreign to `nexus-knowledge`'s former `From` impls), reversing the `nexus-knowledge → nexus-spoke-adapter` edge to `nexus-spoke-adapter → nexus-knowledge`. The conversion seam remains the sole boundary — no second conversion path is added (spec §7.1).
+The adapter converts between nexus storage rows and spoke wire types using the conversion seam owned by `nexus-spoke-adapter` as free functions in `src/conversion/` (`knowledge_record_to_spoke` / `spoke_to_knowledge_record`) plus the `KnowledgeEntryRecordSpokeExt` lifecycle trait. The conversion seam remains the sole boundary — no second conversion path is added (spec §7.1).
 
-**Module layout (V1.146):**
+**Module layout:**
 ```
 nexus-spoke-adapter/src/
   lib.rs                            ← Surface A (extensions accessors, delegate wrappers) + Surface B (port trait re-exports, orchestrator entrypoints) + production adapter re-export
   extensions.rs                     ← extensions.nexus accessors
   ops.rs                            ← Surface A delegation wrappers
-  conversion/                       ← V1.145 P1a — KnowledgeEntryRecord↔KnowledgeEntry free fns + KnowledgeEntryRecordSpokeExt (sole conversion seam)
+  conversion/                       ← KnowledgeEntryRecord↔KnowledgeEntry free fns + KnowledgeEntryRecordSpokeExt (sole conversion seam)
   pack.rs                          ← Narrative Knowledge Pack build/parse helpers
   pack/
-    st_lorebook.rs                 ← Clean-room documented-format SillyTavern lorebook → Pack converter (V1.181 / DF-80)
+    st_lorebook.rs                 ← Clean-room documented-format SillyTavern lorebook → Pack converter (DF-80)
   adapter/
     mod.rs                          ← NexusAdapter struct + TX bridge (Arc<Mutex<Option<Transaction>>>) [V1.146 rename; V1.145 P1b rehome from nexus-local-db]
     ── Spoke port trait impls ──
@@ -546,27 +543,25 @@ examples/
   baseline_adapter.rs               ← reference in-memory mock (for port shape reference)
 ```
 
-**V1.146 rename:** adapter struct renamed to `NexusAdapter`. Import path: `nexus_spoke_adapter::NexusAdapter`. (V1.145: `nexus_spoke_adapter::adapter::NexusAdapter`; V1.142–V1.144: `nexus_local_db::spoke_adapter::NexusAdapter` before the rename.)
+**Adapter struct:** `NexusAdapter`, imported as `nexus_spoke_adapter::NexusAdapter`.
 
-#### Lore activation engine — default-on + Relation hop expand (V1.149 / DF-74)
+#### Lore activation engine — default-on + Relation hop expand (DF-74)
 
 | Aspect | Contract |
 |--------|----------|
-| **Status** | **Production default-on** (V1.149 — in-flight; P2 dogfood confirms before ship). Supersedes V1.146 P4 flag-gated spike (`NEXUS_MCA_LORE_ACTIVATION=1` opt-in). |
+| **Status** | **Production default-on.** Supersedes the flag-gated spike (`NEXUS_MCA_LORE_ACTIVATION=1` opt-in). |
 | **Owner** | `nexus-spoke-adapter/src/adapter/activation.rs` (pure match + hop). MCA calls the engine; CLI loads hop edges. **No** matching/hop code in `spoke-operations`. |
-| **Dialect** | Consumer-only over spoke handbook `domain-profile-lore-activation.md` `modules.activation`: `keys`, `secondary_keys`, `logic`, `constant`, `order`, `priority`, `position_hint`, `outlet`, `match`. Inner shapes are handbook-defined under open `ModuleMap` (KE schema does not enumerate activation fields). Logic per handbook truth table — `secondary_keys` absent/empty ⇒ primary-any, `logic` ignored (replaces V1.146 primary-only). Unknown keys ignored + round-trip safe. `position_hint`/`outlet` parsed-not-actioned until DF-75. |
+| **Dialect** | Consumer-only over spoke handbook `domain-profile-lore-activation.md` `modules.activation`: `keys`, `secondary_keys`, `logic`, `constant`, `order`, `priority`, `position_hint`, `outlet`, `match`. Inner shapes are handbook-defined under open `ModuleMap` (KE schema does not enumerate activation fields). Logic per handbook truth table — `secondary_keys` absent/empty ⇒ primary-any, `logic` ignored (replaces the primary-only behavior). Unknown keys ignored + round-trip safe. `position_hint`/`outlet` parsed-not-actioned until DF-75. |
 | **Default / off-switch** | Runs on every `assemble_moment` with `world_id` + non-empty World-KB. Escape hatch: `NEXUS_MCA_LORE_ACTIVATION=off` (kept ≥ one minor). |
-| **Neutral-only guarantee** | Worlds with no `modules.activation` produce assembled output **byte-equivalent** to V1.146 flag-off (hard ship gate). |
+| **Neutral-only guarantee** | Worlds with no `modules.activation` produce assembled output **byte-equivalent** to flag-off (hard ship gate). |
 | **Scan** | Stage-0 full string + outline beats = timeline `title`/`summary` from existing narrative fetch. Per-entry `canonical_name` + `body.summary` self-match. Raw manuscript body **not** on MCA path (documented Stage-0 fallback). |
 | **Ordering** | Constant seeds first; then `priority` descending (higher wins) → `order` ascending → stable index. |
 | **Hops** | On primary/constant fire, expand ≤ **2** hops over undirected adjacency built from confirmed `kb_relationships` via inherent `NexusAdapter::list_hop_edges_for_world` (`list_relationships_for_world(..., include_suggested=false)`). spoke `RelationPort` remains get/put only — **no** list-by-entity on the trait. Hop-pulled entries do **not** re-fire keyword activation. Token budget = remaining MCA budget after primary match when `max_tokens` set; personality never truncated. Cycle-safe (`visited` on `entry_id`). |
 | **Trace** | Per-entry reason + hop-origin / hop-depth / source-relation for hopped rows (`--emit-packet`; Control Room inspector = DF-76). |
 
-DF-74 delivered V1.149; DF-75 delivered V1.150; DF-76 delivered V1.151 (assembly inspector).
+#### Slot vocabulary + Moment Directive + generation-stage gates (DF-75)
 
-#### Slot vocabulary + Moment Directive + generation-stage gates (V1.150 / DF-75 — shipped)
-
-V1.150 (DF-75, plans P0+P1+P2) adds **product-local** assembly shaping on top of the V1.149 activation engine. **Consumer-only discipline holds:** no new spoke wire, no `spoke-operations` changes, no new `schemas/` DTOs (`wire_contracts_changed: false`). Product behavior SSOT: iteration draft `fl-l-w5-prompt-control-plane.md` (promoted to tracked status here at P2 close).
+DF-75 adds **product-local** assembly shaping on top of the activation engine. **Consumer-only discipline holds:** no new spoke wire, no `spoke-operations` changes, no new `schemas/` DTOs (`wire_contracts_changed: false`).
 
 | Aspect | Contract |
 |--------|----------|
@@ -578,11 +573,9 @@ V1.150 (DF-75, plans P0+P1+P2) adds **product-local** assembly shaping on top of
 | **Neutral-only guarantee** | Unchanged (AC-I1b, HARD): no activation entries + no active directive + `unspecified` ⇒ byte-identical to V1.149. Golden suites (`golden_neutral_only_default_on`, `golden_slots_neutral_only`, `golden_flag_off`) green at V1.150 P2 close. |
 | **Off-switch interaction** | Slot routing + stage gate are **activation-product shaping steps**: with `NEXUS_MCA_LORE_ACTIVATION=off` every candidate entry is emitted unchanged as the V1.149 flat block (no sub-headings, no gating). |
 
-DF-74 delivered V1.149; **DF-75 delivered V1.150**; DF-76 delivered V1.151.
+#### Inspector packet field surface (DF-76)
 
-#### Inspector packet field surface (V1.151 / DF-76 — shipped; P2 dogfood-confirmed)
-
-V1.151 (DF-76, plans P0+P1+P2) makes the V1.149–V1.150 traces **author-visible** via an **enriched inspector packet** — a **separate emission path** from `to_full_context()` (AC-I6: assembled bytes are byte-identical to V1.150). **Consumer-only discipline holds:** the `modules.*` section keeps the spoke assemble-module recipe vocabulary (presented, not cloned); `slot_map`/`budget`/`moment_directive` and the V1.181 `hygiene` trace are **product-local** sections, explicitly outside the spoke recipe. No new spoke wire or `schemas/` spoke DTOs; the daemon wire DTOs are nexus-product-local (`schemas/daemon-api/inspector/`). Product behavior SSOT: iteration draft `fl-l-w6-assembly-inspector.md` (promoted to tracked status at P2 close).
+DF-76 makes the activation/slot traces **author-visible** via an **enriched inspector packet** — a **separate emission path** from `to_full_context()` (AC-I6: assembled bytes are byte-identical to the non-inspector path). **Consumer-only discipline holds:** the `modules.*` section keeps the spoke assemble-module recipe vocabulary (presented, not cloned); `slot_map`/`budget`/`moment_directive` and the V1.181 `hygiene` trace are **product-local** sections, explicitly outside the spoke recipe. No new spoke wire or `schemas/` spoke DTOs; the daemon wire DTOs are nexus-product-local (`schemas/daemon-api/inspector/`).
 
 **P2 confirmation (2026-08-05, dogfood + recipe sweep):** the `modules.*` surface was verified against the spoke assemble-module recipe handbook (`assemble-module-recipes.md`) and the shipped `build_inspector_packet` (`nexus-moment-context-assembly/src/inspector.rs`, exercised by the T1 dogfood `dogfood_inspector_packet_stages` across `produce`/`review`/`persist`). Nexus is **consumer-only**: it presents the trace in the recipe **vocabulary** (`placement` = accepted-entries snapshot; `activation_trace` = full fire/miss provenance with `reason`) and does **not** clone the spoke `AssemblePacket.modules` wire. `slot_map`/`budget`/`moment_directive`/`hygiene` are top-level **product-local** sections, explicitly outside the spoke recipe (never under `modules.*`, AC-I3).
 
@@ -593,10 +586,10 @@ V1.151 (DF-76, plans P0+P1+P2) makes the V1.149–V1.150 traces **author-visible
 | **`budget`** | `{ "primary_tokens_est", "hop_tokens_est", "cap", "remaining" }` (u | null) — chars/4 estimator (`estimate_tokens`, `activation.rs:778`, summary-or-name / 4). **Additive:** `ActivationBudget` on `ActivationResult` (values already computed inside `apply_activation_with_hops` at `activation.rs:576` and `expand_relation_hops` at `activation.rs:698`; surface via `HopExpandResult.tokens_consumed`); `MomentContext.activation_budget` captured at `moment.rs:695`. `cap` = effective hop cap (`None` ⇒ depth+cycle only); `remaining` = budget left after primary + hops (`None` when no cap). No-hops path: primary estimate only, `cap`/`remaining` = `None`. |
 | **`moment_directive`** | Status/metadata only — `{ "scope": "work"|"world"|null, "scope_id", "insert_depth": "head"|"mid"|"tail"|null, "ttl_kind": "generations"|"chapters"|null, "ttl_remaining": u|null, "clear_on_scene_change": bool, "status": "active"|"none" }`. Sources: persisted `MomentDirectiveRow` (`nexus-local-db/src/moment_directive.rs:59-87` — `scope_kind`, `scope_id`, `insert_depth`, `ttl_kind`, `ttl_remaining`, `clear_on_scene_change`, `status`). **Additive:** `ActiveDirective` (`nexus-moment-context-assembly/src/directive.rs:103-134`) gains `ttl_remaining/status/scope_kind/scope_id`; `MomentContext.moment_directive_meta` captured at `moment.rs:779`. `status` = `"active"` when injected this assembly (active-row lookups only, `moment_directive.rs:224-243`), `"none"` when absent. |
 | **Directive-body exclusion (AC-I3, by construction)** | The packet builder reads `MomentContext.moment_directive_meta` and **never** `MomentContext.moment_directive` (the body, `moment.rs:292`) nor the `body` column. The directive body is author content surfaced only via the directive `show` surface / the assembled prompt. Enforced by the extended `inspector_packet_never_carries_moment_directive` test. |
-| **Builder home** | Packet building stays **product-local**: `build_inspector_packet` relocated from `apps/nexus42` (private fn, `context.rs:810-845`) to MCA module `nexus-moment-context-assembly/src/inspector.rs` (`pub fn build_inspector_packet(ctx: &MomentContext) -> serde_json::Value`, shipped P0) — shared by the CLI (`emit_inspector_packet`, `context.rs:785`), the inspector route (`POST /v1/daemon/inspector/moment`, tier2, ownership-guarded — served today by `apps/nexus-service` `context.ts`; the `handlers/check.rs:98-184` pattern reference is pre-v1.193 provenance from the deleted daemon crate), and the Control Room panel. No inspector logic in `spoke-operations`. |
-| **Directive daemon route (P0, H5)** | `POST /v1/daemon/moment-directive` — thin set/show/clear HTTP wrapper over `nexus_local_db::moment_directive::{set_active, replace_active, get_active_for_work, get_active_for_world, clear}` (CLI precedent `apps/nexus42/src/commands/creator/moment_directive.rs:145/247/273`); validation mirrors the CLI (`handle_set`, `apps/nexus42/src/commands/creator/moment_directive.rs:145`; explicit `replace` via the unique partial index, `local-db moment_directive.rs:126` — no silent overwrite). `LocalDirectiveStore` (now `crates/nexus-core/src/context.rs:112`; the interim `nexus-daemon-runtime/src/directive_store.rs` home was deleted in v1.193 P2) relocated so CLI and route share the composition root (cannot live in `nexus-local-db` — cycle MCA → spoke-adapter → local-db). The route is served today by `apps/nexus-service` (`context.ts` moment-directive family). |
+| **Builder home** | Packet building stays **product-local**: `build_inspector_packet` relocated from `apps/nexus42` (private fn, `context.rs:810-845`) to MCA module `nexus-moment-context-assembly/src/inspector.rs` (`pub fn build_inspector_packet(ctx: &MomentContext) -> serde_json::Value`, shipped P0) — shared by the CLI (`emit_inspector_packet`, `context.rs:785`), the inspector route (`POST /v1/daemon/inspector/moment`, tier2, ownership-guarded — served by `apps/nexus-service` `context.ts`), and the Control Room panel. No inspector logic in `spoke-operations`. |
+| **Directive daemon route (P0, H5)** | `POST /v1/daemon/moment-directive` — thin set/show/clear HTTP wrapper over `nexus_local_db::moment_directive::{set_active, replace_active, get_active_for_work, get_active_for_world, clear}` (CLI precedent `apps/nexus42/src/commands/creator/moment_directive.rs:145/247/273`); validation mirrors the CLI (`handle_set`, `apps/nexus42/src/commands/creator/moment_directive.rs:145`; explicit `replace` via the unique partial index, `local-db moment_directive.rs:126` — no silent overwrite). `LocalDirectiveStore` (`crates/nexus-core/src/context.rs:112`) relocated so CLI and route share the composition root (cannot live in `nexus-local-db` — cycle MCA → spoke-adapter → local-db). The route is served today by `apps/nexus-service` (`context.ts` moment-directive family). |
 
-#### Lore emission hygiene (V1.181 / DF-79 — shipped)
+#### Lore emission hygiene (DF-79)
 
 Author-defined lore cleanup travels in
 `body.attributes.hygiene` as an ordered array of
@@ -620,20 +613,20 @@ per carrier-bearing entry shaped as
 Source authorities are `hygiene.rs`, `moment.rs::render_gated_slots`, and
 `inspector.rs::build_inspector_packet`.
 
-#### Production-vs-stub matrix per port family (V1.148)
+#### Production-vs-stub matrix per port family
 
 | Port family / method | Implementation class | Backing | Rationale |
 |---|---|---|---|
-| `KnowledgeEntryPort` | **Production** | `kb_key_blocks` via `SqliteKbStore` primitives + V1.73 CAS + `modules_json` serialization (spoke `KnowledgeEntry.modules`, V1.146 P4 T1) | Existing storage with OCC; adapter in spoke-adapter, storage primitives in local-db |
-| `RelationPort` | **Production** (OCC-aware, V1.144 P1) | `kb_relationships` via `SqliteKbStore` primitives + CAS (`WHERE revision = ?`) + `extensions_nexus_json` round-trip (V1.146 P3) | Existing storage; OCC added V1.144 P1 per spoke 0.5.0 `RelationPort` trait |
+| `KnowledgeEntryPort` | **Production** | `kb_key_blocks` via `SqliteKbStore` primitives + V1.73 CAS + `modules_json` serialization (spoke `KnowledgeEntry.modules`) | Existing storage with OCC; adapter in spoke-adapter, storage primitives in local-db |
+| `RelationPort` | **Production** (OCC-aware) | `kb_relationships` via `SqliteKbStore` primitives + CAS (`WHERE revision = ?`) + `extensions_nexus_json` round-trip (V1.146 P3) | Existing storage; OCC added V1.144 P1 per spoke 0.5.0 `RelationPort` trait |
 | `FindingPort` | **Production** | `findings` table | Existing storage |
 | `ScopeQueryPort.list_knowledge_entries` | **Production** | `kb_key_blocks` scope-filtered by `scope_id` + `entry_ids`/`entry_types`; unfiltered full-world listings reject on >`LIST_BY_WORLD_LIMIT` overflow (no silent truncation for orchestrators). The MCA read path does NOT use this trait method — it uses `SpokeBackedKbStore` → `NexusAdapter::list_knowledge_entries_scoped` reading `scope.extensions["nexus"]` (see §7.4 scope-pushdown contract) | Existing storage; P2 production read via `SpokeBackedKbStore` (MCA only) |
-| `ScopeQueryPort.list_timeline_events` | **Production** (V1.145 P3) | `narrative_timeline_events` table (V1.26); scope-filtered by `scope_id` → `world_id`, `extensions.nexus.branch_id`, `timeline_event_ids` | Timeline IS persisted in `narrative_timeline_events` (V1.26 migration); the V1.142 stub was incorrect — data exists, the port just didn't query it |
-| `RuleQueryPort` | **Production** (V1.148 P1) | New `spoke_rules` table (`nexus-local-db`); `list_rules(rule_refs)` maps `rule_id` → spoke `Rule`; unknown refs omitted (not error); empty ref-set → empty | Closes `R-V1142P1-001`. Substrate for Daemon HTTP `POST /v1/daemon/check` (P2). Does **not** imply Connect `check` dispatch (N-C0 refuses all ops). |
+| `ScopeQueryPort.list_timeline_events` | **Production** | `narrative_timeline_events` table (V1.26); scope-filtered by `scope_id` → `world_id`, `extensions.nexus.branch_id`, `timeline_event_ids` | Timeline IS persisted in `narrative_timeline_events` (V1.26 migration); the V1.142 stub was incorrect — data exists, the port just didn't query it |
+| `RuleQueryPort` | **Production** | New `spoke_rules` table (`nexus-local-db`); `list_rules(rule_refs)` maps `rule_id` → spoke `Rule`; unknown refs omitted (not error); empty ref-set → empty | Closes `R-V1142P1-001`. Substrate for Daemon HTTP `POST /v1/daemon/check` (P2). Does **not** imply Connect `check` dispatch (N-C0 refuses all ops). |
 | `HostManifestPort.get_host_capability_manifest` | **Production** (self) | Shared builder: installation `host_id` from `~/.nexus42/device-id`; roles `["data-store"]`; capabilities `spoke-baseline` + `l2-computable` + `l5-fork`; namespaces `["nexus"]` | Honest self-description for adapter + Connect Host hello (`ConnectConfig.local_manifest`) |
-| `HostManifestPort.list_peer_host_capability_manifests` | **Production** (V1.155 P0 N-C3) | `peer_hosts` table (workspace DB, migration `20260808120000_peer_hosts.sql`); `nexus_local_db::list_peer_manifests` rows → typed `HostCapabilityManifest` (`last_seen` DESC, `host_id` ASC) | Multi-host production (DF-72 N-C3): peers recorded ONLY from observed Connect sessions — the outbound `connect()` return observation point (`record_peer_manifest`, manifest-backed, lock #1); inbound-only peers not recorded (spoke-connect API change, out of nexus scope). Empty table → `Ok(vec![])` (stub contract preserved); corrupt stored row → `InternalError` (never skipped). Closes `R-V1142P1-002`. Adapter-level CLI read: `NexusAdapter::list_observed_peer_hosts` (manifest + `last_seen`) backs `connect peers list`. |
-| `ComputablePort` | **Production** (V1.146 P2 T2) | `compute_sessions` table via `nexus-wasm-host` session store | WASM compute sessions; bridges spoke `project`/`compute` requests to the stateless WASM runtime |
-| `ForkTimelineQueryPort` | **Production** (V1.146 P2 T3) | `narrative_timeline_events` + `narrative_branches` fork-filtered | Fork-scoped timeline queries; fork has no relation to fork-timeline precedes ordering (precedes is Relation-DAG, not fork-port scope) |
+| `HostManifestPort.list_peer_host_capability_manifests` | **Production** (N-C3) | `peer_hosts` table (workspace DB, migration `20260808120000_peer_hosts.sql`); `nexus_local_db::list_peer_manifests` rows → typed `HostCapabilityManifest` (`last_seen` DESC, `host_id` ASC) | Multi-host production (DF-72 N-C3): peers recorded ONLY from observed Connect sessions — the outbound `connect()` return observation point (`record_peer_manifest`, manifest-backed, lock #1); inbound-only peers not recorded (spoke-connect API change, out of nexus scope). Empty table → `Ok(vec![])` (stub contract preserved); corrupt stored row → `InternalError` (never skipped). Closes `R-V1142P1-002`. Adapter-level CLI read: `NexusAdapter::list_observed_peer_hosts` (manifest + `last_seen`) backs `connect peers list`. |
+| `ComputablePort` | **Production** | `compute_sessions` table via `nexus-wasm-host` session store | WASM compute sessions; bridges spoke `project`/`compute` requests to the stateless WASM runtime |
+| `ForkTimelineQueryPort` | **Production** | `narrative_timeline_events` + `narrative_branches` fork-filtered | Fork-scoped timeline queries; fork has no relation to fork-timeline precedes ordering (precedes is Relation-DAG, not fork-port scope) |
 
 **Rule vocabulary amendment (v1.198 accepted target).** Nexus rule
 authoring distinguishes `draft`, `active`, `deprecated`, and `archived`;
@@ -654,7 +647,7 @@ CLI/HTTP/native callers. See
 and [CLI specification](../cli/cli-spec.md); these are different read purposes,
 not two competing lifecycle authorities.
 
-**Stub behavior contract:** each stub is a documented empty/static return with a doc-comment referencing its roadmap trigger and residual. Stubs must never fabricate data — they return exactly what the backing storage would if it were empty/static. **V1.155 P0 (N-C3): the last stub is gone** — `HostManifestPort.list_peer_host_capability_manifests` is production (see the matrix row); the adapter has zero stubs. See `host_manifest_port.rs` module-level docs and §10.
+**Stub behavior contract:** each stub is a documented empty/static return with a doc-comment referencing its roadmap trigger and residual. Stubs must never fabricate data — they return exactly what the backing storage would if it were empty/static. **No stubs remain (N-C3).** `HostManifestPort.list_peer_host_capability_manifests` is production (see the matrix row); the adapter has zero stubs. See `host_manifest_port.rs` module-level docs and §10.
 
 #### CAS contract reuse
 
@@ -689,13 +682,11 @@ On create, the adapter seeds `revision = 1` (spoke convention), not `0` (nexus V
 
 `RelationPort::get_relation` reads from `kb_relationships` via the existing `KbRelationshipRow` → spoke `Relation` conversion. On not-found it returns `SpokeRejectCode::RelationNotFound` (available in spoke 0.5.0; verified in `result.rs` line 28). The conversion mapping is identical to the `put_relation` path (see `relation_port.rs` header table, verified for 0.5.0 field names).
 
-#### Scope-pushdown contract — Nexus query filters alongside `Scope` (V1.145 P2)
+#### Scope-pushdown contract — Nexus query filters alongside `Scope`
 
-> **V1.145 P2 (spoke-native extensions, ≥ 0.6.0):** the nexus-specific filters
+> **Scope-native extensions (spoke ≥ 0.6.0):** the nexus-specific filters
 > ride `scope.extensions["nexus"]` (looked up via the typify
-> `ScopeExtensionsKey` newtype). This is the original scope-pushdown design;
-> the prior typed `KbScopeFilters` carrier was a 0.5.0 workaround (0.5.0's
-> `Scope` had no `extensions` field) and is **removed** in the 0.6.0 redo. See
+> `ScopeExtensionsKey` newtype). See
 > `nexus-spoke-adapter/src/adapter/mca_read.rs` (`scope_from_kb_query` /
 > `kb_query_from_scope`). The round-trip is proven by the
 > `scope_extensions_round_trip` smoke test.
@@ -714,17 +705,17 @@ spoke `Scope` supports `entry_ids`, `entry_types`, `source_id`, `fork_id`, `time
 
 **Behavior preservation (HARD):** `SpokeBackedKbStore::query` builds a spoke `Scope` (native `entry_types` + `extensions["nexus"]`), then `NexusAdapter::list_knowledge_entries_scoped` extracts the nexus filters from the scope, reconstructs the equivalent `KbQuery`, and delegates to `SqliteKbStore::query` — so it produces a byte-identical `KbQueryResult` to the direct `query` path (same silent 500-row window, same in-memory filter + pagination, **no** reject-on-overflow). The MCA inherent method and the spoke `ScopeQueryPort::list_knowledge_entries` (whose reject-on-overflow serves orchestrators) stay **separate** — unifying them would break one limit contract or the other. The body round-trips losslessly: the adapter stashes the `_nexus_body` carrier on the read path so `spoke_to_world_kb` recovers the exact body (V1.143 body-fidelity mechanism).
 
-#### Read-path ScopeQuery adoption (V1.145)
+#### Read-path ScopeQuery adoption
 
 **P2 — MCA WorldKB read:** MCA's `fetch_world_kb` (in `nexus-moment-context-assembly/src/moment.rs`) switches from `SqliteKbStore` to a `SpokeBackedKbStore` wrapper (`nexus-spoke-adapter/src/adapter/mca_read.rs`) that implements `KbStore` by translating `KbQuery` → spoke `Scope` (native `entry_types` from `block_type` + the nexus-specific filters under `scope.extensions["nexus"]`) → `NexusAdapter::list_knowledge_entries_scoped` (an async inherent method, NOT the spoke `ScopeQueryPort` trait method, so MCA does not inherit the spoke port's reject-on-overflow). The wrapper converts spoke `KnowledgeEntry` → nexus `KnowledgeEntryRecord` via the free function `spoke_to_knowledge_record` (V1.145 P1a conversion seam; lossless body carrier preserves summary/tags/attributes). The MCA read is wired at `apps/nexus42/src/commands/platform/context.rs::run_assemble_moment` (the single production `assemble_moment` KB-store call site). MCA's generic `K: KbStore` signature is unchanged — only the injected implementation changes.
 
-**P2 scope boundary (explicit):** MCA is the only production consumer cut over in V1.145. Daemon CRUD read paths (`get_graph`, `get_candidates`) stay on `SqliteKbStore` directly — these are UI views, not spoke integration concerns. **Durable roadmap:** DR-43 (MCA read-path cutover evaluation).
+**P2 scope boundary (explicit):** MCA is the only production consumer cut over. Daemon CRUD read paths (`get_graph`, `get_candidates`) stay on `SqliteKbStore` directly — these are UI views, not spoke integration concerns. **Durable roadmap:** DR-43 (MCA read-path cutover evaluation).
 
-**Narrative timeline ordering through the adapter (deferred to V1.146):** P3 shipped production `ScopeQueryPort.list_timeline_events` (table query + scope filter). The remaining goal — routing the narrative gateway's `get_timeline_ordered` ordering through the adapter boundary so the spoke `order_timeline_events_by_ids` helper is called via adapter re-export rather than a direct `spoke-operations` import in `narrative_gateway.rs` — is **deferred to V1.146**. It is a real refactor: `narrative_gateway` lives in `nexus-local-db` (pure storage, no spoke-adapter dep post-P1b reversal) and in `nexus-narrative`, neither of which can depend on `nexus-spoke-adapter` without re-introducing the reversed edge. The ordering therefore needs to move to a spoke-adapter-dependent layer. Until then, `nexus-local-db` and `nexus-narrative` take `spoke-operations` directly as a **standard leaf library dep** (no cycle) for the ordering helper.
+**Narrative timeline ordering through the adapter (deferred):** production `ScopeQueryPort.list_timeline_events` (table query + scope filter) is shipped. The remaining goal — routing the narrative gateway's `get_timeline_ordered` ordering through the adapter boundary so the spoke `order_timeline_events_by_ids` helper is called via adapter re-export rather than a direct `spoke-operations` import in `narrative_gateway.rs` — is **deferred**. It is a real refactor: `narrative_gateway` lives in `nexus-local-db` (pure storage, no spoke-adapter dep post-P1b reversal) and in `nexus-narrative`, neither of which can depend on `nexus-spoke-adapter` without re-introducing the reversed edge. The ordering therefore needs to move to a spoke-adapter-dependent layer. Until then, `nexus-local-db` and `nexus-narrative` take `spoke-operations` directly as a **standard leaf library dep** (no cycle) for the ordering helper.
 
-#### Timeline storage — existing table reuse (V1.145 P3)
+#### Timeline storage — existing table reuse
 
-The `narrative_timeline_events` table already exists (V1.26 migration `20260524_narrative_worlds.sql`). The production write path (`narrative_write.rs::append_event`) already writes to it. The V1.143 `TimelineEvent` ↔ spoke `TimelineEvent` conversion seam already maps the stored columns. P3 adds one additive column for spoke round-trip (`extensions_nexus_json TEXT`) and replaces the stub `list_timeline_events` with a production query. No new table, no write migration needed — the SSOT for timeline data already lives in `narrative_timeline_events`.
+The `narrative_timeline_events` table exists (V1.26 migration `20260524_narrative_worlds.sql`). The production write path (`narrative_write.rs::append_event`) writes to it, and the `TimelineEvent` ↔ spoke `TimelineEvent` conversion seam maps the stored columns. The additive `extensions_nexus_json TEXT` column carries spoke round-trip, and `list_timeline_events` is a production query. No new table, no write migration needed — the SSOT for timeline data already lives in `narrative_timeline_events`.
 
 **Timeline Scope filter alignment:** Scope for timeline:
 - `scope.scope_id` → `world_id` (SQL `WHERE world_id = ?`)
@@ -744,11 +735,6 @@ Each orchestrator adoption on a daemon write path is registered here. The regist
 
 > **Note:** `patch_relationship_remove()` (line 1653) is **not** a cutover candidate — `orchestrate_relate` has no delete path (`RelationPort` exposes only `put_relation`). The `remove` action stays on Surface A via `delete_relationship_in_tx()`.
 
-> **V1.143 structural mismatch resolved by spoke 0.5.0:** V1.143 `R-V1143P2-DEFER-RELATE` identified that spoke 0.4.1's `Relation` type lacked a `revision` field, making `RelationPort::put_relation` insert-only with no CAS guard. spoke 0.5.0 ships `Relation.revision: Option<u64>` (verified in `../spoke/crates/spoke-schemas/src/generated/data/relation.rs`) + OCC-aware `RelationPort` trait with `get_relation` + `put_relation(relation, expected_base_revision: Option<u64>)` (verified in `../spoke/crates/spoke-operations/src/adapter/ports.rs` lines 30–52) + `orchestrate_relate` deep OCC (verified in `../spoke/crates/spoke-operations/src/adapter/orchestrate.rs` lines 300–338). The nexus `kb_relationships` table already has a `revision` column (V1.74; verified in `nexus-local-db/src/kb_relationships.rs` line 45). The cutover plan now spans three P0→P2 plans in V1.144:
-> - **P0** — Pin to 0.5.0 + compile-gate stubs (`get_relation`/OCC `put_relation` signature).
-> - **P1** — Production `RelationPort` OCC impl (CAS create/update, stale-reject, `RelationAlreadyExists`, `RelationNotFound`).
-> - **P2** — Daemon handler cutover (`patch_relationship_add`/`_update` → `orchestrate_relate`).
-
 **Surface A retention (promote sub-outcomes):** spoke `orchestrate_promote` covers the accept/adopt lifecycle only. The following nexus-specific promote outcomes are retained on Surface A with explicit rationale:
 
 | Outcome | Handler | Rationale |
@@ -758,7 +744,7 @@ Each orchestrator adoption on a daemon write path is registered here. The regist
 
 Both decisions are accepted residuals (`R-V1143P2-ACCEPT-01`, `R-V1143P2-ACCEPT-02`) with rationale; pre-1.0, retaining narrow product-specific handlers on Surface A is acceptable when spoke has no equivalent concept.
 
-#### Timeline wire-type unification (V1.143 P0)
+#### Timeline wire-type unification
 
 `nexus-narrative::timeline_event::TimelineEvent` and `spoke_schemas::TimelineEvent` are unified via a `From`/`Into` conversion seam (two `From` impls in `nexus-narrative/src/timeline_event.rs`), mirroring the `KnowledgeEntryRecord`↔`KnowledgeEntry` pattern (§7.1). The types are structurally divergent (spoke: fork-oriented with 14 fields; nexus: branch/world-oriented with 13 fields including lifecycle state machine) — a type alias is not feasible.
 
@@ -781,11 +767,11 @@ Both decisions are accepted residuals (`R-V1143P2-ACCEPT-01`, `R-V1143P2-ACCEPT-
 
 spoke-only fields (`fork_id`, `parent_fork_id`, `timeline_scale`, `source_anchor`, `computable_logs`) are lossily filled (`None`/empty) — **durable roadmap:** DR-44 (spoke fork-model participation).
 
-**Beat-assist helper adoption:** `order_timeline_events_by_ids` is the primary production adoption target (V1.143 P0 T2). The helper operates on `timeline_event_id` alone and requires no peripheral infrastructure. `order_timeline_events_by_precedes` — **durable roadmap:** DR-45 (`order_timeline_events_by_precedes` adapter adoption).
+**Beat-assist helper adoption:** `order_timeline_events_by_ids` is the primary production adoption target. The helper operates on `timeline_event_id` alone and requires no peripheral infrastructure. `order_timeline_events_by_precedes` — **durable roadmap:** DR-45 (`order_timeline_events_by_precedes` adapter adoption).
 
-**`ScopeQueryPort.list_timeline_events`** is now **production** (V1.145 P3) — queries `narrative_timeline_events` table, converts via the V1.143 conversion seam, filters by Scope. The V1.142 stub (`Ok(Vec::new())`) is replaced.
+**`ScopeQueryPort.list_timeline_events`** is **production** — queries the `narrative_timeline_events` table, converts via the conversion seam, filters by Scope.
 
-## 8. Crate Dependency Graph (V1.146)
+## 8. Crate Dependency Graph
 
 ```
 nexus-spoke-adapter                    ← capability aggregation (PRODUCTION ADAPTER HOME)
@@ -812,21 +798,13 @@ nexus-narrative                      ← narrative domain: worlds, forks, timeli
   └── spoke-schemas                   ← TimelineEvent wire type (V1.143 conversion seam)
 ```
 
-**Key changes from V1.145:**
-- `nexus-spoke-adapter` gains a `nexus-wasm-host` dep (ComputablePort, V1.146 P2 T2).
-- `nexus-local-db` no longer depends on `spoke-operations` (timeline ordering moved to `nexus-spoke-adapter::narrative_read`, V1.146 P1).
-- `nexus-narrative` no longer depends on `spoke-operations` (same refactor, V1.146 P1).
+**Dependency facts:**
+- `nexus-spoke-adapter` gains a `nexus-wasm-host` dep (ComputablePort).
+- `nexus-local-db` does not depend on `spoke-operations` (timeline ordering lives in `nexus-spoke-adapter::narrative_read`).
+- `nexus-narrative` does not depend on `spoke-operations` (same refactor).
 - The ordered-timeline facet now lives on the adapter boundary as `NexusAdapter::list_timeline_events_ordered`.
 
-**Historical V1.145 context:** prior to V1.146 P1, `nexus-narrative` and `nexus-local-db` depended on `spoke-operations` directly as a standard leaf library for the `order_timeline_events_by_ids` timeline ordering helper. The V1.146 P1 refactor moved timeline ordering to `nexus-spoke-adapter::narrative_read` (`NexusAdapter::list_timeline_events_ordered`), removing the last `spoke-operations` direct deps from both `nexus-local-db` and `nexus-narrative`. The conversion seam (`knowledge_record_to_spoke` / `spoke_to_knowledge_record`) remains owned by `nexus-spoke-adapter` (V1.145 P1a).
-
-## 9. Migration Summary
-
-| P0 | P1 | P2 | P3 |
-|----|----|----|-----|
-| Add spoke deps; create adapter crate; delete `key-block.schema.json`; repoint daemon-api envelope `$ref`; regenerate codegen; update drift detection; create this tracked spec | Rename `nexus-kb` → `nexus-knowledge`; migrate types to spoke `KnowledgeEntry`; route lifecycle ops through adapter; migrate SQLite storage; migrate all Rust consumers | Rename daemon-api DTOs; bump `@42ch/nexus-contracts`; migrate TS apps (import from `@42ch/spoke-schemas`); update UI strings to Q11 product label | Sweep specs/docs/knowledge/CLI/fixtures for terminology; add pattern doc via compound at iteration-close |
-
-## 10. Connect Host N-C0 (V1.148 / DF-72)
+## 10. Connect Host N-C0 (DF-72)
 
 Normative architectural surface for the first FL-R Connect Host slice. Product behavior detail (integrator persona, dogfood story, non-goals) lives in the iteration draft `fl-r-connect-host-foundation.md` until promoted; this section locks durable topology and honesty rules for implementers and QC.
 
@@ -872,7 +850,7 @@ Normative architectural surface for the first FL-R Connect Host slice. Product b
 
 ### 10.5 Daemon HTTP `check` (related, not Connect)
 
-- V1.148 also lands **`POST /v1/daemon/check`** (tier2, `is_world_owned`, adapter `orchestrate_check`, no KB auto-apply beyond FindingPort persistence). That route is **creator Daemon HTTP only** — it does not make Connect `check` available. .
+- **`POST /v1/daemon/check`** (tier2, `is_world_owned`, adapter `orchestrate_check`, no KB auto-apply beyond FindingPort persistence). That route is **creator Daemon HTTP only** — it does not make Connect `check` available. .
 
 ### 10.6 Phased DF-72 roadmap (durable)
 
@@ -888,7 +866,7 @@ Normative architectural surface for the first FL-R Connect Host slice. Product b
 
 **Denial signaling (N-C1):** identity denials and non-served ops share the `op_unsupported` refusal family (`ErrorEnvelope.code = "op_unsupported"`), but the message distinguishes them. An invalid payload identity claim (present `extensions.nexus.peer_id` that does not resolve to the session peer — mismatch, non-string, unparseable, or >128 chars) returns `message = "op denied: extensions.nexus.peer_id does not match the session peer; caller identity comes from the authenticated session"` (invoke.rs `denied()`); a non-served op returns `message = "op <op> is not supported: …"` (invoke.rs `unsupported()`). Integrators match on the `op denied:` prefix to tell "identity spoofed / claim invalid" from "op not served".
 
-## 11. Narrative Knowledge Pack I/O (V1.152 / DF-77)
+## 11. Narrative Knowledge Pack I/O (DF-77)
 
 A **Narrative Knowledge Pack** is a single JSON file that transports one
 World's lore — ordered `KnowledgeEntry` records, their `Relation`s, optional
@@ -900,9 +878,8 @@ contract. nexus is **consumer-only** for the pack handbook shape (spoke
 `domain-profile-narrative-knowledge-pack.md`).
 
 **Supersedes** iteration-scoped
-`pack-io-product-behavior.md` (V1.146 P3 shipped
-the CLI transport; V1.152 ships the author-facing surface: daemon routes, all
-three conflict policies, Control Room UI).
+`pack-io-product-behavior.md` (author-facing surface: daemon routes, all three
+conflict policies, Control Room UI).
 
 ### 11.1 Envelope shape (handbook-conformant)
 
@@ -936,7 +913,7 @@ extra_modules }`.
 | `/v1/daemon/worlds/:world_id/kb/pack/export` | POST | `PackExportRequest` `{include_deprecated?, include_anchors?, title?, pack_version?, description?}` | handbook pack envelope JSON (opaque items — entries/relations are spoke objects per the V1.139 `$ref` fallback §3.4) |
 | `/v1/daemon/worlds/:world_id/kb/pack/import` | POST | `PackImportRequest` `{pack: <opaque handbook pack>, conflict: "skip"\|"rename"\|"overwrite", include_anchors?}` | `PackImportResponse` `{entries: AtomCounts, relations: AtomCounts, details: ImportDetail[]}` |
 
-**Owner (v1.193 P2):** these routes are **retained wire contracts** served today by the standalone TS service (`apps/nexus-service/src/worlds.ts`); the original handler was the deleted `crates/nexus-daemon-runtime/src/api/handlers/world_kb_pack.rs`, registered through `pack_routes()` → `tier2_routes()` (`api/mod.rs`) mirroring the V1.151 `inspector_routes()` pattern.
+**Owner:** these routes are **retained wire contracts** served by the standalone TS service (`apps/nexus-service/src/worlds.ts`) through `pack_routes()` → `tier2_routes()` (`api/mod.rs`).
 
 **Auth/guard (HARD):** both routes are tier2 (`require_api_key` +
 `require_active_creator` middleware) and additionally call `require_creator` +
@@ -967,7 +944,7 @@ applies **uniformly** to entries and relations:
 
 **Additive-only at the policy level:** skip and rename never delete. Overwrite
 replaces via `orchestrate_upsert` / `orchestrate_relate` (CAS body replace), never
-a raw DELETE. The V1.146 "don't clobber author work" invariant holds for the two
+a raw DELETE. The "don't clobber author work" invariant holds for the two
 safe policies.
 
 **Control Room confirmation:** overwrite in the Control Room (P1) requires an
@@ -981,7 +958,7 @@ Created, renamed, and overwritten rows carry
 `source_provenance_kind = "pack_import"` (stamped via
 `extensions::set_provenance(..., Some("pack_import"))`). Skipped rows are
 unchanged. The constant `IMPORT_PROVENANCE = "pack_import"` is shared by the
-CLI and the HTTP path (V1.146 lock; DB CHECK includes this value since migration
+CLI and the HTTP path (DB CHECK includes this value since migration
 `20260731000001`).
 
 ### 11.5 Shared import-orchestration module
@@ -993,11 +970,7 @@ today the owner is `nexus-core`'s typed pack surface
 `preview_world_pack_import`, `crates/nexus-core/src/world_pack.rs`). Both the CLI
 (`apps/nexus42/src/commands/creator/world/kb/pack.rs` — direct-core caller) and
 the HTTP route (`apps/nexus-service/src/worlds.ts` — thin caller) consume that
-one path. The original V1.146/V1.152 home was the shared
-`nexus-daemon-runtime/src/pack_import.rs` module with its
-`LocalDirectiveStore` relocation precedent; both were deleted with the host in
-v1.193 P2, and the invariant they established — one shared import path, no
-second implementation — is what carries over.
+one path. The invariant is one shared import path, no second implementation.
 
 Admission is the **core's** responsibility now: `CoreService::import_world_pack`
 takes the `Principal` and runs `verify_principal`, the read-only refusal and
@@ -1007,14 +980,12 @@ The pack round-trip guarantee is unchanged: the import path consumes the parsed
 pack (which carries its extra modules) and writes atoms via the orchestrators —
 it never re-builds the pack.
 
-### 11.6 CLI surface (LOCKED — V1.146 placement, V1.152 completeness)
+### 11.6 CLI surface (LOCKED)
 
 User-facing path: `creator world kb pack export|import` (Pack is World-lore
-transport). All three conflict policies are implemented (V1.146 shipped `skip`;
-V1.152 implements `rename` + `overwrite`, removing the "not yet implemented"
-stubs). `skip` is the default. `--dry-run` covers all three policies. The CLI and the HTTP path share the single core `import_world_pack` path.
+transport). All three conflict policies are implemented (`skip`, `rename`, `overwrite`). `skip` is the default. `--dry-run` covers all three policies. The CLI and the HTTP path share the single core `import_world_pack` path.
 
-### 11.7 Clean-room SillyTavern lorebook import (V1.181 / DF-80 — shipped)
+### 11.7 Clean-room SillyTavern lorebook import (DF-80)
 
 The CLI accepts
 `creator world kb pack import <world_ref> --from-st <PATH>` as an alternative

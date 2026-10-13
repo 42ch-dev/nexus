@@ -1,9 +1,9 @@
 # Essay Profile — Specification v1
 
-**Status**: Shipped (V1.63) — essay profile production-ready: scaffold (ScaffoldTransaction), `essay-writing` preset (7-state chain), 4-dimension quality rubric (blocking with `--force-gates` override), completion detection, optional KB extraction.  
+**Status**: Shipped — essay profile production-ready: scaffold (ScaffoldTransaction), `essay-writing` preset (7-state chain), 4-dimension quality rubric (blocking with `--force-gates` override), completion detection, optional KB extraction.  
 **Document class**: Feature line  
 **Created**: 2026-06-19  
-**Last updated**: 2026-09-29 — authority aligned with V1.63 shipped status (Draft → Shipped promotion: 2026-06-24).  
+**Last updated**: 2026-09-29  
 **Scope**: `work_profile: essay` on generic **Work** — artifact layout under `Works/<work_ref>/`, templates, stage chain, completion semantics  
 **Coordinates with**:
 
@@ -12,7 +12,7 @@
 - [cli-spec.md](../cli/cli-spec.md) — creator entry and workspace layout
 - [orchestration-engine.md](../orchestration/orchestration-engine.md) — preset execution model
 - [entity-scope-model.md](../architecture/entity-scope-model.md) — optional World/KB binding boundaries
-- [novel-writing/workflow-profile.md](../novel-writing/workflow-profile.md) — prior `work_profile: novel` Feature line pattern
+- [novel-writing/workflow-profile.md](../novel-writing/workflow-profile.md) — `work_profile: novel` Feature line pattern
 
 ---
 
@@ -115,7 +115,7 @@ intake → outline → draft → revise → finalize
 | `outline` | `Outlines/outline.md` | Thesis + audience + structure present |
 | `draft` | `Drafts/draft.md` status `draft` | Outline exists |
 | `revise` | `Drafts/draft.md` status `revised` | Draft exists; review notes optional |
-| `finalize` | `Drafts/draft.md` status `finalized` | 4-dimension quality rubric passes or explicit `--force-gates` override (V1.63 P2) |
+| `finalize` | `Drafts/draft.md` status `finalized` | 4-dimension quality rubric passes or explicit `--force-gates` override |
 
 Essay finalization runs a 4-dimension quality rubric (thesis clarity, evidence support, coherence, ending takeaway) — a **blocking gate** with `--force-gates` override (parity with game-bible/script Depth 3.5). All four dimensions must pass for the `finalize_commit` state to write `status: finalized` to the draft frontmatter.
 
@@ -147,7 +147,7 @@ word_count: integer
 ---
 ```
 
-Optional fields may include `audience`, `thesis`, `world_refs`, and `source_refs`, but the V1.52 minimum implementation must not require them.
+Optional fields may include `audience`, `thesis`, `world_refs`, and `source_refs`; the minimum implementation must not require them.
 
 ---
 
@@ -167,7 +167,7 @@ Completion does not enqueue a next chapter, next volume, or new Work. Reopening 
 
 ---
 
-## 9. Acceptance (historical V1.52 draft)
+## 9. Acceptance (spec-level)
 
 1. Essay layout is distinct from novel layout (`Drafts/` not `Stories/`).
 2. Stage chain is single-artifact and chapter-free.
@@ -176,4 +176,4 @@ Completion does not enqueue a next chapter, next volume, or new Work. Reopening 
 
 ---
 
-*Shipped V1.63 Feature line — normative for the essay profile described here, including the completion contract and implementation anchors in §8. §9 preserves V1.52 draft acceptance as historical context; implementation authority is not conditional on the V1.52 compass remaining active.*
+*Normative Feature line for the essay profile described here, including the completion contract and implementation anchors in §8.*

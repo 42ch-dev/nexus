@@ -1,9 +1,9 @@
 # Reference Knowledge — Reference Body Refreshable Scan Pipeline
 
-**Status**: Normative (V1.58 P-last promote)
+**Status**: Normative
 **Document class**: Master
-**Created**: 2026-06-22 (Draft at P1)
-**Promoted to Master**: 2026-06-22 (V1.58 P-last)
+**Created**: 2026-06-22
+**Promoted to Master**: 2026-06-22
 **Scope**: Reference body externalization — refreshable scan pipeline for DF-44
 **Coordinates with**: [acp-capability-set.md](../agents/acp-capability-set.md) §4, [capability-registry.md](../agents/capability-registry.md) §2.8, [daemon-runtime.md](../../archived/runtime/2026-09-21-daemon-runtime.md) §10 (historical host record), [entity-scope-model.md](../architecture/entity-scope-model.md)
 
@@ -11,14 +11,11 @@
 
 ## 0. Document position
 
-This Draft spec defines the `nexus.reference.refresh` capability and the
-reference body refreshable scan pipeline introduced in V1.58 P1 (DF-44).
-It covers the refresh policy model, DB schema for refresh tracking,
-capability admission contracts, and the refresh-scheduler hook.
-
-The static registration of reference sources was shipped in V1.26.
-V1.58 P1 adds the refreshable pipeline core (capability + DB migration +
-scheduler). V1.58 P3 adds the CLI subcommand and cross-cut E2E tests.
+This spec defines the `nexus.reference.refresh` capability and the
+reference body refreshable scan pipeline (DF-44). It covers the refresh policy
+model, DB schema for refresh tracking, capability admission contracts, and the
+refresh-scheduler hook. The refreshable pipeline core (capability + DB
+migration + scheduler) is the current implementation.
 
 ---
 
@@ -33,8 +30,8 @@ scheduler). V1.58 P3 adds the CLI subcommand and cross-cut E2E tests.
   `crates/nexus-core/src/execution/schedules/refresh.rs` (retained scheduler,
   unwired — §3).
 
-Non-goals: CLI subcommand (`nexus42 reference refresh`) deferred to P3;
-cross-cut E2E tests deferred to P3; `entity-scope-model.md` unchanged
+Non-goals: CLI subcommand (`nexus42 reference refresh`) and cross-cut E2E
+tests are not part of this surface; `entity-scope-model.md` is unchanged
 (reference refresh is reference-source-scoped, not KB-scoped). **Durable roadmap:** DR-07.
 
 ---
@@ -73,19 +70,14 @@ tool registration and creator-context wiring live in
 
 **Retained implementation, not a running service.** These are the current code
 homes, but no current boot path spawns the scheduler: `spawn_refresh_scheduler`
-has zero call sites in `crates/` and `apps/` (the daemon boot path that spawned
-it was deleted with the v1.193 P2 host removal). Nor does any production caller
+has zero call sites in `crates/` and `apps/`. Nor does any production caller
 invoke `nexus.reference.refresh`; only
 `crates/nexus-orchestration/tests/cross_reference_refresh_e2e.rs` exercises the
 capability. Registered reference sources therefore do **not** refresh
 automatically today; periodic refresh is unwired pending an explicit
 boot/composition decision.
 
-**V1.58 historical host:** the scheduler formerly lived in
-`crates/nexus-daemon-runtime/src/refresh_scheduler.rs`, and the former
-`crates/nexus-daemon-runtime/src/boot.rs` §4e spawned it at daemon startup.
-Those deleted host paths describe the V1.58 composition, not current boot wiring.
-The retained scheduler contract is:
+The scheduler contract is:
 
 - **Cadence**: Configurable interval (default 3600s = 1 hour). Overridable via
   `NEXUS_DAEMON_REFRESH_SCHEDULER_INTERVAL_SECS` env var.
@@ -111,11 +103,11 @@ The retained scheduler contract is:
   This prevents concurrent scheduler ticks from refreshing the same source.
   **Limitation (single-daemon only):** This guard is best-effort within a single
   daemon process. There is no cross-invocation or cross-process lock. An explicit
-  CLI call (P3) arriving between the SELECT and the UPDATE, or two daemon
+  CLI call arriving between the SELECT and the UPDATE, or two daemon
   instances against the same SQLite file, could both proceed to fetch. For the
-  V1.58 single-daemon local model this is acceptable; a cross-process mutex or
-  row-level optimistic concurrency check (OCC) on the refresh columns should be
-  considered when P3 lands and multi-process scenarios are supported (DR-07).
+  current single-daemon local model this is acceptable; a cross-process mutex or
+  row-level optimistic concurrency check (OCC) on the refresh columns is the
+  upgrade path when multi-process scenarios are supported (DR-07).
 
 ---
 
@@ -171,8 +163,8 @@ Current tracking DAO owner: `crates/nexus-local-db/src/reference_source.rs` (ref
 ### Sibling capability IDs (deferred)
 
 `nexus.reference.refresh_policy.get` and `nexus.reference.refresh_status` are
-deferred to P3 if the user-facing surface (CLI) requires them. P1 ships only
-`nexus.reference.refresh` as the core pipeline capability.
+deferred if the user-facing surface (CLI) requires them. Only
+`nexus.reference.refresh` is exposed as the core pipeline capability.
 
 > **Durable roadmap:** DR-07 (refresh caps + CLI + E2E + cross-process OCC).
 
@@ -187,8 +179,7 @@ deferred to P3 if the user-facing surface (CLI) requires them. P1 ships only
   and active creator context before delegating to `ReferenceRefresh`.
 - **`crates/nexus-core/src/execution/schedules/refresh.rs`**:
   Owns `spawn_refresh_scheduler` and `run_one_refresh_tick`; queries stale
-  sources and dispatches refresh. The former V1.58 daemon boot composition is
-  historical (§3), not a current startup anchor.
+  sources and dispatches refresh. No current boot path spawns it (§3).
 - **`crates/nexus-local-db/src/reference_source.rs`**:
   Refresh lifecycle DAOs (`set_refresh_policy`, `mark_refreshing`,
   `mark_refreshed`, `mark_refresh_error`, `find_stale_sources`).
@@ -230,7 +221,7 @@ deferred to P3 if the user-facing surface (CLI) requires them. P1 ships only
 
 ### 7.2 Scheduled refresh flow
 
-1. V1.58 historical daemon boot flow: the former host spawned the scheduler with a 60s initial delay. The current scheduler implementation is `crates/nexus-core/src/execution/schedules/refresh.rs` (§3); this example does not assert current host startup wiring.
+1. The scheduler implementation is `crates/nexus-core/src/execution/schedules/refresh.rs` (§3); no current boot path spawns it, and the first tick follows the configured 60s initial delay.
 2. After 60s, first tick: `find_stale_sources()` queries `reference_sources`.
 3. For each stale source: `ReferenceRefresh::run({"reference_source_id": "..."})`.
 4. Handler fetches URL, compares hash, updates DB.

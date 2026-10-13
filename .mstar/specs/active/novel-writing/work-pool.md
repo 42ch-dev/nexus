@@ -104,7 +104,7 @@ Daemon API `set_pool_active` (and CLI `creator works use` / `pool promote --set-
 
 - Request body **`creator_id` must match** the authenticated/active creator context.
 - Mismatch → **403 Forbidden** (not silent demote on wrong creator).
-- Cross-reference [cli-spec.md](../cli/cli-spec.md) §6.2D.
+- Cross-reference [cli-spec.md](../cli/cli-spec.md) §6.2H.
 
 ---
 

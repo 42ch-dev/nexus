@@ -28,7 +28,7 @@ Three product surfaces, one producer:
 | **`apps/web`** | **Consumer** — Control Room + canvas SPA | Talks only through contracts + client interface |
 | **`apps/desktop-electron`** | **Consumer** — Electron host around `web` | Native extras only; no second SPA or DTO set |
 
-The headless **`nexus-runtime`** binary (Connect-only, `--no-default-features --features connect-host`) and the Electron-owned TS service are the two long-running hosts; neither is launched or statused by the CLI. The integrated `nexus42 daemon` group was retired in v1.193 P2.
+The headless **`nexus-runtime`** binary (Connect-only, `--no-default-features --features connect-host`) and the Electron-owned TS service are the two long-running hosts; neither is launched or statused by the CLI.
 
 Placement rule: runnable product surfaces → `apps/`; reusable Rust libraries → `crates/`; publishable npm libraries → `packages/`. App-owned nested Rust stays with the surface until it becomes a shared building block.
 
@@ -77,7 +77,7 @@ Guiding rules:
 
 1. Every scoped entity has **exactly one** owning scope and primary owner crate.
 2. **World history is immutable** — change via Fork, not in-place rewrite.
-3. **`nexus-knowledge`** owns World-scoped KnowledgeEntries / SourceAnchors (merged from former `nexus-kb` in V1.139) and User-scoped knowledge. Do not conflate either with the CLI **work file index** under work-scope `kb` routes.
+3. **`nexus-knowledge`** owns World-scoped KnowledgeEntries / SourceAnchors and User-scoped knowledge. Do not conflate either with the CLI **work file index** under work-scope `kb` routes.
 4. **`nexus-narrative`** coordinates World / Timeline / Event state; forks are platform-oriented where the entity model says so.
 5. **`nexus-moment-context-assembly`** owns session-start context assembly (`assemble_moment` is the assembly SSOT).
 6. A local `workspace_slug` is a **storage partition** under Creator, not a new entity scope.
@@ -100,7 +100,7 @@ schemas/  →  contracts (Rust + npm)
 
 - **Foundation:** contracts, home layout, local DB mechanics — no product HTTP.
 - **Domain crates:** Creator, memory, narrative, KB, knowledge, orchestration, agent host — own invariants for their scopes.
-- **Local service host:** the Electron-owned TS service composes the native/TS authority and serves browser/desktop HTTP. The retired Rust host composition (`nexus-daemon-runtime`, v1.193 P2) is gone; `nexus-runtime` is the Connect-only headless cohort.
+- **Local service host:** the Electron-owned TS service composes the native/TS authority and serves browser/desktop HTTP. `nexus-runtime` is the Connect-only headless cohort.
 - **CLI binary:** direct-call composition root for authoring/operator leaves, ACP client paths and cloud CLI features (feature-gated; the Connect-only `nexus-runtime` bin is the separate headless product).
 - **UI:** depends on contracts and a transport-agnostic client interface; screens must not call `fetch` / Electron IPC directly.
 

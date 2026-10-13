@@ -1,6 +1,6 @@
 # World KB Runtime Architecture
 
-**Status**: Normative — V1.74 Shipped (§2 `kb_relationships` store + symmetric read projection; prior V1.51 §5.5 LLM pathway + §6 OCC extension). **V1.139 SPOKE alignment**: crate `nexus-kb` merged INTO `nexus-knowledge`; `KeyBlock` → `KnowledgeEntry` (technical wire name). Crate table §2 updated to reflect current topology. Full terminology sweep deferred to P3.  
+**Status**: Normative — World KB runtime SSOT: `kb_relationships` store + symmetric read projection (§2), LLM extraction pathway (§5.5), OCC protection (§6). Crate note: `nexus-kb` is merged into `nexus-knowledge`; `KeyBlock` → `KnowledgeEntry` (technical wire name). Full terminology sweep deferred to P3.  
 **Document class**: Master  
 **Authority**: Implementation SSOT below normative specs. Does not override [entity-scope-model.md](entity-scope-model.md) or [novel-writing/workflow-profile.md](../novel-writing/workflow-profile.md).  
 **Iteration**:  ·  (SPOKE alignment)
@@ -9,7 +9,7 @@
 
 ## 1. Problem
 
-World KB concerns were split across `nexus-knowledge` (formerly `nexus-kb`, merged V1.139), `nexus-moment-context-assembly`, `nexus-orchestration` presets (`kb-extract`), and Layer 1 rules (now at `embedded-rules/writing-craft.md`). Taxonomy in spec (§5.1.1) diverged from `kb-extract` prompts (`Character`/`Ability`/…). V1.40 closes DF-63 with a single runtime layering model.
+World KB concerns span `nexus-knowledge`, `nexus-moment-context-assembly`, `nexus-orchestration` presets (`kb-extract`), and Layer 1 rules (`embedded-rules/writing-craft.md`). DF-63 is closed by the single runtime layering model in this document (taxonomy per §5.1.1, aligned with `kb-extract` prompts).
 
 ---
 
@@ -18,36 +18,34 @@ World KB concerns were split across `nexus-knowledge` (formerly `nexus-kb`, merg
 | Layer | Crate | Responsibility |
 | --- | --- | --- |
 | **Service-family authority** | `nexus-core` | `CoreService` orchestration and authorization for `worlds`, `world_kb`, `forks`, `world_pack`, `world_rules` (+findings), and `timeline`; shared ownership guard and guarded storage (§2.1), not ownership of the underlying domain aggregates |
-| **World KB domain** | `nexus-knowledge` | `crates/nexus-knowledge/src/world_kb/` owns `KnowledgeEntryRecord`, `SourceAnchor`, taxonomy/body validation, `KbStore` traits and query types, and extraction preparation/persistence coordination. The former `nexus-kb` crate was merged here in V1.139. |
+| **World KB domain** | `nexus-knowledge` | `crates/nexus-knowledge/src/world_kb/` owns `KnowledgeEntryRecord`, `SourceAnchor`, taxonomy/body validation, `KbStore` traits and query types, and extraction preparation/persistence coordination. |
 | **Narrative domain** | `nexus-narrative` | World, fork, timeline/event, and manuscript domain models; local branch persistence remains separate from the world-copy fork model (§6.6 of entity-scope-model) |
 | **Read SSOT** | `nexus-moment-context-assembly` | `WorldKbQueryBuilder` — shared filter/taxonomy logic; `assemble_moment` (wide session snapshot) and `build_chapter_kb_block` (narrow prompt slice) |
-| **User knowledge** | `nexus-knowledge` | User-scoped global knowledge — **also owns World KB after V1.139 merger** |
+| **User knowledge** | `nexus-knowledge` | User-scoped global knowledge — same crate as the World KB domain row above |
 | **Execution** | `nexus-orchestration` | Presets + capabilities; LLM inner graphs; schedule/job lifecycle — **no** KB domain rules |
 | **SQLite persistence** | `nexus-local-db` | `crates/nexus-local-db/src/kb_store.rs` implements `SqliteKbStore`; `crates/nexus-local-db/src/kb_relationships.rs` owns relationship CRUD/OCC. This crate owns SQLite migrations and persistence for `kb_key_blocks`, `kb_relationships`, and `kb_extract_jobs`, not the domain aggregate definitions. |
 
 Platform integration reads World KB through `assemble_moment` / moment-context-assembly contracts, not through orchestration presets.
 
-V1.74 adds `kb_relationships` as the first-class relationship store under the World KB graph. Source/target entities FK to `kb_key_blocks`; source anchors remain optional JSON projection ids validated by the daemon. `GET graph` reads stored rows and emits derived reverse projections for `symmetric=true` without writing duplicate rows.
+`kb_relationships` is the first-class relationship store under the World KB graph. Source/target entities FK to `kb_key_blocks`; source anchors remain optional JSON projection ids validated by the daemon. `GET graph` reads stored rows and emits derived reverse projections for `symmetric=true` without writing duplicate rows.
 
-### 2.1 `nexus-core` — single World/KB/narrative service-family authority (v1.190 P0 — Normative)
+### 2.1 `nexus-core` — single World/KB/narrative service-family authority (Normative)
 
 World/KB/narrative **service orchestration and authorization** live behind `CoreService` in `nexus-core`; this is not a transfer of data/domain ownership from `nexus-knowledge` or `nexus-narrative`. Each family lives in its own module under `crates/nexus-core/src/`: `worlds` (World lifecycle list/get/create/delete), `world_kb` (graph / patch-entity / candidates / promote / relationship), `forks` (local timeline forks over immutable parent history), `world_pack` (pack import/export), `world_rules` (structured rules plus the advisory world-findings read) and `timeline` (timeline overview + per-World keyset event pages). Family reads and writes reuse the shared persistence implementations in `nexus-local-db` (`SqliteNarrativeGateway`, `narrative_write`, `SqliteKbStore`, `kb_relationships`) and the spoke operations; the `KbStore` trait and `KnowledgeEntryRecord` aggregate remain in `nexus_knowledge::world_kb`.
 
 **One ownership guard.** `world_kb::guards::check_world_owner` is the single ownership SQL: `SELECT owner_creator_id FROM narrative_worlds WHERE world_id = ?`. It reports a typed denial — `Missing` (no row), `Foreign` (the row names another creator), `Unowned` (`owner_creator_id` is NULL) — and every family (kb, pack, fork, rules, findings, timeline) calls this one guard; the daemon runs no ownership SQL of its own.
 
-> **Historical v1.190 adapter/bridge notes (below).** The daemon HTTP adapters and transitional CLI pack bridge described in the next three paragraphs belong to the pre-retirement host topology, not current implementation anchors. Current pack service authority is `CoreService::import_world_pack` in `crates/nexus-core/src/world_pack.rs`; the `nexus-daemon-runtime` host was retired in v1.193.
+**Denial → retained envelopes.** The guard surfaces the neutral `CoreError::WorldOwnerDenied { world_id, reason }`; the service adapter maps it to `Forbidden { resource: "world {id}", reason }` and HTTP 403. Each transport family keeps its retained envelope verbatim: World-KB-family routes render `world {id}` 404 plus the cross-author/unowned 403 reasons; timeline routes render `world {id} not found` 404 plus `you do not own this world` 403.
 
-**Denial → retained envelopes.** The guard surfaces the neutral `CoreError::WorldOwnerDenied { world_id, reason }`; the daemon adapter maps it to `Forbidden { resource: "world {id}", reason }` and HTTP 403. Each transport family keeps its retained envelope verbatim: World-KB-family routes render `world {id}` 404 plus the cross-author/unowned 403 reasons; timeline routes render `world {id} not found` 404 plus `you do not own this world` 403.
+**Service HTTP handlers are thin translations.** The narrative/worlds, world_kb, fork, world_rules, world_findings, world_kb_pack, timeline and timeline_events handlers only resolve the active creator + stored principal, call the matching `CoreService` method and map the neutral error onto the retained status/body envelopes. World-KB canonical mutations keep the ownership check, expected-version CAS (`kb_key_blocks.revision` / `kb_extract_jobs.version`) and the durable `core_changes` outbox inside one private transaction in core; no handler keeps business SQL or a second mutation path.
 
-**Daemon HTTP handlers are thin translations.** The narrative/worlds, world_kb, fork, world_rules, world_findings, world_kb_pack, timeline and timeline_events handlers only resolve the active creator + stored principal, call the matching `CoreService` method and map the neutral error onto the retained status/body envelopes. World-KB canonical mutations keep the ownership check, expected-version CAS (`kb_key_blocks.revision` / `kb_extract_jobs.version`) and the durable `core_changes` outbox inside one private transaction in core; no handler keeps business SQL or a second mutation path.
-
-**Pack bridge — retained authorized transition.** The retained local CLI pack composition is the direct-core caller `apps/nexus42/src/commands/creator/world/kb/pack.rs` → `CoreService::import_world_pack` / `export_world_pack` (`crates/nexus-core/src/world_pack.rs`); the former `nexus-daemon-runtime::pack_import` bridge module was deleted with the crate in v1.193 P2. The CLI translates its arguments into the core request and projects the core report back into the summary shape; conflict detection, remapping, provenance and persistence live in the core pack surface. The doc-hidden `CoreService::import_legacy_world_pack` remains transitional with a single deletion owner (P6-T1) — it admits the caller against stored state (registered creator, world ownership, non-query-only pool with a live registered writer) before importing, and no new callers may attach.
+**Pack bridge.** The local CLI pack composition is the direct-core caller `apps/nexus42/src/commands/creator/world/kb/pack.rs` → `CoreService::import_world_pack` / `export_world_pack` (`crates/nexus-core/src/world_pack.rs`). The CLI translates its arguments into the core request and projects the core report back into the summary shape; conflict detection, remapping, provenance and persistence live in the core pack surface. The doc-hidden `CoreService::import_legacy_world_pack` remains transitional with a single deletion owner (P6-T1) — it admits the caller against stored state (registered creator, world ownership, non-query-only pool with a live registered writer) before importing, and no new callers may attach.
 
 ---
 
 ## 3. Two loops (do not conflate)
 
-### 3.1 Quality loop (V1.39 shipped)
+### 3.1 Quality loop
 
 ```text
 reflection-loop → findings → novel-brainstorm / novel-review-master
@@ -56,7 +54,7 @@ reflection-loop → findings → novel-brainstorm / novel-review-master
 - `novel-review-master`: human decisions on findings; may read World KB context; does **not** own ingest.
 - Layer 1/2 **rules** via `read_rules_layers()` — prose craft, not fictional facts.
 
-### 3.2 Knowledge loop (V1.40 P3)
+### 3.2 Knowledge loop
 
 ```text
 persist → kb-extract (schedule) → World KB KnowledgeEntries + SourceAnchors
@@ -71,8 +69,7 @@ persist → kb-extract (schedule) → World KB KnowledgeEntries + SourceAnchors
 | Layer | Shipped default | User override |
 | --- | --- | --- |
 | Layer 1 craft rules | `crates/nexus-orchestration/embedded-rules/writing-craft.md` | `~/.nexus42/rules/writing-craft.md` |
-| Layer 2 per-work rules | `Works/<work_ref>/Rules/novel-rules.md` | user-editable |
-| Layer 3 history | `Works/<work_ref>/Rules/novel-rules-history.md` | append-only |
+| Layer 2 per-work rules | `Works/<work_ref>/AGENTS.md` (legacy `Rules/novel-rules.md` read-only fallback) | user-editable |
 
 **Not** in `embedded-presets/` (presets are state machines with `preset.yaml` only).
 
@@ -92,7 +89,7 @@ job {
 }
 ```
 
-**V1.40 ships**: `source_kind=work_chapter`, `profile_hint=novel` only. Schema and CLI accept other kinds as reserved.
+Shipped scope: `source_kind=work_chapter`, `profile_hint=novel` only; schema and CLI accept other kinds as reserved.
 
 Domain path (extend existing stack — grill-me #13):
 
@@ -102,11 +99,11 @@ kb-extract preset (LLM inner_graph)
   → nexus-knowledge validation + KnowledgeEntry upsert + SourceAnchor
 ```
 
-Retire work-entry-only job semantics in V1.40; keep wire `BlockType` from contracts (grill-me #10).
+Work-entry-only job semantics are retired; wire `BlockType` stays from contracts (grill-me #10).
 
-### 5.5 LLM extraction pathway (V1.51 T-A P0 — Normative)
+### 5.5 LLM extraction pathway (Normative)
 
-V1.51 T-A P0 closes `R-V150KBED-01` by swapping the V1.50 heuristic
+T-A P0 closes `R-V150KBED-01` by swapping the capitalized-noun heuristic
 (`block_type_guess='character'` for every capitalized noun phrase) for an
 LLM-driven extraction pathway. The `nexus.llm.extract` capability
 ([llm-extract.md](../orchestration/llm-extract.md)) is a sibling to `judge.llm`: both
@@ -124,18 +121,17 @@ novel-review-master (terminal) → supervisor hook
   → creator world kb adopt <id> (surfaces confidence + source_quote)
 ```
 
-The hook is keyed on `preset_id == NOVEL_REVIEW_MASTER_PRESET_ID` (unchanged
-from V1.50); the supervisor threads its `CapabilityRegistry` (new optional
-field in V1.51) into the hook. The `proposed_payload` JSON gains
+The hook is keyed on `preset_id == NOVEL_REVIEW_MASTER_PRESET_ID` (unchanged); the supervisor threads its `CapabilityRegistry` (optional
+field) into the hook. The `proposed_payload` JSON gains
 `block_type`/`canonical_name`/`confidence`/`source_quote` keys; two dedicated
 columns (`llm_confidence REAL`, `llm_source_quote TEXT`) make confidence
-queryable/sortable. Heuristic rows keep the V1.50 shape (columns `NULL`,
+queryable/sortable. Heuristic rows keep the fallback shape (columns `NULL`,
 `tags: ["novel","heuristic-extracted"]`). Cross-chapter reconciliation
 (T-A P1) and missing-KB detection (T-A P2) build on this pathway.
 
-### 5.5.7 Relationship candidate extraction (V1.76 γ — Normative)
+### 5.5.7 Relationship candidate extraction (Normative)
 
-V1.76 extends the extraction pathway to also **propose relationships** from
+The extraction pathway also **proposes relationships** from
 chapter prose. `nexus.llm.extract` may now return `{ candidates, relationships? }`
 (see [llm-extract.md](../orchestration/llm-extract.md) §1.2). The review-time hook
 (`quality_loop::extract_kb_candidates_for_review`) parses the optional
@@ -144,7 +140,7 @@ endpoint resolution:
 
 ```text
 nexus.llm.extract → { candidates, relationships? }
-  ├─ candidates → persist_candidates → kb_extract_jobs (pending)   [V1.51 path]
+  ├─ candidates → persist_candidates → kb_extract_jobs (pending)
   └─ relationships → persist_relationship_candidates
        ├─ resolve_entity_by_canonical_name (source + target)
        │     skip + log when an endpoint is missing/ambiguous
@@ -167,9 +163,9 @@ endpoints already exist as non-deleted KnowledgeEntries (entity-scope-model §5.
 The `needs_review` gate + GET graph default-filter + confidence-weighting UX
 complete the γ surface; see entity-scope-model §5.6.7 + llm-extract.md §5.2.
 
-### 5.5.1 Cross-chapter reconciliation (V1.51 T-A P1 — Normative)
+### 5.5.1 Cross-chapter reconciliation (Normative)
 
-V1.51 T-A P1 closes `R-V150KBED-08` by extending the V1.50 chapter-scoped
+T-A P1 closes `R-V150KBED-08` by extending the chapter-scoped
 `creator kb rescan <work_ref>/<chapter>` (T-B P2) with a work-scoped mode
 `creator kb rescan --work <work_ref>`. The work-scoped mode reconciles
 extraction candidates **across all chapters** of a Work so a recurring
@@ -178,7 +174,7 @@ single `pending` candidate row carrying cross-chapter provenance, rather
 than N independent pending rows the author must adopt one-by-one.
 
 ```text
-creator kb rescan --work <work_ref>  (V1.51 T-A P1)
+creator kb rescan --work <work_ref>
   → resolve_work(work_ref) → world_id
   → require_world_owner(world_id, creator)         (§5.5.3 author gate)
   → work_chapters::list_chapters(work_id)          (ordered by volume, chapter)
@@ -197,7 +193,7 @@ creator kb rescan --work <work_ref>  (V1.51 T-A P1)
 **Reconciliation rules (entity-scope-model §5.5.2 invariant preserved):**
 
 - The `kb_extract_jobs` DB uniqueness `(creator_id, work_entry_id =
-  canonical_name_guess, world_id) WHERE status NOT IN ('failed')` (V1.50 P1
+  canonical_name_guess, world_id) WHERE status NOT IN ('failed')` (P1
   migration) is what collapses N same-name per-chapter candidates into 1 row.
   The work-scoped upsert calls `upsert_pending_candidate` **once per
   aggregate** (not once per chapter), so the merged row's `source_chapter_id`
@@ -221,7 +217,7 @@ candidate needed" when the entity is already confirmed). Example line:
 new candidate`. The dry path acquires **no** advisory lock (it is read-only).
 
 **Extraction pathway used.** Work-scoped rescan uses the **heuristic**
-(`extract_candidates_from_text`), identical to the V1.50 chapter-scoped path,
+(`extract_candidates_from_text`), identical to the chapter-scoped path,
 so the two modes produce consistent candidates for the same prose. The
 `canonical_name` field — made first-class by T-A P0 — is the grouping key.
 Wiring the rescan to the `nexus.llm.extract` LLM pathway (so aggregates carry
@@ -241,9 +237,9 @@ it returns `E_LOCK` (exit 75, `EX_TEMPFAIL`); on I/O failure it returns
 This is the same lock `creator world kb adopt`, `creator works cron set`, and
 `creator run` acquire; lock ordering is file-lock-before-DB, never reversed.
 
-**T-B P1 CAS hook.** The V1.51 T-B P1 plan generalises the V1.50 P0
+**T-B P1 CAS hook.** The T-B P1 plan generalises the
 `set_schedule_json_tx` CAS pattern to `kb_extract_jobs` (adding a `version`
-column + `cas_update` helper). The work-scoped upsert uses the V1.50
+column + `cas_update` helper). The work-scoped upsert uses the
 non-versioned `upsert_pending_candidate` today; T-B P1 will migrate it to the
 versioned CAS path (a single call-site swap — see the `TODO(T-B P1)` marker
 in `kb_rescan_work_hermetic`). The advisory lock acquired here is the
@@ -253,9 +249,9 @@ cross-process guard; CAS is the per-row optimistic guard; both compose.
 
 ## 6. Read path
 
-### 6.1 OCC protection (V1.51 T-B P1)
+### 6.1 OCC protection
 
-`kb_extract_jobs.version` (added V1.51 T-B P1 migration `202606190001`) closes the
+`kb_extract_jobs.version` (migration `202606190001`) closes the
 TOCTOU window between promotion-row reads and `mark_confirmed` writes in the
 `creator world kb adopt` path. The adopt flow must:
 
@@ -312,22 +308,9 @@ Do **not** implement a second query implementation inside `nexus-orchestration`.
 
 ---
 
-## 7. V1.40 plan mapping
-
-| Slice | Architecture touch |
-| --- | --- |
-| P0.5 | `embedded-rules/` migration; this document |
-| P1 | Wire `BlockType` + novel `body` validation in `nexus-knowledge` |
-| P2 | Refactor `fetch_world_kb` + `format_chapter_kb_block` |
-| P3 | Extend `kb.extract_work` + artifact jobs + `WorkFields.world_id` |
-| P3 (tail) | `schedule.enqueue_child` + review-master `sync_world_kb` |
-| P4 | Hygiene only — no duplicate P0.5 |
-
----
-
 ## 8. Explicit non-goals
 
 - Merging `novel-review-master` and `kb-extract` into one preset.
 - World KB logic in `embedded-rules/` or preset-only prompt strings.
-- Backward compatibility with V1.29 work-entry-only job rows (may wipe in pre-release).
+- Backward compatibility with work-entry-only job rows (may wipe in pre-release).
 - Renaming `kb.extract_work` or adding parallel `BlockType` enum.

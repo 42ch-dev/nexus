@@ -19,13 +19,7 @@ applies_when:
 
 ## Context
 
-V1.156 shipped two sibling Canvas-layer plans that mirror each other: **P1** (World Timeline gains a Moment layer) and **P2** (Work Timeline gains a Brief layer). Both complete the 3×2 Brief/Narrative/Moment matrix; both are frontend-only projection extensions following the same adapter + orchestrator + inspector pattern (see `architecture-patterns/three-layer-timeline-projection.md`).
-
-P1 ran first and its plan QC tri produced a fix-wave with four reusable findings:
-- **W-1**: projected-layer nodes were selectable but the inspector dispatch fell through to the generic KB inspector → fired a guaranteed-failing `kb.patch_entity` write (PD-3 read-only violation).
-- **W-2**: the alt-view/summarize path crashed on the new node kind (`block_type.localeCompare` on a node type without `block_type`).
-- **F-3**: the fixture/data prop was missing from the projection `useMemo` deps → stale layer until a layer swap.
-- **F-4**: lifting a `?layer=` URL restriction repurposed the old invalid-layer test slot → the null-branch went unpinned.
+An iteration often ships **sibling plans** that mirror each other — same pattern, different surface/scope — and run sequentially. The first plan's QC tri-review produces a fix-wave whose findings are frequently tied to the **shared pattern**, not to the specific surface (a read-only inspector that falls through to a write path; a crash on a newly introduced node kind; a projection memo missing a data prop; an unpinned fallback when a restriction is lifted). Those findings are reusable for the later siblings.
 
 ## Guidance
 
@@ -41,7 +35,7 @@ When an iteration has **sibling plans** (same pattern, different surface/scope) 
 
 ## Why This Matters
 
-In V1.156, P2 (the sibling) baked in all four P1 lessons proactively. P2's QC tri then found only **one** converged issue (a surface-specific graph-query status gate the lessons didn't cover) — a single fix-wave of one item, vs P1's fix-wave of four items including a PD-3 violation. The proactive carry-forward turned a likely 4-finding fix-wave into a 1-finding fix-wave and avoided a second PD-3 violation.
+In practice, the sibling that carried the lessons forward proactively needed only **one** converged fix item, versus the first plan's fix-wave of several items including a read-only violation. The proactive carry-forward turned a likely multi-finding fix-wave into a single-finding one and avoided repeating the same defect class.
 
 The pattern generalizes beyond Canvas layers: any iteration with mirror plans (e.g., two transport adapters, two export formats, two CLI subcommands sharing a parser) benefits. The key precondition is **shared structure** — if the plans don't share a pattern, the lessons don't transfer.
 
@@ -57,15 +51,6 @@ The pattern generalizes beyond Canvas layers: any iteration with mirror plans (e
 - Only one plan in the iteration (no sibling to carry to).
 - Plans run fully in parallel (briefs already dispatched before the first QC returns) — in that case, note the lesson for a future iteration's similar work instead.
 
-## Examples
-
-### V1.156 P2 brief — proactive P1 lessons
-
-P2's T2 orchestrator brief included a section "Apply P1's QC lessons proactively (baked into the brief)" listing all four (read-only inspector, memo deps, alt-view crash-safety, invalid-layer test). The implementer applied them from the start. P2's QC tri (all three seats) verified the lessons were applied and found only the graph-query-status gap (surface-specific, not a pattern carry-forward).
-
-P1 (no prior sibling) went through the full fix-wave discovery; P2 (with the carry-forward) needed one item.
-
 ## References
 
-- V1.156 P1 QC consolidated `qc-consolidated.md` (the four lessons; local)
 - Three-layer projection pattern: `architecture-patterns/three-layer-timeline-projection.md`

@@ -4,26 +4,25 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — shipped through V1.188: Host-mediated orchestration, configured ACP/native registration, dsh SDK runtime/streaming cutover, and verified provider readiness |
+| **Status** | Normative — shipped: Host-mediated orchestration, configured ACP/native registration, dsh SDK runtime/streaming, and verified provider readiness |
 | **Document class** | Master |
 | **Normative scope** | Host boundaries, provider model, capability contract, security/supervision invariants |
-| **Former filename** | `agent-host-architecture.md` (renamed 2026-05-20, spec hygiene — `-v1` suffix dropped; same document, git history is the record) |
-| **Related** | [daemon-runtime.md](../../archived/runtime/2026-09-21-daemon-runtime.md) (historical host record), [local-runtime-boundary.md](../architecture/local-runtime-boundary.md), [acp-client-tech-spec.md](acp-client-tech-spec.md) |
+| **Related** | [local-runtime-boundary.md](../architecture/local-runtime-boundary.md), [acp-client-tech-spec.md](acp-client-tech-spec.md) |
 
 ---
 
 ## 1. Purpose
 
-Define **`nexus-agent-host`**: the orchestration/facade above ACP and native CLI adapters, hosted by the core/service composition (`nexus-core` + `nexus-core-node`, served by `apps/nexus-service`; historically the daemon runtime, retired in v1.193 P2) under **Managed-only** supervision.
+Define **`nexus-agent-host`**: the orchestration/facade above ACP and native CLI adapters, hosted by the core/service composition (`nexus-core` + `nexus-core-node`, served by `apps/nexus-service`) under **Managed-only** supervision.
 
 ---
 
 ## 2. Frozen decisions
 
-1. **Managed-only** — every session and provider process is host-owned, observable and cleanup-supervised; cancellation is advertised only when the provider supports it. No unmanaged attach in v1 scope.
+1. **Managed-only** — every session and provider process is host-owned, observable and cleanup-supervised; cancellation is advertised only when the provider supports it. No unmanaged attach.
 2. **Hybrid providers** — ACP-backed adapters **and** selected native CLI adapters under a narrower capability contract.
 3. **ACP-first preferred** — native CLI is supplementary, not a second control plane.
-4. **Host is not an ACP Server** — hosting agents does not make the local host (the pre-v1.193 "daemon runtime") an ACP Agent advertised on Registry.
+4. **Host is not an ACP Server** — hosting agents does not make the local host an ACP Agent advertised on Registry.
 5. **Tool execution is mediated** — external clients never speak raw provider protocol; normalized host operations only.
 
 ---
@@ -33,8 +32,7 @@ Define **`nexus-agent-host`**: the orchestration/facade above ACP and native CLI
 ```text
 OSS CLI (cli-spec)
   └─ apps/nexus-service (TS host — serves /v1/daemon/agent-host/* over core)
-       ├─ /v1/daemon/agent-host/*  (Daemon API wire family — retained surface; the
-       │    historical host-side layering record is [daemon-runtime.md §2](../../archived/runtime/2026-09-21-daemon-runtime.md))
+       ├─ /v1/daemon/agent-host/*  (Daemon API wire family — retained surface)
        └─ crates/nexus-core (`provider-host` feature) / crates/nexus-core-node
             └─ Arc<dyn HostFacade>
                  └─ nexus-agent-host
@@ -45,8 +43,6 @@ OSS CLI (cli-spec)
                       ├─ providers/acp → nexus-acp-host
                       └─ providers/native_cli → managed processes
 ```
-
-> **Historical host note (v1.193 P2):** the pre-retirement topology ran this tree under the `nexus-daemon-runtime` crate; that host was deleted in v1.193 P2 and the composition above is the current owner.
 
 Multica / OpenDesign are **reference architectures only**, not runtime dependencies.
 
@@ -60,15 +56,15 @@ Multica / OpenDesign are **reference architectures only**, not runtime dependenc
 | Native CLI adapter | Managed subprocess (e.g. Claude CLI wave 1) | Narrower capability surface; same HostOperation contract |
 
 
-**Current runtime wiring (V1.188):** daemon boot loads validated provider
+**Current runtime wiring:** service boot loads validated provider
 configuration once and constructs supported native and generic ACP launch
 recipes through one factory. A configured or discovered recipe is a candidate,
 not evidence of availability. `HostManager::ProviderEntry` owns the selected
 metadata, optional adapter and live health; catalog and admission use that same
 health. Missing verified Creator/workspace context leaves candidates unavailable.
 
-**Shipped orchestration path (V1.186, retained in V1.188):** orchestration uses
-the in-process `PromptExecutor` → daemon adapter → existing `HostFacade` plane
+**Orchestration path:** orchestration uses
+the in-process `PromptExecutor` → `HostFacade` plane
 specified in [orchestration-engine.md](../orchestration/orchestration-engine.md) §15. All graph
 and capability prompt consumers migrate off worker echo-success together;
 standalone Character execution stays on the same Host without new Actor IR.
@@ -99,19 +95,19 @@ restart no-leak guarantee. Host owns transport handles and process identity;
 the daemon must not implement a second SDK client.
 Existing non-interactive permission denial remains; no new Ask UI is implied.
 
-Nexus remains ACP Client and the daemon is not an ACP Server. CLI-only
+Nexus remains ACP Client and the host is not an ACP Server. CLI-only
 `nexus42 acp run` remains separate from workflow execution and recovery.
 
-**Runtime rule**: the serving host (`apps/nexus-service` over `nexus-core` / `nexus-core-node`) depends only on **`HostFacade` traits**, never on provider-specific crates. (The rule originally bound the `nexus-daemon-runtime` crate, deleted in v1.193 P2; the boundary itself is retained.)
+**Runtime rule**: the serving host (`apps/nexus-service` over `nexus-core` / `nexus-core-node`) depends only on **`HostFacade` traits**, never on provider-specific crates.
 
 ---
 
 ## 5. Capability & streaming
 
 1. Execution flows through normalized **`HostOperation`** / **`HostEvent`** (wire shapes in knowledge SSOT and future contracts).
-2. **Provider-native streaming, unified relay**: providers may use internal transports; daemon exposes a **single host event stream** to HTTP clients (e.g. SSE over Daemon API).
+2. **Provider-native streaming, unified relay**: providers may use internal transports; the host exposes a **single host event stream** to HTTP clients (e.g. SSE over the Daemon API wire family).
 3. Cancel and health are **control-plane** actions on `HostFacade`, not execution operations.
-4. **dsh message-level real time (V1.188).** Complete root assistant messages become ordered nonempty `MessageDelta` events during the SDK run, after one `OpStarted`. If any root text was emitted, ignore `final_response` entirely; otherwise emit its nonempty text once. Malformed recognized content, empty-only/non-success results, premature exit and overflow produce one terminal failure, including after partial text. No text follows the terminal. This is not token streaming; dsh advertises streaming true and cancellation false.
+4. **dsh message-level real time.** Complete root assistant messages become ordered nonempty `MessageDelta` events during the SDK run, after one `OpStarted`. If any root text was emitted, ignore `final_response` entirely; otherwise emit its nonempty text once. Malformed recognized content, empty-only/non-success results, premature exit and overflow produce one terminal failure, including after partial text. No text follows the terminal. This is not token streaming; dsh advertises streaming true and cancellation false.
 5. **Bounds and causality.** Nexus delivery bounds are 64 queued messages, 256 KiB serialized event, 1 MiB pending payload and 4 MiB text per operation. The SDK may accumulate unbounded internal events/frames; no end-to-end RSS bound is claimed. Its observer precedes the private prompt-receipt filter, so root-session callback output is not proof of causal submitted-message identity.
 
 ---
@@ -126,7 +122,7 @@ Host discovers providers via:
 
 Admission policy limits sessions, concurrent ops, and risky tool classes (detail in implementation SSOT).
 
-**V1.188 readiness contract:**
+**Readiness contract:**
 
 - Preserve config → PATH → registry precedence and disabled suppression. Reject malformed enabled recipes, unsupported native IDs/args/protocols and unusable structural config rather than silently serving defaults.
 - The native factory supports `dsh-native`, `codex-native`, `claude-native`; generic ACP uses `AcpProvider::from_config`. Registry discovery is not an installer or availability proof.
@@ -148,12 +144,12 @@ Crate file tree, trait signatures, route list, and test matrix: **Appendix** bel
 
 ---
 
-## 8. dsh SDK runtime and retained cleanup (V1.188)
+## 8. dsh SDK runtime
 
-The workspace dependency pin is authoritative for the SDK version. V1.188
-cuts over to the SDK 0.2 runtime contract: configured command, then nonblank
+The workspace dependency pin is authoritative for the SDK version. The
+runtime contract is the SDK 0.2 line: configured command, then nonblank
 `DSH_RUNTIME_BIN`, then PATH `dsh`; a bad explicit override fails without
-fallback. Ordinary argv is `--profile sdk`; the retired helper and SDK 0.1
+fallback. Ordinary argv is `--profile sdk`; the pre-0.2 helper and SDK 0.1
 compatibility fields are not supported.
 
 The all-false permission scope uses an exclusively owned `DSH_HOME` and a
@@ -232,8 +228,7 @@ crates/nexus-agent-host/
   facade implementation behind the optional `provider-host` feature
   (`nexus-core-node` depends on `nexus-agent-host` directly for the napi
   projection); provider-specific Rust modules do not cross the
-  `HostFacade` call boundary. (Pre-v1.193 P2 this edge was
-  `nexus-daemon-runtime` → `nexus-agent-host`; the crate is deleted.)
+  `HostFacade` call boundary.
 - `nexus42/Cargo.toml`: `nexus-agent-host` is an optional dependency enabled by the `cli` cohort feature set; the CLI still holds no direct provider-crate dependency.
 
 ### 2.3 DTO sourcing
@@ -602,7 +597,7 @@ On denial, return `HostError::PolicyDenied` with descriptive message. Default po
 
 ---
 
-### 6.5 Actor admission and lifecycle leases (v1.190 P2)
+### 6.5 Actor admission and lifecycle leases
 
 Stored Actor admission and per-Character fencing are owned by `nexus-core`
 (`CoreService`), not by the transport. Current facts:
@@ -641,7 +636,7 @@ Stored Actor admission and per-Character fencing are owned by `nexus-core`
   (`verify_selected_context` is the only staleness enforcement; an open-scoped
   generation alone never proves freshness).
 
-### 6.6 Core Host authority and provider multiplex (v1.190 P4)
+### 6.6 Core Host authority and provider multiplex
 
 - **Provider selection (P4-T1).** `compose_provider_port` selects the owning
   provider port once per session from the Rust-admitted catalog entry
@@ -802,18 +797,11 @@ Wave 1 uses in-memory session tracking only. ACP sessions may optionally use `ne
 
 ---
 
-## 10. Daemon-Runtime Integration
+## 10. Host API routes
 
-> **Host note (v1.193 P2):** the §10.1 boot/`WorkspaceState` wiring is a historical record of the deleted `nexus-daemon-runtime` crate. The facade boundary rule survives: the serving host reaches the agent host through `HostFacade` only. The §10.2 route family is retained wire, now served by `apps/nexus-service` (`routes.ts` + `provider.ts`/`discovery.ts`) over `nexus-core` (`provider-host` feature) / `nexus-core-node`.
+The serving host reaches the agent host through `HostFacade` only. `apps/nexus-service` (`routes.ts` + `provider.ts`/`discovery.ts`) serves this route family over `nexus-core` (`provider-host` feature) / `nexus-core-node`:
 
-### 10.1 Facade boundary
-
-Integration is via narrow facade only:
-- `WorkspaceState` stores `Option<Arc<dyn HostFacade>>` plus setters/getters.
-- `boot.rs` constructs `HostManager`, loads config, calls `start`, stores the facade, and adds `AgentHostSubsystem` to lifecycle.
-- Runtime handlers call `HostFacade` only — they do not import provider modules.
-
-### 10.2 API routes
+### 10.1 API routes
 
 | Method | Route | Purpose |
 |---|---|---|
@@ -835,13 +823,11 @@ before resolving the operation. Therefore clients MUST send
 `/operations/{operation_id}:cancel`; a bare
 `POST /operations/{operation_id}` is rejected.
 
-V1.20 redesign extends these routes with additional agent-host endpoints (see V1.20 spec §4.3).
-
 ---
 
 ## 11. Reference: Multica
 
-> **Historical mapping note (v1.193 P2):** the Nexus-side mappings below were written against the deleted `nexus-daemon-runtime` host. The current owner of the mapped runtime role is `apps/nexus-service` over `nexus-core` / `nexus-core-node`, with `nexus-agent-host` unchanged below the `HostFacade` boundary.
+Multica is a reference architecture only. Its daemon role maps to `apps/nexus-service` over `nexus-core` / `nexus-core-node`, with `nexus-agent-host` below the `HostFacade` boundary.
 
 **Source**: <https://github.com/multica-ai/multica> (Go server + local daemon)
 
@@ -870,7 +856,7 @@ Multica is an open-source AI-native team collaboration platform that wraps multi
 
 | Pattern | Nexus mapping |
 |---|---|
-| Local daemon as session orchestrator | `apps/nexus-service` + `nexus-core` orchestration over `nexus-agent-host` `HostManager` (pre-v1.193 mapping: `nexus-daemon-runtime` + `HostManager`) |
+| Local daemon as session orchestrator | `apps/nexus-service` + `nexus-core` orchestration over `nexus-agent-host` `HostManager` |
 | PATH scan discovery for known CLI commands | `discovery/path_scan.rs` |
 | Provider catalog with trust metadata | `ProviderCatalogEntry` |
 | Managed task/session state with deterministic terminal events | Session state machine (§6.1) |
@@ -882,8 +868,7 @@ Multica is an open-source AI-native team collaboration platform that wraps multi
 ### 11.4 Architecture mapping
 
 ```
-Multica Runtime          ≈ apps/nexus-service + nexus-core  (Daemon API wire family + lifecycle;
-                            pre-v1.193 P2 mapping: nexus-daemon-runtime, deleted)
+Multica Runtime          ≈ apps/nexus-service + nexus-core  (Daemon API wire family + lifecycle)
 Multica Agent Protocol   ≈ ProviderAdapter        (ACP SDK / native CLI)
 Multica event model     ≈ HostEvent + SSE relay  (unified event stream)
 Multica task lifecycle   ≈ HostSession state machine (managed-only)
@@ -942,7 +927,7 @@ This is the pattern adopted for Nexus `AutoToolRiskClassifier` (§7.2).
 | Auto tool-risk classification | `AutoToolRiskClassifier` (§7.2) |
 | Centralized permission policy | ACP permission delegation via `PermissionPolicy` (§4.1.3) |
 | Per-provider stream normalization | Native CLI adapter pattern (§4.2.2) |
-| Tool execution via host mediation | `HostToolExecutor` trait (V1.20 spec §4.4) |
+| Tool execution via host mediation | core tool execution (`crates/nexus-core/src/execution/capabilities.rs`) |
 | One process per managed provider session | `ManagedSessionHandle` + session state machine |
 
 ---
@@ -983,7 +968,7 @@ ACP providers can request permissions (`session/request_permission`) with allow/
 
 ## 14. Design Review Decisions
 
-These decisions were made during V1.18 PM review and remain authoritative.
+These decisions remain authoritative.
 
 ### R-001: ACP streaming bridge [MEDIUM — RESOLVED]
 
@@ -1009,7 +994,7 @@ Verified: `--print` is the correct non-interactive flag. `ClaudeCliProvider::def
 
 ### R-006: Tool risk auto-classification extension [LOW — RESOLVED]
 
-`ToolRiskClassifier` trait created in Wave 1 with `StaticToolRiskClassifier`. `AutoToolRiskClassifier` implemented in V1.19 (D-005) borrowing OpenDesign regex approach. See §7.2.
+`ToolRiskClassifier` ships with `StaticToolRiskClassifier`; `AutoToolRiskClassifier` (D-005) borrows the OpenDesign regex approach. See §7.2.
 
 ### R-007: Session persistence reserved [LOW — RESOLVED]
 
@@ -1021,13 +1006,4 @@ Dedupe per `provider_id`, not per agent identity. Both can coexist with distinct
 
 ---
 
-## 15. Version History
-
-| Version | Scope | Key additions |
-|---|---|---|
-| v1 | Consolidated from V1.18 + V1.19 | Initial SSOT: architecture, provider impl, discovery, policy, streaming, Multica/OpenDesign research, ACP protocol findings, design review decisions |
-| v2 | V1.29 Batch 2 hardening | DF-21 timeout enforcement (audit + close gaps in TimeoutConfig coverage); R11 persistent child Drop kill; R12 persistent mode cancel(); Batch 2  DF-22/23/27/28 already resolved in V1.28. |
-
----
-
-*Created: 2026-05-18. Consolidated from V1.18 / V1.19. Authoritative SSOT for `nexus-agent-host` subsystem design.*
+*Authoritative SSOT for `nexus-agent-host` subsystem design.*

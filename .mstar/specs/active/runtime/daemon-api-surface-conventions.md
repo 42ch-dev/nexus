@@ -2,9 +2,9 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — V1.77 amendment (§11 findings PATCH route as a non-OCC resource PATCH; last-writer-wins, no revision/version, no conflict modal; cross-profile consumption). Prior: V1.74 amendment (§7.6 World KB relationship patch route extending the V1.73 World KB route pattern; additive relationship DTOs; per-row OCC with `expected_version`/`version` against `kb_relationships.revision`), V1.73 amendment (§7 World KB canvas structured patch/read routes extending the V1.71/V1.72 patch-route convention; additive World KB DTOs; per-row OCC with `expected_version`/`version`), V1.72 amendment (§7 outline/timeline structured patch routes extending the V1.71 patch-route convention; additive outline DTOs; `@42ch/nexus-contracts` 0.7.0 → 0.8.0 by default), V1.71 amendment (§7 structured patch-route convention for canvas-like surfaces; Strategy β patch routes; `@42ch/nexus-contracts` 0.6.0 → 0.7.0 by default), V1.67 amendment (§3.2 casing ratification + §4 `items` enforcement + §5 sort-param contract; `@42ch/nexus-contracts` 0.5.0 → 0.6.0), V1.64 cursor/error/`items` conventions + V1.65 chapter-content file-backed route rules. |
+| **Status** | Normative — cross-resource conventions for the Daemon API (pagination, error envelope, list-array naming, sort parameters, structured canvas patch routes, and file-backed chapter-content routes). |
 | **Document class** | Master |
-| **Scope** | Cross-resource Daemon API response/query conventions for schemas under `schemas/daemon-api/` and the serving route families in `apps/nexus-service` over `nexus-core` (pre-v1.193 references to `nexus-daemon-runtime` handlers below are historical) |
+| **Scope** | Cross-resource Daemon API response/query conventions for schemas under `schemas/daemon-api/` and the serving route families in `apps/nexus-service` over `nexus-core` |
 | **Coordinates with** | [schemas-directory-layout.md](../architecture/schemas-directory-layout.md), [schemas-external-consumer-boundary.md](../architecture/schemas-external-consumer-boundary.md), [daemon-runtime.md](../../archived/runtime/2026-09-21-daemon-runtime.md) (historical host record), [findings-lifecycle.md](../contracts/findings-lifecycle.md) |
 | **Evidence** | `surface-audit.md` |
 
@@ -53,7 +53,7 @@ Response:
 
 ### 2.2 Legacy pattern — offset/limit
 
-Offset/limit plus `total` is legacy. It exists because Works was the first promoted Daemon API list surface. V1.64 migrates Works pagination to cursor semantics (F-P1). New endpoints MUST NOT introduce offset/limit pagination.
+Offset/limit plus `total` is legacy and is not an allowed shape for new endpoints; new endpoints MUST use cursor pagination (F-P1).
 
 When converting a legacy endpoint:
 
@@ -69,9 +69,8 @@ When converting a legacy endpoint:
 ### 3.1 Canonical wire shape
 
 All Daemon API JSON error responses are emitted by the serving host as a
-**wrapped envelope** — today `apps/nexus-service` (`src/errors.ts`,
-`mapNativeError`); the pre-v1.193 emitter was `ApiErrorResponse` in
-`crates/nexus-daemon-runtime/src/api/errors.rs` (deleted with the crate):
+**wrapped envelope** — emitted by `apps/nexus-service` (`src/errors.ts`,
+`mapNativeError`):
 
 ```json
 {
@@ -91,8 +90,7 @@ All Daemon API JSON error responses are emitted by the serving host as a
   (`schemas/daemon-api/common/error-response.schema.json`); the schema describes
   the **inner detail**, not the full wire body.
 - `error.request_id`: correlation ID injected by the request-tracing middleware
-  when active (today the `apps/nexus-service` error mapping in `src/errors.ts`;
-  the pre-v1.193 injector was `crates/nexus-daemon-runtime/src/api/middleware.rs`);
+  when active (the `apps/nexus-service` error mapping in `src/errors.ts`);
   absent when the middleware is not installed. It lives under `error`, not at
   the top level.
 
@@ -106,13 +104,11 @@ Inner detail fields:
 | `request_id` | no | Correlation ID; set by middleware, not by handlers. |
 
 > **Implementation note:** transport adapters and consumers MUST read
-> `code`/`message`/`details` from `body.error`, not from the top level. V1.67
-> P0 (FE1-ORCH) **resolves** the ad-hoc `(StatusCode, String)` bodies that
-> remained in orchestration handlers (`schedules.rs` / `sessions.rs` /
-> `presets.rs`): they are swept onto this canonical envelope via a shared
-> error-mapping helper. After V1.67, ad-hoc tuple bodies are not an allowed
-> Daemon API surface; clients no longer need the `http_<status>` fallback for
-> orchestration routes.
+> `code`/`message`/`details` from `body.error`, not from the top level. Ad-hoc
+> `(StatusCode, String)` bodies are not an allowed Daemon API surface; a shared
+> error-mapping helper puts every route — including the orchestration handlers
+> (`schedules.rs` / `sessions.rs` / `presets.rs`) — onto this canonical
+> envelope, so clients do not need an `http_<status>` fallback.
 
 ### 3.2 Error-code naming
 
@@ -134,7 +130,7 @@ Examples:
 
 Use singular resource nouns (`work`, `preset`, `finding`, `workspace`). For cross-resource failures, use the subsystem noun (`auth`, `runtime`, `schema`, `validation`). Codes are contract surface: change only with a schema/version bump and consumer coordination.
 
-> **V1.67 ratification (`@42ch/nexus-contracts` 0.5.0 → 0.6.0):** the canonical `NexusApiError::error_code()` module is aligned to lowercase `snake_case` **globally** — it previously emitted `UPPER_SNAKE_CASE`, contradicting this section. The ~18 canonical codes (e.g. `UNINITIALIZED`→`uninitialized`, `INVALID_INPUT`→`invalid_input`, `INTERNAL`→`internal`, `AUTH_REQUIRED`→`auth_required`, `NOT_FOUND`→`not_found`) change in the 0.6.0 bump. This is a global error-module change, not an orchestration-handler-local one.
+> **Naming convention (`@42ch/nexus-contracts`):** the canonical `NexusApiError::error_code()` module emits lowercase `snake_case` globally (e.g. `uninitialized`, `invalid_input`, `internal`, `auth_required`, `not_found`). This is a global error-module convention, not orchestration-handler-local.
 
 ---
 
@@ -142,18 +138,18 @@ Use singular resource nouns (`work`, `preset`, `finding`, `workspace`). For cros
 
 `items` is canonical for plain list responses.
 
-> **V1.67 ratification (F-P3, `@42ch/nexus-contracts` 0.5.0 → 0.6.0):** the prior legacy allowance for schema-backed plain lists is **removed**. V1.67 P0 renames the four remaining schema-backed per-resource keys to `items`:
+> **F-P3:** the legacy allowance for schema-backed plain lists is removed; every schema-backed per-resource key is `items`:
 
-| Key | Resource | V1.67 status |
+| Key | Resource | Status |
 | --- | --- | --- |
-| `works` | Works list | **Renamed → `items`** (`GET /v1/daemon/works`). |
-| `schedules` | Schedule list | **Renamed → `items`** (`GET /v1/daemon/orchestration/schedules`). |
-| `sessions` | Orchestration sessions list | **Renamed → `items`** (`GET /v1/daemon/orchestration/sessions`). |
-| `capabilities` | Capability registry list | **Renamed → `items`** (`GET /v1/daemon/orchestration/capabilities`). |
+| `works` | Works list | `items` (`GET /v1/daemon/works`). |
+| `schedules` | Schedule list | `items` (`GET /v1/daemon/orchestration/schedules`). |
+| `sessions` | Orchestration sessions list | `items` (`GET /v1/daemon/orchestration/sessions`). |
+| `capabilities` | Capability registry list | `items` (`GET /v1/daemon/orchestration/capabilities`). |
 | `items` | chapters / findings / creators / workspace / KB / pending-review / agent-host | Already canonical; no change. |
 | `embedded` / `system` / `user` | Preset management grouped response | Intentional **grouped** response, not a plain list — retained. |
 
-Pre-1.0 → no compatibility shim. Hand-written / local-only plain lists not yet schema-backed (`references`, `worlds`, `fragments`, `pool entries`, orchestration `presets` DTO) are **out of the 0.6.0 bump**; they adopt `items` at their next schema-promotion or feature touch.
+Pre-1.0 → no compatibility shim. Hand-written / local-only plain lists not yet schema-backed (`references`, `worlds`, `fragments`, `pool entries`, orchestration `presets` DTO) adopt `items` at their next schema-promotion or feature touch.
 
 New endpoints MUST use `items`. UI adapters must not carry legacy-key normalization after 0.6.0 for the renamed endpoints.
 
@@ -161,7 +157,7 @@ New endpoints MUST use `items`. UI adapters must not carry legacy-key normalizat
 
 ## 5. Sort parameters
 
-> **V1.67 lock (F-F1):** the prior `sort_by` + `sort_order` two-parameter sketch is **superseded** by a single optional `sort` query parameter.
+> **F-F1:** sort is expressed with a single optional `sort` query parameter; the earlier `sort_by` + `sort_order` two-parameter shape is not part of the contract.
 
 List endpoints MAY expose a single optional `sort` query parameter.
 
@@ -189,13 +185,13 @@ Rules:
 4. Unsupported keys return the canonical error envelope with `code: "<resource>_sort_invalid"`.
 5. Cursor-paginated endpoints MUST document which sort keys are compatible with their cursor. If arbitrary sorting would require a new cursor design, only the default sort is implemented and other keys are deferred in the endpoint spec.
 
-V1.67 implements server-side sort on: works (`updated_at`/`title`/`status`/`intake_status`), schedules (`created_at`/`updated_at`/`status`/`preset_id`/`label`), sessions (`session_id`/`creator_id`/`preset_id`/`status`), capabilities (`name`). Chapters document/accept default `volume,chapter` only (cursor-keyed). Other lists adopt on next schema-promotion.
+Server-side sort is implemented on: works (`updated_at`/`title`/`status`/`intake_status`), schedules (`created_at`/`updated_at`/`status`/`preset_id`/`label`), sessions (`session_id`/`creator_id`/`preset_id`/`status`), capabilities (`name`). Chapters document/accept default `volume,chapter` only (cursor-keyed). Other lists adopt on next schema-promotion.
 
 ---
 
 ## 6. File-backed chapter-content routes
 
-V1.65 introduces the chapter-content Daemon API surface under
+The chapter-content Daemon API surface lives under
 `/v1/daemon/works/{work_id}/chapters/*`; detailed field contracts live in
 [chapter-content-local-api.md](chapter-content-local-api.md). This section is
 the normative cross-surface convention for any Daemon API route that exposes
@@ -220,21 +216,17 @@ Do not introduce a `chapters` array key. Chapter list ordering defaults to
 `volume ASC, chapter ASC`; optional filters such as `status` must preserve cursor
 semantics and return `chapter_cursor_invalid` / validation errors for bad input.
 
-### 6.2 Outline-prose `set.content` persistence is atomic file write + DB metadata update (V1.75)
+### 6.2 Outline-prose `set.content` persistence is atomic file write + DB metadata update
 
-The V1.65 `PUT /v1/daemon/works/{work_id}/chapters/{n}/outline` whole-document
-write route is **removed in V1.75** (canvas-pivot). Outline prose writes now go
-through the canvas patch route
+Outline prose writes go through the canvas patch route
 `POST /v1/daemon/works/{work_id}/chapters/{chapter_id}/patch` with `set.content`
-+ `base_revision` (`outline_revision` CAS) — see §7 (V1.75 amendment) and
++ `base_revision` (`outline_revision` CAS) — see §7 and
 [canvas-strategy-surface.md](../surfaces/canvas-strategy-surface.md) §3.5. The atomic-write
-invariants that this section historically attached to the removed PUT are still
-normative; they are re-anchored to the PATCH content path below and enforced by
+invariants for that PATCH content path are enforced by
 `crates/nexus-core/src/outline.rs::apply_chapter_patch`
 (the `atomic_write_outline` call: sibling temp + rename + file fsync + directory
-fsync, run while the caller holds a `RuntimeLockGuard`). The pre-v1.193 enforcer
-was `crates/nexus-daemon-runtime/src/api/handlers/outline.rs`, deleted with the
-crate; the route is served today by `apps/nexus-service` (`content.ts`).
+fsync, run while the caller holds a `RuntimeLockGuard`). The route is served by
+`apps/nexus-service` (`content.ts`).
 
 When `set.content` is present on an `outline.patch_chapter` request, the handler
 MUST:
@@ -267,12 +259,12 @@ Status is author-controlled through the explicit chapter structure route /
 
 ### 6.3 Structure PATCH status and protection rules
 
-`PATCH /v1/daemon/works/{work_id}/chapters/{n}` is the V1.65 structure-edit route
+`PATCH /v1/daemon/works/{work_id}/chapters/{n}` is the structure-edit route
 for metadata such as title/slug/planned word count/volume/status.
 
 Normative rules:
 
-- The only normal UI-driven status progression in V1.65 is
+- The only normal UI-driven status progression is
   `not_started → outlined`.
 - Reverse transitions and terminal-state changes MUST be explicit actions with a
   reason if implemented; they must never occur as side effects of ordinary
@@ -280,17 +272,17 @@ Normative rules:
 - `draft` chapters may be structurally edited, but consumers should warn that a
   body already exists.
 - `finalized` structural edits require explicit confirmation from the caller.
-- `published` structural edits are hard-blocked in V1.65 unless a future
+- `published` structural edits are hard-blocked unless a future
   publish-retraction design changes the policy.
-- Chapter deletion is out of scope for V1.65; any future delete route MUST
+- Chapter deletion is out of scope; any future delete route MUST
   hard-block `finalized` and `published` chapters.
 
-### 6.4 Body markdown is read-only in V1.65
+### 6.4 Body markdown is read-only
 
 `GET /v1/daemon/works/{work_id}/chapters/{n}/body` may return body markdown and
-optional parsed frontmatter for rendering, but V1.65 MUST NOT add a body write
-route. The orchestration host-tool path remains the body writer until V1.66
-designs a per-chapter edit lock and conflict policy.
+optional parsed frontmatter for rendering, but no body write route exists. The
+orchestration host-tool path remains the body writer; a per-chapter edit lock and
+conflict policy would come with a future per-chapter edit design.
 
 ### 6.5 DB-sourced path guard is mandatory
 
@@ -307,12 +299,12 @@ until resolved. Every outline/body read or write route MUST:
    through to an arbitrary filesystem error.
 
 This mirrors the W-002 defense-in-depth guard in
-`host_tool_handlers.rs` for body reads and applies it to outline writes (V1.75:
-the `outline.patch_chapter set.content` path — see §6.2).
+`host_tool_handlers.rs` for body reads and applies it to outline writes (the
+`outline.patch_chapter set.content` path — see §6.2).
 
 ### 6.6 Soft concurrency semantics
 
-V1.65 has no hard per-chapter edit lock. Outline writes are last-write-wins at
+There is no hard per-chapter edit lock. Outline writes are last-write-wins at
 the file level, and orchestration reads the outline at draft-time as a natural
 snapshot. UI consumers should warn when editing outlines for `draft` or
 `finalized` chapters.
@@ -325,9 +317,9 @@ does not change the contract's last-write-wins semantics for clients.
 
 ---
 
-## 7. Structured patch routes for canvas-like surfaces (V1.71)
+## 7. Structured patch routes for canvas-like surfaces
 
-V1.71 promotes the Strategy canvas write-boundary from paper contract to Daemon API convention. New node/edge edit surfaces that mutate graph-like or structured domain documents SHOULD use an explicit patch route rather than raw file PUTs or broad resource updates:
+New node/edge edit surfaces that mutate graph-like or structured domain documents SHOULD use an explicit patch route rather than raw file PUTs or broad resource updates:
 
 ```text
 POST /v1/daemon/{surface}/{id}/{sub}/patch
@@ -341,7 +333,7 @@ Examples:
 | Strategy transition | `POST /v1/daemon/strategies/{strategy_id}/transitions/patch` | `StrategyPatchTransitionRequest` | `StrategyPatchResponse` |
 | Strategy prompt template | `POST /v1/daemon/strategies/{strategy_id}/states/{state_id}/prompt/patch` | `StrategyPatchPromptTemplateRequest` | `StrategyPatchResponse` |
 
-> **V1.75 amendment — outline `content` field.** `outline.patch_chapter` supports node-scoped chapter edits. In addition to metadata fields (`title`, `slug`, `planned_word_count`, `actual_word_count`, `volume`, `status`), V1.75 adds optional `set.content` for chapter outline prose. `content` is a chapter-outline markdown string persisted to the chapter row's `outline_path` file under the same `base_revision` / `new_revision` `outline_revision` CAS used by outline structure and timeline patches. `content` is not a body editor: handlers MUST NOT mutate `body_path` or body markdown files, and conflict handling remains the standard 409 `OutlineConflictError` with refetch/reapply UX. The V1.65 `PUT /chapters/{n}/outline` whole-document write route is removed in the same bump; the canvas patch route is now the sole outline write path.
+> **Outline `content` field.** `outline.patch_chapter` supports node-scoped chapter edits. In addition to metadata fields (`title`, `slug`, `planned_word_count`, `actual_word_count`, `volume`, `status`), it accepts an optional `set.content` for chapter outline prose. `content` is a chapter-outline markdown string persisted to the chapter row's `outline_path` file under the same `base_revision` / `new_revision` `outline_revision` CAS used by outline structure and timeline patches. `content` is not a body editor: handlers MUST NOT mutate `body_path` or body markdown files, and conflict handling remains the standard 409 `OutlineConflictError` with refetch/reapply UX. The canvas patch route is the sole outline write path.
 
 ### 7.1 Request semantics
 
@@ -393,30 +385,30 @@ Revision conflicts are **pre-write** failures: if `base_revision` does not equal
 
 ### 7.4 Revision storage and future reuse
 
-The owning domain chooses the revision storage location, but it MUST name a single source of truth and expose the current revision on canonical reads. V1.71 Strategy uses a `revision:` key in the preset YAML header; existing presets without the key read as revision `0` and write `revision: 1` on the first accepted patch.
+The owning domain chooses the revision storage location, but it MUST name a single source of truth and expose the current revision on canonical reads. The Strategy canvas uses a `revision:` key in the preset YAML header; existing presets without the key read as revision `0` and write `revision: 1` on the first accepted patch.
 
-V1.72 Outline+Timeline canvas surfaces reuse this convention with an outline markdown frontmatter `outline_revision:` key (mirroring the V1.71 preset YAML `revision:` choice): existing outlines without the key read as revision `0` and write `1` on the first accepted patch. The owning domain chooses the revision storage location, but it MUST name a single source of truth and expose the current revision on canonical reads; a future DB-backed revisions table is deferred until audit history, multi-device sync, or collaborative edits require it, and would backfill from frontmatter rather than become a second source of truth. **Durable roadmap:** DR-56 (DB-backed revisions table).
+Outline+Timeline canvas surfaces reuse this convention with an outline markdown frontmatter `outline_revision:` key (mirroring the Strategy preset YAML `revision:` choice): existing outlines without the key read as revision `0` and write `1` on the first accepted patch. The owning domain chooses the revision storage location, but it MUST name a single source of truth and expose the current revision on canonical reads; a future DB-backed revisions table is deferred until audit history, multi-device sync, or collaborative edits require it, and would backfill from frontmatter rather than become a second source of truth. **Durable roadmap:** DR-56 (DB-backed revisions table).
 
-V1.72 adds 3 outline/timeline patch routes following the V1.71 pattern:
+Three outline/timeline patch routes follow the convention:
 
 1. `POST /v1/daemon/works/{work_id}/outline/patch` with `OutlinePatchStructureRequest` (operations: `move_chapter`, `link_event`, `attach_to_volume`) → `OutlinePatchResponse`.
 2. `POST /v1/daemon/works/{work_id}/chapters/{chapter_id}/patch` with `OutlinePatchChapterRequest` (fields: title, slug, wc, volume binding, status) → `OutlinePatchResponse`.
 3. `POST /v1/daemon/works/{work_id}/timeline/patch` with `TimelinePatchEventRequest` (operations: `add_event`, `remove_event`, `attach_event_to_chapter`, `link_foreshadow`) → `OutlinePatchResponse`.
 
-Error envelope (mirrors V1.71 Strategy convention): `OutlineConflictError` (409) extends canonical `ErrorResponse.details` with `current_revision`, `node_id`, `conflicting_path`, recovery hint; `OutlineValidationError` (422) carries structured `validation_summary` mirroring V1.71's `StrategyValidationError`.
+Error envelope (mirrors the Strategy convention): `OutlineConflictError` (409) extends canonical `ErrorResponse.details` with `current_revision`, `node_id`, `conflicting_path`, recovery hint; `OutlineValidationError` (422) carries structured `validation_summary` mirroring `StrategyValidationError`.
 
-V1.73 World KB canvas surface reuses this convention with per-row OCC rather than a single graph/document revision:
+The World KB canvas surface reuses this convention with per-row OCC rather than a single graph/document revision:
 
 1. Client reads a canonical graph/candidate projection with row `version` values.
 2. Client submits a node/subresource patch or candidate promotion with `expected_version`.
 3. Daemon validates path identifiers, row identifiers, entity-scope-model §5.5 promotion-state invariants, merge/adopt/reject rules, and entity patch payloads.
 4. Daemon persists atomically and returns the updated row `version`, or rejects stale writes with 409 and structured recovery data.
 
-This convention does **not** authorize direct browser/desktop-webview writes to raw files. File-backed routes remain domain-specific and must be separately specified like the V1.65 chapter-content routes in §6.
+This convention does **not** authorize direct browser/desktop-webview writes to raw files. File-backed routes remain domain-specific and must be separately specified like the chapter-content routes in §6.
 
-### 7.5 World KB canvas β routes (V1.73)
+### 7.5 World KB canvas β routes
 
-V1.73 adds the World KB entities + candidates surface to the structured canvas convention. It intentionally ships **2 mutating patch routes** plus **2 read projection routes**; typed relationship CRUD remains `tbd-v1.74-world-kb-relationships`.
+The World KB entities + candidates surface of the structured canvas convention ships **2 mutating patch routes** plus **2 read projection routes**; typed relationship CRUD remains `tbd-v1.74-world-kb-relationships`.
 
 | Use | Route | Request DTO | Response DTO |
 | --- | --- | --- | --- |
@@ -444,11 +436,11 @@ Conflict and validation errors:
 | `409` | `WorldKbConflictError` | Returned before mutation when `expected_version` is stale. Details include `current_version`, `entity_id`, `conflicting_path`, and `recovery_hint`. |
 | `422` | `WorldKbValidationError` | Returned for domain-rule failures such as invalid promotion action/target, invalid merge target, invalid entity patch, or entity-scope lifecycle violations. Details carry `validation_summary.errors[]` / `warnings[]`. |
 
-V1.73 graph reads expose source-anchor provenance edges and reserve `relationships` as an empty array until the V1.74 relationship surface. Relationship editing must not be tunneled through `patch-entity` or `promote-candidate` blobs.
+Graph reads expose source-anchor provenance edges; `relationships` is populated by the relationship route in §7.6. Relationship editing must not be tunneled through `patch-entity` or `promote-candidate` blobs.
 
-### 7.6 World KB relationship patch route (V1.74)
+### 7.6 World KB relationship patch route
 
-V1.74 extends the World KB canvas β routes with a first-class relationship patch route and with populated relationship projections on the existing graph read.
+The World KB canvas β routes include a first-class relationship patch route and populated relationship projections on the graph read.
 
 | Use | Route | Request DTO | Response DTO |
 | --- | --- | --- | --- |
@@ -457,7 +449,7 @@ V1.74 extends the World KB canvas β routes with a first-class relationship patc
 
 DTO naming follows the generated filename convention from `schemas/daemon-api/canvas/world-kb/world-kb-*.schema.json`: generated public symbols use the `WorldKb...` entity-prefix form (`WorldKbPatchRelationshipRequest`, `WorldKbPatchRelationshipResponse`, `WorldKbRelationshipInput`, `WorldKbRelationshipProjection`, `WorldKbRelationshipKind`). Schema `title` text may use a verb-prefix phrase for human readability, but public generated symbols are filename-derived.
 
-**V1.76 `needs_review` + `source` (extraction suggestions):** `WorldKbRelationshipProjection`
+**`needs_review` + `source` (extraction suggestions):** `WorldKbRelationshipProjection`
 exposes `needs_review` (boolean) and `source` (`manual` | `extraction`). `source`
 is read-only provenance — `manual` marks author-created rows, `extraction` marks
 `nexus.llm.extract`-proposed suggestions. `needs_review` is the lightweight
@@ -479,7 +471,7 @@ Relationship request semantics:
 | `relationship_id` | Server-assigned for `add`; required for `update` and `remove`. |
 | `expected_version` | Required for `update` and `remove`; omitted or `0` for `add`. It is the row version observed on the last canonical read and compares against `kb_relationships.revision`. |
 | Response `version` | Mutating success responses return the committed row version after persistence. Clients MUST update from the response or refetch before issuing another patch. |
-| `relationship` payload | Required for `add` and `update`, omitted for `remove`. Contains `source_entity_id`, `target_entity_id`, `relation_type`, optional `custom_label`, `symmetric`, optional `confidence`, optional `source_anchor_ids`, optional `metadata`, and optional `needs_review` (V1.76: `false` promotes/confirm a suggestion; omit to preserve). |
+| `relationship` payload | Required for `add` and `update`, omitted for `remove`. Contains `source_entity_id`, `target_entity_id`, `relation_type`, optional `custom_label`, `symmetric`, optional `confidence`, optional `source_anchor_ids`, optional `metadata`, and optional `needs_review` (`false` promotes/confirm a suggestion; omit to preserve). |
 
 Conflict and validation errors:
 
@@ -506,9 +498,9 @@ Future endpoint acceptance requires:
 
 ---
 
-## 9. Evidence and V1.64 decisions
+## 9. Evidence and decision IDs
 
-The V1.63 Daemon API surface audit (historical name) identified:
+A cross-resource Daemon API surface audit identified:
 
 - F-P1: Works uses offset/limit while peers use cursor pagination.
 - F-P2: Findings list endpoint lacks a response schema.
@@ -516,15 +508,15 @@ The V1.63 Daemon API surface audit (historical name) identified:
 - F-E1: No standardized error envelope.
 - F-F1: Sort parameters are not standardized.
 
-V1.64 closes F-P1, F-P2, and F-E1 for the Web UI data-layer baseline, while documenting F-P3 and F-F1 as future conventions with adapter coverage for MVP.
+F-P1, F-P2, and F-E1 are closed; F-P3 and F-F1 are carried as the conventions in §4 and §5.
 
 ---
 
-## 10. Daemon port discovery (V1.66 desktop shell)
+## 10. Daemon port discovery
 
-Daemon API clients that connect over loopback HTTP use a **resolved daemon base URL**, not a schema-defined discovery endpoint. (Compass: v1.66 §5 #3 LOCKED.)
+Daemon API clients that connect over loopback HTTP use a **resolved daemon base URL**, not a schema-defined discovery endpoint.
 
-V1.66 desktop-shell convention:
+The desktop-shell convention:
 
 1. Default port is `8420` (the `boot.rs` default).
 2. `NEXUS_DAEMON_PORT` may override the default when the client/launcher environment provides it.
@@ -539,15 +531,15 @@ V1.66 desktop-shell convention:
    ```
    (NOT stdout parsing — rationale in the historical host record [daemon-runtime.md](../../archived/runtime/2026-09-21-daemon-runtime.md) §12.2).
 5. Clients MUST treat health-probe failure as transport/lifecycle failure, not as a schema mismatch.
-6. **V1.66 does not introduce a dynamic port handshake endpoint or daemon-lifecycle Daemon API schema** (`wire_contracts_changed: false`).
+6. **No dynamic port handshake endpoint or daemon-lifecycle Daemon API schema is introduced** (`wire_contracts_changed: false`).
 
 If a future iteration introduces dynamic port allocation, it must define a separate launcher-to-app handshake contract **before** adding any Daemon API schema.
 
 ---
 
-## 11. Findings PATCH route (V1.77 — non-OCC resource PATCH)
+## 11. Findings PATCH route (non-OCC resource PATCH)
 
-The findings PATCH route (`PATCH /v1/daemon/works/{work_id}/findings/{finding_id}`) is a **non-OCC resource PATCH** — last-writer-wins, no `revision`/`version` field, no conflict detection. It is consumed by the V1.77 findings-remediation UI surface (Control-Room table → full triage authoring surface).
+The findings PATCH route (`PATCH /v1/daemon/works/{work_id}/findings/{finding_id}`) is a **non-OCC resource PATCH** — last-writer-wins, no `revision`/`version` field, no conflict detection. It is consumed by the findings-remediation UI surface (Control-Room table → full triage authoring surface).
 
 ### 11.1 Route
 
@@ -588,16 +580,16 @@ This is the correct shape for a simple CRUD PATCH on a non-OCC resource. Future 
 
 ### 11.4 Contract status
 
-- **Schema on disk**: `schemas/daemon-api/findings/update-finding-request.schema.json` (unchanged since V1.49).
+- **Schema on disk**: `schemas/daemon-api/findings/update-finding-request.schema.json`.
 - **Codegen**: `UpdateFindingRequest` + `CreateFindingRequest` are fully codegen'd into both Rust and TypeScript and barrel-exported by `@42ch/nexus-contracts` (confirmed `generated/index.ts:66,71`).
-- **Handler**: the findings PATCH is served today by `apps/nexus-service` (`src/knowledge.ts` findings routes) over the `nexus-core-node` `update_finding` projection (`src/domain.rs`); the pre-v1.193 handler was `update_finding_handler` in `crates/nexus-daemon-runtime/src/api/handlers/findings.rs:380-451` (deleted with the crate).
+- **Handler**: the findings PATCH is served today by `apps/nexus-service` (`src/knowledge.ts` findings routes) over the `nexus-core-node` `update_finding` projection (`src/domain.rs`).
 - **DAO enforcement**: `update_finding` in `crates/nexus-local-db/src/findings.rs:927-1042` (enum validation + transition enforcement + dynamic SET clause builder).
-- **`wire_contracts_changed`**: `FALSE` for V1.77 — the route, schema, codegen, and handler are unchanged. Only consumer-side consumption is additive.
+- **`wire_contracts_changed`**: `FALSE` — the route, schema, codegen, and handler are unchanged; only consumer-side consumption is additive.
 - **Spec cross-reference**: [findings-lifecycle.md](../contracts/findings-lifecycle.md) — the 6-state lifecycle, `target_executor` routing, and UI remediation surface.
 
-## 12. V1.114 compute registry and KB state read routes
+## 12. Compute registry and KB state read routes
 
-V1.114 adds two read-only surfaces to the Daemon API inventory.
+Two read-only surfaces join the Daemon API inventory:
 
 ### 12.1 Compute module registry
 
@@ -627,10 +619,10 @@ This route is intentionally read-only and distinct from the World KB canvas
 patch routes in §7.5; it gives clients a focused, cacheable state dump without
 a full graph projection.
 
-### 12.3 V1.147 compute direct lane and World timeline events routes
+### 12.3 Compute direct lane and World timeline events routes
 
-V1.147 adds the **direct Control Room compute lane** — invoke/accept/discard of
-installed WASM compute modules against owned Worlds over HTTP — plus a
+The **direct Control Room compute lane** provides invoke/accept/discard of
+installed WASM compute modules against owned Worlds over HTTP, plus a
 per-World timeline-events read. These routes are mounted in tier-2 (behind
 `require_api_key` + `require_active_creator`, like the timeline/compute
 surfaces) and are schema-backed by `schemas/daemon-api/compute/` (run wire
@@ -664,7 +656,7 @@ states `applied | discarded | failed`; `running` and `succeeded` (needs-review)
 rows are never deleted. The response is the schema-less inline `{ "deleted":
 number }` count (trivial-shape precedent — no contract bump).
 
-**Error-code family (V1.147 compute lane)** — all errors use the canonical §3
+**Error-code family (compute direct lane)** — all errors use the canonical §3
 envelope:
 
 | HTTP | Code | Condition |
@@ -679,11 +671,11 @@ envelope:
 
 Sandbox, validation, and build failures persist the Run row as `failed` with
 the same error code — never a silent skip of invalid entries, never a
-misleading 500 (V1.147 P3 F2 reclassification).
+misleading 500.
 
 ## 13. World structured-rule lifecycle
 
-**Normative amendment (v1.198; accepted target, implementation pending).**
+**Normative target (implementation pending).**
 The Rust `CoreService` is the lifecycle and ownership authority; the
 standalone TS service and native bridge translate requests only.
 

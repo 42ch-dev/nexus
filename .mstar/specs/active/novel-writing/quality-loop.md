@@ -1,9 +1,9 @@
 # Novel Quality Loop — Normative Specification v1
 
-**Status**: Normative — V1.51 Shipped (findings lifecycle F6 + KB closure overwrites/supersedes integrated)  
+**Status**: Normative — novel quality-loop SSOT: findings lifecycle (6-state), review presets, two-layer rules runtime, logs, KB extraction + closure, 96h escalation  
 **Document class**: Feature line (quality-loop supplement)  
 **Created**: 2026-06-09  
-**Last updated**: 2026-09-29 (authority routing aligned with the cross-profile findings Master; V1.49 lifecycle history retained)  
+**Last updated**: 2026-10-13  
 **Scope**: Local-first quality loop for `work_profile: novel` — findings, review routing, rules, logs, 96h escalation, on-demand audit cross-refs  
 **Coordinates with**:
 
@@ -11,14 +11,14 @@
 - [creator-workflow.md](../creator/creator-workflow.md) — FL-E `review` stage and auto-chain
 - [orchestration-engine.md](../orchestration/orchestration-engine.md) — presets, scheduled tasks
 - [cli-spec.md](../cli/cli-spec.md) — status/banner surfaces
-- [manuscript-audit.md](manuscript-audit.md) — DF-69 on-demand audit (V1.44 P0)
-- [author-experience.md](author-experience.md) — quickstart §5 cross-refs (V1.43 shipped)
+- [manuscript-audit.md](manuscript-audit.md) — DF-69 on-demand audit
+- [author-experience.md](author-experience.md) — quickstart §5 cross-refs
 
 ---
 
 ## 1. Purpose
 
-V1.36 shipped inline `llm_judge` 五问 on finalize. V1.39 implements a durable quality-loop backplane: findings lifecycle, auxiliary review presets, three-layer rules, process logs, and 96h master-decision escalation — all local DB + daemon + CLI, no Redis or platform workers.
+The quality loop is a durable backplane over the inline `llm_judge` 五问 finalize gate ([workflow-profile.md §5.1](workflow-profile.md)): findings lifecycle, auxiliary review presets, layered rules, process logs, and 96h master-decision escalation — all local DB + CLI, no Redis or platform workers.
 
 ---
 
@@ -33,13 +33,13 @@ V1.36 shipped inline `llm_judge` 五问 on finalize. V1.39 implements a durable 
 | `chapter` | INTEGER NULL | Optional chapter binding |
 | `kind` | TEXT | `continuity`, `craft`, `plot_hole`, `world_inconsistency`, … |
 | `severity` | TEXT | `info`, `minor`, `major`, `blocker` |
-| `status` | TEXT | **V1.49 P0**: 6-state — `open`, `triaged`, `in_review`, `resolved`, `wont_fix`, `duplicate` (supersedes V1.39 three-state `open` / `resolved` / `wont_fix`) |
+| `status` | TEXT | 6-state — `open`, `triaged`, `in_review`, `resolved`, `wont_fix`, `duplicate` |
 | `target_executor` | TEXT | `write`, `brainstorm`, `none`, `master` |
 | `body` | TEXT | Human-readable finding |
-| `rule_suggestion` | TEXT NULL | **V1.47** — optional prose suggestion for Layer 2 rules; persisted on finding row only (no `AGENTS.md` write in P0) |
+| `rule_suggestion` | TEXT NULL | Optional prose suggestion for Layer 2 rules; persisted on finding row only |
 | `created_at` / `updated_at` | INTEGER | Unix epoch |
 
-Indexes: `(work_id, status)`, `(work_id, chapter, status)`. **V1.49 P0**: added composite index `idx_findings_status_updated_at` on `(status, updated_at)`.
+Indexes: `(work_id, status)`, `(work_id, chapter, status)`, and composite `idx_findings_status_updated_at` on `(status, updated_at)`.
 
 ### 2.2 Executor routing
 
@@ -52,11 +52,11 @@ Indexes: `(work_id, status)`, `(work_id, chapter, status)`. **V1.49 P0**: added 
 
 Auto-chain must not fork driver when routing spawns auxiliary schedules; at most one active FL-E driver per Work remains invariant.
 
-### 2.3 Extended status enum (V1.49 P0 — F6 lifecycle)
+### 2.3 Extended status enum (F6 lifecycle)
 
-> **Authority (§2.3–§2.4 and executor routing):** The root [Findings Lifecycle — Cross-Profile Master](../contracts/findings-lifecycle.md) owns the cross-profile six-state lifecycle, `target_executor` routing semantics, and UI remediation surface. The V1.49 enum and transition graph below are retained as historical context, not a second normative lifecycle authority. This spec retains only novel-specific producer-side responsibilities: review verdicts, finding creation, orchestration hooks, produce-prompt selection, and retention/prune.
+> **Authority (§2.3–§2.4 and executor routing):** The root [Findings Lifecycle — Cross-Profile Master](../contracts/findings-lifecycle.md) owns the cross-profile six-state lifecycle, `target_executor` routing semantics, and UI remediation surface. The enum and transition graph below are the novel-side reference, not a second normative lifecycle authority. This spec retains only novel-specific producer-side responsibilities: review verdicts, finding creation, orchestration hooks, produce-prompt selection, and retention/prune.
 
-V1.49 P0 extends the V1.39 three-state model (`open` / `resolved` / `wont_fix`) to a 6-state lifecycle:
+The findings lifecycle is a 6-state model:
 
 | Status | Meaning |
 | --- | --- |
@@ -82,13 +82,13 @@ Invalid transitions return `422` with stable error code on Daemon API (see §2.7
 
 ### 2.5 Actionable set for prompt consumer
 
-Findings with status ∈ `{ open, triaged }` are included in `open_findings_block` (V1.48 naming preserved). Status `in_review` is **excluded** from produce prompts unless a future spec amends.
+Findings with status ∈ `{ open, triaged }` are included in `open_findings_block`. Status `in_review` is **excluded** from produce prompts unless a future spec amends.
 
 ### 2.6 Migration
 
 Existing rows remain valid. No automatic status rewrite on migration. Default for new rows: `open`.
 
-### 2.7 API error classification (V1.49 P0)
+### 2.7 API error classification
 
 | Error | Trigger | HTTP |
 | --- | --- | --- |
@@ -101,40 +101,31 @@ Existing rows remain valid. No automatic status rewrite on migration. Default fo
 
 | Preset ID | Role |
 | --- | --- |
-| `novel-chapter-review` | FL-E `review` stage — novel/work/chapter-aware review producer (findings writer); **V1.47 P0** shipped. Named `novel-chapter-review` (replaces the former generic `reflection-loop` demo). See §8 for output contract + [workflow-profile.md §5.3.3](workflow-profile.md#533-novel-chapter-review-gates-review-quality-pass) for preset gates. |
-| `novel-brainstorm` | Ideation from open findings (V1.39 P2) |
-| `novel-review-master` | Master decision surface (V1.39 P2) |
-| `novel-manuscript-audit` | On-demand chapter audit — review and/or extract (V1.44 P0; see [manuscript-audit.md](manuscript-audit.md)) |
+| `novel-chapter-review` | FL-E `review` stage — novel/work/chapter-aware review producer (findings writer). See §8 for output contract + [workflow-profile.md §5.3.3](workflow-profile.md#533-novel-chapter-review-gates-review-quality-pass) for preset gates. |
+| `novel-brainstorm` | Ideation from open findings |
+| `novel-review-master` | Master decision surface |
+| `novel-manuscript-audit` | On-demand chapter audit — review and/or extract (see [manuscript-audit.md](manuscript-audit.md)) |
 
-### 3.4 Review-master CLI surface (V1.45 P0–P2 — generic preset dispatch; **runner retired in v1.193 P2**)
+### 3.4 Review-master admission surface
 
-V1.44 shipped a dedicated `review-master` subcommand. V1.45 replaced it with the generic `creator run <preset_id>` entry — `creator run novel-review-master` was the preset-id form. **Both entries were removed in v1.193 P2**: no CLI preset-dispatch entrance exists today ([creator-run-preset-entry.md](../../archived/creator/2026-09-21-creator-run-preset-entry.md) is the historical Master). Preset admission goes through the core execution surface (schedule add via `POST /v1/daemon/orchestration/schedules`, served by `apps/nexus-service`); the retained CLI scheduling surface is `creator works cron` declaration editing. Findings listing lives on `creator works status`.
+There is no CLI preset-dispatch entrance (the retired dedicated `review-master` subcommand and the generic `creator run <preset_id>` entry are frozen in [creator-run-preset-entry.md](../../archived/creator/2026-09-21-creator-run-preset-entry.md)). Preset admission goes through the core execution surface (schedule add via `POST /v1/daemon/orchestration/schedules`, served by `apps/nexus-service`); the retained CLI scheduling surface is `creator works cron` declaration editing. Findings listing lives on `creator works status`.
 
-**Normative CLI (Shipped V1.45 — historical record, entry removed in v1.193 P2):**
-
-```bash
-nexus42 creator run novel-review-master [<work_id>] [--finding-id <id>] [--auto-schedule]
-```
+Normative semantics (per the archived Master body):
 
 | Behavior | Requirement |
 | --- | --- |
-| `--finding-id` | Runs or enqueues `novel-review-master` preset scoped to one finding |
-| `--auto-schedule` | Opt-in: enqueue `novel-review-master` when 96h stale findings exist (mirrors DF-67 Work setting) |
+| Finding-scoped run | Runs or enqueues `novel-review-master` scoped to one finding |
+| Auto-schedule | Opt-in: enqueue `novel-review-master` when 96h stale findings exist (mirrors DF-67 Work setting) |
 | Driver interaction | Must not fork or cancel active FL-E auto-chain driver |
 
 **Presentation** (minimum):
 
 - Use `creator works status` to list open findings with severity breakdown
-- Quickstart §5 updated to cite `creator run novel-review-master` as primary path (V1.45 P3 — historical; that cite was retired with the runner in v1.193 P2)
-- On empty findings: `creator works status [<work_id>]` surfaces a clear "no findings yet" message (rendered as `none open`); the former suggestion to `creator run novel-review-master` went with the removed runner in v1.193 P2 — master-decision review admission is via the execution surface (schedule add), not a CLI entry
-
-**Residual**: R-V143P0-002 — resolved V1.44 P1; close in P-last hygiene.
-
----
+- On empty findings: `creator works status [<work_id>]` surfaces a clear "no findings yet" message (rendered as `none open`); master-decision review admission is via the execution surface (schedule add), not a CLI entry
 
 ## 4. Rules architecture (DF-65)
 
-**V1.47 Shipped (normative)** — two-layer model (Layer 3 history removed). **Shipped runtime** (through V1.48) prefers `Works/<work_ref>/AGENTS.md` for Layer 2; legacy `Rules/novel-rules.md` read-only when absent.
+Two-layer model (a history layer is not part of the model). The runtime prefers `Works/<work_ref>/AGENTS.md` for Layer 2; legacy `Rules/novel-rules.md` read-only when absent.
 
 | Layer | Location | Mutability | Purpose |
 | --- | --- | --- | --- |
@@ -149,14 +140,14 @@ Rules are distinct from **SOUL** (creator voice) and **World KB** (fictional fac
 
 ## 5. Logs structure (DF-66)
 
-V1.39+ quality-loop work uses subdirectories under `Works/<work_ref>/Logs/`:
+Quality-loop work uses subdirectories under `Works/<work_ref>/Logs/`:
 
 ```text
 Works/<work_ref>/Logs/
   brainstorm/    # brainstorm session outputs
   write/         # drafting process logs
-  review/        # review outputs, findings notes, review-report.md (V1.48 producer)
-  kb/            # V1.51: KB candidate audit trails (pending/rejected/missing)
+  review/        # review outputs, findings notes, review-report.md (producer)
+  kb/            # KB candidate audit trails (pending/rejected/missing)
   publish/       # reserved until platform publish (DF-59)
 ```
 
@@ -166,7 +157,7 @@ Write discipline:
 2. Promotion to findings, rules, or KB must be explicit.
 3. `Logs/**` is **not** scanned by the chapter sync module ([sync-contract.md](sync-contract.md); [workflow-profile.md](workflow-profile.md) §7).
 
-### 5.5 Missing-KB detection at finalize (V1.51 T-A P2)
+### 5.5 Missing-KB detection at finalize
 
 When a `novel-writing` schedule completes and the active chapter transitions to `finalized`, the orchestration supervisor runs an advisory missing-KB scan over the finalized chapter prose. The scan reuses the same `nexus.llm.extract` pathway as review-time extraction (T-A P0), falling back to the capitalized-noun heuristic when no worker is available.
 
@@ -180,7 +171,7 @@ When a `novel-writing` schedule completes and the active chapter transitions to 
 6. **Idempotency**: re-running finalize on the same day overwrites the same log file so repeated transitions do not accumulate duplicate entries.
 7. **Best-effort**: errors are logged at `warn!` and do **not** fail the schedule terminal transition.
 
-### 5.6 Auto-promote high-confidence KB candidates (V1.52 T-A P0 — Normative)
+### 5.6 Auto-promote high-confidence KB candidates (Normative)
 
 The CLI command `creator world kb adopt --auto <world_ref>` promotes pending `kb_extract_jobs` rows to confirmed KnowledgeEntries without per-row author confirmation, provided every safety predicate holds:
 
@@ -221,11 +212,11 @@ Each candidate uses its own transaction with a CAS version guard (`kb_extract_jo
 
 ---
 
-## 8. Reflection-loop output contract (V1.47 Shipped)
+## 8. Reflection-loop output contract
 
-Heading preserved for back-compat with existing inbound cross-refs; the canonical preset id is `novel-chapter-review` (renamed in V1.47 P0).
+The canonical preset id is `novel-chapter-review`.
 
-**Scope**: Normative behavior for the FL-E `review` preset after P0 implement. Applies to **both** auto-chain review stage and on-demand preset admission (the on-demand CLI entry was `creator run <preset_id>`, retired in v1.193 P2).
+**Scope**: Normative behavior for the FL-E `review` preset after P0 implement. Applies to **both** auto-chain review stage and on-demand preset admission.
 
 ### 8.1 Inputs (minimum)
 
@@ -240,7 +231,7 @@ Heading preserved for back-compat with existing inbound cross-refs; the canonica
 
 1. On terminal success of review preset, call existing `create_finding_from_review` (or supervisor-equivalent) **≥1** time per review pass.
 2. Each finding MUST set: `work_id`, `chapter` (when known), `kind`, `severity`, `status=open`, `target_executor`, `body`.
-3. Optional `rule_suggestion` text MAY be stored on the finding row; accepting a suggestion does **not** mutate `Works/<work_ref>/AGENTS.md` in V1.47.
+3. Optional `rule_suggestion` text MAY be stored on the finding row; accepting a suggestion appends to `Works/<work_ref>/AGENTS.md` via the §9.3 accept path.
 
 ### 8.3 Idempotency
 
@@ -252,15 +243,15 @@ Finding creation MUST NOT fork or cancel the active FL-E auto-chain driver sched
 
 ---
 
-*Shipped V1.47. Quality-loop normative SSOT for this domain; profile gates in [workflow-profile.md §5.3.3](workflow-profile.md#533-novel-chapter-review-gates-review-quality-pass).*
+*Quality-loop normative SSOT for this domain; profile gates in [workflow-profile.md §5.3.3](workflow-profile.md#533-novel-chapter-review-gates-review-quality-pass).*
 
 ---
 
-## 9. V1.48 Shipped — Findings maturity (folded from the novel-findings-maturity overlay)
+## 9. Findings maturity
 
-V1.48 closes the novel quality loop: durable findings enrich the writing prompt, accepted suggestions mutate the runtime Layer 2, and a retention policy prevents unbounded growth.
+Findings maturity closes the novel quality loop: durable findings enrich the writing prompt, accepted suggestions mutate the runtime Layer 2, and a retention policy prevents unbounded growth.
 
-### 9.1 Producer (V1.48 P0)
+### 9.1 Producer
 
 - `novel-chapter-review` preset id hoisted to `crates/nexus-orchestration/src/preset_ids.rs::NOVEL_CHAPTER_REVIEW_PRESET_ID` (SSOT).
 - `Works/<work_ref>/Logs/review/review-report.md` is parsed to populate `kind`/`severity`/`body`/optional `rule_suggestion` per finding row (per §2.1 vocabulary).
@@ -268,37 +259,34 @@ V1.48 closes the novel quality loop: durable findings enrich the writing prompt,
 - Findings are persisted in a single SQLite transaction (idempotent retries).
 - R-V147P0-01 (review-report parsing), R-V147P0-05 (RVM schedule_id PK collision hotfix), R-V147P0-06 (preset-id SSOT) — **closed**.
 
-### 9.2 Consumer (V1.48 P1)
+### 9.2 Consumer
 
 - Open findings for the active `work_id` + chapter (or work-level with `chapter IS NULL`) are summarized into a `open_findings_block` and injected into `novel-writing` outline + draft prompts via the `{{open_findings_block}}` template variable.
-- Cap: 8 findings max, 400 chars/body, 3200 chars total block (per overlay §2.2).
+- Cap: 8 findings max, 400 chars/body, 3200 chars total block.
 - Empty input → no block (no sentinel noise; `{{#if open_findings_block}}` guard in templates).
 
-### 9.3 Rules runtime (V1.48 P2)
+### 9.3 Rules runtime
 
-- Runtime `read_rules_layers` prefers `Works/<work_ref>/AGENTS.md` (Layer 2 per V1.47 normative); falls back to legacy `Rules/novel-rules.md` read-only when `AGENTS.md` absent.
+- Runtime `read_rules_layers` prefers `Works/<work_ref>/AGENTS.md` (Layer 2 normative); falls back to legacy `Rules/novel-rules.md` read-only when `AGENTS.md` absent.
 - New scaffolds write `AGENTS.md` (not `Rules/novel-rules.md`).
 - Accept path: `creator works findings accept <finding_id>` appends a structured entry to `AGENTS.md` (idempotent on `finding_id` marker, atomic temp+rename, timestamped).
 - Reset path: `creator works rules reset [<work_id>]` restores the default scaffold (supports `--dry-run` for preview, `--yes`/`-y` to skip prompt; default prompts via `dialoguer`).
 - R-V147P0-04 (AGENTS.md runtime + accept + reset) — **closed**.
 
-> **Forward pointer (V1.166, DR-64):** §9.3 is the work-scoped three-layer rules runtime (`read_rules_layers`); it is distinct from the daemon check callback — post-V1.164 `POST /v1/daemon/check` runs the frozen mental checker pair (`stale_belief_drift` / `dramatic_irony_asymmetry`), and V1.166 adds the deterministic rule evaluator over world-scoped `spoke_rules` (four constraint families; empty `rule_refs` auto-includes `status=active`; foreign-world ids fail closed). Iteration locks: `v1.166-quality-loop-locks.md`.
+> **Work-scoped vs world-scoped rules runtimes (DR-64):** §9.3 is the work-scoped rules runtime (`read_rules_layers`); it is distinct from the check callback — `POST /v1/daemon/check` runs the frozen mental checker pair (`stale_belief_drift` / `dramatic_irony_asymmetry`), plus the deterministic rule evaluator over world-scoped `spoke_rules` (four constraint families; empty `rule_refs` auto-includes `status=active`; foreign-world ids fail closed). Iteration locks: `v1.166-quality-loop-locks.md`.
 
-### 9.4 Data hygiene (V1.48 P3)
+### 9.4 Data hygiene
 
 - Retention: `prune_resolved_findings_older_than(pool, now_epoch, retention_seconds)` DAO removes `resolved` rows whose `updated_at` is older than `RETENTION_DEFAULT_DAYS` (default 90 days). Skips `open` and `wont_fix` rows. CLI command (e.g. `creator works findings prune`) is a future wiring item; the DAO is the seam.
 - `FindingPatch.rule_suggestion` is tri-state `Option<Option<String>>`: `Some(Some(value))` sets, `Some(None)` clears to NULL, `None` leaves unchanged. Wire PATCH uses `deserialize_some` helper to accept explicit null.
 - New composite index `idx_findings_status_updated_at` on `(status, updated_at)`.
 - R-V147P0-02 (retention policy) and R-V147P0-03 (NULL clear) — **closed**.
 
-### 9.5 Acceptance (V1.48)
+### 9.5 Acceptance
 
 - All P0–P3 acceptance criteria pass hermetically.
-- All R-V147P0-* targets (6) closed in V1.48 (R-V147P0-01, 02, 03, 04, 05, 06).
-- R-V147P1-01 (intake re-trigger on existing Work) — **deferred to V1.49** (per V1.48 P4 §8).
+- All R-V147P0-* targets (6) closed (R-V147P0-01, 02, 03, 04, 05, 06).
+- R-V147P1-01 (intake re-trigger on existing Work) — **deferred**.
 
 ---
 
-## V1.45 supersession (P-last promotion)
-
-**Superseded by**: [creator-run-preset-entry.md](../../archived/creator/2026-09-21-creator-run-preset-entry.md) (Shipped Master V1.45). The `novel-review-master` preset id + enqueue-only semantics + audit preset ids are now part of the canonical Master body.

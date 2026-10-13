@@ -1,62 +1,23 @@
-# v1.207 Spec — Connect Replay/Negotiation Wire + Operation Receipts
+# Connect Replay/Negotiation Wire + Operation Receipts
 
-> **Status:** shipped (v1.207, PR #367) — the Connect event-delivery + durable
-> operation-receipt surface. Frozen 2026-10-07 (Phase 1 Review & Edit pass 2/3,
-> architect) with four in-flight amendments during delivery. Landed in tracked
-> specs at v1.207 close; the gitignored iteration-package copy remains the
-> working record of the amendment rounds.
+> **Status:** shipped — the Connect event-delivery + durable
+> operation-receipt surface. Frozen 2026-10-07.
 > **Document class:** Master (Connect event surface + operation-receipt store:
 > the durable contract for WS-lane event delivery, gap/reconcile, and the
 > receipt-first recover handshake).
 > **Coordinates with:** [spoke-adapter-architecture.md](spoke-adapter-architecture.md)
 > (the spoke-connect transport + manifest seam), `schemas/core/`
 > (subscribe/gap/receipt schemas), `knowledge/architecture-patterns/connect-event-delivery-and-operation-receipts.md`
-> (the distilled reusable shape).
-> Resolves compass Q1 and the P2/P3 architect markers; referenced by the
-> v1.207 iteration plans (P2 §A/§C, P3 §B/§C). Field names are named **once**
-> here (§C) — the plans point at this file instead of restating them.
+> (the distilled reusable shape). Field names are named **once** here (§C).
 >
 > **Promoted to**: `.mstar/knowledge/architecture-patterns/connect-event-delivery-and-operation-receipts.md`
-> (v1.207 §3.2 iteration-close, structured rewrite of the durable shape).
+> (structured rewrite of the durable shape).
 >
-> Source survey basis: HEAD 2026-10-07, read-only. Anchor citations at the
+> Source survey basis: 2026-10-07, read-only. Anchor citations at the
 > bottom; every placement claim below names the module it lands in.
 
-> Amended 2026-10-07 (Phase 2, architect): §A.2a added — the WS
-> event-delivery contract resolving the P2 Task 1 NEEDS_CONTEXT
-> (the P2 Task 1 report);
-> §C gained the §A.2a field rows. §A.1–§A.5 and §B are otherwise unchanged.
 
-> Amended 2026-10-07 (Phase 2, second pass, architect): §A.2a(f) added —
-> the composition-seam decision resolving the P2 Task 1 BLOCKED round
-> (same report); the §A.2 subscribe bullet is re-pointed to the WS
-> accept/responder lane; §A.2a(d)'s manifest-lockstep sentence is restated
-> (subscribe enters no node-lane set); §C gained the
-> `tools.nexus.subscribe` row. The §A.2a(a)–(e) wire contract, §A.3, §A.4,
-> §A.5 and §B are otherwise unchanged.
-
-> Amended 2026-10-07 (Phase 2, third pass, architect): §B.2 writer
-> admission ruled cooperative — the Connect receipt-writer path,
-> resolving the P3 Task 3 blocker
-> (the P3 Task 3 report);
-> §B.1 compute-Run `session` derivation confirmed run-scoped for the
-> session-less daemon lane. §A and §C are unchanged (both rulings are
-> P3-internal).
-
-> Amended 2026-10-07 (Phase 2, fourth pass, architect): §A.2a(f)4
-> ruled — the WS-lane host hello names `tools.nexus.deliver_events` as a
-> **reverse-use** capability, resolving the P2 Task 2 BLOCKED round
-> (the P2 Task 2 report):
-> the pinned consumer-side reverse-invoke dispatch gate
-> (`remote_adapter.rs:1051-1063`) reads the both-hello intersection
-> (`remote_adapter.rs:1707-1710`), so consumer-side advertisement alone
-> can never authorize the push. §A.2a(a)/(d)/(f)7 restated; the §C
-> `tools.nexus.deliver_events` row updated; source anchors gained the
-> gate/intersection citations. The id stays consumer-served, the
-> node-lane prohibition stands, and §A beyond §A.2a(a)/(d)/(f) and §B
-> are unchanged.
-
-## §A Connect replay/gap + optional-capability negotiation wire (P2)
+## §A Connect replay/gap + optional-capability negotiation wire
 
 ### A.1 Current-state finding (survey result)
 
@@ -69,9 +30,9 @@ an **invoke-only** spoke-connect surface: `invoke::SERVED_OPS`
 today** — the runtime has no HTTP listener at all (readiness is
 stdout-only, `docs/nexus-runtime.md:68`). The replayable run-event SSE
 rings (`crates/nexus-core/src/execution/run_events.rs`) are the
-current-host workflow surface and are **out of P2 scope** (plan boundary;
-v1.188/v1.195). P2 therefore adds a new, Connect-scoped event surface —
-it does not extend the workflow rings.
+current-host workflow surface and are **out of scope here** — this spec
+defines a new, Connect-scoped event surface that does not extend the
+workflow rings.
 
 ### A.2 Event surface placement
 
@@ -91,7 +52,7 @@ it does not extend the workflow rings.
   `schemas/core/core-connect-invoke-request.schema.json`) carrying the
   subscribe arguments `{stream, last_event_id?}`. Admission is fail-closed
   in the logical order session gate → capability advertisement (§A.5) →
-  op admission. Executing surface (second amendment — §A.2a(f)): the op is
+  op admission. Executing surface (§A.2a(f)): the op is
   served on the WS accept/responder lane under the `tools.` grammar as
   `tools.nexus.subscribe` (arguments ride the §4 `payload.arguments`
   convention there); it does NOT enter `SERVED_OPS`
@@ -103,7 +64,7 @@ it does not extend the workflow rings.
   `allowlist.rs:323-325` name the node-lane surface only; §A.2a(f)3 binds
   the logical gate order to the WS lane's concrete gates.
 
-### A.2a Event-delivery contract on the WS lane (Phase 2 amendment)
+### A.2a Event-delivery contract on the WS lane
 
 §A.2 places the event surface on the existing spoke-connect WS lane; this
 section defines how event pushes are multiplexed onto that lane next to
@@ -128,7 +89,7 @@ The push's own authorization is a separate gate: the pinned consumer-side
 reverse-invoke dispatch check evaluates the op against the both-hello
 intersection (`remote_adapter.rs:1051-1063`, constructed `:1707-1710`),
 so the delivery id must ALSO be named by the host WS-lane hello — the
-reverse-use carriage ruled in (f)4 (fourth amendment).
+reverse-use carriage ruled in (f)4.
 On success the handler performs the ring's atomic subscribe (replay cut +
 live-tail registration in one step, the `subscribe_live` precedent
 `run_events.rs:802`) with the verbatim `last_event_id`, then responds. The
@@ -213,10 +174,7 @@ node-lane manifest; the honesty machine's host-advertised ⇔ host-served
 invariant binds the NODE lane and is untouched).
 
 **(f) Composition seam — core-owned execution on the WS accept/responder
-lane (Phase 2, second amendment).** Decided on the P2 Task 1 BLOCKED
-evidence
-(the P2 Task 1 report):
-ONE owner for the subscription execution path. **Route (A), core-owned
+lane.** ONE owner for the subscription execution path. **Route (A), core-owned
 execution** — the ring, the subscription table, the subscribe serving
 path, and the ack-gated push loop are all owned by `nexus-core` on the WS
 accept/responder lane; the nexus42 node lane (`SpokeConnectNode` +
@@ -300,8 +258,7 @@ The seam (all edit points named):
    peer-tool set, AR-69). The consumer opts the session in by advertising
    `tools.nexus.subscribe` in its own hello (negotiation = intersection).
    The host WS-lane hello ALSO names `tools.nexus.deliver_events` — as a
-   **reverse-use** capability, not a serve claim (fourth amendment; the
-   P2 Task 2 BLOCKED ruling): the host announces that it will INVOKE
+   **reverse-use** capability, not a serve claim: the host announces that it will INVOKE
    this consumer-served op on the session and accepts the consumer's
    serving of it. This host-side carriage is REQUIRED by the pinned
    reverse-invoke authorization: the push is gated on the CONSUMER side
@@ -318,8 +275,7 @@ The seam (all edit points named):
    registered-or-deny arm (`responder.rs:1103-1111`) after the
    capability gate; it enters no host-SERVED set on either lane (item
    7). The consumer's native reverse gate (sequence + envelope-auth,
-   `remote_adapter.rs:927` `run_reverse_gate`) still runs first — the
-   pre-amendment text erred in naming it the only consumer-side check;
+   `remote_adapter.rs:927` `run_reverse_gate`) still runs first;
    the dispatch gate is the arm behind it. Join mechanics mirror the
    subscribe constant: a fixed reverse-use constant at the
    `daemon_manifest` composition (never allowlist-derived), joining
@@ -356,10 +312,9 @@ The seam (all edit points named):
    because `tools.nexus.subscribe` is advertised only in the lane's
    per-connection hello, which never exists without the lane. The lane is
    plaintext and loopback-only by fail-closed refusal
-   (`accept.rs:550-560`): the Connect event surface is loopback-only in
-   P2; remote event consumption is a future TLS decision, explicitly out
-   of scope. **Lane address disclosure (v1.210 P3, architect-locked in the
-   Phase 1 Review & Edit chain, 2026-10-10; ships with v1.210).** Both boot
+   (`accept.rs:550-560`): the Connect event surface is loopback-only;
+   remote event consumption is a future TLS decision, explicitly out
+   of scope. **Lane address disclosure.** Both boot
    surfaces print the event-lane address they actually bound (from the
    lane handle's bound address, never the config echo) as one stable,
    greppable readiness line — `event_lane: ws://<host>:<port>/connect` —
@@ -384,8 +339,8 @@ The seam (all edit points named):
    `manifest.rs:930-1011`, binds the node-lane manifest; the WS-lane
    reserved-set admission, `accept.rs:425`, governs peer-advertised
    tools and is unaffected — the host never invokes a peer's
-   `tools.nexus.subscribe`). **WS-lane-vs-node-lane distinction (fourth
-   amendment):** the node-lane hello's `capabilities[]` derives
+   `tools.nexus.subscribe`). **WS-lane-vs-node-lane distinction:**
+   the node-lane hello's `capabilities[]` derives
    exclusively from host-SERVED ops (`build_local_host_manifest`,
    `manifest.rs:310`, fed by `LOCAL_SERVED_OPS`, `manifest.rs:279`), so
    on the node lane "advertised ⇒ served" is the invariant the interop
@@ -401,7 +356,7 @@ The seam (all edit points named):
    classes are honest by construction; the pinned negotiation semantics
    (hello intersection) make no served/used distinction, and the §A.2a
    compatibility verdict stands — hello `capabilities[]` content is
-   product-defined session scope, so this amendment changes no external
+   product-defined session scope, so this changes no external
    protocol field, envelope kind, or behavior.
 
 ### A.3 Resume cursor
@@ -470,12 +425,12 @@ are the intersection of both hello `capabilities[]` lists
   refusal**: an op whose capability was not negotiated is refused
   `op_unsupported` at the spoke dispatch gate before any host handler runs
   (`docs/nexus-runtime.md:93-94`, `:141-143`; dispatch gate
-  `invoke.rs:486`). P2 pins this with a test (first-use without
-  negotiation ⇒ typed refusal, zero side effects) and adds any missing
-  gate arm for newly introduced optional capabilities — it does not add a
+  `invoke.rs:486`). This is pinned by a test (first-use without
+  negotiation ⇒ typed refusal, zero side effects); any missing gate arm
+  for newly introduced optional capabilities must be added — never a
   negotiation round-trip.
 
-## §B Durable operation receipts + stable operationId (P3)
+## §B Durable operation receipts + stable operationId
 
 ### B.1 operationId syntax and scope derivation
 
@@ -492,20 +447,19 @@ are the intersection of both hello `capabilities[]` lists
     carrying lane provides one (`ToolExecuteRequest.session_id`,
     `capabilities.rs:91`). The direct daemon lane's `RunRequest` carries
     no session field, so there the run's own id is the session component
-    (`session = run_id`, `compute.rs:1287-1303`; confirmed 2026-10-07,
-    third amendment) — a run-scoped shadow, unique per run, stable for
+    (`session = run_id`, `compute.rs:1287-1303`) — a run-scoped shadow, unique per run, stable for
     the run, reachable from the row by `subject_id`;
   - `action` = the op/tool id string;
   - `args` = canonical JSON of the operation arguments.
   Same logical call retried/replayed ⇒ identical tuple ⇒ identical id ⇒
   the receipt dedupes. Any scope difference (actor, session, action)
   changes the hash ⇒ collision-free across scopes.
-  Dedupe scope (third amendment): with `session = run_id`, compute
+  Dedupe scope: with `session = run_id`, compute
   receipts dedupe ONLY the same run's replay/recovery — two independent
   identical runs derive distinct ids and each executes (behavior
   preservation; a request-scoped derivation would dedupe every repeated
-  identical run repo-wide, a behavior change the P3 acceptance's
-  behavior-preserving clause does not authorize). Cross-retry replay
+  identical run repo-wide, a behavior change the behavior-preserving
+  clause does not authorize). Cross-retry replay
   dedupe by stable logical-call id is the Connect consumer's semantics
   (the peer-session-scoped ids above).
 - **Caller-supplied ids**: a caller MAY supply `args.operation_id`; it is
@@ -540,8 +494,7 @@ of the `compute_sessions` migrations
 | `created_at` / `updated_at` / `terminal_at` | RFC 3339 UTC |
 | `sequence` | monotonic, assigned at write time (journal precedent `CoreProviderOperation.sequence`) |
 
-- Writer admission (**ruled 2026-10-07, third amendment** — resolves the
-  P3 Task 3 Connect-writer blocker): the table is a **cooperative core
+- Writer admission (ruled cooperative 2026-10-07): the table is a **cooperative core
   table** under the core writer protocol, not engine-owned — because it
   is shared by the compute lane (engine writer) and the Connect host
   (DIRECT writer). The `guard_operation_receipts_*` family admits the
@@ -623,31 +576,31 @@ of the `compute_sessions` migrations
    - non-idempotent write without a terminal receipt ⇒ typed
      `uncertain`/`blocked` answer to the caller — never a blind retry.
 
-## §C Frozen cross-plan receipt-wire field ownership (P2 transport ↔ P3 semantics)
+## §C Frozen receipt-wire field ownership (transport ↔ receipt semantics)
 
-One owner per field; named once here. A field's owner is the only plan
-that may change its wire name or meaning; the other plan references this
+One owner per field; named once here. A field's owning section is the only
+one that may change its wire name or meaning; the other references this
 section.
 
 | wire field | owner | defined in | carried by |
 |------------|-------|------------|------------|
-| `operation_id` | **P3** | §B.1 (syntax + derivation) | P2 envelopes/gap events carry it **verbatim**, never rename or interpret |
-| `consumer`, `status`, `subject_id`, `request_fingerprint`, `result_json`, `error_json`, `created_at`, `updated_at`, `terminal_at`, `sequence` | **P3** | §B.2 (`CoreOperationReceipt` / `operation_receipts`) | receipt store + receipt read DTO only |
-| `id`, `event`, `data` (SSE frame) | **P2** | §A.2 (`SseFrame` dialect); wire carriage §A.2a(b) | Connect event stream — delivery batches (`frames[]`) |
-| `last_event_id` | **P2** | §A.3 | subscribe request payload |
-| `stream` | **P2** | §A.2a | subscribe request `args`, subscribe response, delivery arguments |
-| `epoch`, `resumed_from` | **P2** | §A.2a | subscribe response `result` |
-| `frames` (bounded frame batch) | **P2** | §A.2a(b) | delivery arguments of `tools.nexus.deliver_events` |
-| `tools.nexus.deliver_events` (delivery op / capability id) | **P2** | §A.2a, §A.2a(f)4 | host→consumer reverse-invoke op; consumer hello `capabilities[]` (serve declaration) AND host WS-lane hello `capabilities[]` (reverse-use session-scope carriage — the intersection both sides' dispatch gates read); consumer-served: enters no host-served set on either lane |
-| `tools.nexus.subscribe` (subscribe op / capability id) | **P2** | §A.2a(f) | consumer→host subscribe invoke op on the WS accept/responder lane; advertised in the WS-lane hello `capabilities[]` (host) and the consumer hello (opt-in); enters no node-lane set |
-| `reason`, `requires_transcript_reconciliation`, `resync_required`, `inspect_url` | **P2** | §A.4 (`CoreConnectGapEvent`) | gap event |
-| `operation_id_conflict` / `uncertain` / `operation_in_progress` refusal codes | **P3** | §B.1, §B.3 | typed refusals on any consumer surface (`operation_in_progress` = §B.3's typed Busy answer; ratified at v1.207 plan QC revalidation 2026-10-07) |
+| `operation_id` | **§B** | §B.1 (syntax + derivation) | §A envelopes/gap events carry it **verbatim**, never rename or interpret |
+| `consumer`, `status`, `subject_id`, `request_fingerprint`, `result_json`, `error_json`, `created_at`, `updated_at`, `terminal_at`, `sequence` | **§B** | §B.2 (`CoreOperationReceipt` / `operation_receipts`) | receipt store + receipt read DTO only |
+| `id`, `event`, `data` (SSE frame) | **§A** | §A.2 (`SseFrame` dialect); wire carriage §A.2a(b) | Connect event stream — delivery batches (`frames[]`) |
+| `last_event_id` | **§A** | §A.3 | subscribe request payload |
+| `stream` | **§A** | §A.2a | subscribe request `args`, subscribe response, delivery arguments |
+| `epoch`, `resumed_from` | **§A** | §A.2a | subscribe response `result` |
+| `frames` (bounded frame batch) | **§A** | §A.2a(b) | delivery arguments of `tools.nexus.deliver_events` |
+| `tools.nexus.deliver_events` (delivery op / capability id) | **§A** | §A.2a, §A.2a(f)4 | host→consumer reverse-invoke op; consumer hello `capabilities[]` (serve declaration) AND host WS-lane hello `capabilities[]` (reverse-use session-scope carriage — the intersection both sides' dispatch gates read); consumer-served: enters no host-served set on either lane |
+| `tools.nexus.subscribe` (subscribe op / capability id) | **§A** | §A.2a(f) | consumer→host subscribe invoke op on the WS accept/responder lane; advertised in the WS-lane hello `capabilities[]` (host) and the consumer hello (opt-in); enters no node-lane set |
+| `reason`, `requires_transcript_reconciliation`, `resync_required`, `inspect_url` | **§A** | §A.4 (`CoreConnectGapEvent`) | gap event |
+| `operation_id_conflict` / `uncertain` / `operation_in_progress` refusal codes | **§B** | §B.1, §B.3 | typed refusals on any consumer surface (`operation_in_progress` = §B.3's typed Busy answer) |
 
-P2 never defines receipt semantics or a competing receipt shape; P3 never
-defines SSE frame fields. Neither plan blocks the other's implementation
+§A never defines receipt semantics or a competing receipt shape; §B never
+defines SSE frame fields. Neither side blocks the other's implementation
 beyond this table.
 
-## Source anchors (HEAD 2026-10-07)
+## Source anchors (surveyed 2026-10-07)
 
 - `docs/nexus-runtime.md:53-61` — boot via `connect::build_host_config`;
   `:68` no HTTP in the runtime process; `:85-103` served ops + gates;
@@ -688,7 +641,7 @@ beyond this table.
   `tools.<ns>.<id>` requires its own id negotiated;
   `remote/remote_adapter.rs:414-415` — async `ToolHandler`; `:927` —
   consumer-side reverse gate (sequence + envelope-auth).
-- spoke-connect 0.14.1 (reverse-invoke authorization, fourth amendment):
+- spoke-connect 0.14.1 (reverse-invoke authorization):
   `remote/remote_adapter.rs:1707-1710` — dialer-side negotiated set =
   both-hello `capabilities[]` intersection (`:388-392` field doc: the
   dispatch gate for inbound invokes; responder-side mirror
@@ -737,26 +690,3 @@ beyond this table.
   `effect_committed_failure` (journal failure after commit = not
   retryable).
 
-- v1.207 P3 branch anchors for the §B.1/§B.2 rulings (Task-3 report
-  HEAD `412989b23`, branch `feat/v1.207-p3-op-receipts`):
-  `crates/nexus-local-db/migrations/20260919000001_operation_receipts.sql:37-57`
-  — table + payload CHECK; `:67-140` — `guard_operation_receipts_*`
-  (admission ruled cooperative, §B.2); `:150-164` — terminal
-  immutability; `:168-190` — outbox family.
-  `crates/nexus-local-db/src/operation_receipts.rs:262` / `:334` /
-  `:385` / `:410` — `begin_operation` / `settle_operation` /
-  `classify_recovery` / `recover` (admission-agnostic store).
-  `crates/nexus-local-db/src/writer_protocol.rs:65-69` — `WriterMode`;
-  `:807-811` — Direct holds the shared migration lock, never the
-  exclusive engine lock; `:921-963` — migration quiescence of
-  cooperative pools.
-  `crates/nexus-spoke-adapter/src/adapter/computable_port.rs:934-937`
-  and `apps/nexus42/src/commands/connect/invoke.rs:2190-2193` — the
-  Connect host's no-engine-ownership lock (untouched by the ruling);
-  `invoke.rs:432-435` / `:451` / `:898-975` — the Connect write routes
-  (the `LiveWrite` dispatch the receipt lifecycle wires into).
-  `crates/nexus-core/src/execution/compute.rs:254-263` — receipt begun
-  before the effect; `:1287-1303` — `compute_run_operation_id`
-  (`session = run_id`); `:1357-1397` — `recover_stuck_compute_runs`
-  asking by `subject_id`; `capabilities.rs:91` —
-  `ToolExecuteRequest.session_id`.

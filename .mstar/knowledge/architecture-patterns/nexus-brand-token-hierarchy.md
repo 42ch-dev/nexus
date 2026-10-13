@@ -23,15 +23,15 @@ last_updated: 2026-10-12
 
 # Nexus Brand & Design Token Hierarchy
 
-**Refreshed 2026-09-10** — re-based on v1.187 v0.5 "Precision Creative Tool" (cobalt / silver-neutral / graphite, offline system typography, compiler-owned projection); the v0.4 warm-paper/serif/cyan values it previously described are retired.
+**Current language: v0.5 "Precision Creative Tool"** (cobalt / silver-neutral / graphite, offline system typography, compiler-owned projection).
 
-**Track**: Knowledge (durable guidance distilled from V1.83 Brand UI Foundation; corrected V1.94; unified V1.98; recalibrated V1.121 v0.4 Literary Engine; re-based on v1.187 v0.5 "Precision Creative Tool").
+**Track**: Knowledge (durable guidance).
 
 ## Context
 
-Before V1.83, `apps/web/DESIGN.md` held both app-specific canvas/SOUL/findings tokens and de-facto brand colors. V1.83 introduced a publishable `@42ch/nexus-ui` package and root `DESIGN.md` / `DESIGN.dark.md` as the cross-application brand SSOT. **V1.98 unified the full token contract**: the root pair is the **sole** normative token SSOT (not just brand), `apps/web/DESIGN*.md` were deleted, and a shared `@nexus/design-tokens` workspace package (Tailwind preset + `tokens.css`) was extracted at `tooling/design-tokens/` so every app consumes one pipeline with no per-app duplicate `theme.extend`. A read-only `apps/design-studio` gallery visualizes the contract.
+The cross-application brand SSOT is the repo-root `DESIGN.md` / `DESIGN.dark.md` pair: it is the **sole** normative token SSOT (brand + app tokens). A publishable `@42ch/nexus-ui` package owns reusable brand artifacts, and a shared `@nexus/design-tokens` workspace package (Tailwind preset + `tokens.css`) is extracted at `tooling/design-tokens/` so every app consumes one pipeline with no per-app duplicate `theme.extend`. A read-only `apps/design-studio` gallery visualizes the contract; no per-app `DESIGN.md` exists.
 
-**v1.187 (`version: 0.5.0`)** recalibrated the language to a precision creative tool: silver-neutral light planes, graphite dark planes, cobalt interaction, offline system typography. The v0.4 warm-paper surfaces, global literary serif and cyan glow are retired values — they are not an alternative theme, and the public token *names* (`brand-deep-blue`, `brand-cyan`, `blue-*`, `brandColors.deepBlue/cyan/white`) are stable API identifiers that now carry the new pigments. Exact values live in the DESIGN pair; do not restate them elsewhere.
+The current language is v0.5 "Precision Creative Tool": silver-neutral light planes, graphite dark planes, cobalt interaction, offline system typography. The public token *names* (`brand-deep-blue`, `brand-cyan`, `blue-*`, `brandColors.deepBlue/cyan/white`) are stable API identifiers that carry the v0.5 pigments; the v0.4 warm-paper surfaces, literary serif and cyan glow are not an alternative theme. Exact values live in the DESIGN pair; do not restate them elsewhere.
 
 ## Guidance (the pattern)
 
@@ -67,11 +67,11 @@ When a light-surface interactive element uses an interaction-step fill (`blue-70
 
 **Audit trap:** grepping literals for the fill class **misses** semantic tokens that alias those fills (e.g. `setup-wizard-step-circle-active-*`, `footer-profile-avatar-*-active`). Scan `tokens.css` for light `blue-*` / `brand-cyan-*` active-bg pairs and verify the paired `*-text` token; prefer token SSOT fixes over component class overrides. Both pairs belong in the projection/audit evidence when adding theme-split active chrome.
 
-### Registered-scale-only rule (V1.98 lesson — qc1 W001)
+### Registered-scale-only rule (qc1 W001)
 
 A Tailwind utility class only emits a CSS rule if its scale step is **registered** in the shared preset. `bg-gray-alpha-150` produced no production CSS because the `gray-alpha` scale registers only `{100,200,300,400,500,600}` — the active nav highlight was silently invisible in the production bundle (JIT purges unregistered steps; dev may tolerate the artifact). **Use only scale steps that exist in `tooling/design-tokens/tailwind.preset.ts`**; verify gallery chrome against the production build, not just dev. See also [tailwind-theme-key-routing-for-sizing-tokens.md](tailwind-theme-key-routing-for-sizing-tokens.md) (a token under the wrong `theme.*` key likewise emits nothing).
 
-### Audit pattern (V1.94, still the shape to copy)
+### Audit pattern (the shape to copy)
 
 When introducing the rule or changing any button token: write a vitest test that captures the rendered `className` for every variant in both themes, plus explicit assertions encoding the background-driven rule. A regression that flips the dark primary label back to white will fail the assertions. Existing references: `packages/nexus-ui/src/components/button.test.tsx` and the consumer-side `apps/web/src/components/ui/button.test.tsx`. Assert the observable recipe contract, not incidental neighbouring classes — see [behavior-first-assertions-shared-ui.md](../testing-patterns/behavior-first-assertions-shared-ui.md).
 
@@ -95,15 +95,15 @@ Apps that consume `@42ch/nexus-ui` should run `pnpm --filter @42ch/nexus-ui run 
 
 ## Do NOT
 
-- Resurrect a per-app `DESIGN.md` mapping layer (V1.98 retired `apps/web/DESIGN*.md`); the root pair + `@nexus/design-tokens` is the SSOT.
+- Resurrect a per-app `DESIGN.md` mapping layer; the root pair + `@nexus/design-tokens` is the SSOT.
 - Hand-edit `tokens.css`, `packages/nexus-ui/theme.css` or the generated brand snapshot — they are derived outputs.
 - Define a per-app `theme.extend` token block that duplicates the shared preset.
-- Use a Tailwind scale step that is not registered in `tooling/design-tokens/tailwind.preset.ts` (it silently emits nothing in production — V1.98 qc1 W001).
+- Use a Tailwind scale step that is not registered in `tooling/design-tokens/tailwind.preset.ts` (it silently emits nothing in production — qc1 W001).
 - Put canonical brand hex values only in an app without root DESIGN + package alignment.
 - Export React components from `@42ch/nexus-ui` without following the bundler-agnostic asset convention (consumer resolves the SVG URL via its own bundler and passes it as a `src` prop — do NOT import `.svg` in package source; see [bundler-agnostic-component-library-assets.md](bundler-agnostic-component-library-assets.md)).
 - Commit runtime SVG logos through Git LFS (breaks text diffs and bundler inlining).
-- Treat the public name `brand-cyan` as a colour promise — it carries the theme's cobalt signal now, and the frozen logo assets intentionally keep their historical pigments.
-- Reintroduce the retired v0.4 language (warm-paper surfaces, serif display tier, neon cyan glow) as an alternative palette or a "light reset" scope.
+- Treat the public name `brand-cyan` as a colour promise — it carries the theme's cobalt signal, and the frozen logo assets intentionally keep their baked pigments.
+- Reintroduce the v0.4 language (warm-paper surfaces, serif display tier, neon cyan glow) as an alternative palette or a "light reset" scope.
 - Swap plain wide marks (`logoVariants`) for square plate lockups (`logoSquareVariants`) or vice versa.
 
 ## Examples
@@ -116,7 +116,7 @@ Apps that consume `@42ch/nexus-ui` should run `pnpm --filter @42ch/nexus-ui run 
 
 ---
 
-## Chronos dual-role + timeline logo (`2026-07-22-vi-logo-upgrade`, values re-based v1.187)
+## Chronos dual-role + timeline logo
 
 Chronos Light/Dark shells share one brand language via an explicit **dual-role** model. Normative tables live in root `DESIGN.md` §Brand Colors; this section is the agent-facing operational summary.
 
@@ -129,13 +129,13 @@ Chronos Light/Dark shells share one brand language via an explicit **dual-role**
 
 **Token strategy (unchanged in shape, new values):** the light and dark `blue-*` scales both carry the interactive accent, so component tokens that reference `{colors.blue-700}` follow the accent in both themes without renaming CSS keys. Ink structure must use **`brand-deep-blue` explicitly** — the generic scale is the action scale.
 
-### Failure mode that cost a QC fix-wave (W-001) — the durable lesson
+### Failure mode: deep-ink vs the generic interaction scale (W-001)
 
-After a scale reinterpretation, surfaces that still meant **deep structure** but used the generic interaction scale (`border-blue-700/20 bg-blue-700/10 text-blue-700`) rendered as accent washes — fingerprint trust/match cards on connection-setup violated `DESIGN.md` `connection-setup.security-note`. Fix: deep-ink classes (`border-brand-deep-blue/20`, `bg-brand-deep-blue/10`, `text-brand-deep-blue`) plus regression assertions that **exclude** the generic scale on those nodes.
+Surfaces that still mean **deep structure** but use the generic interaction scale (`border-blue-700/20 bg-blue-700/10 text-blue-700`) render as accent washes — fingerprint trust/match cards on connection-setup violate `DESIGN.md` `connection-setup.security-note`. Fix: deep-ink classes (`border-brand-deep-blue/20`, `bg-brand-deep-blue/10`, `text-brand-deep-blue`) plus regression assertions that **exclude** the generic scale on those nodes.
 
 **Heuristic:** if DESIGN or a component token names ink/structure/security-note/titlebar/link-on-light, use `brand-deep-blue` — never assume the generic scale means "deep".
 
-### Timeline logo system (V1.132 plain vs square split — assets unchanged by v0.5)
+### Timeline logo system (plain vs square split)
 
 | Contract | Package key | Asset | Role |
 | --- | --- | --- | --- |
@@ -149,17 +149,17 @@ After a scale reinterpretation, surfaces that still meant **deep structure** but
 
 **Compact scale:** `logoCompactMarkHeightPx` = 14px (−30% from `logoShellHeightPx` 20px) — titlebar, Brand hero mini.
 
-**Asset boundary (v0.5):** the SVG/PNG assets keep their historical baked pigments. That is deliberate: installed-identity assets are references, not live token swatches. `NexusMark` is the inline `currentColor` mark driven by shared tokens; Brand separates installed asset references from live token/CSS swatches. Do not recolor assets with CSS filters to simulate a new logo, and do not regenerate desktop icons from this change.
+**Asset boundary:** the SVG/PNG assets keep their baked pigments. That is deliberate: installed-identity assets are references, not live token swatches. `NexusMark` is the inline `currentColor` mark driven by shared tokens; Brand separates installed asset references from live token/CSS swatches. Do not recolor assets with CSS filters to simulate a new logo, and do not regenerate desktop icons from this change.
 
-**macOS app icon (V1.135 P1 / V1.136 — desktop-domain, unaffected by v0.5):**
+**macOS app icon (desktop-domain):**
 
-1. **H1 (retain):** Canvas must stay **fully opaque RGB** (`hasAlpha: false`) — never transparent margins/`INSET_RATIO` alpha that defeat the macOS squircle mask.
+1. **H1:** Canvas must stay **fully opaque RGB** (`hasAlpha: false`) — never transparent margins/`INSET_RATIO` alpha that defeat the macOS squircle mask.
 2. **H6:** Bake a **visible squircle plate** in `compose-app-icon.mjs` — opaque plate-colour canvas + ~6% opaque inset + ~22% corner radius clip (margin pixels remain plate colour, not alpha).
-3. **H6 contrast (V1.136):** Margin/plate **must not share the same hex** — same-colour bakes yield 0 non-plate border pixels (geometry exists but is invisible). Use a contrasting margin and verify with a border-pixel scan before claiming compose success.
+3. **H6 contrast:** Margin/plate **must not share the same hex** — same-colour bakes yield 0 non-plate border pixels (geometry exists but is invisible). Use a contrasting margin and verify with a border-pixel scan before claiming compose success.
 4. **H7:** `pnpm dev:desktop` must run `icons:generate` before the Electron desktop dev launch.
 5. **Done gate:** a live Dock squircle confirm — Studio VI-004 / PNG opacity alone are **not** Dock-done.
 
-**Removed:** `logo-color.svg` / `logoVariants.color` — redundant; do not resurrect.
+**Do not resurrect** `logo-color.svg` / `logoVariants.color` (redundant).
 
 **Shell rule:** sidebar plate uses `logo-primary-square.svg` at `logoShellHeightPx`; ink titlebar uses plain `logo-white.svg` at `logoCompactMarkHeightPx`. Do not theme-split shell lockups by light/dark.
 
@@ -167,7 +167,7 @@ After a scale reinterpretation, surfaces that still meant **deep structure** but
 
 ### Audit pattern additions (logo/brand)
 
-- Button: assert the light primary recipe (`blue-700` fill + `brand-white` label) and the dark primary recipe (`blue-700` fill + `brand-deep-blue` label); assert absence of the retired cyan-fill primary.
+- Button: assert the light primary recipe (`blue-700` fill + `brand-white` label) and the dark primary recipe (`blue-700` fill + `brand-deep-blue` label); assert absence of a cyan-fill primary.
 - Focus band: `components.focus-ring` — 2px background gap + 2px `blue-700` outer band, in both themes.
 - Links: light retry/list links assert `brand-deep-blue`; a light link using the generic interaction scale is a smell.
 - Security / structure washes: assert `brand-deep-blue` alpha classes and **no** interaction-scale class on those nodes.
@@ -175,9 +175,9 @@ After a scale reinterpretation, surfaces that still meant **deep structure** but
 
 ---
 
-## v0.5 design-language additions (v1.187)
+## v0.5 design-language
 
-These replaced the v0.4 values wholesale; the DESIGN pair is the value authority, the rules below are the durable part.
+The DESIGN pair is the value authority; the rules below are the durable part.
 
 ### Surfaces and signal
 
@@ -191,7 +191,7 @@ These replaced the v0.4 values wholesale; the DESIGN pair is the value authority
 - Interface and content display both use the OS sans stack with named simplified-Chinese fallbacks (`system-ui` → Apple/Segoe UI → PingFang SC / Hiragino Sans GB / Microsoft YaHei UI / Noto Sans CJK SC). No network font request; do not claim identical glyph metrics across operating systems.
 - The display tier (`display-32/24/20`) remains a **larger title hierarchy**, not a different typeface; `font-display`, `display-*` utilities and `CardTitle.voice="content"` stay valid. Mono uses the OS monospace stack with CJK sans fallback.
 - Reading measure 66ch, line-height 1.75, paragraph gap 1.25em in both themes; containers constrain the measure rather than shrinking the type.
-- The V1.121 Source Serif 4 font-face declarations and Studio preloads are **removed from the active pipeline**; the pattern that wired them (and what a future reintroduction must do differently, given `tokens.css` is now generated) is recorded in [self-hosted-ofl-font-wiring.md](self-hosted-ofl-font-wiring.md).
+- No self-hosted font-face declarations or Studio preloads are in the active pipeline; the pattern for reintroducing one (and what the generated `tokens.css` requires) is recorded in [self-hosted-ofl-font-wiring.md](self-hosted-ofl-font-wiring.md).
 
 ### Shape, elevation, motion, focus
 
@@ -204,7 +204,7 @@ These replaced the v0.4 values wholesale; the DESIGN pair is the value authority
 
 Layout metrics (canvas node widths, dialog/sheet sizing) live in **structural** CSS variables (`--canvas-node-width-*`, `--dialog-width`, `--sheet-width`, `--dialog-max-height`), **not** `--color-*`. The `sv()` helper (structural var) in `tailwind.preset.ts` resolves them under `minWidth`, `width`, `maxWidth`, `maxHeight` keys — not `colors`. The compiler projects these names explicitly; the projection is the guard (a structural token has no `--color-` twin to drift into).
 
-### twMerge registry hardening (V1.121, retained)
+### twMerge registry hardening
 
 Token-derived class groups are registered in `packages/nexus-ui/src/lib/cn.ts` so they merge within their own group instead of being stripped:
 
@@ -219,15 +219,15 @@ Token-derived class groups are registered in `packages/nexus-ui/src/lib/cn.ts` s
 | `max-w` | `max-w-dialog` |
 | `max-h` | `max-h-dialog` |
 
-**Threat model**: the V1.94 silent-strip class of bug — an unregistered display-size class misparsed as a text-colour class and dropped by `twMerge`. `packages/nexus-ui/src/lib/cn.test.ts` asserts representative classes from each new group survive `twMerge()` against conflicting defaults.
+**Threat model**: the silent-strip bug class — an unregistered display-size class misparsed as a text-colour class and dropped by `twMerge`. `packages/nexus-ui/src/lib/cn.test.ts` asserts representative classes from each new group survive `twMerge()` against conflicting defaults.
 
 ### Projection gate
 
-`pnpm --filter @nexus/design-tokens check` regenerates the three derived artifacts from the DESIGN pair and compares them byte-for-byte, plus asserts leaf/var parity and rejects stale v0.4 pins. It **replaced** the older hand-written needle list: the compiler's fail-closed rules and the byte comparison are what make a landing provable now — see [design-pair-token-compiler.md](design-pair-token-compiler.md) and [component-variant-token-projection.md](component-variant-token-projection.md).
+`pnpm --filter @nexus/design-tokens check` regenerates the three derived artifacts from the DESIGN pair and compares them byte-for-byte, plus asserts leaf/var parity and rejects stale v0.4 pins. The compiler's fail-closed rules and the byte comparison are what make a landing provable — see [design-pair-token-compiler.md](design-pair-token-compiler.md) and [component-variant-token-projection.md](component-variant-token-projection.md).
 
 ### Canvas colour discipline
 
-Every canvas/outline/worldkb/timeline/SOUL/annotation colour resolves from the brand semantic scales (no Tailwind-palette leftovers). Per-surface accent spines stay distinct (strategy / outline / worldkb / timeline / layer accents) and canvas stays neutral with a subtle decorative grid; hierarchy comes from the node plane, border, selection ring/state text and semantic spine. The v0.4 hue-mapping appendix is retired — the rule is now simply "these families project from the same scales as everything else".
+Every canvas/outline/worldkb/timeline/SOUL/annotation colour resolves from the brand semantic scales (no Tailwind-palette leftovers). Per-surface accent spines stay distinct (strategy / outline / worldkb / timeline / layer accents) and canvas stays neutral with a subtle decorative grid; hierarchy comes from the node plane, border, selection ring/state text and semantic spine. The rule is simply "these families project from the same scales as everything else".
 
 ### Reading-chrome tokenization
 

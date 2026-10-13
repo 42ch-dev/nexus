@@ -130,7 +130,7 @@ pnpm run build:desktop -- --arch arm64   # native arch is the default
 
 ## Worktree lifecycle and reclamation
 
-A feature track is opened, measured and reclaimed inside the slice that owns it: a feature's cache and worktree are never parked until the end of an iteration. Reclamation is immediate and scoped, and it is never a reason to serialize independent work — in v1.190 six concurrent targets consumed 98 GiB under `/tmp` in a single iteration and degraded the host, so each slice reclaims its own footprint as soon as it is done with it.
+A feature track is opened, measured and reclaimed inside the slice that owns it: a feature's cache and worktree are never parked until the end of an iteration. Reclamation is immediate and scoped, and it is never a reason to serialize independent work — each slice reclaims its own footprint as soon as it is done with it.
 
 ### Sizing concurrency (resource budget)
 
