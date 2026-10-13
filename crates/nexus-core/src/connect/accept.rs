@@ -31,7 +31,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -77,6 +77,9 @@ pub struct ObservedTransport {
     closed_notify: Notify,
     pending_subscribe: Mutex<HashMap<String, String>>,
     session: Mutex<Option<String>>,
+    /// Outbound envelopes dropped without activating a delivery
+    /// (`R-V1207-P2-S3A`): the payload-blind `observe_outbound` returns.
+    outbound_drops: AtomicU64,
 }
 
 impl ObservedTransport {
@@ -88,6 +91,7 @@ impl ObservedTransport {
             closed_notify: Notify::new(),
             pending_subscribe: Mutex::new(HashMap::new()),
             session: Mutex::new(None),
+            outbound_drops: AtomicU64::new(0),
         })
     }
 
@@ -122,6 +126,7 @@ impl ObservedTransport {
 
     fn observe_outbound(&self, envelope: &[u8]) {
         let Ok(value) = serde_json::from_slice::<serde_json::Value>(envelope) else {
+            self.record_outbound_drop("unreadable outbound envelope");
             return;
         };
         let Some(request_id) = value.get("request_id").and_then(serde_json::Value::as_str) else {
@@ -134,6 +139,7 @@ impl ObservedTransport {
             .remove(request_id);
         let Some(stream) = stream else { return };
         if value.pointer("/payload/result").is_none() {
+            self.record_outbound_drop("outbound response missing /payload/result");
             return;
         }
         let session = self
@@ -146,9 +152,29 @@ impl ObservedTransport {
         }
     }
 
+    /// Record an outbound envelope dropped without activating a delivery
+    /// (`R-V1207-P2-S3A`). The drop stays non-fatal — the subscription is
+    /// simply never enabled — so the signal is a counter + warn line, never
+    /// a `send` error.
+    fn record_outbound_drop(&self, reason: &'static str) {
+        self.outbound_drops.fetch_add(1, Ordering::Relaxed);
+        tracing::warn!(
+            reason,
+            "outbound envelope dropped without activating a delivery"
+        );
+    }
+
     #[must_use]
     pub fn is_closed(&self) -> bool {
         self.closed.load(Ordering::SeqCst)
+    }
+
+    /// How many outbound envelopes were dropped without activating a
+    /// delivery (`R-V1207-P2-S3A`) — the diagnostic counter for the
+    /// payload-blind `observe_outbound` returns.
+    #[must_use]
+    pub fn outbound_drops(&self) -> u64 {
+        self.outbound_drops.load(Ordering::Relaxed)
     }
     fn closed_notified(&self) -> impl Future<Output = ()> + '_ {
         self.closed_notify.notified()
@@ -1249,6 +1275,52 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(pushed.len(), 1);
+        registry.remove_session(&session);
+        pair.server.close().await.unwrap();
+    }
+
+    /// S1 (`R-V1207-P2-S3A`): the two payload-blind `observe_outbound`
+    /// branches — an unparseable response envelope, and a response whose
+    /// `/payload/result` is absent — dropped the activation silently. Both
+    /// drops must now be observable through the per-transport counter.
+    #[tokio::test]
+    async fn payload_blind_outbound_drops_are_observable() {
+        let session = format!("drop-{}", uuid::Uuid::new_v4());
+        let stream = format!("stream-{}", uuid::Uuid::new_v4());
+        let registry = crate::connect::events::connect_event_registry().clone();
+        registry.open_session(&session);
+        let pair = spoke_connect::remote::loopback_transport_pair();
+        let observed = ObservedTransport::new(Arc::new(pair.client) as Arc<dyn Transport>);
+        observed.bind_session(&session);
+
+        // Arm a pending subscribe so a matching response reaches the
+        // payload check rather than the earlier lifecycle returns.
+        send_subscribe_request(&pair.server, &stream, "subscribe-1").await;
+        observed.recv().await.unwrap();
+        assert_eq!(observed.outbound_drops(), 0);
+
+        // (a) Unparseable response envelope.
+        observed.send(b"{ not json").await.unwrap();
+        assert_eq!(observed.outbound_drops(), 1, "unparseable drop must count");
+
+        // (b) Parseable response with a matching request_id but no
+        // `/payload/result`.
+        observed
+            .send(
+                serde_json::to_vec(&serde_json::json!({
+                    "request_id": "subscribe-1", "payload": {}
+                }))
+                .unwrap()
+                .as_slice(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            observed.outbound_drops(),
+            2,
+            "missing /payload/result drop must count"
+        );
+
         registry.remove_session(&session);
         pair.server.close().await.unwrap();
     }
