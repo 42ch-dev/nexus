@@ -114,7 +114,7 @@ export class DesktopQuitController {
 
   private async decide(): Promise<boolean> {
     const status = this.controller.getStatus();
-    // Shipped semantics (`apps/desktop/src-tauri/src/lib.rs` quit prompt): with
+    // Shipped semantics (retired native-host quit prompt): with
     // nothing this app runs or is attached to, there is no service to stop or
     // keep, so the quit is not gated by a dialog.
     if (status.state === 'stopped') return true;

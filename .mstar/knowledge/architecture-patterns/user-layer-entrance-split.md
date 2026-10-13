@@ -60,7 +60,7 @@ An axis that changes what is visible must be consumed by **every shell surface t
 ### 4. Persistence seams mirror `setup_completed`
 
 - Browser: `localStorage` key (`nexus-entrance`), key convention from the existing locale/active-creator keys.
-- Desktop: Tauri IPC pair (`get_entrance` / `set_entrance`) shaped exactly like the `setup_completed` pair — same `~/.nexus42/config.toml` file and durability class; screens depend on the `DesktopCapabilities` interface, never `window.__TAURI__`.
+- Desktop: the IPC pair (`get_entrance` / `set_entrance`) shaped exactly like the `setup_completed` pair — same `~/.nexus42/config.toml` file and durability class; screens depend on the `DesktopCapabilities` interface, never the host global.
 - Provider semantics: desktop reads via IPC on mount, fail-open → default on command error; browser reads synchronously; **no optimistic write** (a landing-layout switch must not flash the wrong tree); unset resolves default **without writing** storage until the user confirms; a stored-but-unparseable value resolves default.
 - The daemon never sees the axis — no `state.db` column, no HTTP header.
 

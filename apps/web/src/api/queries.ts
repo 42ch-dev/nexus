@@ -886,7 +886,7 @@ export function usePatchChapter(workId: string | undefined) {
  * Resolve the active creator id from client context.
  *
  * V1.94: the footer profile switcher stores the selected creator id in
- * {@link ActiveCreatorProvider} (backed by localStorage / Tauri store). Memory
+ * {@link ActiveCreatorProvider} (backed by localStorage / desktop store). Memory
  * and other creator-scoped queries read that value. When no explicit selection
  * exists yet, callers can fall back to deriving one from sessions or creators.
  */
@@ -1081,7 +1081,7 @@ export function usePendingReviewCount(creatorId: string | undefined) {
     refetchInterval: MEMORY_COUNT_POLL_MS,
     // Intentionally NO `refetchIntervalInBackground: true`: TanStack pauses
     // `refetchInterval` when the tab/window is hidden by default, which keeps
-    // this 10s poll from draining battery/CPU on the Tauri desktop shell and
+    // this 10s poll from draining battery/CPU on the desktop shell and
     // backgrounded browser tabs. Do not add `refetchIntervalInBackground` here
     // without a deliberate reason — this is a battery-sensitive surface.
   });
@@ -1101,8 +1101,8 @@ export function useMemoryFragments(
     refetchInterval: options?.refetchInterval,
     // Intentionally NO `refetchIntervalInBackground: true`: TanStack pauses
     // `refetchInterval` when the tab/window is hidden by default, which keeps a
-    // SOUL auto-refresh poll from draining battery/CPU on the Tauri desktop
-    // shell and backgrounded browser tabs (matches usePendingReviewCount).
+    // SOUL auto-refresh poll from draining battery/CPU on the desktop shell and
+    // backgrounded browser tabs (matches usePendingReviewCount).
   });
 }
 
@@ -1281,7 +1281,7 @@ export function useReviewMemory() {
  * fragments captured by a background review surface in the viz + narrative
  * stale-detection without a manual reload. Conservative vs. the 10s
  * pending-review badge: the SOUL surface is a reflection view, not a live
- * action queue, so a slower cadence keeps the Tauri desktop shell light.
+ * action queue, so a slower cadence keeps the desktop shell light.
  */
 export const SOUL_REFETCH_MS = 30_000;
 

@@ -83,7 +83,7 @@ A data-dense table (same register as the Control Room dashboards in §1) with an
 ### 5.3 Body read-only context menu
 
 - **"Copy path" only.** The body is rendered read-only (frontmatter-aware header strip + rendered prose). The right-click menu offers **Copy path** (browser clipboard write; path sourced from the API).
-- **Explicitly out of scope (V1.66 Tauri)**: "Open with…" and "Reveal in file manager" are **native-shell** desktop-integration actions (compass §0 Q5), not browser capabilities. The V1.65 design must not imply them — no greyed-out "Open with…" entries that tease an unavailable action. When the Tauri shell lands in V1.66 these become real entries via `TauriClient`; the V1.65 browser menu simply does not contain them. **(shipped V1.66)**
+- **Explicitly out of scope (V1.66 native desktop shell)**: "Open with…" and "Reveal in file manager" are **native-shell** desktop-integration actions (compass §0 Q5), not browser capabilities. The V1.65 design must not imply them — no greyed-out "Open with…" entries that tease an unavailable action. When the native shell lands in V1.66 these become real entries via `DesktopClient`; the V1.65 browser menu simply does not contain them. **(shipped V1.66)**
 
 ### 5.4 Light + dark theme parity (carried from V1.64)
 
@@ -114,9 +114,9 @@ All three V1.65 component classes — editor, table, context menu — must ship 
 
 ## 6. V1.66 desktop shell surface — component design requirements
 
-> **Host note (v1.192, RFT-11):** the Tauri desktop host was retired; the repository has exactly one desktop host — Electron, contract [desktop-shell.md](../../active/surfaces/desktop-shell.md). The surface classes below (window chrome, app menu, native dialogs, desktop context menu, daemon-status indicator) remain the product design requirements for that host.
+> **Host note (v1.192, RFT-11):** the native desktop host was retired; the repository has exactly one desktop host — Electron, contract [desktop-shell.md](../../active/surfaces/desktop-shell.md). The surface classes below (window chrome, app menu, native dialogs, desktop context menu, daemon-status indicator) remain the product design requirements for that host.
 
-V1.66 wrapped the V1.65 SPA in a Tauri v2 desktop shell (see [web-ui.md](../../active/surfaces/web-ui.md) §14); since v1.192 the host is Electron ([desktop-shell.md](../../active/surfaces/desktop-shell.md)). The shell introduces surface classes whose look/feel the design system must serve. As in §1–§5, this section fixes *product intent and constraints* — token values remain `@architect`'s in repo-root `DESIGN.md` **Desktop Shell Supplement** *(authored under `apps/web/DESIGN.md` pre-V1.98)* (**Standard+ desktop supplement** this iteration; Production polish — custom title bar, animated transitions, system tray — stays V1.67+).
+V1.66 wrapped the V1.65 SPA in a native v2 desktop shell (see [web-ui.md](../../active/surfaces/web-ui.md) §14); since v1.192 the host is Electron ([desktop-shell.md](../../active/surfaces/desktop-shell.md)). The shell introduces surface classes whose look/feel the design system must serve. As in §1–§5, this section fixes *product intent and constraints* — token values remain `@architect`'s in repo-root `DESIGN.md` **Desktop Shell Supplement** *(authored under `apps/web/DESIGN.md` pre-V1.98)* (**Standard+ desktop supplement** this iteration; Production polish — custom title bar, animated transitions, system tray — stays V1.67+).
 
 ### 6.1 Window chrome
 

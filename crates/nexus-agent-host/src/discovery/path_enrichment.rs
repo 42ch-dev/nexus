@@ -5,7 +5,7 @@
 //! CLI binaries and the Host mount probe share one implementation, and the
 //! daemon never gains a Host dependency or an app dependency.
 //!
-//! macOS GUI apps (including the Tauri desktop shell) often inherit a minimal
+//! macOS GUI apps (including the desktop host) often inherit a minimal
 //! PATH such as `/usr/bin:/bin:/usr/sbin:/sbin`. Homebrew and user-local agent
 //! CLIs under `/opt/homebrew/bin` or `~/.local/bin` are then invisible to
 //! `which::which` during a provider scan.

@@ -78,7 +78,7 @@ App integration tests should cover at least one entity kind (Work); symmetric Wo
 
 - **IA clarity**: Authors see Create when nothing is selected and a distinct Controller surface when an entity is active — matching the long-term Control Room loop without prematurely building Controller business widgets.
 - **Boundary hygiene**: Context SSOT prevents route-param hacks that would fight canvas deep links and work-shell navigation.
-- **Studio parity**: Fixtures prove both modes before daemon/Tauri dogfood cost.
+- **Studio parity**: Fixtures prove both modes before daemon dogfood cost.
 
 ## When to Apply
 

@@ -25,8 +25,8 @@
  *      - `client.worldKbPatchRelationship` is NOT called (relationships are
  *        read-only on Timeline in V1.122).
  *      - `client.worldKbPromoteCandidate` is NOT called.
- *      - No raw-file write path: no `fetch PUT` to a file route; no Tauri
- *        `invoke` writing to disk.
+ *      - No raw-file write path: no `fetch PUT` to a file route; no desktop
+ *        IPC writing to disk.
  *
  * The pure conflict extraction (`extractTimelineConflict`) is covered
  * separately at the bottom — it has no React dependencies.

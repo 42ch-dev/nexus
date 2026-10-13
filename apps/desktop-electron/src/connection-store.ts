@@ -2,7 +2,7 @@
  * Connection credential store (v1.192 P0-T5).
  *
  * Encrypted main-process store for the remote connection config, replacing
- * the Tauri-era OS-keychain-with-plaintext-fallback (D-18):
+ * the legacy OS-keychain-with-plaintext-fallback (D-18):
  *
  * - Secrets are encrypted with Electron `safeStorage` before touching disk;
  *   the renderer only ever receives the redacted public projection.

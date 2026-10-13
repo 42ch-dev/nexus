@@ -195,7 +195,7 @@ export function httpOriginForBindHost(host: string, port: number): string {
 
 /**
  * Production desktop app origin (`nexus://app`), frozen by the host contract.
- * The obsolete Tauri-only origins are replaced by exactly this one; loopback and
+ * The obsolete native-host-only origins are replaced by exactly this one; loopback and
  * Vite dev origins stay, the `NEXUS_DAEMON_ALLOWED_ORIGINS` escape hatch stays,
  * and no wildcard or null-origin relaxation is added.
  */

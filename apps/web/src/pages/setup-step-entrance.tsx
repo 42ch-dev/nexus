@@ -21,7 +21,7 @@ interface SetupStepEntranceProps {
  * locked EL §2 copy; the choice is cheap and daemon-independent, so it comes
  * first and the remaining steps can frame themselves for the chosen layout.
  * The selection is written into `WizardState.entrance` immediately; the
- * wizard's `finish()` persists it (Tauri IPC / localStorage) before marking
+ * wizard's `finish()` persists it (desktop IPC / localStorage) before marking
  * setup completed.
  */
 const OPTIONS: readonly { id: EntranceId; titleKey: string; descriptionKey: string }[] = [

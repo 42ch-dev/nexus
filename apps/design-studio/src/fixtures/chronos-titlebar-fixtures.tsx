@@ -148,7 +148,7 @@ export function ChronosTitlebarFixtures() {
 
       <FixtureFrame
         title="Desktop drag contract (light + dark)"
-        description={`Logo/title paint, safe inset (${CHRONOS_TITLEBAR_DESKTOP_INSET_PX}px), and flex spacer carry data-tauri-drag-region; gear/theme/health cluster opts out (no-drag). Mark uses draggable={false}; title uses select-none.`}
+        description={`Logo/title paint, safe inset (${CHRONOS_TITLEBAR_DESKTOP_INSET_PX}px), and flex spacer are plain non-interactive chrome; gear/theme/health cluster stays interactive. Mark uses draggable={false}; title uses select-none.`}
         testId="chronos-titlebar-fixture-drag-contract"
       >
         <div className="grid gap-4">

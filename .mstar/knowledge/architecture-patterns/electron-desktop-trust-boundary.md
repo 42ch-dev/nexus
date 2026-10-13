@@ -29,7 +29,7 @@ tags:
 
 ## Context
 
-v1.192 replaced the Tauri desktop shell with an Electron host (`apps/desktop-electron`) while keeping the product — the same `apps/web` SPA, setup flow, workspace semantics and TS service — behind it. The host's security model is the classic Electron three-process shape: a privileged **main** process owning OS actions, config, credentials, windows and service lifecycle; a **sandboxed renderer** (`sandbox: true`, `contextIsolation: true`, `nodeIntegration: false`) that never loads `.node` or secrets; and a **preload** bridge as the only renderer→main primitive. Renderer↔service traffic stays ordinary HTTP (`BrowserClient` / thin `DesktopClient` subclass); it never rides the desktop IPC channel.
+v1.192 replaced the retired native desktop shell with an Electron host (`apps/desktop-electron`) while keeping the product — the same `apps/web` SPA, setup flow, workspace semantics and TS service — behind it. The host's security model is the classic Electron three-process shape: a privileged **main** process owning OS actions, config, credentials, windows and service lifecycle; a **sandboxed renderer** (`sandbox: true`, `contextIsolation: true`, `nodeIntegration: false`) that never loads `.node` or secrets; and a **preload** bridge as the only renderer→main primitive. Renderer↔service traffic stays ordinary HTTP (`BrowserClient` / thin `DesktopClient` subclass); it never rides the desktop IPC channel.
 
 The trust boundary has five separable surfaces, each with its own failure mode and its own review checklist:
 
@@ -105,7 +105,7 @@ Only `{version: 1, runtime, invoke, onStatusChanged}` with the closed operation 
 - Building or reviewing any Electron/webview host whose renderer ships a shared web app.
 - Adding preload operations: check the closed union, payload map, bounds, sender path and failure-path totality before merge.
 - Designing CSP/navigation for a packaged app that also supports a dev server.
-- Any "parity" port of an old shell: keep the old shell's *observable* behavior (e.g. arbitrary http/https external links) while dropping its mechanisms (Tauri globals, PID-based process replacement).
+- Any "parity" port of an old shell: keep the old shell's *observable* behavior (e.g. arbitrary http/https external links) while dropping its mechanisms (the old host's globals, PID-based process replacement).
 
 ## Examples
 

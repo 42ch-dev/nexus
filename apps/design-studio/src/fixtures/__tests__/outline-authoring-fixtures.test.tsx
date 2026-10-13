@@ -4,7 +4,7 @@
  *
  * Mirrors the timeline-canvas-fixtures test recipe:
  *   1. Presentational boundary — fixture imports no @xyflow/react, no
- *      contracts, no daemon clients, no useTranslation, no Tauri.
+ *      contracts, no daemon clients, no useTranslation.
  *   2. Authoring card states — empty / with-draft / bound (disabled + live
  *      affordances, chapter badges, empty-state copy).
  *   3. Bind control states — unbound / bound / disabled-when-no-bound-World.
@@ -65,7 +65,6 @@ describe('outline-authoring-fixtures presentational boundary', () => {
     expect(imports.join('\n')).not.toMatch(/useTranslation/);
     expect(imports.join('\n')).not.toMatch(/lib\/nexus/);
     expect(imports.join('\n')).not.toMatch(/NexusClient/);
-    expect(imports.join('\n')).not.toMatch(/@tauri-apps/);
   });
 
   it('imports promoted primitives from @42ch/nexus-ui public API only', () => {

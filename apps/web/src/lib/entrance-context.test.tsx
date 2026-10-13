@@ -2,9 +2,9 @@
  * Entrance provider resolution semantics (V1.170 P1 — AR-16 / AR-20).
  *
  * Precedence: URL override > stored > default; invalid values ignored; no
- * write on unset; provider never rewrites the URL. The Tauri IPC pair is a
- * runtime-detected seam (T2 wires `get_entrance`/`set_entrance` into
- * `DesktopCapabilities`) — the desktop cases below exercise it now.
+ * write on unset; provider never rewrites the URL. The desktop IPC pair is a
+ * runtime-detected seam (wired via `DesktopCapabilities`) — the desktop cases
+ * below exercise it now.
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { fireEvent, waitFor } from '@testing-library/react';

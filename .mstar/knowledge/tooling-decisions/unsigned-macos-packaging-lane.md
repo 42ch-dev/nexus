@@ -108,7 +108,7 @@ A verifier must fail on absence, not default: a Mach-O with no `minos`/`LC_VERSI
 ## When to Apply
 
 - Standing up or reviewing any unsigned build/package lane that must be credential-free.
-- Porting packaging across hosts (Tauri → Electron here): re-inspect the new toolchain for implicit signing/distribution behavior before trusting defaults.
+- Porting packaging across hosts (to Electron here): re-inspect the new toolchain for implicit signing/distribution behavior before trusting defaults.
 - Adding CI for a platform the development host cannot build natively: plan the `[UNVERIFIED] — CI-only` markers up front.
 - Writing package receipts: copy the closed-schema + separate-verifier split rather than extending the builder with self-checks.
 

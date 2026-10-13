@@ -1,6 +1,6 @@
 /**
  * `DesktopClient` — Electron desktop shell `NexusClient` implementation
- * (v1.192 P0-T8; renamed from `TauriClient`, no aliases).
+ * (v1.192 P0-T8).
  *
  * Architecture: **thin desktop-augmentation over `BrowserClient`** — the
  * `NexusClient` data methods reuse the identical HTTP transport to the

@@ -6,9 +6,8 @@
  *
  * Selection (compass §5 #7 LOCKED, parity row 27): a valid
  * `window.nexusDesktop.version === 1` marks the desktop runtime. Everything
- * else — browser tab, missing/foreign bridge — runs browser mode. There is no
- * Tauri fallback: the Tauri baseline is rollback source only until P2, not a
- * supported concurrent runtime.
+ * else — browser tab, missing/foreign bridge — runs browser mode. The preload
+ * bridge is the only desktop signal; there is no fallback runtime.
  *
  * The bridge is immutable nonsecret metadata + a typed invoke closed over the
  * frozen operation union; the SPA never sees raw IPC channels, event objects

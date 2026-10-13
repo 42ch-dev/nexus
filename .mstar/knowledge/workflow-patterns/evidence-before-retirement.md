@@ -32,7 +32,7 @@ tags:
 
 ## Context
 
-v1.192 retired the replaced Tauri desktop composition (`apps/desktop/**`, `scripts/fetch-sidecar.sh`, the Tauri release workflow, `@tauri-apps/*` and the `desktop` workspace package) after the Electron host was accepted — one desktop host must remain. In the same iteration, two neighboring families were **not** deleted:
+v1.192 retired the replaced native desktop composition (`apps/desktop/**`, `scripts/fetch-sidecar.sh`, its release workflow, its plugin package family and the `desktop` workspace package) after the Electron host was accepted — one desktop host must remain. In the same iteration, two neighboring families were **not** deleted:
 
 - the legacy integrated daemon + Daemon API + embedded SPA, and
 - dormant/hidden CLI route rows,
@@ -56,7 +56,7 @@ Every "dormant" CLI row existed in code with a clap definition and a `run` path 
 
 ### 3. Sequence deletion after the replacement passes acceptance
 
-The Tauri deletion was correct only because its replacement (the Electron host) had passed its own gates; the retirement commit stayed separable and revertable on the integration branch. Deleting a shipped composition before the replacement is accepted trades a working product for an unverified one — this is a sequencing rule, not a style preference.
+The native-composition deletion was correct only because its replacement (the Electron host) had passed its own gates; the retirement commit stayed separable and revertable on the integration branch. Deleting a shipped composition before the replacement is accepted trades a working product for an unverified one — this is a sequencing rule, not a style preference.
 
 ### 4. Deferrals carry a named blocker + trigger + tracking location
 
@@ -88,7 +88,7 @@ Before declaring the closeout done, grep for executable callers of every deleted
 
 ### 8. Lockfile and workspace hygiene are part of the deletion evidence
 
-For dependency retirements: regenerate with `--lockfile-only`, run it **twice** (idempotence: identical diff), confirm the removed content is exactly the retired family, confirm unrelated dependencies survive (the `sharp` entry was preserved for the *new* host while `@tauri-apps/*` and the `desktop` importer disappeared), then prove `--frozen-lockfile` "Already up to date" and a **cold-state install** with the family's packages absent from `node_modules`. An export-surface diff on shared scripts (e.g. 42 → 39 exports, "shared unchanged: true") plus one smoke of the retained dispatch is cheap proof that the cut didn't take neighbors with it.
+For dependency retirements: regenerate with `--lockfile-only`, run it **twice** (idempotence: identical diff), confirm the removed content is exactly the retired family, confirm unrelated dependencies survive (the `sharp` entry was preserved for the *new* host while the removed host's plugin packages and the `desktop` importer disappeared), then prove `--frozen-lockfile` "Already up to date" and a **cold-state install** with the family's packages absent from `node_modules`. An export-surface diff on shared scripts (e.g. 42 → 39 exports, "shared unchanged: true") plus one smoke of the retained dispatch is cheap proof that the cut didn't take neighbors with it.
 
 ### 9. Gate external actions on the verified main merge
 
@@ -176,7 +176,7 @@ Never close a PR merely because a feature worktree deleted files — verified ma
 
 ## Evidence
 
-- Product-side retirement — deleted `apps/desktop/**` (21 tracked paths), `scripts/fetch-sidecar.sh`, `scripts/dev-backend-manifest.mjs` sidecar helpers; `.github/workflows/desktop-release.yml` removed and the Tauri `desktop-build` job stripped in `.github/workflows/desktop-build.yml` / `ci.yml`; lockfile 17 → 16 workspace projects with `sharp` preserved.
+- Product-side retirement — deleted `apps/desktop/**` (21 tracked paths), `scripts/fetch-sidecar.sh`, `scripts/dev-backend-manifest.mjs` sidecar helpers; `.github/workflows/desktop-release.yml` removed and the native-host `desktop-build` job stripped in `.github/workflows/desktop-build.yml` / `ci.yml`; lockfile 17 → 16 workspace projects with `sharp` preserved.
 - Retained/adjudicated families — `apps/nexus42` default features, daemon boot path, embedded SPA serving, and the dormant CLI rows listed in `.mstar/specs/active/architecture/rust-core-service-boundary.md` §7.4.
 - Policy texts — `.github/dependabot.yml` (all remaining directories verified at HEAD), `.oxlintrc.json` (dead override removed), `.mstar/specs/active/surfaces/desktop-shell.md` header, `.mstar/specs/README.md` rows.
 - Companion docs — [resolved-residual-verification.md](../architecture-patterns/resolved-residual-verification.md) (verify residual claims against current `main`), [surface-rename-hygiene-checklist.md](../conventions/surface-rename-hygiene-checklist.md) (sweep shape for cross-language renames), [capability-parity-receipt.md](capability-parity-receipt.md) (the acceptance-evidence counterpart for this cutover).

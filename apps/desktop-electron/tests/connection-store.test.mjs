@@ -2,7 +2,7 @@
 /**
  * Connection store tests (v1.192 P0-T5).
  *
- * Defends D-18 against the Tauri-era behavior: the secret is never read
+ * Defends D-18 against the legacy-host behavior: the secret is never read
  * back to the renderer projection, there is NO plaintext write fallback,
  * failed encryption is non-destructive, clear removes material and never
  * reimports, and the one-time legacy import encrypts before switching

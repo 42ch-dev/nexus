@@ -1,11 +1,11 @@
 # Local Web UI (Control Room + Setup → Content-Authoring) — Specification v1
 
-**Status**: Shipped (V1.65) — Control Room + Setup MVP (V1.64) **+ Content-Authoring UI stage (V1.65, §13)**: outline rich-text editor + chapter structure table + structure CRUD (slug/wc/volume/status; title display-only) + body read-only render + browser "Copy path" context menu. Tauri desktop shell + body full-text editor + "open-with" → **V1.66** (compass §0 Q5). QC tri-review Approve (fix-wave-1) + QA Pass. **+ V1.67 Surface Convergence & De-risk (§15)** + **V1.69 Design System Maturation & Canvas Draft** (`apps/web/DESIGN.md` Production + Canvas Draft) + **V1.70 Canvas Strategy Implement α (§16)** + **CI/desktop-build optimization** (parallel ops track; PR path filter narrowed + release-gated full build) + **V1.71 Canvas Strategy Write-Boundary (§17)** (Strategy patch routes, graphRevision conflict policy, conflict modal UX, canvas-write tokens) + **V1.72 Canvas Outline+Timeline β (§18)** (3 outline/timeline patch routes `outline.patch_structure` / `outline.patch_chapter` / `timeline.patch_event` + outlineRevision conflict policy + outline-flavored conflict modal UX + non-spatial alternate views + 8 outline/timeline canvas-write DESIGN.md tokens). V1.71 `wire_contracts_changed: TRUE` for Strategy; V1.72 `wire_contracts_changed: TRUE` for additive Outline+Timeline (`@42ch/nexus-contracts` 0.7.0 → 0.8.0); V1.73 `wire_contracts_changed: TRUE` for additive World KB (`@42ch/nexus-contracts` 0.8.0 → 0.9.0). **V1.74 Shipped** — Canvas World KB Relationships β (§20) with typed relationship edges, `world_kb.patch_relationship`, relationship inspector, non-spatial relationship table, and KB-flavored conflict modal reuse. **V1.94 Draft amendment** — §29 Information Architecture (V1.94): two-tab sidebar, nested nav, footer Profiles switcher, daemon status bar simplification, Strategies unification, button contrast invariant. **V1.98 Draft amendment** — §30 Design Studio dev surface (auxiliary gallery app; not author-facing). **V1.118 Draft amendment** — §29.17 Creation peer groups (Works / Worlds / Memories) + Canvas-first work shell (`WorkShellLayout` + `WorkRail`). **V1.125 Draft amendment** — §29.17.4 Worlds-first Creator list-mode sidebar (supersedes §29.17.1 peer groups only). **V1.122 Draft amendment** — §29.18 Three-pillar pivot (Harness/Canvas/Computable) + Timeline-first Canvas IA: Timeline is the default surface for **World entry** (`/worlds/:worldId` → Timeline); Work entry stays Outline (V1.118); `CanvasSurfaceKind = "timeline"` added as a peer surface. `wire_contracts_changed: false`. **V1.147/V1.156** (§29.18.2 pillar framing): Computable pillar fronted — V1.147 Run Studio on Modules + compute-on-Timeline Accept-landed nodes; V1.156 P3 Harness pillar-entry rename (user-visible copy only; internal identifiers unchanged). **V1.157** (§3 stack): React 19 upgrade. **V1.170 P1** (§29.2/§29.13, AR-15/AR-17): Entrance axis + Entrance-first setup step (Create/Develop layout trees).
+**Status**: Shipped (V1.65) — Control Room + Setup MVP (V1.64) **+ Content-Authoring UI stage (V1.65, §13)**: outline rich-text editor + chapter structure table + structure CRUD (slug/wc/volume/status; title display-only) + body read-only render + browser "Copy path" context menu. Native desktop shell + body full-text editor + "open-with" → **V1.66** (compass §0 Q5). QC tri-review Approve (fix-wave-1) + QA Pass. **+ V1.67 Surface Convergence & De-risk (§15)** + **V1.69 Design System Maturation & Canvas Draft** (`apps/web/DESIGN.md` Production + Canvas Draft) + **V1.70 Canvas Strategy Implement α (§16)** + **CI/desktop-build optimization** (parallel ops track; PR path filter narrowed + release-gated full build) + **V1.71 Canvas Strategy Write-Boundary (§17)** (Strategy patch routes, graphRevision conflict policy, conflict modal UX, canvas-write tokens) + **V1.72 Canvas Outline+Timeline β (§18)** (3 outline/timeline patch routes `outline.patch_structure` / `outline.patch_chapter` / `timeline.patch_event` + outlineRevision conflict policy + outline-flavored conflict modal UX + non-spatial alternate views + 8 outline/timeline canvas-write DESIGN.md tokens). V1.71 `wire_contracts_changed: TRUE` for Strategy; V1.72 `wire_contracts_changed: TRUE` for additive Outline+Timeline (`@42ch/nexus-contracts` 0.7.0 → 0.8.0); V1.73 `wire_contracts_changed: TRUE` for additive World KB (`@42ch/nexus-contracts` 0.8.0 → 0.9.0). **V1.74 Shipped** — Canvas World KB Relationships β (§20) with typed relationship edges, `world_kb.patch_relationship`, relationship inspector, non-spatial relationship table, and KB-flavored conflict modal reuse. **V1.94 Draft amendment** — §29 Information Architecture (V1.94): two-tab sidebar, nested nav, footer Profiles switcher, daemon status bar simplification, Strategies unification, button contrast invariant. **V1.98 Draft amendment** — §30 Design Studio dev surface (auxiliary gallery app; not author-facing). **V1.118 Draft amendment** — §29.17 Creation peer groups (Works / Worlds / Memories) + Canvas-first work shell (`WorkShellLayout` + `WorkRail`). **V1.125 Draft amendment** — §29.17.4 Worlds-first Creator list-mode sidebar (supersedes §29.17.1 peer groups only). **V1.122 Draft amendment** — §29.18 Three-pillar pivot (Harness/Canvas/Computable) + Timeline-first Canvas IA: Timeline is the default surface for **World entry** (`/worlds/:worldId` → Timeline); Work entry stays Outline (V1.118); `CanvasSurfaceKind = "timeline"` added as a peer surface. `wire_contracts_changed: false`. **V1.147/V1.156** (§29.18.2 pillar framing): Computable pillar fronted — V1.147 Run Studio on Modules + compute-on-Timeline Accept-landed nodes; V1.156 P3 Harness pillar-entry rename (user-visible copy only; internal identifiers unchanged). **V1.157** (§3 stack): React 19 upgrade. **V1.170 P1** (§29.2/§29.13, AR-15/AR-17): Entrance axis + Entrance-first setup step (Create/Develop layout trees).
 **Document class**: Feature line  
 **Created**: 2026-06-24  
 **Scope**: Nexus local Web SPA (`apps/web`), its `NexusClient` transport boundary and standalone TypeScript HTTP service (`apps/nexus-service`) under Electron lifecycle ownership; Control Room, Setup and content-authoring product stages; strict separation from the private cloud SaaS.
 
-> **Current host boundary (v1.193 P2; reconciled 2026-09-29):** Electron is the sole desktop host ([desktop-shell.md](desktop-shell.md)); Tauri was retired in v1.192. The integrated daemon, `nexus-daemon-runtime`, `nexus42 daemon` command group and `web-embed` were deleted in v1.193 P2. The standalone `apps/web` SPA uses `apps/nexus-service` for `/v1/daemon/*`; that retained URL prefix does not imply a Rust daemon host. Tauri/daemon-era shipping stages below are historical records, not current host or packaging requirements.
+> **Current host boundary (v1.193 P2; reconciled 2026-09-29):** Electron is the sole desktop host ([desktop-shell.md](desktop-shell.md)); the native host was retired in v1.192. The integrated daemon, `nexus-daemon-runtime`, `nexus42 daemon` command group and `web-embed` were deleted in v1.193 P2. The standalone `apps/web` SPA uses `apps/nexus-service` for `/v1/daemon/*`; that retained URL prefix does not imply a Rust daemon host. Native/daemon-era shipping stages below are historical records, not current host or packaging requirements.
 
 **Coordinates with**:
 
@@ -22,7 +22,7 @@
 
 `apps/web` is a standalone SPA, not a Rust-embedded asset feature. In the desktop product, Electron loads the built web assets through `nexus://app/index.html` and owns the local service lifecycle through `DesktopServiceController`. The standalone TS service opens the native core and serves the retained `/v1/daemon/*` HTTP surface. Browser development/preview runs the SPA separately with a proxy to that service.
 
-Code anchors: [`apps/desktop-electron/src/main.ts`](../../../../apps/desktop-electron/src/main.ts) (web protocol, `DesktopServiceController`, standalone service entry), [`apps/nexus-service/src/index.ts`](../../../../apps/nexus-service/src/index.ts) (`startService`), [`apps/nexus-service/src/routes.ts`](../../../../apps/nexus-service/src/routes.ts), and [`apps/web/vite.config.ts`](../../../../apps/web/vite.config.ts) (dev/preview proxy). §§1, 4.1–4.3, 11–14 retain their shipped-era context where they describe the deleted daemon or Tauri; this section and §4's current boundary supersede those hosting claims.
+Code anchors: [`apps/desktop-electron/src/main.ts`](../../../../apps/desktop-electron/src/main.ts) (web protocol, `DesktopServiceController`, standalone service entry), [`apps/nexus-service/src/index.ts`](../../../../apps/nexus-service/src/index.ts) (`startService`), [`apps/nexus-service/src/routes.ts`](../../../../apps/nexus-service/src/routes.ts), and [`apps/web/vite.config.ts`](../../../../apps/web/vite.config.ts) (dev/preview proxy). §§1, 4.1–4.3, 11–14 retain their shipped-era context where they describe the deleted daemon or the native host; this section and §4's current boundary supersede those hosting claims.
 
 ---
 
@@ -110,11 +110,11 @@ See §11 and the [cli-spec.md](../cli/cli-spec.md) §6.3 amendment (proposed by 
 
 ---
 
-## 5. `NexusClient` adapter boundary (normative; formerly the `tauri-api` boundary)
+## 5. `NexusClient` adapter boundary (normative; formerly the host-client boundary)
 
-> **Current client names (v1.192):** browser mode selects `BrowserClient`; desktop mode selects `DesktopClient` (renamed from `TauriClient`, no aliases) through the versioned preload bridge — [desktop-shell.md](desktop-shell.md) §5. The V1.64/V1.65 text below is the historical boundary record; the invariant it states is what remains normative.
+> **Current client names (v1.192):** browser mode selects `BrowserClient`; desktop mode selects `DesktopClient` (renamed from the legacy host client, no aliases) through the versioned preload bridge — [desktop-shell.md](desktop-shell.md) §5. The V1.64/V1.65 text below is the historical boundary record; the invariant it states is what remains normative.
 
-All daemon access from the UI goes through a single **`NexusClient`** interface. Core screen logic depends only on this interface, never on a concrete transport, so the same screens run unchanged in the browser today and inside the desktop host (Tauri through V1.191; Electron since v1.192).
+All daemon access from the UI goes through a single **`NexusClient`** interface. Core screen logic depends only on this interface, never on a concrete transport, so the same screens run unchanged in the browser today and inside the desktop host (the native host through V1.191; Electron since v1.192).
 
 ```text
             ┌──────────────────────────────────────────┐
@@ -122,14 +122,14 @@ Control Room │  screen components → TanStack Query       │
  + Setup     │       → NexusClient (interface)           │
             └──────────────┬───────────────┬────────────┘
                            │               │
-              BrowserClient│               │ TauriClient (V1.65 stub)
+              BrowserClient│               │ DesktopClient (V1.65 stub)
               fetch http://localhost:<port>│ invoke(...)
                            ▼               ▼
                    /v1/daemon/*  (axum, hardened by Track B)
 ```
 
 - **`BrowserClient`** (V1.64) — `fetch` against `http://localhost:<port>/v1/daemon/*`. This is the only shipped impl this iteration.
-- **`TauriClient`** (V1.65) — implements the same interface via Tauri `invoke`; ships as a stub/interface-reference now so the boundary is frozen and P2 screens are transport-agnostic. Not implemented in V1.64.
+- **`DesktopClient`** (V1.65) — implements the same interface via the native `invoke`; ships as a stub/interface-reference now so the boundary is frozen and P2 screens are transport-agnostic. Not implemented in V1.64.
 
 The interface exposes the Daemon API resources the MVP consumes (conceptual — exact signatures are owned by plan P1, compass §5 item #7):
 
@@ -142,7 +142,7 @@ The interface exposes the Daemon API resources the MVP consumes (conceptual — 
 | Findings | list (per Work) | Findings view |
 | Presets | list, get, create, update, delete, **validate** | Preset management CRUD |
 
-**Invariant:** screens must not call `fetch`/`invoke` directly; they call `NexusClient`. This is what makes the V1.65 Tauri swap a one-impl change rather than a rewrite.
+**Invariant:** screens must not call `fetch`/`invoke` directly; they call `NexusClient`. This is what makes the V1.65 host swap a one-impl change rather than a rewrite.
 
 ---
 
@@ -192,11 +192,11 @@ Common cross-cutting story: *As any user*, when a request fails I see one clear,
 
 Explicitly deferred with durable tracking (compass §1.2 + §6; satisfies the Durable Roadmap Gate):
 
-- **Tauri desktop shell (`apps/desktop`)** — V1.65. The SPA is Tauri-ready now; the shell wraps the same `apps/web/dist`.
+- **Native desktop shell (`apps/desktop`)** — V1.65. The SPA is native-ready now; the shell wraps the same `apps/web/dist`.
 - **Content-authoring UI** — chapter rich-text editor, outline editor, KB editor — V1.65+. CLI continues content production this iteration.
 - **Findings-remediation UI** — **Ships in V1.77 (§23).** Findings were *visible* in V1.64; remediation (status transitions, `target_executor` assignment, inline edit) is the V1.77 lead surface. Remaining remediation follow-up (inline fix / re-run from finding) is deferred — **DR-28**.
 - **Schedule / cron editor** — retired in v1.200 P3. CLI `creator works cron` declaration editing is retained; no successor UI roadmap item.
-- **Mobile (Tauri v2 mobile targets)** — deferred. **Durable roadmap:** DR-61 (mobile / Tauri v2 mobile targets).
+- **Mobile (native v2 mobile targets)** — deferred. **Durable roadmap:** DR-61 (mobile / native v2 mobile targets).
 - **OpenAPI spec generation + generated TS client SDK (C2)** — deferred; TanStack Query + codegen TS types suffice for the SPA.
 - **Remote (non-loopback) access / any new auth** — out of scope; would require its own auth spec.
 - **agent-host sessions/operations/events(SSE) DTO promotion** — deferred. **Durable roadmap:** DR-57 (agent-host sessions/operations/events (SSE) DTO promotion).
@@ -208,9 +208,9 @@ Explicitly deferred with durable tracking (compass §1.2 + §6; satisfies the Du
 
 | Version | Scope |
 | --- | --- |
-| **V1.64** | Control Room + Setup MVP (browser SPA), daemon-served via `rust-embed`, `tauri-api` adapter boundary frozen. |
-| **V1.65 (§13 stage)** | **Content-Authoring UI** (lead slice): outline rich-text editor + chapter structure table + structure CRUD + body read-only render + browser "Copy path"; **Track B** API hardening (chapter-content surface, `work_profile`, preset full CRUD, `items`+cursor). Tauri shell deliberately deferred to V1.66 (compass §0 Q1/Q5). |
-| **V1.66** | **Tauri desktop shell** (`apps/desktop`) — loads `apps/web/dist`, system webview, `TauriClient` impl, daemon hosting (sidecar `nexus42 daemon start`); per-OS webview deps / signing / CI matrix. **"Open with" / "Reveal in file manager"** desktop integration (Tauri `shell.open`/`openWith`). Body full-text editor direction **rejected** (2026-06-26 — see §15.3); UI productivity deferred to V1.68. |
+| **V1.64** | Control Room + Setup MVP (browser SPA), daemon-served via `rust-embed`, host-client adapter boundary frozen. |
+| **V1.65 (§13 stage)** | **Content-Authoring UI** (lead slice): outline rich-text editor + chapter structure table + structure CRUD + body read-only render + browser "Copy path"; **Track B** API hardening (chapter-content surface, `work_profile`, preset full CRUD, `items`+cursor). Native shell deliberately deferred to V1.66 (compass §0 Q1/Q5). |
+| **V1.66** | **Native desktop shell** (`apps/desktop`) — loads `apps/web/dist`, system webview, `DesktopClient` impl, daemon hosting (sidecar `nexus42 daemon start`); per-OS webview deps / signing / CI matrix. **"Open with" / "Reveal in file manager"** desktop integration (native `shell.open`/`openWith`). Body full-text editor direction **rejected** (2026-06-26 — see §15.3); UI productivity deferred to V1.68. |
 | **V1.67 (§15 stage)** | **Surface Convergence & De-risk**: Daemon API `items` array-key convergence + error-envelope consolidation (FE1-ORCH) + error-code casing + sort params (all transparent to the author); work_profile selector in Create-Work dialog; preset **TS-client promotion** (preset **management UI deferred to V1.68 canvas**). **Canvas Strategy Surface Exploration** authored (de-risk V1.68). Body editor direction **rejected** (§15.3). |
 | **V1.69** | **Design System Maturation & Canvas Draft** (calm hygiene + V1.70 de-risk; no new UI screens, no wire change): `apps/web/DESIGN.md` migrated to **Production** completeness (YAML frontmatter SSOT + new `apps/web/DESIGN.dark.md` + body reshaped to rule-type docs + Level 3); **Canvas Exploration → Draft** (interface contracts + structured write-boundary + canvas→DESIGN.md token contract); 4 V1.67 frontend refactor residuals closed (work_profile literal union, `WORK_PROFILES` SSOT module, adapter-contract parity, preset query keys). Token names preserved verbatim → zero `index.css`/`tailwind.config.ts` consumer changes. |
 | **V1.70 (§16 stage)** | **Canvas Strategy Implement (α)** — the first canvas surface ships: shared Canvas Shell (`@xyflow/react`, route-split behind `/strategy`) + Strategy (Preset) graph read projection (preset YAML → outer state-machine nodes + inner-DAG sub-flows + Converge join nodes per Draft §3.2) + live execution overlay (session-level status, 5 s poll) + Idea-input affordance + Run/Resume/Steer verbs (reuse existing schedule/orchestration endpoints; `wire_contracts_changed: FALSE` — A5 verdict: option a, client-side YAML parse from existing `getPreset(id).yaml`; no new backend route). DESIGN.md canvas tokens filled with concrete light + dark values. Accessibility baseline (keyboard-first, non-spatial alt view, ARIA live-region summary, focus management). UI copy adopts **Strategy** terminology; persisted identifiers remain `preset`. **`R-V167PSEC-QC1-S-UNMOUNT`** closed (daemon-status-bar subscription-cleanup race fix alongside overlay work). **Parallel ops track**: `desktop-build.yml` PR path filter narrowed (Rust-only PRs skip the 75 min macOS packaging build; main + tag/release triggers retain full coverage); new `desktop-release.yml` for distributable artifacts; **`R-V167PSEC-QC1-S-CI-SETUO`** closed (`set -euo pipefail`); `ci.yml` untouched. |
@@ -219,11 +219,11 @@ Explicitly deferred with durable tracking (compass §1.2 + §6; satisfies the Du
 | **V1.73 (§19 stage)** | **Canvas World KB β** — third canvas surface (after Strategy α/β + Outline+Timeline β): 2 structured patch routes (`world_kb.patch_entity` for entity title/body/aliases/block_type edits + `world_kb.promote_candidate` for adopt/reject/merge promotion state machine) + per-row OCC conflict detection (reuses `kb_key_blocks.revision` + `kb_extract_jobs.version`; 409 `WorldKbConflictError` + 422 `WorldKbValidationError`) + Canvas UI: World KB graph projection (entity nodes + promotion-state badges + source-anchor edges + computable badges) + entity inspector + promotion inspector + conflict modal (KB-flavored copy) + non-spatial alternate view (sortable entity list with virtualization) + backend prerequisite: promoted World KB read+write from CLI-direct-DB to 4 first-class Daemon API routes + `@42ch/nexus-contracts` 0.8.0 → 0.9.0 (additive World KB DTOs) + 17 `canvas-worldkb-*` DESIGN.md tokens. Track B companion: 4 outline β hardening (MEDIUM validation gaps) + outline-canvas.tsx split + 2 release-hardening items. |
 | **V1.74 (§20 stage)** | **Canvas World KB Relationships β** — fourth Canvas World KB capability: typed relationship edges, `world_kb.patch_relationship`, relationship inspector, non-spatial relationship table, conflict modal reuse, and relationship DESIGN.md tokens. Hygiene slate cleared in the same iteration. |
 | **V1.75 (§21 stage)** | **Canvas-Pivot** — the V1.65 §13 whole-document TipTap outline editor (`chapter-page.tsx` Outline tab + `usePutChapterOutline` PUT save path) is **retired**. The V1.72 node-granular canvas is now the **sole outline authoring surface**. The canvas chapter inspector gains outline-prose TipTap editing via a new `content` field on `outline.patch_chapter` (parity-close — the inspector replicates the V1.65 editor's rich-text capability: headings, bold, italic, lists, markdown round-trip via `tiptap-markdown`). The retired `chapter-page.tsx` morphs to a read-only body view + "Edit outline → Canvas" redirect CTA — the reading/preview value is preserved (body prose render, frontmatter metadata strip, Copy Path), and outline authoring is relocated (not lost) to the canvas. This is a pre-1.0 hard cutover: no dual-editor deprecation period; the pivot is a clean retire+replace. `wire_contracts_changed: TRUE` (`content` field + V1.65 PUT write route/DTO removal → `@42ch/nexus-contracts` 0.10.0 → 0.11.0). |
-| **V1.76 (§22 stage)** | **World KB Relationship γ — auto-extraction + confidence** — completes the World KB relationship surface. **Extraction proposes relationships**: `nexus.llm.extract` emits relationship candidates (entity pairs + relation_type + confidence + source anchors) from chapter text, persisted behind a `needs_review=1` gate (`source='extraction'`); the canvas shows them in a **Suggested pane** (sortable by confidence, default high→low, per-row Promote/Delete + bulk Promote all). **Confidence-weighting UX**: graph edges render with stepped confidence bands (low <0.4: 1px/30%, mid 0.4–<0.7: 2px/60%, high ≥0.7: 3px/100%) consuming the shipped DESIGN.md `canvas-worldkb-relationship-confidence-*` tokens; confidence-band colored badges (red/amber/green, uniform 8px) appear on edge labels. **`needs_review` gate semantics**: extraction defaults to `needs_review=1`; GET graph defaults to excluding suggested rows (`?include_suggested=true` surfaces them); suggested edges render dashed (distinct from confirmed solid). **Curation**: promotion clears `needs_review` via the existing `world_kb.patch_relationship` route (`needs_review: false` on update); `source` stays read-only provenance. `wire_contracts_changed: TRUE` (additive `needs_review` + `source` + extraction DTO + `include_suggested` → `@42ch/nexus-contracts` 0.11.0 → 0.12.0). No new DESIGN.md colors — the stepped bands reuse shipped confidence tokens. Desktop distribution v2 actual signing rollout remains blocked on Apple Developer ID cert + notarization credentials; Mobile (Tauri v2 mobile targets) remains future scope. |
+| **V1.76 (§22 stage)** | **World KB Relationship γ — auto-extraction + confidence** — completes the World KB relationship surface. **Extraction proposes relationships**: `nexus.llm.extract` emits relationship candidates (entity pairs + relation_type + confidence + source anchors) from chapter text, persisted behind a `needs_review=1` gate (`source='extraction'`); the canvas shows them in a **Suggested pane** (sortable by confidence, default high→low, per-row Promote/Delete + bulk Promote all). **Confidence-weighting UX**: graph edges render with stepped confidence bands (low <0.4: 1px/30%, mid 0.4–<0.7: 2px/60%, high ≥0.7: 3px/100%) consuming the shipped DESIGN.md `canvas-worldkb-relationship-confidence-*` tokens; confidence-band colored badges (red/amber/green, uniform 8px) appear on edge labels. **`needs_review` gate semantics**: extraction defaults to `needs_review=1`; GET graph defaults to excluding suggested rows (`?include_suggested=true` surfaces them); suggested edges render dashed (distinct from confirmed solid). **Curation**: promotion clears `needs_review` via the existing `world_kb.patch_relationship` route (`needs_review: false` on update); `source` stays read-only provenance. `wire_contracts_changed: TRUE` (additive `needs_review` + `source` + extraction DTO + `include_suggested` → `@42ch/nexus-contracts` 0.11.0 → 0.12.0). No new DESIGN.md colors — the stepped bands reuse shipped confidence tokens. Desktop distribution v2 actual signing rollout remains blocked on Apple Developer ID cert + notarization credentials; Mobile (native v2 mobile targets) remains future scope. |
 | **V1.77 (§23 stage)** | **Findings-Remediation UI — quality loop closure** — promotes the Control-Room findings view from read-only (V1.64) to a full remediation authoring surface: status transitions (6-state lifecycle, server-enforced adjacency), `target_executor` assignment, inline edit of title/description/severity/kind/rule_suggestion. Detail-panel + row-action hybrid layout. TanStack Query optimistic mutations with stale-count refresh. DESIGN.md tokens: 6 status badges + severity color reuse + triage chrome. Closes the §8 deferred "Findings-remediation UI" item. Cross-profile (DB + Daemon API already profile-agnostic). `wire_contracts_changed: FALSE` (findings schemas already shipped + codegen'd; V1.77 only consumes them). |
 | **V1.78 (§24 stage)** | **Creator Memory Review-Loop UI — self-loop closure** — publishes the memory OSS schemas the runtime already serves but never contracted (`schemas/daemon-api/memory/`, `@42ch/nexus-contracts` 0.12.0 → 0.13.0 additive) and builds a creator-scoped Control-Room Memory page: pending-review list with live count badge + delete (cursor-paginated, optimistic), "Review & Summarize" CTA triggering `POST /memory/review` with processing state + result-counters toast (`promoted`/`fragmented`/`dropped`), and a read-only fragments browser with optional keyword filter. Detail-panel + row-action hybrid layout (mirrors V1.77 findings page). TanStack Query optimistic mutations; `createPendingReview` stays CLI/producer-only (session-end capture pipeline owns creation), mirroring V1.77's `createFinding` CLI-only decision. 13 DESIGN.md memory tokens (pending-count badge, 5 task-kind chips, fragment chrome, inspector chrome, review CTA, fragment-filter input). `wire_contracts_changed: TRUE` (additive — memory schemas net-new; handler behavior unchanged). |
 
-The Tauri-ready boundary (§5) is what keeps the V1.66 shell a thin wrap rather than a rewrite. The V1.68 canvas adds new screens (graph surfaces) on the unchanged transport boundary — not a re-architecture.
+The host-agnostic boundary (§5) is what keeps the V1.66 shell a thin wrap rather than a rewrite. The V1.68 canvas adds new screens (graph surfaces) on the unchanged transport boundary — not a re-architecture.
 
 ---
 
@@ -251,11 +251,11 @@ Versioning, npm/Rust bumps, and the single breaking shape change (Works list) ar
 
 1. The UI is served from the `nexus42` binary (release) with no Node runtime requirement, and from the Vite dev server (dev) proxying `/v1/daemon/*`.
 2. All seven MVP screen groups render and operate against the hardened Daemon API; no screen calls a transport directly (all via `NexusClient`).
-3. The `tauri-api` adapter boundary is frozen: `BrowserClient` ships, `TauriClient` exists as a documented stub/interface reference.
+3. The host-client adapter boundary is frozen: `BrowserClient` ships, `DesktopClient` exists as a documented stub/interface reference.
 4. Errors surface as one parsed `ErrorResponse` shape across all screens.
 5. No cloud-product / platform-gated feature appears in the UI while `platform_integration = paused`.
 6. The UI consumes `@42ch/nexus-contracts` via `workspace:*` with zero handwritten duplicate wire types.
-7. V1.65 Tauri shell is achievable by implementing `TauriClient` and wrapping `apps/web/dist` — no screen rewrite.
+7. V1.65 native shell is achievable by implementing `DesktopClient` and wrapping `apps/web/dist` — no screen rewrite.
 
 ---
 
@@ -292,8 +292,8 @@ The UI closes the **plan / review / restructure** loop for an author who is not 
 Explicitly deferred with rationale (compass §0 Q2/Q4/Q5, §1.2; satisfies the Durable Roadmap Gate):
 
 - **Body full-text editor (`body_path` write)** — V1.66. Requires a per-chapter edit-lock design (UI claims chapter N → orchestration skips/queues; lock-expiry policy), MD↔rich-text lossless round-trip, frontmatter/status sync, and a conflict policy with the orchestration co-writer. Lands only after the lock design is reviewed.
-- **"Open with" / "Reveal in file manager" right-click actions** — V1.66 Tauri desktop shell. Launching an OS process to open a file is a **native-shell** capability (Tauri `shell.open` / `openWith` with a scope whitelist), **not** a Web daemon responsibility (compass §0 Q5). The browser sandbox has no such capability; making the daemon a "process launcher" would be the wrong layering. V1.65 ships "Copy path" only.
-- **Tauri desktop shell (`apps/desktop`)** — V1.66. The SPA is Tauri-ready now (§5 adapter boundary; no browser-only APIs in editor core); the shell wraps the same `apps/web/dist`.
+- **"Open with" / "Reveal in file manager" right-click actions** — V1.66 native desktop shell. Launching an OS process to open a file is a **native-shell** capability (native `shell.open` / `openWith` with a scope whitelist), **not** a Web daemon responsibility (compass §0 Q5). The browser sandbox has no such capability; making the daemon a "process launcher" would be the wrong layering. V1.65 ships "Copy path" only.
+- **Native desktop shell (`apps/desktop`)** — V1.66. The SPA is native-ready now (§5 adapter boundary; no browser-only APIs in editor core); the shell wraps the same `apps/web/dist`.
 - **Drag-to-reorder chapters / bulk chapter operations / manual reconcile trigger / outline template library** — V1.66+.
 
 ### 13.4 User stories (V1.65 slice)
@@ -315,21 +315,21 @@ The authoring surface consumes new chapter-content schemas (additive, owned by T
 
 ---
 
-## 14. Next stage — Desktop Shell (historical V1.66 Tauri lead slice)
+## 14. Next stage — Desktop Shell (historical V1.66 native lead slice)
 
-V1.65 made the UI an **authoring entry surface** in the browser. V1.66 takes Nexus from **"open a browser tab to `localhost:8420`"** to a **double-clickable macOS desktop application**. The browser SPA transport stays **unchanged** (screen data access remains transport-agnostic); a new `apps/desktop` Tauri v2 wrapper loads the `apps/web` dist, the `TauriClient` impl of `NexusClient` swaps in, and the bundled `nexus42` daemon comes up transparently on launch. This is the gating prerequisite for everything desktop-native in the roadmap (signing, multi-OS, auto-update, mobile).
+V1.65 made the UI an **authoring entry surface** in the browser. V1.66 takes Nexus from **"open a browser tab to `localhost:8420`"** to a **double-clickable macOS desktop application**. The browser SPA transport stays **unchanged** (screen data access remains transport-agnostic); a new `apps/desktop` native v2 wrapper loads the `apps/web` dist, the `DesktopClient` impl of `NexusClient` swaps in, and the bundled `nexus42` daemon comes up transparently on launch. This is the gating prerequisite for everything desktop-native in the roadmap (signing, multi-OS, auto-update, mobile).
 
 > **Scope and roadmap SSOT**:  §0 (grill decisions Q1/Q2) + §1.1 (Track A) + §1.2 (V1.67+ roadmap) + §5 (locked design items). Contract detail: [desktop-shell.md](desktop-shell.md). This section records the product contract; the compass is authoritative for scope, batching, and residual tracking.
 
 ### 14.1 What ships in V1.66 (Track A lead slice)
 
-A Tauri v2 desktop wrapper layered around the transport-unchanged V1.65 SPA, plus the desktop-only `NexusClient` surface the browser sandbox cannot provide.
+A native v2 desktop wrapper layered around the transport-unchanged V1.65 SPA, plus the desktop-only `NexusClient` surface the browser sandbox cannot provide.
 
-- **`apps/desktop` Tauri v2 app** (new pnpm workspace member under `apps/*`): `tauri.conf.json` (productName, macOS bundle id, window config, `build.frontendDist` = bundled `apps/web` dist); Rust `src-tauri/` (Tauri app entry, plugin registration — `opener`, `shell`; NO `http` plugin — webview fetches loopback directly). **macOS-only target in V1.66** (`aarch64-apple-darwin` + `x86_64-apple-darwin`, universal). Windows/Linux deferred (V1.67+).
-- **`TauriClient` impl** (replaces the V1.65 stub at `apps/web/src/lib/nexus/tauri-client.ts`): implements the full **21-method** `NexusClient` interface as **thin desktop-augmentation over `BrowserClient`** (compass §5 #1 LOCKED) — data methods reuse the identical HTTP transport to the localhost daemon; `TauriClient` adds only the desktop-only methods below. V1.64/V1.65 HTTP work reused wholesale.
-- **Desktop-only `NexusClient` extensions** (the new surface): `openWith(path)` / `revealInFinder(path)` (Tauri custom commands → `plugin-opener`; runtime workspace-root path guard, §14.6), plus **daemon lifecycle** (`getDaemonStatus` / `startDaemon` / `stopDaemon`). Exposed via the interface **only in desktop mode** (capability detection: `NEXUS_DESKTOP` flag + `isTauri`, checked once at the client factory).
+- **`apps/desktop` native v2 app** (new pnpm workspace member under `apps/*`): host config (productName, macOS bundle id, window config, `build.frontendDist` = bundled `apps/web` dist); the Rust app crate (native app entry, plugin registration — `opener`, `shell`; NO `http` plugin — webview fetches loopback directly). **macOS-only target in V1.66** (`aarch64-apple-darwin` + `x86_64-apple-darwin`, universal). Windows/Linux deferred (V1.67+).
+- **`DesktopClient` impl** (replaces the V1.65 stub): implements the full **21-method** `NexusClient` interface as **thin desktop-augmentation over `BrowserClient`** (compass §5 #1 LOCKED) — data methods reuse the identical HTTP transport to the localhost daemon; `DesktopClient` adds only the desktop-only methods below. V1.64/V1.65 HTTP work reused wholesale.
+- **Desktop-only `NexusClient` extensions** (the new surface): `openWith(path)` / `revealInFinder(path)` (native custom commands → `plugin-opener`; runtime workspace-root path guard, §14.6), plus **daemon lifecycle** (`getDaemonStatus` / `startDaemon` / `stopDaemon`). Exposed via the interface **only in desktop mode** (capability detection: `NEXUS_DESKTOP` flag + the host-mode check, checked once at the client factory).
 - **Q5 desktop actions — right-click context menu**: on the chapter body read-only view + outline editor surfaces (V1.65), wire "Copy path" (browser + desktop) + **"Open with…"** (system MD-editor picker; desktop only) + **"Reveal in Finder"** (desktop only). Browser build keeps "Copy path" only — **no greyed-out teasing** entries.
-- **Bundled `nexus42` sidecar** (transparent daemon autostart): Tauri `externalBin` + `plugin-shell` Sidecar (compass §5 #2 LOCKED); auto-start on launch, stop on quit, health probe + restart-on-crash. The user double-clicks the `.app` and the daemon comes up — **no terminal**. In-process lib link deferred V1.67+.
+- **Bundled `nexus42` sidecar** (transparent daemon autostart): native `externalBin` + `plugin-shell` Sidecar (compass §5 #2 LOCKED); auto-start on launch, stop on quit, health probe + restart-on-crash. The user double-clicks the `.app` and the daemon comes up — **no terminal**. In-process lib link deferred V1.67+.
 - **macOS CI unsigned `.app` build leg**: `desktop-build` workflow job (unsigned `.app` + `.dmg` artifacts uploaded). **No signing/notarization/auto-update/GitHub Releases** in V1.66.
 
 **Stage status**: **Shipped (V1.66)** — QC tri-review Approve (after fix-wave-1: port-exposure-to-SPA + attached-daemon-probe + dev-prereq docs + CI cache/path-filter + error-label split) + QA Pass.
@@ -357,16 +357,16 @@ A Tauri v2 desktop wrapper layered around the transport-unchanged V1.65 SPA, plu
 
 ### 14.5 Wire contracts (V1.66)
 
-**No new wire schemas** (`wire_contracts_changed: false`, confirmed Phase 2b). The shell is a packaging/delivery layer: `TauriClient` reuses the identical HTTP transport; desktop-only methods are Tauri IPC; the 3 residuals are test/refactor/hardening. `@42ch/nexus-contracts` version unaffected.
+**No new wire schemas** (`wire_contracts_changed: false`, confirmed Phase 2b). The shell is a packaging/delivery layer: `DesktopClient` reuses the identical HTTP transport; desktop-only methods are native IPC; the 3 residuals are test/refactor/hardening. `@42ch/nexus-contracts` version unaffected.
 
 ### 14.6 Capability table delta (desktop-only `NexusClient` extensions)
 
 | Method | Mode | Transport | Notes |
 | --- | --- | --- | --- |
-| `openWith(path)` | desktop only | Tauri custom command → `plugin-opener.openPath()` | Runtime path-guarded to active workspace root (W-002-equivalent; Tauri scope = defense-in-depth only). |
-| `revealInFinder(path)` | desktop only | Tauri custom command → `plugin-opener.revealItemInDir()` | Same runtime path guard. |
-| `getDaemonStatus()` | desktop only | Tauri `plugin-shell` / sidecar IPC | Health + port; drives the status indicator. |
-| `startDaemon()` / `stopDaemon()` | desktop only | Tauri `plugin-shell` Sidecar | Lifecycle control; autostart on launch is default. |
+| `openWith(path)` | desktop only | native custom command → `plugin-opener.openPath()` | Runtime path-guarded to active workspace root (W-002-equivalent; native scope = defense-in-depth only). |
+| `revealInFinder(path)` | desktop only | native custom command → `plugin-opener.revealItemInDir()` | Same runtime path guard. |
+| `getDaemonStatus()` | desktop only | native `plugin-shell` / sidecar IPC | Health + port; drives the status indicator. |
+| `startDaemon()` / `stopDaemon()` | desktop only | native `plugin-shell` Sidecar | Lifecycle control; autostart on launch is default. |
 | `copyPath(path)` | browser + desktop | clipboard write (V1.65 reuse) | Unchanged. |
 
 All other `NexusClient` methods = identical HTTP transport to the localhost daemon (reuse of V1.64/V1.65 `BrowserClient` paths). Detail: [desktop-shell.md](desktop-shell.md).
@@ -375,7 +375,7 @@ All other `NexusClient` methods = identical HTTP transport to the localhost daem
 
 ## 15. Next stage — Surface Convergence & De-risk (V1.67)
 
-V1.66 shipped the Tauri desktop shell. V1.67 is a **hygiene-lead consolidation & de-risk** iteration: it converges the Daemon API surface to one error envelope + one array-key convention + casing discipline, closes ~26 residuals, polishes the just-shipped desktop shell, closes the work-profile selector gap, and authors the **Canvas Strategy Surface Exploration** that de-risks the V1.68 lead. **No new author-facing features ship** — the only user-visible change is a work-profile selector in the Create-Work dialog. The canvas *implement* is V1.68; V1.67 authors its *design* only (see §15.3). *(Revised 2026-06-26: the prior body-editor lead was rejected — Nexus is an AI-autonomous executor; the AI owns prose, the human steers via Canvas.)*
+V1.66 shipped the native desktop shell. V1.67 is a **hygiene-lead consolidation & de-risk** iteration: it converges the Daemon API surface to one error envelope + one array-key convention + casing discipline, closes ~26 residuals, polishes the just-shipped desktop shell, closes the work-profile selector gap, and authors the **Canvas Strategy Surface Exploration** that de-risks the V1.68 lead. **No new author-facing features ship** — the only user-visible change is a work-profile selector in the Create-Work dialog. The canvas *implement* is V1.68; V1.67 authors its *design* only (see §15.3). *(Revised 2026-06-26: the prior body-editor lead was rejected — Nexus is an AI-autonomous executor; the AI owns prose, the human steers via Canvas.)*
 
 > **Scope and roadmap SSOT**:  §0 (grill decisions + 2026-06-26 re-discussion Q4–Q6) + §1.1 (Tracks A–F) + §1.2 (V1.68 roadmap) + §5 (locked design items). This section records the product contract; the compass is authoritative for scope, batching, and residual tracking.
 
@@ -454,7 +454,7 @@ V1.70 does not ship a full authoring loop; it ships the **steering surface** tha
 
 ### 16.3 Parallel ops track — CI/desktop-build optimization (Track B)
 
-The desktop packaging CI was wasteful on PRs: any `crates/**` change triggered a 75 min macOS Tauri universal build, even though sidecar compilation is already covered by `ci.yml` (clippy + rust-tests on ubuntu). V1.70 fixes this without changing the test gate:
+The desktop packaging CI was wasteful on PRs: any `crates/**` change triggered a 75 min macOS native universal build, even though sidecar compilation is already covered by `ci.yml` (clippy + rust-tests on ubuntu). V1.70 fixes this without changing the test gate:
 
 - **`desktop-build.yml` PR path filter narrowed** to `apps/desktop/**`, `apps/web/**`, `.github/workflows/**` — Rust-only PRs no longer trigger the macOS packaging build. `push:main` retains broad coverage as the integration safety net.
 - **New `desktop-release.yml`** triggers on `release.published` only (single-source per release; QC3 W1 double-run fix), produces distributable `.app.zip` + `.dmg` artifacts for GitHub Releases.
@@ -475,7 +475,7 @@ Explicitly deferred with rationale (compass §1.2; satisfies the Durable Roadmap
 - **CLI / schema rename of `preset` → `strategy`** — breaking; deferred. V1.70 adopts **Strategy** terminology in UI copy only (Draft §4.2). The user-visible Strategy/Strategies → **Harness** rename shipped V1.156 P3; the internal CLI/schema `preset` → `strategy` identifier rename remains deferred (architect LOCKED: internal identifiers unchanged).
 - **Desktop distribution v2** (signing / tri-OS / auto-update) — deferred. **Durable roadmap:** DR-58 (desktop distribution v2).
 - **Rich live overlay** (completed-path history, child-session hierarchy) — deferred. **Durable roadmap:** DR-29 (rich live overlay).
-- **Tauri WKWebView runtime smoke** — implementer documented they could not run Tauri locally; QA ran `cargo check` only. Full gesture/keyboard/pan-zoom validation inside actual WKWebView is a V1.71 follow-up if deeper runtime validation is needed.
+- **WKWebView runtime smoke** — implementer documented they could not run the native host locally; QA ran `cargo check` only. Full gesture/keyboard/pan-zoom validation inside actual WKWebView is a V1.71 follow-up if deeper runtime validation is needed.
 
 ### 16.6 User stories (V1.70 α slice)
 
@@ -488,13 +488,13 @@ Explicitly deferred with rationale (compass §1.2; satisfies the Durable Roadmap
 
 ## 17. Next stage — Canvas Strategy Write-Boundary (V1.71)
 
-V1.70 made the Strategy canvas legible and steerable. V1.71 makes the **Strategy surface editable at node granularity** while preserving the core boundary: the browser/Tauri webview never writes raw files. All Strategy edits flow through schema-backed Daemon API patch routes, daemon validation, atomic persistence, and graphRevision conflict handling.
+V1.70 made the Strategy canvas legible and steerable. V1.71 makes the **Strategy surface editable at node granularity** while preserving the core boundary: the browser webview never writes raw files. All Strategy edits flow through schema-backed Daemon API patch routes, daemon validation, atomic persistence, and graphRevision conflict handling.
 
 > **Scope and roadmap SSOT**:  §1.1 Track A (A1–A9), §1.3 wire contracts, §2 normative specs, and §6 risk notes. Architectural detail: [canvas-strategy-surface.md](canvas-strategy-surface.md) (V1.71 Shipped β) and [daemon-api-surface-conventions.md](../runtime/daemon-api-surface-conventions.md) §7 patch-route pattern.
 
 ### 17.1 What ships in V1.71 (Track A — Strategy β writes)
 
-- **Strategy patch routes**: the UI calls three new Daemon API routes through `NexusClient`, not `fetch`/Tauri filesystem access:
+- **Strategy patch routes**: the UI calls three new Daemon API routes through `NexusClient`, not `fetch`/native filesystem access:
   - `POST /v1/daemon/strategies/{strategy_id}/states/{state_id}/patch` (`StrategyPatchStateRequest` → `StrategyPatchResponse`) for state label/description edits.
   - `POST /v1/daemon/strategies/{strategy_id}/transitions/patch` (`StrategyPatchTransitionRequest` → `StrategyPatchResponse`) for edge/transition condition and target rewiring.
   - `POST /v1/daemon/strategies/{strategy_id}/states/{state_id}/prompt/patch` (`StrategyPatchPromptTemplateRequest` → `StrategyPatchResponse`) for in-node prompt-template edits.
@@ -582,7 +582,7 @@ V1.72 shipped the Outline+Timeline canvas. V1.73 completes the Canvas program's 
 - **Canvas UI — KB-flavored conflict modal**: same structural pattern as Strategy (§17.1) and Outline (§18.1) conflict modals, but with World-KB-appropriate copy ("This entity changed while you were editing." / "This candidate's state changed while you were editing.") and KB-flavored actions (Use current, Reapply my edit, Review side-by-side). Cancel returns focus to the originating inspector.
 - **Non-spatial alternate view**: sortable entity list (name, block_type, promotion state, last modified) with virtualization — satisfies the accessibility requirement for non-spatial navigation.
 - **17 `canvas-worldkb-*` DESIGN.md tokens**: concrete light + dark values filled in `apps/web/DESIGN.md` + `apps/web/DESIGN.dark.md` for World KB node fills/borders/selection, promotion-state badges (confirmed/rejected/merged/pending), source-anchor edges, computable badges, conflict markers, and entity-inspector chrome — token names preserved verbatim (V1.69 invariant continues).
-- **Track B companion — Outline β hardening**: 4 MEDIUM outline validation gaps closed (slug format, volume existence, foreshadow temporal order, published-chapter structural guard) + `outline-canvas.tsx` monolith split (≤250 lines per V1.71 Strategy pattern) + 2 release-hardening items (`tauri.conf.json` signing clarity + desktop release Rust cache coverage).
+- **Track B companion — Outline β hardening**: 4 MEDIUM outline validation gaps closed (slug format, volume existence, foreshadow temporal order, published-chapter structural guard) + `outline-canvas.tsx` monolith split (≤250 lines per V1.71 Strategy pattern) + 2 release-hardening items (host-config signing clarity + desktop release Rust cache coverage).
 
 ### 19.2 The knowledge loop this enables
 
@@ -664,7 +664,7 @@ The findings page gains three remediation affordances consuming the already-ship
 
 - **DESIGN.md tokens** — findings status badges (6 states: `open`, `triaged`, `in_review`, `resolved`, `wont_fix`, `duplicate`), severity colors (reusing existing `severityVariant` where possible), triage chrome (action buttons, assignment selector, inline-edit affordance). Token names preserved verbatim (V1.69 invariant continues).
 
-- **Codegen wiring** — `UpdateFindingRequest` and `CreateFindingRequest` are already generated and barrel-exported by `@42ch/nexus-contracts` (D2 LOCKED: codegen is glob-based, both types exist on disk at `packages/nexus-contracts/src/generated/daemon-api/findings/` and `crates/nexus-contracts/src/generated/daemon_api/findings/`). V1.77 adds imports in `apps/web/src/lib/nexus/types.ts` + wires `getFinding`/`updateFinding` onto the `NexusClient` interface + `BrowserClient`/`TauriClient` implementations. No codegen config change, no schema change.
+- **Codegen wiring** — `UpdateFindingRequest` and `CreateFindingRequest` are already generated and barrel-exported by `@42ch/nexus-contracts` (D2 LOCKED: codegen is glob-based, both types exist on disk at `packages/nexus-contracts/src/generated/daemon-api/findings/` and `crates/nexus-contracts/src/generated/daemon_api/findings/`). V1.77 adds imports in `apps/web/src/lib/nexus/types.ts` + wires `getFinding`/`updateFinding` onto the `NexusClient` interface + `BrowserClient`/`DesktopClient` implementations. No codegen config change, no schema change.
 
 ### 23.2 The triage loop this enables
 
@@ -720,7 +720,7 @@ The Memory page (`apps/web/src/pages/memory-page.tsx`, NEW) gains three affordan
 
 - **Inspector panel** — selecting a pending-review row opens a side inspector (matching the V1.77 `FindingDetailPanel` layout) showing all 6 `PendingReviewInfo` fields: `pending_id` (monospace badge), `session_id`, `world_id` (or "(none)" if absent — open item #3), `task_kind` (humanized chip), `raw_digest` (scrollable preformatted area), `created_at` (RFC 3339 → author's local time). Clicking the selected row again or the panel's delete affordance dismisses it.
 
-- **`NexusClient` promotion** — five methods added to the interface (`listPendingReviews`, `countPendingReviews`, `deletePendingReview`, `reviewMemory`, `listMemoryFragments`) and implemented on `BrowserClient` (inherited unchanged by `TauriClient`). Adapter-contract parity guard extended. `createPendingReview` is intentionally absent (CLI/producer-only).
+- **`NexusClient` promotion** — five methods added to the interface (`listPendingReviews`, `countPendingReviews`, `deletePendingReview`, `reviewMemory`, `listMemoryFragments`) and implemented on `BrowserClient` (inherited unchanged by `DesktopClient`). Adapter-contract parity guard extended. `createPendingReview` is intentionally absent (CLI/producer-only).
 
 - **TanStack Query mutations with optimistic updates** — `useDeletePendingReview` removes the row and decrements the count before the server responds, rolls back on error, and invalidates pending-list + count + fragments on settle. `useReviewMemory` surfaces the result counters in a toast and invalidates the same three query sets on success. The pending-review list uses `useInfiniteQuery` for cursor pagination (reuses the `LoadMore` component).
 
@@ -1131,7 +1131,7 @@ The setup wizard moves from a centered card with horizontal steps at the top to 
 
 #### 29.10.2 Setup wizard workspace selection with native directory picker
 
-Step 1 (Welcome) now includes a native directory picker (Tauri `@tauri-apps/plugin-dialog` `open({ directory: true })`) to let the user select a custom workspace path:
+Step 1 (Welcome) now includes a native directory picker (`plugin-dialog` `open({ directory: true })`) to let the user select a custom workspace path:
 
 - Default workspace path: `~/Documents/nexus/default` (brand `nexus/`, not `nexus42/`; system home remains `~/.nexus42/`).
 - Stale path overwrite: if the existing `workspace_path` matches `~/Documents/nexus42/default` or `~/Documents/nexus/local/default`, it is overwritten with the new default; custom user-set paths are preserved.
@@ -1141,9 +1141,9 @@ Step 1 (Welcome) now includes a native directory picker (Tauri `@tauri-apps/pl
 
 The `FingerprintGate` adds `/setup` to its bypass routes (alongside `/connect`), so the wizard can render before any remote config exists without timing risks.
 
-#### 29.10.4 ClientProvider immediate TauriClient for desktop
+#### 29.10.4 ClientProvider immediate DesktopClient for desktop
 
-On desktop builds, `ClientProvider` returns `TauriClient` + `TauriDesktopCapabilities` immediately in the `!loaded` branch (no temporary `BrowserClient`), avoiding the "Request failed: The string did not match the expected pattern" error from same‑origin `/v1/daemon/runtime/health` calls in the Tauri webview.
+On desktop builds, `ClientProvider` returns the desktop bridge client and its desktop capabilities immediately in the `!loaded` branch (no temporary `BrowserClient`), avoiding the "Request failed: The string did not match the expected pattern" error from same‑origin `/v1/daemon/runtime/health` calls in the desktop webview.
 
 #### 29.10.5 Daemon error surfacing + migration‑mismatch recovery
 
@@ -1187,7 +1187,7 @@ On desktop builds, `ClientProvider` returns `TauriClient` + `TauriDesktopCapabil
 - The status callback explicitly handles the `'starting'` state (treated as in-progress).
 - A hard timeout (≤30 s) fires a "Taking longer than expected" state exposing Retry / Reset actions if no terminal state arrives.
 - On `error`, the `detail` shown contains the **real stderr** captured from the sidecar (clearly distinguishable from generic wrapper text).
-- V1.95 fixes (immediate TauriClient, Reset local database, stale workspace handling) remain effective.
+- V1.95 fixes (immediate DesktopClient, Reset local database, stale workspace handling) remain effective.
 
 #### 29.11.6 Preservation
 
@@ -1263,8 +1263,8 @@ Bootstrap (`ensureSetupBootstrap`) on Workspace **Continue** only.
 
 #### 29.13.6 Non-goals
 
-- Tauri PATH agent scan; multi-workspace switcher; BYOK; Settings shell IA redesign; wire/schema changes unless P0 proves unavoidable.
-  > **Durable roadmap:** DR-35 (Tauri PATH agent scan), DR-34 (multi-workspace switcher + Settings shell IA redesign). BYOK: tracked as **DF-70** (tracker §2.3).
+- Native PATH agent scan; multi-workspace switcher; BYOK; Settings shell IA redesign; wire/schema changes unless P0 proves unavoidable.
+  > **Durable roadmap:** DR-35 (PATH agent scan), DR-34 (multi-workspace switcher + Settings shell IA redesign). BYOK: tracked as **DF-70** (tracker §2.3).
 
 ### 30. V1.98 Amendments — Design Studio dev surface (not author-facing)
 

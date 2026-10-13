@@ -494,7 +494,7 @@ does not remove CLI parity for the then-existing `creator run`, Work status, rec
 chapter-oriented orchestration flows. The CLI remains the power-user and
 automation surface; the Web UI becomes the primary author-facing surface for
 outline/structure planning. Body full-text editing and native `Open with` actions
-are deferred to the V1.66 Tauri shell/body-editor design.
+are deferred to the V1.66 native desktop shell/body-editor design.
 
 The `daemon` command group **used to include** (all deleted in v1.193 P2):
 

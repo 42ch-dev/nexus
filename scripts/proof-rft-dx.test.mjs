@@ -8,7 +8,6 @@ import {
   evaluateDx2,
   evaluateDx3,
   isCargoFamilyCommand,
-  isTauriFamilyCommand,
   countCargoTraces,
   evidenceFilename,
   markerSource,
@@ -41,10 +40,9 @@ test('evaluateDx2 and evaluateDx3 thresholds', () => {
   assert.equal(evaluateDx3([6000]).pass, false);
 });
 
-test('cargo and tauri family detection', () => {
+test('cargo family detection', () => {
   assert.equal(isCargoFamilyCommand('/usr/bin/cargo build -p nexus42'), true);
   assert.equal(isCargoFamilyCommand('node scripts/proof-rft-dx.mjs'), false);
-  assert.equal(isTauriFamilyCommand('/path/tauri dev'), true);
 });
 
 test('countCargoTraces walks descendant process tree', () => {
@@ -94,8 +92,8 @@ test('shared-ui DX-1 roots include watcher and vite child', () => {
 
 test('summarizeIntervalSamples detects cargo across interval observations', () => {
   const summary = summarizeIntervalSamples([
-    { processCount: 2, cargoCount: 0, tauriCount: 0, cargoCommands: [], tauriCommands: [], tracedPids: [1, 2] },
-    { processCount: 3, cargoCount: 1, tauriCount: 0, cargoCommands: ['/usr/bin/cargo build'], tauriCommands: [], tracedPids: [1, 2, 3] },
+    { processCount: 2, cargoCount: 0, cargoCommands: [], tracedPids: [1, 2] },
+    { processCount: 3, cargoCount: 1, cargoCommands: ['/usr/bin/cargo build'], tracedPids: [1, 2, 3] },
   ]);
   assert.equal(summary.anyCargo, true);
   assert.equal(summary.cargoPositiveSamples, 1);

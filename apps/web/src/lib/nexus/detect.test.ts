@@ -6,8 +6,7 @@
  * Electron shell. It must read `true` only with a valid
  * `window.nexusDesktop.version === 1` bridge, and `false` in a plain
  * browser/jsdom — including when a legacy `NEXUS_DESKTOP` flag/global is
- * present (desktop-shell.md §5 forbids build-env-only selection). No Tauri
- * runtime marker remains.
+ * present (desktop-shell.md §5 forbids build-env-only selection).
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -58,7 +57,9 @@ describe('isDesktopBuild (capability detection — §5 #7)', () => {
   });
 
   it('does not flip on unrelated global properties (defends against false positives)', () => {
-    (window as unknown as { __TAURI__?: unknown }).__TAURI__ = {};
+    // Test seam: inject an unrelated global to prove detection ignores it.
+    (window as unknown as { __UNRELATED_GLOBAL__?: unknown }).__UNRELATED_GLOBAL__ = {};
     expect(isDesktopBuild()).toBe(false);
+    delete (window as unknown as { __UNRELATED_GLOBAL__?: unknown }).__UNRELATED_GLOBAL__;
   });
 });

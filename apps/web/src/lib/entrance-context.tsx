@@ -33,7 +33,7 @@ interface EntranceContextValue {
    */
   isFirstRun: boolean;
   /**
-   * Persist and sync the entrance (localStorage / Tauri IPC). No optimistic
+   * Persist and sync the entrance (localStorage / desktop IPC). No optimistic
    * write: a landing-layout switch must not flash the wrong tree (AR-16).
    */
   setEntrance: (value: EntranceId) => Promise<void>;

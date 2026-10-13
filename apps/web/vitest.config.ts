@@ -90,7 +90,6 @@ export default defineConfig({
       provider: 'v8',
       include: [
         'src/lib/nexus/browser-client.ts',
-        'src/lib/nexus/tauri-client.ts',
         'src/lib/nexus/adapters.ts',
         'src/lib/nexus/errors.ts',
         'src/lib/nexus/types.ts',

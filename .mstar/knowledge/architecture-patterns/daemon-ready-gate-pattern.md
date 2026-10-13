@@ -24,7 +24,7 @@ applies_when:
 
 ## Context
 
-V1.66 (Tauri Desktop Shell) shipped a `SidecarManager` that auto-starts the bundled `nexus42` daemon and exposes a single lifecycle event stream `onDaemonStatusChanged` carrying `DaemonStatus { state, version, port, detail }`. States: `starting → running → degraded → stopped → error`.
+V1.66 (the retired Desktop Shell) shipped a `SidecarManager` that auto-starts the bundled `nexus42` daemon and exposes a single lifecycle event stream `onDaemonStatusChanged` carrying `DaemonStatus { state, version, port, detail }`. States: `starting → running → degraded → stopped → error`.
 
 V1.94 introduced **two distinct consumers** of that single event stream (wizard step + per-launch splash). **V1.105 collapses wait ownership into one outer app-level gate:**
 
@@ -32,11 +32,11 @@ V1.94 introduced **two distinct consumers** of that single event stream (wizard 
 2. **`SetupGate`** (marker only) — after Ready, routes incomplete setup to `/setup` vs main UI. **No splash.**
 3. **Setup wizard** — Agent → Workspace → Done only; **no** Daemon wizard step (`setup-step-daemon.tsx` deleted).
 
-The naive implementation would create two independent health-probe polls or two Tauri commands ("is the daemon ready yet?"). Both are wrong: they compete with the existing `SidecarManager` state machine, can deadlock on the 15s `HEALTH_START_TIMEOUT` boundary, and drift from the source of truth.
+The naive implementation would create two independent health-probe polls or two host commands ("is the daemon ready yet?"). Both are wrong: they compete with the existing `SidecarManager` state machine, can deadlock on the 15s `HEALTH_START_TIMEOUT` boundary, and drift from the source of truth.
 
 ## Guidance (the pattern)
 
-**Single source of truth, multiple observers.** The `SidecarManager` owns daemon lifecycle state. Consumers observe the existing `onDaemonStatusChanged` event; they do NOT spawn their own probes, do NOT poll a health endpoint independently, and do NOT ask for a new Tauri command when the event already carries the signal.
+**Single source of truth, multiple observers.** The `SidecarManager` owns daemon lifecycle state. Consumers observe the existing `onDaemonStatusChanged` event; they do NOT spawn their own probes, do NOT poll a health endpoint independently, and do NOT ask for a new host command when the event already carries the signal.
 
 | Rule | Reason |
 |------|--------|
@@ -60,14 +60,14 @@ The naive implementation would create two independent health-probe polls or two 
 
 ## Examples
 
-- **Outer launch gate (V1.105 current)** (`apps/web/src/components/setup/daemon-launch-gate.tsx` + `daemon-ready-splash.tsx`): mount-time `getDaemonStatus` + `onDaemonStatusChanged`; 25s timeout; retry = reload; reset = `resetLocalDatabase` + reload; **no** happy-path `startDaemon` (D2 always-starts in Tauri `.setup()`).
+- **Outer launch gate (V1.105 current)** (`apps/web/src/components/setup/daemon-launch-gate.tsx` + `daemon-ready-splash.tsx`): mount-time `getDaemonStatus` + `onDaemonStatusChanged`; 25s timeout; retry = reload; reset = `resetLocalDatabase` + reload; **no** happy-path `startDaemon` (D2 always-starts in the host `.setup()`).
 - **Marker routing (V1.105)** (`apps/web/src/components/setup/setup-gate.tsx`): after outer gate Ready — `!setup_completed` → `/setup`; else main shell. No splash/subscribe.
 - **Historical — Setup Wizard Step 2** (`setup-step-daemon.tsx`, deleted in V1.105 P1): previously owned wait+`startDaemon` inside the wizard. Do not reintroduce.
 - **Crash banner** (`apps/web/src/components/layout/main-banner.tsx`): long-running-session consumer; appears when state degrades from `"running"` to `"degraded"`/`"error"`/`"stopped"`.
 
 ## Anti-patterns
 
-- ❌ Adding `is_daemon_ready() -> bool` Tauri command (race-prone; the event already carries it).
+- ❌ Adding an `is_daemon_ready() -> bool` host command (race-prone; the event already carries it).
 - ❌ Polling `GET /v1/daemon/runtime/health` from the SPA (duplicates `SidecarManager`'s own probe).
 - ❌ Two consumers calling `start_daemon()` independently (budget-reset semantics differ; can mask crash loops).
 
@@ -99,7 +99,7 @@ V1.96 () hit a P0 blocker: the setup wizard Step 2 hung indefinitely in "Startin
 
 ### Rule 5: probe current state on mount, BEFORE subscribing
 
-The daemon auto-starts at Tauri boot (`lib.rs` setup hook), which runs **before** the SPA's React tree mounts. By the time the SPA subscribes to `onDaemonStatusChanged`, the daemon may have already transitioned to `running` (normal) or `error` (crashed on boot). The first event the SPA would otherwise receive is `state: 'starting'` — but if the daemon already exited, even that event was emitted before subscription and is lost.
+The daemon auto-starts at host boot (`lib.rs` setup hook), which runs **before** the SPA's React tree mounts. By the time the SPA subscribes to `onDaemonStatusChanged`, the daemon may have already transitioned to `running` (normal) or `error` (crashed on boot). The first event the SPA would otherwise receive is `state: 'starting'` — but if the daemon already exited, even that event was emitted before subscription and is lost.
 
 **Pattern**: call `getDaemonStatus()` (or the equivalent one-shot current-state command) on mount, apply the result, THEN subscribe for future transitions. If the mount-probe already returns a terminal state, the UI is immediately correct; the subscription is still attached for later restart/recovery events.
 
@@ -141,9 +141,9 @@ Rules 5+6+7 together make the consumer resilient to **any** timing of the event 
 
 Distilled from V1.96 . Iteration-scoped RCA with code sketches: `daemon-startup-rca.md` (snapshot; promoted here).
 
-## V1.97 refinements: initial-state correctness + Tauri v2 spawn-name resolution
+## V1.97 refinements: initial-state correctness + v2 host spawn-name resolution
 
-V1.97 () ran the first real clean-state desktop smoke against the bundled sidecar and found **two latent first-launch blockers** that had been present since V1.66 but never surfaced (no prior iteration had actually spawned the sidecar end-to-end). Both distil into durable rules that apply to the supervisor state machine and the Tauri shell-plugin contract.
+V1.97 () ran the first real clean-state desktop smoke against the bundled sidecar and found **two latent first-launch blockers** that had been present since V1.66 but never surfaced (no prior iteration had actually spawned the sidecar end-to-end). Both distil into durable rules that apply to the supervisor state machine and the host shell-plugin contract.
 
 ### Rule 9: a freshly constructed SidecarManager starts in `Stopped`, never `Starting`
 
@@ -163,17 +163,17 @@ if state == Starting { return Ok(()); }
 if state == Starting && inner.child.is_some() { return Ok(()); }
 ```
 
-### Rule 11: Tauri v2 `app.shell().sidecar(name)` takes the FILENAME, not the `externalBin` path
+### Rule 11: the v2 host's `app.shell().sidecar(name)` takes the FILENAME, not the `externalBin` path
 
-> **Historical (host retired v1.192):** this rule documents the Tauri v2 desktop host, which was replaced by the Electron composition (`apps/desktop-electron`). The general lesson — a sidecar/spawn argument must match the registered runtime name byte-for-byte, not the build-time source path — still applies to any host's child-process launch; the concrete `tauri.conf.json` / `tauri-plugin-shell` details below are a historical record.
+> **Historical (host retired v1.192):** this rule documents the retired v2 desktop host, which was replaced by the Electron composition (`apps/desktop-electron`). The general lesson — a sidecar/spawn argument must match the registered runtime name byte-for-byte, not the build-time source path — still applies to any host's child-process launch; the concrete bundle-config / shell-plugin details below are a historical record.
 
-This was the more severe latent blocker. `bundle.externalBin` in `tauri.conf.json` lists **build-time source paths** (e.g. `["binaries/nexus42"]`); Tauri appends the target-triple suffix (`nexus42-aarch64-apple-darwin`) at bundle time. But the **runtime** Rust API `tauri_plugin_shell::ShellExt::sidecar()` "expects only the filename of the sidecar, not its full path" (Tauri v2 docs, `https://v2.tauri.app/develop/sidecar`). The desktop shell had called `app.shell().sidecar("binaries/nexus42")` since V1.66 — which **never resolves**, so the bundled daemon was never spawnable from the desktop app. The error (`failed to spawn sidecar: No such file or directory (os error 2)`) only appeared once V1.97 actually ran a clean-state smoke.
+This was the more severe latent blocker. `bundle.externalBin` in the bundle config lists **build-time source paths** (e.g. `["binaries/nexus42"]`); the bundler appends the target-triple suffix (`nexus42-aarch64-apple-darwin`) at bundle time. But the **runtime** Rust API `ShellExt::sidecar()` "expects only the filename of the sidecar, not its full path" (host sidecar docs). The desktop shell had called `app.shell().sidecar("binaries/nexus42")` since V1.66 — which **never resolves**, so the bundled daemon was never spawnable from the desktop app. The error (`failed to spawn sidecar: No such file or directory (os error 2)`) only appeared once V1.97 actually ran a clean-state smoke.
 
-The matching `tauri-plugin-shell` capability scope (`shell:allow-execute`, `sidecar: true`) registers a `name` that must be **byte-identical** to the `sidecar()` argument — so both must be the bare filename (`"nexus42"`), while `bundle.externalBin` keeps the source-relative path (`"binaries/nexus42"`).
+The matching shell-plugin capability scope (`shell:allow-execute`, `sidecar: true`) registers a `name` that must be **byte-identical** to the `sidecar()` argument — so both must be the bare filename (`"nexus42"`), while `bundle.externalBin` keeps the source-relative path (`"binaries/nexus42"`).
 
 **Pattern**:
 ```rust
-// tauri.conf.json  (build-time source path — UNCHANGED)
+// bundle config  (build-time source path — UNCHANGED)
 //   "bundle": { "externalBin": ["binaries/nexus42"] }
 // sidecar.rs (runtime — filename only)
 let command = app.shell().sidecar("nexus42")?;   // NOT "binaries/nexus42"
@@ -199,7 +199,7 @@ Rules 9 + 10 fix the supervisor state machine so a real spawn is actually attemp
 
 | Lock | Value |
 |------|-------|
-| Auto-start | Tauri `.setup()` **always** `SidecarManager::start` — ignore `setup_completed` |
+| Auto-start | host `.setup()` **always** `SidecarManager::start` — ignore `setup_completed` |
 | Wait UX | Outer `DaemonLaunchGate` before `/setup` **and** main UI |
 | Marker | Inner `SetupGate` routes by `setup_completed` only |
 | Bootstrap | `ensureSetupBootstrap` on Workspace **Continue** (after Ready), not before daemon start |
@@ -213,7 +213,7 @@ Rules 9 + 10 fix the supervisor state machine so a real spawn is actually attemp
 
 ### Rule 14 (V1.101): enrich process PATH at startup for agent CLI discovery (Class B) — no schemas/
 
-V1.101 P0 closed `R-V1100P0SMOKE-AGENT-SCAN`: macOS GUI / Tauri-launched daemons often inherit a minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`). Homebrew and user-local ACP agent CLIs under `/opt/homebrew/bin`, `~/.local/bin`, `~/.cargo/bin`, asdf/mise shims, etc. are then invisible to `which::which` during `POST /v1/daemon/agent-host/scan`, so the setup AgentPicker shows empty even when agents are installed in a login shell.
+V1.101 P0 closed `R-V1100P0SMOKE-AGENT-SCAN`: macOS GUI-launched daemons often inherit a minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`). Homebrew and user-local ACP agent CLIs under `/opt/homebrew/bin`, `~/.local/bin`, `~/.cargo/bin`, asdf/mise shims, etc. are then invisible to `which::which` during `POST /v1/daemon/agent-host/scan`, so the setup AgentPicker shows empty even when agents are installed in a login shell.
 
 **Pattern:** merge a **login-shell-equivalent** set of common user bin dirs into the **process** `PATH` **once at startup** (before any scan probe). Implementation: `crates/nexus-agent-host/src/discovery/path_enrichment.rs` (`apply_process_path_enrichment`, `:333`, built on `login_equivalent_bin_dirs`, `:165`), called from the CLI's synchronous `main` **before Tokio starts** — `apps/nexus42/src/main.rs:27`. No shell-out; only existing directories are appended; idempotent merge. (Historical: the former caller was the deleted Rust daemon's `run_daemon`; it is gone with the daemon host in v1.193 P2.)
 
@@ -229,4 +229,4 @@ V1.101 P0 closed `R-V1100P0SMOKE-AGENT-SCAN`: macOS GUI / Tauri-launched daemons
 
 ### Source
 
-Distilled from V1.97 (Tauri v2 host; retired in v1.192). Tauri v2 sidecar resolution rule confirmed against `https://v2.tauri.app/develop/sidecar` ("expects only the filename of the sidecar, not its full path"). Iteration-scoped invariants + prototype intake rule: `sidecar-startup-state-machine.md` (snapshot; durable rules promoted here). **Rule 13 distilled from V1.100 P0** . **Rule 14 distilled from V1.101 P0** . **Rule 15 distilled from V1.105** P0–P2 (`DaemonLaunchGate`, D2 always-start, Agent→Workspace→Done, portrait shell).
+Distilled from V1.97 (the v2 host; retired in v1.192). The v2 sidecar resolution rule confirmed against the host's sidecar docs ("expects only the filename of the sidecar, not its full path"). Iteration-scoped invariants + prototype intake rule: `sidecar-startup-state-machine.md` (snapshot; durable rules promoted here). **Rule 13 distilled from V1.100 P0** . **Rule 14 distilled from V1.101 P0** . **Rule 15 distilled from V1.105** P0–P2 (`DaemonLaunchGate`, D2 always-start, Agent→Workspace→Done, portrait shell).

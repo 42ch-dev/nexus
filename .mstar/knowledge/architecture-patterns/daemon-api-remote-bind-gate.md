@@ -53,7 +53,7 @@ The original V1.90 gate lived in the Rust daemon: a pure function `ensure_remote
 ## Why this works
 
 - **Fail-closed**: a missing flag, cert/key, or key stops the service before a socket is opened, and the request gate refuses too.
-- **Loopback unaffected**: local development and Tauri/desktop default paths require no extra flags.
+- **Loopback unaffected**: local development and desktop default paths require no extra flags.
 - **TLS mandatory off-loopback**: an opt-in remote listener can never run in cleartext, so the API key and manuscript bytes are not exposed on the LAN.
 - **Auth middleware remains**: the startup gate protects against accidental bind; the request gate still enforces key presence on every non-loopback **guarded** request.
 

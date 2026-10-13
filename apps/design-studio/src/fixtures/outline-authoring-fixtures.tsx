@@ -30,7 +30,7 @@
  *
  * Boundary (apps/design-studio AGENTS.md — HARD): no `@xyflow/react`, no
  * `@42ch/nexus-contracts`, no daemon clients (`lib/nexus`), no
- * `useTranslation`, no `@tauri-apps`. Static English product vocabulary only.
+ * `useTranslation`. Static English product vocabulary only.
  * Each variant renders as a light/dark pair — the dark specimen sits in a
  * scoped `.dark` panel so both themes are inspectable without a document
  * theme toggle (same recipe as vi-aesthetic-retune-fixtures).

@@ -340,7 +340,7 @@ function quitDetail(status: DaemonStatus): string {
   return status.detail ? `${base} ${status.detail}` : base;
 }
 
-/** Retired Tauri-era keychain identity of the legacy connection credential. */
+/** Retired legacy-host keychain identity of the legacy connection credential. */
 const LEGACY_KEYCHAIN_SERVICE = 'nexus42';
 const LEGACY_KEYCHAIN_ACCOUNT = 'connection_config';
 /** `security` exit status for errSecItemNotFound: the item is already gone. */

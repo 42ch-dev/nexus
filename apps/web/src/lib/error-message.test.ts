@@ -9,7 +9,7 @@ describe('errorMessage', () => {
   });
 
   it('returns message from a plain object with a string message field', () => {
-    expect(errorMessage({ message: 'tauri invoke error' })).toBe('tauri invoke error');
+    expect(errorMessage({ message: 'desktop invoke error' })).toBe('desktop invoke error');
   });
 
   it('falls through when the message field is not a string', () => {
