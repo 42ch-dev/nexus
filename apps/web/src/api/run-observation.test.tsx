@@ -133,6 +133,22 @@ async function wait(ms: number): Promise<void> {
 }
 
 /**
+ * A wait that reads `events` must also assert a published field: the retained
+ * buffer is mutated in place ahead of React's commit, so a wait on the buffer
+ * alone can pass while `result.current` is still the previous snapshot.
+ */
+async function waitForCursor(
+  probe: { result: { current: RunObservationResult } },
+  cursor: string,
+  buffer: () => void,
+): Promise<void> {
+  await waitFor(() => {
+    expect(probe.result.current.lastEventId).toBe(cursor);
+    buffer();
+  });
+}
+
+/**
  * Frames a COMMITTED render showed. A render React discards never commits, so
  * the layout effect that records here never runs for it: an entry with a stale
  * identity's frames is therefore a frame that reached the UI.
@@ -202,7 +218,9 @@ describe('useRunObservation — replay/live handoff', () => {
     first.unmount();
 
     const reentry = observeRun(client, 'run-boundary');
-    await waitFor(() => expect(reentry.result.current.events.map(cursorOf)).toContain('e1:5'));
+    await waitForCursor(reentry, 'e1:5', () =>
+      expect(reentry.result.current.events.map(cursorOf)).toContain('e1:5'),
+    );
 
     expect(calls[1].lastEventId).toBe('e1:2');
     expect(reentry.result.current.events.map(cursorOf)).toEqual([
@@ -253,7 +271,7 @@ describe('useRunObservation — replay/live handoff', () => {
     expect(reentry.result.current.liveFrom).toBe(256);
 
     await waitFor(() => expect(reentry.result.current.phase).toBe('live'));
-    await waitFor(() =>
+    await waitForCursor(reentry, 'e1:302', () =>
       expect(
         reentry.result.current.events.slice(reentry.result.current.liveFrom).map(cursorOf),
       ).toEqual(['e1:302']),
@@ -298,7 +316,9 @@ describe('useRunObservation — replay/live handoff', () => {
     await wait(200);
     expect(reentry.result.current.phase).toBe('replaying');
 
-    await waitFor(() => expect(reentry.result.current.events.map(cursorOf)).toContain('e1:5'));
+    await waitForCursor(reentry, 'e1:5', () =>
+      expect(reentry.result.current.events.map(cursorOf)).toContain('e1:5'),
+    );
 
     expect(calls[1].lastEventId).toBe('e1:2');
     // The delayed replay burst stays replayed; only the post-settle frame is live.
@@ -340,7 +360,9 @@ describe('useRunObservation — replay/live handoff', () => {
     first.unmount();
 
     const reentry = observeRun(client, 'run-busy-replay');
-    await waitFor(() => expect(reentry.result.current.events).toHaveLength(72));
+    await waitForCursor(reentry, 'e1:72', () =>
+      expect(reentry.result.current.events).toHaveLength(72),
+    );
 
     // 70 catch-up frames (e1:3…e1:72): the 64th, `e1:66`, is the first live one,
     // and the six frames after it keep arriving live rather than replaying.
@@ -373,7 +395,9 @@ describe('useRunObservation — gap recovery', () => {
     const { client, calls } = stubClientFor([(options) => gappedThenTail(options)]);
 
     const probe = observeRun(client, 'run-gap-inline');
-    await waitFor(() => expect(probe.result.current.events.map(cursorOf)).toContain('e1:3'));
+    await waitForCursor(probe, 'e1:3', () =>
+      expect(probe.result.current.events.map(cursorOf)).toContain('e1:3'),
+    );
 
     // One subscription, never aborted: the frames after the gap arrived on the
     // stream that reported it.
@@ -659,7 +683,9 @@ describe('useRunObservation — retention bounds', () => {
 
     const { client } = stubClientFor([(options) => many(options)]);
     const probe = observeRun(client, 'run-capped');
-    await waitFor(() => expect(probe.result.current.events.length).toBeGreaterThan(128));
+    await waitForCursor(probe, 'e1:300', () =>
+      expect(probe.result.current.events.length).toBeGreaterThan(128),
+    );
 
     const retained = probe.result.current.events;
     expect(retained.length).toBeLessThan(300);
@@ -847,7 +873,9 @@ describe('useRunObservation — connection-scoped retention', () => {
       },
       { wrapper: wrapperFor(client), initialProps: { runId: 'run-switch-a' } },
     );
-    await waitFor(() => expect(hook.result.current.events.map(cursorOf)).toEqual(['e1:1']));
+    await waitForCursor(hook, 'e1:1', () =>
+      expect(hook.result.current.events.map(cursorOf)).toEqual(['e1:1']),
+    );
 
     committedFrames.length = 0;
     act(() => hook.rerender({ runId: 'run-switch-b' }));

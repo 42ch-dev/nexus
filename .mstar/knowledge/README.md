@@ -486,3 +486,9 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | Document | Description |
 | --- | --- |
 | [conventions/mechanism-tracing-over-path-retargeting.md](conventions/mechanism-tracing-over-path-retargeting.md) | Mechanism tracing over path retargeting — when a cited implementation moved or was deleted, trace the mechanism at HEAD before rewriting the reference: a path that resolves is not a current fact (RegExp capture groups vs the retired `:param` teaching, `node:https` vs `axum-server` startup notes, symbols with zero `rg` hits, the peer-tools `NEXUS_DAEMON_REMOTE_BIND` lane vs the service's `--allow-remote` + TLS contract, the local-db DAO vs the same-named service method); dead mechanisms keep the reusable lesson under an explicit historical + retired-iteration label with unresolvable symbols deleted; index rows re-sync with the body; shared refusal codes are disambiguated in RCA steps (`501 route_not_migrated` on both the unmatched and the matched-then-refused path) (2026-10-12 knowledge/specs hygiene round distilled) |
+
+### 2026-10-13 run-observation flake-fix additions
+
+| Document | Description |
+| --- | --- |
+| [test-failures/published-buffer-mutated-before-commit.md](test-failures/published-buffer-mutated-before-commit.md) | Reading a mutation-live published buffer — `useRunObservation` publishes React state whose `events` field *is* the retained buffer, mutated in place ahead of the commit, so a `waitFor` on the buffer can pass while `result.current` is still the previous snapshot (`expected 'e1:2' to be 'e1:3'` with the frame list already correct); the hook design is unchanged and the tests gate every buffer-reading wait on a published field (`lastEventId`/`revision`) instead; reproduce such flake by changing the schedule under load, never by repeating idle runs (plan `2026-10-13-web-run-observation-flake` distilled; residual `R-FLAKE-WEB-RUN-OBSERVATION` closed) |
