@@ -7,10 +7,10 @@
  * here keeps the detection logic in one place.
  *
  * The match is intentionally lenient (case-insensitive substring) because the
- * underlying message is produced by the desktop sidecar
- * (`apps/desktop/.../sidecar.rs`, "... port {n} is already in use ...") and
- * reaches the UI through several transport layers — exact-string matching would
- * be brittle. Returns `false` for an empty/blank input.
+ * underlying message ("... port {n} is already in use ...") is produced by the
+ * desktop host and reaches the UI through several transport layers —
+ * exact-string matching would be brittle. Returns `false` for an empty/blank
+ * input.
  *
  * Note: this covers the **restart-error** surface only.
  * `MainBanner.messageFor` matches a different, stricter shape
