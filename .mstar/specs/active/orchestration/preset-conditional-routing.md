@@ -1,60 +1,32 @@
 # Preset Conditional Routing — Specification
 
-**Status**: Shipped (V1.42 P2 — 2026-06-12; `llm_judge` GO/NOGO → two `next` edges; V1.52 T-B P0 — 2026-06-19; N-way labeled routing; V1.52 T-B P1 — 2026-06-19; multi-branch merge semantics; V1.56 P2 — 2026-06-22; arbitrary stage conditional + expression routing + converge nodes; V1.56 P3 — 2026-06-22; registry.refresh conditional edges + workspace branch inputs; **V1.179 P2 — 2026-08-27; DR-06 bounded joins** — `timeout_ms` / `on_timeout` on `merge:`/`converge:` states (additive fields; normative §3.3.3))  
-**Document class**: Feature line (conditional routing — minimal slice → N-way labeled → merge semantics → full expression routing → data-source integration)  
+**Status**: Shipped — normative SSOT for preset conditional routing: `llm_judge` GO/NOGO and N-way labeled routing, multi-branch merge semantics, arbitrary stage-level conditional `next` + expression routing + converge nodes, registry/workspace context fields, and DR-06 bounded joins (§3.3.3)  
+**Document class**: Feature line (conditional routing)  
 **Created**: 2026-06-06  
-**Last updated**: 2026-09-29 (authority clarified; V1.179 P2 DR-06 bounded joins remain shipped, §3.3.3)
+**Last updated**: 2026-09-29  
 **Tracker**: DF-56 (conditional routing / branching engine)  
-**Scope**: Preset `next.kind: conditional` loader + runtime evaluator (shipped)  
-**Supersedes**: `fl-d-conditional-routing-exploration-v1.35-prepare.md` (pre-shipment exploration superseded 2026-06-06; rationale preserved in §4–§7)  
+**Scope**: Preset `next.kind: conditional` loader + runtime evaluator  
+**Supersedes**: `fl-d-conditional-routing-exploration-v1.35-prepare.md` (pre-shipment exploration; the superseded rationale is frozen in the archive record)  
 **Coordinates with**:
 
-- [orchestration-engine.md](orchestration-engine.md) §7.5 — delegates conditional-routing semantics to this file as the shipped normative SSOT, including DR-06 bounded joins (V1.179 P2); it is not a linear-only contract awaiting a future shipment
-- [creator-workflow.md](../creator/creator-workflow.md) — linear creator workflow stages (shipped V1.34); conditional routing layers beneath, does not replace FL-E enum in the first ship slice
+- [orchestration-engine.md](orchestration-engine.md) §7.5 — delegates conditional-routing semantics to this file as the shipped normative SSOT, including DR-06 bounded joins
+- [creator-workflow.md](../creator/creator-workflow.md) — linear creator workflow stages; conditional routing layers beneath, does not replace the FL-E enum
 
-This file is the shipped normative SSOT for conditional routing. DR-06 bounded-join validation is implemented in `crates/nexus-preset/src/loader.rs`, runtime deadlines/rerouting in `crates/nexus-orchestration/src/tasks/mod.rs`, and deterministic coverage in `crates/nexus-orchestration/tests/join_timeout_e2e.rs`. Pre-shipment rationale and release snapshots below are explicitly historical, not pending implementation gates.
+This file is the shipped normative SSOT for conditional routing. DR-06 bounded-join validation is implemented in `crates/nexus-preset/src/loader.rs`, runtime deadlines/rerouting in `crates/nexus-orchestration/src/tasks/mod.rs`, and deterministic coverage in `crates/nexus-orchestration/tests/join_timeout_e2e.rs`.
 
 ---
 
 ## 1. Purpose
 
-Authors need presets that branch on runtime signals (judge outcome, tool result, user input) without spawning separate schedules or manual dispatch (historically `creator run <preset_id>`; that CLI runner was retired in v1.193 P2).
-
-**Historical V1.42 P2 minimal-slice snapshot** (2026-06-11; later shipped semantics are in §3):
-
-- `llm_judge` states with `next: { go: <state>, nogo: <state> }` now accepted by loader.
-- Graph wires a conditional edge using `_judge_result` from context.
-- GO → `go` target; NOGO or worker-unavailable → `nogo` target.
-- Only valid on `exit_when: { kind: llm_judge }` states. Full expression-based conditional routing remains post-V1.42 (see §3.6.3).
-- 
-
-Historical pre-V1.42 state:
-
-- Preset loader rejected `next.kind: conditional` with `ConditionalNotYetSupported`.
-- Shipped creator workflow uses linear stage enum + explicit `creator run <preset_id>` dispatch (DF-53 auto-chain still open).
-- V1.32 validator catches invalid preset graphs at load time for **linear** graphs only.
-
----
-
-## 2. Historical state (V1.42 P2 shipped snapshot)
-
-This table records the initial slice, not today's loader limits or CLI surface. Expression routing shipped in V1.56 (§3.3); `creator run` was retired in v1.193 P2.
-
-| Area | State |
-| --- | --- |
-| Preset loader | Accepts `next: { go: <state>, nogo: <state> }` on `llm_judge` states; still rejects expression-based `ConditionalNotYetSupported` |
-| Creator workflow stages | Linear enum; explicit `creator run <preset_id>` dispatch |
-| Quality gate | V1.32 validator: reachability, terminal consistency, asset sandbox (linear graphs) |
-| Conditional edge runtime | `graph_flow::add_conditional_edge` reads `_judge_result` from context |
-| Open deferrals | DF-29 (`registry.refresh`), DF-31 (`workspace.*`), **DF-56** (full expression routing — post-V1.42) |
+Authors need presets that branch on runtime signals (judge outcome, tool result, user input) without spawning separate schedules or manual dispatch.
 
 ---
 
 ## 3. Shipped normative semantics
 
-Orchestration-engine §7.5 delegates the full conditional `next` schema and merge/converge semantics to this section. N-way routing, expression routing, and DR-06 bounded joins are shipped; the release labels below identify their provenance, not future targets.
+Orchestration-engine §7.5 delegates the full conditional `next` schema and merge/converge semantics to this section. N-way routing, expression routing, and DR-06 bounded joins are shipped.
 
-### 3.1 N-way labeled routing (V1.52 T-B P0 — Normative)
+### 3.1 N-way labeled routing
 
 N-way labeled routing generalizes the binary GO/NOGO routing into multi-label routing for `llm_judge` states. The judge returns a label string (e.g. `"outline"`, `"research"`, `"abandon"`), and the runtime selects the first matching `LabeledNext` edge.
 
@@ -92,7 +64,7 @@ When `next` contains `Labeled` (or `GoNogo` via auto-conversion), the orchestrat
 
 **Substring matching caveat**: matching uses `String::contains()` (substring containment). Authors should choose labels that are unlikely to appear as substrings of unrelated words. The descending-length sort mitigates the most common case (e.g., `"nogo"` checked before `"go"`). A future iteration may add word-boundary or exact matching.
 
-### 3.2 Merge semantics (V1.52 T-B P1 — Normative)
+### 3.2 Merge semantics
 
 When multiple `LabeledNext` edges from different `llm_judge` states converge on a single state, the orchestration engine uses merge semantics to decide when to advance to that state.
 
@@ -121,7 +93,7 @@ Three merge modes:
 - **`any`**: advance on FIRST incoming labeled edge result.
 - **`quorum N/M`**: advance when at least N of M incoming edges have produced their target.
 
-When `merge:` is absent on a state with multiple incoming labeled edges, the default is `wait-all`. States with 0 incoming labeled edges are not merge nodes; a state with exactly 1 incoming labeled edge is still join-gated by the implicit wait-all rule (it waits for that single arrival). Reconciliation with §3.3.3 (v1.179 QC): bounded-join fields are accepted from that same ≥1-incoming threshold — at `expected_incoming == 1` the `timeout_ms` budget is meaningful, bounding the wait for the single edge — while explicit `merge:` states additionally require ≥2 incoming edges (§3.2.3) and explicit `converge:` states accept the fields at any predecessor count (0 predecessors skips the gate per §3.3.3).
+When `merge:` is absent on a state with multiple incoming labeled edges, the default is `wait-all`. States with 0 incoming labeled edges are not merge nodes; a state with exactly 1 incoming labeled edge is still join-gated by the implicit wait-all rule (it waits for that single arrival). Reconciliation with §3.3.3: bounded-join fields are accepted from that same ≥1-incoming threshold — at `expected_incoming == 1` the `timeout_ms` budget is meaningful, bounding the wait for the single edge — while explicit `merge:` states additionally require ≥2 incoming edges (§3.2.3) and explicit `converge:` states accept the fields at any predecessor count (0 predecessors skips the gate per §3.3.3).
 
 #### §3.2.2 Runtime tracking
 
@@ -135,7 +107,7 @@ On each labeled edge match (`resolve_labeled_target`), the runtime writes the ma
    - `Quorum { n, .. }`: `arrived_count >= n`
 4. If satisfied: clears the context key and processes enter actions normally.
 5. If not satisfied: returns `NextAction::WaitForInput` — the engine will re-enter the state when the next labeled edge arrives.
-   Bounded-join opt-in (DR-06, v1.179): if the merge state sets
+   Bounded-join opt-in (DR-06): if the merge state sets
    `timeout_ms`, the wait is bounded — deadline expiry reroutes to
    `on_timeout` or fails with the typed `converge_timeout:` error
    (`gate=merge`); see §3.3.3 "Bounded joins" for the normative table.
@@ -157,13 +129,13 @@ Violations produce `DiagnosticCategory::MergeIntegrity` errors and block preset 
 - Existing binary `GoNogo` + N-way `Labeled` presets continue to work without modification — the `merge:` field is additive.
 - `GoNogo` edges are also counted as incoming labeled edges for merge node purposes (labels `"go"` and `"nogo"`).
 
-### 3.3 Arbitrary stage-level conditional `next` + expression routing (V1.56 P2 — Normative)
+### 3.3 Arbitrary stage-level conditional `next` + expression routing
 
 Extends the conditional routing engine from `llm_judge`-only to **arbitrary state kinds**, adds a simple expression grammar for rule-based routing, and defines explicit converge (merge-point) state nodes.
 
 #### §3.3.1 Arbitrary stage-level conditional `next`
 
-Any state kind (`produce`, `review`, `manual`, `rule`, `timer`, `graph_complete`, custom states) can now declare a conditional `next` using either the legacy `kind: conditional` form or the new expression-based `branches` form. The loader no longer restricts conditional routing to `llm_judge` states.
+Any state kind (`produce`, `review`, `manual`, `rule`, `timer`, `graph_complete`, custom states) can declare a conditional `next` using either the legacy `kind: conditional` form or the expression-based `branches` form. The loader does not restrict conditional routing to `llm_judge` states.
 
 **Loader validation**: target state IDs in all branches and the default must reference valid states. The runtime evaluator reads `_state_result` or user-set context values for non-judge states.
 
@@ -190,24 +162,24 @@ next:
 
 **Evaluation**: first-match semantics — branches are evaluated in declaration order; the first branch with a `when` expression that evaluates to `true` wins. If no branch matches, the `default` target is used. Missing context fields resolve to `null`.
 
-**Null comparison semantics** (V1.56 P2 fix-wave, M-001): follows JSON equality semantics:
+**Null comparison semantics** (fix-wave M-001): follows JSON equality semantics:
   - `null == null` → `true`
   - `null != "x"` → `true` (non-null value not equal to null)
   - `null > 0` → type error (no numeric comparison with null)
   - Bare `null` reference → falsey
 
-**Absent vs null vs empty string** (V1.58 P2 — R-V156P2-M001 clarification): the expression evaluator treats three field states distinctly:
+**Absent vs null vs empty string** (R-V156P2-M001 clarification): the expression evaluator treats three field states distinctly:
   - **Absent** (key not in context): resolves to `null`. `_context.missing == null` → `true`. `_context.missing` (bare truthy) → `false`.
   - **Explicit `null`** (key present with JSON `null`): identical to absent — both produce `null` at the value layer, so `null == null` → `true`.
   - **Empty string `""`** (key present with `""`): distinct from null. `_context.text == null` → `false` (string is not null). `_context.text` (bare truthy) → `false` (empty string is falsey per truthy rules). However `_context.text != null` → `true`.
 
 Preset authors should use `== null` / `!= null` to test for field presence, and avoid bare truthy checks when distinguishing absent from empty-string.
 
-**Depth limit** (V1.56 P2 fix-wave, W-003): expression nesting depth is bounded by `MAX_EXPR_DEPTH = 32` to prevent stack overflow from deeply-nested `when:` expressions in user-installable presets. Exceeding the depth returns `ExprError::DepthExceeded`. Depth=32 succeeds; depth=33 returns an error; depth=1000 does not panic.
+**Depth limit** (fix-wave W-003): expression nesting depth is bounded by `MAX_EXPR_DEPTH = 32` to prevent stack overflow from deeply-nested `when:` expressions in user-installable presets. Exceeding the depth returns `ExprError::DepthExceeded`. Depth=32 succeeds; depth=33 returns an error; depth=1000 does not panic.
 
-**Expression caching** (V1.56 P2 fix-wave, M-004): compiled expression ASTs are cached per task at construction time and reused across transitions. Parsing happens once per preset load, not once per transition.
+**Expression caching** (fix-wave M-004): compiled expression ASTs are cached per task at construction time and reused across transitions. Parsing happens once per preset load, not once per transition.
 
-**Error propagation** (V1.56 P2 fix-wave, M-006): expression evaluation errors are propagated as `TaskExecutionFailed` (not silently swallowed). Runtime failures surface to the caller instead of skipping the branch.
+**Error propagation** (fix-wave M-006): expression evaluation errors are propagated as `TaskExecutionFailed` (not silently swallowed). Runtime failures surface to the caller instead of skipping the branch.
 
 **Safety**: expressions are locally evaluated in-process; no code injection, no scripting engine, no external service calls.
 
@@ -230,7 +202,7 @@ states:
   - **`first_completed`**: advance on first arrival; subsequent arrivals are ignored
   - **`any`**: idempotent — advance on first arrival; re-run after gate pass continues immediately
 
-**Runtime enforcement** (V1.56 P2 fix-wave, H-001/W-002): the convergence gate runs in `StateCompositeTask::run()` after the merge node gate. Arrivals are tracked via the `_converge_arrivals_{state_id}` context key, populated by source states when they route to a converge target. The converge gate check:
+**Runtime enforcement** (fix-wave H-001/W-002): the convergence gate runs in `StateCompositeTask::run()` after the merge node gate. Arrivals are tracked via the `_converge_arrivals_{state_id}` context key, populated by source states when they route to a converge target. The converge gate check:
   1. Reads the arrivals from the converge key
   2. Compares against the number of known predecessors
   3. For `wait_for_all`: all predecessors must have arrived
@@ -238,16 +210,16 @@ states:
   5. If unsatisfied: returns `NextAction::WaitForInput`
   6. If satisfied: clears the key and advances to enter actions
 
-**Predecessor tracking** (V1.56 P2 fix-wave): converge predecessors are discovered at graph build time by scanning all states' `next` targets. States that are converge targets have their predecessor sets populated in `StateCompositeTask::converge_predecessors`. Source states call `record_converge_arrival()` when routing to a converge target via `resolve_expression_target()` or `resolve_labeled_target()`.
+**Predecessor tracking** (fix-wave): converge predecessors are discovered at graph build time by scanning all states' `next` targets. States that are converge targets have their predecessor sets populated in `StateCompositeTask::converge_predecessors`. Source states call `record_converge_arrival()` when routing to a converge target via `resolve_expression_target()` or `resolve_labeled_target()`.
 
-**Loader validation** (V1.56 P2 fix-wave, M-002; V1.58 P2 — R-V156P2-M002 reconciliation):
+**Loader validation** (fix-wave M-002; R-V156P2-M002 reconciliation):
   - Converge states must not be terminal
-  - Converge states with 0 predecessors: **gate is skipped, state advances immediately** (no validation error). This handles the orphan-converge edge case gracefully — the state behaves as a normal non-converge state. The predecessor set is empty, so `converge_predecessors.is_empty()` short-circuits the gate check in `StateCompositeTask::run()`. (Previous spec text said "validation error (orphan)"; reconciled to match tested implementation in V1.58 P2.)
+  - Converge states with 0 predecessors: **gate is skipped, state advances immediately** (no validation error). This handles the orphan-converge edge case gracefully — the state behaves as a normal non-converge state. The predecessor set is empty, so `converge_predecessors.is_empty()` short-circuits the gate check in `StateCompositeTask::run()`.
   - Converge states with 1 predecessor produce a warning (consider linear transition)
 
 **DAG enforcement**: cycles remain rejected at load time. Acyclic paths through converge nodes (e.g. `A → M → B`, `C → M → B` where M waits for both A and C) are allowed.
 
-**Bounded joins — `timeout_ms` / `on_timeout`** (DR-06, v1.179 — Normative):
+**Bounded joins — `timeout_ms` / `on_timeout`** (DR-06 — Normative):
 join states may declare a bounded-join deadline. ONE field pair on the
 **state** serves BOTH join gates (merge §3.2 and converge §3.3.3):
 
@@ -266,7 +238,7 @@ Semantics:
   the join LEAVES — every present gate passed and processing proceeds — so
   a same-session re-entry (runtime `GoTo` loop; the DAG load only rejects
   static cycles) starts a fresh budget instead of firing the stale
-  deadline immediately (F-001, v1.179 QC fix).
+  deadline immediately (F-001).
 - `timeout_ms: 0` is legal and means the deadline is already elapsed: the
   FIRST waiting tick immediately reroutes (with `on_timeout`) or fails
   typed (without). `on_timeout` without `timeout_ms` is inert (no
@@ -285,24 +257,19 @@ Semantics:
 - Loader fails closed: `timeout_ms`/`on_timeout` on a state the runtime
   does not treat as a join is a load-time error. A join state carries
   `merge:`, `converge:`, OR has ≥1 incoming labeled/GoNogo edge (implicit
-  wait-all merge per §3.2 — W-1 parity fix, v1.179 QC: the loader
+  wait-all merge per §3.2 — W-1 parity fix: the loader
   validation and the graph wiring share one edge-count scan). `on_timeout`
   naming an unknown state is a load-time error.
 
-> Historical note: this paragraph previously deferred a
-> `wait_for_all_timeout_seconds` field (default 3600 s) on `ConvergeConfig`
-> (V1.58 P2 — R-V156P2-L003). That name is RETIRED — v1.179 DR-06 (plan
-> `2026-08-27-v1.179-p2-reliability-convergence`) shipped the state-level
-> additive `timeout_ms`/`on_timeout` pair above instead, keeping
-> `ConvergeConfig`/`MergeKind` shapes unchanged.
+The `wait_for_all_timeout_seconds` field name (a `ConvergeConfig` field with a default 3600 s budget) is **retired**: the state-level additive `timeout_ms`/`on_timeout` pair above is the bounded-join contract, and `ConvergeConfig`/`MergeKind` shapes are unchanged.
 
-### 3.4 Registry and workspace context fields (V1.56 P3 — Normative)
+### 3.4 Registry and workspace context fields
 
 Extends the expression grammar's context namespace with two new sub-objects — `registry_refresh` and `workspace` — enabling conditional routing decisions driven by capability registry output and workspace session state.
 
 #### §3.4.1 `registry_refresh` context fields
 
-When a state's conditional `next` references `_context.registry_refresh.*`, the runtime invokes the `nexus.registry.refresh` capability (shipped in V1.56 P1) and feeds its output into the expression context as a nested `registry_refresh` object with these fields:
+When a state's conditional `next` references `_context.registry_refresh.*`, the runtime invokes the `nexus.registry.refresh` capability and feeds its output into the expression context as a nested `registry_refresh` object with these fields:
 
 | Context field | Type | Source | Description |
 |---|---|---|---|
@@ -361,71 +328,11 @@ The runtime scans compiled expression ASTs for `registry_refresh` and `workspace
 
 ---
 
-## 4. Historical design axes (pre-shipment exploration)
-
-§4–§7 preserve the pre-shipment V1.35 exploration, dependencies, proposed sequencing, and non-goals. They do not override shipped §3 or define current CLI entries; `creator run` was retired in v1.193 P2.
-
-| Axis | Options | Recommendation (exploration) |
-| --- | --- | --- |
-| Graph model | DAG with conditional edges vs FSM vs stage hooks | Defer — needs product + security review |
-| User visibility | Hidden in preset vs exposed `creator run branch` | Prefer hidden first; CLI surface later |
-| Interaction with linear stages | Replace stage enum vs layer beneath stages | **Layer beneath** — do not break V1.34 linear creator-workflow spec |
-| Agent tools | Agent chooses branch vs engine chooses | **Engine chooses** |
-| Validation | Extend V1.32 validator (reachability + cycle detection on conditional edges) | Required before any ship |
-
----
-
-## 5. Historical dependencies before implementation
-
-1. Close or cap V1.33 **critical** residuals (security/auth on memory, judge.llm correctness).
-2. DF-47 production caller wiring (agent tool path stable).
-3. CLI IA stable (V1.35 five-group IA) so new commands are not added atop a moving surface.
-4. Promote this doc from Exploration → Draft with locked compass; update orchestration-engine §7.5 cross-link.
-
----
-
-## 6. Historical proposed iteration shape (non-binding)
-
-| Phase | Deliverable |
-| --- | --- |
-| Spec | This document → Status **Normative**; orchestration-engine §7.5 points here |
-| Engine | Loader + runtime evaluator for `next.kind: conditional` |
-| Presets | 1–2 reference presets (reflection branch, research retry) |
-| CLI | Optional; prefer preset-driven first |
-| QA | Validator + hermetic e2e branch coverage |
-
-**Target timing:** Post-V1.35. V1.35 compass explicitly **OUT** for implement — see v1.35 compass Appendix B.
-
----
-
-## 7. Historical explicit non-goals (V1.35 exploration)
-
-| Scope | Rule |
-| --- | --- |
-| V1.35 | No engine or loader code for conditional routing |
-| DF-56 | No tracker closure until implement compass locks |
-| DF-53 | `--auto-chain` / `creator run next` semantics remain separate track (V1.35 P4 partial) |
-| Linear workflow replacement | First conditional-routing slice must not break shipped linear creator-workflow contract |
-
----
-
 ## 8. References
 
 - PD-08: Preset orchestration + Agentic Design Patterns (deferred tracker product line)
-- 
--  §1.2 OUT: conditional routing
 - External: https://github.com/evoiz/Agentic-Design-Patterns
 
 ---
 
-## 9. Historical change control (promotion record)
-
-| Event | Action |
-| --- | --- |
-| V1.42 P2 implement compass locks | Status → Draft V1.42; open implement plan; ship minimal `llm_judge` GO/NOGO slice ✅ (2026-06-11) |
-| First preset with conditional edges ships | Status → Normative; close DF-56 in deferred tracker |
-| Conflict with active linear creator-workflow spec | Linear workflow spec wins until ADR + compass explicitly supersedes |
-
----
-
-*Normative SSOT for preset conditional routing. V1.42 Draft established minimal `llm_judge` GO/NOGO; V1.52 promoted N-way labeled routing + multi-branch merge semantics; V1.56 promoted expression grammar + context namespace. All overlays promoted to Normative (V1.158 P3). V1.179 P2 added the DR-06 bounded-join amendment (§3.3.3).*
+*Normative SSOT for preset conditional routing. N-way labeled routing, multi-branch merge semantics, the expression grammar with registry/workspace context fields, and DR-06 bounded joins are shipped (§3).*

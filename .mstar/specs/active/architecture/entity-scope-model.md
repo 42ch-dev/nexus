@@ -4,15 +4,11 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — entity scope hierarchy, uniqueness, crate ownership. **V1.40 Shipped**: §5.1.1 narrative taxonomy (`BlockType` + `novel_category` + `canonical_name` grammar). **V1.50 Shipped**: §5.5 World KB promotion state machine. **V1.51 Shipped**: §5.5.6 LLM pathway subsection. **V1.54 Shipped**: §5.1.1 game-bible taxonomy. **V1.55 P3**: §5.1.1 script taxonomy. **V1.62 Shipped**: §5.5.9 computable-flag semantics + structured validation mode (closes `R-V161P1-LOW-001`). **V1.74 Shipped β**: §5.6 World KB relationship semantics. **V1.139 architect §5.2**: §2 (crate table: `nexus-kb`→`nexus-knowledge`, KeyBlock→KnowledgeEntry in architecture-bearing prose). **V1.155 P2**: §5.5+ prose refs modernized to KnowledgeEntry; remaining `KeyBlock` mentions are structural wire/DB identifiers (`kb_key_blocks` table, `ComputeInput.key_blocks` field, `KeyBlockStatus`/`KeyBlockId` types, `BlockType` enum values) and historical implementation records (`crates/nexus-kb/…` paths as-shipped). Full V1.139 SPOKE alignment tracked in [`spoke-adapter-architecture.md`](spoke-adapter-architecture.md). **V1.156**: §1.4 three-layer Draft overlay 3×2 matrix completion amendment (World×Moment + Work×Brief closed; frontend-only, `wire_contracts_changed: false` — no scope-ownership/transition change). **V1.159**: §5.1.1 era taxonomy amendment — `era_type` freeform field + era-era nesting via §5.6 `custom`/`custom_label: "parent_era"` (additive; `wire_contracts_changed: false`). **V1.160 Review & Edit chain (architect pass 2)**: §5.1.2 `patch_entity` create-on-absent write boundary (normative; closes create half of `R-V1159P1-001`; `wire_contracts_changed: false`). |
+| **Status** | Normative — entity scope hierarchy, uniqueness, crate ownership. |
 | **Document class** | Master |
 | **Scope** | Global/User/Creator/World/Timeline/Event/Moment hierarchy; entity ownership; `kb`/`knowledge` naming boundaries; scope transition rules |
-| **Last updated** | 2026-08-12 — V1.162 Review & Edit chain (architect pass 2): §6.6 fork-creation write boundary + lineage projection contract (PD-01 local-vs-platform reconciliation; carrier approach B locked). |
+| **Last updated** | 2026-08-12 |
 | **Related** | [local-cloud-crate-architecture.md](../../archived/architecture/2026-09-21-local-cloud-crate-architecture.md) (historical record), [cli-spec.md](../cli/cli-spec.md), [daemon-runtime.md](../../archived/runtime/2026-09-21-daemon-runtime.md) (historical host record), [orchestration-engine.md](../orchestration/orchestration-engine.md), [compute-module-abi.md](../compute/compute-module-abi.md), [wasm-host.md](../compute/wasm-host.md), [local-db-schema.md](../runtime/local-db-schema.md), [spoke-adapter-architecture.md](spoke-adapter-architecture.md), [`docs/ARCHITECTURE.md`](../../../../docs/ARCHITECTURE.md) |
-
-This file is normative for V1.23 crate wiring and naming alignment. When this file
-overlaps older wording in prior specs, keep the locked decisions here and update the
-older wording during the relevant follow-up task.
 
 ---
 
@@ -52,11 +48,7 @@ Global
 4. `User` and `Pairing` are cloud-domain concepts. Cloud transport MUST use `nexus-cloud-domain` for their invariants.
 5. Local `workspace_slug` is a storage partition under the active Creator. It can bind or stage multiple Worlds, but it is not a canonical entity scope in this hierarchy.
 
-### 1.4 Three-Layer Timeline projection (V1.123 — Normative)
-
-> **V1.156 amendment (shipped)**: the 3×2 matrix is completed (World×Moment + Work×Brief closed — see §1.4.4). The amendment is frontend-only (`wire_contracts_changed: false`); it adds no scope-ownership, uniqueness, or transition rule. The V1.123 carrier locks (§1.4.1) are unchanged. Product semantics: `product-locks.md` PD-2 / PD-3.
-
-> **V1.200 carrier amendment (shipped) — persisted Work-owned scene/beat carrier.** V1.200 replaces the deferred/fixtures-only Moment carrier described in §1.4.1, §1.4.3 and §1.4.4 with persisted Work-owned `WorkOutline.scenes[]` / `beats[]` (`{scene_id, chapter_id, title, status}` / `{beat_id, scene_id, title, status}`), authored through four additive `outline.patch_structure` operations (`add_scene` / `remove_scene` / `add_beat` / `remove_beat`) and read through the existing outline read route. Carrier/write-boundary contract: [`canvas-strategy-surface.md`](../surfaces/canvas-strategy-surface.md) §3.3.3 (V1.200 amendment) + §3.5 (V1.200 scene/beat authoring). This is a wire-carrier extension, **not a new scope**: Outline remains the authoring home, both Timeline Moment projections stay read-only, default layers remain unchanged, and Moment Context Assembly is unaffected. The V1.156 frontend-only statement remains historical (V1.200 itself is a wire change).
+### 1.4 Three-Layer Timeline projection (Normative)
 
 This subsection is **additive** — it does not rewrite §1.1 (canonical scope tree) or §1.2 (scope definitions). It canonizes three Timeline zoom layers — **Brief**, **Narrative**, **Moment** — as a re-projection of the existing `World > Timeline > Event > Moment` scope hierarchy, and locks the World/Work layer composition.
 
@@ -64,51 +56,51 @@ This subsection is **additive** — it does not rewrite §1.1 (canonical scope t
 
 | Layer | Granularity | Time span | Primary domain | Carrier (architect seat 2 LOCK) |
 |-------|-------------|-----------|----------------|---------------------------------|
-| **Brief** | World-global | Multi-decade / era / age | **World** (World-global Timeline layer) | `block_type=era` KnowledgeEntry (new wire enum value — see §5.1.1 narrative taxonomy extension + iteration architecture §2) |
-| **Narrative** | Event-level | Human-paced (days/weeks/years) | **Shared** (both World Timeline and Work Timeline) | World scope: `block_type=event` KnowledgeEntry (V1.122 preserved). Work scope: `WorkOutline.timeline_events[]` (V1.72 preserved). |
-| **Moment** | Scene/beat-precise | Sub-scene (minutes/hours within a scene) | **Work** (Work-scoped Timeline layer) | Persisted Work-owned outline carrier `WorkOutline.scenes[]` / `beats[]` (`{scene_id, chapter_id, title, status}` / `{beat_id, scene_id, title, status}` — V1.200, replacing the V1.108 fixture-only deferred carrier), projected as `OutlineSceneNodeData` / `OutlineBeatNodeData`. Work Timeline projects its own outline; World Timeline projects the composed bound-Work carrier (per-entry Work provenance). Honestly empty when the arrays are empty — never fabricated from chapter titles. See iteration architecture §3. |
+| **Brief** | World-global | Multi-decade / era / age | **World** (World-global Timeline layer) | `block_type=era` KnowledgeEntry (wire enum value — see §5.1.1) |
+| **Narrative** | Event-level | Human-paced (days/weeks/years) | **Shared** (both World Timeline and Work Timeline) | World scope: `block_type=event` KnowledgeEntry. Work scope: `WorkOutline.timeline_events[]`. |
+| **Moment** | Scene/beat-precise | Sub-scene (minutes/hours within a scene) | **Work** (Work-scoped Timeline layer) | Persisted Work-owned outline carrier `WorkOutline.scenes[]` / `beats[]` (`{scene_id, chapter_id, title, status}` / `{beat_id, scene_id, title, status}`), projected as `OutlineSceneNodeData` / `OutlineBeatNodeData`. Work Timeline projects its own outline; World Timeline projects the composed bound-Work carrier (per-entry Work provenance). Honestly empty when the arrays are empty — never fabricated from chapter titles. |
 
 #### 1.4.2 Brief canonization
 
 Brief is canonized as a **Timeline-granularity concept at the World-global level**. It is **not** a new top-level scope container and does not modify §1.1's canonical tree. Concretely:
 
 - Brief is a **projection granularity of the World Timeline** — a multi-decade / era sweep visible on the World Timeline Brief layer.
-- The Brief data carrier is a World-scoped KnowledgeEntry with the new wire `block_type=era` (architect seat 2 LOCK — see iteration architecture §2). It is owned by the `World` scope and persisted in the World KB graph alongside `event` / `character` / `scene` / etc. KnowledgeEntries.
-- No new scope-ownership rule applies. Brief-on-KnowledgeEntry uses the existing `kb.patch_entity` write boundary (V1.73) and the existing `WorldKbConflictError` / `WorldKbValidationError` conflict policy (V1.73).
+- The Brief data carrier is a World-scoped KnowledgeEntry with the wire `block_type=era` (see §5.1.1). It is owned by the `World` scope and persisted in the World KB graph alongside `event` / `character` / `scene` / etc. KnowledgeEntries.
+- No new scope-ownership rule applies. Brief-on-KnowledgeEntry uses the existing `kb.patch_entity` write boundary and the existing `WorldKbConflictError` / `WorldKbValidationError` conflict policy.
 
 #### 1.4.3 Moment re-projection
 
-The existing §1.2 `Moment` scope definition ("session-start context point: a read-only snapshot assembled before an agent session begins") is **preserved unchanged** — that is `Moment Context Assembly` semantics. V1.123 **adds** a second, parallel meaning to `Moment` as a **Timeline layer at the Work scope**:
+The existing §1.2 `Moment` scope definition ("session-start context point: a read-only snapshot assembled before an agent session begins") is **preserved unchanged** — that is `Moment Context Assembly` semantics. `Moment` also carries a second, parallel meaning as a **Timeline layer at the Work scope**:
 
 - Moment-as-Timeline-layer is a **projection granularity of the Work Timeline** — scene/beat precision visible on the Work Timeline Moment layer.
-- The Moment data carrier is the persisted Work-owned `WorkOutline.scenes[]` / `beats[]` outline arrays (**V1.200** — `{scene_id, chapter_id, title, status}` / `{beat_id, scene_id, title, status}`, snake_case on the wire), projected as the V1.108 `OutlineSceneNodeData` / `OutlineBeatNodeData` UI projection (architect seat 2 LOCK — see iteration architecture §3). It is owned by the `Work` scope (via the Outline). The World Timeline Moment layer projects the **same carrier composed across the World's bound Works** (each entry tagged with its owning Work); it owns nothing. The previous V1.108 fixture-only deferred carrier is retired.
-- Moment-as-Timeline-layer is **read-only on both surfaces** — edits route through the outline write boundary (`outline.patch_structure`, which since V1.200 carries `add_scene` / `remove_scene` / `add_beat` / `remove_beat`; `outline.patch_chapter` for chapter prose/metadata). The Outline surface owns the write; the Work Timeline offers an "Edit in Outline" affordance and the World Timeline Moment inspector offers no authoring path at all.
+- The Moment data carrier is the persisted Work-owned `WorkOutline.scenes[]` / `beats[]` outline arrays (`{scene_id, chapter_id, title, status}` / `{beat_id, scene_id, title, status}`, snake_case on the wire), projected as the `OutlineSceneNodeData` / `OutlineBeatNodeData` UI projections. It is owned by the `Work` scope (via the Outline). The World Timeline Moment layer projects the **same carrier composed across the World's bound Works** (each entry tagged with its owning Work); it owns nothing.
+- Moment-as-Timeline-layer is **read-only on both surfaces** — edits route through the outline write boundary (`outline.patch_structure`, which carries `add_scene` / `remove_scene` / `add_beat` / `remove_beat`; `outline.patch_chapter` for chapter prose/metadata). The Outline surface owns the write; the Work Timeline offers an "Edit in Outline" affordance and the World Timeline Moment inspector offers no authoring path at all.
 - The existing `Moment Context Assembly` (session-start snapshot) is unaffected. `nexus-moment-context-assembly` continues to assemble session context per §6.5; the Timeline-layer Moment is a separate projection concern.
 
 The two meanings of "Moment" are disambiguated by context:
 - "Moment Context Assembly" = session-start snapshot (existing).
-- "Moment Timeline layer" or "Work Timeline Moment" = scene/beat projection (V1.123).
+- "Moment Timeline layer" or "Work Timeline Moment" = scene/beat projection.
 
-#### 1.4.4 World/Work layer composition (LOCKED — V1.156 completed the 3×2 matrix)
+#### 1.4.4 World/Work layer composition (LOCKED)
 
 ```
-World Timeline (V1.123 + V1.156):
-  ├── Brief layer (hero)     — `block_type=era` KnowledgeEntry projection (era markers / world shape) — V1.123
-  ├── Narrative layer (peer) — `block_type=event` KnowledgeEntry projection (V1.122 baseline, reframed)
-  └── Moment layer (V1.156; carrier V1.200) — projection of bound Works' Scene/Beat data
+World Timeline:
+  ├── Brief layer (hero)     — `block_type=era` KnowledgeEntry projection (era markers / world shape)
+  ├── Narrative layer (peer) — `block_type=event` KnowledgeEntry projection
+  └── Moment layer — projection of bound Works' Scene/Beat data
                                (WorkOutline.scenes[] / beats[] — the persisted carrier;
                                composed client-side across the World's bound Works, each
                                entry tagged with its owning Work; read-only — Moments
                                remain Work-owned per PD-3; honestly empty when the bound
                                Works' canonical arrays are empty — never fabricated)
 
-Work Timeline (V1.123 + V1.156):
-  ├── Brief layer (V1.156)   — projection of the bound World's Brief (WorldKbGraphResponse.entities
-                               [block_type=era], V1.73 — composed client-side from the bound World;
+Work Timeline:
+  ├── Brief layer — projection of the bound World's Brief (WorldKbGraphResponse.entities
+                               [block_type=era] — composed client-side from the bound World;
                                read-only — Brief remains World spine per PD-2; full bound-World Brief)
-  ├── Narrative layer (peer) — `WorkOutline.timeline_events[]` projection (V1.72 preserved)
+  ├── Narrative layer (peer) — `WorkOutline.timeline_events[]` projection
   └── Moment layer (hero-on-demand) — Scene/Beat projection from `WorkOutline.scenes[]` / `beats[]`
-                                       (persisted V1.200 carrier; read-only)
+                                       (persisted carrier; read-only)
                                        (default layer = Narrative; Moment is one click away —
                                         architect UX-risk override documented in iteration
                                         architecture §7.3, authorized by product spec §4.3)
@@ -117,7 +109,7 @@ Work Timeline (V1.123 + V1.156):
 **Author mental model (do not invert in code comments or empty-state copy):**
 
 ```
-Both surfaces = Brief + Narrative + Moment (3×2 matrix complete — V1.156)
+Both surfaces = Brief + Narrative + Moment (3×2 matrix complete)
 
 Spine ownership (unchanged):
   Brief is authored on the World spine (block_type=era KnowledgeEntry)
@@ -129,25 +121,21 @@ Projection invariant:
   Work Timeline Brief    = read-only projection of the bound World's eras
 ```
 
-Narrative is the **shared bridge**: events at human pace belong to both world history (World Timeline) and chapter realization (Work Timeline). Brief is the World's spine; Moment is the Work's spine. The V1.156 matrix completion does **not** change spine ownership — it adds read-only projections of each surface's non-owned layer. `wire_contracts_changed: false` for **V1.156** (frontend-only; see `canvas-strategy-surface.md` §3.3.3 "V1.156 wire verification") — that gate is version-scoped: **V1.200 is a wire change** (`WorkOutline.scenes[]` / `beats[]` + the four `outline.patch_structure` operations), and it likewise changes no spine ownership: Moment stays Work-owned and Outline-authored, World-Moment stays a read-only projection of bound Works.
+Narrative is the **shared bridge**: events at human pace belong to both world history (World Timeline) and chapter realization (Work Timeline). Brief is the World's spine; Moment is the Work's spine. The 3×2 matrix completion does **not** change spine ownership — it adds read-only projections of each surface's non-owned layer. The persisted scene/beat carrier (`WorkOutline.scenes[]` / `beats[]` + the four `outline.patch_structure` operations) is a wire change and likewise changes no spine ownership: Moment stays Work-owned and Outline-authored, World-Moment stays a read-only projection of bound Works.
 
 #### 1.4.5 Scope tree preservation
 
-The canonical `World > Timeline > Event > Moment` scope tree (§1.1) is **unchanged** in V1.123. The three layers are a **Canvas projection re-projection** of the existing hierarchy:
+The canonical `World > Timeline > Event > Moment` scope tree (§1.1) is **unchanged**. The three layers are a **Canvas projection re-projection** of the existing hierarchy:
 
 - Brief → World-global projection of `World > Timeline` at era granularity.
 - Narrative → Event-level projection (already in §1.1 as `Timeline > Event`).
 - Moment → Work-scoped projection at `Event > Moment` granularity (with the dual meaning noted in §1.4.3).
 
-No new scope-ownership rule. No new uniqueness constraint. No new transition rule. The V1.123 changes are confined to (a) one additive wire enum value (`BlockType::Era`) per §5.1.1 narrative taxonomy extension and (b) one additive overlay on the Canvas surface contract (`specs/active/surfaces/canvas-strategy-surface.md` V1.123 overlay — see `canvas-strategy-surface.md`). The V1.156 matrix completion adds **no** scope-ownership, uniqueness, or transition rule either — it is a frontend-only projection extension (`wire_contracts_changed: false`, version-scoped to V1.156); both non-owned layers (World-Moment, Work-Brief) are read-only projections that preserve the existing `World > Timeline > Event > Moment` scope tree. The **V1.200** scene/beat carrier lands on the same terms: it extends the persisted shape of an already-Work-owned outline artifact (`WorkOutline.scenes[]` / `beats[]`) and its patch operation enum, adding **no** scope, ownership, uniqueness, or transition rule — the scope tree is unchanged.
+No new scope-ownership rule. No new uniqueness constraint. No new transition rule. The layer projection is confined to (a) one additive wire enum value (`BlockType::Era`) per §5.1.1 and (b) one additive overlay on the Canvas surface contract (`canvas-strategy-surface.md`). The 3×2 matrix completion adds **no** scope-ownership, uniqueness, or transition rule either — both non-owned layers (World-Moment, Work-Brief) are read-only projections that preserve the existing `World > Timeline > Event > Moment` scope tree. The persisted scene/beat carrier lands on the same terms: it extends the persisted shape of an already-Work-owned outline artifact (`WorkOutline.scenes[]` / `beats[]`) and its patch operation enum, adding **no** scope, ownership, uniqueness, or transition rule — the scope tree is unchanged.
 
 #### 1.4.6 Cross-reference
 
-- **Iteration-scoped architecture (authoritative for carrier implementation):** `three-layer-architecture.md` §2 (Brief carrier), §3 (Moment carrier), §4 (wire_contracts_changed), §6 (conflict policy), §7 (Work Timeline adapter contract).
-- **Canvas surface contract overlay:** [`specs/active/surfaces/canvas-strategy-surface.md`](../surfaces/canvas-strategy-surface.md) §3.3.3 (V1.123 three-layer overlay + V1.156 3×2 matrix completion amendment + **V1.200 persisted scene/beat carrier amendment**) and §3.5 (structured write boundary — **V1.200 scene/beat authoring through `outline.patch_structure`**).
-- **Product spec (author voice + demo script):** `three-layer-product-spec.md`.
-- **V1.156 product locks (World-Moment + Work-Brief semantics):** `product-locks.md` PD-2 (Work-Brief projection) + PD-3 (World-Moment projection).
-- **Layer feel contract (P4 handoff):** `layer-feel-differentiation.md`.
+- **Canvas surface contract overlay:** [`specs/active/surfaces/canvas-strategy-surface.md`](../surfaces/canvas-strategy-surface.md) §3.3.3 (three-layer overlay + 3×2 matrix completion + persisted scene/beat carrier) and §3.5 (structured write boundary — scene/beat authoring through `outline.patch_structure`).
 
 ---
 
@@ -172,9 +160,9 @@ Local persistence is an implementation boundary and does not add new canonical s
 - `workspace_slug` is unique under `creator_id` and is managed by CLI/daemon local state.
 - A workspace may stage or bind multiple `world_id` values; requests that touch a World MUST carry `world_id` explicitly.
 
-### 2.2 Workspace single-owner reads, creator admission and selection invalidation (v1.190 normative)
+### 2.2 Workspace single-owner reads, creator admission and selection invalidation (normative)
 
-The v1.190 P0 core cutover makes the §2.1 workspace boundary enforceable at every read and write. Three current-behavior rules apply:
+The §2.1 workspace boundary is enforceable at every read and write. Three current-behavior rules apply:
 
 1. **Workspace single-owner read invariant.** A workspace state DB holds one owner's workspace. Lifecycle reads (World list/get) intentionally return workspace-wide rows with no per-row `owner_creator_id` filter — owner isolation is a workspace boundary property, not a per-read filter; every mutation path stays ownership-guarded against `narrative_worlds.owner_creator_id`.
 2. **Creator registration admission.** Admission requires the caller to exist in stored creator state. The core service mints its active principal only from a configured active creator + workspace selection, and the retained pack-import bridge additionally verifies the caller against the stored `creators` table before running — forged or unknown creator ids are rejected with `AuthRequired`, and the supplied pool must be non-query-only with a live registered writer or the write stays fenced.
@@ -227,35 +215,35 @@ explicitly declares uniqueness.
 | `nexus-cloud-sync` | Cloud transport for User/Pairing and sync bundles | Owns platform HTTP and sync transport. It MUST use `nexus-cloud-domain` for User/Pairing invariants instead of reimplementing or bypassing them; current Cargo wiring includes this dependency. |
 | `nexus-creator` | `Creator` | Owns Creator aggregate logic, credential/cache hooks, active Creator local state, and conversions over contract types. No platform HTTP. |
 | `nexus-creator-memory` | `Creator` memory subdomain | Owns SOUL, long-term memory, review, and personality/experience I/O under Creator scope. |
-| `nexus-knowledge` | `World` (narrative KB) + `User` (global knowledge) | Two-tier knowledge crate merged in V1.139 (former `nexus-kb`). World-scoped: narrative KnowledgeEntries, SourceAnchors, graph insertion/query, narrative KB lifecycle; holds spoke `KnowledgeEntry` natively with `extensions.nexus` accessors via `nexus-spoke-adapter`. User-scoped: global knowledge/reference indexing and storage; tag-driven, may be pulled into Moment context assembly. Does not own Creator memory semantics. |
+| `nexus-knowledge` | `World` (narrative KB) + `User` (global knowledge) | Two-tier knowledge crate merged from the former `nexus-kb`. World-scoped: narrative KnowledgeEntries, SourceAnchors, graph insertion/query, narrative KB lifecycle; holds spoke `KnowledgeEntry` natively with `extensions.nexus` accessors via `nexus-spoke-adapter`. User-scoped: global knowledge/reference indexing and storage; tag-driven, may be pulled into Moment context assembly. Does not own Creator memory semantics. |
 | `nexus-narrative` | `World`, `Timeline`, `Event` | Owns creative-work narrative domain models: world state, `World::fork` / `ForkBranch`, timelines, events, story/manuscript projections, and narrative consistency. Domain fork models do not imply populated local world-fork metadata: local authoring forks use branch-level marker lineage, while the SQLite gateway returns world-level fork fields as `false` / `None` (§6.6). |
 | `nexus-spoke-adapter` | SPOKE consumption boundary | Constructs spoke standard objects with `extensions.nexus` populated; delegates standard lifecycle ops to `spoke-operations`. Enforces the spoke-operations call-boundary invariant (spoke-standard operands only). The sole crate that directly depends on `spoke-operations`. |
 | `nexus-moment-context-assembly` | `Moment` | Owns session-start moment context aggregation. It runs before a session begins and aggregates relevant local domains: Creator memory, narrative state, World KB assets, and User knowledge. Optional `cloud-stage` may merge platform context, but daemon default remains local Stage-0. |
-| `nexus-daemon-runtime` (historical; retired v1.193) | Former runtime host, not entity owner | Hosted local APIs, DB handles, orchestration, and agent-host before retirement. This is a historical ownership boundary, not a current implementation anchor; current service-family authority is `nexus-core` (see [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md) §2.1). |
+| `nexus-daemon-runtime` (retired) | Former runtime host, not entity owner | Hosted local APIs, DB handles, orchestration, and agent-host before retirement. This is a historical ownership boundary, not a current implementation anchor; current service-family authority is `nexus-core` (see [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md) §2.1). |
 | `nexus-orchestration` | Execution sessions/schedules, not hierarchy owner | Owns presets, schedules, workers, and capability registry. It carries `creator_id`/workspace/world references as execution context, but it does not redefine entity ownership. |
 
-#### 5.5.8 Conditional routing branch input visibility (V1.56 P3 amendment)
+#### 5.5.8 Conditional routing branch input visibility
 
 When the conditional routing engine (DF-56) evaluates a state's `next: { kind: conditional, branches: [...] }` expression, the engine may invoke capabilities and read workspace state to populate the expression context. Branch decision inputs are **read-only projections** of underlying entity state:
 
-- **`_context.registry_refresh.*`** — fields projected from the `nexus.registry.refresh` capability output (which is itself an entity-scope snapshot of the capability registry). Fields include `source` (`synthetic` | `network` | `synthetic_fallback`), `snapshot_version`, `capability_count`, `fallback_reason` (CdnError variant stringified per V1.56 P1 fix-wave), `retry_count`. The branch input is read-only; the capability invocation does not mutate the registry.
-- **`_context.workspace.*`** — fields projected from the active workspace session (V1.56 P0 OCC + persistent session). Fields include `session_id`, `conflict_detected` (bool; OCC outcome of last commit), `changes_applied` (count of paths committed), `workspace_root` (canonical path). The branch input is read-only; expression evaluation does not invoke `workspace.commit` itself.
+- **`_context.registry_refresh.*`** — fields projected from the `nexus.registry.refresh` capability output (which is itself an entity-scope snapshot of the capability registry). Fields include `source` (`synthetic` | `network` | `synthetic_fallback`), `snapshot_version`, `capability_count`, `fallback_reason` (CdnError variant stringified), `retry_count`. The branch input is read-only; the capability invocation does not mutate the registry.
+- **`_context.workspace.*`** — fields projected from the active workspace session (OCC + persistent session). Fields include `session_id`, `conflict_detected` (bool; OCC outcome of last commit), `changes_applied` (count of paths committed), `workspace_root` (canonical path). The branch input is read-only; expression evaluation does not invoke `workspace.commit` itself.
 
-Branch inputs do **not** redefine entity ownership. The following API wiring is a **V1.56 historical snapshot**; the former daemon handlers are not current implementation anchors:
+Branch inputs do **not** redefine entity ownership. Current API wiring:
 
 - Registry refresh input: `nexus-orchestration::tasks::inject_registry_refresh_context()` → reads `nexus.registry.refresh` capability output via existing capability registry machinery.
-- Workspace input: `nexus-orchestration::tasks::inject_workspace_context()` → reads active workspace session via its injected `workspace_state_provider` (`crates/nexus-orchestration/src/tasks/mod.rs`); the V1.56 wiring read the `nexus-daemon-runtime` workspace handlers, deleted with the crate in v1.193 P2.
+- Workspace input: `nexus-orchestration::tasks::inject_workspace_context()` → reads active workspace session via its injected `workspace_state_provider` (`crates/nexus-orchestration/src/tasks/mod.rs`).
 
-This amendment exists to clarify that DF-56 conditional routing branch inputs are **derived from**, not **owners of**, the entity scope. The entity ownership hierarchy (Creator > World > Timeline > Event > Moment) is unchanged; routing inputs are projections.
+DF-56 conditional routing branch inputs are **derived from**, not **owners of**, the entity scope. The entity ownership hierarchy (Creator > World > Timeline > Event > Moment) is unchanged; routing inputs are projections.
 
-#### 5.5.9 Computable-flag semantics and structured validation mode (V1.62 P2)
+#### 5.5.9 Computable-flag semantics and structured validation mode
 
-**Status**: Normative — V1.62 Shipped (closes `R-V161P1-LOW-001`).
+**Status**: Normative.
 
-V1.61 added `computable: Option<bool>` and `state: Option<serde_json::Value>` to
-`KnowledgeEntryBody` (carried inside spoke `KnowledgeEntry` — see spoke `knowledge-entry.schema.json`). V1.62 formalizes
-the semantics of these fields and establishes the structured validation mode that
-was deferred from V1.61 P1.
+`KnowledgeEntryBody` (carried inside spoke `KnowledgeEntry` — see spoke
+`knowledge-entry.schema.json`) carries `computable: Option<bool>` and
+`state: Option<serde_json::Value>`; this section pins their semantics and the
+structured validation mode.
 
 ##### 5.5.9.1 `computable` flag
 
@@ -269,13 +257,12 @@ participating in WASM compute. Its semantics are:
 
 The flag is a filterable marker — the KB query layer
 (`KbQuery::with_computable(bool)`) can select only computable KnowledgeEntries
-when building the invocation snapshot. The V1.61 P1 historical implementation
-anchors were `crates/nexus-kb/src/query.rs`, `InMemoryKbStore`, and `SqliteKbStore`.
+when building the invocation snapshot.
 
 ##### 5.5.9.2 `state` field
 
 The `state` field on `KnowledgeEntryBody` holds **mutable runtime data** scoped
-to the KnowledgeEntry. Its shape is nested by `block_type` (compass V1.61 Q5):
+to the KnowledgeEntry. Its shape is nested by `block_type`:
 
 ```json
 {
@@ -296,7 +283,7 @@ applies `state_delta` operations (`+/-/set`) from `ComputeOutput.state_delta`
 
 The `state` field is carried in the KnowledgeEntry's `body_json` (TEXT column in
 SQLite). No separate DB column is required — the JSON is transparent to the
-storage layer (compass V1.61 design item #2). Growth is expected as modules
+storage layer. Growth is expected as modules
 add per-block state, but individual state objects are small (character-scale
 combat state is < 1 KiB).
 
@@ -325,18 +312,14 @@ replacement, not a supplement — avoiding two sources of truth for the same sta
 ##### 5.5.9.3 Structured validation mode
 
 Per-module attribute and state shapes are **not** declared in product-level
-schemas. V1.61 placed placeholder schemas under
-`schemas/compute/compute-entity-attributes.schema.json` and
-`schemas/compute/compute-entity-state.schema.json` — these are **deleted**
-in V1.62 P0. Their content (per-`BlockType` shape declarations) is replaced
-by per-module JSON Schema fragments declared in each compute module's
-`manifest.json` `schemas` block (V1.62 P1; see
+schemas; they are declared as per-module JSON Schema fragments in each compute
+module's `manifest.json` `schemas` block (see
 [compute-module-abi.md](../compute/compute-module-abi.md) §7.3).
 
 The structured validation mode is:
 
 1. The `nexus_knowledge::world_kb::validation` module provides `ValidationMode::Structured`
-   (introduced in V1.61 P1; current source: `crates/nexus-knowledge/src/world_kb/validation.rs`). This mode
+   (source: `crates/nexus-knowledge/src/world_kb/validation.rs`). This mode
    requires `computable: true` on KnowledgeEntries that carry `state`.
 2. Per-module attribute/state shapes are declared in the module's
    `manifest.json` `schemas.key_block_attributes[block_type]` and
@@ -356,14 +339,15 @@ concrete values match the module's declared schemas.
 
 ##### 5.5.9.4 Relationship to deleted entity-* schemas
 
-V1.61's `schemas/compute/compute-entity-attributes.schema.json` and
-`schemas/compute/compute-entity-state.schema.json` are **deleted** in
-V1.62 P0. Their content was per-`BlockType` placeholder shape declarations
-(e.g., `character` attributes: `max_hp`, `base_atk`, `base_def`). V1.62
-replaces this with:
+The former product-level placeholder schemas
+`schemas/compute/compute-entity-attributes.schema.json` and
+`schemas/compute/compute-entity-state.schema.json` are **deleted**. Their
+content was per-`BlockType` placeholder shape declarations
+(e.g., `character` attributes: `max_hp`, `base_atk`, `base_def`). The
+replacement is:
 
 - **Per-module shape declarations** in each module's `manifest.json`
-  `schemas` block (V1.62 P1).
+  `schemas` block.
 - **No product-level enumeration** of all possible BlockType attributes
   — the manifest is the module author's contract, not the platform's.
 
@@ -388,27 +372,27 @@ replacement is `manifest.json` `schemas` as documented in
 - `nexus-knowledge` MUST NOT be treated as generic Creator knowledge or User knowledge.
 - Holds spoke `KnowledgeEntry` natively (consumed from `spoke-schemas`); `extensions.nexus` accessors via `nexus-spoke-adapter`. See [`spoke-adapter-architecture.md`](spoke-adapter-architecture.md) §2 for the `extensions.nexus` field contract.
 
-#### 5.1.1 Narrative World KB item taxonomy (V1.40 grill-me locked — **Shipped V1.40 P1**)
+#### 5.1.1 Narrative World KB item taxonomy
 
 The `nexus-knowledge` persistence model stores World-scoped KnowledgeEntries with `block_type`, `canonical_name`, `body`, provenance anchors, and active uniqueness under `(world_id, block_type, canonical_name)` (see [local-db-schema.md](../runtime/local-db-schema.md) §4.1.2).
 
-**SSOT for `block_type` (wire enum):** `schemas/common/common.schema.json` → `BlockType` → `@42ch/nexus-contracts` / `nexus-contracts`. Current shipped values (snake_case on wire): `character`, `ability`, `scene`, `organization`, `item`, `conflict`, `info_point`, `event`, `species`, `faction`, `magic_system`, `technology`, `deity`, `level`, `economy_tier`, `dialogue`, `beat`, `act`, `era`. The eight-value V1.40 baseline was extended by the game-bible, script, and Brief-era additions documented below; `era` is the cross-profile Brief carrier in §§1.4.4–1.4.5. The generated patch wire enum is in `crates/nexus-contracts/src/generated/daemon_api/canvas/world_kb/world_kb_entity_patch.rs`. Implementations MUST NOT introduce a parallel `block_type` enum in `nexus-knowledge` or orchestration presets. `kb-extract`, `SqliteKbStore`, and `assemble_moment` / `fetch_world_kb` already use this vocabulary.
+**SSOT for `block_type` (wire enum):** `schemas/common/common.schema.json` → `BlockType` → `@42ch/nexus-contracts` / `nexus-contracts`. Current shipped values (snake_case on wire): `character`, `ability`, `scene`, `organization`, `item`, `conflict`, `info_point`, `event`, `species`, `faction`, `magic_system`, `technology`, `deity`, `level`, `economy_tier`, `dialogue`, `beat`, `act`, `era`. The baseline set was extended by the game-bible, script, and Brief-era additions documented below; `era` is the cross-profile Brief carrier in §§1.4.4–1.4.5. The generated patch wire enum is in `crates/nexus-contracts/src/generated/daemon_api/canvas/world_kb/world_kb_entity_patch.rs`. Implementations MUST NOT introduce a parallel `block_type` enum in `nexus-knowledge` or orchestration presets. `kb-extract`, `SqliteKbStore`, and `assemble_moment` / `fetch_world_kb` already use this vocabulary.
 
-**Design decision: `environment` NOT in `BlockType` (R-V161P0-INFO-001).** The V1.61 compass initially named `environment` as a potential computable BlockType for environmental context (weather, terrain, lighting). After evaluation, `environment` was intentionally excluded from the wire enum:
+**Design decision: `environment` NOT in `BlockType` (R-V161P0-INFO-001).** `environment` was evaluated as a potential computable BlockType for environmental context (weather, terrain, lighting) and intentionally excluded from the wire enum:
 
 1. `environment` is too broad for a single entity BlockType — it spans weather, terrain, celestial, ambient conditions, and multi-entity spatial state, all of which benefit from separate `KnowledgeEntry` instances with different `block_type` values.
 2. Environmental context is served by existing types: `scene` (spatial descriptions), `event` (ambient occurrences), `info_point` (environmental rules), and `location` (a novel category carried in `body.attributes`, not a wire enum variant).
 3. Future profile-specific environmental modelling (e.g., game-bible `level` carrying terrain grid state, script `scene` carrying lighting cues) uses per-profile `body.attributes` shapes rather than a dedicated wire enum variant.
 
-Module authors should use the `scene` + `info_point` BlockType combination to model environmental KnowledgeEntries, with per-module shape declarations in `manifest.json` `schemas` (see §5.5.9.3). If a future profile introduces a domain-specific environmental BlockType (e.g. `biome` for game-bible), it should follow the V1.54 game-bible precedent: extend `BlockType` as a new wire variant with a corresponding body-layer category.
+Module authors should use the `scene` + `info_point` BlockType combination to model environmental KnowledgeEntries, with per-module shape declarations in `manifest.json` `schemas` (see §5.5.9.3). If a future profile introduces a domain-specific environmental BlockType (e.g. `biome` for game-bible), it should follow the game-bible precedent: extend `BlockType` as a new wire variant with a corresponding body-layer category.
 
-**Novel profile semantics (body layer):** The V1.37 novel "seven categories" (`foundation`, `background`, `character`, `location`, `society`, `rules`, `economy`) are carried in `KnowledgeEntry.body.attributes.novel_category` (string) plus type-specific fields in `body.attributes` / `body.summary`. They do **not** replace wire `block_type`.
+**Novel profile semantics (body layer):** The novel "seven categories" (`foundation`, `background`, `character`, `location`, `society`, `rules`, `economy`) are carried in `KnowledgeEntry.body.attributes.novel_category` (string) plus type-specific fields in `body.attributes` / `body.summary`. They do **not** replace wire `block_type`.
 
-**V1.40 P1 validation (current owner):** `nexus_knowledge::world_kb::validation` provides `validate_body(block_type, body, ValidationMode)` that enforces `novel_category` presence and validity when `ValidationMode::Novel` is active. Both `InMemoryKbStore` and `SqliteKbStore` run validation on insert/update. Validation errors are structured (`ValidationKind` enum) so callers can produce precise diagnostics without string matching. `canonical_name` is validated for format/safety (no control chars, path separators, shell metacharacters, max 256 chars). Advisory warnings for `novel_category` ↔ `block_type` mismatch are emitted via `tracing::warn!`. See `crates/nexus-knowledge/src/world_kb/validation.rs`.
+**Novel-profile validation (current owner):** `nexus_knowledge::world_kb::validation` provides `validate_body(block_type, body, ValidationMode)` that enforces `novel_category` presence and validity when `ValidationMode::Novel` is active. Both `InMemoryKbStore` and `SqliteKbStore` run validation on insert/update. Validation errors are structured (`ValidationKind` enum) so callers can produce precise diagnostics without string matching. `canonical_name` is validated for format/safety (no control chars, path separators, shell metacharacters, max 256 chars). Advisory warnings for `novel_category` ↔ `block_type` mismatch are emitted via `tracing::warn!`. See `crates/nexus-knowledge/src/world_kb/validation.rs`.
 
-**`canonical_name` grammar (V1.40 P1):** `[^\x00-\x1F\x7F/\\`$;&|><!*?"'(){}\[\]#]{1,256}` — non-empty, no control characters, no path separators, no shell metacharacters, max 256 chars.
+**`canonical_name` grammar:** `[^\x00-\x1F\x7F/\\`$;&|><!*?"'(){}\[\]#]{1,256}` — non-empty, no control characters, no path separators, no shell metacharacters, max 256 chars.
 
-Recommended default mapping when ingesting or authoring novel items (P1 validation may require `novel_category` when `profile_hint=novel`):
+Recommended default mapping when ingesting or authoring novel items (validation may require `novel_category` when `profile_hint=novel`):
 
 | `novel_category` (body) | Default wire `block_type` | Narrative use |
 | --- | --- | --- |
@@ -422,7 +406,7 @@ Recommended default mapping when ingesting or authoring novel items (P1 validati
 
 `world_refs` in novel chapter frontmatter reference **stable `canonical_name`** values (optionally prefixed in prose as `char_lin_xia` — resolved against `(world_id, block_type, canonical_name)` via P0 validator). runtime layering: [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md).
 
-Minimum common `body` shape for novel-profile items (V1.40 P1):
+Minimum common `body` shape for novel-profile items:
 
 ```json
 {
@@ -436,11 +420,9 @@ Minimum common `body` shape for novel-profile items (V1.40 P1):
 }
 ```
 
-**V1.40 P1 history:** validation helpers shipped in the former `nexus-kb` crate for wire `BlockType` + optional `novel_category` / per-category `body.attributes` minimums, without a `schemas/` enum change in V1.40. Their current owner is `nexus_knowledge::world_kb::validation` (`crates/nexus-knowledge/src/world_kb/validation.rs`); later wire additions are recorded below.
+**Game-bible profile semantics (body layer):** Seven new `BlockType` wire enum variants are registered in `schemas/common/common.schema.json` for game-bible domain concepts. The corresponding body-layer category is `game_bible_category` (string, carried in `KnowledgeEntry.body.attributes`). It does **not** replace wire `block_type`.
 
-**Game-bible profile semantics (body layer — V1.54 P1):** Seven new `BlockType` wire enum variants are registered in `schemas/common/common.schema.json` for game-bible domain concepts. The corresponding body-layer category is `game_bible_category` (string, carried in `KnowledgeEntry.body.attributes`). It does **not** replace wire `block_type`.
-
-Game-bible profile `BlockType` additions (V1.54 P1, snake_case on wire):
+Game-bible profile `BlockType` additions (snake_case on wire):
 
 | Wire `block_type` | UI label | `game_bible_category` | Design section |
 | --- | --- | --- | --- |
@@ -454,7 +436,7 @@ Game-bible profile `BlockType` additions (V1.54 P1, snake_case on wire):
 
 Existing variants (`character`, `ability`, `scene`, `organization`, `item`, `conflict`, `info_point`, `event`) are reused for cross-domain concepts (e.g., a game character uses `BlockType::Character` with `game_bible_category: "character"`).
 
-**V1.54 P1 validation (current owner):** `nexus_knowledge::world_kb::validation` provides `ValidationMode::GameBible` that requires `game_bible_category` in `body.attributes` when active and rejects `novel_category`. The game-bible category validation mirrors the novel pattern: seven valid categories, structured (`ValidationKind`) errors, advisory warnings on `game_bible_category` ↔ `block_type` mismatch. `canonical_name` validation is identical across all modes.
+**Game-bible validation (current owner):** `nexus_knowledge::world_kb::validation` provides `ValidationMode::GameBible` that requires `game_bible_category` in `body.attributes` when active and rejects `novel_category`. The game-bible category validation mirrors the novel pattern: seven valid categories, structured (`ValidationKind`) errors, advisory warnings on `game_bible_category` ↔ `block_type` mismatch. `canonical_name` validation is identical across all modes.
 
 Valid `game_bible_category` values:
 
@@ -488,21 +470,21 @@ Minimum common `body` shape for game-bible items:
 }
 ```
 
-**Script profile semantics (body layer — V1.55 P3):** Three new `BlockType` wire enum variants are registered in `schemas/common/common.schema.json` for script domain concepts. The corresponding body-layer category is `script_category` (string, carried in `KnowledgeEntry.body.attributes`). It does **not** replace wire `block_type`.
+**Script profile semantics (body layer):** Three new `BlockType` wire enum variants are registered in `schemas/common/common.schema.json` for script domain concepts. The corresponding body-layer category is `script_category` (string, carried in `KnowledgeEntry.body.attributes`). It does **not** replace wire `block_type`.
 
-**Three-Layer Timeline semantics (cross-profile, V1.123 — Normative):** One new `BlockType` wire enum variant is registered in `schemas/common/common.schema.json` for the V1.123 Brief layer. The corresponding body-layer semantics live in `KnowledgeEntry.body.attributes` as freeform era-marker fields (`era_id`, `start_hint`, `end_hint`, `world_summary`); there is **no `brief_category` body-layer string** because Brief is cross-profile world-shape, not a profile-specific category. See `three-layer-architecture.md` §2 for the architect-locked carrier rationale.
+**Three-Layer Timeline semantics (cross-profile — Normative):** One new `BlockType` wire enum variant is registered in `schemas/common/common.schema.json` for the Brief layer. The corresponding body-layer semantics live in `KnowledgeEntry.body.attributes` as freeform era-marker fields (`era_id`, `start_hint`, `end_hint`, `world_summary`); there is **no `brief_category` body-layer string** because Brief is cross-profile world-shape, not a profile-specific category.
 
 Shipped `BlockType` values (snake_case on wire) extended with:
 
 | Wire `block_type` | UI label | Body-layer | Design section |
 | --- | --- | --- | --- |
-| `era` | Era (Brief marker) | `body.attributes.era_id` / `start_hint` / `end_hint` / `world_summary` (freeform) | `three-layer-architecture.md` §2 (Brief-on-KeyBlock LOCK) |
+| `era` | Era (Brief marker) | `body.attributes.era_id` / `start_hint` / `end_hint` / `world_summary` (freeform) | §1.4.2 (Brief carrier) |
 
 Existing variants (`character`, `ability`, `scene`, `organization`, `item`, `conflict`, `info_point`, `event`, `species`, `faction`, `magic_system`, `technology`, `deity`, `level`, `economy_tier`, `dialogue`, `beat`, `act`) are reused unchanged.
 
-**V1.123 implementation history:** no new `ValidationMode` was added for `era` — `era` is cross-profile and not subject to `novel_category` / `game_bible_category` / `script_category` enforcement (mirroring `event`, the V1.122 Timeline event block type). Advisory warnings only. `canonical_name` validation is identical across all modes. The wire enum change was additive; the then-current daemon Rust handlers accepting `BlockType` (`world_kb::patch_entity` and `world_kb::get_graph`) needed no code change because they parsed valid values through `parse_block_type`. **Current validation anchor:** `crates/nexus-knowledge/src/world_kb/validation.rs` (`is_cross_profile_block_type` recognizes `Event` and `Era`).
+**`era` validation:** no `ValidationMode` exists for `era` — `era` is cross-profile and not subject to `novel_category` / `game_bible_category` / `script_category` enforcement (mirroring `event`, the Timeline event block type). Advisory warnings only. `canonical_name` validation is identical across all modes. **Current validation anchor:** `crates/nexus-knowledge/src/world_kb/validation.rs` (`is_cross_profile_block_type` recognizes `Event` and `Era`).
 
-Minimum common `body` shape for Brief-era items (V1.123):
+Minimum common `body` shape for Brief-era items:
 
 ```json
 {
@@ -517,19 +499,19 @@ Minimum common `body` shape for Brief-era items (V1.123):
 }
 ```
 
-**Era taxonomy type semantics (V1.159 — Normative amendment to §5.1.1).** The V1.123 `era` block_type carried flat, untyped era markers. V1.159 deepens the Brief-era carrier with a **typed nesting model** (DF-V1123-ERA-TAXONOMY): an era gains an optional `body.attributes.era_type` (freeform string) and may participate in a parent-child nesting via the §5.6 World KB relationship graph. This is an **additive amendment** — it does not change the V1.123 `era` wire `BlockType`, the existing `body.attributes` era-marker fields (`era_id` / `start_hint` / `end_hint` / `world_summary`), or the V1.123 implementation note (no `ValidationMode` for `era`).
+**Era taxonomy type semantics (Normative).** The Brief-era carrier carries a **typed nesting model** (DF-V1123-ERA-TAXONOMY): an era gains an optional `body.attributes.era_type` (freeform string) and may participate in a parent-child nesting via the §5.6 World KB relationship graph. This is additive — it does not change the `era` wire `BlockType`, the `body.attributes` era-marker fields (`era_id` / `start_hint` / `end_hint` / `world_summary`), or the no-`ValidationMode`-for-`era` rule.
 
-**`era_type` field (V1.159 — cross-profile, freeform, no validation mode).**
+**`era_type` field (cross-profile, freeform, no validation mode).**
 
 - **Carrier:** `KnowledgeEntry.body.attributes.era_type` — an optional freeform string. Because `body.attributes` is already freeform JSON (§5.1.1 + §5.5.9.2), adding `era_type` is **additive with no schema/codegen change** (`wire_contracts_changed: false`).
 - **Recommended values:** `kingdom` / `age` / `epoch` / `period` / `sub-age` (matching product-locks PD-2). These are author-facing taxonomy hints, not an enforced enum; values are freeform strings (snake_case is conventional but not required — the product-locked `sub-age` spelling is canonical).
-- **Custom values allowed:** authors MAY use any string (`dynasty`, `reign`, `eon`, …). Unknown values are NOT rejected and render with a default Brief-layer color (no validation error). This mirrors the V1.123 decision that `era` is cross-profile world-shape and is **not** subject to `novel_category` / `game_bible_category` / `script_category` enforcement.
-- **No `ValidationMode::Era` and no `era_category` body-layer string.** V1.159 deliberately does NOT introduce a validation mode or a parallel category string (mirrors the V1.123 "no `brief_category`" rationale: era taxonomy is cross-profile world-shape, not a profile-specific category). The current `nexus_knowledge::world_kb::validation` module has no era-specific mode.
-- **Cross-profile consistency:** `era_type` is read the same way across profiles; the Brief layer colors known recommended types and falls back to the default Brief accent for unknown/absent values. A missing `era_type` (legacy V1.123 flat-era data) renders at the default nesting depth with the default color — V1.156-era flat era data is **backward-compatible**.
+- **Custom values allowed:** authors MAY use any string (`dynasty`, `reign`, `eon`, …). Unknown values are NOT rejected and render with a default Brief-layer color (no validation error). This mirrors the cross-profile decision that `era` is world-shape and is **not** subject to `novel_category` / `game_bible_category` / `script_category` enforcement.
+- **No `ValidationMode::Era` and no `era_category` body-layer string.** No validation mode or parallel category string is introduced (mirroring the "no `brief_category`" rationale: era taxonomy is cross-profile world-shape, not a profile-specific category). The `nexus_knowledge::world_kb::validation` module has no era-specific mode.
+- **Cross-profile consistency:** `era_type` is read the same way across profiles; the Brief layer colors known recommended types and falls back to the default Brief accent for unknown/absent values. A missing `era_type` (legacy flat-era data) renders at the default nesting depth with the default color — flat-era data is **backward-compatible**.
 
-**Era nesting carrier (V1.159 — reuses §5.6 World KB relationships, no new data model).** Era-era parent-child nesting is modeled as a directed World KB relationship edge (§5.6), NOT as a self-referential `parent_era_id` column. The nesting edge uses the **sanctioned §5.6.3 escape hatch**: `relation_type = "custom"` with `custom_label = "parent_era"`, directed `source → target` where source is the **parent** (coarser) era and target is the **child** (finer) era. Rationale: `parent_era` is a single domain relationship kind, not a third concrete use case for extending the closed `WorldKbRelationshipKind` wire enum (STRATEGY guiding principle #3 — simplicity over premature abstraction); the `custom` + `custom_label` mechanism exists precisely for domain-specific relationship kinds and round-trips honestly through the graph read path (`project_relationship` preserves `custom_label`). `wire_contracts_changed: false`. See [`canvas-strategy-surface.md`](../surfaces/canvas-strategy-surface.md) §3.3.3 V1.159 amendment for the Brief-layer nesting UI contract.
+**Era nesting carrier (reuses §5.6 World KB relationships, no new data model).** Era-era parent-child nesting is modeled as a directed World KB relationship edge (§5.6), NOT as a self-referential `parent_era_id` column. The nesting edge uses the **sanctioned §5.6.3 escape hatch**: `relation_type = "custom"` with `custom_label = "parent_era"`, directed `source → target` where source is the **parent** (coarser) era and target is the **child** (finer) era. Rationale: `parent_era` is a single domain relationship kind, not a third concrete use case for extending the closed `WorldKbRelationshipKind` wire enum (STRATEGY guiding principle #3 — simplicity over premature abstraction); the `custom` + `custom_label` mechanism exists precisely for domain-specific relationship kinds and round-trips honestly through the graph read path (`project_relationship` preserves `custom_label`). `wire_contracts_changed: false`. See [`canvas-strategy-surface.md`](../surfaces/canvas-strategy-surface.md) §3.3.3 for the Brief-layer nesting UI contract.
 
-Minimum common `body` shape for a typed nested Brief-era item (V1.159):
+Minimum common `body` shape for a typed nested Brief-era item:
 
 ```json
 {
@@ -545,9 +527,9 @@ Minimum common `body` shape for a typed nested Brief-era item (V1.159):
 }
 ```
 
-The nesting edge for the example above (parent `age_of_stars` → child `age_of_expansion`) is a §5.6 relationship row: `relation_type = "custom"`, `custom_label = "parent_era"`, `source_entity_id = <age_of_stars key_block_id>`, `target_entity_id = <age_of_expansion key_block_id>`, `symmetric = false` (nesting is directional). Created via `kb.relate` (V1.144 spoke `RelationPort`) or `kb.patch_relationship` (V1.74) — both accept `custom` + `custom_label`; no new write route.
+The nesting edge for the example above (parent `age_of_stars` → child `age_of_expansion`) is a §5.6 relationship row: `relation_type = "custom"`, `custom_label = "parent_era"`, `source_entity_id = <age_of_stars key_block_id>`, `target_entity_id = <age_of_expansion key_block_id>`, `symmetric = false` (nesting is directional). Created via `kb.relate` (spoke `RelationPort`) or `kb.patch_relationship` — both accept `custom` + `custom_label`; no new write route.
 
-Script profile `BlockType` additions (V1.55 P3, snake_case on wire):
+Script profile `BlockType` additions (snake_case on wire):
 
 | Wire `block_type` | UI label | `script_category` | Primary section |
 | --- | --- | --- | --- |
@@ -557,7 +539,7 @@ Script profile `BlockType` additions (V1.55 P3, snake_case on wire):
 
 Existing variants (`character`, `scene`, `organization`, `event`, etc.) are reused for cross-domain concepts (e.g., a script character uses `BlockType::Character` with `script_category: "dialogue"`).
 
-**V1.55 P3 validation (current owner):** `nexus_knowledge::world_kb::validation` provides `ValidationMode::Script` that requires `script_category` in `body.attributes` when active and rejects `novel_category` and `game_bible_category`. The script category validation mirrors the novel/game-bible pattern: three valid categories, structured (`ValidationKind`) errors, advisory warnings on `script_category` ↔ `block_type` mismatch. `canonical_name` validation is identical across all modes.
+**Script validation (current owner):** `nexus_knowledge::world_kb::validation` provides `ValidationMode::Script` that requires `script_category` in `body.attributes` when active and rejects `novel_category` and `game_bible_category`. The script category validation mirrors the novel/game-bible pattern: three valid categories, structured (`ValidationKind`) errors, advisory warnings on `script_category` ↔ `block_type` mismatch. `canonical_name` validation is identical across all modes.
 
 Valid `script_category` values:
 
@@ -587,36 +569,36 @@ Minimum common `body` shape for script items:
 }
 ```
 
-#### 5.1.2 `patch_entity` write boundary — create-on-absent (V1.160 — Normative)
+#### 5.1.2 `patch_entity` write boundary — create-on-absent (Normative)
 
-> **Status**: Normative (V1.160 Review & Edit chain, architect pass 2) — closes the entity-create half of `R-V1159P1-001`. Documents the carrier that the World Timeline Brief 「新建 era」 affordance ([`canvas-strategy-surface.md`](../surfaces/canvas-strategy-surface.md) §3.3.3 "Create entry") drives. `wire_contracts_changed: false`: the route, request DTO, response DTO, and success status are unchanged from V1.73; create-on-absent is an internal handler branch, not a new wire contract.
+> **Status**: Normative — the entity-create write boundary. Documents the carrier that the World Timeline Brief 「新建 era」 affordance ([`canvas-strategy-surface.md`](../surfaces/canvas-strategy-surface.md) §3.3.3 "Create entry") drives. The route, request DTO, response DTO, and success status are unchanged; create-on-absent is an internal handler branch, not a new wire contract.
 
-`POST /v1/daemon/worlds/{world_id}/kb/patch-entity` (`kb.patch_entity`, V1.73) is the sole author-facing World KB entity write surface. V1.160 makes it a true **create-or-update** handler by branching on the store read result instead of failing on absent entities (pre-V1.160 the handler mapped `NotFound` → 500). No new route, no DTO rename, no `upsert` re-branding — the wire name stays `patch-entity`.
+`POST /v1/daemon/worlds/{world_id}/kb/patch-entity` (`kb.patch_entity`) is the sole author-facing World KB entity write surface. It is a true **create-or-update** handler, branching on the store read result instead of failing on absent entities. No new route, no DTO rename, no `upsert` re-branding — the wire name stays `patch-entity`.
 
 **Branching contract (normative).** The handler performs `require_world_owner` (authz on the PATH `world_id`) **before** any entity read, then branches on `get_knowledge_entry(&entity_id)`:
 
 | `get_knowledge_entry` result | `expected_version` | Path | HTTP |
 |------------------------------|--------------------|------|------|
-| `Ok(kb)` — entity exists (**any** status, including `deleted` / `merged` / other terminal) | must equal `kb.revision` (per-row OCC) | **Update** — unchanged V1.73 path; terminal-status guard + cross-world scope check fire here | 200 (success) / 409 (OCC) / 422 (terminal) / 404 (cross-world) |
+| `Ok(kb)` — entity exists (**any** status, including `deleted` / `merged` / other terminal) | must equal `kb.revision` (per-row OCC) | **Update** — terminal-status guard + cross-world scope check fire here | 200 (success) / 409 (OCC) / 422 (terminal) / 404 (cross-world) |
 | `Err(NotFound)` | `== 0` | **Create** — require `patch.title` + `patch.block_type` → build a fresh `KnowledgeEntry` (client-minted `entity_id`, PATH `world_id`) → `orchestrate_upsert` → `put_create` (INSERT, revision = 1) | **200** + `version=1` |
 | `Err(NotFound)` | `> 0` | **Reject** — update-on-absent is client staleness, never a silent create | 409 `WorldKbConflictError` |
 | `Err(other)` | — | Genuine storage error | 500 Internal |
 
-**Create convention (normative).** Create is signaled by three things together: (a) a **client-minted** `entity_id` (`kb_<32-hex>` UUID, pack-import-aligned), (b) `expected_version: 0`, and (c) a store-absent row. The dormant frontend `era-create-dialog` (V1.159 P1 T3) already locks this convention. Create success returns **HTTP 200** (NOT 201) with the existing `WorldKbPatchEntityResponse` shape (`entity` projection + `version = 1` + empty `validation_summary`) — byte-for-byte indistinguishable from an update response, so existing clients need no new parsing branch.
+**Create convention (normative).** Create is signaled by three things together: (a) a **client-minted** `entity_id` (`kb_<32-hex>` UUID, pack-import-aligned), (b) `expected_version: 0`, and (c) a store-absent row. The dormant frontend `era-create-dialog` already locks this convention. Create success returns **HTTP 200** (NOT 201) with the existing `WorldKbPatchEntityResponse` shape (`entity` projection + `version = 1` + empty `validation_summary`) — byte-for-byte indistinguishable from an update response, so existing clients need no new parsing branch.
 
-**Create required fields.** Unlike update (which can inherit unchanged fields from the pre-read entity), create has no pre-read entity to fall back on. The create branch therefore **requires** `patch.title` (→ `canonical_name`) and `patch.block_type`; a missing either is **422** `WorldKbValidationError`. `patch.body` is optional (era create sends `body.attributes.era_type` + `world_summary`). `canonical_name` and `body` run the same V1.40 P1 validation (`validate_canonical_name` + `validate_body(..., ValidationMode::Novel)`) as the update path.
+**Create required fields.** Unlike update (which can inherit unchanged fields from the pre-read entity), create has no pre-read entity to fall back on. The create branch therefore **requires** `patch.title` (→ `canonical_name`) and `patch.block_type`; a missing either is **422** `WorldKbValidationError`. `patch.body` is optional (era create sends `body.attributes.era_type` + `world_summary`). `canonical_name` and `body` run the same §5.1.1 validation (`validate_canonical_name` + `validate_body(..., ValidationMode::Novel)`) as the update path.
 
 **Terminal Found ≠ absent (normative — closes VC-2).** `get_knowledge_entry` queries `kb_key_blocks` by `key_block_id` **without** a status filter (only `list_by_world` filters terminal statuses). A soft-deleted (`status = "deleted"`) or merged row is therefore `Ok(kb)` — **Found**, not `NotFound`. Such rows enter the **update** arm and are rejected by the existing terminal-status guard (`status == "deleted"` → 422), **never** the create arm. The create-on-absent branch fires only on a genuinely absent `key_block_id`. Resurrect / purge-and-recreate of terminal rows is explicitly a non-goal — the active-only `kb_key_blocks_active_unique` constraint governs name reuse, not this handler.
 
-**Authz / scope (must not regress — V1.73 greploop issue-3).** `require_world_owner` runs **first**, so a foreign (non-owned) world yields **403** regardless of whether the `entity_id` exists. On the Found path, an entity that exists but belongs to another world yields **404** (no cross-world existence leak). The create path runs only on store `NotFound` and uses the PATH `world_id` (already authz-checked), so it cannot leak cross-world detail either. A concurrent insert between the handler's read and the orchestrator's own read is caught by the orchestrator's `put_create` existence pre-check and the `kb_key_blocks_active_unique` constraint, mapped to 409 `KnowledgeEntryAlreadyExists`.
+**Authz / scope (must not regress).** `require_world_owner` runs **first**, so a foreign (non-owned) world yields **403** regardless of whether the `entity_id` exists. On the Found path, an entity that exists but belongs to another world yields **404** (no cross-world existence leak). The create path runs only on store `NotFound` and uses the PATH `world_id` (already authz-checked), so it cannot leak cross-world detail either. A concurrent insert between the handler's read and the orchestrator's own read is caught by the orchestrator's `put_create` existence pre-check and the `kb_key_blocks_active_unique` constraint, mapped to 409 `KnowledgeEntryAlreadyExists`.
 
 **Conflict / validation policy (normative).** Reuses the shipped error family — no new error code: **403** foreign world; **404** cross-world entity (Found); **409** `WorldKbConflictError` (OCC stale, create-on-existing, update-on-absent); **422** `WorldKbValidationError` (missing create fields, terminal status, body / canonical-name validation); **500** genuine storage error.
 
-**Cross-reference.** Frontend create affordance contract: [`canvas-strategy-surface.md`](../surfaces/canvas-strategy-surface.md) §3.3.3 "Create entry" (V1.159). Orchestrator create path + tests: `orchestrate_upsert` → `put_create` (`knowledge_entry_port.rs`), `orchestrate_upsert_happy_create` / `orchestrate_upsert_happy_create_path`.
+**Cross-reference.** Frontend create affordance contract: [`canvas-strategy-surface.md`](../surfaces/canvas-strategy-surface.md) §3.3.3 "Create entry". Orchestrator create path + tests: `orchestrate_upsert` → `put_create` (`knowledge_entry_port.rs`), `orchestrate_upsert_happy_create` / `orchestrate_upsert_happy_create_path`.
 
 ### 5.2 `nexus-knowledge` — two-tier knowledge (World + User)
 
-`nexus-knowledge` is the two-tier knowledge crate merged in V1.139 (former `nexus-kb`):
+`nexus-knowledge` is the two-tier knowledge crate merged from the former `nexus-kb`:
 
 - **`nexus-knowledge` (World-scoped):** Narrative KB graph assets (KnowledgeEntries, SourceAnchors, graph insertion/query, narrative KB lifecycle) coordinated with `nexus-narrative`. Holds spoke `KnowledgeEntry` natively; `extensions.nexus` typed accessors via `nexus-spoke-adapter`. Formerly the separate `nexus-kb` crate.
 - **`nexus-knowledge` (User-scoped):** Global knowledge/reference material. Tag-driven, may be pulled into Moment context assembly. Not Creator-scoped; does not own Creator memory semantics.
@@ -638,9 +620,9 @@ The term `KB` MUST be qualified in architecture/spec text when ambiguity matters
 - Use **User knowledge** or **global knowledge index** for `nexus-knowledge`.
 - Use **CLI local work KB index** for `nexus42 creator kb --scope work`.
 
-### 5.5 World KB promotion state machine (V1.50 normative)
+### 5.5 World KB promotion state machine (normative)
 
-> **Status**: Normative (V1.50) — V1.50 T-B P1 shipped on 2026-06-18. Migration `202606180002_kb_extract_jobs.sql` landed; review-time extraction hook verified end-to-end; promotion row promoted Draft → Normative at V1.50 P-last.
+> **Status**: Normative — the World KB promotion state machine. Migration `202606180002_kb_extract_jobs.sql` carries `kb_extract_jobs`; the review-time extraction hook is wired end-to-end.
 > **Plan**: 
 > **Cross-refs**: [workflow-profile.md §11.5](../novel-writing/workflow-profile.md#115-auto-chronology-per-work-opt-in) — auto-advance logs auto-promotion status; [quality-loop.md §3](../novel-writing/quality-loop.md) — review-time extraction hook.
 
@@ -666,13 +648,13 @@ rejected → (terminal; archived)
 
 Invalid transitions return `422` with stable error code on Daemon API.
 
-#### 5.5.3 Promotion gate (normative V1.50)
+#### 5.5.3 Promotion gate (normative)
 
 `pending → confirmed` requires:
 
 - `creator world kb adopt <extract_job_id>` invocation
 - Author identity matches `works.creator_id` (no cross-author adoption)
-- Optional `--with-merge` flag (V1.50 T-B P1 extension) merges proposed payload into an existing KB row instead of creating a new one
+- Optional `--with-merge` flag merges proposed payload into an existing KB row instead of creating a new one
 
 #### 5.5.4 Rejected retention
 
@@ -680,21 +662,20 @@ Rejected promotion candidates are retained in `Logs/kb/rejected/<YYYY-MM-DD>-<ex
 
 #### 5.5.5 Relationship to existing World KB taxonomy
 
-The promotion state machine does **not** change the `BlockType` enum (see §5.1.1 SSOT) or the `ValidationMode` constraints (see V1.40 P1 validation module). It governs **how** a row enters the World, not **what** the row contains.
+The promotion state machine does **not** change the `BlockType` enum (see §5.1.1 SSOT) or the `ValidationMode` constraints (see §5.1.1 validation module). It governs **how** a row enters the World, not **what** the row contains.
 
-#### 5.5.6 LLM extraction pathway (V1.51 T-A P0 — Normative)
+#### 5.5.6 LLM extraction pathway (Normative)
 
-V1.51 T-A P0 closes `R-V150KBED-01`. The V1.50 heuristic defaulted every
-review-time candidate to `block_type_guess='character'` (capitalized noun
-phrase), forcing authors to correct the type on adopt for every non-character
-entity. V1.51 replaces the heuristic with the `nexus.llm.extract` capability
-(see [llm-extract.md](../orchestration/llm-extract.md)) at the review-time extraction hook.
+The default review-time extraction pathway is the `nexus.llm.extract`
+capability (see [llm-extract.md](../orchestration/llm-extract.md)) at the
+review-time extraction hook. The heuristic fallback defaults every review-time
+candidate to `block_type_guess='character'` (capitalized noun phrase).
 
 The state machine in §5.5.1–§5.5.2 is **unchanged** — LLM extraction only
 improves the *quality* of the `block_type_guess` + `canonical_name_guess`
 proposed in the `pending` row. What changes:
 
-| Column / field | V1.50 heuristic | V1.51 LLM pathway |
+| Column / field | Heuristic fallback | LLM pathway (default) |
 | --- | --- | --- |
 | `block_type_guess` | always `character` | LLM-judged wire `BlockType` |
 | `canonical_name_guess` | matched phrase as-is | LLM-extracted canonical name |
@@ -706,10 +687,10 @@ The promotion gate (§5.5.3), the `confirmed`/`rejected` terminal states
 (§5.5.2), and the `ValidationMode::Novel` re-run on adopt (§5.5.5) are all
 unchanged — the LLM only affects what the author *sees* on a `pending` row, not
 how it transitions. When the LLM worker is unavailable, the hook falls back to
-the V1.50 heuristic so no-worker environments (hermetic tests,
+the heuristic so no-worker environments (hermetic tests,
 daemon-without-worker) remain functional.
 
-#### 5.5.7 Work→KnowledgeEntry provenance linkage (V1.52 T-A P2 — Normative)
+#### 5.5.7 Work→KnowledgeEntry provenance linkage (Normative)
 
 ##### 5.5.7.1 Purpose
 
@@ -730,9 +711,9 @@ Three nullable columns added to `kb_key_blocks`:
 | Value | Meaning |
 |-------|---------|
 | `manual` | Author directly added via `creator world kb add` or initial scaffold |
-| `review_time_extract` | Review-time extraction hook (V1.50 heuristic or V1.51 LLM) |
+| `review_time_extract` | Review-time extraction hook (heuristic or LLM) |
 | `finalize_time_extract` | Finalize-time extraction (novel finalize hook) |
-| `cross_chapter_rescan` | V1.51 T-A P1 cross-chapter reconciliation |
+| `cross_chapter_rescan` | Cross-chapter reconciliation |
 | `author_explicit` | Author explicitly confirmed/adopted a pending candidate |
 
 All three columns default to `NULL`; existing rows are not backfilled. Rows without provenance (legacy, manual entry) continue to resolve ownership via `narrative_worlds.owner_creator_id`.
@@ -760,9 +741,9 @@ On `creator world kb adopt <extract_job_id>`:
 
 On `creator world kb adopt --auto <world_ref>`: same logic applied to each auto-promoted candidate individually.
 
-### 5.6 World KB relationship semantics (V1.74 normative)
+### 5.6 World KB relationship semantics (normative)
 
-> **Status**: Normative — V1.74 Shipped β. This section defines first-class inter-entity relationships in the World KB graph. The V1.50–V1.73 model defined KeyBlocks, SourceAnchors, and the promotion state machine; V1.74 adds typed edges between confirmed/non-deleted World KB entities.
+> **Status**: Normative. This section defines first-class inter-entity relationships — typed edges between confirmed/non-deleted World KB entities — in the World KB graph.
 
 World KB relationships are World-scoped graph edges owned by the same World as their source and target KeyBlocks. A relationship row does not transfer ownership, change the KeyBlock lifecycle, or replace SourceAnchor provenance; it records author-visible semantic linkage between two World KB entities.
 
@@ -778,7 +759,7 @@ Relationships are stored as directed edges. The `symmetric` flag marks a directe
 
 #### 5.6.3 Taxonomy
 
-The wire taxonomy is the `WorldKbRelationshipKind` enum. V1.74 core values are: `allied_with`, `opposes`, `parent_of`, `child_of`, `member_of`, `located_in`, `rules_over`, `references`, `serves`, `rival_of`, `mentor_of`, and `custom`. Wire values are snake_case. When `relation_type = custom`, `custom_label` is required and carries the author's narrative label. When `relation_type` is any core enum value, `custom_label` is ignored or normalized to absent.
+The wire taxonomy is the `WorldKbRelationshipKind` enum. Core values are: `allied_with`, `opposes`, `parent_of`, `child_of`, `member_of`, `located_in`, `rules_over`, `references`, `serves`, `rival_of`, `mentor_of`, and `custom`. Wire values are snake_case. When `relation_type = custom`, `custom_label` is required and carries the author's narrative label. When `relation_type` is any core enum value, `custom_label` is ignored or normalized to absent.
 
 #### 5.6.4 Source-anchor grounding
 
@@ -786,13 +767,13 @@ Relationship grounding is optional. `source_anchor_ids` may be empty for author-
 
 #### 5.6.5 Confidence
 
-`confidence` is optional and display-only in V1.74. It may be author-set or future-extraction-set, but it MUST NOT drive validation, graph layout weighting, filtering, or conflict resolution in this iteration. Values, when present, are in the inclusive range `0.0..=1.0`.
+`confidence` is optional and display-only. It may be author-set or future-extraction-set, but it MUST NOT drive validation, graph layout weighting, filtering, or conflict resolution in this iteration. Values, when present, are in the inclusive range `0.0..=1.0`.
 
 #### 5.6.6 Optimistic concurrency
 
 Relationship writes use per-row OCC through `kb_relationships.revision`. Canonical reads expose the current row version; mutating requests submit `expected_version`. A stale `expected_version` MUST return a conflict before mutation. Successful updates increment the stored `revision`; deletes compare against the expected revision before removing the row.
 
-#### 5.6.7 Extraction-sourced suggested relationships (V1.76 γ)
+#### 5.6.7 Extraction-sourced suggested relationships
 
 `kb_relationships.needs_review = 1` marks an edge as a **suggestion** proposed by
 extraction (`nexus.llm.extract`) and not yet author-confirmed; it is not part of
@@ -865,10 +846,10 @@ normative.
 A **local authoring fork** is a single creator branching the timeline of a world they
 own, so a divergent rewrite can be explored without disturbing the parent branch. It
 performs no sync, no cross-creator sharing, and no platform publish. The local authoring
-fork is implemented by the `nexus.fork.create` capability (V1.60 P0, DF-46); the daemon
-HTTP route and Canvas UI that expose it to authors are added in V1.162.
+fork is implemented by the `nexus.fork.create` capability (DF-46); the daemon
+HTTP route and Canvas UI expose it to authors.
 
-**Lazy-branch model (V1.26+, preserved).** A local fork is a new `branch_id` carried by
+**Lazy-branch model (preserved).** A local fork is a new `branch_id` carried by
 `narrative_timeline_events` rows within an existing owned world — it is NOT a new world
 copy and does NOT duplicate world storage. The fork is materialized by appending a
 `fork_created` marker event at `sequence_no` 0 on the new branch. There is no dedicated
@@ -880,7 +861,7 @@ lineage is carried as structured metadata on the marker event (see §6.6.3).
 1. **Owner-gated.** Only the world's owning creator may create a local fork. Authorization is enforced before any fork-point read (`require_world_owner` / `ensure_world_owned`); a foreign world yields **403** and MUST NOT reveal whether the fork-point event exists.
 2. **Fork-point event validation.** The stated `forked_from_event_id` MUST exist on the stated `parent_branch_id` within the same `world_id`; otherwise the create is rejected (**422**). A fork always diverges from a real event on a real branch of the owned world.
 3. **Atomic materialization.** `fork.create` allocates a new `fbk_<uuid12>` `branch_id` and appends the `fork_created` marker event establishing the branch. The branch does not exist until the marker is appended (lazy forks are otherwise invisible until the first event).
-4. **No merge / no edit / no cross-creator.** Local fork-merge, lineage editing, reparenting, and cross-creator sharing are out of scope (deferred — `BL-01` fork-merge; V1.162 compass Non-Goals).
+4. **No merge / no edit / no cross-creator.** Local fork-merge, lineage editing, reparenting, and cross-creator sharing are out of scope (deferred — `BL-01` fork-merge).
 
 #### 6.6.2 Platform / social / community fork (platform-only; out of this repo)
 
@@ -890,15 +871,14 @@ not in this repo. `World::fork` / the in-memory `ForkBranch` aggregate in
 `nexus-narrative` MAY carry the platform world-copy domain model (including
 `parent_world_id`) for platform sync, but no LOCAL product surface exposes platform fork
 operations. PD-01's "World fork is platform-only" refers to THIS community/social kind,
-NOT to the local authoring fork in §6.6.1. (Tracker §2.1 PD-01 wording is reconciled to
-match by V1.162 P1 T3 — doc-aligns-to-shipped-reality, not new policy.)
+NOT to the local authoring fork in §6.6.1.
 
-#### 6.6.3 Lineage projection contract (V1.162 — normative)
+#### 6.6.3 Lineage projection contract (normative)
 
 Because a local fork is a branch within a world (not a forked world), fork lineage is a
 **branch-level** projection, distinct from the world-level `WorldState` fork fields.
 
-- **Carrier (architect-locked, V1.162): approach B — structured marker metadata.** The `fork_created` marker event's `extensions_nexus_json` carries the lineage payload. The marker is the single source of truth for the fork's existence and lineage (consistent with the lazy model: no second store, no `fork_branches` table, no new read route). The marker is written with `status = canon` (a fork creation is a committed structural fact, findable in canon-filtered reads).
+- **Carrier (architect-locked): approach B — structured marker metadata.** The `fork_created` marker event's `extensions_nexus_json` carries the lineage payload. The marker is the single source of truth for the fork's existence and lineage (consistent with the lazy model: no second store, no `fork_branches` table, no new read route). The marker is written with `status = canon` (a fork creation is a committed structural fact, findable in canon-filtered reads).
 - **Branch-level lineage fields** (derived from the marker; surfaced to clients through the existing `TimelineEventInfo.extensions` field on the `GET /v1/daemon/worlds/:world_id/timeline/events` read, filtered by `event_type=fork_created`):
   - `is_fork` — `true` iff a `fork_created` marker exists on the branch; `false` for root/non-fork branches.
   - `parent_branch_id` — the branch this fork diverged from (drives one-hop return-to-parent).
@@ -922,15 +902,3 @@ does not own their domain invariants. In particular:
 - User/Pairing invariants go through `nexus-cloud-domain`.
 - Narrative World/Timeline/Event/KB invariants go through `nexus-narrative` and `nexus-knowledge`.
 - Moment assembly remains `nexus-moment-context-assembly`; optional cloud Stage-1 is an input source, not a replacement owner.
-
----
-
-## 7. Wiring implications for V1.23
-
-> **Historical V1.23 wiring snapshot.** The former `nexus-kb` and separate User-only `nexus-knowledge` responsibilities below describe that version, not current crate ownership. Current World/User knowledge ownership is in §4 and §5.2.
-
-1. `nexus-moment-context-assembly` target wiring should aggregate local `nexus-creator-memory`, `nexus-narrative`, `nexus-kb`, and `nexus-knowledge` inputs for Stage-0 moment context.
-2. `nexus-narrative` is the core entry point for creative-work narrative state and should be the natural owner for World/Timeline/Event queries consumed by context assembly and CLI/daemon local APIs.
-3. `nexus-knowledge` must be described and wired as User-scoped global knowledge, not Creator-scoped knowledge.
-4. `nexus-cloud-sync` must depend on and use `nexus-cloud-domain` for User/Pairing invariants.
-5. `nexus-kb` should become the key module for World-scoped KB graph insertion and query, with `nexus-narrative` owning the surrounding narrative aggregates.

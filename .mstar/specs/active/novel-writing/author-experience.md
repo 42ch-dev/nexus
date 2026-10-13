@@ -1,15 +1,15 @@
 # Novel Author Experience — Normative Supplement v1
 
-**Status**: **Shipped (V1.49 P2 — author desk UX integrated)** — baseline Shipped (V1.43) + V1.45 CLI IA amendments + V1.46 Shipped; §8 intake re-trigger + reconcile preview merged from V1.49 P2 overlay  
+**Status**: Shipped — author desk UX integrated: canvas-first author journey, normative CLI surfaces, remediation chains, and author visibility  
 **Document class**: Feature line (author experience supplement)  
 **Created**: 2026-06-12  
-**Last updated**: 2026-10-10 (v1.210 P3 — author journey re-narrated canvas-first; retired-command citations removed)  
-**Scope**: End-user **ongoing serial** happy path — canvas-first author journey, normative CLI surfaces, remediation chains, and author visibility (spec-only SSOT; **no** `docs/novel-writing-quickstart.md` after P1)  
+**Last updated**: 2026-10-13  
+**Scope**: End-user **ongoing serial** happy path — canvas-first author journey, normative CLI surfaces, remediation chains, and author visibility (spec-only SSOT; **no** `docs/novel-writing-quickstart.md`)  
 **Coordinates with**:
 
 - [cli-spec.md](../cli/cli-spec.md) — §6.0B current command IA + §7 first-run UX principles
-- [creator-run-preset-entry.md](../../archived/creator/2026-09-21-creator-run-preset-entry.md) — historical V1.45 CLI IA (its generic preset runner was retired in v1.193 P2; kept for provenance)
-- [creator-centric-entry-model.md](../../archived/creator/2026-06-07-creator-centric-entry-model.md) — historical §3.1 local bootstrap (≤7 steps)
+- [creator-run-preset-entry.md](../../archived/creator/2026-09-21-creator-run-preset-entry.md) — historical CLI IA record (superseded generic preset runner)
+- [creator-centric-entry-model.md](../../archived/creator/2026-06-07-creator-centric-entry-model.md) — historical local bootstrap record (≤7 steps)
 - [workflow-profile.md](workflow-profile.md) — artifact layout + completion §6
 - [quality-loop.md](quality-loop.md) — findings + review visibility
 - [creator-workflow.md](../creator/creator-workflow.md) — FL-E stage names in narrative
@@ -18,28 +18,26 @@
 
 ## 1. Purpose
 
-V1.36–V1.45 implemented novel-writing **capabilities** across crates. V1.46 does **not** add a new profile or preset grammar. It:
+This spec defines the novel-writing author journey. It:
 
-1. **Embeds the author happy path** (formerly BL-10 quickstart) in this spec §3 — compact ~80 lines.
-2. **Closes author-desk deltas** — `--json` `findings[]`, per-finding remediation, novel-only scope (P0).
-3. **Retires duplicate end-user doc** — `docs/novel-writing-quickstart.md` deleted in P1; agents cite `.mstar/specs/` only.
+1. **Embeds the author happy path** in §3 — compact ~80 lines.
+2. **Covers author-desk surfaces** — `--json` `findings[]`, per-finding remediation, novel-only scope.
+3. **Holds the single end-user doc home** — agents cite `.mstar/specs/` only; there is no `docs/novel-writing-quickstart.md`.
 
-**v1.210 P3 refresh**: §3's journey is re-narrated to the canvas-first reality — Work creation via the world-bound web canvas, ref-less reads as the default-outline degrade (v1.209 P3), ref-less writes as the typed D7 refusal (v1.210 P2) — and every retired-command citation is removed.
-
-**Part II (optional)** — multi-work switch, multi-volume, inspiration pool — documentation pointers only; shipped in V1.41–V1.44.
+**Part II (optional)** — multi-work switch, multi-volume, inspiration pool — documentation pointers only.
 
 ---
 
-## 2. Document map (V1.46)
+## 2. Document map
 
-| Section | Content | Owner plan |
-| --- | --- | --- |
-| §3 Author path | World + Work init → first chapter → serial → quality loop → completion | P1 (narrative); CLI detail in [cli-spec.md §6.0B](../cli/cli-spec.md#60b-v2-命令信息架构权威) |
-| §4 Author visibility | Human + machine-readable status surfaces | P0 delta on V1.43 baseline |
-| §4.1 `--json` contract | `findings[]` + optional `findings_stale` | P0 |
-| §5 Residual pointer | local process (not clone SSOT) | P-last |
+| Section | Content |
+| --- | --- |
+| §3 Author path | World + Work init → first chapter → serial → quality loop → completion (narrative; CLI detail in [cli-spec.md §6.0B](../cli/cli-spec.md#60b-v2-命令信息架构权威)) |
+| §4 Author visibility | Human + machine-readable status surfaces |
+| §4.1 `--json` contract | `findings[]` + optional `findings_stale` |
+| §5 Residual pointer | local process (not clone SSOT) |
 
-**Invariant**: Every command in §3 must exist in [cli-spec.md](../cli/cli-spec.md) at ship time; every canvas action narrated in §3 must be a shipped canvas surface.
+**Invariant**: Every command in §3 must exist in [cli-spec.md](../cli/cli-spec.md); every canvas action narrated in §3 must be a shipped canvas surface.
 
 ---
 
@@ -57,8 +55,8 @@ nexus42 creator workspace init workspace
 ```
 
 The long-running local service is owned by the **desktop app**: launching the
-app starts and supervises the service. The CLI daemon group is retired
-(v1.193 P2) — there is no terminal command that starts the service.
+app starts and supervises the service. The CLI daemon group does not exist —
+there is no terminal command that starts the service.
 
 ### 3.2 World + Work init (canvas-first)
 
@@ -72,20 +70,19 @@ Create the Work in the canvas: open the **Create** layout and use **Create
 Work** — title, long-term goal, initial idea, the **Work profile** (`novel`),
 and the **required World selector**. Work creation is world-bound: the runtime
 refuses a Work without a World (400 `world_id_required`), and there is **no CLI
-Work-create command** — canvas creation is the product path (the CLI
-Work-creation entrance was retired in v1.193 P2).
+Work-create command** — canvas creation is the product path.
 
 A freshly created Work is **ref-less** (`work_ref`/`story_ref` not yet
 assigned). The runtime stays honest about that state on both sides:
 
 - **Reads render.** The Work Outline and Work Timeline canvases show the
-  default outline instead of erroring (v1.209 P3) — the same "outline not yet
+  default outline instead of erroring — the same "outline not yet
   written" presentation as any empty Work; the projection is in-memory and
   never persisted.
 - **Writes refuse, typed.** Outline/timeline structure edits on a ref-less
   Work are refused with HTTP 400 `invalid_input` and the stable discriminator
   `error.details.field = "work_ref_missing"`; the message names the recovery
-  step — assign the Work's `story_ref` (v1.210 P2, D7). The refusal surfaces
+  step — assign the Work's `story_ref` (D7). The refusal surfaces
   through the canvas error toast; no in-canvas ref-assignment step exists yet
   (the D7-triggered next-iteration candidate). Wire contract:
   [canvas-strategy-surface.md §3.5](../surfaces/canvas-strategy-surface.md).
@@ -117,11 +114,11 @@ Serial chapter 2+: daemon auto-chain; inject direction:
 nexus42 creator works inspire <work_id> --note "the partner is the informant"
 ```
 
-On-disk chapter files: see [workflow-profile.md](workflow-profile.md); missing paths surfaced in status (P2 on-disk hints).
+On-disk chapter files: see [workflow-profile.md](workflow-profile.md); missing paths surfaced in status.
 
 ### 3.4 Quality loop — dual preset table (Grill #19)
 
-> **V1.47 shipped**: Review preset produces findings per [quality-loop.md §8](quality-loop.md#8-reflection-loop-output-contract-v147-shipped) (P0). The preset is named `novel-chapter-review` (replaces the former generic `reflection-loop` demo).
+> The review preset produces findings per [quality-loop.md §8](quality-loop.md#8-reflection-loop-output-contract). It is named `novel-chapter-review`.
 
 | Intent | Preset id | When |
 | --- | --- | --- |
@@ -134,9 +131,9 @@ nexus42 creator works findings list [<work_id>]     # findings read (--status / 
 nexus42 creator works findings accept <finding_id>  # accept a rule suggestion into the Work's AGENTS.md
 ```
 
-**Remediation (P0, Grill #7)**: `works status` uses **per-finding `routing_hint`** only — no blanket footer pointing only at `novel-chapter-review`; with **zero** open findings it reports the state alone (v1.193 P2 removed the runner the old master-review suggestion named). Review presets are enqueued as schedule runs carrying the Work's context; the 96h stale-findings auto-schedule is opt-in per Work.
+**Remediation (Grill #7)**: `works status` uses **per-finding `routing_hint`** only — no blanket footer pointing only at `novel-chapter-review`; with **zero** open findings it reports the state alone. Review presets are enqueued as schedule runs carrying the Work's context; the 96h stale-findings auto-schedule is opt-in per Work.
 
-96h master-review banner: visible on `creator works status` (V1.39 P4 baseline).
+96h master-review banner: visible on `creator works status`.
 
 ### 3.5 Completion
 
@@ -148,7 +145,7 @@ nexus42 creator works completion-lock release <work_id>   # optional: write more
 nexus42 creator works reopen <work_id> --reason "epilogue"
 ```
 
-Auto-chain stops on completion (`reject_produce_when_novel_complete` — V1.39+).
+Auto-chain stops on completion (`reject_produce_when_novel_complete`).
 
 ### 3.6 Part II appendix (optional, doc-only)
 
@@ -160,21 +157,21 @@ Auto-chain stops on completion (`reject_produce_when_novel_complete` — V1.39+)
 
 ---
 
-## 4. Author visibility (P2 baseline + V1.46 delta)
+## 4. Author visibility
 
 Authors must answer without reading raw JSON APIs (human path). **Novel profile only** for findings (Grill #6) — generic `works status` does **not** fetch findings.
 
-| Question | Surface (minimum) | Status |
-| --- | --- | --- |
-| Which chapter is active? | `creator works status` — `current_chapter` + chapter table | Shipped V1.43 P2 |
-| Is the Work complete? | Completed banner + `COMPLETED` marker | Shipped V1.43 P2 |
-| Open findings? | Count + severity; per-row hints | Shipped V1.43 P2; **remediation delta P0** |
-| 96h master-review banner? | Stale banner on status path | Shipped V1.39 P4 |
-| Run master review? | `novel-review-master` as a schedule run carrying the Work's context; 96h opt-in auto-schedule | Shipped V1.45; CLI runner retired v1.193 P2 |
+| Question | Surface (minimum) |
+| --- | --- |
+| Which chapter is active? | `creator works status` — `current_chapter` + chapter table |
+| Is the Work complete? | Completed banner + `COMPLETED` marker |
+| Open findings? | Count + severity; per-row hints |
+| 96h master-review banner? | Stale banner on status path |
+| Run master review? | `novel-review-master` as a schedule run carrying the Work's context; 96h opt-in auto-schedule |
 
 Normative finding semantics: [quality-loop.md](quality-loop.md) §3.4.
 
-### 4.1 Machine-readable status (`--json`, V1.46 P0)
+### 4.1 Machine-readable status (`--json`)
 
 For **`work_profile=novel`** only, `creator works status <work_id> --json` **extends** the daemon GET work payload:
 
@@ -214,64 +211,40 @@ When error/remediation conditions occur, user-visible output must include a **si
 | Work completed (auto-chain stopped) | Cite §3.5 |
 | Open findings (when shown) | Per-finding hint or §3.4 findings leaves |
 
-**V1.46 P1**: remove all `docs/novel-writing-quickstart.md §N` runtime references.
-
 ---
 
-## 6. P-last author-path tech-debt (pointer)
+## 6. Author-path tech-debt (pointer)
 
 This spec does not duplicate local residual registers.
 
 ---
 
-## 7. Promotion (iteration close)
+## 7. Author desk deltas
 
-At V1.46 P-last:
+### 7.1 Intake re-trigger on existing Work (R-V147P1-01)
 
-- [ ] Draft → **Shipped (V1.46)** header
-- [ ] BL-10 archive supersede note in shipped tracker (Grill #15)
-- [ ] Confirm zero runtime quickstart references
-
----
-
-## 8. Author desk deltas (Shipped V1.49 P2)
-
-> **Status**: Shipped (V1.49 P2) — P2 overlay merged into Master.  
-> **Plan**: 
-> **Cross-refs**: findings lifecycle → [quality-loop.md §2](quality-loop.md#2-findings-lifecycle) (6-state V1.49 P0); narrative indexes → [workflow-profile.md §4.6](workflow-profile.md#46-narrative-indexes--f--e-runtime-v149-p1) (V1.49 P1)
-
-### 8.1 Intake re-trigger on existing Work (R-V147P1-01)
-
-**Problem** (as recorded at V1.49): the V1.49-era Work-creation flow scheduled
-`creative-brief-intake` for the new Work, but existing Works had no equivalent
-intake re-trigger. That creation flow and the intake CLI leaf V1.49 P2 shipped
-for this residual were both retired in v1.193 P2 (v1.193 P2-T1 removed the
-remaining execution entrances).
-
-**Present lane** (v1.210): `creative-brief-intake` is an embedded preset that
+`creative-brief-intake` is an embedded preset that
 declares **no gates**, so it can be enqueued for an existing Work as a schedule
 run — `POST /v1/daemon/orchestration/schedules` with
 `preset_id="creative-brief-intake"` and the Work in the schedule input
 (`input.work_id`). The enqueue creates no new Work row and does not replace the
 Work's auto-chain driver (`driver_schedule_id` is untouched). There is no
-dedicated CLI leaf for this since v1.193 P2.
+dedicated CLI leaf for this.
 
-### 8.2 Reconcile preview (R-V148P4-W2)
+### 7.2 Reconcile preview (R-V148P4-W2)
 
-**Problem**: `creator works reconcile-chapters` mutates filesystem frontmatter and `work_chapters` without preview.
-
-**Shipped CLI** (mirror `works rules reset` safety flags; V1.49 P2):
+`creator works reconcile-chapters` mutates filesystem frontmatter and `work_chapters`; preview is available via:
 
 ```bash
 nexus42 creator works reconcile-chapters [<work_id>] [--dry-run] [--yes|-y] [--json]
 ```
 
-| Flag | Requirement | Implementation (V1.49 P2) |
+| Flag | Requirement | Implementation |
 | --- | --- | --- |
 | `--dry-run` | Compute `ReconcileReport` only; **no** filesystem or DB writes; **no** runtime lock acquire | Threads `?dry_run=true` query param; daemon skips `RuntimeLockGuard::acquire` and calls `reconcile_from_filesystem(..., dry_run=true)` which gates all writes behind `if !dry_run` while keeping counter increments accurate |
 | `--yes` (or `-y`) | Skip interactive confirmation when not dry-run | CLI skips `confirm_reconcile_interactive`; daemon mutating path unchanged |
 | default | Prompt before mutating when stdin is a TTY (same policy family as rules reset) | `confirm_reconcile_interactive` errors when stdin is non-TTY (scripted use must pass `--yes`); `--dry-run` takes precedence over `--yes` |
 
-The daemon handler signature is now `POST /v1/daemon/works/{work_id}/reconcile-chapters?dry_run=true|false` (query param optional, defaults to the mutating path).
+The daemon handler is `POST /v1/daemon/works/{work_id}/reconcile-chapters?dry_run=true|false` (query param optional, defaults to the mutating path).
 
 **Remediation copy** in `creator works status` must cite `reconcile-chapters --dry-run` when filesystem/DB drift detected.

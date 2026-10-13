@@ -1,14 +1,13 @@
 # Concurrency — Master Specification
 
-**Status**: Normative — V1.51 advisory lock/heartbeat/OCC; V1.56 workspace sessions; V1.188 recoverable target-content commit (§9); V1.201 P2 §6.2 successful-acquire detection restated as an implementable decision table (semantics unchanged)
+**Status**: Normative — advisory file lock + heartbeat + zombie detection + per-row OCC + workspace-session OCC
 **Document class**: Master
 **Created**: 2026-06-18
 **Scope**: Multi-writer concurrency control for the local-first daemon + CLI model — advisory file lock + heartbeat + zombie detection + CLI integration.
 **Coordinates with**:
 
 - [novel-writing/multi-work-lifecycle.md](../novel-writing/multi-work-lifecycle.md) — §4-§5 DB-level `runtime_lock_holder`
-- `cron-staggering.md` — §4 daemon cron evaluator (archived; folded into workflow-profile.md §11)
-- [novel-writing/workflow-profile.md](../novel-writing/workflow-profile.md) — completion locking
+- [novel-writing/workflow-profile.md](../novel-writing/workflow-profile.md) — completion locking; §11 cron staggering
 - [cli-spec.md](../cli/cli-spec.md) — `creator works cron set`, `creator run`, `creator world kb adopt`
 - [daemon-runtime.md](../../archived/runtime/2026-09-21-daemon-runtime.md) (historical record) — daemon tick / cron supervisor
 
@@ -16,14 +15,14 @@
 
 ## 1. Problem Statement
 
-V1.42 P0 shipped the DB-level `works.runtime_lock_holder` column + `RuntimeLockGuard` RAII in `nexus_local_db::runtime_lock` — a single-process concurrency guard using SQLite's transactional semantics. V1.49 chose a single-writer daemon model with atomic temp+rename as the safe default (single `nexus42 daemon start` instance — the daemon host was retired in v1.193 P2; the single-writer service model carries over to `apps/nexus-service` over `nexus-core`).
+The DB-level `works.runtime_lock_holder` column + `RuntimeLockGuard` RAII in `nexus_local_db::runtime_lock` provides a single-process concurrency guard using SQLite's transactional semantics. The single-writer service model uses atomic temp+rename as the safe default; a single service instance owns the daemon role (`apps/nexus-service` over `nexus-core`).
 
-V1.50 introduced cron staggering (three-role per-Work automated scheduling), which creates **real multi-writer contention**:
+Cron staggering (three-role per-Work automated scheduling) creates **real multi-writer contention**:
 
-- The cron evaluator (`nexus-orchestration` cron supervisor; V1.50-era host was the daemon, retired in v1.193 P2) fires `novel-brainstorm` / `novel-write` / `novel-review-master` on a 1-minute tick.
+- The cron evaluator (`nexus-orchestration` cron supervisor) fires `novel-brainstorm` / `novel-write` / `novel-review-master` on a 1-minute tick.
 - The author concurrently runs CLI commands like `creator works cron set` or `creator works reconcile-chapters`.
 
-The DB-level lock (`runtime_lock_holder`) is process-local — it cannot protect against two independent processes (service/scheduler + CLI) racing on `works.schedule_json`. The V1.50 P0 CAS fix (`set_schedule_json_tx`) added transactional compare-and-swap on `schedule_json`, but the broader class of cross-process races remains:
+The DB-level lock (`runtime_lock_holder`) is process-local — it cannot protect against two independent processes (service/scheduler + CLI) racing on `works.schedule_json`. A CAS fix (`set_schedule_json_tx`) provides transactional compare-and-swap on `schedule_json`, but the broader class of cross-process races remains:
 
 | Race class | Source | Risk |
 |------------|--------|------|
@@ -31,12 +30,12 @@ The DB-level lock (`runtime_lock_holder`) is process-local — it cannot protect
 | `kb_extract_jobs` status mutation | CLI `kb adopt` vs scheduler-driven review-time extract | Duplicate extract |
 | `works` row mutation | CLI `creator works` mutations vs scheduler auto-chain | Inconsistent state |
 
-A **hard cross-process advisory lock** (`flock` on `Works/<work_ref>/.lock`) is the V1.51 fix.
+A **hard cross-process advisory lock** (`flock` on `Works/<work_ref>/.lock`) closes this.
 
-V1.190 P1 moves the reading/annotations, findings, work-scope KB index and
-reference-source read authorities into the guarded `nexus-core` service (one
-engine-owner `CoreService` per daemon; CLI composition follows in P6). The
-concurrency rules in this document are unchanged by that extraction: the core
+The reading/annotations, findings, work-scope KB index and
+reference-source read authorities live in the guarded `nexus-core` service (one
+engine-owner `CoreService` per daemon; the CLI composes against it). The
+concurrency rules in this document are unchanged by that ownership: the core
 joins the same writer-protocol pools and file locks, takes the same per-Work
 runtime locks, and adds no new mutation path.
 
@@ -104,7 +103,7 @@ Callers must **never** map an I/O failure to `E_LOCK` or exit 75 — that would 
 
 ### 2.5 Relationship to DB-Level Runtime Lock
 
-The file-based lock is a **companion** to the existing DB-level `runtime_lock_holder` (V1.42 P0). Both must be acquired for mutating paths:
+The file-based lock is a **companion** to the DB-level `runtime_lock_holder`. Both must be acquired for mutating paths:
 
 | Layer | Mechanism | Scope | Purpose |
 |-------|-----------|-------|---------|
@@ -128,7 +127,7 @@ Before enqueuing a cron-triggered schedule (via `auto_chain::enqueue_cron_schedu
 
 ### 3.2 Cron Evaluator (Read-Only)
 
-The cron evaluator (`cron_fires_at_minute`, `has_active_role_schedule`) is **read-only** on `works.schedule_json` and `creator_schedules`. It does **not** need the file lock. This is documented here for clarity — the V1.50 CAS fix ensures the evaluator never mutates `schedule_json`.
+The cron evaluator (`cron_fires_at_minute`, `has_active_role_schedule`) is **read-only** on `works.schedule_json` and `creator_schedules`. It does **not** need the file lock. This is documented here for clarity — the CAS fix ensures the evaluator never mutates `schedule_json`.
 
 ### 3.3 Per-Work Cron Evaluator Reads
 
@@ -215,7 +214,7 @@ When `try_acquire` succeeds (i.e., `flock` returns without contention), the acqu
 3. **Cleanly released** — content parses and `expires_at_ms ≥ now_ms − 60_000` → the previous holder released cleanly but didn't delete the file. Normal — no warning; overwrite and proceed.
 4. **Unparseable** — content is non-empty but malformed (a crash between metadata write and flush can leave a partial `<pid>:<holder_name>:<expires_at_ms>` body) → log at `warn!` noting the unparseable prior holder, then overwrite and proceed. Takeover is already authorized by the uncontended `flock`; a parse failure never blocks or fails the acquire (conservative handling mirrors the conflict-path NB, R-V151Q1-09).
 
-Binding clarifications for implementers and reviewers (V1.201 P2, register `core-and-spoke` / R-DOCS-001):
+Binding clarifications for implementers and reviewers (register `core-and-spoke` / R-DOCS-001):
 
 - **Read before overwrite.** The classification read happens after the successful `flock` and *before* `write_lock_metadata_to_path` writes the fresh body — reading after the overwrite would always classify the new holder.
 - **Diagnostics only.** §2.3's pinned signature `try_acquire(work_dir, holder_name) -> Result<FileLockGuard, FileLockError>` is unchanged; detection adds a log event, not a return path, an error variant, or a takeover condition. Lock-taking behavior is identical in all four cases (the OS `flock` arbitrates; the 60 s heartbeat and conflict-path stale reporting of §6.3 are untouched).
@@ -239,7 +238,7 @@ The only safe recovery for a zombie lock is to kill the holder process (SIGTERM)
 
 ---
 
-## 7. Per-Row Optimistic Concurrency Control (OCC) — V1.51 T-B P1
+## 7. Per-Row Optimistic Concurrency Control (OCC)
 
 ### 7.1 Rationale
 
@@ -253,19 +252,19 @@ Per-row OCC adds a **version column** (`INTEGER NOT NULL DEFAULT 0`) to contenti
 
 ### 7.2 Versioned Tables
 
-| Table | Version column | Added | Rationale |
+| Table | Version column | Migration | Rationale |
 |---|---|---|---|
-| `kb_extract_jobs` | `version` | V1.51 T-B P1 migration `202606190001` | Promotion status transitions (`mark_confirmed`, `upsert_pending_candidate`), LLM payload refresh (`insert_pending_with_llm`), and cron-side extract job mutation are multi-actor paths where a stale preimage can produce duplicate extracts or lost confirmations. |
-| `novel_pool_entries` | `version` | V1.51 T-B P1 migration `202606190001` | Pool promote/demote is an `INSERT ... ON CONFLICT DO UPDATE` that can race with concurrent `archive`/`completed` transitions from the FL-E completion hook. |
+| `kb_extract_jobs` | `version` | `202606190001` | Promotion status transitions (`mark_confirmed`, `upsert_pending_candidate`), LLM payload refresh (`insert_pending_with_llm`), and cron-side extract job mutation are multi-actor paths where a stale preimage can produce duplicate extracts or lost confirmations. |
+| `novel_pool_entries` | `version` | `202606190001` | Pool promote/demote is an `INSERT ... ON CONFLICT DO UPDATE` that can race with concurrent `archive`/`completed` transitions from the FL-E completion hook. |
 
-`works.schedule_json` remains under its own column-value CAS (V1.50 P0 `set_schedule_json_tx`) because the compare-and-swap target is the JSON content itself, not a monotonic version counter.
+`works.schedule_json` remains under its own column-value CAS (`set_schedule_json_tx`) because the compare-and-swap target is the JSON content itself, not a monotonic version counter.
 
 ### 7.3 CAS Helper (`nexus-local-db::cas`)
 
 The `cas` module provides two primitives (source: `crates/nexus-local-db/src/cas.rs`):
 
 - **`cas_check(pool, rows_affected, table, id_col, id_val, expected_version) -> Result<(), LocalDbError>`** — call after `UPDATE ... WHERE version = ?`. On `rows_affected == 0`, re-reads the current version and returns `VersionMismatch`.
-- **`with_cas_retry(max_attempts, backoff_ms, name, f) -> Result<T, LocalDbError>`** — retries the closure `f` up to `max_attempts` times (default 3, 100 ms) when a `VersionMismatch` is caught. Logs `warn!` on each retry. Any other error is returned immediately without retrying.
+- **`with_cas_retry(max_attempts, backoff_ms, name, f) -> Result<T, LocalDbError>`** — retries the closure `f` up to `max_attempts` times (default 3, 100 ms) when a `VersionMismatch` is caught. Logs `warn!` on each retry. Any other error is returned immediately without retrying.
 
 ### 7.4 KB-Side CAS Integration (adopt / rescan)
 
@@ -283,11 +282,11 @@ The `creator world kb adopt` path is the primary CAS consumer:
 5. On success → commit KnowledgeEntry + flip atomically
 ```
 
-`upsert_pending_candidate` (V1.50 T-B P2) refreshes `proposed_payload` for an existing `pending` row. T-A P1 (cross-chapter rescan) and T-A P2 (missing-KB detection) **must** pass the version from their preimage read through this path to close the TOCTOU window.
+`upsert_pending_candidate` refreshes `proposed_payload` for an existing `pending` row. Cross-chapter rescan and missing-KB detection **must** pass the version from their preimage read through this path to close the TOCTOU window.
 
 ### 7.5 Cron-Side CAS Retry
 
-The daemon cron-fire enqueue path (`cron_supervisor::try_fire_role`) wraps `enqueue_cron_schedule` in a retry loop (3 attempts, 100 ms backoff). When a `VersionMismatch` propagates from a versioned-table mutation inside the fire scope, the loop re-reads the preimage and retries.
+The daemon cron-fire enqueue path (`cron_supervisor::try_fire_role`) wraps `enqueue_cron_schedule` in a retry loop (3 attempts, 100 ms backoff). When a `VersionMismatch` propagates from a versioned-table mutation inside the fire scope, the loop re-reads the preimage and retries.
 
 **Acquire-order discipline:** file lock → DB lock → CAS (never reverse). The CAS always executes **inside** the file-lock scope (§2.4). Two CAS-protected writes to different tables are sequenced by the file lock; no two-phase commit or distributed consensus is needed (local-only).
 
@@ -305,7 +304,7 @@ All three codes are mapped in `apps/nexus42/src/main.rs` §Exit mapping.
 
 - **DO NOT** CAS-guard a write that is already fully serialised by the file lock and performs only INSERT (no read-modify-write). The `version` column adds a monotonic counter; INSERT is not a TOCTOU surface.
 - **DO NOT** increment `version` on purely informational/read-path queries.
-- **DO NOT** add a `version` column to tables outside the V1.51 scope (`kb_extract_jobs` + `novel_pool_entries`).
+- **DO NOT** add a `version` column to tables outside the versioned scope (`kb_extract_jobs` + `novel_pool_entries`).
 - **DO NOT** use `unsafe` for any CAS code.
 
 ---
@@ -348,7 +347,7 @@ The lock holder is read from the `.lock` file content only — it does not requi
 
 ---
 
-## 9. Workspace Session OCC (V1.56; V1.188 recoverable content commit)
+## 9. Workspace Session OCC
 
 ### 9.1 One authority
 

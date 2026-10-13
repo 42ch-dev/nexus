@@ -1,6 +1,6 @@
 # Design Studio — Specification
 
-**Status**: Normative target contract (v1.187) — the token-projection semantics defined here are implemented and owned by this spec (§3.5; `tooling/design-tokens`); implementation beyond tokens and visual/runtime acceptance remain unverified (§11)  
+**Status**: Normative — the token-projection semantics defined here are implemented and owned by this spec (§3.5; `tooling/design-tokens`); implementation beyond tokens and visual/runtime acceptance remain unverified (§11)  
 **Document class**: Feature line  
 **Created**: 2026-07-08 (`@product-manager`)  
 **Revised**: 2026-09-09 (product, architecture and writing Review & Edit)  
@@ -13,17 +13,15 @@
 - Root [`AGENTS.md`](../../../../AGENTS.md) UI Component Policy (Studio-first)
 - [`apps/design-studio/AGENTS.md`](../../../../apps/design-studio/AGENTS.md) — import guardrails
 
-Iteration history that used to live in this file (V1.98–V1.107 task tables, superseded process notes) is **not** current promise. See §12.
-
 ---
 
 ## 1. Purpose
 
-Contributors and frontend implementers need one visual workspace to validate Nexus tokens, brand VI, component states, voice samples, and representative product chrome without running the daemon, the desktop host, or live product flows.
+Contributors and frontend implementers need one visual workspace to validate Nexus tokens, brand VI, component states, voice samples, and representative product chrome without running the local service, the desktop host, or live product flows.
 
 Design Studio is a standalone Vite + React SPA (`apps/design-studio`). It is a **read-only showcase**: token edits happen in repo-root `DESIGN.md` / `DESIGN.dark.md` on disk; refresh the dev server to see updates. App chrome displays **Read-only · edit `DESIGN.md`**.
 
-**Product outcome (v1.187):** Studio is a complete proving ground for a **precision creative tool** visual language. A contributor can find, inspect (both themes and meaningful states), and classify source without scrolling a monolithic gallery blindly, and without a second theme authority.
+**Product outcome:** Studio is a complete proving ground for a **precision creative tool** visual language. A contributor can find, inspect (both themes and meaningful states), and classify source without scrolling a monolithic gallery blindly, and without a second theme authority.
 
 Studio is **not** the author-facing product. Shared token and primitive changes may restyle `apps/web` naturally. This spec does **not** accept web or desktop page redesign.
 
@@ -80,7 +78,7 @@ Four source categories. `@42ch/nexus-ui` and `@web-*` aliases are not interchang
 | `apps/web` screens, routing, `NexusClient`, daemon hooks, providers, desktop helpers | **No** | Studio must not become a second product shell |
 | Direct `apps/web/src/components/layout/**` or `settings/**` | **No** | Extracts only via `@web-*` |
 | Live token override, localStorage theme hacks, YAML write-back | **No** | Read-only invariant |
-| New component families or mass `@web-*` → package promotion | **No** | Out of v1.187 scope unless a later plan names the promotion |
+| New component families or mass `@web-*` → package promotion | **No** | Out of scope unless a later plan names the promotion |
 
 Guardrail: `tooling/check-ui-guardrails.sh`.
 
@@ -101,13 +99,13 @@ Guardrail: `tooling/check-ui-guardrails.sh`.
 
 - `apps/web` remains the author-facing local product UI.
 - Both read the same root DESIGN pair. Studio must not invent tokens.
-- v1.187 may restyle existing public primitives. It must **not** break public callable contracts or require `apps/web` callsite edits.
+- Restyling existing public primitives is allowed; it must **not** break public callable contracts or require `apps/web` callsite edits.
 - An API break that would force web edits is a STOP, not a shim.
 - Forbidden in the package: app shells, page components, daemon-aware or route-aware controls.
 
 ### 3.5 Token projection contract
 
-The DESIGN pair is the authority; checked-in CSS and brand constants are **derived outputs**, not independently editable sources. The original checker only searched strings in handwritten CSS/preset files and could not make a DESIGN edit visible. The target replaces that gap with one shared build-time compiler in `tooling/design-tokens/scripts/project-tokens.mjs`, used by both the generation command and Studio Vite integration. No browser YAML parser, runtime token override, separate Studio palette, or second stylesheet transcription.
+The DESIGN pair is the authority; checked-in CSS and brand constants are **derived outputs**, not independently editable sources. One shared build-time compiler in `tooling/design-tokens/scripts/project-tokens.mjs` is used by both the generation command and the Studio Vite integration. No browser YAML parser, runtime token override, separate Studio palette, or second stylesheet transcription.
 
 **Compiler interface (internal tooling, not a package UI API):**
 
@@ -247,7 +245,7 @@ Surfaces nested routes (sidebar labels frozen):
 | Launch | `/surfaces/launch` |
 | Selection Submenu | `/surfaces/selection-submenu` |
 
-Do not add `/surfaces/banner`. That sketch was removed; do not restore it without a new plan.
+Do not add `/surfaces/banner` without a new plan.
 
 At 1280×800 and 390×844 the same five top-level labels remain reachable (wrap, compact, or overflow menu listing those labels). No document-wide horizontal overflow.
 
@@ -291,7 +289,7 @@ Transitional keep-web (`@web-ui/*`): Dialog, States, Table.
 
 Studio sections that must remain: Badge, Button, Card, Dialog, Domain Badges, Input, Label, Select, States, Table, Tabs, Textarea, Form Field, Toast, Transport Error, Run Studio, Compute Timeline, VI acceptance.
 
-No new primitive families in v1.187.
+No new primitive families.
 
 ### 7.4 Voice (`/voice`)
 
@@ -339,14 +337,14 @@ Focus rings remain visible. Text/control pairings used in the locked language me
 
 ---
 
-## 9. Non-goals (v1.187)
+## 9. Non-goals
 
 - Not shipped inside `nexus42` or the desktop installer
 - No Storybook adoption
 - No live token editor, drag-and-drop theme builder, or YAML write-back
 - No unbounded migration of extracts into `@42ch/nexus-ui`
 - No daemon/native-host integration, schema changes, or `@42ch/nexus-contracts` bump
-- No `apps/web` or `apps/desktop` source, routing, business-flow, or asset edits
+- No `apps/web` or `apps/desktop-electron` source, routing, business-flow, or asset edits
 - Not a replacement for `apps/web` product QA — Studio complements it
 - No new product routes or renamed top-level nav labels
 - No new logo geometry or desktop icon replacement
@@ -374,25 +372,10 @@ Focus rings remain visible. Text/control pairings used in the locked language me
 
 ---
 
-## 11. Resolved (historical, still true)
+## 11. Resolved
 
 - CSS pipeline: `@nexus/design-tokens` (`tooling/design-tokens`) — shared preset + `tokens.css`
 - Import strategy: public `@42ch/nexus-ui` + annotated `@web-ui/*` + `@web-*` extracts
 - Theme mechanism: `.dark` on `html`
 
-The DESIGN pair locks exact v0.5 values and component recipes. This document locks the single compiler, iframe isolation, discovery metadata and source-compatible boundaries. Implementation evidence is required independently; these target contracts do not claim runtime or visual QC verification.
-
----
-
-## 12. Historical (not current promises)
-
-Studio originated in V1.98 as a read-only DESIGN gallery. Later iterations added `@42ch/nexus-ui` promotions, `@web-*` extracts, Surfaces nested routes, and many fixture families. Those shipped behaviors remain as the inventory in §7.
-
-The following are **archived process**, not v1.187 work to re-execute:
-
-- V1.98 “parity with shipped Web UI” as the primary outcome (this iteration overhauls the shared language; web page QA is deferred)
-- V1.99 first-promotion-batch checklists
-- V1.106/V1.107 Surfaces addition tables and App Toast-adoption follow-ups
-- Earlier IA-guide prose that described five generic home cards and warm-paper Chronos copy as the target look (superseded by §6 and §7)
-
-Do not copy those checklists forward as open tasks.
+The DESIGN pair locks exact v0.5 values and component recipes. This document locks the single compiler, iframe isolation, discovery metadata and source-compatible boundaries. Implementation evidence is required independently; these contracts do not claim runtime or visual QC verification.
