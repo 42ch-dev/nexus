@@ -10,7 +10,7 @@
 - [quality-loop.md](quality-loop.md) — findings lifecycle; review routing
 - [workflow-profile.md](workflow-profile.md) — chapter paths, `Logs/review/`, 五问 baseline
 - [creator-workflow.md](../creator/creator-workflow.md) — FL-E stages (audit is **out-of-band**)
-- [cli-spec.md](../cli/cli-spec.md) — historical `creator run audit-chapter` IA (see §4)
+- [cli-spec.md](../cli/cli-spec.md) — CLI surface authority (no audit CLI entry; see §4)
 - [entity-scope-model.md](../architecture/entity-scope-model.md) — World-bound extract mode
 - [world-kb-runtime-architecture.md](../architecture/world-kb-runtime-architecture.md) — `kb.extract_work` on-demand path
 
@@ -82,7 +82,7 @@ The manuscript reading surface is distinct from this on-demand audit line: readi
 
 ## 4. CLI entry
 
-> **No CLI audit entry.** The `creator run` runner and the `daemon` group do not exist; no CLI audit entry is provided. The §3 modes and §5 preset contract are unchanged; audit admission goes through the core execution surface (schedule add via `POST /v1/daemon/orchestration/schedules`, served by `apps/nexus-service`).
+> **No CLI audit entry.** The `creator run` runner and the `daemon` group do not exist; no CLI audit entry is provided. The §3 modes and §5 preset contract are unchanged; audit admission goes through the core execution surface (schedule add via `POST /v1/daemon/orchestration/schedules`, served by `apps/nexus-service`). The pre-retirement `creator run` IA is recorded as history in [creator-run-preset-entry.md](../../archived/creator/2026-09-21-creator-run-preset-entry.md).
 
 **Invariants**:
 
@@ -93,15 +93,16 @@ The manuscript reading surface is distinct from this on-demand audit line: readi
 
 ## 5. Preset contract (embedded)
 
-| Preset ID | Mode | Notes |
+Two shipped embedded presets, one per mode:
+
+| Preset ID | Mode | Declared `cli_args` |
 | --- | --- | --- |
-| `novel-manuscript-audit` | `review` + `extract` | Single preset with `mode` input **or** two thin presets; the implement plan decides |
+| `novel-manuscript-audit-review` | `review` | `chapter` (integer, required); `volume` (integer, optional, default 1) |
+| `novel-manuscript-audit-extract` | `extract` | `chapter` (integer, required); `volume` (integer, optional, default 1) |
 
-Minimum preset surface:
+`cli_args` is a field of the preset manifest; its schema is owned by [orchestration-engine.md](../orchestration/orchestration-engine.md) §7.
 
-- `preset.input.mode`: `review` | `extract`
-- `preset.input.work_id`, `chapter`, optional `volume`, optional `body_path`
-- `preset.input.upsert_findings`: boolean (review mode only; default true)
+Input locators (both presets): `work_id`, `chapter`, optional `volume`, optional `body_path`. Review mode additionally accepts `upsert_findings` (boolean, default true).
 
 ---
 
@@ -112,9 +113,3 @@ Minimum preset surface:
 3. Hermetic test: extract on worldless Work fails closed with documented error.
 4. No regression: auto-chain driver invariants unchanged (one active FL-E driver per Work).
 5. CLI help cites [docs/README.md](../../../../docs/README.md).
-
----
-
-## Supersession
-
-**Superseded by**: [creator-run-preset-entry.md](../../archived/creator/2026-09-21-creator-run-preset-entry.md) — the split preset ids (`novel-manuscript-audit-review` / `novel-manuscript-audit-extract`), DEPRECATED parent dir deletion, and `cli_args` declaration are part of the canonical Master body.

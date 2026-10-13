@@ -205,7 +205,10 @@ The upgrade from an insert-only port to OCC-aware follows a repeatable pattern:
 ### Known gaps
 
 - **`extensions.nexus` keys don't round-trip on `Relation`:** unknown `extensions.nexus` keys are silently dropped when a Relation is stored and re-read, because there is no `extras` JSON column for `kb_relationships` (unlike `kb_key_blocks`, which stores full body fidelity). The `extras` column pattern from `kb_key_blocks` is the model for a future fix.
-- **No 500-class reject code in spoke:** storage errors (e.g. SQLite constraint failures) are classified as `INVALID_INPUT` (400) because spoke's `RejectCode` enum has no server-error variant. This misclassification is shared across the cutover ports; it needs a local mapping fallback until spoke adds the reject code.
+
+### Error classification
+
+Spoke exposes a server-error reject code (`InternalError`, HTTP 500). Genuine storage/internal failures map to it — corrupt or unreadable stored rows and SQLite failures are `InternalError`, never skipped and never reclassified as client input. Validation, not-found and revision/conflict conditions keep their own distinct reject codes (`INVALID_INPUT`, `*NotFound`, `STORED_REVISION_STALE` / `REVISION_CONFLICT` / `*AlreadyExists`). The per-port CAS/reject matrix is owned by [`spoke-adapter-architecture.md`](../../specs/active/architecture/spoke-adapter-architecture.md).
 
 ## Adapter topology
 

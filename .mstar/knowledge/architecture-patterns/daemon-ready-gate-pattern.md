@@ -24,7 +24,7 @@ applies_when:
 
 ## Context
 
-The desktop host ships a `SidecarManager` that auto-starts the bundled `nexus42` daemon and exposes a single lifecycle event stream `onDaemonStatusChanged` carrying `DaemonStatus { state, version, port, detail }`. States: `starting → running → degraded → stopped → error`.
+The Electron desktop host owns the app-managed TypeScript service (`apps/nexus-service`) lifecycle through its main-process `DesktopServiceController` (`apps/desktop-electron/src/service-controller.ts`), and exposes a single status event stream `onDaemonStatusChanged` carrying `DaemonStatus { state, version, port, detail }`. States: `starting → running → degraded → stopped → error`.
 
 Wait ownership collapses into one outer app-level gate:
 
@@ -32,11 +32,11 @@ Wait ownership collapses into one outer app-level gate:
 2. **`SetupGate`** (marker only) — after Ready, routes incomplete setup to `/setup` vs main UI. **No splash.**
 3. **Setup wizard** — Agent → Workspace → Done only; **no** Daemon wizard step (`setup-step-daemon.tsx` deleted).
 
-The naive implementation would create two independent health-probe polls or two host commands ("is the daemon ready yet?"). Both are wrong: they compete with the existing `SidecarManager` state machine, can deadlock on the 15s `HEALTH_START_TIMEOUT` boundary, and drift from the source of truth.
+The naive implementation would create two independent health-probe polls or two host commands ("is the daemon ready yet?"). Both are wrong: they compete with the existing `DesktopServiceController` state machine, can deadlock on the 15s `HEALTH_START_TIMEOUT` boundary, and drift from the source of truth.
 
 ## Guidance (the pattern)
 
-**Single source of truth, multiple observers.** The `SidecarManager` owns daemon lifecycle state. Consumers observe the existing `onDaemonStatusChanged` event; they do NOT spawn their own probes, do NOT poll a health endpoint independently, and do NOT ask for a new host command when the event already carries the signal.
+**Single source of truth, multiple observers.** The `DesktopServiceController` owns daemon lifecycle state. Consumers observe the existing `onDaemonStatusChanged` event; they do NOT spawn their own probes, do NOT poll a health endpoint independently, and do NOT ask for a new host command when the event already carries the signal.
 
 | Rule | Reason |
 |------|--------|
@@ -49,7 +49,7 @@ The naive implementation would create two independent health-probe polls or two 
 ## Why This Matters
 
 - **Avoids deadlock.** Independent probes racing the state machine can hang the UI past the 15s `HEALTH_START_TIMEOUT`.
-- **Keeps the gate truthful.** The event stream reflects what `SidecarManager` actually believes; a command would snapshot a moment that may already be stale.
+- **Keeps the gate truthful.** The event stream reflects what `DesktopServiceController` actually believes; a command would snapshot a moment that may already be stale.
 - **Supports two distinct UX flows from one signal.** First-launch wizard and returning-user splash are different visuals driven by the same state machine — no duplicated logic.
 
 ## When to Apply
@@ -68,7 +68,7 @@ The naive implementation would create two independent health-probe polls or two 
 ## Anti-patterns
 
 - ❌ Adding an `is_daemon_ready() -> bool` host command (race-prone; the event already carries it).
-- ❌ Polling `GET /v1/daemon/runtime/health` from the SPA (duplicates `SidecarManager`'s own probe).
+- ❌ Polling `GET /v1/daemon/runtime/health` from the SPA (duplicates `DesktopServiceController`'s own probe).
 - ❌ Two consumers calling `start_daemon()` independently (budget-reset semantics differ; can mask crash loops).
 
 ## Three-valued port-probe gate (FB-D1)
@@ -81,7 +81,7 @@ The naive implementation would create two independent health-probe polls or two 
 | `Occupied` | TCP connect succeeded (something listens) | HTTP `probe_health` → attach (`owned=false`) or port-conflict error |
 | `Unknown` | Timeout / inconclusive (≤150ms gate) | HTTP `probe_health` → attach or spawn (safe fallback) |
 
-**Critical invariant preserved:** `Occupied`/`Unknown` always run the HTTP probe, so the attach-without-ownership path for an external daemon (user ran `nexus42 daemon start` first) is intact. Only the `Free` cold-start case skips the HTTP round-trip — dropping the felt latency from "up to 2s probe" to "<50ms TCP gate".
+**Critical invariant preserved:** `Occupied`/`Unknown` always run the HTTP probe, so the attach-without-ownership path for an independently started service is intact. Only the `Free` cold-start case skips the HTTP round-trip — dropping the felt latency from "up to 2s probe" to "<50ms TCP gate".
 
 **Two-phase poll:** `wait_for_first_health` now polls at 100ms for the first 1s (fast ready-detection), then 250ms (steady). Global `HEALTH_POLL_INTERVAL` unchanged.
 
@@ -123,13 +123,13 @@ A callback shaped like `if (running) {...} else if (error || stopped) {...}` wit
 
 ### Rule 7: bound the wait with a hard timeout that RE-PROBES
 
-A consumer that subscribes and waits can hang forever if no terminal event arrives (event lost, process stuck in initialization, subscription silently dropped). A hard timeout (25s; the SidecarManager's own health timeout is 15s — the consumer timeout should be LONGER to give the state machine room) prevents indefinite hangs.
+A consumer that subscribes and waits can hang forever if no terminal event arrives (event lost, process stuck in initialization, subscription silently dropped). A hard timeout (25s; the `DesktopServiceController`'s own readiness deadline is 15s — the consumer timeout should be LONGER to give the state machine room) prevents indefinite hangs.
 
 **Pattern**: `setTimeout(() => { re-probe getDaemonStatus(); if still non-terminal → surface "taking longer than expected" }, 25_000)`. The re-probe before declaring timeout avoids misreporting when the process silently transitioned between mount-probe and timeout fire. Clear the timeout in the effect cleanup.
 
 ### Rule 8: capture the supervised process's stderr (bounded tail)
 
-When the daemon fails to start, `DaemonStatus.detail` must carry more than generic SidecarManager messages ("Daemon did not start. Check the logs or try restarting.") — the **real** crash reason (SQLite migration mismatch, missing config, port bind failure, binary missing) is written to the daemon's stderr, so the `_rx` event receiver from `command.spawn()` must not be discarded.
+When the daemon fails to start, `DaemonStatus.detail` must carry more than generic `DesktopServiceController` messages ("Daemon did not start. Check the logs or try restarting.") — the **real** crash reason (SQLite migration mismatch, missing config, port bind failure, binary missing) is written to the service's stderr, so the `_rx` event receiver from `command.spawn()` must not be discarded.
 
 **Pattern**: spawn a bounded async task that drains the `_rx` receiver, accumulates a tail capped at ~2 KiB (nearest newline boundary — keep the tail, drop the head), and appends it verbatim to `DaemonStatus.detail` on the Error transition. Keep the generic message as fallback when stderr is empty. Run the drain concurrently with `wait_for_first_health` — do NOT block the spawn path. The consumer renders `detail` with `whitespace-pre-wrap` so the multi-line stderr survives the browser's default `white-space: normal` collapse.
 
@@ -141,9 +141,9 @@ Rules 5+6+7 together make the consumer resilient to **any** timing of the event 
 
 A clean-state desktop smoke against the bundled sidecar found **two latent first-launch blockers** that only surface when the sidecar is actually spawned end-to-end. Both distil into durable rules that apply to the supervisor state machine and the host shell-plugin contract.
 
-### Rule 9: a freshly constructed SidecarManager starts in `Stopped`, never `Starting`
+### Rule 9: a freshly constructed `DesktopServiceController` starts in `Stopped`, never `Starting`
 
-`SidecarManager::new` has no owned child process. Defaulting its initial state to `Starting` is an **invalid compound state** (`Starting` + `child.is_none()`): it implies a spawn is in progress when none is, and — critically — it causes `start_with_budget` to short-circuit and never attempt a real spawn. The desktop app would report "Starting daemon…" forever on a clean launch while never actually spawning anything.
+The `DesktopServiceController` constructor has no owned child process. Defaulting its initial state to `Starting` is an **invalid compound state** (`Starting` + no owned child): it implies a spawn is in progress when none is, and — critically — it causes the start path to short-circuit and never attempt a real spawn. The desktop app would report "Starting daemon…" forever on a clean launch while never actually spawning anything.
 
 **Pattern**: the initial state of any supervisor that does not yet own the supervised process is the inactive terminal (`Stopped`), not a transient "in progress" state. Transient states (`Starting`) are only valid while a spawn attempt is actually in progress or an owned child is being health-probed.
 
@@ -177,7 +177,7 @@ let command = app.shell().sidecar("nexus42")?;   // NOT "binaries/nexus42"
 
 ### Rule 12: attaching to a healthy daemon must not fabricate an owned child handle
 
-The attach path (daemon already running on the resolved port, e.g. user ran `nexus42 daemon start` first, or a prior desktop session left it running) may report `state: Running` — but it must set `owned: false` and must NOT insert a child handle. Stop/quit cleanup terminates **only** processes the desktop app actually spawned. This preserves existing-install attach behavior without risking killing an unrelated user-started daemon.
+The attach path (service already running on the resolved port, e.g. an independently started service, or a prior desktop session left it running) may report `state: Running` — but it must set `owned: false` and must NOT insert a child handle. Stop/quit cleanup terminates **only** processes the desktop app actually spawned. This preserves existing-install attach behavior without risking killing an unrelated user-started service.
 
 ### Why these compound
 
@@ -187,7 +187,7 @@ Rules 9 + 10 fix the supervisor state machine so a real spawn is actually attemp
 
 | Lock | Value |
 |------|-------|
-| Auto-start | host `.setup()` **always** `SidecarManager::start` — ignore `setup_completed` |
+| Auto-start | Electron main **always** starts or attaches the app-managed service — ignore `setup_completed` |
 | Wait UX | Outer `DaemonLaunchGate` before `/setup` **and** main UI |
 | Marker | Inner `SetupGate` routes by `setup_completed` only |
 | Bootstrap | `ensureSetupBootstrap` on Workspace **Continue** (after Ready), not before daemon start |

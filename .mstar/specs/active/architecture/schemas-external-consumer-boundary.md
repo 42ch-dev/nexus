@@ -2,7 +2,7 @@
 
 **Status**: Active — current external daemon contracts use the Daemon API namespace; the bundled Web UI is an external API consumer
 **Document class**: Companion
-**Supersedes**: `schemas-wire-platform-sync-boundary.md` (renamed 2026-06-23, V1.62 P0; same file, expanded scope). Companion to the retired `schemas-boundary.md` (local process record).
+**Supersedes**: `schemas-wire-platform-sync-boundary.md` (same file, expanded scope).
 **Aligned with**: `nexus` `schemas/AGENTS.md`, `crates/nexus-contracts/src/local/`
 **Last reconciled**: 2026-09-04 — current schema tree, generated module names, and Daemon API namespace.
 

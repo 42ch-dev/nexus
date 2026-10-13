@@ -78,9 +78,13 @@ re-labeled or re-scoped to fit the MCP lane.
 ### Native CLI config JSON (PL-10)
 
 The native CLI `--mcp-config` story is **documented-only** (PL-10): nexus does not own native CLI spawn
-configuration. A document-only native face is not an
-acceptance miss — the acceptance journey closes on the wired ACP path, not on
-native CLI configuration.
+configuration — the native-CLI providers (`ClaudeCliProvider`, `CodexNativeProvider`) register session state with no MCP flags, and the native-CLI descriptor honestly reports
+`mcp_http` / `mcp_sse` / `mcp_stdio = false`, so MCP servers are not part of a
+native-hosted session. Nexus is an ACP **client** that forwards generic
+`newSession.mcp_servers` descriptors to the agent (owned by
+[acp-client-tech-spec.md](../.mstar/specs/active/agents/acp-client-tech-spec.md) and
+[agent-host.md](../.mstar/specs/active/agents/agent-host.md)); native MCP
+services belong to the agent, and `rmcp` stays out of the shipped graph.
 
 ## Implementation ownership
 

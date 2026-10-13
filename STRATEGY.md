@@ -87,7 +87,7 @@ Shared: local-first privacy; harness the user's own ACP/native agents; structure
 
 ## Standing Decisions
 
-These decisions are current and normative. The per-iteration decision history they replaced is frozen verbatim in [.mstar/specs/archived/architecture/2026-10-13-STRATEGY-decision-log-history-historical-notes.md](.mstar/specs/archived/architecture/2026-10-13-STRATEGY-decision-log-history-historical-notes.md).
+These decisions are current and normative. The per-iteration decision history they replaced is frozen verbatim in [.mstar/specs/archived/architecture/2026-10-13-strategy-decision-log-history-historical-notes.md](.mstar/specs/archived/architecture/2026-10-13-strategy-decision-log-history-historical-notes.md).
 
 **Releases are a standalone process, fully decoupled from development.** No release action — version-bump PR, tag, producer runs, GitHub Release publish — executes inside an iteration, plan, task, or any development phase / post-phase step; iteration Done never depends on a release, and release execution is triggered independently after the shipped work merges. A **mandatory pre-trigger operator gate** must pass before merge/trigger (canary producer runs on the release branch, packaged launch PASS for every architecture, receipts `dirty:false`, family checksum checks, and a local aggregate canary built by the frozen generator); the publish job's count/name guards run automatically before the draft-clearing PATCH, post-publication checks are additional, and a manual PATCH-hold remains an explicit ops-owned prerequisite. Rule: `AGENTS.md` → Release Policy.
 
