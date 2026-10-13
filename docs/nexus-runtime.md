@@ -25,8 +25,8 @@ cargo build --release --bin nexus-runtime --no-default-features --features conne
 ```
 
 `--no-default-features` keeps the artifact on the Connect-only cohort, so it
-carries no SPA bytes at all: the app-only `web-embed` selector (and the Rust
-daemon host it embedded) was deleted in v1.193 P2, and the ordinary `cli`
+carries no SPA bytes at all: there is no app-only `web-embed` selector and no
+embedded Rust daemon host, and the ordinary `cli`
 cohort is the default. The `connect-host` feature links spoke-connect
 (libp2p); the default build stays libp2p-free and does not produce the
 binary (`required-features = ["connect-host"]`).
@@ -146,8 +146,7 @@ tools.nexus.list_observed_peers  tools.nexus.list_modules
 - Bounded bridge: 8 concurrent invokes per process, 30 s per-invoke
   deadline, 500 collection entries / 2 MiB request / 2 MiB response.
 
-The retired Rust daemon host is not linked into this binary at all (v1.193 P2
-deleted the crate): its HTTP router, embedded SPA, Setup/Canvas/Control Room,
+The Rust daemon host is not linked into this binary at all: its HTTP router, embedded SPA, Setup/Canvas/Control Room,
 ACP surfaces and schedule/worker supervision do not exist in this graph.
 `nexus-runtime` boots Connect and nothing else.
 
@@ -155,10 +154,10 @@ ACP surfaces and schedule/worker supervision do not exist in this graph.
 
 The Connect host also serves a small set of **named tools** over
 `tools.*` — host-served functions a peer can invoke by id, discovered on
-the manifest's `tools[]` member. They are **not** the V1.172 capabilities
+the manifest's `tools[]` member. They are **not** the capabilities
 (user-authored WASM modules + descriptors under
 `~/.nexus42/capabilities/`): Connect tools are host-side, peer-invoked
-reads with no authoring surface, and the V1.172 capability registry is
+reads with no authoring surface, and the capability registry is
 never scanned by the Connect host. The two served tools are
 `tools.nexus.list_observed_peers` and `tools.nexus.list_modules` — each
 advertised with a description and input/output JSON Schemas, invoked with
@@ -247,8 +246,7 @@ The runtime boots against the active workspace selected in `config.toml`;
 
 `nexus-runtime` and the creator-facing `nexus42` app share the home and the
 workspace DB. Concurrency is governed by SQLite WAL (1 writer + N readers,
-`DbPool` busy timeout); the per-work `runtime_lock` belonged to the retired
-Rust host (v1.193 P2) and the Connect invoke path never acquires it. The
+`DbPool` busy timeout); the per-work `runtime_lock` is a Rust-host artifact and the Connect invoke path never acquires it. The
 Electron/TS service may run while the runtime serves invokes.
 
 ## Allowlist and module scope
@@ -310,7 +308,7 @@ is the shipped trigger. mDNS is never enabled.
 
 ## Capability tokens
 
-Two pieces (V1.155 P1): the operator policy file and the issuance command.
+Two pieces: the operator policy file and the issuance command.
 
 ### Operator policy — `connect/config.json`
 
@@ -332,8 +330,7 @@ Two pieces (V1.155 P1): the operator policy file and the issuance command.
 | `capability_token_provider.enabled` | Mint outbound proofs on demand at challenge time; the issuer key must exist at boot (missing key ⇒ fail-closed boot error) |
 | `capability_token_provider.issuer_key_path` | Optional override of `~/.nexus42/connect/issuer.key`; relative paths resolve against `~/.nexus42/connect/` |
 
-An absent file yields the defaults (empty / false / disabled — pre-V1.155
-behavior). A malformed file, unknown fields, or
+An absent file yields the defaults (empty / false / disabled). A malformed file, unknown fields, or
 `require_capability_token: true` without `trusted_issuers` is a boot error
 (fail-closed, no silent defaults).
 

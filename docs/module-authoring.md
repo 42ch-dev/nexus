@@ -169,7 +169,7 @@ spec §7 and [`modules/README.md`](../modules/README.md).
 | `module_id` | string | Unique module id. **Must match the directory name** and the install directory (`~/.nexus42/modules/<id>/`). |
 | `name` | string | Human-readable name. |
 | `version` | string | Module SemVer (independent of the Nexus ABI version). |
-| `nexus_abi_version` | integer | Compute envelope ABI version (`1` for V1.x). Unrecognized versions are rejected. |
+| `nexus_abi_version` | integer | Compute envelope ABI version. Unrecognized versions are rejected. |
 | `required_key_block_types` | array of string | BlockTypes the module reads (e.g. `["character"]`); the host bundles matching entries into `key_blocks`. |
 | `compute_export` | string | Name of the WASM export implementing `compute`. |
 | `init_export` | string | Name of the WASM export implementing `init`; empty string if none. |
@@ -186,7 +186,7 @@ spec §7 and [`modules/README.md`](../modules/README.md).
 | `max_memory_mib` | integer | host default (64) | Per-invocation memory-cap override (MiB). |
 | `max_wall_time_ms` | integer | host default (30000) | Per-invocation wall-time override (ms). |
 | `wasm_sha256` | string | — | SHA-256 of the compiled `.wasm` bytes this manifest pairs with (see below). |
-| `schemas` | object | — | V1.62+: inline JSON-Schema fragments — `key_block_attributes`, `key_block_state`, `invocation`, `battle_report` — validated by the host before/after invocation. Omitting the block disables validation (V1.61 modules keep working unchanged). Spec §7.3. |
+| `schemas` | object | — | inline JSON-Schema fragments — `key_block_attributes`, `key_block_state`, `invocation`, `battle_report` — validated by the host before/after invocation. Omitting the block disables validation (existing modules keep working unchanged). Spec §7.3. |
 
 ### `wasm_sha256` — content-based pairing
 

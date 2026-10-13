@@ -219,7 +219,8 @@ round; the empty-lists reality is the honest boundary for a tools-only server.
 - Proof suites: `crates/nexus-core/tests/retained_peer_contracts.rs`
   (embedded-Model-B half behind `embedded-mcp`),
   `apps/nexus42/tests/mcp_acp_probe.rs` (generic ACP descriptor round trip).
-- Consumer docs: `docs/mcp-server.md` (historical record + retained-contract
-  pointer).
+- Consumer docs: `docs/mcp-server.md` (retained-contract pointer); the
+  retired Model A bridge record is
+  `.mstar/specs/archived/architecture/2026-10-13-mcp-server-historical-notes.md`.
 - Companion: `architecture-patterns/peer-tool-registration-exposure-lanes.md`
   (the spine + admission the bridge proxies).

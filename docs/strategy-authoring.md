@@ -32,8 +32,7 @@ for the end-to-end loop; this doc is the authoring reference.
 > 2. **Creator-host path (optional)** — install the bundle under
 >    `~/.nexus42/presets/<id>/` and drive it through the local service host's
 >    schedule API (`POST /v1/daemon/orchestration/schedules`, served by the
->    Electron/TS service — the CLI has had no `daemon`/schedule group since
->    v1.193 P2); preset lanes then execute on the retained orchestration
+>    Electron/TS service; the CLI has no `daemon`/schedule group); preset lanes then execute on the retained orchestration
 >    engine. Snippets marked *daemon path* below name that service API, not a
 >    CLI command.
 
@@ -136,11 +135,9 @@ POST /v1/daemon/orchestration/schedules
   "input": { ... run payload ... } }
 ```
 
-The `input` field maps to `preset.input.*` at schedule start. The retired CLI
-schedule leaf (`nexus42 daemon schedule add --preset <id> --creator <id>
---seed <text>`, deleted with the whole `daemon` group in v1.193 P2) only
-stored seed text as `core_context` v0 — it did **not** populate
-`preset.input.*`, and it has no replacement CLI entry: drive schedules through
+The `input` field maps to `preset.input.*` at schedule start. There is no CLI
+schedule entry (seed text was never mapped into `preset.input.*` by the removed
+CLI leaf): drive schedules through
 the service API above.
 
 **Template rendering vs expression resolution.** Prompt templates render
@@ -244,9 +241,8 @@ Requires the `nexus42` CLI on `PATH` (build it once from the repo root:
 clean, non-zero otherwise (`127` when the CLI is missing).
 
 The script delegates to the retained local leaf
-`nexus42 preset validate <path>` (the pre-v1.193 spelling
-`nexus42 system preset validate --offline` is deleted, and with the local leaf
-becoming the only implementation the `--offline` switch is gone). It mirrors
+`nexus42 preset validate <path>` (the local leaf is the only implementation,
+so there is no `--offline` switch). It mirrors
 the service's `POST /v1/daemon/presets:validate` composition in-process:
 `loader_validate_manifest_compat` +
 `validate_path_safety` + `validate_preset_semantic` +
@@ -330,8 +326,7 @@ same id.
 Once a strategy is installed under `~/.nexus42/presets/<id>/`, the **write
 path is the local service host's strategy canvas API**
 (`POST /v1/daemon/strategies/…`, served by the Electron/TS service) through the
-retained CLI leaves (`nexus42 preset patch state|transition|prompt`, V1.175 P1
-— see [cli-spec §6.2G.4](../.mstar/specs/active/cli/cli-spec.md)):
+retained CLI leaves (`nexus42 preset patch state|transition|prompt` — see [cli-spec §6.2G.4](../.mstar/specs/active/cli/cli-spec.md)):
 
 ```bash
 # Patch a state node (rename via --label, or update --description).
@@ -378,7 +373,7 @@ On the **daemon path** (optional — see the *Execution surfaces* callout at
 the top of this doc), preset lanes execute on the creator-facing service
 host's retained orchestration engine via its schedule API;
 `nexus-runtime` intentionally ships without any HTTP router and without
-schedule supervision (the Rust host composition was deleted in v1.193 P2).
+schedule supervision.
 On the **integrator path**, your backend
 drives the strategy side (its own timer/event loop + LLM step using the
 templates) and writes results into the World over Connect — see

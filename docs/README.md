@@ -12,7 +12,7 @@ compute, fork + validate).
 | [nexus-runtime.md](nexus-runtime.md) | Integrators | Install/run the headless `nexus-runtime` binary, Connect-only invoke surface (core ops + Connect `tools.*`), home layout, coexistence with the creator app, allowlist + `module_scope` setup. |
 | [strategy-authoring.md](strategy-authoring.md) | Integrators | External strategy format (`preset.yaml` + `templates/`), trigger/scheduled lanes, prompt templates, validator, fork flow. |
 | [module-authoring.md](module-authoring.md) | Integrators | WASM module ABI, marshalling, `manifest.json` (incl. `wasm_sha256`), `module_scope` allowlist, operator install, read-only compute. |
-| [mcp-server.md](mcp-server.md) | Operators | **Retired in v1.193 P2** — historical record of the removed `nexus42 mcp serve` tools-only MCP bridge (prerequisites, Claude Code / Codex config JSON, documented-only native face PL-10, the deleted ACP stdio factory) plus the retained core peer-admission contract. |
+| [mcp-server.md](mcp-server.md) | Operators | Retained MCP/peer-tool contract: exact-tool-id admission (both sides name the same id), allowlist-edit restart semantics, one catalog, draft-2020-12 builtin schemas, visibility policy, peer-control lane. The removed Model A `nexus42 mcp serve` bridge record is archived under `.mstar/specs/archived/architecture/`. |
 
 ## Maintainer docs
 

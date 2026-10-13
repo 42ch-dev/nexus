@@ -1,3 +1,7 @@
+**Provenance**: frozen from [`docs/mcp-server.md`](../../../../docs/mcp-server.md) on 2026-10-13 during the **v1.216** de-historicization pass (plan `2026-10-13-active-docs-dehistorize`). Relocated whole via `git mv`; the body below is the pre-freeze document verbatim. The live peer-admission contract it carried is restated present-tense in the retained [`docs/mcp-server.md`](../../../../docs/mcp-server.md); nothing here is current setup authority.
+
+---
+
 # Nexus MCP Server (retired in v1.193 P2)
 
 > **Historical record — nothing below is a current setup instruction.** The
@@ -10,8 +14,8 @@
 > features: peer tool registry, shared rmcp bridge core, embedded Model B
 > server, `VisibilityPolicy`, peer-control lane), composed by the native/TS
 > consumers. See
-> [`.mstar/specs/active/architecture/rust-core-service-boundary.md`](../.mstar/specs/active/architecture/rust-core-service-boundary.md)
-> §3–§4 and [`ARCHITECTURE.md`](ARCHITECTURE.md).
+> [`.mstar/specs/active/architecture/rust-core-service-boundary.md`](../../active/architecture/rust-core-service-boundary.md)
+> §3–§4 and [`ARCHITECTURE.md`](../../../../docs/ARCHITECTURE.md).
 
 `nexus42 mcp serve` **was** a **tools-only** Model Context Protocol (MCP)
 server over stdio (V1.174 P0-5 / P1, AR-70/71/72). An MCP client — Claude
