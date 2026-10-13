@@ -13,6 +13,7 @@ import {
   rewriteUnrestrictedJsonValues,
   stageAndSwap,
 } from './ts-gen';
+import { generateCoreSliceClient } from './client-gen';
 
 describe('nested discriminant literals', () => {
   it('rewrites exact patterns inside inlined oneOf $ref bodies', async () => {
@@ -387,6 +388,28 @@ describe('publication lock acquisition', () => {
     expect(() => acquirePublicationLock(outDir)).toThrow(`remove ${lockDir} manually`);
     expect(fs.readFileSync(path.join(lockDir, 'owner'), 'utf8').trim()).toBe(token);
     expect(fs.existsSync(lockDir)).toBe(true);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe('CoreSliceClient staging', () => {
+  it('writes the client and its barrel export into the given output tree', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-client-gen-'));
+    const outDir = path.join(root, 'generated');
+    const coreDir = path.join(outDir, 'core');
+    fs.mkdirSync(coreDir, { recursive: true });
+    // The ts-gen barrel pass writes this file before the client is built into the same
+    // staged tree; the client re-export is appended to it.
+    fs.writeFileSync(path.join(coreDir, 'index.ts'), "export type { Foo } from './foo';\n");
+
+    generateCoreSliceClient(outDir);
+
+    expect(fs.readFileSync(path.join(coreDir, 'CoreSliceClient.ts'), 'utf8')).toContain(
+      'export interface CoreSliceClient {',
+    );
+    const barrel = fs.readFileSync(path.join(coreDir, 'index.ts'), 'utf8');
+    expect(barrel).toContain("export type { CoreSliceClient } from './CoreSliceClient';");
+    expect(barrel).toContain("export type { Foo } from './foo';");
     fs.rmSync(root, { recursive: true, force: true });
   });
 });

@@ -46,6 +46,7 @@ import {
   extractSchemaVersion,
 } from './utils';
 import { resolvePrepPaths } from './schema-prep';
+import { generateCoreSliceClient } from './client-gen';
 
 /** Derive the compile() schema param type without depending on `@types/json-schema`. */
 type JsonSchema = Parameters<typeof compile>[0];
@@ -423,7 +424,14 @@ export async function generateTSTypes(): Promise<void> {
   const outDir = resolveFromRoot('packages', 'nexus-contracts', 'src', 'generated');
   logger.info(`Generating TypeScript types to: ${outDir}`);
 
-  await stageAndSwap(outDir, stageDir => buildGeneratedTree(localizedDir, srcSchemasDir, stageDir));
+  // The client and its barrel export belong to the same published tree as the
+  // schema-derived types, so they are built INTO the staging directory too — a
+  // post-publish write would leave the committed tree without `CoreSliceClient`
+  // whenever a later step fails or the process stops between the two.
+  await stageAndSwap(outDir, async stageDir => {
+    await buildGeneratedTree(localizedDir, srcSchemasDir, stageDir);
+    generateCoreSliceClient(stageDir);
+  });
 }
 
 /**
