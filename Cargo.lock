@@ -48,9 +48,9 @@ dependencies = [
 
 [[package]]
 name = "agent-client-protocol"
-version = "3.2.0"
+version = "3.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0d09e5bd7214b0aa5f0fd3f2eefae4a8c0069fd6a4c1ae4e733d3691e36ec19"
+checksum = "02898d848a20eb09b8a392e85bb3a4c79dba01d369758185d102b001362a60da"
 dependencies = [
  "agent-client-protocol-derive",
  "agent-client-protocol-schema",
@@ -75,9 +75,9 @@ dependencies = [
 
 [[package]]
 name = "agent-client-protocol-schema"
-version = "1.10.2"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c3ffd489b0e2f96a134d7966c2f43d874d91299e951b66093b91b54b00b7f8f"
+checksum = "3d9a84a76a4f44721e0d8dabcd85b219893c43d6171a4a033d84844d85880823"
 dependencies = [
  "anyhow",
  "derive_more",
@@ -688,9 +688,9 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
 name = "claude-codes"
-version = "2.1.296"
+version = "2.1.297"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9268f9ff2baff85bb65b84c100e3a1ecfe59d2bf312b3f019974a250a2631d9a"
+checksum = "8ef3e3a274beb8e8351cd3f993b5ddadf84ce6c4ef3306594dc3299da7453eaa"
 dependencies = [
  "anyhow",
  "chrono",
@@ -729,9 +729,9 @@ dependencies = [
 
 [[package]]
 name = "codex-codes"
-version = "0.162.1"
+version = "0.162.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a74a462f662c7c36d7b731493719a3acdddd5e8d09c5f1888ced3e167ce245f"
+checksum = "cab1d568fc27cf38b1818e43654d66763cd3d9c60e2e34af3cbcf64655f3b30c"
 dependencies = [
  "log",
  "serde",
@@ -6656,9 +6656,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.27.0"
+version = "1.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97277d36b9c3ace13e58fa6e753f8b0bbbf302a18dd193240d70f9e29681059a"
+checksum = "7cc1186384beb7dd8eedea376413fd654937285ea6c9cfbb928dc3043ea4b606"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",
