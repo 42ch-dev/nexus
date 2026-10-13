@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { compile } from 'json-schema-to-typescript';
+import { spawnSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -341,35 +342,76 @@ describe('publication lock acquisition', () => {
     return fs.mkdtempSync(path.join(os.tmpdir(), `nexus-ts-lock-${tag}-`));
   }
 
-  it('refuses a competing run that reclaims a stale lock first', () => {
+  /** A pid guaranteed dead: a child that has already exited (await-free, reaped). */
+  function deadPid(): number {
+    const child = spawnSync(process.execPath, ['-e', '']);
+    if (!child.pid || child.pid === process.pid) {
+      throw new Error('failed to spawn a helper process for a dead pid');
+    }
+    return child.pid;
+  }
+
+  /** Seed a lock directory holding an owner record. */
+  function seedLock(lockDir: string, token: string): void {
+    fs.mkdirSync(lockDir, { recursive: true });
+    fs.writeFileSync(path.join(lockDir, 'owner'), `${token}\n`);
+  }
+
+  it('lets only one contender recover a stale lock, the loser refusing without deleting it', () => {
     const root = scratch('compete-reclaim');
     const outDir = path.join(root, 'generated');
-    const lockFile = `${outDir}.lock`;
-    // A crashed run left a lock whose holder identity was never written — the exact
-    // partially published claim another process must not be able to reclaim after the
-    // first process has already re-claimed it.
-    fs.writeFileSync(lockFile, 'stale-uninitialized\n');
+    const lockDir = `${outDir}.lock`;
+    // A crashed run left a lock naming a dead owner, so both contenders judge it
+    // reclaimable and race to take it.
+    seedLock(lockDir, `${deadPid()}:stale:0`);
 
-    let reclaimRelease: (() => void) | undefined;
-    let reclaimToken = '';
-    // The probe interleaves a second acquisition at the stale-holder window, so both
-    // contenders observe the same reclaimable lock and race to reclaim it.
-    const acquireLate = () =>
+    let winnerRelease: (() => void) | undefined;
+    let winnerToken = '';
+    // The probe interleaves a second acquisition at the stale-owner window: the second
+    // contender fully recovers and publishes a live claim before the first resumes.
+    const acquireLoser = () =>
       acquirePublicationLock(outDir, {
         afterStaleHolderRead: () => {
-          reclaimRelease = acquirePublicationLock(outDir);
-          reclaimToken = fs.readFileSync(lockFile, 'utf8').trim();
+          winnerRelease = acquirePublicationLock(outDir);
+          winnerToken = fs.readFileSync(path.join(lockDir, 'owner'), 'utf8').trim();
         },
       });
 
-    // The late contender must fail visibly instead of unlinking the reclaim the
-    // interleaved run just wrote and publishing on top of it.
-    expect(acquireLate).toThrow(/another codegen run/);
-    expect(reclaimToken).not.toBe('');
-    expect(fs.readFileSync(lockFile, 'utf8').trim()).toBe(reclaimToken);
+    // The loser must fail visibly and delete nothing: the winner's live claim survives.
+    expect(acquireLoser).toThrow(/another codegen run/);
+    expect(winnerToken).not.toBe('');
+    expect(fs.readFileSync(path.join(lockDir, 'owner'), 'utf8').trim()).toBe(winnerToken);
+    expect(fs.existsSync(lockDir)).toBe(true);
+    // The loser's aborted rename-take leaves no orphaned directory behind.
+    expect(fs.readdirSync(root).filter(name => name.includes('.take.'))).toEqual([]);
 
-    reclaimRelease?.();
-    expect(fs.existsSync(lockFile)).toBe(false);
+    winnerRelease?.();
+    expect(fs.existsSync(lockDir)).toBe(false);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('never removes a fresh live claim published after an absent read', () => {
+    const root = scratch('fresh-claim');
+    const outDir = path.join(root, 'generated');
+    const lockDir = `${outDir}.lock`;
+    seedLock(lockDir, `${deadPid()}:stale:0`);
+    const liveToken = `${process.pid}:fresh:0`;
+
+    // The previously failing read-then-delete schedule: while this contender is paused
+    // at the stale window, another run recovers the stale lock and publishes a fresh
+    // live claim.
+    const acquire = () =>
+      acquirePublicationLock(outDir, {
+        afterStaleHolderRead: () => {
+          fs.rmSync(lockDir, { recursive: true, force: true });
+          seedLock(lockDir, liveToken);
+        },
+      });
+
+    // The contender must refuse (the claim is live) and must not delete the fresh claim.
+    expect(acquire).toThrow(/another codegen run/);
+    expect(fs.readFileSync(path.join(lockDir, 'owner'), 'utf8').trim()).toBe(liveToken);
+    expect(fs.existsSync(lockDir)).toBe(true);
     fs.rmSync(root, { recursive: true, force: true });
   });
 });

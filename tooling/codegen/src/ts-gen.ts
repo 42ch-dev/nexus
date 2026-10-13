@@ -468,10 +468,12 @@ export async function stageAndSwap(
   }
 }
 
-/** Sibling lock file guarding one output directory's publication lifecycle. */
-function lockPath(outDir: string): string {
-  return `${outDir}.lock`;
-}
+/**
+ * Acquisition attempts before giving up; each attempt may recover one stale lock.
+ * Bounds the retry loop so a contended or unrecoverable lock fails visibly instead of
+ * spinning.
+ */
+const MAX_LOCK_ATTEMPTS = 5;
 
 /** True while `pid` names a live process we could signal. */
 function isProcessAlive(pid: number): boolean {
@@ -486,115 +488,72 @@ function isProcessAlive(pid: number): boolean {
 
 /**
  * Interleaving seam for the acquisition/stale-recovery protocol: `afterStaleHolderRead`
- * runs synchronously once a lock has been read and judged reclaimable, before the
- * reclaim is attempted. Production callers omit it; the competing-process regression
- * passes one to drive a second acquisition through exactly that window.
+ * runs synchronously after the lock has been read and judged reclaimable (dead owner),
+ * before the exclusive rename-take is attempted. Production callers omit it; the
+ * competing-process regression passes one to drive a second acquisition through exactly
+ * that window.
  */
 export interface PublicationLockProbe {
   afterStaleHolderRead?: () => void;
 }
 
-/** Orphaned reclaim gates are recovered after this age (reclaim is sub-millisecond). */
-const RECLAIM_GATE_STALE_MS = 10_000;
+/** Owner record written inside the lock directory: `<pid>:<nonce>:<startedAt>`. */
+interface LockOwner {
+  pid: number;
+  token: string;
+}
 
-/** The `pid` recorded in a lock token (`<pid>:<nonce>`), or `undefined` when unreadable. */
-function readHolder(lockFile: string): number | undefined {
+/**
+ * Read the owner record from a lock directory, or `undefined` when it is missing or
+ * unreadable (the directory was just created, or a run died before writing it).
+ */
+function readOwner(lockDir: string): LockOwner | undefined {
   let raw: string;
   try {
-    raw = fs.readFileSync(lockFile, 'utf8');
+    raw = fs.readFileSync(path.join(lockDir, 'owner'), 'utf8');
   } catch {
     return undefined;
   }
-  const pid = Number.parseInt(raw.split(':', 1)[0].trim(), 10);
-  return Number.isInteger(pid) ? pid : undefined;
+  const token = raw.trim();
+  const pid = Number.parseInt(token.split(':', 1)[0], 10);
+  return Number.isInteger(pid) ? { pid, token } : undefined;
 }
 
 /**
- * Publish a claim atomically: write the holder token to a unique temp file, then
- * hard-link it into place. `link(2)` fails with EEXIST when the lock is held, and the
- * linked inode already carries the full token — so a competing run can never observe a
- * partially written claim and reclaim it (the previous `open` then `write` left an
- * empty window).
+ * Publish a claim atomically: `mkdir` is the portable atomic-exclusive primitive
+ * (`EEXIST` = held). The owner record is written inside the claimed directory
+ * immediately after, so a live claim is always identifiable.
  *
- * @returns true when this claim now owns `lockFile`.
+ * @returns true when this claim now owns `lockDir`.
  */
-function tryClaim(lockFile: string, token: string): boolean {
-  const tmp = `${lockFile}.${process.pid}.${randomUUID()}.tmp`;
-  fs.writeFileSync(tmp, `${token}\n`);
+function tryMkdirClaim(lockDir: string, token: string): boolean {
   try {
-    fs.linkSync(tmp, lockFile);
-    return true;
+    fs.mkdirSync(lockDir);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'EEXIST') return false;
     throw err;
-  } finally {
-    fs.rmSync(tmp, { force: true });
   }
+  fs.writeFileSync(path.join(lockDir, 'owner'), `${token}\n`);
+  return true;
 }
 
-/**
- * Cross-process mutual exclusion for stale-lock recovery. Without it, two recoverers
- * can both decide an old dead holder is reclaimable, and each unlink the other's fresh
- * claim. `mkdir` is the portable atomic-exclusive primitive.
- *
- * simplify: a reclaimer killed while holding the gate orphans it; recovery ages the
- * gate out after RECLAIM_GATE_STALE_MS. Reclaim is sub-millisecond, so this only
- * delays the crash path.
- */
-function takeReclaimGate(gate: string): boolean {
-  try {
-    fs.mkdirSync(gate);
-    return true;
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-    let age: number;
-    try {
-      age = Date.now() - fs.statSync(gate).mtimeMs;
-    } catch {
-      return false; // gate vanished; caller retries the loop
-    }
-    if (age < RECLAIM_GATE_STALE_MS) return false;
-    fs.rmSync(gate, { recursive: true, force: true });
-    try {
-      fs.mkdirSync(gate);
-      return true;
-    } catch {
-      return false;
-    }
+/** Remove the lock directory only while it still carries this claim's owner record. */
+function releaseOwned(lockDir: string, token: string): void {
+  const owner = readOwner(lockDir);
+  if (owner?.token === token) {
+    fs.rmSync(lockDir, { recursive: true, force: true });
   }
-}
-
-/** Reclaim `lockFile` when it names a dead (or unreadable) holder. */
-function reclaimDeadLock(lockFile: string): void {
-  const gate = `${lockFile}.reclaim`;
-  if (!takeReclaimGate(gate)) return; // another run is reclaiming; caller retries
-  try {
-    const holder = readHolder(lockFile);
-    // Re-read under the gate: a live owner that claimed since the first read keeps its
-    // lock — never unlink it on the strength of the earlier read.
-    if (holder !== undefined && isProcessAlive(holder)) return;
-    fs.rmSync(lockFile, { force: true });
-  } finally {
-    fs.rmSync(gate, { recursive: true, force: true });
-  }
-}
-
-/** Remove `lockFile` only while it still carries this claim's token. */
-function releaseOwned(lockFile: string, token: string): void {
-  let current: string;
-  try {
-    current = fs.readFileSync(lockFile, 'utf8').trim();
-  } catch {
-    return;
-  }
-  if (current === token) fs.rmSync(lockFile, { force: true });
 }
 
 /**
  * Take the exclusive per-output-directory publication lock, or throw when another live
- * run already holds it. Node exposes no advisory file lock, so the lock file itself is
- * the lock: claims publish atomically, dead holders are reclaimed, and recovery is
- * serialized so two recoverers cannot delete each other's claim.
+ * run already holds it. Node exposes no advisory file lock, so the lock directory
+ * itself is the lock. Every ownership transition is a single atomic filesystem
+ * primitive: acquisition is `mkdir`, stale recovery is a `rename` that exactly one
+ * contender can win, and release only removes a directory this claim still owns.
+ * Staleness is decided from the recorded owner's liveness — never from age — so no code
+ * path can unlink or remove a claim it has not first exclusively taken, and a live
+ * owner's claim is never displaced.
  *
  * @returns the release hook; it only removes a lock this claim still owns.
  */
@@ -602,22 +561,62 @@ export function acquirePublicationLock(
   outDir: string,
   probe?: PublicationLockProbe,
 ): () => void {
-  const lockFile = lockPath(outDir);
-  const token = `${process.pid}:${randomUUID()}`;
-  for (;;) {
-    if (tryClaim(lockFile, token)) {
-      return () => releaseOwned(lockFile, token);
+  const lockDir = `${outDir}.lock`;
+  const token = `${process.pid}:${randomUUID()}:${Date.now()}`;
+  for (let attempt = 0; attempt < MAX_LOCK_ATTEMPTS; attempt++) {
+    if (tryMkdirClaim(lockDir, token)) {
+      return () => releaseOwned(lockDir, token);
     }
-    const holder = readHolder(lockFile);
-    if (holder !== undefined && isProcessAlive(holder)) {
+    const owner = readOwner(lockDir);
+    if (owner === undefined) {
+      // Missing or half-written owner record: liveness is undecidable. We never guess
+      // and never delete here; a crashed run that died between `mkdir` and the owner
+      // write is left for manual recovery rather than an unsafe automatic takeover.
+      continue;
+    }
+    if (isProcessAlive(owner.pid)) {
       throw new Error(
-        `another codegen run (pid ${holder}) is publishing ${outDir}; ` +
+        `another codegen run (pid ${owner.pid}) is publishing ${outDir}; ` +
           'refusing to share its staging tree',
       );
     }
+    // Dead owner: recover by taking the stale lock exclusively. Re-read first — a
+    // contender may have recovered and re-published since our first read — then
+    // `rename`. Only the rename winner removes anything, and a failed rename deletes
+    // nothing.
     probe?.afterStaleHolderRead?.();
-    reclaimDeadLock(lockFile);
+    const current = readOwner(lockDir);
+    if (current === undefined || current.token !== owner.token) continue;
+    const takeDir = `${lockDir}.take.${randomUUID()}`;
+    try {
+      fs.renameSync(lockDir, takeDir);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue; // another won
+      throw err;
+    }
+    const taken = readOwner(takeDir);
+    if (taken !== undefined && isProcessAlive(taken.pid)) {
+      // We displaced a claim that turned live between the read and the rename: put it
+      // back and delete nothing.
+      try {
+        fs.renameSync(takeDir, lockDir);
+      } catch {
+        // The pathname was re-claimed; leave the displaced tree for manual recovery.
+      }
+      throw new Error(
+        `another codegen run (pid ${taken.pid}) is publishing ${outDir}; ` +
+          'refusing to share its staging tree',
+      );
+    }
+    fs.rmSync(takeDir, { recursive: true, force: true });
   }
+  const owner = readOwner(lockDir);
+  throw new Error(
+    `codegen: could not acquire the publication lock for ${outDir} after ` +
+      `${MAX_LOCK_ATTEMPTS} attempts` +
+      (owner ? ` (recorded owner ${owner.token})` : '') +
+      `; if no codegen run is active, remove ${lockDir} manually`,
+  );
 }
 
 /**
