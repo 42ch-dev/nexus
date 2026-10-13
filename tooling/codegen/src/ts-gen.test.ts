@@ -165,6 +165,34 @@ describe('$ref target dedupe', () => {
 
     expect(dedupeRefTargets(source, actorRef, [character, actorRef])).toBe(source);
   });
+
+  it('removes a declaration whose body holds a nested template literal', () => {
+    // The nested template's backtick must not close the outer one; otherwise the
+    // literal `/*` reads as a block comment and the declaration end is missed.
+    const pattern = schemaModule('core/works', 'Pattern', ['Pattern']);
+    const listResponse = schemaModule('core/works', 'PatternListResponse', [
+      'PatternListResponse',
+      'Pattern',
+    ]);
+    const source = [
+      'export interface PatternListResponse {',
+      '  items: Pattern[];',
+      '}',
+      'export interface Pattern {',
+      '  raw: `outer${`/*`}`;',
+      '  n: number;',
+      '}',
+    ].join('\n');
+
+    const out = dedupeRefTargets(source, listResponse, [listResponse, pattern]);
+
+    expect(out).toContain("import type { Pattern } from './pattern';");
+    // The complete declaration is gone and the next declaration survives.
+    expect(out).not.toContain('export interface Pattern {');
+    expect(out).not.toContain('raw: `outer${`/*`}`;');
+    expect(out).toContain('export interface PatternListResponse {');
+    expect(out).toContain('  items: Pattern[];');
+  });
 });
 
 describe('declarationEnd brace scan', () => {
@@ -192,6 +220,16 @@ describe('declarationEnd brace scan', () => {
       '};',
     ];
     expect(declarationEnd(lines, 0)).toBe(6);
+  });
+
+  it('keeps comment-looking text inside a nested template literal literal', () => {
+    const lines = [
+      'export interface Pattern {',
+      '  raw: `outer${`/*`}`;',
+      '  n: number;',
+      '}',
+    ];
+    expect(declarationEnd(lines, 0)).toBe(3);
   });
 });
 
@@ -231,6 +269,42 @@ describe('stage-and-swap tree write', () => {
 
     expect(fs.existsSync(path.join(outDir, 'stale.ts'))).toBe(false);
     expect(fs.existsSync(path.join(outDir, 'fresh.ts'))).toBe(true);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('restores the previous tree when publication fails', async () => {
+    const root = scratch('publish');
+    const outDir = path.join(root, 'generated');
+    fs.mkdirSync(outDir);
+    fs.writeFileSync(path.join(outDir, 'kept.ts'), '// committed');
+
+    // Force the publish rename to fail by dropping the built tree before the swap.
+    await expect(
+      stageAndSwap(outDir, stageDir => {
+        fs.rmSync(stageDir, { recursive: true, force: true });
+      }),
+    ).rejects.toThrow();
+
+    expect(fs.existsSync(path.join(outDir, 'kept.ts'))).toBe(true);
+    expect(fs.existsSync(`${outDir}.backup`)).toBe(false);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('recovers an interrupted publication before another run publishes', async () => {
+    const root = scratch('recover');
+    const outDir = path.join(root, 'generated');
+    // Simulate a kill after the old tree was retired but before the swap landed.
+    fs.mkdirSync(`${outDir}.backup`, { recursive: true });
+    fs.writeFileSync(path.join(`${outDir}.backup`, 'kept.ts'), '// committed');
+
+    await expect(
+      stageAndSwap(outDir, () => {
+        throw new Error('boom');
+      }),
+    ).rejects.toThrow('boom');
+
+    expect(fs.existsSync(path.join(outDir, 'kept.ts'))).toBe(true);
+    expect(fs.existsSync(`${outDir}.backup`)).toBe(false);
     fs.rmSync(root, { recursive: true, force: true });
   });
 });

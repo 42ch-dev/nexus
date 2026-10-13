@@ -288,13 +288,20 @@ function declaredNames(source: string): string[] {
  * Braces inside string / template literals (`close: "}"`, `` raw: `a}b` ``) are data,
  * not structure — as are braces inside comments, which property-level JSDoc emits
  * freely — so the scan tracks quote / block-comment state across lines and only counts
- * the braces outside both.
+ * the braces outside both. A template literal's `${ … }` re-enters code, so its braces
+ * (and any nested template/quote inside it) are tracked on a stack rather than treated
+ * as template text; that keeps comment-looking text in a nested template literal — e.g.
+ * `` `outer${`/*`}` `` — literal instead of an unterminated comment.
  */
 export function declarationEnd(lines: string[], start: number): number {
   const isTypeAlias = /^export type \b/.test(lines[start]);
   let depth = 0;
   let inBlockComment = false;
+  // Delimiter of the literal the scan is inside (`'`, `"` or a backtick), if any.
   let quote: string | undefined;
+  // One entry per open template `${`: the count of `{` opened inside it, so its own
+  // matching `}` resumes the template instead of closing the declaration.
+  const interpolations: number[] = [];
   for (let i = start; i < lines.length; i++) {
     const line = lines[i];
     for (let j = 0; j < line.length; j++) {
@@ -307,7 +314,11 @@ export function declarationEnd(lines: string[], start: number): number {
         }
       } else if (quote) {
         if (ch === '\\') j += 1;
-        else if (ch === quote) quote = undefined;
+        else if (quote === '`' && ch === '$' && next === '{') {
+          interpolations.push(0);
+          quote = undefined;
+          j += 1;
+        } else if (ch === quote) quote = undefined;
       } else if (ch === '/' && next === '/') {
         break;
       } else if (ch === '/' && next === '*') {
@@ -316,9 +327,19 @@ export function declarationEnd(lines: string[], start: number): number {
       } else if (ch === "'" || ch === '"' || ch === '`') {
         quote = ch;
       } else if (ch === '{') {
+        const open = interpolations.length - 1;
+        if (open >= 0) interpolations[open] += 1;
         depth += 1;
       } else if (ch === '}') {
-        depth -= 1;
+        const open = interpolations.length - 1;
+        if (open < 0) depth -= 1;
+        else if (interpolations[open] > 0) {
+          interpolations[open] -= 1;
+          depth -= 1;
+        } else {
+          interpolations.pop();
+          quote = '`';
+        }
       }
     }
     if (depth > 0) continue;
@@ -408,15 +429,23 @@ export async function generateTSTypes(): Promise<void> {
  * Build `outDir` in a sibling staging directory and swap it into place only after
  * `build` succeeds, so a failed or aborted run cannot prune the existing tree.
  *
- * The generated tree is the import surface of every contract consumer, so it is
- * replaced as a unit: `build` writes freely under the staging dir it is handed, any
- * failure drops that dir, and only a clean build renames it over `outDir`.
+ * Replacement is *recoverable*, not atomic — Node exposes no portable directory
+ * exchange, so this is two operations with a documented window. The committed tree is
+ * retired to a sibling `.backup` path via rename (never a recursive delete of the only
+ * copy), the staged tree is renamed into place, and the retired copy is dropped last.
+ * Concretely, a hard kill leaves one of three states, all recoverable on the next run:
+ * the kill happens before the swap → `outDir` is absent and the committed tree sits at
+ * `.backup` (restored by `recoverInterruptedPublication`); after the swap → the new
+ * tree is committed and the stale backup is dropped; or mid-swap → the backup is
+ * restored in place. The committed path is thus briefly absent during a swap, but the
+ * tree is never observably pruned or partially deleted.
  */
 export async function stageAndSwap(
   outDir: string,
   build: (stageDir: string) => Promise<void> | void,
 ): Promise<void> {
   const stageDir = `${outDir}.staging`;
+  recoverInterruptedPublication(outDir);
   fs.rmSync(stageDir, { recursive: true, force: true });
   ensureDir(stageDir);
   try {
@@ -425,8 +454,36 @@ export async function stageAndSwap(
     fs.rmSync(stageDir, { recursive: true, force: true });
     throw err;
   }
-  fs.rmSync(outDir, { recursive: true, force: true });
-  fs.renameSync(stageDir, outDir);
+  publishTree(stageDir, outDir);
+}
+
+/**
+ * Restore or clear the recovery material a previous interrupted publication left, so a
+ * later run never removes it unrecovered. No-op unless a backup exists.
+ */
+function recoverInterruptedPublication(outDir: string): void {
+  const backupDir = `${outDir}.backup`;
+  if (!fs.existsSync(backupDir)) return;
+  if (fs.existsSync(outDir)) {
+    // The replacement landed; the retired tree is stale litter.
+    fs.rmSync(backupDir, { recursive: true, force: true });
+    return;
+  }
+  // Killed before the replacement landed; the retired tree is the committed one.
+  fs.renameSync(backupDir, outDir);
+}
+
+/** Retire the committed tree, land the staged one, then drop the retired copy. */
+function publishTree(stageDir: string, outDir: string): void {
+  const backupDir = `${outDir}.backup`;
+  if (fs.existsSync(outDir)) fs.renameSync(outDir, backupDir);
+  try {
+    fs.renameSync(stageDir, outDir);
+  } catch (err) {
+    if (fs.existsSync(backupDir)) fs.renameSync(backupDir, outDir);
+    throw err;
+  }
+  fs.rmSync(backupDir, { recursive: true, force: true });
 }
 
 /**

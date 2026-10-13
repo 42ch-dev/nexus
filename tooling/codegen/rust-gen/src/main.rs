@@ -1369,17 +1369,36 @@ fn staging_root(out_root: &Path) -> PathBuf {
     out_root.with_file_name(format!("{}.staging", name.to_string_lossy()))
 }
 
+/// Sibling path holding the committed tree while it is retired for a swap: same parent,
+/// so retiring it and dropping it are renames/removals within one filesystem.
+fn backup_root(out_root: &Path) -> PathBuf {
+    let name = out_root
+        .file_name()
+        .expect("generated tree root has a file name");
+    out_root.with_file_name(format!("{}.backup", name.to_string_lossy()))
+}
+
 /// Generate into a sibling staging tree and swap it into place only after `build`
 /// succeeds, so a failed, aborted or crashed run cannot prune the existing tree.
 ///
-/// The generated tree is the build input of every contract consumer, so it is replaced
-/// as a unit: `build` writes freely under the staging root it is handed, and any failure
-/// drops that root and leaves `out_root` exactly as it was.
+/// Replacement is *recoverable*, not atomic — `std::fs` exposes no portable directory
+/// exchange, so this is two operations with a documented window. The committed tree is
+/// retired to the sibling `.backup` path via rename (never a recursive delete of the
+/// only copy), the staging tree is renamed into place, and the retired copy is dropped
+/// last. A hard kill therefore leaves `out_root` in one of three states, all
+/// recoverable on the next run: before the swap → `out_root` absent, the committed tree
+/// at `.backup`, restored by `recover_interrupted_publication`; after the swap → the new
+/// tree committed, the stale backup dropped; mid-swap → the backup restored in place.
+/// `out_root` is thus briefly absent during a swap, but the tree is never observably
+/// pruned or partially deleted.
 fn stage_and_swap<F>(out_root: &Path, build: F) -> Result<(), String>
 where
     F: FnOnce(&Path) -> Result<(), String>,
 {
     let stage_root = staging_root(out_root);
+    // Recover (or clear) whatever a previous interrupted publication left behind before
+    // this run could overwrite the recovery material.
+    recover_interrupted_publication(out_root)?;
     if stage_root.exists() {
         fs::remove_dir_all(&stage_root)
             .map_err(|err| format!("clear staging tree {}: {err}", stage_root.display()))?;
@@ -1392,12 +1411,52 @@ where
         return Err(err);
     }
 
-    if out_root.exists() {
-        fs::remove_dir_all(out_root)
-            .map_err(|err| format!("remove previous generated tree: {err}"))?;
+    publish(&stage_root, out_root)
+}
+
+/// Restore or clear the recovery material a previous interrupted publication left, so a
+/// later run never removes it unrecovered. No-op when no backup exists.
+fn recover_interrupted_publication(out_root: &Path) -> Result<(), String> {
+    let backup_root = backup_root(out_root);
+    if !backup_root.exists() {
+        return Ok(());
     }
-    fs::rename(&stage_root, out_root)
-        .map_err(|err| format!("swap staging tree into place: {err}"))?;
+    if out_root.exists() {
+        // The replacement landed; the retired tree is stale litter.
+        return fs::remove_dir_all(&backup_root)
+            .map_err(|err| format!("remove retired generated tree: {err}"));
+    }
+    // Killed before the replacement landed; the retired tree is the committed one.
+    fs::rename(&backup_root, out_root).map_err(|err| {
+        format!(
+            "restore previous generated tree from {}: {err}",
+            backup_root.display()
+        )
+    })
+}
+
+/// Retire the committed tree, land the staged one, then drop the retired copy. A failed
+/// swap restores the retired tree before returning the error.
+fn publish(stage_root: &Path, out_root: &Path) -> Result<(), String> {
+    let backup_root = backup_root(out_root);
+    if out_root.exists() {
+        fs::rename(out_root, &backup_root).map_err(|err| {
+            format!(
+                "retire previous generated tree to {}: {err}",
+                backup_root.display()
+            )
+        })?;
+    }
+    if let Err(err) = fs::rename(stage_root, out_root) {
+        if backup_root.exists() {
+            let _ = fs::rename(&backup_root, out_root);
+        }
+        return Err(format!("swap staging tree into place: {err}"));
+    }
+    if backup_root.exists() {
+        fs::remove_dir_all(&backup_root)
+            .map_err(|err| format!("remove retired generated tree: {err}"))?;
+    }
     Ok(())
 }
 
@@ -1459,6 +1518,46 @@ mod tests {
             "stale file survived the swap"
         );
         assert!(out_root.join("fresh.rs").exists());
+        let _ = fs::remove_dir_all(&sandbox);
+    }
+
+    #[test]
+    fn failed_publish_restores_the_previous_tree() {
+        let sandbox = scratch("publish");
+        let out_root = sandbox.join("generated");
+        fs::create_dir_all(&out_root).unwrap();
+        fs::write(out_root.join("kept.rs"), "// committed").unwrap();
+
+        // Force the swap rename to fail: the staged tree is absent when publication runs.
+        let err = publish(&staging_root(&out_root), &out_root).unwrap_err();
+        assert!(
+            err.contains("swap staging tree into place"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            out_root.join("kept.rs").exists(),
+            "previous tree was not restored"
+        );
+        assert!(!backup_root(&out_root).exists());
+        let _ = fs::remove_dir_all(&sandbox);
+    }
+
+    #[test]
+    fn recovers_an_interrupted_publication() {
+        let sandbox = scratch("recover");
+        let out_root = sandbox.join("generated");
+        // Simulate a kill after the old tree was retired but before the swap landed.
+        fs::create_dir_all(backup_root(&out_root)).unwrap();
+        fs::write(backup_root(&out_root).join("kept.rs"), "// committed").unwrap();
+
+        let err = stage_and_swap(&out_root, |_| Err("boom".to_string())).unwrap_err();
+
+        assert_eq!(err, "boom");
+        assert!(
+            out_root.join("kept.rs").exists(),
+            "recovery material was not restored"
+        );
+        assert!(!backup_root(&out_root).exists());
         let _ = fs::remove_dir_all(&sandbox);
     }
 }
