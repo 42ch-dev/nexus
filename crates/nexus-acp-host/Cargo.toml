@@ -18,7 +18,7 @@ workspace = true
 # are opt-in, and Nexus enables none of them — it owns child-process
 # lifecycle with Tokio + `ByteStreams` and owns its wire schemas in
 # `schemas/`. No `unstable_*` feature is enabled.
-agent-client-protocol = "=3.2.0"
+agent-client-protocol = "=3.3.0"
 tokio = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
