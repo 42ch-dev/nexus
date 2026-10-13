@@ -13,7 +13,7 @@ applies_when:
   - deleting a field, struct member or symbol that looks dead because nothing reads it
   - a deletion sweep over serde DTOs or schema-validated input types
 related_components:
-  - apps/desktop (retired)
+  - apps/desktop-electron
   - apps/nexus42
   - .github/workflows
   - docs / specs / knowledge surfaces
@@ -32,12 +32,7 @@ tags:
 
 ## Context
 
-v1.192 retired the replaced native desktop composition (`apps/desktop/**`, `scripts/fetch-sidecar.sh`, its release workflow, its plugin package family and the `desktop` workspace package) after the Electron host was accepted — one desktop host must remain. In the same iteration, two neighboring families were **not** deleted:
-
-- the legacy integrated daemon + Daemon API + embedded SPA, and
-- dormant/hidden CLI route rows,
-
-both of which *look* obsolete but still have live consumers. The retirement round's most reusable output is the discipline that separates the two outcomes: a source-reverified consumer inventory, an adjudicated-keep record, and a closeout ledger that makes documentation lag a tracked quantity instead of a discovered surprise.
+Retiring a host, composition, workflow, dependency tree or CLI family is a claim about the current tree — and it is easy to get wrong in both directions. Families that *look* obsolete are often still wired (a default feature, a boot path, a contract-bound client); families that are genuinely dead carry tokens in dozens of files. The retirement round's most reusable output is the discipline that separates the two outcomes: a source-reverified consumer inventory, an adjudicated-keep record, and a closeout ledger that makes documentation lag a tracked quantity instead of a discovered surprise.
 
 ## Guidance
 
@@ -48,11 +43,11 @@ A residual title, a roadmap sentence or a plan's intention is **not** evidence. 
 1. **Is it still wired?** (default features, boot paths, release embedding, contract-bound clients, dev proxies, API call sites).
 2. **Does anything still call it?** (CLI leaves, scripts, workflows, dependabot entries, docs-as-contract).
 
-Concrete v1.192 findings worth imitating: default features were still `legacy-cli` + `web-embed`; `daemon start` still booted the integrated daemon; the release still embedded and served the SPA; `BrowserClient` was contract-bound to `/v1/daemon/*`. The open residual `R-V1190-P6T4-REMAINING-LEAVES` remained the named blocker. Note the trap: the residual's detail text partly described a *working tree ahead of `main`* — inventory against `main`, not against the plan branch that proposed the deletion.
+Concrete findings worth imitating: default features can still enable a legacy CLI + web-embed pair; a `start` leaf can still boot the integrated daemon; a release can still embed and serve an SPA; a client can be contract-bound to `/v1/daemon/*`. Note the trap: a residual's detail text can describe a *working tree ahead of `main`* — inventory against `main`, not against the plan branch that proposed the deletion.
 
 ### 2. Dormant ≠ dead: adjudicate callable surfaces row by row
 
-Every "dormant" CLI row existed in code with a clap definition and a `run` path — hard-reject stubs (`creator workspace clone`), coming-soon prints (`workspace link|unlink|status`, `publish`), config-error/exit-2 stubs (`explore browse|search`, `platform context assemble`), and hidden-but-callable aliases (`sync`, `preset`, `capability`). One row was even *visible* while the spec said hidden. Deletion of such rows requires a per-row disposition plus help/docs/parity proof — "no callers in tests" is not obsolescence.
+Every "dormant" CLI row existed in code with a clap definition and a `run` path — hard-reject stubs (`creator workspace clone`), coming-soon prints (`workspace link|unlink|status`, `publish`), config-error/exit-2 stubs (`explore browse|search`, `platform context assemble`), and hidden-but-callable aliases (`sync`, `preset`, `capability`). One row can even be *visible* while the spec says hidden. Deletion of such rows requires a per-row disposition plus help/docs/parity proof — "no callers in tests" is not obsolescence.
 
 ### 3. Sequence deletion after the replacement passes acceptance
 
@@ -84,7 +79,7 @@ Documentation lag is expected: a host retirement invalidates prose across `READM
 
 ### 7. Run a debris check for live callers of deleted paths
 
-Before declaring the closeout done, grep for executable callers of every deleted script/directory across owned scopes **and** outside them. v1.192's out-of-scope find: a closed measurement harness still spawned the deleted `scripts/fetch-sidecar.sh` for a surface that was already non-functional at baseline. The disposition (remove the broken surface rather than restore the deleted script) belongs to PM; the *finding* belongs to the closeout. Stale comment-only citations and historical records are fine; live executable references are not.
+Before declaring the closeout done, grep for executable callers of every deleted script/directory across owned scopes **and** outside them. A retirement can surface an out-of-scope live caller: a closed harness may still spawn a script the retirement just deleted, for a surface already non-functional at baseline. The disposition (remove the broken surface rather than restore the deleted script) belongs to PM; the *finding* belongs to the closeout. Stale comment-only citations and historical records are fine; live executable references are not.
 
 ### 8. Lockfile and workspace hygiene are part of the deletion evidence
 
@@ -92,7 +87,7 @@ For dependency retirements: regenerate with `--lockfile-only`, run it **twice** 
 
 ### 9. Gate external actions on the verified main merge
 
-Closing dependabot PRs (#310/#312) or any external cleanup executes only **after the retirement verifies merged to `main`** — never because a feature worktree deleted the files. The preconditions are explicit: confirm the PRs still target the retired tree, comment with the reason and the merge SHA, close, record final states/URLs as post-merge receipts. Related post-merge obligations (branch-protection required check names, CI green runs) are recorded at closeout even when they execute later.
+Closing dependabot PRs or any external cleanup executes only **after the retirement verifies merged to `main`** — never because a feature worktree deleted the files. The preconditions are explicit: confirm the PRs still target the retired tree, comment with the reason and the merge SHA, close, record final states/URLs as post-merge receipts. Related post-merge obligations (branch-protection required check names, CI green runs) are recorded at closeout even when they execute later.
 
 ### 10. "No callers" ≠ "no contract": an unread field can enforce a type check
 
@@ -100,8 +95,7 @@ The consumer inventory answers *who reads this*. It does not answer *what this
 enforces*. A type check on a trust boundary is a contract even when the value is
 never read, so a zero-caller symbol can still be load-bearing.
 
-v1.212 (p3 T3) deleted two serde fields from `nexus-orchestration` capability
-structs as "unread":
+A dead-code sweep once deleted two serde fields from `nexus-orchestration` capability structs as "unread":
 
 - `FinalizeDraftInput.word_count: Option<WordCount>` — an enum whose only variant is `Auto`
 - `ExtractResponse.source_work_entry_id: String`
@@ -136,12 +130,12 @@ Checklist for a field or symbol with no readers:
 ## Why This Matters
 
 - **"Obsolete" is a claim with a blast radius.** Each wrongly deleted family removes shipped capability (or a supported CLI name) that the keep-policy explicitly protects; each wrongly kept family leaves maintenance burden. Both errors come from acting on titles instead of current sources.
-- **The ledger is the memory.** Six months later, the only way to know why the daemon/SPA composition still exists is the adjudicated-keep record with its blocker and trigger.
-- **Documentation lag outlives the code.** Sweeping current docs in the same wave (and listing what remains) is what makes "exactly one desktop host" true for readers, not just for the build.
+- **The ledger is the memory.** Six months later, the only way to know why a retained family still exists is the adjudicated-keep record with its blocker and trigger.
+- **Documentation lag outlives the code.** Sweeping current docs in the same wave (and listing what remains) is what makes a retirement's boundary true for readers, not just for the build.
 
 ## When to Apply
 
-- Any host/composition/dependency retirement, including the future daemon/SPA and dormant-CLI families whose blockers are recorded.
+- Any host/composition/dependency retirement.
 - Before acting on a residual or roadmap claim that a subsystem is dead.
 - When a deletion touches shared manifests, lockfiles, CI or docs — the same wave owns all four.
 
@@ -162,21 +156,14 @@ Checklist for a field or symbol with no readers:
 ```markdown
 | Item | Blocker / trigger | Tracking location |
 |---|---|---|
-| Legacy daemon/SPA composition deletion | `R-V1190-P6T4-REMAINING-LEAVES` (open, high); trigger: default-feature switch completed on main + consumers at zero + new inventory | roadmap RFT-11 slice; project register |
+| <family> | `<residual-id>` (open, <severity>); trigger: <unblock condition> | <roadmap slice>; project register |
 ```
 
 ### External action precondition
 
 ```text
-1. gh pr view 310 / 312 — confirm still open and targeting the retired tree.
+1. Confirm each PR is still open and still targets the retired tree.
 2. Comment: reason + the retirement merge SHA on main.
-3. gh pr close 310 / 312; record final states and URLs.
+3. Close the PRs; record final states and URLs.
 Never close a PR merely because a feature worktree deleted files — verified main merge is the precondition.
 ```
-
-## Evidence
-
-- Product-side retirement — deleted `apps/desktop/**` (21 tracked paths), `scripts/fetch-sidecar.sh`, `scripts/dev-backend-manifest.mjs` sidecar helpers; `.github/workflows/desktop-release.yml` removed and the native-host `desktop-build` job stripped in `.github/workflows/desktop-build.yml` / `ci.yml`; lockfile 17 → 16 workspace projects with `sharp` preserved.
-- Retained/adjudicated families — `apps/nexus42` default features, daemon boot path, embedded SPA serving, and the dormant CLI rows listed in `.mstar/specs/active/architecture/rust-core-service-boundary.md` §7.4.
-- Policy texts — `.github/dependabot.yml` (all remaining directories verified at HEAD), `.oxlintrc.json` (dead override removed), `.mstar/specs/active/surfaces/desktop-shell.md` header, `.mstar/specs/README.md` rows.
-- Companion docs — [resolved-residual-verification.md](../architecture-patterns/resolved-residual-verification.md) (verify residual claims against current `main`), [surface-rename-hygiene-checklist.md](../conventions/surface-rename-hygiene-checklist.md) (sweep shape for cross-language renames), [capability-parity-receipt.md](capability-parity-receipt.md) (the acceptance-evidence counterpart for this cutover).

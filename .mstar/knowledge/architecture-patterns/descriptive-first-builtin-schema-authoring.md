@@ -23,16 +23,14 @@ applies_when:
 
 ## Context
 
-Before V1.175, the MCP catalog's builtin rows (`nexus.*`, `fs/*`) carried
+The MCP catalog's builtin rows (`nexus.*`, `fs/*`) carry real per-tool
+draft-2020-12 JSON Schema on all 30 static registry rows (DF-89). The earlier
 **pseudo-schemas** (`AcpWire` refs like `{"work_id":"string"}` or
-`"WorkApiDto"`) — not valid draft-2020-12 JSON Schema — plus a uniform
-permissive `{"type":"object"}` placeholder on the wire. An MCP consumer
-could not type a builtin `tools/call` from `tools/list` alone. DF-89
-replaced this with real per-tool schemas on all 30 static registry rows.
+`"WorkApiDto"`) and the uniform permissive `{"type":"object"}` placeholder are
+gone — an MCP consumer can type a builtin `tools/call` from `tools/list` alone.
 
-The authoring discipline that made the replacement stick is the reusable
-part: the schema lives on the registry row, never silent, and never gates
-the runtime path.
+The authoring discipline is the reusable part: the schema lives on the
+registry row, never silent, and never gates the runtime path.
 
 ## Guidance
 
@@ -49,12 +47,13 @@ child parse. No parallel DTO, no schema-file duplication.
 ### 2. Authoring ground truth = the handler's actual reads
 
 Author `input_schema` from the handler's real argument reads
-(`host_tool_handlers.rs`), cross-checked against the removed pseudo-shape
-and the capability `input_schema()` source. A field the handler does not
-read must NOT be promised in the schema. Example: `manuscript.chapter.update`
-description once mentioned "block overrides" — the handler reads only
-`work_id`/`chapter`/`volume`/`content` (grep-verified), so the schema omits
-it. Promising a no-op field teaches consumers a false call surface.
+(`host_tool_handlers.rs`), cross-checked against the capability
+`input_schema()` source — never the removed pseudo-shape. A field the handler
+does not read must NOT be promised in the schema. Example:
+`manuscript.chapter.update`'s description must not mention "block overrides" —
+the handler reads only `work_id`/`chapter`/`volume`/`content` (grep-verified),
+so the schema omits it. Promising a no-op field teaches consumers a false call
+surface.
 
 ### 3. Named placeholder + remainder ledger — never silent
 
@@ -79,13 +78,13 @@ also means closed-world **in the schema where the handler is closed**:
 `stage_metadata` matching `PATCH_ALLOWED_FIELDS` /
 `STAGE_METADATA_ALLOWED_KEYS` — descriptive, not enforced.
 
-### 5. Description / schema / handler triple coherence (the drift lesson)
+### 5. Description / schema / handler triple coherence
 
-After the first full pass, QC found 3 of 30 rows where the three claims
-diverged: a description promising a handler-unread field, a description
-under-claiming a 4-action enum, and read-tool descriptions over-promising
-output fields the pinned output schema omits. The fix is a **coherence
-pin** (`touched_rows_description_schema_handler_coherence`) that
+QC found rows where the three claims diverged: a description promising a
+handler-unread field, a description under-claiming a 4-action enum, and
+read-tool descriptions over-promising output fields the pinned output schema
+omits. The fix is a **coherence pin**
+(`touched_rows_description_schema_handler_coherence`) that
 machine-checks: chapter-update property set == handler reads; pool-enum ==
 handler match arm; output-schema presence == description claims. Any future
 row edit must keep the triple coherent or the pin fails.
@@ -149,9 +148,8 @@ reg.register(CapabilityRow {
   (registry ⇄ route, both directions), `mcp_serve_e2e.rs` (registry-derived
   fixture, schema-equality leg over all 30 ids), coherence pin
   (`touched_rows_description_schema_handler_coherence`).
-- The old `AcpWire` struct was deleted in the same change as the migration
-  (clean cutover, no shim); grep the workspace before removing a
-  registry-only carrier — the catalog route was the only consumer.
+- Remove a registry-only carrier with a clean cutover and no shim; grep the
+  workspace first — the catalog route was `AcpWire`'s only consumer.
 - Related: `stateless-mcp-bridge-child.md` (the child that consumes the
   catalog), `conventions/graph-pin-honesty-discipline.md` (rmcp pin that
   keeps the child's server dependency single-version).

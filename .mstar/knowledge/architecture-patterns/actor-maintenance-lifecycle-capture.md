@@ -27,13 +27,13 @@ related_components:
 
 # Actor maintenance lifecycle and run capture
 
-> **Current scope.** The durable mechanisms in §1–§3 and §5–§6 (per-resource revision CAS, lifecycle epoch, per-Character activity/transition fence, the operation phase machine, and the receipt-keyed dedup rows) are live. The **run-to-memory capture writer** described in §4 and §7 is **historical (v1.185)** and is not reachable from the current Host: Character `remember:true` is refused before any effect, so no drain/digest writer runs. That historical writer and its example symbols are retained only as the design record.
+> **Current scope.** The mechanisms in §1–§3, §5, and §6 are live: per-resource revision CAS, the internal lifecycle epoch, the per-Character activity/transition fence, the operation phase machine, and the receipt-keyed dedup rows. No current Host path produces run-capture rows — Character `remember:true` is refused before any effect, so no drain/digest writer runs.
 
 ## Context
 
-The v1.185 developer loop added material mutation and reversible freeze to the shipped Actor vertical: identity edit, archive/restore, WorldSheet maintenance, bounded KE content maintenance, and an opted-in run-to-memory capture. Three well-known concurrency mechanisms are individually insufficient here: SQLite row CAS does not cover Host sessions or file effects, a provider session can outlive a DB transaction, and a server-owned stream ends on the Host's schedule, not the request's. The pattern combines **per-resource revision CAS**, an **internal lifecycle epoch**, and a **per-Character activity fence**; the run-to-memory capture (a v1.185 **historical** drain-authoritative capture with a receipt-keyed immutable dedup, see §4/§7) is currently disabled.
+The Actor vertical supports material mutation and reversible freeze: identity edit, archive/restore, WorldSheet maintenance, bounded KE content maintenance, and an opted-in run-to-memory capture. Three well-known concurrency mechanisms are individually insufficient here: SQLite row CAS does not cover Host sessions or file effects, a provider session can outlive a DB transaction, and a server-owned stream ends on the Host's schedule, not the request's. The pattern combines **per-resource revision CAS**, an **internal lifecycle epoch**, and a **per-Character activity fence**; the run-to-memory capture (a drain-authoritative capture with a receipt-keyed immutable dedup, see §6) is currently refused before any effect.
 
-Non-normative product semantics: [Actor Product Model §11](../../specs/active/architecture/actor-product-model.md). The current Host completion limit for capture is stated at §6.1 there: the Host has a reservation but no complete run-capture writer, so Character `remember:true` is refused. The sibling composition doc covers the shipped v1.184 admission/bearer boundaries: [actor-bearer-boundary-composition.md](actor-bearer-boundary-composition.md).
+Non-normative product semantics: [Actor Product Model §11](../../specs/active/architecture/actor-product-model.md). The current Host completion limit for capture is stated at §6.1 there: the Host has a reservation but no complete run-capture writer, so Character `remember:true` is refused. The sibling composition doc covers the admission/bearer boundaries: [actor-bearer-boundary-composition.md](actor-bearer-boundary-composition.md).
 
 Rejected option (kept as explicit non-goal): archive cancels all sessions, persists conversation/job history, and reconstructs capture from broadcast or SSE. Cancellation cannot atomically roll back provider or file effects, broadcasts are lossy, and persistent history is out of scope. Busy is refused, never forced.
 
@@ -62,7 +62,7 @@ Each mutable resource keeps its own nonnegative `revision` CAS token, initially 
 
 The fence table `character_fences: ActorFenceTable` (`crates/nexus-core/src/service.rs:115`) provides both admission modes; the fence mechanics live in `crates/nexus-core/src/actor_fence.rs` (`try_acquire_activity`:223, `try_acquire_transition`:234). Two layers per Character: a same-process `RwLock`, plus a per-Character OS shared/exclusive file lock, so a direct CLI transition fences against a live service.
 
-- **Activity admission** (writes, runs, and historical capture): an owned shared lease via `CoreService::acquire_actor_activity` (`actors.rs:297`). Owner-check first (no fence state leaks existence), then acquire the read lock and **re-read status and epoch under the fence** — the pair is exact for the lease's lifetime.
+- **Activity admission** (writes and runs): an owned shared lease via `CoreService::acquire_actor_activity` (`actors.rs:297`). Owner-check first (no fence state leaks existence), then acquire the read lock and **re-read status and epoch under the fence** — the pair is exact for the lease's lifetime.
 - **Exclusive transition** (archive/restore): `CoreService::acquire_character_transition` (`actors.rs:340`) takes the exclusive lease; while any activity lease is outstanding it returns `409 character_busy` (`busy_error`, `actor_fence.rs:342`) — zero mutation, no forced cancellation, no provider wait. Acquisition is `try_`, never an awaited write that a provider can pin.
 
 The lease must be **held through every DB, file, provider, and terminal effect** of the admitted activity. Real gaps: mutation handlers that admit then drop the lease and continue, returning `character_busy` only for the next activity, and binding add/remove handlers left entirely unfenced.
@@ -78,16 +78,6 @@ Steps 3–4 are the **caller/Host integration requirement**, not behaviour of `t
 4. drop the exclusive lease, then one Host shutdown attempt per retired id outside registry locks (failure is logged and cannot undo the commit).
 
 Leases with no live holder are swept on admission; no timer. Cancel/shutdown are safety/observation actions and must **not** take the activity lease.
-
-### 4. Drain-authoritative capture (historical — v1.185)
-
-> **Historical.** This section records the v1.185 run-capture design. The writer it described (`drain_and_finalize_character_operation`, `try_persist_capture`, `DrainAccumulator`, `build_capture_digest` in the former `crates/nexus-core/src/execution/lifecycle.rs`) does not exist at HEAD. Capture is currently refused: the Host has a reservation but no complete run-capture writer, so Character `remember:true` is refused before any effect (`not_supported` in core, `crates/nexus-core/src/host.rs:1066-1075`; HTTP `501 route_not_migrated`, `apps/nexus-service/src/provider.ts:456-462`); non-Character `remember:true` stays `422 invalid_input`.
-
-The only capture authority was the **server-owned drain of the stream returned by `HostFacade::exec`** — not CLI SSE, not a broadcast subscriber, not model-written metadata or a caller-supplied digest. The admission snapshot (owner Creator, Character, binding, World, epoch, server-minted session and operation ids) was transferred into the drain along with the activity lease.
-
-- The drain was filtered to the exact stored session + operation; only `MessageDelta` text accumulated into the candidate digest (never thought/tool/plan events) and only `OpFinished(end_turn)` counted as a successful terminal. `MaxTokens` / `MaxTurnRequests` / `Refusal` were `Incomplete` — no candidate.
-- The lease epoch was re-checked at persist time against the snapshot epoch; a mismatch (or a gone binding) failed capture with `CaptureScopeChanged` (now `ActorContractConflict::RunCaptureScopeChanged`, `crates/nexus-local-db/src/error.rs`) **without** rewriting the successful run. Run success and capture failure were distinct outcomes.
-- `remember:true` required a stored admitted Character session with an exact binding; a foreign actor/session still fails validation before Host execution. No caller-supplied actor, binding, digest, or operation id claimed capture authority.
 
 ### 5. Atomic cancel latch, bounded outcome memory
 
@@ -106,17 +96,11 @@ Per-operation phase machine: `Running → CancelRequested → Finalizing → Ter
 - Inside the transaction: active owned Character, exact `lifecycle_epoch` equality, and binding provenance are revalidated before insert — caller-supplied scope is never the authority.
 - The receipt row **survives pending-row consumption** (review/dismiss/promote), so re-observing terminal events can never duplicate a candidate; and two operations sharing one Host session produce two distinct candidates (distinct operation ids → distinct receipts/pending rows).
 
-> **Reachability note.** These rows and their writer still exist for the memory owner, but no current Host path produces them: Character `remember:true` is refused before any effect (§4). Reintroducing capture requires a separately accepted complete integration of the memory owner, not a second pipeline (Actor Product Model §6.1).
-
-### 7. Bounded digest accumulation (historical — v1.185)
-
-> **Historical.** Part of the retired §4 capture writer.
-
-The candidate digest is `Prompt:\n<raw prompt>\n\nResponse:\n<accumulated message text>`, capped at `MAX_CAPTURE_DIGEST_BYTES = 65_536`. Accumulation used **checked arithmetic** (`checked_add` on static overhead + prompt + buffered text + incoming delta); any overflow or over-cap flips `digest_too_large` before a delta is copied and yields `CaptureTooLarge` — never an oversized candidate. An empty (`trim()`-empty) response is `CaptureEmptyOutput`; it is never a candidate.
+> **Reachability note.** These rows and their writer still exist for the memory owner, but no current Host path produces them: Character `remember:true` is refused before any effect. Reintroducing capture requires a separately accepted complete integration of the memory owner, not a second pipeline (Actor Product Model §6.1).
 
 ## Why this matters
 
-Each mechanism covers what the others cannot. Row CAS protects the SQLite truth; the epoch protects Host session identity across a freeze; the fence makes archive/restore refuse instead of racing provider or file effects; the receipt makes capture idempotent and immutable. Omitting any of them produces a concrete failure class: a `500` where a `409` is expected (unmapped constraint), a stale pre-archive session resuming after restore (unfenced epoch key), an archive that "succeeds" mid-activity (lease dropped early), a duplicate candidate after review (no receipt), or an oversized/overflowed digest (unchecked accumulation — historical).
+Each mechanism covers what the others cannot. Row CAS protects the SQLite truth; the epoch protects Host session identity across a freeze; the fence makes archive/restore refuse instead of racing provider or file effects; the receipt makes capture idempotent and immutable. Omitting any of them produces a concrete failure class: a `500` where a `409` is expected (unmapped constraint), a stale pre-archive session resuming after restore (unfenced epoch key), an archive that "succeeds" mid-activity (lease dropped early), a duplicate candidate after review (no receipt), or an oversized/overflowed digest (unchecked accumulation).
 
 ## When to apply
 
@@ -129,6 +113,4 @@ Each mechanism covers what the others cannot. Row CAS protects the SQLite truth;
 - Revision CAS + epoch + active gate ordering — `crates/nexus-local-db/src/character.rs` (`update_character`:634, `transition_character`:700, `map_actor_constraint`:863, `check_expected_revision`:84), mirror in `crates/nexus-local-db/src/actor_world_binding.rs`.
 - Fence leases, epoch keys, phase machine — `crates/nexus-core/src/actor_fence.rs` (`ActorFenceTable`, `try_acquire_activity`:223, `try_acquire_transition`:234) driven by `crates/nexus-core/src/actors.rs` (`acquire_actor_activity`:297, `acquire_character_transition`:340, `commit_character_transition`:375); session retirement, cancel latch and finalization in `crates/nexus-core/src/actor_sessions.rs` (`retire_character_sessions`:1085, `request_operation_cancel`:833, `begin_operation_finalizing`:950).
 - Transition ordering under the lease — `CoreService::transition_character` (`crates/nexus-core/src/actors.rs:446`) composing acquire + commit.
-- Historical (v1.185, retired): drain/digest/persist writer — the former `crates/nexus-core/src/execution/lifecycle.rs` (`drain_and_finalize_character_operation`, `try_persist_capture`, `DrainAccumulator`, `build_capture_digest`); stale-session rejection for the prompt path — the former `prepare_prompt` in `crates/nexus-core/src/host.rs`. The current stale-session refusal is `actor_session_stale` (`crates/nexus-core/src/host.rs:1082-1125`).
 - Receipt dedup, provenance — `crates/nexus-local-db/src/character_pending_review.rs` (`capture_character_run`:212, `capture_character_run_in_tx`:231, `receipt_matches_input`:102), migration `crates/nexus-local-db/migrations/20260906000003_character_run_capture.sql`.
-- Published slice — the v1.185 iteration package is a local process artifact (not tracked at HEAD); the durable authority is [§11](../../specs/active/architecture/actor-product-model.md) plus the sources above.

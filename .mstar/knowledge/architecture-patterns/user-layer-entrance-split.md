@@ -28,7 +28,7 @@ The pattern for splitting the first-party SPA into usage-mode layout trees (**Cr
 
 ## Context
 
-V1.170 P1 split the single Control Room SPA into two trees: **Create** (a reduced tree hiding operator chrome) and **Develop** (full config + Develop hub v1), selected by an entrance identity (`developer` | `content-creator`). The axis is deliberately **not** the Creator profile: Creator is the agent-layer identity aggregate (memory, world ownership, presets); entrance is the human's product-usage mode. v1 keeps entrance as web/desktop persisted client state only — the daemon never sees it (no User entity: a third first-party surface must not inherit a first-party persona).
+The first-party SPA is split into two usage-mode layout trees: **Create** (a reduced tree hiding operator chrome) and **Develop** (full config + Develop hub), selected by an entrance identity (`developer` | `content-creator`). The axis is deliberately **not** the Creator profile: Creator is the agent-layer identity aggregate (memory, world ownership, presets); entrance is the human's product-usage mode. The entrance is web/desktop persisted client state only — the daemon never sees it (no User entity: a third first-party surface must not inherit a first-party persona).
 
 ## Guidance
 
@@ -44,9 +44,9 @@ V1.170 P1 split the single Control Room SPA into two trees: **Create** (a reduce
 - The guard sits inside the existing gate stack (`SetupGate > EntranceGuard > RootLayout`); mismatch on Create → `<Navigate replace>` to `landRoute` + one-shot bounce toast; Develop never bounces.
 - The registry is a **separate axis from the Creator|Orchestrator tabs** — tab highlighting stays untouched.
 
-### 3. Enforcement-path rule (the lesson this doc exists for)
+### 3. Enforcement-path rule
 
-An axis that changes what is visible must be consumed by **every shell surface that renders visibility** — not just the route guard. In V1.170 P1 QC tri, the axis was wired at the route-guard + desktop-sidebar layer only, and **each** unwired surface became a Warning:
+An axis that changes what is visible must be consumed by **every shell surface that renders visibility** — not just the route guard. Wiring the axis at the route-guard + desktop-sidebar layer only leaves **each** unwired surface a Warning:
 
 | Surface | Failure mode when unwired | Fix pattern |
 | --- | --- | --- |
@@ -92,4 +92,4 @@ See §3 table for the four enforcement-path failures and fixes. Structural ancho
 - Settings host pattern: [settings-modal-primary-host.md](settings-modal-primary-host.md)
 - `setup_completed` asymmetry: [asymmetric-setup-completed-context.md](asymmetric-setup-completed-context.md)
 - Shell IA: [workspace-parent-shell-ia.md](workspace-parent-shell-ia.md)
-- Specs: `.mstar/specs/active/surfaces/web-ui.md`, `.mstar/specs/active/surfaces/desktop-shell.md`; iteration spec v1.170 (`v1.170-entrance-locks.md`) EL-1..EL-8 + AR-15..AR-22
+- Specs: `.mstar/specs/active/surfaces/web-ui.md`, `.mstar/specs/active/surfaces/desktop-shell.md`

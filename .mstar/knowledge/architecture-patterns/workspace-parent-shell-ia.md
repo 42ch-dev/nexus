@@ -19,15 +19,11 @@ last_updated: 2026-07-23
 
 # Workspace-parent shell IA
 
-**Track:** Knowledge. Distilled from V1.132 P3; **V1.135 P0** locks hub create in the **sidebar** (`panelContent`) and hub **content** as browse-only; **V1.136 P1** replaces dashed create cards with **inline-tab create** in the same slot. Still supersedes V1.131 orchestrator-only 工作区 and V1.130 creator-left-Menu.
+**Track:** Knowledge. Hub create lives in the **sidebar** (`panelContent`) and hub **content** is browse-only; create uses an **inline-tab create** zone in the same slot.
 
-## V1.134 P3 correction (superseded)
+## Inline-tab create (normative)
 
-**V1.134 P3** placed hub create in the **content dual-pane left column** (`HubWorkspacePane` / `CreatorHubDualPane` inline create) and hid sidebar `panelContent` on `/works` and `/worlds`. That placement is **incorrect for author intent** — authors expect create in the persistent **sidebar / 功能区** shell column, not inside the main content pane. **V1.135 P0** inverts it; do not cite V1.134 P3 dual-pane-left-create as the normative pattern or keep it as a compatibility branch.
-
-## V1.136 P1 — inline-tab create (normative)
-
-**V1.135 P0** restored sidebar placement but still used two dashed **`CreateCardButton`** cards that opened dialogs. **V1.136 P1** replaces that with an **inline create zone** in the same `panelContent` slot:
+Hub create uses an **inline create zone** in the `panelContent` slot:
 
 ```
 Sidebar panelContent (creator hub)
@@ -80,14 +76,14 @@ Authors treat **工作区** as the stable identity parent. 创作 and 编排 are
 4. **Linked tabs:** one shared World/Work tab SSOT above the browse surface; re-resolve initial tab after list queries hydrate (works-only → Work); do not treat pending queries as empty.
 5. **Hub create is inline in sidebar `panelContent`** on `/works` and `/worlds` (`data-testid="sidebar-create-panel"`, `data-mode="create-inline"`); reuse `CreatorCreatePanel` + `CreatorShellContent` (`mode="create-inline"`). Create-zone tabs use `sidebar-create-tab-*` testids and **local state** — not coupled to `creator-hub-dual-pane-tab-bar-*`. **Forbidden on hub:** content-left create (`HubWorkspacePane` mount, `onCreateSubmit`, `forceExpandedCreate`, `*-workspace-pane-inline-form` testids); dashed card create (`mode="create"` on hub path).
 6. Studio fixtures prove **sidebar inline create + content browse** before treating App wiring as visually accepted (`creator-orch-gongnengqu-ia-fixtures` primary; `creator-hub-dual-pane-ia-fixtures` matrix aligned to `create-inline`).
-7. Do not reinstate V1.131 AC-4, V1.130 left-Menu, V1.132 Create-only-left + controller-stub, **V1.134 P3 content dual-pane left-create**, or **V1.135 card-button hub create** as compatibility branches.
+7. Do not reinstate content-left create, a left creator Menu, a Create-only-left layout with a controller stub, or card-button hub create as compatibility branches.
 
 ## Failure modes
 
 - Footer disappears in 创作 → fix `FooterProfiles` wiring / gating, not content layout first.
 - Worlds/Works appear as left nav → remove Menu branch from `Sidebar` / chrome; keep lists in content.
 - Mode switch remounts footer and drops `aria-pressed` / active profile → keep footer always mounted under parent shell state.
-- **Empty sidebar on hub while create sits in content-left** → restore `panelContent` on hub; collapse hub to browse-only (regression of V1.134 P3 placement).
+- **Empty sidebar on hub while create sits in content-left** → restore `panelContent` on hub; collapse hub to browse-only.
 - **Card-button create returns in sidebar** → restore `create-inline` mode; remove dialog open state from `CreatorCreatePanel`.
 - **Create-zone tabs sync with content hub tabs** → decouple state; only optional post-success navigation may align tabs.
 - Empty-state copy points at sidebar create but `panelContent` is undefined → fix sidebar gating before copy QA.

@@ -28,9 +28,9 @@ tags:
 
 ## Context
 
-v1.192's acceptance criterion for the desktop cutover was explicit: **"parity implied" is a fail** — every desktop-only capability either has an explicit evidence-backed verdict or a registered deviation. The plan froze **29 stable capability IDs** (source-backed inventory: current host column, target column, required behavior, owning task), and the cutover's reconciliation pass produced a receipt mapping each row to recorded evidence: report → implementing/fix revision → command → observed result → exercised boundary.
+When a migration's acceptance criterion is "same product, new substrate", the rule is explicit: **"parity implied" is a fail** — every capability of the old substrate either has an explicit evidence-backed verdict or a registered deviation. The plan freezes a stable list of capability IDs (source-backed inventory: current source, target behavior, required behavior, owning task), and the cutover's reconciliation pass produces a receipt mapping each row to recorded evidence: report → implementing/fix revision → command → observed result → exercised boundary.
 
-The receipt is also the place where the iteration's honesty conventions concentrate. Its reusable discipline matters beyond this cutover because every future retirement or migration (the legacy daemon/SPA family already carries a recorded blocker plus the zero-consumer trigger that would unblock its deletion) will need to make the same kind of claim without inflating it.
+The receipt is where the iteration's honesty conventions concentrate. Its reusable discipline matters beyond a single cutover because every future retirement or migration (each with its own recorded blocker and unblocking trigger) must make the same kind of claim without inflating it.
 
 ## Guidance
 
@@ -63,7 +63,7 @@ Structure each evidence key as: source report + implementing revision + **record
 
 Fix-now findings close rows via a new commit plus a targeted re-review recorded as Approved; the row's prose keeps its fix-time wording and the receipt states the closure explicitly. Without that ordering rule, a closed row still *reads* open (or vice versa) and downstream consumers cannot tell which is current.
 
-### 7. Separate authorization from evidence — and never backfill history
+### 7. Separate authorization from evidence — never backfill old rows
 
 A development GO may rest on an explicit decision record (e.g. a compass decision selecting an earlier authorization plus a CI run) while a historical evaluator file remains `blocked` with missing rows. The correct handling: record the authorization basis, keep the contradiction visible, and **do not regenerate or edit the historical evaluation** to resolve it. New acceptance evidence is bound to the new revision; it never retroactively fills old rows. If a reason remains unknown (why the old JSON was never regenerated), write `[UNVERIFIED]` rather than inventing one.
 
@@ -90,7 +90,7 @@ An explicit section enumerates what the receipt does **not** prove (e.g. all act
 ```markdown
 | ID | Capability | Implementing revision(s) | Row → evidence and observed behavior | Verdict / remaining limit |
 |---|---|---|---|---|
-| 26 | Renderer security | `646fd095c` + `0c8bd3bef` + `7a4b9a099` | E1 versioned closed IPC, size/admission/sender/generation, CSP/path traversal; E7 sandbox/isolation/no Node, live generation, protocol-before-window, global navigation lockdown | **Demonstrated — policy/headless composition.** Actual Electron enforcement and extracted-bundle equivalence [UNVERIFIED] |
+| <id> | <capability> | `<sha>` + `<sha>` | `<evidence key>`: versioned closed IPC, size/admission checks, sandbox/isolation, protocol-before-window | **Demonstrated — <layer>.** Actual runtime enforcement [UNVERIFIED] |
 ```
 
 ### Evidence registry row shape
@@ -98,12 +98,5 @@ An explicit section enumerates what the receipt does **not** prove (e.g. all act
 ```markdown
 | Key | Source and implementing revision | Recorded command and observed result | Exercised boundary |
 |---|---|---|---|
-| E1 | T1 report, fixes 1–2; `29e683af` → `2fdb12dc` → **`646fd095`** | `pnpm --dir apps/desktop-electron run build`; `node --test …/desktop-security.test.mjs` → build exit 0; 39 pass / 0 fail in fix 2 | Compiled request/response parsers, sender/generation checks, admission, protocol path/CSP policy; plain Node, not an Electron renderer |
+| `<key>` | <task> report, fixes 1–2; `<sha>` → `<sha>` | `<command>` → exit 0; N pass / 0 fail | Compiled request/response parsers, sender/admission checks, policy path; not a real runtime renderer |
 ```
-
-## Evidence
-
-- Frozen capability inventory and host contracts — plan provenance `2026-09-19-v1.192-p0-electron-desktop-cutover` (capability rows 1–29; IPC/protocol/config/reset/lifecycle contracts), with the product-side encodings in `apps/desktop-electron/src/desktop-contract.ts` (closed operation union, bounds, validators), `src/desktop-ipc.ts` (admission, sender check) and `src/connection-store.ts` + `src/desktop-network.ts` (credential policy).
-- Receipt conventions in practice — the v1.192 desktop capability-parity reconciliation and packaging task evidence; product-side artifacts `apps/desktop-electron/scripts/verify-package.mjs` and the receipt schema in `apps/desktop-electron/scripts/package.mjs`.
-- Authorization-vs-evidence instance — the v1.189 development-GO record plus native CI matrix run is the authorized basis; the historical evaluator (`apps/desktop-electron/scripts/proof-decision.mjs`) remains unregenerated by design.
-- Companion docs — [evidence-before-retirement.md](evidence-before-retirement.md) (the counterpart discipline for deletions), [resolved-residual-verification.md](../architecture-patterns/resolved-residual-verification.md) (verify claims against current `main`).

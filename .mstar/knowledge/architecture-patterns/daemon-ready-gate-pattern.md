@@ -20,13 +20,13 @@ applies_when:
 
 # Daemon-Ready Gate Pattern (App-Level Launch Gate)
 
-**Track**: Knowledge (durable guidance distilled from V1.94 Desktop App Onboarding & IA Pass).
+**Track**: Knowledge (durable guidance).
 
 ## Context
 
-V1.66 (the retired Desktop Shell) shipped a `SidecarManager` that auto-starts the bundled `nexus42` daemon and exposes a single lifecycle event stream `onDaemonStatusChanged` carrying `DaemonStatus { state, version, port, detail }`. States: `starting → running → degraded → stopped → error`.
+The desktop host ships a `SidecarManager` that auto-starts the bundled `nexus42` daemon and exposes a single lifecycle event stream `onDaemonStatusChanged` carrying `DaemonStatus { state, version, port, detail }`. States: `starting → running → degraded → stopped → error`.
 
-V1.94 introduced **two distinct consumers** of that single event stream (wizard step + per-launch splash). **V1.105 collapses wait ownership into one outer app-level gate:**
+Wait ownership collapses into one outer app-level gate:
 
 1. **`DaemonLaunchGate`** (every launch) — fullscreen splash until Ready; wraps **all** routes including `/setup`.
 2. **`SetupGate`** (marker only) — after Ready, routes incomplete setup to `/setup` vs main UI. **No splash.**
@@ -42,7 +42,7 @@ The naive implementation would create two independent health-probe polls or two 
 |------|--------|
 | Subscribe to `onDaemonStatusChanged`; do not add `is_daemon_ready()` commands | The event already carries `state`; a synchronous command would race with the state machine and lie during transitions |
 | Treat `state: "running"` as the only "gate open" signal | `starting` is not ready (health probe pending); `degraded`/`error`/`stopped` are explicit failures |
-| Surface failure paths explicitly (`error`, `stopped`, timeout) | Silent hangs are the worst UX; the wizard step 2 and the per-launch splash both need actionable CTAs (Restart, Open Logs, etc.). V1.96 changed the wizard timeout from 15s to 25s with a mount-time probe — see `desktop-shell.md` §13.10. |
+| Surface failure paths explicitly (`error`, `stopped`, timeout) | Silent hangs are the worst UX; the wizard step 2 and the per-launch splash both need actionable CTAs (Restart, Open Logs, etc.). The wizard timeout is 25s with a mount-time probe — see `desktop-shell.md` §13.10. |
 | Two consumers can coexist without coordination | The event is fan-out; each consumer maintains its own UI state but reads the same lifecycle signal |
 | Do not call `start_daemon()` from a consumer unless you intend to reset the crash budget | `start_daemon()` resets `restart_count`; `start()` does not. The wizard may reset (user-initiated); the per-launch splash must not (automatic) |
 
@@ -60,9 +60,9 @@ The naive implementation would create two independent health-probe polls or two 
 
 ## Examples
 
-- **Outer launch gate (V1.105 current)** (`apps/web/src/components/setup/daemon-launch-gate.tsx` + `daemon-ready-splash.tsx`): mount-time `getDaemonStatus` + `onDaemonStatusChanged`; 25s timeout; retry = reload; reset = `resetLocalDatabase` + reload; **no** happy-path `startDaemon` (D2 always-starts in the host `.setup()`).
-- **Marker routing (V1.105)** (`apps/web/src/components/setup/setup-gate.tsx`): after outer gate Ready — `!setup_completed` → `/setup`; else main shell. No splash/subscribe.
-- **Historical — Setup Wizard Step 2** (`setup-step-daemon.tsx`, deleted in V1.105 P1): previously owned wait+`startDaemon` inside the wizard. Do not reintroduce.
+- **Outer launch gate** (`apps/web/src/components/setup/daemon-launch-gate.tsx` + `daemon-ready-splash.tsx`): mount-time `getDaemonStatus` + `onDaemonStatusChanged`; 25s timeout; retry = reload; reset = `resetLocalDatabase` + reload; **no** happy-path `startDaemon` (D2 always-starts in the host `.setup()`).
+- **Marker routing** (`apps/web/src/components/setup/setup-gate.tsx`): after outer gate Ready — `!setup_completed` → `/setup`; else main shell. No splash/subscribe.
+- **Do not reintroduce a Setup Wizard Step 2** that owns wait + `startDaemon` inside the wizard (`setup-step-daemon.tsx` is gone).
 - **Crash banner** (`apps/web/src/components/layout/main-banner.tsx`): long-running-session consumer; appears when state degrades from `"running"` to `"degraded"`/`"error"`/`"stopped"`.
 
 ## Anti-patterns
@@ -71,9 +71,9 @@ The naive implementation would create two independent health-probe polls or two 
 - ❌ Polling `GET /v1/daemon/runtime/health` from the SPA (duplicates `SidecarManager`'s own probe).
 - ❌ Two consumers calling `start_daemon()` independently (budget-reset semantics differ; can mask crash loops).
 
-## V1.110 refinement — three-valued port-probe gate (FB-D1)
+## Three-valued port-probe gate (FB-D1)
 
-V1.110 optimized the cold-start path. Previously `start_with_budget` ran the full HTTP `probe_health` (2s timeout) **before** spawning the sidecar — a tax paid on every cold start where no daemon was running. V1.110 inserts a **three-valued TCP gate** first:
+`start_with_budget` runs a **three-valued TCP gate** before the HTTP probe, so a cold start where no daemon is running skips the HTTP round-trip:
 
 | `probe_port_state(port)` | Meaning | Action |
 |--------------------------|---------|--------|
@@ -87,15 +87,15 @@ V1.110 optimized the cold-start path. Previously `start_with_budget` ran the ful
 
 **Unit-test boundary:** do NOT spawn the real `nexus42` binary in `#[cfg(test)]` — it hangs (the daemon needs DB/runtime resources unavailable in the test env). Test `probe_port_state` + timing directly; the full `start_with_budget` spawn path is integration territory.
 - ❌ Treating `starting` as "ready" (health probe may still fail; main UI would render against an unreachable daemon).
-- ❌ **Subscribing without a mount-time state probe** (V1.96 regression root cause #1 — the daemon may have already transitioned before the SPA subscribed; the event is lost; the UI hangs forever). See "V1.96 refinements" below.
-- ❌ **Leaving a state-enum branch implicit** (V1.96 regression root cause #2 — the `'starting'` branch was missing → callback was silent → no state update → UI stuck). Every state must have an explicit branch.
-- ❌ **Discarding the supervised process's stderr** (V1.96 residual `R-V195-ARCH-STRERR-GAP` — the daemon's real crash reason was never captured; the wizard showed a generic "Daemon did not start" message).
+- ❌ **Subscribing without a mount-time state probe** (the daemon may have already transitioned before the SPA subscribed; the event is lost; the UI hangs forever). See "Late-subscription race + diagnostic surfacing" below.
+- ❌ **Leaving a state-enum branch implicit** (a missing `'starting'` branch → callback silent → no state update → UI stuck). Every state must have an explicit branch.
+- ❌ **Discarding the supervised process's stderr** (the daemon's real crash reason is never captured; the wizard shows a generic "Daemon did not start" message).
 
-## V1.96 refinements: late-subscription race + diagnostic surfacing
+## Late-subscription race + diagnostic surfacing
 
-V1.96 () hit a P0 blocker: the setup wizard Step 2 hung indefinitely in "Starting daemon…" on a clean `~/.nexus42/` first launch. RCA revealed **three** consumer-side root causes (pre-V1.118, the daemon also crashed within milliseconds when `WorkspaceState::initialize()` found no `active_creator_id`; the wizard just never learned about it). The fixes distill into four durable rules that apply to **any** observer of a process lifecycle event stream, not just the daemon-ready gate.
+The setup wizard Step 2 could hang indefinitely in "Starting daemon…" on a clean `~/.nexus42/` first launch. RCA revealed **three** consumer-side root causes. The fixes distill into four durable rules that apply to **any** observer of a process lifecycle event stream, not just the daemon-ready gate.
 
-> **V1.118 supersession (daemon no-Profile boot):** After V1.118 P0 ships, clean home reaches T0 health without `active_creator_id`; the gate opens on `running` and Profile selection is post-gate business flow. Crash-on-no-creator RCA below is **pre-V1.118** only. See [daemon-runtime.md §17 (archived)](../../specs/archived/runtime/2026-09-21-daemon-runtime.md) + [desktop-shell.md §13.11](../../specs/active/surfaces/desktop-shell.md).
+> **No-Profile boot:** a clean home reaches T0 health without `active_creator_id`; the gate opens on `running` and Profile selection is post-gate business flow. See [desktop-shell.md §13.11](../../specs/active/surfaces/desktop-shell.md).
 
 ### Rule 5: probe current state on mount, BEFORE subscribing
 
@@ -117,19 +117,19 @@ useEffect(() => {
 
 ### Rule 6: every state-enum branch must be explicit (even no-ops)
 
-The V1.96 bug had a callback shaped like `if (running) {...} else if (error || stopped) {...}` with **no** `'starting'` and **no** `'degraded'` branch. The first event after subscription was `'starting'` → no branch matched → no state update → `setReady(false)` stayed → UI stuck forever.
+A callback shaped like `if (running) {...} else if (error || stopped) {...}` with **no** `'starting'` and **no** `'degraded'` branch leaves the first event after subscription (`'starting'`) unmatched → no state update → `setReady(false)` stays → UI stuck forever.
 
 **Pattern**: factor status handling into a single `applyStatus(status)` function that covers **every** state in the enum. No-op branches (`'starting'` → keep the spinner) are explicit, not implicit fall-through silence. This also lets the mount-probe and the subscription share one code path (no drift).
 
 ### Rule 7: bound the wait with a hard timeout that RE-PROBES
 
-A consumer that subscribes and waits can hang forever if no terminal event arrives (event lost, process stuck in initialization, subscription silently dropped). A hard timeout (V1.96 uses 25s; the SidecarManager's own health timeout is 15s — the consumer timeout should be LONGER to give the state machine room) prevents indefinite hangs.
+A consumer that subscribes and waits can hang forever if no terminal event arrives (event lost, process stuck in initialization, subscription silently dropped). A hard timeout (25s; the SidecarManager's own health timeout is 15s — the consumer timeout should be LONGER to give the state machine room) prevents indefinite hangs.
 
 **Pattern**: `setTimeout(() => { re-probe getDaemonStatus(); if still non-terminal → surface "taking longer than expected" }, 25_000)`. The re-probe before declaring timeout avoids misreporting when the process silently transitioned between mount-probe and timeout fire. Clear the timeout in the effect cleanup.
 
 ### Rule 8: capture the supervised process's stderr (bounded tail)
 
-When the daemon fails to start, `DaemonStatus.detail` originally carried only generic SidecarManager messages ("Daemon did not start. Check the logs or try restarting.") — the **real** crash reason (SQLite migration mismatch, missing config, port bind failure, binary missing) was written to the daemon's stderr but never captured. The `_rx` event receiver from `command.spawn()` was discarded.
+When the daemon fails to start, `DaemonStatus.detail` must carry more than generic SidecarManager messages ("Daemon did not start. Check the logs or try restarting.") — the **real** crash reason (SQLite migration mismatch, missing config, port bind failure, binary missing) is written to the daemon's stderr, so the `_rx` event receiver from `command.spawn()` must not be discarded.
 
 **Pattern**: spawn a bounded async task that drains the `_rx` receiver, accumulates a tail capped at ~2 KiB (nearest newline boundary — keep the tail, drop the head), and appends it verbatim to `DaemonStatus.detail` on the Error transition. Keep the generic message as fallback when stderr is empty. Run the drain concurrently with `wait_for_first_health` — do NOT block the spawn path. The consumer renders `detail` with `whitespace-pre-wrap` so the multi-line stderr survives the browser's default `white-space: normal` collapse.
 
@@ -137,13 +137,9 @@ When the daemon fails to start, `DaemonStatus.detail` originally carried only ge
 
 Rules 5+6+7 together make the consumer resilient to **any** timing of the event stream: late subscription (5), partial coverage (6), or total event loss (7). Rule 8 makes the failure **actionable**: the user reads the real crash reason and can act (reset the DB, free the port, install the binary) instead of staring at "Daemon did not start." Without rule 8, even a perfectly-timed subscription surfaces an unhelpful generic message.
 
-### Source
+## Initial-state correctness + spawn-name resolution
 
-Distilled from V1.96 . Iteration-scoped RCA with code sketches: `daemon-startup-rca.md` (snapshot; promoted here).
-
-## V1.97 refinements: initial-state correctness + v2 host spawn-name resolution
-
-V1.97 () ran the first real clean-state desktop smoke against the bundled sidecar and found **two latent first-launch blockers** that had been present since V1.66 but never surfaced (no prior iteration had actually spawned the sidecar end-to-end). Both distil into durable rules that apply to the supervisor state machine and the host shell-plugin contract.
+A clean-state desktop smoke against the bundled sidecar found **two latent first-launch blockers** that only surface when the sidecar is actually spawned end-to-end. Both distil into durable rules that apply to the supervisor state machine and the host shell-plugin contract.
 
 ### Rule 9: a freshly constructed SidecarManager starts in `Stopped`, never `Starting`
 
@@ -163,25 +159,21 @@ if state == Starting { return Ok(()); }
 if state == Starting && inner.child.is_some() { return Ok(()); }
 ```
 
-### Rule 11: the v2 host's `app.shell().sidecar(name)` takes the FILENAME, not the `externalBin` path
+### Rule 11: a spawn argument must match the registered runtime name byte-for-byte
 
-> **Historical (host retired v1.192):** this rule documents the retired v2 desktop host, which was replaced by the Electron composition (`apps/desktop-electron`). The general lesson — a sidecar/spawn argument must match the registered runtime name byte-for-byte, not the build-time source path — still applies to any host's child-process launch; the concrete bundle-config / shell-plugin details below are a historical record.
-
-This was the more severe latent blocker. `bundle.externalBin` in the bundle config lists **build-time source paths** (e.g. `["binaries/nexus42"]`); the bundler appends the target-triple suffix (`nexus42-aarch64-apple-darwin`) at bundle time. But the **runtime** Rust API `ShellExt::sidecar()` "expects only the filename of the sidecar, not its full path" (host sidecar docs). The desktop shell had called `app.shell().sidecar("binaries/nexus42")` since V1.66 — which **never resolves**, so the bundled daemon was never spawnable from the desktop app. The error (`failed to spawn sidecar: No such file or directory (os error 2)`) only appeared once V1.97 actually ran a clean-state smoke.
-
-The matching shell-plugin capability scope (`shell:allow-execute`, `sidecar: true`) registers a `name` that must be **byte-identical** to the `sidecar()` argument — so both must be the bare filename (`"nexus42"`), while `bundle.externalBin` keeps the source-relative path (`"binaries/nexus42"`).
+A bundled binary is registered under a **runtime name** distinct from its build-time source path: the bundle config lists source-relative paths (e.g. `["binaries/nexus42"]`) and the bundler appends the target-triple suffix (`nexus42-aarch64-apple-darwin`) at bundle time, while the runtime spawn API takes the bare registered name. The spawn argument and the host's capability/scope registration (`name`, `sidecar: true`) must both use that same bare name — passing the source-relative path silently fails to resolve (`failed to spawn sidecar: No such file or directory (os error 2)`), so the bundled binary is never spawnable, and the failure surfaces only when a clean-state smoke actually spawns it.
 
 **Pattern**:
 ```rust
 // bundle config  (build-time source path — UNCHANGED)
 //   "bundle": { "externalBin": ["binaries/nexus42"] }
-// sidecar.rs (runtime — filename only)
+// sidecar.rs (runtime — registered name only)
 let command = app.shell().sidecar("nexus42")?;   // NOT "binaries/nexus42"
 // capabilities/main.json (scope name must match the sidecar() arg)
 //   { "name": "nexus42", "sidecar": true, "args": [...] }
 ```
 
-> **JS vs Rust asymmetry (footgun):** the JavaScript `Command.sidecar('binaries/my-sidecar', ...)` API *does* accept the path-form string matching the `externalBin` entry. The Rust `app.shell().sidecar()` does NOT. When porting a sidecar between JS-triggered and Rust-triggered spawn sites, re-derive the argument from the docs — do not copy it across the language boundary.
+> **JS vs Rust asymmetry (footgun):** a JavaScript `Command.sidecar('binaries/my-sidecar', ...)` API may accept the path-form string matching the `externalBin` entry while the Rust `app.shell().sidecar()` does not. When porting a sidecar between JS-triggered and Rust-triggered spawn sites, re-derive the argument from the docs — do not copy it across the language boundary.
 
 ### Rule 12: attaching to a healthy daemon must not fabricate an owned child handle
 
@@ -189,13 +181,9 @@ The attach path (daemon already running on the resolved port, e.g. user ran `nex
 
 ### Why these compound
 
-Rules 9 + 10 fix the supervisor state machine so a real spawn is actually attempted. Rule 11 fixes the framework-contract misuse so the spawn can actually resolve the binary. Rule 12 keeps attach honest. Together they make the desktop clean-state first-launch path **reachable** — before V1.97 it was silently broken at two layers (state machine never spawned, and even if it had, the sidecar name would not resolve). The deeper remaining gap (the daemon requires an active creator to boot, and the desktop wizard does not bootstrap one before the `.setup()` auto-start — see residual `R-V197-SMOKE-CLEAN-STATE`) is a product-architecture deferral tracked for V1.98, not a state-machine or shell-contract rule.
+Rules 9 + 10 fix the supervisor state machine so a real spawn is actually attempted. Rule 11 fixes the framework-contract misuse so the spawn can actually resolve the binary. Rule 12 keeps attach honest. Together they make the desktop clean-state first-launch path **reachable** — without them it is silently broken at two layers (the state machine never spawns, and even if it did, the sidecar name would not resolve).
 
-### Rule 13 (V1.100, historical): gate `.setup()` auto-start behind `setup_completed`
-
-> **Superseded by Rule 15 (V1.105 D2).** Kept for archaeology only.
-
-### Rule 15 (V1.105): always auto-start sidecar; outer `DaemonLaunchGate`; bootstrap on Workspace Continue
+### Rule 15: always auto-start sidecar; outer `DaemonLaunchGate`; bootstrap on Workspace Continue
 
 | Lock | Value |
 |------|-------|
@@ -205,17 +193,15 @@ Rules 9 + 10 fix the supervisor state machine so a real spawn is actually attemp
 | Bootstrap | `ensureSetupBootstrap` on Workspace **Continue** (after Ready), not before daemon start |
 | Wizard | Agent → Workspace → Done; no Daemon step; no happy-path `startDaemon` |
 
-**Why:** Authors must pick an ACP Agent first, but scan needs a Ready daemon. Making wait app-level (not a wizard preference) keeps the product narrative honest while preserving the V1.100 bootstrap IPC contract at a later step.
+**Why:** Authors must pick an ACP Agent first, but scan needs a Ready daemon. Making wait app-level (not a wizard preference) keeps the product narrative honest while preserving the bootstrap IPC contract at a later step.
 
-**Source:** V1.105  + `wizard-ia-reorder` + `portrait-shell-steps`; masters `desktop-shell.md` §13.10 / `web-ui.md` §29.13.
+> Bootstrap moves **after** Ready (Workspace Continue) while keeping always-start. A clean home reaches T0 health without `active_creator_id`; bootstrap remains optional wizard convenience (§13.11).
 
-> Residual `R-V197-SMOKE-CLEAN-STATE` was closed by V1.100 P0. V1.105 moves bootstrap **after** Ready (Workspace Continue) while keeping always-start. **V1.118 P0 supersedes the no-creator boot failure:** clean home reaches T0 health without `active_creator_id`; bootstrap remains optional wizard convenience (§13.11 / daemon-runtime §17, archived).
+### Rule 14: enrich process PATH at startup for agent CLI discovery (Class B) — no schemas/
 
-### Rule 14 (V1.101): enrich process PATH at startup for agent CLI discovery (Class B) — no schemas/
+macOS GUI-launched processes often inherit a minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`). Homebrew and user-local ACP agent CLIs under `/opt/homebrew/bin`, `~/.local/bin`, `~/.cargo/bin`, asdf/mise shims, etc. are then invisible to `which::which` during `POST /v1/daemon/agent-host/scan`, so the setup AgentPicker shows empty even when agents are installed in a login shell.
 
-V1.101 P0 closed `R-V1100P0SMOKE-AGENT-SCAN`: macOS GUI-launched daemons often inherit a minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`). Homebrew and user-local ACP agent CLIs under `/opt/homebrew/bin`, `~/.local/bin`, `~/.cargo/bin`, asdf/mise shims, etc. are then invisible to `which::which` during `POST /v1/daemon/agent-host/scan`, so the setup AgentPicker shows empty even when agents are installed in a login shell.
-
-**Pattern:** merge a **login-shell-equivalent** set of common user bin dirs into the **process** `PATH` **once at startup** (before any scan probe). Implementation: `crates/nexus-agent-host/src/discovery/path_enrichment.rs` (`apply_process_path_enrichment`, `:333`, built on `login_equivalent_bin_dirs`, `:165`), called from the CLI's synchronous `main` **before Tokio starts** — `apps/nexus42/src/main.rs:27`. No shell-out; only existing directories are appended; idempotent merge. (Historical: the former caller was the deleted Rust daemon's `run_daemon`; it is gone with the daemon host in v1.193 P2.)
+**Pattern:** merge a **login-shell-equivalent** set of common user bin dirs into the **process** `PATH` **once at startup** (before any scan probe). Implementation: `crates/nexus-agent-host/src/discovery/path_enrichment.rs` (`apply_process_path_enrichment`, `:333`, built on `login_equivalent_bin_dirs`, `:165`), called from the CLI's synchronous `main` **before Tokio starts** — `apps/nexus42/src/main.rs:27`. No shell-out; only existing directories are appended; idempotent merge.
 
 | Class | Meaning | Fix locus |
 |-------|---------|-----------|
@@ -226,7 +212,3 @@ V1.101 P0 closed `R-V1100P0SMOKE-AGENT-SCAN`: macOS GUI-launched daemons often i
 **Hard stop:** Class B must **not** add wire fields, query params, or `schemas/` changes. Prefer process env enrichment over teaching the SPA about PATH. Exotic layouts still use custom-launch.
 
 **Anti-patterns:** ❌ Proposing a scan schema change for “extra PATH”; ❌ shelling out to `echo $PATH` / login shell on every scan; ❌ duplicating enrichment only in the desktop sidecar without covering the CLI start path.
-
-### Source
-
-Distilled from V1.97 (the v2 host; retired in v1.192). The v2 sidecar resolution rule confirmed against the host's sidecar docs ("expects only the filename of the sidecar, not its full path"). Iteration-scoped invariants + prototype intake rule: `sidecar-startup-state-machine.md` (snapshot; durable rules promoted here). **Rule 13 distilled from V1.100 P0** . **Rule 14 distilled from V1.101 P0** . **Rule 15 distilled from V1.105** P0–P2 (`DaemonLaunchGate`, D2 always-start, Agent→Workspace→Done, portrait shell).

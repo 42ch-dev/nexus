@@ -36,7 +36,7 @@ This repo is a **consumer** of Morning Star, not the harness maintenance repo.
 
 - Product: **Nexus**
 - CLI executable: **nexus42**
-- Headless runtime: **`nexus-runtime`** (Connect-only binary of the same crate as the CLI). The integrated `nexus42 daemon` group and the `nexus-daemon-runtime` composition were retired in v1.193 P2 — no `nexus42d`, no `nexus42 service` alias, no CLI service launcher
+- Headless runtime: **`nexus-runtime`** (Connect-only binary of the same crate as the CLI). There is no integrated `nexus42 daemon` group or `nexus-daemon-runtime` composition — no `nexus42d`, no `nexus42 service` alias, no CLI service launcher
 - npm scope: **@42ch**
 - Contracts package: **@42ch/nexus-contracts**
 
@@ -86,7 +86,7 @@ See linked AGENTS.md files for per-directory decision rules and invariants:
 
 ## UI Component Policy (Studio-first)
 
-UI work in this repo follows a **studio-first** routing rule. The visual proving ground is `apps/design-studio` (daemon-free Vite gallery); reusable presentational primitives live in `packages/nexus-ui`. Agents must **not** land a new visual system directly in `apps/web` and call it done — that is how V1.122/V1.123 Timeline visuals ended up with tokens in `@nexus/design-tokens` and implementations in `apps/web`, but no Studio gallery and no `@42ch/nexus-ui` representation. Visuals are tuned in Studio first; componentize so promotion stays cheap.
+UI work in this repo follows a **studio-first** routing rule. The visual proving ground is `apps/design-studio` (daemon-free Vite gallery); reusable presentational primitives live in `packages/nexus-ui`. Agents must **not** land a new visual system directly in `apps/web` and call it done — Timeline visuals must not end up with tokens in `@nexus/design-tokens` and implementations in `apps/web` without a Studio gallery and an `@42ch/nexus-ui` representation. Visuals are tuned in Studio first; componentize so promotion stays cheap.
 
 ### Decision rule
 
@@ -173,7 +173,7 @@ cargo sweep --time 30
 ```
 
   Optional dry-run: append `-d`. Do **not** use `cargo sweep -i N` for age-based cleanup — `-i` is `--installed` (boolean); age uses `--time` / `-t`.
-**Merge gate — feature-branch target cleanup (HARD):** before merging a feature branch into the integration branch, that feature's scoped `CARGO_TARGET_DIR` **must be removed** — a feature target never outlives its own merge. With the scoped `.envrc` layout the removal is precise, by exact name, and never a wildcard: `rm -rf ~/.cache/nexus-target-*` would delete a peer's target while that peer is still building. This is not optional housekeeping — parallel worktree target dirs compound silently (v1.190: six concurrent targets consumed 98 GiB of `/tmp` in a single iteration) and degraded the host. The recorded conclusion is **immediate per-slice reclamation, not a cap on concurrent development**. Concretely:
+**Merge gate — feature-branch target cleanup (HARD):** before merging a feature branch into the integration branch, that feature's scoped `CARGO_TARGET_DIR` **must be removed** — a feature target never outlives its own merge. With the scoped `.envrc` layout the removal is precise, by exact name, and never a wildcard: `rm -rf ~/.cache/nexus-target-*` would delete a peer's target while that peer is still building. This is not optional housekeeping — parallel worktree target dirs compound silently and can degrade the host. The rule is **immediate per-slice reclamation, not a cap on concurrent development**. Concretely:
 
 ```bash
 # Before merging: remove THIS feature's scoped build cache (exact name only)

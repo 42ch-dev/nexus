@@ -21,7 +21,7 @@ applies_when:
 
 ## Context
 
-The Nexus service boots without a creator SQLite pool when `active_creator_id` is absent from `~/.nexus42/config.toml`. This is **by design** (V1.118 AC-P0-1: boot-without-creator), not a bug. The Setup wizard's Continue path calls `ensureSetupBootstrap()` (an Electron IPC command) which **only writes** `active_creator_id` to config.toml — it does not notify the service or pre-open anything. A subsequent request that needs creator data must therefore resolve the workspace store on demand.
+The Nexus service boots without a creator SQLite pool when `active_creator_id` is absent from `~/.nexus42/config.toml`. This is **by design** (boot-without-creator), not a bug. The Setup wizard's Continue path calls `ensureSetupBootstrap()` (an Electron IPC command) which **only writes** `active_creator_id` to config.toml — it does not notify the service or pre-open anything. A subsequent request that needs creator data must therefore resolve the workspace store on demand.
 
 The current core does **not** keep a long-lived creator pool with a lazy-open entry point. Each creator write resolves its own store: `patch_creator` (`crates/nexus-core/src/creators.rs:272`) calls `active_workspace_db_path()` (`creators.rs:504-508`, which reads `active_creator_id` and returns the state DB path only if it exists), opens a short-lived pool with `nexus_local_db::init_pool`, performs the upsert, and closes it (`pool.close().await`, `creators.rs:331-338`). A missing `active_creator_id` makes the DB resolution fail closed (`CoreError::Uninitialized`).
 
@@ -30,10 +30,6 @@ The current core does **not** keep a long-lived creator pool with a lazy-open en
 - **Resolve the store per operation; do not assume a boot-held pool.** Read `active_creator_id`, resolve the state DB path (`active_workspace_db_path`), open a pool for the write, and close it. This mirrors `patch_creator`.
 - **Fail closed when unresolved.** No `active_creator_id` (or a missing DB file) → `Uninitialized` (HTTP 409) before any write; do not fabricate a store. The caller should bootstrap first via the Setup wizard.
 - **Never keep a global mutable pool** keyed by a config value that changes underneath it — a second creator activation would silently retarget writes.
-
-## Historical (retired Rust daemon, deleted v1.193 P2)
-
-The daemon-host pattern this doc originally recorded — a boot-held optional pool with `state.ensure_creator_pool().await` (idempotent lazy open + migrate) guarded by `state.pool_or_uninit()?`, and the "call `ensure_creator_pool().await` before pool access" rule for Tier-1 handlers — is **retired**. `ensure_creator_pool` and `pool_or_uninit` exist nowhere at HEAD; the `state`-owned pool and the Tier-1/Tier-2 middleware (`require_active_creator`) went with the daemon host. Keep the lesson (boot-without-creator is intentional; a write before bootstrap must fail closed), not the retired entry points.
 
 ## Why This Matters
 
