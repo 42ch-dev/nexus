@@ -146,21 +146,28 @@ type OperationsSchema = OperationsDoc & {
   properties?: { operations?: { default?: Operation[] } };
 };
 
-export function generateCoreSliceClient(): void {
+/**
+ * Emit `CoreSliceClient` (and its barrel re-export) under `outDir`'s `core/`
+ * subdirectory. Callers pass the staging directory so the client lands in the same
+ * tree as the schema-derived types; omitting `outDir` targets the live generated tree.
+ */
+export function generateCoreSliceClient(outDir?: string): void {
   const schemaPath = resolveFromRoot('schemas', 'core', 'core-service-operations.schema.json');
   const doc = readJSON(schemaPath) as OperationsSchema;
   const operations = doc.operations ?? doc.properties?.operations?.default;
   if (!operations?.length) {
     throw new Error(`no operations metadata in ${schemaPath}`);
   }
-  const outPath = resolveFromRoot(
-    'packages',
-    'nexus-contracts',
-    'src',
-    'generated',
-    'core',
-    'CoreSliceClient.ts',
-  );
+  const outPath = outDir
+    ? path.join(outDir, 'core', 'CoreSliceClient.ts')
+    : resolveFromRoot(
+        'packages',
+        'nexus-contracts',
+        'src',
+        'generated',
+        'core',
+        'CoreSliceClient.ts',
+      );
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
 
   const lines: string[] = [

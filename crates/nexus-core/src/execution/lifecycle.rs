@@ -481,7 +481,7 @@ impl ExecutionHandle {
     #[must_use]
     #[cfg(all(feature = "compute", any(test, feature = "test-hooks")))]
     #[doc(hidden)]
-    pub fn compute_run_recovery_error(&self) -> Option<&crate::CoreError> {
+    pub const fn compute_run_recovery_error(&self) -> Option<&crate::CoreError> {
         self.compute_run_recovery_error.as_ref()
     }
 
