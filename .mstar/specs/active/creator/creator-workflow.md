@@ -100,7 +100,7 @@ creator works status [<work_id>]    # includes current_stage + stage_status (def
 | `intake` | `creative-brief-intake` | Composite onboarding entry preset |
 | `research` | `research` | May append references to Work context |
 | `produce` | `novel-writing` | Uses `creative_brief` + `inspiration_log`; novel profile writes to `Works/<work_ref>/` per [novel-writing/workflow-profile.md](../novel-writing/workflow-profile.md) |
-| `review` | `novel-chapter-review` | Persists ≥1 finding per review pass via the supervisor terminal hook; see [novel-writing/quality-loop.md §8](../novel-writing/quality-loop.md#8-reflection-loop-output-contract-v147-shipped). |
+| `review` | `novel-chapter-review` | Persists ≥1 finding per review pass via the supervisor terminal hook; see [novel-writing/quality-loop.md §8](../novel-writing/quality-loop.md#8-reflection-loop-output-contract). |
 | `persist` | `kb-extract` (via queue) + CLI memory review | World-bound novel Works enqueue extract with `work.world_id`; worldless Works skip World promotion. See [novel-writing/workflow-profile.md §3.5.1.5](../novel-writing/workflow-profile.md). |
 
 P2 may add wiring presets or seeds only; **no** new conditional `next.kind`.
@@ -117,16 +117,16 @@ P2 may add wiring presets or seeds only; **no** new conditional `next.kind`.
 creator works inspire --note "new angle"
 ```
 
-Does **not** advance `current_stage`; merges into `inspiration_log` and schedule `core_context` per Work model.
+Does **not** advance `current_stage`; appends a `{at, note}` entry to the Work's `inspiration_log`. It creates no `core_context` version and does not touch a schedule — the appended notes are read when the preset input is built at the **next** state transition. `creator works inspire` is **refused** while the Work has an active auto-chain driver (`auto_chain_enabled` + `driver_schedule_id` → `AUTO_CHAIN_DRIVER_ACTIVE` conflict), so it cannot steer a running driver.
 
 ### 5.5 Side-input lane
 
-Insertions during an active stage driver schedule **must not** fork or cancel the driver schedule:
+Side input never forks or cancels an active stage driver schedule — but the inspiration surfaces below are **refused** while one is running, not merged into it:
 
 | Insertion | Behavior |
 | --- | --- |
-| `creator works inspire --note` | Appends `inspiration_log`; visible in `creator works status`; merged into prompt context at **next** preset state transition |
-| `nexus.work.patch` (agent) | Same append-only inspiration surface per agent-nexus-tool-bridge |
+| `creator works inspire --note` | Refused while the Work has an active auto-chain driver (`AUTO_CHAIN_DRIVER_ACTIVE`); otherwise appends `inspiration_log` only — no `core_context` version, no schedule write; visible in `creator works status`; read when preset input is built at the **next** preset state transition |
+| `nexus.work.patch` (agent) | Same `append_work_inspiration` surface, so the same active-driver refusal; blocked under completion-lock per agent-nexus-tool-bridge |
 | Research stage side effects | KB/reference artifacts written during the chain; consumed by downstream produce/review via existing assembly (P0.5) |
 
 Invariant: at most one active FL-E stage driver schedule per Work is enforced.
@@ -152,7 +152,7 @@ Wire contract: `schemas/daemon-api/memory/memory-fragment-info.schema.json` exte
 | Conditional routing | **Not** used for stage selection (DF-56) |
 | Novel project init | Separate preset `novel-project-init` (DF-58); **not** part of the `novel-writing` chain |
 | Novel completion | Work `status == completed` stops further `novel-writing`; `mark_work_completed` per [novel-writing/multi-work-lifecycle.md](../novel-writing/multi-work-lifecycle.md) |
-| Completion-lock | While `.completion-lock.json` exists, stage drivers **must not** tick that Work; after release, the same `work_id` may resume via `works reopen` |
+| Completion-lock | While `.completion-lock.json` exists, stage drivers **must not** tick that Work; `creator works reopen` releases the lock but leaves `works.status = completed` and does not re-enable auto-chain ([multi-work-lifecycle.md §3.3](../novel-writing/multi-work-lifecycle.md#33-reopen-completion-lock-release)) |
 | Runtime lock | `works.runtime_lock_holder` blocks concurrent mutating CLI/API on same Work |
 | Multi-Work concurrency | Multiple Works may run stage drivers concurrently; pool `active` is CLI default only (DF-60/61) |
 | Selection pool | `creator works pool` + `works use` via [novel-writing/work-pool.md](../novel-writing/work-pool.md); not a Work profile (DF-61) |

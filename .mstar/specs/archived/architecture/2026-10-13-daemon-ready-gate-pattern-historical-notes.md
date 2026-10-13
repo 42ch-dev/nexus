@@ -198,3 +198,45 @@ V1.101 P0 closed `R-V1100P0SMOKE-AGENT-SCAN`: macOS GUI-launched daemons often i
 
 Distilled from V1.97 (the v2 host; retired in v1.192). The v2 sidecar resolution rule confirmed against the host's sidecar docs ("expects only the filename of the sidecar, not its full path"). Iteration-scoped invariants + prototype intake rule: `sidecar-startup-state-machine.md` (snapshot; durable rules promoted here). **Rule 13 distilled from V1.100 P0** . **Rule 14 distilled from V1.101 P0** . **Rule 15 distilled from V1.105** P0–P2 (`DaemonLaunchGate`, D2 always-start, Agent→Workspace→Done, portrait shell).
 ```
+
+---
+
+## Post-freeze increment — Greptile review round 1 (PR #412, 2026-10-13)
+
+Removed from the live document after the freeze above, in the same plan's Greptile fix wave. These units describe the retired Rust supervisor (`start_with_budget`, `probe_port_state`, the `_rx` / `command.spawn()` stderr drain); the live document now describes the shipped `DesktopServiceController` owner probe and its `utility-crashed` diagnostic. Nothing here is current authority.
+
+### Removed block 1 — three-valued port-probe gate (verbatim)
+
+```markdown
+## Three-valued port-probe gate (FB-D1)
+
+`start_with_budget` runs a **three-valued TCP gate** before the HTTP probe, so a cold start where no daemon is running skips the HTTP round-trip:
+
+| `probe_port_state(port)` | Meaning | Action |
+|--------------------------|---------|--------|
+| `Free` | TCP connect refused fast (port unused) | **Skip** HTTP probe; spawn immediately |
+| `Occupied` | TCP connect succeeded (something listens) | HTTP `probe_health` → attach (`owned=false`) or port-conflict error |
+| `Unknown` | Timeout / inconclusive (≤150ms gate) | HTTP `probe_health` → attach or spawn (safe fallback) |
+
+**Critical invariant preserved:** `Occupied`/`Unknown` always run the HTTP probe, so the attach-without-ownership path for an independently started service is intact. Only the `Free` cold-start case skips the HTTP round-trip — dropping the felt latency from "up to 2s probe" to "<50ms TCP gate".
+
+**Two-phase poll:** `wait_for_first_health` now polls at 100ms for the first 1s (fast ready-detection), then 250ms (steady). Global `HEALTH_POLL_INTERVAL` unchanged.
+
+**Unit-test boundary:** do NOT spawn the real `nexus42` binary in `#[cfg(test)]` — it hangs (the daemon needs DB/runtime resources unavailable in the test env). Test `probe_port_state` + timing directly; the full `start_with_budget` spawn path is integration territory.
+```
+
+### Removed block 2 — anti-pattern bullet (verbatim, from the `## Anti-patterns` list)
+
+```markdown
+- ❌ **Discarding the supervised process's stderr** (the daemon's real crash reason is never captured; the wizard shows a generic "Daemon did not start" message).
+```
+
+### Removed block 3 — stderr-drain rule (verbatim)
+
+```markdown
+### Rule 8: capture the supervised process's stderr (bounded tail)
+
+When the daemon fails to start, `DaemonStatus.detail` must carry more than generic `DesktopServiceController` messages ("Daemon did not start. Check the logs or try restarting.") — the **real** crash reason (SQLite migration mismatch, missing config, port bind failure, binary missing) is written to the service's stderr, so the `_rx` event receiver from `command.spawn()` must not be discarded.
+
+**Pattern**: spawn a bounded async task that drains the `_rx` receiver, accumulates a tail capped at ~2 KiB (nearest newline boundary — keep the tail, drop the head), and appends it verbatim to `DaemonStatus.detail` on the Error transition. Keep the generic message as fallback when stderr is empty. Run the drain concurrently with `wait_for_first_health` — do NOT block the spawn path. The consumer renders `detail` with `whitespace-pre-wrap` so the multi-line stderr survives the browser's default `white-space: normal` collapse.
+```

@@ -71,25 +71,25 @@ The naive implementation would create two independent health-probe polls or two 
 - ❌ Polling `GET /v1/daemon/runtime/health` from the SPA (duplicates `DesktopServiceController`'s own probe).
 - ❌ Two consumers calling `start_daemon()` independently (budget-reset semantics differ; can mask crash loops).
 
-## Three-valued port-probe gate (FB-D1)
+## Owner probe: attach by identity, else spawn
 
-`start_with_budget` runs a **three-valued TCP gate** before the HTTP probe, so a cold start where no daemon is running skips the HTTP round-trip:
+`DesktopServiceController.startLocked` never probes the port's TCP state. Before spawning it calls `probeOwner()`, which decides from the service's own published identity, and forks the utility only when no service can be proven:
 
-| `probe_port_state(port)` | Meaning | Action |
-|--------------------------|---------|--------|
-| `Free` | TCP connect refused fast (port unused) | **Skip** HTTP probe; spawn immediately |
-| `Occupied` | TCP connect succeeded (something listens) | HTTP `probe_health` → attach (`owned=false`) or port-conflict error |
-| `Unknown` | Timeout / inconclusive (≤150ms gate) | HTTP `probe_health` → attach or spawn (safe fallback) |
+| `probeOwner()` outcome | Evidence | Action |
+|------------------------|----------|--------|
+| `attached` | `~/.nexus42/run/service.json` names this session's home and loopback origin, and that endpoint answers the guarded `GET /v1/daemon/runtime/discovery` with a matching identity plus `GET /v1/daemon/runtime/health` `status: "ok"` | `state: running`, held as `attached` (no owned child), `detail: 'attached to an independent service'` |
+| `conflict` | a record from another home or naming another endpoint, or a listener that answers HTTP without proving matching discovery | `state: error` with the conflict `detail`; the start throws — a foreign listener is never adopted, and is never killed by pid |
+| `none` | no record and no HTTP answer on this session's origin | `startOwned()` forks the utility and waits for its readiness report |
 
-**Critical invariant preserved:** `Occupied`/`Unknown` always run the HTTP probe, so the attach-without-ownership path for an independently started service is intact. Only the `Free` cold-start case skips the HTTP round-trip — dropping the felt latency from "up to 2s probe" to "<50ms TCP gate".
+**Spawn path:** `startOwned` forks the utility (`utilityProcess.fork(..., { stdio: 'ignore' })`), posts the `start` request with the trusted home/host/port, and waits up to `READINESS_DEADLINE_MS` (15s) for the owner's `service-ready` discovery frame. The reply, the published record and the ready instance must agree on instance, home and endpoint; the controller then re-proves authenticated discovery + health (`confirmIdentity`) before it sets `owned` and reports `running`. A cold start forks and waits — there is no TCP gate that skips a probe.
 
-**Two-phase poll:** `wait_for_first_health` now polls at 100ms for the first 1s (fast ready-detection), then 250ms (steady). Global `HEALTH_POLL_INTERVAL` unchanged.
+**Probe cadence:** `confirmIdentity` re-probes at `PROBE_FAST_INTERVAL_MS` (100ms) for the first `PROBE_FAST_WINDOW_MS` (1s), then `PROBE_SLOW_INTERVAL_MS` (250ms); every request is bounded by `PROBE_REQUEST_TIMEOUT_MS` (2s) inside the 15s deadline.
 
-**Unit-test boundary:** do NOT spawn the real `nexus42` binary in `#[cfg(test)]` — it hangs (the daemon needs DB/runtime resources unavailable in the test env). Test `probe_port_state` + timing directly; the full `start_with_budget` spawn path is integration territory.
+**Test boundary:** drive the controller through its injected seams — `spawnUtility` (a fake `UtilityChildProcess`) and `ControllerClock` — rather than starting a real service; the real fork path is integration territory.
 - ❌ Treating `starting` as "ready" (health probe may still fail; main UI would render against an unreachable daemon).
 - ❌ **Subscribing without a mount-time state probe** (the daemon may have already transitioned before the SPA subscribed; the event is lost; the UI hangs forever). See "Late-subscription race + diagnostic surfacing" below.
 - ❌ **Leaving a state-enum branch implicit** (a missing `'starting'` branch → callback silent → no state update → UI stuck). Every state must have an explicit branch.
-- ❌ **Discarding the supervised process's stderr** (the daemon's real crash reason is never captured; the wizard shows a generic "Daemon did not start" message).
+- ❌ **Discarding the owner's crash diagnostic** (the real failure reason never reaches `detail`; the wizard shows a generic "Daemon did not start" message).
 
 ## Late-subscription race + diagnostic surfacing
 
@@ -127,11 +127,11 @@ A consumer that subscribes and waits can hang forever if no terminal event arriv
 
 **Pattern**: `setTimeout(() => { re-probe getDaemonStatus(); if still non-terminal → surface "taking longer than expected" }, 25_000)`. The re-probe before declaring timeout avoids misreporting when the process silently transitioned between mount-probe and timeout fire. Clear the timeout in the effect cleanup.
 
-### Rule 8: capture the supervised process's stderr (bounded tail)
+### Rule 8: carry the owner's own crash diagnostic into `detail`
 
-When the daemon fails to start, `DaemonStatus.detail` must carry more than generic `DesktopServiceController` messages ("Daemon did not start. Check the logs or try restarting.") — the **real** crash reason (SQLite migration mismatch, missing config, port bind failure, binary missing) is written to the service's stderr, so the `_rx` event receiver from `command.spawn()` must not be discarded.
+When the service fails, `DaemonStatus.detail` must carry more than a generic `DesktopServiceController` message ("Daemon did not start. Check the logs or try restarting."). The owner reports its own pre-exit diagnostic as the typed `utility-crashed` frame (`utility-host.ts` `reportCrash`, hooked to `uncaughtException` / `unhandledRejection`); `onChildMessage` retains it as `crashDetail` (capped at 512 chars) and `scheduleRecovery` folds it into the recovery `detail` as `<reason>: <crashDetail>`. The controller does not read the child's stderr — `utilityProcess.fork` is called with `stdio: 'ignore'`.
 
-**Pattern**: spawn a bounded async task that drains the `_rx` receiver, accumulates a tail capped at ~2 KiB (nearest newline boundary — keep the tail, drop the head), and appends it verbatim to `DaemonStatus.detail` on the Error transition. Keep the generic message as fallback when stderr is empty. Run the drain concurrently with `wait_for_first_health` — do NOT block the spawn path. The consumer renders `detail` with `whitespace-pre-wrap` so the multi-line stderr survives the browser's default `white-space: normal` collapse.
+**Pattern**: surface `detail` verbatim on the `degraded`/`stopped` transitions these diagnostics ride on, and keep the generic message as the fallback when the owner reported nothing. The consumer renders `detail` with `whitespace-pre-wrap` so a multi-line owner message survives the browser's default `white-space: normal` collapse.
 
 ### Why these four rules compound
 

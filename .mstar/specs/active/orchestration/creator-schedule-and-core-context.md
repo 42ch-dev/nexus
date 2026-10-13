@@ -314,18 +314,17 @@ preset:
 
 ## 9. HTTP Surface (`/v1/daemon/orchestration/schedules*`)
 
-The endpoints (control surface served by [`apps/nexus-service`](../../../../apps/nexus-service/src/execution.ts) over `nexus-core`):
+The served endpoints (control surface served by [`apps/nexus-service`](../../../../apps/nexus-service/src/execution.ts) over `nexus-core`; `EXECUTION_ROUTES` in that module is the exact served set):
 
 | Method | Path                                                                  | Purpose                                                     |
 | ------ | --------------------------------------------------------------------- | ----------------------------------------------------------- |
 | GET    | `/v1/daemon/orchestration/schedules`                                   | List Schedules; filters `?creator_id=`, `?status=`, `?sort=`, `?cursor=`, `?limit=` |
-| GET    | `/v1/daemon/orchestration/schedules/{schedule_id}`                     | Schedule detail + current core_context preview             |
+| GET    | `/v1/daemon/orchestration/schedules/{schedule_id}`                     | Schedule detail (`schedule` summary + `depends_on` + `concurrency_kind`) |
 | POST   | `/v1/daemon/orchestration/schedules`                                   | Add Schedule                                                |
 | PATCH  | `/v1/daemon/orchestration/schedules/{schedule_id}/core-context`        | Apply `EditOp` (user edit)                                  |
-| POST   | `/v1/daemon/orchestration/schedules/{schedule_id}/signal`              | `{signal: pause\|resume\|cancel\|continue}`                 |
-| GET    | `/v1/daemon/orchestration/schedules/{schedule_id}/core-context`        | Current core_context content                                |
-| GET    | `/v1/daemon/orchestration/schedules/{schedule_id}/core-context-history`| Full derivation trace (meta by default, content with flag)  |
-| DELETE | `/v1/daemon/orchestration/schedules/{schedule_id}`                     | Remove Schedule (if terminal)                               |
+| POST   | `/v1/daemon/orchestration/schedules/{schedule_id}/signal`              | `{signal: pause\|resume\|cancel}`                           |
+
+**Not served:** `GET .../{schedule_id}/core-context`, `GET .../{schedule_id}/core-context-history`, `DELETE .../{schedule_id}` and the schedule label mutation are not routed; they keep the truthful `501 route_not_migrated` refusal (`apps/nexus-service/src/server.ts`) rather than a degraded fake. The signal route does not serve `start` / `advance` / `continue` either — the core signal seam refuses them as `InvalidInput` (`crates/nexus-core/src/execution/handle_ops.rs`), and no other served route accepts them. A successful signal returns `{schedule_id, status, current_wait_id?}`.
 
 Per [schemas-external-consumer-boundary.md](../architecture/schemas-external-consumer-boundary.md) §2, these request/response types are **local** (platform never observes them). Request/response Rust types live in `crates/nexus-contracts/src/local/schedule/http.rs` — hand-written, no JSON Schema file.
 

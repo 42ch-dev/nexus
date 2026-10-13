@@ -7,7 +7,7 @@
 
 保留的本地表面：`creator demo-seed`、`creator world event-add`、chronology `set|show|advance`、Work/pool inspiration、holder-governed Character CRUD/bindings/knowledge/memory/ToM、reading 与 directives。`creator kb --scope world`、World create `--name`、`system preset`、隐藏顶层 `sync`、`preset validate --offline` 均不存在；canonical 拼写是 World KB、`--title`、`preset`、`platform sync`、positional `preset validate <path>`。无 no-op alias。Graph/entity patch 保留 `--expected-version`；Character edits 保留显式 revision CAS。
 
-Ordinary CLI 使用默认 `cli` cohort；可选 `connect-host` 独立。Connect runtime 保留 scoped compute/WASM 与共享 module cache，无 ACP/agent-host、scheduler startup、HTTP/SPA 或 Node。Core Model B/MCP libraries 保留；无 TS launcher 替代已删除的 Model A child descriptor。见 [rust-core-service-boundary.md](../architecture/rust-core-service-boundary.md) §4.2 的依赖与生命周期合同。
+Ordinary CLI 使用默认 `cli` cohort；可选 `connect-host` 独立。Connect runtime 保留 scoped compute/WASM 与共享 module cache，无 ACP/agent-host、scheduler startup、HTTP/SPA 或 Node。Core Model B/MCP libraries 保留；无 TS launcher 替代已删除的 Model A child descriptor。见 [rust-core-service-boundary.md](../architecture/rust-core-service-boundary.md) §3.2 的依赖与生命周期合同。
 
 ## 0. 文档定位
 
@@ -41,7 +41,7 @@ Ordinary CLI 使用默认 `cli` cohort；可选 `connect-host` 独立。Connect 
 ### 0.1 品牌、CLI 名称与版本节奏
 
 - **产品名**：对外统一为 **Nexus**。
-- **CLI 可执行名**：**`nexus42`**（与 **42ch / Creative Hub** 品牌同源；下文命令示例一律使用 `nexus42`）。无本地 daemon single-binary runtime mode（无 `nexus42 daemon start` / hidden `daemon-run`）；不引入第二个 CLI 产品二进制（`nexus-runtime` 仍是同一 `nexus42` crate 的独立 Connect-host 二进制，见 [rust-core-service-boundary.md](../architecture/rust-core-service-boundary.md) §4.1–§4.2；[daemon-runtime.md](../../archived/runtime/2026-09-21-daemon-runtime.md) 为退役宿主记录）；Electron/TS 持有长期运行的服务进程。
+- **CLI 可执行名**：**`nexus42`**（与 **42ch / Creative Hub** 品牌同源；下文命令示例一律使用 `nexus42`）。无本地 daemon single-binary runtime mode（无 `nexus42 daemon start` / hidden `daemon-run`）；不引入第二个 CLI 产品二进制（`nexus-runtime` 仍是同一 `nexus42` crate 的独立 Connect-host 二进制，见 [rust-core-service-boundary.md](../architecture/rust-core-service-boundary.md) §3.1–§3.2；[daemon-runtime.md](../../archived/runtime/2026-09-21-daemon-runtime.md) 为退役宿主记录）；Electron/TS 持有长期运行的服务进程。
 - **`v1-notes/ideas/` 与 `v1-notes/` 的扩展需求**：视为路线图输入。CLI 必须保证：**协议与 schema 的可扩展字段**、保留的 `/v1/daemon/*` wire 家族（由 TS 服务提供，见 §6.7）/ ACP 能力面的**演进位**、以及已写入合同的能力（如 **`research.*` 等 ACP 能力名**、context assembly、`manuscript_phase` 等）的**最小可用实现或安全默认（no-op）**，避免把后续实现空间钉死。
 
 ### 0.2 V2 重定位（pre-release）
@@ -181,7 +181,7 @@ CLI 不默认同步：
 - 顶层命令尽量面向用户意图，而不是内部模块
 - 关键命令必须稳定、可脚本化
 
-**Command-surface lock:** the visible top-level command groups are `creator` / `acp` / `platform` / `system` (plus feature-gated `connect`). Hidden retained groups are `preset`, `compute`, `capability`, `ops` and `desktop`; a leaf inside a retained group stays only with a complete direct core, cloud or Connect operation. There are no top-level `nexus42 sync` or `system preset` aliases, and no dormant stubs or compatibility spellings. Authority for *which leaf stays* is the retain/remove rules in [rust-core-service-boundary.md](../architecture/rust-core-service-boundary.md) §7.
+**Command-surface lock:** the visible top-level command groups are `creator` / `acp` / `platform` / `system` (plus feature-gated `connect`). Hidden retained groups are `preset`, `compute`, `capability`, `ops` and `desktop`; a leaf inside a retained group stays only with a complete direct core, cloud or Connect operation. There are no top-level `nexus42 sync` or `system preset` aliases, and no dormant stubs or compatibility spellings. Authority for *which leaf stays* is the retain/remove rules in [rust-core-service-boundary.md](../architecture/rust-core-service-boundary.md) §6.
 
 
 ### 6.0A 与 Platform Creator 三层标识兼容约束（V2 权威约束）

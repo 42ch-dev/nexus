@@ -2,5 +2,5 @@
 -- Zero active Rust consumers since V1.159 T3 (confirmed by audit).
 -- The cloud-sync `outbox_entries` table (behind `legacy-sync` feature flag)
 -- is a separate schema and is NOT affected by this migration.
--- See .mstar/specs/active/runtime/outbox-consolidation.md §6.
+-- See .mstar/specs/outbox-consolidation.md §6.
 DROP TABLE IF EXISTS outbox;
