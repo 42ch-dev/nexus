@@ -2,7 +2,7 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Shipped — V1.65 chapter surface; V1.75 retired whole-document outline PUT in favor of the canvas patch route |
+| **Status** | Shipped — chapter content surface; whole-document outline PUT route is retired in favor of the canvas patch route |
 | **Document class** | Feature line |
 | **Scope** | Chapter list/detail, outline read, structure PATCH, and body read-only Daemon API contracts under `/v1/daemon/works/{work_id}/chapters/*` |
 | **Coordinates with** | [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md), [daemon-runtime.md](../../archived/runtime/2026-09-21-daemon-runtime.md) (historical host record), [schemas-directory-layout.md](../architecture/schemas-directory-layout.md), [web-ui.md](../surfaces/web-ui.md), repo-root [`DESIGN.md`](../../../../DESIGN.md) |
@@ -12,16 +12,18 @@
 
 ## 1. Purpose and boundary
 
-V1.65 exposes the existing `work_chapters` metadata and file-backed chapter content to the bundled local Web UI so authors can plan and restructure a Work without turning the browser SPA into a manuscript co-writer.
+This surface exposes the existing `work_chapters` metadata and file-backed
+chapter content to the bundled local Web UI so authors can plan and restructure
+a Work without turning the browser SPA into a manuscript co-writer.
 
 Route and schema names in this document are current. Conditional “P0” wording
-inside DTO/implementation discussions is retained as V1.65 design history and
-does not override the shipped source or schema tree.
+inside DTO/implementation discussions does not override the shipped source or
+schema tree.
 
 The surface is intentionally split:
 
-- **Structure and outline are writable** in V1.65.
-- **Body markdown is read-only** — the AI owns prose writing via orchestration through the host-tool path; there is **no manual body editor** (the body-editor direction was rejected 2026-06-26 — Nexus is an AI-autonomous executor; see [canvas-strategy-surface.md](../surfaces/canvas-strategy-surface.md)). Any future human body interaction is a V1.68 canvas concern (structured/node-granular, no-raw-file-editing), not a per-chapter manual write route.
+- **Structure and outline are writable.**
+- **Body markdown is read-only** — the AI owns prose writing via orchestration through the host-tool path; there is **no manual body editor** (Nexus is an AI-autonomous executor; see [canvas-strategy-surface.md](../surfaces/canvas-strategy-surface.md)). Any future human body interaction is a canvas concern (structured/node-granular, no-raw-file-editing), not a per-chapter manual write route.
 - All routes stay under the Daemon API and are consumed through the frontend `NexusClient` interface; no browser-only filesystem assumptions are part of the contract.
 
 ## 2. Existing implementation facts this contract builds on
@@ -41,11 +43,10 @@ All endpoints use the Daemon API error convention: non-2xx responses are emitted
 | `GET` | `/v1/daemon/works/{work_id}/chapters` | Cursor-paginated chapter summaries | No | No |
 | `GET` | `/v1/daemon/works/{work_id}/chapters/{n}` | Chapter detail including paths | No | No |
 | `GET` | `/v1/daemon/works/{work_id}/chapters/{n}/outline` | Read outline markdown | No | No |
-| ~~`PUT`~~ | ~~`/v1/local/works/{work_id}/chapters/{n}/outline`~~ | **Removed in V1.75** (historical route spelling; canvas pivot). Outline prose writes now go through `POST /v1/daemon/works/{work_id}/chapters/{chapter_id}/patch` with `set.content` + `base_revision` (`outline_revision` CAS). See [canvas-strategy-surface.md](../surfaces/canvas-strategy-surface.md) §3.5. | — | — |
 | `PATCH` | `/v1/daemon/works/{work_id}/chapters/{n}` | Structure metadata update | No | Yes |
 | `GET` | `/v1/daemon/works/{work_id}/chapters/{n}/body` | Read body markdown | No | No |
 
-`{n}` is the chapter number within a volume. V1.65 MUST support `volume` as an optional query parameter on detail/content/patch routes; when omitted it defaults to `1` to preserve existing single-volume behavior.
+`{n}` is the chapter number within a volume. Detail/content/patch routes MUST support `volume` as an optional query parameter; when omitted it defaults to `1` to preserve single-volume behavior.
 
 ## 4. Common query and DTO rules
 
@@ -61,7 +62,7 @@ All endpoints use the Daemon API error convention: non-2xx responses are emitted
 
 ### 4.2 Chapter status enum
 
-V1.65 uses the existing chapter status vocabulary:
+The chapter status vocabulary is:
 
 ```text
 not_started | outlined | draft | finalized | published
@@ -98,7 +99,7 @@ If P0 decides not to add a `title` column to `work_chapters` in V1.65, `title` M
 | --- | --- | --- | --- |
 | `can_edit_outline` | boolean | yes | True for existing chapter rows with an in-bounds outline path or initializable outline path. |
 | `can_edit_structure` | boolean | yes | False only if Work/chapter policy blocks all structural edits. |
-| `body_read_only` | boolean | yes | Always `true` in V1.65. |
+| `body_read_only` | boolean | yes | Always `true`. |
 | `protection` | object | yes | See finalized/published policy below. |
 
 Suggested `protection` shape:
@@ -120,7 +121,7 @@ Query:
 | --- | --- | --- | --- |
 | `cursor` | string | absent | Opaque cursor; clients MUST NOT parse. |
 | `limit` | integer | `50` | Handler-bounded. |
-| `status` | chapter status | absent | Optional filter; recommended for P2 table filtering. |
+| `status` | chapter status | absent | Optional filter for table filtering. |
 
 Response schema: `schemas/daemon-api/works/chapters/list-chapters-response.schema.json`.
 
@@ -201,11 +202,7 @@ Rules:
 - Before reading, resolve the path inside the workspace root and apply the W-002 path guard described in §7.
 - Missing but in-bounds files return a typed file-read/not-found error; path traversal returns validation failure.
 
-### 5.4 `PUT /v1/local/works/{work_id}/chapters/{n}/outline` — removed in V1.75
-
-**Removed in V1.75** (canvas-pivot). The historical V1.65 whole-document outline PUT route, its `put-chapter-outline-request` DTO, and schema file were retired; outline prose writes now go through the canvas patch route `POST /v1/daemon/works/{work_id}/chapters/{chapter_id}/patch` with `set.content` + `base_revision` (`outline_revision` CAS). The atomic-write / RuntimeLockGuard / body-ownership invariants that this section used to describe are re-anchored to that PATCH content path in [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md) §6.2 and §7 (V1.75 amendment); see also [canvas-strategy-surface.md](../surfaces/canvas-strategy-surface.md) §3.5. The outline *read* (`GET …/outline`, §5.3) is unchanged.
-
-### 5.5 `PATCH /v1/daemon/works/{work_id}/chapters/{n}`
+### 5.4 `PATCH /v1/daemon/works/{work_id}/chapters/{n}`
 
 Query:
 
@@ -255,7 +252,7 @@ Protection rules:
 - Structural edits to `published` chapters are hard-blocked in V1.65.
 - Edits to `draft` chapters are allowed but should surface a warning in UI because the body may already exist.
 
-### 5.6 `GET /v1/daemon/works/{work_id}/chapters/{n}/body`
+### 5.5 `GET /v1/daemon/works/{work_id}/chapters/{n}/body`
 
 Query:
 
@@ -282,7 +279,7 @@ Response schema: `schemas/daemon-api/works/chapters/chapter-body.schema.json`.
 
 Rules:
 
-- Body is read-only in V1.65: no PUT/PATCH body route is introduced.
+- Body is read-only: no PUT/PATCH body route exists.
 - `body_path` is DB-sourced and path-guarded exactly like outline reads.
 - API may return raw markdown content plus parsed frontmatter metadata for UI rendering. If P0 does not parse frontmatter, `frontmatter` may be omitted from schema v1; the UI can parse client-side. The read-only flag remains required.
 
@@ -292,8 +289,8 @@ Rules:
 
 Rationale:
 
-1. It preserves V1.64 UI behavior where omitted profile values continue to let the daemon apply its default/profile inference.
-2. It lets the V1.65 UI select a profile explicitly without forcing every existing consumer to send the field.
+1. It preserves existing UI behavior where omitted profile values let the daemon apply its default/profile inference.
+2. It lets the Web UI select a profile explicitly without forcing every existing consumer to send the field.
 3. It avoids a gratuitous breaking schema change even though the repository is pre-1.0 and could tolerate one.
 4. It keeps the P0 backend change small: validate the field when present; default when absent.
 
@@ -314,7 +311,7 @@ Algorithm:
 
 This uses the W-002 defense-in-depth authority in `crates/nexus-core/src/content.rs` (`resolve_guarded_path` / `resolve_guarded_path_async`), including guarded resolution for outline writes where the target may not exist yet.
 
-## 8. Host-agnostic frontend boundary (V1.65 title: "native-desktop-ready frontend boundary" — the native host was retired in v1.192)
+## 8. Host-agnostic frontend boundary
 
 The Web UI must consume this surface through `NexusClient` methods such as:
 
@@ -326,7 +323,7 @@ patchChapter(workId, chapter, patch, query)
 getChapterBody(workId, chapter, query)
 ```
 
-The contract deliberately returns markdown strings and relative workspace paths; it does not require browser filesystem access. Browser-only APIs such as clipboard writes are UI affordances around `Copy path`, not transport semantics. The V1.66 plan implemented `DesktopClient` with the same method signatures plus native `open with` / `reveal` affordances outside this API (historical: the native shell was retired in v1.192; the desktop host is Electron, which consumes this surface through the same `NexusClient` boundary).
+The contract deliberately returns markdown strings and relative workspace paths; it does not require browser filesystem access. Browser-only APIs such as clipboard writes are UI affordances around `Copy path`, not transport semantics. The desktop host is Electron, which consumes this surface through the same `NexusClient` boundary; native `open with` / `reveal` affordances stay outside this API.
 
 ## 9. Schema placement
 

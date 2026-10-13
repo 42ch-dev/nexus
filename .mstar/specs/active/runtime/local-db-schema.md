@@ -2,11 +2,7 @@
 
 **Status**: Normative  
 **Document class**: Master  
-**V1.40 Shipped amendments:** §4.1.2 `kb_key_blocks` validation intent — application-layer validation in `nexus-kb::validation` module (ValidationMode::Novel enforces `body.attributes.novel_category`); `narrative_worlds` rows via `creator world create` (V1.40 P0); `kb_extract_jobs` artifact locator columns (`source_kind`, `source_locator`, `profile_hint`, `work_id`) added V1.40 P3.  
-**V1.42 Draft amendment:** `work_chapters` PK migration — composite primary key `(work_id, volume, chapter)` with `volume INTEGER NOT NULL DEFAULT 1`; backfill existing rows `volume = 1`; drop legacy `(work_id, chapter)` PK. Normative detail: [novel-writing/workflow-profile.md §4.5.4](../novel-writing/workflow-profile.md).   
-**V1.139 architect §5.2 amendment:** §4.1.2 `kb_key_blocks` — `extensions_nexus_json TEXT` column (additive migration) for spoke `extensions.nexus` round-trip preservation. Existing columns (`world_id`, `created_from_command_id`, `source_work_id`, `source_chapter`, `source_provenance_kind`) retained for query efficiency. Full contract: [`spoke-adapter-architecture.md`](../architecture/spoke-adapter-architecture.md) §2.3.  
-**Last updated**: 2026-09-19 — v1.191 P1: holder registry, native governance columns and knowledge revisions (schema 23 → 24).
-**v1.191 P1 amendment (shipped):** [holder-governance.md §§2–6](../architecture/holder-governance.md#2-registry-identity-stability-and-lifecycle) owns the workspace holder registry (`knowledge_holders`), the native KE governance columns (`holder_entry_id` / `disclosure` on `kb_key_blocks`), the World/Character `knowledge_revision` columns, the isolated import quarantine (`knowledge_import_quarantine`), the guarded offline migration and rollback. The ordered migration `20260918000001_holder_registry.sql` raises the schema version 23 → 24; the legacy `creator_only` column and the `extensions.nexus.creator_only` key are removed from every runtime path and refused on input. Actor narrative ownership remains the existing three-container model; no fake World lore rows or parallel holder database are introduced.
+**Last updated**: 2026-09-19 — schema version 24 (workspace holder registry, native governance columns, and knowledge revisions).
 
 ## 0. 文档定位
 
@@ -103,13 +99,13 @@ Required V1.26 columns:
 
 New code MUST write canonical body text to `content_path` on disk instead of `content`. Listing references MUST be satisfiable from registry metadata without reading full body text.
 
-**DF-43 ownership boundary (V1.55 P0)**: `nexus-local-db` is the sole production persistence owner for reference sources. The `nexus-knowledge` crate provides domain types (`ReferenceSource`), traits (`KnowledgeStore`), and adapter seams (`From<ReferenceSourceRow> for nexus_knowledge::ReferenceSource` in `nexus-local-db/src/reference_source.rs`) — it does **not** introduce its own SQLite/file-backed truth source. All production DB writes go through `nexus-local-db` DAO functions (`register`, `list`, `get_by_id`).
+**DF-43 ownership boundary**: `nexus-local-db` is the sole production persistence owner for reference sources. The `nexus-knowledge` crate provides domain types (`ReferenceSource`), traits (`KnowledgeStore`), and adapter seams (`From<ReferenceSourceRow> for nexus_knowledge::ReferenceSource` in `nexus-local-db/src/reference_source.rs`) — it does **not** introduce its own SQLite/file-backed truth source. All production DB writes go through `nexus-local-db` DAO functions (`register`, `list`, `get_by_id`).
 
-#### 4.1.2 Narrative + World KB persistence (V1.26 draft)
+#### 4.1.2 Narrative + World KB persistence
 
-These tables live in the same workspace `state.db` as `reference_sources` and support the V1.26 persistent `NarrativeGateway` and `KbStore` adapters. Domain semantics remain owned by `nexus-narrative` and `nexus-kb`; `nexus-local-db` owns migration ordering and SQLite mechanics.
+These tables live in the same workspace `state.db` as `reference_sources` and support the persistent `NarrativeGateway` and `KbStore` adapters. Domain semantics remain owned by `nexus-narrative` and `nexus-kb`; `nexus-local-db` owns migration ordering and SQLite mechanics.
 
-**V1.40 P1 migration intent** (): add validation for narrative `block_type` vocabulary (`foundation`, `background`, `character`, `location`, `society`, `rules`, `economy`) on `kb_key_blocks.block_type` — via CHECK constraint, application-layer enum, or companion lookup table. Minimum `body_json` shape per category is enforced in `nexus-kb`, not in raw SQL. **V1.40 P1 shipped**: application-layer validation in `nexus-kb::validation` module; `ValidationMode::Novel` enforces `body.attributes.novel_category` on insert/update. **V1.40 P0** may add `narrative_worlds` rows via `creator world create` without altering `kb_key_blocks` DDL beyond existing indexes.
+The narrative `block_type` vocabulary (`foundation`, `background`, `character`, `location`, `society`, `rules`, `economy`) on `kb_key_blocks.block_type` is validated at the application layer in the `nexus-kb::validation` module; `ValidationMode::Novel` enforces `body.attributes.novel_category` on insert/update. Minimum `body_json` shape per category is enforced in `nexus-kb`, not in raw SQL. `narrative_worlds` rows are added via `creator world create` without altering `kb_key_blocks` DDL beyond existing indexes.
 
 `workspace_id` is retained on `narrative_worlds` as the logical workspace binding. The current local schema has no `workspaces` catalog table, so this draft does **not** add a physical workspace FK. If a workspace catalog is introduced later, `narrative_worlds.workspace_id` should become the FK target without changing child table ownership.
 
@@ -181,11 +177,11 @@ CREATE TABLE IF NOT EXISTS kb_key_blocks (
     created_from_command_id TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT,
-    -- V1.52 provenance columns (V1.139 V1.52 amendment: retained for query efficiency)
+    -- provenance columns (retained for query efficiency)
     source_work_id TEXT,
     source_chapter INTEGER,
     source_provenance_kind TEXT,
-    -- V1.139: spoke extensions.nexus round-trip preservation (see spoke-adapter-architecture.md §2.3)
+    -- spoke extensions.nexus round-trip preservation (see spoke-adapter-architecture.md §2.3)
     extensions_nexus_json TEXT,
     FOREIGN KEY (world_id) REFERENCES narrative_worlds (world_id) ON DELETE CASCADE
 );
@@ -215,7 +211,7 @@ CREATE INDEX IF NOT EXISTS idx_kb_source_anchors_key_block_id
     ON kb_source_anchors (key_block_id);
 ```
 
-#### 4.1.3 Knowledge entries persistence (V1.27)
+#### 4.1.3 Knowledge entries persistence
 
 `knowledge_entries` stores user-scoped knowledge for the `User Knowledge` domain in Moment context assembly. Each entry belongs to a single user and carries a JSON tags array for filtering.
 
@@ -256,23 +252,23 @@ Column notes:
 - `kb_source_anchors` is required because `KbStore::attach_source_anchor` permits multiple anchors per KeyBlock; `kb_key_blocks.source_anchor_json` remains the optional embedded `KeyBlock.source_anchor` value.
 - The partial unique index on `kb_key_blocks` implements the existing active uniqueness rule: one active `(world_id, canonical_name, block_type)` tuple, while `deleted`, `merged`, and `deprecated` rows no longer block replacement.
 
-**V1.139 architect §5.2 amendment — `extensions_nexus_json` column:**
+**`extensions_nexus_json` column:**
 
-The `extensions_nexus_json TEXT` column is additive (V1.139 migration adds it via `ALTER TABLE`). It stores the full `extensions.nexus` JSON payload from spoke `KnowledgeEntry.extensions.nexus` for round-trip preservation of unknown keys. Known nexus-local fields (`world_id`, `created_from_command_id`, `source_work_id`, `source_chapter`, `source_provenance_kind`) are kept as typed SQLite columns — this preserves query efficiency (e.g., `list_by_world` filters on the indexed `world_id` column without JSON extraction). The `nexus-spoke-adapter` constructs `extensions.nexus` from typed columns + `extensions_nexus_json` (merged) when reading, and extracts known fields into typed columns + serializes the full `extensions.nexus` into `extensions_nexus_json` when writing. See [`spoke-adapter-architecture.md`](../architecture/spoke-adapter-architecture.md) §2.3 for the full storage contract.
+The `extensions_nexus_json TEXT` column stores the full `extensions.nexus` JSON payload from spoke `KnowledgeEntry.extensions.nexus` for round-trip preservation of unknown keys. Known nexus-local fields (`world_id`, `created_from_command_id`, `source_work_id`, `source_chapter`, `source_provenance_kind`) are kept as typed SQLite columns — this preserves query efficiency (e.g., `list_by_world` filters on the indexed `world_id` column without JSON extraction). The `nexus-spoke-adapter` constructs `extensions.nexus` from typed columns + `extensions_nexus_json` (merged) when reading, and extracts known fields into typed columns + serializes the full `extensions.nexus` into `extensions_nexus_json` when writing. See [`spoke-adapter-architecture.md`](../architecture/spoke-adapter-architecture.md) §2.3 for the full storage contract.
 
-#### 4.1.4 `works` lifecycle lock columns (V1.41 Draft — DF-60)
+#### 4.1.4 `works` lifecycle lock columns (DF-60)
 
 Additive columns on existing `works` table. Normative: [novel-writing/multi-work-lifecycle.md](../novel-writing/multi-work-lifecycle.md).
 
 | Column | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `novel_completion_status` | `TEXT` | no | `completed` when §6 criteria met (V1.38 residual) |
+| `novel_completion_status` | `TEXT` | no | `completed` when §6 criteria met |
 | `completion_locked_at` | `TEXT` | no | DB mirror of `.completion-lock.json` |
 | `runtime_lock_holder` | `TEXT` | no | `pid:<pid>:<uuid>` while mutating command holds Work |
 | `runtime_lock_acquired_at` | `TEXT` | no | ISO-8601 |
 | `lineage_from_work_id` | `TEXT` | no | Set on new Work from `creator bootstrap --from-work` |
 
-#### 4.1.5 Novel work pool tables (V1.41 Draft — DF-61)
+#### 4.1.5 Novel work pool tables (DF-61)
 
 Creator-scoped; not Work rows. Normative: [novel-writing/work-pool.md](../novel-writing/work-pool.md). Validation rules for KB taxonomy: see [nexus-knowledge::world_kb::validation](../../../../crates/nexus-knowledge/src/world_kb/validation.rs) (World KB — separate concern).
 
@@ -308,18 +304,15 @@ Partial unique index: one row per `(creator_id, work_id)` where `work_id IS NOT 
 
 | Table | 作用 | Owner |
 | --- | --- | --- |
-| `outbox`（已删除） | 同步命令队列（V1.163 由 `20260812_drop_legacy_outbox.sql` 删除；schema 15→16） | — |
 | `auth_tokens` | OAuth token 本地存储 | Daemon |
 | `device_code_sessions` | 设备授权会话 | Daemon |
 | `acp_tool_audit_log` | ACP 工具调用审计 | Daemon |
 | `acp_sessions` | ACP 会话持久化 | Daemon |
-| `workspace_sessions` | Workspace session persistence for `workspace.open`/`workspace.commit` with file-level OCC content hashes (V1.56 P0) | Daemon |
+| `workspace_sessions` | Workspace session persistence for `workspace.open`/`workspace.commit` with file-level OCC content hashes | Daemon |
 
-> **Provenance**：零活跃消费者审计完成于 **V1.59 P1 T3**（commit `c39e4afc`，2026-06-22）。migration `20260812_drop_legacy_outbox.sql` 头注的 "V1.159 T3" 为已知不可变值（migration 文件自应用起不可变：sqlx checksum 锁定，禁止原地修改），以 **V1.59 T3** 为 verified 值。
+#### 4.2.1 `workspace_sessions`
 
-#### 4.2.1 `workspace_sessions` (V1.56 P0)
-
-Persists `workspace.open`/`workspace.commit` sessions in `SQLite`. Replaces the V1.55 in-memory `WorkspaceSessionManager`.
+Persists `workspace.open`/`workspace.commit` sessions in `SQLite`.
 
 ```sql
 CREATE TABLE IF NOT EXISTS workspace_sessions (
