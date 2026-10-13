@@ -439,22 +439,80 @@ export async function generateTSTypes(): Promise<void> {
  * tree is committed and the stale backup is dropped; or mid-swap → the backup is
  * restored in place. The committed path is thus briefly absent during a swap, but the
  * tree is never observably pruned or partially deleted.
+ *
+ * The entire recover → build → publish lifecycle is serialized per `outDir` by
+ * `acquirePublicationLock`: two runs targeting the same output cannot share the
+ * staging/backup siblings, and the loser fails visibly instead of publishing the
+ * other run's incomplete tree.
  */
 export async function stageAndSwap(
   outDir: string,
   build: (stageDir: string) => Promise<void> | void,
 ): Promise<void> {
-  const stageDir = `${outDir}.staging`;
-  recoverInterruptedPublication(outDir);
-  fs.rmSync(stageDir, { recursive: true, force: true });
-  ensureDir(stageDir);
+  const releaseLock = acquirePublicationLock(outDir);
   try {
-    await build(stageDir);
-  } catch (err) {
+    const stageDir = `${outDir}.staging`;
+    recoverInterruptedPublication(outDir);
     fs.rmSync(stageDir, { recursive: true, force: true });
-    throw err;
+    ensureDir(stageDir);
+    try {
+      await build(stageDir);
+    } catch (err) {
+      fs.rmSync(stageDir, { recursive: true, force: true });
+      throw err;
+    }
+    publishTree(stageDir, outDir);
+  } finally {
+    releaseLock();
   }
-  publishTree(stageDir, outDir);
+}
+
+/** Sibling lock file guarding one output directory's publication lifecycle. */
+function lockPath(outDir: string): string {
+  return `${outDir}.lock`;
+}
+
+/** True while `pid` names a live process we could signal. */
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // EPERM: alive, just owned by another user — still an active owner.
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/**
+ * Take the exclusive per-output-directory publication lock, or throw when another
+ * run already holds it. Node exposes no advisory file lock, so the lock file itself
+ * (created with `O_EXCL`) is the lock; it records the holder pid so a run killed
+ * without releasing does not wedge the next one — a dead holder is reclaimed.
+ *
+ * @returns the release hook, which deletes the lock file.
+ */
+function acquirePublicationLock(outDir: string): () => void {
+  const lockFile = lockPath(outDir);
+  const claim = (): void => {
+    const fd = fs.openSync(lockFile, 'wx');
+    fs.writeSync(fd, `${process.pid}\n`);
+    fs.closeSync(fd);
+  };
+  try {
+    claim();
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    const holder = Number.parseInt(fs.readFileSync(lockFile, 'utf8').trim(), 10);
+    if (Number.isInteger(holder) && isProcessAlive(holder)) {
+      throw new Error(
+        `another codegen run (pid ${holder}) is publishing ${outDir}; ` +
+          'refusing to share its staging tree',
+      );
+    }
+    fs.rmSync(lockFile, { force: true }); // holder died without releasing
+    claim();
+  }
+  return () => fs.rmSync(lockFile, { force: true });
 }
 
 /**

@@ -180,6 +180,10 @@ target
 tooling/codegen/.schemas-localized/
 tooling/codegen/.schemas-dereferenced/
 
+# Codegen publication lock files (stage-and-swap; tooling/codegen)
+/packages/nexus-contracts/src/generated.lock
+/crates/nexus-contracts/src/generated.lock
+
 # Git worktrees (isolation for parallel branch development)
 .worktrees/
 

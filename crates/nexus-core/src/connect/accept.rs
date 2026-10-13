@@ -170,10 +170,13 @@ impl ObservedTransport {
     }
 
     /// How many outbound envelopes were dropped without activating a
-    /// delivery (`R-V1207-P2-S3A`) — the diagnostic counter for the
-    /// payload-blind `observe_outbound` returns.
+    /// delivery (`R-V1207-P2-S3A`) — the counter the in-crate test asserts the
+    /// payload-blind `observe_outbound` returns against. Test-only: the
+    /// production signal is the `record_outbound_drop` warning, so this is not
+    /// part of the crate's public surface.
     #[must_use]
-    pub fn outbound_drops(&self) -> u64 {
+    #[cfg(test)]
+    fn outbound_drops(&self) -> u64 {
         self.outbound_drops.load(Ordering::Relaxed)
     }
     fn closed_notified(&self) -> impl Future<Output = ()> + '_ {

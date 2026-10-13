@@ -21,9 +21,14 @@
 //! directory (nested `pub mod` + flat `pub use`, mirroring the sibling spoke
 //! generator), and stamps `SCHEMA_VERSIONS` / `LATEST_SCHEMA_VERSION` into the root.
 //!
-//! The tree is built in a sibling staging directory and swapped in with a single rename
-//! once every write succeeded, so a failed, aborted or crashed run leaves the committed
-//! tree untouched instead of pruning it mid-regeneration.
+//! The tree is built in a sibling staging directory and published by two renames — the
+//! committed tree is retired to a sibling `.backup`, then the staged tree is landed —
+//! so a failed, aborted or crashed run never prunes or partially regenerates the tree
+//! in place. Publication is *recoverable*, not atomic: `std::fs` exposes no portable
+//! directory exchange, so `out_root` is briefly absent between the two renames, and a
+//! hard kill in that window leaves it absent until the next run restores the `.backup`.
+//! Overlapping runs of this binary against the same output directory are refused by a
+//! per-output advisory lock rather than allowed to share the staging/backup siblings.
 //!
 //! # Formatting pass + `$ref` dedupe
 //!
@@ -1378,6 +1383,37 @@ fn backup_root(out_root: &Path) -> PathBuf {
     out_root.with_file_name(format!("{}.backup", name.to_string_lossy()))
 }
 
+/// Sibling advisory lock file guarding one output directory's whole publication
+/// lifecycle, so overlapping invocations cannot share its staging/backup siblings.
+fn lock_root(out_root: &Path) -> PathBuf {
+    let name = out_root
+        .file_name()
+        .expect("generated tree root has a file name");
+    out_root.with_file_name(format!("{}.lock", name.to_string_lossy()))
+}
+
+/// Take the exclusive per-output-directory publication lock, or fail when another run
+/// holds it. Backed by the OS advisory file lock (`std::fs::File::try_lock`), which the
+/// OS releases when the holder exits — so a crashed run cannot wedge the next one. Only
+/// the advisory lock is stateful; the zero-byte lock file is kept beside the output.
+fn acquire_publication_lock(out_root: &Path) -> Result<fs::File, String> {
+    let lock_path = lock_root(out_root);
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .map_err(|err| format!("open publication lock {}: {err}", lock_path.display()))?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(fs::TryLockError::WouldBlock) => Err(format!(
+            "another codegen run is active for {}; refusing to share its staging tree",
+            out_root.display()
+        )),
+        Err(fs::TryLockError::Error(err)) => Err(format!("lock {}: {err}", lock_path.display())),
+    }
+}
+
 /// Generate into a sibling staging tree and swap it into place only after `build`
 /// succeeds, so a failed, aborted or crashed run cannot prune the existing tree.
 ///
@@ -1391,10 +1427,15 @@ fn backup_root(out_root: &Path) -> PathBuf {
 /// tree committed, the stale backup dropped; mid-swap → the backup restored in place.
 /// `out_root` is thus briefly absent during a swap, but the tree is never observably
 /// pruned or partially deleted.
+///
+/// The whole recover → build → publish lifecycle is serialized per `out_root` by
+/// [`acquire_publication_lock`], so a second run targeting the same output fails before
+/// it can clear this run's staging tree.
 fn stage_and_swap<F>(out_root: &Path, build: F) -> Result<(), String>
 where
     F: FnOnce(&Path) -> Result<(), String>,
 {
+    let _lock = acquire_publication_lock(out_root)?;
     let stage_root = staging_root(out_root);
     // Recover (or clear) whatever a previous interrupted publication left behind before
     // this run could overwrite the recovery material.
@@ -1558,6 +1599,48 @@ mod tests {
             "recovery material was not restored"
         );
         assert!(!backup_root(&out_root).exists());
+        let _ = fs::remove_dir_all(&sandbox);
+    }
+
+    #[test]
+    fn overlapping_runs_refuse_to_share_the_output() {
+        let sandbox = scratch("overlap");
+        let out_root = sandbox.join("generated");
+        fs::create_dir_all(&out_root).unwrap();
+
+        let (locked_tx, locked_rx) = std::sync::mpsc::channel::<()>();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let holder_root = out_root.clone();
+        let holder = std::thread::spawn(move || {
+            stage_and_swap(&holder_root, |stage_root| {
+                fs::write(stage_root.join("first.rs"), "// first").unwrap();
+                locked_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                Ok(())
+            })
+        });
+
+        // The first run holds the lock across its whole build; the second must fail
+        // rather than clear the staging tree out from under it.
+        locked_rx.recv().unwrap();
+        let err = stage_and_swap(&out_root, |_| Ok(())).unwrap_err();
+        assert!(
+            err.contains("another codegen run is active"),
+            "overlap must fail visibly, got: {err}"
+        );
+
+        release_tx.send(()).unwrap();
+        holder.join().unwrap().unwrap();
+        assert!(out_root.join("first.rs").exists());
+
+        // The lock is released with its holder, so the next run proceeds normally.
+        stage_and_swap(&out_root, |stage_root| {
+            fs::write(stage_root.join("second.rs"), "// second").unwrap();
+            Ok(())
+        })
+        .unwrap();
+        assert!(out_root.join("second.rs").exists());
+        assert!(!out_root.join("first.rs").exists());
         let _ = fs::remove_dir_all(&sandbox);
     }
 }

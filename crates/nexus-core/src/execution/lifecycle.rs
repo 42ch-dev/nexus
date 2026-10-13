@@ -266,7 +266,11 @@ pub struct ExecutionHandle {
     /// `Some` makes "the read failed" distinguishable from "no run was stuck"
     /// — both leave [`Self::compute_run_recoveries`] empty. The failure is
     /// reporting only: recovery still decides nothing and re-applies no effect.
-    #[cfg(feature = "compute")]
+    ///
+    /// Retained on the handle only for the `test-hooks` seam (see
+    /// [`Self::compute_run_recovery_error`]); a production build reports the
+    /// failure through the boot pass's warning and does not hold it.
+    #[cfg(all(feature = "compute", any(test, feature = "test-hooks")))]
     compute_run_recovery_error: Option<crate::CoreError>,
     /// A WEAK link back to the service that established this owner.
     ///
@@ -468,8 +472,15 @@ impl ExecutionHandle {
     /// [`compute_run_recoveries`](Self::compute_run_recoveries) means "no run
     /// was stuck". `Some` means the read failed and no decision was made — a
     /// reporting failure, never a license to re-apply an effect.
+    ///
+    /// `#[doc(hidden)]` test seam, the same convention as the crate's other
+    /// `test-hooks` integration seams: it exists for the boot-recovery tests
+    /// (which read the failure explicitly) and is compiled out of a production
+    /// build, so it adds nothing to the crate's public surface. The production
+    /// signal is the boot pass's own log/warning.
     #[must_use]
-    #[cfg(feature = "compute")]
+    #[cfg(all(feature = "compute", any(test, feature = "test-hooks")))]
+    #[doc(hidden)]
     pub fn compute_run_recovery_error(&self) -> Option<&crate::CoreError> {
         self.compute_run_recovery_error.as_ref()
     }
@@ -1213,6 +1224,11 @@ impl CoreService {
                     (Vec::new(), Some(err))
                 }
             };
+        // The read failure is retained on the handle only for the test-hooks seam
+        // (see `ExecutionHandle::compute_run_recovery_error`); a production build
+        // reports it through the warning above and holds nothing.
+        #[cfg(all(feature = "compute", not(any(test, feature = "test-hooks"))))]
+        drop(compute_run_recovery_error);
         // Recovery is complete: start the clock. Until this signal the owned
         // scheduler task cannot tick, so an admission sweep can never race the
         // recovery pass above.
@@ -1245,7 +1261,7 @@ impl CoreService {
             compute_serializer: deps_compute_serializer,
             #[cfg(feature = "compute")]
             compute_run_recoveries,
-            #[cfg(feature = "compute")]
+            #[cfg(all(feature = "compute", any(test, feature = "test-hooks")))]
             compute_run_recovery_error,
             engine,
             coordinator,

@@ -307,4 +307,30 @@ describe('stage-and-swap tree write', () => {
     expect(fs.existsSync(`${outDir}.backup`)).toBe(false);
     fs.rmSync(root, { recursive: true, force: true });
   });
+
+  it('refuses a second run over the same output while the first is building', async () => {
+    const root = scratch('overlap');
+    const outDir = path.join(root, 'generated');
+    fs.mkdirSync(outDir);
+
+    let releaseFirst!: () => void;
+    const firstBuild = new Promise<void>(resolve => {
+      releaseFirst = resolve;
+    });
+    const first = stageAndSwap(outDir, () => firstBuild);
+    // The first run holds the output lock for its whole build, so the second run must
+    // fail visibly rather than clear the staging tree out from under it.
+    await expect(stageAndSwap(outDir, () => {})).rejects.toThrow(/another codegen run/);
+
+    releaseFirst();
+    await first;
+    expect(fs.existsSync(`${outDir}.lock`)).toBe(false);
+
+    // The lock is released with the first run: a follow-up run proceeds normally.
+    await stageAndSwap(outDir, stageDir => {
+      fs.writeFileSync(path.join(stageDir, 'second.ts'), '// second');
+    });
+    expect(fs.existsSync(path.join(outDir, 'second.ts'))).toBe(true);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
 });
