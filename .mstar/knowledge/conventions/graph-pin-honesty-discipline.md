@@ -4,7 +4,7 @@ date: 2026-08-25
 problem_type: convention
 category: conventions
 severity: medium
-last_updated: 2026-10-12
+last_updated: 2026-10-13
 tags: 
   - cargo-tree
   - feature-gate
@@ -111,6 +111,19 @@ the value comparison: `assert_exactly_one <crate> <features> <package>`,
 `assert_features <crate> <features> <package> <feature-list>`. Version drift
 is a manifest-review concern, not a probe concern.
 
+**An empty default feature set does not print as `feats=[]`.** `cargo tree -f
+"{p} feats=[{f}]"` prints the *name* of the resolved default feature, so a
+crate declaring `default = []` (the ACP 3.x contract) resolves as
+`feats=[default]`, and expecting the empty string makes the probe red for a
+truthful manifest — the mirror image of a false green. Expected value =
+`default`; it still discriminates, because enabling any opt-in capability
+appends its name (`process` → `feats=[default, process]`) or replaces the list
+under `default-features = false`. V1.215 recorded the negative control
+(scratch `features = ["process"]` → `feats=[default, process]` plus the
+capability's own dependency resolving) and reverted it before commit, which is
+how a features-pin earns its keep: an assertion that has never been observed to
+fail is not yet evidence.
+
 ## Why This Matters
 
 Feature gates exist so the default build stays lean; their proof is the graph
@@ -139,8 +152,12 @@ real regression net for the next iteration that touches the graph.
   `spoke-connect`/`libp2p`/`rmcp`; exactly one `spoke-operations`, one
   `agent-client-protocol`, and one featureless `graph-flow` in the default
   graphs; exactly one `rmcp` in every feature-on combination;
-  `-F connect-client` single-version libp2p. No probe asserts a version
-  value (Guidance §5).
+  `-F connect-client` single-version libp2p. ACP 3.x adds the inverse
+  obligation (V1.215): the ordinary-CLI `agent-client-protocol` row must keep
+  its empty default feature set (`feats=[default]`, Guidance §5) and the two
+  crates its opt-in native transports pull (`async-process`, `blocking`) must
+  stay absent, so re-enabling `process`/`stdio` cannot slip through as a
+  silently heavier graph. No probe asserts a version value (Guidance §5).
 - V1.174 corrections: `spoke-operations` prior art (§9.2 of the v1.174 lock
   spec, `v1.174-peer-tools-lock.md`), rmcp default-graph reality (same spec,
   corrections list #1).
