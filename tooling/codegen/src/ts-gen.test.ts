@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { compile } from 'json-schema-to-typescript';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import type { SchemaModule } from './ts-gen';
-import { dedupeRefTargets, rewriteExactStringPatterns, rewriteUnrestrictedJsonValues } from './ts-gen';
+import {
+  declarationEnd,
+  dedupeRefTargets,
+  rewriteExactStringPatterns,
+  rewriteUnrestrictedJsonValues,
+  stageAndSwap,
+} from './ts-gen';
 
 describe('nested discriminant literals', () => {
   it('rewrites exact patterns inside inlined oneOf $ref bodies', async () => {
@@ -155,5 +164,73 @@ describe('$ref target dedupe', () => {
     const source = ['export interface CharacterActorRef {', '  actor_kind: string;', '}'].join('\n');
 
     expect(dedupeRefTargets(source, actorRef, [character, actorRef])).toBe(source);
+  });
+});
+
+describe('declarationEnd brace scan', () => {
+  it('ignores braces inside string literals', () => {
+    const lines = [
+      'export interface BracedQuery {',
+      '  close: "}";',
+      '  count: number;',
+      '}',
+      'export interface Next {',
+      '}',
+    ];
+    // A naive counter takes the `}` in `"}"` as the declaration close (line 1).
+    expect(declarationEnd(lines, 0)).toBe(3);
+  });
+
+  it('ignores braces inside template literals and comments', () => {
+    const lines = [
+      'export type Pattern = {',
+      '  /**',
+      "   * Closes with a literal `}` -- don't count it.",
+      '   */',
+      '  raw: `a}b`;',
+      '  n: number;',
+      '};',
+    ];
+    expect(declarationEnd(lines, 0)).toBe(6);
+  });
+});
+
+describe('stage-and-swap tree write', () => {
+  function scratch(tag: string): string {
+    return fs.mkdtempSync(path.join(os.tmpdir(), `nexus-ts-gen-${tag}-`));
+  }
+
+  it('keeps the existing tree when the build throws', async () => {
+    const root = scratch('abort');
+    const outDir = path.join(root, 'generated');
+    fs.mkdirSync(outDir);
+    fs.writeFileSync(path.join(outDir, 'kept.ts'), '// committed');
+
+    await expect(
+      stageAndSwap(outDir, stageDir => {
+        fs.writeFileSync(path.join(stageDir, 'half.ts'), '// partial');
+        throw new Error('boom');
+      }),
+    ).rejects.toThrow('boom');
+
+    expect(fs.existsSync(path.join(outDir, 'kept.ts'))).toBe(true);
+    expect(fs.existsSync(path.join(outDir, 'half.ts'))).toBe(false);
+    expect(fs.existsSync(`${outDir}.staging`)).toBe(false);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('replaces the existing tree on success', async () => {
+    const root = scratch('swap');
+    const outDir = path.join(root, 'generated');
+    fs.mkdirSync(outDir);
+    fs.writeFileSync(path.join(outDir, 'stale.ts'), '// stale');
+
+    await stageAndSwap(outDir, stageDir => {
+      fs.writeFileSync(path.join(stageDir, 'fresh.ts'), '// fresh');
+    });
+
+    expect(fs.existsSync(path.join(outDir, 'stale.ts'))).toBe(false);
+    expect(fs.existsSync(path.join(outDir, 'fresh.ts'))).toBe(true);
+    fs.rmSync(root, { recursive: true, force: true });
   });
 });

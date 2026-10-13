@@ -282,17 +282,47 @@ function declaredNames(source: string): string[] {
   return names;
 }
 
-/** Last line index of the top-level declaration that starts at `start`. */
-function declarationEnd(lines: string[], start: number): number {
+/**
+ * Last line index of the top-level declaration that starts at `start`.
+ *
+ * Braces inside string / template literals (`close: "}"`, `` raw: `a}b` ``) are data,
+ * not structure — as are braces inside comments, which property-level JSDoc emits
+ * freely — so the scan tracks quote / block-comment state across lines and only counts
+ * the braces outside both.
+ */
+export function declarationEnd(lines: string[], start: number): number {
   const isTypeAlias = /^export type \b/.test(lines[start]);
   let depth = 0;
+  let inBlockComment = false;
+  let quote: string | undefined;
   for (let i = start; i < lines.length; i++) {
-    for (const ch of lines[i]) {
-      if (ch === '{') depth += 1;
-      else if (ch === '}') depth -= 1;
+    const line = lines[i];
+    for (let j = 0; j < line.length; j++) {
+      const ch = line[j];
+      const next = line[j + 1];
+      if (inBlockComment) {
+        if (ch === '*' && next === '/') {
+          inBlockComment = false;
+          j += 1;
+        }
+      } else if (quote) {
+        if (ch === '\\') j += 1;
+        else if (ch === quote) quote = undefined;
+      } else if (ch === '/' && next === '/') {
+        break;
+      } else if (ch === '/' && next === '*') {
+        inBlockComment = true;
+        j += 1;
+      } else if (ch === "'" || ch === '"' || ch === '`') {
+        quote = ch;
+      } else if (ch === '{') {
+        depth += 1;
+      } else if (ch === '}') {
+        depth -= 1;
+      }
     }
     if (depth > 0) continue;
-    if (isTypeAlias ? lines[i].trimEnd().endsWith(';') : lines[i].trimEnd().endsWith('}')) {
+    if (isTypeAlias ? line.trimEnd().endsWith(';') : line.trimEnd().endsWith('}')) {
       return i;
     }
   }
@@ -371,6 +401,44 @@ export async function generateTSTypes(): Promise<void> {
   const outDir = resolveFromRoot('packages', 'nexus-contracts', 'src', 'generated');
   logger.info(`Generating TypeScript types to: ${outDir}`);
 
+  await stageAndSwap(outDir, stageDir => buildGeneratedTree(localizedDir, srcSchemasDir, stageDir));
+}
+
+/**
+ * Build `outDir` in a sibling staging directory and swap it into place only after
+ * `build` succeeds, so a failed or aborted run cannot prune the existing tree.
+ *
+ * The generated tree is the import surface of every contract consumer, so it is
+ * replaced as a unit: `build` writes freely under the staging dir it is handed, any
+ * failure drops that dir, and only a clean build renames it over `outDir`.
+ */
+export async function stageAndSwap(
+  outDir: string,
+  build: (stageDir: string) => Promise<void> | void,
+): Promise<void> {
+  const stageDir = `${outDir}.staging`;
+  fs.rmSync(stageDir, { recursive: true, force: true });
+  ensureDir(stageDir);
+  try {
+    await build(stageDir);
+  } catch (err) {
+    fs.rmSync(stageDir, { recursive: true, force: true });
+    throw err;
+  }
+  fs.rmSync(outDir, { recursive: true, force: true });
+  fs.renameSync(stageDir, outDir);
+}
+
+/**
+ * Build the tree under `outDir`, which is the staging dir during a normal run.
+ * Regeneration is authoritative — the caller swaps the whole directory in, so a
+ * failure here leaves the previously generated tree untouched.
+ */
+async function buildGeneratedTree(
+  localizedDir: string,
+  srcSchemasDir: string,
+  outDir: string,
+): Promise<void> {
   // v1.184 P1 T3 fix1: rewrite exact-string pattern discriminants across the
   // whole localized tree BEFORE compiling. compile() resolves cross-file $ref
   // bodies from disk, so rewriting only the root schema left nested oneOf
@@ -396,10 +464,6 @@ export async function generateTSTypes(): Promise<void> {
     base: path.basename(rel, '.schema.json'),
     declared: new Set<string>(),
   }));
-
-  // Reset the generated tree (regeneration is authoritative).
-  fs.rmSync(outDir, { recursive: true, force: true });
-  ensureDir(outDir);
 
   // 1. Synthetic common module: common definitions + SourceAnchor (skip-listed but referenced).
   await generateCommonTypesModule(localizedDir, outDir);
