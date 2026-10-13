@@ -357,60 +357,35 @@ describe('publication lock acquisition', () => {
     fs.writeFileSync(path.join(lockDir, 'owner'), `${token}\n`);
   }
 
-  it('lets only one contender recover a stale lock, the loser refusing without deleting it', () => {
-    const root = scratch('compete-reclaim');
+  it('refuses a second contender against a held lock and removes nothing', () => {
+    const root = scratch('held');
     const outDir = path.join(root, 'generated');
     const lockDir = `${outDir}.lock`;
-    // A crashed run left a lock naming a dead owner, so both contenders judge it
-    // reclaimable and race to take it.
-    seedLock(lockDir, `${deadPid()}:stale:0`);
 
-    let winnerRelease: (() => void) | undefined;
-    let winnerToken = '';
-    // The probe interleaves a second acquisition at the stale-owner window: the second
-    // contender fully recovers and publishes a live claim before the first resumes.
-    const acquireLoser = () =>
-      acquirePublicationLock(outDir, {
-        afterStaleHolderRead: () => {
-          winnerRelease = acquirePublicationLock(outDir);
-          winnerToken = fs.readFileSync(path.join(lockDir, 'owner'), 'utf8').trim();
-        },
-      });
+    const release = acquirePublicationLock(outDir);
+    const ownerBefore = fs.readFileSync(path.join(lockDir, 'owner'), 'utf8');
 
-    // The loser must fail visibly and delete nothing: the winner's live claim survives.
-    expect(acquireLoser).toThrow(/another codegen run/);
-    expect(winnerToken).not.toBe('');
-    expect(fs.readFileSync(path.join(lockDir, 'owner'), 'utf8').trim()).toBe(winnerToken);
+    // The competitor fails visibly and must not touch the holder's lock or its record.
+    expect(() => acquirePublicationLock(outDir)).toThrow(/another codegen run/);
+    expect(fs.readFileSync(path.join(lockDir, 'owner'), 'utf8')).toBe(ownerBefore);
     expect(fs.existsSync(lockDir)).toBe(true);
-    // The loser's aborted rename-take leaves no orphaned directory behind.
-    expect(fs.readdirSync(root).filter(name => name.includes('.take.'))).toEqual([]);
 
-    winnerRelease?.();
+    release();
     expect(fs.existsSync(lockDir)).toBe(false);
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it('never removes a fresh live claim published after an absent read', () => {
-    const root = scratch('fresh-claim');
+  it('leaves a stale lock from a dead pid in place and fails with the manual-removal message', () => {
+    const root = scratch('stale');
     const outDir = path.join(root, 'generated');
     const lockDir = `${outDir}.lock`;
-    seedLock(lockDir, `${deadPid()}:stale:0`);
-    const liveToken = `${process.pid}:fresh:0`;
+    const token = `${deadPid()}:stale:0`;
+    seedLock(lockDir, token);
 
-    // The previously failing read-then-delete schedule: while this contender is paused
-    // at the stale window, another run recovers the stale lock and publishes a fresh
-    // live claim.
-    const acquire = () =>
-      acquirePublicationLock(outDir, {
-        afterStaleHolderRead: () => {
-          fs.rmSync(lockDir, { recursive: true, force: true });
-          seedLock(lockDir, liveToken);
-        },
-      });
-
-    // The contender must refuse (the claim is live) and must not delete the fresh claim.
-    expect(acquire).toThrow(/another codegen run/);
-    expect(fs.readFileSync(path.join(lockDir, 'owner'), 'utf8').trim()).toBe(liveToken);
+    // A dead owner is never probed or reclaimed: the run fails visibly instead.
+    expect(() => acquirePublicationLock(outDir)).toThrow(/another codegen run/);
+    expect(() => acquirePublicationLock(outDir)).toThrow(`remove ${lockDir} manually`);
+    expect(fs.readFileSync(path.join(lockDir, 'owner'), 'utf8').trim()).toBe(token);
     expect(fs.existsSync(lockDir)).toBe(true);
     fs.rmSync(root, { recursive: true, force: true });
   });

@@ -468,55 +468,21 @@ export async function stageAndSwap(
   }
 }
 
-/**
- * Acquisition attempts before giving up; each attempt may recover one stale lock.
- * Bounds the retry loop so a contended or unrecoverable lock fails visibly instead of
- * spinning.
- */
-const MAX_LOCK_ATTEMPTS = 5;
-
-/** True while `pid` names a live process we could signal. */
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    // EPERM: alive, just owned by another user — still an active owner.
-    return (err as NodeJS.ErrnoException).code === 'EPERM';
-  }
-}
-
-/**
- * Interleaving seam for the acquisition/stale-recovery protocol: `afterStaleHolderRead`
- * runs synchronously after the lock has been read and judged reclaimable (dead owner),
- * before the exclusive rename-take is attempted. Production callers omit it; the
- * competing-process regression passes one to drive a second acquisition through exactly
- * that window.
- */
-export interface PublicationLockProbe {
-  afterStaleHolderRead?: () => void;
-}
-
 /** Owner record written inside the lock directory: `<pid>:<nonce>:<startedAt>`. */
-interface LockOwner {
-  pid: number;
-  token: string;
-}
+type LockOwner = string;
 
 /**
  * Read the owner record from a lock directory, or `undefined` when it is missing or
- * unreadable (the directory was just created, or a run died before writing it).
+ * unreadable (the directory was just created, or a run died before writing it). Used
+ * only to name the holder in the failure message and to guard release — never to decide
+ * whether a lock may be reclaimed.
  */
 function readOwner(lockDir: string): LockOwner | undefined {
-  let raw: string;
   try {
-    raw = fs.readFileSync(path.join(lockDir, 'owner'), 'utf8');
+    return fs.readFileSync(path.join(lockDir, 'owner'), 'utf8').trim() || undefined;
   } catch {
     return undefined;
   }
-  const token = raw.trim();
-  const pid = Number.parseInt(token.split(':', 1)[0], 10);
-  return Number.isInteger(pid) ? { pid, token } : undefined;
 }
 
 /**
@@ -533,89 +499,46 @@ function tryMkdirClaim(lockDir: string, token: string): boolean {
     if ((err as NodeJS.ErrnoException).code === 'EEXIST') return false;
     throw err;
   }
-  fs.writeFileSync(path.join(lockDir, 'owner'), `${token}\n`);
+  try {
+    fs.writeFileSync(path.join(lockDir, 'owner'), `${token}\n`);
+  } catch (err) {
+    // We own the directory but recorded no token, so nothing could ever release it —
+    // drop it rather than strand the lock for manual removal.
+    fs.rmSync(lockDir, { recursive: true, force: true });
+    throw err;
+  }
   return true;
 }
 
 /** Remove the lock directory only while it still carries this claim's owner record. */
 function releaseOwned(lockDir: string, token: string): void {
-  const owner = readOwner(lockDir);
-  if (owner?.token === token) {
+  if (readOwner(lockDir) === token) {
     fs.rmSync(lockDir, { recursive: true, force: true });
   }
 }
 
 /**
- * Take the exclusive per-output-directory publication lock, or throw when another live
+ * Take the exclusive per-output-directory publication lock, or fail visibly when any
  * run already holds it. Node exposes no advisory file lock, so the lock directory
- * itself is the lock. Every ownership transition is a single atomic filesystem
- * primitive: acquisition is `mkdir`, stale recovery is a `rename` that exactly one
- * contender can win, and release only removes a directory this claim still owns.
- * Staleness is decided from the recorded owner's liveness — never from age — so no code
- * path can unlink or remove a claim it has not first exclusively taken, and a live
- * owner's claim is never displaced.
+ * itself is the lock: acquisition is a single atomic `mkdir` and nothing else. There is
+ * no stale takeover — a lock left behind by a crashed run (or one whose owner record is
+ * missing) is never removed automatically, because no liveness check can exclude the
+ * race between observing an owner and removing it. Any such lock fails the run visibly
+ * and is removed by an operator, deliberately, once no codegen run is active.
  *
  * @returns the release hook; it only removes a lock this claim still owns.
  */
-export function acquirePublicationLock(
-  outDir: string,
-  probe?: PublicationLockProbe,
-): () => void {
+export function acquirePublicationLock(outDir: string): () => void {
   const lockDir = `${outDir}.lock`;
   const token = `${process.pid}:${randomUUID()}:${Date.now()}`;
-  for (let attempt = 0; attempt < MAX_LOCK_ATTEMPTS; attempt++) {
-    if (tryMkdirClaim(lockDir, token)) {
-      return () => releaseOwned(lockDir, token);
-    }
-    const owner = readOwner(lockDir);
-    if (owner === undefined) {
-      // Missing or half-written owner record: liveness is undecidable. We never guess
-      // and never delete here; a crashed run that died between `mkdir` and the owner
-      // write is left for manual recovery rather than an unsafe automatic takeover.
-      continue;
-    }
-    if (isProcessAlive(owner.pid)) {
-      throw new Error(
-        `another codegen run (pid ${owner.pid}) is publishing ${outDir}; ` +
-          'refusing to share its staging tree',
-      );
-    }
-    // Dead owner: recover by taking the stale lock exclusively. Re-read first — a
-    // contender may have recovered and re-published since our first read — then
-    // `rename`. Only the rename winner removes anything, and a failed rename deletes
-    // nothing.
-    probe?.afterStaleHolderRead?.();
-    const current = readOwner(lockDir);
-    if (current === undefined || current.token !== owner.token) continue;
-    const takeDir = `${lockDir}.take.${randomUUID()}`;
-    try {
-      fs.renameSync(lockDir, takeDir);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue; // another won
-      throw err;
-    }
-    const taken = readOwner(takeDir);
-    if (taken !== undefined && isProcessAlive(taken.pid)) {
-      // We displaced a claim that turned live between the read and the rename: put it
-      // back and delete nothing.
-      try {
-        fs.renameSync(takeDir, lockDir);
-      } catch {
-        // The pathname was re-claimed; leave the displaced tree for manual recovery.
-      }
-      throw new Error(
-        `another codegen run (pid ${taken.pid}) is publishing ${outDir}; ` +
-          'refusing to share its staging tree',
-      );
-    }
-    fs.rmSync(takeDir, { recursive: true, force: true });
+  if (tryMkdirClaim(lockDir, token)) {
+    return () => releaseOwned(lockDir, token);
   }
   const owner = readOwner(lockDir);
   throw new Error(
-    `codegen: could not acquire the publication lock for ${outDir} after ` +
-      `${MAX_LOCK_ATTEMPTS} attempts` +
-      (owner ? ` (recorded owner ${owner.token})` : '') +
-      `; if no codegen run is active, remove ${lockDir} manually`,
+    `codegen: another codegen run holds the publication lock for ${outDir} ` +
+      `(recorded owner ${owner ?? 'unknown'}); it serializes recover→build→publish and ` +
+      `is never reclaimed automatically — if no codegen run is active, remove ${lockDir} manually`,
   );
 }
 
