@@ -103,7 +103,7 @@ The rows below are the durable decision history, recorded as written on their da
 | Monorepo with `apps/` + `crates/` + `schemas/` | Product surfaces, reusable Rust libs, and wire contracts each have their own lifecycle | Early 2025 |
 | `nexus42` binary hosts both CLI and daemon | Single binary for simplicity (no separate `nexus42d`) | V1.68 (June 2026) |
 | Web SPA (`apps/web`) as daemon-served Control Room UI | React SPA, served by the daemon over localhost HTTP; reuses generated contract types | V1.64 (June 2026) |
-| Desktop shell (`apps/desktop`) via a native host | Wraps the web SPA for native OS capabilities (file open, reveal in Finder, sidecar lifecycle); no second DTO set | V1.66 (June 2026) |
+| Desktop shell via a native host | Wraps the web SPA for native OS capabilities (file open, reveal in Finder, sidecar lifecycle); no second DTO set | V1.66 (June 2026) |
 | JSON Schema as wire truth source | Enables Rust + TypeScript codegen; avoids hand-written DTO drift | V1.0 planning |
 | Integration branches via PR only | All merges to `main` go through GitHub PR for review trail and CI gate | V1.39 (June 2026) |
 | `.mstar/` harness conventions | Morning Star harness for plan/QC/QA discipline | V1.39 (June 2026) |
