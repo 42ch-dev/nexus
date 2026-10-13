@@ -48,7 +48,7 @@ A `waitFor` whose predicate reads `result.current.events` will resolve on the fi
 
 ## Solution
 
-Gate every wait that reads the buffer on a published field, in the same predicate:
+Gate every wait that reads the buffer on the published value its frame newly reaches, in the same predicate:
 
 ```ts
 /**
@@ -72,11 +72,15 @@ Sites that assert an exact frame count gate on `revision` (or the cursor that th
 
 ## Why This Works
 
-`lastEventId` / `revision` / `phase` / `liveFrom` are scalars copied at publish time, so they only move when a new snapshot commits. A predicate that requires one of them cannot be satisfied by the previous snapshot object, and once it is satisfied the buffer it reads is described by the committed snapshot's own publish — the frame list and the cursor agree by construction. The wait keeps its original meaning ("this frame arrived"), it just stops reading the one field that is not snapshot-scoped.
+`lastEventId` / `revision` / `phase` / `liveFrom` are scalars copied at publish time, so they only move when a new snapshot commits. Gating on **the value the frame under assertion newly reaches** therefore cannot be satisfied by the previous snapshot object: in the failing case the awaited cursor must be `'e1:3'` while the stale snapshot still reports `'e1:2'`. Once the wait is satisfied, the buffer it reads is described by the committed snapshot's own publish — the frame list and the cursor agree by construction.
+
+The qualifier is load-bearing: gating on *any* published scalar is not enough, because a scalar can be unchanged by the frame being awaited. `phase` can already be `'live'` across a data frame, and a `gap` frame does not advance the cursor at all — a wait that requires only "some published value that is already in that state" passes immediately, keeps reading the stale buffer, and reopens the same race. Gate on the expected post-frame value (the cursor of the frame being asserted, or the resulting `revision` for frames that carry no cursor), never on a state the previous snapshot already had.
+
+The wait keeps its original meaning ("this frame arrived"); it just stops reading the one field that is not snapshot-scoped.
 
 ## Prevention
 
 - **Consumer rule** (already stated at `run-observation.ts:84-95`): memoize on the published `revision`, or read a published scalar — never treat `result.current.events` as a snapshot-scoped value. Any new consumer or test of this hook inherits this rule; the helper's comment carries it in the test file.
-- When a `waitFor` predicate reads an array/object that the producer mutates outside React state, ask whether that value is committed or live; if it is live, add a published field to the predicate.
+- When a `waitFor` predicate reads an array/object that the producer mutates outside React state, ask whether that value is committed or live; if it is live, add a published field to the predicate — and require the value that frame newly reaches (its own cursor, or the resulting `revision`), not a scalar that is already in that state.
 - Reproduce timing flakes by changing the schedule (parallel load, worker count) before declaring a test stable; `N` idle repetitions of a load-dependent race prove nothing.
 - Treat "same job passed on rerun, same commit" as flake evidence, not as a fix: it identifies the class, and the class still needs the read/write-order defect removed.
