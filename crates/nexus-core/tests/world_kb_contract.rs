@@ -1153,15 +1153,16 @@ async fn v1191_world_sheet_governance_restated_content_is_a_no_op() {
 /// dialect first, then re-submit.
 #[tokio::test]
 async fn v1214_p1s2_drifted_dialect_restate_is_still_a_seam_422() {
-    let fx = setup_sheet_fixture().await;
-    let pool = sheet_pool(&fx).await;
-
     // A stored row whose authored dialects are already non-compliant. The
     // request below re-states this value unchanged, so the materialised
     // content is identical — only the seam stands between it and a no-op.
     const DRIFT_ID: &str = "kb_drift";
     const DRIFTED: &str =
         r#"{"mental":["drifted"],"belief":{"holder":"kb_ana"},"observation":["drifted"]}"#;
+
+    let fx = setup_sheet_fixture().await;
+    let pool = sheet_pool(&fx).await;
+
     seed_kb(
         &pool,
         DRIFT_ID,
