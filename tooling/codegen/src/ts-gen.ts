@@ -32,6 +32,7 @@
  */
 import { compile } from 'json-schema-to-typescript';
 import { glob } from 'glob';
+import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -484,35 +485,139 @@ function isProcessAlive(pid: number): boolean {
 }
 
 /**
- * Take the exclusive per-output-directory publication lock, or throw when another
- * run already holds it. Node exposes no advisory file lock, so the lock file itself
- * (created with `O_EXCL`) is the lock; it records the holder pid so a run killed
- * without releasing does not wedge the next one — a dead holder is reclaimed.
- *
- * @returns the release hook, which deletes the lock file.
+ * Interleaving seam for the acquisition/stale-recovery protocol: `afterStaleHolderRead`
+ * runs synchronously once a lock has been read and judged reclaimable, before the
+ * reclaim is attempted. Production callers omit it; the competing-process regression
+ * passes one to drive a second acquisition through exactly that window.
  */
-function acquirePublicationLock(outDir: string): () => void {
-  const lockFile = lockPath(outDir);
-  const claim = (): void => {
-    const fd = fs.openSync(lockFile, 'wx');
-    fs.writeSync(fd, `${process.pid}\n`);
-    fs.closeSync(fd);
-  };
+export interface PublicationLockProbe {
+  afterStaleHolderRead?: () => void;
+}
+
+/** Orphaned reclaim gates are recovered after this age (reclaim is sub-millisecond). */
+const RECLAIM_GATE_STALE_MS = 10_000;
+
+/** The `pid` recorded in a lock token (`<pid>:<nonce>`), or `undefined` when unreadable. */
+function readHolder(lockFile: string): number | undefined {
+  let raw: string;
   try {
-    claim();
+    raw = fs.readFileSync(lockFile, 'utf8');
+  } catch {
+    return undefined;
+  }
+  const pid = Number.parseInt(raw.split(':', 1)[0].trim(), 10);
+  return Number.isInteger(pid) ? pid : undefined;
+}
+
+/**
+ * Publish a claim atomically: write the holder token to a unique temp file, then
+ * hard-link it into place. `link(2)` fails with EEXIST when the lock is held, and the
+ * linked inode already carries the full token — so a competing run can never observe a
+ * partially written claim and reclaim it (the previous `open` then `write` left an
+ * empty window).
+ *
+ * @returns true when this claim now owns `lockFile`.
+ */
+function tryClaim(lockFile: string, token: string): boolean {
+  const tmp = `${lockFile}.${process.pid}.${randomUUID()}.tmp`;
+  fs.writeFileSync(tmp, `${token}\n`);
+  try {
+    fs.linkSync(tmp, lockFile);
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') return false;
+    throw err;
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
+}
+
+/**
+ * Cross-process mutual exclusion for stale-lock recovery. Without it, two recoverers
+ * can both decide an old dead holder is reclaimable, and each unlink the other's fresh
+ * claim. `mkdir` is the portable atomic-exclusive primitive.
+ *
+ * simplify: a reclaimer killed while holding the gate orphans it; recovery ages the
+ * gate out after RECLAIM_GATE_STALE_MS. Reclaim is sub-millisecond, so this only
+ * delays the crash path.
+ */
+function takeReclaimGate(gate: string): boolean {
+  try {
+    fs.mkdirSync(gate);
+    return true;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-    const holder = Number.parseInt(fs.readFileSync(lockFile, 'utf8').trim(), 10);
-    if (Number.isInteger(holder) && isProcessAlive(holder)) {
+    let age: number;
+    try {
+      age = Date.now() - fs.statSync(gate).mtimeMs;
+    } catch {
+      return false; // gate vanished; caller retries the loop
+    }
+    if (age < RECLAIM_GATE_STALE_MS) return false;
+    fs.rmSync(gate, { recursive: true, force: true });
+    try {
+      fs.mkdirSync(gate);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+/** Reclaim `lockFile` when it names a dead (or unreadable) holder. */
+function reclaimDeadLock(lockFile: string): void {
+  const gate = `${lockFile}.reclaim`;
+  if (!takeReclaimGate(gate)) return; // another run is reclaiming; caller retries
+  try {
+    const holder = readHolder(lockFile);
+    // Re-read under the gate: a live owner that claimed since the first read keeps its
+    // lock — never unlink it on the strength of the earlier read.
+    if (holder !== undefined && isProcessAlive(holder)) return;
+    fs.rmSync(lockFile, { force: true });
+  } finally {
+    fs.rmSync(gate, { recursive: true, force: true });
+  }
+}
+
+/** Remove `lockFile` only while it still carries this claim's token. */
+function releaseOwned(lockFile: string, token: string): void {
+  let current: string;
+  try {
+    current = fs.readFileSync(lockFile, 'utf8').trim();
+  } catch {
+    return;
+  }
+  if (current === token) fs.rmSync(lockFile, { force: true });
+}
+
+/**
+ * Take the exclusive per-output-directory publication lock, or throw when another live
+ * run already holds it. Node exposes no advisory file lock, so the lock file itself is
+ * the lock: claims publish atomically, dead holders are reclaimed, and recovery is
+ * serialized so two recoverers cannot delete each other's claim.
+ *
+ * @returns the release hook; it only removes a lock this claim still owns.
+ */
+export function acquirePublicationLock(
+  outDir: string,
+  probe?: PublicationLockProbe,
+): () => void {
+  const lockFile = lockPath(outDir);
+  const token = `${process.pid}:${randomUUID()}`;
+  for (;;) {
+    if (tryClaim(lockFile, token)) {
+      return () => releaseOwned(lockFile, token);
+    }
+    const holder = readHolder(lockFile);
+    if (holder !== undefined && isProcessAlive(holder)) {
       throw new Error(
         `another codegen run (pid ${holder}) is publishing ${outDir}; ` +
           'refusing to share its staging tree',
       );
     }
-    fs.rmSync(lockFile, { force: true }); // holder died without releasing
-    claim();
+    probe?.afterStaleHolderRead?.();
+    reclaimDeadLock(lockFile);
   }
-  return () => fs.rmSync(lockFile, { force: true });
 }
 
 /**

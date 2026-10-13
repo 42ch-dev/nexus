@@ -5,6 +5,7 @@ import os from 'os';
 import path from 'path';
 import type { SchemaModule } from './ts-gen';
 import {
+  acquirePublicationLock,
   declarationEnd,
   dedupeRefTargets,
   rewriteExactStringPatterns,
@@ -331,6 +332,44 @@ describe('stage-and-swap tree write', () => {
       fs.writeFileSync(path.join(stageDir, 'second.ts'), '// second');
     });
     expect(fs.existsSync(path.join(outDir, 'second.ts'))).toBe(true);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe('publication lock acquisition', () => {
+  function scratch(tag: string): string {
+    return fs.mkdtempSync(path.join(os.tmpdir(), `nexus-ts-lock-${tag}-`));
+  }
+
+  it('refuses a competing run that reclaims a stale lock first', () => {
+    const root = scratch('compete-reclaim');
+    const outDir = path.join(root, 'generated');
+    const lockFile = `${outDir}.lock`;
+    // A crashed run left a lock whose holder identity was never written — the exact
+    // partially published claim another process must not be able to reclaim after the
+    // first process has already re-claimed it.
+    fs.writeFileSync(lockFile, 'stale-uninitialized\n');
+
+    let reclaimRelease: (() => void) | undefined;
+    let reclaimToken = '';
+    // The probe interleaves a second acquisition at the stale-holder window, so both
+    // contenders observe the same reclaimable lock and race to reclaim it.
+    const acquireLate = () =>
+      acquirePublicationLock(outDir, {
+        afterStaleHolderRead: () => {
+          reclaimRelease = acquirePublicationLock(outDir);
+          reclaimToken = fs.readFileSync(lockFile, 'utf8').trim();
+        },
+      });
+
+    // The late contender must fail visibly instead of unlinking the reclaim the
+    // interleaved run just wrote and publishing on top of it.
+    expect(acquireLate).toThrow(/another codegen run/);
+    expect(reclaimToken).not.toBe('');
+    expect(fs.readFileSync(lockFile, 'utf8').trim()).toBe(reclaimToken);
+
+    reclaimRelease?.();
+    expect(fs.existsSync(lockFile)).toBe(false);
     fs.rmSync(root, { recursive: true, force: true });
   });
 });
