@@ -260,6 +260,18 @@ pub struct ExecutionHandle {
     /// cannot perform one.
     #[cfg(feature = "compute")]
     compute_run_recoveries: Vec<crate::execution::compute::ComputeRunRecovery>,
+    /// The boot recovery pass's read failure, when it could not read the
+    /// stuck-run set (v1.214 S3).
+    ///
+    /// `Some` makes "the read failed" distinguishable from "no run was stuck"
+    /// — both leave [`Self::compute_run_recoveries`] empty. The failure is
+    /// reporting only: recovery still decides nothing and re-applies no effect.
+    ///
+    /// Retained on the handle only for the `test-hooks` seam (see
+    /// [`Self::compute_run_recovery_error`]); a production build reports the
+    /// failure through the boot pass's warning and does not hold it.
+    #[cfg(all(feature = "compute", any(test, feature = "test-hooks")))]
+    compute_run_recovery_error: Option<crate::CoreError>,
     /// A WEAK link back to the service that established this owner.
     ///
     /// The service stores the handle (`CoreInner::execution`), so a strong
@@ -444,11 +456,33 @@ impl ExecutionHandle {
     ///
     /// Each entry reports whether the run was answered from a terminal receipt
     /// or refused as the typed `uncertain` one; recovery never re-applies an
-    /// effect, so no entry can record a re-run. Empty when no run was stuck.
+    /// effect, so no entry can record a re-run. Empty when no run was stuck —
+    /// and also empty when the read itself failed, which
+    /// [`Self::compute_run_recovery_error`] distinguishes (v1.214 S3).
     #[must_use]
     #[cfg(feature = "compute")]
     pub fn compute_run_recoveries(&self) -> &[crate::execution::compute::ComputeRunRecovery] {
         &self.compute_run_recoveries
+    }
+
+    /// The boot recovery pass's read failure, when the §B.3 receipt-first pass
+    /// could not read the stuck-run set (v1.214 S3).
+    ///
+    /// `None` means the pass read successfully, so an empty
+    /// [`compute_run_recoveries`](Self::compute_run_recoveries) means "no run
+    /// was stuck". `Some` means the read failed and no decision was made — a
+    /// reporting failure, never a license to re-apply an effect.
+    ///
+    /// `#[doc(hidden)]` test seam, the same convention as the crate's other
+    /// `test-hooks` integration seams: it exists for the boot-recovery tests
+    /// (which read the failure explicitly) and is compiled out of a production
+    /// build, so it adds nothing to the crate's public surface. The production
+    /// signal is the boot pass's own log/warning.
+    #[must_use]
+    #[cfg(all(feature = "compute", any(test, feature = "test-hooks")))]
+    #[doc(hidden)]
+    pub const fn compute_run_recovery_error(&self) -> Option<&crate::CoreError> {
+        self.compute_run_recovery_error.as_ref()
     }
 
     /// The service that established this owner, if it is still alive.
@@ -1165,33 +1199,36 @@ impl CoreService {
         // effect — a terminal receipt answers the replay, and any other state
         // is reported as the typed `uncertain` refusal. A read failure is a
         // warning (the boot continues); it can never license a re-apply. The
-        // decisions are retained on the handle so the boot-time answer stays
-        // observable.
+        // decisions — and the read failure itself — are retained on the handle
+        // so the boot-time answer stays observable and a failed read is not
+        // mistaken for "nothing was stuck".
         #[cfg(feature = "compute")]
-        let compute_run_recoveries = match crate::execution::compute::recover_stuck_compute_runs(
-            &pool,
-        )
-        .await
-        {
-            Ok(recovered) => {
-                for run in &recovered {
-                    tracing::info!(
-                        run_id = %run.run_id,
-                        operation_id = run.operation_id.as_deref().unwrap_or("<none>"),
-                        outcome = ?run.outcome,
-                        "execution start: compute run receipt recovery decision"
-                    );
+        let (compute_run_recoveries, compute_run_recovery_error) =
+            match crate::execution::compute::recover_stuck_compute_runs(&pool).await {
+                Ok(recovered) => {
+                    for run in &recovered {
+                        tracing::info!(
+                            run_id = %run.run_id,
+                            operation_id = run.operation_id.as_deref().unwrap_or("<none>"),
+                            outcome = ?run.outcome,
+                            "execution start: compute run receipt recovery decision"
+                        );
+                    }
+                    (recovered, None)
                 }
-                recovered
-            }
-            Err(err) => {
-                tracing::warn!(
-                    error = %err,
-                    "execution start: compute run receipt recovery failed; no run was re-applied"
-                );
-                Vec::new()
-            }
-        };
+                Err(err) => {
+                    tracing::warn!(
+                        error = %err,
+                        "execution start: compute run receipt recovery failed; no run was re-applied"
+                    );
+                    (Vec::new(), Some(err))
+                }
+            };
+        // The read failure is retained on the handle only for the test-hooks seam
+        // (see `ExecutionHandle::compute_run_recovery_error`); a production build
+        // reports it through the warning above and holds nothing.
+        #[cfg(all(feature = "compute", not(any(test, feature = "test-hooks"))))]
+        drop(compute_run_recovery_error);
         // Recovery is complete: start the clock. Until this signal the owned
         // scheduler task cannot tick, so an admission sweep can never race the
         // recovery pass above.
@@ -1224,6 +1261,8 @@ impl CoreService {
             compute_serializer: deps_compute_serializer,
             #[cfg(feature = "compute")]
             compute_run_recoveries,
+            #[cfg(all(feature = "compute", any(test, feature = "test-hooks")))]
+            compute_run_recovery_error,
             engine,
             coordinator,
             capability_holder,

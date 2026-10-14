@@ -26,7 +26,7 @@ last_updated: 2026-10-12
 
 # Codegen lane: single-home emission, in-process formatting, byte-stability
 
-> **Status: current.** The v1.207 P1 convergence delivered single-home emission + in-process formatting; the abort-window residual `R-V1190-RUSTGEN-PRETTY-RESET` (prefer stage-and-swap) remains open, not a current defect.
+> **Status: current.** The v1.207 P1 convergence delivered single-home emission + in-process formatting; **v1.214 P1** closed the abort-window residual (`R-V1190-RUSTGEN-PRETTY-RESET`) with a recoverable stage-and-swap publication plus a `mkdir`-only per-output-directory publication lock, and made the TS declaration scanner string/template/comment aware (`R-V1190-CODEGEN-TS-BRACE-COUNT`).
 
 ## Context
 
@@ -48,12 +48,14 @@ contract consumer, so its discipline is load-bearing.
 2. **In-process formatting** — rust-gen parses generated modules with `syn`
    and re-prints with `prettyplease`. Do **not** depend on a rustfmt binary
    or a toolchain pin: the verify-codegen CI job installs no rustfmt.
-3. **Write discipline** — every module is generated, parsed and rendered
-   BEFORE the first write (failure paths write nothing). Note this is *not*
-   atomic tree replacement: `main()` still removes the generated tree before
-   regenerating, so a hard abort inside that window can still prune outputs
-   (tracked as `R-V1190-RUSTGEN-PRETTY-RESET`); prefer stage-and-swap if you
-   touch this.
+3. **Write discipline (stage-and-swap; v1.214)** — every module is generated,
+   parsed and rendered BEFORE the first write (failure paths write nothing), and
+   publication is a **recoverable replacement**: the committed tree is renamed to
+   a sibling `<tree>.backup`, the completed `<tree>.staging` is renamed into its
+   place, and the backup is dropped last; `recover_interrupted_publication`
+   restores a backup left by a crashed run before the next build. This is not
+   atomic — a hard kill between the two renames leaves the output path absent
+   until a later run recovers it (the module docs say so explicitly).
 4. **Byte-stability verification** — the acceptance proof is: run the lane
    twice, compare a full-tree `sha256` manifest (identical) plus an empty
    `git status`; pin the historical target file by recorded sha. Ordinary-path
@@ -63,6 +65,17 @@ contract consumer, so its discipline is load-bearing.
    silently validate nothing. Pin the generated type with **bidirectional**
    regressions: deserialization rejects `false` AND the outbound path cannot
    emit it (v1.207 P2 added a generated `serialize_with` guard for this).
+6. **Publication lock — one atomic primitive, no stale takeover (v1.214)** —
+   the TS lane serializes the whole recover→build→publish lifecycle per output
+   directory with a single `mkdir(<outDir>.lock)` claim: `EEXIST` fails visibly
+   (naming the lock path and the recorded owner), and only the claim that still
+   owns the lock releases it. Automatic stale recovery is deliberately **absent**:
+   four review rounds showed every read-then-delete recovery design (age-out
+   gate, atomically published claim + `linkSync`, liveness-checked
+   `rename(...).take` takeover) leaves another ownership window through which two
+   runs can publish an incomplete tree. An orphaned lock is removed manually.
+   Reintroducing an automatic reclaim path requires a proof-level argument, not
+   a heuristic.
 
 ## Why This Matters
 

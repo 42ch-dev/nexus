@@ -1145,6 +1145,87 @@ async fn v1191_world_sheet_governance_restated_content_is_a_no_op() {
     pool.close().await;
 }
 
+/// D8 ordering pin (v1.214 P1-S2): the authored-dialect seam validation runs
+/// **before** the durable no-op short-circuit, so re-supplying an unchanged
+/// but already-drifted dialect is still refused with the seam's 422
+/// `validation_summary.errors` — never absorbed as a no-op. The row and the
+/// World revision stay put (a refusal is not a write); the caller must fix the
+/// dialect first, then re-submit.
+#[tokio::test]
+async fn v1214_p1s2_drifted_dialect_restate_is_still_a_seam_422() {
+    // A stored row whose authored dialects are already non-compliant. The
+    // request below re-states this value unchanged, so the materialised
+    // content is identical — only the seam stands between it and a no-op.
+    const DRIFT_ID: &str = "kb_drift";
+    const DRIFTED: &str =
+        r#"{"mental":["drifted"],"belief":{"holder":"kb_ana"},"observation":["drifted"]}"#;
+
+    let fx = setup_sheet_fixture().await;
+    let pool = sheet_pool(&fx).await;
+
+    seed_kb(
+        &pool,
+        DRIFT_ID,
+        SHEET_WORLD,
+        "Drifted",
+        "confirmed",
+        Some(0),
+        Some(DRIFTED),
+    )
+    .await;
+
+    let restated: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
+        "entity_id": DRIFT_ID,
+        "expected_version": 0,
+        "patch": {"modules": {
+            "mental": ["drifted"],
+            "belief": {"holder": "kb_ana"},
+            "observation": ["drifted"],
+        }},
+    }))
+    .unwrap();
+    let err = fx
+        .core
+        .patch_world_kb_entity(&fx.principal, SHEET_WORLD.to_string(), restated)
+        .await
+        .expect_err("an unchanged drifted dialect is still a seam 422, not a no-op");
+    let mut errors = match err {
+        CoreError::WorldKbValidation(payload) => payload.validation_summary.errors,
+        other => panic!("expected the seam's 422 payload, got {other:?}"),
+    };
+    // The patch's `modules` map is a HashMap, so the seam's own error order is
+    // not part of the contract — only the per-dialect message set is.
+    errors.sort();
+    assert_eq!(
+        errors,
+        [
+            "modules.belief: must be an array",
+            "modules.mental: must be an object",
+            "modules.observation: must be an object",
+        ]
+        .map(String::from)
+    );
+
+    assert_eq!(
+        sheet_revision(&pool, DRIFT_ID).await,
+        0,
+        "a refused patch moves no revision"
+    );
+    let stored: String =
+        sqlx::query_scalar("SELECT modules_json FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind(DRIFT_ID)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored, DRIFTED, "the stored drifted dialect is untouched");
+    assert_eq!(
+        world_revision(&pool, SHEET_WORLD).await,
+        0,
+        "a refused patch moves no World knowledge revision"
+    );
+    pool.close().await;
+}
+
 #[tokio::test]
 async fn v1191_world_sheet_governance_canvas_create_authors_the_audience() {
     let fx = setup_sheet_fixture().await;

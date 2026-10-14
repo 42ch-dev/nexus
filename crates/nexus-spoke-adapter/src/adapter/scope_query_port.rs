@@ -527,10 +527,44 @@ mod tests {
             let mut filler =
                 KnowledgeEntryRecord::new(&world_id, BlockType::Item, &format!("Filler_{i:03}"));
             filler.entry_id = format!("kb_fill_{i:03}");
+            // Deterministic keyset order: these sort before the target by
+            // `created_at` regardless of insert timing.
+            filler.created_at = "2000-01-01T00:00:00Z".to_string();
             store.insert_knowledge_entry(filler).await.unwrap();
         }
 
         let target_id = seeded[0].entry_id.clone();
+        sqlx::query(
+            "UPDATE kb_key_blocks SET created_at = '2099-01-01T00:00:00Z' \
+             WHERE key_block_id = ?",
+        )
+        .bind(&target_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // The regression claim is that the target lies *beyond* the first
+        // unfiltered window — a filtered hit proves nothing otherwise. Read the
+        // same keyset window the unfiltered port serves and pin that here.
+        let window = store
+            .list_by_owner_keyset(
+                &KnowledgeOwnerRef::world(&world_id),
+                None,
+                u32::try_from(LIST_BY_WORLD_LIMIT).unwrap(),
+                &KnowledgeReadScope::creator_management(
+                    vec![KnowledgeOwnerRef::world(&world_id)],
+                    Vec::new(),
+                ),
+            )
+            .await
+            .unwrap();
+        assert_eq!(window.len(), usize::try_from(LIST_BY_WORLD_LIMIT).unwrap());
+        assert!(
+            !window.iter().any(|row| row.entry_id == target_id),
+            "target {target_id} must lie beyond the first unfiltered \
+             {LIST_BY_WORLD_LIMIT}-row window"
+        );
+
         let mut scope = scope_for(&world_id);
         scope.entry_ids = vec![target_id.clone()];
 

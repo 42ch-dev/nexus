@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { compile } from 'json-schema-to-typescript';
+import { spawnSync } from 'child_process';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import type { SchemaModule } from './ts-gen';
-import { dedupeRefTargets, rewriteExactStringPatterns, rewriteUnrestrictedJsonValues } from './ts-gen';
+import {
+  acquirePublicationLock,
+  declarationEnd,
+  dedupeRefTargets,
+  rewriteExactStringPatterns,
+  rewriteUnrestrictedJsonValues,
+  stageAndSwap,
+} from './ts-gen';
+import { generateCoreSliceClient } from './client-gen';
 
 describe('nested discriminant literals', () => {
   it('rewrites exact patterns inside inlined oneOf $ref bodies', async () => {
@@ -155,5 +167,249 @@ describe('$ref target dedupe', () => {
     const source = ['export interface CharacterActorRef {', '  actor_kind: string;', '}'].join('\n');
 
     expect(dedupeRefTargets(source, actorRef, [character, actorRef])).toBe(source);
+  });
+
+  it('removes a declaration whose body holds a nested template literal', () => {
+    // The nested template's backtick must not close the outer one; otherwise the
+    // literal `/*` reads as a block comment and the declaration end is missed.
+    const pattern = schemaModule('core/works', 'Pattern', ['Pattern']);
+    const listResponse = schemaModule('core/works', 'PatternListResponse', [
+      'PatternListResponse',
+      'Pattern',
+    ]);
+    const source = [
+      'export interface PatternListResponse {',
+      '  items: Pattern[];',
+      '}',
+      'export interface Pattern {',
+      '  raw: `outer${`/*`}`;',
+      '  n: number;',
+      '}',
+    ].join('\n');
+
+    const out = dedupeRefTargets(source, listResponse, [listResponse, pattern]);
+
+    expect(out).toContain("import type { Pattern } from './pattern';");
+    // The complete declaration is gone and the next declaration survives.
+    expect(out).not.toContain('export interface Pattern {');
+    expect(out).not.toContain('raw: `outer${`/*`}`;');
+    expect(out).toContain('export interface PatternListResponse {');
+    expect(out).toContain('  items: Pattern[];');
+  });
+});
+
+describe('declarationEnd brace scan', () => {
+  it('ignores braces inside string literals', () => {
+    const lines = [
+      'export interface BracedQuery {',
+      '  close: "}";',
+      '  count: number;',
+      '}',
+      'export interface Next {',
+      '}',
+    ];
+    // A naive counter takes the `}` in `"}"` as the declaration close (line 1).
+    expect(declarationEnd(lines, 0)).toBe(3);
+  });
+
+  it('ignores braces inside template literals and comments', () => {
+    const lines = [
+      'export type Pattern = {',
+      '  /**',
+      "   * Closes with a literal `}` -- don't count it.",
+      '   */',
+      '  raw: `a}b`;',
+      '  n: number;',
+      '};',
+    ];
+    expect(declarationEnd(lines, 0)).toBe(6);
+  });
+
+  it('keeps comment-looking text inside a nested template literal literal', () => {
+    const lines = [
+      'export interface Pattern {',
+      '  raw: `outer${`/*`}`;',
+      '  n: number;',
+      '}',
+    ];
+    expect(declarationEnd(lines, 0)).toBe(3);
+  });
+});
+
+describe('stage-and-swap tree write', () => {
+  function scratch(tag: string): string {
+    return fs.mkdtempSync(path.join(os.tmpdir(), `nexus-ts-gen-${tag}-`));
+  }
+
+  it('keeps the existing tree when the build throws', async () => {
+    const root = scratch('abort');
+    const outDir = path.join(root, 'generated');
+    fs.mkdirSync(outDir);
+    fs.writeFileSync(path.join(outDir, 'kept.ts'), '// committed');
+
+    await expect(
+      stageAndSwap(outDir, stageDir => {
+        fs.writeFileSync(path.join(stageDir, 'half.ts'), '// partial');
+        throw new Error('boom');
+      }),
+    ).rejects.toThrow('boom');
+
+    expect(fs.existsSync(path.join(outDir, 'kept.ts'))).toBe(true);
+    expect(fs.existsSync(path.join(outDir, 'half.ts'))).toBe(false);
+    expect(fs.existsSync(`${outDir}.staging`)).toBe(false);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('replaces the existing tree on success', async () => {
+    const root = scratch('swap');
+    const outDir = path.join(root, 'generated');
+    fs.mkdirSync(outDir);
+    fs.writeFileSync(path.join(outDir, 'stale.ts'), '// stale');
+
+    await stageAndSwap(outDir, stageDir => {
+      fs.writeFileSync(path.join(stageDir, 'fresh.ts'), '// fresh');
+    });
+
+    expect(fs.existsSync(path.join(outDir, 'stale.ts'))).toBe(false);
+    expect(fs.existsSync(path.join(outDir, 'fresh.ts'))).toBe(true);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('restores the previous tree when publication fails', async () => {
+    const root = scratch('publish');
+    const outDir = path.join(root, 'generated');
+    fs.mkdirSync(outDir);
+    fs.writeFileSync(path.join(outDir, 'kept.ts'), '// committed');
+
+    // Force the publish rename to fail by dropping the built tree before the swap.
+    await expect(
+      stageAndSwap(outDir, stageDir => {
+        fs.rmSync(stageDir, { recursive: true, force: true });
+      }),
+    ).rejects.toThrow();
+
+    expect(fs.existsSync(path.join(outDir, 'kept.ts'))).toBe(true);
+    expect(fs.existsSync(`${outDir}.backup`)).toBe(false);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('recovers an interrupted publication before another run publishes', async () => {
+    const root = scratch('recover');
+    const outDir = path.join(root, 'generated');
+    // Simulate a kill after the old tree was retired but before the swap landed.
+    fs.mkdirSync(`${outDir}.backup`, { recursive: true });
+    fs.writeFileSync(path.join(`${outDir}.backup`, 'kept.ts'), '// committed');
+
+    await expect(
+      stageAndSwap(outDir, () => {
+        throw new Error('boom');
+      }),
+    ).rejects.toThrow('boom');
+
+    expect(fs.existsSync(path.join(outDir, 'kept.ts'))).toBe(true);
+    expect(fs.existsSync(`${outDir}.backup`)).toBe(false);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('refuses a second run over the same output while the first is building', async () => {
+    const root = scratch('overlap');
+    const outDir = path.join(root, 'generated');
+    fs.mkdirSync(outDir);
+
+    let releaseFirst!: () => void;
+    const firstBuild = new Promise<void>(resolve => {
+      releaseFirst = resolve;
+    });
+    const first = stageAndSwap(outDir, () => firstBuild);
+    // The first run holds the output lock for its whole build, so the second run must
+    // fail visibly rather than clear the staging tree out from under it.
+    await expect(stageAndSwap(outDir, () => {})).rejects.toThrow(/another codegen run/);
+
+    releaseFirst();
+    await first;
+    expect(fs.existsSync(`${outDir}.lock`)).toBe(false);
+
+    // The lock is released with the first run: a follow-up run proceeds normally.
+    await stageAndSwap(outDir, stageDir => {
+      fs.writeFileSync(path.join(stageDir, 'second.ts'), '// second');
+    });
+    expect(fs.existsSync(path.join(outDir, 'second.ts'))).toBe(true);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe('publication lock acquisition', () => {
+  function scratch(tag: string): string {
+    return fs.mkdtempSync(path.join(os.tmpdir(), `nexus-ts-lock-${tag}-`));
+  }
+
+  /** A pid guaranteed dead: a child that has already exited (await-free, reaped). */
+  function deadPid(): number {
+    const child = spawnSync(process.execPath, ['-e', '']);
+    if (!child.pid || child.pid === process.pid) {
+      throw new Error('failed to spawn a helper process for a dead pid');
+    }
+    return child.pid;
+  }
+
+  /** Seed a lock directory holding an owner record. */
+  function seedLock(lockDir: string, token: string): void {
+    fs.mkdirSync(lockDir, { recursive: true });
+    fs.writeFileSync(path.join(lockDir, 'owner'), `${token}\n`);
+  }
+
+  it('refuses a second contender against a held lock and removes nothing', () => {
+    const root = scratch('held');
+    const outDir = path.join(root, 'generated');
+    const lockDir = `${outDir}.lock`;
+
+    const release = acquirePublicationLock(outDir);
+    const ownerBefore = fs.readFileSync(path.join(lockDir, 'owner'), 'utf8');
+
+    // The competitor fails visibly and must not touch the holder's lock or its record.
+    expect(() => acquirePublicationLock(outDir)).toThrow(/another codegen run/);
+    expect(fs.readFileSync(path.join(lockDir, 'owner'), 'utf8')).toBe(ownerBefore);
+    expect(fs.existsSync(lockDir)).toBe(true);
+
+    release();
+    expect(fs.existsSync(lockDir)).toBe(false);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('leaves a stale lock from a dead pid in place and fails with the manual-removal message', () => {
+    const root = scratch('stale');
+    const outDir = path.join(root, 'generated');
+    const lockDir = `${outDir}.lock`;
+    const token = `${deadPid()}:stale:0`;
+    seedLock(lockDir, token);
+
+    // A dead owner is never probed or reclaimed: the run fails visibly instead.
+    expect(() => acquirePublicationLock(outDir)).toThrow(/another codegen run/);
+    expect(() => acquirePublicationLock(outDir)).toThrow(`remove ${lockDir} manually`);
+    expect(fs.readFileSync(path.join(lockDir, 'owner'), 'utf8').trim()).toBe(token);
+    expect(fs.existsSync(lockDir)).toBe(true);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe('CoreSliceClient staging', () => {
+  it('writes the client and its barrel export into the given output tree', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-client-gen-'));
+    const outDir = path.join(root, 'generated');
+    const coreDir = path.join(outDir, 'core');
+    fs.mkdirSync(coreDir, { recursive: true });
+    // The ts-gen barrel pass writes this file before the client is built into the same
+    // staged tree; the client re-export is appended to it.
+    fs.writeFileSync(path.join(coreDir, 'index.ts'), "export type { Foo } from './foo';\n");
+
+    generateCoreSliceClient(outDir);
+
+    expect(fs.readFileSync(path.join(coreDir, 'CoreSliceClient.ts'), 'utf8')).toContain(
+      'export interface CoreSliceClient {',
+    );
+    const barrel = fs.readFileSync(path.join(coreDir, 'index.ts'), 'utf8');
+    expect(barrel).toContain("export type { CoreSliceClient } from './CoreSliceClient';");
+    expect(barrel).toContain("export type { Foo } from './foo';");
+    fs.rmSync(root, { recursive: true, force: true });
   });
 });
