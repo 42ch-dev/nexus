@@ -10,7 +10,7 @@ import type {
   WorldKbRelationshipProjection,
 } from '@42ch/nexus-contracts';
 
-import type { EntityEditForm, ModuleDialect } from './entity-inspector';
+import type { EntityEditForm, ModuleDialect } from './world-kb-authoring';
 import type { RelationshipForm } from './relationship-inspector';
 import type {
   WorldKbEntityConflictDraft,

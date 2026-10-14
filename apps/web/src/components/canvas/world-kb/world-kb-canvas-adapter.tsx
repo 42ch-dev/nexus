@@ -27,7 +27,8 @@ import {
   filterRelationshipEdgesByConfidence,
 } from './relationship-projection';
 import { WorldKbAltView } from './world-kb-alt-view';
-import { EntityInspector, type EntityEditForm, type ModuleDialect } from './entity-inspector';
+import { EntityInspector } from './entity-inspector';
+import type { EntityEditForm, ModuleDialect } from './world-kb-authoring';
 import { PromotionInspector } from './promotion-inspector';
 import type { RelationshipForm } from './relationship-inspector';
 import type { EntityField, Selection } from './world-kb-canvas-types';
