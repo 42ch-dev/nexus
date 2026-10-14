@@ -13,11 +13,11 @@
 #   work_id:     Work entity ID being intaked (required)
 #   initial_idea: Raw user idea text (required)
 #
-# Launch:
-#   nexus42 daemon schedule add \
-#     --preset creative-brief-intake \
-#     --creator <creator-id> \
-#     --seed "<initial_idea>"
+# Launch (no dedicated CLI leaf): enqueue it as a schedule run via the core
+#   execution surface served by apps/nexus-service —
+#   POST /v1/daemon/orchestration/schedules with
+#   preset_id="creative-brief-intake" and the Work in the schedule input
+#   (`input.work_id`).
 
 preset:
   id: creative-brief-intake

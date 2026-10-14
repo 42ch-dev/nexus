@@ -23,11 +23,11 @@ Authors track multiple novel ideas and one **default** writing target for CLI co
 
 | | |
 | --- | --- |
-| **Means** | Default `work_id` when `creator run` omits `work_id` |
+| **Means** | Default `work_id` when a `creator works` subcommand omits `work_id` |
 | **Does not mean** | Only one Work may run auto-chain or schedules globally |
 | **Enforced** | At most **one** `novel_pool_entries.status = active` per `creator_id` |
-| **Set by** | `creator works use`, `pool promote --set-default`, `creator bootstrap --set-default` |
-| **Created on start** | `creator bootstrap` auto-inserts `queued` row unless `--no-pool-row` |
+| **Set by** | `creator works use`, `creator works pool promote --set-default` |
+| **Created on first use** | `creator works use` (or `creator works pool inspiration promote`) inserts a `queued` row when none exists |
 | **Prior active on change** | Demoted to **`queued`** (not `completed` unless Work already completed) |
 
 ---
@@ -112,12 +112,12 @@ Daemon API `set_pool_active` (and CLI `creator works use` / `pool promote --set-
 
 | Command | Effect |
 | --- | --- |
-| `creator works list` | List Works (from `works` table; migrated from `run list`) |
+| `creator works list` | List Works (from `works` table) |
 | `creator works status [<work_id>]` | Work detail; default = pool `active` |
 | `creator works use <work_id>` | Upsert pool row if needed; demote prior `active` → `queued`; set target `active` |
 | `creator works pool list` | List pool entries |
 | `creator works pool promote <entry_id> [--set-default]` | `queued` → `active`; prior `active` → `queued`; bind/scaffold `work_id` if missing |
-| `creator works pool inspiration promote <item_id> [--set-default] [--idea <text>]` | Read MD title/body → `run start --idea`; pool `queued` row; item → `promoted` |
+| `creator works pool inspiration promote <item_id> [--set-default] [--idea <text>]` | Read MD title/body → create the Work (`initial_idea`); pool `queued` row; item → `promoted` |
 | `creator works pool archive <entry_id>` | Entry → `completed` |
 | `creator works pool inspiration add/list` | CRUD inspiration pool |
 | `creator works completion-lock release <work_id>` | See lifecycle spec §3.1 |
@@ -130,7 +130,7 @@ When `pool promote` targets `queued`:
 
 1. Ensure `work_id` bound (scaffold via init preset if entry has none).
 2. Demote current `active` row → `queued`.
-3. Set promoted entry → `active`. `--set-default` is redundant when promote already sets `active`; flag retained for symmetry with `run start`.
+3. Set promoted entry → `active`. `--set-default` is redundant when promote already sets `active`; flag retained for symmetry with `creator works pool promote`.
 4. **Does not** pause auto-chain on other Works.
 
 CLI may **warn** when prior `active` Work still has running schedules (informational only).
@@ -152,8 +152,8 @@ This makes the behavior explicit and CLI-help-testable.
 On Work completion (lifecycle spec §2):
 
 - Bound pool row → `completed`.
-- If it was `active`, no pool `active` until `works use` / `promote --set-default` / `run start --set-default`.
-- `resume --reopen` does **not** auto-restore pool `active`.
+- If it was `active`, no pool `active` until `creator works use` / `creator works pool promote --set-default`.
+- `creator works reopen` does **not** auto-restore pool `active`.
 
 ---
 
@@ -161,7 +161,7 @@ On Work completion (lifecycle spec §2):
 
 | Phase | Deliverable |
 | --- | --- |
-| **P0** | `novel_pool_entries` migration; `works use`; completion → pool row update; `run start` auto row |
+| **P0** | `novel_pool_entries` migration; `creator works use`; completion → pool row update; auto row on first use |
 | **P1** | `inspiration_items`; `pool list/promote/archive/inspiration *` |
 
 ---
@@ -170,8 +170,8 @@ On Work completion (lifecycle spec §2):
 
 1. DB SSOT; markdown derivative for 选题库 export only.
 2. One `active` per creator; unique `(creator_id, work_id)`.
-3. `creator works list|status` replace `run list|status` (hard remove).
-4. Inspiration promote = `run start` + pool row (grill-me A).
+3. `creator works list|status` are the sole Work listing surfaces (the legacy `run` shorthand is hard-removed).
+4. Inspiration promote = Work creation + pool row (grill-me A).
 
 ---
 
