@@ -27,7 +27,7 @@ Authors track multiple novel ideas and one **default** writing target for CLI co
 | **Does not mean** | Only one Work may run auto-chain or schedules globally |
 | **Enforced** | At most **one** `novel_pool_entries.status = active` per `creator_id` |
 | **Set by** | `creator works use`, `creator works pool promote --set-default` |
-| **Created on first use** | `creator works use` (or `creator works pool inspiration promote`) inserts a `queued` row when none exists |
+| **Created on initialization** | A Work gets its `queued` pool row at initialization unless explicitly opted out |
 | **Prior active on change** | Demoted to **`queued`** (not `completed` unless Work already completed) |
 
 ---
@@ -130,7 +130,7 @@ When `pool promote` targets `queued`:
 
 1. Ensure `work_id` bound (scaffold via init preset if entry has none).
 2. Demote current `active` row → `queued`.
-3. Set promoted entry → `active`. `--set-default` is redundant when promote already sets `active`; flag retained for symmetry with `creator works pool promote`.
+3. Set promoted entry → `active`. `--set-default` is redundant when promote already sets `active`; the flag is retained.
 4. **Does not** pause auto-chain on other Works.
 
 CLI may **warn** when prior `active` Work still has running schedules (informational only).
@@ -161,7 +161,7 @@ On Work completion (lifecycle spec §2):
 
 | Phase | Deliverable |
 | --- | --- |
-| **P0** | `novel_pool_entries` migration; `creator works use`; completion → pool row update; auto row on first use |
+| **P0** | `novel_pool_entries` migration; `creator works use`; completion → pool row update; auto row on initialization |
 | **P1** | `inspiration_items`; `pool list/promote/archive/inspiration *` |
 
 ---
