@@ -25,6 +25,7 @@ use crate::world_kb::errors::KbError;
 use crate::world_kb::source_anchor::SourceAnchor;
 use nexus_contracts::BlockType;
 use nexus_contracts::KeyBlockStatus;
+use serde::de::value::MapDeserializer;
 use serde::{Deserialize, Serialize};
 
 /// `KnowledgeEntryRecord` body content.
@@ -1030,14 +1031,35 @@ fn module_error(dialect: &str, index: Option<usize>, field: Option<&str>, reason
     format!("{path}: {reason}")
 }
 
+/// Borrowed view of one authored module value: the JSON containers a patch
+/// carries, or any other JSON value handed in directly. Validating the borrow
+/// keeps the write seam from materialising a copy of the dialect payload.
+pub enum AuthoredModuleValue<'a> {
+    Object(&'a serde_json::Map<String, serde_json::Value>),
+    Array(&'a [serde_json::Value]),
+    /// Any non-container JSON value; every dialect addresses it as the wrong
+    /// container.
+    Other(&'a serde_json::Value),
+}
+
+impl<'a> From<&'a serde_json::Value> for AuthoredModuleValue<'a> {
+    fn from(value: &'a serde_json::Value) -> Self {
+        match value {
+            serde_json::Value::Object(obj) => Self::Object(obj),
+            serde_json::Value::Array(arr) => Self::Array(arr),
+            other => Self::Other(other),
+        }
+    }
+}
+
 /// Validate an authored `modules.mental` value.
 ///
 /// It must be an object in the nine-field [`MentalFieldsRaw`] handbook shape.
 /// Field values stay raw JSON and unknown inner keys round-trip verbatim
 /// (PD-13), so every JSON object is accepted; only a non-object value rejects.
 #[must_use]
-pub fn validate_mental_module(value: &serde_json::Value) -> Vec<String> {
-    if value.is_object() {
+pub fn validate_mental_module<'a>(value: impl Into<AuthoredModuleValue<'a>>) -> Vec<String> {
+    if matches!(value.into(), AuthoredModuleValue::Object(_)) {
         Vec::new()
     } else {
         vec![module_error("mental", None, None, "must be an object")]
@@ -1053,8 +1075,8 @@ pub fn validate_mental_module(value: &serde_json::Value) -> Vec<String> {
 /// (`modules.belief.<index>.<member>`); only a genuinely non-object row
 /// falls back to the row-level `must be a belief proposition object`.
 #[must_use]
-pub fn validate_belief_module(value: &serde_json::Value) -> Vec<String> {
-    let Some(rows) = value.as_array() else {
+pub fn validate_belief_module<'a>(value: impl Into<AuthoredModuleValue<'a>>) -> Vec<String> {
+    let AuthoredModuleValue::Array(rows) = value.into() else {
         return vec![module_error("belief", None, None, "must be an array")];
     };
     let mut errors = Vec::new();
@@ -1075,9 +1097,10 @@ pub fn validate_belief_module(value: &serde_json::Value) -> Vec<String> {
         // mistyped handbook member does.
         let mut mistyped = false;
         for (member, member_value) in members {
-            let probe = serde_json::Value::Object(
-                std::iter::once((member.clone(), member_value.clone())).collect(),
-            );
+            // Borrowed singleton probe: serde reads the one member through its
+            // generic map deserializer, so no per-member object is built and an
+            // unknown key stays ignored (PD-13).
+            let probe = MapDeserializer::new(std::iter::once((member.as_str(), member_value)));
             if let Err(error) = BeliefPropositionRaw::deserialize(probe) {
                 errors.push(module_error(
                     "belief",
@@ -1113,8 +1136,8 @@ pub fn validate_belief_module(value: &serde_json::Value) -> Vec<String> {
 /// entry-id strings — an explicit `[]` is the meaningful PD-9 "no observers"
 /// claim and is accepted — and whose `access` (when present) is a JSON object.
 #[must_use]
-pub fn validate_observation_module(value: &serde_json::Value) -> Vec<String> {
-    let Some(obj) = value.as_object() else {
+pub fn validate_observation_module<'a>(value: impl Into<AuthoredModuleValue<'a>>) -> Vec<String> {
+    let AuthoredModuleValue::Object(obj) = value.into() else {
         return vec![module_error("observation", None, None, "must be an object")];
     };
     let mut errors = Vec::new();

@@ -13,8 +13,9 @@ use nexus_contracts::{
     WorldKbPromoteCandidateResponse, WorldKbRelationshipProjection, WorldKbSourceAnchorProjection,
 };
 use nexus_knowledge::world_kb::knowledge_entry::{
-    validate_belief_module, validate_mental_module, validate_observation_module, KnowledgeAudience,
-    KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeGovernance,
+    validate_belief_module, validate_mental_module, validate_observation_module,
+    AuthoredModuleValue, KnowledgeAudience, KnowledgeEntryBody, KnowledgeEntryRecord,
+    KnowledgeGovernance,
 };
 use nexus_knowledge::world_kb::store::{KbStoreError, KnowledgeReadScope};
 use nexus_knowledge::world_kb::validation::{
@@ -541,12 +542,13 @@ pub mod patch {
         resolve_authored_audience_tx, set_nexus_body, spoke_to_knowledge_record, store_err,
         validate_belief_module, validate_body, validate_canonical_name, validate_mental_module,
         validate_observation_module, validation_summary, wire_cast, AudienceContainer,
-        AuthoredAudience, BlockType, CoreError, CoreResult, HashMap, KbStoreError,
-        KnowledgeAudience, KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeGovernance,
-        KnowledgeReadScope, NexusWorldKbEntityPatch, NexusWorldKbEntityPatchAudience,
-        NexusWorldKbEntityPatchModulesKey, NexusWorldKbEntityPatchModulesValue,
-        SpokeKnowledgeEntry, SpokeReject, SpokeRejectCode, SpokeResult, Sqlite, SqlitePool,
-        ValidationMode, WorldKbPatchEntityRequest, WorldKbPatchEntityResponse,
+        AuthoredAudience, AuthoredModuleValue, BlockType, CoreError, CoreResult, HashMap,
+        KbStoreError, KnowledgeAudience, KnowledgeEntryBody, KnowledgeEntryRecord,
+        KnowledgeGovernance, KnowledgeReadScope, NexusWorldKbEntityPatch,
+        NexusWorldKbEntityPatchAudience, NexusWorldKbEntityPatchModulesKey,
+        NexusWorldKbEntityPatchModulesValue, SpokeKnowledgeEntry, SpokeReject, SpokeRejectCode,
+        SpokeResult, Sqlite, SqlitePool, ValidationMode, WorldKbPatchEntityRequest,
+        WorldKbPatchEntityResponse,
     };
 
     #[allow(clippy::too_many_lines)] // one linear domain operation
@@ -1101,17 +1103,15 @@ pub mod patch {
         Some(serde_json::Value::Object(map))
     }
 
-    /// Materialise one provided first-level module value as JSON for the
-    /// knowledge-crate validators (the same Object/Array mapping
-    /// `merge_modules` performs).
-    fn module_value_to_json(value: &NexusWorldKbEntityPatchModulesValue) -> serde_json::Value {
+    /// Borrow one provided first-level module value as an authored-module view
+    /// for the knowledge-crate validators (the same Object/Array mapping
+    /// `merge_modules` performs), without materialising a JSON copy.
+    fn authored_module_value(
+        value: &NexusWorldKbEntityPatchModulesValue,
+    ) -> AuthoredModuleValue<'_> {
         match value {
-            NexusWorldKbEntityPatchModulesValue::Object(obj) => {
-                serde_json::Value::Object(obj.clone())
-            }
-            NexusWorldKbEntityPatchModulesValue::Array(arr) => {
-                serde_json::Value::Array(arr.clone())
-            }
+            NexusWorldKbEntityPatchModulesValue::Object(obj) => AuthoredModuleValue::Object(obj),
+            NexusWorldKbEntityPatchModulesValue::Array(arr) => AuthoredModuleValue::Array(arr),
         }
     }
 
@@ -1124,9 +1124,9 @@ pub mod patch {
         let mut errors = Vec::new();
         for (key, value) in &patch.modules {
             let dialect_errors = match key.as_str() {
-                "mental" => validate_mental_module(&module_value_to_json(value)),
-                "belief" => validate_belief_module(&module_value_to_json(value)),
-                "observation" => validate_observation_module(&module_value_to_json(value)),
+                "mental" => validate_mental_module(authored_module_value(value)),
+                "belief" => validate_belief_module(authored_module_value(value)),
+                "observation" => validate_observation_module(authored_module_value(value)),
                 // Not an authored dialect: untouched opaque round-trip (PD-13).
                 _ => continue,
             };
