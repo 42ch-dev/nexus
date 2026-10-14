@@ -31,7 +31,7 @@ When the Daemon API authenticates **remote** clients via a **custom request head
 
 1. A state-changing request must carry `X-API-Key` (a custom header).
 2. A cross-origin malicious page **cannot** set a custom header on a `fetch`/XHR without triggering a **CORS preflight** (`OPTIONS`).
-3. The V1.86 Origin allowlist — `checkOrigin` + `allowedOrigins` in `apps/nexus-service/src/security.ts`, the successor to the retired `require_allowed_origin` middleware — **rejects** any preflight whose `Origin` is not allowlisted.
+3. The V1.86 Origin allowlist is enforced by withholding permission, not by rejecting the preflight: `writeCors` in `apps/nexus-service/src/server.ts` sets `Access-Control-Allow-Origin` only when the request's `Origin` is in `config.allowedOrigins`, and the `OPTIONS` preflight path answers `204` before the auth gates run — so a preflight from a non-allowlisted origin gets **no CORS grant** and the browser withholds the real request. A non-`OPTIONS` request whose `Origin` is present and not allowlisted is rejected `403 forbidden` by `checkOrigin` in `apps/nexus-service/src/security.ts`, the successor to the retired `require_allowed_origin` middleware.
 4. Therefore a malicious site can neither read responses nor forge a state-changing request with the required header.
 
 This is the complete CSRF defence for the header-key model. Adding a double-submit cookie or synchronizer token on top would add maintenance surface (cookie issuance, token storage, expiry, SameSite config) for **no incremental security** — those mechanisms exist to defend cookie-based auth, which the daemon does not use.
