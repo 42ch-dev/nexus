@@ -443,8 +443,13 @@ export const HOST_ROUTES: readonly DomainRoute[] = [
     tier: 'provider_stream',
     family: 'host',
     capture: 'sessionId',
-    handle: async (service, params, search) => {
+    handle: async (service, params, search, _body, request) => {
       const sessionId = params[0];
+      // The retained `Last-Event-ID` header outranks the query cursor: both are
+      // resume cursors, and this is the one slot the stream reader parses.
+      if (request.lastEventId !== undefined) {
+        search.set('cursor', request.lastEventId);
+      }
       return {
         kind: 'sse',
         run: async (res) => {
