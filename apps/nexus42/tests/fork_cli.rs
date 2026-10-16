@@ -90,7 +90,6 @@ fn seed_world_with_fork_point(fixture: &DirectFixture) -> (String, String, Strin
             "creator",
             "world",
             "event-add",
-            "--world-id",
             &world_id,
             "--event-type",
             "story_advance",

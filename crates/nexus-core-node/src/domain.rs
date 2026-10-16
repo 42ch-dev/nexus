@@ -383,13 +383,27 @@ impl NativeCore {
 
     /// `POST /v1/daemon/works` — returns `[created, response]`; the adapter
     /// maps the flag onto the retained 201 (new) / 200 (idempotent replay).
+    ///
+    /// An absent `world_id` key is normalised to the empty-string shape before
+    /// typed decoding: the DTO's required field would otherwise fail as a
+    /// generic `missing field` rejection, while the curated `world_id_required`
+    /// 400 (and its single remediation text) is owned by the core guard
+    /// (`nexus-core` `works.rs`), which rejects that same empty-string shape.
+    /// Presence is read off the raw object keys, never off serde's wording.
     #[napi]
     pub async fn create_work(
         &self,
         principal_handle: String,
         request_json: Buffer,
     ) -> Result<Buffer> {
-        let request: CreateWorkRequest = decode(request_json, "request")?;
+        let mut payload: serde_json::Value = decode(request_json, "request")?;
+        if let Some(members) = payload.as_object_mut() {
+            members
+                .entry("world_id")
+                .or_insert_with(|| serde_json::Value::String(String::new()));
+        }
+        let request: CreateWorkRequest = serde_json::from_value(payload)
+            .map_err(|error| Error::from_reason(format!("invalid request: {error}")))?;
         self.json_call(principal_handle, async move |core, principal| {
             let (created, response) = core.create_work_with_outcome(&principal, request).await?;
             Ok(serde_json::json!([created, response]))

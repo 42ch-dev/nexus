@@ -446,6 +446,35 @@ describe('security-stream (P4-T2)', () => {
     assert.equal((equalBody.match(/event: /g) ?? []).length, 0, 'terminal equal-cursor retry must not fabricate an event or gap');
   });
 
+  test('Last-Event-ID resumes after that id and outranks the query cursor', async () => {
+    const { sessionId, operationId } = await providerFlow(baseUrl);
+    const eventsPath = `/v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId}`;
+    const idsOf = (body) => parseSseChunks(body.split(/\r?\n\r?\n/).slice(1).join('\r\n\r\n')).map((frame) => frame.id);
+    // Replay the completed operation: its retained frames are the resume truth.
+    const full = await rawSseGet(baseUrl, eventsPath);
+    const frames = parseSseChunks(full.raw.split(/\r?\n\r?\n/).slice(1).join('\r\n\r\n'));
+    assert.ok(frames.length >= 3, `the run must retain at least three frames, got ${frames.length}`);
+    const resumeFrom = frames[0].id;
+    const after = frames.slice(1);
+
+    // The standard reconnect header alone resumes strictly after that id.
+    const headerOnly = await rawSseGet(baseUrl, eventsPath, { headers: { 'Last-Event-ID': resumeFrom } });
+    assert.deepEqual(idsOf(headerOnly.raw), after.map((frame) => frame.id), 'Last-Event-ID must resume after the id it carries');
+
+    // A query cursor pointing elsewhere on the same request loses to the header.
+    const both = await rawSseGet(baseUrl, `${eventsPath}&cursor=${encodeURIComponent(frames[1].id)}`, { headers: { 'Last-Event-ID': resumeFrom } });
+    assert.deepEqual(idsOf(both.raw), after.map((frame) => frame.id), 'the retained header must outrank the query cursor');
+
+    // An empty header carries no usable id: it must yield to the query cursor
+    // rather than clobber it with an empty cursor (which would replay all).
+    const emptyHeader = await rawSseGet(baseUrl, `${eventsPath}&cursor=${encodeURIComponent(resumeFrom)}`, { headers: { 'Last-Event-ID': '' } });
+    assert.deepEqual(idsOf(emptyHeader.raw), after.map((frame) => frame.id), 'an empty Last-Event-ID must yield to the query cursor');
+
+    // The query-parameter path stays available when no header is sent.
+    const queryOnly = await rawSseGet(baseUrl, `${eventsPath}&cursor=${encodeURIComponent(resumeFrom)}`);
+    assert.deepEqual(idsOf(queryOnly.raw), after.map((frame) => frame.id), 'the query cursor path must keep resuming');
+  });
+
   test('subscriber cap returns 409', async () => {
     await stopSharedService();
     const envHome = seedHome();

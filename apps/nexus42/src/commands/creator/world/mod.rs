@@ -56,7 +56,6 @@ pub enum WorldCommand {
     #[command(name = "event-add")]
     EventAdd {
         /// World ID (required, e.g. `wld_abc123`)
-        #[arg(long)]
         world_id: String,
         /// Branch ID (defaults to world's root branch)
         #[arg(long)]
@@ -291,7 +290,7 @@ async fn run_event_add(
         .flatten()
         .ok_or_else(|| {
             crate::errors::CliError::Other(format!(
-                "World '{world_id}' not found or has no root branch. Use --world-id with a valid world ID."
+                "World '{world_id}' not found or has no root branch. Pass a valid world ID to `world event-add <WORLD_ID>`."
             ))
         })?
     };
@@ -508,7 +507,6 @@ mod tests {
         let cli = WorldCli::try_parse_from([
             "nexus42",
             "event-add",
-            "--world-id",
             "wld_abc123",
             "--observer",
             "kb_ana",
@@ -539,7 +537,7 @@ mod tests {
 
     #[test]
     fn event_add_parses_without_observation_flags() {
-        let cli = WorldCli::try_parse_from(["nexus42", "event-add", "--world-id", "wld_abc123"])
+        let cli = WorldCli::try_parse_from(["nexus42", "event-add", "wld_abc123"])
             .expect("event-add without observation flags should parse");
         match cli.command {
             WorldCommand::EventAdd {
@@ -550,6 +548,17 @@ mod tests {
             }
             _ => panic!("expected EventAdd variant"),
         }
+    }
+
+    /// v1.215 P1-T5 (compass D8): the World id is the command's one required
+    /// primary id, so it is positional and the removed `--world-id` spelling is
+    /// not an alias — clap refuses it instead of accepting a second form.
+    #[test]
+    fn event_add_rejects_the_removed_world_id_flag() {
+        assert!(
+            WorldCli::try_parse_from(["nexus42", "event-add", "--world-id", "wld_abc123"]).is_err(),
+            "the removed --world-id spelling must not parse"
+        );
     }
 
     // ── AR-5: observation modules builder (tri-state) ─────────────────
