@@ -8948,9 +8948,10 @@ mod tests {
     //
     // Characterisation only: the architect ruling (D9) keeps the shipped
     // two layers as the boundary, so these pin the CURRENT decisions — no
-    // production rejection branch is added here. The integration-level
-    // v1.186 cases live in tests/workflow_run_state.rs and are not
-    // duplicated.
+    // production rejection branch is added here. Only the branches the
+    // existing v1.186 predicate matrix and the integration-level cases in
+    // tests/workflow_run_state.rs do not already pin are kept; the rest are
+    // cited, not restated.
     // -----------------------------------------------------------------
 
     /// Descriptor of the recovery root a persisted child must match.
@@ -8989,17 +8990,21 @@ mod tests {
         }
     }
 
-    /// `validate_descendant_position` rejects every tampered branch: a child
-    /// with no graph name, a name outside the frozen preset's inner graphs, a
-    /// non-terminal child under a non-root (inner-graph) parent, a name that
-    /// disagrees with the inner graph the root's position enters, and an
-    /// unrecorded child once the root is already past that position.
+    /// The one `validate_descendant_position` rejection branch the shipped
+    /// v1.186 matrix
+    /// (`descendant_position_validation_rejects_valid_but_wrong_inner_graph`)
+    /// does not already pin: a child row with no `graph_name` at all. That
+    /// existing test already covers the unknown inner graph, the nested
+    /// non-root parent, the disagreeing entered graph, the unrecorded
+    /// past-position child, and the tolerated recorded/terminal/reattach
+    /// cases, so they are not restated here. The caller-level marker
+    /// projection that drives the past-position branch end to end is covered
+    /// by the `workflow_run_state` integration scenarios.
     #[test]
-    fn recovery_child_identity_descendant_position_rejects_tampered_branches() {
+    fn recovery_child_identity_child_without_graph_name_is_non_replayable() {
         let valid_inner: std::collections::HashSet<&str> =
             ["inner_graph", "other_inner"].into_iter().collect();
 
-        // No graph name at all.
         let err = validate_descendant_position(
             "novel-writing",
             &valid_inner,
@@ -9014,145 +9019,6 @@ mod tests {
         )
         .expect_err("a child without a graph name is non-replayable");
         assert!(err.to_string().contains("has no graph_name"), "got {err}");
-
-        // Name outside the frozen preset's inner graphs.
-        let err = validate_descendant_position(
-            "novel-writing",
-            &valid_inner,
-            Some("inner_graph"),
-            true,
-            None,
-            "root",
-            "state_s",
-            "child",
-            Some("bogus_inner"),
-            false,
-        )
-        .expect_err("an unknown inner graph name is non-replayable");
-        assert!(err.to_string().contains("unknown inner graph"), "got {err}");
-
-        // Non-terminal child under an inner-graph (non-root) parent: nested
-        // inner graphs do not exist.
-        let err = validate_descendant_position(
-            "novel-writing",
-            &valid_inner,
-            None,
-            false,
-            None,
-            "inner-child",
-            "prompt",
-            "grandchild",
-            Some("inner_graph"),
-            false,
-        )
-        .expect_err("a nested inner graph is non-replayable");
-        assert!(
-            err.to_string().contains("nested inner graphs do not exist"),
-            "got {err}"
-        );
-
-        // Name disagrees with the inner graph the root's position enters.
-        let err = validate_descendant_position(
-            "novel-writing",
-            &valid_inner,
-            Some("other_inner"),
-            true,
-            None,
-            "root",
-            "state_s",
-            "child",
-            Some("inner_graph"),
-            false,
-        )
-        .expect_err("a name disagreeing with the entered graph is non-replayable");
-        assert!(
-            err.to_string().contains("which enters 'other_inner'"),
-            "got {err}"
-        );
-
-        // Root already past the inner-graph position and no recorded marker
-        // names this child (a duplicate/conflicting marker set collapses to
-        // the same `recorded_graph: None` input).
-        let err = validate_descendant_position(
-            "novel-writing",
-            &valid_inner,
-            None,
-            true,
-            None,
-            "root",
-            "state_after",
-            "child",
-            Some("inner_graph"),
-            false,
-        )
-        .expect_err("an unrecorded child past the position is non-replayable");
-        assert!(
-            err.to_string()
-                .contains("not recorded by an inner-graph state"),
-            "got {err}"
-        );
-    }
-
-    /// The abandon-and-reattach path must keep working: the root entered
-    /// graph `inner_graph` via state `state_s` (marker
-    /// `_inner_child_session_state_s`), its position has since moved past that
-    /// state (the bounded poller abandoned the child), and the non-terminal
-    /// child's descriptor still names `inner_graph`. Re-attachment must be
-    /// accepted — refusing every parent-context marker would make such a
-    /// child non-replayable.
-    #[test]
-    fn recovery_child_identity_abandoned_child_still_reattaches() {
-        let valid_inner: std::collections::HashSet<&str> =
-            ["inner_graph", "other_inner"].into_iter().collect();
-
-        validate_descendant_position(
-            "novel-writing",
-            &valid_inner,
-            None,                // position past the inner-graph state
-            true,                // root
-            Some("inner_graph"), // recorded by the state that entered it
-            "root",
-            "state_after",
-            "child",
-            Some("inner_graph"), // descriptor names the same inner graph
-            false,               // non-terminal
-        )
-        .expect("an abandoned child named by the root context must re-attach");
-
-        // A record naming a DIFFERENT inner graph is not that evidence.
-        let err = validate_descendant_position(
-            "novel-writing",
-            &valid_inner,
-            None,
-            true,
-            Some("other_inner"),
-            "root",
-            "state_after",
-            "child",
-            Some("inner_graph"),
-            false,
-        )
-        .expect_err("a record for another graph must not tolerate the child");
-        assert!(
-            err.to_string()
-                .contains("not recorded by an inner-graph state"),
-            "got {err}"
-        );
-
-        // Terminal descendants are historical and only need membership.
-        validate_descendant_position(
-            "novel-writing",
-            &valid_inner,
-            None,
-            true,
-            None,
-            "root",
-            "state_after",
-            "child",
-            Some("inner_graph"),
-            true,
-        )
-        .expect("a terminal child needs only graph membership");
     }
 
     /// `validate_child_descriptor_identity` rejects every tampered branch of
