@@ -11,7 +11,7 @@
  *      (`git tag --list 'v*' --sort=-v:refname` mis-orders `v0.2.0-rc.1` above
  *      `v0.2.0` unless `versionsort.suffix` is configured), so each ref is
  *      parsed with the release grammar and compared via `compareSemVer`, and
- *      unparseable `v*` refs are skipped
+ *      unparseable `v*` refs are skipped with a stderr warning naming the ref
  *   2. first-release fallback (compass D9): the commit that introduced
  *      `CHANGELOG.md` (`git log --diff-filter=A -1 --format=%H -- CHANGELOG.md`),
  *      so the first governed release covers everything merged after the
@@ -199,10 +199,14 @@ export function resolveChangelogBase(repoRoot) {
     const newest = tags.stdout
       .split("\n")
       .map((line) => line.trim())
+      .filter((tag) => tag.length > 0)
       .reduce(
         (best, tag) => {
           const version = tag.slice(1);
           if (!isReleaseSemVer(version)) {
+            console.error(
+              `warning: ignoring unparseable v* ref ${tag}: not a release SemVer (X.Y.Z, X.Y.Z-alpha.N, or X.Y.Z-rc.N)`,
+            );
             return best;
           }
           return best === null || compareSemVer(version, best) > 0 ? version : best;
