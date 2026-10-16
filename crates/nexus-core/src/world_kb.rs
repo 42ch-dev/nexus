@@ -1175,6 +1175,101 @@ pub mod patch {
             })?;
         Ok(Some(body))
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use std::hint::black_box;
+
+        /// Large nested unknown payload: 64 first-level keys x 16 unknown leaf
+        /// objects, each leaf its own allocation — one deep copy of it is a
+        /// four-figure allocation count.
+        ///
+        /// p4 t3 fix wave 1 — this feeds the authored-module allocation
+        /// regression check. The borrowed `AuthoredModuleValue` view is an
+        /// *integration* convenience: it lets the patch DTO's own `Map` / `Vec`
+        /// containers be validated directly instead of being re-wrapped in a
+        /// `Value`. It is **not** a compile-time no-copy guard — the removed
+        /// materialising shape below still type-checks against the new
+        /// signatures — so the no-copy property is pinned by measurement here.
+        ///
+        /// `allocation_counter::measure` counts the *current thread's*
+        /// allocations, so unit tests running in parallel cannot pollute the
+        /// reading.
+        fn large_unknown_payload() -> serde_json::Value {
+            let mut module = serde_json::Map::new();
+            for key in 0..64 {
+                let leaves: Vec<serde_json::Value> = (0..16)
+                    .map(|leaf| serde_json::json!({"leaf": format!("unknown-{key}-{leaf}")}))
+                    .collect();
+                module.insert(format!("unknown_{key}"), serde_json::Value::Array(leaves));
+            }
+            serde_json::Value::Object(module)
+        }
+
+        /// The shape `authored_module_value` replaced: an owned copy of the whole module.
+        ///
+        /// Kept only so the check below proves it still rejects that regression —
+        /// it is the call shape W1 names.
+        fn module_value_to_json(value: &NexusWorldKbEntityPatchModulesValue) -> serde_json::Value {
+            match value {
+                NexusWorldKbEntityPatchModulesValue::Object(obj) => {
+                    serde_json::Value::Object(obj.clone())
+                }
+                NexusWorldKbEntityPatchModulesValue::Array(arr) => {
+                    serde_json::Value::Array(arr.clone())
+                }
+            }
+        }
+
+        #[test]
+        fn authored_module_dispatch_borrows_the_patch_payload() {
+            // Fixtures are prepared outside the measured region.
+            let patch: NexusWorldKbEntityPatch =
+                serde_json::from_value(serde_json::json!({"modules": {
+                    "mental": large_unknown_payload(),
+                    "belief": [{
+                        "holder": "kb_ana",
+                        "proposition": "raining",
+                        "order": 1,
+                        "truth": "True",
+                        "unknown_member": large_unknown_payload(),
+                    }],
+                    "observation": {"observers": [], "unknown_member": large_unknown_payload()},
+                    "unknown_dialect": large_unknown_payload(),
+                }}))
+                .expect("fixture patch");
+            let copied: NexusWorldKbEntityPatchModulesValue =
+                serde_json::from_value(large_unknown_payload()).expect("fixture module value");
+
+            // Warm the thread-local counter outside the measured regions.
+            let _ = allocation_counter::measure(|| {});
+
+            // The regression this check must reject: the whole-module copy,
+            // reached through the call shape the borrowed view still accepts.
+            let copied_payload = allocation_counter::measure(|| {
+                black_box(validate_mental_module(&module_value_to_json(black_box(
+                    &copied,
+                ))));
+            });
+            let measured = allocation_counter::measure(|| {
+                black_box(validate_authored_modules(black_box(&patch)));
+            });
+
+            // `merge_modules` (persistence materialisation) is not on this path:
+            // the dispatch is measured directly. Existing typed work and
+            // diagnostics are allowed; a copy of the payload is not.
+            assert!(
+                copied_payload.count_total >= 1024,
+                "the copy shape must be visible to the counter, got {copied_payload:?}"
+            );
+            assert!(
+                measured.count_total <= 64,
+                "the core dispatch copied the patch payload: {measured:?}"
+            );
+            println!("core dispatch {measured:?} vs whole-module copy {copied_payload:?}");
+        }
+    }
 }
 
 fn store_err(e: &KbStoreError) -> CoreError {

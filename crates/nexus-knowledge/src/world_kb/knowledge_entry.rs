@@ -1031,9 +1031,11 @@ fn module_error(dialect: &str, index: Option<usize>, field: Option<&str>, reason
     format!("{path}: {reason}")
 }
 
-/// Borrowed view of one authored module value: the JSON containers a patch
-/// carries, or any other JSON value handed in directly. Validating the borrow
-/// keeps the write seam from materialising a copy of the dialect payload.
+/// Borrowed view of one authored module value.
+///
+/// The JSON containers a patch carries, or any other JSON value handed in
+/// directly. Validating the borrow keeps the write seam from materialising a
+/// copy of the dialect payload.
 pub enum AuthoredModuleValue<'a> {
     Object(&'a serde_json::Map<String, serde_json::Value>),
     Array(&'a [serde_json::Value]),
@@ -1217,6 +1219,7 @@ pub const LEGACY_MENTAL_BELIEF_MODULES_FIXTURE: &str = r#"{
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::hint::black_box;
 
     #[test]
     fn test_create_provisional_keyblock() {
@@ -1780,5 +1783,69 @@ mod tests {
             validate_observation_module(&serde_json::json!([1, 2])),
             vec!["modules.observation: must be an object".to_string()]
         );
+    }
+
+    /// p4 t3 fix wave 1 — allocation regression check for the belief-member probe.
+    ///
+    /// The probe reads one member through a borrowed one-entry map; it
+    /// must not materialise the per-member singleton JSON object the pre-fix
+    /// code built, which deep-copied every member value — including unknown
+    /// members serde only ignores (PD-13).
+    ///
+    /// `allocation_counter::measure` counts the *current thread's* allocations,
+    /// so unit tests running in parallel cannot pollute the reading.
+    #[test]
+    fn belief_member_probe_does_not_materialise_a_singleton_object() {
+        const MEMBER: &str = "unknown_belief_member";
+        // Fixture prepared outside the measured region: 64 unknown keys x 16
+        // unknown leaf objects, each leaf its own allocation.
+        let payload = {
+            let mut member_payload = serde_json::Map::new();
+            for key in 0..64 {
+                let leaves: Vec<serde_json::Value> = (0..16)
+                    .map(|leaf| serde_json::json!({"leaf": format!("unknown-{key}-{leaf}")}))
+                    .collect();
+                member_payload.insert(format!("unknown_{key}"), serde_json::Value::Array(leaves));
+            }
+            serde_json::Value::Object(member_payload)
+        };
+        let mut row = serde_json::Map::new();
+        for (field, value) in [
+            ("holder", serde_json::json!("kb_ana")),
+            ("proposition", serde_json::json!("raining")),
+            ("order", serde_json::json!(1)),
+            ("truth", serde_json::json!("True")),
+        ] {
+            row.insert(field.to_string(), value);
+        }
+        row.insert(MEMBER.to_string(), payload.clone());
+        let module = serde_json::Value::Array(vec![serde_json::Value::Object(row)]);
+
+        // Warm the thread-local counter outside the measured regions.
+        let _ = allocation_counter::measure(|| {});
+
+        // The removed shape: one owned singleton object per member, holding a
+        // deep copy of the member value.
+        let singleton_copy = allocation_counter::measure(|| {
+            let singleton = serde_json::Value::Object(
+                std::iter::once((MEMBER.to_string(), black_box(&payload).clone())).collect(),
+            );
+            let _ = black_box(BeliefPropositionRaw::deserialize(singleton));
+        });
+        let measured = allocation_counter::measure(|| {
+            black_box(validate_belief_module(black_box(&module)));
+        });
+
+        // Existing typed field deserialization is allowed; a copy of the member
+        // payload is not.
+        assert!(
+            singleton_copy.count_total >= 1024,
+            "the singleton-copy shape must be visible to the counter, got {singleton_copy:?}"
+        );
+        assert!(
+            measured.count_total <= 64,
+            "the belief-member probe copied the member payload: {measured:?}"
+        );
+        println!("belief probe {measured:?} vs singleton copy {singleton_copy:?}");
     }
 }
