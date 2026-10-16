@@ -25,6 +25,7 @@ use crate::world_kb::errors::KbError;
 use crate::world_kb::source_anchor::SourceAnchor;
 use nexus_contracts::BlockType;
 use nexus_contracts::KeyBlockStatus;
+use serde::de::value::MapDeserializer;
 use serde::{Deserialize, Serialize};
 
 /// `KnowledgeEntryRecord` body content.
@@ -1030,14 +1031,37 @@ fn module_error(dialect: &str, index: Option<usize>, field: Option<&str>, reason
     format!("{path}: {reason}")
 }
 
+/// Borrowed view of one authored module value.
+///
+/// The JSON containers a patch carries, or any other JSON value handed in
+/// directly. Validating the borrow keeps the write seam from materialising a
+/// copy of the dialect payload.
+pub enum AuthoredModuleValue<'a> {
+    Object(&'a serde_json::Map<String, serde_json::Value>),
+    Array(&'a [serde_json::Value]),
+    /// Any non-container JSON value; every dialect addresses it as the wrong
+    /// container.
+    Other(&'a serde_json::Value),
+}
+
+impl<'a> From<&'a serde_json::Value> for AuthoredModuleValue<'a> {
+    fn from(value: &'a serde_json::Value) -> Self {
+        match value {
+            serde_json::Value::Object(obj) => Self::Object(obj),
+            serde_json::Value::Array(arr) => Self::Array(arr),
+            other => Self::Other(other),
+        }
+    }
+}
+
 /// Validate an authored `modules.mental` value.
 ///
 /// It must be an object in the nine-field [`MentalFieldsRaw`] handbook shape.
 /// Field values stay raw JSON and unknown inner keys round-trip verbatim
 /// (PD-13), so every JSON object is accepted; only a non-object value rejects.
 #[must_use]
-pub fn validate_mental_module(value: &serde_json::Value) -> Vec<String> {
-    if value.is_object() {
+pub fn validate_mental_module<'a>(value: impl Into<AuthoredModuleValue<'a>>) -> Vec<String> {
+    if matches!(value.into(), AuthoredModuleValue::Object(_)) {
         Vec::new()
     } else {
         vec![module_error("mental", None, None, "must be an object")]
@@ -1053,8 +1077,8 @@ pub fn validate_mental_module(value: &serde_json::Value) -> Vec<String> {
 /// (`modules.belief.<index>.<member>`); only a genuinely non-object row
 /// falls back to the row-level `must be a belief proposition object`.
 #[must_use]
-pub fn validate_belief_module(value: &serde_json::Value) -> Vec<String> {
-    let Some(rows) = value.as_array() else {
+pub fn validate_belief_module<'a>(value: impl Into<AuthoredModuleValue<'a>>) -> Vec<String> {
+    let AuthoredModuleValue::Array(rows) = value.into() else {
         return vec![module_error("belief", None, None, "must be an array")];
     };
     let mut errors = Vec::new();
@@ -1075,9 +1099,10 @@ pub fn validate_belief_module(value: &serde_json::Value) -> Vec<String> {
         // mistyped handbook member does.
         let mut mistyped = false;
         for (member, member_value) in members {
-            let probe = serde_json::Value::Object(
-                std::iter::once((member.clone(), member_value.clone())).collect(),
-            );
+            // Borrowed singleton probe: serde reads the one member through its
+            // generic map deserializer, so no per-member object is built and an
+            // unknown key stays ignored (PD-13).
+            let probe = MapDeserializer::new(std::iter::once((member.as_str(), member_value)));
             if let Err(error) = BeliefPropositionRaw::deserialize(probe) {
                 errors.push(module_error(
                     "belief",
@@ -1113,8 +1138,8 @@ pub fn validate_belief_module(value: &serde_json::Value) -> Vec<String> {
 /// entry-id strings — an explicit `[]` is the meaningful PD-9 "no observers"
 /// claim and is accepted — and whose `access` (when present) is a JSON object.
 #[must_use]
-pub fn validate_observation_module(value: &serde_json::Value) -> Vec<String> {
-    let Some(obj) = value.as_object() else {
+pub fn validate_observation_module<'a>(value: impl Into<AuthoredModuleValue<'a>>) -> Vec<String> {
+    let AuthoredModuleValue::Object(obj) = value.into() else {
         return vec![module_error("observation", None, None, "must be an object")];
     };
     let mut errors = Vec::new();
@@ -1194,6 +1219,7 @@ pub const LEGACY_MENTAL_BELIEF_MODULES_FIXTURE: &str = r#"{
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::hint::black_box;
 
     #[test]
     fn test_create_provisional_keyblock() {
@@ -1757,5 +1783,73 @@ mod tests {
             validate_observation_module(&serde_json::json!([1, 2])),
             vec!["modules.observation: must be an object".to_string()]
         );
+    }
+
+    // Minimum ratio by which the removed singleton copy must out-allocate the
+    // real belief-member probe. Measured 6 vs 3212 allocations on this fixture
+    // (~535x); 8x leaves room for payload/allocator drift while still failing
+    // if the copy lands on the measured path.
+    const COPY_MARGIN: u64 = 8;
+
+    /// p4 t3 fix wave 1 — allocation regression check for the belief-member probe.
+    ///
+    /// The probe reads one member through a borrowed one-entry map; it
+    /// must not materialise the per-member singleton JSON object the pre-fix
+    /// code built, which deep-copied every member value — including unknown
+    /// members serde only ignores (PD-13).
+    ///
+    /// `allocation_counter::measure` counts the *current thread's* allocations,
+    /// so unit tests running in parallel cannot pollute the reading.
+    #[test]
+    fn belief_member_probe_does_not_materialise_a_singleton_object() {
+        const MEMBER: &str = "unknown_belief_member";
+        // Fixture prepared outside the measured region: 64 unknown keys x 16
+        // unknown leaf objects, each leaf its own allocation.
+        let payload = {
+            let mut member_payload = serde_json::Map::new();
+            for key in 0..64 {
+                let leaves: Vec<serde_json::Value> = (0..16)
+                    .map(|leaf| serde_json::json!({"leaf": format!("unknown-{key}-{leaf}")}))
+                    .collect();
+                member_payload.insert(format!("unknown_{key}"), serde_json::Value::Array(leaves));
+            }
+            serde_json::Value::Object(member_payload)
+        };
+        let mut row = serde_json::Map::new();
+        for (field, value) in [
+            ("holder", serde_json::json!("kb_ana")),
+            ("proposition", serde_json::json!("raining")),
+            ("order", serde_json::json!(1)),
+            ("truth", serde_json::json!("True")),
+        ] {
+            row.insert(field.to_string(), value);
+        }
+        row.insert(MEMBER.to_string(), payload.clone());
+        let module = serde_json::Value::Array(vec![serde_json::Value::Object(row)]);
+
+        // Warm the thread-local counter outside the measured regions.
+        let _ = allocation_counter::measure(|| {});
+
+        // The removed shape: one owned singleton object per member, holding a
+        // deep copy of the member value.
+        let singleton_copy = allocation_counter::measure(|| {
+            let singleton = serde_json::Value::Object(
+                std::iter::once((MEMBER.to_string(), black_box(&payload).clone())).collect(),
+            );
+            let _ = black_box(BeliefPropositionRaw::deserialize(singleton));
+        });
+        let measured = allocation_counter::measure(|| {
+            black_box(validate_belief_module(black_box(&module)));
+        });
+
+        // The real probe is compared against the removed singleton-copy shape
+        // instead of against absolute counts, so allocator/profile drift that
+        // moves both readings together does not flake while a copy
+        // re-appearing on the measured path still fails.
+        assert!(
+            singleton_copy.count_total > measured.count_total * COPY_MARGIN,
+            "the belief-member probe copied the member payload: {measured:?} vs singleton copy {singleton_copy:?}"
+        );
+        println!("belief probe {measured:?} vs singleton copy {singleton_copy:?}");
     }
 }

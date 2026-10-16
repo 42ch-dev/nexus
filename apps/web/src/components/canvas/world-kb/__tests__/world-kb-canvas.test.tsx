@@ -16,7 +16,7 @@ import userEvent from '@testing-library/user-event';
 import { act } from 'react';
 
 import { patchFromForm, WorldKbCanvas, type EntityField } from '../world-kb-canvas';
-import type { EntityEditForm } from '../entity-inspector';
+import type { EntityEditForm } from '../world-kb-authoring';
 import { NexusClientError } from '@/lib/nexus/errors';
 import type { WorldKbCandidateProjection } from '@42ch/nexus-contracts';
 

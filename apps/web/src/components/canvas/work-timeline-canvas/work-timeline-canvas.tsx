@@ -32,7 +32,7 @@
  * registration; Task 2 ships the canvas facade with the `workId` prop
  * contract ready).
  */
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import type { Node } from '@xyflow/react';
@@ -43,6 +43,7 @@ import {
   useCanvasSurface,
   type CanvasSurfaceQueryResult,
 } from '@/components/canvas/use-canvas-surface';
+import { useInboundEventFocus } from '@/components/canvas/use-inbound-event-focus';
 import { SemanticZoomBridge } from '@/components/canvas/use-semantic-zoom';
 import { useWorkOutline } from '@/lib/canvas/use-outline-data';
 import { useWorldKbGraph } from '@/lib/canvas/use-world-kb-data';
@@ -290,36 +291,13 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
   // `narrativeEventNodeId(event_id)`). Selection drives the existing
   // inspector — no new focus primitive.
   //
-  // AC-V1163-3 honest empty focus: an unknown id matches no node → nothing is
-  // selected and nothing errors — the Narrative layer loads normally. The
-  // `appliedInboundFocusRef` one-shot guard (per URL value) ensures a LATER
-  // user selection is never fought by a re-running effect: once the deep-link
-  // selection has been applied (or the id is unknown), the effect stays quiet
-  // until the `?event=` value itself changes. Mirrors the World Timeline
-  // orchestrator's Task 2 inbound focus (`timeline-canvas.tsx`).
+  // Honest empty focus + the per-URL one-shot guard live in the shared hook
+  // (the same one the World Timeline's Task 2 effect uses). Its `wt-event:`
+  // id namespace is event-exclusive, so no extra target rule is needed.
   const eventParamRaw = searchParams.get('event');
   const inboundEventNodeId =
     eventParamRaw && eventParamRaw.length > 0 ? narrativeEventNodeId(eventParamRaw) : null;
-  const appliedInboundFocusRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!inboundEventNodeId) return;
-    if (appliedInboundFocusRef.current === inboundEventNodeId) return;
-    if (surface.selectedNodeId === inboundEventNodeId) {
-      // Selection already applied (e.g. it survived a projection rebuild) —
-      // mark it applied so we never fight a later user selection.
-      appliedInboundFocusRef.current = inboundEventNodeId;
-      return;
-    }
-    const exists = surface.nodes.some((n) => n.id === inboundEventNodeId);
-    if (!exists) return; // unknown id — no fabricated node (AC-V1163-3)
-    const changes = surface.nodes.map((n) => ({
-      type: 'select' as const,
-      id: n.id,
-      selected: n.id === inboundEventNodeId,
-    }));
-    surface.onNodesChange(changes);
-    appliedInboundFocusRef.current = inboundEventNodeId;
-  }, [inboundEventNodeId, surface.nodes, surface.selectedNodeId, surface.onNodesChange]);
+  useInboundEventFocus(surface, inboundEventNodeId);
 
   // ── Render ────────────────────────────────────────────────────────────────
 

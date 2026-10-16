@@ -13,8 +13,9 @@ use nexus_contracts::{
     WorldKbPromoteCandidateResponse, WorldKbRelationshipProjection, WorldKbSourceAnchorProjection,
 };
 use nexus_knowledge::world_kb::knowledge_entry::{
-    validate_belief_module, validate_mental_module, validate_observation_module, KnowledgeAudience,
-    KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeGovernance,
+    validate_belief_module, validate_mental_module, validate_observation_module,
+    AuthoredModuleValue, KnowledgeAudience, KnowledgeEntryBody, KnowledgeEntryRecord,
+    KnowledgeGovernance,
 };
 use nexus_knowledge::world_kb::store::{KbStoreError, KnowledgeReadScope};
 use nexus_knowledge::world_kb::validation::{
@@ -541,12 +542,13 @@ pub mod patch {
         resolve_authored_audience_tx, set_nexus_body, spoke_to_knowledge_record, store_err,
         validate_belief_module, validate_body, validate_canonical_name, validate_mental_module,
         validate_observation_module, validation_summary, wire_cast, AudienceContainer,
-        AuthoredAudience, BlockType, CoreError, CoreResult, HashMap, KbStoreError,
-        KnowledgeAudience, KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeGovernance,
-        KnowledgeReadScope, NexusWorldKbEntityPatch, NexusWorldKbEntityPatchAudience,
-        NexusWorldKbEntityPatchModulesKey, NexusWorldKbEntityPatchModulesValue,
-        SpokeKnowledgeEntry, SpokeReject, SpokeRejectCode, SpokeResult, Sqlite, SqlitePool,
-        ValidationMode, WorldKbPatchEntityRequest, WorldKbPatchEntityResponse,
+        AuthoredAudience, AuthoredModuleValue, BlockType, CoreError, CoreResult, HashMap,
+        KbStoreError, KnowledgeAudience, KnowledgeEntryBody, KnowledgeEntryRecord,
+        KnowledgeGovernance, KnowledgeReadScope, NexusWorldKbEntityPatch,
+        NexusWorldKbEntityPatchAudience, NexusWorldKbEntityPatchModulesKey,
+        NexusWorldKbEntityPatchModulesValue, SpokeKnowledgeEntry, SpokeReject, SpokeRejectCode,
+        SpokeResult, Sqlite, SqlitePool, ValidationMode, WorldKbPatchEntityRequest,
+        WorldKbPatchEntityResponse,
     };
 
     #[allow(clippy::too_many_lines)] // one linear domain operation
@@ -1101,17 +1103,15 @@ pub mod patch {
         Some(serde_json::Value::Object(map))
     }
 
-    /// Materialise one provided first-level module value as JSON for the
-    /// knowledge-crate validators (the same Object/Array mapping
-    /// `merge_modules` performs).
-    fn module_value_to_json(value: &NexusWorldKbEntityPatchModulesValue) -> serde_json::Value {
+    /// Borrow one provided first-level module value as an authored-module view
+    /// for the knowledge-crate validators (the same Object/Array mapping
+    /// `merge_modules` performs), without materialising a JSON copy.
+    fn authored_module_value(
+        value: &NexusWorldKbEntityPatchModulesValue,
+    ) -> AuthoredModuleValue<'_> {
         match value {
-            NexusWorldKbEntityPatchModulesValue::Object(obj) => {
-                serde_json::Value::Object(obj.clone())
-            }
-            NexusWorldKbEntityPatchModulesValue::Array(arr) => {
-                serde_json::Value::Array(arr.clone())
-            }
+            NexusWorldKbEntityPatchModulesValue::Object(obj) => AuthoredModuleValue::Object(obj),
+            NexusWorldKbEntityPatchModulesValue::Array(arr) => AuthoredModuleValue::Array(arr),
         }
     }
 
@@ -1124,9 +1124,9 @@ pub mod patch {
         let mut errors = Vec::new();
         for (key, value) in &patch.modules {
             let dialect_errors = match key.as_str() {
-                "mental" => validate_mental_module(&module_value_to_json(value)),
-                "belief" => validate_belief_module(&module_value_to_json(value)),
-                "observation" => validate_observation_module(&module_value_to_json(value)),
+                "mental" => validate_mental_module(authored_module_value(value)),
+                "belief" => validate_belief_module(authored_module_value(value)),
+                "observation" => validate_observation_module(authored_module_value(value)),
                 // Not an authored dialect: untouched opaque round-trip (PD-13).
                 _ => continue,
             };
@@ -1174,6 +1174,107 @@ pub mod patch {
                 reason: format!("body is not a valid KnowledgeEntryBody: {e}"),
             })?;
         Ok(Some(body))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use std::hint::black_box;
+
+        // Minimum ratio by which the removed whole-module copy must out-allocate
+        // the real dispatch. Measured 6 vs 4226 allocations on this fixture
+        // (~700x); 8x leaves room for payload/allocator drift while still
+        // failing if the copy lands on the measured path.
+        const COPY_MARGIN: u64 = 8;
+
+        /// Large nested unknown payload: 64 first-level keys x 16 unknown leaf
+        /// objects, each leaf its own allocation — one deep copy of it is a
+        /// four-figure allocation count.
+        ///
+        /// p4 t3 fix wave 1 — this feeds the authored-module allocation
+        /// regression check. The borrowed `AuthoredModuleValue` view is an
+        /// *integration* convenience: it lets the patch DTO's own `Map` / `Vec`
+        /// containers be validated directly instead of being re-wrapped in a
+        /// `Value`. It is **not** a compile-time no-copy guard — the removed
+        /// materialising shape below still type-checks against the new
+        /// signatures — so the no-copy property is pinned by measurement here.
+        ///
+        /// `allocation_counter::measure` counts the *current thread's*
+        /// allocations, so unit tests running in parallel cannot pollute the
+        /// reading.
+        fn large_unknown_payload() -> serde_json::Value {
+            let mut module = serde_json::Map::new();
+            for key in 0..64 {
+                let leaves: Vec<serde_json::Value> = (0..16)
+                    .map(|leaf| serde_json::json!({"leaf": format!("unknown-{key}-{leaf}")}))
+                    .collect();
+                module.insert(format!("unknown_{key}"), serde_json::Value::Array(leaves));
+            }
+            serde_json::Value::Object(module)
+        }
+
+        /// The shape `authored_module_value` replaced: an owned copy of the whole module.
+        ///
+        /// Kept only so the check below proves it still rejects that regression —
+        /// it is the call shape W1 names.
+        fn module_value_to_json(value: &NexusWorldKbEntityPatchModulesValue) -> serde_json::Value {
+            match value {
+                NexusWorldKbEntityPatchModulesValue::Object(obj) => {
+                    serde_json::Value::Object(obj.clone())
+                }
+                NexusWorldKbEntityPatchModulesValue::Array(arr) => {
+                    serde_json::Value::Array(arr.clone())
+                }
+            }
+        }
+
+        #[test]
+        fn authored_module_dispatch_borrows_the_patch_payload() {
+            // Fixtures are prepared outside the measured region.
+            let patch: NexusWorldKbEntityPatch =
+                serde_json::from_value(serde_json::json!({"modules": {
+                    "mental": large_unknown_payload(),
+                    "belief": [{
+                        "holder": "kb_ana",
+                        "proposition": "raining",
+                        "order": 1,
+                        "truth": "True",
+                        "unknown_member": large_unknown_payload(),
+                    }],
+                    "observation": {"observers": [], "unknown_member": large_unknown_payload()},
+                    "unknown_dialect": large_unknown_payload(),
+                }}))
+                .expect("fixture patch");
+            let copied: NexusWorldKbEntityPatchModulesValue =
+                serde_json::from_value(large_unknown_payload()).expect("fixture module value");
+
+            // Warm the thread-local counter outside the measured regions.
+            let _ = allocation_counter::measure(|| {});
+
+            // The regression this check must reject: the whole-module copy,
+            // reached through the call shape the borrowed view still accepts.
+            let copied_payload = allocation_counter::measure(|| {
+                black_box(validate_mental_module(&module_value_to_json(black_box(
+                    &copied,
+                ))));
+            });
+            let measured = allocation_counter::measure(|| {
+                black_box(validate_authored_modules(black_box(&patch)));
+            });
+
+            // `merge_modules` (persistence materialisation) is not on this path:
+            // the dispatch is measured directly. The real dispatch is compared
+            // against the removed copy shape instead of against absolute counts,
+            // so allocator/profile drift that moves both readings together does
+            // not flake while a copy re-appearing on the measured path still
+            // fails. An uninstalled counter reads 0 for both, which fails here
+            // too — the liveness check.
+            assert!(
+                copied_payload.count_total > measured.count_total * COPY_MARGIN,
+                "the core dispatch copied the patch payload: {measured:?} vs whole-module copy {copied_payload:?}"
+            );
+            println!("core dispatch {measured:?} vs whole-module copy {copied_payload:?}");
+        }
     }
 }
 
