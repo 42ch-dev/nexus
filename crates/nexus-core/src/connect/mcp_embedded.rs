@@ -317,8 +317,7 @@ pub fn start_embedded_mcp_server<B: McpBackend + Clone + 'static>(
 ) -> Option<EmbeddedMcpServer<B>> {
     if !embedded_enabled {
         tracing::info!(
-            "embedded MCP not enabled (config key `embedded_mcp` and --embedded-mcp \
-             both unset); no server created"
+            "embedded MCP not enabled (config key `embedded_mcp` unset); no server created"
         );
         return None;
     }
