@@ -92,7 +92,7 @@ export interface NexusComputeOutputEnvelope {
   /**
    * New KnowledgeEntry records the module creates (e.g. a spawned item, a newly established faction relation). These are upserted by the host.
    *
-   * Items: Spoke KnowledgeEntry (serialized JSON object). Typed access is via the spoke package (@42ch/spoke-schemas 0.1.1 TS / spoke-schemas 0.1.1 Rust). Canonical schema: https://spoke42.invalid/schemas/data/knowledge-entry.schema.json. V1.139 P0 fallback (spoke-adapter-architecture spec §3.4): the published spoke packages ship only compiled types (npm dist/ + cargo src/), not their schemas/ source, so codegen cannot resolve the $ref — the wire item is an opaque object here. Target state restores the $ref once spoke ships schemas/.
+   * Items: Spoke KnowledgeEntry (serialized JSON object). Typed access is via the spoke package (@42ch/spoke-schemas / spoke-schemas). Canonical schema: https://spoke42.invalid/schemas/data/knowledge-entry.schema.json. V1.139 P0 fallback (spoke-adapter-architecture spec §3.4): the published spoke packages ship only compiled types (npm dist/ + cargo src/), not their schemas/ source, so codegen cannot resolve the $ref — the wire item is an opaque object here. Target state restores the $ref once spoke ships schemas/.
    */
   new_key_blocks: {
     [k: string]: unknown | undefined;
