@@ -19,7 +19,7 @@ tags:
   - phase-2-entry
   - residual-register
   - retired-plan-bucket
-last_updated: 2026-10-10
+last_updated: 2026-10-16
 ---
 
 # Host identity vs engine identity, and residuals in retired plan buckets
@@ -87,3 +87,35 @@ Consequences to state honestly:
 - Any session where the shell/tool surface has no session environment variable and the next step needs one.
 - Writing or reading a plan/iteration residual summary: check the bucket of every entry before treating `open`/closed as current product state.
 - Deciding whether an inherited residual needs a carry-forward entry (it does) versus a closure (not available).
+
+## Guidance — 2026-10-16 store cutover: register closure is now a store-issue PM action
+
+The 2026-10-16 store cutover retired the file registers (`.mstar/projects/**/residuals.json`
+moved under `archived/`) and the `mstar status backlog-close` verb (`status.verb-retired`).
+Plans authored before the cutover still carry "register close-out" tasks whose Steps point at
+the dead mechanism; treat them like any stale-target task under verify-first:
+
+- The sanctioned successor is `mstar issue close` (unscoped) / `mstar plan issue-close`
+  (plan-scoped). Closure is a **PM-authority action**: a leaf seat that hits the retired verb
+  stops, records per-row verify-first evidence, and hands ready-to-run `ClosureEvidence`
+  payloads to the PM instead of forcing a coordinator bind it must not have.
+- `ClosureEvidence` shape: `reason` (required), `references` (required for `resolved`),
+  `alignmentRef` (required for `resolved`/`waived`), `canonicalIssueId` (required for
+  `duplicate`/`superseded`), `scope` (required for `waived`). CLI takes `--file <absolute
+  json>` when the payload is not inline. `--expect` is the issue revision from
+  `mstar issue show --id <id>` taken immediately before the write.
+- Row-to-issue mapping lives in each issue's `occurrences[].occurrenceKey =
+  register-entry:<batch>/<R-key>`.
+- Closing on partial evidence is recoverable but embarrassing: close only what the evidence
+  covers and reopen immediately when a half was missed (`mstar issue reopen --payload
+  {"reason": ...}`), keeping the closed-half evidence in the reopen reason. A resumed
+  iteration must re-read resume-point pending decisions before consolidating QC verdicts —
+  a "keep open until X" ruling outranks an implementer's closure payload.
+- Coordinator recovery after the creating session dies: `mstar-harness session recover
+  --workflow <id> --prior-session <id>` (or `--unowned` only when the DB records none) with
+  `--expect <workflow token from mstar status validate>` and an ActivationAttestation file:
+  `{version: 1, attestedAt, operator:{actor, authorizationRef}, consumers:[{entryId, kind,
+  entrypoint, runtime:"node", runtimeVersion, version, current, disposition}],
+  stoppedSessions:[{sessionId, host, state}]}` — exactly one `current: true` consumer with
+  `kind: "coordinator"`; dispositions: `reloaded`, `upgraded`,
+  `excluded:not-this-control-root`, `excluded:no-store-access`, `excluded:superseded-binary`.
