@@ -82,7 +82,7 @@ The manuscript reading surface is distinct from this on-demand audit line: readi
 
 ## 4. CLI entry
 
-> **No CLI audit entry.** The `creator run` runner and the `daemon` group do not exist; no CLI audit entry is provided. The §3 modes and §5 preset contract are unchanged; audit admission goes through the core execution surface (schedule add via `POST /v1/daemon/orchestration/schedules`, served by `apps/nexus-service`). The pre-retirement `creator run` IA is recorded as history in [creator-run-preset-entry.md](../../archived/creator/2026-09-21-creator-run-preset-entry.md).
+> **No CLI audit entry.** The CLI daemon group and the generic preset runner no longer exist, so no CLI audit entry is provided. The §3 modes and §5 preset contract are unchanged; audit admission goes through the core execution surface (schedule add via `POST /v1/daemon/orchestration/schedules`, served by `apps/nexus-service`). The pre-retirement CLI IA is recorded as history in [creator-run-preset-entry.md](../../archived/creator/2026-09-21-creator-run-preset-entry.md).
 
 **Invariants**:
 

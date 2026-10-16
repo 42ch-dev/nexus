@@ -13,7 +13,7 @@ tags:
   - desktop-dev
 applies_when:
   - debugging desktop/web startup HTTP 500s; wiring Vite proxy to local daemon; placing queries outside DaemonLaunchGate
-last_updated: 2026-07-23
+last_updated: 2026-10-14
 source: iteration:v1.134/guides/p0-startup-500-rca.md
 ---
 
@@ -29,7 +29,7 @@ Packaged desktop (non-5173) uses direct loopback — refusal surfaces as fetch f
 
 ## Invariants
 
-1. **Proxy connect refusal ≠ daemon Internal.** Empty-body 500 on `/v1/daemon/*` during boot almost always means proxy transport, not `NexusApiError::Internal`.
+1. **Proxy connect refusal ≠ daemon Internal.** Empty-body 500 on `/v1/daemon/*` during boot almost always means proxy transport, not a service `internal` envelope (500 with `code: "internal"` in the body).
 2. **Map connect errors to 503** (`daemon_unavailable` F-E1 envelope) in both `server` and `preview` proxies (`createDaemonProxyRoute` / `handleDaemonProxyError`).
 3. **Gate data queries on daemon ready.** Mount network-heavy coordinators (e.g. `DefaultProfileCoordinator`) **inside** `DaemonLaunchGate` children so creator/works/worlds/scan do not fire during the splash window.
 4. **Health polls may still 503** during attach — treat as not-ready; do not paper over real daemon JSON 500 envelopes after the listener is up.

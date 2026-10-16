@@ -108,7 +108,7 @@ Existing rows remain valid. No automatic status rewrite on migration. Default fo
 
 ### 3.4 Review-master admission surface
 
-There is no CLI preset-dispatch entrance (the retired dedicated `review-master` subcommand and the generic `creator run <preset_id>` entry are frozen in [creator-run-preset-entry.md](../../archived/creator/2026-09-21-creator-run-preset-entry.md)). Preset admission goes through the core execution surface (schedule add via `POST /v1/daemon/orchestration/schedules`, served by `apps/nexus-service`); the retained CLI scheduling surface is `creator works cron` declaration editing. Findings listing lives on `creator works status`.
+There is no CLI preset-dispatch entrance (the retired dedicated review-master subcommand and the superseded generic preset runner are frozen as history in [creator-run-preset-entry.md](../../archived/creator/2026-09-21-creator-run-preset-entry.md)). Preset admission goes through the core execution surface (schedule add via `POST /v1/daemon/orchestration/schedules`, served by `apps/nexus-service`); the retained CLI scheduling surface is `creator works cron` declaration editing. Findings listing lives on `creator works status`.
 
 Normative semantics (per the archived Master body):
 

@@ -270,7 +270,7 @@ fn v2_target_acp_subcommands() {
 /// V2 Target: `creator` command group subcommands (extended).
 ///
 /// Expected: register, status, use, list, pair, unpair, logout,
-///   credentials (rotate), workspace (list/create/use/init/clone/link/unlink/status),
+///   credentials (rotate), workspace (list/create/use/init),
 ///   soul, memory, kb
 ///
 /// Active since Plan 4 landed the creator/knowledge surface.

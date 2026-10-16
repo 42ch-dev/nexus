@@ -1,7 +1,7 @@
 ---
 module: apps/nexus-service
 date: 2026-07-05
-last_updated: 2026-10-12
+last_updated: 2026-10-14
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
@@ -21,7 +21,7 @@ applies_when:
 
 ## Context
 
-V1.90 made the `nexus42` daemon opt-in **remote-bind** capable (`NEXUS42_DAEMON_API_KEY` + `NEXUS_DAEMON_REMOTE_BIND=1` for non-loopback binds). V1.86 had already closed the localhost trust-boundary attack chain with an Origin allowlist + `require_allowed_origin` middleware, and explicitly deferred a CSRF token framework as a non-goal pending threat-model growth.
+V1.90 made the then-integrated `nexus42` daemon opt-in **remote-bind** capable (`NEXUS42_DAEMON_API_KEY` + `NEXUS_DAEMON_REMOTE_BIND=1` for non-loopback binds) — historical: that host was deleted in v1.193 P2, and `NEXUS_DAEMON_REMOTE_BIND=1` now gates the separate core Connect peer-tools bind, not this HTTP surface. `apps/nexus-service` requires `--allow-remote` + `--tls-cert`/`--tls-key` + `NEXUS42_DAEMON_API_KEY` for a non-loopback bind. V1.86 had already closed the localhost trust-boundary attack chain with an Origin allowlist + `require_allowed_origin` middleware, and explicitly deferred a CSRF token framework as a non-goal pending threat-model growth.
 
 The natural reflex once remote-bind shipped was: *"now that browsers can reach the daemon remotely, we need CSRF tokens."* V1.92 evaluated that reflex and rejected it — the existing model already covers CSRF without a token layer.
 
@@ -31,7 +31,7 @@ When the Daemon API authenticates **remote** clients via a **custom request head
 
 1. A state-changing request must carry `X-API-Key` (a custom header).
 2. A cross-origin malicious page **cannot** set a custom header on a `fetch`/XHR without triggering a **CORS preflight** (`OPTIONS`).
-3. The V1.86 Origin allowlist + `require_allowed_origin` middleware **rejects** any preflight whose `Origin` is not allowlisted.
+3. The V1.86 Origin allowlist is enforced by withholding permission, not by rejecting the preflight: `writeCors` in `apps/nexus-service/src/server.ts` sets `Access-Control-Allow-Origin` only when the request's `Origin` is in `config.allowedOrigins`, and the `OPTIONS` preflight path answers `204` before the auth gates run — so a preflight from a non-allowlisted origin gets **no CORS grant** and the browser withholds the real request. A non-`OPTIONS` request whose `Origin` is present and not allowlisted is rejected `403 forbidden` by `checkOrigin` in `apps/nexus-service/src/security.ts`, the successor to the retired `require_allowed_origin` middleware.
 4. Therefore a malicious site can neither read responses nor forge a state-changing request with the required header.
 
 This is the complete CSRF defence for the header-key model. Adding a double-submit cookie or synchronizer token on top would add maintenance surface (cookie issuance, token storage, expiry, SameSite config) for **no incremental security** — those mechanisms exist to defend cookie-based auth, which the daemon does not use.

@@ -152,7 +152,7 @@ v1 中，CLI 不负责以下事情：
 ### 5.2 平台权威
 
 - World / Creator 元数据
-- Key Block 结构化状态
+- KnowledgeEntry 结构化状态
 - Timeline / Fork 图
 - Explore 所需索引
 - 订阅和权限信息
@@ -1420,7 +1420,7 @@ SQLite 是本地 working state，不是平台 graph 的替代品。
 
 ### 13.1 应存内容
 
-- Key Block 的本地投影
+- KnowledgeEntry 的本地投影
 - Timeline working copy
 - staged deltas
 - sync cursor
