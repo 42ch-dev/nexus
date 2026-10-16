@@ -925,9 +925,7 @@ async fn create_work(
     // missing required field. This is consistent with other "field missing" errors
     // in this handler. Semantic 422 is used only for preset_gates_failed.
     // R-V140P0-S4: tracing span for mandatory binding check observability.
-    // F-01 W1: the wire contract now marks `world_id` required (schema +
-    // generated contract), so an absent field fails deserialization upstream;
-    // this guard still rejects the empty-string shape with the same 400.
+    // F-01 W1: the napi `create_work` entry normalises an absent `world_id` key to the empty string, so this guard owns the curated 400 for both request shapes.
     if req.world_id.is_empty() {
         tracing::info!(creator_id = %creator_id, "create_work rejected: missing world_id binding");
         return Err(WorkFault::BadRequest {
