@@ -37,7 +37,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { BLOCK_TYPE_LABELS } from '../world-kb/types';
-import { HOLDER_BLOCK_TYPES } from '../world-kb/entity-inspector';
+import { HOLDER_BLOCK_TYPES } from '../world-kb/world-kb-authoring';
 import type { BlockType } from '@42ch/nexus-contracts';
 import type {
   TimelineCanvasAdapterContext,

@@ -440,16 +440,23 @@ impl ManagedAcpProcess {
 
     /// Poll the owned process group until quiescent or the bound expires.
     ///
-    /// `killpg(pgrp, None)` returns `Ok` while at least one member exists
-    /// (guarding against signalling a recycled group id) and `ESRCH` when
-    /// the group is fully gone; any other error means existence cannot be
-    /// confirmed and is treated as not-quiescent (never signalled).
+    /// `killpg(pgrp, None)` returns `Ok` while at least one signallable member
+    /// exists (guarding against signalling a recycled group id) and `ESRCH`
+    /// when the group is fully gone. `EPERM` also proves the group still
+    /// exists: the kernel reports it when no member can be signalled, which is
+    /// the state of an owned group whose members have all exited but whose
+    /// zombies are not reaped yet. It is therefore polled out inside the bound
+    /// (never treated as evidence of a recycled group, and never signalled).
+    /// Any other error means existence cannot be confirmed and is treated as
+    /// not-quiescent (never signalled).
     #[cfg(unix)]
     async fn wait_group_quiescent(pgrp: nix::unistd::Pid, bound: Duration) -> bool {
         tokio::time::timeout(bound, async {
             loop {
                 match nix::sys::signal::killpg(pgrp, None) {
-                    Ok(()) => tokio::time::sleep(Duration::from_millis(10)).await,
+                    Ok(()) | Err(nix::errno::Errno::EPERM) => {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
                     Err(nix::errno::Errno::ESRCH) => return true,
                     Err(e) => {
                         tracing::warn!(pgrp = %pgrp, error = %e, "process-group existence unconfirmed");

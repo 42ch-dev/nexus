@@ -13,7 +13,7 @@ tags:
   - cas
   - occ
   - call-boundary-invariant
-last_updated: 2026-10-12
+last_updated: 2026-10-14
 applies_when:
   - Consuming the SPOKE adapter-port + injection-orchestration architecture from a product adapter boundary (Surface B adoption); deciding between pure delegates (Surface A) and port+orchestrator (Surface B); verifying CAS through orchestrators; enforcing call-boundary invariant mechanically
 ---
@@ -169,7 +169,7 @@ The production orchestrator consumers are `promote_adopt` (`crates/nexus-core/sr
 1. **`orchestrate_promote` handles `stored = None`:** the orchestrator can promote a NEW candidate (not just an existing provisional entry). It skips stored-entry terminal-status checks when `stored = None`, validates `candidate.status == "provisional"`, applies acceptance (`→ confirmed`, revision bump), and calls `put_knowledge_entry(None)` (create path). This means the nexus adopt flow (create + confirm in one step) maps cleanly: build candidate with `status = "provisional"`, let the orchestrator flip it.
 2. **Single-transaction adopt:** `promote_adopt` binds a handler-owned `sqlx::Transaction` into `NexusAdapter` via a shared `Arc<std::sync::Mutex<Option<Transaction>>>` for the synchronous `orchestrate_promote` bridge, then flips the extract job in the same transaction before one `COMMIT`. Rollback on any failure — no soft-delete compensation.
 3. **Retry-safe idempotency:** when a prior attempt committed but returned an error (commit-ack ambiguity), retry hits `KnowledgeEntryAlreadyExists` → handler checks job status → returns success if already confirmed and attributed.
-4. **SpokeRejectCode → NexusApiError mapping:** OCC codes → 409 with re-read version; validation codes → 422; remaining → 500. Preserve existing error semantics.
+4. **SpokeRejectCode → `CoreError` mapping:** OCC codes → 409 with re-read version; validation codes → 422; remaining → 500. Preserve existing error semantics.
 
 ### Cross-domain conversion seams
 

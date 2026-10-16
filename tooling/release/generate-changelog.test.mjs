@@ -178,6 +178,26 @@ test("resolveChangelogBase takes the semver maximum, not git's version sort", ()
   }
 });
 
+test("resolveChangelogBase warns about an unparseable v* ref and keeps the best value", () => {
+  const dir = createTempRepo();
+  const warnings = [];
+  const originalError = console.error;
+  console.error = (...args) => warnings.push(args.join(" "));
+  try {
+    initGitRepo(dir);
+    const baseline = commitFile(dir, "CHANGELOG.md", "# Changelog\n", "docs: add changelog");
+    tagRelease(dir, "v0.2.0", baseline);
+    tagRelease(dir, "vnext", baseline);
+
+    assert.deepEqual(resolveChangelogBase(dir), { tag: "v0.2.0", source: "tag" });
+    assert.equal(warnings.length, 1, warnings.join("\n"));
+    assert.match(warnings[0], /vnext/);
+  } finally {
+    console.error = originalError;
+    cleanupTempRepo(dir);
+  }
+});
+
 test("resolveChangelogBase returns null without tags or a CHANGELOG baseline", () => {
   const dir = createTempRepo();
   try {

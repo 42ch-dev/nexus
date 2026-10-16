@@ -1,7 +1,7 @@
 ---
 module: nexus-orchestration + nexus42 CLI + nexus-core
 date: 2026-08-21
-last_updated: 2026-10-12
+last_updated: 2026-10-14
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
@@ -98,8 +98,9 @@ pub fn validate_cron_expr(expr: &str) -> Result<(), CliError> { /* … */ }
 
 ### After
 ```rust
-// Shared core in nexus-orchestration; CLI re-exports; daemon imports directly
-// daemon handler
+// Shared core in nexus-orchestration; CLI re-exports; the HTTP consumer imports directly
+// Historical (Rust daemon host, deleted in v1.193 P2) — the error spelling on the next
+// line is that host's recorded envelope shape, not a current crate:
 let err = work_schedule::validate_cron_expr(&body.roles.brainstorm.cron)
     .map_err(|e| NexusApiError::BadRequest { code: e.code.into(), message: e.message })?;
 ```

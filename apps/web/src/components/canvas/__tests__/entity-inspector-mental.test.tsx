@@ -20,7 +20,8 @@ import { ToastProvider, Toaster } from '@/lib/use-toast';
 import { NexusClientError, type NexusClient } from '@/lib/nexus';
 import type { WorldKbEntityPatch, WorldKbEntityProjection } from '@42ch/nexus-contracts';
 
-import { EntityInspector, formFromEntity, modulesPatchFromForm } from '../world-kb/entity-inspector';
+import { EntityInspector, formFromEntity } from '../world-kb/entity-inspector';
+import { modulesPatchFromForm } from '../world-kb/world-kb-authoring';
 import type { WorldKbNodeData } from '../world-kb/types';
 
 const node: WorldKbNodeData = {

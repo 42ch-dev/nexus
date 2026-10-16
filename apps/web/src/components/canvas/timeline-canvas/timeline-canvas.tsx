@@ -63,6 +63,7 @@ import { Cpu, Info, Plus } from 'lucide-react';
 import { CanvasShell } from '@/components/canvas/canvas-shell';
 import { LayerBreadcrumb } from '@/components/canvas/layer-breadcrumb';
 import { useCanvasSurface, type CanvasSurfaceQueryResult } from '@/components/canvas/use-canvas-surface';
+import { useInboundEventFocus } from '@/components/canvas/use-inbound-event-focus';
 import { SemanticZoomBridge } from '@/components/canvas/use-semantic-zoom';
 import { useWorldKbGraph, usePatchWorldKbEntity } from '@/lib/canvas/use-world-kb-data';
 import {
@@ -128,6 +129,17 @@ export interface TimelineCanvasProps {
    */
   sceneBeatFixture?: SceneBeatFixturePayload;
 }
+
+/**
+ * QC2 F-001 (fix wave) — inbound focus targets Narrative EVENT nodes only
+ * (AC-V1163-3 — "focuses the named event"). The `entity:` node-id prefix is
+ * ALSO used by context entities and Brief-era nodes, so an id match alone is
+ * not enough: a crafted `?event=<context-entity-id>` must not select those.
+ * Module-level so the shared focus hook's effect deps stay stable across
+ * re-renders (the same `layoutHint` discriminator `boundWorkEventTarget` uses).
+ */
+const isTimelineEventNode = (node: Node<TimelineNodeData>): boolean =>
+  node.data.layoutHint === 'event';
 
 /**
  * V1.147 P2 T3 — hard ceiling for the auto-fetched compute-event projection
@@ -896,40 +908,10 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   // `nodeIdOf(keyBlockId)`). Selection drives the existing inspector — no new
   // focus primitive.
   //
-  // AC-V1163-3 honest empty focus: an unknown id matches no node → nothing is
-  // selected and nothing errors — the Narrative layer loads normally. The
-  // `appliedInboundFocusRef` one-shot guard (per URL value) ensures a LATER
-  // user selection is never fought by a re-running effect: once the deep-link
-  // selection has been applied (or the id is unknown), the effect stays quiet
-  // until the `?event=` value itself changes.
+  // AC-V1163-3 honest empty focus + the per-URL one-shot guard live in the
+  // shared hook (also used by the Work Timeline's Task 3 effect).
   const inboundEventNodeId = inboundEventParam ? nodeIdOf(inboundEventParam) : null;
-  const appliedInboundFocusRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!inboundEventNodeId) return;
-    if (appliedInboundFocusRef.current === inboundEventNodeId) return;
-    if (surface.selectedNodeId === inboundEventNodeId) {
-      // Selection already applied (e.g. it survived a projection rebuild) —
-      // mark it applied so we never fight a later user selection.
-      appliedInboundFocusRef.current = inboundEventNodeId;
-      return;
-    }
-    // QC2 F-001 (fix wave): the inbound focus targets Narrative EVENT nodes
-    // only (AC-V1163-3 — "focuses the named event"). The shared `entity:`
-    // node-id prefix is also used by context entities and Brief-era nodes —
-    // a crafted `?event=<context-entity-id>` must not select those. Same
-    // `layoutHint === 'event'` discriminator `boundWorkEventTarget` uses.
-    const exists = surface.nodes.some(
-      (n) => n.id === inboundEventNodeId && n.data.layoutHint === 'event',
-    );
-    if (!exists) return; // unknown / non-event id — no fabricated selection
-    const changes = surface.nodes.map((n) => ({
-      type: 'select' as const,
-      id: n.id,
-      selected: n.id === inboundEventNodeId,
-    }));
-    surface.onNodesChange(changes);
-    appliedInboundFocusRef.current = inboundEventNodeId;
-  }, [inboundEventNodeId, surface.nodes, surface.selectedNodeId, surface.onNodesChange]);
+  useInboundEventFocus(surface, inboundEventNodeId, isTimelineEventNode);
 
   // ── Write boundary wiring (T4) ────────────────────────────────────────────
 

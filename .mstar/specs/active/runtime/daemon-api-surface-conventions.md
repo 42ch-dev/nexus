@@ -130,7 +130,7 @@ Examples:
 
 Use singular resource nouns (`work`, `preset`, `finding`, `workspace`). For cross-resource failures, use the subsystem noun (`auth`, `runtime`, `schema`, `validation`). Codes are contract surface: change only with a schema/version bump and consumer coordination.
 
-> **Naming convention (`@42ch/nexus-contracts`):** the canonical `NexusApiError::error_code()` module emits lowercase `snake_case` globally (e.g. `uninitialized`, `invalid_input`, `internal`, `auth_required`, `not_found`). This is a global error-module convention, not orchestration-handler-local.
+> **Naming convention (`@42ch/nexus-contracts`):** the canonical `CoreError` envelope's `code` module (`schemas/core/core-error.schema.json`) emits lowercase `snake_case` globally (e.g. `uninitialized`, `invalid_input`, `internal`, `auth_required`, `not_found`). This is a global error-module convention, not orchestration-handler-local.
 
 ---
 
@@ -624,7 +624,7 @@ a full graph projection.
 The **direct Control Room compute lane** provides invoke/accept/discard of
 installed WASM compute modules against owned Worlds over HTTP, plus a
 per-World timeline-events read. These routes are mounted in tier-2 (behind
-`require_api_key` + `require_active_creator`, like the timeline/compute
+`checkApiKey` + `withPrincipal` (active-principal resolution), like the timeline/compute
 surfaces) and are schema-backed by `schemas/daemon-api/compute/` (run wire
 contracts; `@42ch/nexus-contracts` 0.25.0 → 0.26.0) and
 `schemas/daemon-api/timeline/`.

@@ -7,8 +7,7 @@
  */
 import type { Node } from '@xyflow/react';
 
-import type { EntityEditForm, ModuleDialect } from './entity-inspector';
-import { modulesPatchFromForm } from './entity-inspector';
+import { modulesPatchFromForm, type EntityEditForm, type ModuleDialect } from './world-kb-authoring';
 import type { EntityField } from './world-kb-canvas-types';
 import type { WorldKbNodeData } from './types';
 import type { WorldKbEntityPatch } from '@42ch/nexus-contracts';

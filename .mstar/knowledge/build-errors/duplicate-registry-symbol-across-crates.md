@@ -1,7 +1,7 @@
 ---
 module: nexus-core (ActorSessionRegistry transitional duplicate — the nexus-daemon-runtime copy was deleted with the crate in v1.193)
 date: 2026-09-17
-last_updated: 2026-10-12
+last_updated: 2026-10-14
 problem_type: build_error
 category: build-errors
 severity: high
@@ -23,7 +23,7 @@ tags:
 
 # Same-named registry methods in two crates break cross-crate text rewrites
 
-> Provenance: the duplicate definitions and their signature divergence are observed at HEAD; the failing rewrite is reproduced on a two-crate fixture. The analogous recorded incident in this repo is the `open_direct_core` → `open_write_core` rename (four callers, reverted before commit) described in Prevention.
+> Provenance: the duplicate definitions and their signature divergence were observed at the v1.190 duplication (the daemon copy was deleted with its crate in v1.193); the failing rewrite is reproduced on a two-crate fixture. The analogous recorded incident in this repo is the `open_direct_core` → `open_write_core` rename (four callers, reverted before commit) described in Prevention.
 
 ## Problem
 
@@ -31,7 +31,7 @@ During the v1.190 core extraction, `ActorSessionRegistry` was **copied** into `n
 
 That divergence makes a symbol-level text rewrite dangerous. Rewriting the call shape across the tree (`reserve_character_operation(snapshot.clone())` → `reserve_character_operation(&snapshot)`) is correct for the core crate and wrong for every daemon call site; the edit applies to both because a grep for the method name returns both.
 
-The hazard is structural, not incidental: 13 by-value call sites live in the daemon crate and one by-reference site in core, and the two crates expose the same method name over same-named-but-distinct types. Any tree-wide rewrite of that call shape therefore has to be split per crate, and nothing in a grep reports which crate a hit belongs to.
+The hazard is structural, not incidental: at the time of the incident 13 by-value call sites lived in the daemon crate and one by-reference site in core, and the two crates exposed the same method name over same-named-but-distinct types. Any tree-wide rewrite of that call shape therefore has to be split per crate, and nothing in a grep reports which crate a hit belongs to.
 
 ## Symptoms
 
@@ -51,8 +51,8 @@ The hazard is structural, not incidental: 13 by-value call sites live in the dae
 
 - **A single mechanical rewrite across every `.rs` file** for the method: it would change the 13 by-value call sites in `actor_run_capture.rs` (which belong to the daemon's by-value copy) together with the core's by-reference site, making the daemon crate uncompilable in one pass. The rewrite must be scoped to the crate that owns the changed signature. Reproduced in a two-crate fixture: applying the reference form to the by-value crate yields one `E0308` per call site, all `expected Snapshot, found &Snapshot`.
 - **Counting call sites to estimate blast radius.** The count is meaningless until each hit is attributed to a crate, because both crates expose the same method name over the same-named type.
-- **Treating the duplicate as a rename target.** The two types are not aliases — `CharacterOperationSnapshot` in core and in the daemon are distinct structs, and the error types differ too (`CoreResult<()>` vs `Result<(), NexusApiError>`), so a textual signature sync in either direction leaves one side wrong.
-- **Assuming a commit message's call-site count describes the tree.** The core-lib lint commit that introduced the by-reference form changed exactly one core call site in its diff (`snap.clone()` → `&snap` in `host.rs`) while its message claims "net: 13 call sites stop cloning a CharacterOperationSnapshot" — the 13 are the daemon sites that clone, and they still clone at HEAD because the daemon copy still takes by value. Read the diff, not the summary, when estimating cross-crate blast radius.
+- **Treating the duplicate as a rename target.** The two types were not aliases — `CharacterOperationSnapshot` in core and in the then-present daemon crate were distinct structs, and the error types differed too (`CoreResult<()>` vs the retired `NexusApiError` envelope), so a textual signature sync in either direction leaves one side wrong.
+- **Assuming a commit message's call-site count describes the tree.** The core-lib lint commit that introduced the by-reference form changed exactly one core call site in its diff (`snap.clone()` → `&snap` in `host.rs`) while its message claims "net: 13 call sites stop cloning a CharacterOperationSnapshot" — the 13 were the daemon sites that cloned, and they kept cloning until that copy was deleted with the crate in v1.193 because it still took by value. Read the diff, not the summary, when estimating cross-crate blast radius.
 - **Reverting and moving on.** `git checkout HEAD --` over the affected paths restores the tree, but the next edit to either copy re-hits the same trap unless the call-site ownership is established.
 
 ## Solution
@@ -63,8 +63,8 @@ Attribute every hit to its owning crate **before** editing, and scope the rewrit
 # 1. Both definitions, with their real signatures — this is the divergence evidence
 grep -rn "fn reserve_character_operation" crates/ --include=*.rs
 
-#   crates/nexus-core/src/actor_sessions.rs:309            snapshot: &CharacterOperationSnapshot  -> CoreResult<()>
-#   crates/nexus-daemon-runtime/src/workspace/actor_sessions.rs:385 (retired v1.193)  snapshot: CharacterOperationSnapshot -> Result<(), NexusApiError>
+#   crates/nexus-core/src/actor_sessions.rs               snapshot: &CharacterOperationSnapshot  -> CoreResult<()>
+#   crates/nexus-daemon-runtime/src/workspace/actor_sessions.rs (deleted with the crate in v1.193)  snapshot: CharacterOperationSnapshot -> Result<(), NexusApiError>
 
 # 2. Call sites, grouped by crate — count per crate, not in total
 grep -rn "reserve_character_operation" crates/ apps/ --include=*.rs \

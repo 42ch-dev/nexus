@@ -64,7 +64,7 @@ use nexus_knowledge::world_kb::knowledge_entry::{
     parse_stored_created_at, KnowledgeEntryRecord, LEGACY_CREATOR_ONLY_UNSUPPORTED,
 };
 use nexus_local_db::{CharacterPatch, FieldPatch, ACTOR_KNOWLEDGE_SUMMARY_MAX_UTF8_BYTES};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// `creator character` subcommands.
 #[derive(Debug, Subcommand)]
@@ -177,7 +177,7 @@ pub enum BindingCommand {
     },
     /// List bindings for a Character
     List {
-        #[arg(long)]
+        /// Character ID (e.g. `chr_abc123`)
         character_id: String,
         #[arg(long)]
         limit: Option<i64>,
@@ -226,7 +226,8 @@ pub enum BindingCommand {
 pub enum KnowledgeCommand {
     /// Add a `KnowledgeEntry` under a stored owner
     Add {
-        /// Owner kind: world | character | binding
+        /// Owner kind: world | character | binding. A World-owned create
+        /// carries no summary (§11.5) — see `--summary`.
         #[arg(long)]
         owner: String,
         #[arg(long)]
@@ -254,8 +255,13 @@ pub enum KnowledgeCommand {
         block_type: String,
         #[arg(long)]
         canonical_name: String,
+        /// Authored summary text. Refused together with `--owner world`
+        /// (§11.5: a World-owned create carries no summary) — omit it, or use
+        /// `--owner character|binding`.
         #[arg(long)]
         summary: Option<String>,
+        /// Read the summary from a file (at most 65536 UTF-8 bytes, untrimmed).
+        /// Refused together with `--owner world`, exactly like `--summary`.
         #[arg(long)]
         summary_file: Option<PathBuf>,
         #[arg(long, default_value_t = false)]
@@ -263,7 +269,7 @@ pub enum KnowledgeCommand {
     },
     /// List Character-owned `KnowledgeEntry` rows (no World union)
     List {
-        #[arg(long)]
+        /// Character ID (e.g. `chr_abc123`)
         character_id: String,
         #[arg(long)]
         limit: Option<i64>,
@@ -500,13 +506,15 @@ pub enum CharacterTomCommand {
 /// Every arm authors through the shared direct-core seam and the writer is
 /// released by [`finish_direct`] before any line is printed, so a command
 /// never reports an outcome its core could not settle — on success and on
-/// refusal alike.
+/// refusal alike. The `knowledge add` argv refusals are pure input checks and
+/// run before that seam is opened ([`refuse_invalid_knowledge_add_input`]).
 ///
 /// # Errors
 ///
 /// Returns the mapped core refusal (admission, CAS conflict, storage) and any
 /// cleanup refusal from [`finish_direct`].
 pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
+    refuse_invalid_knowledge_add_input(&cmd)?;
     let core = open_direct_core(config).await?;
     let outcome = async {
         let principal = core.active_principal().await.map_err(map_core_error)?;
@@ -516,6 +524,30 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
     // `None` is a settled verb that prints nothing (`--json` on a remove).
     if let Some(text) = finish_direct(&core, outcome).await? {
         println!("{text}");
+    }
+    Ok(())
+}
+
+/// v1.215 P1-T5 (W1): the `knowledge add` argv refusals are pure input checks
+/// — the retired `--creator-only` flag and the World-owned summary — so they
+/// run here, **before** [`open_direct_core`] admits the writer. An invalid
+/// combination then reports its owner-scope cause without initializing or
+/// migrating durable storage on the way, and without depending on a selected,
+/// materialized workspace.
+fn refuse_invalid_knowledge_add_input(cmd: &CharacterCommand) -> Result<()> {
+    if let CharacterCommand::Knowledge {
+        command:
+            KnowledgeCommand::Add {
+                owner,
+                creator_only,
+                summary,
+                summary_file,
+                ..
+            },
+    } = cmd
+    {
+        refuse_legacy_creator_only_flag(*creator_only)?;
+        refuse_world_owned_summary(owner, summary.as_deref(), summary_file.as_deref())?;
     }
     Ok(())
 }
@@ -622,14 +654,13 @@ async fn run_arm(
                 binding_id,
                 audience,
                 audience_character,
-                creator_only,
+                creator_only: _,
                 block_type,
                 canonical_name,
                 summary,
                 summary_file,
                 json,
             } => {
-                refuse_legacy_creator_only_flag(creator_only)?;
                 let audience = audience_wire(audience.as_deref(), audience_character.as_deref())?;
                 add_knowledge(
                     core,
@@ -1604,6 +1635,26 @@ fn refuse_legacy_creator_only_flag(present: Option<bool>) -> Result<()> {
     Ok(())
 }
 
+/// Durable §11.5: a World-owned create carries no summary — the server answers
+/// `422 invalid_input`. Refused here on flag **presence** (before the writer is
+/// opened and before the summary-file read) so the author is told the
+/// owner-scope cause and its two recoveries instead of a round-trip refusal.
+fn refuse_world_owned_summary(
+    owner: &str,
+    summary: Option<&str>,
+    summary_file: Option<&Path>,
+) -> Result<()> {
+    if owner == "world" && (summary.is_some() || summary_file.is_some()) {
+        return Err(CliError::Other(
+            "--owner world rejects --summary/--summary-file (actor-product-model §11.5: a \
+             World-owned create carries no summary and the server answers 422 invalid_input); \
+             omit the summary, or use --owner character|binding"
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
 /// Map the closed `--audience` / `--audience-character` pair onto the frozen
 /// wire object (durable §3). The author supplies intent only: the permitted
 /// identity and its holder are resolved by core admission against stored state.
@@ -2393,7 +2444,8 @@ fn format_tom_item_human(row: &NexusCharacterTomBeliefItem) -> String {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod holder_public_tests {
-    use super::{audience_wire, refuse_legacy_creator_only_flag};
+    use super::{audience_wire, refuse_legacy_creator_only_flag, refuse_world_owned_summary};
+    use std::path::Path;
 
     // v1.191 P1 T9 (durable §5/§6): the CLI request surface for the shipped
     // `creator character knowledge` authoring commands.
@@ -2435,5 +2487,24 @@ mod holder_public_tests {
             );
         }
         assert!(refuse_legacy_creator_only_flag(None).is_ok());
+    }
+
+    /// v1.215 P1-T5 (`R-V1208-P2-06`): the World-owned create has no summary
+    /// (§11.5), and only that owner is narrowed — the refusal keys on flag
+    /// presence, so an unread `--summary-file` path is refused exactly like
+    /// `--summary`.
+    #[test]
+    fn v1215_world_owned_summary_is_refused_by_presence() {
+        assert!(
+            refuse_world_owned_summary("world", None, None).is_ok(),
+            "an absent summary keeps the World-owned create supported"
+        );
+        for (summary, summary_file) in [(Some("text"), None), (None, Some(Path::new("absent.txt")))]
+        {
+            let err = refuse_world_owned_summary("world", summary, summary_file).unwrap_err();
+            assert!(err.to_string().contains("§11.5"), "{err}");
+        }
+        assert!(refuse_world_owned_summary("character", Some("text"), None).is_ok());
+        assert!(refuse_world_owned_summary("binding", None, Some(Path::new("s.txt"))).is_ok());
     }
 }

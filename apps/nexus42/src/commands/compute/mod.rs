@@ -49,6 +49,9 @@ pub enum ComputeCommand {
     /// Build a compute module daemon-free: cargo build → locate the wasm
     /// artifact → inject `wasm_sha256` → stage the pair under
     /// `<module-dir>/dist/<module_id>/`.
+    ///
+    /// Environment contract: `RUSTUP_HOME`/`CARGO_HOME` are inherited from the
+    /// calling environment.
     Build {
         /// Path to the module's `manifest.json` (module dir = manifest parent).
         #[arg(long)]
@@ -166,8 +169,9 @@ fn cmd_build(manifest_path: &Path, release: bool) -> Result<()> {
         compute_exit(
             exit::BUILD,
             format!(
-                "failed to invoke `cargo` to build module `{module_id}` in {}: {e} — is `cargo` on PATH?",
-                module_dir.display()
+                "failed to invoke `cargo` to build module `{module_id}` in {}: {e} — is `cargo` on PATH?\n{}",
+                module_dir.display(),
+                toolchain_home_context()
             ),
         )
     })?;
@@ -178,13 +182,17 @@ fn cmd_build(manifest_path: &Path, release: bool) -> Result<()> {
                 exit::BUILD,
                 format!(
                     "wasm32-unknown-unknown target not installed — required to compile \
-                     module `{module_id}`.\nFix: rustup target add wasm32-unknown-unknown"
+                     module `{module_id}`.\nFix: rustup target add wasm32-unknown-unknown\n{}",
+                    toolchain_home_context()
                 ),
             ));
         }
         return Err(compute_exit(
             exit::BUILD,
-            format!("failed to compile module `{module_id}`:\n{stderr}"),
+            format!(
+                "failed to compile module `{module_id}`:\n{stderr}\n{}",
+                toolchain_home_context()
+            ),
         ));
     }
 
@@ -561,6 +569,52 @@ fn is_missing_target_error(stderr: &str) -> bool {
         || stderr.contains("rust-std")
 }
 
+/// Name the effective toolchain-home resolution for a build failure: the
+/// actual `HOME` and, for each of `RUSTUP_HOME`/`CARGO_HOME`, whether it is
+/// inherited from the calling environment or defaulted under `$HOME` — plus
+/// remediation. Presence is read with `var_os`: a present non-Unicode path is
+/// inherited by the child unchanged, so it must not be reported as unset, and
+/// an empty value is reported as present-but-empty rather than as absent. The
+/// CLI never invents a toolchain location (no `rustup which` derivation, no
+/// synthesised default), so an unpinned wrong `HOME` is named, not guessed
+/// around.
+fn toolchain_home_context() -> String {
+    let home = std::env::var_os("HOME");
+    let home_dir = home.as_deref().filter(|home| !home.is_empty());
+    let home_line = match home.as_deref() {
+        Some(home) if !home.is_empty() => format!("HOME={}", home.to_string_lossy()),
+        Some(_) => "HOME=\"\" (present but empty)".to_string(),
+        None => "HOME=<unset>".to_string(),
+    };
+    let resolution = |var: &str, default_subdir: &str| {
+        let state = match std::env::var_os(var) {
+            // Present — displayable or not — is inherited by the child unchanged.
+            Some(pin) if !pin.is_empty() => {
+                return format!(
+                    "{var}={} (inherited from the calling environment)",
+                    pin.to_string_lossy()
+                )
+            }
+            Some(_) => format!("{var}=\"\" (present but empty)"),
+            None => format!("{var} unset"),
+        };
+        let tail = home_dir.map_or_else(
+            || "no HOME to default against".to_string(),
+            |home| format!("defaults to {}/{default_subdir}", home.to_string_lossy()),
+        );
+        format!("{state} — {tail}")
+    };
+    format!(
+        "toolchain home resolution: {home_line}.\n\
+         {}.\n\
+         {}.\n\
+         Fix: pin RUSTUP_HOME and CARGO_HOME in the calling environment, or run \
+         under the real account HOME.",
+        resolution("RUSTUP_HOME", ".rustup"),
+        resolution("CARGO_HOME", ".cargo"),
+    )
+}
+
 /// Resolve the cdylib artifact path, honoring `CARGO_TARGET_DIR` (same
 /// resolution as the wasm-host build.rs).
 fn artifact_path(module_dir: &Path, profile: &str, crate_name: &str) -> PathBuf {
@@ -594,6 +648,7 @@ fn crate_name_from_cargo_toml(module_dir: &Path) -> Option<String> {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::ffi::OsStr;
 
     #[test]
     fn field_error_extracts_backticked_field() {
@@ -817,5 +872,260 @@ mod tests {
     fn crate_name_from_missing_cargo_toml_is_none() {
         let dir = tempfile::tempdir().expect("tempdir");
         assert_eq!(crate_name_from_cargo_toml(dir.path()), None);
+    }
+
+    // ── T3 (v1.215 P1): fail-loud toolchain-home diagnostics ───────────────
+
+    /// A `cargo` stand-in that writes `stderr_line` to stderr and exits with
+    /// `exit_code` — the production build takes its failure path through a
+    /// real child process without ever reaching a real toolchain.
+    #[cfg(unix)]
+    fn stub_cargo(exit_code: i32, stderr_line: &str) -> tempfile::TempDir {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().expect("create stub directory");
+        let script = format!("#!/bin/sh\necho \"{stderr_line}\" >&2\nexit {exit_code}\n");
+        let path = dir.path().join("cargo");
+        std::fs::write(&path, script).expect("write stub");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod stub");
+        dir
+    }
+
+    /// Prepends a stub directory to this process's `PATH` until dropped.
+    #[cfg(unix)]
+    struct StubPath(Option<std::ffi::OsString>);
+
+    #[cfg(unix)]
+    impl StubPath {
+        fn prepend(dir: &Path) -> Self {
+            let previous = std::env::var_os("PATH");
+            let mut value = dir.as_os_str().to_os_string();
+            if let Some(previous) = &previous {
+                value.push(":");
+                value.push(previous);
+            }
+            std::env::set_var("PATH", value);
+            Self(previous)
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for StubPath {
+        fn drop(&mut self) {
+            match &self.0 {
+                Some(previous) => std::env::set_var("PATH", previous),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+    }
+
+    /// Overrides `HOME` and the two toolchain-home variables, restoring every
+    /// original on drop so a panic cannot leak the overrides into siblings.
+    /// Values are `OsStr` so a case can pin a non-Unicode path.
+    #[cfg(unix)]
+    struct HomeEnv {
+        home: Option<std::ffi::OsString>,
+        rustup: Option<std::ffi::OsString>,
+        cargo: Option<std::ffi::OsString>,
+    }
+
+    #[cfg(unix)]
+    impl HomeEnv {
+        fn set(home: &Path, rustup: Option<&OsStr>, cargo: Option<&OsStr>) -> Self {
+            let guard = Self {
+                home: std::env::var_os("HOME"),
+                rustup: std::env::var_os("RUSTUP_HOME"),
+                cargo: std::env::var_os("CARGO_HOME"),
+            };
+            std::env::set_var("HOME", home);
+            match rustup {
+                Some(value) => std::env::set_var("RUSTUP_HOME", value),
+                None => std::env::remove_var("RUSTUP_HOME"),
+            }
+            match cargo {
+                Some(value) => std::env::set_var("CARGO_HOME", value),
+                None => std::env::remove_var("CARGO_HOME"),
+            }
+            guard
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for HomeEnv {
+        fn drop(&mut self) {
+            match &self.home {
+                Some(value) => std::env::set_var("HOME", value),
+                None => std::env::remove_var("HOME"),
+            }
+            match &self.rustup {
+                Some(value) => std::env::set_var("RUSTUP_HOME", value),
+                None => std::env::remove_var("RUSTUP_HOME"),
+            }
+            match &self.cargo {
+                Some(value) => std::env::set_var("CARGO_HOME", value),
+                None => std::env::remove_var("CARGO_HOME"),
+            }
+        }
+    }
+
+    /// Writes `basic-combat`'s manifest into `dir` and returns its path.
+    #[cfg(unix)]
+    fn write_build_manifest(dir: &Path) -> PathBuf {
+        let path = dir.join("manifest.json");
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&valid_manifest_json("basic-combat")).expect("json"),
+        )
+        .expect("write manifest");
+        path
+    }
+
+    /// A failing `cargo` under a temp `HOME` with both toolchain-home variables
+    /// unset (the residual's scenario) must name the *defaulted* resolution and
+    /// the remediation.
+    #[cfg(unix)]
+    #[test]
+    #[serial_test::serial]
+    fn build_failure_names_the_defaulted_toolchain_home_resolution() {
+        // `HOME` is process-wide: hold the shared HOME lock for the whole
+        // override/assertion window so sibling CLI tests cannot race it.
+        let _home = crate::testutil::isolated_home();
+        let stub = stub_cargo(1, "error: stub cargo failure");
+        let _path = StubPath::prepend(stub.path());
+        let home = tempfile::tempdir().expect("temp home");
+        let _env = HomeEnv::set(home.path(), None, None);
+        let manifest_path = write_build_manifest(home.path());
+
+        let message = cmd_build(&manifest_path, false)
+            .expect_err("a failing cargo must fail the build")
+            .to_string();
+
+        let home_path = home.path().to_string_lossy().into_owned();
+        assert!(
+            message.contains(&format!("toolchain home resolution: HOME={home_path}.")),
+            "diagnostic must name the effective HOME: {message}"
+        );
+        assert!(
+            message.contains(&format!(
+                "RUSTUP_HOME unset — defaults to {home_path}/.rustup."
+            )),
+            "the unset RUSTUP_HOME must be named as defaulted under HOME, not inherited: {message}"
+        );
+        assert!(
+            message.contains(&format!(
+                "CARGO_HOME unset — defaults to {home_path}/.cargo."
+            )),
+            "the unset CARGO_HOME must be named as defaulted under HOME, not inherited: {message}"
+        );
+        assert!(
+            message.contains(
+                "Fix: pin RUSTUP_HOME and CARGO_HOME in the calling environment, or run \
+                 under the real account HOME."
+            ),
+            "diagnostic must carry the remediation: {message}"
+        );
+    }
+
+    /// With `RUSTUP_HOME`/`CARGO_HOME` pinned in the calling environment the
+    /// same failure reports the inherited values, not `$HOME` defaults.
+    #[cfg(unix)]
+    #[test]
+    #[serial_test::serial]
+    fn build_failure_reports_inherited_toolchain_homes() {
+        let _home = crate::testutil::isolated_home();
+        let stub = stub_cargo(1, "error: stub cargo failure");
+        let _path = StubPath::prepend(stub.path());
+        let home = tempfile::tempdir().expect("temp home");
+        let _env = HomeEnv::set(
+            home.path(),
+            Some(OsStr::new("/pinned/rustup")),
+            Some(OsStr::new("/pinned/cargo")),
+        );
+        let manifest_path = write_build_manifest(home.path());
+
+        let message = cmd_build(&manifest_path, false)
+            .expect_err("a failing cargo must fail the build")
+            .to_string();
+
+        assert!(
+            message
+                .contains("RUSTUP_HOME=/pinned/rustup (inherited from the calling environment)."),
+            "the pinned RUSTUP_HOME must be reported as inherited: {message}"
+        );
+        assert!(
+            message.contains("CARGO_HOME=/pinned/cargo (inherited from the calling environment)."),
+            "the pinned CARGO_HOME must be reported as inherited: {message}"
+        );
+    }
+
+    /// Presence must not be conflated with display encoding: a non-Unicode
+    /// toolchain home is a valid path the child inherits unchanged, so it must
+    /// be reported as inherited. An empty value is present too — named as
+    /// present-but-empty and default-triggering, never as absent.
+    #[cfg(unix)]
+    #[test]
+    #[serial_test::serial]
+    fn build_failure_reports_present_values_that_are_not_plain_text() {
+        use std::os::unix::ffi::OsStrExt as _;
+        let _home = crate::testutil::isolated_home();
+        let stub = stub_cargo(1, "error: stub cargo failure");
+        let _path = StubPath::prepend(stub.path());
+        let home = tempfile::tempdir().expect("temp home");
+        let pin = OsStr::from_bytes(b"/pinned/\xffrustup");
+        let env = HomeEnv::set(home.path(), Some(pin), Some(OsStr::new("")));
+        let manifest_path = write_build_manifest(home.path());
+
+        let message = cmd_build(&manifest_path, false)
+            .expect_err("a failing cargo must fail the build")
+            .to_string();
+
+        let home_path = home.path().to_string_lossy().into_owned();
+        assert!(
+            message.contains(&format!(
+                "RUSTUP_HOME={} (inherited from the calling environment).",
+                pin.to_string_lossy()
+            )),
+            "a present non-Unicode RUSTUP_HOME is inherited by the child, not unset: {message}"
+        );
+        assert!(
+            message.contains(&format!(
+                "CARGO_HOME=\"\" (present but empty) — defaults to {home_path}/.cargo."
+            )),
+            "an empty CARGO_HOME must be named as present-but-empty, not absent: {message}"
+        );
+
+        // An empty `HOME` is present-but-empty too, and leaves nothing to default against.
+        drop(env);
+        let _env = HomeEnv::set(Path::new(""), Some(OsStr::new("/pinned/rustup")), None);
+        let message = cmd_build(&manifest_path, false)
+            .expect_err("a failing cargo must fail the build")
+            .to_string();
+
+        assert!(
+            message.contains("HOME=\"\" (present but empty)."),
+            "an empty HOME must be named as present-but-empty: {message}"
+        );
+        assert!(
+            message.contains("CARGO_HOME unset — no HOME to default against."),
+            "with no usable HOME there is no default to name: {message}"
+        );
+    }
+
+    /// `compute build --help` states the toolchain-home environment contract.
+    #[test]
+    fn build_help_documents_the_environment_contract() {
+        use crate::cli::Cli;
+        use clap::Parser as _;
+        let error = Cli::try_parse_from(["nexus42", "compute", "build", "--help"])
+            .expect_err("--help is reported through clap's DisplayHelp error");
+        let help = error.to_string();
+        assert!(
+            help.contains("RUSTUP_HOME") && help.contains("CARGO_HOME"),
+            "help must name the toolchain-home variables: {help}"
+        );
+        assert!(
+            help.contains("inherited from the calling environment"),
+            "help must state that the homes are inherited: {help}"
+        );
     }
 }

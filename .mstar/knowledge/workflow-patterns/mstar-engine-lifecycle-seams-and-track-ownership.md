@@ -18,7 +18,7 @@ tags:
   - ownership
   - worktree-cleanup
   - phase-machine
-last_updated: 2026-10-12
+last_updated: 2026-10-16
 ---
 
 # Engine lifecycle seams: declare the phase you are in, register the tracks you create
@@ -107,3 +107,27 @@ The row-level Done authority and the ownership obligation are summarised in the 
 - **`amend-prepare` admits only while every row is `Todo`; `bind` closes that window.** Correct order: `iteration register` → phase `phase-1-prepare` → `amend-prepare` (integration checkout + parallelism) → `prepare` → `bind`. Binding first moves the row to InProgress and the amend face refuses (`the amendment is available only while every row is Todo`) with no engine path back to Todo.
 - **Feature-branch isolation is structural, not bookkeeping.** L1 (`mstar worktree check <plan> --workflow <id>`) requires: the main worktree on its recorded branch and not carrying any lifecycle-owned branch; a dedicated integration checkout existing on `branch.integration`; and an execution-lease feature worktree whose probed branch equals the Assignment's `Working branch`. "Working branch = the integration branch, no feature worktree" fails structurally — the lease worktree would have to be a second checkout of the integration branch (Git forbids) or the main checkout (residency violation / branch mismatch).
 - **Recovery rehearsal (v1.211, 2026-10-11).** When a wrong pin has closed the window: first **prove the workflow idle** — no live plan/coordinator writer, no in-flight merge, no active CI review wave touching the workflow — and keep writers stopped until recovery completes; the surgery must never race a live holder. Then: (1) back up the snapshot bytes; (2) restore the row to `Todo` by deleting its `coordination` and `execution_lease` keys in the snapshot file (no engine verb does this; treat as an incident repair, fully recorded in the workflow notes); (3) `mstar status validate <snapshot>` must return OK; (4) delete the orphan plan-session envelope; (5) correct the Assignment (pure headers, dedicated feature branch, feature worktree path) and re-run `prepare` (revision 0) → `amend-prepare` → `bind`; (6) `mstar worktree check` should print OK. Success chain: `plan show` lists `allowed operations: prepare` → after bind, `worktree check … OK`.
+
+## Guidance — 2026-10-16: plan progress/complete payload shapes (4.0.1 CLI)
+
+The row-mutation verbs validate their JSON payloads strictly; the error surfaces name one
+violation at a time, so the full shape is worth having in one place:
+
+- `mstar plan progress --progress '<json>'` requires exactly `{status, summary,
+  evidence_paths}` — `status` ∈ InProgress/InReview/Blocked, `summary` non-empty,
+  `evidence_paths` an array of **absolute paths that already exist inside the plan's
+  plan/SDD area** (`{PLAN_DIR}`, `{SDD_DIR}/<plan-id>`); a `{PLAN_DIR}/plans`-external path
+  (e.g. an iteration guide) is refused. Transitions are state-machine constrained:
+  `Blocked` may only move to `InProgress` (never straight to `InReview`), so unblocking a
+  plan left Blocked costs two progress writes.
+- `mstar plan complete --evidence '<json>'` accepts only `{source_sha, review_base,
+  review_head, qc, qa, evidence_paths}`; nested `qc` = `{decision, reports, consolidated}`
+  with `decision` literally `Approve` or `Approve with residuals` (no `seats` key), `qa` =
+  `{gate, decision, report}` with `decision: "pass"`; every path absolute and inside the
+  plan area. `--integration-base-sha`/`--integration-result-sha` must be full SHAs and the
+  recorded plan worktree must be fully clean (untracked `node_modules` counts as dirty —
+  remove build-only untracked dirs before completing).
+- `mstar sdd review-package <base> <head> <outfile> --context <context.json>` wants full
+  SHAs, an absolute outfile, and an existing `context.json` (`mstar sdd workspace` creates
+  the dir but not the file — write the five-field context.json by hand when a hand-built
+  SDD root lacks it).

@@ -36,3 +36,9 @@ tokio = { workspace = true, features = ["macros", "rt"] }
 # in V1.145 P1a (they exercise the conversion seam + lifecycle trait that now
 # live there). This crate's own tests no longer reference spoke-adapter.
 nexus-contracts = { path = "../nexus-contracts" }
+# p4 t3 fix wave 1: the belief-member-probe allocation regression check counts
+# the current thread's allocations. The workspace lints forbid `unsafe_code`,
+# so a counting `GlobalAlloc` cannot be hand-rolled in this crate; this
+# dev-dep ships one (MIT/Apache-2.0, no transitive dependencies) and is
+# test-only — the shipped graph is untouched.
+allocation-counter = "0.8"

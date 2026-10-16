@@ -2684,6 +2684,183 @@ async fn v1_child_under_parent_without_descriptor_is_non_replayable() {
     let _ = child_sid;
 }
 
+// ---------------------------------------------------------------------------
+// W1 (v1.215 P2 T2 fix wave): the root-context marker is the ONLY evidence
+// that tolerates a non-terminal inner-graph child the root has already moved
+// past (the bounded `InnerGraphTask` poller abandoned it). These scenarios
+// drive the EXISTING recovery entrypoint end to end: root state S enters inner
+// graph X, the root cursor has advanced past S, and a still-RUNNING child row
+// — admitted through the production spawn path — has a descriptor naming X.
+// Only the root's `_inner_child_session_<S>` record connects the two facts.
+// ---------------------------------------------------------------------------
+
+/// Seed that persisted shape. `marker_states` are the outer states whose
+/// `_inner_child_session_<state>` records name the child; `child_inner_graph`
+/// is the inner graph the child's frozen descriptor names.
+async fn seed_abandoned_child_root(
+    pool: &sqlx::SqlitePool,
+    storage: &Arc<SqliteSessionStorage>,
+    engine: &nexus_orchestration::GraphFlowEngine,
+    marker_states: &[&str],
+    child_inner_graph: &str,
+) -> (SessionId, SessionId) {
+    let inner_graph = Arc::new(
+        graph_flow::GraphBuilder::new(child_inner_graph)
+            .add_task(Arc::new(EndTask))
+            .build()
+            .expect("test inner graph"),
+    );
+    let parent_graph = Arc::new(
+        graph_flow::GraphBuilder::new("parent_graph")
+            .add_task(Arc::new(EndTask))
+            .build()
+            .expect("test parent graph"),
+    );
+    // `novel-project-init` defines three inner graphs, two of them entered by
+    // distinct states (`init_intro` → `intro_graph`, `collecting_details` →
+    // `details_graph`), which the negative variants below rely on.
+    let root_sid = engine
+        .start_session("novel-project-init", parent_graph)
+        .await
+        .expect("start root session");
+    let child_sid = engine
+        .shared_state()
+        .spawn_child_session_internal(nexus_orchestration::engine::ChildSessionParams {
+            parent_session_id: root_sid.0.clone(),
+            inner_graph,
+            initial_context: graph_flow::Context::new(),
+        })
+        .await
+        .expect("spawn child through production admission");
+
+    let root = storage
+        .get(&root_sid.0)
+        .await
+        .expect("get root")
+        .expect("root row");
+    for state in marker_states {
+        root.context
+            .set(format!("_inner_child_session_{state}"), child_sid.0.clone())
+            .expect("write root marker");
+    }
+    sqlx::query(
+        "UPDATE orchestration_sessions SET context_json = ?, current_task_id = 'committing'
+         WHERE session_id = ?",
+    )
+    .bind(serde_json::to_vec(&root.context).expect("serialize root context"))
+    .bind(&root_sid.0)
+    .execute(pool)
+    .await
+    .expect("persist root marker and advanced cursor");
+    (root_sid, child_sid)
+}
+
+/// The root moved past `init_intro` (which enters `intro_graph`) and its
+/// record still names the abandoned child whose descriptor names
+/// `intro_graph`: recovery must accept the row, and must not mint a
+/// replacement child.
+#[tokio::test]
+async fn recovery_child_marker_reattaches_abandoned_child_without_replacement() {
+    let (pool, _db) = fresh_pool().await;
+    let (storage, engine) = fresh_engine(pool.clone());
+    let (root_sid, _child_sid) =
+        seed_abandoned_child_root(&pool, &storage, &engine, &["init_intro"], "intro_graph").await;
+
+    let (_storage_b, engine_b) = fresh_engine(pool.clone());
+    engine_b
+        .ensure_recovered_runner_inner(&root_sid)
+        .await
+        .expect("a marker-named child past the root position must stay replayable");
+
+    let children = storage
+        .load_children(&root_sid)
+        .await
+        .expect("load children");
+    assert_eq!(
+        children.len(),
+        1,
+        "recovery must not mint a replacement child"
+    );
+}
+
+/// The record's state resolves to a DIFFERENT legal inner graph than the
+/// child's descriptor names, so it is not evidence of this child's
+/// reattachment: recovery rejects it and mints no replacement.
+#[tokio::test]
+async fn recovery_child_marker_for_another_inner_graph_is_non_replayable() {
+    let (pool, _db) = fresh_pool().await;
+    let (storage, engine) = fresh_engine(pool.clone());
+    // `collecting_details` enters `details_graph`, not the child's
+    // `intro_graph`.
+    let (root_sid, _child_sid) = seed_abandoned_child_root(
+        &pool,
+        &storage,
+        &engine,
+        &["collecting_details"],
+        "intro_graph",
+    )
+    .await;
+
+    let (_storage_b, engine_b) = fresh_engine(pool.clone());
+    let err = engine_b
+        .ensure_recovered_runner_inner(&root_sid)
+        .await
+        .expect_err("a record for another inner graph must be non-replayable");
+    assert!(
+        err.to_string()
+            .contains("not recorded by an inner-graph state"),
+        "refusal must come from the marker branch, got {err}"
+    );
+
+    let children = storage
+        .load_children(&root_sid)
+        .await
+        .expect("load children");
+    assert_eq!(
+        children.len(),
+        1,
+        "rejection must not mint a replacement child"
+    );
+}
+
+/// Two records name the SAME child but resolve to two different legal inner
+/// graphs, so the record set is ambiguous and counts as no evidence at all:
+/// recovery rejects it and mints no replacement.
+#[tokio::test]
+async fn recovery_child_marker_conflict_is_non_replayable() {
+    let (pool, _db) = fresh_pool().await;
+    let (storage, engine) = fresh_engine(pool.clone());
+    let (root_sid, _child_sid) = seed_abandoned_child_root(
+        &pool,
+        &storage,
+        &engine,
+        &["init_intro", "collecting_details"], // intro_graph vs details_graph
+        "intro_graph",
+    )
+    .await;
+
+    let (_storage_b, engine_b) = fresh_engine(pool.clone());
+    let err = engine_b
+        .ensure_recovered_runner_inner(&root_sid)
+        .await
+        .expect_err("conflicting records for one child must be non-replayable");
+    assert!(
+        err.to_string()
+            .contains("not recorded by an inner-graph state"),
+        "refusal must come from the marker branch, got {err}"
+    );
+
+    let children = storage
+        .load_children(&root_sid)
+        .await
+        .expect("load children");
+    assert_eq!(
+        children.len(),
+        1,
+        "rejection must not mint a replacement child"
+    );
+}
+
 // Important 1: a restarted parent hydrates its children map from persisted
 // child rows so its next commit_transition submits the correct child revision.
 #[tokio::test]

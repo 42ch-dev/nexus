@@ -818,7 +818,6 @@ fn anonymous_selection_is_refused_at_world_event_add() {
             "creator",
             "world",
             "event-add",
-            "--world-id",
             "wld_absent",
             "--title",
             "Anon event",

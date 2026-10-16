@@ -12,12 +12,8 @@ import type {
   WorldKbSourceAnchorProjection,
 } from '@42ch/nexus-contracts';
 
-import {
-  EntityInspector,
-  type EntityEditForm,
-  type ModuleDialect,
-  type WorldKbEntityField,
-} from './entity-inspector';
+import { EntityInspector, type WorldKbEntityField } from './entity-inspector';
+import type { EntityEditForm, ModuleDialect } from './world-kb-authoring';
 import { PromotionInspector } from './promotion-inspector';
 import { RelationshipInspector, type RelationshipForm } from './relationship-inspector';
 import type { Selection } from './world-kb-canvas-types';

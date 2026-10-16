@@ -270,7 +270,7 @@ fn v2_target_acp_subcommands() {
 /// V2 Target: `creator` command group subcommands (extended).
 ///
 /// Expected: register, status, use, list, pair, unpair, logout,
-///   credentials (rotate), workspace (list/create/use/init/clone/link/unlink/status),
+///   credentials (rotate), workspace (list/create/use/init),
 ///   soul, memory, kb
 ///
 /// Active since Plan 4 landed the creator/knowledge surface.
@@ -1534,5 +1534,122 @@ fn daemon_tree_is_unknown() {
             .args(args)
             .assert()
             .success();
+    }
+}
+
+// =============================================================================
+// Part 14: v1.215 P1-T5 creator primary-id positional cutover (compass D8)
+// =============================================================================
+
+/// v1.215 P1-T5 (compass D8): the three `creator` leaves whose only required
+/// object id is the command's primary target take that id as a positional
+/// argument — `world event-add <WORLD_ID>`, `character binding list
+/// <CHARACTER_ID>` and `character knowledge list <CHARACTER_ID>`. The old
+/// `--world-id` / `--character-id` spellings are removed outright, with no
+/// dual form or alias (cli-spec.md:8 「无 no-op alias」), so each old spelling is
+/// clap's usage error (exit 2) whose page advertises the new positional.
+///
+/// Discriminating regression: pre-cutover all three declared the id as a
+/// required long flag and accepted no positional, so every assertion below was
+/// inverted — the `<ID>` invocation was clap's `unexpected argument` (exit 2)
+/// and the `--id` invocation parsed through to the direct-core seam.
+#[test]
+fn v1215_creator_primary_id_is_positional() {
+    let home = tempfile::tempdir().expect("temp home");
+
+    // (leaf argv, positional placeholder shown in usage, removed id flag)
+    let leaves: [(&[&str], &str, &str); 3] = [
+        (
+            &["creator", "world", "event-add"],
+            "<WORLD_ID>",
+            "--world-id",
+        ),
+        (
+            &["creator", "character", "binding", "list"],
+            "<CHARACTER_ID>",
+            "--character-id",
+        ),
+        (
+            &["creator", "character", "knowledge", "list"],
+            "<CHARACTER_ID>",
+            "--character-id",
+        ),
+    ];
+
+    for (leaf, placeholder, removed_flag) in leaves {
+        let leaf_label = leaf.join(" ");
+
+        // ── The new positional form is the advertised surface ─────────────
+        let help = Command::cargo_bin("nexus42")
+            .unwrap()
+            .env("HOME", home.path())
+            .env_remove("NEXUS_API_KEY")
+            .args(leaf)
+            .arg("--help")
+            .assert()
+            .success()
+            .get_output()
+            .clone();
+        let help_text = String::from_utf8_lossy(&help.stdout).into_owned();
+        assert!(
+            help_text.contains(placeholder),
+            "v1.215 P1-T5: `{leaf_label}` must advertise the {placeholder} positional: {help_text}"
+        );
+        assert!(
+            !help_text.contains(removed_flag),
+            "v1.215 P1-T5: `{leaf_label}` must not advertise the removed \
+             {removed_flag}: {help_text}"
+        );
+
+        // ── It parses: the next stop is the unnamed-creator refusal, not a
+        //    clap usage error (exit 1, `Creator not selected.`). ───────────
+        let positional = Command::cargo_bin("nexus42")
+            .unwrap()
+            .env("HOME", home.path())
+            .env_remove("NEXUS_API_KEY")
+            .args(leaf)
+            .arg("obj_probe")
+            .assert()
+            .get_output()
+            .clone();
+        let positional_stderr = String::from_utf8_lossy(&positional.stderr).into_owned();
+        assert!(
+            !positional_stderr.contains("unexpected argument"),
+            "v1.215 P1-T5: `{leaf_label} <id>` must be accepted by clap: {positional_stderr}"
+        );
+        assert_eq!(
+            positional.status.code(),
+            Some(1),
+            "v1.215 P1-T5: past clap, `{leaf_label} <id>` reaches the unnamed-creator \
+             refusal: {positional_stderr}"
+        );
+        assert!(
+            positional_stderr.contains("Creator not selected"),
+            "v1.215 P1-T5: the declared refusal for `{leaf_label} <id>`: {positional_stderr}"
+        );
+
+        // ── The removed flag spelling is refused by clap, and the usage page
+        //    it prints names the new positional instead. ──────────────────
+        let old = Command::cargo_bin("nexus42")
+            .unwrap()
+            .env("HOME", home.path())
+            .env_remove("NEXUS_API_KEY")
+            .args(leaf)
+            .args([removed_flag, "obj_probe"])
+            .assert()
+            .code(2)
+            .get_output()
+            .clone();
+        let old_stderr = String::from_utf8_lossy(&old.stderr).into_owned();
+        assert!(
+            old_stderr.contains(removed_flag) && old_stderr.contains(placeholder),
+            "v1.215 P1-T5: `{leaf_label} {removed_flag} …` must be a clap usage error \
+             naming the new {placeholder} positional: {old_stderr}"
+        );
+        assert!(
+            old.stdout.is_empty(),
+            "v1.215 P1-T5: the removed spelling must answer with no stdout: {}",
+            String::from_utf8_lossy(&old.stdout)
+        );
     }
 }
