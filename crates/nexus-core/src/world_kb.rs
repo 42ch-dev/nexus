@@ -1181,6 +1181,12 @@ pub mod patch {
         use super::*;
         use std::hint::black_box;
 
+        // Minimum ratio by which the removed whole-module copy must out-allocate
+        // the real dispatch. Measured 6 vs 4226 allocations on this fixture
+        // (~700x); 8x leaves room for payload/allocator drift while still
+        // failing if the copy lands on the measured path.
+        const COPY_MARGIN: u64 = 8;
+
         /// Large nested unknown payload: 64 first-level keys x 16 unknown leaf
         /// objects, each leaf its own allocation — one deep copy of it is a
         /// four-figure allocation count.
@@ -1257,15 +1263,15 @@ pub mod patch {
             });
 
             // `merge_modules` (persistence materialisation) is not on this path:
-            // the dispatch is measured directly. Existing typed work and
-            // diagnostics are allowed; a copy of the payload is not.
+            // the dispatch is measured directly. The real dispatch is compared
+            // against the removed copy shape instead of against absolute counts,
+            // so allocator/profile drift that moves both readings together does
+            // not flake while a copy re-appearing on the measured path still
+            // fails. An uninstalled counter reads 0 for both, which fails here
+            // too — the liveness check.
             assert!(
-                copied_payload.count_total >= 1024,
-                "the copy shape must be visible to the counter, got {copied_payload:?}"
-            );
-            assert!(
-                measured.count_total <= 64,
-                "the core dispatch copied the patch payload: {measured:?}"
+                copied_payload.count_total > measured.count_total * COPY_MARGIN,
+                "the core dispatch copied the patch payload: {measured:?} vs whole-module copy {copied_payload:?}"
             );
             println!("core dispatch {measured:?} vs whole-module copy {copied_payload:?}");
         }

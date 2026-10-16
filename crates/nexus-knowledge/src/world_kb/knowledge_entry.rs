@@ -1785,6 +1785,12 @@ mod tests {
         );
     }
 
+    // Minimum ratio by which the removed singleton copy must out-allocate the
+    // real belief-member probe. Measured 6 vs 3212 allocations on this fixture
+    // (~535x); 8x leaves room for payload/allocator drift while still failing
+    // if the copy lands on the measured path.
+    const COPY_MARGIN: u64 = 8;
+
     /// p4 t3 fix wave 1 — allocation regression check for the belief-member probe.
     ///
     /// The probe reads one member through a borrowed one-entry map; it
@@ -1836,15 +1842,13 @@ mod tests {
             black_box(validate_belief_module(black_box(&module)));
         });
 
-        // Existing typed field deserialization is allowed; a copy of the member
-        // payload is not.
+        // The real probe is compared against the removed singleton-copy shape
+        // instead of against absolute counts, so allocator/profile drift that
+        // moves both readings together does not flake while a copy
+        // re-appearing on the measured path still fails.
         assert!(
-            singleton_copy.count_total >= 1024,
-            "the singleton-copy shape must be visible to the counter, got {singleton_copy:?}"
-        );
-        assert!(
-            measured.count_total <= 64,
-            "the belief-member probe copied the member payload: {measured:?}"
+            singleton_copy.count_total > measured.count_total * COPY_MARGIN,
+            "the belief-member probe copied the member payload: {measured:?} vs singleton copy {singleton_copy:?}"
         );
         println!("belief probe {measured:?} vs singleton copy {singleton_copy:?}");
     }

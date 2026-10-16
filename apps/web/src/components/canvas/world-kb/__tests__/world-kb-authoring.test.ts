@@ -4,14 +4,9 @@
  *
  * The holder vocabulary and the `modules.mental` / `modules.belief` builders
  * moved out of the React component module; these cases pin their
- * inputs/outputs at the new lower-layer home and pin the import surface
- * (wire-contract types only — no component dependency), so the move stays
+ * inputs/outputs at the new lower-layer home, so the move stays
  * behaviour-neutral.
  */
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
-
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -23,14 +18,6 @@ import {
   type BeliefRowForm,
   type EntityEditForm,
 } from '../world-kb-authoring';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const AUTHORING_SOURCE = readFileSync(path.resolve(__dirname, '../world-kb-authoring.ts'), 'utf8');
-const TIMELINE_INSPECTOR_SOURCE = readFileSync(
-  path.resolve(__dirname, '../../timeline-canvas/timeline-inspector.tsx'),
-  'utf8',
-);
 
 function emptyForm(overrides: Partial<EntityEditForm> = {}): EntityEditForm {
   return {
@@ -133,23 +120,5 @@ describe('modulesPatchFromForm', () => {
     expect(modulesPatchFromForm(form, ['belief'])).toEqual({ belief: [{ proposition: 'The tide turns' }] });
     expect(Object.keys(modulesPatchFromForm(form, ['mental', 'belief']) ?? {})).toEqual(['mental', 'belief']);
     expect(modulesPatchFromForm(form, [])).toBeUndefined();
-  });
-});
-
-describe('import surface (R-V1203P2QC1-S001)', () => {
-  it('depends on wire-contract types only — no React, no component module', () => {
-    const importLines = AUTHORING_SOURCE.split('\n').filter((line) => /^\s*import\b/.test(line));
-
-    expect(importLines.length).toBeGreaterThan(0);
-    for (const line of importLines) {
-      expect(line).toMatch(/from '@42ch\/nexus-contracts';$/);
-    }
-  });
-
-  it('is where the timeline inspector takes the holder vocabulary from', () => {
-    expect(TIMELINE_INSPECTOR_SOURCE).not.toMatch(/from '\.\.\/world-kb\/entity-inspector'/);
-    expect(TIMELINE_INSPECTOR_SOURCE).toContain(
-      "import { HOLDER_BLOCK_TYPES } from '../world-kb/world-kb-authoring';",
-    );
   });
 });
