@@ -8942,4 +8942,356 @@ mod tests {
         );
         assert_eq!(record.status, SessionStatus::Running);
     }
+
+    // -----------------------------------------------------------------
+    // Recovery child-identity boundary matrix (v1.215 P2 T2).
+    //
+    // Characterisation only: the architect ruling (D9) keeps the shipped
+    // two layers as the boundary, so these pin the CURRENT decisions — no
+    // production rejection branch is added here. The integration-level
+    // v1.186 cases live in tests/workflow_run_state.rs and are not
+    // duplicated.
+    // -----------------------------------------------------------------
+
+    /// Descriptor of the recovery root a persisted child must match.
+    fn recovery_root_descriptor() -> RunDescriptorV1 {
+        RunDescriptorV1 {
+            creator_id: "creator-1".to_string(),
+            work_id: None,
+            workspace_root: std::path::PathBuf::from("/tmp/ws"),
+            preset_id: "novel-writing".to_string(),
+            preset_version: 3,
+            source: PresetSourceIdentity::Embedded {
+                preset_id: "novel-writing".to_string(),
+                content_hash: [7u8; 32],
+            },
+            input: serde_json::Map::new(),
+            agent_bindings: HashMap::new(),
+            parent_session_id: None,
+            graph_name: None,
+        }
+    }
+
+    /// Persisted child row carrying `descriptor` at `execution_version`.
+    fn persisted_child_record(
+        session_id: &str,
+        execution_version: u32,
+        descriptor: Option<RunDescriptorV1>,
+    ) -> RunRecord {
+        RunRecord {
+            session_id: SessionId(session_id.to_string()),
+            status: SessionStatus::Running,
+            state_revision: 1,
+            execution_version,
+            descriptor,
+            state: Some(RunStateV1::default()),
+            graph_version: 1,
+        }
+    }
+
+    /// `validate_descendant_position` rejects every tampered branch: a child
+    /// with no graph name, a name outside the frozen preset's inner graphs, a
+    /// non-terminal child under a non-root (inner-graph) parent, a name that
+    /// disagrees with the inner graph the root's position enters, and an
+    /// unrecorded child once the root is already past that position.
+    #[test]
+    fn recovery_child_identity_descendant_position_rejects_tampered_branches() {
+        let valid_inner: std::collections::HashSet<&str> =
+            ["inner_graph", "other_inner"].into_iter().collect();
+
+        // No graph name at all.
+        let err = validate_descendant_position(
+            "novel-writing",
+            &valid_inner,
+            Some("inner_graph"),
+            true,
+            None,
+            "root",
+            "state_s",
+            "child",
+            None,
+            false,
+        )
+        .expect_err("a child without a graph name is non-replayable");
+        assert!(err.to_string().contains("has no graph_name"), "got {err}");
+
+        // Name outside the frozen preset's inner graphs.
+        let err = validate_descendant_position(
+            "novel-writing",
+            &valid_inner,
+            Some("inner_graph"),
+            true,
+            None,
+            "root",
+            "state_s",
+            "child",
+            Some("bogus_inner"),
+            false,
+        )
+        .expect_err("an unknown inner graph name is non-replayable");
+        assert!(err.to_string().contains("unknown inner graph"), "got {err}");
+
+        // Non-terminal child under an inner-graph (non-root) parent: nested
+        // inner graphs do not exist.
+        let err = validate_descendant_position(
+            "novel-writing",
+            &valid_inner,
+            None,
+            false,
+            None,
+            "inner-child",
+            "prompt",
+            "grandchild",
+            Some("inner_graph"),
+            false,
+        )
+        .expect_err("a nested inner graph is non-replayable");
+        assert!(
+            err.to_string().contains("nested inner graphs do not exist"),
+            "got {err}"
+        );
+
+        // Name disagrees with the inner graph the root's position enters.
+        let err = validate_descendant_position(
+            "novel-writing",
+            &valid_inner,
+            Some("other_inner"),
+            true,
+            None,
+            "root",
+            "state_s",
+            "child",
+            Some("inner_graph"),
+            false,
+        )
+        .expect_err("a name disagreeing with the entered graph is non-replayable");
+        assert!(
+            err.to_string().contains("which enters 'other_inner'"),
+            "got {err}"
+        );
+
+        // Root already past the inner-graph position and no recorded marker
+        // names this child (a duplicate/conflicting marker set collapses to
+        // the same `recorded_graph: None` input).
+        let err = validate_descendant_position(
+            "novel-writing",
+            &valid_inner,
+            None,
+            true,
+            None,
+            "root",
+            "state_after",
+            "child",
+            Some("inner_graph"),
+            false,
+        )
+        .expect_err("an unrecorded child past the position is non-replayable");
+        assert!(
+            err.to_string()
+                .contains("not recorded by an inner-graph state"),
+            "got {err}"
+        );
+    }
+
+    /// The abandon-and-reattach path must keep working: the root entered
+    /// graph `inner_graph` via state `state_s` (marker
+    /// `_inner_child_session_state_s`), its position has since moved past that
+    /// state (the bounded poller abandoned the child), and the non-terminal
+    /// child's descriptor still names `inner_graph`. Re-attachment must be
+    /// accepted — refusing every parent-context marker would make such a
+    /// child non-replayable.
+    #[test]
+    fn recovery_child_identity_abandoned_child_still_reattaches() {
+        let valid_inner: std::collections::HashSet<&str> =
+            ["inner_graph", "other_inner"].into_iter().collect();
+
+        validate_descendant_position(
+            "novel-writing",
+            &valid_inner,
+            None,                // position past the inner-graph state
+            true,                // root
+            Some("inner_graph"), // recorded by the state that entered it
+            "root",
+            "state_after",
+            "child",
+            Some("inner_graph"), // descriptor names the same inner graph
+            false,               // non-terminal
+        )
+        .expect("an abandoned child named by the root context must re-attach");
+
+        // A record naming a DIFFERENT inner graph is not that evidence.
+        let err = validate_descendant_position(
+            "novel-writing",
+            &valid_inner,
+            None,
+            true,
+            Some("other_inner"),
+            "root",
+            "state_after",
+            "child",
+            Some("inner_graph"),
+            false,
+        )
+        .expect_err("a record for another graph must not tolerate the child");
+        assert!(
+            err.to_string()
+                .contains("not recorded by an inner-graph state"),
+            "got {err}"
+        );
+
+        // Terminal descendants are historical and only need membership.
+        validate_descendant_position(
+            "novel-writing",
+            &valid_inner,
+            None,
+            true,
+            None,
+            "root",
+            "state_after",
+            "child",
+            Some("inner_graph"),
+            true,
+        )
+        .expect("a terminal child needs only graph membership");
+    }
+
+    /// `validate_child_descriptor_identity` rejects every tampered branch of
+    /// the frozen child identity: a v1 child under a descriptor-less parent,
+    /// a v1 child without its own descriptor, a descriptor naming a different
+    /// root, a descriptor with no graph name, and a descriptor forking the
+    /// trusted creator/preset/version/source. A matching descriptor and a
+    /// legacy v0 child are accepted.
+    #[test]
+    fn recovery_child_identity_descriptor_identity_rejects_tampered_branches() {
+        let root = SessionId("root".to_string());
+        let parent = recovery_root_descriptor();
+        let matching = RunDescriptorV1 {
+            parent_session_id: Some(root.clone()),
+            graph_name: Some("inner_graph".to_string()),
+            ..parent.clone()
+        };
+
+        // v1 child under a parent whose frozen descriptor is absent.
+        let err = validate_child_descriptor_identity(
+            &root,
+            None,
+            &persisted_child_record("child", 1, Some(matching.clone())),
+        )
+        .expect_err("a v1 child under a descriptor-less parent is non-replayable");
+        assert!(
+            err.to_string().contains("has no frozen v1 descriptor"),
+            "got {err}"
+        );
+
+        // v1 child with no frozen descriptor of its own.
+        let err = validate_child_descriptor_identity(
+            &root,
+            Some(&parent),
+            &persisted_child_record("child", 1, None),
+        )
+        .expect_err("a v1 child without a descriptor is non-replayable");
+        assert!(
+            err.to_string()
+                .contains("child has no frozen v1 descriptor"),
+            "got {err}"
+        );
+
+        // Descriptor names a different parent than the recovering root.
+        let err = validate_child_descriptor_identity(
+            &root,
+            Some(&parent),
+            &persisted_child_record(
+                "child",
+                1,
+                Some(RunDescriptorV1 {
+                    parent_session_id: Some(SessionId("other-root".to_string())),
+                    ..matching.clone()
+                }),
+            ),
+        )
+        .expect_err("a descriptor naming another root is non-replayable");
+        assert!(
+            err.to_string()
+                .contains("does not name the recovering root"),
+            "got {err}"
+        );
+
+        // Descriptor without a graph name.
+        let err = validate_child_descriptor_identity(
+            &root,
+            Some(&parent),
+            &persisted_child_record(
+                "child",
+                1,
+                Some(RunDescriptorV1 {
+                    graph_name: None,
+                    ..matching.clone()
+                }),
+            ),
+        )
+        .expect_err("a descriptor without a graph name is non-replayable");
+        assert!(
+            err.to_string().contains("graph_name is absent"),
+            "got {err}"
+        );
+
+        // Descriptor forks the frozen creator/preset/version/source identity.
+        let forked = [
+            (
+                "creator_id",
+                RunDescriptorV1 {
+                    creator_id: "other-creator".to_string(),
+                    ..matching.clone()
+                },
+            ),
+            (
+                "preset_id",
+                RunDescriptorV1 {
+                    preset_id: "other-preset".to_string(),
+                    ..matching.clone()
+                },
+            ),
+            (
+                "preset_version",
+                RunDescriptorV1 {
+                    preset_version: 999,
+                    ..matching.clone()
+                },
+            ),
+            (
+                "source",
+                RunDescriptorV1 {
+                    source: PresetSourceIdentity::Embedded {
+                        preset_id: "novel-writing".to_string(),
+                        content_hash: [9u8; 32],
+                    },
+                    ..matching.clone()
+                },
+            ),
+        ];
+        for (field, descriptor) in forked {
+            let err = validate_child_descriptor_identity(
+                &root,
+                Some(&parent),
+                &persisted_child_record("child", 1, Some(descriptor)),
+            )
+            .expect_err("a forked frozen identity is non-replayable");
+            assert!(
+                err.to_string().contains("do not match the trusted root"),
+                "{field}: got {err}"
+            );
+        }
+
+        // The untouched descriptor matches the trusted root.
+        validate_child_descriptor_identity(
+            &root,
+            Some(&parent),
+            &persisted_child_record("child", 1, Some(matching)),
+        )
+        .expect("a matching frozen identity is replayable");
+
+        // Legacy v0 children keep the shipped conservative classifier.
+        validate_child_descriptor_identity(&root, None, &persisted_child_record("child", 0, None))
+            .expect("a legacy v0 child is not identity-checked");
+    }
 }
