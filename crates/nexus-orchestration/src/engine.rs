@@ -8942,4 +8942,222 @@ mod tests {
         );
         assert_eq!(record.status, SessionStatus::Running);
     }
+
+    // -----------------------------------------------------------------
+    // Recovery child-identity boundary matrix (v1.215 P2 T2).
+    //
+    // Characterisation only: the architect ruling (D9) keeps the shipped
+    // two layers as the boundary, so these pin the CURRENT decisions — no
+    // production rejection branch is added here. Only the branches the
+    // existing v1.186 predicate matrix and the integration-level cases in
+    // tests/workflow_run_state.rs do not already pin are kept; the rest are
+    // cited, not restated.
+    // -----------------------------------------------------------------
+
+    /// Descriptor of the recovery root a persisted child must match.
+    fn recovery_root_descriptor() -> RunDescriptorV1 {
+        RunDescriptorV1 {
+            creator_id: "creator-1".to_string(),
+            work_id: None,
+            workspace_root: std::path::PathBuf::from("/tmp/ws"),
+            preset_id: "novel-writing".to_string(),
+            preset_version: 3,
+            source: PresetSourceIdentity::Embedded {
+                preset_id: "novel-writing".to_string(),
+                content_hash: [7u8; 32],
+            },
+            input: serde_json::Map::new(),
+            agent_bindings: HashMap::new(),
+            parent_session_id: None,
+            graph_name: None,
+        }
+    }
+
+    /// Persisted child row carrying `descriptor` at `execution_version`.
+    fn persisted_child_record(
+        session_id: &str,
+        execution_version: u32,
+        descriptor: Option<RunDescriptorV1>,
+    ) -> RunRecord {
+        RunRecord {
+            session_id: SessionId(session_id.to_string()),
+            status: SessionStatus::Running,
+            state_revision: 1,
+            execution_version,
+            descriptor,
+            state: Some(RunStateV1::default()),
+            graph_version: 1,
+        }
+    }
+
+    /// The one `validate_descendant_position` rejection branch the shipped
+    /// v1.186 matrix
+    /// (`descendant_position_validation_rejects_valid_but_wrong_inner_graph`)
+    /// does not already pin: a child row with no `graph_name` at all. That
+    /// existing test already covers the unknown inner graph, the nested
+    /// non-root parent, the disagreeing entered graph, the unrecorded
+    /// past-position child, and the tolerated recorded/terminal/reattach
+    /// cases, so they are not restated here. The caller-level marker
+    /// projection that drives the past-position branch end to end is covered
+    /// by the `workflow_run_state` integration scenarios.
+    #[test]
+    fn recovery_child_identity_child_without_graph_name_is_non_replayable() {
+        let valid_inner: std::collections::HashSet<&str> =
+            ["inner_graph", "other_inner"].into_iter().collect();
+
+        let err = validate_descendant_position(
+            "novel-writing",
+            &valid_inner,
+            Some("inner_graph"),
+            true,
+            None,
+            "root",
+            "state_s",
+            "child",
+            None,
+            false,
+        )
+        .expect_err("a child without a graph name is non-replayable");
+        assert!(err.to_string().contains("has no graph_name"), "got {err}");
+    }
+
+    /// `validate_child_descriptor_identity` rejects every tampered branch of
+    /// the frozen child identity: a v1 child under a descriptor-less parent,
+    /// a v1 child without its own descriptor, a descriptor naming a different
+    /// root, a descriptor with no graph name, and a descriptor forking the
+    /// trusted creator/preset/version/source. A matching descriptor and a
+    /// legacy v0 child are accepted.
+    #[test]
+    fn recovery_child_identity_descriptor_identity_rejects_tampered_branches() {
+        let root = SessionId("root".to_string());
+        let parent = recovery_root_descriptor();
+        let matching = RunDescriptorV1 {
+            parent_session_id: Some(root.clone()),
+            graph_name: Some("inner_graph".to_string()),
+            ..parent.clone()
+        };
+
+        // v1 child under a parent whose frozen descriptor is absent.
+        let err = validate_child_descriptor_identity(
+            &root,
+            None,
+            &persisted_child_record("child", 1, Some(matching.clone())),
+        )
+        .expect_err("a v1 child under a descriptor-less parent is non-replayable");
+        assert!(
+            err.to_string().contains("has no frozen v1 descriptor"),
+            "got {err}"
+        );
+
+        // v1 child with no frozen descriptor of its own.
+        let err = validate_child_descriptor_identity(
+            &root,
+            Some(&parent),
+            &persisted_child_record("child", 1, None),
+        )
+        .expect_err("a v1 child without a descriptor is non-replayable");
+        assert!(
+            err.to_string()
+                .contains("child has no frozen v1 descriptor"),
+            "got {err}"
+        );
+
+        // Descriptor names a different parent than the recovering root.
+        let err = validate_child_descriptor_identity(
+            &root,
+            Some(&parent),
+            &persisted_child_record(
+                "child",
+                1,
+                Some(RunDescriptorV1 {
+                    parent_session_id: Some(SessionId("other-root".to_string())),
+                    ..matching.clone()
+                }),
+            ),
+        )
+        .expect_err("a descriptor naming another root is non-replayable");
+        assert!(
+            err.to_string()
+                .contains("does not name the recovering root"),
+            "got {err}"
+        );
+
+        // Descriptor without a graph name.
+        let err = validate_child_descriptor_identity(
+            &root,
+            Some(&parent),
+            &persisted_child_record(
+                "child",
+                1,
+                Some(RunDescriptorV1 {
+                    graph_name: None,
+                    ..matching.clone()
+                }),
+            ),
+        )
+        .expect_err("a descriptor without a graph name is non-replayable");
+        assert!(
+            err.to_string().contains("graph_name is absent"),
+            "got {err}"
+        );
+
+        // Descriptor forks the frozen creator/preset/version/source identity.
+        let forked = [
+            (
+                "creator_id",
+                RunDescriptorV1 {
+                    creator_id: "other-creator".to_string(),
+                    ..matching.clone()
+                },
+            ),
+            (
+                "preset_id",
+                RunDescriptorV1 {
+                    preset_id: "other-preset".to_string(),
+                    ..matching.clone()
+                },
+            ),
+            (
+                "preset_version",
+                RunDescriptorV1 {
+                    preset_version: 999,
+                    ..matching.clone()
+                },
+            ),
+            (
+                "source",
+                RunDescriptorV1 {
+                    source: PresetSourceIdentity::Embedded {
+                        preset_id: "novel-writing".to_string(),
+                        content_hash: [9u8; 32],
+                    },
+                    ..matching.clone()
+                },
+            ),
+        ];
+        for (field, descriptor) in forked {
+            let err = validate_child_descriptor_identity(
+                &root,
+                Some(&parent),
+                &persisted_child_record("child", 1, Some(descriptor)),
+            )
+            .expect_err("a forked frozen identity is non-replayable");
+            assert!(
+                err.to_string().contains("do not match the trusted root"),
+                "{field}: got {err}"
+            );
+        }
+
+        // The untouched descriptor matches the trusted root.
+        validate_child_descriptor_identity(
+            &root,
+            Some(&parent),
+            &persisted_child_record("child", 1, Some(matching)),
+        )
+        .expect("a matching frozen identity is replayable");
+
+        // Legacy v0 children keep the shipped conservative classifier.
+        validate_child_descriptor_identity(&root, None, &persisted_child_record("child", 0, None))
+            .expect("a legacy v0 child is not identity-checked");
+    }
 }
