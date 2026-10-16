@@ -171,7 +171,6 @@ async fn binding_list_human_and_json_paginate() {
         "character",
         "binding",
         "list",
-        "--character-id",
         &chr,
         "--limit",
         "1",
@@ -195,7 +194,6 @@ async fn binding_list_human_and_json_paginate() {
         "character",
         "binding",
         "list",
-        "--character-id",
         &chr,
         "--limit",
         "1",
@@ -220,7 +218,6 @@ async fn binding_list_human_and_json_paginate() {
         "character",
         "binding",
         "list",
-        "--character-id",
         &chr,
         "--limit",
         "1",
@@ -239,7 +236,6 @@ async fn binding_list_human_and_json_paginate() {
         "character",
         "binding",
         "list",
-        "--character-id",
         &chr,
         "--limit",
         "1",
@@ -288,7 +284,6 @@ async fn knowledge_add_list_view_json_round_trip() {
         "character",
         "knowledge",
         "list",
-        "--character-id",
         &seeded.character_id,
         "--json",
     ]);
@@ -951,7 +946,6 @@ async fn summary_file_over_byte_limit_rejects_via_metadata_precheck() {
         "character",
         "knowledge",
         "list",
-        "--character-id",
         &seeded.character_id,
         "--json",
     ]);
@@ -961,5 +955,84 @@ async fn summary_file_over_byte_limit_rejects_via_metadata_precheck() {
         listed_body["items"].as_array().unwrap().len(),
         0,
         "an oversized summary-file must not store a row"
+    );
+}
+
+/// v1.215 P1-T5 (compass D8, `R-V1208-P2-06`): a World-owned create rejects a
+/// summary — `actor-product-model.md` §11.5 has the server answer **422
+/// `invalid_input`**, as cli-spec.md §6.2I.2 records. The CLI now refuses the
+/// combination on flag presence, before any write, naming both the constraint
+/// and its two supported recoveries; the same create **without** a summary is
+/// untouched.
+///
+/// Discriminating regression: pre-cutover both invocations passed clap, opened
+/// the writer and were refused only by the core with the generic
+/// `invalid_input` — no owner-scope cause, no recovery. The `absent.txt`
+/// `--summary-file` arm also pins the refusal to flag presence: the guard runs
+/// before the bounded read, so the missing file is never reported.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn knowledge_add_world_owner_rejects_summary_at_cli_layer() {
+    let actor = DirectActor::new().await;
+    let world_a = actor.create_world("Owner Scope World").await;
+
+    let base: [&str; 10] = [
+        "creator",
+        "character",
+        "knowledge",
+        "add",
+        "--owner",
+        "world",
+        "--world-id",
+        &world_a,
+        "--block-type",
+        "item",
+    ];
+    let tail = ["--canonical-name", "WorldNote"];
+
+    for extra in [["--summary", "not allowed"], ["--summary-file", "absent.txt"]] {
+        let argv: Vec<&str> = base
+            .iter()
+            .copied()
+            .chain(tail)
+            .chain(extra)
+            .collect();
+        let refused = actor.cli(&argv);
+        let err = stderr(&refused);
+        assert!(
+            !refused.status.success(),
+            "`--owner world` with {extra:?} must be refused: {err}"
+        );
+        assert!(
+            err.contains("11.5"),
+            "the owner-scope constraint must be named: {err}"
+        );
+        assert!(
+            err.contains("--owner world") && err.contains("omit the summary"),
+            "the refusing cause and its recovery must be named: {err}"
+        );
+        assert!(
+            err.contains("--owner character|binding"),
+            "the owner alternative must be named: {err}"
+        );
+        assert!(
+            !err.contains("cannot read") && !err.contains("No such file"),
+            "the refusal must precede the summary-file read: {err}"
+        );
+    }
+
+    // The narrowing is the summary, not World ownership: the same create
+    // without a summary still lands.
+    let allowed = actor.cli(
+        &base
+            .iter()
+            .copied()
+            .chain(tail)
+            .chain(["--json"])
+            .collect::<Vec<_>>(),
+    );
+    assert!(
+        allowed.status.success(),
+        "a World-owned create without a summary stays supported: {}",
+        stderr(&allowed)
     );
 }
