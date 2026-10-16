@@ -812,16 +812,20 @@ The serving host reaches the agent host through `HostFacade` only. `apps/nexus-s
 | `GET` | `/v1/daemon/agent-host/sessions` | list managed sessions and health |
 | `GET` | `/v1/daemon/agent-host/sessions/{id}` | get one managed session |
 | `POST` | `/v1/daemon/agent-host/sessions/{id}/operations` | execute prompt or config op |
-| `POST` | `/v1/daemon/agent-host/operations/{operation_id}:cancel` | cancel active operation; the handler requires the `:cancel` suffix |
+| `POST` | `/v1/daemon/agent-host/operations/{operation_id}` | cancel active operation; the final path segment is the bare operation id |
 | `GET` | `/v1/daemon/agent-host/sessions/{id}/events` | SSE event stream |
 | `DELETE` | `/v1/daemon/agent-host/sessions/{id}` | shut down one session (must not shut down entire host) |
 
-The cancel spelling is intentional. Axum registers
-`POST /v1/daemon/agent-host/operations/:operation_id`; the handler then
-requires the captured final segment to end in `:cancel` and strips that suffix
-before resolving the operation. Therefore clients MUST send
-`/operations/{operation_id}:cancel`; a bare
-`POST /operations/{operation_id}` is rejected.
+The cancel route carries the bare operation id as its final path segment.
+`apps/nexus-service/src/routes.ts:432` registers
+`POST /v1/daemon/agent-host/operations/:operation_id` and passes the captured
+segment straight to `cancelProviderOperation`, which validates it with
+`parseUuid(operationId, 'operation_id')` (`apps/nexus-service/src/provider.ts:551`):
+a segment that is not a UUID — including a `:cancel`-suffixed id — is rejected
+with `400 invalid_input`. Clients therefore send
+`/v1/daemon/agent-host/operations/{operation_id}`; the bare-id call and its
+`{ operation_id, status: 'cancelled' }` reply are asserted by
+`apps/nexus-service/tests/actor-http.test.mjs:983`.
 
 ---
 
