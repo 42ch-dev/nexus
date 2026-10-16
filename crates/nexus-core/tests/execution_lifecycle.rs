@@ -392,6 +392,54 @@ async fn second_owner_and_restart_are_fenced() {
     owner_a.close().await.unwrap();
 }
 
+/// R-V1186P3-T1-002 (A7 rule 6, P3 T1 rereview P1): the safe-boundary re-drive
+/// regression must be driven by the real restart, never the coordinator seam
+/// alone. The v1.186 case called `WorkflowRunCoordinator::recover_persisted`
+/// directly on a live runtime; its legacy harness (`LiveDaemon` and the daemon
+/// runtime it booted) was retired in v1.193, so the real restart is now
+/// `CoreService::open(EngineOwner)` + `start_execution` — whose boot runs that
+/// same production seam over the persisted DB.
+///
+/// A v1 row parked at a fully committed boundary (no wait, no in-flight
+/// prompt, no unfinished step, no cancel request → `SafeBoundary`) must be
+/// reconstructed from its frozen source identity and re-driven; the pre-fix
+/// explicit safe-boundary skip stranded it. The seeded position is the
+/// `generate` inner graph's `acp_prompt`, so the re-drive is observed as the
+/// prompt executor being entered — a skip leaves the run stranded and the
+/// wait times out.
+#[tokio::test]
+async fn daemon_restart_safe_boundary_is_reconstructed_and_redriven() {
+    let f = fixture().await;
+    seed_run_at(
+        &f.db_path,
+        "test-preset:safe-boundary",
+        CREATOR,
+        nexus_orchestration::RunStateV1::default(),
+        "generate",
+    )
+    .await;
+
+    let owner = open_engine_owner(&f).await;
+    let gate = GatedPromptExecutor::new();
+    let handle = owner
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps {
+                prompt_executor: Some(Arc::new(gate.clone())),
+                ..RunnerDeps::default()
+            },
+        )
+        .await
+        .expect("owner starts");
+
+    // Deterministic hold: the safe-boundary run was reconstructed and
+    // re-driven into its prompt step by the boot recovery.
+    gate.wait_entered().await;
+    gate.release();
+    handle.close().await.unwrap();
+    owner.close().await.unwrap();
+}
+
 // ── Concurrency regressions (T1 review C1/C2/C3) ───────────────────────────
 
 /// Poll `cond` until it holds, failing the test instead of hanging.
