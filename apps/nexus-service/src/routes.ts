@@ -446,8 +446,10 @@ export const HOST_ROUTES: readonly DomainRoute[] = [
     handle: async (service, params, search, _body, request) => {
       const sessionId = params[0];
       // The retained `Last-Event-ID` header outranks the query cursor: both are
-      // resume cursors, and this is the one slot the stream reader parses.
-      if (request.lastEventId !== undefined) {
+      // resume cursors, and this is the one slot the stream reader parses. An
+      // empty header carries no usable id, so it yields to the query cursor
+      // instead of clobbering it with an empty cursor (full replay).
+      if (request.lastEventId !== undefined && request.lastEventId !== '') {
         search.set('cursor', request.lastEventId);
       }
       return {

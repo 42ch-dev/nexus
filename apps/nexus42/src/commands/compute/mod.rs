@@ -879,6 +879,7 @@ mod tests {
     /// A `cargo` stand-in that writes `stderr_line` to stderr and exits with
     /// `exit_code` — the production build takes its failure path through a
     /// real child process without ever reaching a real toolchain.
+    #[cfg(unix)]
     fn stub_cargo(exit_code: i32, stderr_line: &str) -> tempfile::TempDir {
         use std::os::unix::fs::PermissionsExt as _;
         let dir = tempfile::tempdir().expect("create stub directory");
@@ -891,8 +892,10 @@ mod tests {
     }
 
     /// Prepends a stub directory to this process's `PATH` until dropped.
+    #[cfg(unix)]
     struct StubPath(Option<std::ffi::OsString>);
 
+    #[cfg(unix)]
     impl StubPath {
         fn prepend(dir: &Path) -> Self {
             let previous = std::env::var_os("PATH");
@@ -906,6 +909,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     impl Drop for StubPath {
         fn drop(&mut self) {
             match &self.0 {
@@ -918,12 +922,14 @@ mod tests {
     /// Overrides `HOME` and the two toolchain-home variables, restoring every
     /// original on drop so a panic cannot leak the overrides into siblings.
     /// Values are `OsStr` so a case can pin a non-Unicode path.
+    #[cfg(unix)]
     struct HomeEnv {
         home: Option<std::ffi::OsString>,
         rustup: Option<std::ffi::OsString>,
         cargo: Option<std::ffi::OsString>,
     }
 
+    #[cfg(unix)]
     impl HomeEnv {
         fn set(home: &Path, rustup: Option<&OsStr>, cargo: Option<&OsStr>) -> Self {
             let guard = Self {
@@ -944,6 +950,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     impl Drop for HomeEnv {
         fn drop(&mut self) {
             match &self.home {
@@ -962,6 +969,7 @@ mod tests {
     }
 
     /// Writes `basic-combat`'s manifest into `dir` and returns its path.
+    #[cfg(unix)]
     fn write_build_manifest(dir: &Path) -> PathBuf {
         let path = dir.join("manifest.json");
         std::fs::write(
@@ -975,9 +983,13 @@ mod tests {
     /// A failing `cargo` under a temp `HOME` with both toolchain-home variables
     /// unset (the residual's scenario) must name the *defaulted* resolution and
     /// the remediation.
+    #[cfg(unix)]
     #[test]
     #[serial_test::serial]
     fn build_failure_names_the_defaulted_toolchain_home_resolution() {
+        // `HOME` is process-wide: hold the shared HOME lock for the whole
+        // override/assertion window so sibling CLI tests cannot race it.
+        let _home = crate::testutil::isolated_home();
         let stub = stub_cargo(1, "error: stub cargo failure");
         let _path = StubPath::prepend(stub.path());
         let home = tempfile::tempdir().expect("temp home");
@@ -1016,9 +1028,11 @@ mod tests {
 
     /// With `RUSTUP_HOME`/`CARGO_HOME` pinned in the calling environment the
     /// same failure reports the inherited values, not `$HOME` defaults.
+    #[cfg(unix)]
     #[test]
     #[serial_test::serial]
     fn build_failure_reports_inherited_toolchain_homes() {
+        let _home = crate::testutil::isolated_home();
         let stub = stub_cargo(1, "error: stub cargo failure");
         let _path = StubPath::prepend(stub.path());
         let home = tempfile::tempdir().expect("temp home");
@@ -1053,6 +1067,7 @@ mod tests {
     #[serial_test::serial]
     fn build_failure_reports_present_values_that_are_not_plain_text() {
         use std::os::unix::ffi::OsStrExt as _;
+        let _home = crate::testutil::isolated_home();
         let stub = stub_cargo(1, "error: stub cargo failure");
         let _path = StubPath::prepend(stub.path());
         let home = tempfile::tempdir().expect("temp home");

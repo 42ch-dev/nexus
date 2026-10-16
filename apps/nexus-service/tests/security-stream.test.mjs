@@ -465,6 +465,11 @@ describe('security-stream (P4-T2)', () => {
     const both = await rawSseGet(baseUrl, `${eventsPath}&cursor=${encodeURIComponent(frames[1].id)}`, { headers: { 'Last-Event-ID': resumeFrom } });
     assert.deepEqual(idsOf(both.raw), after.map((frame) => frame.id), 'the retained header must outrank the query cursor');
 
+    // An empty header carries no usable id: it must yield to the query cursor
+    // rather than clobber it with an empty cursor (which would replay all).
+    const emptyHeader = await rawSseGet(baseUrl, `${eventsPath}&cursor=${encodeURIComponent(resumeFrom)}`, { headers: { 'Last-Event-ID': '' } });
+    assert.deepEqual(idsOf(emptyHeader.raw), after.map((frame) => frame.id), 'an empty Last-Event-ID must yield to the query cursor');
+
     // The query-parameter path stays available when no header is sent.
     const queryOnly = await rawSseGet(baseUrl, `${eventsPath}&cursor=${encodeURIComponent(resumeFrom)}`);
     assert.deepEqual(idsOf(queryOnly.raw), after.map((frame) => frame.id), 'the query cursor path must keep resuming');
