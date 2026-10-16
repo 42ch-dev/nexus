@@ -2499,10 +2499,8 @@ mod holder_public_tests {
             refuse_world_owned_summary("world", None, None).is_ok(),
             "an absent summary keeps the World-owned create supported"
         );
-        for (summary, summary_file) in [
-            (Some("text"), None),
-            (None, Some(Path::new("absent.txt"))),
-        ] {
+        for (summary, summary_file) in [(Some("text"), None), (None, Some(Path::new("absent.txt")))]
+        {
             let err = refuse_world_owned_summary("world", summary, summary_file).unwrap_err();
             assert!(err.to_string().contains("§11.5"), "{err}");
         }

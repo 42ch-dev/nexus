@@ -989,13 +989,11 @@ async fn knowledge_add_world_owner_rejects_summary_at_cli_layer() {
     ];
     let tail = ["--canonical-name", "WorldNote"];
 
-    for extra in [["--summary", "not allowed"], ["--summary-file", "absent.txt"]] {
-        let argv: Vec<&str> = base
-            .iter()
-            .copied()
-            .chain(tail)
-            .chain(extra)
-            .collect();
+    for extra in [
+        ["--summary", "not allowed"],
+        ["--summary-file", "absent.txt"],
+    ] {
+        let argv: Vec<&str> = base.iter().copied().chain(tail).chain(extra).collect();
         let refused = actor.cli(&argv);
         let err = stderr(&refused);
         assert!(
