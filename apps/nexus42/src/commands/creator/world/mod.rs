@@ -290,7 +290,7 @@ async fn run_event_add(
         .flatten()
         .ok_or_else(|| {
             crate::errors::CliError::Other(format!(
-                "World '{world_id}' not found or has no root branch. Use --world-id with a valid world ID."
+                "World '{world_id}' not found or has no root branch. Pass a valid world ID to `world event-add <WORLD_ID>`."
             ))
         })?
     };
