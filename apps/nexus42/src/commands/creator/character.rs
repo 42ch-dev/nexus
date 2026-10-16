@@ -506,13 +506,15 @@ pub enum CharacterTomCommand {
 /// Every arm authors through the shared direct-core seam and the writer is
 /// released by [`finish_direct`] before any line is printed, so a command
 /// never reports an outcome its core could not settle — on success and on
-/// refusal alike.
+/// refusal alike. The `knowledge add` argv refusals are pure input checks and
+/// run before that seam is opened ([`refuse_invalid_knowledge_add_input`]).
 ///
 /// # Errors
 ///
 /// Returns the mapped core refusal (admission, CAS conflict, storage) and any
 /// cleanup refusal from [`finish_direct`].
 pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
+    refuse_invalid_knowledge_add_input(&cmd)?;
     let core = open_direct_core(config).await?;
     let outcome = async {
         let principal = core.active_principal().await.map_err(map_core_error)?;
@@ -522,6 +524,30 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
     // `None` is a settled verb that prints nothing (`--json` on a remove).
     if let Some(text) = finish_direct(&core, outcome).await? {
         println!("{text}");
+    }
+    Ok(())
+}
+
+/// v1.215 P1-T5 (W1): the `knowledge add` argv refusals are pure input checks
+/// — the retired `--creator-only` flag and the World-owned summary — so they
+/// run here, **before** [`open_direct_core`] admits the writer. An invalid
+/// combination then reports its owner-scope cause without initializing or
+/// migrating durable storage on the way, and without depending on a selected,
+/// materialized workspace.
+fn refuse_invalid_knowledge_add_input(cmd: &CharacterCommand) -> Result<()> {
+    if let CharacterCommand::Knowledge {
+        command:
+            KnowledgeCommand::Add {
+                owner,
+                creator_only,
+                summary,
+                summary_file,
+                ..
+            },
+    } = cmd
+    {
+        refuse_legacy_creator_only_flag(*creator_only)?;
+        refuse_world_owned_summary(owner, summary.as_deref(), summary_file.as_deref())?;
     }
     Ok(())
 }
@@ -628,15 +654,13 @@ async fn run_arm(
                 binding_id,
                 audience,
                 audience_character,
-                creator_only,
+                creator_only: _,
                 block_type,
                 canonical_name,
                 summary,
                 summary_file,
                 json,
             } => {
-                refuse_legacy_creator_only_flag(creator_only)?;
-                refuse_world_owned_summary(&owner, summary.as_deref(), summary_file.as_deref())?;
                 let audience = audience_wire(audience.as_deref(), audience_character.as_deref())?;
                 add_knowledge(
                     core,
@@ -1612,8 +1636,8 @@ fn refuse_legacy_creator_only_flag(present: Option<bool>) -> Result<()> {
 }
 
 /// Durable §11.5: a World-owned create carries no summary — the server answers
-/// `422 invalid_input`. Refused here on flag **presence** (before the
-/// summary-file read and before any write) so the author is told the
+/// `422 invalid_input`. Refused here on flag **presence** (before the writer is
+/// opened and before the summary-file read) so the author is told the
 /// owner-scope cause and its two recoveries instead of a round-trip refusal.
 fn refuse_world_owned_summary(
     owner: &str,

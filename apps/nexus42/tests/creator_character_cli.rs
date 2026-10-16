@@ -1036,3 +1036,52 @@ async fn knowledge_add_world_owner_rejects_summary_at_cli_layer() {
         stderr(&allowed)
     );
 }
+
+/// v1.215 P1-T5 fix wave 1 (W1): the owner-scope refusal is an argv check, so
+/// it fires **before** the direct-core writer is opened. The discriminating
+/// home is one with no selected creator and no materialized workspace: the
+/// core open refuses that selection first, so before this fix the guard was
+/// unreachable here — and no case may initialize, migrate or seed durable
+/// storage on the way to a refusal.
+#[test]
+fn knowledge_add_world_owner_summary_refused_before_writer_open() {
+    let home = tempfile::tempdir().expect("temp home");
+    let refused = assert_cmd::Command::cargo_bin("nexus42")
+        .expect("nexus42 binary")
+        .env("HOME", home.path())
+        .env("RUST_LOG", "off")
+        .args([
+            "creator",
+            "character",
+            "knowledge",
+            "add",
+            "--owner",
+            "world",
+            "--world-id",
+            "wld_5ee70000",
+            "--block-type",
+            "item",
+            "--canonical-name",
+            "WorldNote",
+            "--summary",
+            "not allowed",
+        ])
+        .output()
+        .expect("spawn nexus42");
+
+    let err = stderr(&refused);
+    assert!(!refused.status.success(), "must be refused: {err}");
+    assert!(
+        err.contains("11.5") && err.contains("--owner world"),
+        "the owner-scope cause must be the refusal on an unselected home: {err}"
+    );
+    assert!(
+        !err.contains("Creator not selected"),
+        "the refusal must not be the selection check: {err}"
+    );
+    assert!(
+        !nexus_home_layout::nexus_root_from_home(home.path()).exists(),
+        "a refused argv must not initialize durable storage: {}",
+        home.path().join(".nexus42").display()
+    );
+}
