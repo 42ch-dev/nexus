@@ -2270,6 +2270,132 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     assert.equal(released.payload.status, 'shutdown');
   });
 
+  test('the idle Actor settlement window is shared by every reader of the hub', async () => {
+    // I-000044: the empty-batch settlement window lives on the operation's HUB,
+    // so a second reader of that operation inherits the window the first reader
+    // opened instead of spending an authority read of its own. The window is the
+    // whole point: the empty batch's poll cadence is 25ms while the status read
+    // is a full Character lookup, so per-reader state would spend one such read
+    // per reader inside a single second. Everything below runs on a FROZEN
+    // clock: no window can elapse on its own, so a status read is attributable
+    // to the poll that spent it and never to the passage of time.
+    const { sseTestHooks } = await import(join(serviceRoot, 'dist/sse.js'));
+    // This test owns its Character, binding and session (same reason as the
+    // amortized test above): the reuse key is (provider, cwd, Actor,
+    // World/binding), so a Character nobody else holds is what keeps this
+    // session — and its cwd-typed prompt — unique.
+    const owned = await jsonFetch('/v1/daemon/characters', {
+      method: 'POST',
+      body: { world_id: JOURNEY_WORLD, display_name: 'Shared Throttle Actor', persona: { voice: 'quiet' } },
+    });
+    assert.equal(owned.status, 201, owned.text);
+    const character = owned.payload.character.character_id;
+    const binding = owned.payload.binding.binding_id;
+    const session = await jsonFetch('/v1/daemon/agent-host/sessions', {
+      method: 'POST',
+      body: {
+        provider_id: MAIN_PROVIDER,
+        cwd: creativeRoot,
+        actor_ref: { actor_kind: 'character', character_id: character },
+        viewpoint: { world_id: JOURNEY_WORLD, binding_id: binding },
+      },
+    });
+    assert.equal(session.status, 200, session.text);
+    const sessionId = session.payload.session_id;
+    const prompt = await jsonFetch(`/v1/daemon/agent-host/sessions/${sessionId}/operations`, {
+      method: 'POST',
+      body: { kind: 'prompt', content: 'shared-throttle' },
+    });
+    assert.equal(prompt.status, 200, prompt.text);
+    const operationId = prompt.payload.operation_id;
+    assert.equal((await waitForCharacterOutcome(operationId)).run_status, 'succeeded');
+    // Drain the retained observation, then drop the mirror rows: the hub and its
+    // replay are gone and the authority's observation is already delivered, so
+    // every pull from here on is an immediate EMPTY batch — the idle state that
+    // polls, which is the only state that reaches the settlement window.
+    assert.equal((await sseBody(sessionId, operationId)).status, 200);
+    service.service.providerRegistry.removeSession(sessionId);
+    assert.equal(service.service.providerRegistry.operationRecord(operationId), undefined);
+
+    const core = service.service.core;
+    const realCharacterOperation = core.hostCharacterOperation;
+    const realNow = sseTestHooks.now;
+    let clock = 1_000_000_000;
+    let statusReads = 0;
+    // The controlled native boundary: still the REAL read underneath, with the
+    // run pinned to `running` so neither reader can settle and end on its own —
+    // a reader that ended would stop polling and leave the window unspent.
+    core.hostCharacterOperation = async (principal, id) => {
+      statusReads += 1;
+      const latest = await realCharacterOperation.call(core, principal, id);
+      return { ...latest, run_status: 'running' };
+    };
+    sseTestHooks.now = () => clock;
+    const pullsBefore = sseTestHooks.providerPullCount;
+    const polls = () => sseTestHooks.providerPullCount - pullsBefore;
+    /** The second reader exists only from the phase that joins it to the open window. */
+    let second;
+    const diagnosis = () =>
+      `reads=${statusReads} polls=${polls()} first=${first.ended()} second=${second ? second.ended() : 'not-opened'}`;
+    // The first reader ALONE opens the hub's window: one admission read, then
+    // one settlement check on its first empty batch.
+    const first = openActorStream(sessionId, operationId);
+    try {
+      await until(() => polls() >= 2, 'two empty polls of the first reader');
+      assert.equal(
+        statusReads,
+        2,
+        `one admission read plus one settlement check opens the window: ${diagnosis()}`,
+      );
+      assert.ok(!first.ended(), `the first reader stays open while idle: ${diagnosis()}`);
+
+      // The second reader joins the SAME hub while the first one is still
+      // reading. Its admission is its own authority read; the window it then
+      // polls inside is the hub's, so it spends no settlement check of its own.
+      second = openActorStream(sessionId, operationId);
+      await until(() => statusReads >= 3, 'the second reader to be admitted');
+      // The first reader leaves, so the polls counted from here are the second
+      // reader's own empty batches. Attributing them to ONE reader is what makes
+      // the count below evidence of the shared window rather than a race with
+      // the first reader's poll cadence.
+      first.close();
+      const pollsAfterFirst = polls();
+      await until(
+        () => polls() >= pollsAfterFirst + 12,
+        'twelve empty polls of the second reader',
+      );
+      assert.equal(
+        statusReads,
+        3,
+        `the second reader spends no settlement check inside the hub's window: ${diagnosis()}`,
+      );
+      assert.ok(!second.ended(), `the second reader stays open while idle: ${diagnosis()}`);
+
+      // One window later the hub spends its next check once for the reader
+      // inside it, never once per reader that has read it.
+      const pollsBeforeWindow = polls();
+      clock += 1_000;
+      await until(
+        () => polls() >= pollsBeforeWindow + 10,
+        'ten polls after the window boundary',
+      );
+      assert.equal(
+        statusReads,
+        4,
+        `the next window costs one check for the hub, not one per reader: ${diagnosis()}`,
+      );
+    } finally {
+      first.close();
+      second.close();
+      sseTestHooks.now = realNow;
+      core.hostCharacterOperation = realCharacterOperation;
+    }
+
+    const released = await jsonFetch(`/v1/daemon/agent-host/sessions/${sessionId}`, { method: 'DELETE' });
+    assert.equal(released.status, 200, released.text);
+    assert.equal(released.payload.status, 'shutdown');
+  });
+
   test('Actor re-mark preserves settled terminal', async () => {
     // The Actor stream re-marks its operation on every (re)connect, and a mark is
     // admission bookkeeping, not an observation: it used to replace the row it
