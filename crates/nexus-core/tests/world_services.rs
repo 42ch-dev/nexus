@@ -37,6 +37,16 @@ const REPEAT_UPDATED_AT: i64 = 1_700_000_200;
 /// promptly, and only a request that never gets there hits this bound.
 const RACE_HANG_GUARD: Duration = Duration::from_secs(30);
 
+/// Serializes the two scenarios that own the process-global rule-write gate.
+///
+/// The gate slot holds exactly one gate; installing replaces it and clearing
+/// removes whatever currently occupies it. Under the default parallel test
+/// runner the proof test's install/clear could therefore replace or remove the
+/// race fixture's gate mid-race (failing its hang guard, or letting the proof
+/// probe complete against a replaced gate). Each such scenario takes this lock
+/// before installing and holds it until its gate is no longer observable.
+static GATE_OWNER_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Disarms the process-global rule-write gate when it leaves scope.
 ///
 /// The archive/edit race fixture arms [`set_rule_write_gate`]; an armed gate
@@ -2453,6 +2463,9 @@ async fn retained_world_rules_archive_visibility_and_cap_honesty() {
 /// preimage tests red here: it would rename the tombstone instead of refusing.
 #[tokio::test]
 async fn retained_world_rules_archive_concurrent_tombstone_guard() {
+    // Exclusive gate ownership for this scenario's whole gate lifetime, so no
+    // other scenario can replace the armed gate before this race resolves.
+    let _gate_owner = GATE_OWNER_LOCK.lock().await;
     let fx = setup().await;
     let (_guard, pool) = live_write_pool(&fx).await;
     let world = "wld_rules_race";
@@ -2549,6 +2562,10 @@ async fn retained_world_rules_archive_concurrent_tombstone_guard() {
 /// completes instead of parking.
 #[tokio::test]
 async fn retained_world_rules_race_gate_disarms_on_failure_exit() {
+    // Exclusive gate ownership from the armed install through the post-unwind
+    // probe: the probe must observe the proof's own disarm, not a gate another
+    // scenario installed over the leaked one.
+    let _gate_owner = GATE_OWNER_LOCK.lock().await;
     let failed = std::panic::catch_unwind(|| {
         let _armed = RuleWriteGateGuard::arm(Arc::new(RuleWriteGate::for_rule("rul_race_proof")));
         panic!("controlled failure exit");
