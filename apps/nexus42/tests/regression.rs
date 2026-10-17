@@ -408,7 +408,13 @@ fn r3_context_assemble_moment_worldless_refuses() {
 
     Command::cargo_bin("nexus42")
         .unwrap()
-        .args(["creator", "workspace", "init", "workspace", "--creative-root"])
+        .args([
+            "creator",
+            "workspace",
+            "init",
+            "workspace",
+            "--creative-root",
+        ])
         .arg(&workspace)
         .env("HOME", home)
         .current_dir(&workspace)
