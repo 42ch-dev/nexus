@@ -2386,7 +2386,7 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       );
     } finally {
       first.close();
-      second.close();
+      second?.close();
       sseTestHooks.now = realNow;
       core.hostCharacterOperation = realCharacterOperation;
     }
