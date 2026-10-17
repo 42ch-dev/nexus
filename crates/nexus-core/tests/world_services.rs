@@ -37,6 +37,28 @@ const REPEAT_UPDATED_AT: i64 = 1_700_000_200;
 /// promptly, and only a request that never gets there hits this bound.
 const RACE_HANG_GUARD: Duration = Duration::from_secs(30);
 
+/// Disarms the process-global rule-write gate when it leaves scope.
+///
+/// The archive/edit race fixture arms [`set_rule_write_gate`]; an armed gate
+/// parks every later same-rule write at its write-lock boundary, so it MUST be
+/// disarmed on the fixture's failure exits too — the `panic!`/`assert!` that
+/// report the race failing. `Drop` runs on unwinding as well as on the success
+/// path, so a trailing manual clear cannot be forgotten.
+struct RuleWriteGateGuard;
+
+impl RuleWriteGateGuard {
+    fn arm(gate: Arc<RuleWriteGate>) -> Self {
+        set_rule_write_gate(Some(gate));
+        Self
+    }
+}
+
+impl Drop for RuleWriteGateGuard {
+    fn drop(&mut self) {
+        set_rule_write_gate(None);
+    }
+}
+
 struct Fixture {
     tmp: TempDir,
     db_path: PathBuf,
@@ -2458,9 +2480,11 @@ async fn retained_world_rules_archive_concurrent_tombstone_guard() {
     .unwrap();
 
     // Arm the write-lock rendezvous for THIS rule (the gate names its rule, so
-    // a gate armed here never parks another test's write).
+    // a gate armed here never parks another test's write). The guard disarms
+    // the process-global gate on every exit, including this test's failure
+    // panics — a leaked armed gate would park the next same-rule write forever.
     let gate = Arc::new(RuleWriteGate::for_rule("rul_race"));
-    set_rule_write_gate(Some(Arc::clone(&gate)));
+    let _gate_guard = RuleWriteGateGuard::arm(Arc::clone(&gate));
 
     let edit = fx.core.update_world_rule(
         &fx.principal,
@@ -2492,7 +2516,6 @@ async fn retained_world_rules_archive_concurrent_tombstone_guard() {
     // construction; release the edit only afterwards.
     concurrent_archive.commit().await.unwrap();
     gate.proceed.notify_one();
-    set_rule_write_gate(None);
 
     // The edit's transaction started after the archive committed, so it sees
     // the tombstone and refuses the content member it supplied first.
@@ -2516,6 +2539,52 @@ async fn retained_world_rules_archive_concurrent_tombstone_guard() {
         updated_at, 1_700_000_200,
         "no write landed after the archive"
     );
+}
+
+/// The process-global rule-write gate MUST be disarmed on the failure exits of
+/// the archive/edit race fixture — an armed gate parks the next same-rule write
+/// at its write-lock boundary forever. This proves the guard's `Drop`, not the
+/// fixture's happy path: it arms the gate, exits through a controlled panic
+/// (the fixture's own failure shape), and then shows a same-rule write still
+/// completes instead of parking.
+#[tokio::test]
+async fn retained_world_rules_race_gate_disarms_on_failure_exit() {
+    let failed = std::panic::catch_unwind(|| {
+        let _armed = RuleWriteGateGuard::arm(Arc::new(RuleWriteGate::for_rule("rul_race_proof")));
+        panic!("controlled failure exit");
+    });
+    assert!(failed.is_err(), "the controlled failure must panic");
+
+    let fx = setup().await;
+    let (_guard, pool) = live_write_pool(&fx).await;
+    let world = "wld_rules_gate_proof";
+    seed_world(&pool, world, CREATOR).await;
+    seed_world_rule(
+        &pool,
+        "rul_race_proof",
+        world,
+        "Proof",
+        "active",
+        Some("info"),
+        &["character"],
+        json!({ "family": "module_presence", "module_key": "m" }),
+    )
+    .await;
+
+    let probe = fx.core.update_world_rule(
+        &fx.principal,
+        world.to_string(),
+        "rul_race_proof".to_string(),
+        rule_update(json!({ "canonical_name": "Disarmed" })),
+        RulePatchPresence::from_supplied_keys(&["canonical_name"]),
+    );
+    // A gate left armed for `rul_race_proof` would park this write at its
+    // write-lock boundary and hit the hang guard; the guard's `Drop` fires on
+    // the panic above, so the write proceeds to its result.
+    let disarmed = tokio::time::timeout(RACE_HANG_GUARD, probe)
+        .await
+        .expect("a leaked armed gate would park this same-rule write at its boundary");
+    disarmed.expect("the probe write itself succeeds");
 }
 
 fn relate(
