@@ -330,13 +330,10 @@ fn r3_context_assemble_moment_executes_without_placeholder_skip() {
     // the real binary in v1.194 P2-T2), so the R3 chain materializes a World and
     // names it.
     //
-    // That refusal is retained but currently unasserted: the pre-retirement pin
-    // for the *removed* `platform context assemble` guidance leaf was re-pointed
-    // by v1.193 P2-T12 to assert that leaf's removal
-    // (`integration.rs::retired_platform_context_assemble_is_unknown`), so no
-    // assertion covers this path. Tracked as a coverage gap on
-    // `apps/nexus42/src/commands/platform/context.rs:562` — v1.194 P2-T2
-    // finding F-T2-1; not covered here.
+    // The refusal is now pinned at the CLI exit path by
+    // `r3_context_assemble_moment_worldless_refuses` (I-000039), closing the
+    // v1.194 P2-T2 finding F-T2-1 coverage gap on
+    // `apps/nexus42/src/commands/platform/context.rs:562`.
     let world_out = Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -376,6 +373,59 @@ fn r3_context_assemble_moment_executes_without_placeholder_skip() {
         .current_dir(&workspace)
         .assert()
         .success();
+}
+
+/// Regression R3 (I-000039): a worldless `assemble-moment` fails closed.
+///
+/// v1.191 P1 T9 made the admitted knowledge view World-scoped: the
+/// `creator_view_scope` guard in `commands/platform/context.rs` refuses a
+/// missing `--world-id` with "an admitted knowledge view requires a World"
+/// instead of widening the read or fabricating a container. Pinned at the CLI
+/// exit path so a refactor cannot silently drop the refusal.
+#[test]
+fn r3_context_assemble_moment_worldless_refuses() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+    let workspace = tmp.path().join("workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+
+    // The guard runs once the active Creator resolves, so identity + workspace
+    // must be in place for the refusal — not a missing-creator error — to fire.
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .args([
+            "system",
+            "identity",
+            "create",
+            "--kind",
+            "persistent",
+            "--name",
+            "WorldlessRefusal",
+        ])
+        .env("HOME", home)
+        .assert()
+        .success();
+
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "workspace", "init", "workspace", "--creative-root"])
+        .arg(&workspace)
+        .env("HOME", home)
+        .current_dir(&workspace)
+        .assert()
+        .success();
+
+    // No `--world-id`: exit 1 with the worldless refusal, never a widened read.
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["platform", "context", "assemble-moment"])
+        .env("HOME", home)
+        .current_dir(&workspace)
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "an admitted knowledge view requires a World",
+        ));
 }
 
 /// Regression R3: SOUL validation works
