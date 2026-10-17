@@ -22,7 +22,7 @@
  * adapter-side status filtering anywhere in this surface.
  */
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -124,8 +124,14 @@ describe('world-rules-http (V1.198 P0-T3)', () => {
   });
 
   after(async () => {
-    if (service) {
-      await service.close();
+    try {
+      if (service) {
+        await service.close();
+      }
+    } finally {
+      // Remove the seeded home even when the service close fails; `home` is
+      // unset when the `before` hook failed before seeding it.
+      if (home) rmSync(home, { recursive: true, force: true });
     }
   });
 
