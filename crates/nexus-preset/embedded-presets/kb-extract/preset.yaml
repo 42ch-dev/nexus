@@ -10,8 +10,10 @@
 # The kb.extract_work capability handles the full lifecycle:
 # claim → mark_running → build prompt → parse LLM response → insert KnowledgeEntry → mark done/failed
 #
-# Manual run command:
-#   nexus42 daemon schedule add --preset kb-extract --creator <creator-id>
+# Launch (no dedicated CLI leaf): enqueue it as a schedule run via the core
+#   execution surface served by apps/nexus-service —
+#   POST /v1/daemon/orchestration/schedules with
+#   preset_id="kb-extract" and creator_id in the request body.
 
 preset:
   id: kb-extract

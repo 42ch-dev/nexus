@@ -9,7 +9,10 @@
 #   body_path:      Full relative path to chapter body file.
 #   slug:           Chapter filename slug (e.g., "ch01" or descriptive kebab-case).
 #
-#   Launch: nexus42 creator run stage advance --stage produce
+#   Launch (no dedicated CLI leaf): enqueue it as a schedule run via the core
+#   execution surface served by apps/nexus-service —
+#   POST /v1/daemon/orchestration/schedules with
+#   preset_id="novel-writing" and the Work in the schedule input.
 #   Requires: novel-project-init completed (gated by §5.3.2).
 
 preset:
