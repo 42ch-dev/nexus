@@ -2457,6 +2457,61 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     );
   });
 
+  test('Actor re-mark from the same session with a different provider cannot take over a live operation', async () => {
+    // Admission bookkeeping carries the association the stream was admitted
+    // under: a re-mark naming the same session but a different provider is a
+    // no-op against the live row, not a second association it can claim. The
+    // mark still answers `true` — the mirror holds a row — so its caller never
+    // tears down the hub it is about to read.
+    const { ProviderRegistry } = await import(join(serviceRoot, 'dist/provider-registry.js'));
+    const registry = new ProviderRegistry();
+    const sessionId = randomUUID();
+    const operationId = randomUUID();
+
+    assert.equal(
+      registry.markActorOperation(operationId, sessionId, MAIN_PROVIDER),
+      true,
+      'the live operation is admitted under the first association',
+    );
+    const admitted = structuredClone(registry.operationRecord(operationId));
+
+    assert.equal(
+      registry.markActorOperation(operationId, sessionId, LATE_PROVIDER),
+      true,
+      'a re-mark naming a different provider is accepted as a no-op, not refused',
+    );
+    const reMarked = registry.operationRecord(operationId);
+    assert.equal(reMarked.providerId, MAIN_PROVIDER, 'a different provider must not take over the live association');
+    assert.equal(reMarked.sessionId, sessionId);
+    assert.deepEqual(reMarked, admitted, 'a live row keeps every field the admitting mark gave it');
+  });
+
+  test('Actor live refresh with the identical association keeps the operation live', async () => {
+    // The ordinary (re)connect re-marks a still-live operation with the very
+    // association it already holds. That is the compatible case, and it must
+    // leave the row exactly as admitted: the stream hub is keyed by the
+    // operation, so a rewrite here would only lose the live state.
+    const { ProviderRegistry } = await import(join(serviceRoot, 'dist/provider-registry.js'));
+    const registry = new ProviderRegistry();
+    const sessionId = randomUUID();
+    const operationId = randomUUID();
+
+    assert.equal(registry.markActorOperation(operationId, sessionId, MAIN_PROVIDER), true);
+    const admitted = structuredClone(registry.operationRecord(operationId));
+    assert.equal(admitted.status, 'started', 'the admitted mark is live, not terminal');
+
+    assert.equal(
+      registry.markActorOperation(operationId, sessionId, MAIN_PROVIDER),
+      true,
+      'the identical re-mark is accepted',
+    );
+    const refreshed = registry.operationRecord(operationId);
+    assert.equal(refreshed.sessionId, sessionId);
+    assert.equal(refreshed.providerId, MAIN_PROVIDER);
+    assert.equal(refreshed.status, 'started');
+    assert.deepEqual(refreshed, admitted, 'the live association and its state survive the refresh untouched');
+  });
+
   test('session create stays API-key and Origin guarded, with zero launch', async () => {
     // One process holds one core Host authority, so the journey service must be
     // down before the keyed service opens; it is restored either way.

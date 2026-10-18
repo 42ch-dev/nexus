@@ -20,23 +20,25 @@ This directory contains embedded presets compiled into the `nexus42` binary at b
 
 ## Manual Run
 
-All presets are invoked via the daemon scheduler:
+All presets are invoked as schedule runs via the core execution surface:
 
 ```bash
-# Example: run novel-chapter-review (the FL-E `review` stage producer)
-nexus42 creator run novel-chapter-review <work_id>
+# Example: enqueue novel-chapter-review (the FL-E `review` stage producer)
+#   POST /v1/daemon/orchestration/schedules with
+#   preset_id="novel-chapter-review" and the Work in the schedule input.
 
-# Example: run memory-augmented
-nexus42 daemon schedule add \
-  --preset memory-augmented \
-  --creator <creator-id> \
-  --seed "Write a character arc for the antagonist"
+# Example: enqueue memory-augmented
+#   POST /v1/daemon/orchestration/schedules with
+#   preset_id="memory-augmented", creator_id, and seed
+#   "Write a character arc for the antagonist".
 
-# Example: run kb-extract
-nexus42 daemon schedule add --preset kb-extract --creator <creator-id>
+# Example: enqueue kb-extract
+#   POST /v1/daemon/orchestration/schedules with
+#   preset_id="kb-extract" and creator_id.
 
-# Example: run soul-experience-refresh
-nexus42 daemon schedule add --preset soul-experience-refresh --creator <creator-id>
+# Example: enqueue soul-experience-refresh
+#   POST /v1/daemon/orchestration/schedules with
+#   preset_id="soul-experience-refresh" and creator_id.
 # Or use the one-shot CLI command:
 nexus42 creator soul refresh-experience
 ```
@@ -46,15 +48,18 @@ nexus42 creator soul refresh-experience
 The `creative-brief-intake` preset is designed to be chained with `novel-project-init` and `novel-writing`:
 
 ```bash
-# Via creator run (recommended — chains intake automatically):
-nexus42 creator run start --idea "A sci-fi thriller about AI consciousness"
+# Work creation runs through the world-bound web canvas (there is no CLI
+# Work-create); canvas creation auto-chains intake.
 
 # Manual chaining:
-nexus42 daemon schedule add --preset creative-brief-intake --creator <creator-id> --seed "<idea>"
+#   POST /v1/daemon/orchestration/schedules with
+#   preset_id="creative-brief-intake", creator_id, and seed "<idea>".
 # After intake completes, initialize the novel scaffold:
-nexus42 daemon schedule add --preset novel-project-init --creator <creator-id> --seed "<topic from brief>"
+#   POST /v1/daemon/orchestration/schedules with
+#   preset_id="novel-project-init", creator_id, and seed "<topic from brief>".
 # After scaffold completes, start production:
-nexus42 daemon schedule add --preset novel-writing --creator <creator-id> --seed "<topic>"
+#   POST /v1/daemon/orchestration/schedules with
+#   preset_id="novel-writing", creator_id, and seed "<topic>".
 ```
 
 ### Novel Project Init → Novel Writing (P1 → P3)
@@ -82,11 +87,10 @@ Auxiliary presets invoked by the quality loop when findings are routed to specif
 Consumes open findings with `target_executor: brainstorm` and generates structured ideation prompts for downstream `novel-writing`. Auto-chain compatible (uses `llm_judge` exit).
 
 ```bash
-# Trigger brainstorm via daemon schedule (findings-driven routing):
-nexus42 daemon schedule add \
-  --preset novel-brainstorm \
-  --creator <creator-id> \
-  --seed '{"work_id":"<work_id>","work_ref":"<work_ref>"}'
+# Trigger brainstorm via a schedule run (findings-driven routing):
+#   POST /v1/daemon/orchestration/schedules with
+#   preset_id="novel-brainstorm", creator_id, and seed
+#   '{"work_id":"<work_id>","work_ref":"<work_ref>"}'.
 ```
 
 ### `novel-review-master`
@@ -94,11 +98,10 @@ nexus42 daemon schedule add \
 Interactive human-in-loop preset that surfaces open findings with `target_executor: master` for approval/reject/wont_fix decisions. Uses `manual` exit (waits for human input).
 
 ```bash
-# Trigger review-master via daemon schedule (findings-driven routing):
-nexus42 daemon schedule add \
-  --preset novel-review-master \
-  --creator <creator-id> \
-  --seed '{"work_id":"<work_id>","work_ref":"<work_ref>"}'
+# Trigger review-master via a schedule run (findings-driven routing):
+#   POST /v1/daemon/orchestration/schedules with
+#   preset_id="novel-review-master", creator_id, and seed
+#   '{"work_id":"<work_id>","work_ref":"<work_ref>"}'.
 ```
 
 ## Validation
@@ -149,9 +152,9 @@ intake → research → produce → review → persist
 
 ### Stage Advance Flow
 
-Each `creator run stage advance --stage <id>` triggers:
+Each FL-E stage advance (driven through the orchestration control plane) triggers:
 
-1. **Gate validation** — checks linear order, current stage completion, no active schedule (shared by CLI and daemon).
+1. **Gate validation** — checks linear order, current stage completion, no active schedule (shared by every stage-advance path).
 2. **Work PATCH** — sets `current_stage` and `stage_status = active`.
 3. **Schedule create** — enqueues a schedule for the default preset with `presetInput` containing `work_id`, `fl_e_stage`, `creative_brief`, and `inspiration_log`.
 
@@ -169,18 +172,6 @@ All stage schedules receive these preset input fields from the Work entity:
 | `fl_e_stage` | Target stage name | All stages |
 | `creative_brief` | `works.creative_brief` | `research`, `novel-writing` |
 | `inspiration_log` | `works.inspiration_log` (JSON array) | `research`, `novel-writing` |
-
-### Manual Demo
-
-```bash
-# Full FL-E chain on a demo Work:
-nexus42 creator run start --idea "A sci-fi thriller about AI consciousness"
-# After intake completes:
-nexus42 creator run stage advance <work_id> --stage research
-nexus42 creator run stage advance <work_id> --stage produce
-nexus42 creator run stage advance <work_id> --stage review
-nexus42 creator run stage advance <work_id> --stage persist
-```
 
 ### Test Coverage
 

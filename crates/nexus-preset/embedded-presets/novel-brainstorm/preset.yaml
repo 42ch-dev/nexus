@@ -16,13 +16,11 @@
 #   - synthesize: Produce structured ideation prompts and cluster proposals.
 #   - done:      Terminal; output available for downstream consume.
 #
-# Launch:
-#   nexus42 creator run stage advance <work_id> --stage produce
-#   (with preset routed from findings where target_executor=brainstorm)
-#
-# Alternatively via daemon schedule:
-#   nexus42 daemon schedule add --preset novel-brainstorm \
-#     --creator <creator-id> --seed '{"work_id":"...","work_ref":"..."}'
+# Launch (no dedicated CLI leaf): enqueue it as a schedule run via the core
+#   execution surface served by apps/nexus-service —
+#   POST /v1/daemon/orchestration/schedules with
+#   preset_id="novel-brainstorm" and the finding-routed input
+#   (`{"work_id":"...","work_ref":"..."}` as seed).
 
 preset:
   id: novel-brainstorm

@@ -11,8 +11,8 @@
 #   `Works/<work_ref>/Logs/review/` as a side-effect.
 # - `done` (terminal): the supervisor's `on_schedule_terminal` hook keys off
 #   `preset_id == "novel-chapter-review"` and synthesizes ≥1 finding row via
-#   `create_finding_from_review`. Both auto-chain and on-demand
-#   `creator run novel-chapter-review <work_id>` reach the same code path.
+#   `create_finding_from_review`. Both auto-chain and on-demand schedule runs
+#   (POST /v1/daemon/orchestration/schedules) reach the same code path.
 #
 # Input variables (populated by `stage_gates::build_preset_input`):
 #   work_id:         Work entity ID (wrk_...).
@@ -27,8 +27,10 @@
 #   rules_content:   Layer 1 + Layer 2 writing-craft rules (best-effort).
 #   world_kb_block:  World KB YAML block (empty for worldless Works).
 #
-# Manual run command:
-#   nexus42 creator run novel-chapter-review <work_id>
+# Launch (no dedicated CLI leaf): enqueue it as a schedule run via the core
+#   execution surface served by apps/nexus-service —
+#   POST /v1/daemon/orchestration/schedules with
+#   preset_id="novel-chapter-review" and the Work in the schedule input.
 
 preset:
   id: novel-chapter-review

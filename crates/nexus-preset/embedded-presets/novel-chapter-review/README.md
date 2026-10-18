@@ -13,7 +13,7 @@ that writes ≥1 finding row per review pass via the supervisor's terminal hook
 3. Emits a human-readable review report under `Works/<work_ref>/Logs/review/`.
 4. On schedule terminal, the supervisor's `on_schedule_terminal` hook
    synthesizes ≥1 `findings` row via `create_finding_from_review` (the same
-   path used by the on-demand `creator run novel-chapter-review`).
+   path used by an on-demand schedule run of this preset).
 
 ## Inputs (populated by `stage_gates::build_preset_input`)
 
@@ -23,14 +23,16 @@ that writes ≥1 finding row per review pass via the supervisor's terminal hook
 - `rules_content` — Layer 1 + Layer 2 writing-craft rules (best-effort).
 - `world_kb_block` — World KB YAML block (empty for worldless Works).
 
-## CLI
+## Invocation
 
 ```bash
 # Auto-chain (after `produce` completes; driver invariant preserved)
 #  — no user action; supervisor auto-advances and persists findings.
 
-# On-demand
-nexus42 creator run novel-chapter-review <work_id>
+# On-demand (no dedicated CLI leaf): enqueue a schedule run via the core
+# execution surface served by apps/nexus-service —
+# POST /v1/daemon/orchestration/schedules with
+# preset_id="novel-chapter-review" and the Work in the schedule input.
 ```
 
 ## Out of V1.47 P0
