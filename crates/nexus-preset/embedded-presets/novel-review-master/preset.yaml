@@ -44,13 +44,11 @@
 #                     (V1.51 T-A P0) Supervisor terminal hook then runs
 #                     nexus.llm.extract review-time KB candidate extraction.
 #
-# Launch:
-#   nexus42 creator run stage advance <work_id> --stage review
-#   (with preset routed from findings where target_executor=master)
-#
-# Alternatively via daemon schedule:
-#   nexus42 daemon schedule add --preset novel-review-master \
-#     --creator <creator-id> --seed '{"work_id":"...","work_ref":"..."}'
+# Launch (no dedicated CLI leaf): enqueue it as a schedule run via the core
+#   execution surface served by apps/nexus-service —
+#   POST /v1/daemon/orchestration/schedules with
+#   preset_id="novel-review-master" and the finding-routed input
+#   (`{"work_id":"...","work_ref":"..."}` as seed).
 
 preset:
   id: novel-review-master
@@ -76,7 +74,6 @@ preset:
     - kind: work_field
       field: work_ref
       op: required
-  # V1.45 §3.3: CLI args parsed by the generic `creator run` runner.
   cli_args:
     - name: finding-id
       type: string

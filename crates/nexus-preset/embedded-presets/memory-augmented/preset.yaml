@@ -12,8 +12,10 @@
 #   keyword:   Keyword to filter memories for recall (required)
 #   topic:     Topic or prompt for content generation (required)
 #
-# Manual run command:
-#   nexus42 daemon schedule add --preset memory-augmented --creator <creator-id> --seed "<topic>"
+# Launch (no dedicated CLI leaf): enqueue it as a schedule run via the core
+#   execution surface served by apps/nexus-service —
+#   POST /v1/daemon/orchestration/schedules with
+#   preset_id="memory-augmented", creator_id, and seed "<topic>".
 
 preset:
   id: memory-augmented
