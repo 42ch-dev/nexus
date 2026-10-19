@@ -203,6 +203,25 @@ function rawRequestPath(target: string | undefined): string {
   return query === -1 ? raw : raw.slice(0, query);
 }
 
+/**
+ * Textual dot-segment collapse for the static admission view. It splits on `/`
+ * only — the same segmentation the static handler's `path.resolve` applies
+ * after its own decode — so a decoded `?`/`#`/space stays a filename character
+ * instead of `new URL()` structure. `.` drops, `..` pops (an empty stack is the
+ * root and stays there), every other segment is verbatim; empty segments
+ * survive so `/v1/` keeps its trailing slash.
+ */
+function collapseDotSegments(decoded: string): string {
+  const rooted = decoded.startsWith('/');
+  const stack: string[] = [];
+  for (const segment of (rooted ? decoded.slice(1) : decoded).split('/')) {
+    if (segment === '.') continue;
+    if (segment === '..') stack.pop();
+    else stack.push(segment);
+  }
+  return `${rooted ? '/' : ''}${stack.join('/')}`;
+}
+
 function requestId(req: IncomingMessage): string {
   const header = req.headers['x-request-id'];
   const value = Array.isArray(header) ? header[0] : header;
@@ -401,27 +420,22 @@ export function createServiceServer(
         // The `/v1/` exclusion covers both path domains. The normalized
         // `pathname` is the same view `matchRoute` uses, so a dot-segment form
         // (`/foo/../v1/x`) collapses into the API domain and cannot slip into
-        // the SPA fallback. `new URL()` preserves percent-escapes in
-        // `pathname` (`/v1/` ≠ `/%76%31/`), so the raw target is decoded and
-        // then dot-normalized before the same prefix test: that catches the
-        // encoded `/%76%31/...` form and the mixed `/foo/../%76%31/...` form
-        // alike, the latter collapsing to `/v1/...` only after both steps. The
-        // decode + normalize is check-only and never served, so the handler's
-        // sole decode (§5 step 1) is untouched.
+        // the SPA fallback. `pathname` keeps percent-escapes (`/v1/` ≠
+        // `/%76%31/`), so the raw target is decoded and its dot segments are
+        // collapsed textually with the handler's `/`-segment semantics: a
+        // decoded `?` or `#` is a filename character, never URL structure, so
+        // the admission view and the resolve view segment the same string.
+        // The decode + collapse is check-only and never served, so the
+        // handler's sole decode (§5 step 1) is untouched.
         let decodedTarget: string | null = null;
         try {
           decodedTarget = decodeURIComponent(staticTarget);
         } catch {
           // Malformed escape: the static handler refuses it 404 (§5 step 1).
         }
-        let normalizedTarget: string | null = null;
-        if (decodedTarget?.startsWith('/')) {
-          try {
-            normalizedTarget = new URL(`http://h${decodedTarget}`).pathname;
-          } catch {
-            // Unparseable after decoding: no `/v1/` match either way.
-          }
-        }
+        const normalizedTarget = decodedTarget?.startsWith('/')
+          ? collapseDotSegments(decodedTarget)
+          : null;
         const apiDomain =
           urlObj.pathname.startsWith('/v1/') || (normalizedTarget?.startsWith('/v1/') ?? false);
         if (staticHandler && !apiDomain) {

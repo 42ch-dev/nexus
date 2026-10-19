@@ -298,6 +298,33 @@ describe('web static serve (20261019-web-static-serve)', () => {
       assert.equal(errorCode(res), 'route_not_migrated');
     });
 
+    test('a decoded ? dot-segment /v1/ form keeps the byte-identical 501 envelope', async () => {
+      // `%3f` decodes to `?`: a filename character for the static handler's
+      // `path.resolve`, URL structure for any re-parse. Both views must
+      // segment the same string, or `foo?`/`..` collapses into the API domain
+      // here while the handler serves the SPA fallback 200 instead.
+      const encoded = await rawRequest(ENABLED_PORT, '/%76%31/daemon/nope');
+      const res = await rawRequest(ENABLED_PORT, '/foo%3f/../%76%31/daemon/nope');
+      assert.equal(res.status, 501);
+      assert.equal(errorCode(res), 'route_not_migrated');
+      assert.equal(envelopeOf(res), envelopeOf(encoded));
+    });
+
+    test('a decoded # dot-segment /v1/ form keeps the byte-identical 501 envelope', async () => {
+      // `%23` decodes to `#`: same filename-character contract as `?`.
+      const encoded = await rawRequest(ENABLED_PORT, '/%76%31/daemon/nope');
+      const res = await rawRequest(ENABLED_PORT, '/foo%23/../%76%31/daemon/nope');
+      assert.equal(res.status, 501);
+      assert.equal(errorCode(res), 'route_not_migrated');
+      assert.equal(envelopeOf(res), envelopeOf(encoded));
+    });
+
+    test('POST on a decoded ? dot-segment /v1/ form keeps the 501 envelope', async () => {
+      const res = await rawRequest(ENABLED_PORT, '/foo%3f/../%76%31/daemon/nope', { method: 'POST' });
+      assert.equal(res.status, 501);
+      assert.equal(errorCode(res), 'route_not_migrated');
+    });
+
     test('an absolute-form request target resolves to the same asset', async () => {
       const res = await rawRequest(ENABLED_PORT, `http://127.0.0.1:${ENABLED_PORT}/assets/app-test.js`);
       assert.equal(res.status, 200);
