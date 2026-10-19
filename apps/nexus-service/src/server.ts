@@ -187,9 +187,18 @@ function assertPrivateSocketParent(socketPath: string): void {
  * Raw request-target path, still percent-encoded and NOT dot-normalized:
  * `new URL()` collapses `%2e%2e` segments before the static boundary could
  * refuse them, so the static handler receives the undecoded target minus query.
+ * An absolute-form target (`GET http://host/path`) has its scheme + authority
+ * stripped so it resolves to the same file as the origin-form request.
  */
 function rawRequestPath(target: string | undefined): string {
-  const raw = target ?? '/';
+  let raw = target ?? '/';
+  if (!raw.startsWith('/')) {
+    const schemeEnd = raw.indexOf('://');
+    if (schemeEnd !== -1) {
+      const pathStart = raw.indexOf('/', schemeEnd + 3);
+      raw = pathStart === -1 ? '/' : raw.slice(pathStart);
+    }
+  }
   const query = raw.indexOf('?');
   return query === -1 ? raw : raw.slice(0, query);
 }
@@ -388,8 +397,19 @@ export function createServiceServer(
       if (!route) {
         // UI serving sits after the origin gate and is exempt from the API-key
         // gate only; every `/v1/*` admission is unchanged.
-        if (staticHandler && !urlObj.pathname.startsWith('/v1/')) {
-          await staticHandler(res, method, rawRequestPath(req.url));
+        const staticTarget = rawRequestPath(req.url);
+        // Check-decode only for the `/v1/` exclusion: `new URL()` preserves
+        // `%76`, so `/%76%31/...` would otherwise enter the static branch and
+        // answer the SPA page where BASE answers 501. Never used for serving,
+        // so the handler's sole decode (§5 step 1) is untouched.
+        let decodedTarget: string | null = null;
+        try {
+          decodedTarget = decodeURIComponent(staticTarget);
+        } catch {
+          // Malformed escape: the static handler refuses it 404 (§5 step 1).
+        }
+        if (staticHandler && !(decodedTarget?.startsWith('/v1/') ?? false)) {
+          await staticHandler(res, method, staticTarget);
           return;
         }
         sendError(res, new HttpError(501, 'route_not_migrated', `Route is not migrated: ${urlObj.pathname}`), id, origin, config.allowedOrigins);

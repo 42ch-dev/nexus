@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -11,6 +12,7 @@ import {
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { after, before, describe, test } from 'node:test';
 
@@ -22,6 +24,9 @@ const ENABLED_PORT = 18_531;
 const DISABLED_PORT = 18_532;
 const KEYED_PORT = 18_533;
 const ESCAPE_PORT = 18_535;
+
+// Root bypasses the file mode, so the unreadable-file case cannot be provoked.
+const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
 
 const INDEX_HTML = '<!doctype html><html><body>nexus-web-fixture</body></html>';
 const APP_JS = "console.log('app-test');\n";
@@ -35,8 +40,9 @@ function tempDir(prefix) {
 }
 
 /**
- * Built-SPA fixture: an `assets/` hit, an ordinary served file, and a symlink
- * whose target lives outside the root.
+ * Built-SPA fixture: an `assets/` hit, an ordinary served file, a file whose
+ * mode denies reading (metadata still resolves), and a symlink whose target
+ * lives outside the root.
  */
 function webDistFixture() {
   const base = tempDir('nexus-webdist-');
@@ -45,6 +51,9 @@ function webDistFixture() {
   writeFileSync(join(root, 'index.html'), INDEX_HTML);
   writeFileSync(join(root, 'assets', 'app-test.js'), APP_JS);
   writeFileSync(join(root, 'robots.txt'), 'User-agent: *\n');
+  const unreadable = join(root, 'unreadable.txt');
+  writeFileSync(unreadable, 'unreadable');
+  chmodSync(unreadable, 0o000);
   const outside = join(base, 'outside');
   mkdirSync(outside);
   writeFileSync(join(outside, 'secret.txt'), 'secret');
@@ -234,6 +243,34 @@ describe('web static serve (20261019-web-static-serve)', () => {
       });
     }
 
+    test('a percent-encoded /v1/ prefix keeps the 501 envelope', async () => {
+      const res = await rawRequest(ENABLED_PORT, '/%76%31/daemon/nope');
+      assert.equal(res.status, 501);
+      assert.equal(errorCode(res), 'route_not_migrated');
+    });
+
+    test('an absolute-form request target resolves to the same asset', async () => {
+      const res = await rawRequest(ENABLED_PORT, `http://127.0.0.1:${ENABLED_PORT}/assets/app-test.js`);
+      assert.equal(res.status, 200);
+      assert.equal(res.headers['content-type'], 'text/javascript');
+      assert.equal(res.body.toString(), APP_JS);
+    });
+
+    test(
+      'an unreadable asset is a clean 500 envelope, never the asset framing',
+      { skip: isRoot },
+      async () => {
+        const res = await rawRequest(ENABLED_PORT, '/unreadable.txt');
+        assert.equal(res.status, 500);
+        const parsed = JSON.parse(res.body.toString());
+        assert.equal(parsed.success, false);
+        assert.equal(parsed.error.code, 'internal');
+        assert.equal(parsed.error.message, 'Internal server error');
+        const declared = res.headers['content-length'];
+        if (declared !== undefined) assert.equal(Number(declared), res.body.length);
+      },
+    );
+
     test('POST / is a 405 method_not_allowed envelope', async () => {
       const res = await rawRequest(ENABLED_PORT, '/', { method: 'POST' });
       assert.equal(res.status, 405);
@@ -377,16 +414,17 @@ describe('web static serve (20261019-web-static-serve)', () => {
     });
 
     function fakeRes() {
-      return {
-        statusCode: 0,
-        headers: {},
-        setHeader(name, value) {
-          this.headers[name.toLowerCase()] = value;
+      const res = new Writable({
+        write(_chunk, _encoding, callback) {
+          callback();
         },
-        end(body) {
-          this.body = body;
-        },
+      });
+      res.statusCode = 0;
+      res.headers = {};
+      res.setHeader = (name, value) => {
+        res.headers[name.toLowerCase()] = value;
       };
+      return res;
     }
 
     for (const path of [

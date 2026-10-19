@@ -1,6 +1,8 @@
-import { existsSync, readFileSync, realpathSync, statSync, type Stats } from 'node:fs';
+import { existsSync, realpathSync, type Stats } from 'node:fs';
+import { open, realpath, stat } from 'node:fs/promises';
 import type { ServerResponse } from 'node:http';
 import { dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { HttpError } from './errors.js';
 
@@ -56,12 +58,24 @@ function notFound(): HttpError {
   return new HttpError(404, 'not_found', 'not found');
 }
 
+interface StaticHit {
+  /** Containment-verified realpath: the bytes actually served (§5 step 4). */
+  real: string;
+  size: number;
+  /** Whether the request-relative path sits under the `assets/` cache tier. */
+  assets: boolean;
+}
+
 /**
  * Map one request path to the file it may serve, or `null` when the path is a
  * plain miss (ENOENT / directory) and the SPA fallback applies. Traversal
  * refusals throw so the caller's single error envelope reports them.
  */
-function resolveInsideRoot(root: string, rootReal: string, pathname: string): string | null {
+async function resolveInsideRoot(
+  root: string,
+  rootReal: string,
+  pathname: string,
+): Promise<StaticHit | null> {
   let decoded: string;
   try {
     decoded = decodeURIComponent(pathname);
@@ -77,19 +91,19 @@ function resolveInsideRoot(root: string, rootReal: string, pathname: string): st
   if (rel.startsWith('..') || isAbsolute(rel)) throw notFound();
   let stats: Stats;
   try {
-    stats = statSync(candidate);
+    stats = await stat(candidate);
   } catch {
     return null;
   }
   if (!stats.isFile()) return null;
   let real: string;
   try {
-    real = realpathSync(candidate);
+    real = await realpath(candidate);
   } catch {
     return null;
   }
   if (real !== rootReal && !real.startsWith(rootReal + sep)) throw notFound();
-  return candidate;
+  return { real, size: stats.size, assets: relPath.split(sep)[0] === 'assets' };
 }
 
 export type StaticFileHandler = (
@@ -113,12 +127,13 @@ export function createStaticFileHandler(options: {
   // against a path that is itself a symlink.
   const rootReal = realpathSync(root);
   // The fallback is containment-checked once here too: a symlinked `index.html`
-  // escaping the root must be refused like a direct hit, never served.
+  // escaping the root must be refused like a direct hit, never served. Its
+  // realpath is what gets read (same swap-window shrink as a direct hit).
   let safeFallback: string | null = null;
   try {
     const fallbackReal = realpathSync(fallback);
     if (fallbackReal === rootReal || fallbackReal.startsWith(rootReal + sep)) {
-      safeFallback = fallback;
+      safeFallback = fallbackReal;
     }
   } catch {
     // Unresolvable fallback: refuse at request time (404).
@@ -130,17 +145,27 @@ export function createStaticFileHandler(options: {
     if (method !== 'GET' && method !== 'HEAD') {
       throw new HttpError(405, 'method_not_allowed', 'method not allowed');
     }
-    const hit = resolveInsideRoot(root, rootReal, pathname);
-    const file = hit ?? safeFallback;
+    const hit = await resolveInsideRoot(root, rootReal, pathname);
+    const file = hit ? hit.real : safeFallback;
     if (file === null) throw notFound();
-    const cache =
-      hit && relative(root, hit).split(sep)[0] === 'assets' ? 'public, max-age=3600' : 'no-store';
+    const cache = hit?.assets ? 'public, max-age=3600' : 'no-store';
     let size: number;
-    try {
-      size = statSync(file).size;
-    } catch {
-      throw notFound();
+    if (hit) {
+      size = hit.size;
+    } else {
+      let stats: Stats;
+      try {
+        stats = await stat(file);
+      } catch {
+        throw notFound();
+      }
+      if (!stats.isFile()) throw notFound();
+      size = stats.size;
     }
+    // Open before committing success headers: a read failure must land on the
+    // shared `sendError` envelope without the asset's framing, or a keep-alive
+    // socket would inherit a stale `Content-Length` (§6).
+    const handle = await open(file, 'r');
     res.statusCode = 200;
     res.setHeader(
       'Content-Type',
@@ -149,9 +174,17 @@ export function createStaticFileHandler(options: {
     res.setHeader('Cache-Control', cache);
     res.setHeader('Content-Length', String(size));
     if (method === 'HEAD') {
+      await handle.close();
       res.end();
       return;
     }
-    res.end(readFileSync(file));
+    // Streamed, never buffered whole: large assets stay off the shared loop.
+    try {
+      await pipeline(handle.createReadStream(), res);
+    } catch {
+      // A body that failed mid-stream cannot be repaired: cut the connection
+      // rather than append an envelope to a short, already-framed body (§6).
+      res.destroy();
+    }
   };
 }

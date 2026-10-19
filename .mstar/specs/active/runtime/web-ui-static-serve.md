@@ -48,8 +48,11 @@ The static branch MUST be inserted inside the step-4 `if (!route)` block, and no
 
 ```ts
 if (!route) {
-  if (staticHandler && !urlObj.pathname.startsWith('/v1/')) {
-    await staticHandler(res, method, rawRequestPath(req.url));
+  const staticTarget = rawRequestPath(req.url);
+  let decoded: string | null = null;
+  try { decoded = decodeURIComponent(staticTarget); } catch { /* malformed escape → §5 404 */ }
+  if (staticHandler && !(decoded?.startsWith('/v1/') ?? false)) {
+    await staticHandler(res, method, staticTarget);
     return;
   }
   sendError(res, new HttpError(501, 'route_not_migrated', `Route is not migrated: ${urlObj.pathname}`), …);
@@ -57,7 +60,9 @@ if (!route) {
 }
 ```
 
-**Raw static path vs normalized guard:** the `/v1/` exclusion uses `urlObj.pathname`, but the static branch receives `rawRequestPath(req.url)` — the raw request-target path with the query stripped and percent-escapes intact. WHATWG `new URL()` collapses `%2e%2e` dot segments during normalization, so passing `urlObj.pathname` would silently erase the encoded-traversal forms §4/§8 require to return 404 and hand the static boundary an already-normalized path. The single decoding boundary therefore lives inside the handler (§5 step 1), and `pathname` remains encoded at entry.
+**Raw static path vs normalized guard:** the static branch receives `rawRequestPath(req.url)` — the raw request-target path with the query stripped and percent-escapes intact. WHATWG `new URL()` collapses `%2e%2e` dot segments during normalization, so passing `urlObj.pathname` would silently erase the encoded-traversal forms §4/§8 require to return 404 and hand the static boundary an already-normalized path. The single decoding boundary therefore lives inside the handler (§5 step 1), and `pathname` remains encoded at entry.
+
+**Check-decode for the `/v1/` exclusion:** the exclusion test decodes the raw target once, read-only, because `new URL()` preserves percent-escapes in `pathname` (`/v1/` ≠ `/%76%31/`). Without it, `GET /%76%31/daemon/nope` enters the static branch, misses, and answers the SPA fallback 200 where the disabled mode answers the 501 envelope — a silent admission change. The check decode feeds this prefix test only, never serving, so §5 step 1 stays the sole decode of the served path. A malformed escape fails the decode and falls into the static branch, which refuses it 404 per §5.
 
 **Exemption boundary (D2):** the branch runs after `checkOrigin` and is exempt from `checkApiKey` only — the same exemption the `unguarded` tier grants `/v1/daemon/runtime/cert-fingerprint` (`routes.ts:296-302`), reached one step earlier because no route matches. Browser navigations carry no `Origin` header, so the origin gate does not block them; CORS response headers are unchanged.
 
@@ -74,6 +79,7 @@ if (!route) {
 | `GET /<spa-route>` (no file) | 200 `index.html` fallback; `Cache-Control: no-store` | 501 `route_not_migrated` |
 | `GET /v1/daemon/daemon/status` | unchanged (unguarded route) | unchanged |
 | `GET`/`POST` unknown `/v1/*` | 501 `route_not_migrated` envelope (unchanged) | 501 `route_not_migrated` |
+| `GET /%76%31/…` (percent-encoded `/v1/` prefix) | 501 `route_not_migrated` (check-decode, §3) | 501 `route_not_migrated` |
 | Traversal attempt (`/…`, `%2e%2e`, `%2E%2E/`, `%5c`, `%00`, absolute, symlink escape) | 404 `not_found` envelope; never 500; no filesystem text | n/a (never reaches static branch) |
 | `HEAD /` (or any served path) | same status/headers as `GET`, empty body | 501 `route_not_migrated` |
 | `POST`/`PUT`/etc. on non-`/v1/*` | 405 `method_not_allowed` envelope | 501 `route_not_migrated` (unchanged) |
@@ -91,8 +97,10 @@ All error bodies use the canonical envelope via the existing `HttpError` → `ma
 1. `decodeURIComponent(pathname)` exactly once; malformed escape → 404. The decoded value is never decoded again.
 2. Reject (404) any decoded path containing NUL (`\0`) or backslash (`\`) — backslash is refused on all platforms, per D5.
 3. Remove exactly one leading request-root slash from the decoded value, reject (404) an absolute remainder (e.g. `//…` from `%2F…`), then `path.resolve(root, remainder)`; `path.relative(root, candidate)` must not be empty-for-escape, must not start with `..`, and must not be absolute — else 404. (Literal `path.resolve(root, decoded)` with an ordinary `/assets/x` discards `root`, so the root slash is stripped first; stripping every leading slash would lose the absolute-path refusal.)
-4. File hit: `realpathSync(candidate)` must remain under `realpathSync(root)` (computed once at handler creation) — symlink escape → 404.
+4. File hit: `realpath(candidate)` must remain under `realpathSync(root)` (computed once at handler creation) — symlink escape → 404. **The bytes are read from that verified realpath** (opened with `fs.promises.open` before any success header is committed), not from the pre-realpath candidate, shrinking the symlink-swap window between the containment check and the read. The fallback is served from its containment-checked realpath too.
 5. Miss or non-file (including directory and ENOENT): serve the `index.html` fallback (200). The fallback is itself containment-checked once at handler creation — a symlinked `index.html` escaping the root is refused (404) on every fallback path, exactly like a direct hit, never served. No `ENOENT`/filesystem message ever reaches the client.
+
+**Async I/O and absolute-form targets:** every per-request filesystem call is asynchronous (`node:fs/promises`); only the two creation-time containment checks stay synchronous. An absolute-form request target (`GET http://host/assets/x.js`) has its scheme and authority stripped in `server.ts` before the handler decodes the path (a one-clause alternative to an absolute-URI special case), so it resolves to the same file as its origin-form equivalent instead of missing into the fallback.
 
 ---
 
@@ -101,6 +109,8 @@ All error bodies use the canonical envelope via the existing `HttpError` → `ma
 - MIME map (exact set): `html js mjs css map svg png jpg jpeg gif ico json txt wasm woff woff2`; `html` → `text/html; charset=utf-8`, `js`/`mjs` → `text/javascript`, `json` → `application/json`, `wasm` → `application/wasm`; unknown extension → `application/octet-stream`.
 - `X-Content-Type-Options: nosniff` on every static response — successes and the 404/405 refusal envelopes alike (set at static-handler entry so it survives the shared `sendError` path).
 - `Cache-Control`: `no-store` for `index.html` and every fallback response; `public, max-age=3600` for files under `/assets/` (Vite's content-hashed output); `no-store` for any other served file.
+- File bodies are **streamed** (`FileHandle.createReadStream()` piped to the response) with `Content-Length` taken from the served file's size, so a large asset is never buffered whole on the shared API/SSE event loop.
+- Success framing and caching headers are set **only after the file opens successfully**. Every pre-header static failure therefore reaches the single `sendError` envelope without a stale `Content-Length`; a read failure after headers are sent destroys the response rather than appending an envelope to a short body.
 - No Range, ETag, or compression this round (D6; add only on evidence).
 
 ---
@@ -114,7 +124,7 @@ export type StaticFileHandler = (res: ServerResponse, method: string, pathname: 
 export function createStaticFileHandler(options: { root: string; fallback: string }): StaticFileHandler;
 ```
 
-`fallback` is the absolute `index.html` path; the handler owns the full method matrix (GET/HEAD serve, others 405) so the wiring in `server.ts` is the single branch shown in §3. `pathname` is the raw, still-encoded request-target path (query stripped); the handler performs the sole decode. Consumes: existing `HttpError` envelope, `ServerResponse`; touches neither the auth chain nor `bind.ts`.
+`fallback` is the absolute `index.html` path; the handler owns the full method matrix (GET/HEAD serve, others 405) so the wiring in `server.ts` is the single branch shown in §3. `pathname` is the raw, still-encoded request-target path (query stripped); the handler performs the sole decode, then reads and streams the file with asynchronous filesystem calls. Consumes: existing `HttpError` envelope, `ServerResponse`; touches neither the auth chain nor `bind.ts`.
 
 ---
 
@@ -122,7 +132,7 @@ export function createStaticFileHandler(options: { root: string; fallback: strin
 
 New HTTP test file in the `actor-http.test.mjs` harness style (`node:test`; build `tsc` first, import `dist/index.js`, `startService` on a fixed 18xxx port; fixture dist under `mkdtempSync` with `index.html`, `assets/app-test.js`, and a symlink-escape fixture). Every case below is mandatory:
 
-**Enabled mode** (explicit `--web-dist` → fixture): (1) `GET /` → 200, `text/html; charset=utf-8`, `no-store`, `nosniff`, body = index bytes; (2) `GET /assets/app-test.js` → 200, `text/javascript`, `public, max-age=3600`, `nosniff`; (3) `GET /spa/route` → 200 index fallback, `no-store`; (4) `HEAD /` → 200, headers of (1), empty body; (5) `GET /v1/daemon/daemon/status` → 200 unchanged; (6) `GET /v1/daemon/nope` → 501 `route_not_migrated`; (7) `POST /v1/daemon/nope` → 501; (8) `GET /%2e%2e/%2e%2e/etc/passwd`, `GET /%2E%2E/`, `GET /%2e%2e%5c`, `GET /%00`, `GET /%2e%2e/web/dist/index.html` escaping root → each 404 `not_found`, no fs text; (9) `POST /` → 405 `method_not_allowed`; (10) keyed mode (`NEXUS42_DAEMON_API_KEY` set): `GET /` → 200 without the key, `GET /v1/daemon/daemon/status` → 401 without the key.
+**Enabled mode** (explicit `--web-dist` → fixture): (1) `GET /` → 200, `text/html; charset=utf-8`, `no-store`, `nosniff`, body = index bytes; (2) `GET /assets/app-test.js` → 200, `text/javascript`, `public, max-age=3600`, `nosniff`; (3) `GET /spa/route` → 200 index fallback, `no-store`; (4) `HEAD /` → 200, headers of (1), empty body; (5) `GET /v1/daemon/daemon/status` → 200 unchanged; (6) `GET /v1/daemon/nope` → 501 `route_not_migrated`; (7) `POST /v1/daemon/nope` → 501; (8) `GET /%2e%2e/%2e%2e/etc/passwd`, `GET /%2E%2E/`, `GET /%2e%2e%5c`, `GET /%00`, `GET /%2e%2e/web/dist/index.html` escaping root → each 404 `not_found`, no fs text; (9) `POST /` → 405 `method_not_allowed`; (10) keyed mode (`NEXUS42_DAEMON_API_KEY` set): `GET /` → 200 without the key, `GET /v1/daemon/daemon/status` → 401 without the key; (11) `GET /%76%31/daemon/nope` → 501 `route_not_migrated` (check-decode, §3) while the (8) encoded-traversal cases stay 404; (12) `GET http://127.0.0.1:<port>/assets/app-test.js` (absolute-form target) → 200 asset bytes; (13) fixture file with mode `000` → `GET /<file>` → 500 `internal` envelope whose `Content-Length`, when present, equals the body length (skipped when running as root).
 
 **Disabled mode** (`webDist: null`): boots clean; `GET /` → 501 `route_not_migrated`; `POST /` → 501; API unchanged.
 
