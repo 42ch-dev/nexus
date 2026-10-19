@@ -93,7 +93,15 @@ async function resolveInsideRoot(
   // admission guard (`/../dist/v1/y` folds to `/dist/v1/y` there) lands back
   // on `<root>/v1/y` here. Refuse that class so static content can never
   // shadow the API-key-gated `/v1/` namespace, whatever the guard or layout.
-  if (rel === 'v1' || rel.startsWith('v1' + sep)) throw notFound();
+  // The decision is a pure string fold made before `stat`, so it holds on
+  // every host: lowercase (an ASCII fold suffices for the `v1` literal) plus
+  // per-segment trim of trailing dots/spaces, the Win32 normalization that
+  // would otherwise resolve `/v1./y` onto `/v1/y`.
+  const folded = rel
+    .split(sep)
+    .map((segment) => segment.replace(/[. ]+$/, '').toLowerCase())
+    .join(sep);
+  if (folded === 'v1' || folded.startsWith('v1' + sep)) throw notFound();
   let stats: Stats;
   try {
     stats = await stat(candidate);

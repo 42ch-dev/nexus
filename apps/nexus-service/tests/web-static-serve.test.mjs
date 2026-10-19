@@ -275,6 +275,20 @@ describe('web static serve (20261019-web-static-serve)', () => {
       });
     }
 
+    // The refusal folds case and Win32 trailing dots/spaces per segment as a
+    // pure string check before `stat`, so these are 404 on every host even
+    // where the fixture has no `v1/` tier (pre-fix they fell back to 200).
+    for (const path of ['/V1/y', '/v1./y']) {
+      test(`${path} cannot re-open <root>/v1 via case or dot folding`, async () => {
+        const res = await rawRequest(ENABLED_PORT, path);
+        assert.equal(res.status, 404);
+        assert.equal(errorCode(res), 'not_found');
+        assert.equal(JSON.parse(res.body.toString()).error.message, 'not found');
+        assert.equal(res.headers['x-content-type-options'], 'nosniff');
+        assert.notEqual(res.body.toString(), INDEX_HTML);
+      });
+    }
+
     test('a literal dist/v1 path is not the refused class', async () => {
       // Only candidates whose normalized root-relative path is `v1`/`v1/…`
       // are refused; `<root>/dist/v1/y` keeps normal file-or-fallback rules
