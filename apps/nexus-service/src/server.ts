@@ -9,7 +9,7 @@ import {
   createServer as createHttpsServer,
 } from 'node:https';
 import { chmodSync, existsSync, lstatSync, rmSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import net from 'node:net';
 import { randomUUID } from 'node:crypto';
 import type { CoreCloseReport, CoreServiceDiscovery, CoreServiceStopRequest } from '@42ch/nexus-contracts';
@@ -28,6 +28,7 @@ import { createDiscoveryRecord } from './discovery.js';
 import type { ServiceCore } from './lifecycle.js';
 import { checkApiKey, checkOrigin, corsAllowHeaders, corsAllowMethods } from './security.js';
 import { handleRoute, matchRoute } from './routes.js';
+import { createStaticFileHandler } from './static-files.js';
 import { releaseSessionSubscriber, reserveSessionSubscriber } from './sse.js';
 
 export interface RunningService {
@@ -182,6 +183,47 @@ function assertPrivateSocketParent(socketPath: string): void {
   }
 }
 
+/**
+ * Raw request-target path, still percent-encoded and NOT dot-normalized:
+ * `new URL()` collapses `%2e%2e` segments before the static boundary could
+ * refuse them, so the static handler receives the undecoded target minus query.
+ * An absolute-form target (`GET http://host/path`) has its scheme + authority
+ * stripped so it resolves to the same file as the origin-form request.
+ */
+function rawRequestPath(target: string | undefined): string {
+  let raw = target ?? '/';
+  if (!raw.startsWith('/')) {
+    const schemeEnd = raw.indexOf('://');
+    if (schemeEnd !== -1) {
+      const pathStart = raw.indexOf('/', schemeEnd + 3);
+      raw = pathStart === -1 ? '/' : raw.slice(pathStart);
+    }
+  }
+  const query = raw.indexOf('?');
+  return query === -1 ? raw : raw.slice(0, query);
+}
+
+/**
+ * Textual dot-segment collapse for the static admission view. It splits on `/`
+ * only — the same segmentation the static handler's `path.resolve` applies
+ * after its own decode — so a decoded `?`/`#`/space stays a filename character
+ * instead of `new URL()` structure. Empty and `.` segments are skipped before
+ * any fold, matching `path.resolve`'s treatment of duplicate slashes; `..`
+ * then pops a real parent (an empty stack is the root and stays there), every
+ * other segment is verbatim. The result is single-`/`-separated with no
+ * trailing empty segment, so `/v1/` and `/v1/.` both collapse to `/v1`.
+ */
+function collapseDotSegments(decoded: string): string {
+  const rooted = decoded.startsWith('/');
+  const stack: string[] = [];
+  for (const segment of (rooted ? decoded.slice(1) : decoded).split('/')) {
+    if (segment === '' || segment === '.') continue;
+    if (segment === '..') stack.pop();
+    else stack.push(segment);
+  }
+  return `${rooted ? '/' : ''}${stack.join('/')}`;
+}
+
 function requestId(req: IncomingMessage): string {
   const header = req.headers['x-request-id'];
   const value = Array.isArray(header) ? header[0] : header;
@@ -281,6 +323,10 @@ export function createServiceServer(
   const protocol = config.tlsCert && config.tlsKey ? 'https' : 'http';
   const url = `${protocol}://${formatHttpAuthority(config.host, config.port)}`;
 
+  const staticHandler = config.webDist
+    ? createStaticFileHandler({ root: config.webDist, fallback: join(config.webDist, 'index.html') })
+    : null;
+
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
     const id = requestId(req);
     const origin = req.headers.origin;
@@ -370,6 +416,41 @@ export function createServiceServer(
 
       const route = matchRoute(method, urlObj.pathname);
       if (!route) {
+        // UI serving sits after the origin gate and is exempt from the API-key
+        // gate only; every `/v1/*` admission is unchanged.
+        const staticTarget = rawRequestPath(req.url);
+        // The `/v1/` exclusion covers both path domains. The normalized
+        // `pathname` is the same view `matchRoute` uses, so a dot-segment form
+        // (`/foo/../v1/x`) collapses into the API domain and cannot slip into
+        // the SPA fallback. `pathname` keeps percent-escapes (`/v1/` ≠
+        // `/%76%31/`), so the raw target is decoded and its dot segments are
+        // collapsed textually with the handler's `/`-segment semantics: a
+        // decoded `?` or `#` is a filename character, never URL structure, so
+        // the admission view and the resolve view segment the same string.
+        // The decode + collapse is check-only and never served, so the
+        // handler's sole decode (§5 step 1) is untouched. The collapse skips
+        // empty and `.` segments the way `path.resolve` ignores duplicate
+        // slashes, so `/v1/` and `/v1/.` both normalize to the bare `/v1` that
+        // `path.resolve` also produces — the boundary must therefore accept
+        // the exact `/v1` form, or those equivalent paths split into the API
+        // and static views again.
+        let decodedTarget: string | null = null;
+        try {
+          decodedTarget = decodeURIComponent(staticTarget);
+        } catch {
+          // Malformed escape: the static handler refuses it 404 (§5 step 1).
+        }
+        const normalizedTarget = decodedTarget?.startsWith('/')
+          ? collapseDotSegments(decodedTarget)
+          : null;
+        const apiDomain =
+          urlObj.pathname.startsWith('/v1/') ||
+          normalizedTarget === '/v1' ||
+          (normalizedTarget?.startsWith('/v1/') ?? false);
+        if (staticHandler && !apiDomain) {
+          await staticHandler(res, method, staticTarget);
+          return;
+        }
         sendError(res, new HttpError(501, 'route_not_migrated', `Route is not migrated: ${urlObj.pathname}`), id, origin, config.allowedOrigins);
         return;
       }

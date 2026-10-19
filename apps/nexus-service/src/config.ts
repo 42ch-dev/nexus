@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { isLoopbackBindHost } from './bind.js';
+import { resolveWebDist } from './static-files.js';
 
 export interface ServiceOptions {
   home: string;
@@ -18,6 +19,11 @@ export interface ServiceOptions {
   cdnUrl?: string;
   /** Enable the embedded MCP lane for peers that request it. */
   embeddedMcp?: boolean;
+  /**
+   * Absolute web-UI build directory to serve, `null` to force-disable, or
+   * `undefined` for repo-anchored auto-discovery (`resolveWebDist`).
+   */
+  webDist?: string | null;
 }
 
 export interface ResolvedServiceConfig extends ServiceOptions {
@@ -29,6 +35,7 @@ export interface ResolvedServiceConfig extends ServiceOptions {
   socketPath?: string;
   cdnUrl?: string;
   embeddedMcp: boolean;
+  webDist: string | null;
 }
 export const MAX_REQUEST_BYTES = 1024 * 1024;
 export const HEADER_READ_TIMEOUT_MS = 5_000;
@@ -386,6 +393,7 @@ export function resolveServiceConfig(options: ServiceOptions): ResolvedServiceCo
     socketPath,
     cdnUrl,
     embeddedMcp: options.embeddedMcp === true,
+    webDist: resolveWebDist(options.webDist),
   };
 }
 
@@ -401,6 +409,7 @@ export interface CliArgs {
   socketPath?: string;
   cdnUrl?: string;
   embeddedMcp: boolean;
+  webDist?: string;
 }
 
 export function parseCliArgs(argv: string[]): CliArgs {
@@ -416,6 +425,7 @@ export function parseCliArgs(argv: string[]): CliArgs {
   let socketPath: string | undefined;
   let cdnUrl: string | undefined;
   let embeddedMcp = false;
+  let webDist: string | undefined;
   let hostGiven = false;
   let portGiven = false;
 
@@ -458,6 +468,9 @@ export function parseCliArgs(argv: string[]): CliArgs {
         break;
       case '--cdn-url':
         cdnUrl = args[++i] ?? '';
+        break;
+      case '--web-dist':
+        webDist = resolve(args[++i] ?? '');
         break;
       case '--embedded-mcp':
         embeddedMcp = true;
@@ -506,6 +519,7 @@ export function parseCliArgs(argv: string[]): CliArgs {
     socketPath,
     cdnUrl,
     embeddedMcp,
+    webDist,
   };
 }
 

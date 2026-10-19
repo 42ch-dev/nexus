@@ -3,8 +3,9 @@
  *
  * Spec: web-ui.md §5. Uses `fetch` against same-origin `/v1/daemon/*`. In dev
  * the Vite dev server proxies these requests to the running daemon
- * (vite.config.ts, default http://127.0.0.1:8420); in release the daemon serves
- * the embedded SPA at `/` and the Daemon API at `/v1/daemon/*` on the same port.
+ * (vite.config.ts, default http://127.0.0.1:8420); in release the built SPA
+ * ships through the Electron desktop shell, and `nexus-service` can optionally
+ * serve that same build at `/` with the Daemon API on one port.
  *
  * Daemon API data endpoints are keyless on loopback (V1.20 model),
  * so this client sends no credentials.

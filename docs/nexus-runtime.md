@@ -146,8 +146,9 @@ tools.nexus.list_observed_peers  tools.nexus.list_modules
 - Bounded bridge: 8 concurrent invokes per process, 30 s per-invoke
   deadline, 500 collection entries / 2 MiB request / 2 MiB response.
 
-The Rust daemon host is not linked into this binary at all: its HTTP router, embedded SPA, Setup/Canvas/Control Room,
-ACP surfaces and schedule/worker supervision do not exist in this graph.
+The Rust daemon host is not linked into this binary at all: its HTTP router,
+Setup/Canvas/Control Room, ACP surfaces and schedule/worker supervision do not
+exist in this graph.
 `nexus-runtime` boots Connect and nothing else.
 
 ## Connect tools (DF-84)
@@ -248,6 +249,27 @@ The runtime boots against the active workspace selected in `config.toml`;
 workspace DB. Concurrency is governed by SQLite WAL (1 writer + N readers,
 `DbPool` busy timeout); the per-work `runtime_lock` is a Rust-host artifact and the Connect invoke path never acquires it. The
 Electron/TS service may run while the runtime serves invokes.
+
+## Optional web UI serve (`apps/nexus-service`)
+
+The Electron desktop shell is the shipped release surface for the built SPA
+(`apps/web/dist`); the standalone `nexus-service` process can optionally serve
+that same build (`--web-dist <dir>`, or auto-discovery of
+`<repo>/apps/web/dist/index.html` via a 3-level module-relative probe):
+
+- `--web-dist <dir>` must hold `index.html` — a miss fails startup; the
+  no-flag auto-discovery probe **misses silently**, and `webDist: null`
+  force-disables it (test/embedder hook).
+- Serving is exempt from `checkApiKey` **only**: the Origin gate + CORS still
+  apply (every `/v1/*` admission, and its `X-API-Key`, is unchanged).
+- `GET`/`HEAD` on a non-`/v1/*` path serves the file, else `index.html` as the
+  SPA fallback; other methods `405` — except `OPTIONS`, answered `204` by the
+  CORS preflight path earlier in the pipeline, so it never reaches the static
+  branch; unknown `/v1/*` keeps `501`.
+- `index.html`/fallback are `no-store`, `/assets/*` is `public, max-age=3600`,
+  and `nosniff` is set everywhere.
+
+Auth model: [header-key auth is its own CSRF defence](../.mstar/knowledge/architecture-patterns/header-key-csrf-defence.md).
 
 ## Allowlist and module scope
 
