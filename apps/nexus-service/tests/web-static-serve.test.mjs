@@ -104,6 +104,11 @@ function errorCode(response) {
   return JSON.parse(response.body.toString()).error.code;
 }
 
+/** Error envelope with the volatile request id masked, for byte-identity checks. */
+function envelopeOf(response) {
+  return response.body.toString().replace(/"request_id":"[^"]*"/, '"request_id":"<id>"');
+}
+
 function withTimeout(promise, ms) {
   let timer;
   return Promise.race([
@@ -268,9 +273,29 @@ describe('web static serve (20261019-web-static-serve)', () => {
       const bypass = await rawRequest(ENABLED_PORT, '/foo/../v1/daemon/nope');
       assert.equal(bypass.status, 501);
       assert.equal(errorCode(bypass), 'route_not_migrated');
-      const envelope = (response) =>
-        response.body.toString().replace(/"request_id":"[^"]*"/, '"request_id":"<id>"');
-      assert.equal(envelope(bypass), envelope(direct));
+      assert.equal(envelopeOf(bypass), envelopeOf(direct));
+    });
+
+    test('a mixed dot-segment + percent-encoded /v1/ form keeps the byte-identical 501 envelope', async () => {
+      // `/foo/../%76%31/...`: `new URL()` collapses `..` but preserves
+      // `%76%31`, and the raw target starts with `/foo/..`, so neither view
+      // alone sees `/v1/`; the exclusion must decode AND dot-normalize the raw
+      // target or this answers the SPA fallback 200. Both mixed forms share
+      // the `/%76%31/...` pathname, so their 501 is byte-identical to the
+      // encoded-prefix case.
+      const encoded = await rawRequest(ENABLED_PORT, '/%76%31/daemon/nope');
+      for (const path of ['/foo/../%76%31/daemon/nope', '/foo/%2e%2e/%76%31/daemon/nope']) {
+        const res = await rawRequest(ENABLED_PORT, path);
+        assert.equal(res.status, 501, `${path} status`);
+        assert.equal(errorCode(res), 'route_not_migrated', `${path} code`);
+        assert.equal(envelopeOf(res), envelopeOf(encoded), `${path} envelope`);
+      }
+    });
+
+    test('POST on a mixed dot-segment + percent-encoded /v1/ form keeps the 501 envelope', async () => {
+      const res = await rawRequest(ENABLED_PORT, '/foo/../%76%31/daemon/nope', { method: 'POST' });
+      assert.equal(res.status, 501);
+      assert.equal(errorCode(res), 'route_not_migrated');
     });
 
     test('an absolute-form request target resolves to the same asset', async () => {
