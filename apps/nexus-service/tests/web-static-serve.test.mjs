@@ -298,6 +298,54 @@ describe('web static serve (20261019-web-static-serve)', () => {
       assert.equal(errorCode(res), 'route_not_migrated');
     });
 
+    test('an empty-segment + `..` /v1 form keeps the byte-identical 501 envelope', async () => {
+      // `path.resolve` ignores duplicate slashes before folding dot segments,
+      // so `..` must consume the real parent `a`, never the empty segment:
+      // `/a//../%76%31/x` resolves to `<root>/v1/x` in the handler. The guard
+      // collapse must agree or this answers the SPA fallback 200. Each pair
+      // differs only in dot-segment spelling and shares its pathname, so the
+      // 501 bodies are byte-identical.
+      const pairs = [
+        ['/a//../%76%31/x', '/a//%2e%2e/%76%31/x'],
+        ['/a///../%76%31/x', '/a///%2e%2e/%76%31/x'],
+      ];
+      for (const [path, spelling] of pairs) {
+        const res = await rawRequest(ENABLED_PORT, path);
+        assert.equal(res.status, 501, `${path} status`);
+        assert.equal(errorCode(res), 'route_not_migrated', `${path} code`);
+        const twin = await rawRequest(ENABLED_PORT, spelling);
+        assert.equal(envelopeOf(res), envelopeOf(twin), `${path} envelope`);
+      }
+    });
+
+    test('POST on an empty-segment + `..` /v1 form keeps the 501 envelope, not a static 405', async () => {
+      const res = await rawRequest(ENABLED_PORT, '/a//../%76%31/x', { method: 'POST' });
+      assert.equal(res.status, 501);
+      assert.equal(errorCode(res), 'route_not_migrated');
+    });
+
+    test('a trailing `.` / `..` /v1 form keeps the byte-identical 501 envelope', async () => {
+      // Skipping empty and `.` segments makes `/v1/`, `/v1/.`, `/%76%31/.`
+      // and `/%76%31/x/..` collapse to the same `/v1`, which `path.resolve`
+      // also resolves to `<root>/v1`; the guard must admit that bare form or
+      // the equivalent paths split between the API and static views.
+      const encoded = await rawRequest(ENABLED_PORT, '/%76%31/');
+      for (const path of ['/%76%31/.', '/%76%31/x/..']) {
+        const res = await rawRequest(ENABLED_PORT, path);
+        assert.equal(res.status, 501, `${path} status`);
+        assert.equal(errorCode(res), 'route_not_migrated', `${path} code`);
+        assert.equal(envelopeOf(res), envelopeOf(encoded), `${path} envelope`);
+      }
+      const direct = await rawRequest(ENABLED_PORT, '/v1/');
+      const dotted = await rawRequest(ENABLED_PORT, '/v1/.');
+      assert.equal(dotted.status, 501);
+      assert.equal(errorCode(dotted), 'route_not_migrated');
+      assert.equal(envelopeOf(dotted), envelopeOf(direct));
+      const bare = await rawRequest(ENABLED_PORT, '/v1');
+      assert.equal(bare.status, 501);
+      assert.equal(errorCode(bare), 'route_not_migrated');
+    });
+
     test('a decoded ? dot-segment /v1/ form keeps the byte-identical 501 envelope', async () => {
       // `%3f` decodes to `?`: a filename character for the static handler's
       // `path.resolve`, URL structure for any re-parse. Both views must

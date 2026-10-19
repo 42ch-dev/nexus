@@ -207,15 +207,17 @@ function rawRequestPath(target: string | undefined): string {
  * Textual dot-segment collapse for the static admission view. It splits on `/`
  * only — the same segmentation the static handler's `path.resolve` applies
  * after its own decode — so a decoded `?`/`#`/space stays a filename character
- * instead of `new URL()` structure. `.` drops, `..` pops (an empty stack is the
- * root and stays there), every other segment is verbatim; empty segments
- * survive so `/v1/` keeps its trailing slash.
+ * instead of `new URL()` structure. Empty and `.` segments are skipped before
+ * any fold, matching `path.resolve`'s treatment of duplicate slashes; `..`
+ * then pops a real parent (an empty stack is the root and stays there), every
+ * other segment is verbatim. The result is single-`/`-separated with no
+ * trailing empty segment, so `/v1/` and `/v1/.` both collapse to `/v1`.
  */
 function collapseDotSegments(decoded: string): string {
   const rooted = decoded.startsWith('/');
   const stack: string[] = [];
   for (const segment of (rooted ? decoded.slice(1) : decoded).split('/')) {
-    if (segment === '.') continue;
+    if (segment === '' || segment === '.') continue;
     if (segment === '..') stack.pop();
     else stack.push(segment);
   }
@@ -426,7 +428,12 @@ export function createServiceServer(
         // decoded `?` or `#` is a filename character, never URL structure, so
         // the admission view and the resolve view segment the same string.
         // The decode + collapse is check-only and never served, so the
-        // handler's sole decode (§5 step 1) is untouched.
+        // handler's sole decode (§5 step 1) is untouched. The collapse skips
+        // empty and `.` segments the way `path.resolve` ignores duplicate
+        // slashes, so `/v1/` and `/v1/.` both normalize to the bare `/v1` that
+        // `path.resolve` also produces — the boundary must therefore accept
+        // the exact `/v1` form, or those equivalent paths split into the API
+        // and static views again.
         let decodedTarget: string | null = null;
         try {
           decodedTarget = decodeURIComponent(staticTarget);
@@ -437,7 +444,9 @@ export function createServiceServer(
           ? collapseDotSegments(decodedTarget)
           : null;
         const apiDomain =
-          urlObj.pathname.startsWith('/v1/') || (normalizedTarget?.startsWith('/v1/') ?? false);
+          urlObj.pathname.startsWith('/v1/') ||
+          normalizedTarget === '/v1' ||
+          (normalizedTarget?.startsWith('/v1/') ?? false);
         if (staticHandler && !apiDomain) {
           await staticHandler(res, method, staticTarget);
           return;
