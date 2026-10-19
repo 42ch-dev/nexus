@@ -146,8 +146,9 @@ tools.nexus.list_observed_peers  tools.nexus.list_modules
 - Bounded bridge: 8 concurrent invokes per process, 30 s per-invoke
   deadline, 500 collection entries / 2 MiB request / 2 MiB response.
 
-The Rust daemon host is not linked into this binary at all: its HTTP router, embedded SPA, Setup/Canvas/Control Room,
-ACP surfaces and schedule/worker supervision do not exist in this graph.
+The Rust daemon host is not linked into this binary at all: its HTTP router,
+Setup/Canvas/Control Room, ACP surfaces and schedule/worker supervision do not
+exist in this graph.
 `nexus-runtime` boots Connect and nothing else.
 
 ## Connect tools (DF-84)
@@ -262,7 +263,9 @@ that same build (`--web-dist <dir>`, or auto-discovery of
 - Serving is exempt from `checkApiKey` **only**: the Origin gate + CORS still
   apply (every `/v1/*` admission, and its `X-API-Key`, is unchanged).
 - `GET`/`HEAD` on a non-`/v1/*` path serves the file, else `index.html` as the
-  SPA fallback; other methods `405`; unknown `/v1/*` keeps `501`.
+  SPA fallback; other methods `405` — except `OPTIONS`, answered `204` by the
+  CORS preflight path earlier in the pipeline, so it never reaches the static
+  branch; unknown `/v1/*` keeps `501`.
 - `index.html`/fallback are `no-store`, `/assets/*` is `public, max-age=3600`,
   and `nosniff` is set everywhere.
 

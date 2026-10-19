@@ -85,7 +85,7 @@ export function isViteDevOrigin(): boolean {
  * Default desktop transport origin.
  *
  * - Vite `:5173` → empty string (same-origin + preview/dev proxy).
- * - Packaged / embedded SPA → `http://localhost:<port>` (prefer `localhost`
+ * - Packaged desktop SPA → `http://localhost:<port>` (prefer `localhost`
  *   over `127.0.0.1` so the host matches the daemon allowlist family and avoids
  *   localhost↔127.0.0.1 cross-host quirks).
  */

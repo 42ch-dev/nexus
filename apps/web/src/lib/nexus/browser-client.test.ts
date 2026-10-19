@@ -784,9 +784,10 @@ describe('BrowserClient transport classification (V1.129 P0)', () => {
   });
 
   it('classifies `http_fallback` when the daemon returns 200 + text/html (release SPA fallback)', async () => {
-    // Release-mode unrouted paths fall through to the embedded SPA shell, which
-    // serves text/html with HTTP 200. The classifier must intercept this BEFORE
-    // `response.json()` would throw a raw SyntaxError (legacy V1.128 behavior).
+    // Release-mode unrouted paths fall through to the static SPA fallback shell,
+    // which serves text/html with HTTP 200. The classifier must intercept this
+    // BEFORE `response.json()` would throw a raw SyntaxError (legacy V1.128
+    // behavior).
     const response = new Response('<!doctype html><html>…</html>', {
       status: 200,
       headers: { 'content-type': 'text/html; charset=utf-8' },

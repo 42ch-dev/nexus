@@ -49,8 +49,10 @@ VITE_DAEMON_URL=http://127.0.0.1:9000 pnpm --filter web dev
 
 All `/v1/daemon/*` requests are proxied to that origin. Daemon API data endpoints
 are **keyless on loopback** (V1.20 model); the browser client sends no
-credentials. In release the daemon serves the embedded SPA at `/` and the Local
-API at `/v1/daemon/*` on the same port, so the client stays same-origin.
+credentials. In release the built SPA ships through the Electron desktop shell;
+the standalone service (`apps/nexus-service`) can optionally serve that same
+`apps/web/dist` build at `/` alongside the Local API at `/v1/daemon/*` on one
+port, so browser clients stay same-origin.
 
 ## Roadmap (desktop-ready boundary)
 
