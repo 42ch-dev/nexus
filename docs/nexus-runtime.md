@@ -249,6 +249,25 @@ workspace DB. Concurrency is governed by SQLite WAL (1 writer + N readers,
 `DbPool` busy timeout); the per-work `runtime_lock` is a Rust-host artifact and the Connect invoke path never acquires it. The
 Electron/TS service may run while the runtime serves invokes.
 
+## Optional web UI serve (`apps/nexus-service`)
+
+The Electron desktop shell is the shipped release surface for the built SPA
+(`apps/web/dist`); the standalone `nexus-service` process can optionally serve
+that same build (`--web-dist <dir>`, or auto-discovery of
+`<repo>/apps/web/dist/index.html` via a 3-level module-relative probe):
+
+- `--web-dist <dir>` must hold `index.html` — a miss fails startup; the
+  no-flag auto-discovery probe **misses silently**, and `webDist: null`
+  force-disables it (test/embedder hook).
+- Serving is exempt from `checkApiKey` **only**: the Origin gate + CORS still
+  apply (every `/v1/*` admission, and its `X-API-Key`, is unchanged).
+- `GET`/`HEAD` on a non-`/v1/*` path serves the file, else `index.html` as the
+  SPA fallback; other methods `405`; unknown `/v1/*` keeps `501`.
+- `index.html`/fallback are `no-store`, `/assets/*` is `public, max-age=3600`,
+  and `nosniff` is set everywhere.
+
+Auth model: [header-key auth is its own CSRF defence](../.mstar/knowledge/architecture-patterns/header-key-csrf-defence.md).
+
 ## Allowlist and module scope
 
 `~/.nexus42/connect/allowlist.json` is the trust root. Each `peer_ids`

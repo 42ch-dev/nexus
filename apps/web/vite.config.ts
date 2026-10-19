@@ -15,8 +15,10 @@ import { resolveDaemonEndpoint } from '../../scripts/dev-backend-manifest.mjs';
 // it, relative `/v1/daemon/*` hits the SPA fallback HTML and surfaces a false
 // "Cannot reach the local daemon" transport error.
 //
-// Release: the built dist/ is embedded into the nexus42 binary (plan P3,
-// rust-embed); no Node runtime ships. The proxy is dev/preview-only.
+// Release: the built dist/ ships through the Electron desktop shell; the
+// standalone service (`apps/nexus-service`) may optionally serve that same
+// build from `apps/web/dist` (`--web-dist <dir>`, or auto-discovery of the
+// repo-anchored directory). The proxy here is dev/preview-only.
 const { baseUrl: daemonUrl } = resolveDaemonEndpoint({
   portEnv: process.env.NEXUS42_DAEMON_PORT,
   urlEnv: process.env.VITE_DAEMON_URL,
@@ -26,7 +28,8 @@ const { baseUrl: daemonUrl } = resolveDaemonEndpoint({
 const daemonProxy = {
   // Daemon API — keyless on loopback (V1.20 model). BrowserClient is
   // same-origin against this proxy in dev/preview; in release it is
-  // same-origin against the daemon port that serves the embedded SPA.
+  // same-origin against whoever serves the built SPA (the Electron shell, or
+  // `nexus-service --web-dist`).
   '/v1/daemon': createDaemonProxyRoute(daemonUrl),
 } as const;
 
