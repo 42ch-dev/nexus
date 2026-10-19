@@ -51,7 +51,8 @@ if (!route) {
   const staticTarget = rawRequestPath(req.url);
   let decoded: string | null = null;
   try { decoded = decodeURIComponent(staticTarget); } catch { /* malformed escape → §5 404 */ }
-  if (staticHandler && !(decoded?.startsWith('/v1/') ?? false)) {
+  const apiDomain = urlObj.pathname.startsWith('/v1/') || (decoded?.startsWith('/v1/') ?? false);
+  if (staticHandler && !apiDomain) {
     await staticHandler(res, method, staticTarget);
     return;
   }
@@ -62,7 +63,7 @@ if (!route) {
 
 **Raw static path vs normalized guard:** the static branch receives `rawRequestPath(req.url)` — the raw request-target path with the query stripped and percent-escapes intact. WHATWG `new URL()` collapses `%2e%2e` dot segments during normalization, so passing `urlObj.pathname` would silently erase the encoded-traversal forms §4/§8 require to return 404 and hand the static boundary an already-normalized path. The single decoding boundary therefore lives inside the handler (§5 step 1), and `pathname` remains encoded at entry.
 
-**Check-decode for the `/v1/` exclusion:** the exclusion test decodes the raw target once, read-only, because `new URL()` preserves percent-escapes in `pathname` (`/v1/` ≠ `/%76%31/`). Without it, `GET /%76%31/daemon/nope` enters the static branch, misses, and answers the SPA fallback 200 where the disabled mode answers the 501 envelope — a silent admission change. The check decode feeds this prefix test only, never serving, so §5 step 1 stays the sole decode of the served path. A malformed escape fails the decode and falls into the static branch, which refuses it 404 per §5.
+**`/v1/` exclusion over both path domains:** the exclusion test covers the normalized `pathname` and a read-only decode of the raw target. The `pathname` comparison uses the same view `matchRoute` uses, so a dot-segment form (`GET /foo/../v1/daemon/nope`) collapses to the API domain instead of slipping into the SPA fallback 200. The raw decode is additionally required because `new URL()` preserves percent-escapes in `pathname` (`/v1/` ≠ `/%76%31/`): without it, `GET /%76%31/daemon/nope` enters the static branch, misses, and answers the SPA fallback 200 where the disabled mode answers the 501 envelope — a silent admission change. The check decode feeds this prefix test only, never serving, so §5 step 1 stays the sole decode of the served path. A malformed escape fails the decode; the `pathname` half still governs, so a malformed target outside `/v1/` falls into the static branch and is refused 404 per §5, while a malformed `/v1/…` target keeps the API-domain 501.
 
 **Exemption boundary (D2):** the branch runs after `checkOrigin` and is exempt from `checkApiKey` only — the same exemption the `unguarded` tier grants `/v1/daemon/runtime/cert-fingerprint` (`routes.ts:296-302`), reached one step earlier because no route matches. Browser navigations carry no `Origin` header, so the origin gate does not block them; CORS response headers are unchanged.
 
@@ -108,7 +109,7 @@ All error bodies use the canonical envelope via the existing `HttpError` → `ma
 
 - MIME map (exact set): `html js mjs css map svg png jpg jpeg gif ico json txt wasm woff woff2`; `html` → `text/html; charset=utf-8`, `js`/`mjs` → `text/javascript`, `json` → `application/json`, `wasm` → `application/wasm`; unknown extension → `application/octet-stream`.
 - `X-Content-Type-Options: nosniff` on every static response — successes and the 404/405 refusal envelopes alike (set at static-handler entry so it survives the shared `sendError` path).
-- `Cache-Control`: `no-store` for `index.html` and every fallback response; `public, max-age=3600` for files under `/assets/` (Vite's content-hashed output); `no-store` for any other served file.
+- `Cache-Control`: `no-store` for `index.html` and every fallback response; `public, max-age=3600` for files under `/assets/` (Vite's content-hashed output); `no-store` for any other served file. The tier derives from the **normalized** root-relative location of the served file (the containment-checked `relative(root, candidate)`), never from the raw first request segment, so a dot-segment alias like `GET /assets/%2e%2e%2findex.html` resolves to the root `index.html` and ships `no-store`.
 - File bodies are **streamed** (`FileHandle.createReadStream()` piped to the response) with `Content-Length` from an `fstat` on that same opened handle, so the advertised length and the streamed bytes describe one file object; a large asset is never buffered whole on the shared API/SSE event loop.
 - Success framing and caching headers are set **only after the opened file's first read returns**. Every pre-header static failure — including a read failure on the already-open file — therefore reaches the single `sendError` envelope without a stale `Content-Length`; a read failure once that first chunk is out destroys the response rather than appending an envelope to a short body.
 - No Range, ETag, or compression this round (D6; add only on evidence).

@@ -62,7 +62,7 @@ function notFound(): HttpError {
 interface StaticHit {
   /** Containment-verified realpath: the bytes actually served (§5 step 4). */
   real: string;
-  /** Whether the request-relative path sits under the `assets/` cache tier. */
+  /** Whether the served file's normalized location sits under the `assets/` tier. */
   assets: boolean;
 }
 
@@ -103,7 +103,10 @@ async function resolveInsideRoot(
     return null;
   }
   if (real !== rootReal && !real.startsWith(rootReal + sep)) throw notFound();
-  return { real, assets: relPath.split(sep)[0] === 'assets' };
+  // The cache tier follows the normalized root-relative location of the file
+  // actually served, not the raw first request segment: `/assets/../index.html`
+  // normalizes to the root `index.html` and must not inherit the assets tier.
+  return { real, assets: rel.split(sep)[0] === 'assets' };
 }
 
 export type StaticFileHandler = (

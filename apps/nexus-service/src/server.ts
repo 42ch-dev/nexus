@@ -398,17 +398,22 @@ export function createServiceServer(
         // UI serving sits after the origin gate and is exempt from the API-key
         // gate only; every `/v1/*` admission is unchanged.
         const staticTarget = rawRequestPath(req.url);
-        // Check-decode only for the `/v1/` exclusion: `new URL()` preserves
-        // `%76`, so `/%76%31/...` would otherwise enter the static branch and
-        // answer the SPA page where BASE answers 501. Never used for serving,
-        // so the handler's sole decode (§5 step 1) is untouched.
+        // The `/v1/` exclusion covers both path domains. The normalized
+        // `pathname` is the same view `matchRoute` uses, so a dot-segment form
+        // (`/foo/../v1/x`) collapses into the API domain and cannot slip into
+        // the SPA fallback. The check-decoded raw target adds the encoded
+        // `/%76%31/...` form, which `new URL()` preserves verbatim; it is
+        // check-only and never served, so the handler's sole decode (§5 step 1)
+        // is untouched.
         let decodedTarget: string | null = null;
         try {
           decodedTarget = decodeURIComponent(staticTarget);
         } catch {
           // Malformed escape: the static handler refuses it 404 (§5 step 1).
         }
-        if (staticHandler && !(decodedTarget?.startsWith('/v1/') ?? false)) {
+        const apiDomain =
+          urlObj.pathname.startsWith('/v1/') || (decodedTarget?.startsWith('/v1/') ?? false);
+        if (staticHandler && !apiDomain) {
           await staticHandler(res, method, staticTarget);
           return;
         }

@@ -188,6 +188,16 @@ describe('web static serve (20261019-web-static-serve)', () => {
       assert.equal(res.headers['cache-control'], 'no-store');
     });
 
+    test('a dot-segment alias to index.html keeps the entry-HTML no-store tier', async () => {
+      // `/assets/%2e%2e%2findex.html` normalizes to the root `index.html`; the
+      // cache tier follows the served location, not the raw first segment.
+      const res = await rawRequest(ENABLED_PORT, '/assets/%2e%2e%2findex.html');
+      assert.equal(res.status, 200);
+      assert.equal(res.headers['content-type'], 'text/html; charset=utf-8');
+      assert.equal(res.headers['cache-control'], 'no-store');
+      assert.equal(res.body.toString(), INDEX_HTML);
+    });
+
     test('GET /spa/route falls back to index.html', async () => {
       const res = await rawRequest(ENABLED_PORT, '/spa/route');
       assert.equal(res.status, 200);
@@ -248,6 +258,19 @@ describe('web static serve (20261019-web-static-serve)', () => {
       const res = await rawRequest(ENABLED_PORT, '/%76%31/daemon/nope');
       assert.equal(res.status, 501);
       assert.equal(errorCode(res), 'route_not_migrated');
+    });
+
+    test('a dot-segment /v1/ form keeps the byte-identical 501 envelope', async () => {
+      // `new URL()` collapses `/foo/../v1/...` to `/v1/...` for `matchRoute`,
+      // while the raw target does not start with `/v1/`; the exclusion must
+      // judge the normalized pathname too or this answers the SPA fallback 200.
+      const direct = await rawRequest(ENABLED_PORT, '/v1/daemon/nope');
+      const bypass = await rawRequest(ENABLED_PORT, '/foo/../v1/daemon/nope');
+      assert.equal(bypass.status, 501);
+      assert.equal(errorCode(bypass), 'route_not_migrated');
+      const envelope = (response) =>
+        response.body.toString().replace(/"request_id":"[^"]*"/, '"request_id":"<id>"');
+      assert.equal(envelope(bypass), envelope(direct));
     });
 
     test('an absolute-form request target resolves to the same asset', async () => {
