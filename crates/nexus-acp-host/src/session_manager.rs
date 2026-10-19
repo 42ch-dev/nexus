@@ -186,11 +186,13 @@ mod tests {
         let json = serde_json::to_string(&entry).unwrap();
         assert!(json.contains("sess-abc"));
         assert!(json.contains("codex-acp"));
+        assert!(json.contains("/home/user/project"));
 
         // Deserialize back
         let decoded: SessionEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.session_id, entry.session_id);
         assert_eq!(decoded.agent_id, entry.agent_id);
+        assert_eq!(decoded.workspace_hint, entry.workspace_hint);
     }
 
     #[test]
@@ -385,7 +387,9 @@ mod tests {
         );
 
         // Delete one session
-        manager.delete_session(&SessionId::new("sess-001")).unwrap();
+        let removed = manager.delete_session(&SessionId::new("sess-001")).unwrap();
+        assert!(removed.is_some());
+        assert_eq!(removed.unwrap().session_id, SessionId::new("sess-001"));
 
         // Verify only sess-002 remains
         let remaining = manager.load_sessions().unwrap();
