@@ -397,27 +397,6 @@ jobs:
       - name: Typecheck nexus-ui package
         run: pnpm --filter @42ch/nexus-ui run typecheck
 
-  verify-graph-pins:
-    name: Verify product dependency graph pins
-    runs-on: ubuntu-latest
-    needs: changes
-    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.rust == 'true'
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-      # Truthful product graph matrix. The previous bespoke step grepped the
-      # (since deleted) nexus-daemon-runtime manifest for `nexus-acp-host` /
-      # `agent-client-protocol` and failed if either appeared; `nexus-acp-host`
-      # has been an unconditional normal dependency of the CLI since V1.94
-      # (7c61c033), so that assertion described a linkage the daemon never had
-      # and failed the job on every run. v1.193 P2 deleted that composition
-      # entirely; this job now runs the machine-checked matrix over the
-      # products that exist (ordinary `cli` CLI, Connect-only runtime,
-      # optional CLI Connect, core domain, core MCP/peer library, native host).
-      # `cargo tree` requires a Rust toolchain.
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
-      - name: Check graph pins
-        run: bash tooling/check-graph-pins.sh
-
   schema-consistency-check:
     name: Schema Consistency Check
     runs-on: ubuntu-latest

@@ -135,14 +135,16 @@ mod tests {
         assert_eq!(TERMINAL_RELEASE, "terminal.release");
     }
 
-    /// Verify the capability set builder returns a non-empty result.
-    ///
-    /// This is a smoke test — the detailed capability structure will be
-    /// validated in Task 4 integration tests.
+    /// Verify the capability set builder enables the required capabilities.
     #[test]
     fn test_build_v1_0_capabilities_returns_non_default() {
         use super::build_v1_0_capabilities;
-        let _caps = build_v1_0_capabilities();
-        // Placeholder — will be enhanced in Task 4.
+
+        let caps = build_v1_0_capabilities();
+
+        // The fs field is a FileSystemCapabilities struct, not an Option
+        assert!(caps.fs.read_text_file);
+        assert!(caps.fs.write_text_file);
+        assert!(caps.terminal);
     }
 }

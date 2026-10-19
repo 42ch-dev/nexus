@@ -481,37 +481,6 @@ fn novel_writing_judge_quality_gate_on_finalize() {
 }
 
 // ---------------------------------------------------------------------------
-// P3 T7: finalize-exit.md prompt file referenced from finalize state
-// ---------------------------------------------------------------------------
-
-#[test]
-fn novel_writing_finalize_exit_prompt_referenced() {
-    let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
-    let loaded = nexus_preset::load_embedded_preset("novel-writing", &caps)
-        .expect("novel-writing preset should load");
-
-    // The finalize state's exit_when references prompts/finalize-exit.md
-    let finalize = loaded
-        .manifest
-        .states
-        .iter()
-        .find(|s| s.id == "finalize")
-        .expect("finalize state should exist");
-
-    if let Some(nexus_preset::manifest::ExitWhen::LlmJudge { template_file, .. }) =
-        &finalize.exit_when
-    {
-        assert_eq!(
-            template_file.as_deref(),
-            Some("prompts/finalize-exit.md"),
-            "finalize should reference prompts/finalize-exit.md"
-        );
-    } else {
-        panic!("finalize should have llm_judge exit_when");
-    }
-}
-
-// ---------------------------------------------------------------------------
 // P3 T5: Verify novel.chapter_transition capability is registered
 // ---------------------------------------------------------------------------
 

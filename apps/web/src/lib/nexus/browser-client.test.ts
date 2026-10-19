@@ -4,8 +4,7 @@
  * on a real fetch, and transport-unreachable handling.
  *
  * These complement the pure unit tests in errors.test.ts (fromBody parsing)
- * and adapters.test.ts (F-P3/F-F1) by exercising the actual fetch → fromBody
- * → thrown NexusClientError chain.
+ * by exercising the actual fetch → fromBody → thrown NexusClientError chain.
  */
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi } from 'vitest';

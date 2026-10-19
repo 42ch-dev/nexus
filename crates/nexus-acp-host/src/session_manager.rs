@@ -186,11 +186,13 @@ mod tests {
         let json = serde_json::to_string(&entry).unwrap();
         assert!(json.contains("sess-abc"));
         assert!(json.contains("codex-acp"));
+        assert!(json.contains("/home/user/project"));
 
         // Deserialize back
         let decoded: SessionEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.session_id, entry.session_id);
         assert_eq!(decoded.agent_id, entry.agent_id);
+        assert_eq!(decoded.workspace_hint, entry.workspace_hint);
     }
 
     #[test]
@@ -385,7 +387,9 @@ mod tests {
         );
 
         // Delete one session
-        manager.delete_session(&SessionId::new("sess-001")).unwrap();
+        let removed = manager.delete_session(&SessionId::new("sess-001")).unwrap();
+        assert!(removed.is_some());
+        assert_eq!(removed.unwrap().session_id, SessionId::new("sess-001"));
 
         // Verify only sess-002 remains
         let remaining = manager.load_sessions().unwrap();
@@ -401,5 +405,65 @@ mod tests {
         assert!(path.to_string_lossy().contains(".nexus42"));
         assert!(path.to_string_lossy().contains("acp"));
         assert_eq!(path.file_name().unwrap(), "sessions.json");
+    }
+
+    #[test]
+    fn delete_session_returns_none_for_nonexistent() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let sessions_file = temp_dir.path().join("sessions.json");
+        let manager = SessionManager::new(sessions_file);
+
+        let deleted = manager
+            .delete_session(&SessionId::new("nonexistent_session"))
+            .unwrap();
+
+        assert!(deleted.is_none());
+    }
+
+    #[test]
+    fn cleanup_expired_empty_list() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let sessions_file = temp_dir.path().join("sessions.json");
+
+        let manager = SessionManager::new(sessions_file.clone());
+        write_sessions(&sessions_file, Vec::new());
+
+        let removed = manager.cleanup_expired().unwrap();
+
+        assert_eq!(removed.len(), 0);
+    }
+
+    #[test]
+    fn cleanup_expired_missing_file() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let sessions_file = temp_dir.path().join("nonexistent.json");
+        let manager = SessionManager::new(sessions_file);
+
+        // Should not error, just return empty
+        let removed = manager.cleanup_expired().unwrap();
+
+        assert_eq!(removed.len(), 0);
+    }
+
+    #[test]
+    fn load_sessions_corrupted_json_errors() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let sessions_file = temp_dir.path().join("corrupted.json");
+
+        // Write invalid JSON
+        std::fs::write(&sessions_file, "not valid json {").unwrap();
+
+        let manager = SessionManager::new(sessions_file);
+
+        // Should return error for corrupted JSON
+        assert!(manager.load_sessions().is_err());
     }
 }
