@@ -259,6 +259,31 @@ describe('web static serve (20261019-web-static-serve)', () => {
       });
     }
 
+    // The admission guard clamps `..` at the request root, so these forms pass
+    // its `/v1/` exclusion as non-API paths, then `path.resolve(root, …)` folds
+    // them back to `<root>/v1/…`. The handler's resolve view is the serving
+    // authority and must refuse that class rather than serve a `v1/` file or
+    // fall back to index.html.
+    for (const path of ['/../dist/v1/y', '/%2e%2e/dist/v1/y', '/x/../../dist/v1/y']) {
+      test(`${path} resolving under <root>/v1 is refused with a bare 404`, async () => {
+        const res = await rawRequest(ENABLED_PORT, path);
+        assert.equal(res.status, 404);
+        assert.equal(errorCode(res), 'not_found');
+        assert.equal(JSON.parse(res.body.toString()).error.message, 'not found');
+        assert.equal(res.headers['x-content-type-options'], 'nosniff');
+        assert.notEqual(res.body.toString(), INDEX_HTML);
+      });
+    }
+
+    test('a literal dist/v1 path is not the refused class', async () => {
+      // Only candidates whose normalized root-relative path is `v1`/`v1/…`
+      // are refused; `<root>/dist/v1/y` keeps normal file-or-fallback rules
+      // (a miss here, since the fixture has no `dist/` tier).
+      const res = await rawRequest(ENABLED_PORT, '/dist/v1/y');
+      assert.equal(res.status, 200);
+      assert.equal(res.body.toString(), INDEX_HTML);
+    });
+
     test('a percent-encoded /v1/ prefix keeps the 501 envelope', async () => {
       const res = await rawRequest(ENABLED_PORT, '/%76%31/daemon/nope');
       assert.equal(res.status, 501);

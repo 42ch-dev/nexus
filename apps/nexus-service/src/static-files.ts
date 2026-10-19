@@ -89,6 +89,11 @@ async function resolveInsideRoot(
   const candidate = resolve(root, relPath);
   const rel = relative(root, candidate);
   if (rel.startsWith('..') || isAbsolute(rel)) throw notFound();
+  // The resolve view is the serving authority: a root-clamped `..` in the
+  // admission guard (`/../dist/v1/y` folds to `/dist/v1/y` there) lands back
+  // on `<root>/v1/y` here. Refuse that class so static content can never
+  // shadow the API-key-gated `/v1/` namespace, whatever the guard or layout.
+  if (rel === 'v1' || rel.startsWith('v1' + sep)) throw notFound();
   let stats: Stats;
   try {
     stats = await stat(candidate);
