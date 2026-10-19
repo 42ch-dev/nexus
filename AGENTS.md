@@ -271,6 +271,12 @@ If `.git` exceeds ~100 MiB or clone slows again: consider `git filter-repo` or a
 
 **Merge discipline:** All PRs to the protected branch (`target_branch`, usually `main`) land via **GitHub PR** only; never local `git merge` onto the protected branch. Merge method by **PR commit count** (head vs base): **≤30 → merge commit**; **>30 → squash**. Branch naming → upstream `mstar-iteration` / `mstar-branch-worktree`.
 
+**Merge authorization gate (HARD — binds every agent, including autonomous harness workflows):**
+
+1. **Green CI is a precondition, never a bet.** A PR does not land while any required check is queued, in progress, or failed. Local scoped tests, L2 reviews, QC/QA approvals, and workflow gate verdicts do not substitute for the CI matrix — the agent waits for every required run to finish and re-verifies all checks green immediately before merging.
+2. **Merging is human-confirmed.** Agents (including PM/coordinator seats driving autonomous-execute, hotfix, delivery tails, or any "PM-verified merge" workflow semantics) stop at **merge-ready**: post the PR link plus full check status and wait for an explicit human instruction in the conversation. Approval of a plan, a fix request, or a harness workflow's autonomous-execute semantics authorizes the *work* — never the landing of a PR to the protected branch. No agent runs `gh pr merge` (or any equivalent) on its own authority.
+3. **Post-merge is still watched.** After a human-confirmed merge, the agent tracks the target branch's post-merge runs to completion; a red run is fixed forward or reverted, and any follow-up landing again passes gates 1–2.
+
 ## Versioning Policy
 
 - Schema contracts use `schema_version` field aligned with bundle envelope
