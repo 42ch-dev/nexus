@@ -9,12 +9,13 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { open as openFile } from 'node:fs/promises';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { Writable } from 'node:stream';
+import { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { after, before, describe, test } from 'node:test';
+import { after, before, describe, mock, test } from 'node:test';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, '..', '..', '..');
@@ -270,6 +271,31 @@ describe('web static serve (20261019-web-static-serve)', () => {
         if (declared !== undefined) assert.equal(Number(declared), res.body.length);
       },
     );
+
+    test('an open-success first-read failure is the 500 envelope, never the asset framing', async () => {
+      // `open` succeeds here; only the opened file's first read fails, which is
+      // the failure QC3-002 flagged as swallowed onto a destroyed response.
+      const probeHandle = await openFile(join(root, 'robots.txt'), 'r');
+      const fileHandleProto = Object.getPrototypeOf(probeHandle);
+      await probeHandle.close();
+      mock.method(
+        fileHandleProto,
+        'createReadStream',
+        () => new Readable({ read() { this.destroy(new Error('injected read failure')); } }),
+      );
+      try {
+        const res = await rawRequest(ENABLED_PORT, '/robots.txt');
+        assert.equal(res.status, 500);
+        const parsed = JSON.parse(res.body.toString());
+        assert.equal(parsed.success, false);
+        assert.equal(parsed.error.code, 'internal');
+        assert.equal(parsed.error.message, 'Internal server error');
+        assert.equal(Number(res.headers['content-length']), res.body.length);
+        assert.ok(!res.body.toString().includes('User-agent'));
+      } finally {
+        mock.restoreAll();
+      }
+    });
 
     test('POST / is a 405 method_not_allowed envelope', async () => {
       const res = await rawRequest(ENABLED_PORT, '/', { method: 'POST' });

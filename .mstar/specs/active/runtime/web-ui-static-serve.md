@@ -109,8 +109,8 @@ All error bodies use the canonical envelope via the existing `HttpError` → `ma
 - MIME map (exact set): `html js mjs css map svg png jpg jpeg gif ico json txt wasm woff woff2`; `html` → `text/html; charset=utf-8`, `js`/`mjs` → `text/javascript`, `json` → `application/json`, `wasm` → `application/wasm`; unknown extension → `application/octet-stream`.
 - `X-Content-Type-Options: nosniff` on every static response — successes and the 404/405 refusal envelopes alike (set at static-handler entry so it survives the shared `sendError` path).
 - `Cache-Control`: `no-store` for `index.html` and every fallback response; `public, max-age=3600` for files under `/assets/` (Vite's content-hashed output); `no-store` for any other served file.
-- File bodies are **streamed** (`FileHandle.createReadStream()` piped to the response) with `Content-Length` taken from the served file's size, so a large asset is never buffered whole on the shared API/SSE event loop.
-- Success framing and caching headers are set **only after the file opens successfully**. Every pre-header static failure therefore reaches the single `sendError` envelope without a stale `Content-Length`; a read failure after headers are sent destroys the response rather than appending an envelope to a short body.
+- File bodies are **streamed** (`FileHandle.createReadStream()` piped to the response) with `Content-Length` from an `fstat` on that same opened handle, so the advertised length and the streamed bytes describe one file object; a large asset is never buffered whole on the shared API/SSE event loop.
+- Success framing and caching headers are set **only after the opened file's first read returns**. Every pre-header static failure — including a read failure on the already-open file — therefore reaches the single `sendError` envelope without a stale `Content-Length`; a read failure once that first chunk is out destroys the response rather than appending an envelope to a short body.
 - No Range, ETag, or compression this round (D6; add only on evidence).
 
 ---

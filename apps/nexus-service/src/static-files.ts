@@ -2,6 +2,7 @@ import { existsSync, realpathSync, type Stats } from 'node:fs';
 import { open, realpath, stat } from 'node:fs/promises';
 import type { ServerResponse } from 'node:http';
 import { dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
+import type { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { HttpError } from './errors.js';
@@ -61,7 +62,6 @@ function notFound(): HttpError {
 interface StaticHit {
   /** Containment-verified realpath: the bytes actually served (§5 step 4). */
   real: string;
-  size: number;
   /** Whether the request-relative path sits under the `assets/` cache tier. */
   assets: boolean;
 }
@@ -103,7 +103,7 @@ async function resolveInsideRoot(
     return null;
   }
   if (real !== rootReal && !real.startsWith(rootReal + sep)) throw notFound();
-  return { real, size: stats.size, assets: relPath.split(sep)[0] === 'assets' };
+  return { real, assets: relPath.split(sep)[0] === 'assets' };
 }
 
 export type StaticFileHandler = (
@@ -111,6 +111,41 @@ export type StaticFileHandler = (
   method: string,
   pathname: string,
 ) => Promise<void>;
+
+/**
+ * Read the first chunk off `stream` and push it back, so a filesystem failure
+ * on an already-open file surfaces before any response byte is written.
+ * Rejects on a read failure; resolves at EOF.
+ */
+function probeFirstChunk(stream: Readable): Promise<void> {
+  return new Promise<void>((resolveProbe, rejectProbe) => {
+    function cleanup() {
+      stream.off('readable', onReadable);
+      stream.off('end', onEnd);
+      stream.off('error', onError);
+    }
+    function onReadable() {
+      const chunk = stream.read();
+      // Null below the probe's watermark just means the next read is pending;
+      // 'readable' fires again.
+      if (chunk === null) return;
+      cleanup();
+      stream.unshift(chunk);
+      resolveProbe();
+    }
+    function onEnd() {
+      cleanup();
+      resolveProbe();
+    }
+    function onError(error: Error) {
+      cleanup();
+      rejectProbe(error);
+    }
+    stream.on('readable', onReadable);
+    stream.once('end', onEnd);
+    stream.once('error', onError);
+  });
+}
 
 /**
  * Serve the built SPA from `root` with `index.html` (`fallback`) for any
@@ -149,10 +184,9 @@ export function createStaticFileHandler(options: {
     const file = hit ? hit.real : safeFallback;
     if (file === null) throw notFound();
     const cache = hit?.assets ? 'public, max-age=3600' : 'no-store';
-    let size: number;
-    if (hit) {
-      size = hit.size;
-    } else {
+    if (!hit) {
+      // The fallback has no request-path probe of its own: a missing or
+      // non-file `index.html` is a clean 404 miss, never a served body (§5).
       let stats: Stats;
       try {
         stats = await stat(file);
@@ -160,12 +194,34 @@ export function createStaticFileHandler(options: {
         throw notFound();
       }
       if (!stats.isFile()) throw notFound();
-      size = stats.size;
     }
     // Open before committing success headers: a read failure must land on the
     // shared `sendError` envelope without the asset's framing, or a keep-alive
     // socket would inherit a stale `Content-Length` (§6).
     const handle = await open(file, 'r');
+    let size: number;
+    try {
+      // Frame the body from the opened descriptor, so the advertised
+      // `Content-Length` and the streamed bytes describe one file object (§6).
+      size = (await handle.stat()).size;
+    } catch (error) {
+      await handle.close();
+      throw error;
+    }
+    // A HEAD answers from metadata alone; a GET probes its first read below, so
+    // the framing and the body can never come from different file objects.
+    const body = method === 'GET' ? handle.createReadStream() : null;
+    if (body) {
+      // Probe the first read before committing success headers: a failure on the
+      // opened file must reach the shared `sendError` envelope, rather than being
+      // swallowed onto an already-destroyed response (§6).
+      try {
+        await probeFirstChunk(body);
+      } catch (error) {
+        body.destroy();
+        throw error;
+      }
+    }
     res.statusCode = 200;
     res.setHeader(
       'Content-Type',
@@ -173,17 +229,17 @@ export function createStaticFileHandler(options: {
     );
     res.setHeader('Cache-Control', cache);
     res.setHeader('Content-Length', String(size));
-    if (method === 'HEAD') {
+    if (body === null) {
       await handle.close();
       res.end();
       return;
     }
     // Streamed, never buffered whole: large assets stay off the shared loop.
     try {
-      await pipeline(handle.createReadStream(), res);
+      await pipeline(body, res);
     } catch {
-      // A body that failed mid-stream cannot be repaired: cut the connection
-      // rather than append an envelope to a short, already-framed body (§6).
+      // A body that failed after the headers went out cannot be repaired: cut
+      // the connection rather than append an envelope to a short, framed body (§6).
       res.destroy();
     }
   };
