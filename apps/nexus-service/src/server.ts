@@ -9,7 +9,7 @@ import {
   createServer as createHttpsServer,
 } from 'node:https';
 import { chmodSync, existsSync, lstatSync, rmSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import net from 'node:net';
 import { randomUUID } from 'node:crypto';
 import type { CoreCloseReport, CoreServiceDiscovery, CoreServiceStopRequest } from '@42ch/nexus-contracts';
@@ -28,6 +28,7 @@ import { createDiscoveryRecord } from './discovery.js';
 import type { ServiceCore } from './lifecycle.js';
 import { checkApiKey, checkOrigin, corsAllowHeaders, corsAllowMethods } from './security.js';
 import { handleRoute, matchRoute } from './routes.js';
+import { createStaticFileHandler } from './static-files.js';
 import { releaseSessionSubscriber, reserveSessionSubscriber } from './sse.js';
 
 export interface RunningService {
@@ -182,6 +183,17 @@ function assertPrivateSocketParent(socketPath: string): void {
   }
 }
 
+/**
+ * Raw request-target path, still percent-encoded and NOT dot-normalized:
+ * `new URL()` collapses `%2e%2e` segments before the static boundary could
+ * refuse them, so the static handler receives the undecoded target minus query.
+ */
+function rawRequestPath(target: string | undefined): string {
+  const raw = target ?? '/';
+  const query = raw.indexOf('?');
+  return query === -1 ? raw : raw.slice(0, query);
+}
+
 function requestId(req: IncomingMessage): string {
   const header = req.headers['x-request-id'];
   const value = Array.isArray(header) ? header[0] : header;
@@ -281,6 +293,10 @@ export function createServiceServer(
   const protocol = config.tlsCert && config.tlsKey ? 'https' : 'http';
   const url = `${protocol}://${formatHttpAuthority(config.host, config.port)}`;
 
+  const staticHandler = config.webDist
+    ? createStaticFileHandler({ root: config.webDist, fallback: join(config.webDist, 'index.html') })
+    : null;
+
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
     const id = requestId(req);
     const origin = req.headers.origin;
@@ -370,6 +386,12 @@ export function createServiceServer(
 
       const route = matchRoute(method, urlObj.pathname);
       if (!route) {
+        // UI serving sits after the origin gate and is exempt from the API-key
+        // gate only; every `/v1/*` admission is unchanged.
+        if (staticHandler && !urlObj.pathname.startsWith('/v1/')) {
+          await staticHandler(res, method, rawRequestPath(req.url));
+          return;
+        }
         sendError(res, new HttpError(501, 'route_not_migrated', `Route is not migrated: ${urlObj.pathname}`), id, origin, config.allowedOrigins);
         return;
       }

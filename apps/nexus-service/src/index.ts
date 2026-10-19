@@ -106,6 +106,9 @@ export function createCloseOwner(options: CloseOwnerOptions): () => Promise<Core
  */
 export async function startService(options: ServiceOptions): Promise<RunningService> {
   const config = resolveServiceConfig(options);
+  if (config.webDist) {
+    console.error(`[nexus-service] serving web UI from ${config.webDist}`);
+  }
   if (config.tlsCert && config.tlsKey) {
     const material = loadTlsMaterial(config.tlsCert, config.tlsKey);
     config.tlsCert = material.cert;

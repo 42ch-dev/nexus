@@ -24,6 +24,7 @@ async function main(): Promise<void> {
     socketPath: args.socketPath,
     cdnUrl: args.cdnUrl,
     embeddedMcp: args.embeddedMcp,
+    webDist: args.webDist,
   });
 
   let shuttingDown = false;

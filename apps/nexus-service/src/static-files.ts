@@ -1,0 +1,144 @@
+import { existsSync, readFileSync, realpathSync, statSync, type Stats } from 'node:fs';
+import type { ServerResponse } from 'node:http';
+import { dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { HttpError } from './errors.js';
+
+/**
+ * Repo-root-anchored default build output (`apps/web/dist`). Three levels up
+ * lands on the repo root from both `src/` (tsx) and `dist/` (compiled), the
+ * same module-relative derivation `routes.ts` uses for its manifest.
+ */
+const BUILT_WEB_INDEX = new URL('../../../apps/web/dist/index.html', import.meta.url);
+
+/**
+ * Resolve the web-UI build directory.
+ *
+ * `null` force-disables serving (test/embedder hook — the discovery probe is
+ * repo-anchored, so a no-dist boot would otherwise depend on checkout state);
+ * `undefined` probes the repo-anchored build output and misses silently; an
+ * explicit directory must actually hold `index.html`, so a mistyped
+ * `--web-dist` fails the start instead of silently serving nothing.
+ */
+export function resolveWebDist(explicit: string | undefined | null): string | null {
+  if (explicit === null) return null;
+  if (explicit === undefined) {
+    const index = fileURLToPath(BUILT_WEB_INDEX);
+    return existsSync(index) ? dirname(index) : null;
+  }
+  const root = resolve(explicit);
+  if (!existsSync(resolve(root, 'index.html'))) {
+    throw new Error(`--web-dist requires ${root}/index.html to exist: ${root}`);
+  }
+  return root;
+}
+
+const CONTENT_TYPES: Record<string, string> = {
+  html: 'text/html; charset=utf-8',
+  js: 'text/javascript',
+  mjs: 'text/javascript',
+  css: 'text/css; charset=utf-8',
+  map: 'application/json',
+  svg: 'image/svg+xml',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  ico: 'image/x-icon',
+  json: 'application/json',
+  txt: 'text/plain; charset=utf-8',
+  wasm: 'application/wasm',
+  woff: 'font/woff',
+  woff2: 'font/woff2',
+};
+
+function notFound(): HttpError {
+  return new HttpError(404, 'not_found', 'not found');
+}
+
+/**
+ * Map one request path to the file it may serve, or `null` when the path is a
+ * plain miss (ENOENT / directory) and the SPA fallback applies. Traversal
+ * refusals throw so the caller's single error envelope reports them.
+ */
+function resolveInsideRoot(root: string, rootReal: string, pathname: string): string | null {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    throw notFound();
+  }
+  if (decoded.includes('\0') || decoded.includes('\\')) throw notFound();
+  // The request path is rooted at `root`; a decoded `//…` is an absolute path.
+  const relPath = decoded.startsWith('/') ? decoded.slice(1) : decoded;
+  if (isAbsolute(relPath)) throw notFound();
+  const candidate = resolve(root, relPath);
+  const rel = relative(root, candidate);
+  if (rel.startsWith('..') || isAbsolute(rel)) throw notFound();
+  let stats: Stats;
+  try {
+    stats = statSync(candidate);
+  } catch {
+    return null;
+  }
+  if (!stats.isFile()) return null;
+  let real: string;
+  try {
+    real = realpathSync(candidate);
+  } catch {
+    return null;
+  }
+  if (real !== rootReal && !real.startsWith(rootReal + sep)) throw notFound();
+  return candidate;
+}
+
+export type StaticFileHandler = (
+  res: ServerResponse,
+  method: string,
+  pathname: string,
+) => Promise<void>;
+
+/**
+ * Serve the built SPA from `root` with `index.html` (`fallback`) for any
+ * unknown path. `pathname` is the raw request-target path: it is decoded here
+ * exactly once, and never again.
+ */
+export function createStaticFileHandler(options: {
+  root: string;
+  fallback: string;
+}): StaticFileHandler {
+  const root = resolve(options.root);
+  const fallback = resolve(options.fallback);
+  // Computed once: symlink containment is judged against the real root, never
+  // against a path that is itself a symlink.
+  const rootReal = realpathSync(root);
+
+  return async (res, method, pathname) => {
+    if (method !== 'GET' && method !== 'HEAD') {
+      throw new HttpError(405, 'method_not_allowed', 'method not allowed');
+    }
+    const hit = resolveInsideRoot(root, rootReal, pathname);
+    const file = hit ?? fallback;
+    const cache =
+      hit && relative(root, hit).split(sep)[0] === 'assets' ? 'public, max-age=3600' : 'no-store';
+    let size: number;
+    try {
+      size = statSync(file).size;
+    } catch {
+      throw notFound();
+    }
+    res.statusCode = 200;
+    res.setHeader(
+      'Content-Type',
+      CONTENT_TYPES[extname(file).slice(1).toLowerCase()] ?? 'application/octet-stream',
+    );
+    res.setHeader('Cache-Control', cache);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Length', String(size));
+    if (method === 'HEAD') {
+      res.end();
+      return;
+    }
+    res.end(readFileSync(file));
+  };
+}
