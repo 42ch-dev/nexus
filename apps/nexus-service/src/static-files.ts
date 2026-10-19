@@ -112,13 +112,27 @@ export function createStaticFileHandler(options: {
   // Computed once: symlink containment is judged against the real root, never
   // against a path that is itself a symlink.
   const rootReal = realpathSync(root);
+  // The fallback is containment-checked once here too: a symlinked `index.html`
+  // escaping the root must be refused like a direct hit, never served.
+  let safeFallback: string | null = null;
+  try {
+    const fallbackReal = realpathSync(fallback);
+    if (fallbackReal === rootReal || fallbackReal.startsWith(rootReal + sep)) {
+      safeFallback = fallback;
+    }
+  } catch {
+    // Unresolvable fallback: refuse at request time (404).
+  }
 
   return async (res, method, pathname) => {
+    // Set before any throw so the single error envelope carries it too.
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     if (method !== 'GET' && method !== 'HEAD') {
       throw new HttpError(405, 'method_not_allowed', 'method not allowed');
     }
     const hit = resolveInsideRoot(root, rootReal, pathname);
-    const file = hit ?? fallback;
+    const file = hit ?? safeFallback;
+    if (file === null) throw notFound();
     const cache =
       hit && relative(root, hit).split(sep)[0] === 'assets' ? 'public, max-age=3600' : 'no-store';
     let size: number;
@@ -133,7 +147,6 @@ export function createStaticFileHandler(options: {
       CONTENT_TYPES[extname(file).slice(1).toLowerCase()] ?? 'application/octet-stream',
     );
     res.setHeader('Cache-Control', cache);
-    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Content-Length', String(size));
     if (method === 'HEAD') {
       res.end();

@@ -49,13 +49,15 @@ The static branch MUST be inserted inside the step-4 `if (!route)` block, and no
 ```ts
 if (!route) {
   if (staticHandler && !urlObj.pathname.startsWith('/v1/')) {
-    await staticHandler(res, method, urlObj.pathname);
+    await staticHandler(res, method, rawRequestPath(req.url));
     return;
   }
   sendError(res, new HttpError(501, 'route_not_migrated', `Route is not migrated: ${urlObj.pathname}`), …);
   return;
 }
 ```
+
+**Raw static path vs normalized guard:** the `/v1/` exclusion uses `urlObj.pathname`, but the static branch receives `rawRequestPath(req.url)` — the raw request-target path with the query stripped and percent-escapes intact. WHATWG `new URL()` collapses `%2e%2e` dot segments during normalization, so passing `urlObj.pathname` would silently erase the encoded-traversal forms §4/§8 require to return 404 and hand the static boundary an already-normalized path. The single decoding boundary therefore lives inside the handler (§5 step 1), and `pathname` remains encoded at entry.
 
 **Exemption boundary (D2):** the branch runs after `checkOrigin` and is exempt from `checkApiKey` only — the same exemption the `unguarded` tier grants `/v1/daemon/runtime/cert-fingerprint` (`routes.ts:296-302`), reached one step earlier because no route matches. Browser navigations carry no `Origin` header, so the origin gate does not block them; CORS response headers are unchanged.
 
@@ -88,16 +90,16 @@ All error bodies use the canonical envelope via the existing `HttpError` → `ma
 
 1. `decodeURIComponent(pathname)` exactly once; malformed escape → 404. The decoded value is never decoded again.
 2. Reject (404) any decoded path containing NUL (`\0`) or backslash (`\`) — backslash is refused on all platforms, per D5.
-3. `path.resolve(root, decoded)`; `path.relative(root, candidate)` must not be empty-for-escape, must not start with `..`, and must not be absolute — else 404.
+3. Remove exactly one leading request-root slash from the decoded value, reject (404) an absolute remainder (e.g. `//…` from `%2F…`), then `path.resolve(root, remainder)`; `path.relative(root, candidate)` must not be empty-for-escape, must not start with `..`, and must not be absolute — else 404. (Literal `path.resolve(root, decoded)` with an ordinary `/assets/x` discards `root`, so the root slash is stripped first; stripping every leading slash would lose the absolute-path refusal.)
 4. File hit: `realpathSync(candidate)` must remain under `realpathSync(root)` (computed once at handler creation) — symlink escape → 404.
-5. Miss or non-file (including directory and ENOENT): serve the `index.html` fallback (200). No `ENOENT`/filesystem message ever reaches the client.
+5. Miss or non-file (including directory and ENOENT): serve the `index.html` fallback (200). The fallback is itself containment-checked once at handler creation — a symlinked `index.html` escaping the root is refused (404) on every fallback path, exactly like a direct hit, never served. No `ENOENT`/filesystem message ever reaches the client.
 
 ---
 
 ## 6. Response hygiene (D6)
 
 - MIME map (exact set): `html js mjs css map svg png jpg jpeg gif ico json txt wasm woff woff2`; `html` → `text/html; charset=utf-8`, `js`/`mjs` → `text/javascript`, `json` → `application/json`, `wasm` → `application/wasm`; unknown extension → `application/octet-stream`.
-- `X-Content-Type-Options: nosniff` on every static response.
+- `X-Content-Type-Options: nosniff` on every static response — successes and the 404/405 refusal envelopes alike (set at static-handler entry so it survives the shared `sendError` path).
 - `Cache-Control`: `no-store` for `index.html` and every fallback response; `public, max-age=3600` for files under `/assets/` (Vite's content-hashed output); `no-store` for any other served file.
 - No Range, ETag, or compression this round (D6; add only on evidence).
 
@@ -112,7 +114,7 @@ export type StaticFileHandler = (res: ServerResponse, method: string, pathname: 
 export function createStaticFileHandler(options: { root: string; fallback: string }): StaticFileHandler;
 ```
 
-`fallback` is the absolute `index.html` path; the handler owns the full method matrix (GET/HEAD serve, others 405) so the wiring in `server.ts` is the single branch shown in §3. Consumes: existing `HttpError` envelope, `ServerResponse`; touches neither the auth chain nor `bind.ts`.
+`fallback` is the absolute `index.html` path; the handler owns the full method matrix (GET/HEAD serve, others 405) so the wiring in `server.ts` is the single branch shown in §3. `pathname` is the raw, still-encoded request-target path (query stripped); the handler performs the sole decode. Consumes: existing `HttpError` envelope, `ServerResponse`; touches neither the auth chain nor `bind.ts`.
 
 ---
 

@@ -21,6 +21,7 @@ const serviceRoot = join(__dirname, '..');
 const ENABLED_PORT = 18_531;
 const DISABLED_PORT = 18_532;
 const KEYED_PORT = 18_533;
+const ESCAPE_PORT = 18_535;
 
 const INDEX_HTML = '<!doctype html><html><body>nexus-web-fixture</body></html>';
 const APP_JS = "console.log('app-test');\n";
@@ -48,6 +49,21 @@ function webDistFixture() {
   mkdirSync(outside);
   writeFileSync(join(outside, 'secret.txt'), 'secret');
   symlinkSync(outside, join(root, 'escape'), 'dir');
+  return root;
+}
+
+/**
+ * Dist whose `index.html` is a symlink to a file outside the root: the SPA
+ * fallback must be refused exactly like a direct `/index.html` hit.
+ */
+function escapingIndexFixture() {
+  const base = tempDir('nexus-webdist-esc-');
+  const root = join(base, 'dist');
+  mkdirSync(join(root, 'assets'), { recursive: true });
+  const outside = join(base, 'outside');
+  mkdirSync(outside);
+  writeFileSync(join(outside, 'index.html'), '<!doctype html><body>outside-secret</body>');
+  symlinkSync(join(outside, 'index.html'), join(root, 'index.html'), 'file');
   return root;
 }
 
@@ -214,6 +230,7 @@ describe('web static serve (20261019-web-static-serve)', () => {
         assert.equal(JSON.parse(res.body.toString()).error.message, 'not found');
         assert.ok(!res.body.toString().includes('ENOENT'));
         assert.ok(!res.body.toString().includes('secret'));
+        assert.equal(res.headers['x-content-type-options'], 'nosniff');
       });
     }
 
@@ -221,6 +238,7 @@ describe('web static serve (20261019-web-static-serve)', () => {
       const res = await rawRequest(ENABLED_PORT, '/', { method: 'POST' });
       assert.equal(res.status, 405);
       assert.equal(errorCode(res), 'method_not_allowed');
+      assert.equal(res.headers['x-content-type-options'], 'nosniff');
     });
 
     test('a non-allowlisted Origin still hits the checkOrigin 403', async () => {
@@ -230,6 +248,28 @@ describe('web static serve (20261019-web-static-serve)', () => {
       assert.equal(res.status, 403);
       assert.equal(errorCode(res), 'forbidden');
     });
+  });
+
+  describe('enabled mode (escaping index.html symlink)', () => {
+    let service;
+
+    before(async () => {
+      service = await startFixtureService(ESCAPE_PORT, { webDist: escapingIndexFixture() });
+    });
+
+    after(async () => {
+      if (service) await withTimeout(service.close(), 8_000);
+    });
+
+    for (const path of ['/', '/missing-spa-route', '/index.html']) {
+      test(`GET ${path} refuses the outside-root fallback with a bare 404`, async () => {
+        const res = await rawRequest(ESCAPE_PORT, path);
+        assert.equal(res.status, 404);
+        assert.equal(errorCode(res), 'not_found');
+        assert.ok(!res.body.toString().includes('outside-secret'));
+        assert.equal(res.headers['x-content-type-options'], 'nosniff');
+      });
+    }
   });
 
   describe('enabled mode (keyed)', () => {
