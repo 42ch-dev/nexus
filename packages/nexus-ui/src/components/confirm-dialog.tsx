@@ -21,6 +21,8 @@ export interface ConfirmDialogProps {
   description?: string;
   confirmLabel: string;
   cancelLabel: string;
+  /** Accessible name for the header dismiss control; defaults to "Close dialog". */
+  closeLabel?: string;
   destructive?: boolean;
   /** Caller mutation busy state: disables both actions and shows the spinner. */
   pending?: boolean;
@@ -34,6 +36,7 @@ export function ConfirmDialog({
   description,
   confirmLabel,
   cancelLabel,
+  closeLabel,
   destructive = false,
   pending = false,
   onConfirm,
@@ -47,7 +50,7 @@ export function ConfirmDialog({
         if (!pending) onOpenChange(next);
       }}
     >
-      <DialogContent title={title} description={description}>
+      <DialogContent title={title} description={description} closeLabel={closeLabel}>
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="secondary" disabled={pending} onClick={() => onOpenChange(false)}>
             {cancelLabel}

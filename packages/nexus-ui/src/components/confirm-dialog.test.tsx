@@ -202,6 +202,101 @@ describe('ConfirmDialog', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
+  it('pending blocks Escape-key dismissal', () => {
+    const onOpenChange = vi.fn();
+    render(
+      <ConfirmDialog
+        open
+        onOpenChange={onOpenChange}
+        title="Delete Work"
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        pending
+        onConfirm={vi.fn()}
+      />,
+    );
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('pending blocks outside-click dismissal', async () => {
+    const onOpenChange = vi.fn();
+    const { container } = render(
+      <ConfirmDialog
+        open
+        onOpenChange={onOpenChange}
+        title="Delete Work"
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        pending
+        onConfirm={vi.fn()}
+      />,
+    );
+
+    // Radix attaches its document pointerdown listener after a tick.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const overlay = container.ownerDocument.body.querySelector('.fixed.inset-0')!;
+    fireEvent.pointerDown(overlay, { pointerType: 'mouse', bubbles: true, button: 0 });
+    fireEvent.click(overlay, { bubbles: true });
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('Escape and outside click dismiss through onOpenChange(false) when not pending', async () => {
+    const onOpenChange = vi.fn();
+    const { container } = render(
+      <ConfirmDialog
+        open
+        onOpenChange={onOpenChange}
+        title="Delete Work"
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        onConfirm={() => {}}
+      />,
+    );
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+
+    // Radix attaches its document pointerdown listener after a tick.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const overlay = container.ownerDocument.body.querySelector('.fixed.inset-0')!;
+    fireEvent.pointerDown(overlay, { pointerType: 'mouse', bubbles: true, button: 0 });
+    fireEvent.click(overlay, { bubbles: true });
+    expect(onOpenChange).toHaveBeenCalledTimes(2);
+    expect(onOpenChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it('close control falls back to the default label and honors a closeLabel override', () => {
+    const { unmount } = render(
+      <ConfirmDialog
+        open
+        onOpenChange={() => {}}
+        title="Delete Work"
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        onConfirm={() => {}}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Close dialog' })).toBeInTheDocument();
+    unmount();
+
+    render(
+      <ConfirmDialog
+        open
+        onOpenChange={() => {}}
+        title="Delete Work"
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        closeLabel="Dismiss"
+        onConfirm={() => {}}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Dismiss' })).toBeInTheDocument();
+  });
+
   it('panel inherits the modal token recipe from the promoted Dialog', () => {
     render(
       <ConfirmDialog

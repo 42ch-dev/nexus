@@ -27,6 +27,8 @@ export interface FormDialogProps {
   onSubmit?: FormEventHandler<HTMLFormElement>;
   submitLabel: string;
   cancelLabel: string;
+  /** Accessible name for the header dismiss control; defaults to "Close dialog". */
+  closeLabel?: string;
   /** Caller mutation busy state: disables both actions and shows the spinner. */
   pending?: boolean;
   /** Inline error copy (e.g. a failed mutation message); renders the error slot. */
@@ -42,6 +44,7 @@ export function FormDialog({
   onSubmit,
   submitLabel,
   cancelLabel,
+  closeLabel,
   pending = false,
   error,
 }: FormDialogProps) {
@@ -54,7 +57,7 @@ export function FormDialog({
         if (!pending) onOpenChange(next);
       }}
     >
-      <DialogContent title={title} description={description}>
+      <DialogContent title={title} description={description} closeLabel={closeLabel}>
         {/* Always preventDefault: implicit submit (Enter key, requestSubmit)
             must never fall through to native navigation/reload, and pending
             intercepts the event before it reaches the caller's handler. */}
