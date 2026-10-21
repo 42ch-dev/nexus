@@ -560,7 +560,7 @@ Buttons use a clear verb when the object is obvious: Save, Create, Delete. Dialo
 
 ## Component Primitives
 
-All current public signatures remain. No new public families and no promotion of Dialog/States/Table. Values are frontmatter recipes; behavior remains native or owned by the existing component.
+All current public signatures remain. Dialog, States (EmptyState/Loading/ErrorState), Table and other app-proven primitives MAY be promoted to public component families under the library discipline: pure presentational, caller-owned copy via props, a per-component test, and export via `src/index.ts` with no deep imports. Values are frontmatter recipes; behavior remains native or owned by the existing component.
 
 - **Button:** four variants × four sizes; source-compatible `asChild`, refs, native attributes and callbacks. Primary uses the new blue-700/800/900 recipe. Disabled remains non-interactive. No layout transform on hover/press.
 - **Badge:** neutral/running/queued/warning/error/preset × soft/solid. Preserve default soft and state meaning. Soft uses named semantic fills/borders; solid chooses text by fill luminance. Domain badges retain every finding/task/chapter status.
@@ -570,7 +570,7 @@ All current public signatures remain. No new public families and no promotion of
 - **Toast:** existing success/error/warning/info, real queue/dismissal/portals and caller-owned copy. Dialog/Toast portals stay in their rendering document, including comparison frames. Long text wraps, viewport inset is respected.
 - **TransportErrorBlock:** existing six kinds and optional actions; compact text-link CTAs, not filled buttons in an alert. Preserve kind-to-action/callback/copy rules.
 - **Compute composites:** existing field schemas, entity pickers, proposal sections, statuses, run tables, node chrome, inspector props remain. Show existing empty/populated/invalid/disabled/truncated/overflow/provenance states as supported, never simulate network state inside a pure primitive.
-- **Dialog / States / Table:** remain transitional @web-ui extracts in Studio. Style through shared tokens and fixture composition only. Dialog/Popover recipes also govern menus/tooltips; no new package export is implied.
+- **Dialog / States / Table:** MAY be promoted to public library families under the discipline above (rationale: repeated Studio composition has proven these APIs; promotion consolidates them instead of leaving per-page copies to drift). Until promoted they remain transitional @web-ui extracts in Studio, styled through shared tokens and fixture composition. Dialog/Popover recipes also govern menus/tooltips.
 
 ## Form Field
 

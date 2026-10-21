@@ -438,6 +438,8 @@ Graphite companion to [DESIGN.md](DESIGN.md), with exactly the same token paths.
 
 Dark values use brighter cobalt interaction on neutral graphite planes. Bright primary/destructive/solid-status fills use `brand-deep-blue` labels, not white. Dark small metadata uses gray-700; scrims remain dark, never inverted gray-1000 washes. Content display is the same offline system sans hierarchy as light, not serif.
 
+Promotion boundary matches the light contract: Dialog, States (EmptyState/Loading/ErrorState), Table and other app-proven primitives MAY be promoted to public families under the library discipline (pure presentational, caller-owned copy, per-component tests, `src/index.ts` export, no deep imports); promoted components follow the same light/dark token parity.
+
 ## Contrast
 
 Design-time sRGB arithmetic: gray-1000 on background-100 16.15:1; gray-700 on background-300 6.78:1; gray-600 on background-300 4.98:1; blue-700 on background-300 6.52:1; brand-deep-blue on blue-700/800/900 6.81/8.08/9.54:1. These are token calculations, not rendered QA. Actual alpha/state combinations require browser evidence.
