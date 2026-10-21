@@ -442,6 +442,8 @@ Promotion boundary matches the light contract: Dialog, States (EmptyState/Loadin
 
 V1.148 P1 promotion (light contract §Component Primitives): Dialog, Sheet, States, Table, and EmptyCreateCard are now public `@42ch/nexus-ui` families. Dark parity is token-driven — scrim stays dark, surfaces resolve through the graphite token projections, and the explicit `dark:` hooks (Spinner blue-700, retry cobalt) match the light recipes.
 
+V1.149 P1 promotion (light contract §Component Primitives): ListStateContainer is now a public `@42ch/nexus-ui` L2 pattern family. It composes the V1.148 States primitives, so dark parity is inherited — state branches resolve through the same graphite projections and dark hooks (Spinner blue-700, retry cobalt).
+
 ## Contrast
 
 Design-time sRGB arithmetic: gray-1000 on background-100 16.15:1; gray-700 on background-300 6.78:1; gray-600 on background-300 4.98:1; blue-700 on background-300 6.52:1; brand-deep-blue on blue-700/800/900 6.81/8.08/9.54:1. These are token calculations, not rendered QA. Actual alpha/state combinations require browser evidence.
