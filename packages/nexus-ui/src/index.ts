@@ -148,6 +148,7 @@ export {
   ListStateContainer,
   type ListStateContainerProps,
 } from './components/list-state-container';
+export { ConfirmDialog, type ConfirmDialogProps } from './components/confirm-dialog';
 
 // V1.147 P1 — promoted Compute Run Studio presentational primitives.
 // Pure presentational: data + caller-owned copy + callbacks in; no daemon,
