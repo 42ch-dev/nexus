@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
+import { i18n } from '@/lib/i18n/config';
+
 import { Dialog, DialogContent } from './dialog';
 import { Sheet, SheetContent } from './sheet';
 
@@ -62,5 +64,44 @@ describe('Sheet (v0.4 elevation)', () => {
     expect(content.className).toMatch(/\bshadow-elevation-4\b/);
     expect(content.className).toMatch(/\bw-sheet\b/);
     expect(content.className).not.toMatch(/\[min\(100vw,280px\)\]/);
+  });
+});
+
+describe('close-label i18n defaults (V1.148 wrapper)', () => {
+  it('Dialog/Sheet fall back to the zh-CN translated close label when copy props are omitted', async () => {
+    await i18n.changeLanguage('zh-CN');
+
+    const dialog = render(
+      <Dialog open>
+        <DialogContent title="Delete Work">
+          <p>Body</p>
+        </DialogContent>
+      </Dialog>,
+    );
+    expect(screen.getByRole('button', { name: '关闭对话框' })).toBeInTheDocument();
+    dialog.unmount();
+
+    render(
+      <Sheet open>
+        <SheetContent title="Inspector">
+          <p>Rail</p>
+        </SheetContent>
+      </Sheet>,
+    );
+    expect(screen.getByRole('button', { name: '关闭对话框' })).toBeInTheDocument();
+  });
+
+  it('explicit closeLabel overrides the injected default', async () => {
+    await i18n.changeLanguage('zh-CN');
+
+    render(
+      <Dialog open>
+        <DialogContent title="Delete Work" closeLabel="Dismiss">
+          <p>Body</p>
+        </DialogContent>
+      </Dialog>,
+    );
+    expect(screen.getByRole('button', { name: 'Dismiss' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '关闭对话框' })).not.toBeInTheDocument();
   });
 });
