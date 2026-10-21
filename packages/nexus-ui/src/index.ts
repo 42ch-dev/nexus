@@ -97,6 +97,46 @@ export {
   type TabsContentProps,
 } from './components/tabs';
 
+// V1.148 P1 — promoted Dialog presentational primitive (Radix dialog; caller-owned copy).
+export {
+  Dialog,
+  DialogTrigger,
+  DialogClose,
+  DialogContent,
+  type DialogContentProps,
+} from './components/dialog';
+
+// V1.148 P1 — promoted Sheet presentational primitive (end-rail drawer; caller-owned copy).
+export {
+  Sheet,
+  SheetTrigger,
+  SheetClose,
+  SheetContent,
+  type SheetContentProps,
+} from './components/sheet';
+
+// V1.148 P1 — promoted Table presentational primitives (native table recipe).
+export {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from './components/table';
+
+// V1.148 P1 — promoted States presentational primitives (Spinner/Loading/Empty/Unavailable/Error).
+export {
+  Spinner,
+  LoadingState,
+  EmptyState,
+  UnavailableState,
+  ErrorState,
+} from './components/states';
+
+// V1.148 P1 — promoted EmptyCreateCard presentational primitive (empty-list create affordance).
+export { EmptyCreateCard } from './components/empty-create-card';
+
 // V1.147 P1 — promoted Compute Run Studio presentational primitives.
 // Pure presentational: data + caller-owned copy + callbacks in; no daemon,
 // no wire-contract imports (structural mirrors only), no routing.
