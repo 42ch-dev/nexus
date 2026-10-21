@@ -46,9 +46,25 @@ export function FormDialog({
   error,
 }: FormDialogProps) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    // Guard dismissal at the Root: while pending, the X control, Escape, and
+    // overlay click all funnel through onOpenChange and must not fire.
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!pending) onOpenChange(next);
+      }}
+    >
       <DialogContent title={title} description={description}>
-        <form onSubmit={onSubmit} className="flex flex-col gap-4">
+        {/* Always preventDefault: implicit submit (Enter key, requestSubmit)
+            must never fall through to native navigation/reload, and pending
+            intercepts the event before it reaches the caller's handler. */}
+        <form
+          className="flex flex-col gap-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!pending) onSubmit?.(event);
+          }}
+        >
           {children}
           {error && (
             <div

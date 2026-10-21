@@ -166,6 +166,42 @@ describe('ConfirmDialog', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
+  it('pending blocks dismissal through the close control', () => {
+    const onOpenChange = vi.fn();
+    render(
+      <ConfirmDialog
+        open
+        onOpenChange={onOpenChange}
+        title="Delete Work"
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        pending
+        onConfirm={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('close control dismisses through onOpenChange(false) when not pending', () => {
+    const onOpenChange = vi.fn();
+    render(
+      <ConfirmDialog
+        open
+        onOpenChange={onOpenChange}
+        title="Delete Work"
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        onConfirm={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
   it('panel inherits the modal token recipe from the promoted Dialog', () => {
     render(
       <ConfirmDialog

@@ -39,7 +39,14 @@ export function ConfirmDialog({
   onConfirm,
 }: ConfirmDialogProps) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    // Guard dismissal at the Root: while pending, the X control, Escape, and
+    // overlay click all funnel through onOpenChange and must not fire.
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!pending) onOpenChange(next);
+      }}
+    >
       <DialogContent title={title} description={description}>
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="secondary" disabled={pending} onClick={() => onOpenChange(false)}>

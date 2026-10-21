@@ -134,6 +134,48 @@ describe('FormDialog', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it('pending intercepts implicit submit before it reaches the caller handler', () => {
+    const onSubmit = vi.fn();
+    render(
+      <FormDialog
+        open
+        onOpenChange={() => {}}
+        title="Create agent"
+        submitLabel="Create"
+        cancelLabel="Cancel"
+        pending
+        onSubmit={onSubmit}
+      >
+        <input name="name" />
+      </FormDialog>,
+    );
+
+    // Enter-key implicit submit path: a submit event on the form itself.
+    const form = document.querySelector('form')!;
+    fireEvent.submit(form);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('implicit submit without onSubmit does not navigate or unmount the dialog', () => {
+    render(
+      <FormDialog
+        open
+        onOpenChange={() => {}}
+        title="Create agent"
+        submitLabel="Create"
+        cancelLabel="Cancel"
+      >
+        <input name="name" />
+      </FormDialog>,
+    );
+
+    const form = document.querySelector('form')!;
+    fireEvent.submit(form);
+    // preventDefault keeps jsdom from attempting native navigation; the
+    // dialog stays mounted and no reload wipes its state.
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
   it('panel inherits the modal token recipe from the promoted Dialog', () => {
     render(
       <FormDialog
