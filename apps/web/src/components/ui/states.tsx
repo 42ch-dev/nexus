@@ -1,142 +1,46 @@
-import { Loader2 } from 'lucide-react';
-import type { ReactNode } from 'react';
+/**
+ * States — DESIGN.md §Component Primitives/States.
+ *
+ * Re-exported from @42ch/nexus-ui (V1.148 P1 promotion).
+ * The package owns the presentational implementation; this file is a thin
+ * wrapper to avoid call-site churn in apps/web. Default copy stays
+ * locale-aware: the wrapper injects the i18n defaults for loading / error
+ * title / retry labels, callers may still pass explicit props to override.
+ */
 import { useTranslation } from 'react-i18next';
 
-import { cn } from '@/lib/utils';
+import {
+  ErrorState as NexusErrorState,
+  LoadingState as NexusLoadingState,
+  UnavailableState as NexusUnavailableState,
+} from '@42ch/nexus-ui';
 
-/**
- * Spinner — DESIGN.md §Motion. A small rotating loader used in loading states.
- * Honors prefers-reduced-motion via the global CSS rule (animation-duration 0).
- */
-export function Spinner({ className }: { className?: string }) {
-  return (
-    <Loader2
-      className={cn('h-4 w-4 animate-spin text-blue-1000 dark:text-blue-700', className)}
-      aria-hidden
-    />
-  );
-}
+export { Spinner, EmptyState } from '@42ch/nexus-ui';
 
-/**
- * LoadingState — present participle + ellipsis per DESIGN.md §Voice & Content.
- * Use inside a card/section while a query is pending.
- */
-export function LoadingState({ label }: { label?: string }) {
+export function LoadingState({ label, ...props }: { label?: string }) {
   const { t } = useTranslation('common');
-  return (
-    <div className="flex items-center gap-2 py-6 text-copy-14 text-gray-700">
-      <Spinner />
-      <span>{label ?? t('status.loading')}</span>
-    </div>
-  );
+  return <NexusLoadingState label={label ?? t('status.loading')} {...props} />;
 }
 
-/**
- * EmptyState — DESIGN.md §Voice & Content (sentence case, first action).
- * Points the author to the next step (e.g. "No works yet. Create a Work to
- * start the local loop."). The headline is content voice (serif display tier)
- * per §Design Concept — "empty-state headlines on authoring surfaces".
- */
-export function EmptyState({
-  title,
-  description,
-  action,
-  className,
-}: {
-  title: string;
-  description?: string;
-  action?: ReactNode;
-  className?: string;
-}) {
-  return (
-    <div className={cn('flex flex-col items-center justify-center gap-2 py-16 text-center', className)}>
-      <p className="font-display text-display-24 text-gray-1000">{title}</p>
-      {description && <p className="max-w-sm text-copy-14 text-gray-900">{description}</p>}
-      {action && <div className="mt-2">{action}</div>}
-    </div>
-  );
-}
-
-/**
- * UnavailableState — orchestration engine idle or not started. Neutral tone
- * (not `ErrorState` crash framing) with an optional Retry action.
- */
 export function UnavailableState({
-  title,
-  description,
-  onRetry,
   retryLabel,
-  action,
-  className,
-}: {
-  title: string;
-  description?: string;
-  onRetry?: () => void;
-  retryLabel?: string;
-  action?: ReactNode;
-  className?: string;
-}) {
+  ...props
+}: Parameters<typeof NexusUnavailableState>[0]) {
   const { t } = useTranslation('common');
-  return (
-    <div
-      className={cn(
-        'flex flex-col items-center justify-center gap-2 py-16 text-center',
-        className,
-      )}
-    >
-      <p className="font-display text-display-24 text-gray-1000">{title}</p>
-      {description && <p className="max-w-sm text-copy-14 text-gray-900">{description}</p>}
-      {(onRetry ?? action) && (
-        <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
-          {onRetry && (
-            <button
-              type="button"
-              onClick={onRetry}
-              className="text-label-14 font-medium text-brand-deep-blue transition-colors duration-state ease-standard hover:opacity-80 dark:text-blue-700 dark:hover:text-blue-800 dark:hover:opacity-100"
-            >
-              {retryLabel ?? t('error.retry')}
-            </button>
-          )}
-          {action}
-        </div>
-      )}
-    </div>
-  );
+  return <NexusUnavailableState retryLabel={retryLabel ?? t('error.retry')} {...props} />;
 }
 
-/**
- * ErrorState — DESIGN.md §Voice & Content error pattern: what happened + what
- * to do next. The transport `message` already came from the shared
- * ErrorResponse via NexusClientError (W-1 fix).
- */
 export function ErrorState({
   title,
-  description,
-  onRetry,
   retryLabel,
-}: {
-  title?: string;
-  description?: string;
-  onRetry?: () => void;
-  retryLabel?: string;
-}) {
+  ...props
+}: Parameters<typeof NexusErrorState>[0]) {
   const { t } = useTranslation('common');
   return (
-    <div
-      role="alert"
-      className="flex flex-col gap-2 rounded-card border border-error-surface-border bg-error-surface p-4"
-    >
-      <p className="text-heading-16 font-heading text-red-1000">{title ?? t('error.title')}</p>
-      {description && <p className="text-copy-14 text-red-900">{description}</p>}
-      {onRetry && (
-        <button
-          type="button"
-          onClick={onRetry}
-          className="self-start text-label-14 font-medium text-brand-deep-blue transition-colors duration-state ease-standard hover:opacity-80 dark:text-blue-700 dark:hover:text-blue-800 dark:hover:opacity-100"
-        >
-          {retryLabel ?? t('error.retry')}
-        </button>
-      )}
-    </div>
+    <NexusErrorState
+      title={title ?? t('error.title')}
+      retryLabel={retryLabel ?? t('error.retry')}
+      {...props}
+    />
   );
 }
