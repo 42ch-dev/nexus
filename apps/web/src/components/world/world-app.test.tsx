@@ -131,6 +131,8 @@ describe('WorldApp — Brief layer (era KnowledgeEntry projection)', () => {
     expect(empty).toHaveTextContent('写下你的第一个 Brief');
     expect(empty).toHaveTextContent('Brief 是这个世界的最高层描述——一句话讲清它是什么。');
     expect(empty).toHaveTextContent('例如：“一个魔法正在消亡的低魔奇幻世界”');
+    // T2: the guided entry action is present (behaviour locks in brief-flow.test.tsx).
+    expect(screen.getByTestId('world-brief-create')).toHaveTextContent('+ 写 Brief');
   });
 });
 

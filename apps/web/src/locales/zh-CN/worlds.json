@@ -42,8 +42,26 @@
     "briefEmpty": {
       "title": "写下你的第一个 Brief",
       "body": "Brief 是这个世界的最高层描述——一句话讲清它是什么。",
-      "example": "例如：“一个魔法正在消亡的低魔奇幻世界”"
+      "example": "例如：“一个魔法正在消亡的低魔奇幻世界”",
+      "action": "+ 写 Brief"
     },
+    "briefEditor": {
+      "placeholder": "一个魔法正在消亡的低魔奇幻世界……",
+      "ariaLabel": "Brief 内容",
+      "cancel": "取消",
+      "save": "保存 Brief",
+      "saveFailure": "Brief 保存失败：{{reason}}。草稿已保留，可直接重试。"
+    },
+    "briefCard": {
+      "tag": "BRIEF · {{when}}",
+      "justNow": "刚刚",
+      "edit": "编辑"
+    },
+    "briefReady": {
+      "title": "世界已就绪",
+      "body": "「作品」模块已解锁——创建一个作品，开始在这个世界里写作。"
+    },
+    "briefSavedToast": "✅ Brief 已保存——「作品」模块已解锁",
     "briefAria": "Brief 层",
     "narrativePlaceholder": "Narrative 层——章节级叙事时间线",
     "momentPlaceholder": "Moment 层——场景级细粒度时间线",

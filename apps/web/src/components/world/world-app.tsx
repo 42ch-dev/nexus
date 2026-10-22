@@ -5,23 +5,29 @@
  *
  * Brief-layer read model = the era `KnowledgeEntry` projection over the World
  * KB graph (`useWorldKbGraph`; architect-confirmed data contract) — NOT the
- * timeline-era endpoints (those belong to the Narrative layer). Narrative /
- * Moment are labelled pre-rebuild placeholders until their module rebuilds;
- * the Brief editor + write path lands in T2 (this file only reads).
+ * timeline-era endpoints (those belong to the Narrative layer). The Brief
+ * layer's write path (empty state → inline editor → saved card) lives in T2's
+ * components; Narrative / Moment are labelled pre-rebuild placeholders until
+ * their module rebuilds.
  *
  * States are explicit and single: loading (`正在加载世界…`) and error
  * (`世界加载失败：{reason}` + `重试`) — never silent blanks or toasts.
  */
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useParams, useSearchParams } from 'react-router';
 
+import { BriefCard, BriefReadyCard } from '@/components/world/brief-card';
+import { BriefEditor } from '@/components/world/brief-editor';
+import { BriefEmpty } from '@/components/world/brief-empty';
 import { LayerTabs, parseWorldLayer } from '@/components/world/layer-tabs';
 import { WorldHeader } from '@/components/world/world-header';
 import { ErrorState, LoadingState } from '@/components/ui/states';
 import { useWorldKbGraph } from '@/lib/canvas/use-world-kb-data';
 import { useNexusClient } from '@/lib/client-context';
 import { NexusClientError } from '@/lib/nexus';
+import { useToast } from '@/lib/use-toast';
 import { NotFoundPage } from '@/pages/not-found-page';
 import type { WorldKbEntityProjection } from '@42ch/nexus-contracts';
 
@@ -82,32 +88,7 @@ function WorldAppSurface({ worldId }: { worldId: string }) {
       <LayerTabs active={layer} />
       {layer === 'brief' ? (
         <section aria-label={t('worldApp.briefAria')} data-testid="world-layer-brief">
-          {eras.length === 0 ? (
-            <div className="rounded-card border border-gray-500 p-6" data-testid="world-brief-empty">
-              <h2 className="font-display text-display-24 text-gray-1000">
-                {t('worldApp.briefEmpty.title')}
-              </h2>
-              <p className="text-copy-14 text-gray-900">{t('worldApp.briefEmpty.body')}</p>
-              <p className="text-copy-14 text-gray-700">{t('worldApp.briefEmpty.example')}</p>
-            </div>
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {eras.map((era) => {
-                const summary = eraSummary(era);
-                return (
-                  <li
-                    key={era.key_block_id}
-                    className="rounded-card border border-gray-500 p-4"
-                  >
-                    <h3 className="text-heading-16 font-heading text-gray-1000">
-                      {era.canonical_name}
-                    </h3>
-                    {summary && <p className="text-copy-14 text-gray-900">{summary}</p>}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+          <BriefLayer worldId={worldId} eras={eras} />
         </section>
       ) : (
         <section
@@ -121,6 +102,69 @@ function WorldAppSurface({ worldId }: { worldId: string }) {
           <p className="text-copy-14 text-gray-700">{t('worldApp.layerPlaceholderSub')}</p>
         </section>
       )}
+    </div>
+  );
+}
+
+/**
+ * Brief layer body (plan v1219-world-module T2): the guided empty state →
+ * inline editor → saved card flow. The Brief read model is the era
+ * KnowledgeEntry projection; an era with a non-empty `world_summary` is the
+ * saved Brief (renders as {@link BriefCard}), otherwise the empty state with
+ * the `+ 写 Brief` action. Eras without a summary keep the T1 plain list
+ * item. The `世界已就绪` follow-up card announces the Work unlock after the
+ * first save.
+ */
+function BriefLayer({ worldId, eras }: { worldId: string; eras: WorldKbEntityProjection[] }) {
+  const { t } = useTranslation('worlds');
+  const { toast } = useToast();
+  const [editing, setEditing] = useState(false);
+
+  const withSummary = eras.filter((era) => eraSummary(era) !== null);
+  const withoutSummary = eras.filter((era) => eraSummary(era) === null);
+  const brief = withSummary[0] ?? null;
+
+  if (editing) {
+    return (
+      <BriefEditor
+        worldId={worldId}
+        initialText={brief ? (eraSummary(brief) ?? undefined) : undefined}
+        entity={brief ? { entityId: brief.key_block_id, version: brief.version } : undefined}
+        onCancel={() => setEditing(false)}
+        onSaved={() => {
+          setEditing(false);
+          toast({ variant: 'success', title: t('worldApp.briefSavedToast') });
+        }}
+      />
+    );
+  }
+  if (!brief) {
+    return <BriefEmpty onCreate={() => setEditing(true)} />;
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <ul className="flex flex-col gap-2">
+        {withSummary.map((era) => (
+          <li key={era.key_block_id}>
+            <BriefCard
+              text={eraSummary(era)!}
+              title={era.canonical_name}
+              updatedAt={era.updated_at}
+              onEdit={() => setEditing(true)}
+            />
+          </li>
+        ))}
+      </ul>
+      {withoutSummary.length > 0 && (
+        <ul className="flex flex-col gap-2">
+          {withoutSummary.map((era) => (
+            <li key={era.key_block_id} className="rounded-card border border-gray-500 p-4">
+              <h3 className="text-heading-16 font-heading text-gray-1000">{era.canonical_name}</h3>
+            </li>
+          ))}
+        </ul>
+      )}
+      <BriefReadyCard />
     </div>
   );
 }

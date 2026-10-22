@@ -55,6 +55,7 @@ function renderCreatorHubFlow(options?: {
       <Route path="works" element={<CreatorHubPage />} />
       <Route path="works/:workId/outline" element={<div data-testid="work-outline-canvas" />} />
       <Route path="worlds" element={<CreatorHubPage />} />
+      <Route path="worlds/:worldId" element={<div data-testid="world-app-surface" />} />
       <Route path="worlds/:worldId/timeline" element={<div data-testid="world-timeline-canvas" />} />
     </Routes>
   );
@@ -306,5 +307,29 @@ describe('CreatorHubPage browse IA (V1.135 P0)', () => {
       expect(screen.getByTestId('work-outline-canvas')).toBeInTheDocument();
     });
     expect(screen.queryByTestId('creator-hub-controller')).not.toBeInTheDocument();
+  });
+
+  // v1219-world-module T2 (T1 review follow-up): world cards open the new
+  // world app surface at the index (Brief default), not the Timeline.
+  it('navigates to the world app surface index when a world card is clicked', async () => {
+    renderCreatorHubFlow({
+      works: [],
+      worlds: [{ world_id: 'world-1', title: 'Fantasy Realm' }],
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('creator-hub-dual-pane-card-list-pane-world-card-world-1'),
+      ).toBeInTheDocument();
+    });
+
+    fireEvent.click(
+      screen.getByTestId('creator-hub-dual-pane-card-list-pane-world-card-world-1'),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('world-app-surface')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('world-timeline-canvas')).not.toBeInTheDocument();
   });
 });
