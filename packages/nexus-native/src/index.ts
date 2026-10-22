@@ -631,6 +631,11 @@ export interface NativeCore {
   listWorkspaces(): Promise<ListWorkspacesResponse>;
   getActiveWorkspace(): Promise<ActiveWorkspaceResponse>;
   selectWorkspace(request: SetActiveWorkspaceRequest): Promise<SetActiveWorkspaceResponse>;
+  /**
+   * Promote the status-only shell to the full core in process. Runs the same
+   * admission/publication as the startup open; idempotent once published.
+   */
+  promoteCore(): Promise<void>;
   logoutCreator(creatorId: string): Promise<LogoutResponse>;
   captureCharacterPendingReview(
     principal: PrincipalHandle,
@@ -1034,6 +1039,7 @@ type DomainSurface = Pick<
   | 'listWorkspaces'
   | 'getActiveWorkspace'
   | 'selectWorkspace'
+  | 'promoteCore'
   | 'logoutCreator'
   | 'captureCharacterPendingReview'
   | 'listCharacterPendingReviews'
@@ -1409,6 +1415,9 @@ function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
     },
     async selectWorkspace(request) {
       return json(await inner.selectWorkspace(wire(request, 'request')));
+    },
+    async promoteCore() {
+      await inner.promoteCore();
     },
     async logoutCreator(creatorId) {
       return json(await inner.logoutCreator(creatorId));

@@ -90,12 +90,34 @@ export async function setActiveWorkspace(
   );
   service.creatorId = response.creator_id;
   service.workspaceSlug = response.workspace_slug;
-  // `workspaceInitialized` is the boot-time "full core published" fact, and
-  // `/runtime/status` must never advertise domain readiness the domain routes
-  // deny. The service-only shell cannot publish a core in-process: selection
-  // initializes the chosen workspace on disk, so this session keeps reporting
-  // uninitialized and the next start opens the full core.
+  // A status-only shell publishes the full core in process once a workspace is
+  // selected, so the first-run flow completes without a restart. Readiness is
+  // claimed only after promotion (and, for a provider profile, the execution
+  // owner) succeeded.
+  if (!service.workspaceInitialized) await promoteShell(service);
   return response;
+}
+
+/**
+ * Promote the status-only shell and publish the runtime readiness facts.
+ *
+ * The flag is written last: a failed promotion keeps `workspace_initialized`
+ * false (the request fails and may be retried); the native side is idempotent
+ * once the core is published, so a retry only re-attempts the missing step.
+ */
+async function promoteShell(service: ServiceCore): Promise<void> {
+  await service.core.promoteCore();
+  if (service.domainOnly) {
+    // The domain-only profile owns no execution engine (openServiceCore's
+    // same post-open facts).
+    service.providerReady = true;
+    service.engineEpoch = 0;
+  } else {
+    const owner = await service.core.startExecutionOwner();
+    service.providerReady = owner.provider_ready;
+    service.engineEpoch = owner.engine_epoch ?? 0;
+  }
+  service.workspaceInitialized = true;
 }
 
 /** Exact path/verb/tier identities this family owns (composer input). */

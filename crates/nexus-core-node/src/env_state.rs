@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use napi::bindgen_prelude::Error;
 use napi::Env;
 use nexus_contracts::{CoreCloseReport, CoreError, CoreErrorCode};
-use nexus_core::{CoreService, HostHandle};
+use nexus_core::{CoreAccess, CoreService, HostHandle};
 use nexus_provider_ports::ProviderPort;
 use tokio::sync::{Mutex, Notify};
 
@@ -113,6 +113,13 @@ pub struct EnvState {
     /// reachable on the service-only shell, where no core exists to derive it
     /// from.
     pub user_home: StdMutex<Option<PathBuf>>,
+    /// The access mode this environment was opened with. A later in-process
+    /// promotion repeats the same admission mode as the startup open would.
+    pub open_access: StdMutex<Option<CoreAccess>>,
+    /// The JS provider adapter installed at open (None for the native Host
+    /// providers). Retained so promotion composes the SAME adapter instead of
+    /// replacing the provider callback identity mid-process.
+    pub js_provider_port: StdMutex<Option<Arc<dyn ProviderPort>>>,
     /// The Host lifetime slot: the ONE attached core authority (its manager,
     /// Actor registry and composed provider port), never a bare manager. The
     /// core authority owns every Actor effect/observation/close path; native
@@ -281,6 +288,8 @@ impl EnvState {
             generation: AtomicU64::new(1),
             core: StdMutex::new(None),
             user_home: StdMutex::new(None),
+            open_access: StdMutex::new(None),
+            js_provider_port: StdMutex::new(None),
             host: StdMutex::new(None),
             provider_port: StdMutex::new(None),
             pending_budget: PendingBudget::new(),
@@ -620,6 +629,12 @@ impl EnvState {
     pub async fn publish_closed(&self) {
         *self.lifecycle.lock().expect("lifecycle mutex poisoned") = EnvLifecyclePhase::Closed;
         self.clear_service_only_uninitialized();
+        // The retained JS provider adapter belongs to this open only; a later
+        // open installs its own.
+        self.js_provider_port
+            .lock()
+            .expect("js provider port mutex poisoned")
+            .take();
     }
 
     /// Subscribe to the race-free close signal.

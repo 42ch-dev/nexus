@@ -24,7 +24,7 @@ use nexus_provider_ports::ProviderPort;
 use super::admitting_provider_port::AdmittingProviderPort;
 use super::core_error;
 
-use super::env_state::EnvState;
+use super::env_state::{EnvLifecyclePhase, EnvState};
 
 fn open_err(err: CoreError) -> String {
     core_error::open_reason_from_domain(err)
@@ -130,6 +130,49 @@ async fn abort_opening(
         }
     } else {
         state.publish_closed().await;
+    }
+}
+
+/// How a failed full-core publication rolls back.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OpenMode {
+    /// Normal startup: nothing is being served yet, so a failed open ends the
+    /// environment `Closed` (a retry may reopen).
+    Startup,
+    /// In-process promotion from the service-only shell: the shell is already
+    /// serving home control, so a failure releases the candidate owners and
+    /// leaves the shell open for a retry instead of closing the environment.
+    Promotion,
+}
+
+/// Roll back a failed full-core publication according to its mode.
+async fn abort_failed_open(
+    state: Arc<EnvState>,
+    mode: OpenMode,
+    core: Option<Arc<CoreService>>,
+    host: Option<HostOwner>,
+    js_port: Option<Arc<dyn ProviderPort>>,
+) {
+    if mode == OpenMode::Startup {
+        abort_opening(state, core, host, js_port).await;
+        return;
+    }
+    // Promotion: release only the candidate owners. The shell keeps its
+    // service-only mark and its `Open` phase, so home control stays reachable
+    // and the caller can retry after the underlying refusal is fixed.
+    if core.is_none() && host.is_none() {
+        return;
+    }
+    let (released, _) = cleanup_owners(
+        state.clone(),
+        core,
+        host,
+        js_port,
+        Instant::now() + close_budget(),
+    )
+    .await;
+    if !released {
+        state.mark_interrupted();
     }
 }
 
@@ -835,6 +878,14 @@ pub async fn open_core(
         .user_home
         .lock()
         .map_err(|_| "user home mutex poisoned".to_string())? = Some(user_home.clone());
+    *state
+        .open_access
+        .lock()
+        .map_err(|_| "open access mutex poisoned".to_string())? = Some(access);
+    *state
+        .js_provider_port
+        .lock()
+        .map_err(|_| "js provider port mutex poisoned".to_string())? = js_port.clone();
 
     if options.allow_uninitialized && is_genuinely_uninitialized(&user_home, access) {
         state.clear_service_only_uninitialized();
@@ -843,9 +894,67 @@ pub async fn open_core(
         return Ok(());
     }
 
+    publish_full_core(state, user_home, access, js_port, OpenMode::Startup).await
+}
+
+/// Promote the service-only shell to the full core after a successful
+/// workspace selection, performing the SAME admission and publication the
+/// startup open would (prerequisites, host admission, core open, principal,
+/// Host/probe owner, provider port, adopted authority, orphan settlement,
+/// publication). Idempotent once the full core is published.
+///
+/// # Errors
+/// Refuses when the environment is not an open shell (closed/closing/dead or
+/// already interrupted). A failed promotion releases its candidate owners and
+/// keeps the shell open, so home control stays usable and a later selection can
+/// retry.
+pub async fn promote_core(state: Arc<EnvState>) -> Result<(), String> {
+    if state.is_env_dead() {
+        return Err("dead_env".to_string());
+    }
+    if state.is_interrupted() {
+        return Err("interrupted: retained cleanup owner requires a confirmed close".to_string());
+    }
+    if state.is_closing() {
+        return Err("closing".to_string());
+    }
+    if state.lifecycle_phase() != EnvLifecyclePhase::Open {
+        return Err("native environment not open".to_string());
+    }
+    if !state.is_service_only_uninitialized() {
+        return Ok(());
+    }
+    let user_home = state
+        .user_home
+        .lock()
+        .map_err(|_| "user home mutex poisoned".to_string())?
+        .clone()
+        .ok_or_else(|| "native environment has no user home".to_string())?;
+    let access = state
+        .open_access
+        .lock()
+        .map_err(|_| "open access mutex poisoned".to_string())?
+        .ok_or_else(|| "native environment has no access mode".to_string())?;
+    let js_port = state
+        .js_provider_port
+        .lock()
+        .map_err(|_| "js provider port mutex poisoned".to_string())?
+        .clone();
+    publish_full_core(state, user_home, access, js_port, OpenMode::Promotion).await
+}
+
+/// Admit and publish the full core (the shared body of the startup open and the
+/// in-process promotion).
+async fn publish_full_core(
+    state: Arc<EnvState>,
+    user_home: PathBuf,
+    access: CoreAccess,
+    js_port: Option<Arc<dyn ProviderPort>>,
+    mode: OpenMode,
+) -> Result<(), String> {
     if let Err(err) = validate_initialized_prerequisites(&user_home, access) {
         let reason = open_err(err);
-        abort_opening(state.clone(), None, None, js_port.clone()).await;
+        abort_failed_open(state.clone(), mode, None, None, js_port.clone()).await;
         return Err(reason);
     }
 
@@ -853,7 +962,7 @@ pub async fn open_core(
         Ok(admission) => admission,
         Err(err) => {
             let reason = core_error::open_reason_from_wire(err);
-            abort_opening(state.clone(), None, None, js_port.clone()).await;
+            abort_failed_open(state.clone(), mode, None, None, js_port.clone()).await;
             return Err(reason);
         }
     };
@@ -867,7 +976,7 @@ pub async fn open_core(
         Ok(core) => core,
         Err(err) => {
             let reason = open_err(err);
-            abort_opening(state.clone(), None, None, js_port.clone()).await;
+            abort_failed_open(state.clone(), mode, None, None, js_port.clone()).await;
             return Err(reason);
         }
     };
@@ -876,7 +985,14 @@ pub async fn open_core(
         Ok(principal) => principal,
         Err(err) => {
             let reason = open_err(err);
-            abort_opening(state.clone(), Some(Arc::new(core)), None, js_port.clone()).await;
+            abort_failed_open(
+                state.clone(),
+                mode,
+                Some(Arc::new(core)),
+                None,
+                js_port.clone(),
+            )
+            .await;
             return Err(reason);
         }
     };
@@ -924,8 +1040,9 @@ pub async fn open_core(
     };
     if let Err(err) = host.start(start_config).await {
         let reason = core_error::open_reason_from_host(err);
-        abort_opening(
+        abort_failed_open(
             state.clone(),
+            mode,
             Some(Arc::new(core)),
             Some(HostOwner::Unattached(host)),
             js_port.clone(),
@@ -955,8 +1072,9 @@ pub async fn open_core(
         Ok(authority) => Arc::new(authority),
         Err(err) => {
             let reason = open_err(err);
-            abort_opening(
+            abort_failed_open(
                 state.clone(),
+                mode,
                 Some(core),
                 Some(HostOwner::Unattached(host)),
                 js_port.clone(),
@@ -976,8 +1094,9 @@ pub async fn open_core(
     // the whole attached authority, not just its manager.
     if let Err(err) = core.settle_provider_orphans().await {
         let reason = format!("journal settlement failed: {err}");
-        abort_opening(
+        abort_failed_open(
             state.clone(),
+            mode,
             Some(core),
             Some(HostOwner::Attached(authority)),
             js_port.clone(),

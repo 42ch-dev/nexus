@@ -203,12 +203,22 @@ impl CoreHomeService {
         })?;
 
         // Membership SSOT write — Profile is real only when the home dir exists.
+        // A home with no selected workspace has no workspace store to carry the
+        // creator's enrichment row: register the identity metadata first (the
+        // `register_creator` carrier), so a name collision refuses before any
+        // Profile home exists.
+        let workspace_db = self.active_workspace_db_path();
+        if workspace_db.is_none() {
+            self.persist_creator_identity(&creator_id, &display_name)
+                .await?;
+        }
         ensure_profile_home_ssot(&self.nexus_home, &creator_id)?;
 
         // No selected workspace ⇒ no workspace store to enrich yet: creation
         // must not fail on that absence (the first-run shell creates the
-        // creator before any workspace is selected).
-        let holder_entry_id = match self.active_workspace_db_path() {
+        // creator before any workspace is selected). The row is materialized
+        // by the first workspace selection.
+        let holder_entry_id = match workspace_db {
             Some(db_path) => {
                 let pool = nexus_local_db::init_pool(&db_path)
                     .await
@@ -246,6 +256,60 @@ impl CoreHomeService {
             has_cached_token: false,
             is_active: false,
         })
+    }
+
+    /// Persist a freshly created creator's identity metadata when no workspace
+    /// store exists: the global identity row (the `register_creator` carrier,
+    /// which `resolved_display_name` reads when a workspace is later selected)
+    /// and the enrichment cache `list_creators` reads display names from.
+    ///
+    /// # Errors
+    /// Returns [`CoreError::InvalidInput`] for a display-name collision with an
+    /// existing persistent identity, and the mapped storage/internal carriers
+    /// when the identity store or cache cannot be written.
+    async fn persist_creator_identity(
+        &self,
+        creator_id: &str,
+        display_name: &str,
+    ) -> CoreResult<()> {
+        std::fs::create_dir_all(&self.nexus_home)
+            .map_err(|e| internal("HOME_DIR_CREATE_ERROR", e))?;
+        let global_db = self.nexus_home.join("state.db");
+        let pool = nexus_local_db::init_pool(&global_db)
+            .await
+            .map_err(crate::error::local_db_err)?;
+        let created_at = chrono::Utc::now().to_rfc3339();
+        let inserted = nexus_local_db::create_local_identity(
+            &pool,
+            creator_id,
+            "persistent",
+            Some(display_name),
+            &created_at,
+        )
+        .await;
+        pool.close().await;
+        if let Err(err) = inserted {
+            if let nexus_local_db::LocalDbError::Sqlx(sqlx::Error::Database(db_err)) = &err {
+                if db_err.is_unique_violation() {
+                    return Err(CoreError::InvalidInput {
+                        field: "display_name".to_string(),
+                        reason: format!(
+                            "creator name collision: {display_name} is already used by a persistent identity"
+                        ),
+                    });
+                }
+            }
+            return Err(crate::error::local_db_err(err));
+        }
+
+        let cache_path = self.nexus_home.join("creator_identity_cache.json");
+        let mut cache = if cache_path.exists() {
+            load_identity_cache_strict(&cache_path)?
+        } else {
+            serde_json::json!({ "creators": {} })
+        };
+        set_cached_display_name(&mut cache, creator_id, display_name);
+        save_identity_cache(&cache_path, &cache)
     }
 
     /// Project the status/detail of one creator: identity-cache metadata,
@@ -347,31 +411,7 @@ impl CoreHomeService {
             pool.close().await;
             // Write the display name to the cache as well so the rename is
             // reflected by every consumer (QC1-F-001).
-            if let Some(entry) = cache
-                .get_mut("creators")
-                .and_then(|v| v.as_object_mut())
-                .and_then(|creators| creators.get_mut(creator_id))
-            {
-                if let Some(entry_obj) = entry.as_object_mut() {
-                    entry_obj.insert(
-                        "display_name".to_string(),
-                        serde_json::Value::String(display_name.clone()),
-                    );
-                }
-            } else {
-                // Ensure a minimal entry exists before inserting the name.
-                if let Some(creators) = cache.get_mut("creators").and_then(|v| v.as_object_mut()) {
-                    let entry = creators
-                        .entry(creator_id.to_string())
-                        .or_insert_with(|| serde_json::json!({}));
-                    if let Some(entry_obj) = entry.as_object_mut() {
-                        entry_obj.insert(
-                            "display_name".to_string(),
-                            serde_json::Value::String(display_name.clone()),
-                        );
-                    }
-                }
-            }
+            set_cached_display_name(&mut cache, creator_id, display_name);
         }
 
         save_identity_cache(&cache_path, &cache)?;
@@ -688,6 +728,24 @@ pub fn set_active_creator_id(nexus_home: &Path, creator_id: &str) -> CoreResult<
         toml::Value::String(creator_id.to_string()),
     );
     write_cli_config(nexus_home, &config)
+}
+
+/// Set a creator's `display_name` in the enrichment cache
+/// (`creator_identity_cache.json`), creating the minimal entry when absent.
+/// `list_creators` reads display names from this cache.
+fn set_cached_display_name(cache: &mut serde_json::Value, creator_id: &str, display_name: &str) {
+    let Some(creators) = cache.get_mut("creators").and_then(|v| v.as_object_mut()) else {
+        return;
+    };
+    let entry = creators
+        .entry(creator_id.to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    if let Some(entry_obj) = entry.as_object_mut() {
+        entry_obj.insert(
+            "display_name".to_string(),
+            serde_json::Value::String(display_name.to_string()),
+        );
+    }
 }
 
 /// Load the creator identity cache (`Value::Null` for missing/unparseable —

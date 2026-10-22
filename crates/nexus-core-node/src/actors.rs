@@ -60,12 +60,6 @@ use nexus_contracts::daemon_api::creators::{
     logout_response::LogoutResponse, set_active_creator_request::SetActiveCreatorRequest,
     set_active_creator_response::SetActiveCreatorResponse,
 };
-use nexus_contracts::daemon_api::workspace::{
-    active_workspace_response::ActiveWorkspaceResponse,
-    list_workspaces_response::ListWorkspacesResponse,
-    set_active_workspace_request::SetActiveWorkspaceRequest,
-    set_active_workspace_response::SetActiveWorkspaceResponse,
-};
 use nexus_contracts::daemon_api::inspector::{
     moment_directive_request::MomentDirectiveRequest,
     moment_directive_response::MomentDirectiveResponse,
@@ -79,6 +73,12 @@ use nexus_contracts::daemon_api::memory::{
     list_memory_fragments_query::ListMemoryFragmentsQuery,
     list_pending_reviews_query::ListPendingReviewsQuery, review_request::ReviewRequest,
     review_response::ReviewResponse, soul_narrative_request::SoulNarrativeRequest,
+};
+use nexus_contracts::daemon_api::workspace::{
+    active_workspace_response::ActiveWorkspaceResponse,
+    list_workspaces_response::ListWorkspacesResponse,
+    set_active_workspace_request::SetActiveWorkspaceRequest,
+    set_active_workspace_response::SetActiveWorkspaceResponse,
 };
 use nexus_contracts::generated::core::CoreCharacterTransitionRequest;
 use nexus_core::{

@@ -269,6 +269,11 @@ export interface NativeCoreBinding {
   listWorkspaces(): Promise<Uint8Array>;
   getActiveWorkspace(): Promise<Uint8Array>;
   selectWorkspace(requestJson: Uint8Array): Promise<Uint8Array>;
+  /**
+   * Promote the service-only shell to the full core after a first-run
+   * workspace selection (idempotent once published).
+   */
+  promoteCore(): Promise<void>;
   captureCharacterPendingReview(
     principal: string,
     characterId: string,
