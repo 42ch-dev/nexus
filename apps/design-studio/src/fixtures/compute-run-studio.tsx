@@ -3,6 +3,7 @@ import { useState, type ReactNode } from 'react';
 import {
   Button,
   EntityPickerField,
+  ErrorState,
   Label,
   ProposalSections,
   RunFormFields,
@@ -18,7 +19,6 @@ import {
   type RunsTableCopy,
   type RunTableRow,
 } from '@42ch/nexus-ui';
-import { ErrorState } from '@web-ui/states'; // transitional — keep-web (lucide-react asset boundary; product copy & app-composition callbacks)
 
 /**
  * Studio fixture for the Compute Run Studio primitives (V1.147 P1 T2).
@@ -31,10 +31,10 @@ import { ErrorState } from '@web-ui/states'; // transitional — keep-web (lucid
  * (module summary, World selector, Advanced JSON disclosure, Accept/Discard
  * row, filter selects).
  *
- * Boundary: imports promoted primitives from `@42ch/nexus-ui` plus the
- * transitional `@web-ui/states` ErrorState (inline annotation on the import)
- * so the Run detail read-error variant matches production presentation
- * exactly. All copy is literal English caller-owned strings (studio is
+ * Boundary: all primitives (including the promoted ErrorState) are imported
+ * from `@42ch/nexus-ui` so the Run detail read-error variant matches
+ * production presentation exactly. All copy is literal English caller-owned
+ * strings (studio is
  * developer-auxiliary and excluded from i18n catalogs); all data is fake.
  * No daemon, no routing, no contracts, no `react-i18next`. Toggle the shell
  * theme to verify light + dark — every class is token-backed.

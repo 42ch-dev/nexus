@@ -38,11 +38,11 @@ import {
   CardHeader,
   CardTitle,
   cn,
+  Dialog,
+  DialogContent,
 } from '@42ch/nexus-ui';
 
 import { StudioShellLogo } from '@/components/studio-shell-logo';
-
-import { Dialog, DialogContent } from '@web-ui/dialog'; // transitional — keep-web (Radix portal/focus-trap beyond presentational scope)
 
 import { WorkspacePathField } from '@web-setup/workspace-path-field';
 import {

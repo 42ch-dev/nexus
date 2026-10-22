@@ -7,7 +7,7 @@
  * blocking is owned by {@link DaemonLaunchGate}; mid-session restart lives here.
  *
  * V1.130 P0: remains mounted while state is `starting` so Restart shows inline
- * pending copy; degraded/stopped/error stay on {@link MainBanner}.
+ * pending copy; degraded/stopped/error are surfaced by the layout banner.
  *
  * Browser build: returns `null`.
  */
@@ -136,7 +136,7 @@ export function DaemonStatusBar() {
   const state = status.state;
   // Keep the footer mounted during mid-session restart (`starting`) so the
   // Restart control can show inline pending state (V1.130 P0). Other
-  // non-running states stay on {@link MainBanner}.
+  // non-running states are surfaced by the layout banner.
   if (state !== 'running' && state !== 'starting') return null;
 
   const handleRestart = async () => {
