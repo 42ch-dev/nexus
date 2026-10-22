@@ -48,6 +48,7 @@ export function ProfileSwitcher() {
 
   const items = creators.data?.items ?? [];
   const active = items.find((c) => c.creator_id === activeCreatorId) ?? null;
+  const activeInitial = (active?.display_name ?? '?').trim().charAt(0).toUpperCase();
 
   useEffect(() => {
     if (!open) return;
@@ -102,7 +103,7 @@ export function ProfileSwitcher() {
           aria-hidden="true"
           className="flex h-[18px] w-[18px] items-center justify-center rounded-[5px] bg-blue-700 text-[10px] font-bold text-gray-100"
         >
-          {(active?.display_name ?? '?').trim().charAt(0).toUpperCase() || '?'}
+          {activeInitial.length > 0 ? activeInitial : '?'}
         </span>
         <span className="max-w-40 truncate">{active?.display_name ?? activeCreatorId ?? '—'}</span>
       </button>
@@ -119,6 +120,7 @@ export function ProfileSwitcher() {
           {items.map((creator) => {
             const isActive = creator.creator_id === activeCreatorId;
             const maturity = soulMaturityOf(creator);
+            const creatorInitial = creator.display_name.trim().charAt(0).toUpperCase();
             return (
               <button
                 key={creator.creator_id}
@@ -135,7 +137,7 @@ export function ProfileSwitcher() {
                   aria-hidden="true"
                   className="flex h-[18px] w-[18px] items-center justify-center rounded-[5px] bg-blue-700 text-[10px] font-bold text-gray-100"
                 >
-                  {creator.display_name.trim().charAt(0).toUpperCase() || '?'}
+                  {creatorInitial.length > 0 ? creatorInitial : '?'}
                 </span>
                 <span className="flex-1 truncate">{creator.display_name}</span>
                 {maturity !== undefined && (

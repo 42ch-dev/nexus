@@ -762,6 +762,9 @@ function SceneBeatAuthoringPanel({
             {outline.scenes.map((scene) => {
               const beats = outline.beats.filter((beat) => beat.scene_id === scene.scene_id);
               const beatTitle = beatTitles[scene.scene_id] ?? '';
+              const sceneTitle = scene.title?.length
+                ? scene.title
+                : t('sceneBeatAuthoring.untitledScene');
 
               // Cascade guard (V1.200 Greptile wave A) — removing a scene also
               // removes every beat it owns, so confirm first and name the
@@ -770,7 +773,11 @@ function SceneBeatAuthoringPanel({
               function removeScene() {
                 if (beats.length > 0) {
                   const affected = beats
-                    .map((beat) => beat.title?.trim() || t('sceneBeatAuthoring.untitledBeat'))
+                    .map((beat) => {
+                      const title = beat.title?.trim();
+                      if (!title) return t('sceneBeatAuthoring.untitledBeat');
+                      return title;
+                    })
                     .join(', ');
                   if (
                     !window.confirm(t('sceneBeatAuthoring.removeSceneConfirm', { beats: affected }))
@@ -793,7 +800,7 @@ function SceneBeatAuthoringPanel({
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <span className="text-label-14 font-semibold text-gray-900">
-                        {scene.title || t('sceneBeatAuthoring.untitledScene')}
+                        {sceneTitle}
                       </span>
                       <Badge variant="neutral">
                         {t('sceneBeatAuthoring.chapterBadge', { chapter: scene.chapter_id })}
@@ -814,14 +821,16 @@ function SceneBeatAuthoringPanel({
 
                   {beats.length > 0 ? (
                     <ul className="mt-2 space-y-1">
-                      {beats.map((beat) => (
-                        <li
-                          key={beat.beat_id}
-                          className="flex items-center justify-between gap-2 text-copy-13 text-gray-900"
-                        >
-                          <span>
-                            {beat.title || t('sceneBeatAuthoring.untitledBeat')}
-                          </span>
+                      {beats.map((beat) => {
+                        const beatListTitle = beat.title?.length
+                          ? beat.title
+                          : t('sceneBeatAuthoring.untitledBeat');
+                        return (
+                          <li
+                            key={beat.beat_id}
+                            className="flex items-center justify-between gap-2 text-copy-13 text-gray-900"
+                          >
+                            <span>{beatListTitle}</span>
                           <Button
                             type="button"
                             variant="tertiary"
@@ -838,9 +847,10 @@ function SceneBeatAuthoringPanel({
                           >
                             <Trash2 className="h-4 w-4" aria-hidden />
                             {t('sceneBeatAuthoring.remove')}
-                          </Button>
-                        </li>
-                      ))}
+                            </Button>
+                          </li>
+                        );
+                      })}
                     </ul>
                   ) : null}
 

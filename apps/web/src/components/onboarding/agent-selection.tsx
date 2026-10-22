@@ -88,11 +88,12 @@ function matchChoice(choices: AgentChoice[], profile: AgentProfile): AgentChoice
 }
 
 function profileOfChoice(choice: AgentChoice): AgentProfile {
+  // The scan entry name, not the catalog display name: `resolveAgentBadge`
+  // matches a saved profile against `AgentScanEntry.name`.
+  const launchCommand = choice.item.launchCommand?.trim();
   return {
-    // The scan entry name, not the catalog display name: `resolveAgentBadge`
-    // matches a saved profile against `AgentScanEntry.name`.
     name: choice.entry.name,
-    launchCommand: choice.item.launchCommand?.trim() || undefined,
+    launchCommand: launchCommand?.length ? launchCommand : undefined,
   };
 }
 
