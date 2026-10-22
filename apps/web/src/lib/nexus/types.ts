@@ -129,6 +129,12 @@ import type {
   ValidatePresetRequest,
   ValidatePresetResponse,
   ActiveCreatorResponse,
+  ActiveWorkspaceResponse,
+  ListWorkspacesQuery,
+  ListWorkspacesResponse,
+  SetActiveWorkspaceRequest,
+  SetActiveWorkspaceResponse,
+  WorkspaceSummary,
   WorkDetailResponse,
   WorkOutline,
   WorldKbCandidatesResponse,
@@ -287,6 +293,16 @@ export interface NexusClient extends CoreSliceClient {
   getActiveCreator(): Promise<ActiveCreatorResponse>;
   /** `PUT /v1/daemon/creators/active` — switch the daemon's active creator. */
   setActiveCreator(request: SetActiveCreatorRequest): Promise<SetActiveCreatorResponse>;
+
+  // ── Workspaces (plan v1219 T3 — frozen workspace family; create omitted, D23) ──
+  /** `GET /v1/daemon/workspaces` — cursor list of the creator's workspaces. */
+  listWorkspaces(query?: ListWorkspacesQuery): Promise<ListWorkspacesResponse>;
+  /** `GET /v1/daemon/workspace` — the daemon's active workspace. */
+  getActiveWorkspace(): Promise<ActiveWorkspaceResponse>;
+  /** `POST /v1/daemon/workspace/active` — switch the daemon's active workspace. */
+  setActiveWorkspace(
+    request: SetActiveWorkspaceRequest,
+  ): Promise<SetActiveWorkspaceResponse>;
 
   // ── Agent host (V1.94 P1) ──────────────────────────────────────────────────
   /** `POST /v1/daemon/agent-host/scan` — detect locally available ACP agents. */
@@ -772,8 +788,14 @@ export type {
   ScanRequest,
   ScanResponse,
   ActiveCreatorResponse,
+  ActiveWorkspaceResponse,
+  ListWorkspacesQuery,
+  ListWorkspacesResponse,
   SetActiveCreatorRequest,
   SetActiveCreatorResponse,
+  SetActiveWorkspaceRequest,
+  SetActiveWorkspaceResponse,
+  WorkspaceSummary,
   SoulNarrativeRequest,
   SoulNarrativeResponse,
   UpdateFindingRequest,

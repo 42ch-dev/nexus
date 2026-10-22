@@ -12,6 +12,11 @@
  */
 import type {
   ActiveCreatorResponse,
+  ActiveWorkspaceResponse,
+  ListWorkspacesQuery,
+  ListWorkspacesResponse,
+  SetActiveWorkspaceRequest,
+  SetActiveWorkspaceResponse,
   AddScheduleRequest,
   AddScheduleResponse,
   BatchUpdateFindingsRequest,
@@ -274,6 +279,19 @@ export class BrowserClient implements NexusClient {
   }
   getActiveCreator(): Promise<ActiveCreatorResponse> {
     return this.get<ActiveCreatorResponse>('/v1/daemon/creators/active');
+  }
+
+  // ── Workspaces (plan v1219 T3 — frozen workspace family; create omitted, D23) ──
+  listWorkspaces(query?: ListWorkspacesQuery): Promise<ListWorkspacesResponse> {
+    return this.get<ListWorkspacesResponse>('/v1/daemon/workspaces', query);
+  }
+  getActiveWorkspace(): Promise<ActiveWorkspaceResponse> {
+    return this.get<ActiveWorkspaceResponse>('/v1/daemon/workspace');
+  }
+  setActiveWorkspace(
+    request: SetActiveWorkspaceRequest,
+  ): Promise<SetActiveWorkspaceResponse> {
+    return this.post<SetActiveWorkspaceResponse>('/v1/daemon/workspace/active', request);
   }
   scanAgents(request?: ScanRequest): Promise<ScanResponse> {
     return this.post<ScanResponse>('/v1/daemon/agent-host/scan', request);
