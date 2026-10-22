@@ -8,7 +8,6 @@
 **Coordinates with**:
 
 - Repo-root [`DESIGN.md`](../../../../DESIGN.md) + [`DESIGN.dark.md`](../../../../DESIGN.dark.md) — sole token SSOT
-- [`web-ui.md`](web-ui.md) §30 — Studio is contributor tooling, not a Control Room feature
 - `@42ch/nexus-ui` — brand layer plus approved presentational primitives (public exports only)
 - Root [`AGENTS.md`](../../../../AGENTS.md) UI Component Policy (Studio-first)
 - [`apps/design-studio/AGENTS.md`](../../../../apps/design-studio/AGENTS.md) — import guardrails

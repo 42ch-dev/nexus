@@ -7,7 +7,6 @@
 **Coordinates with**:
 
 - [creator-workflow.md](creator-workflow.md) §5.6 — SOUL visualization contract over memory fragments
-- [web-ui.md](../surfaces/web-ui.md) §26–§27 — Creator SOUL Maturation + SOUL Completion per-World narrative
 - [`schemas/daemon-api/memory/`](../../../../schemas/daemon-api/memory) — wire contract schemas
 - [on-demand-synthesis-read-path-invariant.md](../../../knowledge/architecture-patterns/on-demand-synthesis-read-path-invariant.md) — read-path LLM gating (applies per world)
 - [fingerprint-cached-live-aggregate.md](../../../knowledge/architecture-patterns/fingerprint-cached-live-aggregate.md) — read-path cost (cache key per (creator, world))

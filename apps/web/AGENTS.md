@@ -13,19 +13,19 @@ Parent rules: [`../../AGENTS.md`](../../AGENTS.md) (repo),
 - This is the **OSS local Web UI** (`apps/web`), a pnpm workspace member under
   `apps/*`. It is **not** the private `nexus-platform` cloud SaaS — do not
   introduce cloud/platform-gated features, platform auth, or platform-only types
-  here (spec invariant: `web-ui.md` §2.2).
+  here (spec invariant: `web-rebuild-ia.md` §7).
 - Consumes `@42ch/nexus-contracts` via `workspace:*`. **Never** hand-write a
   second source of wire DTO types in this package — all wire types come from the
-  generated contracts (web-ui.md §12.6).
+  generated contracts.
 
 ## SSOT & authority
 
 - **Design tokens**: Root [`DESIGN.md`](../../DESIGN.md) + [`DESIGN.dark.md`](../../DESIGN.dark.md) are the **sole normative SSOT** (Production completeness). Shared CSS variables + Tailwind preset live in `tooling/design-tokens` (`@nexus/design-tokens`). `src/index.css` + `tailwind.config.ts` *consume* them via `@import '@nexus/design-tokens/tokens.css'` and the shared preset; they do not invent tokens. If a token you need is missing, **report** it to the architect — do not fabricate a value.
-- **Product contract**: [`web-ui.md`](../../.mstar/specs/active/surfaces/web-ui.md).
+- **Product contract**: [`web-rebuild-ia.md`](../../.mstar/specs/proposed/surfaces/web-rebuild-ia.md) (rebuild direction).
 - **Transport boundary**: the `NexusClient` interface
   (`src/lib/nexus/types.ts`). Screens must depend only on the interface, never
   on `fetch`/`window.nexusDesktop` directly — the client factory selects
-  `BrowserClient` or `DesktopClient` (web-ui.md §5; desktop-shell.md §5), which
+  `BrowserClient` or `DesktopClient` (`web-rebuild-ia.md` §7; `desktop-shell.md` §5), which
   keeps a host change a one-impl swap rather than a rewrite. The HTTP path
   prefix is the frozen `/v1/daemon/*`; the SPA reaches the local service (the
   standalone TypeScript service, or the Electron-owned one) at
@@ -115,5 +115,5 @@ and consumed by the screens. Remaining gaps the UI adapts around:
   locale catalogs. Exclude developer-auxiliary surfaces (`apps/design-studio`),
   test fixtures, and manuscript body text.
 - **Normative spec:**
-  [`web-ui.md` §29.16](../../.mstar/specs/active/surfaces/web-ui.md) (V1.112 frontend i18n amendments, shipped); the distilled pattern note lives at
+  the V1.112 frontend i18n amendments (shipped); the distilled pattern note lives at
   [`.mstar/knowledge/architecture-patterns/web-i18n-pattern.md`](../../.mstar/knowledge/architecture-patterns/web-i18n-pattern.md).

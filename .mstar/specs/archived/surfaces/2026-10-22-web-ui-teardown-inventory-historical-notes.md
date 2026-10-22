@@ -5,7 +5,7 @@
 | **Status** | **Active** — rebuild prep inventory. Batches 1–2 shipped (PR #429 L1 V1.148, PR #430 L2 V1.149); Batch 3 deferred (trigger: rebuild IA consumption need). |
 | **Document class** | Survey-derived inventory (prep input for the web rebuild; not a behavioral spec) |
 | **Scope** | Disposition of `apps/web` UI assets: components grading, `components/ui/` per-file state, cross-page patterns, user-named composite blocks |
-| **Coordinates with** | [web-ui.md](web-ui.md), root `DESIGN.md` / `DESIGN.dark.md` (v0.5.0), [web-rebuild-cleanup-list.md](web-rebuild-cleanup-list.md) |
+| **Coordinates with** | [web-ui.md](2026-10-22-web-ui-retired-historical-notes.md), root `DESIGN.md` / `DESIGN.dark.md` (v0.5.0), [web-rebuild-cleanup-list.md](2026-10-22-web-rebuild-cleanup-list-historical-notes.md) |
 | **Authored** | 2026-10-22 — product-manager, synthesized from five recorded read-only surveys (plan `20261022-ui-library-teardown` follow-up; docs-only round, no code changed) |
 
 ## 1. Purpose & scope
@@ -102,5 +102,5 @@ Siblings (per CompositeBlocksSurvey; all keep app-side / rewrite at rebuild, no 
 
 - No visual redesign: no new tokens, colors, spacing, or layout decisions. `DESIGN.md` / `DESIGN.dark.md` (v0.5.0) and the `@nexus/design-tokens` pipeline remain the sole token source; light/dark parity is generator-enforced.
 - No adoption work in this round: adoption of library patterns (Batch 3 items and rewrites) happens inside the web rebuild, not here.
-- No deletion in this round: cleanup candidates live in [web-rebuild-cleanup-list.md](web-rebuild-cleanup-list.md) as a list only.
+- No deletion in this round: cleanup candidates live in [web-rebuild-cleanup-list.md](2026-10-22-web-rebuild-cleanup-list-historical-notes.md) as a list only.
 - DESIGN.md's current boundary (no new public primitive families beyond shipped batches) is respected; any Batch 3 promotion revisits that boundary at rebuild time.
