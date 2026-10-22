@@ -126,17 +126,18 @@ describe('AppShell', () => {
   it('shows search disabled in the topnav', () => {
     useShellHandlers();
     renderShell('content-creator');
-    expect(screen.getByRole('button', { name: 'Search (coming soon)' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: i18n.t('topnav.searchDisabled', { ns: 'shell' }) })).toBeDisabled();
   });
 
   it('toggles light/dark theme via the existing token class', async () => {
     useShellHandlers();
     const user = userEvent.setup();
     renderShell('content-creator');
+    const themeButton = () => screen.getByRole('button', { name: i18n.t('topnav.theme', { ns: 'shell' }) });
     expect(document.documentElement.classList.contains('dark')).toBe(false);
-    await user.click(screen.getByRole('button', { name: 'Toggle theme' }));
+    await user.click(themeButton());
     await waitFor(() => expect(document.documentElement.classList.contains('dark')).toBe(true));
-    await user.click(screen.getByRole('button', { name: 'Toggle theme' }));
+    await user.click(themeButton());
     await waitFor(() => expect(document.documentElement.classList.contains('dark')).toBe(false));
   });
 });

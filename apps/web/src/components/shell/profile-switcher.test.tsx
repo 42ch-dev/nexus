@@ -72,7 +72,8 @@ describe('ProfileSwitcher', () => {
     expect(screen.getByRole('menuitem', { name: /Bob/ })).not.toHaveTextContent('✓');
     // The wire contract carries no SOUL maturity → no fake number rendered.
     expect(screen.queryByTestId('soul-maturity')).not.toBeInTheDocument();
-    expect(screen.getByTestId('profile-switcher-new')).toHaveTextContent('＋ 新建 Creator…');
+    // Exact match: fails on the old double-＋ markup (＋＋ 新建 Creator…).
+    expect(screen.getByTestId('profile-switcher-new')).toHaveTextContent(/^＋ 新建 Creator…$/);
   });
 
   it('renders SOUL {n}% only when the surface supplies a value', async () => {

@@ -159,7 +159,6 @@ export function ProfileSwitcher() {
             onClick={() => setOpen(false)}
             className="flex w-full items-center gap-2.5 rounded-control px-2.5 py-2 text-left text-copy-13 text-gray-800 transition-colors duration-state ease-standard hover:bg-gray-alpha-100 motion-reduce:transition-none"
           >
-            <span aria-hidden="true">＋</span>
             <span>{t('topnav.newCreator')}</span>
           </button>
         </div>
