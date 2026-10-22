@@ -50,12 +50,23 @@ const COMPONENT_ENTRIES: readonly GalleryEntry[] = [
   entry('/components', 'comp-domain-badges', 'Domain Badges', ['finding', 'memory', 'reading'], [UI]),
   entry('/components', 'comp-button', 'Button', ['primary', 'secondary', 'ghost'], [UI]),
   entry('/components', 'comp-card', 'Card', ['interactive', 'voice'], [UI]),
-  entry('/components', 'comp-dialog', 'Dialog', ['modal', 'portal', 'escape'], ['@web-ui/dialog']), // @web-ui/dialog — transitional — keep-web (Radix portal/focus-trap beyond presentational scope)
+  entry('/components', 'comp-dialog', 'Dialog', ['modal', 'portal', 'escape'], [UI]),
+  entry('/components', 'comp-confirm-dialog', 'ConfirmDialog', ['confirm', 'destructive', 'pending'], [UI]),
+  entry('/components', 'comp-detail-parts', 'Detail Parts', ['fieldrow', 'detailcard', 'readonly'], [UI]),
+  entry('/components', 'comp-empty-create-card', 'EmptyCreateCard', ['empty', 'create', 'cta'], [UI]),
+  entry('/components', 'comp-form-dialog', 'FormDialog', ['form', 'modal', 'submit'], [UI]),
+  entry('/components', 'comp-form-section', 'FormSection', ['fieldset', 'group', 'error'], [UI]),
   entry('/components', 'comp-input', 'Input', ['invalid', 'focus'], [UI]),
   entry('/components', 'comp-label', 'Label', ['form'], [UI]),
+  entry('/components', 'comp-list-detail-shell', 'ListDetailShell', ['master', 'detail', 'split'], [UI]),
+  entry('/components', 'comp-list-page-layout', 'ListPageLayout', ['list', 'page', 'chrome'], [UI]),
+  entry('/components', 'comp-list-state-container', 'ListStateContainer', ['loading', 'empty', 'error', 'ready'], [UI]),
   entry('/components', 'comp-select', 'Select', ['native', 'invalid'], [UI]),
-  entry('/components', 'comp-states', 'States', ['loading', 'empty', 'error', 'spinner'], ['@web-ui/states']), // @web-ui/states — transitional — keep-web (lucide-react asset boundary; product copy & app-composition callbacks)
-  entry('/components', 'comp-table', 'Table', ['overflow', 'row'], ['@web-ui/table']), // @web-ui/table — transitional — keep-web (responsive overflow wrapper; not in V1.99 first batch)
+  entry('/components', 'comp-settings-layout', 'SettingsLayout', ['settings', 'nav', 'rail'], [UI]),
+  entry('/components', 'comp-settings-section', 'SettingsSection', ['settings', 'row', 'hint'], [UI]),
+  entry('/components', 'comp-sheet', 'Sheet', ['drawer', 'rail', 'portal'], [UI]),
+  entry('/components', 'comp-states', 'States', ['loading', 'empty', 'error', 'spinner', 'unavailable'], [UI]),
+  entry('/components', 'comp-table', 'Table', ['overflow', 'row'], [UI]),
   entry('/components', 'comp-tabs', 'Tabs', ['controlled', 'panel'], [UI]),
   entry('/components', 'comp-textarea', 'Textarea', ['invalid', 'disabled'], [UI]),
   entry('/components', 'comp-form-field', 'Form Field (composition)', ['helper', 'label'], [UI]),
@@ -169,7 +180,7 @@ const SURFACES_DAEMON_ENTRIES: readonly GalleryEntry[] = [
     'surfaces-run-observation',
     'Session run view',
     ['run', 'observation', 'events', 'live', 'gap', 'replay', 'history', 'refusal', 'sessions'],
-    [UI, '@web-ui/states'], // transitional — badge path label (not an import)
+    [UI],
   ),
 ];
 

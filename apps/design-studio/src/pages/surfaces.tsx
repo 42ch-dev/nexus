@@ -730,7 +730,7 @@ export function SurfacesShellPage() {
             '@web-layout/shell-sidebar-chrome',
             '@web-layout/footer-profiles-chrome',
             '@web-setup/workspace-path-field',
-            '@web-ui/dialog', // transitional — badge path label (not an import)
+            '@42ch/nexus-ui',
           ]}
         />
         <p className="text-copy-14 text-gray-700 mb-6">
@@ -849,7 +849,7 @@ export function SurfacesDaemonPage() {
 
       <section className="mt-10" id="surfaces-run-observation">
         <SurfaceHeading id="surfaces-run-observation">Session run view</SurfaceHeading>
-        <SurfaceSourceBadges importPaths={['@42ch/nexus-ui', '@web-ui/states']} /> {/* @web-ui/states — transitional — badge path label (not an import) */}
+        <SurfaceSourceBadges importPaths={['@42ch/nexus-ui']} />
         <p className="text-copy-14 text-gray-700 mb-6">
           The v1.201 P1 observation surface (daemon orchestration session events), state by state:
           live tail, inline gap marker with the reconnect affordance, replay/live split with the

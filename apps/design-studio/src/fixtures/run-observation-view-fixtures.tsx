@@ -9,8 +9,9 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
+  ErrorState,
+  LoadingState,
 } from '@42ch/nexus-ui';
-import { ErrorState, LoadingState } from '@web-ui/states'; // transitional — keep-web (lucide-react asset boundary; product copy & app-composition callbacks)
 
 /**
  * Studio fixture for the session **run view** (`apps/web/src/pages/session-run-view.tsx`,
@@ -45,9 +46,9 @@ import { ErrorState, LoadingState } from '@web-ui/states'; // transitional — k
  * Surfaces pair view renders this fixture in light and dark without a second
  * specimen tree, and no ancestor `.dark` wrapper is hard-coded here.
  *
- * Boundary: imports promoted primitives from `@42ch/nexus-ui` plus the
- * transitional `@web-ui/states` ErrorState/LoadingState (annotated above) so
- * the failure and pre-frame variants match production presentation exactly.
+ * Boundary: all primitives (including the promoted ErrorState/LoadingState)
+ * are imported from `@42ch/nexus-ui` so the failure and pre-frame variants
+ * match production presentation exactly.
  * All copy is literal English caller-owned strings mirroring
  * `apps/web/src/locales/en/sessions.json#runView` (studio is
  * developer-auxiliary and excluded from i18n catalogs); all data is fake. No
