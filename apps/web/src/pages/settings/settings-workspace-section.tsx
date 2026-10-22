@@ -19,7 +19,9 @@ import { WorkspacePathField } from '@/components/setup/workspace-path-field';
 import { useDesktopCapabilities } from '@/lib/client-context';
 import { errorMessage } from '@/lib/error-message';
 import { useToast } from '@/lib/use-toast';
-import { DEFAULT_WORKSPACE } from '@/pages/setup-step-workspace';
+
+/** Fallback shown when the desktop workspace-root read fails (v1.94 default). */
+const DEFAULT_WORKSPACE = '~/Documents/nexus/default';
 
 export function SettingsWorkspaceSection() {
   const { t } = useTranslation('settings');

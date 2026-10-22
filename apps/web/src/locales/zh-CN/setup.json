@@ -113,6 +113,18 @@
     "workspaceBootstrapFailed": "无法准备你的本地工作区。",
     "profileDisplayNameFailed": "无法保存个人档案名称。"
   },
+  "degraded": {
+    "body": "Nexus 服务暂不可用：{{reason}}。请确认本地服务正在运行后重试。",
+    "retry": "重试",
+    "separator": "、",
+    "reason": {
+      "unreachable": "无法连接本地服务"
+    },
+    "subsystem": {
+      "db": "本地数据库未就绪",
+      "engine": "编排引擎未就绪"
+    }
+  },
   "continueError": {
     "helper": {
       "soft": "请修正问题后再次点击「继续」。",

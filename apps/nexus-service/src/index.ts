@@ -3,6 +3,7 @@ import { rmSync } from 'node:fs';
 import { createAcpProvider } from '@42ch/nexus-provider-acp';
 import type { CoreCloseReport } from '@42ch/nexus-contracts';
 import { validateStartupBind } from './bind.js';
+import { AuthSessionStore } from './auth-session.js';
 import {
   CLOSE_BUDGET_MS,
   loadTlsMaterial,
@@ -136,7 +137,8 @@ export async function startService(options: ServiceOptions): Promise<RunningServ
     });
 
     try {
-      const created = createServiceServer(config, serviceCore, close);
+      const authSessions = new AuthSessionStore();
+      const created = createServiceServer(config, serviceCore, close, authSessions);
       server = created.server;
       const endpoint = await listenServer(server, config);
       const record = createDiscoveryRecord({
@@ -154,6 +156,10 @@ export async function startService(options: ServiceOptions): Promise<RunningServ
         url: endpoint.transport === 'http' ? endpoint.url : null,
         endpoint,
         discovery: record,
+        bootstrapUrl:
+          endpoint.transport === 'http'
+            ? `${endpoint.url}/__bootstrap?token=${authSessions.mintToken()}`
+            : null,
         service: serviceCore,
         close,
       };

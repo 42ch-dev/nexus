@@ -410,6 +410,8 @@ export interface CliArgs {
   cdnUrl?: string;
   embeddedMcp: boolean;
   webDist?: string;
+  /** Suppresses the startup browser auto-open (access spec §3.1). */
+  noOpen: boolean;
 }
 
 export function parseCliArgs(argv: string[]): CliArgs {
@@ -426,6 +428,7 @@ export function parseCliArgs(argv: string[]): CliArgs {
   let cdnUrl: string | undefined;
   let embeddedMcp = false;
   let webDist: string | undefined;
+  let noOpen = false;
   let hostGiven = false;
   let portGiven = false;
 
@@ -475,6 +478,9 @@ export function parseCliArgs(argv: string[]): CliArgs {
       case '--embedded-mcp':
         embeddedMcp = true;
         break;
+      case '--no-open':
+        noOpen = true;
+        break;
       default:
         throw new Error(`unknown argument: ${token}`);
     }
@@ -520,6 +526,7 @@ export function parseCliArgs(argv: string[]): CliArgs {
     cdnUrl,
     embeddedMcp,
     webDist,
+    noOpen,
   };
 }
 

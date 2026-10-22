@@ -11,6 +11,7 @@ import { useNavigate, useLocation } from 'react-router';
 import { useTranslation } from 'react-i18next';
 
 import { BrowserClient, type NexusClient } from '@/lib/nexus';
+import { AUTHORIZED_EVENT } from '@/lib/nexus/errors';
 import { DesktopClient } from '@/lib/nexus/desktop-client';
 import {
   ElectronDesktopCapabilities,
@@ -72,6 +73,42 @@ interface ResolvedClients {
   desktop: DesktopCapabilities | null;
 }
 
+const API_KEY_STORAGE = 'nexus-api-key';
+
+/**
+ * API key accepted by the 401 recovery surface (access spec §6.1), kept so a
+ * reload keeps working without re-entering it. Absent/inaccessible storage
+ * just means "no key" — the loopback/session paths are unaffected.
+ */
+export function readStoredApiKey(): string | null {
+  try {
+    return window.localStorage.getItem(API_KEY_STORAGE);
+  } catch {
+    return null;
+  }
+}
+
+export function storeApiKey(key: string): void {
+  try {
+    window.localStorage.setItem(API_KEY_STORAGE, key);
+  } catch {
+    // Storage unavailable: the accepted key cannot outlive this document.
+  }
+}
+
+/**
+ * Drops the stored key so a valid session cookie is admitted instead: the
+ * service lets a non-empty `X-API-Key` win, so a stale key would keep 401ing
+ * even after a successful cookie-only probe (access spec §6.1).
+ */
+export function clearStoredApiKey(): void {
+  try {
+    window.localStorage.removeItem(API_KEY_STORAGE);
+  } catch {
+    // Storage unavailable: there is no stored key to drop.
+  }
+}
+
 function buildClient(config: ConnectionConfig | null, desktop: boolean): NexusClient {
   // Remote mode requires an explicit `active: true` (same rule as
   // `daemon-health-indicator`). A saved-but-inactive config, a partial
@@ -82,7 +119,9 @@ function buildClient(config: ConnectionConfig | null, desktop: boolean): NexusCl
   // key is injected by main's session hook (D-18 redacted load), so the
   // renderer-side `apiKey` may be absent for remote mode.
   if (config?.active !== true) {
-    return desktop ? new DesktopClient() : new BrowserClient();
+    return desktop
+      ? new DesktopClient()
+      : new BrowserClient({ apiKey: readStoredApiKey() ?? undefined });
   }
   return desktop
     ? new DesktopClient({ baseUrl: config.endpointUrl, apiKey: config.apiKey })
@@ -208,6 +247,14 @@ export function ClientProvider({
 }: ClientProviderProps) {
   const [storedConfig, setStoredConfig] = useState<ConnectionConfig | null>(null);
   const [loaded, setLoaded] = useState(false);
+  // Bumped when the 401 recovery surface accepts an API key, so the memo below
+  // rebuilds the local client with `readStoredApiKey()`.
+  const [authEpoch, setAuthEpoch] = useState(0);
+  useEffect(() => {
+    const onAuthorized = () => setAuthEpoch((value) => value + 1);
+    window.addEventListener(AUTHORIZED_EVENT, onAuthorized);
+    return () => window.removeEventListener(AUTHORIZED_EVENT, onAuthorized);
+  }, []);
   const storage = useMemo(() => createConnectionStorage(), []);
   const isDesktop = useMemo(() => isDesktopBuild(), []);
   // Keep a live ref so setConfig can roll back optimistic updates without a stale closure.
@@ -277,7 +324,7 @@ export function ClientProvider({
       client: buildClient(config, isDesktop),
       desktop: isDesktop ? new ElectronDesktopCapabilities() : null,
     };
-  }, [client, desktop, config, loaded, isDesktop]);
+  }, [client, desktop, config, loaded, isDesktop, authEpoch]);
 
   return (
     <ClientContext.Provider value={value.client}>

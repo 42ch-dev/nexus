@@ -3,7 +3,6 @@ import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Route, Routes } from 'react-router';
 
-import { Sidebar } from '@/components/layout/sidebar';
 import { CreatorHubPage } from '@/pages/creator-hub-page';
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
@@ -23,7 +22,6 @@ function renderCreatorHubFlow(options?: {
   works?: Parameters<typeof worksList>[0];
   worlds?: { world_id: string; title: string }[];
   initialEntry?: string;
-  withSidebar?: boolean;
 }) {
   const works = options?.works ?? [
     {
@@ -55,27 +53,12 @@ function renderCreatorHubFlow(options?: {
       <Route path="works" element={<CreatorHubPage />} />
       <Route path="works/:workId/outline" element={<div data-testid="work-outline-canvas" />} />
       <Route path="worlds" element={<CreatorHubPage />} />
+      <Route path="worlds/:worldId" element={<div data-testid="world-app-surface" />} />
       <Route path="worlds/:worldId/timeline" element={<div data-testid="world-timeline-canvas" />} />
     </Routes>
   );
 
-  const routes = options?.withSidebar ? (
-    <Routes>
-      <Route
-        path="/works"
-        element={
-          <div className="flex h-full min-h-0">
-            <Sidebar />
-            <CreatorHubPage />
-          </div>
-        }
-      />
-    </Routes>
-  ) : (
-    hubRoutes
-  );
-
-  renderInApp(routes, {
+  renderInApp(hubRoutes, {
     client: makeClient(),
     activeCreatorId: 'creator-a',
     initialRouterEntries: [options?.initialEntry ?? '/works'],
@@ -101,13 +84,18 @@ describe('CreatorHubPage browse IA (V1.135 P0)', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('shows sidebar create panel when hub mounts beside Sidebar', async () => {
-    renderCreatorHubFlow({ works: [], worlds: [], withSidebar: true });
+  // plan-1 regression fix: after the shell cutover the create column is
+  // hosted by the creator hub itself (CreatorCreatePanel, unchanged from the
+  // sidebar era) — exactly one inline-create panel, and the legacy Sidebar
+  // shell panel is no longer mounted on this route.
+  it('shows the create panel hosted on the creator hub (shell cutover)', async () => {
+    renderCreatorHubFlow({ works: [], worlds: [] });
 
-    expect(await screen.findByTestId('sidebar-create-panel')).toBeInTheDocument();
-    expect(screen.getByTestId('sidebar-create-panel')).toHaveAttribute('data-mode', 'create-inline');
+    const panels = await screen.findAllByTestId('sidebar-create-panel');
+    expect(panels).toHaveLength(1);
+    expect(panels[0]).toHaveAttribute('data-mode', 'create-inline');
     expect(screen.getByTestId('sidebar-create-tab-bar')).toBeInTheDocument();
-    expect(screen.getByTestId('shell-sidebar-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('shell-sidebar-panel')).not.toBeInTheDocument();
     expect(
       screen.queryByTestId('creator-hub-dual-pane-workspace-pane-inline-form'),
     ).not.toBeInTheDocument();
@@ -306,5 +294,29 @@ describe('CreatorHubPage browse IA (V1.135 P0)', () => {
       expect(screen.getByTestId('work-outline-canvas')).toBeInTheDocument();
     });
     expect(screen.queryByTestId('creator-hub-controller')).not.toBeInTheDocument();
+  });
+
+  // v1219-world-module T2 (T1 review follow-up): world cards open the new
+  // world app surface at the index (Brief default), not the Timeline.
+  it('navigates to the world app surface index when a world card is clicked', async () => {
+    renderCreatorHubFlow({
+      works: [],
+      worlds: [{ world_id: 'world-1', title: 'Fantasy Realm' }],
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('creator-hub-dual-pane-card-list-pane-world-card-world-1'),
+      ).toBeInTheDocument();
+    });
+
+    fireEvent.click(
+      screen.getByTestId('creator-hub-dual-pane-card-list-pane-world-card-world-1'),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('world-app-surface')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('world-timeline-canvas')).not.toBeInTheDocument();
   });
 });

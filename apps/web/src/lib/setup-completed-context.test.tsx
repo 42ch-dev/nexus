@@ -5,16 +5,17 @@ import userEvent from '@testing-library/user-event';
 import { SetupCompletedProvider, useSetupCompleted } from './setup-completed-context';
 import { renderInApp } from '@/test/test-providers';
 import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
-import { BrowserClient } from '@/lib/nexus';
+import { BrowserClient, type NexusClient } from '@/lib/nexus';
 
 function TestController() {
-  const { completed, isLoading, markCompleted, setCompleted } = useSetupCompleted();
+  const { completed, isLoading, markCompleted, setCompleted, refresh } = useSetupCompleted();
   return (
     <div>
       <span data-testid="completed">{completed ? 'true' : 'false'}</span>
       <span data-testid="loading">{isLoading ? 'true' : 'false'}</span>
       <button onClick={() => markCompleted()}>Finish</button>
       <button onClick={() => void setCompleted(false)}>Clear</button>
+      <button onClick={() => void refresh()}>Refresh</button>
       <button
         onClick={() => {
           // Await path so IPC rejection is handled (rollback assertion).
@@ -50,8 +51,6 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     getWorkspaceRoot: () => Promise.resolve('/tmp/nexus'),
     pickDirectory: () => Promise.resolve(null),
     setWorkspacePath: () => Promise.resolve(),
-    ensureSetupBootstrap: () =>
-      Promise.resolve({ creator_id: 'ctr_local1234567890ab', already_bootstrapped: false }),
     switchActiveCreator: () => Promise.resolve('/tmp/nexus'),
     restartDaemon: () => Promise.resolve(),
     toggleMaximizeWindow: () => Promise.resolve(),
@@ -59,17 +58,103 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
   };
 }
 
+/** Browser branch seam: the derived gate reads the unguarded runtime status. */
+function statusClient(read: () => Promise<{ workspace_initialized: boolean }>): NexusClient {
+  return { runtimeStatus: vi.fn(read) } as unknown as NexusClient;
+}
+
 describe('SetupCompletedProvider', () => {
-  it('browser build is immediately completed with no loading', () => {
+  it('browser build derives completed from the runtime status (initialized)', async () => {
     renderInApp(
       <SetupCompletedProvider>
         <TestController />
       </SetupCompletedProvider>,
-      { client: makeClient() },
+      { client: statusClient(() => Promise.resolve({ workspace_initialized: true })) },
     );
 
-    expect(screen.getByTestId('completed')).toHaveTextContent('true');
+    // Nothing is assumed before the probe resolves (SetupGate waits on this).
+    expect(screen.getByTestId('loading')).toHaveTextContent('true');
+    await waitFor(() => expect(screen.getByTestId('completed')).toHaveTextContent('true'));
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'));
+  });
+
+  it('browser build routes a fresh origin to the wizard (uninitialized)', async () => {
+    renderInApp(
+      <SetupCompletedProvider>
+        <TestController />
+      </SetupCompletedProvider>,
+      { client: statusClient(() => Promise.resolve({ workspace_initialized: false })) },
+    );
+
+    await waitFor(() => expect(screen.getByTestId('completed')).toHaveTextContent('false'));
     expect(screen.getByTestId('loading')).toHaveTextContent('false');
+  });
+
+  it('browser build leaves the gate unresolved when the status probe rejects', async () => {
+    renderInApp(
+      <SetupCompletedProvider>
+        <TestController />
+      </SetupCompletedProvider>,
+      { client: statusClient(() => Promise.reject(new Error('daemon down'))) },
+    );
+
+    // The service-unavailable surface owns this state (T4): the app must never
+    // silently claim an initialized shell when the service cannot be reached.
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'));
+    expect(screen.getByTestId('completed')).toHaveTextContent('false');
+  });
+
+  it('refresh re-reads the service after a recovery', async () => {
+    const user = userEvent.setup();
+    let initialized = false;
+    renderInApp(
+      <SetupCompletedProvider>
+        <TestController />
+      </SetupCompletedProvider>,
+      { client: statusClient(() => Promise.resolve({ workspace_initialized: initialized })) },
+    );
+
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'));
+    expect(screen.getByTestId('completed')).toHaveTextContent('false');
+
+    initialized = true;
+    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    await waitFor(() => expect(screen.getByTestId('completed')).toHaveTextContent('true'));
+  });
+
+  it('browser finish re-reads the service instead of writing a marker', async () => {
+    const user = userEvent.setup();
+    let initialized = false;
+    renderInApp(
+      <SetupCompletedProvider>
+        <TestController />
+      </SetupCompletedProvider>,
+      { client: statusClient(() => Promise.resolve({ workspace_initialized: initialized })) },
+    );
+
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'));
+    expect(screen.getByTestId('completed')).toHaveTextContent('false');
+
+    initialized = true;
+    await user.click(screen.getByRole('button', { name: 'FinishTracked' }));
+
+    await waitFor(() => expect(screen.getByTestId('completed')).toHaveTextContent('true'));
+  });
+
+  it('browser clear only reflects the always-reachable wizard route', async () => {
+    const user = userEvent.setup();
+    renderInApp(
+      <SetupCompletedProvider>
+        <TestController />
+      </SetupCompletedProvider>,
+      { client: statusClient(() => Promise.resolve({ workspace_initialized: true })) },
+    );
+
+    await waitFor(() => expect(screen.getByTestId('completed')).toHaveTextContent('true'));
+    await user.click(screen.getByRole('button', { name: 'Clear' }));
+
+    await waitFor(() => expect(screen.getByTestId('completed')).toHaveTextContent('false'));
   });
 
   it('desktop build reads setup state from the shell', async () => {

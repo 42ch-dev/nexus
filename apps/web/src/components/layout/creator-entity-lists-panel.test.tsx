@@ -2,6 +2,7 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Route, Routes } from 'react-router';
 
 import { CreatorEntityListsPanel } from './creator-entity-lists-panel';
 import { renderInApp } from '@/test/test-providers';
@@ -191,5 +192,41 @@ describe('CreatorEntityListsPanel (V1.132 P3 AC-8)', () => {
       expect(screen.getByRole('menu', { name: 'Row actions' })).toBeInTheDocument(),
     );
     expect(screen.queryByRole('menuitem', { name: /Rename/i })).not.toBeInTheDocument();
+  });
+
+  // v1219-world-module T2 (T1 review follow-up): the world row submenu's
+  // 打开时间线 keeps pointing at the per-world Timeline while world cards
+  // open the new index surface.
+  it('navigates to the per-world timeline from the world row submenu (打开时间线)', async () => {
+    const user = userEvent.setup();
+    useHandlers(
+      http.get('/v1/daemon/creators', () =>
+        HttpResponse.json({
+          items: [{ creator_id: 'creator-a', display_name: 'Alice' }],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+      worksList([]),
+      http.get('/v1/daemon/narrative/worlds', () =>
+        HttpResponse.json({ worlds: [{ world_id: 'world-9', title: 'Eryndor' }] }),
+      ),
+      http.post('/v1/daemon/agent-host/scan', () => HttpResponse.json({ agents: [] })),
+    );
+    renderInApp(
+      <Routes>
+        <Route path="/works" element={<CreatorEntityListsPanel />} />
+        <Route
+          path="/worlds/:worldId/timeline"
+          element={<div data-testid="world-timeline-canvas" />}
+        />
+      </Routes>,
+      { client: makeClient(), activeCreatorId: 'creator-a', initialRouterEntries: ['/works'] },
+    );
+
+    const menuBtn = await screen.findByRole('button', { name: /Open menu for Eryndor/i });
+    await user.click(menuBtn);
+    await user.click(await screen.findByRole('menuitem', { name: 'Open Timeline' }));
+
+    expect(await screen.findByTestId('world-timeline-canvas')).toBeInTheDocument();
   });
 });

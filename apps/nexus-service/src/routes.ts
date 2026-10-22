@@ -27,6 +27,7 @@ import {
   patchWorldKbEntity,
 } from './world-kb.js';
 import { ACTOR_ROUTES } from './actors.js';
+import { WORKSPACE_ROUTES } from './workspaces.js';
 import { MEMORY_ROUTES } from './memory.js';
 import { CONTEXT_ROUTES } from './context.js';
 import { PRESET_ROUTES } from './presets.js';
@@ -71,6 +72,7 @@ export type DomainFamily =
   | 'content'
   | 'knowledge'
   | 'actors'
+  | 'workspaces'
   | 'memory'
   | 'context'
   | 'presets'
@@ -524,6 +526,7 @@ export const DOMAIN_ROUTES: readonly DomainRoute[] = [
   ...CONTENT_ROUTES,
   ...KNOWLEDGE_ROUTES,
   ...ACTOR_ROUTES,
+  ...WORKSPACE_ROUTES,
   ...MEMORY_ROUTES,
   ...CONTEXT_ROUTES,
   ...PRESET_ROUTES,

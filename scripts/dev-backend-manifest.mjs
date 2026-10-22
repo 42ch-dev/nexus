@@ -364,6 +364,24 @@ function assertLoopbackHostname(hostname, label = 'VITE_DAEMON_URL') {
   }
 }
 
+/** Any-interface wildcards a LAN dev bind may use; plain HTTP, no TLS needed. */
+const DEV_WILDCARD_HOSTS = new Set(['0.0.0.0', '::']);
+
+/**
+ * `NEXUS42_DEV_HOST` selects the service bind for `pnpm dev` (access spec §3.1).
+ * Loopback by default; a wildcard binds the whole LAN and implies
+ * `--allow-remote` (an explicit API key is still required for the bind).
+ */
+export function resolveDevBindHost(hostEnv) {
+  const host = String(hostEnv ?? '').trim() || DEFAULT_DAEMON_HOST;
+  if (!isLoopbackHostname(host) && !DEV_WILDCARD_HOSTS.has(host)) {
+    throw new Error(
+      `NEXUS42_DEV_HOST must be loopback, 0.0.0.0 or :: for LAN dev; got ${host}.`,
+    );
+  }
+  return { host, allowRemote: !isLoopbackHostname(host) };
+}
+
 export function resolveDaemonEndpoint({ portEnv, urlEnv } = {}) {
   const portRaw = portEnv ?? '';
   const urlRaw = urlEnv ?? '';
@@ -766,9 +784,14 @@ export async function prepareDevCliWebEnvironment(env = process.env) {
 
 export async function runDevCliWebPreflight(env = process.env) {
   const prepared = await prepareDevCliWebEnvironment(env);
+  const bind = resolveDevBindHost(env.NEXUS42_DEV_HOST);
   process.stdout.write(`export VITE_DAEMON_URL=${JSON.stringify(prepared.baseUrl)}\n`);
   process.stdout.write(`export NEXUS42_DAEMON_PORT=${JSON.stringify(String(prepared.port))}\n`);
   process.stdout.write(`export NEXUS42_ARTIFACT=${JSON.stringify(prepared.artifactPath)}\n`);
+  process.stdout.write(`export NEXUS42_DEV_HOST=${JSON.stringify(bind.host)}\n`);
+  process.stdout.write(
+    `export NEXUS42_DEV_ALLOW_REMOTE=${JSON.stringify(bind.allowRemote ? '1' : '0')}\n`,
+  );
   return prepared;
 }
 

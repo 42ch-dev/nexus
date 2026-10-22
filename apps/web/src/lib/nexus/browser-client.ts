@@ -12,6 +12,11 @@
  */
 import type {
   ActiveCreatorResponse,
+  ActiveWorkspaceResponse,
+  ListWorkspacesQuery,
+  ListWorkspacesResponse,
+  SetActiveWorkspaceRequest,
+  SetActiveWorkspaceResponse,
   AddScheduleRequest,
   AddScheduleResponse,
   BatchUpdateFindingsRequest,
@@ -175,15 +180,17 @@ import type {
 import type { PresetProfileResponse } from './preset-profile';
 import type { CapabilityListResponse } from './capability-info';
 
-import { NexusClientError, type TransportErrorKind } from './errors';
+import { NexusClientError, UNAUTHORIZED_EVENT, type TransportErrorKind } from './errors';
 import type {
   ClearRunsQuery,
   ClearRunsResponse,
   DaemonHealth,
+  DaemonRuntimeStatus,
   DiscardRunResponse,
   ListRunsQuery,
   ListTimelineEventsQuery,
   NexusClient,
+  RuntimeStatus,
   WorkflowHostEventPayload,
   WorkflowObservationFrame,
   WorkflowRunStatePayload,
@@ -256,6 +263,18 @@ export class BrowserClient implements NexusClient {
     return this.request<CertFingerprintResponse>('GET', '/v1/daemon/runtime/cert-fingerprint', undefined, false);
   }
 
+  runtimeStatus(): Promise<RuntimeStatus> {
+    // Unguarded runtime family: the API-key gate skips it, so the browser
+    // first-run gate works on a fresh origin/LAN browser (compass D21).
+    return this.get<RuntimeStatus>('/v1/daemon/runtime/status');
+  }
+
+  daemonStatus(): Promise<DaemonRuntimeStatus> {
+    // Same unguarded runtime family; carries the `degraded` block for the
+    // global service-unavailable surface (v1219-onboarding T4).
+    return this.get<DaemonRuntimeStatus>('/v1/daemon/daemon/status');
+  }
+
   // ── Creators + Agent host (V1.94 P1) ───────────────────────────────────────
   listCreators(query?: ListCreatorsQuery): Promise<ListCreatorsResponse> {
     return this.get<ListCreatorsResponse>('/v1/daemon/creators', query);
@@ -274,6 +293,19 @@ export class BrowserClient implements NexusClient {
   }
   getActiveCreator(): Promise<ActiveCreatorResponse> {
     return this.get<ActiveCreatorResponse>('/v1/daemon/creators/active');
+  }
+
+  // ── Workspaces (plan v1219 T3 — frozen workspace family; create omitted, D23) ──
+  listWorkspaces(query?: ListWorkspacesQuery): Promise<ListWorkspacesResponse> {
+    return this.get<ListWorkspacesResponse>('/v1/daemon/workspaces', query);
+  }
+  getActiveWorkspace(): Promise<ActiveWorkspaceResponse> {
+    return this.get<ActiveWorkspaceResponse>('/v1/daemon/workspace');
+  }
+  setActiveWorkspace(
+    request: SetActiveWorkspaceRequest,
+  ): Promise<SetActiveWorkspaceResponse> {
+    return this.post<SetActiveWorkspaceResponse>('/v1/daemon/workspace/active', request);
   }
   scanAgents(request?: ScanRequest): Promise<ScanResponse> {
     return this.post<ScanResponse>('/v1/daemon/agent-host/scan', request);
@@ -855,7 +887,12 @@ export class BrowserClient implements NexusClient {
 
     let response: Response;
     try {
-      response = await this.fetchImpl(url, { method: 'GET', headers, signal });
+      response = await this.fetchImpl(url, {
+        method: 'GET',
+        headers,
+        credentials: 'include',
+        signal,
+      });
     } catch (cause) {
       if (signal.aborted) return;
       throw new NexusClientError(
@@ -865,6 +902,10 @@ export class BrowserClient implements NexusClient {
         { cause: String(cause) },
         BrowserClient.classifyTransportError(this.baseUrl, cause),
       );
+    }
+
+    if (response.status === 401 && typeof window !== 'undefined') {
+      window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
     }
 
     if (!response.ok) {
@@ -951,7 +992,12 @@ export class BrowserClient implements NexusClient {
 
     let response: Response;
     try {
-      response = await this.fetchImpl(url, { method: 'GET', headers, signal });
+      response = await this.fetchImpl(url, {
+        method: 'GET',
+        headers,
+        credentials: 'include',
+        signal,
+      });
     } catch (cause) {
       if (signal.aborted) return;
       throw new NexusClientError(
@@ -961,6 +1007,10 @@ export class BrowserClient implements NexusClient {
         { cause: String(cause) },
         BrowserClient.classifyTransportError(this.baseUrl, cause),
       );
+    }
+
+    if (response.status === 401 && typeof window !== 'undefined') {
+      window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
     }
 
     if (!response.ok) {
@@ -1264,7 +1314,13 @@ export class BrowserClient implements NexusClient {
     includeApiKey = true,
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
-    const init: RequestInit = { method, headers: { Accept: 'application/json' } };
+    // `include` lets the `nexus_session` cookie flow from the desktop custom
+    // protocol and Vite dev origins (access spec §3.1).
+    const init: RequestInit = {
+      method,
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    };
     if (this.apiKey && includeApiKey) {
       init.headers = { ...init.headers, 'X-API-Key': this.apiKey };
     }
@@ -1306,6 +1362,12 @@ export class BrowserClient implements NexusClient {
         { status: response.status, content_type: contentType },
         'http_fallback',
       );
+    }
+
+    // One 401 notification per failed request; the app-level recovery surface
+    // owns deduplication, so concurrent 401s collapse into one instance.
+    if (response.status === 401 && typeof window !== 'undefined') {
+      window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
     }
 
     if (!response.ok) {

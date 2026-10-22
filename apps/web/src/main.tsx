@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 
 import { App } from '@/App';
 import { ClientProvider } from '@/lib/client-context';
+import { AuthRecoveryGate } from '@/components/access/auth-recovery';
 import { ThemeProvider } from '@/components/theme-provider';
 import { LocaleProvider } from '@/components/locale-provider';
 import { ToastProvider, Toaster, useToast } from '@/lib/use-toast';
@@ -22,6 +23,9 @@ function useQueryErrorToast() {
   const { toast } = useToast();
   const { t } = useTranslation('common');
   return (error: unknown) => {
+    // A 401 is owned by the app-level recovery surface (access spec §6.1):
+    // toasting it per query is the I-000059 toast storm.
+    if (error instanceof NexusClientError && error.status === 401) return;
     const description =
       error instanceof NexusClientError
         ? error.message
@@ -71,7 +75,9 @@ function AppProviders({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <ClientProvider>{children}</ClientProvider>
+        <ClientProvider>
+          <AuthRecoveryGate>{children}</AuthRecoveryGate>
+        </ClientProvider>
       </BrowserRouter>
     </QueryClientProvider>
   );

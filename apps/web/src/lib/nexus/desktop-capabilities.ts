@@ -120,12 +120,6 @@ export interface DesktopCapabilities {
   getWorkspaceRoot(): Promise<string>;
   /** Toggle the main window between maximized and restored (desktop titlebar double-click). */
   toggleMaximizeWindow(): Promise<void>;
-  /**
-   * Bootstrap local creator/workspace state before daemon start.
-   * Idempotent: if a creator ID already exists, returns it without overwriting.
-   * Browser build: no-op — wizard skips this step when {@link useDesktopCapabilities} is `null`.
-   */
-  ensureSetupBootstrap(): Promise<{ creator_id: string; already_bootstrapped: boolean }>;
 }
 
 function asDesktopError(err: unknown): DesktopCapabilityError {
@@ -235,14 +229,6 @@ export class ElectronDesktopCapabilities implements DesktopCapabilities {
   async setWorkspacePath(path: string): Promise<void> {
     try {
       await invokeDesktop('set_workspace_path', { path });
-    } catch (err) {
-      throw asDesktopError(err);
-    }
-  }
-
-  async ensureSetupBootstrap(): Promise<{ creator_id: string; already_bootstrapped: boolean }> {
-    try {
-      return await invokeDesktop('ensure_setup_bootstrap');
     } catch (err) {
       throw asDesktopError(err);
     }

@@ -129,6 +129,12 @@ import type {
   ValidatePresetRequest,
   ValidatePresetResponse,
   ActiveCreatorResponse,
+  ActiveWorkspaceResponse,
+  ListWorkspacesQuery,
+  ListWorkspacesResponse,
+  SetActiveWorkspaceRequest,
+  SetActiveWorkspaceResponse,
+  WorkspaceSummary,
   WorkDetailResponse,
   WorkOutline,
   WorldKbCandidatesResponse,
@@ -157,6 +163,28 @@ export interface DaemonHealth {
   status: string;
   /** Daemon (`nexus42`) package version. */
   version: string;
+}
+
+/**
+ * Runtime status probe result (`GET /v1/daemon/runtime/status`, unguarded).
+ * App-side type: only the browser first-run gate consumes it.
+ */
+export interface RuntimeStatus {
+  /** `false` until a workspace is active/initialized (compass D21 first-run gate). */
+  workspace_initialized: boolean;
+}
+
+/**
+ * Daemon status probe result (`GET /v1/daemon/daemon/status`, unguarded).
+ * App-side type: only the `degraded` block is consumed (v1219-onboarding T4).
+ */
+export interface DaemonRuntimeStatus {
+  degraded: {
+    /** Degraded subsystem names (`db`, `engine`). */
+    subsystems: string[];
+    /** Human-readable reason per subsystem. */
+    reasons: string[];
+  };
 }
 
 /**
@@ -268,6 +296,17 @@ export interface NexusClient extends CoreSliceClient {
    * access (V1.92 P1).
    */
   certFingerprint(): Promise<CertFingerprintResponse>;
+  /**
+   * `GET /v1/daemon/runtime/status` — unguarded runtime status. Its
+   * `workspace_initialized` is the browser first-run gate (compass D21).
+   */
+  runtimeStatus(): Promise<RuntimeStatus>;
+  /**
+   * `GET /v1/daemon/daemon/status` — unguarded daemon status. Its
+   * `degraded.subsystems` drives the global service-unavailable surface
+   * (v1219-onboarding T4).
+   */
+  daemonStatus(): Promise<DaemonRuntimeStatus>;
   // ── Creators (V1.94 P1) ────────────────────────────────────────────────────
   /** `GET /v1/daemon/creators` — cursor list of local creators. */
   listCreators(query?: ListCreatorsQuery): Promise<ListCreatorsResponse>;
@@ -287,6 +326,16 @@ export interface NexusClient extends CoreSliceClient {
   getActiveCreator(): Promise<ActiveCreatorResponse>;
   /** `PUT /v1/daemon/creators/active` — switch the daemon's active creator. */
   setActiveCreator(request: SetActiveCreatorRequest): Promise<SetActiveCreatorResponse>;
+
+  // ── Workspaces (plan v1219 T3 — frozen workspace family; create omitted, D23) ──
+  /** `GET /v1/daemon/workspaces` — cursor list of the creator's workspaces. */
+  listWorkspaces(query?: ListWorkspacesQuery): Promise<ListWorkspacesResponse>;
+  /** `GET /v1/daemon/workspace` — the daemon's active workspace. */
+  getActiveWorkspace(): Promise<ActiveWorkspaceResponse>;
+  /** `POST /v1/daemon/workspace/active` — switch the daemon's active workspace. */
+  setActiveWorkspace(
+    request: SetActiveWorkspaceRequest,
+  ): Promise<SetActiveWorkspaceResponse>;
 
   // ── Agent host (V1.94 P1) ──────────────────────────────────────────────────
   /** `POST /v1/daemon/agent-host/scan` — detect locally available ACP agents. */
@@ -772,8 +821,14 @@ export type {
   ScanRequest,
   ScanResponse,
   ActiveCreatorResponse,
+  ActiveWorkspaceResponse,
+  ListWorkspacesQuery,
+  ListWorkspacesResponse,
   SetActiveCreatorRequest,
   SetActiveCreatorResponse,
+  SetActiveWorkspaceRequest,
+  SetActiveWorkspaceResponse,
+  WorkspaceSummary,
   SoulNarrativeRequest,
   SoulNarrativeResponse,
   UpdateFindingRequest,

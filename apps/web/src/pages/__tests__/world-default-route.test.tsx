@@ -1,16 +1,19 @@
 /**
- * World default route + IA tests (V1.122 P1 T3).
+ * World default route + IA tests (V1.122 P1 T3, index owner revised by
+ * v1219-world-module T1).
  *
  * Asserts the architect-locked information architecture:
- *   - `/worlds/:worldId` redirects to `/worlds/:worldId/timeline` (Timeline
- *     is the default World entry; compass AC-V1122-5).
- *   - The Timeline canvas mounts at `/worlds/:worldId/timeline`.
+ *   - `/worlds/:worldId` renders the World app surface (header + layer
+ *     tabs; v1219-world-module T1 — the index STOPS redirecting to
+ *     `timeline`; Brief is the default layer).
+ *   - The Timeline canvas mounts at `/worlds/:worldId/timeline` (legacy
+ *     canvas page until its module rebuild).
  *   - Peer-surface nav links (World KB at `/kb`, Strategy at `/strategies`)
  *     are present in the Timeline header.
  *   - World KB route `/worlds/:worldId/kb` still mounts as a sibling
  *     (regression — the peer surface stays reachable).
  *   - Work entry regression: `/works/:workId` redirects to `outline`
- *     (V1.118; the Timeline retarget MUST NOT change Work entry).
+ *     (V1.118; the World surface retarget MUST NOT change Work entry).
  */
 import { describe, expect, it, vi } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
@@ -19,6 +22,16 @@ import { Navigate, Route, Routes, useLocation } from 'react-router';
 import { renderInApp } from '@/test/test-providers';
 import { noopClient } from '@/test/test-providers';
 import { TimelinePage } from '@/pages/timeline-page';
+import { WorldApp } from '@/components/world/world-app';
+
+/**
+ * The World app surface reads the World + KB graph via TanStack Query; for
+ * route-resolution tests we mock it so the test asserts routing (the index
+ * owns the URL and renders the surface), not data loading.
+ */
+vi.mock('@/components/world/world-app', () => ({
+  WorldApp: () => <div data-testid="world-app-mock" />,
+}));
 
 
 /**
@@ -66,7 +79,9 @@ function AppRoutes() {
           element={<div data-testid="worlds-index-outlet">worlds</div>}
         />
         <Route path="worlds/:worldId">
-          <Route index element={<Navigate to="timeline" replace />} />
+          {/* Mirror App.tsx (v1219-world-module T1): the index renders the
+              World app surface — no more redirect to `timeline`. */}
+          <Route index element={<WorldApp />} />
           <Route path="timeline" element={<TimelinePage />} />
           <Route
             path="kb"
@@ -79,21 +94,18 @@ function AppRoutes() {
 }
 
 describe('World default route + IA (V1.122 P1 T3)', () => {
-  it('redirects /worlds/:worldId to /worlds/:worldId/timeline (Timeline is the default World entry)', async () => {
+  it('renders the World app surface at /worlds/:worldId (index owner since v1219-world-module T1 — no redirect)', async () => {
     renderInApp(<AppRoutes />, {
       client: noopClient,
       initialRouterEntries: ['/worlds/eryndor'],
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId('location')).toHaveTextContent(
-        '/worlds/eryndor/timeline',
-      );
+      expect(screen.getByTestId('world-app-mock')).toBeInTheDocument();
     });
-    expect(screen.getByTestId('timeline-canvas-mock')).toBeInTheDocument();
-    expect(screen.getByTestId('timeline-canvas-world')).toHaveTextContent(
-      'eryndor',
-    );
+    // The URL is owned, not rewritten — the legacy Timeline stays a peer.
+    expect(screen.getByTestId('location')).toHaveTextContent('/worlds/eryndor');
+    expect(screen.queryByTestId('timeline-canvas-mock')).not.toBeInTheDocument();
   });
 
   it('renders the Timeline canvas at the timeline route', async () => {

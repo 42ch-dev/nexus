@@ -139,6 +139,10 @@ import type {
   SetActiveCreatorResponse,
   ActiveCreatorResponse,
   LogoutResponse,
+  ListWorkspacesResponse,
+  ActiveWorkspaceResponse,
+  SetActiveWorkspaceRequest,
+  SetActiveWorkspaceResponse,
   CaptureCharacterPendingReviewRequest,
   CaptureCharacterPendingReviewResponse,
   ListCharacterPendingReviewsQuery,
@@ -624,6 +628,14 @@ export interface NativeCore {
   patchCreator(creatorId: string, displayName?: string): Promise<CreatorDetail>;
   setActiveCreator(request: SetActiveCreatorRequest): Promise<SetActiveCreatorResponse>;
   getActiveCreator(): Promise<ActiveCreatorResponse>;
+  listWorkspaces(): Promise<ListWorkspacesResponse>;
+  getActiveWorkspace(): Promise<ActiveWorkspaceResponse>;
+  selectWorkspace(request: SetActiveWorkspaceRequest): Promise<SetActiveWorkspaceResponse>;
+  /**
+   * Promote the status-only shell to the full core in process. Runs the same
+   * admission/publication as the startup open; idempotent once published.
+   */
+  promoteCore(): Promise<void>;
   logoutCreator(creatorId: string): Promise<LogoutResponse>;
   captureCharacterPendingReview(
     principal: PrincipalHandle,
@@ -1024,6 +1036,10 @@ type DomainSurface = Pick<
   | 'patchCreator'
   | 'setActiveCreator'
   | 'getActiveCreator'
+  | 'listWorkspaces'
+  | 'getActiveWorkspace'
+  | 'selectWorkspace'
+  | 'promoteCore'
   | 'logoutCreator'
   | 'captureCharacterPendingReview'
   | 'listCharacterPendingReviews'
@@ -1390,6 +1406,18 @@ function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
     },
     async getActiveCreator() {
       return json(await inner.getActiveCreator());
+    },
+    async listWorkspaces() {
+      return json(await inner.listWorkspaces());
+    },
+    async getActiveWorkspace() {
+      return json(await inner.getActiveWorkspace());
+    },
+    async selectWorkspace(request) {
+      return json(await inner.selectWorkspace(wire(request, 'request')));
+    },
+    async promoteCore() {
+      await inner.promoteCore();
     },
     async logoutCreator(creatorId) {
       return json(await inner.logoutCreator(creatorId));

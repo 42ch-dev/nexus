@@ -344,6 +344,11 @@ impl CoreHomeService {
         pool.close().await;
         materialized.map_err(local_db_err)?;
 
+        // A creator bootstrap only pre-creates the directory: register the
+        // workspace's discovery metadata so it is listable (D25 — the first
+        // workspace is selected, never created over HTTP).
+        self.ensure_workspace_registration(&creator_id, &request.workspace_slug)?;
+
         // Failure-atomic selection commit: the config write happens only
         // after initialization fully succeeded, so an initialization failure
         // preserves the previous selection instead of committing a broken one.
@@ -352,6 +357,70 @@ impl CoreHomeService {
         Ok(SetActiveWorkspaceResponse {
             creator_id,
             workspace_slug: request.workspace_slug,
+        })
+    }
+
+    /// Register the selected workspace for discovery when only its operational
+    /// directory was pre-created. `scan_workspaces` lists exactly the
+    /// workspaces carrying an operational `meta.json`, and the display name is
+    /// read from `<creative_root>/.nexus42/workspace.json`; both are written
+    /// here (never overwriting an existing registration or manifest).
+    ///
+    /// # Errors
+    /// Returns the mapped internal carriers when the creative tree or the
+    /// registration metadata cannot be written.
+    fn ensure_workspace_registration(&self, creator_id: &str, slug: &str) -> CoreResult<()> {
+        let op_dir = operational_workspace_dir(&self.user_home, creator_id, slug);
+        if op_dir.join("meta.json").exists() {
+            return Ok(());
+        }
+
+        let creative_root =
+            default_creative_root(&self.user_home, &self.nexus_home, creator_id, slug);
+        let creative_meta = creative_root.join(".nexus42");
+        std::fs::create_dir_all(&creative_meta).map_err(|e| CoreError::Internal {
+            category: format!("workspace_dir_create: {e}"),
+        })?;
+
+        let workspace_json = creative_meta.join("workspace.json");
+        if !workspace_json.exists() {
+            // D25 copy: the pre-created first workspace is the product's
+            // `默认工作区`; an additional workspace names itself by slug (the
+            // deferred create route supplies its own display name).
+            let display_name = if slug == "default" {
+                "默认工作区"
+            } else {
+                slug
+            };
+            let manifest = serde_json::json!({
+                "name": display_name,
+                "version": 1,
+                "created_at": chrono::Utc::now().to_rfc3339(),
+                "creator_id": creator_id,
+                "workspace_slug": slug,
+            });
+            let text =
+                serde_json::to_string_pretty(&manifest).map_err(|e| CoreError::Internal {
+                    category: format!("workspace_manifest_serialize: {e}"),
+                })?;
+            std::fs::write(&workspace_json, text).map_err(|e| CoreError::Internal {
+                category: format!("workspace_manifest_write: {e}"),
+            })?;
+        }
+
+        let meta = serde_json::json!({
+            "schema_version": 1,
+            "creator_id": creator_id,
+            "workspace_slug": slug,
+            "local_root": creative_root,
+            "workspace_id": null,
+            "created_at": chrono::Utc::now().to_rfc3339(),
+        });
+        let text = serde_json::to_string_pretty(&meta).map_err(|e| CoreError::Internal {
+            category: format!("workspace_meta_serialize: {e}"),
+        })?;
+        std::fs::write(op_dir.join("meta.json"), text).map_err(|e| CoreError::Internal {
+            category: format!("workspace_meta_write: {e}"),
         })
     }
 
@@ -508,6 +577,34 @@ fn validate_workspace_slug(slug: &str) -> CoreResult<()> {
         });
     }
     Ok(())
+}
+
+/// The creative root written into a first registration: the legacy setup root
+/// for the creator when the config carries one, else `~/Nexus` for the first
+/// workspace and `~/Nexus/<slug>` for an additional one (access spec §3.1 Q3).
+/// A relative legacy path resolves against the raw user home.
+fn default_creative_root(
+    user_home: &Path,
+    nexus_home: &Path,
+    creator_id: &str,
+    slug: &str,
+) -> PathBuf {
+    let legacy = crate::creators::read_cli_config(nexus_home)
+        .ok()
+        .and_then(|config| {
+            config
+                .get("workspace_path_by_creator")
+                .and_then(|paths| paths.get(creator_id))
+                .and_then(toml::Value::as_str)
+                .or_else(|| config.get("workspace_path").and_then(toml::Value::as_str))
+                .map(PathBuf::from)
+        });
+    match legacy {
+        Some(path) if path.is_absolute() => path,
+        Some(path) => user_home.join(path),
+        None if slug == "default" => user_home.join("Nexus"),
+        None => user_home.join("Nexus").join(slug),
+    }
 }
 
 /// Deny selecting a workspace whose operational `meta.json` registers a

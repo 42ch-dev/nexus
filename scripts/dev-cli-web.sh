@@ -10,8 +10,14 @@
 #    selected loopback endpoint (starts detached if not). No old-daemon
 #    fallback exists.
 # 3. Validates TS service health on that endpoint before starting Vite.
-# 4. Runs the web dev server in the foreground (proxy → service via
+# 4. Prints the tokenized browser access URL from the service log.
+# 5. Runs the web dev server in the foreground (proxy → service via
 #    VITE_DAEMON_URL).
+#
+# LAN dev (plain HTTP, no TLS): NEXUS42_DEV_HOST=0.0.0.0 pnpm dev
+#   The service binds the LAN and implies --allow-remote; a remote bind still
+#   requires NEXUS42_DAEMON_API_KEY, and the browser gets in through the
+#   printed /__bootstrap link (session cookie).
 #
 # Stop: Ctrl-C kills the web dev server; the service stays up.
 
@@ -37,6 +43,21 @@ echo "==> native artifact (${ARTIFACT})"
 # ── 2. Standalone TS service on the loopback endpoint. ──────────────────────
 echo "==> service endpoint ${BASE_URL}"
 SERVICE_ROOT="${REPO_ROOT}/apps/nexus-service"
+SERVICE_LOG="${REPO_ROOT}/.dev/nexus-service.log"
+
+# The one-time bootstrap URL carries an access token; the service log is only
+# the transport this script reads it through. Drop that boot line once read so
+# no token outlives its single use on disk (auth-session invariant: no token is
+# persisted). The directory itself is owner-only.
+scrub_bootstrap_token_line() {
+  [ -f "${SERVICE_LOG}" ] || return 0
+  if grep -qF '[nexus-service] open: ' "${SERVICE_LOG}" 2>/dev/null; then
+    awk '!/\[nexus-service\] open: /' "${SERVICE_LOG}" > "${SERVICE_LOG}.scrub"
+    mv "${SERVICE_LOG}.scrub" "${SERVICE_LOG}"
+  fi
+  return 0
+}
+
 if [ ! -f "${SERVICE_ROOT}/dist/main.js" ]; then
   echo "    building service (tsc, no Cargo)"
   (cd "${SERVICE_ROOT}" && npx tsc -p tsconfig.json)
@@ -58,20 +79,48 @@ health_ok() {
   " "${BASE_URL}"
 }
 
+SERVICE_STARTED=0
 if health_ok; then
   echo "    service already running"
+  if [ -d "${REPO_ROOT}/.dev" ]; then chmod 700 "${REPO_ROOT}/.dev"; fi
 else
+  SERVICE_STARTED=1
   echo "    starting standalone service (detached)"
   mkdir -p "${REPO_ROOT}/.dev"
-  nohup node "${SERVICE_ROOT}/dist/main.js" --home "${HOME}" --host 127.0.0.1 --port "${PORT}" \
+  chmod 700 "${REPO_ROOT}/.dev"
+  SERVICE_ARGS=(--home "${HOME}" --host "${NEXUS42_DEV_HOST:-127.0.0.1}" --port "${PORT}")
+  if [ "${NEXUS42_DEV_ALLOW_REMOTE:-0}" = "1" ]; then
+    SERVICE_ARGS+=(--allow-remote)
+  fi
+  nohup node "${SERVICE_ROOT}/dist/main.js" "${SERVICE_ARGS[@]}" \
     > "${REPO_ROOT}/.dev/nexus-service.log" 2>&1 &
   SERVICE_PID=$!
   for _ in $(seq 1 50); do
     if health_ok; then break; fi
     sleep 0.2
   done
-  health_ok || { echo "    service failed to become healthy; see .dev/nexus-service.log" >&2; exit 1; }
+  health_ok || { scrub_bootstrap_token_line; echo "    service failed to become healthy; see .dev/nexus-service.log" >&2; exit 1; }
   echo "    service healthy (pid ${SERVICE_PID})"
+fi
+
+# Browser access (access spec §3.1): the tokenized URL from the LATEST service
+# boot in the log. Tokens are single-use, so an earlier run's line is dead and
+# only the last match is useful. Dev serves the SPA through Vite, so the
+# service never auto-opens a browser here; the link is surfaced to copy.
+BOOTSTRAP_URL=""
+if [ -f "${SERVICE_LOG}" ]; then
+  BOOTSTRAP_URL="$(grep -o '\[nexus-service\] open: [^ ]*' "${SERVICE_LOG}" | tail -1 | sed 's/^\[nexus-service\] open: //' || true)"
+  if [ -n "${BOOTSTRAP_URL}" ]; then
+    scrub_bootstrap_token_line
+  fi
+fi
+if [ "${SERVICE_STARTED}" = "0" ]; then
+  echo "    service was already running; its one-time access link came from that run"
+  echo "    restart the service for a fresh access link"
+elif [ -n "${BOOTSTRAP_URL}" ]; then
+  echo "==> browser access: ${BOOTSTRAP_URL}"
+else
+  echo "    no bootstrap URL in ${SERVICE_LOG}; see the service log"
 fi
 
 echo "==> validating running service identity"

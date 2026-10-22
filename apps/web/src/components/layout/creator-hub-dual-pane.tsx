@@ -16,7 +16,8 @@ export { resolveInitialHubTab } from '@/components/layout/use-hub-tab-state';
 /**
  * Wired Creator Hub browse surface — shared tab SSOT, card list, canvas navigation (V1.135 P0).
  *
- * Create lives in {@link Sidebar} `panelContent` ({@link CreatorCreatePanel}), not here.
+ * Create lives in {@link CreatorCreatePanel} on the creator hub page
+ * (`creator-hub-page.tsx`), not here.
  */
 export function CreatorHubDualPane() {
   const { t } = useTranslation(['shell', 'common']);
@@ -69,7 +70,10 @@ export function CreatorHubDualPane() {
   const handleSelectCard = useCallback(
     (id: string) => {
       if (activeTab === 'world') {
-        navigate(`/worlds/${encodeURIComponent(id)}/timeline`);
+        // v1219-world-module T2 (T1 review follow-up): the world index is the
+        // new app surface (Brief default); the per-world Timeline stays
+        // reachable via the row submenu's 打开时间线.
+        navigate(`/worlds/${encodeURIComponent(id)}`);
         return;
       }
       navigate(`/works/${encodeURIComponent(id)}/outline`);

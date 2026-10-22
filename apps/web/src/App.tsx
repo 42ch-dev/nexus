@@ -7,34 +7,31 @@ import {
   DefaultProfileCoordinator,
 } from '@/lib/active-creator-context';
 import { SetupCompletedProvider } from '@/lib/setup-completed-context';
+import { ServiceStatusProvider } from '@/lib/service-status-context';
 import { EntranceProvider } from '@/lib/entrance-context';
 import {
   EntranceGuard,
   EntranceIndexRedirect,
 } from '@/components/layout/entrance-guard';
-import { RootLayout } from '@/components/layout/root-layout';
+import { AppShell, AppModuleRoute } from '@/components/shell/app-shell';
 import { SettingsModalHost } from '@/components/layout/settings-modal-host';
 import {
   SettingsModalProvider,
   useSettingsModal,
 } from '@/components/layout/settings-modal-context';
 import { DaemonLaunchGate } from '@/components/setup/daemon-launch-gate';
+import { ServiceDegradedGate } from '@/components/setup/service-degraded-surface';
 import { SetupGate } from '@/components/setup/setup-gate';
 import { ChapterPage } from '@/pages/chapter-page';
 import { ChaptersPage } from '@/pages/chapters-page';
 import { FindingsPage } from '@/pages/findings-page';
 import { GlobalTimelinePage } from '@/pages/global-timeline-page';
-import { MemoryPage } from '@/pages/memory-page';
-import { ModulesPage } from '@/pages/modules-page';
 import { NotFoundPage } from '@/pages/not-found-page';
 import { SchedulePage } from '@/pages/schedule-page';
 import { SessionRunViewPage } from '@/pages/session-run-view';
-import { SessionsPage } from '@/pages/sessions-page';
 import { WorkShellLayout } from '@/components/layout/work-shell-layout';
-import { CreatorHubPage } from '@/pages/creator-hub-page';
-import { SetupWizardPage } from '@/pages/setup-wizard-page';
+import { WizardShell } from '@/components/onboarding/wizard-shell';
 import { EntrancePage } from '@/pages/entrance-page';
-import { StrategiesPage } from '@/pages/strategies-page';
 import { LoadingState } from '@/components/ui/states';
 
 // Route-split: the Strategy canvas pulls in `@xyflow/react`, which is a
@@ -74,6 +71,13 @@ const WorldKbPage = lazy(() =>
   import('@/pages/world-kb-page').then((m) => ({ default: m.WorldKbPage })),
 );
 
+// Route-split: the World app surface (v1219-world-module T1) owns
+// `/worlds/:worldId` — a light header + layer tabs + era projection, no
+// `@xyflow/react` — so it lazy-loads outside the canvas chunk family.
+const WorldApp = lazy(() =>
+  import('@/components/world/world-app').then((m) => ({ default: m.WorldApp })),
+);
+
 // V1.151 P1 (DF-76) — Assembly Inspector debug surface. A Control-Room-style
 // read-only page (no `@xyflow/react`), sibling of outline/timeline/chapters
 // under the Work canvas shell.
@@ -96,19 +100,8 @@ const WorldFindingsPage = lazy(() =>
   import('@/pages/world-findings-page').then((m) => ({ default: m.WorldFindingsPage })),
 );
 
-// Route-split: the Develop hub (V1.170 P1 — AR-18) is the developer-entrance
-// land route. Lazy-loaded like the canvas routes so the hub chunk stays out
-// of the bootstrap path (canvases keep React Flow out; the hub is static cards).
-const DeveloperHubPage = lazy(() =>
-  import('@/pages/developer-hub-page').then((m) => ({ default: m.DeveloperHubPage })),
-);
-
-// Route-split: the Capability browser is a Develop-tree-only surface (V1.170
-// P1 — EL-6; Create bounces). Lazy-loaded like the hub so the Create-default
-// bootstrap stays lean (plan QC S-2/F-3 — chunk symmetry with /developer).
-const CapabilitiesPage = lazy(() =>
-  import('@/pages/capabilities-page').then((m) => ({ default: m.CapabilitiesPage })),
-);
+// v1.219 T2 — the Develop hub and Capability browser are registry apps now
+// (developer rail); their lazy boundary lives in `lib/app-registry.ts`.
 
 // P4-T3 development-only RFT-M1 browser proof route. The dynamic import is
 // guarded by a compile-time `import.meta.env` check, so in a production build
@@ -153,7 +146,10 @@ function AppRoutes() {
 
   return (
     <Routes location={routesLocation}>
-      <Route path="setup" element={<SetupWizardPage />} />
+      {/* v1219-onboarding T1 — first-run wizard (identity step; agent/world
+          steps land in T2–T3). The route is always directly reachable: it is
+          both the derived-gate destination and the re-run entry (compass D21). */}
+      <Route path="setup" element={<WizardShell />} />
       {/* V1.170 P1 (AR-16/AR-20) — entrance identity page. Standalone (sibling
           of /setup, outside the gated tree): first-run land for unset browser
           installs + the footer switch control's destination. Only Continue
@@ -163,7 +159,9 @@ function AppRoutes() {
         element={
           <SetupGate>
             <EntranceGuard>
-              <RootLayout />
+              {/* v1.219 T2 — the new app shell (topnav + dock rail) replaces
+                  the old RootLayout chrome; legacy pages keep their routes. */}
+              <AppShell />
             </EntranceGuard>
           </SetupGate>
         }
@@ -177,7 +175,7 @@ function AppRoutes() {
             `/worlds/:worldId/timeline` (V1.122 P1 T3 hero surface); Work
             Timeline stays at `/works/:workId/timeline` (V1.123 P2 T5). */}
         <Route path="timeline" element={<GlobalTimelinePage />} />
-        <Route path="works" element={<CreatorHubPage />} />
+        <Route path="works" element={<AppModuleRoute appId="work" />} />
         <Route path="works/chapters" element={<ChaptersPage />} />
         <Route path="works/:workId" element={<WorkShellLayout />}>
           <Route index element={<Navigate to="outline" replace />} />
@@ -215,18 +213,21 @@ function AppRoutes() {
         </Route>
         <Route
           path="worlds"
-          element={<CreatorHubPage />}
+          element={<AppModuleRoute appId="world" />}
         />
-        {/* V1.122 P1 T3 — Timeline is the default World entry. The index
-            redirect sends `/worlds/:worldId` to `/worlds/:worldId/timeline`
-            (the World-building hero surface). Peer surfaces (World KB at
-            `/kb`, Strategy via `/strategies`) stay reachable as siblings.
-            Work entry is unchanged — `/works/:workId` still redirects to
-            `outline` (V1.118 regression gate). */}
+        {/* v1219-world-module T1 — the World app surface owns `/worlds/:worldId`:
+            header (name + 世界 · 时间线) + Brief/Narrative/Moment layer tabs on
+            the `?layer=` convention. Brief is the default layer; the legacy
+            canvas pages stay at `/worlds/:worldId/{timeline,kb,findings}`
+            until their module rebuilds. */}
         <Route path="worlds/:worldId">
           <Route
             index
-            element={<Navigate to="timeline" replace />}
+            element={
+              <Suspense fallback={<LoadingState />}>
+                <WorldApp />
+              </Suspense>
+            }
           />
           <Route
             path="timeline"
@@ -262,29 +263,20 @@ function AppRoutes() {
             surface: a session row opens its run view at `/sessions/:sessionId`
             (read-only event stream; no run control). Sibling of the list, not
             a layout — mirrors the `worlds/:worldId` nesting. */}
-        <Route path="sessions">
-          <Route index element={<SessionsPage />} />
-          <Route path=":sessionId" element={<SessionRunViewPage />} />
-        </Route>
+        <Route path="sessions" element={<AppModuleRoute appId="session" />} />
+        <Route path="sessions/:sessionId" element={<SessionRunViewPage />} />
         <Route path="schedule" element={<SchedulePage />} />
         {/* V1.170 P1 (EL-6) — capability browser restored as a live Develop-tree
             surface (read-only builtin capability schemas from
             GET /v1/daemon/orchestration/capabilities). The V1.120 P2 soft-remove
             redirect is replaced by the entrance guard: Create bounces to
             `/works`, Develop renders the browser (AR-15/AR-19). */}
-        <Route
-          path="capabilities"
-          element={
-            <Suspense fallback={<LoadingState label="Loading Capability browser…" />}>
-              <CapabilitiesPage />
-            </Suspense>
-          }
-        />
+        <Route path="capabilities" element={<AppModuleRoute appId="caps" />} />
         {/* Compatibility only — Settings modal owns Modules (V1.131 P2). */}
-        <Route path="modules" element={<ModulesPage />} />
+        <Route path="modules" element={<AppModuleRoute appId="modules" />} />
         <Route path="findings" element={<FindingsPage />} />
-        <Route path="memory" element={<MemoryPage />} />
-        <Route path="strategies" element={<StrategiesPage />} />
+        <Route path="memory" element={<AppModuleRoute appId="memory" />} />
+        <Route path="strategies" element={<AppModuleRoute appId="harness" />} />
         {/* V1.171 P1 (PL-13/AR-28) — per-preset profile drill-down. Sibling of
             the canvas route: the canvas stays at `/strategies/:presetId`
             (PL-14 write-boundary preserved); the profile view lives at a
@@ -315,14 +307,7 @@ function AppRoutes() {
         {/* V1.170 P1 (AR-18) — Develop hub v1: developer-entrance land route.
             Develop-only (guard-bounced on Create); lazy-split with the other
             route-split pages. */}
-        <Route
-          path="developer"
-          element={
-            <Suspense fallback={<LoadingState label="Loading Develop hub…" />}>
-              <DeveloperHubPage />
-            </Suspense>
-          }
-        />
+        <Route path="developer" element={<AppModuleRoute appId="hub" />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
@@ -373,15 +358,19 @@ export function App() {
           {/* V1.134 P0: gate creator probes until daemon ready — avoids
               pre-boot `/v1/daemon/creators*` traffic during dist-load startup. */}
           <DefaultProfileCoordinator />
-          <SettingsModalProvider>
-            <EntranceProvider>
-              <AppRoutes />
-              {/* Inside EntranceProvider so the modal rail can filter by the
-                  resolved entrance (W-2). Rendered after AppRoutes — the
-                  Dialog overlays the route tree either way. */}
-              <SettingsModalHost />
-            </EntranceProvider>
-          </SettingsModalProvider>
+          <ServiceStatusProvider>
+            <SettingsModalProvider>
+              <EntranceProvider>
+                <ServiceDegradedGate>
+                  <AppRoutes />
+                </ServiceDegradedGate>
+                {/* Inside EntranceProvider so the modal rail can filter by the
+                    resolved entrance (W-2). Rendered after AppRoutes — the
+                    Dialog overlays the route tree either way. */}
+                <SettingsModalHost />
+              </EntranceProvider>
+            </SettingsModalProvider>
+          </ServiceStatusProvider>
         </DaemonLaunchGate>
       </SetupCompletedProvider>
     </ActiveCreatorProvider>

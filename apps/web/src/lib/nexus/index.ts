@@ -25,9 +25,11 @@ export type {
   ClearRunsQuery,
   ClearRunsResponse,
   DaemonHealth,
+  DaemonRuntimeStatus,
   DiscardRunResponse,
   ListRunsQuery,
   NexusClient,
+  RuntimeStatus,
 } from './types';
 export type {
   PresetProfileConditionalRule,
