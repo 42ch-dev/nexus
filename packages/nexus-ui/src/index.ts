@@ -14,6 +14,11 @@
  * `<ComputeInspectorSections>`).
  * VI logo upgrade ships: timeline `<NexusMark>`, `logoVariants.text`,
  * Studio-only `<NexusLogoVariant>` specimens.
+ * V1.148 P1 ships: `<Dialog>` (+ trigger/close/content), `<Sheet>` (+ trigger/close/content),
+ * `<Table>` primitives, `<States>` (Spinner/LoadingState/EmptyState/UnavailableState/ErrorState),
+ * `<EmptyCreateCard>`.
+ * V1.149 P1 ships: L2 patterns `<ListStateContainer>`, `<ConfirmDialog>`,
+ * `<FormDialog>` (+ `<FormSection>`).
  */
 
 // Class-merge utility — the V1.100 SSOT for cn / extendTailwindMerge.
@@ -136,6 +141,16 @@ export {
 
 // V1.148 P1 — promoted EmptyCreateCard presentational primitive (empty-list create affordance).
 export { EmptyCreateCard } from './components/empty-create-card';
+
+// V1.149 P1 — promoted L2 pattern components (compose promoted Dialog/States/Button;
+// caller-owned copy; no query/router/i18n deps).
+export {
+  ListStateContainer,
+  type ListStateContainerProps,
+} from './components/list-state-container';
+export { ConfirmDialog, type ConfirmDialogProps } from './components/confirm-dialog';
+export { FormDialog, type FormDialogProps } from './components/form-dialog';
+export { FormSection, type FormSectionProps } from './components/form-section';
 
 // V1.147 P1 — promoted Compute Run Studio presentational primitives.
 // Pure presentational: data + caller-owned copy + callbacks in; no daemon,
