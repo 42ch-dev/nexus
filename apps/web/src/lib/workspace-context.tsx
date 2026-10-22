@@ -32,6 +32,30 @@ interface WorkspaceContextValue {
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
+/**
+ * Active workspace read (`GET /v1/daemon/workspace`), mapping the fresh-home
+ * 409 `uninitialized` to null: that is a normal "no active workspace yet"
+ * state, not a failure — a thrown 409 would also fire the global query-error
+ * toast (409 bypasses the 401-only suppression in main.tsx).
+ *
+ * Neutral (no provider required): the onboarding wizard's developer step reads
+ * the reported `creative_root` without mounting the creator-only provider.
+ */
+export function useActiveWorkspaceQuery() {
+  const client = useNexusClient();
+  return useQuery({
+    queryKey: queryKeys.workspaces.active(),
+    queryFn: async (): Promise<ActiveWorkspaceResponse | null> => {
+      try {
+        return await client.getActiveWorkspace();
+      } catch (error) {
+        if (error instanceof NexusClientError && error.status === 409) return null;
+        throw error;
+      }
+    },
+  });
+}
+
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const client = useNexusClient();
   const qc = useQueryClient();
@@ -45,22 +69,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     queryFn: async () =>
       client.listWorkspaces({ creator_id: creatorId ?? undefined, limit: 100 }),
   });
-  const activeQuery = useQuery({
-    queryKey: queryKeys.workspaces.active(),
-    queryFn: async (): Promise<ActiveWorkspaceResponse | null> => {
-      try {
-        return await client.getActiveWorkspace();
-      } catch (error) {
-        // A fresh home (pre-first-selection) retains 409 `uninitialized`.
-        // That is a normal "no active workspace yet" state, not a failure —
-        // map it to null so the hub renders with no active chip and the
-        // global query-error toast stays silent (QC W: 409 bypasses the
-        // 401-only suppression in main.tsx's useQueryErrorToast).
-        if (error instanceof NexusClientError && error.status === 409) return null;
-        throw error;
-      }
-    },
-  });
+  const activeQuery = useActiveWorkspaceQuery();
 
   const switchMutation = useMutation({
     mutationFn: async (workspaceSlug: string) =>
