@@ -110,6 +110,29 @@ describe('SettingsLayout', () => {
     expect(screen.getByText('Manage workspace preferences.')).toBeInTheDocument();
   });
 
+  it('stacks the nav rail above content on narrow screens, side-by-side from lg up', () => {
+    render(
+      <SettingsLayout
+        sections={SECTIONS}
+        activeId="appearance"
+        onNavigate={() => {}}
+        navLabel="Settings sections"
+      >
+        body
+      </SettingsLayout>,
+    );
+
+    const nav = screen.getByRole('navigation', { name: 'Settings sections' });
+    // Small-screen path: horizontal, wrapping section list above the outlet.
+    expect(nav.className).toMatch(/\bflex-row\b/);
+    expect(nav.className).toMatch(/\bborder-b\b/);
+    // Desktop path: vertical rail beside the outlet (promoted family's lg).
+    expect(nav.className).toMatch(/\blg:flex-col\b/);
+    expect(nav.className).toMatch(/\blg:border-r\b/);
+    expect(nav.parentElement!.className).toMatch(/\bflex-col\b/);
+    expect(nav.parentElement!.className).toMatch(/\blg:flex-row\b/);
+  });
+
   it('keeps the frame token recipe (light/dark parity)', () => {
     render(
       <SettingsLayout

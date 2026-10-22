@@ -21,15 +21,35 @@ describe('FieldRow', () => {
     expect(screen.getByText('Ready')).toBeInTheDocument();
   });
 
-  it('renders nothing when value is missing, null, or empty string', () => {
+  it('renders nothing when value is missing, null, undefined, or empty string', () => {
     const { container: missing } = render(<FieldRow label="Status" />);
     expect(missing.firstElementChild).toBeNull();
 
     const { container: nullValue } = render(<FieldRow label="Status" value={null} />);
     expect(nullValue.firstElementChild).toBeNull();
 
+    const { container: undefinedValue } = render(<FieldRow label="Status" value={undefined} />);
+    expect(undefinedValue.firstElementChild).toBeNull();
+
     const { container: empty } = render(<FieldRow label="Status" value="" />);
     expect(empty.firstElementChild).toBeNull();
+  });
+
+  it('keeps meaningful falsy values (0 and false) rendered', () => {
+    const { container: zero } = render(<FieldRow label="Retries" value={0} />);
+    expect(zero.firstElementChild).not.toBeNull();
+    expect(screen.getByText('0')).toBeInTheDocument();
+
+    const { container: no } = render(<FieldRow label="Enabled" value={false} />);
+    expect(no.firstElementChild).not.toBeNull();
+    expect(screen.getByText('Enabled')).toBeInTheDocument();
+  });
+
+  it('keeps the detail token recipe (light/dark parity)', () => {
+    render(<FieldRow label="Status" value="Ready" />);
+
+    expect(screen.getByText('Status').className).toMatch(/\btext-gray-700\b/);
+    expect(screen.getByText('Ready').className).toMatch(/\btext-gray-1000\b/);
   });
 
   it('merges a caller className', () => {
@@ -74,7 +94,9 @@ describe('DetailCard', () => {
     // ride the Card token recipe (background-100 fill, gray-alpha-400 border).
     const surface = container.firstElementChild!;
     expect(surface.className).toMatch(/\brounded-card\b/);
-    expect(surface.className).toMatch(/\bborder\b/);
+    expect(surface.className).toMatch(/\bborder-gray-alpha-400\b/);
+    expect(surface.className).toMatch(/\bbg-background-100\b/);
+    expect(surface.className).toMatch(/\btext-gray-1000\b/);
   });
 
   it('merges a caller className', () => {

@@ -19,6 +19,9 @@ export interface SettingsLayoutSection {
   icon: LucideIcon;
 }
 
+/** Stable default for `hiddenIds` — avoids a fresh array allocation per render. */
+const NO_HIDDEN_IDS: readonly string[] = [];
+
 export interface SettingsLayoutProps {
   /** Replaces the app-side SETTINGS_SECTION_DESCRIPTORS import. */
   sections: readonly SettingsLayoutSection[];
@@ -41,7 +44,7 @@ export function SettingsLayout({
   sections,
   activeId,
   onNavigate,
-  hiddenIds = [],
+  hiddenIds = NO_HIDDEN_IDS,
   navLabel,
   title,
   helper,
@@ -60,10 +63,10 @@ export function SettingsLayout({
         </div>
       ) : null}
 
-      <div className="flex min-h-0 flex-1 gap-0">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row lg:gap-0">
         <nav
           aria-label={navLabel}
-          className="flex w-44 shrink-0 flex-col gap-0.5 border-r border-gray-alpha-200 px-3 py-2"
+          className="flex flex-row flex-wrap gap-1 border-b border-gray-alpha-200 px-3 py-2 lg:w-44 lg:shrink-0 lg:flex-col lg:flex-nowrap lg:gap-0.5 lg:border-b-0 lg:border-r"
           data-testid="settings-section-nav"
         >
           {sections

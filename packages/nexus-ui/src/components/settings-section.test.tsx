@@ -31,6 +31,21 @@ describe('SettingsSection', () => {
     expect(screen.queryByText('Tune the workspace look.')).toBeNull();
   });
 
+  it('keeps the family token recipe (light/dark parity)', () => {
+    const { container } = render(
+      <SettingsSection title="Appearance" description="Tune the workspace look.">
+        body
+      </SettingsSection>,
+    );
+
+    const fieldset = container.firstElementChild!;
+    expect(fieldset.className).toMatch(/\bflex\b/);
+    expect(fieldset.className).toMatch(/\bflex-col\b/);
+    expect(screen.getByText('Appearance').className).toMatch(/\btext-heading-16\b/);
+    expect(screen.getByText('Appearance').className).toMatch(/\btext-gray-1000\b/);
+    expect(screen.getByText('Tune the workspace look.').className).toMatch(/\btext-gray-900\b/);
+  });
+
   it('merges a caller className', () => {
     const { container } = render(
       <SettingsSection title="Appearance" className="appearance-section">
