@@ -22,8 +22,11 @@ import { BriefCard, BriefReadyCard } from '@/components/world/brief-card';
 import { BriefEditor } from '@/components/world/brief-editor';
 import { BriefEmpty } from '@/components/world/brief-empty';
 import { LayerTabs, parseWorldLayer } from '@/components/world/layer-tabs';
+import { SideChecklist } from '@/components/world/side-checklist';
 import { WorldHeader } from '@/components/world/world-header';
 import { ErrorState, LoadingState } from '@/components/ui/states';
+import { unlock } from '@/lib/activation-store';
+import { useActiveCreatorId } from '@/lib/active-creator-context';
 import { useWorldKbGraph } from '@/lib/canvas/use-world-kb-data';
 import { useNexusClient } from '@/lib/client-context';
 import { NexusClientError } from '@/lib/nexus';
@@ -113,7 +116,9 @@ function WorldAppSurface({ worldId }: { worldId: string }) {
  * saved Brief (renders as {@link BriefCard}), otherwise the empty state with
  * the `+ 写 Brief` action. Eras without a summary keep the T1 plain list
  * item. The `世界已就绪` follow-up card announces the Work unlock after the
- * first save.
+ * just-saved session only (T2 review gating); the settled save is the sole
+ * `unlock(creatorId, 'work')` call site (D8/D17), and the side checklist
+ * tracks the 3-step onboarding progress.
  *
  * `editingId` tracks WHICH era is being edited (`'new'` = create), so each
  * card's `编辑` binds its own entity id/version/initial text. Leaving edit
@@ -124,7 +129,11 @@ function WorldAppSurface({ worldId }: { worldId: string }) {
 function BriefLayer({ worldId, eras }: { worldId: string; eras: WorldKbEntityProjection[] }) {
   const { t } = useTranslation('worlds');
   const { toast } = useToast();
+  const creatorId = useActiveCreatorId();
   const [editingId, setEditingId] = useState<string | null>(null);
+  // BriefReadyCard mounts only for the just-saved session (T2 review note) —
+  // a revisit with an existing Brief does not re-announce the unlock.
+  const [justSaved, setJustSaved] = useState(false);
 
   const withSummary = eras.filter((era) => eraSummary(era) !== null);
   const withoutSummary = eras.filter((era) => eraSummary(era) === null);
@@ -144,38 +153,46 @@ function BriefLayer({ worldId, eras }: { worldId: string; eras: WorldKbEntityPro
         onCancel={() => setEditingId(null)}
         onSaved={() => {
           setEditingId(null);
+          setJustSaved(true);
+          // D8/D17: a settled Brief save is the only Work unlock path.
+          if (creatorId) unlock(creatorId, 'work');
           toast({ variant: 'success', title: t('worldApp.briefSavedToast') });
         }}
       />
     );
   }
   return (
-    <div className="flex flex-col gap-2">
-      {!brief && <BriefEmpty onCreate={() => setEditingId('new')} />}
-      {withSummary.length > 0 && (
-        <ul className="flex flex-col gap-2">
-          {withSummary.map((era) => (
-            <li key={era.key_block_id}>
-              <BriefCard
-                text={eraSummary(era)!}
-                title={era.canonical_name}
-                updatedAt={era.updated_at}
-                onEdit={() => setEditingId(era.key_block_id)}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
-      {withoutSummary.length > 0 && (
-        <ul className="flex flex-col gap-2">
-          {withoutSummary.map((era) => (
-            <li key={era.key_block_id} className="rounded-card border border-gray-500 p-4">
-              <h3 className="text-heading-16 font-heading text-gray-1000">{era.canonical_name}</h3>
-            </li>
-          ))}
-        </ul>
-      )}
-      {brief && <BriefReadyCard />}
+    <div className="flex items-start gap-4">
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        {!brief && <BriefEmpty onCreate={() => setEditingId('new')} />}
+        {withSummary.length > 0 && (
+          <ul className="flex flex-col gap-2">
+            {withSummary.map((era) => (
+              <li key={era.key_block_id}>
+                <BriefCard
+                  text={eraSummary(era)!}
+                  title={era.canonical_name}
+                  updatedAt={era.updated_at}
+                  onEdit={() => setEditingId(era.key_block_id)}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+        {withoutSummary.length > 0 && (
+          <ul className="flex flex-col gap-2">
+            {withoutSummary.map((era) => (
+              <li key={era.key_block_id} className="rounded-card border border-gray-500 p-4">
+                <h3 className="text-heading-16 font-heading text-gray-1000">{era.canonical_name}</h3>
+              </li>
+            ))}
+          </ul>
+        )}
+        {justSaved && <BriefReadyCard />}
+      </div>
+      <aside className="w-64 shrink-0">
+        <SideChecklist briefDone={brief !== null} />
+      </aside>
     </div>
   );
 }

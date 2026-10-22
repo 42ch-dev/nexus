@@ -25,6 +25,7 @@ import { i18n } from '@/lib/i18n/config';
 import { Route, Routes } from 'react-router';
 
 import { WorldApp } from '@/components/world/world-app';
+import { isUnlocked } from '@/lib/activation-store';
 import { NexusClientError } from '@/lib/nexus';
 import { renderInApp } from '@/test/test-providers';
 import type { NexusClient } from '@/lib/nexus';
@@ -80,12 +81,16 @@ function makeClient({ world, graph: graphFn, patchEntity }: MockOpts): NexusClie
   } as unknown as NexusClient;
 }
 
-function renderWorld(client: NexusClient, initialPath = `/worlds/${WORLD_ID}`) {
+function renderWorld(
+  client: NexusClient,
+  initialPath = `/worlds/${WORLD_ID}`,
+  opts: { activeCreatorId?: string | null } = {},
+) {
   return renderInApp(
     <Routes>
       <Route path="/worlds/:worldId" element={<WorldApp />} />
     </Routes>,
-    { client, initialRouterEntries: [initialPath] },
+    { client, initialRouterEntries: [initialPath], activeCreatorId: opts.activeCreatorId },
   );
 }
 
@@ -115,6 +120,7 @@ function patchSucceeding(graphRef: { current: WorldKbGraphResponse }) {
 
 beforeEach(() => {
   cleanup();
+  window.localStorage.clear();
   window.localStorage.setItem('nexus-web-locale', 'zh-CN');
   return i18n.changeLanguage('zh-CN');
 });
@@ -448,5 +454,97 @@ describe('Brief flow — no flash / no lost rows (fix round 1)', () => {
 
     expect(await screen.findByTestId('world-brief-empty')).toBeInTheDocument();
     expect(screen.getByTestId('world-layer-brief')).toHaveTextContent('第二纪元');
+  });
+});
+
+describe('Brief flow — T3 checklist + Brief→Work unlock', () => {
+  const CREATOR = 'creator-a';
+
+  function savedBriefGraph(): WorldKbGraphResponse {
+    return graph([
+      eraEntity({
+        key_block_id: 'kb-era-1',
+        canonical_name: BRIEF_TEXT,
+        version: 1,
+        updated_at: new Date().toISOString(),
+        body: { attributes: { world_summary: BRIEF_TEXT } },
+      }),
+    ]);
+  }
+
+  it('shows 进度 0 / 3 with step ① next before any Brief', async () => {
+    renderWorld(makeClient({ graph: () => Promise.resolve(graph([])) }));
+
+    expect(await screen.findByTestId('world-checklist-progress')).toHaveTextContent('进度 0 / 3');
+    expect(screen.getByTestId('world-checklist-step-1')).toHaveClass('font-medium');
+    expect(screen.getByTestId('world-checklist-step-1')).not.toHaveClass('line-through');
+  });
+
+  it('persists the Work unlock per creator on save and advances the checklist to 进度 1 / 3', async () => {
+    const user = userEvent.setup();
+    const graphRef: { current: WorldKbGraphResponse } = { current: graph([]) };
+    renderWorld(
+      makeClient({
+        graph: () => Promise.resolve(graphRef.current),
+        patchEntity: patchSucceeding(graphRef),
+      }),
+      `/worlds/${WORLD_ID}`,
+      { activeCreatorId: CREATOR },
+    );
+
+    await user.click(await screen.findByTestId('world-brief-create'));
+    await user.type(screen.getByTestId('world-brief-input'), BRIEF_TEXT);
+    await user.click(screen.getByTestId('world-brief-save'));
+
+    // Persisted per creator; only `work` is written — no other unlock events.
+    expect(window.localStorage.getItem(`nexus-activation:${CREATOR}`)).toBe(
+      JSON.stringify({ work: true }),
+    );
+    expect(isUnlocked(CREATOR, 'work')).toBe(true);
+    expect(isUnlocked(CREATOR, 'session')).toBe(false);
+
+    // Checklist: ① done, ② next, 进度 1 / 3.
+    expect(await screen.findByTestId('world-checklist-progress')).toHaveTextContent('进度 1 / 3');
+    expect(screen.getByTestId('world-checklist-step-1')).toHaveClass('line-through');
+    expect(screen.getByTestId('world-checklist-step-2')).toHaveClass('font-medium');
+  });
+
+  it('survives a reload: a fresh render for the same creator still sees Work unlocked', async () => {
+    const user = userEvent.setup();
+    const graphRef: { current: WorldKbGraphResponse } = { current: graph([]) };
+    const first = renderWorld(
+      makeClient({
+        graph: () => Promise.resolve(graphRef.current),
+        patchEntity: patchSucceeding(graphRef),
+      }),
+      `/worlds/${WORLD_ID}`,
+      { activeCreatorId: CREATOR },
+    );
+    await user.click(await screen.findByTestId('world-brief-create'));
+    await user.type(screen.getByTestId('world-brief-input'), BRIEF_TEXT);
+    await user.click(screen.getByTestId('world-brief-save'));
+    await screen.findByTestId('world-brief-card');
+    first.unmount();
+
+    renderWorld(
+      makeClient({ graph: () => Promise.resolve(savedBriefGraph()) }),
+      `/worlds/${WORLD_ID}`,
+      { activeCreatorId: CREATOR },
+    );
+    // The unlock persisted across the reload — the rail/store sees it.
+    expect(isUnlocked(CREATOR, 'work')).toBe(true);
+  });
+
+  it('gates BriefReadyCard to the just-saved session — revisits with an existing Brief do not re-announce', async () => {
+    renderWorld(
+      makeClient({ graph: () => Promise.resolve(savedBriefGraph()) }),
+      `/worlds/${WORLD_ID}`,
+      { activeCreatorId: CREATOR },
+    );
+
+    expect(await screen.findByTestId('world-brief-card')).toBeInTheDocument();
+    expect(screen.queryByTestId('world-brief-ready')).not.toBeInTheDocument();
+    // The checklist still reflects the saved Brief.
+    expect(screen.getByTestId('world-checklist-progress')).toHaveTextContent('进度 1 / 3');
   });
 });

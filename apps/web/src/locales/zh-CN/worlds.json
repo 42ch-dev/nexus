@@ -62,6 +62,13 @@
       "body": "「作品」模块已解锁——创建一个作品，开始在这个世界里写作。"
     },
     "briefSavedToast": "✅ Brief 已保存——「作品」模块已解锁",
+    "checklist": {
+      "heading": "接下来可以",
+      "step1": "① 写完 Brief",
+      "step2": "② 创建第一个作品并绑定世界",
+      "step3": "③ 让 AI 起草第一条 Narrative",
+      "progress": "进度 {{n}} / 3"
+    },
     "briefAria": "Brief 层",
     "narrativePlaceholder": "Narrative 层——章节级叙事时间线",
     "momentPlaceholder": "Moment 层——场景级细粒度时间线",

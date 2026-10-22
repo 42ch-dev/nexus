@@ -62,6 +62,13 @@
       "body": "The Works module is unlocked — create a Work and start writing in this world."
     },
     "briefSavedToast": "✅ Brief saved — the Works module is unlocked",
+    "checklist": {
+      "heading": "Next up",
+      "step1": "① Finish the Brief",
+      "step2": "② Create the first work and bind the world",
+      "step3": "③ Let AI draft the first Narrative",
+      "progress": "Progress {{n}} / 3"
+    },
     "briefAria": "Brief layer",
     "narrativePlaceholder": "Narrative layer — chapter-level narrative timeline",
     "momentPlaceholder": "Moment layer — scene-level fine-grained timeline",
