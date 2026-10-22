@@ -849,23 +849,26 @@ impl NativeCore {
 
     // ── Creator identity family (CoreHomeService; Tier-1 — no principal) ────
 
-    /// Open the pre-selection home-control entry against this core's raw user
-    /// home (`nexus_home` is the raw home with `.nexus42` appended exactly
-    /// once, so the parent is the retained user-home argument).
+    /// Open the pre-selection home-control entry against the raw user home this
+    /// environment was opened with.
+    ///
+    /// Home control is admitted on the service-only shell as well: the first-run
+    /// flow (create creator → select the pre-created workspace) runs before any
+    /// full core can be published, and the home entry already owns the
+    /// pre-selection semantics. Every full-domain surface stays behind
+    /// `deny_service_only` / the principal gate.
     fn home_service(&self) -> Result<nexus_core::CoreHomeService> {
-        self.deny_service_only()?;
-        let core = self
+        if self.inner.lifecycle_phase() != crate::env_state::EnvLifecyclePhase::Open {
+            return Err(Error::from_reason("native environment not open"));
+        }
+        let user_home = self
             .inner
-            .core
+            .user_home
             .lock()
-            .map_err(|_| Error::from_reason("core mutex poisoned"))?
+            .map_err(|_| Error::from_reason("user home mutex poisoned"))?
             .clone()
-            .ok_or_else(|| Error::from_reason("core not open"))?;
-        let user_home = core
-            .nexus_home()
-            .parent()
-            .ok_or_else(|| Error::from_reason("invalid home layout"))?;
-        nexus_core::CoreHomeService::open(user_home.to_path_buf())
+            .ok_or_else(|| Error::from_reason("native environment has no user home"))?;
+        nexus_core::CoreHomeService::open(user_home)
             .map_err(crate::core_error::napi_error_from_domain)
     }
 

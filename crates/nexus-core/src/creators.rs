@@ -172,14 +172,16 @@ impl CoreHomeService {
     }
 
     /// Create a new local creator profile: validate the display name, mint a
-    /// `ctr_local…` id, materialize the membership-SSOT Profile home, insert
-    /// the workspace `creators` row and return the detail-shaped result.
+    /// `ctr_local…` id, materialize the membership-SSOT Profile home and
+    /// return the detail-shaped result. The workspace `creators` row is an
+    /// enrichment written into the selected workspace store; a home with no
+    /// selected workspace (the first-run shell) has none yet, and the row is
+    /// materialized by the first workspace selection.
     ///
     /// # Errors
-    /// Returns [`CoreError::InvalidInput`] for an empty/over-long display
-    /// name, [`CoreError::Uninitialized`] when no active creator/workspace
-    /// resolves for the SQL insert, and the mapped internal carriers when the
-    /// Profile home or the insert fails.
+    /// Returns [`CoreError::InvalidInput`] for an empty/over-long display name
+    /// and the mapped internal carriers when the Profile home or the row
+    /// materialization fails.
     pub async fn create_creator(&self, display_name: String) -> CoreResult<CreatorDetail> {
         let display_name = validated_display_name(&display_name)?;
 
@@ -203,29 +205,37 @@ impl CoreHomeService {
         // Membership SSOT write — Profile is real only when the home dir exists.
         ensure_profile_home_ssot(&self.nexus_home, &creator_id)?;
 
-        let db_path = self
-            .active_workspace_db_path()
-            .ok_or(CoreError::Uninitialized)?;
-        let pool = nexus_local_db::init_pool(&db_path)
-            .await
-            .map_err(crate::error::local_db_err)?;
-        // v1.191 P1 T4: the one transaction-taking local-db materialization —
-        // the workspace `creators` row and its stable holder registry row
-        // commit together (§2.1), so no second Creator create SQL exists here.
-        let materialized = nexus_local_db::ensure_creator_row(&pool, &creator_id, &display_name)
-            .await
-            .map_err(crate::error::local_db_err);
-        // §2.2: the detail's holder projection reads the registry row that
-        // just committed with the subject back through the read-only
-        // primitive (a read never provisions), while the pool is still open.
-        let holder = match materialized {
-            Ok(()) => nexus_local_db::require_creator_holder(&pool, &creator_id)
-                .await
-                .map_err(crate::error::local_db_err),
-            Err(err) => Err(err),
+        // No selected workspace ⇒ no workspace store to enrich yet: creation
+        // must not fail on that absence (the first-run shell creates the
+        // creator before any workspace is selected).
+        let holder_entry_id = match self.active_workspace_db_path() {
+            Some(db_path) => {
+                let pool = nexus_local_db::init_pool(&db_path)
+                    .await
+                    .map_err(crate::error::local_db_err)?;
+                // v1.191 P1 T4: the one transaction-taking local-db
+                // materialization — the workspace `creators` row and its
+                // stable holder registry row commit together (§2.1), so no
+                // second Creator create SQL exists here.
+                let materialized =
+                    nexus_local_db::ensure_creator_row(&pool, &creator_id, &display_name)
+                        .await
+                        .map_err(crate::error::local_db_err);
+                // §2.2: the detail's holder projection reads the registry row
+                // that just committed with the subject back through the
+                // read-only primitive (a read never provisions), while the
+                // pool is still open.
+                let holder = match materialized {
+                    Ok(()) => nexus_local_db::require_creator_holder(&pool, &creator_id)
+                        .await
+                        .map_err(crate::error::local_db_err),
+                    Err(err) => Err(err),
+                };
+                pool.close().await;
+                Some(holder_projection(holder?))
+            }
+            None => None,
         };
-        pool.close().await;
-        let holder_entry_id = Some(holder_projection(holder?));
 
         Ok(CreatorDetail {
             creator_id,

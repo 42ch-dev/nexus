@@ -826,6 +826,15 @@ pub async fn open_core(
         NativeOpenOptionsAccess::EngineOwner => CoreAccess::EngineOwner,
     };
     let user_home = PathBuf::from(options.user_home);
+    // Home control (creator + workspace families) must stay reachable on the
+    // service-only shell: the first-run flow creates the creator and selects
+    // the pre-created workspace before any full core can be published. Record
+    // the opened home before either admission branch so the home entry never
+    // has to derive it from a core that does not exist yet.
+    *state
+        .user_home
+        .lock()
+        .map_err(|_| "user home mutex poisoned".to_string())? = Some(user_home.clone());
 
     if options.allow_uninitialized && is_genuinely_uninitialized(&user_home, access) {
         state.clear_service_only_uninitialized();

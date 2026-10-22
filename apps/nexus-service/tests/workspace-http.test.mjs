@@ -213,6 +213,13 @@ describe('workspace-http (v1219 shell Task 4)', () => {
     const unknownKey = await jsonFetch(`${server.url}/v1/daemon/workspaces?slug=default`);
     assert.equal(unknownKey.status, 400, unknownKey.text);
     assert.equal(unknownKey.payload.error.code, 'invalid_input');
+
+    // An unknown cursor must not silently re-serve page one.
+    const unknownCursor = await jsonFetch(
+      `${server.url}/v1/daemon/workspaces?cursor=ctr_a%2Fmissing`,
+    );
+    assert.equal(unknownCursor.status, 400, unknownCursor.text);
+    assert.equal(unknownCursor.payload.error.code, 'invalid_input');
   });
 
   test('active read returns ActiveWorkspaceResponse, never 501', async () => {
@@ -231,7 +238,7 @@ describe('workspace-http (v1219 shell Task 4)', () => {
     );
   });
 
-  test('set-active selects, refreshes the same-session runtime identity, and create stays refused', async () => {
+  test('set-active selects without claiming domain readiness; create stays refused', async () => {
     const before = await jsonFetch(`${server.url}/v1/daemon/runtime/status`);
     assert.equal(before.status, 200, before.text);
     assert.equal(before.payload.workspace_initialized, false);
@@ -244,11 +251,13 @@ describe('workspace-http (v1219 shell Task 4)', () => {
     assert.deepEqual(selected.payload, { creator_id: 'ctr_a', workspace_slug: 'second' });
     assert.deepEqual(state.selected, { creator_id: 'ctr_a', workspace_slug: 'second' });
 
-    // Same session, no restart: the boot-time snapshot is refreshed in place.
+    // `workspace_initialized` is the boot-time core-publication fact: a
+    // status-only session must not advertise readiness its domain routes deny.
     const after = await jsonFetch(`${server.url}/v1/daemon/runtime/status`);
     assert.equal(after.status, 200, after.text);
-    assert.equal(after.payload.workspace_initialized, true);
+    assert.equal(after.payload.workspace_initialized, false);
 
+    // The selected identity is still observable through the active read.
     const followUp = await jsonFetch(`${server.url}/v1/daemon/workspace`);
     assert.equal(followUp.status, 200, followUp.text);
     assert.equal(followUp.payload.workspace_slug, 'second');
@@ -386,4 +395,83 @@ describe('workspace-http native binding (v1219 shell Task 4)', () => {
     assert.equal(bareActive.payload.operational_dir, join(fixture.workspacesRoot, 'third'));
   });
 });
+
+describe('workspace-http service-only shell (v1219 shell Task 4 fix round 1)', () => {
+  let home;
+  let service;
+
+  before(async () => {
+    // A genuinely fresh home: no `.nexus42`, no config, no state DB — the
+    // service opens the status-only shell, exactly the first-run case.
+    home = mkdtempSync(join(tmpdir(), 'nexus-workspace-shell-'));
+    tempDirs.push(home);
+    const { startService } = await import(join(serviceRoot, 'dist/index.js'));
+    service = await startService({
+      home,
+      host: '127.0.0.1',
+      port: 18_462,
+      allowRemote: false,
+      domainOnly: true,
+    });
+  });
+
+  after(async () => {
+    if (service) await service.close();
+  });
+
+  test('the creator + workspace home control plane is admitted; full domain stays denied', async () => {
+    const status = await jsonFetch(`${service.url}/v1/daemon/runtime/status`);
+    assert.equal(status.status, 200, status.text);
+    assert.equal(status.payload.workspace_initialized, false);
+
+    const empty = await jsonFetch(`${service.url}/v1/daemon/creators`);
+    assert.equal(empty.status, 200, empty.text);
+    assert.deepEqual(empty.payload.items, []);
+
+    const created = await jsonFetch(`${service.url}/v1/daemon/creators`, {
+      method: 'POST',
+      body: { display_name: 'Fresh Creator' },
+    });
+    assert.equal(created.status, 201, created.text);
+    const creatorId = created.payload.creator_id;
+    assert.match(creatorId, /^ctr_local[a-zA-Z0-9]+$/);
+
+    const listed = await jsonFetch(`${service.url}/v1/daemon/creators`);
+    assert.equal(listed.status, 200, listed.text);
+    assert.deepEqual(
+      listed.payload.items.map((item) => item.creator_id),
+      [creatorId],
+    );
+
+    const workspaces = await jsonFetch(`${service.url}/v1/daemon/workspaces`);
+    assert.equal(workspaces.status, 200, workspaces.text);
+    // Discovery exposes registered workspaces only; the pre-created
+    // `default` directory has no `meta.json` registration yet.
+    assert.deepEqual(workspaces.payload.items, []);
+
+    const selected = await jsonFetch(`${service.url}/v1/daemon/workspace/active`, {
+      method: 'POST',
+      body: { creator_id: creatorId, workspace_slug: 'default' },
+    });
+    assert.equal(selected.status, 200, selected.text);
+    assert.deepEqual(selected.payload, { creator_id: creatorId, workspace_slug: 'default' });
+
+    const active = await jsonFetch(`${service.url}/v1/daemon/workspace`);
+    assert.equal(active.status, 200, active.text);
+    assert.deepEqual(active.payload, {
+      creator_id: creatorId,
+      workspace_slug: 'default',
+      operational_dir: join(home, '.nexus42', 'creators', creatorId, 'workspaces', 'default'),
+    });
+
+    // Selection persisted, but this process still serves the status-only
+    // shell: the runtime status must not claim domain readiness.
+    const after = await jsonFetch(`${service.url}/v1/daemon/runtime/status`);
+    assert.equal(after.payload.workspace_initialized, false);
+    const domain = await jsonFetch(`${service.url}/v1/daemon/works`);
+    assert.equal(domain.status, 409, domain.text);
+    assert.equal(domain.payload.error.code, 'uninitialized');
+  });
+});
+
 

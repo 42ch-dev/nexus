@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, VecDeque};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 
@@ -107,6 +108,11 @@ impl Drop for PendingBudgetGuard<'_> {
 pub struct EnvState {
     pub generation: AtomicU64,
     pub core: StdMutex<Option<Arc<CoreService>>>,
+    /// The raw user home this environment was opened with. Retained so the
+    /// pre-selection home control plane (creator + workspace families) stays
+    /// reachable on the service-only shell, where no core exists to derive it
+    /// from.
+    pub user_home: StdMutex<Option<PathBuf>>,
     /// The Host lifetime slot: the ONE attached core authority (its manager,
     /// Actor registry and composed provider port), never a bare manager. The
     /// core authority owns every Actor effect/observation/close path; native
@@ -274,6 +280,7 @@ impl EnvState {
         Self {
             generation: AtomicU64::new(1),
             core: StdMutex::new(None),
+            user_home: StdMutex::new(None),
             host: StdMutex::new(None),
             provider_port: StdMutex::new(None),
             pending_budget: PendingBudget::new(),
