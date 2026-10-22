@@ -28,7 +28,7 @@ import { NotFoundPage } from '@/pages/not-found-page';
 import { SchedulePage } from '@/pages/schedule-page';
 import { SessionRunViewPage } from '@/pages/session-run-view';
 import { WorkShellLayout } from '@/components/layout/work-shell-layout';
-import { SetupWizardPage } from '@/pages/setup-wizard-page';
+import { WizardShell } from '@/components/onboarding/wizard-shell';
 import { EntrancePage } from '@/pages/entrance-page';
 import { LoadingState } from '@/components/ui/states';
 
@@ -144,7 +144,10 @@ function AppRoutes() {
 
   return (
     <Routes location={routesLocation}>
-      <Route path="setup" element={<SetupWizardPage />} />
+      {/* v1219-onboarding T1 — first-run wizard (identity step; agent/world
+          steps land in T2–T3). The route is always directly reachable: it is
+          both the derived-gate destination and the re-run entry (compass D21). */}
+      <Route path="setup" element={<WizardShell />} />
       {/* V1.170 P1 (AR-16/AR-20) — entrance identity page. Standalone (sibling
           of /setup, outside the gated tree): first-run land for unset browser
           installs + the footer switch control's destination. Only Continue

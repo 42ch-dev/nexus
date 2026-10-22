@@ -7,12 +7,13 @@ import {
   type ReactNode,
 } from 'react';
 
-import { useDesktopCapabilities } from '@/lib/client-context';
+import { useDesktopCapabilities, useNexusClient } from '@/lib/client-context';
+import { isWorkspaceInitialized } from '@/lib/first-run';
 
 interface SetupCompletedContextValue {
   /** Whether the first-launch setup wizard has been completed. */
   completed: boolean;
-  /** True while the desktop shell is being queried for the initial value. */
+  /** True while the first-run state is being resolved (IPC or service probe). */
   isLoading: boolean;
   /**
    * Persist and sync setup-completed state (desktop IPC when available).
@@ -41,8 +42,9 @@ export interface SetupCompletedProviderProps {
 /**
  * Tracks whether the first-launch setup wizard has been completed.
  *
- * Browser build: always `completed: true` with no loading state — browser users
- * run their own daemon and skip the wizard.
+ * Browser build: derived from the unguarded runtime status
+ * (`workspace_initialized`, compass D21) — no per-browser marker, so a fresh
+ * origin over LAN reaches the wizard and an initialized service skips it.
  *
  * Desktop build: reads the `get_setup_completed` desktop command on mount and
  * writes back via `set_setup_completed` when the user finishes the wizard or
@@ -53,22 +55,28 @@ export function SetupCompletedProvider({
   initialCompleted,
 }: SetupCompletedProviderProps) {
   const desktop = useDesktopCapabilities();
-  const [completed, setCompletedState] = useState(initialCompleted ?? !desktop);
-  const [isLoading, setIsLoading] = useState(Boolean(desktop) && initialCompleted === undefined);
+  const client = useNexusClient();
+  // Unresolved (no override) stays `false` + loading so SetupGate neither
+  // paints the shell nor redirects to the wizard before the real answer lands.
+  const [completed, setCompletedState] = useState(initialCompleted ?? false);
+  const [isLoading, setIsLoading] = useState(initialCompleted === undefined);
 
   useEffect(() => {
-    if (initialCompleted !== undefined || !desktop) return;
+    if (initialCompleted !== undefined) return;
     let cancelled = false;
-    desktop
-      .getSetupCompleted()
+    const resolved = desktop
+      ? desktop.getSetupCompleted()
+      : isWorkspaceInitialized(client);
+    resolved
       .then((value) => {
-        if (cancelled) return;
-        setCompletedState(value);
+        if (!cancelled) setCompletedState(value);
       })
       .catch(() => {
         if (cancelled) return;
-        // Fail open: if the desktop command is missing, treat setup as done so
-        // the app does not hang on the wizard gate.
+        // Fail open: a missing IPC command or an unreachable service must not
+        // hang the app on the wizard gate.
+        // simplify: browser probe failure lands on the shell; T4 owns the
+        // wizard-level degraded surface (plan v1219-onboarding T4).
         setCompletedState(true);
       })
       .finally(() => {
@@ -77,35 +85,41 @@ export function SetupCompletedProvider({
     return () => {
       cancelled = true;
     };
-  }, [desktop, initialCompleted]);
+  }, [client, desktop, initialCompleted]);
 
   const setCompleted = useCallback(
     async (value: boolean) => {
+      if (!desktop) {
+        // Browser: there is no marker to write — re-reading the service is
+        // what flips the derived gate (compass D21). `false` only reflects the
+        // always-reachable wizard route.
+        setCompletedState(value ? await isWorkspaceInitialized(client) : false);
+        return;
+      }
       if (value) {
         // Optimistic: wizard finish navigates to gated routes immediately.
         setCompletedState(true);
-        if (desktop) {
-          try {
-            await desktop.setSetupCompleted(true);
-          } catch (err) {
-            setCompletedState(false);
-            throw err;
-          }
+        try {
+          await desktop.setSetupCompleted(true);
+        } catch (err) {
+          setCompletedState(false);
+          throw err;
         }
         return;
       }
 
       // R1 clear: await IPC before React state so gated UI never sees stale true.
-      if (desktop) {
-        await desktop.setSetupCompleted(false);
-      }
+      await desktop.setSetupCompleted(false);
       setCompletedState(false);
     },
-    [desktop],
+    [client, desktop],
   );
 
   const markCompleted = useCallback(() => {
-    void setCompleted(true);
+    // Fire-and-forget by contract: a browser re-probe can reject (daemon
+    // unreachable) and must not surface as an unhandled rejection — the gate
+    // simply keeps its current value.
+    void setCompleted(true).catch(() => undefined);
   }, [setCompleted]);
 
   return (

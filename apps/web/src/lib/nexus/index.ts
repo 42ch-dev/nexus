@@ -28,6 +28,7 @@ export type {
   DiscardRunResponse,
   ListRunsQuery,
   NexusClient,
+  RuntimeStatus,
 } from './types';
 export type {
   PresetProfileConditionalRule,

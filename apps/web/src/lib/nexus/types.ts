@@ -166,6 +166,15 @@ export interface DaemonHealth {
 }
 
 /**
+ * Runtime status probe result (`GET /v1/daemon/runtime/status`, unguarded).
+ * App-side type: only the browser first-run gate consumes it.
+ */
+export interface RuntimeStatus {
+  /** `false` until a workspace is active/initialized (compass D21 first-run gate). */
+  workspace_initialized: boolean;
+}
+
+/**
  * Query params for `GET /v1/daemon/worlds/:world_id/timeline/events`
  * (V1.147 P2). App-side type: no generated schema for this query object; the
  * fields mirror the daemon handler's `TimelineEventsParams` (branch_id /
@@ -274,6 +283,11 @@ export interface NexusClient extends CoreSliceClient {
    * access (V1.92 P1).
    */
   certFingerprint(): Promise<CertFingerprintResponse>;
+  /**
+   * `GET /v1/daemon/runtime/status` — unguarded runtime status. Its
+   * `workspace_initialized` is the browser first-run gate (compass D21).
+   */
+  runtimeStatus(): Promise<RuntimeStatus>;
   // ── Creators (V1.94 P1) ────────────────────────────────────────────────────
   /** `GET /v1/daemon/creators` — cursor list of local creators. */
   listCreators(query?: ListCreatorsQuery): Promise<ListCreatorsResponse>;

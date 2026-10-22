@@ -189,6 +189,7 @@ import type {
   ListRunsQuery,
   ListTimelineEventsQuery,
   NexusClient,
+  RuntimeStatus,
   WorkflowHostEventPayload,
   WorkflowObservationFrame,
   WorkflowRunStatePayload,
@@ -259,6 +260,12 @@ export class BrowserClient implements NexusClient {
     // reachable so clients can perform TOFU verification before sending the
     // API key. It is the only daemon route that deliberately omits the key.
     return this.request<CertFingerprintResponse>('GET', '/v1/daemon/runtime/cert-fingerprint', undefined, false);
+  }
+
+  runtimeStatus(): Promise<RuntimeStatus> {
+    // Unguarded runtime family: the API-key gate skips it, so the browser
+    // first-run gate works on a fresh origin/LAN browser (compass D21).
+    return this.get<RuntimeStatus>('/v1/daemon/runtime/status');
   }
 
   // ── Creators + Agent host (V1.94 P1) ───────────────────────────────────────

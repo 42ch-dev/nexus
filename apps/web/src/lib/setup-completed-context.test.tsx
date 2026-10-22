@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { SetupCompletedProvider, useSetupCompleted } from './setup-completed-context';
 import { renderInApp } from '@/test/test-providers';
 import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
-import { BrowserClient } from '@/lib/nexus';
+import { BrowserClient, type NexusClient } from '@/lib/nexus';
 
 function TestController() {
   const { completed, isLoading, markCompleted, setCompleted } = useSetupCompleted();
@@ -59,17 +59,82 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
   };
 }
 
+/** Browser branch seam: the derived gate reads the unguarded runtime status. */
+function statusClient(read: () => Promise<{ workspace_initialized: boolean }>): NexusClient {
+  return { runtimeStatus: vi.fn(read) } as unknown as NexusClient;
+}
+
 describe('SetupCompletedProvider', () => {
-  it('browser build is immediately completed with no loading', () => {
+  it('browser build derives completed from the runtime status (initialized)', async () => {
     renderInApp(
       <SetupCompletedProvider>
         <TestController />
       </SetupCompletedProvider>,
-      { client: makeClient() },
+      { client: statusClient(() => Promise.resolve({ workspace_initialized: true })) },
     );
 
-    expect(screen.getByTestId('completed')).toHaveTextContent('true');
+    // Nothing is assumed before the probe resolves (SetupGate waits on this).
+    expect(screen.getByTestId('loading')).toHaveTextContent('true');
+    await waitFor(() => expect(screen.getByTestId('completed')).toHaveTextContent('true'));
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'));
+  });
+
+  it('browser build routes a fresh origin to the wizard (uninitialized)', async () => {
+    renderInApp(
+      <SetupCompletedProvider>
+        <TestController />
+      </SetupCompletedProvider>,
+      { client: statusClient(() => Promise.resolve({ workspace_initialized: false })) },
+    );
+
+    await waitFor(() => expect(screen.getByTestId('completed')).toHaveTextContent('false'));
     expect(screen.getByTestId('loading')).toHaveTextContent('false');
+  });
+
+  it('browser build fails open when the status probe rejects', async () => {
+    renderInApp(
+      <SetupCompletedProvider>
+        <TestController />
+      </SetupCompletedProvider>,
+      { client: statusClient(() => Promise.reject(new Error('daemon down'))) },
+    );
+
+    await waitFor(() => expect(screen.getByTestId('completed')).toHaveTextContent('true'));
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'));
+  });
+
+  it('browser finish re-reads the service instead of writing a marker', async () => {
+    const user = userEvent.setup();
+    let initialized = false;
+    renderInApp(
+      <SetupCompletedProvider>
+        <TestController />
+      </SetupCompletedProvider>,
+      { client: statusClient(() => Promise.resolve({ workspace_initialized: initialized })) },
+    );
+
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'));
+    expect(screen.getByTestId('completed')).toHaveTextContent('false');
+
+    initialized = true;
+    await user.click(screen.getByRole('button', { name: 'FinishTracked' }));
+
+    await waitFor(() => expect(screen.getByTestId('completed')).toHaveTextContent('true'));
+  });
+
+  it('browser clear only reflects the always-reachable wizard route', async () => {
+    const user = userEvent.setup();
+    renderInApp(
+      <SetupCompletedProvider>
+        <TestController />
+      </SetupCompletedProvider>,
+      { client: statusClient(() => Promise.resolve({ workspace_initialized: true })) },
+    );
+
+    await waitFor(() => expect(screen.getByTestId('completed')).toHaveTextContent('true'));
+    await user.click(screen.getByRole('button', { name: 'Clear' }));
+
+    await waitFor(() => expect(screen.getByTestId('completed')).toHaveTextContent('false'));
   });
 
   it('desktop build reads setup state from the shell', async () => {
