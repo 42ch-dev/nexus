@@ -75,8 +75,6 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     getAgentProfile: () => Promise.resolve(null),
     switchActiveCreator: () => Promise.resolve('/tmp/nexus'),
     getWorkspaceRoot: () => Promise.resolve('/tmp/nexus'),
-    ensureSetupBootstrap: () =>
-      Promise.resolve({ creator_id: 'ctr_local1234567890ab', already_bootstrapped: true }),
     toggleMaximizeWindow: () => Promise.resolve(),
     ...overrides,
   };

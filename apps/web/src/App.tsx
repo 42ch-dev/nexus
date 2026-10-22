@@ -7,6 +7,7 @@ import {
   DefaultProfileCoordinator,
 } from '@/lib/active-creator-context';
 import { SetupCompletedProvider } from '@/lib/setup-completed-context';
+import { ServiceStatusProvider } from '@/lib/service-status-context';
 import { EntranceProvider } from '@/lib/entrance-context';
 import {
   EntranceGuard,
@@ -19,6 +20,7 @@ import {
   useSettingsModal,
 } from '@/components/layout/settings-modal-context';
 import { DaemonLaunchGate } from '@/components/setup/daemon-launch-gate';
+import { ServiceDegradedGate } from '@/components/setup/service-degraded-surface';
 import { SetupGate } from '@/components/setup/setup-gate';
 import { ChapterPage } from '@/pages/chapter-page';
 import { ChaptersPage } from '@/pages/chapters-page';
@@ -28,7 +30,7 @@ import { NotFoundPage } from '@/pages/not-found-page';
 import { SchedulePage } from '@/pages/schedule-page';
 import { SessionRunViewPage } from '@/pages/session-run-view';
 import { WorkShellLayout } from '@/components/layout/work-shell-layout';
-import { SetupWizardPage } from '@/pages/setup-wizard-page';
+import { WizardShell } from '@/components/onboarding/wizard-shell';
 import { EntrancePage } from '@/pages/entrance-page';
 import { LoadingState } from '@/components/ui/states';
 
@@ -144,7 +146,10 @@ function AppRoutes() {
 
   return (
     <Routes location={routesLocation}>
-      <Route path="setup" element={<SetupWizardPage />} />
+      {/* v1219-onboarding T1 — first-run wizard (identity step; agent/world
+          steps land in T2–T3). The route is always directly reachable: it is
+          both the derived-gate destination and the re-run entry (compass D21). */}
+      <Route path="setup" element={<WizardShell />} />
       {/* V1.170 P1 (AR-16/AR-20) — entrance identity page. Standalone (sibling
           of /setup, outside the gated tree): first-run land for unset browser
           installs + the footer switch control's destination. Only Continue
@@ -353,15 +358,19 @@ export function App() {
           {/* V1.134 P0: gate creator probes until daemon ready — avoids
               pre-boot `/v1/daemon/creators*` traffic during dist-load startup. */}
           <DefaultProfileCoordinator />
-          <SettingsModalProvider>
-            <EntranceProvider>
-              <AppRoutes />
-              {/* Inside EntranceProvider so the modal rail can filter by the
-                  resolved entrance (W-2). Rendered after AppRoutes — the
-                  Dialog overlays the route tree either way. */}
-              <SettingsModalHost />
-            </EntranceProvider>
-          </SettingsModalProvider>
+          <ServiceStatusProvider>
+            <SettingsModalProvider>
+              <EntranceProvider>
+                <ServiceDegradedGate>
+                  <AppRoutes />
+                </ServiceDegradedGate>
+                {/* Inside EntranceProvider so the modal rail can filter by the
+                    resolved entrance (W-2). Rendered after AppRoutes — the
+                    Dialog overlays the route tree either way. */}
+                <SettingsModalHost />
+              </EntranceProvider>
+            </SettingsModalProvider>
+          </ServiceStatusProvider>
         </DaemonLaunchGate>
       </SetupCompletedProvider>
     </ActiveCreatorProvider>

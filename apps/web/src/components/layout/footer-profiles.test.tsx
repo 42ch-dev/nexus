@@ -34,10 +34,6 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     getWorkspaceRoot: vi.fn().mockResolvedValue('/cached/root'),
     pickDirectory: vi.fn().mockResolvedValue(null),
     setWorkspacePath: vi.fn().mockResolvedValue(undefined),
-    ensureSetupBootstrap: vi.fn().mockResolvedValue({
-      creator_id: 'creator-a',
-      already_bootstrapped: true,
-    }),
     switchActiveCreator: vi.fn().mockResolvedValue('/cached/root'),
     restartDaemon: vi.fn().mockResolvedValue(undefined),
     toggleMaximizeWindow: vi.fn().mockResolvedValue(undefined),

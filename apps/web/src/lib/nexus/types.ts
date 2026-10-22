@@ -166,6 +166,28 @@ export interface DaemonHealth {
 }
 
 /**
+ * Runtime status probe result (`GET /v1/daemon/runtime/status`, unguarded).
+ * App-side type: only the browser first-run gate consumes it.
+ */
+export interface RuntimeStatus {
+  /** `false` until a workspace is active/initialized (compass D21 first-run gate). */
+  workspace_initialized: boolean;
+}
+
+/**
+ * Daemon status probe result (`GET /v1/daemon/daemon/status`, unguarded).
+ * App-side type: only the `degraded` block is consumed (v1219-onboarding T4).
+ */
+export interface DaemonRuntimeStatus {
+  degraded: {
+    /** Degraded subsystem names (`db`, `engine`). */
+    subsystems: string[];
+    /** Human-readable reason per subsystem. */
+    reasons: string[];
+  };
+}
+
+/**
  * Query params for `GET /v1/daemon/worlds/:world_id/timeline/events`
  * (V1.147 P2). App-side type: no generated schema for this query object; the
  * fields mirror the daemon handler's `TimelineEventsParams` (branch_id /
@@ -274,6 +296,17 @@ export interface NexusClient extends CoreSliceClient {
    * access (V1.92 P1).
    */
   certFingerprint(): Promise<CertFingerprintResponse>;
+  /**
+   * `GET /v1/daemon/runtime/status` — unguarded runtime status. Its
+   * `workspace_initialized` is the browser first-run gate (compass D21).
+   */
+  runtimeStatus(): Promise<RuntimeStatus>;
+  /**
+   * `GET /v1/daemon/daemon/status` — unguarded daemon status. Its
+   * `degraded.subsystems` drives the global service-unavailable surface
+   * (v1219-onboarding T4).
+   */
+  daemonStatus(): Promise<DaemonRuntimeStatus>;
   // ── Creators (V1.94 P1) ────────────────────────────────────────────────────
   /** `GET /v1/daemon/creators` — cursor list of local creators. */
   listCreators(query?: ListCreatorsQuery): Promise<ListCreatorsResponse>;

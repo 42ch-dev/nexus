@@ -83,13 +83,7 @@
   },
   "setup": {
     "title": "Setup",
-    "helper": "Return to the first-run wizard to walk through setup steps again. Your workspace and agent choices are kept.",
-    "rerun": "Re-run",
-    "browserOnly": "Re-run setup is available on the desktop app only.",
-    "browserTooltip": "Open the Nexus desktop app to re-run setup.",
-    "confirmTitle": "Re-run Setup?",
-    "confirmBody": "This restarts the setup wizard from the beginning. Your workspace path and agent profile are not deleted.",
-    "couldNotClear": "Could not clear the setup marker.",
-    "couldNotReRun": "Could not re-run setup"
+    "helper": "Re-pick your identity, AI partner, and default workspace; created worlds and works are untouched.",
+    "rerun": "Re-run setup wizard"
   }
 }

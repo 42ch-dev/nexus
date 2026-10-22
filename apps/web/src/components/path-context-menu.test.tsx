@@ -38,7 +38,6 @@ function makeDesktop(impl: Partial<DesktopCapabilities> = {}): DesktopCapabiliti
     getWorkspaceRoot: vi.fn().mockResolvedValue('~/Documents/nexus42/default'),
     pickDirectory: vi.fn().mockResolvedValue(null),
     setWorkspacePath: vi.fn().mockResolvedValue(undefined),
-    ensureSetupBootstrap: vi.fn().mockResolvedValue({ creator_id: 'ctr_local1234567890ab', already_bootstrapped: false }),
     switchActiveCreator: vi.fn().mockResolvedValue('~/Documents/nexus42/default'),
     restartDaemon: vi.fn().mockResolvedValue(undefined),
     toggleMaximizeWindow: vi.fn().mockResolvedValue(undefined),

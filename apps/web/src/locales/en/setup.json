@@ -113,6 +113,18 @@
     "workspaceBootstrapFailed": "Could not prepare your local workspace.",
     "profileDisplayNameFailed": "Could not save the Profile name."
   },
+  "degraded": {
+    "body": "Nexus service unavailable: {{reason}}. Make sure the local service is running, then retry.",
+    "retry": "Retry",
+    "separator": ", ",
+    "reason": {
+      "unreachable": "cannot reach the local service"
+    },
+    "subsystem": {
+      "db": "the local database is not ready",
+      "engine": "the orchestration engine is not ready"
+    }
+  },
   "continueError": {
     "helper": {
       "soft": "Fix the issue and tap Continue again.",

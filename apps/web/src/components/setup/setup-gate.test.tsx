@@ -4,7 +4,7 @@ import { useLocation } from 'react-router';
 
 import { SetupGate } from './setup-gate';
 import { renderInApp } from '@/test/test-providers';
-import { BrowserClient } from '@/lib/nexus';
+import { BrowserClient, type NexusClient } from '@/lib/nexus';
 import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
 
 function makeClient(): BrowserClient {
@@ -31,8 +31,6 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     getWorkspaceRoot: () => Promise.resolve('/tmp/nexus'),
     pickDirectory: () => Promise.resolve(null),
     setWorkspacePath: () => Promise.resolve(),
-    ensureSetupBootstrap: () =>
-      Promise.resolve({ creator_id: 'ctr_local1234567890ab', already_bootstrapped: false }),
     switchActiveCreator: () => Promise.resolve('/tmp/nexus'),
     restartDaemon: () => Promise.resolve(),
     toggleMaximizeWindow: () => Promise.resolve(),
@@ -58,6 +56,27 @@ function renderGate(options: Parameters<typeof renderInApp>[1] = {}) {
 }
 
 describe('SetupGate', () => {
+  it('browser gate redirects to the wizard when the service has no initialized workspace', async () => {
+    const client = {
+      runtimeStatus: () => Promise.resolve({ workspace_initialized: false }),
+    } as unknown as NexusClient;
+
+    renderGate({ client, initialRouterEntries: ['/works'] });
+
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/setup'));
+    expect(screen.queryByTestId('main-shell')).not.toBeInTheDocument();
+  });
+
+  it('browser gate renders the shell when the service reports an initialized workspace', async () => {
+    const client = {
+      runtimeStatus: () => Promise.resolve({ workspace_initialized: true }),
+    } as unknown as NexusClient;
+
+    renderGate({ client, initialRouterEntries: ['/works'] });
+
+    expect(await screen.findByTestId('main-shell')).toBeInTheDocument();
+  });
+
   it('renders children when setup is completed (routing only — no splash)', () => {
     renderGate({ setupCompleted: true, initialRouterEntries: ['/works'] });
     expect(screen.getByTestId('main-shell')).toBeInTheDocument();
