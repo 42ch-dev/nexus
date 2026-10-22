@@ -295,6 +295,28 @@ describe('workspace-http (v1219 shell Task 4)', () => {
     assert.equal(legacyAlias.status, 501, legacyAlias.text);
     assert.equal(legacyAlias.payload.error.code, 'route_not_migrated');
   });
+
+  test('concurrent set-active requests promote exactly once', async () => {
+    const concurrentState = stubState();
+    const concurrent = await startServer(concurrentState);
+    try {
+      const select = () =>
+        jsonFetch(`${concurrent.url}/v1/daemon/workspace/active`, {
+          method: 'POST',
+          body: { creator_id: 'ctr_a', workspace_slug: 'default' },
+        });
+      const [left, right] = await Promise.all([select(), select()]);
+      assert.equal(left.status, 200, left.text);
+      assert.equal(right.status, 200, right.text);
+      // The select+promote pair is serialized: the second request finds the
+      // process ready instead of publishing a second core.
+      assert.equal(concurrentState.promotions, 1);
+      const status = await jsonFetch(`${concurrent.url}/v1/daemon/runtime/status`);
+      assert.equal(status.payload.workspace_initialized, true);
+    } finally {
+      await concurrent.close();
+    }
+  });
 });
 
 const NATIVE_CREATOR = 'ctr_testcreator';

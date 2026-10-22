@@ -80,22 +80,43 @@ export function getActiveWorkspace(service: ServiceCore): Promise<ActiveWorkspac
   return service.core.getActiveWorkspace();
 }
 
+/**
+ * Serializes the select+promote pair per service. Two concurrent finish
+ * requests must not both observe an uninitialized shell and publish two cores;
+ * the second waits for the first and then finds the process ready.
+ */
+const selectionQueues = new WeakMap<ServiceCore, Promise<unknown>>();
+
+function withSelectionLock<T>(service: ServiceCore, work: () => Promise<T>): Promise<T> {
+  const previous = selectionQueues.get(service) ?? Promise.resolve();
+  const run = previous.then(work, work);
+  selectionQueues.set(
+    service,
+    run.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return run;
+}
+
 /** `POST /v1/daemon/workspace/active`. */
-export async function setActiveWorkspace(
+export function setActiveWorkspace(
   service: ServiceCore,
   body: unknown,
 ): Promise<SetActiveWorkspaceResponse> {
-  const response = await service.core.selectWorkspace(
-    wirePayload<SetActiveWorkspaceRequest>(body, 'request'),
-  );
-  service.creatorId = response.creator_id;
-  service.workspaceSlug = response.workspace_slug;
-  // A status-only shell publishes the full core in process once a workspace is
-  // selected, so the first-run flow completes without a restart. Readiness is
-  // claimed only after promotion (and, for a provider profile, the execution
-  // owner) succeeded.
-  if (!service.workspaceInitialized) await promoteShell(service);
-  return response;
+  const request = wirePayload<SetActiveWorkspaceRequest>(body, 'request');
+  return withSelectionLock(service, async () => {
+    const response = await service.core.selectWorkspace(request);
+    service.creatorId = response.creator_id;
+    service.workspaceSlug = response.workspace_slug;
+    // A status-only shell publishes the full core in process once a workspace
+    // is selected, so the first-run flow completes without a restart. Readiness
+    // is claimed only after promotion (and, for a provider profile, the
+    // execution owner) succeeded.
+    if (!service.workspaceInitialized) await promoteShell(service);
+    return response;
+  });
 }
 
 /**

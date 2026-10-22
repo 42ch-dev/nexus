@@ -43,6 +43,21 @@ echo "==> native artifact (${ARTIFACT})"
 # ── 2. Standalone TS service on the loopback endpoint. ──────────────────────
 echo "==> service endpoint ${BASE_URL}"
 SERVICE_ROOT="${REPO_ROOT}/apps/nexus-service"
+SERVICE_LOG="${REPO_ROOT}/.dev/nexus-service.log"
+
+# The one-time bootstrap URL carries an access token; the service log is only
+# the transport this script reads it through. Drop that boot line once read so
+# no token outlives its single use on disk (auth-session invariant: no token is
+# persisted). The directory itself is owner-only.
+scrub_bootstrap_token_line() {
+  [ -f "${SERVICE_LOG}" ] || return 0
+  if grep -qF '[nexus-service] open: ' "${SERVICE_LOG}" 2>/dev/null; then
+    awk '!/\[nexus-service\] open: /' "${SERVICE_LOG}" > "${SERVICE_LOG}.scrub"
+    mv "${SERVICE_LOG}.scrub" "${SERVICE_LOG}"
+  fi
+  return 0
+}
+
 if [ ! -f "${SERVICE_ROOT}/dist/main.js" ]; then
   echo "    building service (tsc, no Cargo)"
   (cd "${SERVICE_ROOT}" && npx tsc -p tsconfig.json)
@@ -67,10 +82,12 @@ health_ok() {
 SERVICE_STARTED=0
 if health_ok; then
   echo "    service already running"
+  if [ -d "${REPO_ROOT}/.dev" ]; then chmod 700 "${REPO_ROOT}/.dev"; fi
 else
   SERVICE_STARTED=1
   echo "    starting standalone service (detached)"
   mkdir -p "${REPO_ROOT}/.dev"
+  chmod 700 "${REPO_ROOT}/.dev"
   SERVICE_ARGS=(--home "${HOME}" --host "${NEXUS42_DEV_HOST:-127.0.0.1}" --port "${PORT}")
   if [ "${NEXUS42_DEV_ALLOW_REMOTE:-0}" = "1" ]; then
     SERVICE_ARGS+=(--allow-remote)
@@ -82,7 +99,7 @@ else
     if health_ok; then break; fi
     sleep 0.2
   done
-  health_ok || { echo "    service failed to become healthy; see .dev/nexus-service.log" >&2; exit 1; }
+  health_ok || { scrub_bootstrap_token_line; echo "    service failed to become healthy; see .dev/nexus-service.log" >&2; exit 1; }
   echo "    service healthy (pid ${SERVICE_PID})"
 fi
 
@@ -90,10 +107,12 @@ fi
 # boot in the log. Tokens are single-use, so an earlier run's line is dead and
 # only the last match is useful. Dev serves the SPA through Vite, so the
 # service never auto-opens a browser here; the link is surfaced to copy.
-SERVICE_LOG="${REPO_ROOT}/.dev/nexus-service.log"
 BOOTSTRAP_URL=""
 if [ -f "${SERVICE_LOG}" ]; then
   BOOTSTRAP_URL="$(grep -o '\[nexus-service\] open: [^ ]*' "${SERVICE_LOG}" | tail -1 | sed 's/^\[nexus-service\] open: //' || true)"
+  if [ -n "${BOOTSTRAP_URL}" ]; then
+    scrub_bootstrap_token_line
+  fi
 fi
 if [ "${SERVICE_STARTED}" = "0" ]; then
   echo "    service was already running; its one-time access link came from that run"

@@ -68,23 +68,45 @@ export function validateBindPolicy(
   return null;
 }
 
+/**
+ * Origin admission for browser requests.
+ *
+ * The allowlist covers the desktop shell and the Vite dev origins. The service
+ * also serves the SPA itself (`--web-dist`), and that document's requests are
+ * same-origin: their `Origin` is exactly the Host the browser connected to — a
+ * LAN address the allowlist cannot know ahead of time. Such a request is
+ * admitted; every other origin is still refused.
+ */
 export function checkOrigin(
   req: IncomingMessage,
   allowedOrigins: readonly string[],
+  protocol: 'http' | 'https',
 ): AuthFailure | null {
   if (req.method === 'OPTIONS') return null;
   const origin = req.headers.origin;
   if (!origin) return null;
-  if (!allowedOrigins.includes(origin)) {
-    return {
-      ok: false,
-      status: 403,
-      code: 'forbidden',
-      message: `Origin '${origin}' is not allowed for this Daemon API`,
-      details: { resource: 'origin' },
-    };
+  if (allowedOrigins.includes(origin)) return null;
+  if (isSameOrigin(origin, req.headers.host, protocol)) return null;
+  return {
+    ok: false,
+    status: 403,
+    code: 'forbidden',
+    message: `Origin '${origin}' is not allowed for this Daemon API`,
+    details: { resource: 'origin' },
+  };
+}
+
+/** Whether `origin` is exactly the served document's own origin (`protocol://Host`). */
+function isSameOrigin(origin: string, host: string | undefined, protocol: string): boolean {
+  if (!host) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    // Opaque origins (`null`, a non-URL value) are never same-origin.
+    return false;
   }
-  return null;
+  return parsed.protocol === `${protocol}:` && parsed.host.toLowerCase() === host.toLowerCase();
 }
 
 /**

@@ -29,7 +29,7 @@ function tempHome() {
   return home;
 }
 
-function request(url, { method = 'GET', headers = {} } = {}) {
+function request(url, { method = 'GET', headers = {}, body } = {}) {
   return new Promise((resolveRequest, rejectRequest) => {
     const req = http.request(url, { method, headers }, (res) => {
       const chunks = [];
@@ -45,11 +45,12 @@ function request(url, { method = 'GET', headers = {} } = {}) {
       });
     });
     req.on('error', rejectRequest);
+    if (body !== undefined) req.write(body);
     req.end();
   });
 }
 
-async function startServer() {
+async function startServer(overrides = {}) {
   const { resolveServiceConfig } = await import(join(serviceRoot, 'dist/config.js'));
   const { createServiceServer, listenServer } = await import(join(serviceRoot, 'dist/server.js'));
   const config = resolveServiceConfig({
@@ -58,7 +59,12 @@ async function startServer() {
     port: 0,
     allowRemote: false,
   });
-  const service = { startedAt: new Date().toISOString(), tlsFingerprint: null, workspaceInitialized: false };
+  const service = {
+    startedAt: new Date().toISOString(),
+    tlsFingerprint: null,
+    workspaceInitialized: false,
+    ...overrides,
+  };
   const created = createServiceServer(config, service, async () => ({
     state: 'closed',
     cleanup_confirmed: true,
@@ -139,5 +145,48 @@ test('a non-browser client without an Origin header keeps its retained access', 
   const response = await request(`${server.url}/v1/daemon/runtime/health`);
   assert.equal(response.status, 200, response.text);
   assert.equal(response.headers['access-control-allow-origin'], undefined);
+  await server.close();
+});
+
+test('the service-served SPA is admitted same-origin on a LAN-style Host', async () => {
+  const server = await startServer({
+    workspaceInitialized: true,
+    core: {
+      selectWorkspace: async (request) => ({
+        creator_id: request.creator_id ?? 'ctr_a',
+        workspace_slug: request.workspace_slug,
+      }),
+    },
+  });
+  // The browser reached the service at a LAN address the allowlist cannot know:
+  // its Origin is exactly the Host it connected to.
+  const lanHost = '192.168.50.7:8421';
+  const body = JSON.stringify({ creator_id: 'ctr_a', workspace_slug: 'default' });
+  const accepted = await request(`${server.url}/v1/daemon/workspace/active`, {
+    method: 'POST',
+    headers: { Host: lanHost, Origin: `http://${lanHost}`, 'Content-Type': 'application/json' },
+    body,
+  });
+  assert.equal(accepted.status, 200, accepted.text);
+  assert.deepEqual(accepted.payload, { creator_id: 'ctr_a', workspace_slug: 'default' });
+
+  // A foreign Origin on the same Host is still refused before the handler.
+  const foreign = await request(`${server.url}/v1/daemon/workspace/active`, {
+    method: 'POST',
+    headers: { Host: lanHost, Origin: 'https://evil.example', 'Content-Type': 'application/json' },
+    body,
+  });
+  assert.equal(foreign.status, 403, foreign.text);
+  assert.equal(foreign.payload.error.code, 'forbidden');
+  assert.deepEqual(foreign.payload.error.details, { resource: 'origin' });
+
+  // Same-origin also requires the served transport's scheme.
+  const schemeMismatch = await request(`${server.url}/v1/daemon/workspace/active`, {
+    method: 'POST',
+    headers: { Host: lanHost, Origin: `https://${lanHost}`, 'Content-Type': 'application/json' },
+    body,
+  });
+  assert.equal(schemeMismatch.status, 403, schemeMismatch.text);
+  assert.deepEqual(schemeMismatch.payload.error.details, { resource: 'origin' });
   await server.close();
 });

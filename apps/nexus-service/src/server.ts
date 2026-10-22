@@ -372,7 +372,7 @@ export function createServiceServer(
         return;
       }
 
-      const originFailure = checkOrigin(req, config.allowedOrigins);
+      const originFailure = checkOrigin(req, config.allowedOrigins, protocol);
       if (originFailure) {
         sendError(res, new HttpError(originFailure.status, originFailure.code, originFailure.message, originFailure.details), id, origin, config.allowedOrigins);
         return;
