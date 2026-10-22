@@ -8,7 +8,6 @@ import userEvent from '@testing-library/user-event';
 import { Navigate, Route, Routes } from 'react-router';
 
 import { SettingsAgentSection } from '@/pages/settings/settings-agent-section';
-import { SettingsShellLayout } from '@/pages/settings/settings-shell-layout';
 import { makeQueryClient, renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import { BrowserClient } from '@/lib/nexus';
@@ -90,7 +89,8 @@ function creatorsHandler() {
 }
 
 const settingsRouteTree = (
-  <Route path="settings" element={<SettingsShellLayout />}>
+  // No layout chrome — section tests assert section testids only.
+  <Route path="settings">
     <Route index element={<Navigate to="agent" replace />} />
     <Route path="agent" element={<SettingsAgentSection />} />
   </Route>

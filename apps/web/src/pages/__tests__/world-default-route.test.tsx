@@ -19,7 +19,7 @@ import { Navigate, Route, Routes, useLocation } from 'react-router';
 import { renderInApp } from '@/test/test-providers';
 import { noopClient } from '@/test/test-providers';
 import { TimelinePage } from '@/pages/timeline-page';
-import { WorldsPage } from '@/pages/worlds-page';
+
 
 /**
  * The Timeline canvas pulls in `@xyflow/react` + the T2 adapter; for route-
@@ -59,7 +59,12 @@ function AppRoutes() {
             element={<div data-testid="work-outline-outlet">outline</div>}
           />
         </Route>
-        <Route path="worlds" element={<WorldsPage />} />
+        {/* Mirror App.tsx: /worlds mounts CreatorHubPage (worlds-page deleted
+            in the v1.218 cleanup wave). Stubbed — no test navigates here. */}
+        <Route
+          path="worlds"
+          element={<div data-testid="worlds-index-outlet">worlds</div>}
+        />
         <Route path="worlds/:worldId">
           <Route index element={<Navigate to="timeline" replace />} />
           <Route path="timeline" element={<TimelinePage />} />

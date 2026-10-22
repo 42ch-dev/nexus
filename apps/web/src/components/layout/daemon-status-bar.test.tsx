@@ -5,7 +5,7 @@
  * label + lowercase `running` tag, and right clickable agent badge (name+version
  * or placeholder → `/settings/agent`) + Restart. Renders when the daemon is
  * running or mid-restart (`starting`); other non-running states are surfaced
- * by the top-of-main-content {@link MainBanner}.
+ * by the top-of-main-content layout banner.
  */
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi, afterEach } from 'vitest';
