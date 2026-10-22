@@ -560,7 +560,7 @@ Buttons use a clear verb when the object is obvious: Save, Create, Delete. Dialo
 
 ## Component Primitives
 
-All current public signatures remain. No new public families and no promotion of Dialog/States/Table. Values are frontmatter recipes; behavior remains native or owned by the existing component.
+All current public signatures remain. Dialog, States (EmptyState/Loading/ErrorState), Table and other app-proven primitives MAY be promoted to public component families under the library discipline: pure presentational, caller-owned copy via props, a per-component test, and export via `src/index.ts` with no deep imports. Values are frontmatter recipes; behavior remains native or owned by the existing component.
 
 - **Button:** four variants × four sizes; source-compatible `asChild`, refs, native attributes and callbacks. Primary uses the new blue-700/800/900 recipe. Disabled remains non-interactive. No layout transform on hover/press.
 - **Badge:** neutral/running/queued/warning/error/preset × soft/solid. Preserve default soft and state meaning. Soft uses named semantic fills/borders; solid chooses text by fill luminance. Domain badges retain every finding/task/chapter status.
@@ -570,7 +570,10 @@ All current public signatures remain. No new public families and no promotion of
 - **Toast:** existing success/error/warning/info, real queue/dismissal/portals and caller-owned copy. Dialog/Toast portals stay in their rendering document, including comparison frames. Long text wraps, viewport inset is respected.
 - **TransportErrorBlock:** existing six kinds and optional actions; compact text-link CTAs, not filled buttons in an alert. Preserve kind-to-action/callback/copy rules.
 - **Compute composites:** existing field schemas, entity pickers, proposal sections, statuses, run tables, node chrome, inspector props remain. Show existing empty/populated/invalid/disabled/truncated/overflow/provenance states as supported, never simulate network state inside a pure primitive.
-- **Dialog / States / Table:** remain transitional @web-ui extracts in Studio. Style through shared tokens and fixture composition only. Dialog/Popover recipes also govern menus/tooltips; no new package export is implied.
+- **Dialog / Sheet:** promoted to public `@42ch/nexus-ui` families (V1.148 P1). Radix-based modal / end-rail drawer with caller-owned copy (`title`, `description`, `closeLabel`); scrim overlay, `shadow-elevation-4`, dialog/sheet sizing tokens. Light/dark parity is token-driven (`--nexus-*` projections); apps/web keeps locale-aware copy through thin wrappers. Dialog/Popover recipes also govern menus/tooltips.
+- **States:** promoted to a public `@42ch/nexus-ui` family (V1.148 P1): `Spinner`, `LoadingState`, `EmptyState`, `UnavailableState`, `ErrorState`. Caller-owned copy with English fallbacks; loading voice (present participle + ellipsis), empty-state content voice (`font-display` display tier), and error pattern (what happened + next action) per §Voice & Content; error surface consumes the `error-surface` tokens. Light/dark parity via token projections plus explicit `dark:` hooks (Spinner blue-1000/blue-700, retry deep ink/cobalt).
+- **Table:** promoted to public `@42ch/nexus-ui` primitives (V1.148 P1): native `Table`/`TableHeader`/`TableBody`/`TableRow`/`TableHead`/`TableCell`; background-200 header well, label-12 head, background-200 row hover with token-driven reduced-motion-safe motion; the overflow-x narrow-screen wrapper is owned by the primitive.
+- **EmptyCreateCard:** promoted to a public `@42ch/nexus-ui` primitive (V1.148 P1): dashed-card create affordance matching the list-item card footprint (V1.125 P2 AC-V1125-5); caller-owned copy/icon/callback, disabled gate with native tooltip, icon brand-deep-blue on light / blue-700 on dark.
 
 ## Form Field
 

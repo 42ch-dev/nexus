@@ -1,67 +1,26 @@
-import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { X } from 'lucide-react';
-import { type ReactNode } from 'react';
-import { useTranslation } from 'react-i18next';
-
-import { cn } from '@/lib/utils';
-
 /**
  * Dialog — DESIGN.md §Component Primitives/Dialog.
  *
- * Built on @radix-ui/react-dialog for accessibility (focus trap, escape,
- * aria). background-100, radius-popover, shadow-elevation-4 (alias
- * shadow-modal), max-width 560px, space-6 padding. Overlay uses the scrim
- * token (§Elevation — V1.121 scrim convergence). Radix handles the portal +
- * scroll lock.
+ * Re-exported from @42ch/nexus-ui (V1.148 P1 promotion).
+ * The package owns the presentational implementation; this file is a thin
+ * wrapper to avoid call-site churn in apps/web. The close control's
+ * accessible name stays locale-aware: the wrapper injects the i18n default,
+ * callers may still pass `closeLabel` to override.
  */
-export const Dialog = DialogPrimitive.Root;
-export const DialogTrigger = DialogPrimitive.Trigger;
-export const DialogClose = DialogPrimitive.Close;
+import { useTranslation } from 'react-i18next';
 
-export function DialogContent({
-  children,
-  className,
-  bodyClassName,
-  title,
-  description,
-}: {
-  children: ReactNode;
-  className?: string;
-  /** Optional override for the scrollable body wrapper (e.g. full-height modal frames). */
-  bodyClassName?: string;
-  title: string;
-  description?: string;
-}) {
+import {
+  DialogContent as NexusDialogContent,
+  type DialogContentProps as NexusDialogContentProps,
+} from '@42ch/nexus-ui';
+
+export { Dialog, DialogTrigger, DialogClose } from '@42ch/nexus-ui';
+
+export type DialogContentProps = Omit<NexusDialogContentProps, 'closeLabel'> & {
+  closeLabel?: string;
+};
+
+export function DialogContent({ closeLabel, ...props }: DialogContentProps) {
   const { t } = useTranslation('common');
-  return (
-    <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-scrim data-[state=open]:animate-in" />
-      <DialogPrimitive.Content
-        className={cn(
-          'fixed left-1/2 top-1/2 z-50 flex max-h-dialog w-dialog max-w-dialog -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-popover border border-gray-alpha-400 bg-background-100 shadow-elevation-4',
-          className,
-        )}
-      >
-        <div className="flex shrink-0 items-start justify-between gap-4 p-6 pb-4">
-          <div className="flex flex-col gap-1">
-            <DialogPrimitive.Title className="text-heading-20 font-heading tracking-tight text-gray-1000">
-              {title}
-            </DialogPrimitive.Title>
-            {description && (
-              <DialogPrimitive.Description className="text-copy-14 text-gray-900">
-                {description}
-              </DialogPrimitive.Description>
-            )}
-          </div>
-          <DialogPrimitive.Close
-            aria-label={t('dialog.close')}
-            className="shrink-0 rounded-control p-1 text-gray-700 transition-colors duration-state ease-standard hover:bg-gray-alpha-100 hover:text-gray-1000"
-          >
-            <X className="h-4 w-4" aria-hidden />
-          </DialogPrimitive.Close>
-        </div>
-        <div className={cn('overflow-y-auto px-6 pb-6', bodyClassName)}>{children}</div>
-      </DialogPrimitive.Content>
-    </DialogPrimitive.Portal>
-  );
+  return <NexusDialogContent closeLabel={closeLabel ?? t('dialog.close')} {...props} />;
 }

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
-import { EmptyState, ErrorState, LoadingState, Spinner } from './states';
+import { i18n } from '@/lib/i18n/config';
+
+import { EmptyState, ErrorState, LoadingState, Spinner, UnavailableState } from './states';
 
 /**
  * V1.121 P1 T2 — States v0.4 (DESIGN.md components.states).
@@ -69,5 +71,41 @@ describe('ErrorState (error-surface tokens)', () => {
     expect(retry.className).toMatch(/\btext-brand-deep-blue\b/);
     expect(retry.className).toMatch(/\bdark:text-blue-700\b/);
     expect(retry.className).not.toMatch(/(?<!dark:)text-blue-700\b/);
+  });
+});
+
+describe('copy i18n defaults (V1.148 wrapper)', () => {
+  it('falls back to the zh-CN translated loading / error title / retry copy when props are omitted', async () => {
+    await i18n.changeLanguage('zh-CN');
+
+    render(<LoadingState />);
+    expect(screen.getByText('加载中…')).toBeInTheDocument();
+
+    render(<ErrorState onRetry={() => undefined} />);
+    expect(screen.getByText('无法加载此视图')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
+
+    render(<UnavailableState title="服务不可用" onRetry={() => undefined} />);
+    // ErrorState + UnavailableState both fell back to the same zh-CN retry copy.
+    expect(screen.getAllByRole('button', { name: '重试' })).toHaveLength(2);
+  });
+
+  it('explicit copy props override the injected zh-CN defaults', async () => {
+    await i18n.changeLanguage('zh-CN');
+
+    render(<LoadingState label="Hold on…" />);
+    expect(screen.getByText('Hold on…')).toBeInTheDocument();
+    expect(screen.queryByText('加载中…')).not.toBeInTheDocument();
+
+    render(
+      <ErrorState title="Custom failure" onRetry={() => undefined} retryLabel="Again" />,
+    );
+    expect(screen.getByText('Custom failure')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Again' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
+
+    render(<UnavailableState title="Nope" onRetry={() => undefined} retryLabel="Once more" />);
+    const retryButtons = screen.getAllByRole('button');
+    expect(retryButtons.some((b) => b.textContent === 'Once more')).toBe(true);
   });
 });
