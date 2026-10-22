@@ -27,6 +27,15 @@ import { SheetFixtures } from '@/fixtures/sheet-fixtures';
 import { StatesFixtures } from '@/fixtures/states-fixtures';
 import { TableFixtures } from '@/fixtures/table-fixtures';
 import { EmptyCreateCardFixtures } from '@/fixtures/empty-create-card-fixtures';
+import { ListStateContainerFixtures } from '@/fixtures/list-state-container-fixtures';
+import { ConfirmDialogFixtures } from '@/fixtures/confirm-dialog-fixtures';
+import { FormDialogFixtures } from '@/fixtures/form-dialog-fixtures';
+import { FormSectionFixtures } from '@/fixtures/form-section-fixtures';
+import { ListPageLayoutFixtures } from '@/fixtures/list-page-layout-fixtures';
+import { SettingsSectionFixtures } from '@/fixtures/settings-section-fixtures';
+import { SettingsLayoutFixtures } from '@/fixtures/settings-layout-fixtures';
+import { ListDetailShellFixtures } from '@/fixtures/list-detail-shell-fixtures';
+import { DetailPartsFixtures } from '@/fixtures/detail-parts-fixtures';
 import { ComputeRunStudioFixtures } from '@/fixtures/compute-run-studio';
 import { TimelineComputeFixtures } from '@/fixtures/timeline-compute';
 import {
@@ -110,6 +119,15 @@ function SubNav() {
     { label: 'Tabs', href: '#comp-tabs' },
     { label: 'Textarea', href: '#comp-textarea' },
     { label: 'Form Field', href: '#comp-form-field' },
+    { label: 'Form Section', href: '#comp-form-section' },
+    { label: 'Form Dialog', href: '#comp-form-dialog' },
+    { label: 'Confirm Dialog', href: '#comp-confirm-dialog' },
+    { label: 'List State', href: '#comp-list-state-container' },
+    { label: 'List Page', href: '#comp-list-page-layout' },
+    { label: 'List Detail', href: '#comp-list-detail-shell' },
+    { label: 'Detail Parts', href: '#comp-detail-parts' },
+    { label: 'Settings Section', href: '#comp-settings-section' },
+    { label: 'Settings Layout', href: '#comp-settings-layout' },
     { label: 'Toast', href: '#comp-toast' },
     { label: 'Transport Error', href: '#comp-transport-error-block' },
     { label: 'Run Studio', href: '#comp-run-studio' },
@@ -696,7 +714,7 @@ function InputSection() {
 
 function LabelSection() {
   return (
-    <section>
+    <section data-testid="label-fixtures">
       <SectionHeading id="comp-label">Label</SectionHeading>
       <p className="text-copy-16 text-gray-700 mb-6">
         Form label — label-14 weight 500, gray-1000 text. Wired to its control via{' '}
@@ -944,7 +962,7 @@ function SheetSection() {
 
 function StatesSection() {
   return (
-    <section data-testid="states-fixtures">
+    <section>
       <SectionHeading id="comp-states">States</SectionHeading>
       <p className="text-copy-16 text-gray-700 mb-6">
         Spinner, Loading, Empty, Unavailable, and Error affordances per
@@ -971,7 +989,7 @@ function StatesSection() {
 
 function TableSection() {
   return (
-    <section data-testid="table-fixtures">
+    <section>
       <SectionHeading id="comp-table">Table</SectionHeading>
       <p className="text-copy-16 text-gray-700 mb-6">
         Data table — promoted{' '}
@@ -1233,6 +1251,177 @@ function FormFieldSection() {
 }
 
 /* ------------------------------------------------------------------ */
+/*  L2 pattern components (V1.149 / V1.150)                             */
+/* ------------------------------------------------------------------ */
+
+function FormSectionSection() {
+  return (
+    <section>
+      <SectionHeading id="comp-form-section">Form Section</SectionHeading>
+      <p className="text-copy-16 text-gray-700 mb-6">
+        Promoted{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">FormSection</code>{' '}
+        (V1.149 P1) — the field-group layout behind form dialogs and settings
+        surfaces: native fieldset/legend group semantics, caller-owned fields
+        and copy, and an optional inline error slot above the fields. Toggle
+        the theme to verify light + dark.
+      </p>
+      <FormSectionFixtures />
+    </section>
+  );
+}
+
+function FormDialogSection() {
+  return (
+    <section>
+      <SectionHeading id="comp-form-dialog">Form Dialog</SectionHeading>
+      <p className="text-copy-16 text-gray-700 mb-6">
+        Promoted{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">FormDialog</code>{' '}
+        (V1.149 P1) — the form-in-modal pattern over the promoted Dialog +
+        Button primitives. The caller owns the fields, native validation, the
+        submit handler, and all copy; pending disables actions and guards
+        dismissal. Use the toggles to demo the busy state and the inline
+        error slot. Toggle the theme to verify light + dark.
+      </p>
+      <FormDialogFixtures />
+    </section>
+  );
+}
+
+function ConfirmDialogSection() {
+  return (
+    <section>
+      <SectionHeading id="comp-confirm-dialog">Confirm Dialog</SectionHeading>
+      <p className="text-copy-16 text-gray-700 mb-6">
+        Promoted{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">ConfirmDialog</code>{' '}
+        (V1.149 P1) — the destructive/irreversible-action confirmation.
+        Caller owns open state and all copy; while pending, both actions
+        disable, the confirm shows a spinner, and X / Escape / overlay
+        dismissal is guarded at the dialog root. Toggle the theme to verify
+        light + dark.
+      </p>
+      <ConfirmDialogFixtures />
+    </section>
+  );
+}
+
+function ListStateContainerSection() {
+  return (
+    <section>
+      <SectionHeading id="comp-list-state-container">List State Container</SectionHeading>
+      <p className="text-copy-16 text-gray-700 mb-6">
+        Promoted{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">ListStateContainer</code>{' '}
+        (V1.149 P1) — the single four-branch container behind list/query
+        surfaces (loading / error / empty / ready), composing the promoted
+        States primitives. Retry and empty-action callbacks are live. Toggle
+        the theme to verify light + dark.
+      </p>
+      <ListStateContainerFixtures />
+    </section>
+  );
+}
+
+function ListPageLayoutSection() {
+  return (
+    <section>
+      <SectionHeading id="comp-list-page-layout">List Page Layout</SectionHeading>
+      <p className="text-copy-16 text-gray-700 mb-6">
+        Promoted{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">ListPageLayout</code>{' '}
+        (V1.150 P1) — the shared list-page chrome over the promoted Card
+        primitives: header title/description + refresh action, filters row,
+        results region, and load-more footer. Refresh and load-more are
+        live. Toggle the theme to verify light + dark.
+      </p>
+      <ListPageLayoutFixtures />
+    </section>
+  );
+}
+
+function ListDetailShellSection() {
+  return (
+    <section>
+      <SectionHeading id="comp-list-detail-shell">List Detail Shell</SectionHeading>
+      <p className="text-copy-16 text-gray-700 mb-6">
+        Promoted{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">ListDetailShell</code>{' '}
+        (V1.150 P3) — the fixed-width responsive master/detail split. The
+        shell owns no open/close state: selection is caller-owned and the
+        caller renders the detail panel or a "no selection" EmptyState.
+        Selection controls are live. Toggle the theme to verify light + dark.
+      </p>
+      <ListDetailShellFixtures />
+    </section>
+  );
+}
+
+function DetailPartsSection() {
+  return (
+    <section>
+      <SectionHeading id="comp-detail-parts">Detail Parts</SectionHeading>
+      <p className="text-copy-16 text-gray-700 mb-6">
+        Promoted{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">DetailCard</code>{' '}
+        and{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">FieldRow</code>{' '}
+        (V1.150 P3) — the read-only detail family over the promoted Card
+        primitives. FieldRow hides rows whose value is null/undefined/'' so
+        callers can map sparse data without guarding each row. Toggle the
+        theme to verify light + dark.
+      </p>
+      <DetailPartsFixtures />
+    </section>
+  );
+}
+
+function SettingsSectionSection() {
+  return (
+    <section>
+      <SectionHeading id="comp-settings-section">Settings Section</SectionHeading>
+      <p className="text-copy-16 text-gray-700 mb-6">
+        Promoted{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">SettingsSection</code>{' '}
+        and{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">SettingRow</code>{' '}
+        (V1.150 P2) — the settings family: section chrome (native
+        fieldset/legend) and label/control/hint rows wired via htmlFor.
+        Toggle the theme to verify light + dark.
+      </p>
+      <SettingsSectionFixtures />
+    </section>
+  );
+}
+
+function SettingsLayoutSection() {
+  return (
+    <section>
+      <SectionHeading id="comp-settings-layout">Settings Layout</SectionHeading>
+      <p className="text-copy-16 text-gray-700 mb-6">
+        Promoted{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">SettingsLayout</code>{' '}
+        (V1.150 P2) — the settings section nav rail + outlet region promoted
+        from the app frame. The caller owns the section registry (labels/
+        icons), active selection, and navigation callback. Navigation is
+        live. Toggle the theme to verify light + dark.
+      </p>
+      <SettingsLayoutFixtures />
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  13. Toast                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -1361,9 +1550,13 @@ export function ComponentsPage() {
         primitives are imported via{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>
         ; Dialog, Sheet, Table, States, and EmptyCreateCard joined the promoted
-        set in V1.148 P1. Every matrix cell renders a real component — hover,
-        focus-visible, disabled, and loading states are live; toggle the theme
-        to verify both light and dark (V1.121 states matrix).
+        set in V1.148 P1 and the V1.149/V1.150 L2 patterns (FormSection,
+        FormDialog, ConfirmDialog, ListStateContainer, ListPageLayout,
+        ListDetailShell, DetailCard/FieldRow, SettingsSection/SettingRow,
+        SettingsLayout) joined in this wave. Every matrix cell renders a real
+        component — hover, focus-visible, disabled, and loading states are
+        live; toggle the theme to verify both light and dark (V1.121 states
+        matrix).
       </p>
       <SurfaceSourceBadges importPaths={['@42ch/nexus-ui']} />
       <SubNav />
@@ -1383,6 +1576,15 @@ export function ComponentsPage() {
       <TabsSection />
       <TextareaSection />
       <FormFieldSection />
+      <FormSectionSection />
+      <FormDialogSection />
+      <ConfirmDialogSection />
+      <ListStateContainerSection />
+      <ListPageLayoutSection />
+      <ListDetailShellSection />
+      <DetailPartsSection />
+      <SettingsSectionSection />
+      <SettingsLayoutSection />
       <ToastSection />
       <TransportErrorBlockSection />
       <RunStudioSection />
@@ -1402,12 +1604,14 @@ export function ComponentsPage() {
       </section>
 
       <p className="text-copy-13 text-gray-700 mt-12 pt-8 border-t border-gray-alpha-200">
-        22 promoted families (Badge, Button, Card, Dialog, EmptyCreateCard,
+        31 promoted families (Badge, Button, Card, Dialog, EmptyCreateCard,
         Input, Label, Select, Sheet, Spinner/LoadingState/EmptyState/
         UnavailableState/ErrorState, Table, Tabs, Textarea, Toast,
-        TransportErrorBlock, RunFormFields, EntityPickerField,
-        ProposalSections, RunStatusBadge, RunsTable, ComputeResultNodeChrome,
-        ComputeInspectorSections) rendered live via{' '}
+        TransportErrorBlock, ListStateContainer, ConfirmDialog, FormDialog,
+        FormSection, ListPageLayout, SettingsSection/SettingRow,
+        SettingsLayout, ListDetailShell, DetailCard/FieldRow, RunFormFields,
+        EntityPickerField, ProposalSections, RunStatusBadge, RunsTable,
+        ComputeResultNodeChrome, ComputeInspectorSections) rendered live via{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>
         . No transitional primitives remain on this page; none are migrated,
         copied, or re-implemented in this gallery.

@@ -1978,11 +1978,14 @@ describe('Components page — display voice confinement (AC-P1-5)', () => {
     // CardTitle voice="content" now uses sans display-20; EmptyState,
     // UnavailableState (promoted States family, V1.148 P1), and
     // EmptyCreateCard (V1.148 P1) carry font-display — interface components
-    // stay sans.
+    // stay sans. ListStateContainer and ListDetailShell render the promoted
+    // EmptyState in their empty/no-selection branches.
     const allowedContainers = [
       'states-empty',
       'states-unavailable',
       'empty-create-card-fixtures',
+      'list-state-container-fixtures',
+      'list-detail-shell-fixtures',
     ];
     const displayEls = Array.from(document.querySelectorAll('.font-display'));
     expect(displayEls.length).toBeGreaterThan(0);
