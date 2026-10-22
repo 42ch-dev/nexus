@@ -1,7 +1,7 @@
 /**
  * Settings Connection section — V1.103 P2.
  *
- * Hosts ConnectDaemonForm under SettingsShellLayout. Legacy `/connect`
+ * Hosts ConnectDaemonForm as a Settings section. Legacy `/connect`
  * permanently redirects here (C1).
  *
  * Author-facing copy: settings-connection-section.md.

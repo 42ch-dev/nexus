@@ -1,7 +1,7 @@
 /**
  * Settings Agent section — V1.103 P1 (G1 getAgentProfile preselect).
  *
- * Mounts app-shared AgentPicker under SettingsShellLayout outlet.
+ * Mounts app-shared AgentPicker as a Settings section body.
  * Desktop: after scan settles, preselect via getAgentProfile (match by command
  * / catalog key). Persist via instant `setAgentProfile` on card select or
  * custom verify success (V1.125 AC-V1125-2).

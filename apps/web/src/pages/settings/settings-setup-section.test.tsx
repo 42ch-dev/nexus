@@ -8,7 +8,6 @@ import { Navigate, Route, Routes, useLocation } from 'react-router';
 
 import { SettingsAdvancedSection } from '@/pages/settings/settings-advanced-section';
 import { SettingsSetupSection } from '@/pages/settings/settings-setup-section';
-import { SettingsShellLayout } from '@/pages/settings/settings-shell-layout';
 import { DaemonLaunchGate } from '@/components/setup/daemon-launch-gate';
 import { renderInApp } from '@/test/test-providers';
 import { BrowserClient } from '@/lib/nexus';
@@ -66,7 +65,8 @@ function CompletedProbe() {
 }
 
 const settingsRouteTree = (
-  <Route path="settings" element={<SettingsShellLayout />}>
+  // No layout chrome — section tests assert section testids only.
+  <Route path="settings">
     <Route index element={<Navigate to="agent" replace />} />
     <Route path="advanced" element={<SettingsAdvancedSection />} />
     <Route path="setup" element={<SettingsSetupSection />} />
