@@ -104,9 +104,29 @@ export function WizardShell() {
     await setCompleted(true);
   }
 
+  /**
+   * Selection is the shell's stage, not the step's: a failure there is reported
+   * by the shell (the same path both finishes use) so it is never misreported
+   * as a World-creation failure. Returns false when the user should stay put.
+   */
+  async function selectWorkspaceOrReport(): Promise<boolean> {
+    try {
+      await selectDefaultWorkspace();
+      return true;
+    } catch (error) {
+      toast({
+        variant: 'error',
+        title: '工作区初始化失败',
+        description: errorMessage(error),
+      });
+      return false;
+    }
+  }
+
   /** Creator finish: select the pre-created workspace, then create the World. */
   async function finishCreator(name: string) {
-    await selectDefaultWorkspace();
+    if (!(await selectWorkspaceOrReport())) return;
+    // Only a World-creation failure reaches the step's inline copy.
     const world = await client.createWorld({ title: name });
     void queryClient.invalidateQueries({ queryKey: queryKeys.memory.worlds() });
     toast({ variant: 'success', title: `🎉 世界「${name}」已创建` });
@@ -115,16 +135,7 @@ export function WizardShell() {
 
   /** Developer finish: workspace selection only; the agent choice persists in the step. */
   async function finishDeveloper() {
-    try {
-      await selectDefaultWorkspace();
-    } catch (error) {
-      toast({
-        variant: 'error',
-        title: '工作区初始化失败',
-        description: errorMessage(error),
-      });
-      return;
-    }
+    if (!(await selectWorkspaceOrReport())) return;
     navigate('/developer');
   }
 

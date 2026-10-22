@@ -27,7 +27,8 @@ const AGENTS = [
 function makeClient({
   initialized = true,
   worldFails = false,
-}: { initialized?: boolean; worldFails?: boolean } = {}) {
+  selectionFails = false,
+}: { initialized?: boolean; worldFails?: boolean; selectionFails?: boolean } = {}) {
   const calls: string[] = [];
   let workspaceInitialized = initialized;
   const client = {
@@ -48,6 +49,7 @@ function makeClient({
     },
     setActiveWorkspace: (request: { creator_id?: string; workspace_slug: string }) => {
       calls.push('select');
+      if (selectionFails) return Promise.reject(new Error('workspace selection failed'));
       // The service promotes the shell in process on selection (D21).
       workspaceInitialized = true;
       return Promise.resolve({
@@ -208,6 +210,23 @@ describe('WizardShell', () => {
     expect(screen.getByLabelText('世界名称')).toHaveValue('远星号');
     expect(screen.getByTestId('location')).toHaveTextContent('/setup');
     expect(calls.filter((call) => call !== 'probe')).toEqual(['creator', 'select', 'world']);
+  });
+
+  it('reports a workspace-selection failure at the shell stage, not as a world failure', async () => {
+    const user = userEvent.setup();
+    const { client, calls } = makeClient({ initialized: false, selectionFails: true });
+    renderShell({ client });
+
+    await reachWorldStep(user);
+    await user.click(screen.getByRole('button', { name: '创建并进入' }));
+
+    expect(await screen.findByText('工作区初始化失败')).toBeInTheDocument();
+    expect(screen.queryByText(/创建世界失败/)).not.toBeInTheDocument();
+    // Still in the step with the draft; no world was created and nothing navigated.
+    expect(screen.getByTestId('location')).toHaveTextContent('/setup');
+    expect(screen.getByLabelText('世界名称')).toHaveValue('灰烬王座');
+    expect(screen.getByRole('button', { name: '创建并进入' })).toBeEnabled();
+    expect(calls.filter((call) => call !== 'probe')).toEqual(['creator', 'select']);
   });
 
   it('finishes the developer path after workspace selection and lands in the Hub', async () => {
