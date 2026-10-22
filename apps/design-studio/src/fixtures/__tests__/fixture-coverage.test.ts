@@ -44,18 +44,25 @@ function parseValueExports(indexSource: string): string[] {
 /**
  * Fail closed on public export forms `parseValueExports` does not recognize.
  * A direct declaration or star export would contribute no parsed name, so the
- * coverage assertion would silently pass. Authors must either use the
- * `export { ... }` form or extend the parser and add a fixture.
+ * coverage assertion would silently pass. Comments are stripped first so a
+ * same-line continuation (`export { ... }; export function Y() {}`) or legal
+ * inter-keyword block comments between `export` and the keyword cannot hide a
+ * form, and the scan is not line-anchored. Type-only exports are exempt.
  */
 function unsupportedExportForms(indexSource: string): string[] {
+  // shortcut: naive comment strip assumes no string literal contains '//' or
+  // '/*' — true for this package index; upgrade to a real lexer otherwise.
+  const stripped = indexSource
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/[^\n]*/g, '');
   const patterns: [RegExp, string][] = [
-    [/^\s*export\s+\*/gm, '`export * ...`'],
-    [/^\s*export\s+(?:async\s+)?function\b/gm, '`export function ...`'],
-    [/^\s*export\s+(?:const|let|var)\b/gm, '`export const/let/var ...`'],
-    [/^\s*export\s+class\b/gm, '`export class ...`'],
-    [/^\s*export\s+default\b/gm, '`export default ...`'],
+    [/export\s*\*/g, '`export * ...`'],
+    [/export\s+(?:async\s+)?function\b/g, '`export function ...`'],
+    [/export\s+(?:const|let|var)\b/g, '`export const/let/var ...`'],
+    [/export\s+class\b/g, '`export class ...`'],
+    [/export\s+default\b/g, '`export default ...`'],
   ];
-  return patterns.filter(([re]) => re.test(indexSource)).map(([, form]) => form);
+  return patterns.filter(([re]) => re.test(stripped)).map(([, form]) => form);
 }
 
 function collectSourceFiles(dir: string): string[] {
@@ -150,5 +157,16 @@ describe('unsupported public export forms fail closed', () => {
   it('type-only declarations are not rejected', () => {
     const indexSource = 'export type Foo = string;\nexport interface Bar {}\n';
     expect(unsupportedExportForms(indexSource)).toEqual([]);
+  });
+
+  it('a direct export continued on the same line as a named export fails closed', () => {
+    const indexSource = "export { Button } from './button'; export function UndemoedWidget() { return null; }\n";
+    expect(unsupportedExportForms(indexSource)).toContain('`export function ...`');
+    expect(parseValueExports(indexSource)).not.toContain('UndemoedWidget');
+  });
+
+  it('a direct export with inter-keyword comments fails closed', () => {
+    const indexSource = 'export /* public */ function UndemoedWidget() { return null; }\n// export * from \'./hidden\'\n';
+    expect(unsupportedExportForms(indexSource)).toContain('`export function ...`');
   });
 });
