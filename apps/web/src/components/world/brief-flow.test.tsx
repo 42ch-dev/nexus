@@ -20,6 +20,7 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { cleanup, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient } from '@tanstack/react-query';
 import { i18n } from '@/lib/i18n/config';
 
 import { Route, Routes } from 'react-router';
@@ -28,6 +29,7 @@ import { WorldApp } from '@/components/world/world-app';
 import { AppRail } from '@/components/shell/app-rail';
 import { isUnlocked } from '@/lib/activation-store';
 import { NexusClientError } from '@/lib/nexus';
+import { queryKeys } from '@/lib/nexus/query-keys';
 import { renderInApp } from '@/test/test-providers';
 import type { NexusClient } from '@/lib/nexus';
 import type {
@@ -96,6 +98,18 @@ function renderWorld(
 }
 
 const BRIEF_TEXT = '一个魔法正在消亡的低魔奇幻世界';
+
+/**
+ * Read the new Brief text off a patch request — create patches carry it as
+ * `title`, edit patches as the merged `body.attributes.world_summary`.
+ */
+function patchSummary(request: {
+  patch: { title?: string; body?: { attributes?: Record<string, unknown> } };
+}): string {
+  return (
+    request.patch.title ?? (request.patch.body?.attributes?.world_summary as string) ?? ''
+  );
+}
 
 /** A patch-entity mock that succeeds and makes the next graph read see the era. */
 function patchSucceeding(graphRef: { current: WorldKbGraphResponse }) {
@@ -307,16 +321,17 @@ describe('Brief flow — edit (per-row OCC)', () => {
         request: {
           entity_id: string;
           expected_version: number;
-          patch: { title?: string };
+          patch: { title?: string; body?: { attributes?: Record<string, unknown> } };
         },
       ) => {
+        const summary = patchSummary(request);
         graphRef.current = graph([
           eraEntity({
             key_block_id: 'kb-era-1',
-            canonical_name: request.patch.title!,
+            canonical_name: summary,
             version: 4,
             updated_at: new Date().toISOString(),
-            body: { attributes: { world_summary: request.patch.title } },
+            body: { attributes: { world_summary: summary } },
           }),
         ]);
         return Promise.resolve({ entity: { key_block_id: 'kb-era-1' } });
@@ -368,16 +383,17 @@ describe('Brief flow — edit (per-row OCC)', () => {
         request: {
           entity_id: string;
           expected_version: number;
-          patch: { title?: string };
+          patch: { title?: string; body?: { attributes?: Record<string, unknown> } };
         },
       ) => {
+        const summary = patchSummary(request);
         graphRef.current = graph([
           eraEntity({
             key_block_id: 'kb-era-2',
-            canonical_name: request.patch.title!,
+            canonical_name: summary,
             version: 6,
             updated_at: new Date().toISOString(),
-            body: { attributes: { world_summary: request.patch.title } },
+            body: { attributes: { world_summary: summary } },
           }),
         ]);
         return Promise.resolve({ entity: { key_block_id: 'kb-era-2' } });
@@ -575,14 +591,15 @@ describe('Brief flow — T3 fix round 1', () => {
     // Work already unlocked for this creator (Brief saved earlier).
     window.localStorage.setItem(`nexus-activation:${CREATOR}`, JSON.stringify({ work: true }));
     const patchEntity = vi.fn(
-      (_: string, request: { patch: { title?: string } }) => {
+      (_: string, request: { patch: { title?: string; body?: { attributes?: Record<string, unknown> } } }) => {
+        const summary = patchSummary(request);
         graphRef.current = graph([
           eraEntity({
             key_block_id: 'kb-era-1',
-            canonical_name: request.patch.title!,
+            canonical_name: summary,
             version: 2,
             updated_at: new Date().toISOString(),
-            body: { attributes: { world_summary: request.patch.title } },
+            body: { attributes: { world_summary: summary } },
           }),
         ]);
         return Promise.resolve({ entity: { key_block_id: 'kb-era-1' } });
@@ -645,5 +662,248 @@ describe('Brief flow — T3 fix round 1', () => {
       expect(screen.getByTestId('rail-item-work').tagName).toBe('A'),
     );
     expect(screen.getByTestId('rail-item-work')).not.toHaveClass('opacity-35');
+  });
+});
+
+describe('Brief flow — QC fix wave', () => {
+  const CREATOR = 'creator-a';
+
+  it('edit merges world_summary into the existing body — other attributes and the title survive', async () => {
+    const user = userEvent.setup();
+    const graphRef: { current: WorldKbGraphResponse } = {
+      current: graph([
+        eraEntity({
+          key_block_id: 'kb-era-1',
+          canonical_name: '第一纪元',
+          version: 3,
+          updated_at: new Date().toISOString(),
+          body: {
+            attributes: { world_summary: BRIEF_TEXT, tone: 'dark' },
+            tags: ['foundation'],
+          },
+        }),
+      ]),
+    };
+    const patchEntity = vi.fn(
+      (_: string, request: { patch: { body?: { attributes?: Record<string, unknown> } } }) => {
+        const summary = patchSummary(request);
+        graphRef.current = graph([
+          eraEntity({
+            key_block_id: 'kb-era-1',
+            canonical_name: '第一纪元',
+            version: 4,
+            updated_at: new Date().toISOString(),
+            body: {
+              attributes: { world_summary: summary, tone: 'dark' },
+              tags: ['foundation'],
+            },
+          }),
+        ]);
+        return Promise.resolve({ entity: { key_block_id: 'kb-era-1' } });
+      },
+    );
+    renderWorld(makeClient({ graph: () => Promise.resolve(graphRef.current), patchEntity }));
+
+    await user.click(await screen.findByTestId('world-brief-edit'));
+    const input = await screen.findByTestId('world-brief-input');
+    await user.clear(input);
+    await user.type(input, '魔法回归的世界');
+    await user.click(screen.getByTestId('world-brief-save'));
+
+    expect(await screen.findByTestId('world-brief-card')).toHaveTextContent('魔法回归的世界');
+    expect(patchEntity).toHaveBeenCalledTimes(1);
+    const request = patchEntity.mock.calls[0][1] as {
+      entity_id: string;
+      expected_version: number;
+      patch: {
+        title?: string;
+        block_type?: string;
+        body: { attributes: Record<string, unknown>; tags?: string[] };
+      };
+    };
+    expect(request.entity_id).toBe('kb-era-1');
+    expect(request.expected_version).toBe(3);
+    // The title is not rewritten on edit; the body is merged, not replaced.
+    expect(request.patch.title).toBeUndefined();
+    expect(request.patch.block_type).toBeUndefined();
+    expect(request.patch.body.attributes.world_summary).toBe('魔法回归的世界');
+    expect(request.patch.body.attributes.tone).toBe('dark');
+    expect(request.patch.body.tags).toEqual(['foundation']);
+  });
+
+  it('edit 409 refreshes the graph so the promised retry uses the fresh version', async () => {
+    const user = userEvent.setup();
+    const eraV2 = (summary: string) =>
+      graph([
+        eraEntity({
+          key_block_id: 'kb-era-1',
+          canonical_name: '第一纪元',
+          version: 2,
+          updated_at: new Date().toISOString(),
+          body: { attributes: { world_summary: summary } },
+        }),
+      ]);
+    const graphRef: { current: WorldKbGraphResponse } = {
+      current: graph([
+        eraEntity({
+          key_block_id: 'kb-era-1',
+          canonical_name: '第一纪元',
+          version: 1,
+          updated_at: new Date().toISOString(),
+          body: { attributes: { world_summary: BRIEF_TEXT } },
+        }),
+      ]),
+    };
+    const conflict = () =>
+      new NexusClientError(409, 'world_kb_conflict', 'conflict', {
+        current_version: 2,
+        entity_id: 'kb-era-1',
+        conflicting_path: 'expected_version',
+        recovery_hint: 'refresh',
+      });
+    const patchEntity = vi
+      .fn()
+      .mockImplementationOnce((_w: string, _r: unknown) => {
+        // The concurrent write lands; the invalidation refetch must see v2.
+        graphRef.current = eraV2(BRIEF_TEXT);
+        return Promise.reject(conflict());
+      })
+      .mockImplementation(
+        (
+          _: string,
+          request: {
+            expected_version: number;
+            patch: { body?: { attributes?: Record<string, unknown> } };
+          },
+        ) => {
+          // Without the graph refresh the retry would still pin version 1 and
+          // re-fail deterministically.
+          if (request.expected_version !== 2) return Promise.reject(conflict());
+          graphRef.current = eraV2(patchSummary({ patch: request.patch }));
+          return Promise.resolve({ entity: { key_block_id: 'kb-era-1' } });
+        },
+      );
+    renderWorld(makeClient({ graph: () => Promise.resolve(graphRef.current), patchEntity }));
+
+    await user.click(await screen.findByTestId('world-brief-edit'));
+    const input = await screen.findByTestId('world-brief-input');
+    await user.clear(input);
+    await user.type(input, '魔法回归的世界');
+    await user.click(screen.getByTestId('world-brief-save'));
+
+    // Inline failure copy; the editor stays mounted with the draft.
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Brief 保存失败：conflict。草稿已保留，可直接重试。',
+    );
+    expect(screen.getByTestId('world-brief-input')).toHaveValue('魔法回归的世界');
+
+    // Retry — now backed by the refreshed revision.
+    await user.click(screen.getByTestId('world-brief-save'));
+    expect(await screen.findByTestId('world-brief-card')).toHaveTextContent('魔法回归的世界');
+    expect(patchEntity).toHaveBeenCalledTimes(2);
+    expect(
+      (patchEntity.mock.calls[1] as [string, { expected_version: number }])[1]
+        .expected_version,
+    ).toBe(2);
+  });
+
+  it('persists the Work unlock before the awaited post-save refetch', async () => {
+    const user = userEvent.setup();
+    const savedGraph = graph([
+      eraEntity({
+        key_block_id: 'kb-new',
+        canonical_name: BRIEF_TEXT,
+        version: 1,
+        updated_at: new Date().toISOString(),
+        body: { attributes: { world_summary: BRIEF_TEXT } },
+      }),
+    ]);
+    // The post-save invalidation refetch stays pending until released.
+    let releaseRefetch: (g: WorldKbGraphResponse) => void = () => {};
+    let read = 0;
+    const graphFn = () => {
+      read += 1;
+      if (read === 1) return Promise.resolve(graph([]));
+      const { promise, resolve } = withResolvers<WorldKbGraphResponse>();
+      releaseRefetch = resolve;
+      return promise;
+    };
+    const patchEntity = vi.fn(() => Promise.resolve({ entity: { key_block_id: 'kb-new' } }));
+    renderWorld(
+      makeClient({ graph: graphFn, patchEntity }),
+      `/worlds/${WORLD_ID}`,
+      { activeCreatorId: CREATOR },
+    );
+
+    await user.click(await screen.findByTestId('world-brief-create'));
+    await user.type(screen.getByTestId('world-brief-input'), BRIEF_TEXT);
+    await user.click(screen.getByTestId('world-brief-save'));
+
+    await waitFor(() => expect(patchEntity).toHaveBeenCalledTimes(1));
+    // The refetch is still pending (editor mounted) — yet the unlock is
+    // already persisted and announced.
+    expect(screen.getByTestId('world-brief-editor')).toBeInTheDocument();
+    expect(isUnlocked(CREATOR, 'work')).toBe(true);
+    expect(
+      screen.getByText('✅ Brief 已保存——「作品」模块已解锁'),
+    ).toBeInTheDocument();
+
+    releaseRefetch(savedGraph);
+    expect(await screen.findByTestId('world-brief-card')).toBeInTheDocument();
+  });
+
+  it('an era deleted mid-edit keeps the editor on the OCC patch path (no create-flip)', async () => {
+    const user = userEvent.setup();
+    const qc = new QueryClient();
+    const graphRef: { current: WorldKbGraphResponse } = {
+      current: graph([
+        eraEntity({
+          key_block_id: 'kb-era-1',
+          canonical_name: '第一纪元',
+          version: 1,
+          updated_at: new Date().toISOString(),
+          body: { attributes: { world_summary: BRIEF_TEXT } },
+        }),
+      ]),
+    };
+    const patchEntity = vi.fn(
+      (_: string, _request: { entity_id: string; expected_version: number }) =>
+        Promise.resolve({ entity: { key_block_id: 'kb-era-1' } }),
+    );
+    renderInApp(
+      <Routes>
+        <Route path="/worlds/:worldId" element={<WorldApp />} />
+      </Routes>,
+      {
+        client: makeClient({ graph: () => Promise.resolve(graphRef.current), patchEntity }),
+        initialRouterEntries: [`/worlds/${WORLD_ID}`],
+        queryClient: qc,
+      },
+    );
+
+    await user.click(await screen.findByTestId('world-brief-edit'));
+    const input = await screen.findByTestId('world-brief-input');
+    expect(input).toHaveValue(BRIEF_TEXT);
+
+    // The era vanishes from the graph mid-edit.
+    graphRef.current = graph([]);
+    await qc.invalidateQueries({ queryKey: queryKeys.worldKb.graph(WORLD_ID) });
+    await waitFor(() =>
+      expect(screen.queryByTestId('world-brief-card')).not.toBeInTheDocument(),
+    );
+
+    // The editor survives on the snapshot — the save is still an OCC patch,
+    // not a silent create.
+    expect(screen.getByTestId('world-brief-editor')).toBeInTheDocument();
+    expect(screen.getByTestId('world-brief-input')).toHaveValue(BRIEF_TEXT);
+    await user.click(screen.getByTestId('world-brief-save'));
+
+    await waitFor(() => expect(patchEntity).toHaveBeenCalledTimes(1));
+    const request = patchEntity.mock.calls[0][1] as {
+      entity_id: string;
+      expected_version: number;
+    };
+    expect(request.entity_id).toBe('kb-era-1');
+    expect(request.expected_version).toBe(1);
   });
 });

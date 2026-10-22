@@ -25,8 +25,6 @@ import { LayerTabs, parseWorldLayer } from '@/components/world/layer-tabs';
 import { SideChecklist } from '@/components/world/side-checklist';
 import { WorldHeader } from '@/components/world/world-header';
 import { ErrorState, LoadingState } from '@/components/ui/states';
-import { isUnlocked, unlock } from '@/lib/activation-store';
-import { useActiveCreatorId } from '@/lib/active-creator-context';
 import { useWorldKbGraph } from '@/lib/canvas/use-world-kb-data';
 import { useNexusClient } from '@/lib/client-context';
 import { NexusClientError } from '@/lib/nexus';
@@ -110,27 +108,39 @@ function WorldAppSurface({ worldId }: { worldId: string }) {
 }
 
 /**
- * Brief layer body (plan v1219-world-module T2): the guided empty state →
- * inline editor → saved card flow. The Brief read model is the era
- * KnowledgeEntry projection; an era with a non-empty `world_summary` is the
- * saved Brief (renders as {@link BriefCard}), otherwise the empty state with
- * the `+ 写 Brief` action. Eras without a summary keep the T1 plain list
+ * Brief layer body (plan v1219-world-module T2 + QC fix wave): the guided
+ * empty state → inline editor → saved card flow. The Brief read model is the
+ * era KnowledgeEntry projection; an era with a non-empty `world_summary` is
+ * the saved Brief (renders as {@link BriefCard}), otherwise the empty state
+ * with the `+ 写 Brief` action. Eras without a summary keep the T1 plain list
  * item. The `世界已就绪` follow-up card announces the Work unlock after the
- * just-saved session only (T2 review gating); the settled save is the sole
- * `unlock(creatorId, 'work')` call site (D8/D17), and the side checklist
- * tracks the 3-step onboarding progress.
+ * just-saved session only (T2 review gating); the mutation owns the sole
+ * `unlock` call site (D8/D17), and the side checklist tracks the 3-step
+ * onboarding progress. Leaving edit mode is safe without a flash because
+ * {@link useSaveBrief} awaits the graph invalidation inside `onSuccess` — by
+ * the time the editor's `mutateAsync` resolves, the eras prop already
+ * contains the saved entity.
  *
- * `editingId` tracks WHICH era is being edited (`'new'` = create), so each
- * card's `编辑` binds its own entity id/version/initial text. Leaving edit
- * mode is safe without a flash because {@link useSaveBrief} awaits the graph
- * invalidation inside `onSuccess` — by the time the editor's `mutateAsync`
- * resolves, the eras prop already contains the saved entity.
+ * Edit target snapshot (QC fix wave): captured at edit entry so a mid-edit
+ * era deletion cannot flip the editor from the OCC patch path to a create.
+ * While the era still exists in the graph, the observed version/body track
+ * the live projection — a concurrent-write 409 refreshes the graph and the
+ * mounted editor picks up the fresh revision for the promised retry.
  */
+type EditTarget =
+  | { kind: 'new' }
+  | {
+      kind: 'era';
+      entityId: string;
+      version: number;
+      body: Record<string, unknown> | undefined;
+      summary: string | null;
+    };
+
 function BriefLayer({ worldId, eras }: { worldId: string; eras: WorldKbEntityProjection[] }) {
   const { t } = useTranslation('worlds');
   const { toast } = useToast();
-  const creatorId = useActiveCreatorId();
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
   // BriefReadyCard mounts only for the just-saved session (T2 review note) —
   // a revisit with an existing Brief, or an edit re-save after the unlock,
   // does not re-announce.
@@ -139,35 +149,45 @@ function BriefLayer({ worldId, eras }: { worldId: string; eras: WorldKbEntityPro
   const withSummary = eras.filter((era) => eraSummary(era) !== null);
   const withoutSummary = eras.filter((era) => eraSummary(era) === null);
   const brief = withSummary[0] ?? null;
-  const editingEra = editingId ? (eras.find((era) => era.key_block_id === editingId) ?? null) : null;
+  const liveEra =
+    editTarget?.kind === 'era'
+      ? (eras.find((era) => era.key_block_id === editTarget.entityId) ?? null)
+      : null;
+  const editEntity =
+    editTarget?.kind === 'era'
+      ? {
+          entityId: editTarget.entityId,
+          version: liveEra ? liveEra.version : editTarget.version,
+          body: liveEra ? (liveEra.body as Record<string, unknown> | undefined) : editTarget.body,
+        }
+      : undefined;
+  const editInitialText =
+    editTarget?.kind === 'era'
+      ? ((liveEra ? eraSummary(liveEra) : editTarget.summary) ?? undefined)
+      : undefined;
 
   return (
     <div className="flex items-start gap-4">
       <div className="flex min-w-0 flex-1 flex-col gap-2">
-        {editingId !== null ? (
+        {editTarget !== null ? (
           <BriefEditor
             worldId={worldId}
-            initialText={editingEra ? (eraSummary(editingEra) ?? undefined) : undefined}
-            entity={
-              editingEra
-                ? { entityId: editingEra.key_block_id, version: editingEra.version }
-                : undefined
-            }
-            onCancel={() => setEditingId(null)}
+            initialText={editInitialText}
+            entity={editEntity}
+            onCancel={() => setEditTarget(null)}
             onSaved={() => {
-              setEditingId(null);
-              // Announce + unlock only on the first transition (D8/D17) — an
-              // edit re-save of an already-unlocked creator stays silent.
-              if (creatorId && !isUnlocked(creatorId, 'work')) {
-                unlock(creatorId, 'work');
-                setJustSaved(true);
-                toast({ variant: 'success', title: t('worldApp.briefSavedToast') });
-              }
+              setEditTarget(null);
+            }}
+            onFirstUnlock={() => {
+              setJustSaved(true);
+              toast({ variant: 'success', title: t('worldApp.briefSavedToast') });
             }}
           />
         ) : (
           <>
-            {!brief && <BriefEmpty onCreate={() => setEditingId('new')} />}
+            {!brief && (
+              <BriefEmpty onCreate={() => setEditTarget({ kind: 'new' })} />
+            )}
             {withSummary.length > 0 && (
               <ul className="flex flex-col gap-2">
                 {withSummary.map((era) => (
@@ -176,7 +196,15 @@ function BriefLayer({ worldId, eras }: { worldId: string; eras: WorldKbEntityPro
                       text={eraSummary(era)!}
                       title={era.canonical_name}
                       updatedAt={era.updated_at}
-                      onEdit={() => setEditingId(era.key_block_id)}
+                      onEdit={() =>
+                        setEditTarget({
+                          kind: 'era',
+                          entityId: era.key_block_id,
+                          version: era.version,
+                          body: era.body as Record<string, unknown> | undefined,
+                          summary: eraSummary(era),
+                        })
+                      }
                     />
                   </li>
                 ))}

@@ -43,14 +43,23 @@ export interface BriefEditorProps {
   worldId: string;
   /** Prefill when editing an existing Brief-era entity. */
   initialText?: string;
-  entity?: { entityId: string; version: number };
+  entity?: { entityId: string; version: number; body?: Record<string, unknown> };
   onCancel: () => void;
   onSaved: () => void;
+  /** Fired by the mutation when this save performs the first-transition Work unlock. */
+  onFirstUnlock?: () => void;
 }
 
-export function BriefEditor({ worldId, initialText, entity, onCancel, onSaved }: BriefEditorProps) {
+export function BriefEditor({
+  worldId,
+  initialText,
+  entity,
+  onCancel,
+  onSaved,
+  onFirstUnlock,
+}: BriefEditorProps) {
   const { t } = useTranslation('worlds');
-  const save = useSaveBrief(worldId);
+  const save = useSaveBrief(worldId, { onFirstUnlock });
   const [text, setText] = useState(initialText ?? '');
   const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
