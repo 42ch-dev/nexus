@@ -41,6 +41,23 @@ function parseValueExports(indexSource: string): string[] {
   return names;
 }
 
+/**
+ * Fail closed on public export forms `parseValueExports` does not recognize.
+ * A direct declaration or star export would contribute no parsed name, so the
+ * coverage assertion would silently pass. Authors must either use the
+ * `export { ... }` form or extend the parser and add a fixture.
+ */
+function unsupportedExportForms(indexSource: string): string[] {
+  const patterns: [RegExp, string][] = [
+    [/^\s*export\s+\*/gm, '`export * ...`'],
+    [/^\s*export\s+(?:async\s+)?function\b/gm, '`export function ...`'],
+    [/^\s*export\s+(?:const|let|var)\b/gm, '`export const/let/var ...`'],
+    [/^\s*export\s+class\b/gm, '`export class ...`'],
+    [/^\s*export\s+default\b/gm, '`export default ...`'],
+  ];
+  return patterns.filter(([re]) => re.test(indexSource)).map(([, form]) => form);
+}
+
 function collectSourceFiles(dir: string): string[] {
   const files: string[] = [];
   for (const entry of readdirSync(dir)) {
@@ -74,6 +91,14 @@ describe('public-export fixture coverage', () => {
   const valueExports = parseValueExports(indexSource);
   const testIds = collectTestIds();
 
+  it('uses only the recognized `export { ... }` form', () => {
+    const forms = unsupportedExportForms(indexSource);
+    expect(
+      forms,
+      `unsupported public export form(s) in index.ts would bypass fixture coverage: ${forms.join(', ')}`,
+    ).toEqual([]);
+  });
+
   it('parses the package index (sanity: known exports present)', () => {
     expect(valueExports).toEqual(expect.arrayContaining(['Button', 'Dialog', 'FormDialog']));
     expect(valueExports).not.toContain('ButtonProps');
@@ -104,5 +129,26 @@ describe('public-export fixture coverage', () => {
       return !testIds.some((id) => (isPrefix ? id.startsWith(testId) : id === testId));
     });
     expect(missing).toEqual([]);
+  });
+});
+
+describe('unsupported public export forms fail closed', () => {
+  it('a previously-unknown direct declaration cannot silently pass', () => {
+    const indexSource = 'export { Button } from \'./button\';\nexport function UndemoedWidget() { return null; }\n';
+    const forms = unsupportedExportForms(indexSource);
+    expect(forms).toContain('`export function ...`');
+    // The parser must not pick the direct export up as covered.
+    expect(parseValueExports(indexSource)).not.toContain('UndemoedWidget');
+  });
+
+  it('a star re-export cannot silently pass', () => {
+    const indexSource = 'export * from \'./components/undemoed-widget\';\n';
+    expect(unsupportedExportForms(indexSource)).toContain('`export * ...`');
+    expect(parseValueExports(indexSource)).toEqual([]);
+  });
+
+  it('type-only declarations are not rejected', () => {
+    const indexSource = 'export type Foo = string;\nexport interface Bar {}\n';
+    expect(unsupportedExportForms(indexSource)).toEqual([]);
   });
 });
