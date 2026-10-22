@@ -61,26 +61,31 @@ export function ServiceStatusProvider({ children }: { children: ReactNode }) {
   const [reason, setReason] = useState<ServiceDegradedReason | null>(null);
   const [checking, setChecking] = useState(false);
   const mounted = useRef(false);
+  // Monotonic probe generation: an in-flight probe whose generation is no
+  // longer the latest (a newer probe started, or the component unmounted)
+  // must not overwrite the newer outcome.
+  const generation = useRef(0);
 
-  /** @returns whether the service answered. */
+  /** @returns whether the service answered and this probe is still the latest. */
   const probe = useCallback(async (): Promise<boolean> => {
+    const mine = ++generation.current;
+    const isLatest = () => mine === generation.current && mounted.current;
     if (mounted.current) setChecking(true);
     try {
       const status = await client.daemonStatus();
+      if (!isLatest()) return false;
       const subsystems = completed ? status.degraded.subsystems : [];
-      if (mounted.current) {
-        setReason(subsystems.length > 0 ? { kind: 'subsystems', subsystems } : null);
-      }
+      setReason(subsystems.length > 0 ? { kind: 'subsystems', subsystems } : null);
       return true;
     } catch (error) {
-      if (mounted.current) {
+      if (isLatest()) {
         const serverMessage =
           error instanceof NexusClientError && error.status >= 400 ? error.message : '';
         setReason(serverMessage ? { kind: 'server', message: serverMessage } : { kind: 'unreachable' });
       }
       return false;
     } finally {
-      if (mounted.current) setChecking(false);
+      if (isLatest()) setChecking(false);
     }
   }, [client, completed]);
 

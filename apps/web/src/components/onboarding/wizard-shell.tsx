@@ -93,15 +93,36 @@ export function WizardShell() {
   }
 
   /**
-   * Step 1 of the finish path: select the workspace bootstrap pre-created,
-   * then re-read the derived gate (the service promotes the shell in place).
+   * Step 1 of the finish path: select the workspace bootstrap pre-created.
+   * The derived-gate re-probe is a separate stage (see
+   * {@link refreshGateOrReport}) so a re-probe failure is never reported as a
+   * workspace-selection failure.
    */
   async function selectDefaultWorkspace(): Promise<void> {
     const creatorId = await ensureCreator();
     await client.setActiveWorkspace({ creator_id: creatorId, workspace_slug: 'default' });
     // The active-workspace read feeds the storage note's actual root.
     void queryClient.invalidateQueries({ queryKey: queryKeys.workspaces.all });
-    await setCompleted(true);
+  }
+
+  /**
+   * Re-read the derived gate (the service promotes the shell in place). The
+   * workspace is already selected server-side when this runs, so a failure
+   * here is a status-refresh failure, with its own copy — never the
+   * workspace-selection toast. Returns false when the user should stay put.
+   */
+  async function refreshGateOrReport(): Promise<boolean> {
+    try {
+      await setCompleted(true);
+      return true;
+    } catch (error) {
+      toast({
+        variant: 'error',
+        title: '状态刷新失败',
+        description: `${errorMessage(error) || '未知错误'}。请重试。`,
+      });
+      return false;
+    }
   }
 
   /**
@@ -112,7 +133,6 @@ export function WizardShell() {
   async function selectWorkspaceOrReport(): Promise<boolean> {
     try {
       await selectDefaultWorkspace();
-      return true;
     } catch (error) {
       toast({
         variant: 'error',
@@ -121,6 +141,7 @@ export function WizardShell() {
       });
       return false;
     }
+    return refreshGateOrReport();
   }
 
   /** Creator finish: select the pre-created workspace, then create the World. */

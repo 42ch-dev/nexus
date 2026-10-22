@@ -7,7 +7,7 @@
  * copy and the EN fallback.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { ServiceDegradedBanner, ServiceDegradedGate } from './service-degraded-surface';
@@ -15,6 +15,21 @@ import { ServiceStatusProvider } from '@/lib/service-status-context';
 import { renderInApp } from '@/test/test-providers';
 import { NexusClientError } from '@/lib/nexus';
 import type { DaemonRuntimeStatus, NexusClient } from '@/lib/nexus';
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+}
+
+// Promise.withResolvers is unavailable at the current tsconfig lib — same
+// local equivalent as brief-flow.test.tsx until the lib target reaches es2024.
+function withResolvers<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
 
 function clientWith(read: () => Promise<DaemonRuntimeStatus>): NexusClient {
   return { daemonStatus: read } as unknown as NexusClient;
@@ -42,6 +57,10 @@ function renderSurface({
 
 const ENGINE_DEGRADED: DaemonRuntimeStatus = {
   degraded: { subsystems: ['engine'], reasons: ['engine not ready'] },
+};
+
+const HEALTHY: DaemonRuntimeStatus = {
+  degraded: { subsystems: [], reasons: [] },
 };
 
 /** jsdom resolves the system locale to `en`; pin zh-CN to assert the product copy. */
@@ -137,6 +156,36 @@ describe('ServiceDegradedGate', () => {
     // One instance throughout: the retry updates the existing banner.
     expect(screen.getAllByTestId('service-degraded-surface')).toHaveLength(1);
     expect(daemonStatus.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('ignores a stale probe that resolves after a newer probe', async () => {
+    const deferreds: Array<Deferred<DaemonRuntimeStatus>> = [];
+    const daemonStatus = vi.fn(() => {
+      const deferred = withResolvers<DaemonRuntimeStatus>();
+      deferreds.push(deferred);
+      return deferred.promise;
+    });
+    // The first-run gate resolves after mount, which re-runs the probe — two
+    // probes are then in flight at once.
+    const client = {
+      daemonStatus,
+      runtimeStatus: () => Promise.resolve({ workspace_initialized: true }),
+    } as unknown as NexusClient;
+    renderSurface({ client });
+
+    await waitFor(() => expect(daemonStatus).toHaveBeenCalledTimes(2));
+
+    // The newest probe resolves healthy first; the stale probe must not
+    // overwrite that outcome when it settles later.
+    await act(async () => {
+      deferreds[1]!.resolve(HEALTHY);
+    });
+    expect(screen.queryByTestId('service-degraded-surface')).not.toBeInTheDocument();
+
+    await act(async () => {
+      deferreds[0]!.resolve(ENGINE_DEGRADED);
+    });
+    expect(screen.queryByTestId('service-degraded-surface')).not.toBeInTheDocument();
   });
 
   it('renders the EN fallback copy', async () => {

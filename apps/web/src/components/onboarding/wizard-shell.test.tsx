@@ -28,12 +28,25 @@ function makeClient({
   initialized = true,
   worldFails = false,
   selectionFails = false,
-}: { initialized?: boolean; worldFails?: boolean; selectionFails?: boolean } = {}) {
+  gateProbeFails = false,
+}: {
+  initialized?: boolean;
+  worldFails?: boolean;
+  selectionFails?: boolean;
+  /** Reject the SECOND runtime-status probe — the finish-path gate re-probe. */
+  gateProbeFails?: boolean;
+} = {}) {
   const calls: string[] = [];
   let workspaceInitialized = initialized;
+  let probeCount = 0;
   const client = {
     runtimeStatus: () => {
       calls.push('probe');
+      probeCount += 1;
+      // The mount probe answers; the finish-path re-probe is what fails.
+      if (gateProbeFails && probeCount > 1) {
+        return Promise.reject(new Error('gate probe failed'));
+      }
       return Promise.resolve({ workspace_initialized: workspaceInitialized });
     },
     scanAgents: () => Promise.resolve({ agents: AGENTS }),
@@ -226,6 +239,25 @@ describe('WizardShell', () => {
     expect(screen.getByTestId('location')).toHaveTextContent('/setup');
     expect(screen.getByLabelText('世界名称')).toHaveValue('灰烬王座');
     expect(screen.getByRole('button', { name: '创建并进入' })).toBeEnabled();
+    expect(calls.filter((call) => call !== 'probe')).toEqual(['creator', 'select']);
+  });
+
+  it('reports a gate re-probe failure as a status-refresh failure, not a selection failure', async () => {
+    const user = userEvent.setup();
+    const { client, calls } = makeClient({ initialized: false, gateProbeFails: true });
+    renderShell({ client });
+
+    await reachWorldStep(user);
+    await user.click(screen.getByRole('button', { name: '创建并进入' }));
+
+    // Selection succeeded server-side; only the derived-gate re-probe failed.
+    expect(await screen.findByText('状态刷新失败')).toBeInTheDocument();
+    expect(screen.getByText('gate probe failed。请重试。')).toBeInTheDocument();
+    expect(screen.queryByText('无法选择默认工作区')).not.toBeInTheDocument();
+    expect(screen.queryByText(/创建世界失败/)).not.toBeInTheDocument();
+    // Still in the step with the draft; no world was created and nothing navigated.
+    expect(screen.getByTestId('location')).toHaveTextContent('/setup');
+    expect(screen.getByLabelText('世界名称')).toHaveValue('灰烬王座');
     expect(calls.filter((call) => call !== 'probe')).toEqual(['creator', 'select']);
   });
 
