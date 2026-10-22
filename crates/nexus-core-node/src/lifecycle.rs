@@ -121,6 +121,7 @@ async fn abort_opening(
             host,
             js_port,
             Instant::now() + close_budget(),
+            true,
         )
         .await;
         if released {
@@ -169,6 +170,7 @@ async fn abort_failed_open(
         host,
         js_port,
         Instant::now() + close_budget(),
+        false,
     )
     .await;
     if !released {
@@ -262,6 +264,27 @@ mod forcing {
 
         pub fn get() -> bool {
             FORCE_ATTACH_FAILURE.load(Ordering::SeqCst)
+        }
+    }
+
+    /// Test-only forcing of a forced settlement failure.
+    ///
+    /// The promotion path must keep the environment service-only until every
+    /// owner slot holds the published core; this seam makes the settlement
+    /// refuse so the regression can prove a retry re-runs the promotion
+    /// instead of no-oping to `Ok`.
+    #[cfg(test)]
+    pub mod settle {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        static FORCE_SETTLE_FAILURE: AtomicBool = AtomicBool::new(false);
+
+        pub fn set(enable: bool) {
+            FORCE_SETTLE_FAILURE.store(enable, Ordering::SeqCst);
+        }
+
+        pub fn get() -> bool {
+            FORCE_SETTLE_FAILURE.load(Ordering::SeqCst)
         }
     }
 
@@ -543,12 +566,18 @@ async fn release_js_provider_sessions(state: &Arc<EnvState>, deadline: Instant) 
 /// sessions while the core is still open, the existing core/execution owner
 /// closes, and the SAME authority then settles the manager + `LocalSet` once
 /// through `close_before` — never a second shutdown of that manager.
+///
+/// `release_environment` publishes the `Closed` phase (with the service-only
+/// marker cleared) on a confirmed release. A promotion rollback passes `false`:
+/// its candidate owners are released, but the shell stays `Open` and service-only
+/// so home control keeps working and a retry can promote again.
 async fn cleanup_owners(
     state: Arc<EnvState>,
     inject_core: Option<Arc<CoreService>>,
     inject_host: Option<HostOwner>,
     inject_port: Option<Arc<dyn ProviderPort>>,
     deadline: Instant,
+    release_environment: bool,
 ) -> (bool, CoreCloseReport) {
     let forced = forced_unconfirmed();
     let mut pending: Vec<String> = Vec::new();
@@ -766,7 +795,12 @@ async fn cleanup_owners(
         state
             .generation
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        state.publish_closed().await;
+        // A promotion rollback releases its candidate owners without ending the
+        // environment: the shell stays `Open` and keeps its service-only mark so
+        // home control still works and a retry can promote again.
+        if release_environment {
+            state.publish_closed().await;
+        }
         let drained = state.pending_operations_snapshot().await;
         let report = CoreCloseReport {
             state: CoreCloseReportState::Closed,
@@ -813,7 +847,7 @@ async fn settle_retained(state: Arc<EnvState>) -> (bool, CoreCloseReport) {
     // guards perform) is dropped before the retained-owner claim is read.
     let settled = tokio::time::timeout_at(
         tokio::time::Instant::from_std(deadline),
-        cleanup_owners(state.clone(), None, None, None, deadline),
+        cleanup_owners(state.clone(), None, None, None, deadline, true),
     )
     .await;
     match settled {
@@ -1084,7 +1118,6 @@ async fn publish_full_core(
         }
     };
 
-    state.clear_service_only_uninitialized();
     // Settle any operation orphaned by the predecessor process's exit as
     // `interrupted` (LIFE-3) through the CoreService-owned journal before the
     // host accepts new work, so a restarted process never re-dispatches a
@@ -1092,7 +1125,17 @@ async fn publish_full_core(
     // settlement cannot prove that recovery, so the open fails instead of
     // publishing a settled journal it does not have — and the rollback carries
     // the whole attached authority, not just its manager.
-    if let Err(err) = core.settle_provider_orphans().await {
+    #[cfg(test)]
+    let settlement = if forcing::settle::get() {
+        Err(CoreError::Internal {
+            category: "forced settlement failure".to_string(),
+        })
+    } else {
+        core.settle_provider_orphans().await
+    };
+    #[cfg(not(test))]
+    let settlement = core.settle_provider_orphans().await;
+    if let Err(err) = settlement {
         let reason = format!("journal settlement failed: {err}");
         abort_failed_open(
             state.clone(),
@@ -1119,6 +1162,12 @@ async fn publish_full_core(
         .lock()
         .expect("port mutex poisoned")
         .replace(provider_port);
+    // The service-only marker means "no full core is published", so it may
+    // only be cleared once every owner slot holds the published core. A failed
+    // publication (e.g. a settlement refusal) therefore keeps the shell marked
+    // and a retry re-runs the promotion instead of no-oping to Ok while the
+    // caller claims readiness no core backs.
+    state.clear_service_only_uninitialized();
     state.publish_open().await;
     Ok(())
 }
@@ -1206,7 +1255,7 @@ async fn run_close(state: Arc<EnvState>) -> CoreCloseReport {
         if !drain_budget.is_zero() {
             tokio::time::sleep(Duration::from_millis(25).min(drain_budget)).await;
         }
-        let (_, report) = cleanup_owners(state.clone(), None, None, None, deadline).await;
+        let (_, report) = cleanup_owners(state.clone(), None, None, None, deadline, true).await;
         report
     })
     .await;
@@ -1491,6 +1540,81 @@ mod tests {
         assert_eq!(report.state, CoreCloseReportState::Closed);
         assert!(report.cleanup_confirmed);
         assert!(!state.is_service_only_uninitialized());
+    }
+
+    /// A settlement refusal during promotion must leave the environment
+    /// service-only: the marker is cleared only once every owner slot holds the
+    /// published core, so a retry re-runs the promotion instead of no-oping to
+    /// `Ok` while the caller claims readiness no core backs (final review Low).
+    #[tokio::test]
+    async fn promotion_settlement_failure_keeps_the_shell_for_retry() {
+        use nexus_contracts::native_open_options::NativeOpenOptionsAccess;
+        use nexus_contracts::NativeOpenOptions;
+        use tempfile::tempdir;
+
+        let _seams = forcing::seam_lock::acquire().await;
+
+        let dir = tempdir().expect("tempdir");
+        let user_home = dir.path().to_path_buf();
+        let creator = "ctr_localaaaaaaaa";
+        std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+            &user_home, creator, "default",
+        ))
+        .expect("workspace dir");
+
+        let state = Arc::new(EnvState::new());
+        open_core(
+            state.clone(),
+            NativeOpenOptions {
+                user_home: user_home.to_string_lossy().to_string(),
+                access: NativeOpenOptionsAccess::DirectWriter,
+                allow_uninitialized: true,
+            },
+            None,
+        )
+        .await
+        .expect("service-only shell opens");
+        assert!(state.is_service_only_uninitialized());
+
+        // The selection makes the home initialized; the process is still the
+        // shell until a promotion publishes the core.
+        nexus_core::CoreHomeService::open(user_home.clone())
+            .expect("home entry")
+            .select_workspace(
+                nexus_contracts::daemon_api::workspace::SetActiveWorkspaceRequest {
+                    creator_id: Some(creator.to_string()),
+                    workspace_slug: "default".to_string(),
+                },
+            )
+            .await
+            .expect("select default");
+        assert!(state.is_service_only_uninitialized());
+
+        forcing::settle::set(true);
+        let first = promote_core(state.clone()).await;
+        assert!(
+            first.is_err(),
+            "a settlement refusal must fail the promotion"
+        );
+        assert!(
+            state.is_service_only_uninitialized(),
+            "the shell marker must survive a failed publication"
+        );
+
+        let retry = promote_core(state.clone()).await;
+        assert!(
+            retry.is_err(),
+            "a retry must re-run the promotion, never no-op to Ok"
+        );
+
+        forcing::settle::set(false);
+        promote_core(state.clone())
+            .await
+            .expect("promotion succeeds once settlement works");
+        assert!(!state.is_service_only_uninitialized());
+
+        let report = close_core(state).await;
+        assert!(report.cleanup_confirmed);
     }
 
     /// R10: a retried settlement is bounded by the SAME outer budget as the
