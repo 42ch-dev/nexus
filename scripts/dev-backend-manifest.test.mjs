@@ -20,6 +20,7 @@ import {
   readBackendManifest,
   refreshBackend,
   resolveDaemonEndpoint,
+  resolveDevBindHost,
   sha256File,
   validateDaemonHealth,
   waitForDaemonHealth,
@@ -478,3 +479,10 @@ test('writeManifestAtomic uses pid and uuid temp filenames', async () => {
   }
 });
 
+
+test('resolveDevBindHost keeps loopback by default and admits LAN wildcards', () => {
+  assert.deepEqual(resolveDevBindHost(undefined), { host: '127.0.0.1', allowRemote: false });
+  assert.deepEqual(resolveDevBindHost('localhost'), { host: 'localhost', allowRemote: false });
+  assert.deepEqual(resolveDevBindHost('0.0.0.0'), { host: '0.0.0.0', allowRemote: true });
+  assert.throws(() => resolveDevBindHost('studio.example'), /NEXUS42_DEV_HOST/);
+});

@@ -132,3 +132,12 @@ export class NexusClientError extends Error {
 export function isOrchestrationEngineUnavailable(error: unknown): boolean {
   return NexusClientError.isOrchestrationEngineUnavailable(error);
 }
+
+/**
+ * Window events bridging the transport boundary to the app-level access
+ * recovery surface (access spec §6.1). `BrowserClient` dispatches
+ * {@link UNAUTHORIZED_EVENT} on any 401; accepting an API key dispatches
+ * {@link AUTHORIZED_EVENT} so the client provider rebuilds with that key.
+ */
+export const UNAUTHORIZED_EVENT = 'nexus:unauthorized';
+export const AUTHORIZED_EVENT = 'nexus:authorized';

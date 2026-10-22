@@ -10,8 +10,14 @@
 #    selected loopback endpoint (starts detached if not). No old-daemon
 #    fallback exists.
 # 3. Validates TS service health on that endpoint before starting Vite.
-# 4. Runs the web dev server in the foreground (proxy → service via
+# 4. Prints the tokenized browser access URL from the service log.
+# 5. Runs the web dev server in the foreground (proxy → service via
 #    VITE_DAEMON_URL).
+#
+# LAN dev (plain HTTP, no TLS): NEXUS42_DEV_HOST=0.0.0.0 pnpm dev
+#   The service binds the LAN and implies --allow-remote; a remote bind still
+#   requires NEXUS42_DAEMON_API_KEY, and the browser gets in through the
+#   printed /__bootstrap link (session cookie).
 #
 # Stop: Ctrl-C kills the web dev server; the service stays up.
 
@@ -63,7 +69,11 @@ if health_ok; then
 else
   echo "    starting standalone service (detached)"
   mkdir -p "${REPO_ROOT}/.dev"
-  nohup node "${SERVICE_ROOT}/dist/main.js" --home "${HOME}" --host 127.0.0.1 --port "${PORT}" \
+  SERVICE_ARGS=(--home "${HOME}" --host "${NEXUS42_DEV_HOST:-127.0.0.1}" --port "${PORT}")
+  if [ "${NEXUS42_DEV_ALLOW_REMOTE:-0}" = "1" ]; then
+    SERVICE_ARGS+=(--allow-remote)
+  fi
+  nohup node "${SERVICE_ROOT}/dist/main.js" "${SERVICE_ARGS[@]}" \
     > "${REPO_ROOT}/.dev/nexus-service.log" 2>&1 &
   SERVICE_PID=$!
   for _ in $(seq 1 50); do
@@ -72,6 +82,20 @@ else
   done
   health_ok || { echo "    service failed to become healthy; see .dev/nexus-service.log" >&2; exit 1; }
   echo "    service healthy (pid ${SERVICE_PID})"
+fi
+
+# Browser access (access spec §3.1): the one-time tokenized URL from this
+# boot's service log. Dev serves the SPA through Vite, so the service never
+# auto-opens a browser here; the link is surfaced for the user to copy.
+SERVICE_LOG="${REPO_ROOT}/.dev/nexus-service.log"
+BOOTSTRAP_URL=""
+if [ -f "${SERVICE_LOG}" ]; then
+  BOOTSTRAP_URL="$(grep -m1 -o '\[nexus-service\] open: [^ ]*' "${SERVICE_LOG}" | sed 's/^\[nexus-service\] open: //' || true)"
+fi
+if [ -n "${BOOTSTRAP_URL}" ]; then
+  echo "==> browser access: ${BOOTSTRAP_URL}"
+else
+  echo "    no bootstrap URL in ${SERVICE_LOG} (the running service predates this run)"
 fi
 
 echo "==> validating running service identity"

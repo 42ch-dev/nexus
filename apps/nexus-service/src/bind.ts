@@ -37,12 +37,13 @@ export function validateStartupBind(config: ResolvedServiceConfig): void {
     throw new HttpError(
       403,
       'forbidden',
-      'non-loopback connections require --allow-remote and TLS',
+      'non-loopback connections require --allow-remote',
     );
   }
-  if (!config.tlsCert || !config.tlsKey) {
-    throw new HttpError(403, 'forbidden', 'remote access requires --tls-cert and --tls-key');
-  }
+  // TLS stays available and recommended outside development, but plain-HTTP
+  // LAN dev is supported: every authenticated remote request is admitted
+  // without TLS material (access spec §3.1), and a remote bind still requires
+  // an API key below.
   if (!config.apiKey) {
     throw new HttpError(401, 'auth_required', 'remote bind requires NEXUS42_DAEMON_API_KEY');
   }

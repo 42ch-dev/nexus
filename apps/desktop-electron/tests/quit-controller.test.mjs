@@ -473,7 +473,7 @@ test('start runs the packaged entry with the same home and port as a detached ch
   await waitFor(() => existsSync(recordFile));
   const record = JSON.parse(readFileSync(recordFile, 'utf8'));
   track(record.pid);
-  assert.deepEqual(record.argv, ['--home', home, '--host', '127.0.0.1', '--port', '8420']);
+  assert.deepEqual(record.argv, ['--home', home, '--host', '127.0.0.1', '--port', '8420', '--no-open']);
   assert.equal(record.host, '127.0.0.1');
   assert.equal(record.port, 8420);
   assert.equal(processAlive(record.pid), true);
@@ -522,7 +522,7 @@ test('a ready detached child survives the parent harness exit', async () => {
   const exit = JSON.parse(readFileSync(join(home, 'parent-exit.json'), 'utf8'));
   const child = JSON.parse(readFileSync(join(home, 'service-child.json'), 'utf8'));
   track(child.pid);
-  assert.deepEqual(child.argv, ['--home', home, '--host', '127.0.0.1', '--port', '8420']);
+  assert.deepEqual(child.argv, ['--home', home, '--host', '127.0.0.1', '--port', '8420', '--no-open']);
   // The spawning parent is already gone when the child is sampled.
   assert.equal(processAlive(exit.parent_pid), false);
 

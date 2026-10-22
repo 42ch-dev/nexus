@@ -1,13 +1,14 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { isLoopbackBindHost } from './bind.js';
+import type { AuthSessionStore } from './auth-session.js';
 import type { ResolvedServiceConfig } from './config.js';
 
 export type AuthMode = 'keyed_all' | 'keyless_localhost';
 
 export interface AuthDecision {
   ok: true;
-  scheme: 'api_key' | 'loopback_bypass';
+  scheme: 'api_key' | 'loopback_bypass' | 'session_cookie';
 }
 
 export interface AuthFailure {
@@ -37,9 +38,15 @@ export function isLoopbackAddress(remoteAddress: string | undefined): boolean {
   return isLoopbackBindHost(normalized);
 }
 
+/**
+ * `authenticated` states that the request already proved access (API key,
+ * session cookie or one-time bootstrap token). Only then does a non-loopback
+ * request skip the TLS requirement — plain-HTTP LAN dev (access spec §3.1).
+ */
 export function validateBindPolicy(
   config: ResolvedServiceConfig,
   remoteAddress: string | undefined,
+  authenticated = false,
 ): AuthFailure | null {
   const loopback = isLoopbackAddress(remoteAddress);
   if (!loopback && !config.allowRemote) {
@@ -47,15 +54,15 @@ export function validateBindPolicy(
       ok: false,
       status: 403,
       code: 'forbidden',
-      message: 'non-loopback connections require --allow-remote and TLS',
+      message: 'non-loopback connections require --allow-remote',
     };
   }
-  if (!loopback && (!config.tlsCert || !config.tlsKey)) {
+  if (!loopback && (!config.tlsCert || !config.tlsKey) && !authenticated) {
     return {
       ok: false,
       status: 403,
       code: 'forbidden',
-      message: 'remote access requires --tls-cert and --tls-key',
+      message: 'remote access requires --tls-cert and --tls-key or an authenticated request',
     };
   }
   return null;
@@ -80,35 +87,48 @@ export function checkOrigin(
   return null;
 }
 
+/**
+ * Keyed admission order (access spec §3.1): a present `X-API-Key` is validated
+ * exactly as before and wins over the cookie; with no header, a valid
+ * `nexus_session` cookie admits. Keyless loopback mode is unchanged.
+ */
 export function checkApiKey(
   req: IncomingMessage,
   config: ResolvedServiceConfig,
   remoteAddress: string | undefined,
+  sessions?: AuthSessionStore,
 ): AuthResult {
-  const bindFailure = validateBindPolicy(config, remoteAddress);
-  if (bindFailure) return bindFailure;
-
   if (authMode(config) === 'keyed_all') {
     const provided = req.headers['x-api-key'];
     const key = Array.isArray(provided) ? provided[0] : provided;
-    if (!key || key.length === 0) {
-      return {
-        ok: false,
-        status: 401,
-        code: 'auth_required',
-        message: 'Authentication required',
-      };
+    if (key && key.length > 0) {
+      if (!constantTimeEqual(key, config.apiKey!)) {
+        return {
+          ok: false,
+          status: 401,
+          code: 'auth_required',
+          message: 'Authentication required',
+        };
+      }
+      return validateBindPolicy(config, remoteAddress, true) ?? { ok: true, scheme: 'api_key' };
     }
-    if (!constantTimeEqual(key, config.apiKey!)) {
-      return {
-        ok: false,
-        status: 401,
-        code: 'auth_required',
-        message: 'Authentication required',
-      };
+    if (sessions?.hasValidSession(req)) {
+      return (
+        validateBindPolicy(config, remoteAddress, true) ?? { ok: true, scheme: 'session_cookie' }
+      );
     }
-    return { ok: true, scheme: 'api_key' };
+    const bindFailure = validateBindPolicy(config, remoteAddress);
+    if (bindFailure) return bindFailure;
+    return {
+      ok: false,
+      status: 401,
+      code: 'auth_required',
+      message: 'Authentication required',
+    };
   }
+
+  const bindFailure = validateBindPolicy(config, remoteAddress);
+  if (bindFailure) return bindFailure;
 
   if (!isLoopbackAddress(remoteAddress)) {
     return {

@@ -324,11 +324,15 @@ export function createDetachedServiceHandoff(options: DetachedHandoffOptions): D
       try {
         // `detached` + `unref` + `stdio:'ignore'`: the child holds no pipe and no
         // process group of the exiting parent, so it is the one owner left.
-        child = spawn(node, [serviceEntry, '--home', home, '--host', host, '--port', String(port)], {
-          detached: true,
-          stdio: 'ignore',
-          env,
-        });
+        child = spawn(
+          node,
+          [serviceEntry, '--home', home, '--host', host, '--port', String(port), '--no-open'],
+          {
+            detached: true,
+            stdio: 'ignore',
+            env,
+          },
+        );
       } catch (error) {
         throw utilityError(
           'interrupted',

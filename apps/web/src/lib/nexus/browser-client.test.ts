@@ -10,6 +10,7 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
 
 import { BrowserClient, NexusClientError } from '@/lib/nexus';
+import { UNAUTHORIZED_EVENT } from '@/lib/nexus/errors';
 import type { WorkflowObservationFrame } from '@/lib/nexus/types';
 import { useHandlers } from '@/test/msw-server';
 
@@ -1136,5 +1137,39 @@ describe('BrowserClient workflow observation stream (v1.201 P1)', () => {
       expect(thrown).toBeInstanceOf(NexusClientError);
       expect((thrown as NexusClientError).code).toBe('invalid_response');
     }
+  });
+});
+
+describe('BrowserClient access bootstrap (v1.219 access spec §3.1)', () => {
+  it('sends credentials so the session cookie flows on every request', async () => {
+    let init: RequestInit | undefined;
+    const fetchImpl = (async (_input: RequestInfo | URL, options?: RequestInit) => {
+      init = options;
+      return new Response(
+        JSON.stringify({ items: [], pagination: { limit: 50, has_more: false, next_cursor: null } }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as typeof fetch;
+
+    await new BrowserClient({ fetchImpl }).listWorks();
+
+    expect(init).toMatchObject({ credentials: 'include' });
+  });
+
+  it('dispatches the app-level unauthorized event on a 401', async () => {
+    useHandlers(
+      http.get('/v1/daemon/works', () =>
+        HttpResponse.json(
+          { success: false, error: { code: 'auth_required', message: 'Authentication required' } },
+          { status: 401 },
+        )),
+    );
+    const unauthorized = vi.fn();
+    window.addEventListener(UNAUTHORIZED_EVENT, unauthorized);
+
+    await expect(new BrowserClient().listWorks()).rejects.toMatchObject({ status: 401 });
+
+    expect(unauthorized).toHaveBeenCalledTimes(1);
+    window.removeEventListener(UNAUTHORIZED_EVENT, unauthorized);
   });
 });

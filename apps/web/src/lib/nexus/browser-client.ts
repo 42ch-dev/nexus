@@ -175,7 +175,7 @@ import type {
 import type { PresetProfileResponse } from './preset-profile';
 import type { CapabilityListResponse } from './capability-info';
 
-import { NexusClientError, type TransportErrorKind } from './errors';
+import { NexusClientError, UNAUTHORIZED_EVENT, type TransportErrorKind } from './errors';
 import type {
   ClearRunsQuery,
   ClearRunsResponse,
@@ -855,7 +855,12 @@ export class BrowserClient implements NexusClient {
 
     let response: Response;
     try {
-      response = await this.fetchImpl(url, { method: 'GET', headers, signal });
+      response = await this.fetchImpl(url, {
+        method: 'GET',
+        headers,
+        credentials: 'include',
+        signal,
+      });
     } catch (cause) {
       if (signal.aborted) return;
       throw new NexusClientError(
@@ -865,6 +870,10 @@ export class BrowserClient implements NexusClient {
         { cause: String(cause) },
         BrowserClient.classifyTransportError(this.baseUrl, cause),
       );
+    }
+
+    if (response.status === 401 && typeof window !== 'undefined') {
+      window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
     }
 
     if (!response.ok) {
@@ -951,7 +960,12 @@ export class BrowserClient implements NexusClient {
 
     let response: Response;
     try {
-      response = await this.fetchImpl(url, { method: 'GET', headers, signal });
+      response = await this.fetchImpl(url, {
+        method: 'GET',
+        headers,
+        credentials: 'include',
+        signal,
+      });
     } catch (cause) {
       if (signal.aborted) return;
       throw new NexusClientError(
@@ -961,6 +975,10 @@ export class BrowserClient implements NexusClient {
         { cause: String(cause) },
         BrowserClient.classifyTransportError(this.baseUrl, cause),
       );
+    }
+
+    if (response.status === 401 && typeof window !== 'undefined') {
+      window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
     }
 
     if (!response.ok) {
@@ -1264,7 +1282,13 @@ export class BrowserClient implements NexusClient {
     includeApiKey = true,
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
-    const init: RequestInit = { method, headers: { Accept: 'application/json' } };
+    // `include` lets the `nexus_session` cookie flow from the desktop custom
+    // protocol and Vite dev origins (access spec §3.1).
+    const init: RequestInit = {
+      method,
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    };
     if (this.apiKey && includeApiKey) {
       init.headers = { ...init.headers, 'X-API-Key': this.apiKey };
     }
@@ -1306,6 +1330,12 @@ export class BrowserClient implements NexusClient {
         { status: response.status, content_type: contentType },
         'http_fallback',
       );
+    }
+
+    // One 401 notification per failed request; the app-level recovery surface
+    // owns deduplication, so concurrent 401s collapse into one instance.
+    if (response.status === 401 && typeof window !== 'undefined') {
+      window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
     }
 
     if (!response.ok) {
