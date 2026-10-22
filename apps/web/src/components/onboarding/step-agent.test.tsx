@@ -86,6 +86,34 @@ describe('StepAgent (creator AI partner)', () => {
     expect(onNext).toHaveBeenCalledTimes(1);
   });
 
+  it('persists the scan entry name, not the catalog display name', async () => {
+    const user = userEvent.setup();
+    renderStep(
+      makeClient(() =>
+        Promise.resolve({
+          agents: [
+            {
+              name: 'Claude Code',
+              // Catalog override maps this key to the display name `Claude`;
+              // the saved profile must keep the scan entry name so the badge
+              // resolver matches it.
+              registry_agent_id: 'claude-native',
+              launch_command: '/usr/local/bin/claude',
+              installed: true,
+            },
+          ],
+        }),
+      ),
+    );
+
+    await user.click(await screen.findByTestId('agent-row-claude-native'));
+
+    expect(JSON.parse(window.localStorage.getItem('nexus-agent-profile:creator-a')!)).toEqual({
+      name: 'Claude Code',
+      launchCommand: '/usr/local/bin/claude',
+    });
+  });
+
   it('keeps the selection after a reload in the same browser', async () => {
     window.localStorage.setItem(
       'nexus-agent-profile:creator-a',

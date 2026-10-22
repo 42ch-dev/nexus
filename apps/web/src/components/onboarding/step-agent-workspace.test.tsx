@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { StepAgentWorkspace } from './step-agent-workspace';
@@ -24,6 +24,16 @@ const AGENTS: AgentScanEntry[] = [
     version: '0.9.2',
   },
 ];
+
+// Promise.withResolvers is unavailable at the current tsconfig lib — local
+// equivalent until the lib target reaches es2024.
+function withResolvers<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
 
 function makeClient(creativeRoot?: string): NexusClient {
   return {
@@ -146,6 +156,31 @@ describe('StepAgentWorkspace (developer agent + workspace)', () => {
     await waitFor(() => expect(setWorkspacePath).toHaveBeenCalledWith('/tmp/picked-root'));
     expect(pickDirectory).toHaveBeenCalled();
     expect(screen.getByTestId('workspace-root')).toHaveTextContent('/tmp/picked-root');
+  });
+
+  it('restores a late desktop profile after the scan has already landed', async () => {
+    const { promise, resolve } = withResolvers<{
+      name: string;
+      launchCommand?: string;
+    } | null>();
+
+    renderStep({
+      client: makeClient(undefined),
+      desktop: makeDesktop({ getAgentProfile: () => promise }),
+    });
+
+    // Scan lands first; the IPC profile is still in flight.
+    await screen.findByTestId('agent-row-claude');
+    const field = screen.getByLabelText(
+      '自定义启动命令（可选，覆盖选中 agent 的默认启动方式）',
+    );
+    expect(field).toHaveValue('');
+
+    await act(async () => {
+      resolve({ name: 'custom-agent', launchCommand: 'my-cli --flag' });
+    });
+
+    await waitFor(() => expect(field).toHaveValue('my-cli --flag'));
   });
 
   it('completes with the recommended agent and reports the finish intent', async () => {

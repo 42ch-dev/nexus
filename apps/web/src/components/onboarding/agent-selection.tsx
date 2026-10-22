@@ -11,6 +11,7 @@
  *   - desktop: the `set_agent_profile` IPC (unchanged, `config.toml`)
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { User } from 'lucide-react';
 
 import { useAgentProfile, useScanAgents } from '@/api/queries';
@@ -18,6 +19,7 @@ import { useActiveCreatorId } from '@/lib/active-creator-context';
 import { useDesktopCapabilities } from '@/lib/client-context';
 import { resolveCatalogItems, type AgentCatalogItem } from '@/lib/agent-catalog';
 import { errorMessage } from '@/lib/error-message';
+import { queryKeys } from '@/lib/nexus/query-keys';
 import { cn } from '@/lib/utils';
 import { Badge, Button, Input, Label } from '@/components/ui';
 import type { AgentScanEntry } from '@42ch/nexus-contracts';
@@ -85,7 +87,9 @@ function matchChoice(choices: AgentChoice[], profile: AgentProfile): AgentChoice
 
 function profileOfChoice(choice: AgentChoice): AgentProfile {
   return {
-    name: choice.item.displayName,
+    // The scan entry name, not the catalog display name: `resolveAgentBadge`
+    // matches a saved profile against `AgentScanEntry.name`.
+    name: choice.entry.name,
     launchCommand: choice.item.launchCommand?.trim() || undefined,
   };
 }
@@ -111,6 +115,7 @@ export interface AgentSelection {
 
 export function useAgentSelection(): AgentSelection {
   const desktop = useDesktopCapabilities();
+  const qc = useQueryClient();
   const creatorId = useActiveCreatorId();
   const savedProfile = useAgentProfile();
   const scan = useScanAgents({ filter: 'installed' });
@@ -123,15 +128,20 @@ export function useAgentSelection(): AgentSelection {
 
   const stored = useMemo(() => readStoredProfile(creatorId), [creatorId]);
   const saved = savedProfile.data ?? stored;
+  // Browser reads localStorage synchronously; the desktop profile arrives over
+  // IPC and may land after the scan. Locking the restore before that read
+  // settles would leave a late profile unmapped, so wait for it here.
+  const profileSettled = desktop ? savedProfile.isFetched : true;
 
   const [pickedId, setPickedId] = useState<string | null>(null);
   const [manual, setManual] = useState('');
   const restored = useRef(false);
 
-  // Restore the saved profile once the scan has landed. A row-backed profile
-  // re-selects its row; a custom command only fills the manual field.
+  // Restore the saved profile once the scan and the desktop read have settled.
+  // A row-backed profile re-selects its row; a custom command only fills the
+  // manual field.
   useEffect(() => {
-    if (restored.current || choices.length === 0) return;
+    if (restored.current || choices.length === 0 || !profileSettled) return;
     restored.current = true;
     if (!saved) return;
     const match = matchChoice(choices, saved);
@@ -140,7 +150,7 @@ export function useAgentSelection(): AgentSelection {
       return;
     }
     setManual(saved.launchCommand ?? '');
-  }, [choices, saved]);
+  }, [choices, saved, profileSettled]);
 
   const selectedId = pickedId ?? recommendedId;
   const selectedChoice = choices.find((choice) => choice.pickerId === selectedId) ?? null;
@@ -154,13 +164,20 @@ export function useAgentSelection(): AgentSelection {
         : 'ready';
 
   function persist(profile: AgentProfile) {
-    if (desktop) {
-      void desktop.setAgentProfile(profile.name, profile.launchCommand).catch((error) => {
-        console.error('setAgentProfile failed', error);
-      });
+    if (!desktop) {
+      writeStoredProfile(creatorId, profile);
       return;
     }
-    writeStoredProfile(creatorId, profile);
+    void desktop
+      .setAgentProfile(profile.name, profile.launchCommand)
+      .then(() => {
+        // The status bar and agent chip read the saved profile + scan.
+        void qc.invalidateQueries({ queryKey: queryKeys.agentProfile.detail() });
+        void qc.invalidateQueries({ queryKey: queryKeys.agentHost.scan({ filter: 'all' }) });
+      })
+      .catch((error) => {
+        console.error('setAgentProfile failed', error);
+      });
   }
 
   function select(pickerId: string) {
@@ -174,7 +191,7 @@ export function useAgentSelection(): AgentSelection {
   function commit() {
     const command = manual.trim();
     if (command) {
-      persist({ name: selectedChoice?.item.displayName ?? command, launchCommand: command });
+      persist({ name: selectedChoice?.entry.name ?? command, launchCommand: command });
       return;
     }
     if (selectedChoice) persist(profileOfChoice(selectedChoice));
