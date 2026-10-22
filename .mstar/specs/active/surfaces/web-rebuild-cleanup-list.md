@@ -16,25 +16,25 @@ This is the input list for the web rebuild's first cleanup wave. **Nothing is de
 
 Pages present in `apps/web/src/pages/` but not registered as elements in `App.tsx` routes; only test files import them.
 
-| Path | Evidence | Label |
-|---|---|---|
-| `apps/web/src/pages/worlds-page.tsx` | Not in `App.tsx` routes; only importers found: `worlds-page.test.tsx`, `components/__tests__/worlds-list-activity.test.tsx`, `pages/__tests__/world-default-route.test.tsx`. `/worlds` currently mounts `CreatorHubPage`. | verify-then-delete |
-| `apps/web/src/pages/works-page.tsx` | Not in `App.tsx` routes; only importers found: `works-page.test.tsx`, `components/__tests__/works-list-activity.test.tsx`. `/works` currently mounts `CreatorHubPage`. | verify-then-delete |
-| `apps/web/src/pages/work-detail-page.tsx` | Not in `App.tsx` routes; only importer found: `work-detail-page.test.tsx`. Work detail routing is now `WorkShellLayout` + Outline/Timeline/Chapters/Inspector sub-routes. | verify-then-delete |
-| `apps/web/src/pages/settings/settings-shell-layout.tsx` | Not a product-route element; file comment states full-page Settings is no longer the main flow (Settings runs via `SettingsModalHost` / `SettingsSectionFrame`) and the file is kept only for isolated section unit tests. | verify-then-delete |
-| `apps/web/src/pages/settings/settings-modules-section.tsx` | `/modules` registers `ModulesPage` directly (compat route with a real element); `App.tsx` comment says the Settings modal owns Modules. Cannot rule out a runtime entry from current evidence. | verify-then-delete |
+| Path | Evidence | Label | Outcome |
+|---|---|---|---|
+| `apps/web/src/pages/worlds-page.tsx` | Not in `App.tsx` routes; only importers found: `worlds-page.test.tsx`, `components/__tests__/worlds-list-activity.test.tsx`, `pages/__tests__/world-default-route.test.tsx`. `/worlds` currently mounts `CreatorHubPage`. | verify-then-delete | **deleted @ 0910792** — page + `worlds-page.test.tsx` + `worlds-list-activity.test.tsx` removed; `world-default-route.test.tsx` updated to mount `CreatorHubPage` |
+| `apps/web/src/pages/works-page.tsx` | Not in `App.tsx` routes; only importers found: `works-page.test.tsx`, `components/__tests__/works-list-activity.test.tsx`. `/works` currently mounts `CreatorHubPage`. | verify-then-delete | **deleted @ 0910792** — page + `works-page.test.tsx` + `works-list-activity.test.tsx` removed |
+| `apps/web/src/pages/work-detail-page.tsx` | Not in `App.tsx` routes; only importer found: `work-detail-page.test.tsx`. Work detail routing is now `WorkShellLayout` + Outline/Timeline/Chapters/Inspector sub-routes. | verify-then-delete | **deleted @ 0910792** — page + `work-detail-page.test.tsx` removed |
+| `apps/web/src/pages/settings/settings-shell-layout.tsx` | Not a product-route element; file comment states full-page Settings is no longer the main flow (Settings runs via `SettingsModalHost` / `SettingsSectionFrame`) and the file is kept only for isolated section unit tests. | verify-then-delete | **deleted @ 2fd04a2** — section tests now mount routes without layout chrome |
+| `apps/web/src/pages/settings/settings-modules-section.tsx` | `/modules` registers `ModulesPage` directly (compat route with a real element); `App.tsx` comment says the Settings modal owns Modules. Cannot rule out a runtime entry from current evidence. | verify-then-delete | **retained — live modal surface @ 2fd04a2** — mounted via `SETTINGS_SECTION_DESCRIPTORS` → `SettingsModalHost`; `/modules` compat route keeps real element |
 
 Deleting any row above requires deleting/migrating its test consumers in the same rebuild change.
 
 ## 3. Legacy shell candidates
 
-| Path | Evidence | Label |
-|---|---|---|
-| `apps/web/src/components/layout/header.tsx` | Standalone Header; `RootLayout` uses `ChronosTitlebar` instead. Only usage found is its own test. | verify-then-delete |
-| `apps/web/src/components/layout/main-banner.tsx` | One-off daemon status banner with browser/daemon branches and dedicated tests; no production mount point confirmed. | verify-then-delete |
-| `apps/web/src/components/layout/chronos-titlebar.tsx` | **Current chrome** — active titlebar, hosts the Settings button opening the settings modal. Not a deletion candidate; fold into new chrome if the rebuild unifies the titlebar. | merge-at-rebuild |
-| `apps/web/src/components/layout/settings-modal-host.tsx` | **Current chrome** — mounted by `App.tsx` inside `SettingsModalProvider`; carries the live Settings modal flow. | merge-at-rebuild |
-| `apps/web/src/components/layout/work-shell-layout.tsx` | **Current chrome** — used by `App.tsx` for `/works/:workId` sub-routes; a work-scoped layout, not an old top-level shell. Re-check only if the rebuild unifies canvas shells. | merge-at-rebuild |
+| Path | Evidence | Label | Outcome |
+|---|---|---|---|
+| `apps/web/src/components/layout/header.tsx` | Standalone Header; `RootLayout` uses `ChronosTitlebar` instead. Only usage found is its own test. | verify-then-delete | **deleted @ 2fd04a2** — zero production mounts; `header.test.tsx` removed with it |
+| `apps/web/src/components/layout/main-banner.tsx` | One-off daemon status banner with browser/daemon branches and dedicated tests; no production mount point confirmed. | verify-then-delete | **deleted @ 2fd04a2** — zero production mounts; `main-banner.test.tsx` removed with it |
+| `apps/web/src/components/layout/chronos-titlebar.tsx` | **Current chrome** — active titlebar, hosts the Settings button opening the settings modal. Not a deletion candidate; fold into new chrome if the rebuild unifies the titlebar. | merge-at-rebuild | — |
+| `apps/web/src/components/layout/settings-modal-host.tsx` | **Current chrome** — mounted by `App.tsx` inside `SettingsModalProvider`; carries the live Settings modal flow. | merge-at-rebuild | — |
+| `apps/web/src/components/layout/work-shell-layout.tsx` | **Current chrome** — used by `App.tsx` for `/works/:workId` sub-routes; a work-scoped layout, not an old top-level shell. Re-check only if the rebuild unifies canvas shells. | merge-at-rebuild | — |
 
 (`settings-shell-layout.tsx` appears in §2 as a zombie/verify-then-delete entry; its "kept for isolated tests" comment is the reason it is not `delete-at-rebuild`.)
 
@@ -42,11 +42,11 @@ Deleting any row above requires deleting/migrating its test consumers in the sam
 
 Grep-level evidence: no non-test importers found for these page-level exports. Not AST-proven; re-verify at rebuild.
 
-| Path | Export | Evidence | Label |
-|---|---|---|---|
-| `apps/web/src/pages/worlds-page.tsx` | `WorldsPage` | Only test-file references; product route uses `CreatorHubPage`. Overlaps zombie-page row above. | verify-then-delete |
-| `apps/web/src/pages/works-page.tsx` | `WorksPage` | Only test-file references; product route uses `CreatorHubPage`. Overlaps zombie-page row above. | verify-then-delete |
-| `apps/web/src/pages/work-detail-page.tsx` | `WorkDetailPage` | Only its own test imports it; product routing is `WorkShellLayout` + sub-pages. Overlaps zombie-page row above. | verify-then-delete |
+| Path | Export | Evidence | Label | Outcome |
+|---|---|---|---|---|
+| `apps/web/src/pages/worlds-page.tsx` | `WorldsPage` | Only test-file references; product route uses `CreatorHubPage`. Overlaps zombie-page row above. | verify-then-delete | **deleted @ 0910792** (with owning file) |
+| `apps/web/src/pages/works-page.tsx` | `WorksPage` | Only test-file references; product route uses `CreatorHubPage`. Overlaps zombie-page row above. | verify-then-delete | **deleted @ 0910792** (with owning file) |
+| `apps/web/src/pages/work-detail-page.tsx` | `WorkDetailPage` | Only its own test imports it; product routing is `WorkShellLayout` + sub-pages. Overlaps zombie-page row above. | verify-then-delete | **deleted @ 0910792** (with owning file) |
 
 ## 5. Redirect-only stubs kept on purpose (compat)
 
