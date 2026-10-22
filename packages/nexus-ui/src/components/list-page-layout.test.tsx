@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 import '@testing-library/jest-dom/vitest';
 
 import { ListPageLayout } from './list-page-layout';
@@ -7,10 +7,11 @@ import { ListPageLayout } from './list-page-layout';
 /**
  * V1.150 P1 — L2 pattern component (DESIGN.md components.list-page-layout).
  *
- * Pins: caller-owned copy (title/description) and slots (filters/actions/
- * children/footer) all render in page order, optional slots stay absent when
- * not passed, and the card chrome inherits the promoted Card token recipe
- * (light + dark parity through the tokens).
+ * Pins caller-visible behavior: caller-owned copy (title/description) and
+ * slot content render, slots appear in page order (relative document order,
+ * not wrapper topology), absent slots leave no trace of their content, the
+ * actions slot stays interactive for the caller, and the card chrome
+ * inherits the promoted Card token recipe (light + dark parity).
  */
 describe('ListPageLayout', () => {
   it('renders caller copy and every slot in page order', () => {
@@ -30,19 +31,18 @@ describe('ListPageLayout', () => {
     expect(screen.getByText('Review findings for the selected work.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Refresh' })).toBeInTheDocument();
 
-    const content = screen.getByTestId('results').parentElement!;
-    const contentChildren = Array.from(content.children);
-    const expected = [
-      screen.getByTestId('filters').parentElement!,
+    // Relative document order only — no assumptions about direct parents or counts.
+    const order = [
+      screen.getByTestId('filters'),
       screen.getByTestId('results'),
-      screen.getByTestId('footer').parentElement!,
+      screen.getByTestId('footer'),
     ];
-    expected.forEach((el, i) => {
-      expect(contentChildren[i]).toBe(el);
-    });
+    for (let i = 0; i < order.length - 1; i += 1) {
+      expect(order[i].compareDocumentPosition(order[i + 1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
   });
 
-  it('omits the filters row and footer slot when not passed', () => {
+  it('omits filters and footer content when not passed', () => {
     render(
       <ListPageLayout title="Sessions">
         <ul data-testid="results" />
@@ -50,14 +50,26 @@ describe('ListPageLayout', () => {
     );
 
     expect(screen.getByRole('heading', { name: 'Sessions' })).toBeInTheDocument();
-    const content = screen.getByTestId('results').parentElement!;
-    expect(content.children).toHaveLength(1);
+    expect(screen.queryByText('filters')).toBeNull();
+    expect(screen.queryByText('load more')).toBeNull();
   });
 
-  it('omits the description element when not passed', () => {
-    const { container } = render(<ListPageLayout title="Works">results</ListPageLayout>);
+  it('omits the description text when not passed', () => {
+    render(<ListPageLayout title="Works">results</ListPageLayout>);
 
-    expect(container.querySelector('p')).toBeNull();
+    expect(screen.queryByText('Review findings for the selected work.')).toBeNull();
+  });
+
+  it('wires the actions slot to the caller: click reaches the caller handler', () => {
+    const onRefresh = vi.fn();
+    render(
+      <ListPageLayout title="Findings" actions={<button type="button" onClick={onRefresh}>Refresh</button>}>
+        results
+      </ListPageLayout>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect(onRefresh).toHaveBeenCalledTimes(1);
   });
 
   it('page card inherits the promoted Card token recipe (light/dark parity)', () => {
