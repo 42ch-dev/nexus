@@ -5,7 +5,7 @@
 **Author**: `@product-manager`  
 **Consumer**: `@architect` (authors repo-root [`DESIGN.md`](../../../../DESIGN.md), the design-token SSOT; completeness level **Standard** per compass §5 item #6) *(V1.98: sole SSOT — former `apps/web/DESIGN*.md` retired)*  
 **Iteration**: V1.64 (V1.65 authoring-surface amendment appended in §5)  
-**Drives**: [web-ui.md](../../active/surfaces/web-ui.md) §6 (MVP surface) — the screens whose look/feel this brief constrains
+**Drives**: [web-ui.md](2026-10-22-web-ui-retired-historical-notes.md) §6 (MVP surface) — the screens whose look/feel this brief constrains
 
 > This document captures the **product and design intent** the design system must serve. It deliberately does **not** specify token values (colors, type scale, spacing units) — those are `@architect`'s job in repo-root `DESIGN.md`. It states *what the UI must feel like and for whom*, so the token system can be derived rather than guessed.
 
@@ -20,7 +20,7 @@ The MVP is two registers with very different density profiles. The token system 
 | **Control Room (dashboards)** | Works dashboard, orchestration sessions, schedule/cron, capability registry, findings | **Data-dense** — tables / lists with status, severity, timestamps, pagination (cursor). An author may have many Works and many findings. | Strong tabular primitives: row hierarchy, status badges, severity chips, comfortable scan-ability, pagination controls, empty/loading/error states for TanStack Query. Dense without being cramped. |
 | **Setup (forms)** | Work CRUD, preset management CRUD (incl. **validate** dry-run) | **Form-dense** — structured inputs, validation feedback, JSON-ish preset fields, create/patch/delete confirmations. | Strong form primitives: labeled inputs, inline validation, destructive-action confirmation, clear primary/secondary action hierarchy. The **validate** action must read as the trustworthy "is this safe?" button. |
 
-Common to both: every list needs first-class **loading / empty / error** states (errors parsed from the shared `ErrorResponse`, one shape — see [web-ui.md](../../active/surfaces/web-ui.md) §4.2). These are not afterthoughts; they are where non-terminal authors either recover or give up.
+Common to both: every list needs first-class **loading / empty / error** states (errors parsed from the shared `ErrorResponse`, one shape — see [web-ui.md](2026-10-22-web-ui-retired-historical-notes.md) §4.2). These are not afterthoughts; they are where non-terminal authors either recover or give up.
 
 ## 2. Author persona — calm and focused, not engineer-facing
 
@@ -56,7 +56,7 @@ Dark mode is **first-class**: the token system must define light **and** dark fr
 
 ## 5. V1.65 authoring surface — component design requirements
 
-V1.65 adds the first **authoring-write** surfaces to the UI (see [web-ui.md](../../active/surfaces/web-ui.md) §13). These introduce three new component classes whose look/feel the design system must serve. As in §1–§4, this section fixes *product intent and constraints* — token values remain `@architect`'s job in repo-root `DESIGN.md` (a **Standard+ increment** this iteration; Production-level polish/animations stay V1.66 per compass §5 item #6/#7). *(Authored under `apps/web/DESIGN.md` pre-V1.98; merged to repo root in V1.98.)*
+V1.65 adds the first **authoring-write** surfaces to the UI (see [web-ui.md](2026-10-22-web-ui-retired-historical-notes.md) §13). These introduce three new component classes whose look/feel the design system must serve. As in §1–§4, this section fixes *product intent and constraints* — token values remain `@architect`'s job in repo-root `DESIGN.md` (a **Standard+ increment** this iteration; Production-level polish/animations stay V1.66 per compass §5 item #6/#7). *(Authored under `apps/web/DESIGN.md` pre-V1.98; merged to repo root in V1.98.)*
 
 ### 5.1 Rich-text outline editor
 
@@ -116,7 +116,7 @@ All three V1.65 component classes — editor, table, context menu — must ship 
 
 > **Host note (v1.192, RFT-11):** the native desktop host was retired; the repository has exactly one desktop host — Electron, contract [desktop-shell.md](../../active/surfaces/desktop-shell.md). The surface classes below (window chrome, app menu, native dialogs, desktop context menu, daemon-status indicator) remain the product design requirements for that host.
 
-V1.66 wrapped the V1.65 SPA in a native v2 desktop shell (see [web-ui.md](../../active/surfaces/web-ui.md) §14); since v1.192 the host is Electron ([desktop-shell.md](../../active/surfaces/desktop-shell.md)). The shell introduces surface classes whose look/feel the design system must serve. As in §1–§5, this section fixes *product intent and constraints* — token values remain `@architect`'s in repo-root `DESIGN.md` **Desktop Shell Supplement** *(authored under `apps/web/DESIGN.md` pre-V1.98)* (**Standard+ desktop supplement** this iteration; Production polish — custom title bar, animated transitions, system tray — stays V1.67+).
+V1.66 wrapped the V1.65 SPA in a native v2 desktop shell (see [web-ui.md](2026-10-22-web-ui-retired-historical-notes.md) §14); since v1.192 the host is Electron ([desktop-shell.md](../../active/surfaces/desktop-shell.md)). The shell introduces surface classes whose look/feel the design system must serve. As in §1–§5, this section fixes *product intent and constraints* — token values remain `@architect`'s in repo-root `DESIGN.md` **Desktop Shell Supplement** *(authored under `apps/web/DESIGN.md` pre-V1.98)* (**Standard+ desktop supplement** this iteration; Production polish — custom title bar, animated transitions, system tray — stays V1.67+).
 
 ### 6.1 Window chrome
 

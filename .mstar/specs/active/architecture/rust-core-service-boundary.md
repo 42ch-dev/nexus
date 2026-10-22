@@ -3,7 +3,7 @@
 **Status:** Accepted target — locked 2026-09-13. The boundary it locks is the shipped composition: the ordinary `nexus42` default is the direct-core + cloud + optional Connect `cli` cohort, the desktop is the Electron host, and the integrated daemon composition no longer exists. This document is normative for that boundary and is self-contained.
 **Document class:** Master
 **Pillar:** Cross-cutting — Harness, Canvas, and Computable consumption ends keep their product identities; this spec only locks the service-boundary target those pillars run on.
-**Coordinates with:** [local-runtime-boundary.md](local-runtime-boundary.md), [cli-spec.md](../cli/cli-spec.md), [desktop-shell.md](../surfaces/desktop-shell.md), [web-ui.md](../surfaces/web-ui.md), [agent-host.md](../agents/agent-host.md), [concurrency.md](../runtime/concurrency.md), [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md), [daemon-api-surface-conventions.md](../runtime/daemon-api-surface-conventions.md), [schemas-directory-layout.md](schemas-directory-layout.md)
+**Coordinates with:** [local-runtime-boundary.md](local-runtime-boundary.md), [cli-spec.md](../cli/cli-spec.md), [desktop-shell.md](../surfaces/desktop-shell.md), [agent-host.md](../agents/agent-host.md), [concurrency.md](../runtime/concurrency.md), [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md), [daemon-api-surface-conventions.md](../runtime/daemon-api-surface-conventions.md), [schemas-directory-layout.md](schemas-directory-layout.md)
 ## 0. Authority
 
 | Layer | Authority | Honest claim |

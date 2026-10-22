@@ -6,7 +6,6 @@
 **Coordinates with**:
 - [novel-writing/quality-loop.md](../novel-writing/quality-loop.md) — producer side (review verdicts, finding creation, orchestration hooks, retention/prune)
 - [daemon-api-surface-conventions.md §11](../runtime/daemon-api-surface-conventions.md#11-findings-patch-route-non-occ-resource-patch) — findings PATCH surface conventions
-- [web-ui.md](../surfaces/web-ui.md) — Control-Room findings view and remediation surface
 - [`crates/nexus-local-db/src/findings.rs`](../../../../crates/nexus-local-db/src/findings.rs) — DAO enforcement (canonical `is_valid_transition`, `VALID_STATUSES`, `enforce_status_transition`)
 - [`crates/nexus-core/src/findings.rs`](../../../../crates/nexus-core/src/findings.rs) — PATCH handler error mapping
 
