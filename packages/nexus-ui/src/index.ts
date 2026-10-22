@@ -151,6 +151,9 @@ export {
 export { ConfirmDialog, type ConfirmDialogProps } from './components/confirm-dialog';
 export { FormDialog, type FormDialogProps } from './components/form-dialog';
 export { FormSection, type FormSectionProps } from './components/form-section';
+// V1.150 P1 — promoted ListPageLayout L2 pattern (list-page chrome over the
+// promoted Card primitives; caller-owned copy + slots; no query/router/i18n deps).
+export { ListPageLayout, type ListPageLayoutProps } from './components/list-page-layout';
 
 // V1.147 P1 — promoted Compute Run Studio presentational primitives.
 // Pure presentational: data + caller-owned copy + callbacks in; no daemon,
