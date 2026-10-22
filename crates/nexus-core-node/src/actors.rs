@@ -60,6 +60,12 @@ use nexus_contracts::daemon_api::creators::{
     logout_response::LogoutResponse, set_active_creator_request::SetActiveCreatorRequest,
     set_active_creator_response::SetActiveCreatorResponse,
 };
+use nexus_contracts::daemon_api::workspace::{
+    active_workspace_response::ActiveWorkspaceResponse,
+    list_workspaces_response::ListWorkspacesResponse,
+    set_active_workspace_request::SetActiveWorkspaceRequest,
+    set_active_workspace_response::SetActiveWorkspaceResponse,
+};
 use nexus_contracts::daemon_api::inspector::{
     moment_directive_request::MomentDirectiveRequest,
     moment_directive_response::MomentDirectiveResponse,
@@ -940,6 +946,76 @@ impl NativeCore {
         let home = self.home_service()?;
         let response: LogoutResponse = home
             .logout_creator(&creator_id)
+            .map_err(crate::core_error::napi_error_from_domain)?;
+        Ok(Buffer::from(serde_json::to_vec(&response)?))
+    }
+
+    // ── Workspace home family (plan v1219 shell Task 4) ─────────────────────
+
+    /// `GET /v1/daemon/workspaces` — workspace discovery over the home entry.
+    #[napi]
+    pub async fn list_workspaces(&self) -> Result<Buffer> {
+        let home = self.home_service()?;
+        let response: ListWorkspacesResponse = home
+            .list_workspaces()
+            .await
+            .map_err(crate::core_error::napi_error_from_domain)?;
+        Ok(Buffer::from(serde_json::to_vec(&response)?))
+    }
+
+    /// `GET /v1/daemon/workspace` — the active selection plus its operational
+    /// paths. The retained 409 `uninitialized` refusal is the core's own
+    /// (no selected creator), never a synthesized response.
+    #[napi]
+    pub async fn get_active_workspace(&self) -> Result<Buffer> {
+        let home = self.home_service()?;
+        let config = home
+            .configuration()
+            .await
+            .map_err(crate::core_error::napi_error_from_domain)?;
+        let creator_id = config.active_creator_id.ok_or_else(|| {
+            crate::core_error::napi_error_from_domain(nexus_core::CoreError::Uninitialized)
+        })?;
+        let workspace_slug = config
+            .active_workspace_slug
+            .unwrap_or_else(|| "default".to_string());
+        let discovered = home
+            .list_workspaces()
+            .await
+            .map_err(crate::core_error::napi_error_from_domain)?;
+        let creative_root = discovered
+            .items
+            .iter()
+            .find(|item| item.creator_id == creator_id && item.workspace_slug == workspace_slug)
+            .map(|item| item.creative_root.clone())
+            // A workspace registered without `local_root` has no creative
+            // root; the retained response omits the field instead of naming
+            // an empty path.
+            .filter(|root| !root.is_empty());
+        let operational_dir = nexus_home_layout::operational_workspace_dir(
+            home.user_home(),
+            &creator_id,
+            &workspace_slug,
+        );
+        let response = ActiveWorkspaceResponse {
+            creator_id,
+            workspace_slug,
+            creative_root,
+            operational_dir: operational_dir.display().to_string(),
+        };
+        Ok(Buffer::from(serde_json::to_vec(&response)?))
+    }
+
+    /// `POST /v1/daemon/workspace/active` — select and initialize one
+    /// workspace (selection persistence and the foreign-workspace denial are
+    /// the core's own).
+    #[napi]
+    pub async fn select_workspace(&self, request_json: Buffer) -> Result<Buffer> {
+        let request: SetActiveWorkspaceRequest = decode(request_json, "request")?;
+        let home = self.home_service()?;
+        let response: SetActiveWorkspaceResponse = home
+            .select_workspace(request)
+            .await
             .map_err(crate::core_error::napi_error_from_domain)?;
         Ok(Buffer::from(serde_json::to_vec(&response)?))
     }

@@ -149,6 +149,9 @@ describe('route-inventory (P5-T5)', () => {
   ['GET', '/v1/daemon/works/([^/]+)/outline', 'tier2', 'content'],
   ['GET', '/v1/daemon/works/pool', 'tier2', 'works'],
   ['GET', '/v1/daemon/works/pool/inspiration', 'tier2', 'works'],
+  // plan v1219 shell Task 4: home-level workspace family (create stays absent).
+  ['GET', '/v1/daemon/workspace', 'tier1', 'workspaces'],
+  ['GET', '/v1/daemon/workspaces', 'tier1', 'workspaces'],
   ['GET', '/v1/daemon/worlds/([^/]+)/findings', 'tier2', 'worlds'],
   ['GET', '/v1/daemon/worlds/([^/]+)/kb/candidates', 'tier2', 'world_kb'],
   ['GET', '/v1/daemon/worlds/([^/]+)/kb/graph', 'tier2', 'world_kb'],
@@ -216,6 +219,7 @@ describe('route-inventory (P5-T5)', () => {
   ['POST', '/v1/daemon/works/pool/inspiration/archive', 'tier2', 'works'],
   ['POST', '/v1/daemon/works/pool/inspiration/promote', 'tier2', 'works'],
   ['POST', '/v1/daemon/works/pool/promote', 'tier2', 'works'],
+  ['POST', '/v1/daemon/workspace/active', 'tier1', 'workspaces'],
   ['POST', '/v1/daemon/worlds', 'tier2', 'worlds'],
   ['POST', '/v1/daemon/worlds/([^/]+)/forks', 'tier2', 'worlds'],
   ['POST', '/v1/daemon/worlds/([^/]+)/kb/pack/export', 'tier2', 'worlds'],
