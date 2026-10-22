@@ -83,13 +83,7 @@
   },
   "setup": {
     "title": "设置",
-    "helper": "返回首次运行向导，重新执行设置步骤。你的工作区和智能体选择将保留。",
-    "rerun": "重新运行",
-    "browserOnly": "仅在桌面应用中可重新运行设置。",
-    "browserTooltip": "打开 Nexus 桌面应用以重新运行设置。",
-    "confirmTitle": "重新运行设置？",
-    "confirmBody": "这将从头开始重新运行设置向导。你的工作区路径和智能体配置文件不会被删除。",
-    "couldNotClear": "无法清除设置标记。",
-    "couldNotReRun": "无法重新运行设置"
+    "helper": "重选身份、AI 搭档与默认工作区；不影响已创建的世界与作品",
+    "rerun": "重新运行设置向导"
   }
 }

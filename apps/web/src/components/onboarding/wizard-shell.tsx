@@ -84,8 +84,8 @@ export function WizardShell() {
     } catch (error) {
       toast({
         variant: 'error',
-        title: '无法创建本地创作者',
-        description: errorMessage(error),
+        title: '无法初始化本地创作者',
+        description: `${errorMessage(error) || '未知错误'}。请重试。`,
       });
       return;
     }
@@ -116,8 +116,8 @@ export function WizardShell() {
     } catch (error) {
       toast({
         variant: 'error',
-        title: '工作区初始化失败',
-        description: errorMessage(error),
+        title: '无法选择默认工作区',
+        description: `${errorMessage(error) || '未知错误'}。请重试。`,
       });
       return false;
     }

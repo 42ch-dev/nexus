@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -29,6 +30,12 @@ interface SetupCompletedContextValue {
    * Safe with SetupGate because `true` is applied optimistically.
    */
   markCompleted: () => void;
+  /**
+   * Re-read the first-run state. The service-unavailable surface calls it after
+   * a successful retry so a recovered service resolves the gate without a page
+   * reload (v1219-onboarding T4).
+   */
+  refresh: () => Promise<void>;
 }
 
 const SetupCompletedContext = createContext<SetupCompletedContextValue | null>(null);
@@ -60,32 +67,34 @@ export function SetupCompletedProvider({
   // paints the shell nor redirects to the wizard before the real answer lands.
   const [completed, setCompletedState] = useState(initialCompleted ?? false);
   const [isLoading, setIsLoading] = useState(initialCompleted === undefined);
+  const mounted = useRef(false);
+
+  const refresh = useCallback(async () => {
+    if (initialCompleted !== undefined) return;
+    try {
+      const value = desktop
+        ? await desktop.getSetupCompleted()
+        : await isWorkspaceInitialized(client);
+      if (mounted.current) setCompletedState(value);
+    } catch {
+      // Browser: the service could not be reached — the service-unavailable
+      // surface owns this state (plan v1219-onboarding T4), so the gate stays
+      // unresolved instead of silently claiming an initialized shell. Desktop:
+      // a missing/refused IPC command is a host-contract break, not a service
+      // outage; fail open so it never strands the app on the wizard.
+      if (mounted.current && desktop) setCompletedState(true);
+    } finally {
+      if (mounted.current) setIsLoading(false);
+    }
+  }, [client, desktop, initialCompleted]);
 
   useEffect(() => {
-    if (initialCompleted !== undefined) return;
-    let cancelled = false;
-    const resolved = desktop
-      ? desktop.getSetupCompleted()
-      : isWorkspaceInitialized(client);
-    resolved
-      .then((value) => {
-        if (!cancelled) setCompletedState(value);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        // Fail open: a missing IPC command or an unreachable service must not
-        // hang the app on the wizard gate.
-        // simplify: browser probe failure lands on the shell; T4 owns the
-        // wizard-level degraded surface (plan v1219-onboarding T4).
-        setCompletedState(true);
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoading(false);
-      });
+    mounted.current = true;
+    void refresh();
     return () => {
-      cancelled = true;
+      mounted.current = false;
     };
-  }, [client, desktop, initialCompleted]);
+  }, [refresh]);
 
   const setCompleted = useCallback(
     async (value: boolean) => {
@@ -123,7 +132,9 @@ export function SetupCompletedProvider({
   }, [setCompleted]);
 
   return (
-    <SetupCompletedContext.Provider value={{ completed, isLoading, setCompleted, markCompleted }}>
+    <SetupCompletedContext.Provider
+      value={{ completed, isLoading, setCompleted, markCompleted, refresh }}
+    >
       {children}
     </SetupCompletedContext.Provider>
   );

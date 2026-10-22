@@ -3,7 +3,7 @@
  * (V1.108 FB-UI-008 PR-review fix).
  *
  * The matcher is a pure function; the hook wrapper is exercised through the
- * setup-step-agent component tests. These cases pin the normalization rules
+ * Settings agent-section tests. These cases pin the normalization rules
  * (trim, exact, basename-of-first-token case-insensitive) so the leniency
  * does not silently regress to substring false positives.
  */

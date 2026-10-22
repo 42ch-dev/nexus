@@ -8,13 +8,14 @@ import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
 import { BrowserClient, type NexusClient } from '@/lib/nexus';
 
 function TestController() {
-  const { completed, isLoading, markCompleted, setCompleted } = useSetupCompleted();
+  const { completed, isLoading, markCompleted, setCompleted, refresh } = useSetupCompleted();
   return (
     <div>
       <span data-testid="completed">{completed ? 'true' : 'false'}</span>
       <span data-testid="loading">{isLoading ? 'true' : 'false'}</span>
       <button onClick={() => markCompleted()}>Finish</button>
       <button onClick={() => void setCompleted(false)}>Clear</button>
+      <button onClick={() => void refresh()}>Refresh</button>
       <button
         onClick={() => {
           // Await path so IPC rejection is handled (rollback assertion).
@@ -50,8 +51,6 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     getWorkspaceRoot: () => Promise.resolve('/tmp/nexus'),
     pickDirectory: () => Promise.resolve(null),
     setWorkspacePath: () => Promise.resolve(),
-    ensureSetupBootstrap: () =>
-      Promise.resolve({ creator_id: 'ctr_local1234567890ab', already_bootstrapped: false }),
     switchActiveCreator: () => Promise.resolve('/tmp/nexus'),
     restartDaemon: () => Promise.resolve(),
     toggleMaximizeWindow: () => Promise.resolve(),
@@ -91,7 +90,7 @@ describe('SetupCompletedProvider', () => {
     expect(screen.getByTestId('loading')).toHaveTextContent('false');
   });
 
-  it('browser build fails open when the status probe rejects', async () => {
+  it('browser build leaves the gate unresolved when the status probe rejects', async () => {
     renderInApp(
       <SetupCompletedProvider>
         <TestController />
@@ -99,8 +98,29 @@ describe('SetupCompletedProvider', () => {
       { client: statusClient(() => Promise.reject(new Error('daemon down'))) },
     );
 
-    await waitFor(() => expect(screen.getByTestId('completed')).toHaveTextContent('true'));
+    // The service-unavailable surface owns this state (T4): the app must never
+    // silently claim an initialized shell when the service cannot be reached.
     await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'));
+    expect(screen.getByTestId('completed')).toHaveTextContent('false');
+  });
+
+  it('refresh re-reads the service after a recovery', async () => {
+    const user = userEvent.setup();
+    let initialized = false;
+    renderInApp(
+      <SetupCompletedProvider>
+        <TestController />
+      </SetupCompletedProvider>,
+      { client: statusClient(() => Promise.resolve({ workspace_initialized: initialized })) },
+    );
+
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'));
+    expect(screen.getByTestId('completed')).toHaveTextContent('false');
+
+    initialized = true;
+    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    await waitFor(() => expect(screen.getByTestId('completed')).toHaveTextContent('true'));
   });
 
   it('browser finish re-reads the service instead of writing a marker', async () => {

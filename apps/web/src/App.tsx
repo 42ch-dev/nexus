@@ -7,6 +7,7 @@ import {
   DefaultProfileCoordinator,
 } from '@/lib/active-creator-context';
 import { SetupCompletedProvider } from '@/lib/setup-completed-context';
+import { ServiceStatusProvider } from '@/lib/service-status-context';
 import { EntranceProvider } from '@/lib/entrance-context';
 import {
   EntranceGuard,
@@ -19,6 +20,7 @@ import {
   useSettingsModal,
 } from '@/components/layout/settings-modal-context';
 import { DaemonLaunchGate } from '@/components/setup/daemon-launch-gate';
+import { ServiceDegradedGate } from '@/components/setup/service-degraded-surface';
 import { SetupGate } from '@/components/setup/setup-gate';
 import { ChapterPage } from '@/pages/chapter-page';
 import { ChaptersPage } from '@/pages/chapters-page';
@@ -356,15 +358,19 @@ export function App() {
           {/* V1.134 P0: gate creator probes until daemon ready — avoids
               pre-boot `/v1/daemon/creators*` traffic during dist-load startup. */}
           <DefaultProfileCoordinator />
-          <SettingsModalProvider>
-            <EntranceProvider>
-              <AppRoutes />
-              {/* Inside EntranceProvider so the modal rail can filter by the
-                  resolved entrance (W-2). Rendered after AppRoutes — the
-                  Dialog overlays the route tree either way. */}
-              <SettingsModalHost />
-            </EntranceProvider>
-          </SettingsModalProvider>
+          <ServiceStatusProvider>
+            <SettingsModalProvider>
+              <EntranceProvider>
+                <ServiceDegradedGate>
+                  <AppRoutes />
+                </ServiceDegradedGate>
+                {/* Inside EntranceProvider so the modal rail can filter by the
+                    resolved entrance (W-2). Rendered after AppRoutes — the
+                    Dialog overlays the route tree either way. */}
+                <SettingsModalHost />
+              </EntranceProvider>
+            </SettingsModalProvider>
+          </ServiceStatusProvider>
         </DaemonLaunchGate>
       </SetupCompletedProvider>
     </ActiveCreatorProvider>

@@ -25,6 +25,7 @@ export type {
   ClearRunsQuery,
   ClearRunsResponse,
   DaemonHealth,
+  DaemonRuntimeStatus,
   DiscardRunResponse,
   ListRunsQuery,
   NexusClient,

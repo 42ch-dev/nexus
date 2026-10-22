@@ -42,11 +42,6 @@ function makeDesktop(
     getWorkspaceRoot: () => Promise.resolve('/tmp/nexus'),
     pickDirectory: () => Promise.resolve(null),
     setWorkspacePath: () => Promise.resolve(),
-    ensureSetupBootstrap: () =>
-      Promise.resolve({
-        creator_id: 'ctr_local1234567890ab',
-        already_bootstrapped: true,
-      }),
     switchActiveCreator: () => Promise.resolve('/tmp/nexus'),
     restartDaemon: () => Promise.resolve(),
     toggleMaximizeWindow: () => Promise.resolve(),

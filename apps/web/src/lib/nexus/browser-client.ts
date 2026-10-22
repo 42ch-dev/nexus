@@ -185,6 +185,7 @@ import type {
   ClearRunsQuery,
   ClearRunsResponse,
   DaemonHealth,
+  DaemonRuntimeStatus,
   DiscardRunResponse,
   ListRunsQuery,
   ListTimelineEventsQuery,
@@ -266,6 +267,12 @@ export class BrowserClient implements NexusClient {
     // Unguarded runtime family: the API-key gate skips it, so the browser
     // first-run gate works on a fresh origin/LAN browser (compass D21).
     return this.get<RuntimeStatus>('/v1/daemon/runtime/status');
+  }
+
+  daemonStatus(): Promise<DaemonRuntimeStatus> {
+    // Same unguarded runtime family; carries the `degraded` block for the
+    // global service-unavailable surface (v1219-onboarding T4).
+    return this.get<DaemonRuntimeStatus>('/v1/daemon/daemon/status');
   }
 
   // ── Creators + Agent host (V1.94 P1) ───────────────────────────────────────

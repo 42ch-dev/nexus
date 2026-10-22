@@ -33,9 +33,6 @@ function makeDesktopCapabilities(): DesktopCapabilities {
     setEntrance: vi.fn(() => Promise.resolve()),
     setAgentProfile: vi.fn(() => Promise.resolve()),
     getAgentProfile: vi.fn(() => Promise.resolve(null)),
-    ensureSetupBootstrap: vi.fn(() =>
-      Promise.resolve({ creator_id: 'creator-a', already_bootstrapped: true }),
-    ),
     switchActiveCreator: vi.fn(() => Promise.resolve('/tmp/nexus')),
     restartDaemon: vi.fn(() => Promise.resolve()),
     toggleMaximizeWindow: vi.fn(() => Promise.resolve()),

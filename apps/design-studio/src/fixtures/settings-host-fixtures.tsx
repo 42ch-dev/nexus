@@ -32,14 +32,11 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import {
-  Button,
   Card,
   CardContent,
   CardHeader,
   CardTitle,
   cn,
-  Dialog,
-  DialogContent,
 } from '@42ch/nexus-ui';
 
 import { StudioShellLogo } from '@/components/studio-shell-logo';
@@ -55,10 +52,7 @@ import {
 } from '@web-layout/shell-sidebar-chrome';
 import { FooterProfilesChrome } from '@web-layout/footer-profiles-chrome';
 import { ConnectDaemonFormChrome } from '@web-settings/connect-daemon-form-chrome';
-import {
-  SettingsSetupSectionChrome,
-  SettingsSetupConfirmChromeStatic,
-} from '@web-settings/settings-setup-section-chrome';
+import { SettingsSetupSectionChrome } from '@web-settings/settings-setup-section-chrome';
 
 import {
   CREATOR_NAV,
@@ -165,11 +159,6 @@ const WORKSPACE_POST_PERSIST_SUCCESS =
 
 /** Copy-only label — no wired app restart orchestration. */
 const WORKSPACE_RESTART_LABEL = 'Quit and reopen Nexus';
-
-const SETUP_CONFIRM_TITLE = 'Re-run Setup?';
-
-const SETUP_CONFIRM_BODY =
-  'This restarts the setup wizard from the beginning. Your workspace path and agent profile are not deleted.';
 
 /** Fixture-only sample paths — visual chrome, not live workspace state. */
 const FIXTURE_WORKSPACE_PATH = '/Users/creator/Documents/Nexus';
@@ -522,59 +511,6 @@ function SettingsWorkspaceSectionChrome({
 }
 
 /**
- * Setup section host — owns the Radix confirm dialog; chrome is purely
- * presentational. Browser-only variant needs no dialog (CTA is disabled).
- */
-function SettingsSetupSectionHost({
-  desktopAvailable = true,
-  'data-testid': dataTestId,
-}: {
-  desktopAvailable?: boolean;
-  'data-testid'?: string;
-}) {
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  return (
-    <>
-      <SettingsSetupSectionChrome
-        desktopAvailable={desktopAvailable}
-        data-testid={dataTestId}
-        onReRunSetup={() => setConfirmOpen(true)}
-      />
-      {desktopAvailable && (
-        <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-          <DialogContent
-            title={SETUP_CONFIRM_TITLE}
-            description={SETUP_CONFIRM_BODY}
-          >
-            <div
-              className="flex justify-end gap-3"
-              data-testid="settings-rerun-setup-confirm"
-            >
-              <Button
-                type="button"
-                variant="secondary"
-                data-testid="settings-rerun-setup-cancel"
-                onClick={() => setConfirmOpen(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                variant="destructive"
-                data-testid="settings-rerun-setup-confirm-action"
-                onClick={() => setConfirmOpen(false)}
-              >
-                Re-run
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
-    </>
-  );
-}
-
-/**
  * Advanced section body chrome — stacks Connection and Setup on one page
  * with hash anchors (V1.106 P2).
  */
@@ -582,7 +518,7 @@ function SettingsAdvancedSectionChrome() {
   return (
     <div className="flex flex-col gap-10" data-testid="settings-advanced-section">
       <SettingsConnectionSectionChrome />
-      <SettingsSetupSectionHost data-testid="settings-setup-section" />
+      <SettingsSetupSectionChrome data-testid="settings-setup-section" />
     </div>
   );
 }
@@ -811,49 +747,12 @@ export function SettingsHostFixtures() {
           Setup section
         </h4>
         <p className="text-copy-13 text-gray-700 mb-4">
-          Section chrome with locked helper copy and Re-run Setup CTA. Opens
-          the confirm dialog (destructive-adjacent Title Case primary).
-          Fixture-driven only; no App IPC.
+          Re-run entry: helper copy and the browser-available Re-run setup
+          wizard CTA. It only navigates to the always-reachable wizard route —
+          no marker clear, no confirm dialog. Fixture-driven only; no App IPC.
         </p>
         <div className="bg-background-200 rounded-card p-6">
-          <SettingsSetupSectionHost data-testid="settings-setup-section" />
-        </div>
-      </div>
-
-      <div
-        className="rounded-card border border-gray-alpha-200 bg-background-100 p-4"
-        data-testid="settings-host-fixture-setup-confirm"
-      >
-        <h4 className="text-heading-16 font-heading text-gray-1000 mb-1">
-          Setup — confirm dialog
-        </h4>
-        <p className="text-copy-13 text-gray-700 mb-4">
-          Static confirm dialog chrome for visual acceptance: title, body,
-          Cancel, and destructive Re-run Setup. No Radix portal (avoids
-          aria-hiding the Surfaces page); interactive open is on the Setup
-          section CTA above.
-        </p>
-        <div className="bg-background-200 rounded-card p-6">
-          <SettingsSetupConfirmChromeStatic />
-        </div>
-      </div>
-
-      <div
-        className="rounded-card border border-gray-alpha-200 bg-background-100 p-4"
-        data-testid="settings-host-fixture-setup-browser"
-      >
-        <h4 className="text-heading-16 font-heading text-gray-1000 mb-1">
-          Setup — browser-only
-        </h4>
-        <p className="text-copy-13 text-gray-700 mb-4">
-          Honest desktop-only helper with disabled Re-run Setup CTA (optional
-          tooltip). No invented HTTP setup-marker API.
-        </p>
-        <div className="bg-background-200 rounded-card p-6">
-          <SettingsSetupSectionChrome
-            desktopAvailable={false}
-            data-testid="settings-setup-section"
-          />
+          <SettingsSetupSectionChrome data-testid="settings-setup-section" />
         </div>
       </div>
 

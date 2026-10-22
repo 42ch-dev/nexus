@@ -17,6 +17,7 @@ import { CommandPalette, openPalette } from '@/components/command-palette';
 import { CreatorEntitySelectionProvider } from '@/components/layout/creator-entity-selection-context';
 import { DaemonStatusBar } from '@/components/layout/daemon-status-bar';
 import { resolveEntranceBounce } from '@/components/layout/entrance-guard';
+import { ServiceDegradedBanner } from '@/components/setup/service-degraded-surface';
 import { Topnav } from '@/components/shell/topnav';
 import { AppRail } from '@/components/shell/app-rail';
 import { LoadingState } from '@/components/ui/states';
@@ -63,6 +64,7 @@ export function AppShell() {
         data-testid="app-shell"
         className="flex h-screen flex-col overflow-hidden bg-background-100 text-gray-1000"
       >
+        <ServiceDegradedBanner />
         <Topnav />
 
         <div className="flex min-h-0 flex-1 overflow-hidden">

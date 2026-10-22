@@ -220,7 +220,7 @@ describe('WizardShell', () => {
     await reachWorldStep(user);
     await user.click(screen.getByRole('button', { name: '创建并进入' }));
 
-    expect(await screen.findByText('工作区初始化失败')).toBeInTheDocument();
+    expect(await screen.findByText('无法选择默认工作区')).toBeInTheDocument();
     expect(screen.queryByText(/创建世界失败/)).not.toBeInTheDocument();
     // Still in the step with the draft; no world was created and nothing navigated.
     expect(screen.getByTestId('location')).toHaveTextContent('/setup');
