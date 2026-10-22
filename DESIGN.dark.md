@@ -448,6 +448,8 @@ V1.150 P1 promotion (light contract §Component Primitives): ListPageLayout is n
 
 V1.150 P2 promotion (light contract §Component Primitives): SettingsSection/SettingRow and SettingsLayout are now public `@42ch/nexus-ui` L2 pattern families. SettingsSection rides the same fieldset/legend recipe as FormSection and SettingRow composes the promoted Label, so dark parity is inherited from those tokens; SettingsLayout ports the settings frame nav rail (gray-alpha rails, token-driven active/inactive states) with no new `dark:` hooks — parity is fully token-driven.
 
+V1.150 P3 promotion (light contract §Component Primitives): ListDetailShell, FieldRow, and DetailCard are now public `@42ch/nexus-ui` L2 pattern families. ListDetailShell is a layout split only (grid recipe + gaps) with no surface tokens of its own; FieldRow rides the shared label/value copy tokens (gray-700 label, gray-1000 value); DetailCard composes the V1.99 Card primitives only — dark parity is fully inherited through the graphite token projections and no new `dark:` hooks are introduced.
+
 ## Contrast
 
 Design-time sRGB arithmetic: gray-1000 on background-100 16.15:1; gray-700 on background-300 6.78:1; gray-600 on background-300 4.98:1; blue-700 on background-300 6.52:1; brand-deep-blue on blue-700/800/900 6.81/8.08/9.54:1. These are token calculations, not rendered QA. Actual alpha/state combinations require browser evidence.

@@ -168,6 +168,20 @@ export {
   type SettingsLayoutProps,
   type SettingsLayoutSection,
 } from './components/settings-layout';
+// V1.150 P3 — promoted master/detail family: ListDetailShell (fixed-width
+// responsive split, caller-owned regions, no open/close state) and the
+// read-only detail parts (FieldRow null-hide rows + DetailCard over the
+// promoted Card primitives). HubCard stays app-side per plan D5 decision.
+export {
+  ListDetailShell,
+  type ListDetailShellProps,
+} from './components/list-detail-shell';
+export {
+  DetailCard,
+  type DetailCardProps,
+  FieldRow,
+  type FieldRowProps,
+} from './components/detail-parts';
 
 // V1.147 P1 — promoted Compute Run Studio presentational primitives.
 // Pure presentational: data + caller-owned copy + callbacks in; no daemon,
