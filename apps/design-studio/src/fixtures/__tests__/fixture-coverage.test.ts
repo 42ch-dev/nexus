@@ -52,9 +52,11 @@ function parseValueExports(indexSource: string): string[] {
 function unsupportedExportForms(indexSource: string): string[] {
   // shortcut: naive comment strip assumes no string literal contains '//' or
   // '/*' — true for this package index; upgrade to a real lexer otherwise.
+  // Replace with a single space (not '') so `export/* c */function` stays
+  // lexically separated and `export\s+` still matches (fails closed).
   const stripped = indexSource
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/\/\/[^\n]*/g, '');
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\/\/[^\n]*/g, ' ');
   const patterns: [RegExp, string][] = [
     [/export\s*\*/g, '`export * ...`'],
     [/export\s+(?:async\s+)?function\b/g, '`export function ...`'],
@@ -167,6 +169,11 @@ describe('unsupported public export forms fail closed', () => {
 
   it('a direct export with inter-keyword comments fails closed', () => {
     const indexSource = 'export /* public */ function UndemoedWidget() { return null; }\n// export * from \'./hidden\'\n';
+    expect(unsupportedExportForms(indexSource)).toContain('`export function ...`');
+  });
+
+  it('an inter-keyword block comment without surrounding whitespace fails closed', () => {
+    const indexSource = 'export/* c */function UndemoedWidget() { return null; }\n';
     expect(unsupportedExportForms(indexSource)).toContain('`export function ...`');
   });
 });
