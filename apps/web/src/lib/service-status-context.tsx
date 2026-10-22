@@ -3,9 +3,10 @@
  * (plan v1219-onboarding T4).
  *
  * Probe: the unguarded `GET /v1/daemon/daemon/status`. A rejected probe means
- * the service cannot be reached at all; a non-empty `degraded.subsystems` means
- * it answers but cannot serve the API. Both collapse into one `reason` string
- * updated in place — this provider never raises toasts.
+ * the service cannot be reached; a non-empty `degraded.subsystems` means it
+ * answers but cannot serve the API. Both collapse into one structured reason
+ * updated in place — this provider never raises toasts, and the surface owns
+ * the localization.
  *
  * The service derives `db` from `workspace_initialized`, and `engine` follows
  * it (`routes.ts` `degradedSubsystems`). A first run therefore reports both
@@ -25,18 +26,27 @@ import {
 } from 'react';
 
 import { useNexusClient } from '@/lib/client-context';
-import { errorMessage } from '@/lib/error-message';
+import { NexusClientError } from '@/lib/nexus';
 import { useSetupCompleted } from '@/lib/setup-completed-context';
 
-/** `degraded.subsystems` → the `{reason}` slot in the product copy. */
-const SUBSYSTEM_REASON: Record<string, string> = {
-  db: '本地数据库未就绪',
-  engine: '编排引擎未就绪',
-};
+/**
+ * Why the service-unavailable surface is showing.
+ *
+ * - `unreachable` — transport failure (no HTTP response). Rendered with a fixed
+ *   localized reason; the raw fetch message ("Failed to fetch") is not copy.
+ * - `server` — the service answered with an error body; its message is the
+ *   actionable reason and is shown as-is.
+ * - `subsystems` — the service answers but reports degraded subsystems; the
+ *   surface localizes each name.
+ */
+export type ServiceDegradedReason =
+  | { kind: 'unreachable' }
+  | { kind: 'server'; message: string }
+  | { kind: 'subsystems'; subsystems: string[] };
 
 interface ServiceStatusValue {
   /** Set while the service is unreachable or degraded; `null` when healthy. */
-  reason: string | null;
+  reason: ServiceDegradedReason | null;
   /** True while a probe (initial or retry) is in flight. */
   checking: boolean;
   /** Re-probe; a successful probe also re-reads the first-run gate. */
@@ -48,7 +58,7 @@ const ServiceStatusContext = createContext<ServiceStatusValue | null>(null);
 export function ServiceStatusProvider({ children }: { children: ReactNode }) {
   const client = useNexusClient();
   const { completed, refresh } = useSetupCompleted();
-  const [reason, setReason] = useState<string | null>(null);
+  const [reason, setReason] = useState<ServiceDegradedReason | null>(null);
   const [checking, setChecking] = useState(false);
   const mounted = useRef(false);
 
@@ -59,15 +69,15 @@ export function ServiceStatusProvider({ children }: { children: ReactNode }) {
       const status = await client.daemonStatus();
       const subsystems = completed ? status.degraded.subsystems : [];
       if (mounted.current) {
-        setReason(
-          subsystems.length > 0
-            ? subsystems.map((name) => SUBSYSTEM_REASON[name] ?? name).join('、')
-            : null,
-        );
+        setReason(subsystems.length > 0 ? { kind: 'subsystems', subsystems } : null);
       }
       return true;
     } catch (error) {
-      if (mounted.current) setReason(errorMessage(error) || '无法连接本地服务');
+      if (mounted.current) {
+        const serverMessage =
+          error instanceof NexusClientError && error.status >= 400 ? error.message : '';
+        setReason(serverMessage ? { kind: 'server', message: serverMessage } : { kind: 'unreachable' });
+      }
       return false;
     } finally {
       if (mounted.current) setChecking(false);

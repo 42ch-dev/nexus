@@ -4,28 +4,47 @@
  * One instance at a time: full-screen while the wizard owns the screen (first
  * run, `/setup`), a top banner inside the shell. Repeated failures update this
  * same node — the probe never raises a toast.
+ *
+ * Copy lives in the `setup` namespace (`degraded.*`): the zh-CN body is the
+ * product-owned string verbatim, and the EN namespace is the fallback.
  */
+import type { TFunction } from 'i18next';
 import type { ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useLocation } from 'react-router';
 
 import { Button } from '@/components/ui/button';
+import type { ServiceDegradedReason } from '@/lib/service-status-context';
 import { useOptionalServiceStatus, useServiceStatus } from '@/lib/service-status-context';
 import { useSetupCompleted } from '@/lib/setup-completed-context';
 
-/** Product-owned copy (plan § Task 4) — ships verbatim, no i18n. */
-const COPY = {
-  body: (reason: string) => `Nexus 服务暂不可用：${reason}。请确认本地服务正在运行后重试。`,
-  retry: '重试',
-};
+/**
+ * The `{reason}` slot. A server-provided message is already human copy, so it
+ * is kept as-is; transport and subsystem reasons are localized.
+ */
+function reasonText(reason: ServiceDegradedReason, t: TFunction<'setup'>): string {
+  switch (reason.kind) {
+    case 'unreachable':
+      return t('degraded.reason.unreachable');
+    case 'server':
+      return reason.message;
+    case 'subsystems':
+      return reason.subsystems
+        .map((name) => t(`degraded.subsystem.${name}`, { defaultValue: name }))
+        .join(t('degraded.separator'));
+  }
+}
 
 function ServiceUnavailable({
   reason,
   variant,
 }: {
-  reason: string;
+  reason: ServiceDegradedReason;
   variant: 'full' | 'banner';
 }) {
+  const { t } = useTranslation('setup');
   const { checking, retry } = useServiceStatus();
+  const body = t('degraded.body', { reason: reasonText(reason, t) });
   const action = (
     <Button
       type="button"
@@ -34,7 +53,7 @@ function ServiceUnavailable({
       disabled={checking}
       onClick={() => void retry()}
     >
-      {COPY.retry}
+      {t('degraded.retry')}
     </Button>
   );
 
@@ -47,7 +66,7 @@ function ServiceUnavailable({
         className="flex min-h-screen items-center justify-center bg-background-100 p-6"
       >
         <div className="flex w-full max-w-md flex-col items-start gap-4">
-          <p className="text-copy-14 text-gray-1000">{COPY.body(reason)}</p>
+          <p className="text-copy-14 text-gray-1000">{body}</p>
           {action}
         </div>
       </div>
@@ -61,7 +80,7 @@ function ServiceUnavailable({
       data-variant="banner"
       className="flex flex-wrap items-center justify-between gap-3 border-b border-red-700/30 bg-red-700/10 px-4 py-2 text-copy-13 text-red-1000"
     >
-      <p className="min-w-0">{COPY.body(reason)}</p>
+      <p className="min-w-0">{body}</p>
       {action}
     </div>
   );
