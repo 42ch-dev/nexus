@@ -27,8 +27,7 @@
  */
 import { type ReactNode } from 'react';
 
-import { Button } from '@42ch/nexus-ui';
-import { EmptyState } from '@web-ui/states'; // transitional — keep-web (lucide-react asset boundary; product copy & app-composition callbacks)
+import { Button, EmptyState } from '@42ch/nexus-ui';
 import { NodeChromeShell } from '@web-canvas/node-chrome-shell'; // @web-canvas/node-chrome-shell - transitional until package promotion criteria met
 import {
   TimelineBriefEraChrome,

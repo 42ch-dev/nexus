@@ -46,8 +46,8 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
+  EmptyState,
 } from '@42ch/nexus-ui';
-import { EmptyState } from '@web-ui/states'; // @web-ui/states — transitional — keep-web (lucide-react asset boundary; product copy & app-composition callbacks)
 
 /* ------------------------------------------------------------------ */
 /*  Local token mirrors (studio boundary: web sources not aliased here) */

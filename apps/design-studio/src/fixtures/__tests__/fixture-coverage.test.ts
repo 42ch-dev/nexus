@@ -70,7 +70,9 @@ function unsupportedExportForms(indexSource: string): string[] {
 function collectSourceFiles(dir: string): string[] {
   const files: string[] = [];
   for (const entry of readdirSync(dir)) {
-    if (entry === 'node_modules' || entry.startsWith('.')) continue;
+    // shortcut: __tests__ excluded so a testid literal existing only in a
+    // test file cannot satisfy the source-presence assertion (QC F-002).
+    if (entry === 'node_modules' || entry === '__tests__' || entry.startsWith('.')) continue;
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) files.push(...collectSourceFiles(full));
     else if (/\.(tsx?|jsx?)$/.test(entry)) files.push(full);
@@ -104,7 +106,7 @@ describe('public-export fixture coverage', () => {
     const forms = unsupportedExportForms(indexSource);
     expect(
       forms,
-      `unsupported public export form(s) in index.ts would bypass fixture coverage: ${forms.join(', ')}`,
+      `unsupported public export form(s) in index.ts would bypass fixture coverage: ${forms.join(', ')} — remedy: keep the named re-export form, or upgrade the parser and add a fixture for the new export`,
     ).toEqual([]);
   });
 

@@ -180,7 +180,7 @@ const SURFACES_DAEMON_ENTRIES: readonly GalleryEntry[] = [
     'surfaces-run-observation',
     'Session run view',
     ['run', 'observation', 'events', 'live', 'gap', 'replay', 'history', 'refusal', 'sessions'],
-    [UI, '@web-ui/states'], // transitional — badge path label (not an import)
+    [UI],
   ),
 ];
 

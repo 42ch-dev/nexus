@@ -70,9 +70,8 @@ describe('outline-authoring-fixtures presentational boundary', () => {
   it('imports promoted primitives from @42ch/nexus-ui public API only', () => {
     const source = readFileSync(FIXTURE_SOURCE_PATH, 'utf8');
     expect(source).toMatch(/from '@42ch\/nexus-ui';/);
-    // Transitional @web-ui/states import carries the inline annotation on the
-    // module-path line (AGENTS.md annotation placement rule).
-    expect(source).toMatch(/'@web-ui\/states'; .*transitional/);
+    // No transitional @web-ui/* imports remain (QC F-001 decoupling).
+    expect(source).not.toMatch(/from '@web-ui\//);
   });
 });
 
