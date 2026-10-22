@@ -25,6 +25,7 @@ import { i18n } from '@/lib/i18n/config';
 import { Route, Routes } from 'react-router';
 
 import { WorldApp } from '@/components/world/world-app';
+import { AppRail } from '@/components/shell/app-rail';
 import { isUnlocked } from '@/lib/activation-store';
 import { NexusClientError } from '@/lib/nexus';
 import { renderInApp } from '@/test/test-providers';
@@ -137,6 +138,8 @@ describe('Brief flow — empty state → editor', () => {
     await user.click(screen.getByTestId('world-brief-create'));
     const editor = await screen.findByTestId('world-brief-editor');
     expect(editor).toBeInTheDocument();
+    // T3 fix: the side checklist stays mounted while editing.
+    expect(screen.getByTestId('world-side-checklist')).toBeInTheDocument();
     expect(screen.getByTestId('world-brief-input')).toHaveAttribute(
       'placeholder',
       '一个魔法正在消亡的低魔奇幻世界……',
@@ -168,7 +171,11 @@ describe('Brief flow — create save', () => {
     const user = userEvent.setup();
     const graphRef: { current: WorldKbGraphResponse } = { current: graph([]) };
     const patchEntity = patchSucceeding(graphRef);
-    renderWorld(makeClient({ graph: () => Promise.resolve(graphRef.current), patchEntity }));
+    renderWorld(
+      makeClient({ graph: () => Promise.resolve(graphRef.current), patchEntity }),
+      `/worlds/${WORLD_ID}`,
+      { activeCreatorId: 'creator-a' },
+    );
 
     await user.click(await screen.findByTestId('world-brief-create'));
     await user.type(screen.getByTestId('world-brief-input'), BRIEF_TEXT);
@@ -546,5 +553,97 @@ describe('Brief flow — T3 checklist + Brief→Work unlock', () => {
     expect(screen.queryByTestId('world-brief-ready')).not.toBeInTheDocument();
     // The checklist still reflects the saved Brief.
     expect(screen.getByTestId('world-checklist-progress')).toHaveTextContent('进度 1 / 3');
+  });
+});
+
+describe('Brief flow — T3 fix round 1', () => {
+  const CREATOR = 'creator-a';
+
+  it('an edit re-save after the unlock stays silent — no ready card, no unlock toast', async () => {
+    const user = userEvent.setup();
+    const graphRef: { current: WorldKbGraphResponse } = {
+      current: graph([
+        eraEntity({
+          key_block_id: 'kb-era-1',
+          canonical_name: BRIEF_TEXT,
+          version: 1,
+          updated_at: new Date().toISOString(),
+          body: { attributes: { world_summary: BRIEF_TEXT } },
+        }),
+      ]),
+    };
+    // Work already unlocked for this creator (Brief saved earlier).
+    window.localStorage.setItem(`nexus-activation:${CREATOR}`, JSON.stringify({ work: true }));
+    const patchEntity = vi.fn(
+      (_: string, request: { patch: { title?: string } }) => {
+        graphRef.current = graph([
+          eraEntity({
+            key_block_id: 'kb-era-1',
+            canonical_name: request.patch.title!,
+            version: 2,
+            updated_at: new Date().toISOString(),
+            body: { attributes: { world_summary: request.patch.title } },
+          }),
+        ]);
+        return Promise.resolve({ entity: { key_block_id: 'kb-era-1' } });
+      },
+    );
+    renderWorld(
+      makeClient({ graph: () => Promise.resolve(graphRef.current), patchEntity }),
+      `/worlds/${WORLD_ID}`,
+      { activeCreatorId: CREATOR },
+    );
+
+    await user.click(await screen.findByTestId('world-brief-edit'));
+    const input = await screen.findByTestId('world-brief-input');
+    await user.clear(input);
+    await user.type(input, '魔法回归的世界');
+    await user.click(screen.getByTestId('world-brief-save'));
+
+    expect(await screen.findByTestId('world-brief-card')).toHaveTextContent('魔法回归的世界');
+    expect(screen.queryByTestId('world-brief-ready')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('✅ Brief 已保存——「作品」模块已解锁'),
+    ).not.toBeInTheDocument();
+    // The checklist stays at the saved-Brief state throughout.
+    expect(screen.getByTestId('world-checklist-progress')).toHaveTextContent('进度 1 / 3');
+  });
+
+  it('the shell rail reacts for the same creator: Work flips from locked button to link after the save', async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem('nexus-entrance', 'content-creator');
+    const graphRef: { current: WorldKbGraphResponse } = { current: graph([]) };
+    renderInApp(
+      <>
+        <AppRail />
+        <Routes>
+          <Route path="/worlds/:worldId" element={<WorldApp />} />
+        </Routes>
+      </>,
+      {
+        client: makeClient({
+          graph: () => Promise.resolve(graphRef.current),
+          patchEntity: patchSucceeding(graphRef),
+        }),
+        initialRouterEntries: [`/worlds/${WORLD_ID}`],
+        activeCreatorId: CREATOR,
+      },
+    );
+
+    // Locked first: a disabled button, not a link.
+    const locked = await screen.findByTestId('rail-item-work');
+    expect(locked.tagName).toBe('BUTTON');
+    expect(locked).toHaveAttribute('aria-disabled', 'true');
+
+    await user.click(await screen.findByTestId('world-brief-create'));
+    await user.type(screen.getByTestId('world-brief-input'), BRIEF_TEXT);
+    await user.click(screen.getByTestId('world-brief-save'));
+    await screen.findByTestId('world-brief-card');
+
+    // The rail re-renders unlocked: a clickable NavLink, no lock styling.
+    await waitFor(() =>
+      expect(screen.getByTestId('rail-item-work').tagName).toBe('A'),
+    );
+    expect(screen.getByTestId('rail-item-work')).not.toHaveClass('opacity-35');
   });
 });
