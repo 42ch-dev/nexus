@@ -69,6 +69,13 @@ const WorldKbPage = lazy(() =>
   import('@/pages/world-kb-page').then((m) => ({ default: m.WorldKbPage })),
 );
 
+// Route-split: the World app surface (v1219-world-module T1) owns
+// `/worlds/:worldId` — a light header + layer tabs + era projection, no
+// `@xyflow/react` — so it lazy-loads outside the canvas chunk family.
+const WorldApp = lazy(() =>
+  import('@/components/world/world-app').then((m) => ({ default: m.WorldApp })),
+);
+
 // V1.151 P1 (DF-76) — Assembly Inspector debug surface. A Control-Room-style
 // read-only page (no `@xyflow/react`), sibling of outline/timeline/chapters
 // under the Work canvas shell.
@@ -203,16 +210,19 @@ function AppRoutes() {
           path="worlds"
           element={<AppModuleRoute appId="world" />}
         />
-        {/* V1.122 P1 T3 — Timeline is the default World entry. The index
-            redirect sends `/worlds/:worldId` to `/worlds/:worldId/timeline`
-            (the World-building hero surface). Peer surfaces (World KB at
-            `/kb`, Strategy via `/strategies`) stay reachable as siblings.
-            Work entry is unchanged — `/works/:workId` still redirects to
-            `outline` (V1.118 regression gate). */}
+        {/* v1219-world-module T1 — the World app surface owns `/worlds/:worldId`:
+            header (name + 世界 · 时间线) + Brief/Narrative/Moment layer tabs on
+            the `?layer=` convention. Brief is the default layer; the legacy
+            canvas pages stay at `/worlds/:worldId/{timeline,kb,findings}`
+            until their module rebuilds. */}
         <Route path="worlds/:worldId">
           <Route
             index
-            element={<Navigate to="timeline" replace />}
+            element={
+              <Suspense fallback={<LoadingState />}>
+                <WorldApp />
+              </Suspense>
+            }
           />
           <Route
             path="timeline"
