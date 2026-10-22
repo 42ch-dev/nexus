@@ -1975,9 +1975,15 @@ describe('Components page — display voice confinement (AC-P1-5)', () => {
   });
 
   it('confines the display voice to EmptyState headline opt-in', () => {
-    // CardTitle voice="content" now uses sans display-20; only EmptyState may
-    // carry font-display on this page — interface components stay sans.
-    const allowedContainers = ['states-empty'];
+    // CardTitle voice="content" now uses sans display-20; EmptyState,
+    // UnavailableState (promoted States family, V1.148 P1), and
+    // EmptyCreateCard (V1.148 P1) carry font-display — interface components
+    // stay sans.
+    const allowedContainers = [
+      'states-empty',
+      'states-unavailable',
+      'empty-create-card-fixtures',
+    ];
     const displayEls = Array.from(document.querySelectorAll('.font-display'));
     expect(displayEls.length).toBeGreaterThan(0);
     for (const el of displayEls) {

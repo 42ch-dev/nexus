@@ -20,24 +20,19 @@ import {
 } from '@42ch/nexus-ui';
 
 import { SurfaceSourceBadges } from '@/components/surface-source-badge';
-import { Dialog, DialogTrigger, DialogContent } from '@web-ui/dialog'; // transitional — keep-web (Radix portal/focus-trap beyond presentational scope)
-import { Spinner, LoadingState, EmptyState, ErrorState } from '@web-ui/states'; // transitional — keep-web (lucide-react asset boundary; product copy & app-composition callbacks)
 import { ToastFixtures } from '@/fixtures/toast-fixtures';
 import { TransportErrorBlockFixtures } from '@/fixtures/transport-error-block';
+import { DialogFixtures } from '@/fixtures/dialog-fixtures';
+import { SheetFixtures } from '@/fixtures/sheet-fixtures';
+import { StatesFixtures } from '@/fixtures/states-fixtures';
+import { TableFixtures } from '@/fixtures/table-fixtures';
+import { EmptyCreateCardFixtures } from '@/fixtures/empty-create-card-fixtures';
 import { ComputeRunStudioFixtures } from '@/fixtures/compute-run-studio';
 import { TimelineComputeFixtures } from '@/fixtures/timeline-compute';
 import {
   ViButtonAcceptanceFixtures,
   ViTransportErrorAcceptanceFixtures,
 } from '@/fixtures/vi-aesthetic-retune-fixtures';
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from '@web-ui/table'; // transitional — keep-web (responsive overflow wrapper; not in V1.99 first batch)
 
 /* ------------------------------------------------------------------ */
 /*  Shared helpers                                                      */
@@ -105,9 +100,11 @@ function SubNav() {
     { label: 'Card', href: '#comp-card' },
     { label: 'Dialog', href: '#comp-dialog' },
     { label: 'Domain Badges', href: '#comp-domain-badges' },
+    { label: 'EmptyCreateCard', href: '#comp-empty-create-card' },
     { label: 'Input', href: '#comp-input' },
     { label: 'Label', href: '#comp-label' },
     { label: 'Select', href: '#comp-select' },
+    { label: 'Sheet', href: '#comp-sheet' },
     { label: 'States', href: '#comp-states' },
     { label: 'Table', href: '#comp-table' },
     { label: 'Tabs', href: '#comp-tabs' },
@@ -585,14 +582,16 @@ function CardSection() {
 /* ------------------------------------------------------------------ */
 
 function DialogSection() {
-  const [open, setOpen] = useState(false);
-
   return (
     <section data-testid="dialog-fixtures">
       <SectionHeading id="comp-dialog">Dialog</SectionHeading>
       <p className="text-copy-16 text-gray-700 mb-6">
-        Modal dialog — built on Radix for focus trap, Escape close, and ARIA.
-        The overlay uses the{' '}
+        Modal dialog — promoted{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @42ch/nexus-ui
+        </code>{' '}
+        primitive (V1.148 P1) built on Radix for focus trap, Escape close, and
+        ARIA. The overlay uses the{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">bg-scrim</code>{' '}
         token and the panel{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">shadow-elevation-4</code>{' '}
@@ -600,40 +599,27 @@ function DialogSection() {
         <kbd className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">Escape</kbd>{' '}
         to close, and focus returns to the trigger.
       </p>
-      <MatrixCard>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button variant="primary" data-testid="dialog-open-trigger">
-              Open dialog
-            </Button>
-          </DialogTrigger>
-          <DialogContent
-            title="Example dialog"
-            description="This dialog demonstrates the title, description, and action pattern."
-          >
-            <div className="flex flex-col gap-4">
-              <p className="text-copy-14 text-gray-900">
-                Dialog body content. The overlay dims the background and focus
-                is trapped inside the modal until dismissed.
-              </p>
-              <div className="flex justify-end gap-3">
-                <Button variant="secondary" onClick={() => setOpen(false)}>
-                  Cancel
-                </Button>
-                <Button variant="primary" onClick={() => setOpen(false)}>
-                  Confirm
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-        <p className="text-copy-13 text-gray-700 mt-4">
-          Transitional{' '}
-          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@web-ui/dialog</code>{' '}
-          — Radix portal, focus trap, and scroll lock. Keyboard: Tab cycles
-          trapped controls; Escape closes and restores focus to the trigger.
-        </p>
-      </MatrixCard>
+      <DialogFixtures />
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  4a. EmptyCreateCard (V1.148 P1)                                     */
+/* ------------------------------------------------------------------ */
+
+function EmptyCreateCardSection() {
+  return (
+    <section>
+      <SectionHeading id="comp-empty-create-card">EmptyCreateCard</SectionHeading>
+      <p className="text-copy-16 text-gray-700 mb-6">
+        Card-sized empty-state create affordance (V1.148 P1) matching the
+        list-item card footprint — the primary action is as prominent as a
+        content card on empty index pages. The dashed border card is a real
+        button: hover, focus-visible, and the disabled gate (inert with a
+        native tooltip) are live.
+      </p>
+      <EmptyCreateCardFixtures />
     </section>
   );
 }
@@ -928,72 +914,53 @@ function SelectSection() {
 }
 
 /* ------------------------------------------------------------------ */
+/*  7a. Sheet (V1.148 P1)                                               */
+/* ------------------------------------------------------------------ */
+
+function SheetSection() {
+  return (
+    <section>
+      <SectionHeading id="comp-sheet">Sheet</SectionHeading>
+      <p className="text-copy-16 text-gray-700 mb-6">
+        End-aligned drawer — promoted{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @42ch/nexus-ui
+        </code>{' '}
+        primitive (V1.148 P1) built on Radix for the work-shell right rail.
+        The overlay uses the{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">bg-scrim</code>{' '}
+        token; the rail sits at the right edge with a{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">border-l</code>{' '}
+        separator. Escape dismisses and focus returns to the trigger.
+      </p>
+      <SheetFixtures />
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  8. States                                                           */
 /* ------------------------------------------------------------------ */
 
 function StatesSection() {
-  const [retries, setRetries] = useState(0);
-
   return (
     <section data-testid="states-fixtures">
       <SectionHeading id="comp-states">States</SectionHeading>
       <p className="text-copy-16 text-gray-700 mb-6">
-        Spinner, Loading, Empty, and Error affordances per DESIGN.md § Voice &amp;
-        Content. V1.121 v0.4: the Empty headline uses the serif display tier
-        (content voice) and ErrorState sits on the token-backed{' '}
+        Spinner, Loading, Empty, Unavailable, and Error affordances per
+        DESIGN.md § Voice &amp; Content — promoted{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @42ch/nexus-ui
+        </code>{' '}
+        primitives (V1.148 P1). V1.121 v0.4: the Empty headline uses the
+        serif display tier (content voice) and ErrorState sits on the
+        token-backed{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           error-surface
         </code>{' '}
-        fill/border pair.
+        fill/border pair. The retry actions are live.
       </p>
-
-      <p className="text-label-14 text-gray-900 mb-4">Spinner</p>
-      <MatrixCard className="mb-6">
-        <div className="flex items-center gap-4" data-testid="states-spinner">
-          <Spinner />
-          <VariantLabel label="Spinner" />
-        </div>
-      </MatrixCard>
-
-      <p className="text-label-14 text-gray-900 mb-4">Loading</p>
-      <MatrixCard className="mb-6">
-        <div data-testid="states-loading">
-          <LoadingState label="Loading data…" />
-        </div>
-      </MatrixCard>
-
-      <p className="text-label-14 text-gray-900 mb-4">
-        Empty — serif display headline (content voice)
-      </p>
-      <MatrixCard className="mb-6">
-        <div data-testid="states-empty">
-          <EmptyState
-            title="No works yet"
-            description="Create a Work to start the local loop."
-          />
-        </div>
-      </MatrixCard>
-
-      <p className="text-label-14 text-gray-900 mb-4">
-        Error — error-surface tokens + retry action
-      </p>
-      <MatrixCard>
-        <div data-testid="states-error">
-          <ErrorState
-            title="Could not load this view"
-            description="The daemon returned an unexpected error."
-            onRetry={() => setRetries((n) => n + 1)}
-          />
-        </div>
-        {retries > 0 && (
-          <p
-            data-testid="states-error-retry-count"
-            className="text-copy-13 text-gray-700 mt-4"
-          >
-            Retry requested {retries} {retries === 1 ? 'time' : 'times'}.
-          </p>
-        )}
-      </MatrixCard>
+      <StatesFixtures />
     </section>
   );
 }
@@ -1003,60 +970,21 @@ function StatesSection() {
 /* ------------------------------------------------------------------ */
 
 function TableSection() {
-  const rows = [
-    { id: 'work-01', title: 'The Lost City', profile: 'Novel', status: 'Active' },
-    { id: 'work-02', title: 'Echo Protocol', profile: 'Script', status: 'Archived' },
-    { id: 'work-03', title: 'Starfall', profile: 'Novel', status: 'Draft' },
-    {
-      id: 'work-04-very-long-correlation-id-for-overflow',
-      title:
-        'A deliberately long work title that exercises horizontal scroll inside the table wrapper without forcing document-wide overflow',
-      profile: 'Novel with an extended profile label',
-      status: 'Active',
-    },
-  ];
-
   return (
     <section data-testid="table-fixtures">
       <SectionHeading id="comp-table">Table</SectionHeading>
       <p className="text-copy-16 text-gray-700 mb-6">
-        Data table — header with label-12 font, body with copy-14, hover row
-        highlighting, and a local{' '}
+        Data table — promoted{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @42ch/nexus-ui
+        </code>{' '}
+        primitives (V1.148 P1): header with label-12 font, body with copy-14,
+        hover row highlighting, and a local{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">overflow-x-auto</code>{' '}
         scroll container. Wide rows scroll inside the matrix card; the page
         itself must not gain horizontal overflow.
       </p>
-      <MatrixCard className="p-0 overflow-hidden" data-testid="table-overflow-wrapper">
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>ID</TableHead>
-                <TableHead>Title</TableHead>
-                <TableHead>Profile</TableHead>
-                <TableHead>Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell className="text-copy-13-mono text-gray-700 whitespace-nowrap">
-                    {r.id}
-                  </TableCell>
-                  <TableCell className="min-w-[280px]">{r.title}</TableCell>
-                  <TableCell className="whitespace-nowrap">{r.profile}</TableCell>
-                  <TableCell>{r.status}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-        <p className="text-copy-13 text-gray-700 p-4">
-          Row hover triggers background-200; header uses background-200 with
-          bottom border gray-alpha-400. The last row carries long copy to prove
-          local horizontal scroll.
-        </p>
-      </MatrixCard>
+      <TableFixtures />
     </section>
   );
 }
@@ -1432,14 +1360,12 @@ export function ComponentsPage() {
         UI primitive matrices per IA guide §4.3 and DESIGN.md. Promoted
         primitives are imported via{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>
-        ; transitional primitives remain on{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@web-ui/*</code>{' '}
-        until their promotion slice lands. Dialog remains transitional; Tabs is
-        promoted. Every matrix cell renders a real component — hover,
+        ; Dialog, Sheet, Table, States, and EmptyCreateCard joined the promoted
+        set in V1.148 P1. Every matrix cell renders a real component — hover,
         focus-visible, disabled, and loading states are live; toggle the theme
         to verify both light and dark (V1.121 states matrix).
       </p>
-      <SurfaceSourceBadges importPaths={["@42ch/nexus-ui", "@web-ui/dialog", "@web-ui/states", "@web-ui/table"]} /> {/* transitional — badge path labels (not imports) */}
+      <SurfaceSourceBadges importPaths={['@42ch/nexus-ui']} />
       <SubNav />
 
       <BadgeSection />
@@ -1447,9 +1373,11 @@ export function ComponentsPage() {
       <ButtonSection />
       <CardSection />
       <DialogSection />
+      <EmptyCreateCardSection />
       <InputSection />
       <LabelSection />
       <SelectSection />
+      <SheetSection />
       <StatesSection />
       <TableSection />
       <TabsSection />
@@ -1474,16 +1402,15 @@ export function ComponentsPage() {
       </section>
 
       <p className="text-copy-13 text-gray-700 mt-12 pt-8 border-t border-gray-alpha-200">
-        17 promoted (Badge, Button, Card, Input, Label, Textarea, Select, Toast,
-        TransportErrorBlock, Tabs, RunFormFields, EntityPickerField,
+        22 promoted families (Badge, Button, Card, Dialog, EmptyCreateCard,
+        Input, Label, Select, Sheet, Spinner/LoadingState/EmptyState/
+        UnavailableState/ErrorState, Table, Tabs, Textarea, Toast,
+        TransportErrorBlock, RunFormFields, EntityPickerField,
         ProposalSections, RunStatusBadge, RunsTable, ComputeResultNodeChrome,
-        ComputeInspectorSections) + 3 transitional (Dialog,
-        States, Table) rendered live via{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>{' '}
-        (promoted) and{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@web-ui/*</code>{' '}
-        (transitional). No transitional primitives are migrated, copied, or
-        re-implemented in this gallery.
+        ComputeInspectorSections) rendered live via{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>
+        . No transitional primitives remain on this page; none are migrated,
+        copied, or re-implemented in this gallery.
       </p>
     </div>
   );
