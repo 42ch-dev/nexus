@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@42ch/nexus-ui';
-import { storeApiKey } from '@/lib/client-context';
+import { clearStoredApiKey, storeApiKey } from '@/lib/client-context';
 import { BrowserClient, NexusClientError } from '@/lib/nexus';
 import { AUTHORIZED_EVENT, UNAUTHORIZED_EVENT } from '@/lib/nexus/errors';
 
@@ -45,7 +45,11 @@ export function AuthRecoveryGate({ children }: { children: ReactNode }) {
     setProbe('checking');
     try {
       await new BrowserClient(candidate ? { apiKey: candidate } : {}).listCreators();
+      // A cookie-only success means the session is authoritative: drop any
+      // stale stored key, because a non-empty X-API-Key wins service-side and
+      // would keep rejecting requests (access spec §6.1).
       if (candidate) storeApiKey(candidate);
+      else clearStoredApiKey();
       window.dispatchEvent(new Event(AUTHORIZED_EVENT));
       setKey('');
       setProbe('idle');

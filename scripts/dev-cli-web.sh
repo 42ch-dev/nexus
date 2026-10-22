@@ -64,9 +64,11 @@ health_ok() {
   " "${BASE_URL}"
 }
 
+SERVICE_STARTED=0
 if health_ok; then
   echo "    service already running"
 else
+  SERVICE_STARTED=1
   echo "    starting standalone service (detached)"
   mkdir -p "${REPO_ROOT}/.dev"
   SERVICE_ARGS=(--home "${HOME}" --host "${NEXUS42_DEV_HOST:-127.0.0.1}" --port "${PORT}")
@@ -84,18 +86,22 @@ else
   echo "    service healthy (pid ${SERVICE_PID})"
 fi
 
-# Browser access (access spec §3.1): the one-time tokenized URL from this
-# boot's service log. Dev serves the SPA through Vite, so the service never
-# auto-opens a browser here; the link is surfaced for the user to copy.
+# Browser access (access spec §3.1): the tokenized URL from the LATEST service
+# boot in the log. Tokens are single-use, so an earlier run's line is dead and
+# only the last match is useful. Dev serves the SPA through Vite, so the
+# service never auto-opens a browser here; the link is surfaced to copy.
 SERVICE_LOG="${REPO_ROOT}/.dev/nexus-service.log"
 BOOTSTRAP_URL=""
 if [ -f "${SERVICE_LOG}" ]; then
-  BOOTSTRAP_URL="$(grep -m1 -o '\[nexus-service\] open: [^ ]*' "${SERVICE_LOG}" | sed 's/^\[nexus-service\] open: //' || true)"
+  BOOTSTRAP_URL="$(grep -o '\[nexus-service\] open: [^ ]*' "${SERVICE_LOG}" | tail -1 | sed 's/^\[nexus-service\] open: //' || true)"
 fi
-if [ -n "${BOOTSTRAP_URL}" ]; then
+if [ "${SERVICE_STARTED}" = "0" ]; then
+  echo "    service was already running; its one-time access link came from that run"
+  echo "    restart the service for a fresh access link"
+elif [ -n "${BOOTSTRAP_URL}" ]; then
   echo "==> browser access: ${BOOTSTRAP_URL}"
 else
-  echo "    no bootstrap URL in ${SERVICE_LOG} (the running service predates this run)"
+  echo "    no bootstrap URL in ${SERVICE_LOG}; see the service log"
 fi
 
 echo "==> validating running service identity"

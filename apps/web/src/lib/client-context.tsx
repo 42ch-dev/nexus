@@ -96,6 +96,19 @@ export function storeApiKey(key: string): void {
   }
 }
 
+/**
+ * Drops the stored key so a valid session cookie is admitted instead: the
+ * service lets a non-empty `X-API-Key` win, so a stale key would keep 401ing
+ * even after a successful cookie-only probe (access spec §6.1).
+ */
+export function clearStoredApiKey(): void {
+  try {
+    window.localStorage.removeItem(API_KEY_STORAGE);
+  } catch {
+    // Storage unavailable: there is no stored key to drop.
+  }
+}
+
 function buildClient(config: ConnectionConfig | null, desktop: boolean): NexusClient {
   // Remote mode requires an explicit `active: true` (same rule as
   // `daemon-health-indicator`). A saved-but-inactive config, a partial

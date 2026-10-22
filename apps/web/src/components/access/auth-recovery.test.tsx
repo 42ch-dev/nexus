@@ -3,6 +3,7 @@ import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AUTHORIZED_EVENT, UNAUTHORIZED_EVENT } from '@/lib/nexus/errors';
+import { readStoredApiKey } from '@/lib/client-context';
 import { useHandlers } from '@/test/msw-server';
 
 import { AuthRecoveryGate } from './auth-recovery';
@@ -94,6 +95,31 @@ describe('AuthRecoveryGate', () => {
       fireEvent.click(screen.getByRole('button', { name: '重新检测' }));
     });
 
+    expect(screen.getByText('intended destination')).toBeInTheDocument();
+  });
+
+  it('drops a stale stored key when the cookie-only probe succeeds', async () => {
+    window.localStorage.setItem('nexus-api-key', 'stale-key');
+    const sentKeys: (string | null)[] = [];
+    useHandlers(
+      http.get('/v1/daemon/creators', ({ request }) => {
+        sentKeys.push(request.headers.get('x-api-key'));
+        return CREATORS_OK();
+      }),
+    );
+    renderGate();
+    signalUnauthorized();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '重新检测' }));
+    });
+
+    // The probe is cookie-only, and the stale key is gone, so the client that
+    // ClientProvider rebuilds (which reads this store) sends no X-API-Key and
+    // the valid session cookie wins service-side.
+    expect(sentKeys).toEqual([null]);
+    expect(window.localStorage.getItem('nexus-api-key')).toBeNull();
+    expect(readStoredApiKey()).toBeNull();
     expect(screen.getByText('intended destination')).toBeInTheDocument();
   });
 });
