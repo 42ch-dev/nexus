@@ -2,7 +2,8 @@
   "appTitle": "控制室",
   "aria": {
     "primary": "主导航",
-    "primaryNavigation": "主导航"
+    "primaryNavigation": "主导航",
+    "rail": "应用导航"
   },
   "route": {
     "works": "作品",
@@ -293,5 +294,26 @@
       "cancel": "取消",
       "confirm": "删除"
     }
+  },
+  "rail": {
+    "world": "世界",
+    "work": "作品",
+    "session": "会话",
+    "memory": "记忆",
+    "hub": "操作台",
+    "harness": "Harness",
+    "modules": "模块",
+    "caps": "能力"
+  },
+  "topnav": {
+    "searchDisabled": "搜索（即将推出）",
+    "language": "语言",
+    "theme": "切换配色",
+    "settings": "系统设置",
+    "agentChip": "当前 AI agent · 点击切换",
+    "noAgent": "未选择 Agent",
+    "profileSection": "CREATOR PROFILE",
+    "newCreator": "＋ 新建 Creator…",
+    "activeMarker": "当前"
   }
 }
