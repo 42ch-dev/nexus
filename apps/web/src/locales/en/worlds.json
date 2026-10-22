@@ -27,5 +27,51 @@
   "loadingMore": "Loading…",
   "overview": {
     "failed": "Couldn't load recent activity"
+  },
+  "worldApp": {
+    "subtitle": "World · Timeline",
+    "loading": "Loading the world…",
+    "loadError": "Couldn't load the world: {{reason}}",
+    "retry": "Retry",
+    "tabsAria": "World layers",
+    "layer": {
+      "brief": "Brief",
+      "narrative": "Narrative",
+      "moment": "Moment"
+    },
+    "briefEmpty": {
+      "title": "Write your first Brief",
+      "body": "The Brief is the highest-level description of this world — one sentence that says what it is.",
+      "example": "For example: “a low-magic fantasy world where magic is dying”",
+      "action": "+ Write a Brief"
+    },
+    "briefEditor": {
+      "placeholder": "A low-magic fantasy world where magic is dying…",
+      "ariaLabel": "Brief text",
+      "cancel": "Cancel",
+      "save": "Save Brief",
+      "saveFailure": "Couldn't save the Brief: {{reason}}. Your draft is kept — just retry."
+    },
+    "briefCard": {
+      "tag": "BRIEF · {{when}}",
+      "justNow": "just now",
+      "edit": "Edit"
+    },
+    "briefReady": {
+      "title": "The world is ready",
+      "body": "The Works module is unlocked — create a Work and start writing in this world."
+    },
+    "briefSavedToast": "✅ Brief saved — the Works module is unlocked",
+    "checklist": {
+      "heading": "Next up",
+      "step1": "① Finish the Brief",
+      "step2": "② Create the first work and bind the world",
+      "step3": "③ Let AI draft the first Narrative",
+      "progress": "Progress {{n}} / 3"
+    },
+    "briefAria": "Brief layer",
+    "narrativePlaceholder": "Narrative layer — chapter-level narrative timeline",
+    "momentPlaceholder": "Moment layer — scene-level fine-grained timeline",
+    "layerPlaceholderSub": "This layer opens in a later iteration"
   }
 }

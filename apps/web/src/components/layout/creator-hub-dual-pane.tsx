@@ -70,7 +70,10 @@ export function CreatorHubDualPane() {
   const handleSelectCard = useCallback(
     (id: string) => {
       if (activeTab === 'world') {
-        navigate(`/worlds/${encodeURIComponent(id)}/timeline`);
+        // v1219-world-module T2 (T1 review follow-up): the world index is the
+        // new app surface (Brief default); the per-world Timeline stays
+        // reachable via the row submenu's 打开时间线.
+        navigate(`/worlds/${encodeURIComponent(id)}`);
         return;
       }
       navigate(`/works/${encodeURIComponent(id)}/outline`);
