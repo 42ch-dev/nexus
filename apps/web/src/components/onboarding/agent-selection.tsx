@@ -12,6 +12,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { User } from 'lucide-react';
 
 import { useAgentProfile, useScanAgents } from '@/api/queries';
@@ -20,6 +21,7 @@ import { useDesktopCapabilities } from '@/lib/client-context';
 import { resolveCatalogItems, type AgentCatalogItem } from '@/lib/agent-catalog';
 import { errorMessage } from '@/lib/error-message';
 import { queryKeys } from '@/lib/nexus/query-keys';
+import { useToast } from '@/lib/use-toast';
 import { cn } from '@/lib/utils';
 import { Badge, Button, Input, Label } from '@/components/ui';
 import type { AgentScanEntry } from '@42ch/nexus-contracts';
@@ -108,12 +110,18 @@ export interface AgentSelection {
   manual: string;
   setManual: (command: string) => void;
   retry: () => void;
-  /** Persist the current profile (a manual command overrides the selected row). */
-  commit: () => void;
+  /**
+   * Persist the current profile (a manual command overrides the selected row).
+   * Resolves `true` when the selection was saved; `false` when the desktop
+   * write failed (one error toast shown) — callers must not advance.
+   */
+  commit: () => Promise<boolean>;
   canContinue: boolean;
 }
 
 export function useAgentSelection(): AgentSelection {
+  const { t: commonT } = useTranslation('common');
+  const { toast } = useToast();
   const desktop = useDesktopCapabilities();
   const qc = useQueryClient();
   const creatorId = useActiveCreatorId();
@@ -138,19 +146,27 @@ export function useAgentSelection(): AgentSelection {
   const restored = useRef(false);
 
   // Restore the saved profile once the scan and the desktop read have settled.
-  // A row-backed profile re-selects its row; a custom command only fills the
-  // manual field.
+  // A row-backed profile re-selects its row; a saved command that differs from
+  // the row's own is a manual override and must come back into the field so a
+  // later commit does not overwrite it. With zero scan rows (empty/error) the
+  // saved command is the only usable path, so it still fills the field and
+  // lets the step continue.
+  const scanSettled = !scan.isLoading;
   useEffect(() => {
-    if (restored.current || choices.length === 0 || !profileSettled) return;
+    if (restored.current || !profileSettled || !scanSettled) return;
     restored.current = true;
     if (!saved) return;
     const match = matchChoice(choices, saved);
     if (match) {
       setPickedId(match.pickerId);
+      const savedCommand = saved.launchCommand?.trim();
+      if (savedCommand && savedCommand !== match.item.launchCommand?.trim()) {
+        setManual(savedCommand);
+      }
       return;
     }
     setManual(saved.launchCommand ?? '');
-  }, [choices, saved, profileSettled]);
+  }, [choices, saved, profileSettled, scanSettled]);
 
   const selectedId = pickedId ?? recommendedId;
   const selectedChoice = choices.find((choice) => choice.pickerId === selectedId) ?? null;
@@ -163,20 +179,24 @@ export function useAgentSelection(): AgentSelection {
         ? 'empty'
         : 'ready';
 
-  function persist(profile: AgentProfile) {
+  function persist(profile: AgentProfile): Promise<boolean> {
     if (!desktop) {
       writeStoredProfile(creatorId, profile);
-      return;
+      return Promise.resolve(true);
     }
-    void desktop
+    return desktop
       .setAgentProfile(profile.name, profile.launchCommand)
       .then(() => {
         // The status bar and agent chip read the saved profile + scan.
         void qc.invalidateQueries({ queryKey: queryKeys.agentProfile.detail() });
         void qc.invalidateQueries({ queryKey: queryKeys.agentHost.scan({ filter: 'all' }) });
+        return true;
       })
       .catch((error) => {
+        // Logged here; the toast is shown by commit() so a failed row click
+        // does not double-report — advance retries the same write.
         console.error('setAgentProfile failed', error);
+        return false;
       });
   }
 
@@ -185,16 +205,22 @@ export function useAgentSelection(): AgentSelection {
     if (!choice) return;
     setPickedId(pickerId);
     setManual('');
-    persist(profileOfChoice(choice));
+    void persist(profileOfChoice(choice));
   }
 
-  function commit() {
+  async function commit(): Promise<boolean> {
     const command = manual.trim();
-    if (command) {
-      persist({ name: selectedChoice?.entry.name ?? command, launchCommand: command });
-      return;
+    const profile = command
+      ? { name: selectedChoice?.entry.name ?? command, launchCommand: command }
+      : selectedChoice
+        ? profileOfChoice(selectedChoice)
+        : null;
+    if (!profile) return true;
+    const persisted = await persist(profile);
+    if (!persisted) {
+      toast({ variant: 'error', title: commonT('error.couldNotSaveAgentProfile') });
     }
-    if (selectedChoice) persist(profileOfChoice(selectedChoice));
+    return persisted;
   }
 
   const canContinue = status !== 'loading' && (manual.trim() !== '' || selectedId !== null);

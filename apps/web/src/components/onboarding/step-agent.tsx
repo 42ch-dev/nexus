@@ -71,9 +71,10 @@ export function StepAgent({ onBack, onNext }: StepAgentProps) {
   const scanning = selection.status === 'loading';
   const canContinue = !scanning && selection.canContinue;
 
-  function advance() {
-    selection.commit();
-    onNext();
+  async function advance() {
+    // Do not advance when the desktop profile write failed — the step stays
+    // so the user can retry (commit() surfaces the error toast).
+    if (await selection.commit()) onNext();
   }
 
   return (

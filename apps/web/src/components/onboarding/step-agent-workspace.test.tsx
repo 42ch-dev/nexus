@@ -181,6 +181,28 @@ describe('StepAgentWorkspace (developer agent + workspace)', () => {
     await waitFor(() => expect(field).toHaveValue('my-cli --flag'));
   });
 
+  it('restores a saved custom launch command together with its row on re-entry', async () => {
+    const user = userEvent.setup();
+    const onFinish = vi.fn();
+    window.localStorage.setItem(
+      'nexus-agent-profile:creator-a',
+      JSON.stringify({ name: 'Claude Code', launchCommand: 'claude --opus' }),
+    );
+    renderStep({ client: makeClient('/home/creator/Nexus'), onFinish });
+
+    expect(await screen.findByTestId('agent-row-claude')).toHaveAttribute('aria-checked', 'true');
+    expect(
+      screen.getByLabelText('自定义启动命令（可选，覆盖选中 agent 的默认启动方式）'),
+    ).toHaveValue('claude --opus');
+
+    await user.click(screen.getByRole('button', { name: '进入开发台' }));
+    expect(onFinish).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(window.localStorage.getItem('nexus-agent-profile:creator-a')!)).toEqual({
+      name: 'Claude Code',
+      launchCommand: 'claude --opus',
+    });
+  });
+
   it('completes with the recommended agent and reports the finish intent', async () => {
     const user = userEvent.setup();
     const { onFinish } = renderStep();

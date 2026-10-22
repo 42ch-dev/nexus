@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { StepAgent } from './step-agent';
 import { renderInApp } from '@/test/test-providers';
 import type { NexusClient } from '@/lib/nexus';
+import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
 import type { AgentScanEntry } from '@42ch/nexus-contracts';
 
 const AGENTS: AgentScanEntry[] = [
@@ -36,14 +37,49 @@ function makeClient(scanAgents: NexusClient['scanAgents']): NexusClient {
   } as unknown as NexusClient;
 }
 
+function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapabilities {
+  return {
+    openWith: () => Promise.resolve(),
+    openExternalUrl: () => Promise.resolve(),
+    revealInFinder: () => Promise.resolve(),
+    getDaemonStatus: () => Promise.resolve({ state: 'running', port: 8420 }),
+    onDaemonStatusChanged: () => Promise.resolve(() => {}),
+    startDaemon: () => Promise.resolve(),
+    stopDaemon: () => Promise.resolve(),
+    restartDaemon: () => Promise.resolve(),
+    resetLocalDatabase: () => Promise.resolve({ status: 'confirmed' }),
+    pickDirectory: () => Promise.resolve(null),
+    setWorkspacePath: () => Promise.resolve(),
+    getSetupCompleted: () => Promise.resolve(true),
+    setSetupCompleted: () => Promise.resolve(),
+    getEntrance: () => Promise.resolve('content-creator'),
+    setEntrance: () => Promise.resolve(),
+    setAgentProfile: () => Promise.resolve(),
+    getAgentProfile: () => Promise.resolve(null),
+    switchActiveCreator: () => Promise.resolve('/tmp/nexus'),
+    getWorkspaceRoot: () => Promise.resolve('/tmp/nexus'),
+    toggleMaximizeWindow: () => Promise.resolve(),
+    ...overrides,
+  };
+}
+
 function renderStep(
   client: NexusClient,
-  { onNext = vi.fn(), creatorId = 'creator-a' }: { onNext?: () => void; creatorId?: string } = {},
+  {
+    onNext = vi.fn(),
+    creatorId = 'creator-a',
+    desktop = null,
+  }: {
+    onNext?: () => void;
+    creatorId?: string;
+    desktop?: DesktopCapabilities | null;
+  } = {},
 ) {
   return {
     onNext,
     ...renderInApp(<StepAgent onBack={() => {}} onNext={onNext} />, {
       client,
+      desktop,
       activeCreatorId: creatorId,
     }),
   };
@@ -173,6 +209,48 @@ describe('StepAgent (creator AI partner)', () => {
       name: 'claude --model opus',
       launchCommand: 'claude --model opus',
     });
+  });
+
+  it('restores a saved manual command on an empty scan so Continue can proceed', async () => {
+    const user = userEvent.setup();
+    const onNext = vi.fn();
+    window.localStorage.setItem(
+      'nexus-agent-profile:creator-a',
+      JSON.stringify({ name: 'my-cli', launchCommand: 'my-cli --flag' }),
+    );
+    renderStep(makeClient(() => Promise.resolve({ agents: [] })), { onNext });
+
+    expect(await screen.findByRole('heading', { name: '没有找到可用的 AI' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下一步' })).toBeEnabled();
+
+    await user.click(screen.getByRole('button', { name: '▸ 高级：手动指定启动命令' }));
+    expect(screen.getByRole('textbox', { name: '启动命令' })).toHaveValue('my-cli --flag');
+
+    await user.click(screen.getByRole('button', { name: '下一步' }));
+    expect(onNext).toHaveBeenCalledTimes(1);
+    // Manual-only profiles carry the command as the profile name.
+    expect(JSON.parse(window.localStorage.getItem('nexus-agent-profile:creator-a')!)).toEqual({
+      name: 'my-cli --flag',
+      launchCommand: 'my-cli --flag',
+    });
+  });
+
+  it('stays on the step with an error toast when the desktop profile write fails', async () => {
+    const user = userEvent.setup();
+    const onNext = vi.fn();
+    renderStep(makeClient(() => Promise.resolve({ agents: AGENTS })), {
+      onNext,
+      desktop: makeDesktop({
+        setAgentProfile: () => Promise.reject(new Error('disk full')),
+      }),
+    });
+
+    await user.click(await screen.findByTestId('agent-row-codex'));
+    await user.click(screen.getByRole('button', { name: '下一步' }));
+
+    // The Toaster mounts per render; assert exactly one actionable toast.
+    expect(await screen.findAllByText('Could not save agent profile.')).toHaveLength(1);
+    expect(onNext).not.toHaveBeenCalled();
   });
 
   it('shows the scan error and retries it', async () => {

@@ -62,9 +62,10 @@ export function StepAgentWorkspace({ onBack, onFinish }: StepAgentWorkspaceProps
     }
   }
 
-  function finish() {
-    selection.commit();
-    onFinish();
+  async function finish() {
+    // Do not finish when the desktop profile write failed — the step stays
+    // so the user can retry (commit() surfaces the error toast).
+    if (await selection.commit()) onFinish();
   }
 
   return (
