@@ -11,9 +11,12 @@
  *   - 409 `world_kb_conflict` on create = minted-id collision → remint and
  *     retry exactly once.
  *
- * The World KB graph query is invalidated on settle so the saved card renders
- * without a reload. Errors propagate to the caller untouched — the editor
- * owns the inline failure copy and the draft (never touched here).
+ * The World KB graph query is invalidated inside `onSuccess` (returned
+ * promise is awaited by `mutateAsync`), so by the time the editor leaves
+ * edit mode the eras prop already contains the saved entity — the saved
+ * card renders without a reload and without an empty-state flash. Errors
+ * propagate to the caller untouched — the editor owns the inline failure
+ * copy and the draft (never touched here).
  */
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
@@ -68,8 +71,10 @@ export function useSaveBrief(worldId: string) {
         return patchBrief(client, worldId, mintBriefEntityId(), 0, text);
       }
     },
-    onSettled: () => {
-      void qc.invalidateQueries({ queryKey: queryKeys.worldKb.graph(worldId) });
+    onSuccess: async () => {
+      // Awaited by mutateAsync: the caller can leave edit mode immediately
+      // after save without an empty-state flash.
+      await qc.invalidateQueries({ queryKey: queryKeys.worldKb.graph(worldId) });
     },
   });
 }

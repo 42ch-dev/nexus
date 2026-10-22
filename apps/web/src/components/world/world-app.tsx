@@ -114,47 +114,58 @@ function WorldAppSurface({ worldId }: { worldId: string }) {
  * the `+ 写 Brief` action. Eras without a summary keep the T1 plain list
  * item. The `世界已就绪` follow-up card announces the Work unlock after the
  * first save.
+ *
+ * `editingId` tracks WHICH era is being edited (`'new'` = create), so each
+ * card's `编辑` binds its own entity id/version/initial text. Leaving edit
+ * mode is safe without a flash because {@link useSaveBrief} awaits the graph
+ * invalidation inside `onSuccess` — by the time the editor's `mutateAsync`
+ * resolves, the eras prop already contains the saved entity.
  */
 function BriefLayer({ worldId, eras }: { worldId: string; eras: WorldKbEntityProjection[] }) {
   const { t } = useTranslation('worlds');
   const { toast } = useToast();
-  const [editing, setEditing] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const withSummary = eras.filter((era) => eraSummary(era) !== null);
   const withoutSummary = eras.filter((era) => eraSummary(era) === null);
   const brief = withSummary[0] ?? null;
+  const editingEra = editingId ? (eras.find((era) => era.key_block_id === editingId) ?? null) : null;
 
-  if (editing) {
+  if (editingId !== null) {
     return (
       <BriefEditor
         worldId={worldId}
-        initialText={brief ? (eraSummary(brief) ?? undefined) : undefined}
-        entity={brief ? { entityId: brief.key_block_id, version: brief.version } : undefined}
-        onCancel={() => setEditing(false)}
+        initialText={editingEra ? (eraSummary(editingEra) ?? undefined) : undefined}
+        entity={
+          editingEra
+            ? { entityId: editingEra.key_block_id, version: editingEra.version }
+            : undefined
+        }
+        onCancel={() => setEditingId(null)}
         onSaved={() => {
-          setEditing(false);
+          setEditingId(null);
           toast({ variant: 'success', title: t('worldApp.briefSavedToast') });
         }}
       />
     );
   }
-  if (!brief) {
-    return <BriefEmpty onCreate={() => setEditing(true)} />;
-  }
   return (
     <div className="flex flex-col gap-2">
-      <ul className="flex flex-col gap-2">
-        {withSummary.map((era) => (
-          <li key={era.key_block_id}>
-            <BriefCard
-              text={eraSummary(era)!}
-              title={era.canonical_name}
-              updatedAt={era.updated_at}
-              onEdit={() => setEditing(true)}
-            />
-          </li>
-        ))}
-      </ul>
+      {!brief && <BriefEmpty onCreate={() => setEditingId('new')} />}
+      {withSummary.length > 0 && (
+        <ul className="flex flex-col gap-2">
+          {withSummary.map((era) => (
+            <li key={era.key_block_id}>
+              <BriefCard
+                text={eraSummary(era)!}
+                title={era.canonical_name}
+                updatedAt={era.updated_at}
+                onEdit={() => setEditingId(era.key_block_id)}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
       {withoutSummary.length > 0 && (
         <ul className="flex flex-col gap-2">
           {withoutSummary.map((era) => (
@@ -164,7 +175,7 @@ function BriefLayer({ worldId, eras }: { worldId: string; eras: WorldKbEntityPro
           ))}
         </ul>
       )}
-      <BriefReadyCard />
+      {brief && <BriefReadyCard />}
     </div>
   );
 }

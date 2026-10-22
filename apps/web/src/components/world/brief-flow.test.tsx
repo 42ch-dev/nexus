@@ -52,6 +52,16 @@ function graph(entities: WorldKbEntityProjection[]): WorldKbGraphResponse {
   return { entities, source_anchors: [], relationships: [] };
 }
 
+// Promise.withResolvers is unavailable at the current tsconfig lib — local
+// equivalent until the lib target reaches es2024.
+function withResolvers<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 interface MockOpts {
   world?: () => Promise<unknown>;
   graph: () => Promise<unknown>;
@@ -317,5 +327,126 @@ describe('Brief flow — edit (per-row OCC)', () => {
     expect(worldId).toBe(WORLD_ID);
     expect(request.entity_id).toBe('kb-era-1');
     expect(request.expected_version).toBe(3);
+  });
+
+  it('binds the clicked card: editing the second era sends the second entity id + version', async () => {
+    const user = userEvent.setup();
+    const graphRef: { current: WorldKbGraphResponse } = {
+      current: graph([
+        eraEntity({
+          key_block_id: 'kb-era-1',
+          canonical_name: '第一纪元',
+          version: 1,
+          updated_at: new Date().toISOString(),
+          body: { attributes: { world_summary: '第一纪元的简介。' } },
+        }),
+        eraEntity({
+          key_block_id: 'kb-era-2',
+          canonical_name: '第二纪元',
+          version: 5,
+          updated_at: new Date().toISOString(),
+          body: { attributes: { world_summary: '第二纪元的简介。' } },
+        }),
+      ]),
+    };
+    const patchEntity = vi.fn(
+      (
+        _: string,
+        request: {
+          entity_id: string;
+          expected_version: number;
+          patch: { title?: string };
+        },
+      ) => {
+        graphRef.current = graph([
+          eraEntity({
+            key_block_id: 'kb-era-2',
+            canonical_name: request.patch.title!,
+            version: 6,
+            updated_at: new Date().toISOString(),
+            body: { attributes: { world_summary: request.patch.title } },
+          }),
+        ]);
+        return Promise.resolve({ entity: { key_block_id: 'kb-era-2' } });
+      },
+    );
+    renderWorld(makeClient({ graph: () => Promise.resolve(graphRef.current), patchEntity }));
+
+    const editButtons = await screen.findAllByTestId('world-brief-edit');
+    expect(editButtons).toHaveLength(2);
+    await user.click(editButtons[1]);
+
+    const input = await screen.findByTestId('world-brief-input');
+    expect(input).toHaveValue('第二纪元的简介。');
+    await user.clear(input);
+    await user.type(input, '更新后的第二纪元。');
+    await user.click(screen.getByTestId('world-brief-save'));
+
+    expect(patchEntity).toHaveBeenCalledTimes(1);
+    const request = (patchEntity.mock.calls[0] as [string, { entity_id: string; expected_version: number }])[1];
+    expect(request.entity_id).toBe('kb-era-2');
+    expect(request.expected_version).toBe(5);
+  });
+});
+
+describe('Brief flow — no flash / no lost rows (fix round 1)', () => {
+  it('stays in the editor while the graph refetch is pending, then lands on the card', async () => {
+    const user = userEvent.setup();
+    const savedGraph = graph([
+      eraEntity({
+        key_block_id: 'kb-new',
+        canonical_name: BRIEF_TEXT,
+        version: 1,
+        updated_at: new Date().toISOString(),
+        body: { attributes: { world_summary: BRIEF_TEXT } },
+      }),
+    ]);
+    // First read resolves immediately; the post-save invalidation refetch
+    // stays pending until the test releases it.
+    let releaseRefetch: (g: WorldKbGraphResponse) => void = () => {};
+    let read = 0;
+    const graphFn = () => {
+      read += 1;
+      if (read === 1) return Promise.resolve(graph([]));
+      const { promise, resolve } = withResolvers<WorldKbGraphResponse>();
+      releaseRefetch = resolve;
+      return promise;
+    };
+    const patchEntity = vi.fn(() => Promise.resolve({ entity: { key_block_id: 'kb-new' } }));
+    renderWorld(makeClient({ graph: graphFn, patchEntity }));
+
+    await user.click(await screen.findByTestId('world-brief-create'));
+    await user.type(screen.getByTestId('world-brief-input'), BRIEF_TEXT);
+    await user.click(screen.getByTestId('world-brief-save'));
+
+    await waitFor(() => expect(patchEntity).toHaveBeenCalledTimes(1));
+    // The editor is still mounted and the empty state never flashes — save
+    // does not leave edit mode until the awaited graph refetch resolves.
+    expect(screen.getByTestId('world-brief-editor')).toBeInTheDocument();
+    expect(screen.queryByTestId('world-brief-empty')).not.toBeInTheDocument();
+
+    releaseRefetch(savedGraph);
+    expect(await screen.findByTestId('world-brief-card')).toBeInTheDocument();
+    expect(screen.queryByTestId('world-brief-empty')).not.toBeInTheDocument();
+  });
+
+  it('keeps the without-summary era rows visible alongside the empty state', async () => {
+    renderWorld(
+      makeClient({
+        graph: () =>
+          Promise.resolve(
+            graph([
+              eraEntity({
+                key_block_id: 'kb-era-2',
+                canonical_name: '第二纪元',
+                version: 1,
+              }),
+            ]),
+          ),
+      }),
+    );
+
+    expect(await screen.findByTestId('world-brief-empty')).toBeInTheDocument();
+    expect(screen.getByTestId('world-layer-brief')).toHaveTextContent('第二纪元');
   });
 });
