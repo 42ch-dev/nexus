@@ -1,6 +1,12 @@
 # Web Rebuild Cleanup List
 
-Status: list only · 2026-10-22 · branch `feat/ui-teardown-docs`
+| Attribute | Value |
+| --- | --- |
+| **Status** | **Active** — list-only cleanup input for the rebuild's first cleanup wave. Nothing is deleted by this document; every entry carries evidence + disposition label. |
+| **Document class** | Survey-derived cleanup list (grep-level evidence; AST-level dead-code proof NOT performed — verify before deleting) |
+| **Scope** | Zombie/unreachable pages, legacy shell candidates, dead exports, intentional compat stubs in `apps/web` |
+| **Coordinates with** | [web-ui.md](web-ui.md), [web-ui-teardown-inventory.md](web-ui-teardown-inventory.md) (§6 non-goals) |
+| **Authored** | 2026-10-22 — product-manager, from the dead-routes survey (plan `20261022-ui-library-teardown` follow-up) |
 
 ## 1. Purpose & discipline
 
