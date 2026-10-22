@@ -15,6 +15,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { CreatorHubPage } from '@/pages/creator-hub-page';
+import { DeveloperHubPage } from '@/pages/developer-hub-page';
 import { WorkspaceProvider } from '@/lib/workspace-context';
 import { WorkspaceChips } from '@/components/shell/workspace-chips';
 import { i18n } from '@/lib/i18n/config';
@@ -41,12 +42,12 @@ let listRequests = 0;
 let setActiveRequests: unknown[] = [];
 let createRequests = 0;
 
-function useWorkspaceHandlers() {
+function useWorkspaceHandlers(items: unknown[] = [DEFAULT_WS, NOVEL_WS]) {
   useHandlers(
     http.get('/v1/daemon/workspaces', () => {
       listRequests += 1;
       return HttpResponse.json({
-        items: [DEFAULT_WS, NOVEL_WS],
+        items,
         pagination: { limit: 100, has_more: false },
       });
     }),
@@ -91,7 +92,15 @@ describe('WorkspaceChips', () => {
     await i18n.changeLanguage('zh-CN');
   });
 
-  it('renders one chip per workspace display_name (fresh creator: exactly 默认工作区)', async () => {
+  it('fresh creator sees exactly one chip, 默认工作区', async () => {
+    useWorkspaceHandlers([DEFAULT_WS]);
+    renderChips();
+    const chips = await screen.findAllByRole('button');
+    expect(chips).toHaveLength(1);
+    expect(chips[0]).toHaveTextContent('默认工作区');
+  });
+
+  it('renders one chip per workspace display_name', async () => {
     useWorkspaceHandlers();
     renderChips();
     const chips = await screen.findAllByRole('button');
@@ -156,5 +165,14 @@ describe('WorkspaceChips', () => {
     });
     await screen.findByTestId('workspace-chips');
     expect(await screen.findByRole('button', { name: '默认工作区' })).toBeInTheDocument();
+  });
+
+  it('never mounts in the developer shell (developer hub page)', () => {
+    useWorkspaceHandlers();
+    renderInApp(<DeveloperHubPage />, {
+      client: new BrowserClient(),
+      activeCreatorId: 'creator-a',
+    });
+    expect(screen.queryByTestId('workspace-chips')).not.toBeInTheDocument();
   });
 });
