@@ -49,4 +49,16 @@ describe('activation store', () => {
     act(() => unlock('creator-a', 'work'));
     expect(result.current.isUnlocked('work')).toBe(true);
   });
+
+  it('useActivation re-renders on a cross-tab storage event (QC S: version bump)', () => {
+    const { result } = renderHook(() => useActivation('creator-a'));
+    expect(result.current.isUnlocked('work')).toBe(false);
+    act(() => {
+      // Another tab writes the map and fires the storage event; this tab's
+      // snapshot version must bump or useSyncExternalStore bails out.
+      window.localStorage.setItem(KEY, JSON.stringify({ work: true }));
+      window.dispatchEvent(new StorageEvent('storage', { key: KEY }));
+    });
+    expect(result.current.isUnlocked('work')).toBe(true);
+  });
 });

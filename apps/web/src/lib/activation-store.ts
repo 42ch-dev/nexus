@@ -71,7 +71,10 @@ export function unlock(creatorId: string, appId: AppId): void {
 
 function subscribe(onStoreChange: () => void): () => void {
   const onStorage = (event: StorageEvent) => {
-    if (event.key?.startsWith(STORAGE_PREFIX)) onStoreChange();
+    // Cross-tab writes must bump the snapshot version: useSyncExternalStore
+    // re-reads getSnapshot on notify, and an unchanged version bails out
+    // without re-rendering (QC S).
+    if (event.key?.startsWith(STORAGE_PREFIX)) bumpVersion();
   };
   window.addEventListener(CHANGE_EVENT, onStoreChange);
   window.addEventListener('storage', onStorage);

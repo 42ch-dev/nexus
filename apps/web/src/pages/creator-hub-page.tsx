@@ -1,12 +1,14 @@
 import { CreatorHubDualPane } from '@/components/layout/creator-hub-dual-pane';
+import { CreatorCreatePanel } from '@/components/layout/sidebar';
 import { WorkspaceChips } from '@/components/shell/workspace-chips';
 import { WorkspaceProvider } from '@/lib/workspace-context';
 
 /**
  * Creator hub content — browse-only shell (V1.135 P0).
  *
- * World/Work tab bar + card list or empty state. Create lives in the sidebar
- * menu slot ({@link Sidebar} `panelContent`), not in this content column.
+ * World/Work tab bar + card list or empty state. The v1219 shell dropped the
+ * sidebar, so the World/Work inline create panel mounts here in the content
+ * column ({@link CreatorCreatePanel}, unchanged from the sidebar era).
  * Card selection navigates to canvas routes — no controller-stub replace.
  * Canvas routes under `/works/:workId/*` and `/worlds/:worldId/*` stay orthogonal.
  *
@@ -18,8 +20,9 @@ export function CreatorHubPage() {
   return (
     <WorkspaceProvider>
       <div className="flex h-full min-h-0 flex-col" data-testid="creator-hub-page">
-        <div className="px-4 pt-4 md:px-6 md:pt-6">
+        <div className="flex flex-col gap-4 px-4 pt-4 md:px-6 md:pt-6">
           <WorkspaceChips />
+          <CreatorCreatePanel />
         </div>
         <div className="min-h-0 flex-1">
           <CreatorHubDualPane />

@@ -12,15 +12,17 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createContext, useContext, useMemo } from 'react';
 import type { ReactNode } from 'react';
 
+import { useActiveCreatorId } from '@/lib/active-creator-context';
 import { useNexusClient } from '@/lib/client-context';
-import type { WorkspaceSummary } from '@/lib/nexus/types';
+import { NexusClientError } from '@/lib/nexus';
+import type { ActiveWorkspaceResponse, WorkspaceSummary } from '@/lib/nexus/types';
 import { queryKeys } from '@/lib/nexus/query-keys';
 import { useToast } from '@/lib/use-toast';
 
 interface WorkspaceContextValue {
-  /** The creator's workspaces from `GET /v1/daemon/workspaces`. */
+  /** The active creator's workspaces from `GET /v1/daemon/workspaces`. */
   workspaces: WorkspaceSummary[];
-  /** The workspace whose slug matches `active_workspace_slug`; null while unknown. */
+  /** The workspace whose creator_id + slug match the daemon's active workspace; null while unknown. */
   activeWorkspace: WorkspaceSummary | null;
   /** Switch the daemon's active workspace; refetches workspace-scoped content. */
   switchWorkspace: (workspaceSlug: string) => void;
@@ -34,18 +36,38 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const client = useNexusClient();
   const qc = useQueryClient();
   const { toast } = useToast();
+  const creatorId = useActiveCreatorId();
 
   const listQuery = useQuery({
-    queryKey: queryKeys.workspaces.list(),
-    queryFn: async () => client.listWorkspaces({ limit: 100 }),
+    // Creator-scoped cache + fetch: two creators can both own a `default`
+    // workspace, so the creator id is part of the key and the query param.
+    queryKey: queryKeys.workspaces.list({ creator_id: creatorId }),
+    queryFn: async () =>
+      client.listWorkspaces({ creator_id: creatorId ?? undefined, limit: 100 }),
   });
   const activeQuery = useQuery({
     queryKey: queryKeys.workspaces.active(),
-    queryFn: async () => client.getActiveWorkspace(),
+    queryFn: async (): Promise<ActiveWorkspaceResponse | null> => {
+      try {
+        return await client.getActiveWorkspace();
+      } catch (error) {
+        // A fresh home (pre-first-selection) retains 409 `uninitialized`.
+        // That is a normal "no active workspace yet" state, not a failure —
+        // map it to null so the hub renders with no active chip and the
+        // global query-error toast stays silent (QC W: 409 bypasses the
+        // 401-only suppression in main.tsx's useQueryErrorToast).
+        if (error instanceof NexusClientError && error.status === 409) return null;
+        throw error;
+      }
+    },
   });
 
   const switchMutation = useMutation({
-    mutationFn: async (workspaceSlug: string) => client.setActiveWorkspace({ workspace_slug: workspaceSlug }),
+    mutationFn: async (workspaceSlug: string) =>
+      client.setActiveWorkspace({
+        workspace_slug: workspaceSlug,
+        creator_id: creatorId ?? undefined,
+      }),
     onSuccess: (_data, workspaceSlug) => {
       // A workspace switch changes the content domain: every cached list/detail
       // is workspace-scoped now, so drop all of it rather than tracking which
@@ -60,10 +82,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<WorkspaceContextValue>(() => {
     const workspaces: WorkspaceSummary[] = listQuery.data?.items ?? [];
-    const activeSlug = activeQuery.data?.workspace_slug;
+    const active = activeQuery.data ?? null;
     return {
       workspaces,
-      activeWorkspace: workspaces.find((w) => w.workspace_slug === activeSlug) ?? null,
+      // Match creator_id AND slug: the `default` slug exists per creator, so
+      // a slug-only match would light the wrong creator's chip (QC W).
+      activeWorkspace:
+        workspaces.find(
+          (w) =>
+            active !== null &&
+            w.creator_id === active.creator_id &&
+            w.workspace_slug === active.workspace_slug,
+        ) ?? null,
       switchWorkspace: (workspaceSlug: string) => switchMutation.mutate(workspaceSlug),
       isSwitching: switchMutation.isPending,
     };

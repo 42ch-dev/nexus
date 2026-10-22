@@ -16,7 +16,8 @@ export { resolveInitialHubTab } from '@/components/layout/use-hub-tab-state';
 /**
  * Wired Creator Hub browse surface — shared tab SSOT, card list, canvas navigation (V1.135 P0).
  *
- * Create lives in {@link Sidebar} `panelContent` ({@link CreatorCreatePanel}), not here.
+ * Create lives in {@link CreatorCreatePanel} on the creator hub page
+ * (`creator-hub-page.tsx`), not here.
  */
 export function CreatorHubDualPane() {
   const { t } = useTranslation(['shell', 'common']);

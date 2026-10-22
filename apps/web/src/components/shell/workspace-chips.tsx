@@ -26,10 +26,15 @@ export function WorkspaceChips() {
       className="flex flex-wrap items-center gap-2"
     >
       {workspaces.map((workspace) => {
-        const active = workspace.workspace_slug === activeWorkspace?.workspace_slug;
+        // creator_id + slug: `default` exists per creator, so a slug-only
+        // comparison would light the wrong creator's chip (QC W).
+        const active =
+          activeWorkspace !== null &&
+          workspace.creator_id === activeWorkspace.creator_id &&
+          workspace.workspace_slug === activeWorkspace.workspace_slug;
         return (
           <button
-            key={workspace.workspace_slug}
+            key={`${workspace.creator_id}:${workspace.workspace_slug}`}
             type="button"
             aria-pressed={active}
             disabled={isSwitching}
