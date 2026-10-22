@@ -7,7 +7,7 @@ Standalone Node HTTP service over `@42ch/nexus-native` (v1.189 P4).
 - Library: `startService(options)` from `dist/index.js`
 - CLI: `node dist/main.js --home <raw-home> --host 127.0.0.1 --port 8421`
 - Domain-only profile: add `--domain-only` (DirectWriter; no provider execution)
-- Remote: requires `--allow-remote --tls-cert <path> --tls-key <path>` and `NEXUS42_DAEMON_API_KEY`
+- Remote: requires `--allow-remote` and `NEXUS42_DAEMON_API_KEY`; TLS (`--tls-cert`/`--tls-key`) stays available and recommended but is optional for development (plain-HTTP LAN dev). Browser access: the boot line prints `[nexus-service] open: http://<host>:<port>/__bootstrap?token=…`; opening it sets the `nexus_session` cookie.
 
 ## Scripts
 

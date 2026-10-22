@@ -265,6 +265,15 @@ export interface NativeCoreBinding {
   setActiveCreator(requestJson: Uint8Array): Promise<Uint8Array>;
   getActiveCreator(): Promise<Uint8Array>;
   logoutCreator(creatorId: string): Promise<Uint8Array>;
+  // ── Workspace home family (plan v1219 shell Task 4) ─────────────────────
+  listWorkspaces(): Promise<Uint8Array>;
+  getActiveWorkspace(): Promise<Uint8Array>;
+  selectWorkspace(requestJson: Uint8Array): Promise<Uint8Array>;
+  /**
+   * Promote the service-only shell to the full core after a first-run
+   * workspace selection (idempotent once published).
+   */
+  promoteCore(): Promise<void>;
   captureCharacterPendingReview(
     principal: string,
     characterId: string,

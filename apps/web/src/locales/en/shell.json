@@ -2,7 +2,8 @@
   "appTitle": "Control Room",
   "aria": {
     "primary": "Primary",
-    "primaryNavigation": "Primary navigation"
+    "primaryNavigation": "Primary navigation",
+    "rail": "App navigation"
   },
   "route": {
     "works": "Works",
@@ -293,5 +294,26 @@
       "cancel": "Cancel",
       "confirm": "Delete"
     }
+  },
+  "rail": {
+    "world": "Worlds",
+    "work": "Works",
+    "session": "Sessions",
+    "memory": "Memory",
+    "hub": "Hub",
+    "harness": "Harness",
+    "modules": "Modules",
+    "caps": "Capabilities"
+  },
+  "topnav": {
+    "searchDisabled": "Search (coming soon)",
+    "language": "Language",
+    "theme": "Toggle theme",
+    "settings": "Settings",
+    "agentChip": "Current AI agent · click to switch",
+    "noAgent": "No agent selected",
+    "profileSection": "CREATOR PROFILE",
+    "newCreator": "＋ 新建 Creator…",
+    "activeMarker": "Active"
   }
 }

@@ -24,9 +24,16 @@ import {
   type ResolvedServiceConfig,
 } from './config.js';
 import { HttpError, mapNativeError, stringifyJsonSafe, toErrorBody } from './errors.js';
+import { AuthSessionStore, sessionCookie } from './auth-session.js';
 import { createDiscoveryRecord } from './discovery.js';
 import type { ServiceCore } from './lifecycle.js';
-import { checkApiKey, checkOrigin, corsAllowHeaders, corsAllowMethods } from './security.js';
+import {
+  checkApiKey,
+  checkOrigin,
+  corsAllowHeaders,
+  corsAllowMethods,
+  validateBindPolicy,
+} from './security.js';
 import { handleRoute, matchRoute } from './routes.js';
 import { createStaticFileHandler } from './static-files.js';
 import { releaseSessionSubscriber, reserveSessionSubscriber } from './sse.js';
@@ -38,6 +45,11 @@ export interface RunningService {
   readonly endpoint: CoreServiceDiscovery['endpoint'];
   /** The v1 discovery record published for this instance (§7). */
   readonly discovery: CoreServiceDiscovery;
+  /**
+   * Tokenized `GET /__bootstrap` URL for this boot (access spec §3.1);
+   * null on the unix transport, where there is no HTTP URL to print.
+   */
+  readonly bootstrapUrl: string | null;
   /** Same-process observability seam for scoped tests; not part of the wire API. */
   readonly service: ServiceCore;
   close(): Promise<CoreCloseReport>;
@@ -55,6 +67,19 @@ const RUNTIME_STOP_PATH = '/v1/daemon/runtime/stop';
  * read back from the replaceable published file.
  */
 const RUNTIME_DISCOVERY_PATH = '/v1/daemon/runtime/discovery';
+
+/**
+ * Tokenized browser bootstrap (access spec §3.1): service-local, not part of
+ * the wire schema. Handled before `matchRoute` because it answers with a
+ * `302` + `Set-Cookie` instead of the JSON-only domain route shape.
+ */
+const AUTH_BOOTSTRAP_PATH = '/__bootstrap';
+
+/** §6.2 copy, verbatim: the bootstrap route's own 401 bodies. */
+const BOOTSTRAP_REPLAY_MESSAGE =
+  '访问链接已被使用。请回到服务终端复制最新打印的访问链接。';
+const BOOTSTRAP_EXPIRED_MESSAGE =
+  '访问链接已过期。请回到服务终端复制最新打印的访问链接。';
 
 /** Port the listener actually serves; 0 resolves to the kernel-assigned port. */
 function boundPort(server: Server, config: ResolvedServiceConfig): number {
@@ -233,6 +258,9 @@ function requestId(req: IncomingMessage): string {
 function writeCors(res: ServerResponse, origin: string | undefined, allowed: readonly string[]): void {
   if (origin && allowed.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
+    // The session cookie must flow from the desktop custom-protocol and Vite
+    // dev origins (access spec §3.1); only explicit allowlisted origins get it.
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Vary', 'Origin');
   }
   res.setHeader('Access-Control-Allow-Methods', corsAllowMethods());
@@ -317,6 +345,7 @@ export function createServiceServer(
   config: ResolvedServiceConfig,
   service: ServiceCore,
   closeFn: () => Promise<CoreCloseReport>,
+  authSessions: AuthSessionStore = new AuthSessionStore(),
 ): { server: Server } {
   // URL base for relative request-URL parsing only; the wire endpoint is
   // reported from the bound listener, never from this placeholder.
@@ -343,9 +372,47 @@ export function createServiceServer(
         return;
       }
 
-      const originFailure = checkOrigin(req, config.allowedOrigins);
+      const originFailure = checkOrigin(req, config.allowedOrigins, protocol);
       if (originFailure) {
         sendError(res, new HttpError(originFailure.status, originFailure.code, originFailure.message, originFailure.details), id, origin, config.allowedOrigins);
+        return;
+      }
+
+      // Tokenized browser bootstrap (access spec §3.1): must precede the route
+      // matcher — it answers `302` + `Set-Cookie`, and an unmatched non-`/v1`
+      // path would otherwise fall into the SPA static fallback.
+      if (method === 'GET' && urlObj.pathname === AUTH_BOOTSTRAP_PATH) {
+        // Non-loopback still needs --allow-remote; the token is the
+        // authentication, so the TLS requirement does not apply here.
+        const bindFailure = validateBindPolicy(config, remoteAddress, true);
+        if (bindFailure) {
+          sendError(
+            res,
+            new HttpError(bindFailure.status, bindFailure.code, bindFailure.message, bindFailure.details),
+            id,
+            origin,
+            config.allowedOrigins,
+          );
+          return;
+        }
+        const token = urlObj.searchParams.get('token') ?? '';
+        if (!authSessions.consumeToken(token)) {
+          res.statusCode = 401;
+          res.setHeader('X-Request-Id', id);
+          res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+          res.end(
+            authSessions.wasConsumed(token) ? BOOTSTRAP_REPLAY_MESSAGE : BOOTSTRAP_EXPIRED_MESSAGE,
+          );
+          return;
+        }
+        res.statusCode = 302;
+        res.setHeader(
+          'Set-Cookie',
+          sessionCookie(authSessions.issueSession(), Boolean(config.tlsCert && config.tlsKey)),
+        );
+        res.setHeader('Location', '/');
+        res.setHeader('X-Request-Id', id);
+        res.end();
         return;
       }
 
@@ -353,7 +420,7 @@ export function createServiceServer(
       // admission as domain routes, handled before the domain route matcher
       // because it controls the transport itself rather than a family.
       if (method === 'POST' && urlObj.pathname === RUNTIME_STOP_PATH) {
-        const auth = checkApiKey(req, config, remoteAddress);
+        const auth = checkApiKey(req, config, remoteAddress, authSessions);
         if (!auth.ok) {
           sendError(
             res,
@@ -399,7 +466,7 @@ export function createServiceServer(
       // Guarded instance-identity anchor (D17): same admission as the operator
       // stop path, answered from this instance's own identity.
       if (method === 'GET' && urlObj.pathname === RUNTIME_DISCOVERY_PATH) {
-        const auth = checkApiKey(req, config, remoteAddress);
+        const auth = checkApiKey(req, config, remoteAddress, authSessions);
         if (!auth.ok) {
           sendError(
             res,
@@ -456,7 +523,7 @@ export function createServiceServer(
       }
 
       if (route.tier !== 'unguarded') {
-        const auth = checkApiKey(req, config, remoteAddress);
+        const auth = checkApiKey(req, config, remoteAddress, authSessions);
         if (!auth.ok) {
           sendError(
             res,

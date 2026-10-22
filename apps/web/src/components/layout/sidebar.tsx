@@ -46,7 +46,14 @@ function tabFromPathname(pathname: string): ShellSidebarTab {
     : 'creator';
 }
 
-function CreatorCreatePanel() {
+/**
+ * World/Work inline create panel (V1.135 P0, V1.136 P1).
+ *
+ * Previously the sidebar's creator-tab `panelContent`; the v1219 shell dropped
+ * the sidebar, so the new shell mounts this panel directly on the creator hub
+ * content surface (QC W: restore the create entry without rewriting it).
+ */
+export function CreatorCreatePanel() {
   const { t: tShell } = useTranslation('shell');
   const { t: tWorlds } = useTranslation('worlds');
   const { t: tCommon } = useTranslation('common');

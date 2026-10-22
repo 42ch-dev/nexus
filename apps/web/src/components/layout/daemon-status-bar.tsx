@@ -38,7 +38,7 @@ interface AgentBadgeInfo {
  * name or launch command so the overrides `displayName` + version are applied;
  * falls back to the raw profile name with no version when nothing matches.
  */
-function resolveAgentBadge(
+export function resolveAgentBadge(
   profile: { name: string; launchCommand?: string },
   agents: AgentScanEntry[],
 ): AgentBadgeInfo {

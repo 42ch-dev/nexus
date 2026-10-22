@@ -59,6 +59,14 @@ export const queryKeys = {
     list: (query?: object) => [...queryKeys.creators.all, 'list', query ?? {}] as const,
     active: () => [...queryKeys.creators.all, 'active'] as const,
   },
+  // v1219 T3 — workspace chips over the frozen workspace family. Workspace
+  // switch invalidates `workspaces.all`; content families are invalidated
+  // separately by the workspace context on switch.
+  workspaces: {
+    all: ['workspaces'] as const,
+    list: (query?: object) => [...queryKeys.workspaces.all, 'list', query ?? {}] as const,
+    active: () => [...queryKeys.workspaces.all, 'active'] as const,
+  },
   agentHost: {
     all: ['agentHost'] as const,
     scan: (request?: { filter?: string; registry_refresh?: boolean }) =>

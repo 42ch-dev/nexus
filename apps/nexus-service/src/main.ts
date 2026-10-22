@@ -1,7 +1,33 @@
 #!/usr/bin/env node
+import { spawn } from 'node:child_process';
 import { parseCliArgs } from './config.js';
 import { SERVICE_READY_PREFIX } from './discovery.js';
 import { startService } from './index.js';
+
+/**
+ * Open the default browser at `url` without holding the service process: a
+ * detached, unref'd child, and a failure is a stderr warning only (access spec
+ * §3.1 — the printed URL remains the recovery path).
+ */
+function openDefaultBrowser(url: string): void {
+  const [command, ...prefixArgs] =
+    process.platform === 'darwin'
+      ? ['open']
+      : process.platform === 'win32'
+        ? ['cmd', '/c', 'start', '']
+        : ['xdg-open'];
+  try {
+    const child = spawn(command, [...prefixArgs, url], { detached: true, stdio: 'ignore' });
+    child.on('error', (error) => {
+      console.error(`[nexus-service] could not open the browser: ${error.message}`);
+    });
+    child.unref();
+  } catch (error) {
+    console.error(
+      `[nexus-service] could not open the browser: ${error instanceof Error ? error.message : error}`,
+    );
+  }
+}
 
 /**
  * Service process boot (architecture §7): the transport host owns the boot
@@ -47,6 +73,12 @@ async function main(): Promise<void> {
   process.stdout.write(`${SERVICE_READY_PREFIX}${JSON.stringify(running.discovery)}\n`);
   const where = running.url ?? `unix:${running.endpoint.transport === 'unix' ? running.endpoint.path : ''}`;
   console.error(`[nexus-service] listening on ${where}`);
+  if (running.bootstrapUrl) {
+    console.error(`[nexus-service] open: ${running.bootstrapUrl}`);
+    // Auto-open only when this process actually serves the SPA; `--no-open`
+    // (used by the Electron detached restart) suppresses it.
+    if (!args.noOpen && args.webDist) openDefaultBrowser(running.bootstrapUrl);
+  }
 }
 
 main().catch((error) => {

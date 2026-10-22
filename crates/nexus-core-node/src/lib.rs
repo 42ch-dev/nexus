@@ -340,6 +340,20 @@ impl NativeCore {
         Ok(Buffer::from(serde_json::to_vec(&report)?))
     }
 
+    /// Promote the service-only shell to the full core in process.
+    ///
+    /// Runs the SAME admission/publication the startup open performs, after a
+    /// first-run workspace selection made the home initialized. Idempotent once
+    /// the full core is published; a failure releases its candidate owners and
+    /// leaves the shell open (home control keeps working, the caller can retry).
+    #[napi]
+    pub async fn promote_core(&self) -> Result<()> {
+        lifecycle::promote_core(self.inner.clone())
+            .await
+            .map_err(core_error::napi_error_from_open_reason)?;
+        Ok(())
+    }
+
     /// The open service and the principal behind `principal_handle`.
     ///
     /// The core must be open, the environment must not be closing, and the
