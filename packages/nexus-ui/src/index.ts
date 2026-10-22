@@ -151,6 +151,37 @@ export {
 export { ConfirmDialog, type ConfirmDialogProps } from './components/confirm-dialog';
 export { FormDialog, type FormDialogProps } from './components/form-dialog';
 export { FormSection, type FormSectionProps } from './components/form-section';
+// V1.150 P1 — promoted ListPageLayout L2 pattern (list-page chrome over the
+// promoted Card primitives; caller-owned copy + slots; no query/router/i18n deps).
+export { ListPageLayout, type ListPageLayoutProps } from './components/list-page-layout';
+// V1.150 P2 — promoted settings family: SettingsSection + SettingRow (section
+// chrome and label/control/hint rows) and SettingsLayout (section nav rail +
+// outlet; caller-owned registry/labels, hiddenIds entrance filter).
+export {
+  SettingsSection,
+  type SettingsSectionProps,
+  SettingRow,
+  type SettingRowProps,
+} from './components/settings-section';
+export {
+  SettingsLayout,
+  type SettingsLayoutProps,
+  type SettingsLayoutSection,
+} from './components/settings-layout';
+// V1.150 P3 — promoted master/detail family: ListDetailShell (fixed-width
+// responsive split, caller-owned regions, no open/close state) and the
+// read-only detail parts (FieldRow null-hide rows + DetailCard over the
+// promoted Card primitives). HubCard stays app-side per plan D5 decision.
+export {
+  ListDetailShell,
+  type ListDetailShellProps,
+} from './components/list-detail-shell';
+export {
+  DetailCard,
+  type DetailCardProps,
+  FieldRow,
+  type FieldRowProps,
+} from './components/detail-parts';
 
 // V1.147 P1 — promoted Compute Run Studio presentational primitives.
 // Pure presentational: data + caller-owned copy + callbacks in; no daemon,
