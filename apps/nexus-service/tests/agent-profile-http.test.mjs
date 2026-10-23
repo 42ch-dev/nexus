@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import {
   chmodSync,
-  existsSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -149,7 +148,6 @@ describe('agent-profile (I-000064)', () => {
     // Establish an unrelated key first (simulates creator/workspace config the
     // core already owns), then verify the profile write preserves it.
     const configPath = join(home, 'config.toml');
-    assert.ok(existsSync(configPath));
     const before = parse(readFileSync(configPath, 'utf8'));
     const foreignKey = 'agent_profile_test_marker';
     writeFileSync(
