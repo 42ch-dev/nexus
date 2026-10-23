@@ -10,7 +10,7 @@ use nexus_contracts::CoreRegisterCreatorRequest;
 use nexus_core::{CoreError, CoreHomeService};
 use tempfile::TempDir;
 
-async fn home() -> (TempDir, CoreHomeService) {
+fn home() -> (TempDir, CoreHomeService) {
     let tmp = tempfile::tempdir().unwrap();
     let svc = CoreHomeService::open(tmp.path().to_path_buf()).expect("open home");
     (tmp, svc)
@@ -46,7 +46,7 @@ fn op_dir(user_home: &std::path::Path, creator_id: &str, slug: &str) -> std::pat
 
 #[tokio::test]
 async fn create_derives_root_and_registers_workspace() {
-    let (tmp, svc) = home().await;
+    let (tmp, svc) = home();
     let user_home = tmp.path().to_path_buf();
     let creator_id = creator(&svc).await;
 
@@ -91,7 +91,7 @@ async fn create_derives_root_and_registers_workspace() {
 
 #[tokio::test]
 async fn create_adopts_empty_dir_and_refuses_foreign_content() {
-    let (tmp, svc) = home().await;
+    let (tmp, svc) = home();
     let user_home = tmp.path().to_path_buf();
     let creator_id = creator(&svc).await;
 
@@ -133,7 +133,7 @@ async fn create_adopts_empty_dir_and_refuses_foreign_content() {
 
 #[tokio::test]
 async fn create_refuses_duplicate_slug_and_claimed_root() {
-    let (tmp, svc) = home().await;
+    let (tmp, svc) = home();
     let user_home = tmp.path().to_path_buf();
     let creator_id = creator(&svc).await;
 
@@ -171,7 +171,7 @@ async fn create_refuses_duplicate_slug_and_claimed_root() {
 
 #[tokio::test]
 async fn create_refuses_invalid_slug_name_and_override() {
-    let (tmp, svc) = home().await;
+    let (tmp, svc) = home();
     let user_home = tmp.path().to_path_buf();
     let creator_id = creator(&svc).await;
 
@@ -245,7 +245,7 @@ async fn create_refuses_invalid_slug_name_and_override() {
 async fn create_refuses_unwritable_root() {
     use std::os::unix::fs::PermissionsExt;
 
-    let (tmp, svc) = home().await;
+    let (tmp, svc) = home();
     let user_home = tmp.path().to_path_buf();
     let creator_id = creator(&svc).await;
 
@@ -287,7 +287,7 @@ async fn create_refuses_unwritable_root() {
 async fn create_probe_failure_leaves_no_directory() {
     use std::os::unix::fs::PermissionsExt;
 
-    let (tmp, svc) = home().await;
+    let (tmp, svc) = home();
     let user_home = tmp.path().to_path_buf();
     let creator_id = creator(&svc).await;
 
@@ -328,7 +328,7 @@ async fn create_probe_failure_leaves_no_directory() {
 async fn create_refuses_unreadable_root() {
     use std::os::unix::fs::PermissionsExt;
 
-    let (tmp, svc) = home().await;
+    let (tmp, svc) = home();
     let user_home = tmp.path().to_path_buf();
     let creator_id = creator(&svc).await;
 
@@ -360,7 +360,7 @@ async fn create_refuses_unreadable_root() {
 
 #[tokio::test]
 async fn concurrent_same_slug_creates_commit_exactly_one() {
-    let (tmp, svc) = home().await;
+    let (tmp, svc) = home();
     let user_home = tmp.path().to_path_buf();
     let creator_id = creator(&svc).await;
 
@@ -399,7 +399,7 @@ async fn concurrent_same_slug_creates_commit_exactly_one() {
 
 #[tokio::test]
 async fn concurrent_same_root_creates_keep_one_owner() {
-    let (tmp, svc) = home().await;
+    let (tmp, svc) = home();
     let user_home = tmp.path().to_path_buf();
     let creator_id = creator(&svc).await;
     let shared_root = user_home.join("shared-root");
@@ -433,7 +433,7 @@ async fn concurrent_same_root_creates_keep_one_owner() {
 
 #[tokio::test]
 async fn create_requires_active_creator_and_matching_creator_id() {
-    let (_tmp, svc) = home().await;
+    let (_tmp, svc) = home();
 
     // No active creator yet: creation is an uninitialized refusal, not a mint.
     let uninitialized = svc
