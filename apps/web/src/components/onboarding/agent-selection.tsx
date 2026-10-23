@@ -105,25 +105,24 @@ export function useAgentSelection(): AgentSelection {
 
   const saved = savedProfile.data;
   // The profile may land after the scan (IPC on desktop, service GET in the
-  // browser). Locking the restore before that read settles would leave a late
-  // profile unmapped, so wait for it here.
+  // browser), and the scan may land first. The saved profile always wins over
+  // the scan-recommended default: apply it whenever it arrives, until the user
+  // explicitly picks a row.
   const profileSettled = savedProfile.isFetched;
+  const scanSettled = !scan.isLoading;
 
   const [pickedId, setPickedId] = useState<string | null>(null);
   const [manual, setManual] = useState('');
-  const restored = useRef(false);
+  const userPicked = useRef(false);
 
-  // Restore the saved profile once the scan and the desktop read have settled.
-  // A row-backed profile re-selects its row; a saved command that differs from
-  // the row's own is a manual override and must come back into the field so a
-  // later commit does not overwrite it. With zero scan rows (empty/error) the
-  // saved command is the only usable path, so it still fills the field and
-  // lets the step continue.
-  const scanSettled = !scan.isLoading;
+  // Restore the saved profile once both the scan and the profile read have
+  // settled. A row-backed profile re-selects its row; a saved command that
+  // differs from the row's own is a manual override and must come back into
+  // the field so a later commit does not overwrite it. With zero scan rows
+  // (empty/error) the saved command is the only usable path, so it still fills
+  // the field and lets the step continue.
   useEffect(() => {
-    if (restored.current || !profileSettled || !scanSettled) return;
-    restored.current = true;
-    if (!saved) return;
+    if (userPicked.current || !profileSettled || !scanSettled || !saved) return;
     const match = matchChoice(choices, saved);
     if (match) {
       setPickedId(match.pickerId);
@@ -136,7 +135,9 @@ export function useAgentSelection(): AgentSelection {
     setManual(saved.launchCommand ?? '');
   }, [choices, saved, profileSettled, scanSettled]);
 
-  const selectedId = pickedId ?? recommendedId;
+  // While the profile read is pending, no selection exists yet: the
+  // scan-recommended default must not be committed as an intermediate choice.
+  const selectedId = pickedId ?? (profileSettled ? recommendedId : null);
   const selectedChoice = choices.find((choice) => choice.pickerId === selectedId) ?? null;
 
   const status: AgentScanStatus = scan.isLoading
@@ -169,6 +170,7 @@ export function useAgentSelection(): AgentSelection {
   function select(pickerId: string) {
     const choice = choices.find((candidate) => candidate.pickerId === pickerId);
     if (!choice) return;
+    userPicked.current = true;
     setPickedId(pickerId);
     setManual('');
     void persist(profileOfChoice(choice));

@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { StepAgent } from './step-agent';
 import { renderInApp } from '@/test/test-providers';
 import type { NexusClient } from '@/lib/nexus';
 import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
-import type { AgentProfile, AgentScanEntry } from '@42ch/nexus-contracts';
+import type { AgentProfile, AgentProfileResponse, AgentScanEntry } from '@42ch/nexus-contracts';
 
 const AGENTS: AgentScanEntry[] = [
   {
@@ -175,6 +175,40 @@ describe('StepAgent (creator AI partner)', () => {
 
     renderStep(client);
     expect(await screen.findByTestId('agent-row-codex')).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('applies the saved profile when it arrives after the scan', async () => {
+    let resolveProfile!: (value: AgentProfileResponse) => void;
+    const client = {
+      scanAgents: () => Promise.resolve({ agents: AGENTS }),
+      getAgentProfile: () =>
+        new Promise<AgentProfileResponse>((resolve) => {
+          resolveProfile = resolve;
+        }),
+      saveAgentProfile: vi.fn(),
+    } as unknown as NexusClient;
+
+    renderStep(client);
+
+    // Scan settles first: no row is committed while the profile read is
+    // pending, and Continue stays blocked (no intermediate default).
+    expect(await screen.findByTestId('agent-row-claude')).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
+    expect(screen.getByRole('button', { name: '下一步' })).toBeDisabled();
+
+    await act(async () => {
+      resolveProfile({
+        profile: { name: 'Codex CLI', launch_command: '/usr/local/bin/codex' },
+      });
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-row-codex')).toHaveAttribute('aria-checked', 'true'),
+    );
+    expect(screen.getByTestId('agent-row-claude')).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('button', { name: '下一步' })).toBeEnabled();
   });
 
   it('restores the daemon-global profile for any active creator', async () => {

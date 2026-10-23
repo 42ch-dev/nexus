@@ -1,18 +1,22 @@
 /**
  * Harness agent-profile bar (plan v1220 T2, I-000064).
  *
- * Shows the saved daemon-global profile (service-backed through the shared
- * `useSavedAgentProfile` seam) and saves the selected installed agent through
- * `NexusClient.saveAgentProfile` — the same service surface the browser path
- * uses everywhere. One explicit success state (`已保存`) and one inline failure
- * state; the prior saved profile stays displayed when a save fails.
+ * Transport-coherent with the shared read seam: on desktop both the read and
+ * the save go through the IPC (`get_agent_profile` / `set_agent_profile`); in
+ * the browser both go through the service surface. A save never writes a
+ * different store than the one being displayed.
+ *
+ * One explicit success state (`已保存`) and one inline failure state; the prior
+ * saved profile stays displayed when a save fails. A selected agent that
+ * reports no launch command keeps the stored custom command for the same
+ * profile (client-side merge — the desktop IPC store does not merge).
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 
 import { useSavedAgentProfile, useScanAgents } from '@/api/queries';
-import { useNexusClient } from '@/lib/client-context';
+import { useDesktopCapabilities, useNexusClient } from '@/lib/client-context';
 import { errorMessage } from '@/lib/error-message';
 import { queryKeys } from '@/lib/nexus/query-keys';
 import { Button } from '@/components/ui/button';
@@ -21,6 +25,7 @@ import { Select } from '@/components/ui/select';
 export function ProfileBar() {
   const { t } = useTranslation('strategies');
   const { t: tCommon } = useTranslation('common');
+  const desktop = useDesktopCapabilities();
   const client = useNexusClient();
   const qc = useQueryClient();
   const saved = useSavedAgentProfile();
@@ -52,15 +57,24 @@ export function ProfileBar() {
   async function handleSave() {
     if (selected.length === 0) return;
     const option = options.find((candidate) => candidate.name === selected);
+    // Preserve the stored custom command when the selected agent reports none
+    // and it is the same stored profile.
+    const command =
+      option?.launchCommand ??
+      (saved.profile?.name === selected ? saved.profile.launchCommand : undefined);
     setPending(true);
     setSaveError(null);
     setSavedState(false);
     try {
-      await client.saveAgentProfile(
-        option?.launchCommand !== undefined
-          ? { name: option.name, launch_command: option.launchCommand }
-          : { name: option?.name ?? selected },
-      );
+      if (desktop) {
+        await desktop.setAgentProfile(selected, command);
+      } else {
+        await client.saveAgentProfile(
+          command !== undefined
+            ? { name: selected, launch_command: command }
+            : { name: selected },
+        );
+      }
       await qc.invalidateQueries({ queryKey: queryKeys.agentProfile.detail() });
       setSavedState(true);
     } catch (error) {

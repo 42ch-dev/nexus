@@ -28,7 +28,7 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/states';
 import { ScaffoldPresetDialog } from '@/pages/dialogs/scaffold-preset-dialog';
 
-import { PresetCard } from './preset-card';
+import { PresetCard, type PresetRunningState } from './preset-card';
 import { ProfileBar } from './profile-bar';
 
 /** Hide internal `_system.` presets from authors (AD-P0-3). */
@@ -77,6 +77,18 @@ export function HarnessPage() {
     return counts;
   }, [sessions.data]);
 
+  // One row-level state: a failed session read is unknown (never `idle`), and
+  // a truncated walk marks the count as a lower bound.
+  const runningStateFor = (presetId: string): PresetRunningState => {
+    if (sessions.isError) return { status: 'error' };
+    if (!sessions.data) return { status: 'loading' };
+    return {
+      status: 'ready',
+      count: runningByPreset.get(presetId) ?? 0,
+      truncated: sessions.data.truncated,
+    };
+  };
+
   return (
     <div className="flex flex-col gap-4" data-testid="harness-page">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -122,7 +134,7 @@ export function HarnessPage() {
                 key={preset.id}
                 preset={preset}
                 profile={profiles[index]!}
-                runningCount={runningByPreset.get(preset.id) ?? 0}
+                running={runningStateFor(preset.id)}
                 onOpenCanvas={() => navigate(`/strategies/${encodeURIComponent(preset.id)}`)}
                 onOpenProfile={() =>
                   navigate(`/strategies/${encodeURIComponent(preset.id)}/profile`)

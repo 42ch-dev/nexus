@@ -369,24 +369,26 @@ export function usePresets() {
  * refetches promptly regardless of staleness (QC1 W-1 / QC3 W-1 fix).
  */
 
-/** Query result of {@link usePresetProfile} — consumed by the strategy
- * catalog rows (lanes / loading / error flags) and the profile drill-down. */
+/** Query result of {@link usePresetProfile} — consumed by the Harness catalog
+ * rows (binding state) and the profile drill-down. */
 export type PresetProfileQuery = UseQueryResult<PresetProfileResponse, Error>;
 
 /**
  * Query options for `GET /v1/daemon/orchestration/presets/{id}/profile`.
  *
  * Shared between `usePresetProfile` (single preset — detail page) and the
- * strategy catalog's `useQueries` fan-out so both consume the SAME
+ * Harness catalog's `useQueries` fan-out so both consume the SAME
  * `['presets','profile',<id>]` cache key and staleness policy: navigating
  * catalog → profile is a cache hit, and `presets.all` invalidation (F-1)
- * clears both.
+ * clears both. `retry: false` — a 404 here is the expected "preset without a
+ * resolvable profile" answer for the unbound probe, not a transient fault.
  */
 export function presetProfileQueryOptions(presetId: string | undefined, client: NexusClient) {
   return {
     queryKey: queryKeys.presets.profile(presetId ?? ''),
     queryFn: async () => client.getPresetProfile(presetId ?? ''),
     enabled: Boolean(presetId),
+    retry: false,
     staleTime: 5 * 60_000,
   };
 }
@@ -765,8 +767,9 @@ export function useValidatePreset() {
   return useMutation({
     mutationFn: (request: ValidatePresetRequest) => client.validatePreset(request),
     onError: (error) => errorToast(error, 'error.couldNotValidatePreset'),
-    // On success the caller surfaces structured errors/warnings inline; a toast
-    // is not added here so the validate dialog stays the single source of truth.
+    // No UI caller today (the legacy validate dialog was removed with the
+    // list page in v1220 T3); the hook stays for a preset-management surface
+    // and surfaces structured results through the mutation state.
   });
 }
 
@@ -791,10 +794,11 @@ export function useReloadPreset() {
 }
 
 /**
- * Delete a user preset (V1.120 strategies-repair). Mirrors the
- * `useScaffoldPreset` shape: `DELETE /v1/daemon/presets/{id}` then invalidate
- * the grouped presets list so the row disappears. Only user presets are
- * deletable — the row UI gates this (system/embedded rows render no Delete).
+ * Delete a user preset (V1.120 strategies-repair). `DELETE /v1/daemon/presets/{id}`
+ * then invalidate the grouped presets list so the row disappears. Only user
+ * presets are deletable; no UI caller today (the legacy row actions were
+ * removed with the list page in v1220 T3), so the hook stays as the client
+ * capability for a future preset-management surface.
  */
 export function useDeletePreset() {
   const client = useNexusClient();

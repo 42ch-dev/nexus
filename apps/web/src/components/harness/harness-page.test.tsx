@@ -8,7 +8,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { delay, http, HttpResponse } from 'msw';
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useLocation } from 'react-router';
 
@@ -57,6 +57,16 @@ function sessionsHandler(items: unknown[]) {
     HttpResponse.json({
       items,
       pagination: { limit: 100, has_more: false, next_cursor: null },
+    }),
+  );
+}
+
+/** Always-more pages: exercises the bounded walk's truncated (lower-bound) path. */
+function truncatedSessionsHandler(items: unknown[]) {
+  return http.get('/v1/daemon/orchestration/sessions', () =>
+    HttpResponse.json({
+      items,
+      pagination: { limit: 100, has_more: true, next_cursor: 'more' },
     }),
   );
 }
@@ -205,6 +215,29 @@ describe('HarnessPage', () => {
     renderHarness();
 
     expect(await screen.findByTestId('preset-row-user/one')).toBeInTheDocument();
-    expect(screen.getByTestId('preset-running-user/one')).toHaveTextContent('idle');
+    // A failed source must not assert a positive state: no `idle`, but an
+    // explicit unknown badge.
+    const badge = screen.getByTestId('preset-running-user/one');
+    expect(badge).toHaveTextContent('运行状态未知');
+    expect(badge).not.toHaveTextContent('idle');
+  });
+
+  it('marks a truncated running count as a lower bound (N+)', async () => {
+    useHandlers(
+      http.get('/v1/daemon/presets', () => HttpResponse.json(presetBody())),
+      profileHandler('user/one', []),
+      profileHandler('embedded/two', []),
+      profileHandler('sys/three', []),
+      // 2 running rows per page × the 10-page cap → 20+ trusted as a lower bound.
+      truncatedSessionsHandler([session('user/one', 'running'), session('user/one', 'running')]),
+    );
+
+    renderHarness();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('preset-running-user/one')).toHaveTextContent(
+        'running ×20+',
+      ),
+    );
   });
 });

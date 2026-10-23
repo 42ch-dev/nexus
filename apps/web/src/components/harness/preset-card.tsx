@@ -20,10 +20,19 @@ const SOURCE_LABEL_KEY: Record<PresetSummary['source'], string> = {
   system: 'harness.sourceSystem',
 };
 
+/**
+ * Running-session state for one catalog row. `error` renders an explicit
+ * unknown badge (never `idle`); `truncated` marks the count as a lower bound.
+ */
+export type PresetRunningState =
+  | { status: 'ready'; count: number; truncated: boolean }
+  | { status: 'loading' }
+  | { status: 'error' };
+
 export interface PresetCardProps {
   preset: PresetSummary;
   profile: PresetProfileQuery;
-  runningCount: number;
+  running: PresetRunningState;
   onOpenCanvas: () => void;
   onOpenProfile: () => void;
 }
@@ -31,7 +40,7 @@ export interface PresetCardProps {
 export function PresetCard({
   preset,
   profile,
-  runningCount,
+  running,
   onOpenCanvas,
   onOpenProfile,
 }: PresetCardProps) {
@@ -40,6 +49,20 @@ export function PresetCard({
   const source = t(SOURCE_LABEL_KEY[preset.source]);
   const intents = preset.run_intents?.join(' · ');
   const facts = intents ? t('harness.facts', { source, intents }) : source;
+
+  const runningBadge =
+    running.status === 'error'
+      ? { variant: 'warning' as const, label: t('harness.runningUnknown') }
+      : running.status === 'loading'
+        ? { variant: 'neutral' as const, label: t('harness.runningLoading') }
+        : running.count > 0
+          ? {
+              variant: 'queued' as const,
+              label: running.truncated
+                ? t('harness.runningTruncated', { count: running.count })
+                : t('harness.running', { count: running.count }),
+            }
+          : { variant: 'neutral' as const, label: t('harness.idle') };
 
   return (
     <li
@@ -84,10 +107,10 @@ export function PresetCard({
               : t('harness.bindingUnbound')}
         </Badge>
         <Badge
-          variant={runningCount > 0 ? 'queued' : 'neutral'}
+          variant={runningBadge.variant}
           data-testid={`preset-running-${preset.id}`}
         >
-          {runningCount > 0 ? t('harness.running', { count: runningCount }) : t('harness.idle')}
+          {runningBadge.label}
         </Badge>
       </div>
     </li>

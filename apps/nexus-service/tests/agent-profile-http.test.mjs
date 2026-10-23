@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -152,7 +160,8 @@ describe('agent-profile (I-000064)', () => {
 
     const saved = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`, {
       method: 'PUT',
-      body: { name: 'codex-cli' },
+      // Explicit blank clears the inherited command (omitting it would preserve).
+      body: { name: 'codex-cli', launch_command: '' },
     });
     assert.equal(saved.status, 200);
 
@@ -163,5 +172,74 @@ describe('agent-profile (I-000064)', () => {
       assert.deepEqual(afterDoc[key], value, `config key ${key} was preserved`);
     }
     assert.deepEqual({ ...afterDoc.agent_profile }, { name: 'codex-cli' });
+  });
+
+  test('a name-only PUT preserves the stored launch command; an explicit blank clears it', async () => {
+    const seeded = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`, {
+      method: 'PUT',
+      body: { name: 'codex-cli', launch_command: 'codex --custom' },
+    });
+    assert.deepEqual(seeded.payload, {
+      profile: { name: 'codex-cli', launch_command: 'codex --custom' },
+    });
+
+    const nameOnly = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`, {
+      method: 'PUT',
+      body: { name: 'codex-cli' },
+    });
+    assert.equal(nameOnly.status, 200);
+    assert.deepEqual(nameOnly.payload, {
+      profile: { name: 'codex-cli', launch_command: 'codex --custom' },
+    });
+
+    const cleared = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`, {
+      method: 'PUT',
+      body: { name: 'codex-cli', launch_command: '   ' },
+    });
+    assert.deepEqual(cleared.payload, { profile: { name: 'codex-cli' } });
+  });
+
+  test('oversized name and launch_command are invalid_input and leave the profile intact', async () => {
+    const before = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`);
+
+    const longName = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`, {
+      method: 'PUT',
+      body: { name: 'a'.repeat(201) },
+    });
+    assert.equal(longName.status, 400);
+    assert.equal(longName.payload.error.code, 'invalid_input');
+
+    const longCommand = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`, {
+      method: 'PUT',
+      body: { name: 'codex-cli', launch_command: 'x'.repeat(4097) },
+    });
+    assert.equal(longCommand.status, 400);
+    assert.equal(longCommand.payload.error.code, 'invalid_input');
+
+    const after = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`);
+    assert.deepEqual(after.payload, before.payload);
+  });
+
+  test('a failed write leaves no temp file behind and logs the cause', async () => {
+    const { writeAgentProfile } = await import(join(serviceRoot, 'dist/agent-profile.js'));
+    const brokenHome = mkdtempSync(join(tmpdir(), 'nexus-agent-profile-broken-'));
+    const errors = [];
+    const originalError = console.error;
+    try {
+      chmodSync(brokenHome, 0o500);
+      console.error = (...args) => {
+        errors.push(args.map((value) => String(value)).join(' '));
+      };
+      await assert.rejects(() => writeAgentProfile(brokenHome, { name: 'claude-code' }));
+      assert.deepEqual(
+        readdirSync(brokenHome).filter((name) => name.endsWith('.tmp')),
+        [],
+      );
+      assert.ok(errors.some((line) => line.includes('config.toml write failed')));
+    } finally {
+      console.error = originalError;
+      chmodSync(brokenHome, 0o700);
+      rmSync(brokenHome, { recursive: true, force: true });
+    }
   });
 });

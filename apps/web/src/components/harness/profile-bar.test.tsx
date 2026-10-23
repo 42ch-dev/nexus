@@ -3,7 +3,7 @@
  * the Task 1 service surface. Success is one explicit `已保存`; a failed save is
  * inline (`保存失败：…`) and the previously saved profile stays displayed.
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { delay, http, HttpResponse } from 'msw';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -11,6 +11,7 @@ import userEvent from '@testing-library/user-event';
 import { ProfileBar } from '@/components/harness/profile-bar';
 import { i18n } from '@/lib/i18n/config';
 import { BrowserClient } from '@/lib/nexus';
+import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
 import { useHandlers } from '@/test/msw-server';
 import { renderInApp } from '@/test/test-providers';
 
@@ -131,5 +132,75 @@ describe('ProfileBar', () => {
     expect(await screen.findByTestId('harness-profile-current')).toHaveTextContent(
       '当前：claude-code',
     );
+  });
+
+  it('desktop saves through the IPC path and never calls the service', async () => {
+    const setAgentProfile = vi.fn().mockResolvedValue(undefined);
+    let puts = 0;
+    useHandlers(
+      http.put('/v1/daemon/agent-host/profile', () => {
+        puts += 1;
+        return HttpResponse.json({ profile: null });
+      }),
+      http.post('/v1/daemon/agent-host/scan', () => HttpResponse.json(installedAgents())),
+    );
+    const desktop = {
+      getAgentProfile: () =>
+        Promise.resolve({ name: 'claude-code', launchCommand: '/usr/local/bin/claude' }),
+      setAgentProfile,
+    } as unknown as DesktopCapabilities;
+
+    renderInApp(<ProfileBar />, {
+      client: new BrowserClient(),
+      desktop,
+      activeCreatorId: 'creator-a',
+    });
+
+    expect(await screen.findByTestId('harness-profile-current')).toHaveTextContent(
+      '当前：claude-code',
+    );
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: 'Agent profile' }),
+      'codex-cli',
+    );
+    await userEvent.click(screen.getByRole('button', { name: '保存到 service' }));
+
+    expect(await screen.findByTestId('harness-profile-saved')).toHaveTextContent('已保存');
+    expect(setAgentProfile).toHaveBeenCalledWith('codex-cli', '/usr/local/bin/codex');
+    // Transport coherence: the desktop save never writes the service store.
+    expect(puts).toBe(0);
+  });
+
+  it('keeps the stored custom launch command when the selected agent reports none', async () => {
+    const puts: unknown[] = [];
+    useHandlers(
+      http.get('/v1/daemon/agent-host/profile', () =>
+        HttpResponse.json({
+          profile: { name: 'claude-code', launch_command: '/custom/claude --flag' },
+        }),
+      ),
+      http.put('/v1/daemon/agent-host/profile', async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>;
+        puts.push(body);
+        return HttpResponse.json({ profile: body });
+      }),
+      http.post('/v1/daemon/agent-host/scan', () =>
+        HttpResponse.json({
+          agents: [{ name: 'claude-code', installed: true, launch_command: null }],
+        }),
+      ),
+    );
+
+    renderBar();
+
+    expect(await screen.findByTestId('harness-profile-current')).toHaveTextContent(
+      '当前：claude-code',
+    );
+    await userEvent.click(screen.getByRole('button', { name: '保存到 service' }));
+
+    expect(await screen.findByTestId('harness-profile-saved')).toHaveTextContent('已保存');
+    expect(puts).toEqual([
+      { name: 'claude-code', launch_command: '/custom/claude --flag' },
+    ]);
   });
 });

@@ -14,7 +14,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { rename, writeFile } from 'node:fs/promises';
+import { rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parse, stringify, type TomlTable } from 'smol-toml';
 import type { AgentProfile, AgentProfileResponse } from '@42ch/nexus-contracts';
@@ -26,6 +26,10 @@ import { wirePayload } from './world-kb.js';
 
 const CONFIG_FILE = 'config.toml';
 const PROFILE_TABLE = 'agent_profile';
+/** Bound on a stored agent name; longer values are rejected at the fold. */
+const MAX_NAME_LENGTH = 200;
+/** Bound on a stored launch command; longer values are rejected at the fold. */
+const MAX_LAUNCH_COMMAND_LENGTH = 4096;
 
 function isTomlTable(value: unknown): value is TomlTable {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -60,7 +64,11 @@ async function writeConfigDocument(home: string, document: TomlTable): Promise<v
   try {
     await writeFile(tempPath, stringify(document), { mode: 0o600 });
     await rename(tempPath, configPath);
-  } catch {
+  } catch (error) {
+    // The wire answer stays generic; the operator log keeps the cause. A temp
+    // file that was already created must not survive the failed write.
+    console.error(`[nexus-service] ${CONFIG_FILE} write failed:`, error);
+    await rm(tempPath, { force: true }).catch(() => undefined);
     throw new HttpError(500, 'internal', `${CONFIG_FILE} could not be written`);
   }
 }
@@ -79,7 +87,11 @@ export function readAgentProfile(home: string): AgentProfile | null {
 
 /**
  * Persist the one daemon-global profile and answer with what was stored.
- * A blank name is `invalid_input` (existing fold → 400).
+ *
+ * Omitting `launch_command` PRESERVES the stored custom command (the fix for
+ * a name-only save silently clearing it); an explicit blank string clears it.
+ * A blank name, or a name/command over the documented caps, is `invalid_input`
+ * (existing fold → 400) and never touches the stored profile.
  */
 export async function writeAgentProfile(
   home: string,
@@ -89,16 +101,42 @@ export async function writeAgentProfile(
   if (name.length === 0) {
     throw new HttpError(400, 'invalid_input', 'name must not be blank');
   }
-  const command = request.launch_command?.trim();
+  if (request.name.length > MAX_NAME_LENGTH) {
+    throw new HttpError(
+      400,
+      'invalid_input',
+      `name must be at most ${MAX_NAME_LENGTH} characters`,
+    );
+  }
+  if (
+    request.launch_command !== undefined &&
+    request.launch_command.length > MAX_LAUNCH_COMMAND_LENGTH
+  ) {
+    throw new HttpError(
+      400,
+      'invalid_input',
+      `launch_command must be at most ${MAX_LAUNCH_COMMAND_LENGTH} characters`,
+    );
+  }
+
   const document = readConfigDocument(home);
+  const existing = document[PROFILE_TABLE];
+  const storedCommand =
+    isTomlTable(existing) && typeof existing['launch_command'] === 'string'
+      ? existing['launch_command']
+      : undefined;
+
+  const command =
+    request.launch_command === undefined
+      ? storedCommand
+      : request.launch_command.trim().length > 0
+        ? request.launch_command.trim()
+        : undefined;
+
   document[PROFILE_TABLE] =
-    command !== undefined && command.length > 0
-      ? { name, launch_command: command }
-      : { name };
+    command !== undefined ? { name, launch_command: command } : { name };
   await writeConfigDocument(home, document);
-  return command !== undefined && command.length > 0
-    ? { name, launch_command: command }
-    : { name };
+  return command !== undefined ? { name, launch_command: command } : { name };
 }
 
 /** Runtime shape check for the PUT body — the schema is not a validator. */

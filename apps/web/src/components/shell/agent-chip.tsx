@@ -1,9 +1,8 @@
 /**
  * Agent chip — topnav badge for the current AI agent (IA spec §3.1).
  *
- * Data sources are read-only (assignment T2): the saved agent profile resolved
- * by `useSavedAgentProfile` (desktop IPC profile, else the browser
- * `nexus-agent-profile:<creator_id>` snapshot owned by T3/onboarding), matched
+ * Read-only: the saved agent profile resolved by `useSavedAgentProfile`
+ * (desktop IPC profile, else the service-backed daemon-global profile), matched
  * onto the latest ACP scan exactly like the daemon status bar badge. Click
  * opens the existing agent settings surface; no new persistence here.
  */
