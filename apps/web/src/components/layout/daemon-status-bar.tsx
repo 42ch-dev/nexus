@@ -30,6 +30,8 @@ import type { AgentScanEntry } from '@42ch/nexus-contracts';
 interface AgentBadgeInfo {
   displayName: string;
   version: string | null;
+  /** True when the saved profile resolves onto an installed ACP scan entry. */
+  connected: boolean;
 }
 
 /**
@@ -55,9 +57,9 @@ export function resolveAgentBadge(
   const entry = byName ?? byCommand ?? null;
   if (entry) {
     const item = resolveCatalogItem(entry);
-    return { displayName: item.displayName, version: item.version ?? null };
+    return { displayName: item.displayName, version: item.version ?? null, connected: true };
   }
-  return { displayName: profile.name, version: null };
+  return { displayName: profile.name, version: null, connected: false };
 }
 
 const STATUS_SYNC_INTERVAL_MS = 10_000;

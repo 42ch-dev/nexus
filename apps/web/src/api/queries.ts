@@ -943,6 +943,43 @@ export function useScanAgents(request?: ScanRequest) {
 /** Saved agent profile snapshot shape (desktop `getAgentProfile` payload). */
 export type AgentProfileSnapshot = { name: string; launchCommand?: string };
 
+/** Browser-snapshot storage key prefix owned by onboarding (T3). */
+const BROWSER_AGENT_PROFILE_PREFIX = 'nexus-agent-profile:';
+
+/**
+ * Read the browser-saved agent profile snapshot; absent in fresh browsers.
+ *
+ * Extracted out of `AgentChip` (v1220 T2) so the topnav chip and the Hub's
+ * Agent card resolve the saved profile from ONE seam — P2 Task 1 replaces this
+ * seam (plus {@link useAgentProfile}) with the service-backed surface.
+ */
+export function readBrowserAgentProfile(
+  creatorId: string | null | undefined,
+): AgentProfileSnapshot | null {
+  if (!creatorId || typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(`${BROWSER_AGENT_PROFILE_PREFIX}${creatorId}`);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== 'object') return null;
+    const { name, launchCommand } = parsed as Partial<AgentProfileSnapshot>;
+    if (typeof name !== 'string' || name.trim() === '') return null;
+    return { name, launchCommand };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Saved agent profile: the desktop IPC profile when available, else the
+ * browser snapshot. Single source for the topnav chip and the Hub Agent card.
+ */
+export function useSavedAgentProfile(): AgentProfileSnapshot | null {
+  const profileQuery = useAgentProfile();
+  const activeCreatorId = useActiveCreatorId();
+  return profileQuery.data ?? readBrowserAgentProfile(activeCreatorId);
+}
+
 /**
  * Desktop-only saved agent profile (V1.120 P1 T1).
  *

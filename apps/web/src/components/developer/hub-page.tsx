@@ -1,20 +1,13 @@
 /**
- * 操作台 (Hub) — the developer entrance's landing surface (plan v1220 T1).
+ * 操作台 (Hub) — the developer entrance's landing surface (plan v1220 T1/T2).
  *
- * Read-only status aggregation: four cards, each linking into its rail app.
- * This task ships the page shell + card frames; T2 fills the cards with live
- * data from the existing daemon endpoints (no new wire contract, IA §6).
+ * Read-only status aggregation: four cards (本地服务 / Agent / Harness 摘要 /
+ * 已装模块), each reading existing daemon endpoints and linking into its rail
+ * app. No new wire contract (IA §6), no mutating action on this page.
  */
 import { useTranslation } from 'react-i18next';
 
-import { HubCard } from '@/components/developer/hub-card';
-
-const HUB_CARD_TITLES = [
-  { id: 'service', titleKey: 'hub.operating.service.title' },
-  { id: 'agent', titleKey: 'hub.operating.agent.title' },
-  { id: 'harness', titleKey: 'hub.operating.harness.title' },
-  { id: 'modules', titleKey: 'hub.operating.modules.title' },
-] as const;
+import { HubCards } from '@/components/developer/hub-cards';
 
 export function HubPage() {
   const { t } = useTranslation('shell');
@@ -28,11 +21,7 @@ export function HubPage() {
         <p className="text-copy-14 text-gray-900">{t('hub.operating.description')}</p>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {HUB_CARD_TITLES.map((card) => (
-          <HubCard key={card.id} id={card.id} title={t(card.titleKey)} />
-        ))}
-      </div>
+      <HubCards />
     </div>
   );
 }
