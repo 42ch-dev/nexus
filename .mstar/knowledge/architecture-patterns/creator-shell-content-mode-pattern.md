@@ -29,6 +29,11 @@ V1.128 introduced a dedicated selection context and a presentational extract (`@
 
 ### 1. Selection SSOT — `CreatorEntitySelectionContext`
 
+> **Removed in #442**: `CreatorEntitySelectionProvider` / `useCreatorEntitySelection`
+> were deleted as dead glue — no product consumer remained, so the provider was
+> only wrapping the shell. The guidance below is the retained design for
+> reintroducing a hub mode switch; the code reference no longer exists.
+
 Hub content mode is driven by React context, not URL params and not shell-sidebar submenu anchor state.
 
 ```ts
@@ -97,6 +102,6 @@ App integration tests should cover at least one entity kind (Work); symmetric Wo
 
 - Iteration spec: `creator-create-controller-shell.md`
 - Presentational extract: `apps/web/src/components/layout/presentational/creator-shell-content.tsx`
-- Context: `apps/web/src/components/layout/creator-entity-selection-context.tsx`
+- Context: removed in #442 (`apps/web/src/components/layout/creator-entity-selection-context.tsx` was deleted as dead glue)
 - App host: `apps/web/src/pages/creator-hub-page.tsx`
 - Related: [ui-component-promotion-workflow.md](./ui-component-promotion-workflow.md) (`@web-layout/*` alias tier)
