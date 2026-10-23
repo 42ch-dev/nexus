@@ -105,6 +105,7 @@
     "openExternalFailed": "无法打开链接。请尝试在浏览器中手动打开。"
   },
   "toast": {
+    "presetReloaded": "预设已重新加载",
     "error": "错误",
     "success": "成功",
     "pathCopied": "路径已复制",
@@ -144,8 +145,6 @@
     "workspacePathLoadFailed": "无法加载工作区路径。",
     "workspacePathSaveFailed": "无法保存工作区路径。",
     "agentProfileSaved": "代理配置已保存",
-    "saveAgentOnDesktop": "请在桌面端保存代理",
-    "saveAgentOnDesktopDescription": "打开 Nexus 桌面应用以更改本地代理。",
     "couldNotSaveAgent": "无法保存代理",
     "agentProfileSavedDescription": "正在使用 {{name}} 执行本地策略。",
     "daemonRestartFailed": "守护进程重启失败",

@@ -39,7 +39,6 @@
   "agent": {
     "title": "Agent",
     "helper": "Choose which local agent Nexus uses for creative work.",
-    "browserOnly": "Agent selection is available on the desktop app only.",
     "save": "Save",
     "saving": "Saving…",
     "scanError": "The daemon did not respond to the agent scan request.",

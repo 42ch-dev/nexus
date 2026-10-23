@@ -105,6 +105,7 @@
     "openExternalFailed": "Could not open the link. Try opening it manually in your browser."
   },
   "toast": {
+    "presetReloaded": "Preset reloaded",
     "error": "Error",
     "success": "Success",
     "pathCopied": "Path copied",
@@ -144,8 +145,6 @@
     "workspacePathLoadFailed": "Could not load the workspace path.",
     "workspacePathSaveFailed": "Could not save the workspace path.",
     "agentProfileSaved": "Agent profile saved",
-    "saveAgentOnDesktop": "Save agent on desktop",
-    "saveAgentOnDesktopDescription": "Open the Nexus desktop app to change your local agent.",
     "couldNotSaveAgent": "Could not save agent",
     "agentProfileSavedDescription": "Using {{name}} for local strategies.",
     "daemonRestartFailed": "Daemon restart failed",

@@ -1,10 +1,11 @@
 /**
- * Settings Agent section — V1.103 P1 (G1 getAgentProfile preselect).
+ * Settings Agent section — V1.103 P1 (G1 preselect).
  *
- * Mounts app-shared AgentPicker as a Settings section body.
- * Desktop: after scan settles, preselect via getAgentProfile (match by command
- * / catalog key). Persist via instant `setAgentProfile` on card select or
- * custom verify success (V1.125 AC-V1125-2).
+ * Mounts app-shared AgentPicker as a Settings section body. The saved profile
+ * comes from the shared `useSavedAgentProfile` seam (desktop IPC / browser
+ * service), so this page preselects and saves through the same store the Agent
+ * chip and the Harness profile bar read — in the browser too. Persist happens
+ * instantly on card select or custom verify success (V1.125 AC-V1125-2).
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -17,8 +18,13 @@ import {
   type AgentPickerStatus,
   type AgentVerifyStatus,
 } from '@/components/setup/agent-picker';
-import { launchCommandMatches, useScanAgents, useVerifyAgent } from '@/api/queries';
-import { useDesktopCapabilities } from '@/lib/client-context';
+import {
+  launchCommandMatches,
+  useSavedAgentProfile,
+  useScanAgents,
+  useVerifyAgent,
+} from '@/api/queries';
+import { useDesktopCapabilities, useNexusClient } from '@/lib/client-context';
 import { errorMessage } from '@/lib/error-message';
 import { useToast } from '@/lib/use-toast';
 import { queryKeys } from '@/lib/nexus/query-keys';
@@ -108,7 +114,9 @@ export function SettingsAgentSection() {
   const { t } = useTranslation('settings');
   const { t: commonT } = useTranslation('common');
   const desktop = useDesktopCapabilities();
+  const client = useNexusClient();
   const { toast } = useToast();
+  const saved = useSavedAgentProfile();
   const scan = useScanAgents({ filter: 'all', registry_refresh: true });
   const verifyAgent = useVerifyAgent();
   const agents = scan.data?.agents ?? [];
@@ -136,20 +144,21 @@ export function SettingsAgentSection() {
 
   const persistAgentProfile = useCallback(
     async (agent: AgentScanEntry | null, customCommand: string) => {
-      if (!desktop) {
-        toast({
-          variant: 'info',
-          title: commonT('toast.saveAgentOnDesktop'),
-          description: commonT('toast.saveAgentOnDesktopDescription'),
-        });
-        return;
-      }
-
       const name = agent?.name ?? 'custom';
       const launchCommand =
         (agent?.launch_command ?? customCommand.trim()) ?? undefined;
       try {
-        await desktop.setAgentProfile(name, launchCommand);
+        // Transport-coherent with the read seam: desktop keeps the IPC store,
+        // the browser writes the service the same seam reads.
+        if (desktop) {
+          await desktop.setAgentProfile(name, launchCommand);
+        } else {
+          await client.saveAgentProfile(
+            launchCommand === undefined
+              ? { name }
+              : { name, launch_command: launchCommand },
+          );
+        }
         void qc.invalidateQueries({ queryKey: queryKeys.agentProfile.detail() });
         void qc.invalidateQueries({
           queryKey: queryKeys.agentHost.scan({ filter: 'all' }),
@@ -164,65 +173,47 @@ export function SettingsAgentSection() {
         });
       }
     },
-    [commonT, desktop, qc, toast],
+    [client, commonT, desktop, qc, toast],
   );
 
-  // G1: after scan settles, desktop preselects via getAgentProfile (match by
-  // command / catalog key). Null/unreadable → first-installed fallback. Browser
-  // skips read.
+  // G1: once both the scan and the shared profile read settle, preselect the
+  // saved profile (match by command / catalog key); null/unreadable falls back
+  // to the first installed agent. Works in the browser too — the seam reads the
+  // service there.
   useEffect(() => {
     if (didInitDefault) return;
-    if (scan.isLoading || scan.isError) return;
+    if (scan.isLoading || scan.isError || saved.isLoading) return;
     const scannedMaybe = scan.data?.agents;
     if (scannedMaybe === undefined) return;
-    const scanned: AgentScanEntry[] = scannedMaybe;
 
-    let cancelled = false;
-
-    async function initSelection() {
-      if (desktop) {
-        const profile = await desktop.getAgentProfile();
-        if (cancelled) return;
-        if (userTouchedRef.current) {
-          setDidInitDefault(true);
-          return;
-        }
-        if (
-          profile &&
-          applySavedProfile(
-            scanned,
-            profile,
-            setSelectedAgent,
-            setCustomLaunchCommand,
-          )
-        ) {
-          setDidInitDefault(true);
-          return;
-        }
-      }
-
-      if (cancelled) return;
-      if (userTouchedRef.current) {
-        setDidInitDefault(true);
-        return;
-      }
-      const fallback = scanned.find((a) => a.installed) ?? null;
-      if (fallback) {
-        setSelectedAgent(fallback);
-      }
+    if (userTouchedRef.current) {
       setDidInitDefault(true);
+      return;
     }
-
-    void initSelection();
-    return () => {
-      cancelled = true;
-    };
+    if (
+      saved.profile &&
+      applySavedProfile(
+        scannedMaybe,
+        saved.profile,
+        setSelectedAgent,
+        setCustomLaunchCommand,
+      )
+    ) {
+      setDidInitDefault(true);
+      return;
+    }
+    const fallback = scannedMaybe.find((a) => a.installed) ?? null;
+    if (fallback) {
+      setSelectedAgent(fallback);
+    }
+    setDidInitDefault(true);
   }, [
     didInitDefault,
     scan.isLoading,
     scan.isError,
     scan.data?.agents,
-    desktop,
+    saved.isLoading,
+    saved.profile,
   ]);
 
   const selectedId = useMemo(() => {
@@ -266,11 +257,6 @@ export function SettingsAgentSection() {
       <div className="flex flex-col gap-2">
         <h3 className="text-heading-16 font-heading text-gray-1000">{t('agent.title')}</h3>
         <p className="text-copy-14 text-gray-900">{t('agent.helper')}</p>
-        {!desktop ? (
-          <p className="text-copy-13 text-gray-700" data-testid="settings-agent-browser-helper">
-            {t('agent.browserOnly')}
-          </p>
-        ) : null}
       </div>
 
       <div data-testid="settings-host-picker-region">
