@@ -679,3 +679,87 @@ async fn retained_preset_catalog_scaffold_and_unknown_lookup() {
     assert!(user.yaml.contains("route-test-preset"));
     fixture.core.close().await.unwrap();
 }
+
+/// The validate endpoint names a host file, so it must be an in-home path and
+/// must never answer with a host path or OS error text (I-000076).
+#[tokio::test]
+async fn preset_validation_is_confined_to_the_daemon_home() {
+    let fixture = setup().await;
+
+    // A manifest inside the daemon home still validates.
+    let inside = nexus_contracts::ValidatePresetRequest {
+        path: fixture.bundle.join("preset.yaml").display().to_string(),
+    };
+    let valid = fixture
+        .core
+        .validate_preset(&fixture.principal, inside)
+        .await
+        .unwrap();
+    assert!(valid.valid, "unexpected errors: {:?}", valid.errors);
+
+    // A host path outside the daemon home is one uniform invalid_input, and the
+    // refusal does not echo the path it was given.
+    for outside in ["/etc/passwd", "/tmp", "/"] {
+        let error = fixture
+            .core
+            .validate_preset(
+                &fixture.principal,
+                nexus_contracts::ValidatePresetRequest {
+                    path: outside.into(),
+                },
+            )
+            .await
+            .expect_err("a host path outside the home must be refused");
+        let CoreError::Preset(PresetError::InvalidInput { field, reason }) = error else {
+            panic!("outside path {outside} must be invalid_input, got {error:?}");
+        };
+        assert_eq!(field, "path");
+        assert_eq!(reason, "must resolve inside the daemon home");
+        assert!(
+            !reason.contains(outside),
+            "the refusal echoes the path: {reason}"
+        );
+    }
+
+    // A relative path never reaches the filesystem.
+    let relative = fixture
+        .core
+        .validate_preset(
+            &fixture.principal,
+            nexus_contracts::ValidatePresetRequest {
+                path: "presets/test-strategy/preset.yaml".into(),
+            },
+        )
+        .await
+        .expect_err("a relative path must be refused");
+    assert!(
+        matches!(
+            relative,
+            CoreError::Preset(PresetError::InvalidInput { ref field, ref reason })
+                if field == "path" && reason == "must be an absolute path inside the daemon home"
+        ),
+        "unexpected: {relative:?}"
+    );
+
+    // A missing manifest inside the home is not_found WITHOUT the host path.
+    let missing = fixture.bundle.join("missing.yaml");
+    let error = fixture
+        .core
+        .validate_preset(
+            &fixture.principal,
+            nexus_contracts::ValidatePresetRequest {
+                path: missing.display().to_string(),
+            },
+        )
+        .await
+        .expect_err("a missing manifest is not_found");
+    let CoreError::Preset(PresetError::NotFound(message)) = error else {
+        panic!("expected not_found, got {error:?}");
+    };
+    assert_eq!(message, "preset file not found");
+    assert!(
+        !message.contains(fixture.tmp.path().to_str().unwrap()),
+        "the not-found message must not echo the host path: {message}"
+    );
+    fixture.core.close().await.unwrap();
+}
