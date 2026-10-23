@@ -3,9 +3,10 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { screen } from '@testing-library/react';
+import { Route, Routes } from 'react-router';
 
 import { HubPage } from '@/components/developer/hub-page';
-import { appsForEntrance } from '@/lib/app-registry';
+import { AppModuleRoute } from '@/components/shell/app-shell';
 import { i18n } from '@/lib/i18n/config';
 import { renderInApp } from '@/test/test-providers';
 
@@ -24,15 +25,15 @@ describe('HubPage', () => {
     }
   });
 
-  it('is the developer rail hub entry: /developer, all five apps unlocked', async () => {
-    const apps = appsForEntrance('developer');
-    const hub = apps.find((app) => app.id === 'hub');
+  it('renders through the /developer route', async () => {
+    window.localStorage.setItem('nexus-entrance', 'developer');
+    renderInApp(
+      <Routes>
+        <Route path="/developer" element={<AppModuleRoute appId="hub" />} />
+      </Routes>,
+      { initialRouterEntries: ['/developer'] },
+    );
 
-    expect(apps).toHaveLength(5);
-    expect(hub?.route).toBe('/developer');
-    expect(apps.every((app) => app.lockReason === undefined)).toBe(true);
-
-    const module = await hub!.load();
-    expect(module.default).toBe(HubPage);
+    expect(await screen.findByTestId('hub-page')).toBeInTheDocument();
   });
 });

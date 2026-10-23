@@ -8,7 +8,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { delay, http, HttpResponse } from 'msw';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useLocation } from 'react-router';
 
@@ -134,6 +134,147 @@ describe('HarnessPage', () => {
     // Canvas and profile drill-downs stay reachable from a row.
     await userEvent.click(screen.getByRole('button', { name: '在 canvas 中打开 user/one' }));
     expect(screen.getByTestId('location')).toHaveTextContent('/strategies/user%2Fone');
+  });
+
+  it('marks a failed profile read as unknown binding, never "not bound"', async () => {
+    useHandlers(
+      http.get('/v1/daemon/presets', () => HttpResponse.json(presetBody())),
+      http.get(/\/v1\/daemon\/orchestration\/presets\/.+\/profile$/, () =>
+        HttpResponse.json(
+          { success: false, error: { code: 'internal', message: 'profile offline' } },
+          { status: 500 },
+        ),
+      ),
+      sessionsHandler([]),
+    );
+
+    renderHarness();
+
+    expect(await screen.findByTestId('preset-binding-user/one')).toHaveTextContent(
+      '绑定状态未知',
+    );
+    expect(screen.getByTestId('preset-binding-user/one')).not.toHaveTextContent('未绑定');
+  });
+
+  it('reloads the row so manifest changes reach the catalog', async () => {
+    let listCalls = 0;
+    useHandlers(
+      http.get('/v1/daemon/presets', () => {
+        listCalls += 1;
+        // The reload re-reads the manifest: the refetched catalog carries the
+        // new list facts, which is what the row must show.
+        return HttpResponse.json(
+          listCalls === 1
+            ? presetBody()
+            : {
+                ...presetBody(),
+                user: [{ id: 'user/one', source: 'user', run_intents: ['review'] }],
+              },
+        );
+      }),
+      profileHandler('user/one', []),
+      profileHandler('embedded/two', []),
+      profileHandler('sys/three', []),
+      sessionsHandler([]),
+      // The real route answers the generated `ReloadPresetResponse`.
+      http.post(/\/v1\/daemon\/presets\/.*:reload$/, () =>
+        HttpResponse.json({ id: 'user/one', reloaded: true }),
+      ),
+    );
+
+    renderHarness();
+    await screen.findByTestId('preset-row-user/one');
+    expect(screen.getByTestId('preset-facts-user/one')).toHaveTextContent('用户 · write');
+
+    await userEvent.click(screen.getByTestId('preset-reload-user/one'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('preset-facts-user/one')).toHaveTextContent('用户 · review'),
+    );
+  });
+
+  it('deletes a user preset and the row leaves the catalog', async () => {
+    let deleted = false;
+    useHandlers(
+      http.get('/v1/daemon/presets', () =>
+        HttpResponse.json(deleted ? { ...presetBody(), user: [] } : presetBody()),
+      ),
+      profileHandler('user/one', []),
+      profileHandler('embedded/two', []),
+      profileHandler('sys/three', []),
+      sessionsHandler([]),
+      http.delete(/\/v1\/daemon\/presets\/.*$/, () => {
+        deleted = true;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    renderHarness();
+    await screen.findByTestId('preset-row-user/one');
+
+    // Delete is offered on user presets only.
+    expect(screen.getByTestId('preset-delete-user/one')).toBeInTheDocument();
+    expect(screen.queryByTestId('preset-delete-embedded/two')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('preset-delete-sys/three')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('preset-delete-user/one'));
+    const confirm = await screen.findByRole('dialog');
+    await userEvent.click(within(confirm).getByRole('button', { name: '删除' }));
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('preset-row-user/one')).not.toBeInTheDocument(),
+    );
+    // The rest of the catalog survives the delete.
+    expect(screen.getByTestId('preset-row-embedded/two')).toBeInTheDocument();
+    expect(screen.getByTestId('preset-row-sys/three')).toBeInTheDocument();
+  });
+
+  it('validates the row it was opened from', async () => {
+    const validatedPaths: unknown[] = [];
+    useHandlers(
+      http.get('/v1/daemon/presets', () => HttpResponse.json(presetBody())),
+      profileHandler('user/one', []),
+      profileHandler('embedded/two', []),
+      profileHandler('sys/three', []),
+      sessionsHandler([]),
+      http.get(/\/v1\/daemon\/presets\/[^/]+$/, ({ request }) => {
+        const id = decodeURIComponent(request.url.split('/').pop() ?? '');
+        return HttpResponse.json({
+          id,
+          source: 'user',
+          path: `/tmp/nexus42/presets/${id}/preset.yaml`,
+          yaml: 'revision: 1',
+        });
+      }),
+      http.post('/v1/daemon/presets:validate', async ({ request }) => {
+        const body = (await request.json()) as { path: string };
+        validatedPaths.push(body.path);
+        return HttpResponse.json({ valid: true, errors: [], warnings: [] });
+      }),
+    );
+
+    renderHarness();
+    await screen.findByTestId('preset-row-user/one');
+
+    // Validate exists only where a manifest file does: user and system rows.
+    expect(screen.getByTestId('preset-validate-user/one')).toBeInTheDocument();
+    expect(screen.getByTestId('preset-validate-sys/three')).toBeInTheDocument();
+    expect(screen.queryByTestId('preset-validate-embedded/two')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('preset-validate-user/one'));
+
+    // The row button names THAT preset: the form arrives pre-filled with its
+    // own manifest path (still editable) instead of a blank disk path.
+    const dialog = await screen.findByRole('dialog', { name: '验证预设' });
+    const pathField = within(dialog).getByRole('textbox');
+    expect(pathField).toHaveValue('/tmp/nexus42/presets/user/one/preset.yaml');
+
+    await userEvent.click(within(dialog).getByRole('button', { name: '验证' }));
+
+    await waitFor(() =>
+      expect(validatedPaths).toEqual(['/tmp/nexus42/presets/user/one/preset.yaml']),
+    );
+    expect(await within(dialog).findByText('预设有效')).toBeInTheDocument();
   });
 
   it('shows a single loading state while presets load', async () => {

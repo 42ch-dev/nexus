@@ -117,6 +117,39 @@ describe('ProfileBar', () => {
     );
   });
 
+  it('renders a failed profile read and retries it', async () => {
+    let attempts = 0;
+    useHandlers(
+      http.get('/v1/daemon/agent-host/profile', () => {
+        attempts += 1;
+        return attempts === 1
+          ? HttpResponse.json(
+              {
+                success: false,
+                error: { code: 'internal', message: 'config.toml is unreadable' },
+              },
+              { status: 500 },
+            )
+          : HttpResponse.json({ profile: { name: 'claude-code' } });
+      }),
+      http.post('/v1/daemon/agent-host/scan', () => HttpResponse.json(installedAgents())),
+    );
+
+    renderBar();
+
+    expect(await screen.findByTestId('harness-profile-error')).toHaveTextContent(
+      '加载失败：config.toml is unreadable',
+    );
+    // A failed read never claims a current profile.
+    expect(screen.queryByTestId('harness-profile-current')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: '重试' }));
+
+    expect(await screen.findByTestId('harness-profile-current')).toHaveTextContent(
+      '当前：claude-code',
+    );
+  });
+
   it('shows the loading state while the profile read is pending', async () => {
     useHandlers(
       http.get('/v1/daemon/agent-host/profile', async () => {

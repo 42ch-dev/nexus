@@ -112,19 +112,11 @@ fn default_creative_root(creator_id: &str, workspace_slug: &str) -> Result<PathB
     Ok(docs.join("nexus").join(creator_id).join(workspace_slug))
 }
 
-/// Validate that a slug is a single, safe path segment.
+/// Validate that a slug is a single, safe path segment — the same rule the
+/// core applies, so the CLI never accepts a name the core would refuse.
 fn validate_slug(label: &str, value: &str) -> Result<()> {
-    if value.is_empty()
-        || value.contains('/')
-        || value.contains('\\')
-        || value == "."
-        || value == ".."
-    {
-        return Err(CliError::Other(format!(
-            "Invalid {label} {value:?} (must be a single path segment)"
-        )));
-    }
-    Ok(())
+    nexus_core::slug::validate_slug_name(value)
+        .map_err(|reason| CliError::Other(format!("Invalid {label} {value:?} ({reason})")))
 }
 
 /// Writes creative tree, `meta.json`, and initializes workspace `state.db` (ADR-014).
@@ -1638,6 +1630,21 @@ mod tests {
         );
         store.creators = Some(m.into_iter().collect());
         store
+    }
+
+    /// The CLI must refuse exactly what the core refuses — the shared slug
+    /// rule, not a second copy that drifts.
+    #[test]
+    fn validate_slug_uses_the_shared_core_rule() {
+        assert!(validate_slug("workspace_slug", "novel").is_ok());
+        for slug in ["novel ", "con", "CON", "novel.", "a\\b", "../x", ""] {
+            let err = validate_slug("workspace_slug", slug)
+                .expect_err("the shared rule must refuse this slug");
+            assert!(
+                err.to_string().starts_with("Invalid workspace_slug"),
+                "slug {slug:?}: {err}"
+            );
+        }
     }
 
     // ── obtain_auth_token tests ──────────────────────────────────

@@ -14,6 +14,7 @@
     "bindingBound": "strategy 已绑定",
     "bindingUnbound": "未绑定",
     "bindingLoading": "检查中…",
+    "bindingUnknown": "绑定状态未知",
     "running": "running ×{{count}}",
     "runningTruncated": "running ×{{count}}+",
     "runningUnknown": "运行状态未知",
@@ -61,7 +62,6 @@
     "laneDirectDetail": "由集成方或产品触发的事件 — 携带显式运行负载的调度启动。不是预设信号中声明的已投递 webhook。",
     "laneYes": "是",
     "laneNo": "否",
-    "openAria": "查看 {{name}} 的档案",
     "loading": "正在加载档案…",
     "unavailableTitle": "档案不可用",
     "unavailableDescription": "无法加载 {{name}} 的档案。",
@@ -98,5 +98,33 @@
     "notFoundDescription": "请从 Harness 列表中选择一个预设。",
     "title": "预设",
     "description": "将预设视为状态机图，并用 Idea 引导执行。Nexus 拥有正文。"
+  },
+  "validatePreset": "验证",
+  "reloading": "正在重新加载…",
+  "reload": "重新加载",
+  "delete": "删除",
+  "deleteAria": "删除预设 {{name}}",
+  "deleteConfirm": {
+    "title": "删除 \"{{name}}\"",
+    "description": "该预设将从你的库中移除。此操作无法撤销。",
+    "delete": "删除",
+    "deleting": "正在删除…"
+  },
+  "dialog": {
+    "validatePreset": {
+      "title": "验证预设",
+      "description": "在提交之前对预设文件进行 dry-run 验证。",
+      "presetPathLabel": "预设路径",
+      "presetPathPlaceholder": "磁盘上的预设文件路径",
+      "helpText": "由守护进程根据本地 home 布局解析。",
+      "close": "关闭",
+      "submit": "验证",
+      "submitting": "正在验证预设…",
+      "valid": "预设有效",
+      "safeToCommit": "可以安全提交",
+      "stateCountSuffix": " · {{count}} 个状态",
+      "validationFailed": "验证失败",
+      "warnings": "警告"
+    }
   }
 }

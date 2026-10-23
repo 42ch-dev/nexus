@@ -70,7 +70,7 @@ use nexus_contracts::local::schedule::http::{
     AddScheduleRequest, AddScheduleResponse, SignalScheduleRequest, SignalScheduleResponse,
 };
 use nexus_contracts::{
-    CoreStrategyPatchResponse, GetPresetResponse, ScaffoldPresetRequest,
+    CoreStrategyPatchResponse, GetPresetResponse, ReloadPresetResponse, ScaffoldPresetRequest,
     StrategyPatchPromptTemplateRequest, StrategyPatchStateRequest, StrategyPatchTransitionRequest,
     UpdatePresetRequest, UpdatePresetResponse, ValidatePresetRequest, ValidatePresetResponse,
 };
@@ -635,6 +635,20 @@ impl NativeCore {
         self.json_call(principal_handle, async move |core, principal| {
             let response: ValidatePresetResponse =
                 core.validate_preset(&principal, request).await?;
+            Ok(response)
+        })
+        .await
+    }
+
+    /// `POST /v1/daemon/presets/{id}:reload`.
+    #[napi]
+    pub async fn reload_preset(
+        &self,
+        principal_handle: String,
+        preset_id: String,
+    ) -> Result<Buffer> {
+        self.json_call(principal_handle, async move |core, principal| {
+            let response: ReloadPresetResponse = core.reload_preset(&principal, preset_id).await?;
             Ok(response)
         })
         .await

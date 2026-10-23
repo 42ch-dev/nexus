@@ -200,6 +200,7 @@ describe('route-inventory (P5-T5)', () => {
   ['POST', '/v1/daemon/orchestration/schedules', 'tier2', 'execution'],
   ['POST', '/v1/daemon/orchestration/schedules/([^/]+)/signal', 'tier2', 'execution'],
   ['POST', '/v1/daemon/presets', 'tier2', 'presets'],
+  ['POST', '/v1/daemon/presets/([^/]+):reload', 'tier2', 'presets'],
   ['POST', '/v1/daemon/presets:validate', 'tier2', 'presets'],
   ['POST', '/v1/daemon/reading/annotations', 'tier2', 'knowledge'],
   ['POST', '/v1/daemon/strategies/([^/]+)/states/([^/]+)/patch', 'tier2', 'presets'],

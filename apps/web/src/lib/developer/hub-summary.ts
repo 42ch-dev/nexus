@@ -10,6 +10,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { SessionSummary } from '@42ch/nexus-contracts';
 
 import {
+  filterVisiblePresets,
   filterVisibleSessions,
   useComputeModules,
   usePresets,
@@ -185,6 +186,10 @@ export function useVisibleSessions() {
   return useQuery({
     queryKey: queryKeys.hub.harnessSessions(),
     queryFn: () => fetchAllVisibleSessions(client),
+    // The walk is up to ten serial requests. Without a staleness window every
+    // remount (Hub ↔ Harness) replays the whole cursor chain, so it stays fresh
+    // for a minute — the count is a status summary, not a live feed.
+    staleTime: 60_000,
   });
 }
 
@@ -195,10 +200,8 @@ export function useHarnessSummary(): HubSectionState<HarnessSummary> {
   const data =
     presets.data && sessions.data
       ? {
-          presetCount:
-            presets.data.embedded.length +
-            presets.data.system.length +
-            presets.data.user.length,
+          // Same visibility rule as the Harness catalog it summarizes.
+          presetCount: filterVisiblePresets(presets.data).length,
           runningSessions: countRunningSessions(sessions.data.sessions),
           sessionsTruncated: sessions.data.truncated,
         }

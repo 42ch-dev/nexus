@@ -755,23 +755,10 @@ fn mint_local_creator_id() -> String {
     format!("ctr_local{random}")
 }
 
-/// Validate a workspace slug: non-empty, single path segment, no `.` / `..`,
-/// no control characters (retained daemon `validate_slug` rule plus the shared
-/// name-safety rule, core error type).
+/// Validate a workspace slug through the one shared slug rule
+/// ([`crate::slug::validate_slug_name`]).
 fn validate_workspace_slug(slug: &str) -> CoreResult<()> {
-    let reason = if slug.is_empty()
-        || slug.contains('/')
-        || slug.contains('\\')
-        || slug == "."
-        || slug == ".."
-    {
-        "must be a single path segment"
-    } else if slug.chars().any(char::is_control) {
-        "must not contain control characters"
-    } else {
-        return Ok(());
-    };
-    Err(CoreError::InvalidInput {
+    crate::slug::validate_slug_name(slug).map_err(|reason| CoreError::InvalidInput {
         field: "workspace_slug".to_string(),
         reason: reason.to_string(),
     })
@@ -831,6 +818,9 @@ fn validate_creative_root_override(raw: &str) -> CoreResult<()> {
     })
 }
 
+/// Files an OS writes into a directory without the author's involvement.
+const NON_AUTHOR_FILES: [&str; 3] = [".DS_Store", "desktop.ini", "Thumbs.db"];
+
 /// True when `dir` has no entries (a freshly chosen empty directory is adopted).
 /// An unreadable directory is a client-side root problem, so it folds to
 /// `invalid_input` rather than an internal fault.
@@ -839,7 +829,18 @@ fn directory_is_empty(dir: &Path) -> CoreResult<bool> {
         field: "creative_root".to_string(),
         reason: "not readable".to_string(),
     })?;
-    Ok(entries.next().is_none())
+    // OS thumbnail/metadata droppings are not author content: adopting a
+    // directory that only carries them must not read as "already holds
+    // content". `.DS_Store` (Finder), `desktop.ini` (Explorer) and `Thumbs.db`
+    // (Explorer thumbs) are the three platforms' equivalents.
+    Ok(entries.all(|entry| {
+        entry.is_ok_and(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| NON_AUTHOR_FILES.contains(&name))
+        })
+    }))
 }
 
 /// Prove the creative root is writable before any registration artifact is
@@ -871,6 +872,34 @@ struct PreexistingArtifacts {
     creative_root: bool,
 }
 
+/// How a rollback artifact is removed.
+#[derive(Clone, Copy)]
+enum RollbackRemoval {
+    File,
+    Directory,
+    RecursiveDirectory,
+}
+
+/// Best-effort removal of one rollback artifact. A missing path is the normal
+/// answer (nothing of ours to undo); anything else is logged, never raised —
+/// the caller is already unwinding a failure.
+fn remove_rollback_artifact(path: &Path, how: RollbackRemoval) {
+    let result = match how {
+        RollbackRemoval::File => std::fs::remove_file(path),
+        RollbackRemoval::Directory => std::fs::remove_dir(path),
+        RollbackRemoval::RecursiveDirectory => std::fs::remove_dir_all(path),
+    };
+    if let Err(err) = result {
+        if err.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!(
+                path = %path.display(),
+                error = %err,
+                "workspace rollback could not remove artifact"
+            );
+        }
+    }
+}
+
 /// Undo a failed create by removing only the artifacts this call produced.
 ///
 /// The operational directory is removed recursively only when this call created
@@ -878,7 +907,9 @@ struct PreexistingArtifacts {
 /// is never deleted — only the manifest file this call wrote (and the
 /// `.nexus42` directory when that leaves it empty). `meta.json` is the
 /// registration marker and never pre-existed here (the preflight refuses a
-/// registered slug), so a partial write of it is safe to drop.
+/// registered slug), so a partial write of it is safe to drop. The DB's
+/// `-wal`/`-shm` sidecars belong to this call's database and are removed with
+/// it, so a pre-existing operational directory keeps no half-open SQLite state.
 fn rollback_new_workspace(
     op_dir: &Path,
     db_path: &Path,
@@ -887,23 +918,28 @@ fn rollback_new_workspace(
     preexisting: PreexistingArtifacts,
 ) {
     if !preexisting.db {
-        let _ = std::fs::remove_file(db_path);
+        remove_rollback_artifact(db_path, RollbackRemoval::File);
+        for suffix in ["-wal", "-shm"] {
+            let mut sidecar = db_path.as_os_str().to_owned();
+            sidecar.push(suffix);
+            remove_rollback_artifact(&PathBuf::from(sidecar), RollbackRemoval::File);
+        }
     }
     if !preexisting.manifest {
-        let _ = std::fs::remove_file(manifest_path);
+        remove_rollback_artifact(manifest_path, RollbackRemoval::File);
     }
-    let _ = std::fs::remove_file(op_dir.join("meta.json"));
+    remove_rollback_artifact(&op_dir.join("meta.json"), RollbackRemoval::File);
     if !preexisting.op_dir {
-        let _ = std::fs::remove_dir_all(op_dir);
+        remove_rollback_artifact(op_dir, RollbackRemoval::RecursiveDirectory);
     }
     if preexisting.creative_root {
         let meta_dir = creative_root.join(".nexus42");
         let empty = std::fs::read_dir(&meta_dir).is_ok_and(|mut entries| entries.next().is_none());
         if empty {
-            let _ = std::fs::remove_dir(&meta_dir);
+            remove_rollback_artifact(&meta_dir, RollbackRemoval::Directory);
         }
     } else {
-        let _ = std::fs::remove_dir_all(creative_root);
+        remove_rollback_artifact(creative_root, RollbackRemoval::RecursiveDirectory);
     }
 }
 

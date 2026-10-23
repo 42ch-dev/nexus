@@ -26,6 +26,7 @@
       "@web-layout/*": ["../web/src/components/layout/presentational/*"],
       "@web-settings/*": ["../web/src/components/settings/presentational/*"],
       "@web-canvas/*": ["../web/src/components/canvas/presentational/*"],
+      "@web-harness/*": ["../web/src/components/harness/presentational/*"],
       "@web-global-timeline/*": [
         "../web/src/components/global-timeline/presentational/*"
       ],

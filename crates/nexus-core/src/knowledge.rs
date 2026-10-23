@@ -104,23 +104,13 @@ fn validate_scope(scope: Option<&str>) -> Result<(), KnowledgeFault> {
 
 /// `workspace_slug` is a logical single-segment workspace identifier (not an
 /// arbitrary filesystem selection): it is joined raw into the KB dir layout,
-/// so a separator/`..`/absolute form would escape the workspace root.
+/// so a separator/`..`/absolute form would escape the workspace root. The
+/// rules themselves live once in [`crate::slug::validate_slug_name`].
 fn validate_workspace_slug(slug: Option<&str>) -> Result<(), KnowledgeFault> {
-    let valid = slug.is_none_or(|slug| {
-        !slug.is_empty()
-            && !slug.contains('/')
-            && !slug.contains('\\')
-            && slug != "."
-            && slug != ".."
-    });
-    if valid {
-        Ok(())
-    } else {
-        Err(invalid_input(
-            "workspace_slug",
-            "must be a single path segment",
-        ))
-    }
+    slug.map_or(Ok(()), |slug| {
+        crate::slug::validate_slug_name(slug)
+            .map_err(|reason| invalid_input("workspace_slug", reason))
+    })
 }
 
 // ─── Work-entry extract queue (`creator kb queue-extract`) ────────────────

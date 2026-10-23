@@ -211,19 +211,6 @@ describe('workspace-http (v1219 shell Task 4)', () => {
     if (server) await server.close();
   });
 
-  test('the family is mounted at exactly list + create + active get/set', async () => {
-    const { DOMAIN_ROUTES } = await import(join(serviceRoot, 'dist/routes.js'));
-    const mounted = DOMAIN_ROUTES.filter((route) => route.family === 'workspaces').map(
-      (route) => `${route.method} ${route.pattern.source}`,
-    );
-    assert.deepEqual(mounted, [
-      'GET ^\\/v1\\/daemon\\/workspaces$',
-      'POST ^\\/v1\\/daemon\\/workspaces$',
-      'GET ^\\/v1\\/daemon\\/workspace$',
-      'POST ^\\/v1\\/daemon\\/workspace\\/active$',
-    ]);
-  });
-
   test('list returns the frozen contract with the retained query semantics', async () => {
     const all = await jsonFetch(`${server.url}/v1/daemon/workspaces`);
     assert.equal(all.status, 200, all.text);
@@ -463,7 +450,7 @@ describe('workspace-http native binding (v1219 shell Task 4)', () => {
     service = await startService({
       home: fixture.home,
       host: '127.0.0.1',
-      port: 18_461,
+      port: 0,
       allowRemote: false,
       domainOnly: true,
     });
@@ -575,7 +562,8 @@ describe('workspace-http service-only shell (v1219 shell Task 4 fix round 2)', (
     service = await startService({
       home,
       host: '127.0.0.1',
-      port: 18_462,
+      // Port 0: the OS picks a free port, so parallel suites never collide.
+      port: 0,
       allowRemote: false,
       domainOnly: true,
     });

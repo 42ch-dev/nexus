@@ -503,9 +503,28 @@ fn incomplete_cleanup(report: &CoreCloseReport) -> String {
 /// The close/operation precedence table, without a database.
 #[cfg(test)]
 mod tests {
-    use super::{coded_status, resolve_direct};
+    use super::{coded_status, map_core_error, resolve_direct};
     use crate::errors::CliError;
     use nexus_contracts::{CoreCloseReport, CoreCloseReportState};
+    use nexus_core::CoreError;
+
+    /// A duplicate workspace slug is a 409 on the CLI transport too — the same
+    /// status and `workspace_conflict:` prefix the daemon adapter emits, so the
+    /// refusal reads identically whichever transport reached the core.
+    #[test]
+    fn workspace_conflict_maps_to_a_409() {
+        let mapped = map_core_error(CoreError::WorkspaceConflict(
+            "workspace 'novel' already exists".to_string(),
+        ));
+        let CliError::Api { status, message } = mapped else {
+            panic!("expected an API error, got {mapped:?}");
+        };
+        assert_eq!(status, 409);
+        assert_eq!(
+            message,
+            "workspace_conflict: workspace 'novel' already exists"
+        );
+    }
 
     /// v1.207 P3 (§B.1/§B.3/§C): the durable-operation refusal codes are
     /// conflicts on this transport too — the same 409 the daemon adapter

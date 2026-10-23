@@ -3,7 +3,7 @@
 use crate::{CoreAccess, CoreError, CoreResult, CoreService, Principal};
 use nexus_contracts::{
     CoreStrategyPatchResponse, CoreStrategyPatchResponseValidationSummary, GetPresetResponse,
-    ScaffoldPresetRequest, ScaffoldPresetResponse, StrategyConflictError,
+    ReloadPresetResponse, ScaffoldPresetRequest, ScaffoldPresetResponse, StrategyConflictError,
     StrategyPatchPromptTemplateRequest, StrategyPatchStateRequest, StrategyPatchTransitionRequest,
     ValidatePresetRequest, ValidatePresetResponse,
 };
@@ -311,6 +311,44 @@ impl CoreService {
         })
     }
 
+    /// Re-resolve a preset from disk (`POST /v1/daemon/presets/{id}:reload`).
+    ///
+    /// Every preset read in this core is read-through: the manifest is parsed
+    /// from its on-disk bundle per request, so there is no compiled cache to
+    /// invalidate. `reload` is the explicit form of that read — it forces the
+    /// same 3-tier resolution (user → system → embedded) the profile read uses
+    /// and therefore reports exactly what an author needs after hand-editing:
+    /// the preset still resolves, or it no longer does. An unknown, deleted or
+    /// unparseable bundle is `not_found`, matching the profile read's mapping.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the id is not a
+    /// valid preset id, or the preset does not resolve from the current disk
+    /// state.
+    #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
+    #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
+    pub async fn reload_preset(
+        &self,
+        principal: &Principal,
+        preset_id: String,
+    ) -> CoreResult<ReloadPresetResponse> {
+        self.verify_principal(principal)?;
+        validate_strategy_id(&preset_id).map_err(CoreError::from)?;
+        nexus_preset::resolve_preset(
+            &preset_id,
+            &self.inner.nexus_home,
+            &BuiltinCapabilityCatalog,
+        )
+        .map_err(|error| {
+            PresetError::NotFound(format!("preset '{preset_id}' not found: {error}"))
+        })?;
+        Ok(ReloadPresetResponse {
+            id: preset_id,
+            reloaded: true,
+        })
+    }
+
     /// # Errors
     ///
     /// Returns `CoreError` when the principal is rejected, the preset is unknown
@@ -390,7 +428,7 @@ impl CoreService {
         request: ValidatePresetRequest,
     ) -> CoreResult<ValidatePresetResponse> {
         self.verify_principal(principal)?;
-        validate_preset_file(&request).map_err(CoreError::from)
+        validate_preset_file(&self.inner.nexus_home, &request).map_err(CoreError::from)
     }
 
     /// # Errors
@@ -1835,22 +1873,54 @@ fn load_preset_yaml(
     }
 }
 
+/// Resolve a client-supplied validation path to an existing file inside the
+/// daemon home. Escapes are one uniform `invalid_input`, and the refusal never
+/// echoes the path it was given.
+fn confine_preset_validate_path(nexus_home: &Path, raw: &str) -> Result<PathBuf, PresetError> {
+    let requested = Path::new(raw);
+    if !requested.is_absolute() {
+        return Err(PresetError::InvalidInput {
+            field: "path".into(),
+            reason: "must be an absolute path inside the daemon home".into(),
+        });
+    }
+    let file_path = confined_path(nexus_home, requested).map_err(|error| match error {
+        PresetError::Forbidden { .. } => PresetError::InvalidInput {
+            field: "path".into(),
+            reason: "must resolve inside the daemon home".into(),
+        },
+        other => other,
+    })?;
+    if !file_path.exists() {
+        return Err(PresetError::NotFound("preset file not found".into()));
+    }
+    Ok(file_path)
+}
+
+/// Validate a preset YAML file named by the request.
+///
+/// The request names a file on the daemon host, so the path is confined to the
+/// daemon home BEFORE any filesystem observation — an unconstrained path turns
+/// this endpoint into an existence/content oracle for the whole host. Escapes
+/// are one uniform `invalid_input`, and no wire error carries a host path or OS
+/// error text (the operator log keeps the detail).
 fn validate_preset_file(
+    nexus_home: &Path,
     req: &ValidatePresetRequest,
 ) -> Result<ValidatePresetResponse, PresetError> {
-    let file_path = std::path::Path::new(&req.path);
-
-    if !file_path.exists() {
-        return Err(PresetError::NotFound(format!(
-            "File not found: {}",
-            file_path.display()
-        )));
-    }
+    let file_path = confine_preset_validate_path(nexus_home, &req.path)?;
 
     // Check file size via metadata BEFORE reading
-    let metadata = std::fs::metadata(file_path).map_err(|e| PresetError::Internal {
-        code: "METADATA_ERROR".into(),
-        message: e.to_string(),
+    let metadata = std::fs::metadata(&file_path).map_err(|error| {
+        tracing::warn!(
+            path = %file_path.display(),
+            error = %error,
+            "preset validation metadata read failed"
+        );
+        PresetError::Internal {
+            code: "METADATA_ERROR".into(),
+            message: "preset file is not readable".into(),
+        }
     })?;
     if metadata.len() > VALIDATE_MAX_YAML_SIZE as u64 {
         return Ok(invalid_validation(&[format!(
@@ -1860,9 +1930,16 @@ fn validate_preset_file(
         )]));
     }
 
-    let yaml = std::fs::read_to_string(file_path).map_err(|e| PresetError::Internal {
-        code: "FILE_READ_ERROR".into(),
-        message: e.to_string(),
+    let yaml = std::fs::read_to_string(&file_path).map_err(|error| {
+        tracing::warn!(
+            path = %file_path.display(),
+            error = %error,
+            "preset validation read failed"
+        );
+        PresetError::Internal {
+            code: "FILE_READ_ERROR".into(),
+            message: "preset file could not be read".into(),
+        }
     })?;
 
     // Defense-in-depth size check
@@ -1905,7 +1982,7 @@ fn validate_preset_file(
     let sem_result = nexus_preset::validate_preset_semantic(&manifest, &caps);
 
     // A3: If the path points into a bundle directory, also run asset checks.
-    let asset_result = infer_bundle_root(file_path)
+    let asset_result = infer_bundle_root(&file_path)
         .map_or_else(nexus_preset::ValidationResult::default, |bundle_root| {
             nexus_preset::validate_assets_in_bundle(&manifest, &bundle_root)
         });

@@ -603,7 +603,19 @@ async fn kb_scope_isolation_and_entry_round_trip() {
         Err(CoreError::InvalidInput { ref field, ref reason })
             if field == "creator_id" && reason == "creator_id is required"
     ));
-    for slug in ["../escape", "a\\b", "..", "/abs", ".", ""] {
+    // The same shared slug rule the workspace-create path uses: separators,
+    // traversal, emptiness, trailing dot/space and Windows device names.
+    for slug in [
+        "../escape",
+        "a\\b",
+        "..",
+        "/abs",
+        ".",
+        "",
+        "novel ",
+        "novel.",
+        "con",
+    ] {
         let Err(CoreError::InvalidInput { field, .. }) = core
             .list_kb_entries(
                 &principal,

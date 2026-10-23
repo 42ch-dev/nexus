@@ -30,6 +30,7 @@ import { EmptyCreateCardFixtures } from '@/fixtures/empty-create-card-fixtures';
 import { ListStateContainerFixtures } from '@/fixtures/list-state-container-fixtures';
 import { ConfirmDialogFixtures } from '@/fixtures/confirm-dialog-fixtures';
 import { FormDialogFixtures } from '@/fixtures/form-dialog-fixtures';
+import { ValidatePresetFixtures } from '@/fixtures/validate-preset-fixtures';
 import { FormSectionFixtures } from '@/fixtures/form-section-fixtures';
 import { ListPageLayoutFixtures } from '@/fixtures/list-page-layout-fixtures';
 import { SettingsSectionFixtures } from '@/fixtures/settings-section-fixtures';
@@ -1291,6 +1292,22 @@ function FormDialogSection() {
   );
 }
 
+function ValidatePresetSection() {
+  return (
+    <section>
+      <SectionHeading id="comp-validate-preset">Validate Preset Dialog</SectionHeading>
+      <p className="text-copy-16 text-gray-700 mb-6">
+        Harness catalog row Validate — the <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">presets:validate</code>{' '}
+        dry-run body, extracted presentational from the product dialog.
+        Pending disables submit; warnings render BESIDE a valid verdict because
+        the core derives <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">valid</code>{' '}
+        from errors alone. Toggle the theme to verify light + dark.
+      </p>
+      <ValidatePresetFixtures />
+    </section>
+  );
+}
+
 function ConfirmDialogSection() {
   return (
     <section>
@@ -1578,6 +1595,7 @@ export function ComponentsPage() {
       <FormFieldSection />
       <FormSectionSection />
       <FormDialogSection />
+      <ValidatePresetSection />
       <ConfirmDialogSection />
       <ListStateContainerSection />
       <ListPageLayoutSection />

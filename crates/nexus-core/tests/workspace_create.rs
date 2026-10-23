@@ -109,6 +109,44 @@ async fn create_adopts_empty_dir_and_refuses_foreign_content() {
         .expect("adopt empty dir");
     assert_eq!(created.creative_root, adopted.display().to_string());
 
+    // Finder's `.DS_Store` is not author content: a directory that only holds
+    // it is still adopted instead of returning a confusing conflict.
+    let finder = user_home.join("finder-root");
+    std::fs::create_dir_all(&finder).unwrap();
+    std::fs::write(finder.join(".DS_Store"), b"finder metadata").unwrap();
+    let adopted_with_store = svc
+        .create_workspace(request(
+            &creator_id,
+            "finder",
+            Some("Finder"),
+            Some(&finder.display().to_string()),
+        ))
+        .await
+        .expect("a .DS_Store-only directory is adopted");
+    assert_eq!(
+        adopted_with_store.creative_root,
+        finder.display().to_string()
+    );
+
+    // The Windows equivalents of `.DS_Store` are likewise not author content.
+    let explorer = user_home.join("explorer-root");
+    std::fs::create_dir_all(&explorer).unwrap();
+    std::fs::write(explorer.join("desktop.ini"), b"[.ShellClassInfo]").unwrap();
+    std::fs::write(explorer.join("Thumbs.db"), b"thumbs").unwrap();
+    let adopted_with_explorer = svc
+        .create_workspace(request(
+            &creator_id,
+            "explorer",
+            Some("Explorer"),
+            Some(&explorer.display().to_string()),
+        ))
+        .await
+        .expect("a desktop.ini/Thumbs.db-only directory is adopted");
+    assert_eq!(
+        adopted_with_explorer.creative_root,
+        explorer.display().to_string()
+    );
+
     // A non-empty directory is never adopted as a workspace root.
     let foreign = user_home.join("foreign-root");
     std::fs::create_dir_all(&foreign).unwrap();
@@ -197,6 +235,50 @@ async fn create_refuses_invalid_slug_name_and_override() {
                 if field == "workspace_slug" && reason == "must not contain control characters"
         ),
         "unexpected: {control:?}"
+    );
+
+    // Windows reserved device names are refused on every platform, and a
+    // trailing dot would silently vanish from the directory name on Windows.
+    for slug in ["con", "CON", "prn", "aux", "nul", "com1", "COM9", "lpt9"] {
+        let err = svc
+            .create_workspace(request(&creator_id, slug, Some("Bad"), None))
+            .await
+            .expect_err("reserved device name");
+        assert!(
+            matches!(
+                err,
+                CoreError::InvalidInput { ref field, ref reason }
+                    if field == "workspace_slug" && reason == "must not be a reserved device name"
+            ),
+            "slug {slug:?}: {err:?}"
+        );
+    }
+    let trailing_dot = svc
+        .create_workspace(request(&creator_id, "novel.", Some("Bad"), None))
+        .await
+        .expect_err("trailing dot");
+    assert!(
+        matches!(
+            trailing_dot,
+            CoreError::InvalidInput { ref field, ref reason }
+                if field == "workspace_slug" && reason == "must not end with '.'"
+        ),
+        "unexpected: {trailing_dot:?}"
+    );
+
+    // Windows strips a trailing space from a directory name, so `"novel "`
+    // would silently name the same directory as `"novel"`.
+    let trailing_space = svc
+        .create_workspace(request(&creator_id, "novel ", Some("Bad"), None))
+        .await
+        .expect_err("trailing space");
+    assert!(
+        matches!(
+            trailing_space,
+            CoreError::InvalidInput { ref field, ref reason }
+                if field == "workspace_slug" && reason == "must not end with whitespace"
+        ),
+        "unexpected: {trailing_space:?}"
     );
 
     let bad_name = svc

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import {
   chmodSync,
+  existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -12,7 +14,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { after, before, describe, test } from 'node:test';
-import { parse } from 'smol-toml';
+import { parse, stringify } from 'smol-toml';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const serviceRoot = join(__dirname, '..');
@@ -45,10 +47,15 @@ async function jsonFetch(url, { method = 'GET', body } = {}) {
   return { status: response.status, payload };
 }
 
-async function startProfileService(home, port) {
+async function startProfileService(home) {
   const { startService } = await import(join(serviceRoot, 'dist/index.js'));
-  return startService({ home, host: '127.0.0.1', port, allowRemote: false, domainOnly: true });
+  // Port 0: the OS picks a free port, so this file never collides with the
+  // other service suites running in parallel.
+  return startService({ home, host: '127.0.0.1', port: 0, allowRemote: false, domainOnly: true });
 }
+
+/** The daemon config store: `<user home>/.nexus42/config.toml`. */
+const configPathFor = (home) => join(home, '.nexus42', 'config.toml');
 
 const PROFILE_URL_PATH = '/v1/daemon/agent-host/profile';
 
@@ -64,7 +71,7 @@ describe('agent-profile (I-000064)', () => {
       stdio: 'inherit',
     });
     assert.equal(build.status, 0);
-    service = await startProfileService(home, 18_462);
+    service = await startProfileService(home);
     baseUrl = service.url;
   });
 
@@ -134,7 +141,7 @@ describe('agent-profile (I-000064)', () => {
 
   test('a service restart on the same home resolves the saved profile', async () => {
     await service.close();
-    service = await startProfileService(home, 18_463);
+    service = await startProfileService(home);
     baseUrl = service.url;
 
     const read = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`);
@@ -144,10 +151,43 @@ describe('agent-profile (I-000064)', () => {
     });
   });
 
+  test('an untrimmed stored profile is normalized on read and on merge', async () => {
+    const configPath = configPathFor(home);
+    const document = parse(readFileSync(configPath, 'utf8'));
+    document.agent_profile = {
+      name: '  spaced-agent  ',
+      launch_command: '  /opt/bin/spaced --flag  ',
+    };
+    writeFileSync(configPath, stringify(document), 'utf8');
+
+    // A hand-edited/legacy value is presented exactly as the next save stores it.
+    const read = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`);
+    assert.deepEqual(read.payload, {
+      profile: { name: 'spaced-agent', launch_command: '/opt/bin/spaced --flag' },
+    });
+
+    // Name-only PUT preserves the TRIMMED command (and trims the incoming name).
+    const saved = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`, {
+      method: 'PUT',
+      body: { name: ' spaced-agent ' },
+    });
+    assert.equal(saved.status, 200);
+    assert.deepEqual(saved.payload, {
+      profile: { name: 'spaced-agent', launch_command: '/opt/bin/spaced --flag' },
+    });
+
+    // smol-toml tables are null-prototype objects; compare as plain data.
+    const stored = { ...parse(readFileSync(configPath, 'utf8')).agent_profile };
+    assert.deepEqual(stored, {
+      name: 'spaced-agent',
+      launch_command: '/opt/bin/spaced --flag',
+    });
+  });
+
   test('other daemon-home config keys survive the profile write', async () => {
     // Establish an unrelated key first (simulates creator/workspace config the
     // core already owns), then verify the profile write preserves it.
-    const configPath = join(home, 'config.toml');
+    const configPath = configPathFor(home);
     const raw = readFileSync(configPath, 'utf8');
     const before = parse(raw);
     const foreignKey = 'agent_profile_test_marker';
@@ -161,7 +201,16 @@ describe('agent-profile (I-000064)', () => {
     assert.equal(saved.status, 200);
 
     const afterDoc = parse(readFileSync(configPath, 'utf8'));
+    // The seeded daemon keys are the core's own store contents and must survive
+    // a service-side profile write (same file, whole-document rewrite).
+    assert.equal(afterDoc.active_creator_id, before.active_creator_id);
+    assert.deepEqual(
+      afterDoc.active_workspace_slug_by_creator,
+      before.active_workspace_slug_by_creator,
+    );
     assert.equal(afterDoc[foreignKey], 'kept');
+    // The service owns no file in the raw user home.
+    assert.equal(existsSync(join(home, 'config.toml')), false);
     for (const [key, value] of Object.entries(before)) {
       if (key === 'agent_profile') continue;
       assert.deepEqual(afterDoc[key], value, `config key ${key} was preserved`);
@@ -235,27 +284,51 @@ describe('agent-profile (I-000064)', () => {
 
     const after = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`);
     assert.deepEqual(after.payload, before.payload);
+
+    // The caps are code points, not UTF-16 units: 201 emoji (402 units) is over
+    // the 200-code-point name bound, and exactly 200 is accepted.
+    const emoji = '\u{1F600}';
+    const overEmoji = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`, {
+      method: 'PUT',
+      body: { name: emoji.repeat(201) },
+    });
+    assert.equal(overEmoji.status, 400);
+    assert.equal(overEmoji.payload.error.code, 'invalid_input');
+
+    const atCap = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`, {
+      method: 'PUT',
+      body: { name: emoji.repeat(200) },
+    });
+    assert.equal(atCap.status, 200);
+    assert.equal(atCap.payload.profile.name, emoji.repeat(200));
   });
 
-  test('a failed write leaves no temp file behind and logs the cause', async () => {
+  test('a failed write leaves no temp file and no partial config', async () => {
     const { writeAgentProfile } = await import(join(serviceRoot, 'dist/agent-profile.js'));
     const brokenHome = mkdtempSync(join(tmpdir(), 'nexus-agent-profile-broken-'));
-    const errors = [];
+    // Pre-create the store directory so the mkdir step is already satisfied and
+    // the failure lands at the write itself, not before it.
+    const configDir = join(brokenHome, '.nexus42');
+    mkdirSync(configDir, { recursive: true });
+    const configPath = join(configDir, 'config.toml');
+    const seeded = 'active_creator_id = "kept"\n';
+    writeFileSync(configPath, seeded, 'utf8');
     const originalError = console.error;
     try {
-      chmodSync(brokenHome, 0o500);
-      console.error = (...args) => {
-        errors.push(args.map((value) => String(value)).join(' '));
-      };
+      // Read-only parent: the temp file cannot be created, and the catch path
+      // must not leave a `.tmp` behind or truncate the existing document.
+      chmodSync(configDir, 0o500);
+      console.error = () => {};
       await assert.rejects(() => writeAgentProfile(brokenHome, { name: 'claude-code' }));
       assert.deepEqual(
-        readdirSync(brokenHome).filter((name) => name.endsWith('.tmp')),
+        readdirSync(configDir).filter((name) => name.endsWith('.tmp')),
         [],
       );
-      assert.ok(errors.some((line) => line.includes('config.toml write failed')));
+      chmodSync(configDir, 0o700);
+      assert.equal(readFileSync(configPath, 'utf8'), seeded);
     } finally {
       console.error = originalError;
-      chmodSync(brokenHome, 0o700);
+      chmodSync(configDir, 0o700);
       rmSync(brokenHome, { recursive: true, force: true });
     }
   });
