@@ -1,14 +1,10 @@
 {
   "title": "Harness",
   "description": "Manage presets, open the strategy canvas, and save the agent profile every shell surface reads.",
-  "validatePreset": "Validate",
-  "scaffoldPreset": "Scaffold",
-  "refreshAria": "Refresh presets",
   "errorDescription": "Could not load presets.",
   "errorTitle": "Could not load presets",
   "engineUnavailableTitle": "Orchestration engine not running",
   "engineUnavailableDescription": "Start the daemon orchestration engine, then try again.",
-  "loading": "Loading presets…",
   "harness": {
     "newPreset": "+ New preset",
     "loading": "Loading…",
@@ -41,22 +37,8 @@
     }
   },
   "catalog": {
-    "title": "Strategy catalog",
-    "description": "How each strategy can fire — trigger and scheduled lanes from its profile.",
-    "empty": "No strategies to show yet.",
-    "triggerBadge": "Trigger",
-    "scheduledBadge": "Scheduled",
     "sourceUser": "User",
-    "sourceEmbedded": "Embedded",
-    "entryPathsTitle": "Entry paths",
-    "pathConnect": "Your backend owns the loop",
-    "pathConnectDetail": "The strategy does not execute on nexus-runtime — an external call fires it.",
-    "pathDaemon": "Requires creator daemon",
-    "pathDaemonDetail": "Daemon schedule admission on a wall-clock tick — no cron recurrence. The schedule's `scheduled_at` is a schedule field, not a next-fire clock.",
-    "pathCron": "Work cron roles",
-    "pathCronDetail": "Per-Work cron roles (brainstorm / write / review) — distinct from the wall-clock poller.",
-    "lanesLoading": "Loading lane details…",
-    "profileUnavailable": "Profile unavailable — lane details could not be loaded."
+    "sourceEmbedded": "Embedded"
   },
   "profile": {
     "title": "Strategy profile",
