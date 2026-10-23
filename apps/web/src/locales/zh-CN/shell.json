@@ -175,6 +175,41 @@
     }
   },
   "hub": {
+    "operating": {
+      "title": "操作台",
+      "description": "本地运行时一览 —— 服务、Agent、Harness 与已装模块。",
+      "loading": "正在加载…",
+      "error": "加载失败：{{reason}}",
+      "go": {
+        "manage": "管理 →",
+        "enter": "进入 →"
+      },
+      "service": {
+        "title": "本地服务",
+        "running": "运行中",
+        "degraded": "降级",
+        "version": "nexus-service v{{version}}",
+        "subsystemsOk": "db / engine 正常",
+        "degradedSubsystems": "降级：{{subsystems}}"
+      },
+      "agent": {
+        "title": "Agent（ACP）",
+        "connected": "已连接",
+        "notConnected": "未连接",
+        "none": "未选择 Agent"
+      },
+      "harness": {
+        "title": "Harness 摘要",
+        "counts_one": "{{count}} 个 preset · {{running}} 个运行中",
+        "counts_other": "{{count}} 个 preset · {{running}} 个运行中"
+      },
+      "modules": {
+        "title": "已装模块",
+        "count_one": "{{count}} 个 compute module",
+        "count_other": "{{count}} 个 compute module",
+        "empty": "尚未安装 compute module"
+      }
+    },
     "develop": {
       "title": "开发",
       "description": "你的完整控制室 — 模块、预设、能力、Connect 等。",

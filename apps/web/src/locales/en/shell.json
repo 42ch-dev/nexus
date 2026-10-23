@@ -175,6 +175,41 @@
     }
   },
   "hub": {
+    "operating": {
+      "title": "Hub",
+      "description": "Local runtime at a glance — service, Agent, Harness, and installed modules.",
+      "loading": "Loading…",
+      "error": "Could not load: {{reason}}",
+      "go": {
+        "manage": "Manage →",
+        "enter": "Enter →"
+      },
+      "service": {
+        "title": "Local service",
+        "running": "Running",
+        "degraded": "Degraded",
+        "version": "nexus-service v{{version}}",
+        "subsystemsOk": "db / engine OK",
+        "degradedSubsystems": "Degraded: {{subsystems}}"
+      },
+      "agent": {
+        "title": "Agent (ACP)",
+        "connected": "Connected",
+        "notConnected": "Not connected",
+        "none": "No agent selected"
+      },
+      "harness": {
+        "title": "Harness summary",
+        "counts_one": "{{count}} preset · {{running}} running",
+        "counts_other": "{{count}} presets · {{running}} running"
+      },
+      "modules": {
+        "title": "Installed modules",
+        "count_one": "{{count}} compute module",
+        "count_other": "{{count}} compute modules",
+        "empty": "No compute modules installed"
+      }
+    },
     "develop": {
       "title": "Develop",
       "description": "Your full Control Room — modules, presets, capabilities, Connect, and more.",
