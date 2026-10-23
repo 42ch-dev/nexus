@@ -109,7 +109,8 @@ function flattenValues(obj: JsonRecord, values: string[] = []): string[] {
 
 /**
  * Entrance keys owned by the `shell` namespace (AR-21 + EL §2/§4/§5): switch
- * control, bounce toast, layout labels, identity page, Develop hub v1 cards.
+ * control, bounce toast, layout labels, identity page, 操作台 Hub cards
+ * (v1220 T1/T2).
  * Membership is namespace-exact — a shell-owned key must exist in `shell`
  * (and its zh-CN twin), never in `setup` (plan QC F-5: no cross-namespace
  * escape hatch for the entrance pin).

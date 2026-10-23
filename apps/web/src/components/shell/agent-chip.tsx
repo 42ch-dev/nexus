@@ -17,7 +17,7 @@ export function AgentChip() {
   const { t } = useTranslation('shell');
   const navigate = useNavigate();
   const scan = useScanAgents({ filter: 'all' });
-  const profile = useSavedAgentProfile();
+  const { profile } = useSavedAgentProfile();
 
   const info = profile
     ? resolveAgentBadge(profile, scan.data?.agents ?? [])

@@ -7,17 +7,20 @@
  * render the shared loading / error copy. No new wire contract (IA §6).
  */
 import { useQuery } from '@tanstack/react-query';
+import type { SessionSummary } from '@42ch/nexus-contracts';
 
 import {
+  filterVisibleSessions,
   useComputeModules,
   usePresets,
   useSavedAgentProfile,
   useScanAgents,
-  useSessions,
 } from '@/api/queries';
 import { resolveAgentBadge } from '@/components/layout/daemon-status-bar';
 import { useConnectionConfig, useNexusClient } from '@/lib/client-context';
+import type { NexusClient } from '@/lib/nexus';
 import type { ConnectionConfig } from '@/lib/nexus/connection-storage';
+import { queryKeys } from '@/lib/nexus/query-keys';
 
 /** One card's data plus its section-scoped loading / error / retry state. */
 export interface HubSectionState<T> {
@@ -30,13 +33,10 @@ export interface HubSectionState<T> {
 // ── 本地服务 ────────────────────────────────────────────────────────────────
 
 export interface ServiceSummary {
-  /** `ok` when the daemon reports itself healthy. */
-  status: string;
   version: string;
   /** The URL the active client is pointed at (the service entry point). */
   entryUrl: string;
   degradedSubsystems: string[];
-  degradedReasons: string[];
 }
 
 /**
@@ -52,22 +52,20 @@ export function useServiceSummary(): HubSectionState<ServiceSummary> {
   const client = useNexusClient();
   const config = useConnectionConfig();
   const health = useQuery({
-    queryKey: ['hub', 'service', 'health'],
+    queryKey: queryKeys.hub.service.health(),
     queryFn: () => client.health(),
   });
   const status = useQuery({
-    queryKey: ['hub', 'service', 'status'],
+    queryKey: queryKeys.hub.service.status(),
     queryFn: () => client.daemonStatus(),
   });
 
   const data =
     health.data && status.data
       ? {
-          status: health.data.status,
           version: health.data.version,
           entryUrl: resolveEntryUrl(config),
           degradedSubsystems: status.data.degraded.subsystems,
-          degradedReasons: status.data.degraded.reasons,
         }
       : undefined;
 
@@ -93,19 +91,25 @@ export interface AgentSummary {
 
 export function useAgentSummary(): HubSectionState<AgentSummary> {
   const scan = useScanAgents({ filter: 'all' });
-  const profile = useSavedAgentProfile();
+  const savedProfile = useSavedAgentProfile();
 
-  const data: AgentSummary | undefined = scan.data
-    ? profile
-      ? resolveAgentBadge(profile, scan.data.agents)
-      : { displayName: null, version: null, connected: false }
-    : undefined;
+  // The card resolves a profile + a scan: both must be settled before it can
+  // claim "no agent selected", and either failure surfaces its own reason.
+  const data: AgentSummary | undefined =
+    scan.data && !savedProfile.isLoading && !savedProfile.error
+      ? savedProfile.profile
+        ? resolveAgentBadge(savedProfile.profile, scan.data.agents)
+        : { displayName: null, version: null, connected: false }
+      : undefined;
 
   return {
     data,
-    isLoading: scan.isLoading,
-    error: scan.error,
-    retry: () => void scan.refetch(),
+    isLoading: scan.isLoading || savedProfile.isLoading,
+    error: scan.error ?? savedProfile.error,
+    retry: () => {
+      void scan.refetch();
+      savedProfile.refetch();
+    },
   };
 }
 
@@ -114,6 +118,36 @@ export function useAgentSummary(): HubSectionState<AgentSummary> {
 export interface HarnessSummary {
   presetCount: number;
   runningSessions: number;
+}
+
+/** Sessions requested per page while aggregating the running count. */
+const HUB_SESSION_PAGE_SIZE = 100;
+
+/**
+ * Safety cap on the aggregation walk: 10 pages × 100 rows = 1000 sessions.
+ * The card is a status summary, not an audit: a longer history stops at the cap
+ * rather than scanning unbounded (documented here, never silently truncated
+ * mid-page — a capped walk still returns whole pages).
+ */
+const HUB_SESSION_MAX_PAGES = 10;
+
+/**
+ * Every visible session across the cursor pages (bounded by
+ * {@link HUB_SESSION_MAX_PAGES}), so the running count is a total rather than a
+ * first-page lower bound.
+ */
+async function fetchAllVisibleSessions(client: NexusClient): Promise<SessionSummary[]> {
+  const sessions: SessionSummary[] = [];
+  let cursor: string | undefined;
+
+  for (let page = 0; page < HUB_SESSION_MAX_PAGES; page += 1) {
+    const response = await client.listSessions({ limit: HUB_SESSION_PAGE_SIZE, cursor });
+    sessions.push(...filterVisibleSessions(response.items));
+    if (!response.pagination.has_more || !response.pagination.next_cursor) break;
+    cursor = response.pagination.next_cursor;
+  }
+
+  return sessions;
 }
 
 /** Terminal session statuses — mirrors the engine's `SessionStatus::is_terminal`. */
@@ -130,8 +164,12 @@ export function countRunningSessions(sessions: readonly { status: string }[]): n
 }
 
 export function useHarnessSummary(): HubSectionState<HarnessSummary> {
+  const client = useNexusClient();
   const presets = usePresets();
-  const sessions = useSessions();
+  const sessions = useQuery({
+    queryKey: queryKeys.hub.harnessSessions(),
+    queryFn: () => fetchAllVisibleSessions(client),
+  });
 
   const data =
     presets.data && sessions.data

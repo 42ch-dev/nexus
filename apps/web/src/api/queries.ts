@@ -962,22 +962,44 @@ export function readBrowserAgentProfile(
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     if (parsed === null || typeof parsed !== 'object') return null;
-    const { name, launchCommand } = parsed as Partial<AgentProfileSnapshot>;
+    // Trust boundary: localStorage can hold anything, so both fields are
+    // validated at runtime — a polluted `launchCommand` is dropped rather than
+    // reaching `?.trim()` callers as a non-string.
+    const { name, launchCommand } = parsed as { name?: unknown; launchCommand?: unknown };
     if (typeof name !== 'string' || name.trim() === '') return null;
-    return { name, launchCommand };
+    return { name, launchCommand: typeof launchCommand === 'string' ? launchCommand : undefined };
   } catch {
     return null;
   }
 }
 
+/** Saved-profile resolution state — the one seam the topnav and Hub share. */
+export interface SavedAgentProfileState {
+  /** Desktop IPC profile, else the browser snapshot; `null` when neither exists. */
+  profile: AgentProfileSnapshot | null;
+  /** True only while the enabled desktop profile query is fetching. */
+  isLoading: boolean;
+  error: Error | null;
+  refetch: () => void;
+}
+
 /**
- * Saved agent profile: the desktop IPC profile when available, else the
- * browser snapshot. Single source for the topnav chip and the Hub Agent card.
+ * Saved agent profile plus its query state: the desktop IPC profile when
+ * available, else the browser snapshot. Single seam for the topnav chip and
+ * the Hub Agent card; P2 Task 1 swaps this implementation to the service
+ * surface without touching either caller.
  */
-export function useSavedAgentProfile(): AgentProfileSnapshot | null {
+export function useSavedAgentProfile(): SavedAgentProfileState {
   const profileQuery = useAgentProfile();
   const activeCreatorId = useActiveCreatorId();
-  return profileQuery.data ?? readBrowserAgentProfile(activeCreatorId);
+  return {
+    profile: profileQuery.data ?? readBrowserAgentProfile(activeCreatorId),
+    isLoading: profileQuery.isLoading,
+    error: profileQuery.error,
+    refetch: () => {
+      void profileQuery.refetch();
+    },
+  };
 }
 
 /**
