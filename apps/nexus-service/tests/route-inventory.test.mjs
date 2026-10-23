@@ -221,6 +221,7 @@ describe('route-inventory (P5-T5)', () => {
   ['POST', '/v1/daemon/works/pool/inspiration/promote', 'tier2', 'works'],
   ['POST', '/v1/daemon/works/pool/promote', 'tier2', 'works'],
   ['POST', '/v1/daemon/workspace/active', 'tier1', 'workspaces'],
+  ['POST', '/v1/daemon/workspaces', 'tier1', 'workspaces'],
   ['POST', '/v1/daemon/worlds', 'tier2', 'worlds'],
   ['POST', '/v1/daemon/worlds/([^/]+)/forks', 'tier2', 'worlds'],
   ['POST', '/v1/daemon/worlds/([^/]+)/kb/pack/export', 'tier2', 'worlds'],

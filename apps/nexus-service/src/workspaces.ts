@@ -1,19 +1,24 @@
 /**
- * Workspace family HTTP surface (plan v1219-shell-and-access T4): home-level
- * discovery, the active-selection read, and set-active over the frozen
- * `workspace` wire contracts (`schemas/daemon-api/workspace/…`).
+ * Workspace family HTTP surface (plan v1219-shell-and-access T4, extended by
+ * v1220 P3-T2): home-level discovery, the active-selection read, set-active,
+ * and create over the frozen `workspace` wire contracts
+ * (`schemas/daemon-api/workspace/…`).
  *
  * Selection is a home-control operation owned by the native entry; this
  * surface only translates transport, then refreshes the boot-time runtime
  * identity in place so `/v1/daemon/runtime/status` reports the new workspace
  * in the same session (first-run gate, access spec §3.1).
  *
- * Create is deliberately NOT mounted (compass D23 / issue I-000063): the
- * frozen `POST /v1/daemon/workspaces` identity keeps the retained 501
- * `route_not_migrated` refusal.
+ * Create (I-000063) forwards to the core capability, which owns slug
+ * validation, the single creative-root derivation, root exclusivity and the
+ * atomic write order (registration metadata last). The core's typed refusals
+ * map to HTTP through the shared error fold — `workspace_conflict` → 409,
+ * `invalid_input` → 400.
  */
 import type {
   ActiveWorkspaceResponse,
+  CreateWorkspaceRequest,
+  CreateWorkspaceResponse,
   ListWorkspacesResponse,
   SetActiveWorkspaceRequest,
   SetActiveWorkspaceResponse,
@@ -73,6 +78,15 @@ export async function listWorkspaces(
       ...(nextCursor !== undefined ? { next_cursor: nextCursor } : {}),
     },
   };
+}
+
+/** `POST /v1/daemon/workspaces`. */
+export function createWorkspace(
+  service: ServiceCore,
+  body: unknown,
+): Promise<CreateWorkspaceResponse> {
+  const request = wirePayload<CreateWorkspaceRequest>(body, 'request');
+  return service.core.createWorkspace(request);
 }
 
 /** `GET /v1/daemon/workspace` — retained 409 `uninitialized` before selection. */
@@ -149,6 +163,16 @@ export const WORKSPACE_ROUTES: readonly DomainRoute[] = [
     tier: 'tier1',
     family: 'workspaces',
     handle: async (service, _params, search) => ({ body: await listWorkspaces(service, search) }),
+  },
+  {
+    method: 'POST',
+    pattern: /^\/v1\/daemon\/workspaces$/,
+    tier: 'tier1',
+    family: 'workspaces',
+    status: 201,
+    handle: async (service, _params, _search, body) => ({
+      body: await createWorkspace(service, body),
+    }),
   },
   {
     method: 'GET',

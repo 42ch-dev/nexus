@@ -50,6 +50,7 @@ const STATUS_BY_CODE: Record<CoreError['code'], number> = {
   compute_module_error: 422,
   outline_conflict: 409,
   outline_validation_failed: 422,
+  workspace_conflict: 409,
   internal: 500,
 };
 
