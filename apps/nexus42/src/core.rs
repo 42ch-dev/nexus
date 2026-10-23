@@ -204,6 +204,10 @@ pub fn map_core_error(err: CoreError) -> CliError {
                 v.validation_summary.errors.join("; ")
             ),
         },
+        CoreError::WorkspaceConflict(conflict) => CliError::Api {
+            status: 409,
+            message: format!("workspace_conflict: {conflict}"),
+        },
         CoreError::OutlineConflict(conflict) => CliError::Api {
             status: 409,
             message: format!(

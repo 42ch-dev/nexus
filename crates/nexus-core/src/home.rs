@@ -445,7 +445,11 @@ impl CoreHomeService {
             "creator_id": creator_id,
             "workspace_slug": slug,
         });
-        write_json_file(&creative_meta.join("workspace.json"), &manifest, "workspace_manifest")?;
+        write_json_file(
+            &creative_meta.join("workspace.json"),
+            &manifest,
+            "workspace_manifest",
+        )?;
 
         let pool = nexus_local_db::init_pool(db_path)
             .await
@@ -753,7 +757,11 @@ fn mint_local_creator_id() -> String {
 /// no control characters (retained daemon `validate_slug` rule plus the shared
 /// name-safety rule, core error type).
 fn validate_workspace_slug(slug: &str) -> CoreResult<()> {
-    let reason = if slug.is_empty() || slug.contains('/') || slug.contains('\\') || slug == "." || slug == ".."
+    let reason = if slug.is_empty()
+        || slug.contains('/')
+        || slug.contains('\\')
+        || slug == "."
+        || slug == ".."
     {
         "must be a single path segment"
     } else if slug.chars().any(char::is_control) {
