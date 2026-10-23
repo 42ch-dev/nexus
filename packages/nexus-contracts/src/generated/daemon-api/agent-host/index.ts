@@ -5,6 +5,8 @@
  */
 
 export type { AgentHostListSessionsQuery } from './agent-host-list-sessions-query';
+export type { AgentProfile } from './agent-profile';
+export type { AgentProfileResponse } from './agent-profile-response';
 export type { AgentScanEntry } from './agent-scan-entry';
 export type { CancelOperationResponse } from './cancel-operation-response';
 export type { CharacterOperationResult } from './character-operation-result';

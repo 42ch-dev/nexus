@@ -100,14 +100,15 @@ const DEVELOPER_APPS: readonly AppDef[] = [
     icon: LayoutDashboard,
     route: '/developer',
     load: () =>
-      import('@/pages/developer-hub-page').then((m) => ({ default: m.DeveloperHubPage })),
+      import('@/components/developer/hub-page').then((m) => ({ default: m.HubPage })),
   },
   {
     id: 'harness',
     label: 'rail.harness',
     icon: Workflow,
     route: '/strategies',
-    load: () => import('@/pages/strategies-page').then((m) => ({ default: m.StrategiesPage })),
+    load: () =>
+      import('@/components/harness/harness-page').then((m) => ({ default: m.HarnessPage })),
   },
   {
     id: 'modules',

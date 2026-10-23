@@ -175,34 +175,42 @@
     }
   },
   "hub": {
-    "develop": {
-      "title": "开发",
-      "description": "你的完整控制室 — 模块、预设、能力、Connect 等。",
-      "presets": {
-        "title": "预设",
-        "description": "查看并管理你的预设与内置预设。",
-        "count_one": "{{count}} 个预设",
-        "count_other": "{{count}} 个预设"
+    "operating": {
+      "title": "操作台",
+      "description": "本地运行时一览 —— 服务、Agent、Harness 与已装模块。",
+      "loading": "正在加载…",
+      "error": "加载失败：{{reason}}",
+      "go": {
+        "manage": "管理 →",
+        "enter": "进入 →"
       },
-      "capabilities": {
-        "title": "能力",
-        "description": "浏览守护进程提供的内置能力模式。"
+      "service": {
+        "title": "本地服务",
+        "running": "运行中",
+        "degraded": "降级",
+        "version": "nexus-service v{{version}}",
+        "subsystemsOk": "db / engine 正常",
+        "degradedSubsystems": "降级：{{subsystems}}"
+      },
+      "agent": {
+        "title": "Agent（ACP）",
+        "connected": "已连接",
+        "notConnected": "未连接",
+        "none": "未选择 Agent"
+      },
+      "harness": {
+        "title": "Harness 摘要",
+        "counts_one": "{{count}} 个 preset · {{running}} 个运行中",
+        "counts_other": "{{count}} 个 preset · {{running}} 个运行中",
+        "countsTruncated_one": "{{count}} 个 preset · {{running}}+ 个运行中",
+        "countsTruncated_other": "{{count}} 个 preset · {{running}}+ 个运行中",
+        "truncatedNote": "仅统计前 {{cap}} 个会话，可能仍有更多。"
       },
       "modules": {
-        "title": "计算模块",
-        "description": "安装并运行计算模块。"
-      },
-      "strategyCanvas": {
-        "title": "策略画布",
-        "description": "查看预设如何编排你的策略。"
-      },
-      "runStudio": {
-        "title": "运行工作室",
-        "description": "运行、检查并接受或舍弃计算结果。"
-      },
-      "connect": {
-        "title": "Connect",
-        "description": "主机状态与连接令牌。"
+        "title": "已装模块",
+        "count_one": "{{count}} 个 compute module",
+        "count_other": "{{count}} 个 compute module",
+        "empty": "尚未安装 compute module"
       }
     },
     "tabs": {
@@ -252,6 +260,29 @@
     "validationError": "标题为必填项。",
     "creating": "正在创建世界…",
     "create": "创建"
+  },
+  "workspaceCreate": {
+    "chip": "＋ 新建工作区",
+    "title": "新建工作区",
+    "nameLabel": "显示名",
+    "namePlaceholder": "例如：星际拓荒志",
+    "rootLabel": "内容根目录（自动派生）",
+    "rootLabelOverride": "内容根目录",
+    "rootPlaceholder": "/Users/you/Nexus/my-workspace",
+    "advanced": "高级：更改位置…",
+    "advancedHint": "手动指定 creative_root；校验可写性与独占性。",
+    "create": "创建并切换",
+    "creating": "创建中…",
+    "cancel": "取消",
+    "failurePrefix": "创建失败：",
+    "activationFailurePrefix": "切换失败：",
+    "createdNotActivated": "工作区已创建，但切换未完成。",
+    "retryActivate": "重试激活",
+    "activationGeneric": "未切换成功，请重试激活。",
+    "conflict": "该工作区或目标目录已存在",
+    "notWritable": "目标目录不可写",
+    "invalid": "工作区名称或目录无效",
+    "generic": "创建未完成，请重试"
   },
   "workShell": {
     "railTitle": "作品",

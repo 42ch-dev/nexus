@@ -13,6 +13,8 @@
 import type {
   ActiveCreatorResponse,
   ActiveWorkspaceResponse,
+  CreateWorkspaceRequest,
+  CreateWorkspaceResponse,
   ListWorkspacesQuery,
   ListWorkspacesResponse,
   SetActiveWorkspaceRequest,
@@ -93,6 +95,8 @@ import type {
   ScaffoldPresetResponse,
   ScanRequest,
   ScanResponse,
+  AgentProfile,
+  AgentProfileResponse,
   SessionDetailResponse,
   SetActiveCreatorRequest,
   SetActiveCreatorResponse,
@@ -295,7 +299,7 @@ export class BrowserClient implements NexusClient {
     return this.get<ActiveCreatorResponse>('/v1/daemon/creators/active');
   }
 
-  // ── Workspaces (plan v1219 T3 — frozen workspace family; create omitted, D23) ──
+  // ── Workspaces (plan v1219 T3; create added by v1220 T3) ──────────────────
   listWorkspaces(query?: ListWorkspacesQuery): Promise<ListWorkspacesResponse> {
     return this.get<ListWorkspacesResponse>('/v1/daemon/workspaces', query);
   }
@@ -307,8 +311,17 @@ export class BrowserClient implements NexusClient {
   ): Promise<SetActiveWorkspaceResponse> {
     return this.post<SetActiveWorkspaceResponse>('/v1/daemon/workspace/active', request);
   }
+  createWorkspace(request: CreateWorkspaceRequest): Promise<CreateWorkspaceResponse> {
+    return this.post<CreateWorkspaceResponse>('/v1/daemon/workspaces', request);
+  }
   scanAgents(request?: ScanRequest): Promise<ScanResponse> {
     return this.post<ScanResponse>('/v1/daemon/agent-host/scan', request);
+  }
+  getAgentProfile(): Promise<AgentProfileResponse> {
+    return this.get<AgentProfileResponse>('/v1/daemon/agent-host/profile');
+  }
+  saveAgentProfile(profile: AgentProfile): Promise<AgentProfileResponse> {
+    return this.put<AgentProfileResponse>('/v1/daemon/agent-host/profile', profile);
   }
 
   // ── Assembly Inspector (V1.151 P1 — DF-76) ────────────────────────────────

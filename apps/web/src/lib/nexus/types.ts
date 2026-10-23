@@ -101,6 +101,8 @@ import type {
   ScaffoldPresetResponse,
   ScanRequest,
   ScanResponse,
+  AgentProfile,
+  AgentProfileResponse,
   SessionDetailResponse,
   SetActiveCreatorRequest,
   SetActiveCreatorResponse,
@@ -130,6 +132,8 @@ import type {
   ValidatePresetResponse,
   ActiveCreatorResponse,
   ActiveWorkspaceResponse,
+  CreateWorkspaceRequest,
+  CreateWorkspaceResponse,
   ListWorkspacesQuery,
   ListWorkspacesResponse,
   SetActiveWorkspaceRequest,
@@ -327,7 +331,7 @@ export interface NexusClient extends CoreSliceClient {
   /** `PUT /v1/daemon/creators/active` — switch the daemon's active creator. */
   setActiveCreator(request: SetActiveCreatorRequest): Promise<SetActiveCreatorResponse>;
 
-  // ── Workspaces (plan v1219 T3 — frozen workspace family; create omitted, D23) ──
+  // ── Workspaces (plan v1219 T3 + v1220 T3 create) ──────────────────────────
   /** `GET /v1/daemon/workspaces` — cursor list of the creator's workspaces. */
   listWorkspaces(query?: ListWorkspacesQuery): Promise<ListWorkspacesResponse>;
   /** `GET /v1/daemon/workspace` — the daemon's active workspace. */
@@ -336,10 +340,26 @@ export interface NexusClient extends CoreSliceClient {
   setActiveWorkspace(
     request: SetActiveWorkspaceRequest,
   ): Promise<SetActiveWorkspaceResponse>;
+  /**
+   * `POST /v1/daemon/workspaces` — create a workspace for the active creator
+   * (I-000063). The core owns slug validation, root exclusivity and atomicity;
+   * success does not activate the workspace.
+   */
+  createWorkspace(request: CreateWorkspaceRequest): Promise<CreateWorkspaceResponse>;
 
   // ── Agent host (V1.94 P1) ──────────────────────────────────────────────────
   /** `POST /v1/daemon/agent-host/scan` — detect locally available ACP agents. */
   scanAgents(request?: ScanRequest): Promise<ScanResponse>;
+  /**
+   * `GET /v1/daemon/agent-host/profile` — the daemon-global saved agent
+   * profile (I-000064). `profile: null` means none was saved yet.
+   */
+  getAgentProfile(): Promise<AgentProfileResponse>;
+  /**
+   * `PUT /v1/daemon/agent-host/profile` — persist the daemon-global agent
+   * profile on the service (browser path; the desktop IPC path is unchanged).
+   */
+  saveAgentProfile(profile: AgentProfile): Promise<AgentProfileResponse>;
 
   /** `GET /v1/daemon/works` — cursor list (F-P1/F-P3/F-F1; canonical `items` key). */
   listWorks(query?: ListWorksQuery): Promise<ListWorksResponse>;
@@ -820,6 +840,8 @@ export type {
   ReviewResponse,
   ScanRequest,
   ScanResponse,
+  AgentProfile,
+  AgentProfileResponse,
   ActiveCreatorResponse,
   ActiveWorkspaceResponse,
   ListWorkspacesQuery,
@@ -828,6 +850,8 @@ export type {
   SetActiveCreatorResponse,
   SetActiveWorkspaceRequest,
   SetActiveWorkspaceResponse,
+  CreateWorkspaceRequest,
+  CreateWorkspaceResponse,
   WorkspaceSummary,
   SoulNarrativeRequest,
   SoulNarrativeResponse,

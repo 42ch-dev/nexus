@@ -11,9 +11,10 @@
  * and the Rust helpers in `crates/nexus-local-db/src/works.rs` —
  * `game_bible` uses an underscore (not a hyphen).
  *
- * Consumed by the Create-Work dialog (`pages/dialogs/create-work-dialog.tsx`)
- * and the future V1.70 canvas Strategy surface. Keep this the single source —
- * do not duplicate the profile list elsewhere in `apps/web/src/`.
+ * Consumed by the inline Work create panel
+ * (`components/layout/sidebar.tsx`) and the future V1.70 canvas Strategy
+ * surface. Keep this the single source — do not duplicate the profile list
+ * elsewhere in `apps/web/src/`.
  */
 
 /** Literal union of admitted work-profile wire values. */

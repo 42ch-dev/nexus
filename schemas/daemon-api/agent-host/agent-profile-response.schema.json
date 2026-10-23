@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/agent-host/agent-profile-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus AgentHostProfileResponse",
+  "description": "Response for GET/PUT /v1/daemon/agent-host/profile. Always 200; `profile: null` means no profile is stored yet (zero new error-fold rows).",
+  "type": "object",
+  "required": ["profile"],
+  "properties": {
+    "profile": {
+      "oneOf": [
+        {
+          "$ref": "https://nexus42.invalid/schemas/daemon-api/agent-host/agent-profile.schema.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The stored daemon-global agent profile, or null when unset."
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { StepAgent } from './step-agent';
 import { renderInApp } from '@/test/test-providers';
 import type { NexusClient } from '@/lib/nexus';
 import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
-import type { AgentScanEntry } from '@42ch/nexus-contracts';
+import type { AgentProfile, AgentProfileResponse, AgentScanEntry } from '@42ch/nexus-contracts';
 
 const AGENTS: AgentScanEntry[] = [
   {
@@ -25,9 +25,22 @@ const AGENTS: AgentScanEntry[] = [
   },
 ];
 
-function makeClient(scanAgents: NexusClient['scanAgents']): NexusClient {
+/**
+ * Transport double with a service-backed profile store: `getAgentProfile`
+ * serves what `saveAgentProfile` persisted, so a remount reads it back.
+ */
+function makeClient(
+  scanAgents: NexusClient['scanAgents'],
+  saved: AgentProfile | null = null,
+): NexusClient {
+  let stored = saved;
   return {
     scanAgents,
+    getAgentProfile: () => Promise.resolve({ profile: stored }),
+    saveAgentProfile: vi.fn((profile: AgentProfile) => {
+      stored = profile;
+      return Promise.resolve({ profile: stored });
+    }),
     getActiveWorkspace: () =>
       Promise.resolve({
         creator_id: 'creator-a',
@@ -106,16 +119,17 @@ describe('StepAgent (creator AI partner)', () => {
     expect(screen.getByRole('button', { name: '下一步' })).toBeEnabled();
   });
 
-  it('persists the selected agent under the creator-scoped key', async () => {
+  it('persists the selected agent on the service', async () => {
     const user = userEvent.setup();
-    const { onNext } = renderStep(makeClient(() => Promise.resolve({ agents: AGENTS })));
+    const client = makeClient(() => Promise.resolve({ agents: AGENTS }));
+    const { onNext } = renderStep(client);
 
     await user.click(await screen.findByTestId('agent-row-codex'));
 
     expect(screen.getByTestId('agent-row-codex')).toHaveAttribute('aria-checked', 'true');
-    expect(JSON.parse(window.localStorage.getItem('nexus-agent-profile:creator-a')!)).toEqual({
+    expect(vi.mocked(client.saveAgentProfile)).toHaveBeenCalledWith({
       name: 'Codex CLI',
-      launchCommand: '/usr/local/bin/codex',
+      launch_command: '/usr/local/bin/codex',
     });
 
     await user.click(screen.getByRole('button', { name: '下一步' }));
@@ -124,38 +138,36 @@ describe('StepAgent (creator AI partner)', () => {
 
   it('persists the scan entry name, not the catalog display name', async () => {
     const user = userEvent.setup();
-    renderStep(
-      makeClient(() =>
-        Promise.resolve({
-          agents: [
-            {
-              name: 'Claude Code',
-              // Catalog override maps this key to the display name `Claude`;
-              // the saved profile must keep the scan entry name so the badge
-              // resolver matches it.
-              registry_agent_id: 'claude-native',
-              launch_command: '/usr/local/bin/claude',
-              installed: true,
-            },
-          ],
-        }),
-      ),
+    const client = makeClient(() =>
+      Promise.resolve({
+        agents: [
+          {
+            name: 'Claude Code',
+            // Catalog override maps this key to the display name `Claude`;
+            // the saved profile must keep the scan entry name so the badge
+            // resolver matches it.
+            registry_agent_id: 'claude-native',
+            launch_command: '/usr/local/bin/claude',
+            installed: true,
+          },
+        ],
+      }),
     );
+    renderStep(client);
 
     await user.click(await screen.findByTestId('agent-row-claude-native'));
 
-    expect(JSON.parse(window.localStorage.getItem('nexus-agent-profile:creator-a')!)).toEqual({
+    expect(vi.mocked(client.saveAgentProfile)).toHaveBeenCalledWith({
       name: 'Claude Code',
-      launchCommand: '/usr/local/bin/claude',
+      launch_command: '/usr/local/bin/claude',
     });
   });
 
   it('keeps the selection after a reload in the same browser', async () => {
-    window.localStorage.setItem(
-      'nexus-agent-profile:creator-a',
-      JSON.stringify({ name: 'Codex CLI', launchCommand: '/usr/local/bin/codex' }),
-    );
-    const client = makeClient(() => Promise.resolve({ agents: AGENTS }));
+    const client = makeClient(() => Promise.resolve({ agents: AGENTS }), {
+      name: 'Codex CLI',
+      launch_command: '/usr/local/bin/codex',
+    });
 
     const first = renderStep(client);
     expect(await screen.findByTestId('agent-row-codex')).toHaveAttribute('aria-checked', 'true');
@@ -165,23 +177,58 @@ describe('StepAgent (creator AI partner)', () => {
     expect(await screen.findByTestId('agent-row-codex')).toHaveAttribute('aria-checked', 'true');
   });
 
-  it('does not inherit another creator id’s selection', async () => {
-    window.localStorage.setItem(
-      'nexus-agent-profile:creator-a',
-      JSON.stringify({ name: 'Codex CLI', launchCommand: '/usr/local/bin/codex' }),
-    );
+  it('applies the saved profile when it arrives after the scan', async () => {
+    let resolveProfile!: (value: AgentProfileResponse) => void;
+    const client = {
+      scanAgents: () => Promise.resolve({ agents: AGENTS }),
+      getAgentProfile: () =>
+        new Promise<AgentProfileResponse>((resolve) => {
+          resolveProfile = resolve;
+        }),
+      saveAgentProfile: vi.fn(),
+    } as unknown as NexusClient;
 
-    renderStep(makeClient(() => Promise.resolve({ agents: AGENTS })), {
-      creatorId: 'creator-b',
+    renderStep(client);
+
+    // Scan settles first: no row is committed while the profile read is
+    // pending, and Continue stays blocked (no intermediate default).
+    expect(await screen.findByTestId('agent-row-claude')).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
+    expect(screen.getByRole('button', { name: '下一步' })).toBeDisabled();
+
+    await act(async () => {
+      resolveProfile({
+        profile: { name: 'Codex CLI', launch_command: '/usr/local/bin/codex' },
+      });
     });
 
-    expect(await screen.findByTestId('agent-row-claude')).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByTestId('agent-row-codex')).toHaveAttribute('aria-checked', 'false');
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-row-codex')).toHaveAttribute('aria-checked', 'true'),
+    );
+    expect(screen.getByTestId('agent-row-claude')).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('button', { name: '下一步' })).toBeEnabled();
+  });
+
+  it('restores the daemon-global profile for any active creator', async () => {
+    // The service profile is daemon-global (architect decision): switching the
+    // active creator does not scope or hide it.
+    const client = makeClient(() => Promise.resolve({ agents: AGENTS }), {
+      name: 'Codex CLI',
+      launch_command: '/usr/local/bin/codex',
+    });
+
+    renderStep(client, { creatorId: 'creator-b' });
+
+    expect(await screen.findByTestId('agent-row-codex')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByTestId('agent-row-claude')).toHaveAttribute('aria-checked', 'false');
   });
 
   it('shows the empty state and recovers through a manual launch command', async () => {
     const user = userEvent.setup();
-    const { onNext } = renderStep(makeClient(() => Promise.resolve({ agents: [] })));
+    const client = makeClient(() => Promise.resolve({ agents: [] }));
+    const { onNext } = renderStep(client);
 
     expect(await screen.findByRole('heading', { name: '没有找到可用的 AI' })).toBeInTheDocument();
     expect(
@@ -205,20 +252,20 @@ describe('StepAgent (creator AI partner)', () => {
     expect(screen.getByRole('button', { name: '下一步' })).toBeEnabled();
     await user.click(screen.getByRole('button', { name: '下一步' }));
     expect(onNext).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(window.localStorage.getItem('nexus-agent-profile:creator-a')!)).toEqual({
+    expect(vi.mocked(client.saveAgentProfile)).toHaveBeenCalledWith({
       name: 'claude --model opus',
-      launchCommand: 'claude --model opus',
+      launch_command: 'claude --model opus',
     });
   });
 
   it('restores a saved manual command on an empty scan so Continue can proceed', async () => {
     const user = userEvent.setup();
     const onNext = vi.fn();
-    window.localStorage.setItem(
-      'nexus-agent-profile:creator-a',
-      JSON.stringify({ name: 'my-cli', launchCommand: 'my-cli --flag' }),
-    );
-    renderStep(makeClient(() => Promise.resolve({ agents: [] })), { onNext });
+    const client = makeClient(() => Promise.resolve({ agents: [] }), {
+      name: 'my-cli --flag',
+      launch_command: 'my-cli --flag',
+    });
+    renderStep(client, { onNext });
 
     expect(await screen.findByRole('heading', { name: '没有找到可用的 AI' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '下一步' })).toBeEnabled();
@@ -229,9 +276,9 @@ describe('StepAgent (creator AI partner)', () => {
     await user.click(screen.getByRole('button', { name: '下一步' }));
     expect(onNext).toHaveBeenCalledTimes(1);
     // Manual-only profiles carry the command as the profile name.
-    expect(JSON.parse(window.localStorage.getItem('nexus-agent-profile:creator-a')!)).toEqual({
+    expect(vi.mocked(client.saveAgentProfile)).toHaveBeenCalledWith({
       name: 'my-cli --flag',
-      launchCommand: 'my-cli --flag',
+      launch_command: 'my-cli --flag',
     });
   });
 

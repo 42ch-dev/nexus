@@ -41,10 +41,9 @@ export const queryKeys = {
     // Detail keys staged for the V1.70 canvas Strategy surface
     // (R-V167P1-QC3-S2): getPreset/updatePreset/deletePreset operate on a
     // single preset by id. Invalidation follows the existing inline mutation
-    // pattern (e.g. useReloadPreset) — `qc.invalidateQueries({ queryKey:
-    // queryKeys.presets.all })` covers the list + every detail, and
-    // `queryKeys.presets.detail(id)` targets one. The actual
-    // `invalidateQueries` wiring lands in V1.70 when the canvas consumes these.
+    // pattern — `qc.invalidateQueries({ queryKey: queryKeys.presets.all })`
+    // covers the list + every detail, and `queryKeys.presets.detail(id)`
+    // targets one.
     details: () => [...queryKeys.presets.all, 'detail'] as const,
     detail: (presetId: string) => [...queryKeys.presets.details(), presetId] as const,
     // V1.171 P1 — per-preset profile (AR-27). Under `presets.all` so the
@@ -78,6 +77,16 @@ export const queryKeys = {
   agentProfile: {
     all: ['agentProfile'] as const,
     detail: () => [...queryKeys.agentProfile.all, 'detail'] as const,
+  },
+  // v1220 T2 — 操作台 Hub aggregation keys. Section-scoped so a card's retry
+  // refetches only its own sources (per-card error isolation).
+  hub: {
+    all: ['hub'] as const,
+    service: {
+      health: () => [...queryKeys.hub.all, 'service', 'health'] as const,
+      status: () => [...queryKeys.hub.all, 'service', 'status'] as const,
+    },
+    harnessSessions: () => [...queryKeys.hub.all, 'harness', 'sessions'] as const,
   },
   chapters: {
     all: ['chapters'] as const,

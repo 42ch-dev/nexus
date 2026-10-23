@@ -304,9 +304,9 @@ function AppRoutes() {
           path="connect"
           element={<Navigate to="/settings/advanced#connection" replace />}
         />
-        {/* V1.170 P1 (AR-18) — Develop hub v1: developer-entrance land route.
-            Develop-only (guard-bounced on Create); lazy-split with the other
-            route-split pages. */}
+        {/* v1220 T1 — 操作台 (Hub): the developer-entrance land route
+            (`landRoute`). Read-only status aggregation over existing daemon
+            endpoints; the lazy boundary lives in `lib/app-registry.ts`. */}
         <Route path="developer" element={<AppModuleRoute appId="hub" />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>

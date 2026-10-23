@@ -129,6 +129,17 @@ describe('AppShell', () => {
     expect(screen.getByRole('button', { name: i18n.t('topnav.searchDisabled', { ns: 'shell' }) })).toBeDisabled();
   });
 
+  it('exposes Settings in the mobile nav linking to /settings', () => {
+    useShellHandlers();
+    // The default settings section is develop-only, so the content-creator
+    // entrance legitimately hides this entry; the developer nav carries it.
+    renderShell('developer');
+    const links = screen.getAllByRole('link').filter(
+      (element) => element.getAttribute('href') === '/settings',
+    );
+    expect(links.length).toBeGreaterThanOrEqual(1);
+  });
+
   it('toggles light/dark theme via the existing token class', async () => {
     useShellHandlers();
     const user = userEvent.setup();

@@ -18,9 +18,12 @@ import { useToast } from '@/lib/use-toast';
 export function ScaffoldPresetDialog({
   open,
   onOpenChange,
+  onCreated,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Called with the created preset id (Harness navigates to its canvas). */
+  onCreated?: (id: string) => void;
 }) {
   const scaffold = useScaffoldPreset();
   const { toast } = useToast();
@@ -49,6 +52,7 @@ export function ScaffoldPresetDialog({
         description: res.path,
       });
       onOpenChange(false);
+      onCreated?.(res.id);
     } catch {
       // Error toast already fired by the mutation's onError callback.
     }

@@ -7,17 +7,16 @@
  * `installed`) resolved through the existing catalog helpers. The selected
  * profile is persisted as `{ name, launchCommand? }` — the same snapshot the
  * shell's agent chip reads:
- *   - browser: `localStorage` under `nexus-agent-profile:<creator_id>`
  *   - desktop: the `set_agent_profile` IPC (unchanged, `config.toml`)
+ *   - browser: `PUT /v1/daemon/agent-host/profile` (I-000064; service-owned)
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { User } from 'lucide-react';
 
-import { useAgentProfile, useScanAgents } from '@/api/queries';
-import { useActiveCreatorId } from '@/lib/active-creator-context';
-import { useDesktopCapabilities } from '@/lib/client-context';
+import { useAgentProfile, useScanAgents, wireFromSnapshot } from '@/api/queries';
+import { useDesktopCapabilities, useNexusClient } from '@/lib/client-context';
 import { resolveCatalogItems, type AgentCatalogItem } from '@/lib/agent-catalog';
 import { errorMessage } from '@/lib/error-message';
 import { queryKeys } from '@/lib/nexus/query-keys';
@@ -26,40 +25,9 @@ import { cn } from '@/lib/utils';
 import { Badge, Button, Input, Label } from '@/components/ui';
 import type { AgentScanEntry } from '@42ch/nexus-contracts';
 
-export const AGENT_PROFILE_PREFIX = 'nexus-agent-profile:';
-
 export interface AgentProfile {
   name: string;
   launchCommand?: string;
-}
-
-function readStoredProfile(creatorId: string | null): AgentProfile | null {
-  if (!creatorId || typeof window === 'undefined') return null;
-  try {
-    const raw = window.localStorage.getItem(`${AGENT_PROFILE_PREFIX}${creatorId}`);
-    if (!raw) return null;
-    const parsed: unknown = JSON.parse(raw);
-    if (parsed === null || typeof parsed !== 'object') return null;
-    const { name, launchCommand } = parsed as Partial<AgentProfile>;
-    if (typeof name !== 'string' || name.trim() === '') return null;
-    return { name, launchCommand: typeof launchCommand === 'string' ? launchCommand : undefined };
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredProfile(creatorId: string | null, profile: AgentProfile): void {
-  // No creator → no profile key to scope the entry by (`<creator_id>` is part
-  // of the contract); the chip ignores a creator-less entry anyway.
-  if (!creatorId || typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(
-      `${AGENT_PROFILE_PREFIX}${creatorId}`,
-      JSON.stringify(profile),
-    );
-  } catch {
-    // Storage may be disabled in some environments; persistence is best-effort.
-  }
 }
 
 /** One selectable scan row with its collision-safe picker id. */
@@ -113,7 +81,7 @@ export interface AgentSelection {
   retry: () => void;
   /**
    * Persist the current profile (a manual command overrides the selected row).
-   * Resolves `true` when the selection was saved; `false` when the desktop
+   * Resolves `true` when the selection was saved; `false` when the profile
    * write failed (one error toast shown) — callers must not advance.
    */
   commit: () => Promise<boolean>;
@@ -124,8 +92,8 @@ export function useAgentSelection(): AgentSelection {
   const { t: commonT } = useTranslation('common');
   const { toast } = useToast();
   const desktop = useDesktopCapabilities();
+  const client = useNexusClient();
   const qc = useQueryClient();
-  const creatorId = useActiveCreatorId();
   const savedProfile = useAgentProfile();
   const scan = useScanAgents({ filter: 'installed' });
 
@@ -135,28 +103,26 @@ export function useAgentSelection(): AgentSelection {
   );
   const recommendedId = choices.find((choice) => choice.entry.installed)?.pickerId ?? null;
 
-  const stored = useMemo(() => readStoredProfile(creatorId), [creatorId]);
-  const saved = savedProfile.data ?? stored;
-  // Browser reads localStorage synchronously; the desktop profile arrives over
-  // IPC and may land after the scan. Locking the restore before that read
-  // settles would leave a late profile unmapped, so wait for it here.
-  const profileSettled = desktop ? savedProfile.isFetched : true;
+  const saved = savedProfile.data;
+  // The saved profile always wins over the scan-recommended default: apply it
+  // whenever it arrives, until the user explicitly picks a row. A read that
+  // settled without a profile (error or `null`) must not hold the step.
+  const profileSettled = savedProfile.isFetched;
+  const profilePending = savedProfile.isLoading;
+  const scanSettled = !scan.isLoading;
 
   const [pickedId, setPickedId] = useState<string | null>(null);
   const [manual, setManual] = useState('');
-  const restored = useRef(false);
+  const userPicked = useRef(false);
 
-  // Restore the saved profile once the scan and the desktop read have settled.
-  // A row-backed profile re-selects its row; a saved command that differs from
-  // the row's own is a manual override and must come back into the field so a
-  // later commit does not overwrite it. With zero scan rows (empty/error) the
-  // saved command is the only usable path, so it still fills the field and
-  // lets the step continue.
-  const scanSettled = !scan.isLoading;
+  // Restore the saved profile once both the scan and the profile read have
+  // settled. A row-backed profile re-selects its row; a saved command that
+  // differs from the row's own is a manual override and must come back into
+  // the field so a later commit does not overwrite it. With zero scan rows
+  // (empty/error) the saved command is the only usable path, so it still fills
+  // the field and lets the step continue.
   useEffect(() => {
-    if (restored.current || !profileSettled || !scanSettled) return;
-    restored.current = true;
-    if (!saved) return;
+    if (userPicked.current || !profileSettled || !scanSettled || !saved) return;
     const match = matchChoice(choices, saved);
     if (match) {
       setPickedId(match.pickerId);
@@ -169,7 +135,11 @@ export function useAgentSelection(): AgentSelection {
     setManual(saved.launchCommand ?? '');
   }, [choices, saved, profileSettled, scanSettled]);
 
-  const selectedId = pickedId ?? recommendedId;
+  // While the profile read is still pending, no selection exists yet: the
+  // scan-recommended default must not be committed as an intermediate choice.
+  // A read that settled without a profile (error or `null`) releases the gate —
+  // only an actually-arrived saved profile overrides the scan default.
+  const selectedId = pickedId ?? (profilePending ? null : recommendedId);
   const selectedChoice = choices.find((choice) => choice.pickerId === selectedId) ?? null;
 
   const status: AgentScanStatus = scan.isLoading
@@ -181,12 +151,10 @@ export function useAgentSelection(): AgentSelection {
         : 'ready';
 
   function persist(profile: AgentProfile): Promise<boolean> {
-    if (!desktop) {
-      writeStoredProfile(creatorId, profile);
-      return Promise.resolve(true);
-    }
-    return desktop
-      .setAgentProfile(profile.name, profile.launchCommand)
+    const write = desktop
+      ? desktop.setAgentProfile(profile.name, profile.launchCommand)
+      : client.saveAgentProfile(wireFromSnapshot(profile)).then(() => undefined);
+    return write
       .then(() => {
         // The status bar and agent chip read the saved profile + scan.
         void qc.invalidateQueries({ queryKey: queryKeys.agentProfile.detail() });
@@ -204,6 +172,7 @@ export function useAgentSelection(): AgentSelection {
   function select(pickerId: string) {
     const choice = choices.find((candidate) => candidate.pickerId === pickerId);
     if (!choice) return;
+    userPicked.current = true;
     setPickedId(pickerId);
     setManual('');
     void persist(profileOfChoice(choice));
