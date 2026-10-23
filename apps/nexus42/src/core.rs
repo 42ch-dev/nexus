@@ -142,6 +142,13 @@ fn require_materialized_workspace_from_home(config: &CliConfig, user_home: &Path
     }
 }
 
+fn map_workspace_conflict(conflict: impl std::fmt::Display) -> CliError {
+    CliError::Api {
+        status: 409,
+        message: format!("workspace_conflict: {conflict}"),
+    }
+}
+
 /// Map a core error to the CLI taxonomy.
 ///
 /// `WorldKbConflict` is deliberately NOT handled here: it needs the caller's
@@ -204,10 +211,7 @@ pub fn map_core_error(err: CoreError) -> CliError {
                 v.validation_summary.errors.join("; ")
             ),
         },
-        CoreError::WorkspaceConflict(conflict) => CliError::Api {
-            status: 409,
-            message: format!("workspace_conflict: {conflict}"),
-        },
+        CoreError::WorkspaceConflict(conflict) => map_workspace_conflict(conflict),
         CoreError::OutlineConflict(conflict) => CliError::Api {
             status: 409,
             message: format!(
