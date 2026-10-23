@@ -104,11 +104,11 @@ export function useAgentSelection(): AgentSelection {
   const recommendedId = choices.find((choice) => choice.entry.installed)?.pickerId ?? null;
 
   const saved = savedProfile.data;
-  // The profile may land after the scan (IPC on desktop, service GET in the
-  // browser), and the scan may land first. The saved profile always wins over
-  // the scan-recommended default: apply it whenever it arrives, until the user
-  // explicitly picks a row.
+  // The saved profile always wins over the scan-recommended default: apply it
+  // whenever it arrives, until the user explicitly picks a row. A read that
+  // settled without a profile (error or `null`) must not hold the step.
   const profileSettled = savedProfile.isFetched;
+  const profilePending = savedProfile.isLoading;
   const scanSettled = !scan.isLoading;
 
   const [pickedId, setPickedId] = useState<string | null>(null);
@@ -135,9 +135,11 @@ export function useAgentSelection(): AgentSelection {
     setManual(saved.launchCommand ?? '');
   }, [choices, saved, profileSettled, scanSettled]);
 
-  // While the profile read is pending, no selection exists yet: the
+  // While the profile read is still pending, no selection exists yet: the
   // scan-recommended default must not be committed as an intermediate choice.
-  const selectedId = pickedId ?? (profileSettled ? recommendedId : null);
+  // A read that settled without a profile (error or `null`) releases the gate —
+  // only an actually-arrived saved profile overrides the scan default.
+  const selectedId = pickedId ?? (profilePending ? null : recommendedId);
   const selectedChoice = choices.find((choice) => choice.pickerId === selectedId) ?? null;
 
   const status: AgentScanStatus = scan.isLoading

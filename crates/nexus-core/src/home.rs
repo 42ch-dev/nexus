@@ -392,13 +392,15 @@ impl CoreHomeService {
         {
             rollback_new_workspace(
                 &op_dir,
-                op_dir_preexisting,
                 &db_path,
-                db_preexisting,
                 &manifest_path,
-                manifest_preexisting,
                 &creative_root,
-                preexisting_root.is_some(),
+                PreexistingArtifacts {
+                    op_dir: op_dir_preexisting,
+                    db: db_preexisting,
+                    manifest: manifest_preexisting,
+                    creative_root: preexisting_root.is_some(),
+                },
             );
             return Err(err);
         }
@@ -858,6 +860,17 @@ fn probe_creative_dir(root: &Path) -> CoreResult<()> {
         })
 }
 
+/// Which create-path artifacts already existed before this call. Rollback
+/// removes only what the create itself produced.
+#[derive(Clone, Copy)]
+#[allow(clippy::struct_excessive_bools)] // four independent artifact flags, not a state machine
+struct PreexistingArtifacts {
+    op_dir: bool,
+    db: bool,
+    manifest: bool,
+    creative_root: bool,
+}
+
 /// Undo a failed create by removing only the artifacts this call produced.
 ///
 /// The operational directory is removed recursively only when this call created
@@ -866,32 +879,26 @@ fn probe_creative_dir(root: &Path) -> CoreResult<()> {
 /// `.nexus42` directory when that leaves it empty). `meta.json` is the
 /// registration marker and never pre-existed here (the preflight refuses a
 /// registered slug), so a partial write of it is safe to drop.
-#[allow(clippy::too_many_arguments)] // explicit artifact bookkeeping, one call site
 fn rollback_new_workspace(
     op_dir: &Path,
-    op_dir_preexisting: bool,
     db_path: &Path,
-    db_preexisting: bool,
     manifest_path: &Path,
-    manifest_preexisting: bool,
     creative_root: &Path,
-    root_preexisting: bool,
+    preexisting: PreexistingArtifacts,
 ) {
-    if !db_preexisting {
+    if !preexisting.db {
         let _ = std::fs::remove_file(db_path);
     }
-    if !manifest_preexisting {
+    if !preexisting.manifest {
         let _ = std::fs::remove_file(manifest_path);
     }
     let _ = std::fs::remove_file(op_dir.join("meta.json"));
-    if !op_dir_preexisting {
+    if !preexisting.op_dir {
         let _ = std::fs::remove_dir_all(op_dir);
     }
-    if root_preexisting {
+    if preexisting.creative_root {
         let meta_dir = creative_root.join(".nexus42");
-        let empty = std::fs::read_dir(&meta_dir)
-            .map(|mut entries| entries.next().is_none())
-            .unwrap_or(false);
+        let empty = std::fs::read_dir(&meta_dir).is_ok_and(|mut entries| entries.next().is_none());
         if empty {
             let _ = std::fs::remove_dir(&meta_dir);
         }

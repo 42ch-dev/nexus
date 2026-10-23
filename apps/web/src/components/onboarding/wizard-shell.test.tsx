@@ -29,12 +29,15 @@ function makeClient({
   worldFails = false,
   selectionFails = false,
   gateProbeFails = false,
+  profileReadFails = false,
 }: {
   initialized?: boolean;
   worldFails?: boolean;
   selectionFails?: boolean;
   /** Reject the SECOND runtime-status probe — the finish-path gate re-probe. */
   gateProbeFails?: boolean;
+  /** Reject the browser agent-profile read (service unavailable). */
+  profileReadFails?: boolean;
 } = {}) {
   const calls: string[] = [];
   let workspaceInitialized = initialized;
@@ -50,6 +53,14 @@ function makeClient({
       return Promise.resolve({ workspace_initialized: workspaceInitialized });
     },
     scanAgents: () => Promise.resolve({ agents: AGENTS }),
+    // The agent step reads the saved profile on mount and persists the choice
+    // on advance; the daemon-global profile it reads back is empty by default.
+    getAgentProfile: () =>
+      profileReadFails
+        ? Promise.reject(new Error('profile read failed'))
+        : Promise.resolve({ profile: null }),
+    saveAgentProfile: (profile: { name: string; launch_command?: string }) =>
+      Promise.resolve({ profile }),
     getActiveWorkspace: () =>
       Promise.resolve({
         creator_id: 'creator-a',
@@ -172,6 +183,16 @@ describe('WizardShell', () => {
 
     expect(calls.filter((call) => call === 'creator')).toHaveLength(1);
     expect(window.localStorage.getItem('nexus:activeCreatorId')).toBe('creator-new');
+  });
+
+  it('reaches the world step when the saved-profile read fails', async () => {
+    const user = userEvent.setup();
+    const { client } = makeClient({ profileReadFails: true });
+    renderShell({ client });
+
+    // A failed read must not hold the flow: onboarding proceeds with the
+    // scan-recommended default instead of dead-ending on the profile gate.
+    await reachWorldStep(user);
   });
 
   it('finishes the creator path in order: creator → selection → world → World Brief', async () => {
