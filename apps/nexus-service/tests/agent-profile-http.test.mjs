@@ -148,13 +148,10 @@ describe('agent-profile (I-000064)', () => {
     // Establish an unrelated key first (simulates creator/workspace config the
     // core already owns), then verify the profile write preserves it.
     const configPath = join(home, 'config.toml');
-    const before = parse(readFileSync(configPath, 'utf8'));
+    const raw = readFileSync(configPath, 'utf8');
+    const before = parse(raw);
     const foreignKey = 'agent_profile_test_marker';
-    writeFileSync(
-      configPath,
-      `${foreignKey} = "kept"\n${readFileSync(configPath, 'utf8')}`,
-      'utf8',
-    );
+    writeFileSync(configPath, `${foreignKey} = "kept"\n${raw}`, 'utf8');
 
     const saved = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`, {
       method: 'PUT',
