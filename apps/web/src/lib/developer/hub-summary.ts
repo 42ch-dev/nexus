@@ -175,13 +175,22 @@ export function countRunningSessions(sessions: readonly { status: string }[]): n
   return sessions.filter((session) => !TERMINAL_SESSION_STATUSES[session.status]).length;
 }
 
-export function useHarnessSummary(): HubSectionState<HarnessSummary> {
+/**
+ * Bounded visible-session aggregate shared by the Hub and the Harness catalog
+ * (one query key, one cursor walk). `truncated` marks the row set as a lower
+ * bound once the page cap is hit.
+ */
+export function useVisibleSessions() {
   const client = useNexusClient();
-  const presets = usePresets();
-  const sessions = useQuery({
+  return useQuery({
     queryKey: queryKeys.hub.harnessSessions(),
     queryFn: () => fetchAllVisibleSessions(client),
   });
+}
+
+export function useHarnessSummary(): HubSectionState<HarnessSummary> {
+  const presets = usePresets();
+  const sessions = useVisibleSessions();
 
   const data =
     presets.data && sessions.data

@@ -144,6 +144,8 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("ViewRequest", 1),
     ("ViewResponse", 1),
     ("AgentHostListSessionsQuery", 1),
+    ("AgentProfileResponse", 1),
+    ("AgentProfile", 1),
     ("AgentScanEntry", 1),
     ("CancelOperationResponse", 1),
     ("CharacterOperationResult", 1),

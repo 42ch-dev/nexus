@@ -63,6 +63,9 @@ function hubHandlers() {
         agents: [{ name: 'my-agent', installed: true, version: '1.2.3' }],
       }),
     ),
+    http.get('/v1/daemon/agent-host/profile', () =>
+      HttpResponse.json({ profile: { name: 'my-agent' } }),
+    ),
     http.get('/v1/daemon/presets', () =>
       HttpResponse.json({
         embedded: [{ id: 'embedded/a', source: 'embedded' }],
@@ -101,10 +104,6 @@ describe('HubCards', () => {
   beforeEach(async () => {
     window.localStorage.clear();
     await i18n.changeLanguage('en');
-    window.localStorage.setItem(
-      `nexus-agent-profile:${CREATOR_ID}`,
-      JSON.stringify({ name: 'my-agent' }),
-    );
   });
 
   it('renders the four cards from live daemon data, navigation-only', async () => {
@@ -267,7 +266,9 @@ describe('HubCards', () => {
 
   it('shows the unconfigured Agent state when no profile exists', async () => {
     hubHandlers();
-    window.localStorage.clear();
+    useHandlers(
+      http.get('/v1/daemon/agent-host/profile', () => HttpResponse.json({ profile: null })),
+    );
     renderHub();
 
     expect(await screen.findByTestId('hub-card-agent-name')).toHaveTextContent(

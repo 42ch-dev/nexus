@@ -9,7 +9,7 @@
  * Findings + Works use cursor pagination; the hook exposes TanStack's
  * `fetchNextPage`/`hasNextPage` for "Load more".
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   useInfiniteQuery,
@@ -63,11 +63,11 @@ import type {
   ScaffoldPresetRequest,
   ScanRequest,
   ScanResponse,
+  AgentProfile,
   SoulNarrativeResponse,
   TimelineOverviewResponse,
   TimelineEventInfo,
   UpdateFindingRequest,
-  ValidatePresetRequest,
   WorkSummary,
   WorldRuleCreateRequest,
   WorldRuleUpdateRequest,
@@ -361,31 +361,32 @@ export function usePresets() {
  *
  * Staleness contract: the profile changes only when the preset manifest is
  * scaffolded/reloaded/deleted, so it is cached well past the app-wide 15s
- * default before a background refetch. The write mutations clear it
- * explicitly — `useScaffoldPreset` / `useReloadPreset` / `useDeletePreset`
- * invalidate `queryKeys.presets.all`, whose `['presets']` prefix covers the
- * list plus every `['presets','profile',<id>]` key — so a manifest change
- * refetches promptly regardless of staleness (QC1 W-1 / QC3 W-1 fix).
+ * default before a background refetch. `useScaffoldPreset` clears it
+ * explicitly by invalidating `queryKeys.presets.all`, whose `['presets']`
+ * prefix covers the list plus every `['presets','profile',<id>]` key — so a
+ * manifest change refetches promptly regardless of staleness.
  */
 
-/** Query result of {@link usePresetProfile} — consumed by the strategy
- * catalog rows (lanes / loading / error flags) and the profile drill-down. */
+/** Query result of {@link usePresetProfile} — consumed by the Harness catalog
+ * rows (binding state) and the profile drill-down. */
 export type PresetProfileQuery = UseQueryResult<PresetProfileResponse, Error>;
 
 /**
  * Query options for `GET /v1/daemon/orchestration/presets/{id}/profile`.
  *
  * Shared between `usePresetProfile` (single preset — detail page) and the
- * strategy catalog's `useQueries` fan-out so both consume the SAME
+ * Harness catalog's `useQueries` fan-out so both consume the SAME
  * `['presets','profile',<id>]` cache key and staleness policy: navigating
  * catalog → profile is a cache hit, and `presets.all` invalidation (F-1)
- * clears both.
+ * clears both. `retry: false` — a 404 here is the expected "preset without a
+ * resolvable profile" answer for the unbound probe, not a transient fault.
  */
 export function presetProfileQueryOptions(presetId: string | undefined, client: NexusClient) {
   return {
     queryKey: queryKeys.presets.profile(presetId ?? ''),
     queryFn: async () => client.getPresetProfile(presetId ?? ''),
     enabled: Boolean(presetId),
+    retry: false,
     staleTime: 5 * 60_000,
   };
 }
@@ -750,63 +751,10 @@ export function useScaffoldPreset() {
     mutationFn: (request: ScaffoldPresetRequest) => client.scaffoldPreset(request),
     onSuccess: () => {
       // Invalidate the whole `['presets']` key set (list + every profile) so
-      // newly scaffolded manifests surface in catalog lanes immediately
-      // (QC1 W-1 / QC3 W-1).
+      // newly scaffolded manifests surface in the catalog immediately.
       void qc.invalidateQueries({ queryKey: queryKeys.presets.all });
     },
     onError: (error) => errorToast(error, 'error.couldNotScaffoldPreset'),
-  });
-}
-
-export function useValidatePreset() {
-  const client = useNexusClient();
-  const errorToast = useErrorToast();
-  return useMutation({
-    mutationFn: (request: ValidatePresetRequest) => client.validatePreset(request),
-    onError: (error) => errorToast(error, 'error.couldNotValidatePreset'),
-    // On success the caller surfaces structured errors/warnings inline; a toast
-    // is not added here so the validate dialog stays the single source of truth.
-  });
-}
-
-export function useReloadPreset() {
-  const client = useNexusClient();
-  const qc = useQueryClient();
-  const errorToast = useErrorToast();
-  const { t } = useTranslation('common');
-  const { toast } = useToast();
-  return useMutation({
-    mutationFn: (presetId: string) => client.reloadPreset(presetId),
-    onSuccess: (_data, presetId) => {
-      toast({ variant: 'success', title: t('toast.presetReloaded'), description: presetId });
-      // Reload re-reads the manifest from disk — lanes/roles/capabilities can
-      // change. `presets.all` (prefix `['presets']`) invalidates the list and
-      // every `['presets','profile',<id>]` key so mounted catalog lane badges
-      // refresh without navigation (QC1 W-1 / QC3 W-1).
-      void qc.invalidateQueries({ queryKey: queryKeys.presets.all });
-    },
-    onError: (error) => errorToast(error, 'error.couldNotReloadPreset'),
-  });
-}
-
-/**
- * Delete a user preset (V1.120 strategies-repair). Mirrors the
- * `useScaffoldPreset` shape: `DELETE /v1/daemon/presets/{id}` then invalidate
- * the grouped presets list so the row disappears. Only user presets are
- * deletable — the row UI gates this (system/embedded rows render no Delete).
- */
-export function useDeletePreset() {
-  const client = useNexusClient();
-  const qc = useQueryClient();
-  const errorToast = useErrorToast();
-  return useMutation({
-    mutationFn: (presetId: string) => client.deletePreset(presetId),
-    onSuccess: () => {
-      // Whole `['presets']` key set — the deleted preset leaves the list and
-      // its profile key is dropped from the cache (QC1 W-1 / QC3 W-1).
-      void qc.invalidateQueries({ queryKey: queryKeys.presets.all });
-    },
-    onError: (error) => errorToast(error, 'error.couldNotDeletePreset'),
   });
 }
 
@@ -947,11 +895,11 @@ export type AgentProfileSnapshot = { name: string; launchCommand?: string };
 const BROWSER_AGENT_PROFILE_PREFIX = 'nexus-agent-profile:';
 
 /**
- * Read the browser-saved agent profile snapshot; absent in fresh browsers.
+ * Read the legacy per-creator browser snapshot; absent in fresh browsers.
  *
- * Extracted out of `AgentChip` (v1220 T2) so the topnav chip and the Hub's
- * Agent card resolve the saved profile from ONE seam — P2 Task 1 replaces this
- * seam (plus {@link useAgentProfile}) with the service-backed surface.
+ * Retained ONLY as the one-time migration source for the service read below:
+ * a null service profile falls back to this snapshot and best-effort PUTs it,
+ * after which the service is authoritative. New saves never write it.
  */
 export function readBrowserAgentProfile(
   creatorId: string | null | undefined,
@@ -973,60 +921,98 @@ export function readBrowserAgentProfile(
   }
 }
 
+/** Wire (`launch_command`) → app snapshot (`launchCommand`). */
+export function snapshotFromWire(profile: AgentProfile): AgentProfileSnapshot {
+  return profile.launch_command !== undefined
+    ? { name: profile.name, launchCommand: profile.launch_command }
+    : { name: profile.name };
+}
+
+/** App snapshot (`launchCommand`) → wire (`launch_command`). */
+export function wireFromSnapshot(profile: AgentProfileSnapshot): AgentProfile {
+  return profile.launchCommand !== undefined
+    ? { name: profile.name, launch_command: profile.launchCommand }
+    : { name: profile.name };
+}
+
+/**
+ * Browser profile read (I-000064): the service is authoritative.
+ *
+ * Read order: service GET → a `null` profile falls back ONCE to the legacy
+ * per-creator localStorage snapshot, which is best-effort PUT to the service
+ * (a failed migration leaves the snapshot in place for the next load). After
+ * any successful service read the legacy snapshot is neither consulted nor
+ * written.
+ */
+async function readServiceAgentProfile(
+  client: NexusClient,
+  creatorId: string | null,
+): Promise<AgentProfileSnapshot | null> {
+  const { profile } = await client.getAgentProfile();
+  if (profile) return snapshotFromWire(profile);
+
+  const legacy = readBrowserAgentProfile(creatorId);
+  if (!legacy) return null;
+  try {
+    const saved = await client.saveAgentProfile(wireFromSnapshot(legacy));
+    return saved.profile ? snapshotFromWire(saved.profile) : legacy;
+  } catch {
+    return legacy;
+  }
+}
+
 /** Saved-profile resolution state — the one seam the topnav and Hub share. */
 export interface SavedAgentProfileState {
-  /** Desktop IPC profile, else the browser snapshot; `null` when neither exists. */
+  /** The daemon-global profile from the service (desktop: the IPC profile). */
   profile: AgentProfileSnapshot | null;
-  /** True only while the enabled desktop profile query is fetching. */
+  /** True only while the profile read is fetching. */
   isLoading: boolean;
+  /**
+   * True once the profile read has settled (success or error). Consumers gate
+   * writes on this so a default is never committed as the persisted choice.
+   */
+  isFetched: boolean;
   error: Error | null;
   refetch: () => void;
 }
 
 /**
- * Saved agent profile plus its query state: the desktop IPC profile when
- * available, else the browser snapshot. Single seam for the topnav chip and
- * the Hub Agent card; P2 Task 1 swaps this implementation to the service
- * surface without touching either caller.
+ * Saved agent profile plus its query state: the desktop IPC profile on desktop,
+ * the service-backed daemon-global profile in the browser. Single seam for the
+ * topnav chip and the Hub Agent card.
  */
 export function useSavedAgentProfile(): SavedAgentProfileState {
   const profileQuery = useAgentProfile();
-  const desktop = useDesktopCapabilities();
-  const activeCreatorId = useActiveCreatorId();
-  // Browser builds have no desktop IPC bridge, so the profile query is
-  // disabled there (`enabled: Boolean(desktop)`). Forcing it would run its
-  // queryFn against a null bridge; retry re-reads the synchronous browser
-  // snapshot by re-rendering instead.
-  const [, setBrowserReadNonce] = useState(0);
 
   return {
-    profile: profileQuery.data ?? readBrowserAgentProfile(activeCreatorId),
+    profile: profileQuery.data ?? null,
     isLoading: profileQuery.isLoading,
+    isFetched: profileQuery.isFetched,
     error: profileQuery.error,
     refetch: () => {
-      if (desktop) {
-        void profileQuery.refetch();
-        return;
-      }
-      setBrowserReadNonce((nonce) => nonce + 1);
+      void profileQuery.refetch();
     },
   };
 }
 
 /**
- * Desktop-only saved agent profile (V1.120 P1 T1).
+ * Saved agent profile read (V1.120 P1 T1).
  *
- * Backed by React Query so the Settings Agent Save handler can invalidate
- * `queryKeys.agentProfile` and the DaemonStatusBar agent badge refreshes
- * immediately after a save — no 10s poll wait (AD-P1-1). Browser build: the
- * hook is disabled (`desktop === null`) and `data` stays `undefined`.
+ * Backed by React Query so a save can invalidate `queryKeys.agentProfile` and
+ * every profile consumer refreshes immediately after it — no 10s poll wait
+ * (AD-P1-1). Desktop keeps the `get_agent_profile` IPC read; the browser reads
+ * the service surface (I-000064).
  */
 export function useAgentProfile() {
   const desktop = useDesktopCapabilities();
+  const client = useNexusClient();
+  const activeCreatorId = useActiveCreatorIdFromContext();
   return useQuery({
     queryKey: queryKeys.agentProfile.detail(),
-    queryFn: (): Promise<AgentProfileSnapshot | null> => desktop!.getAgentProfile(),
-    enabled: Boolean(desktop),
+    queryFn: (): Promise<AgentProfileSnapshot | null> =>
+      desktop
+        ? desktop.getAgentProfile()
+        : readServiceAgentProfile(client, activeCreatorId),
   });
 }
 

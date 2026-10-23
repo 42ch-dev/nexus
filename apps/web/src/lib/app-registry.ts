@@ -107,7 +107,8 @@ const DEVELOPER_APPS: readonly AppDef[] = [
     label: 'rail.harness',
     icon: Workflow,
     route: '/strategies',
-    load: () => import('@/pages/strategies-page').then((m) => ({ default: m.StrategiesPage })),
+    load: () =>
+      import('@/components/harness/harness-page').then((m) => ({ default: m.HarnessPage })),
   },
   {
     id: 'modules',

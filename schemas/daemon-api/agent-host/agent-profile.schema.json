@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/agent-host/agent-profile.schema.json",
+  "schema_version": 1,
+  "title": "Nexus AgentHostProfile",
+  "description": "Daemon-global agent profile selected in the browser path (I-000064). Persisted in the daemon home `config.toml` under the `agent_profile` table. Also the PUT request body for PUT /v1/daemon/agent-host/profile.",
+  "type": "object",
+  "required": ["name"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Agent name as reported by the agent-host scan (or the `custom` sentinel for a manual launch command). Blank names are rejected with `invalid_input`."
+    },
+    "launch_command": {
+      "type": "string",
+      "description": "Optional launch-command override for the selected agent."
+    }
+  },
+  "additionalProperties": false
+}

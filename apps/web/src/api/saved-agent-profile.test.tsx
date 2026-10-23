@@ -1,11 +1,13 @@
 /**
- * Saved-agent-profile seam (v1220 T2) — the transport-aware retry contract.
+ * Saved-agent-profile seam (v1220 T2, service-backed in T1) — transport-aware
+ * reads for the shared profile seam.
  *
- * The desktop IPC profile query is only enabled when a desktop bridge exists.
- * Retry must re-run the transport that actually backs the current build: the
- * enabled IPC query on desktop, the synchronous browser snapshot otherwise.
+ * Browser: the daemon-global service profile is authoritative; a null service
+ * profile falls back ONCE to the legacy per-creator localStorage snapshot and
+ * migrates it with a best-effort PUT. Desktop: the IPC profile is unchanged.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { http, HttpResponse } from 'msw';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
@@ -13,8 +15,8 @@ import { useSavedAgentProfile } from '@/api/queries';
 import { i18n } from '@/lib/i18n/config';
 import { BrowserClient } from '@/lib/nexus';
 import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
-import { queryKeys } from '@/lib/nexus/query-keys';
-import { makeQueryClient, renderInApp } from '@/test/test-providers';
+import { useHandlers } from '@/test/msw-server';
+import { renderInApp } from '@/test/test-providers';
 
 const CREATOR_ID = 'creator-a';
 const STORAGE_KEY = `nexus-agent-profile:${CREATOR_ID}`;
@@ -24,6 +26,7 @@ function ProfileProbe() {
   return (
     <div>
       <span data-testid="profile-name">{profile?.name ?? 'none'}</span>
+      <span data-testid="profile-command">{profile?.launchCommand ?? 'none'}</span>
       <span data-testid="profile-loading">{String(isLoading)}</span>
       <span data-testid="profile-error">{error ? error.message : 'none'}</span>
       <button type="button" onClick={refetch}>
@@ -33,52 +36,99 @@ function ProfileProbe() {
   );
 }
 
+function renderProbe(desktop: DesktopCapabilities | null = null) {
+  return renderInApp(<ProfileProbe />, {
+    client: new BrowserClient(),
+    desktop,
+    activeCreatorId: CREATOR_ID,
+  });
+}
+
 describe('useSavedAgentProfile', () => {
   beforeEach(async () => {
     window.localStorage.clear();
     await i18n.changeLanguage('en');
   });
 
-  it('browser retry re-reads the snapshot without forcing the disabled IPC query', async () => {
-    const queryClient = makeQueryClient();
-    renderInApp(<ProfileProbe />, {
-      client: new BrowserClient(),
-      desktop: null,
-      activeCreatorId: CREATOR_ID,
-      queryClient,
-    });
+  it('browser reads the service profile and retry re-runs the service read', async () => {
+    let reads = 0;
+    useHandlers(
+      http.get('/v1/daemon/agent-host/profile', () => {
+        reads += 1;
+        return HttpResponse.json({
+          profile: { name: 'service-agent', launch_command: '/bin/service-agent' },
+        });
+      }),
+    );
 
-    expect(screen.getByTestId('profile-name')).toHaveTextContent('none');
+    renderProbe();
+
+    expect(await screen.findByText('service-agent')).toBeInTheDocument();
+    expect(screen.getByTestId('profile-command')).toHaveTextContent('/bin/service-agent');
     expect(screen.getByTestId('profile-loading')).toHaveTextContent('false');
-
-    // A snapshot written after mount is picked up by the retry re-read.
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ name: 'snapshot-agent' }));
-    await userEvent.click(screen.getByRole('button', { name: 'retry-profile' }));
-
-    expect(screen.getByTestId('profile-name')).toHaveTextContent('snapshot-agent');
     expect(screen.getByTestId('profile-error')).toHaveTextContent('none');
 
-    // The disabled desktop query was never fetched: it stays pending + idle.
-    const ipcQuery = queryClient
-      .getQueryCache()
-      .find({ queryKey: queryKeys.agentProfile.detail() });
-    expect(ipcQuery?.state.fetchStatus).toBe('idle');
-    expect(ipcQuery?.state.dataUpdateCount).toBe(0);
-    expect(ipcQuery?.state.errorUpdateCount).toBe(0);
+    await userEvent.click(screen.getByRole('button', { name: 'retry-profile' }));
+
+    expect(await screen.findByText('service-agent')).toBeInTheDocument();
+    expect(reads).toBe(2);
+  });
+
+  it('migrates the legacy creator snapshot with one PUT, then stops consulting it', async () => {
+    let stored: Record<string, unknown> | null = null;
+    const puts: unknown[] = [];
+    useHandlers(
+      http.get('/v1/daemon/agent-host/profile', () => HttpResponse.json({ profile: stored })),
+      http.put('/v1/daemon/agent-host/profile', async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>;
+        puts.push(body);
+        stored = body;
+        return HttpResponse.json({ profile: stored });
+      }),
+    );
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ name: 'snapshot-agent' }));
+
+    renderProbe();
+
+    expect(await screen.findByText('snapshot-agent')).toBeInTheDocument();
+    // The legacy snapshot is not written back; it is migrated to the service.
+    expect(puts).toEqual([{ name: 'snapshot-agent' }]);
+
+    // A later read is answered by the service, so a changed legacy value is
+    // neither consulted nor re-written.
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ name: 'stale-agent' }));
+    await userEvent.click(screen.getByRole('button', { name: 'retry-profile' }));
+
+    expect(await screen.findByText('snapshot-agent')).toBeInTheDocument();
+    expect(screen.queryByText('stale-agent')).not.toBeInTheDocument();
+    expect(puts).toHaveLength(1);
+  });
+
+  it('keeps the legacy snapshot when the migration PUT fails', async () => {
+    useHandlers(
+      http.get('/v1/daemon/agent-host/profile', () => HttpResponse.json({ profile: null })),
+      http.put('/v1/daemon/agent-host/profile', () =>
+        HttpResponse.json(
+          { success: false, error: { code: 'internal', message: 'write failed' } },
+          { status: 500 },
+        ),
+      ),
+    );
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ name: 'snapshot-agent' }));
+
+    renderProbe();
+
+    expect(await screen.findByText('snapshot-agent')).toBeInTheDocument();
+    // Best-effort migration: the snapshot stays for the next load.
+    expect(window.localStorage.getItem(STORAGE_KEY)).not.toBeNull();
   });
 
   it('desktop retry re-runs the IPC profile read', async () => {
-    const queryClient = makeQueryClient();
     const getAgentProfile = vi
       .fn()
       .mockRejectedValueOnce(new Error('ipc offline'))
       .mockResolvedValue({ name: 'ipc-agent' });
-    renderInApp(<ProfileProbe />, {
-      client: new BrowserClient(),
-      desktop: { getAgentProfile } as unknown as DesktopCapabilities,
-      activeCreatorId: CREATOR_ID,
-      queryClient,
-    });
+    renderProbe({ getAgentProfile } as unknown as DesktopCapabilities);
 
     expect(await screen.findByText('ipc offline')).toBeInTheDocument();
 
