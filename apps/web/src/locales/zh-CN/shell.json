@@ -261,6 +261,25 @@
     "creating": "正在创建世界…",
     "create": "创建"
   },
+  "workspaceCreate": {
+    "chip": "＋ 新建工作区",
+    "title": "新建工作区",
+    "nameLabel": "显示名",
+    "namePlaceholder": "例如：星际拓荒志",
+    "rootLabel": "内容根目录（自动派生）",
+    "rootLabelOverride": "内容根目录",
+    "rootPlaceholder": "/Users/you/Nexus/my-workspace",
+    "advanced": "高级：更改位置…",
+    "advancedHint": "手动指定 creative_root；校验可写性与独占性。",
+    "create": "创建并切换",
+    "creating": "创建中…",
+    "cancel": "取消",
+    "failurePrefix": "创建失败：",
+    "conflict": "该工作区或目标目录已存在",
+    "notWritable": "目标目录不可写",
+    "invalid": "工作区名称或目录无效",
+    "generic": "创建未完成，请重试"
+  },
   "workShell": {
     "railTitle": "作品",
     "railAria": "作品侧栏",

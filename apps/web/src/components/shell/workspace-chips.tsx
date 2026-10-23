@@ -1,59 +1,80 @@
 /**
- * Workspace chip row (plan v1219 T3; prototype `onboarding-v3.html` group-tabs).
+ * Workspace chip row (plan v1219 T3; create flow added by plan v1220 P3-T3;
+ * prototype `developer-shell-v1.html` screen 3).
  *
  * One chip per workspace `display_name`; the active chip reflects
  * `active_workspace_slug`. Switching calls set-active through the workspace
  * context (which invalidates workspace-scoped queries and toasts the § Copy
- * switch toast). No `＋ 新建工作区` chip this iteration — creation is deferred
- * (compass D23, issue I-000063) and this component never calls createWorkspace.
+ * switch toast). The trailing 「＋新建工作区」 chip opens the create panel — the
+ * only create entry, and it lives solely on the creator-entrance content
+ * surfaces because only those mount this component (IA spec §3.3).
  */
+import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+
+import { WorkspaceCreatePanel } from '@/components/shell/workspace-create-panel';
 import { useWorkspace } from '@/lib/workspace-context';
 import { cn } from '@/lib/utils';
 
 export function WorkspaceChips() {
   const { workspaces, activeWorkspace, switchWorkspace, isSwitching } = useWorkspace();
+  const { t } = useTranslation('shell');
+  const [createOpen, setCreateOpen] = useState(false);
 
   if (workspaces.length === 0) {
     return null;
   }
 
   return (
-    <div
-      data-testid="workspace-chips"
-      role="group"
-      aria-label="工作区"
-      title="工作区（workspace）— 创作内容的容器，每个有自己的根目录"
-      className="flex flex-wrap items-center gap-2"
-    >
-      {workspaces.map((workspace) => {
-        // creator_id + slug: `default` exists per creator, so a slug-only
-        // comparison would light the wrong creator's chip (QC W).
-        const active =
-          activeWorkspace !== null &&
-          workspace.creator_id === activeWorkspace.creator_id &&
-          workspace.workspace_slug === activeWorkspace.workspace_slug;
-        return (
-          <button
-            key={`${workspace.creator_id}:${workspace.workspace_slug}`}
-            type="button"
-            aria-pressed={active}
-            disabled={isSwitching}
-            onClick={() => {
-              if (!active) {
-                switchWorkspace(workspace.workspace_slug);
-              }
-            }}
-            className={cn(
-              'rounded-full border px-3 py-1 text-label-12 font-medium transition-colors duration-state ease-standard motion-reduce:transition-none',
-              active
-                ? 'border-gray-1000 bg-gray-1000 text-background-100'
-                : 'border-gray-alpha-400 text-gray-800 hover:border-gray-1000 hover:text-gray-1000',
-            )}
-          >
-            {workspace.display_name ?? workspace.workspace_slug}
-          </button>
-        );
-      })}
+    <div className="flex flex-col gap-3">
+      <div
+        data-testid="workspace-chips"
+        role="group"
+        aria-label="工作区"
+        title="工作区（workspace）— 创作内容的容器，每个有自己的根目录"
+        className="flex flex-wrap items-center gap-2"
+      >
+        {workspaces.map((workspace) => {
+          // creator_id + slug: `default` exists per creator, so a slug-only
+          // comparison would light the wrong creator's chip (QC W).
+          const active =
+            activeWorkspace !== null &&
+            workspace.creator_id === activeWorkspace.creator_id &&
+            workspace.workspace_slug === activeWorkspace.workspace_slug;
+          return (
+            <button
+              key={`${workspace.creator_id}:${workspace.workspace_slug}`}
+              type="button"
+              data-testid="workspace-chip"
+              aria-pressed={active}
+              disabled={isSwitching}
+              onClick={() => {
+                if (!active) {
+                  switchWorkspace(workspace.workspace_slug);
+                }
+              }}
+              className={cn(
+                'rounded-full border px-3 py-1 text-label-12 font-medium transition-colors duration-state ease-standard motion-reduce:transition-none',
+                active
+                  ? 'border-gray-1000 bg-gray-1000 text-background-100'
+                  : 'border-gray-alpha-400 text-gray-800 hover:border-gray-1000 hover:text-gray-1000',
+              )}
+            >
+              {workspace.display_name ?? workspace.workspace_slug}
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          data-testid="workspace-create-chip"
+          aria-expanded={createOpen}
+          onClick={() => setCreateOpen(true)}
+          className="rounded-full border border-dashed border-gray-alpha-400 px-3 py-1 text-label-12 font-medium text-gray-700 transition-colors duration-state ease-standard motion-reduce:transition-none hover:border-gray-1000 hover:text-gray-1000"
+        >
+          {t('workspaceCreate.chip')}
+        </button>
+      </div>
+      {createOpen ? <WorkspaceCreatePanel onClose={() => setCreateOpen(false)} /> : null}
     </div>
   );
 }
