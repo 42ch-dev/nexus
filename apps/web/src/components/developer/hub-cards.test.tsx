@@ -237,6 +237,32 @@ describe('HubCards', () => {
       '3 presets · 1 running',
     );
     expect(requestedCursors).toEqual([null, 'page-2']);
+    // Within the cap the count stays exact — no lower-bound marker.
+    expect(screen.queryByTestId('hub-card-harness-truncated')).not.toBeInTheDocument();
+  });
+
+  it('reports a capped session walk as a lower bound, never an exact total', async () => {
+    hubHandlers();
+    let requests = 0;
+    useHandlers(
+      http.get('/v1/daemon/orchestration/sessions', () => {
+        requests += 1;
+        return HttpResponse.json({
+          items: [session(`s${requests}`, 'running')],
+          pagination: { limit: 100, has_more: true, next_cursor: `page-${requests + 1}` },
+        });
+      }),
+    );
+    renderHub();
+
+    expect(await screen.findByTestId('hub-card-harness-counts')).toHaveTextContent(
+      '3 presets · 10+ running',
+    );
+    expect(screen.getByTestId('hub-card-harness-truncated')).toHaveTextContent(
+      'Session history capped at 1000 sessions — more may exist.',
+    );
+    // The walk stops at the documented cap instead of scanning unbounded.
+    expect(requests).toBe(10);
   });
 
   it('shows the unconfigured Agent state when no profile exists', async () => {

@@ -201,7 +201,10 @@
       "harness": {
         "title": "Harness summary",
         "counts_one": "{{count}} preset · {{running}} running",
-        "counts_other": "{{count}} presets · {{running}} running"
+        "counts_other": "{{count}} presets · {{running}} running",
+        "countsTruncated_one": "{{count}} preset · {{running}}+ running",
+        "countsTruncated_other": "{{count}} presets · {{running}}+ running",
+        "truncatedNote": "Session history capped at {{cap}} sessions — more may exist."
       },
       "modules": {
         "title": "Installed modules",

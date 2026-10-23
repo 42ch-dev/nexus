@@ -201,7 +201,10 @@
       "harness": {
         "title": "Harness 摘要",
         "counts_one": "{{count}} 个 preset · {{running}} 个运行中",
-        "counts_other": "{{count}} 个 preset · {{running}} 个运行中"
+        "counts_other": "{{count}} 个 preset · {{running}} 个运行中",
+        "countsTruncated_one": "{{count}} 个 preset · {{running}}+ 个运行中",
+        "countsTruncated_other": "{{count}} 个 preset · {{running}}+ 个运行中",
+        "truncatedNote": "仅统计前 {{cap}} 个会话，可能仍有更多。"
       },
       "modules": {
         "title": "已装模块",

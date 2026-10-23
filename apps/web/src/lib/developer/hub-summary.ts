@@ -118,6 +118,8 @@ export function useAgentSummary(): HubSectionState<AgentSummary> {
 export interface HarnessSummary {
   presetCount: number;
   runningSessions: number;
+  /** True when the session walk hit its page cap — the count is a lower bound. */
+  sessionsTruncated: boolean;
 }
 
 /** Sessions requested per page while aggregating the running count. */
@@ -126,28 +128,38 @@ const HUB_SESSION_PAGE_SIZE = 100;
 /**
  * Safety cap on the aggregation walk: 10 pages × 100 rows = 1000 sessions.
  * The card is a status summary, not an audit: a longer history stops at the cap
- * rather than scanning unbounded (documented here, never silently truncated
- * mid-page — a capped walk still returns whole pages).
+ * and is reported as truncated (a lower bound), never as an exact total.
  */
 const HUB_SESSION_MAX_PAGES = 10;
 
+/** Session rows the Hub walk may inspect before it reports a lower bound. */
+export const HUB_SESSION_CAP = HUB_SESSION_MAX_PAGES * HUB_SESSION_PAGE_SIZE;
+
+interface SessionAggregate {
+  sessions: SessionSummary[];
+  /** True when the cursor chain still had pages after the final allowed one. */
+  truncated: boolean;
+}
+
 /**
- * Every visible session across the cursor pages (bounded by
- * {@link HUB_SESSION_MAX_PAGES}), so the running count is a total rather than a
- * first-page lower bound.
+ * Every visible session across the cursor pages, bounded by
+ * {@link HUB_SESSION_MAX_PAGES}; `truncated` tells the card that the resulting
+ * running count is a lower bound rather than an exact total.
  */
-async function fetchAllVisibleSessions(client: NexusClient): Promise<SessionSummary[]> {
+async function fetchAllVisibleSessions(client: NexusClient): Promise<SessionAggregate> {
   const sessions: SessionSummary[] = [];
   let cursor: string | undefined;
 
   for (let page = 0; page < HUB_SESSION_MAX_PAGES; page += 1) {
     const response = await client.listSessions({ limit: HUB_SESSION_PAGE_SIZE, cursor });
     sessions.push(...filterVisibleSessions(response.items));
-    if (!response.pagination.has_more || !response.pagination.next_cursor) break;
+    if (!response.pagination.has_more || !response.pagination.next_cursor) {
+      return { sessions, truncated: false };
+    }
     cursor = response.pagination.next_cursor;
   }
 
-  return sessions;
+  return { sessions, truncated: true };
 }
 
 /** Terminal session statuses — mirrors the engine's `SessionStatus::is_terminal`. */
@@ -178,7 +190,8 @@ export function useHarnessSummary(): HubSectionState<HarnessSummary> {
             presets.data.embedded.length +
             presets.data.system.length +
             presets.data.user.length,
-          runningSessions: countRunningSessions(sessions.data),
+          runningSessions: countRunningSessions(sessions.data.sessions),
+          sessionsTruncated: sessions.data.truncated,
         }
       : undefined;
 

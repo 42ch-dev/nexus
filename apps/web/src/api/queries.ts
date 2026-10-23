@@ -9,7 +9,7 @@
  * Findings + Works use cursor pagination; the hook exposes TanStack's
  * `fetchNextPage`/`hasNextPage` for "Load more".
  */
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   useInfiniteQuery,
@@ -991,13 +991,24 @@ export interface SavedAgentProfileState {
  */
 export function useSavedAgentProfile(): SavedAgentProfileState {
   const profileQuery = useAgentProfile();
+  const desktop = useDesktopCapabilities();
   const activeCreatorId = useActiveCreatorId();
+  // Browser builds have no desktop IPC bridge, so the profile query is
+  // disabled there (`enabled: Boolean(desktop)`). Forcing it would run its
+  // queryFn against a null bridge; retry re-reads the synchronous browser
+  // snapshot by re-rendering instead.
+  const [, setBrowserReadNonce] = useState(0);
+
   return {
     profile: profileQuery.data ?? readBrowserAgentProfile(activeCreatorId),
     isLoading: profileQuery.isLoading,
     error: profileQuery.error,
     refetch: () => {
-      void profileQuery.refetch();
+      if (desktop) {
+        void profileQuery.refetch();
+        return;
+      }
+      setBrowserReadNonce((nonce) => nonce + 1);
     },
   };
 }

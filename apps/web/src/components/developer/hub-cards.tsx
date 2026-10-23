@@ -13,6 +13,7 @@ import { HubCard } from '@/components/developer/hub-card';
 import { Button } from '@/components/ui/button';
 import { errorMessage } from '@/lib/error-message';
 import {
+  HUB_SESSION_CAP,
   useAgentSummary,
   useHarnessSummary,
   useModulesSummary,
@@ -157,6 +158,7 @@ function AgentCard() {
 function HarnessCard() {
   const { t } = useTranslation('shell');
   const summary = useHarnessSummary();
+  const data = summary.data;
 
   return (
     <HubCard
@@ -165,16 +167,28 @@ function HarnessCard() {
       go={{ to: '/strategies', label: t('hub.operating.go.enter') }}
     >
       <HubCardBody id="harness" state={summary}>
-        {summary.data && (
-          <p
-            className="text-copy-14 font-semibold text-gray-1000"
-            data-testid="hub-card-harness-counts"
-          >
-            {t('hub.operating.harness.counts', {
-              count: summary.data.presetCount,
-              running: summary.data.runningSessions,
-            })}
-          </p>
+        {data && (
+          <>
+            <p
+              className="text-copy-14 font-semibold text-gray-1000"
+              data-testid="hub-card-harness-counts"
+            >
+              {t(
+                data.sessionsTruncated
+                  ? 'hub.operating.harness.countsTruncated'
+                  : 'hub.operating.harness.counts',
+                { count: data.presetCount, running: data.runningSessions },
+              )}
+            </p>
+            {data.sessionsTruncated && (
+              <p
+                className="text-copy-13 text-gray-700"
+                data-testid="hub-card-harness-truncated"
+              >
+                {t('hub.operating.harness.truncatedNote', { cap: HUB_SESSION_CAP })}
+              </p>
+            )}
+          </>
         )}
       </HubCardBody>
     </HubCard>
