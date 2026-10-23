@@ -43,7 +43,7 @@
   },
   "devDependencies": {
     "typescript": "7.0.2",
-    "tsup": "^8.0.0"
+    "tsup": "^9.0.0"
   },
   "engines": {
     "node": ">=22.22"
