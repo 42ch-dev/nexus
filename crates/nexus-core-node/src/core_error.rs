@@ -403,6 +403,14 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
             details: Default::default(),
             http_status: Some(400),
         },
+        // Workspace-creation exclusivity refusal: the domain names the exact
+        // collision, the adapter renders the stable 409 code.
+        DomainError::WorkspaceConflict(message) => CoreError {
+            code: CoreErrorCode::WorkspaceConflict,
+            message: format!("workspace conflict: {message}"),
+            details: Default::default(),
+            http_status: Some(409),
+        },
         // Retained bearer-memory 403 wire shape: the core carries the split
         // resource + reason; render the daemon's combined forbidden message.
         DomainError::ForbiddenReason { resource, reason } => CoreError {

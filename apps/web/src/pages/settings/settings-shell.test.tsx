@@ -6,9 +6,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { screen, waitFor, within, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useEffect } from 'react';
-import { Route, Routes, useLocation, useNavigate } from 'react-router';
+import { Outlet, Route, Routes, useLocation, useNavigate } from 'react-router';
 
-import { RootLayout } from '@/components/layout/root-layout';
 import {
   SettingsModalProvider,
   useSettingsModal,
@@ -22,14 +21,6 @@ import { i18n } from '@/lib/i18n/config';
 
 vi.mock('@/components/brand/nexus-logo', () => ({
   NexusLogo: () => <div data-testid="nexus-logo">Nexus</div>,
-}));
-
-vi.mock('@/components/brand/nexus-ink-logo', () => ({
-  NexusInkLogo: () => <div data-testid="nexus-ink-logo">Nexus</div>,
-}));
-
-vi.mock('@/components/daemon-health-indicator', () => ({
-  DaemonHealthIndicator: () => <div data-testid="daemon-health">ok</div>,
 }));
 
 function mockMatchMedia(prefersDark = false) {
@@ -54,7 +45,7 @@ function ModalAppRoutes() {
 
   return (
     <Routes location={routesLocation}>
-      <Route element={<RootLayout />}>
+      <Route element={<Outlet />}>
         <Route path="works" element={<div data-testid="works-stub">Works stub</div>} />
         <Route path="sessions" element={<div data-testid="sessions-stub">Sessions stub</div>} />
         <Route
@@ -72,8 +63,19 @@ function ModalAppShell() {
       <SettingsModalProvider>
         <ModalAppRoutes />
         <SettingsModalHost />
+        <SettingsOpenControl />
       </SettingsModalProvider>
     </ThemeProvider>
+  );
+}
+
+/** Test-only settings trigger (the product opens the modal from shell nav/URL). */
+function SettingsOpenControl() {
+  const { openSettings } = useSettingsModal();
+  return (
+    <button type="button" data-testid="open-settings" onClick={() => openSettings()}>
+      open settings
+    </button>
   );
 }
 
@@ -129,12 +131,11 @@ function modulesListHandler() {
 }
 
 function renderModalApp(initialRouterEntries: string[]) {
-  // The modal suite pins the full-Control-Room settings surface (gear → agent,
-  // full rail, all sections). Post-entrance-split that surface is the DEVELOP
-  // tree (plan QC W-2) — render on the developer entrance so the pinned
-  // behavior stays valid; the Create variant (filtered rail + first visible
-  // section) is covered by settings-section-frame.test.tsx and
-  // chronos-titlebar.test.tsx.
+  // The modal suite pins the full-Control-Room settings surface (modal →
+  // agent, full rail, all sections). Post-entrance-split that surface is the
+  // DEVELOP tree (plan QC W-2) — render on the developer entrance so the
+  // pinned behavior stays valid; the Create variant (filtered rail + first
+  // visible section) is covered by settings-section-frame.test.tsx.
   window.localStorage.setItem('nexus-entrance', 'developer');
   return renderInApp(
     <>
@@ -295,7 +296,7 @@ describe('Settings modal primary', () => {
 
     expect(screen.getByTestId('sessions-stub')).toBeInTheDocument();
 
-    const settingsGear = await screen.findByTestId('chronos-titlebar-settings-gear');
+    const settingsGear = await screen.findByTestId('open-settings');
     await user.click(settingsGear);
 
     await waitFor(() =>
@@ -332,7 +333,7 @@ describe('Settings modal primary', () => {
       const routesLocation = open ? backgroundLocation : location;
       return (
         <Routes location={routesLocation}>
-          <Route element={<RootLayout />}>
+          <Route element={<Outlet />}>
             <Route path="works" element={<div data-testid="works-stub">Works</div>} />
           </Route>
         </Routes>
@@ -345,6 +346,7 @@ describe('Settings modal primary', () => {
           <DirtyTestRoutes />
           <DirtySourceHost />
           <SettingsModalHost />
+          <SettingsOpenControl />
           <LocationProbe />
         </SettingsModalProvider>
       </ThemeProvider>,
@@ -356,7 +358,7 @@ describe('Settings modal primary', () => {
       },
     );
 
-    const gear = await screen.findByTestId('chronos-titlebar-settings-gear');
+    const gear = await screen.findByTestId('open-settings');
     await user.click(gear);
 
     await waitFor(() =>
@@ -417,6 +419,7 @@ describe('Settings modal primary', () => {
           <DirtySourceHost />
           <LeaveSettingsBridge />
           <SettingsModalHost />
+          <SettingsOpenControl />
           <LocationProbe />
         </SettingsModalProvider>
       </ThemeProvider>,
@@ -428,7 +431,7 @@ describe('Settings modal primary', () => {
       },
     );
 
-    const gear = await screen.findByTestId('chronos-titlebar-settings-gear');
+    const gear = await screen.findByTestId('open-settings');
     await user.click(gear);
 
     await waitFor(() =>
@@ -454,31 +457,6 @@ describe('Settings modal primary', () => {
     );
     expect(screen.getByTestId('location-probe')).toHaveTextContent('/sessions');
     expect(screen.getByTestId('sessions-stub')).toBeInTheDocument();
-  });
-
-  it('exposes Settings on the Chronos titlebar gear (V1.131 P0/P2)', async () => {
-    const user = userEvent.setup();
-    useHandlers(scanHandler(), creatorsHandler(), healthHandler());
-    renderModalApp(['/works']);
-
-    const settingsGear = await screen.findByTestId('chronos-titlebar-settings-gear');
-    expect(settingsGear).toHaveAttribute('aria-label', 'Settings');
-
-    await user.click(settingsGear);
-
-    await waitFor(() =>
-      expect(screen.getByTestId('settings-modal-body')).toBeInTheDocument(),
-    );
-    expect(screen.getByTestId('settings-agent-section')).toBeInTheDocument();
-  });
-
-  it('includes Settings in mobile nav linking to /settings', () => {
-    useHandlers(creatorsHandler(), healthHandler());
-    renderModalApp(['/works']);
-
-    const links = screen.getAllByRole('link', { name: 'Settings' });
-    expect(links.length).toBeGreaterThanOrEqual(1);
-    expect(links.some((el) => el.getAttribute('href') === '/settings')).toBe(true);
   });
 });
 

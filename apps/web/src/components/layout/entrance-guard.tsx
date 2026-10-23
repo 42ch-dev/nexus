@@ -53,7 +53,7 @@ export function resolveEntranceBounce(
 
 /**
  * Wraps the gated layout tree. Sits inside the existing gate stack
- * (`<SetupGate><EntranceGuard><RootLayout /></EntranceGuard></SetupGate>`);
+ * (`<SetupGate><EntranceGuard><AppShell /></EntranceGuard></SetupGate>`);
  * no route is removed or re-registered — the guard only redirects (AR-15/18).
  */
 export function EntranceGuard({ children }: { children: ReactNode }) {

@@ -79,6 +79,8 @@ pub enum CoreErrorCode {
     OutlineConflict,
     #[serde(rename = "outline_validation_failed")]
     OutlineValidationFailed,
+    #[serde(rename = "workspace_conflict")]
+    WorkspaceConflict,
     #[serde(rename = "internal")]
     Internal,
 }
@@ -108,6 +110,7 @@ impl ::std::fmt::Display for CoreErrorCode {
             Self::ComputeModuleError => f.write_str("compute_module_error"),
             Self::OutlineConflict => f.write_str("outline_conflict"),
             Self::OutlineValidationFailed => f.write_str("outline_validation_failed"),
+            Self::WorkspaceConflict => f.write_str("workspace_conflict"),
             Self::Internal => f.write_str("internal"),
         }
     }
@@ -141,6 +144,7 @@ impl ::std::str::FromStr for CoreErrorCode {
             "compute_module_error" => Ok(Self::ComputeModuleError),
             "outline_conflict" => Ok(Self::OutlineConflict),
             "outline_validation_failed" => Ok(Self::OutlineValidationFailed),
+            "workspace_conflict" => Ok(Self::WorkspaceConflict),
             "internal" => Ok(Self::Internal),
             _ => Err("invalid value".into()),
         }

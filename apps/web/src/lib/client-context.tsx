@@ -110,8 +110,8 @@ export function clearStoredApiKey(): void {
 }
 
 function buildClient(config: ConnectionConfig | null, desktop: boolean): NexusClient {
-  // Remote mode requires an explicit `active: true` (same rule as
-  // `daemon-health-indicator`). A saved-but-inactive config, a partial
+  // Remote mode requires an explicit `active: true` (the same rule the daemon
+  // connection form applies). A saved-but-inactive config, a partial
   // config, or a leaked test fallback without `active` must not redirect
   // the desktop client off loopback (V1.130 dogfood: poison
   // `connection_config.json` with only `endpointUrl`/`apiKey` produced the

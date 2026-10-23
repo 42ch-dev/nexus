@@ -10,6 +10,7 @@ const CORE_ERROR_CODES = new Set<string>([
   'world_kb_validation',
   'outline_conflict',
   'outline_validation_failed',
+  'workspace_conflict',
   'writer_fenced',
   'owner_busy',
   'schema_mismatch',

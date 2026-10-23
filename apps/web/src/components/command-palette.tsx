@@ -1,14 +1,14 @@
 /**
  * `CommandPalette` — the global shell command palette overlay (⌘K / Ctrl+K).
  *
- * FB-CP-000/002/004, V1.111 P0 T3. Mounted once in `RootLayout`; opens via
- * {@link openPalette} (wired to `useHotkey('mod+k', …)` in `root-layout.tsx`)
+ * FB-CP-000/002/004, V1.111 P0 T3. Mounted once in `AppShell`; opens via
+ * {@link openPalette} (wired to `useHotkey('mod+k', …)` in `app-shell.tsx`)
  * and closes on Escape / option activation / backdrop click.
  *
  * Open-state ownership (architect lock plan `## Architecture locks` item 4):
  * the palette owns its open/close via a tiny module-level store — same pattern
  * as `lib/canvas/command-registry.ts` (module store + `useSyncExternalStore`).
- * This keeps `RootLayout` free of palette state: the hotkey just calls
+ * This keeps `AppShell` free of palette state: the hotkey just calls
  * `openPalette()`, and `<CommandPalette/>` reads `useCommandPalette()` to
  * decide whether to render. A provider/context was rejected for the registry
  * for the same reason (re-renders the whole tree); the palette open-flag is
@@ -58,7 +58,7 @@ function getPaletteOpen(): boolean {
   return paletteOpen;
 }
 
-/** Open the command palette (called from the ⌘K hotkey in `RootLayout`). */
+/** Open the command palette (called from the ⌘K hotkey in `AppShell`). */
 export function openPalette(): void {
   if (paletteOpen) return;
   paletteOpen = true;
@@ -88,7 +88,7 @@ export function _resetPaletteForTests(): void {
 const NO_RESULTS_ID = 'command-palette-no-results';
 
 /**
- * The palette overlay. Render once in `RootLayout`; renders nothing while
+ * The palette overlay. Render once in `AppShell`; renders nothing while
  * closed. Delegates the open dialog to {@link CommandPaletteDialog} so the
  * dialog's mount/unmount lifecycle cleanly drives focus capture + restoration.
  */

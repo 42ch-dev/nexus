@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 /**
- * Task 4 — workspace family exposure (list + active get/set).
+ * Task 4 — workspace family exposure (list + active get/set), extended by
+ * v1220 P3-T2 with create.
  *
- * The retained create identity stays unexposed (compass D23 / issue I-000063),
- * so `POST /v1/daemon/workspaces` must keep the 501 `route_not_migrated`
- * refusal. The real composer and HTTP server run over a stub core here: route
- * identity, contract shape, retained query semantics and the in-place runtime
- * identity refresh are the transport behaviour under test (core discovery and
- * selection semantics are covered by `crates/nexus-core/tests/home_services.rs`).
+ * `POST /v1/daemon/workspaces` forwards to the core create capability; the
+ * core's typed refusals map through the shared error fold (`workspace_conflict`
+ * → 409, `invalid_input` → 400). The real composer and HTTP server run over a
+ * stub core here: route identity, contract shape, retained query semantics and
+ * the in-place runtime identity refresh are the transport behaviour under test
+ * (core create semantics are covered by
+ * `crates/nexus-core/tests/workspace_create.rs`).
  */
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -112,13 +114,16 @@ function stubState() {
   const state = {
     activeSlug: 'default',
     selected: null,
+    createdRequest: null,
+    createdItems: [],
     promotions: 0,
     failPromotion: false,
     core: {
       async listWorkspaces() {
+        const items = [...WORKSPACES, ...state.createdItems];
         return {
-          items: WORKSPACES.map((item) => ({ ...item })),
-          pagination: { limit: WORKSPACES.length, has_more: false, next_cursor: null },
+          items: items.map((item) => ({ ...item })),
+          pagination: { limit: items.length, has_more: false, next_cursor: null },
         };
       },
       async getActiveWorkspace() {
@@ -137,6 +142,46 @@ function stubState() {
         return {
           creator_id: request.creator_id ?? 'ctr_a',
           workspace_slug: request.workspace_slug,
+        };
+      },
+      // The core owns validation/exclusivity; this stub reproduces its typed
+      // refusals so the transport fold (409/400) is what gets exercised.
+      async createWorkspace(request) {
+        state.createdRequest = request;
+        if (request.workspace_slug === 'duplicate') {
+          throw new Error(
+            JSON.stringify({
+              code: 'workspace_conflict',
+              message: "workspace conflict: workspace 'duplicate' already exists",
+              http_status: 409,
+            }),
+          );
+        }
+        if (request.workspace_slug === 'invalid') {
+          throw new Error(
+            JSON.stringify({
+              code: 'invalid_input',
+              message: 'invalid input: workspace_slug — must be a single path segment',
+              details: { field: 'workspace_slug', reason: 'must be a single path segment' },
+              http_status: 400,
+            }),
+          );
+        }
+        const creativeRoot = `/tmp/home/Nexus/${request.workspace_slug}`;
+        state.createdItems.push({
+          creator_id: request.creator_id,
+          workspace_slug: request.workspace_slug,
+          creative_root: creativeRoot,
+          ...(request.display_name === undefined
+            ? {}
+            : { display_name: request.display_name }),
+        });
+        return {
+          creator_id: request.creator_id,
+          workspace_slug: request.workspace_slug,
+          creative_root: creativeRoot,
+          operational_dir: `/tmp/home/.nexus42/creators/${request.creator_id}/workspaces/${request.workspace_slug}`,
+          state_db_path: `/tmp/home/.nexus42/creators/${request.creator_id}/workspaces/${request.workspace_slug}/state.db`,
         };
       },
       async promoteCore() {
@@ -166,20 +211,17 @@ describe('workspace-http (v1219 shell Task 4)', () => {
     if (server) await server.close();
   });
 
-  test('the family is mounted at exactly list + active get/set (create absent)', async () => {
+  test('the family is mounted at exactly list + create + active get/set', async () => {
     const { DOMAIN_ROUTES } = await import(join(serviceRoot, 'dist/routes.js'));
     const mounted = DOMAIN_ROUTES.filter((route) => route.family === 'workspaces').map(
       (route) => `${route.method} ${route.pattern.source}`,
     );
     assert.deepEqual(mounted, [
       'GET ^\\/v1\\/daemon\\/workspaces$',
+      'POST ^\\/v1\\/daemon\\/workspaces$',
       'GET ^\\/v1\\/daemon\\/workspace$',
       'POST ^\\/v1\\/daemon\\/workspace\\/active$',
     ]);
-    const createMounted = DOMAIN_ROUTES.some(
-      (route) => route.method === 'POST' && route.pattern.test('/v1/daemon/workspaces'),
-    );
-    assert.equal(createMounted, false, 'the deferred create identity must stay unmounted');
   });
 
   test('list returns the frozen contract with the retained query semantics', async () => {
@@ -244,7 +286,7 @@ describe('workspace-http (v1219 shell Task 4)', () => {
     );
   });
 
-  test('set-active promotes before claiming readiness; create stays refused', async () => {
+  test('set-active promotes before claiming readiness', async () => {
     const before = await jsonFetch(`${server.url}/v1/daemon/runtime/status`);
     assert.equal(before.status, 200, before.text);
     assert.equal(before.payload.workspace_initialized, false);
@@ -282,18 +324,65 @@ describe('workspace-http (v1219 shell Task 4)', () => {
     assert.equal(followUp.status, 200, followUp.text);
     assert.equal(followUp.payload.workspace_slug, 'second');
 
-    // Create is deferred (compass D23): the identity keeps the retained 501,
-    // and unknown workspace routes keep it too.
-    const create = await jsonFetch(`${server.url}/v1/daemon/workspaces`, {
-      method: 'POST',
-      body: { creator_id: 'ctr_a', workspace_slug: 'third' },
-    });
-    assert.equal(create.status, 501, create.text);
-    assert.equal(create.payload.error.code, 'route_not_migrated');
-
+    // Unknown workspace paths keep the retained 501 refusal.
     const legacyAlias = await jsonFetch(`${server.url}/v1/daemon/workspaces/active`);
     assert.equal(legacyAlias.status, 501, legacyAlias.text);
     assert.equal(legacyAlias.payload.error.code, 'route_not_migrated');
+  });
+
+  test('create returns the contract shape and is visible in the list', async () => {
+    const created = await jsonFetch(`${server.url}/v1/daemon/workspaces`, {
+      method: 'POST',
+      body: {
+        creator_id: 'ctr_a',
+        workspace_slug: 'third',
+        display_name: '第三个工作区',
+      },
+    });
+    assert.equal(created.status, 201, created.text);
+    assert.deepEqual(Object.keys(created.payload).sort(), [
+      'creative_root',
+      'creator_id',
+      'operational_dir',
+      'state_db_path',
+      'workspace_slug',
+    ]);
+    assert.deepEqual(state.createdRequest, {
+      creator_id: 'ctr_a',
+      workspace_slug: 'third',
+      display_name: '第三个工作区',
+    });
+
+    const listed = await jsonFetch(`${server.url}/v1/daemon/workspaces?creator_id=ctr_a`);
+    assert.equal(listed.status, 200, listed.text);
+    const row = listed.payload.items.find((item) => item.workspace_slug === 'third');
+    assert.ok(row, 'created workspace is visible in the list');
+    assert.equal(row.display_name, '第三个工作区');
+  });
+
+  test('create maps conflict to 409 and validation rejection to 400', async () => {
+    const conflict = await jsonFetch(`${server.url}/v1/daemon/workspaces`, {
+      method: 'POST',
+      body: { creator_id: 'ctr_a', workspace_slug: 'duplicate' },
+    });
+    assert.equal(conflict.status, 409, conflict.text);
+    assert.equal(conflict.payload.error.code, 'workspace_conflict');
+
+    const invalid = await jsonFetch(`${server.url}/v1/daemon/workspaces`, {
+      method: 'POST',
+      body: { creator_id: 'ctr_a', workspace_slug: 'invalid' },
+    });
+    assert.equal(invalid.status, 400, invalid.text);
+    assert.equal(invalid.payload.error.code, 'invalid_input');
+    assert.equal(invalid.payload.error.details.field, 'workspace_slug');
+
+    // A non-object body keeps the service's own pre-wire 400.
+    const notAnObject = await jsonFetch(`${server.url}/v1/daemon/workspaces`, {
+      method: 'POST',
+      body: [],
+    });
+    assert.equal(notAnObject.status, 400, notAnObject.text);
+    assert.equal(notAnObject.payload.error.code, 'invalid_input');
   });
 
   test('concurrent set-active requests promote exactly once', async () => {
@@ -435,6 +524,41 @@ describe('workspace-http native binding (v1219 shell Task 4)', () => {
     assert.equal(bareActive.status, 200, bareActive.text);
     assert.equal('creative_root' in bareActive.payload, false);
     assert.equal(bareActive.payload.operational_dir, join(fixture.workspacesRoot, 'third'));
+  });
+
+  test('create registers over the real native core and maps typed refusals', async () => {
+    const created = await jsonFetch(`${service.url}/v1/daemon/workspaces`, {
+      method: 'POST',
+      body: {
+        creator_id: NATIVE_CREATOR,
+        workspace_slug: 'fourth',
+        display_name: '第四个工作区',
+      },
+    });
+    assert.equal(created.status, 201, created.text);
+    assert.equal(created.payload.creator_id, NATIVE_CREATOR);
+    assert.equal(created.payload.workspace_slug, 'fourth');
+    assert.equal(created.payload.creative_root, join(fixture.home, 'Nexus', 'fourth'));
+
+    // Success implies the workspace is discoverable through the list.
+    const listed = await jsonFetch(`${service.url}/v1/daemon/workspaces`);
+    const row = listed.payload.items.find((item) => item.workspace_slug === 'fourth');
+    assert.ok(row, 'created workspace is discoverable');
+    assert.equal(row.display_name, '第四个工作区');
+
+    const duplicate = await jsonFetch(`${service.url}/v1/daemon/workspaces`, {
+      method: 'POST',
+      body: { creator_id: NATIVE_CREATOR, workspace_slug: 'fourth' },
+    });
+    assert.equal(duplicate.status, 409, duplicate.text);
+    assert.equal(duplicate.payload.error.code, 'workspace_conflict');
+
+    const invalid = await jsonFetch(`${service.url}/v1/daemon/workspaces`, {
+      method: 'POST',
+      body: { creator_id: NATIVE_CREATOR, workspace_slug: 'bad/slug' },
+    });
+    assert.equal(invalid.status, 400, invalid.text);
+    assert.equal(invalid.payload.error.code, 'invalid_input');
   });
 });
 
