@@ -76,6 +76,8 @@ use nexus_contracts::daemon_api::memory::{
 };
 use nexus_contracts::daemon_api::workspace::{
     active_workspace_response::ActiveWorkspaceResponse,
+    create_workspace_request::CreateWorkspaceRequest,
+    create_workspace_response::CreateWorkspaceResponse,
     list_workspaces_response::ListWorkspacesResponse,
     set_active_workspace_request::SetActiveWorkspaceRequest,
     set_active_workspace_response::SetActiveWorkspaceResponse,
@@ -1018,6 +1020,20 @@ impl NativeCore {
         let home = self.home_service()?;
         let response: SetActiveWorkspaceResponse = home
             .select_workspace(request)
+            .await
+            .map_err(crate::core_error::napi_error_from_domain)?;
+        Ok(Buffer::from(serde_json::to_vec(&response)?))
+    }
+
+    /// `POST /v1/daemon/workspaces` — create and register a workspace for the
+    /// active creator (I-000063). Validation, exclusivity and the atomic write
+    /// order are the core's own.
+    #[napi]
+    pub async fn create_workspace(&self, request_json: Buffer) -> Result<Buffer> {
+        let request: CreateWorkspaceRequest = decode(request_json, "request")?;
+        let home = self.home_service()?;
+        let response: CreateWorkspaceResponse = home
+            .create_workspace(request)
             .await
             .map_err(crate::core_error::napi_error_from_domain)?;
         Ok(Buffer::from(serde_json::to_vec(&response)?))

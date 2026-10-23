@@ -65,6 +65,7 @@ export interface NexusCoreError {
     | "compute_module_error"
     | "outline_conflict"
     | "outline_validation_failed"
+    | "workspace_conflict"
     | "internal";
   message: string;
   details?: {

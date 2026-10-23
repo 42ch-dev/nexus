@@ -117,6 +117,12 @@ pub enum CoreError {
     /// attached structured `field` details to these rejections.
     #[error("{0}")]
     ActorInput(String),
+    /// Workspace-creation exclusivity refusal (409 at HTTP adapters): the slug
+    /// is already registered for the creator, the resolved creative root is
+    /// claimed by another workspace, or the target root already holds foreign
+    /// content. The message names the concrete collision.
+    #[error("workspace conflict: {0}")]
+    WorkspaceConflict(String),
 }
 
 /// Structured outline-canvas OCC conflict payload (HTTP 409 at the adapter).
