@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -302,21 +303,32 @@ describe('agent-profile (I-000064)', () => {
     assert.equal(atCap.payload.profile.name, emoji.repeat(200));
   });
 
-  test('a failed write leaves no temp file behind', async () => {
+  test('a failed write leaves no temp file and no partial config', async () => {
     const { writeAgentProfile } = await import(join(serviceRoot, 'dist/agent-profile.js'));
     const brokenHome = mkdtempSync(join(tmpdir(), 'nexus-agent-profile-broken-'));
+    // Pre-create the store directory so the mkdir step is already satisfied and
+    // the failure lands at the write itself, not before it.
+    const configDir = join(brokenHome, '.nexus42');
+    mkdirSync(configDir, { recursive: true });
+    const configPath = join(configDir, 'config.toml');
+    const seeded = 'active_creator_id = "kept"\n';
+    writeFileSync(configPath, seeded, 'utf8');
     const originalError = console.error;
     try {
-      chmodSync(brokenHome, 0o500);
+      // Read-only parent: the temp file cannot be created, and the catch path
+      // must not leave a `.tmp` behind or truncate the existing document.
+      chmodSync(configDir, 0o500);
       console.error = () => {};
       await assert.rejects(() => writeAgentProfile(brokenHome, { name: 'claude-code' }));
       assert.deepEqual(
-        readdirSync(brokenHome).filter((name) => name.endsWith('.tmp')),
+        readdirSync(configDir).filter((name) => name.endsWith('.tmp')),
         [],
       );
+      chmodSync(configDir, 0o700);
+      assert.equal(readFileSync(configPath, 'utf8'), seeded);
     } finally {
       console.error = originalError;
-      chmodSync(brokenHome, 0o700);
+      chmodSync(configDir, 0o700);
       rmSync(brokenHome, { recursive: true, force: true });
     }
   });
