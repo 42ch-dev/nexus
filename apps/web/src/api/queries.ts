@@ -68,6 +68,7 @@ import type {
   TimelineOverviewResponse,
   TimelineEventInfo,
   UpdateFindingRequest,
+  ValidatePresetRequest,
   WorkSummary,
   WorldRuleCreateRequest,
   WorldRuleUpdateRequest,
@@ -341,6 +342,22 @@ export interface PresetGroups {
   embedded: PresetSummary[];
   system: PresetSummary[];
   user: PresetSummary[];
+}
+
+/**
+ * The author-facing preset list: user presets plus embedded/system presets
+ * without the `_system.*` internals (AD-P0-3). ONE filter for every surface
+ * that counts or lists presets, so the Hub count and the Harness catalog can
+ * never disagree.
+ */
+export function filterVisiblePresets(groups: PresetGroups): PresetSummary[] {
+  const authorFacing = (presets: PresetSummary[]) =>
+    presets.filter((preset) => !preset.id.startsWith('_system.'));
+  return [
+    ...groups.user,
+    ...authorFacing(groups.embedded),
+    ...authorFacing(groups.system),
+  ];
 }
 
 export function usePresets() {
@@ -755,6 +772,55 @@ export function useScaffoldPreset() {
       void qc.invalidateQueries({ queryKey: queryKeys.presets.all });
     },
     onError: (error) => errorToast(error, 'error.couldNotScaffoldPreset'),
+  });
+}
+
+export function useValidatePreset() {
+  const client = useNexusClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (request: ValidatePresetRequest) => client.validatePreset(request),
+    onError: (error) => errorToast(error, 'error.couldNotValidatePreset'),
+    // On success the caller surfaces structured errors/warnings inline; a toast
+    // is not added here so the validate dialog stays the single source of truth.
+  });
+}
+
+/** Re-read a preset manifest from disk and refresh the list + every profile. */
+export function useReloadPreset() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  const { t } = useTranslation('common');
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: (presetId: string) => client.reloadPreset(presetId),
+    onSuccess: (_data, presetId) => {
+      toast({ variant: 'success', title: t('toast.presetReloaded'), description: presetId });
+      // Reload re-reads the manifest — lanes/roles/capabilities can change.
+      // `presets.all` (prefix `['presets']`) invalidates the list AND every
+      // `['presets','profile',<id>]` key so mounted rows refresh in place.
+      void qc.invalidateQueries({ queryKey: queryKeys.presets.all });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotReloadPreset'),
+  });
+}
+
+/**
+ * Delete a user preset: `DELETE /v1/daemon/presets/{id}`, then invalidate the
+ * grouped list and the preset's profile key. Only user presets are deletable —
+ * the row UI gates this (embedded/system rows render no Delete).
+ */
+export function useDeletePreset() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (presetId: string) => client.deletePreset(presetId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.presets.all });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotDeletePreset'),
   });
 }
 

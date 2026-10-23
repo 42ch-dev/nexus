@@ -124,9 +124,10 @@ describe('HubCards', () => {
     expect(screen.getByTestId('hub-card-agent-version')).toHaveTextContent('1.2.3');
     expect(screen.getByTestId('hub-card-agent')).toHaveTextContent('Connected');
 
-    // 1 embedded + 1 system + 1 user preset; 2 live sessions (`completed` is terminal).
+    // 1 embedded + 1 user preset (`_system.b` is hidden); 2 live sessions
+    // (`completed` is terminal).
     expect(await screen.findByTestId('hub-card-harness-counts')).toHaveTextContent(
-      '3 presets · 2 running',
+      '2 presets · 2 running',
     );
 
     expect(await screen.findByTestId('hub-card-modules-count')).toHaveTextContent(
@@ -233,7 +234,7 @@ describe('HubCards', () => {
     renderHub();
 
     expect(await screen.findByTestId('hub-card-harness-counts')).toHaveTextContent(
-      '3 presets · 1 running',
+      '2 presets · 1 running',
     );
     expect(requestedCursors).toEqual([null, 'page-2']);
     // Within the cap the count stays exact — no lower-bound marker.
@@ -255,7 +256,7 @@ describe('HubCards', () => {
     renderHub();
 
     expect(await screen.findByTestId('hub-card-harness-counts')).toHaveTextContent(
-      '3 presets · 10+ running',
+      '2 presets · 10+ running',
     );
     expect(screen.getByTestId('hub-card-harness-truncated')).toHaveTextContent(
       'Session history capped at 1000 sessions — more may exist.',

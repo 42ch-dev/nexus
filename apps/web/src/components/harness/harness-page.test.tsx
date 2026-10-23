@@ -8,7 +8,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { delay, http, HttpResponse } from 'msw';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useLocation } from 'react-router';
 
@@ -134,6 +134,70 @@ describe('HarnessPage', () => {
     // Canvas and profile drill-downs stay reachable from a row.
     await userEvent.click(screen.getByRole('button', { name: '在 canvas 中打开 user/one' }));
     expect(screen.getByTestId('location')).toHaveTextContent('/strategies/user%2Fone');
+  });
+
+  it('marks a failed profile read as unknown binding, never "not bound"', async () => {
+    useHandlers(
+      http.get('/v1/daemon/presets', () => HttpResponse.json(presetBody())),
+      http.get(/\/v1\/daemon\/orchestration\/presets\/.+\/profile$/, () =>
+        HttpResponse.json(
+          { success: false, error: { code: 'internal', message: 'profile offline' } },
+          { status: 500 },
+        ),
+      ),
+      sessionsHandler([]),
+    );
+
+    renderHarness();
+
+    expect(await screen.findByTestId('preset-binding-user/one')).toHaveTextContent(
+      '绑定状态未知',
+    );
+    expect(screen.getByTestId('preset-binding-user/one')).not.toHaveTextContent('未绑定');
+  });
+
+  it('offers reload, delete, and validate from the catalog rows again', async () => {
+    const reloads: string[] = [];
+    const deletes: string[] = [];
+    useHandlers(
+      http.get('/v1/daemon/presets', () => HttpResponse.json(presetBody())),
+      profileHandler('user/one', []),
+      profileHandler('embedded/two', []),
+      profileHandler('sys/three', []),
+      sessionsHandler([]),
+      http.post(/\/v1\/daemon\/presets\/.*:reload$/, ({ request }) => {
+        reloads.push(request.url);
+        return HttpResponse.json({ preset_id: 'user/one', states: [] });
+      }),
+      http.delete(/\/v1\/daemon\/presets\/.*$/, ({ request }) => {
+        deletes.push(request.url);
+        return new HttpResponse(null, { status: 204 });
+      }),
+      http.post('/v1/daemon/presets:validate', () =>
+        HttpResponse.json({ valid: true, errors: [], warnings: [] }),
+      ),
+    );
+
+    renderHarness();
+    await screen.findByTestId('preset-row-user/one');
+
+    await userEvent.click(screen.getByTestId('preset-reload-user/one'));
+    await waitFor(() => expect(reloads).toHaveLength(1));
+    expect(decodeURIComponent(reloads[0]!)).toContain('/v1/daemon/presets/user/one:reload');
+
+    // Delete is offered on user presets only.
+    expect(screen.getByTestId('preset-delete-user/one')).toBeInTheDocument();
+    expect(screen.queryByTestId('preset-delete-embedded/two')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('preset-delete-sys/three')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('preset-delete-user/one'));
+    const confirm = await screen.findByRole('dialog');
+    await userEvent.click(within(confirm).getByRole('button', { name: '删除' }));
+    await waitFor(() => expect(deletes).toHaveLength(1));
+    expect(decodeURIComponent(deletes[0]!)).toContain('/v1/daemon/presets/user/one');
+
+    await userEvent.click(screen.getByTestId('preset-validate-embedded/two'));
+    expect(await screen.findByRole('dialog', { name: '验证预设' })).toBeInTheDocument();
   });
 
   it('shows a single loading state while presets load', async () => {

@@ -4,15 +4,17 @@
  *
  * Read-only: the two controls are the canvas drill-down (row name) and the
  * profile drill-down link. Binding is derived from the preset profile's
- * `states.length > 0`; a failed/404 profile is a graceful 「未绑定」 row
- * (PL-13) — the preset is still listed.
+ * `states.length > 0`; a failed profile renders an explicit unknown state —
+ * never "not bound", which would assert a fact the read never established
+ * (PL-13 keeps the row itself listed).
  */
 import { useTranslation } from 'react-i18next';
-import { Sparkles } from 'lucide-react';
+import { Sparkles, Trash2 } from 'lucide-react';
 import type { PresetSummary } from '@42ch/nexus-contracts';
 
 import type { PresetProfileQuery } from '@/api/queries';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 
 const SOURCE_LABEL_KEY: Record<PresetSummary['source'], string> = {
   user: 'harness.sourceUser',
@@ -35,6 +37,14 @@ export interface PresetCardProps {
   running: PresetRunningState;
   onOpenCanvas: () => void;
   onOpenProfile: () => void;
+  /** Open the dry-run validate dialog for this row. */
+  onValidate: () => void;
+  /** Re-read this preset's manifest from disk. */
+  onReload: () => void;
+  /** True while this row's reload is in flight. */
+  reloading: boolean;
+  /** User presets only — absent on embedded/system rows. */
+  onDelete?: () => void;
 }
 
 export function PresetCard({
@@ -43,9 +53,22 @@ export function PresetCard({
   running,
   onOpenCanvas,
   onOpenProfile,
+  onValidate,
+  onReload,
+  reloading,
+  onDelete,
 }: PresetCardProps) {
   const { t } = useTranslation('strategies');
   const bound = Boolean(profile.data && profile.data.states.length > 0);
+  // "Not bound" is only claimable from a successful empty profile; a failed
+  // read is unknown, exactly like the running column.
+  const bindingBadge = profile.isError
+    ? { variant: 'warning' as const, label: t('harness.bindingUnknown') }
+    : profile.isLoading
+      ? { variant: 'neutral' as const, label: t('harness.bindingLoading') }
+      : bound
+        ? { variant: 'running' as const, label: t('harness.bindingBound') }
+        : { variant: 'neutral' as const, label: t('harness.bindingUnbound') };
   const source = t(SOURCE_LABEL_KEY[preset.source]);
   const intents = preset.run_intents?.join(' · ');
   const facts = intents ? t('harness.facts', { source, intents }) : source;
@@ -101,14 +124,10 @@ export function PresetCard({
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Badge
-          variant={bound ? 'running' : 'neutral'}
+          variant={bindingBadge.variant}
           data-testid={`preset-binding-${preset.id}`}
         >
-          {profile.isLoading
-            ? t('harness.bindingLoading')
-            : bound
-              ? t('harness.bindingBound')
-              : t('harness.bindingUnbound')}
+          {bindingBadge.label}
         </Badge>
         <Badge
           variant={runningBadge.variant}
@@ -116,6 +135,38 @@ export function PresetCard({
         >
           {runningBadge.label}
         </Badge>
+        <Button
+          type="button"
+          variant="tertiary"
+          size="small"
+          onClick={onValidate}
+          data-testid={`preset-validate-${preset.id}`}
+        >
+          {t('validatePreset')}
+        </Button>
+        <Button
+          type="button"
+          variant="tertiary"
+          size="small"
+          onClick={onReload}
+          disabled={reloading}
+          data-testid={`preset-reload-${preset.id}`}
+        >
+          {reloading ? t('reloading') : t('reload')}
+        </Button>
+        {onDelete && (
+          <Button
+            type="button"
+            variant="tertiary"
+            size="small"
+            onClick={onDelete}
+            aria-label={t('deleteAria', { name: preset.id })}
+            data-testid={`preset-delete-${preset.id}`}
+          >
+            <Trash2 className="h-4 w-4" aria-hidden />
+            {t('delete')}
+          </Button>
+        )}
       </div>
     </li>
   );

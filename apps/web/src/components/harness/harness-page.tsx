@@ -3,15 +3,19 @@
  * page inside the new shell.
  *
  * Reads only existing daemon endpoints (no new aggregation contract):
- * - catalog rows from `usePresets()` (user + embedded + system, `_system.*`
- *   internals hidden);
+ * - catalog rows from `usePresets()` through the shared
+ *   `filterVisiblePresets` (user + embedded + system, `_system.*` internals
+ *   hidden) — the same filter the Hub preset count uses;
  * - strategy binding per row from the preset profile (`states.length > 0`);
  * - running-session counts from the bounded session walk, grouped by
  *   `preset_id`;
  * - the agent profile bar via the shared service-backed seam.
  *
  * The strategy canvas (`/strategies/:presetId`) and the profile drill-down
- * (`/strategies/:presetId/profile`) stay reachable from each row.
+ * (`/strategies/:presetId/profile`) stay reachable from each row, and the
+ * author actions the retired `/strategies` catalog owned live on the rows
+ * again: Validate (dry-run), Reload (re-read the manifest), and Delete on user
+ * presets only.
  */
 import { useMemo, useState } from 'react';
 import { useQueries } from '@tanstack/react-query';
@@ -20,21 +24,24 @@ import { useNavigate } from 'react-router';
 import { Plus } from 'lucide-react';
 import type { PresetSummary } from '@42ch/nexus-contracts';
 
-import { presetProfileQueryOptions, usePresets } from '@/api/queries';
+import {
+  filterVisiblePresets,
+  presetProfileQueryOptions,
+  useDeletePreset,
+  usePresets,
+  useReloadPreset,
+} from '@/api/queries';
 import { useNexusClient } from '@/lib/client-context';
 import { countRunningSessions, useVisibleSessions } from '@/lib/developer/hub-summary';
 import { errorMessage } from '@/lib/error-message';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/ui/states';
 import { ScaffoldPresetDialog } from '@/pages/dialogs/scaffold-preset-dialog';
+import { ValidatePresetDialog } from '@/pages/dialogs/validate-preset-dialog';
 
 import { PresetCard, type PresetRunningState } from './preset-card';
 import { ProfileBar } from './profile-bar';
-
-/** Hide internal `_system.` presets from authors (AD-P0-3). */
-function isAuthorSystemPreset(preset: PresetSummary): boolean {
-  return !preset.id.startsWith('_system.');
-}
 
 export function HarnessPage() {
   const { t } = useTranslation('strategies');
@@ -43,17 +50,14 @@ export function HarnessPage() {
   const navigate = useNavigate();
   const presets = usePresets();
   const sessions = useVisibleSessions();
+  const reload = useReloadPreset();
+  const removePreset = useDeletePreset();
   const [scaffoldOpen, setScaffoldOpen] = useState(false);
+  const [validateOpen, setValidateOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   const catalogPresets = useMemo<PresetSummary[]>(
-    () =>
-      presets.data
-        ? [
-            ...presets.data.user,
-            ...presets.data.embedded.filter(isAuthorSystemPreset),
-            ...presets.data.system.filter(isAuthorSystemPreset),
-          ]
-        : [],
+    () => (presets.data ? filterVisiblePresets(presets.data) : []),
     [presets.data],
   );
 
@@ -88,6 +92,13 @@ export function HarnessPage() {
       truncated: sessions.data.truncated,
     };
   };
+
+  function confirmDelete() {
+    if (deleteTarget === null) return;
+    removePreset.mutate(deleteTarget, {
+      onSettled: () => setDeleteTarget(null),
+    });
+  }
 
   return (
     <div className="flex flex-col gap-4" data-testid="harness-page">
@@ -139,6 +150,10 @@ export function HarnessPage() {
                 onOpenProfile={() =>
                   navigate(`/strategies/${encodeURIComponent(preset.id)}/profile`)
                 }
+                onValidate={() => setValidateOpen(true)}
+                onReload={() => reload.mutate(preset.id)}
+                reloading={reload.isPending && reload.variables === preset.id}
+                onDelete={preset.source === 'user' ? () => setDeleteTarget(preset.id) : undefined}
               />
             ))}
           </ul>
@@ -150,6 +165,37 @@ export function HarnessPage() {
         onOpenChange={setScaffoldOpen}
         onCreated={(id) => navigate(`/strategies/${encodeURIComponent(id)}`)}
       />
+      <ValidatePresetDialog open={validateOpen} onOpenChange={setValidateOpen} />
+
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+      >
+        <DialogContent
+          title={t('deleteConfirm.title', { name: deleteTarget ?? '' })}
+          description={t('deleteConfirm.description')}
+        >
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="tertiary"
+              size="small"
+              onClick={() => setDeleteTarget(null)}
+            >
+              {tCommon('action.cancel')}
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              size="small"
+              onClick={confirmDelete}
+              disabled={removePreset.isPending}
+            >
+              {removePreset.isPending ? t('deleteConfirm.deleting') : t('deleteConfirm.delete')}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
