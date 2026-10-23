@@ -1713,10 +1713,9 @@ export function createTimelineCanvasAdapter(
     },
     // `edgeTypes` is intentionally undefined: V1.122 P1 T2 ships no bespoke
     // edge components. The default React Flow renderer surfaces the label +
-    // stroke styling emitted by `deriveTimelineEdges`. The
-    // `timeline-edge-types.tsx` module exists as a forward-compatible hook
-    // for post-MVP edge components; the architect lock forbids
-    // ForeshadowEdge / RealizesEdge / ForkFromEdge (Work-outline kinds).
+    // stroke styling emitted by `deriveTimelineEdges`; the architect lock
+    // forbids ForeshadowEdge / RealizesEdge / ForkFromEdge (Work-outline
+    // kinds).
     edgeTypes: undefined,
     // V1.123 P1 T4 + V1.156 P1 T1 — layer-dependent dagre options. Brief
     // carries wider `rankSep` + smaller `nodeSep` than the V1.122 Narrative
