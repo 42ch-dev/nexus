@@ -17,7 +17,7 @@ describe('HubPage', () => {
   it('renders the page shell with the four status sections', () => {
     renderInApp(<HubPage />);
 
-    expect(screen.getByTestId('developer-hub-page')).toBeInTheDocument();
+    expect(screen.getByTestId('hub-page')).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 1, name: 'Hub' })).toBeInTheDocument();
     for (const id of ['service', 'agent', 'harness', 'modules']) {
       expect(screen.getByTestId(`hub-card-${id}`)).toBeInTheDocument();

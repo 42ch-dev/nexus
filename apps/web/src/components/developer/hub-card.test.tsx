@@ -38,7 +38,7 @@ describe('HubCard', () => {
     expect(screen.queryAllByRole('textbox')).toHaveLength(0);
   });
 
-  it('omits the body slot entirely when the card has no content or link', () => {
+  it('renders a title-only card without a navigation link', () => {
     renderInApp(<HubCard id="agent" title="Agent (ACP)" />);
 
     expect(screen.getByTestId('hub-card-agent')).toBeInTheDocument();

@@ -38,20 +38,18 @@ export function HubCard({ id, title, status, go, children }: HubCardProps) {
           )}
         </div>
       </CardHeader>
-      {(children || go) && (
-        <CardContent className="flex flex-col gap-1">
-          {children}
-          {go && (
-            <Link
-              to={go.to}
-              className="text-copy-13 text-blue-800 transition-colors duration-state ease-standard motion-reduce:transition-none hover:text-blue-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700"
-              data-testid={`hub-card-${id}-go`}
-            >
-              {go.label}
-            </Link>
-          )}
-        </CardContent>
-      )}
+      <CardContent className="flex flex-col gap-1">
+        {children}
+        {go && (
+          <Link
+            to={go.to}
+            className="text-copy-13 text-blue-800 transition-colors duration-state ease-standard motion-reduce:transition-none hover:text-blue-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700"
+            data-testid={`hub-card-${id}-go`}
+          >
+            {go.label}
+          </Link>
+        )}
+      </CardContent>
     </Card>
   );
 }

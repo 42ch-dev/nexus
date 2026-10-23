@@ -13,7 +13,7 @@ export function HubPage() {
   const { t } = useTranslation('shell');
 
   return (
-    <div className="flex flex-col gap-4" data-testid="developer-hub-page">
+    <div className="flex flex-col gap-4" data-testid="hub-page">
       <div className="flex flex-col gap-1">
         <h1 className="text-heading-24 font-heading text-gray-1000">
           {t('hub.operating.title')}
