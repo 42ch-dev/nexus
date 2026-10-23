@@ -3,8 +3,10 @@
  * binding state, and running-session state.
  *
  * Author actions live on the row: the canvas drill-down (row name), the
- * profile drill-down link, Validate (dry-run of this preset's manifest),
- * Reload (re-read it from disk), and — user presets only — Delete. Binding is
+ * profile drill-down link, Validate (dry-run of this preset's manifest), Reload
+ * (re-read it from disk), and Delete (user presets only). Validate is offered
+ * only where a manifest file exists — user/system presets — so an embedded
+ * preset carries no button that would open a blank, unsubmitable form. Binding is
  * derived from the preset profile's `states.length > 0`; a failed profile
  * renders an explicit unknown state — never "not bound", which would assert a
  * fact the read never established (PL-13 keeps the row itself listed).
@@ -38,8 +40,8 @@ export interface PresetCardProps {
   running: PresetRunningState;
   onOpenCanvas: () => void;
   onOpenProfile: () => void;
-  /** Open the dry-run validate dialog for this row. */
-  onValidate: () => void;
+  /** Open the dry-run validate dialog for this row; absent on embedded presets. */
+  onValidate?: () => void;
   /** Re-read this preset's manifest from disk. */
   onReload: () => void;
   /** True while this row's reload is in flight. */
@@ -136,15 +138,17 @@ export function PresetCard({
         >
           {runningBadge.label}
         </Badge>
-        <Button
-          type="button"
-          variant="tertiary"
-          size="small"
-          onClick={onValidate}
-          data-testid={`preset-validate-${preset.id}`}
-        >
-          {t('validatePreset')}
-        </Button>
+        {onValidate && (
+          <Button
+            type="button"
+            variant="tertiary"
+            size="small"
+            onClick={onValidate}
+            data-testid={`preset-validate-${preset.id}`}
+          >
+            {t('validatePreset')}
+          </Button>
+        )}
         <Button
           type="button"
           variant="tertiary"

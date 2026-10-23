@@ -395,8 +395,9 @@ export type PresetProfileQuery = UseQueryResult<PresetProfileResponse, Error>;
  * Harness catalog's `useQueries` fan-out so both consume the SAME
  * `['presets','profile',<id>]` cache key and staleness policy: navigating
  * catalog → profile is a cache hit, and `presets.all` invalidation (F-1)
- * clears both. `retry: false` — a 404 here is the expected "preset without a
- * resolvable profile" answer for the unbound probe, not a transient fault.
+ * clears both. `retry: false` — the answers are stable: an unbound preset is a
+ * 200 with an empty `states` array (never an error), and a 404 means the preset
+ * itself does not exist. A failed read is "unknown", never "unbound".
  */
 export function presetProfileQueryOptions(presetId: string | undefined, client: NexusClient) {
   return {

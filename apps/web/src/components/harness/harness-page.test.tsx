@@ -255,6 +255,11 @@ describe('HarnessPage', () => {
     renderHarness();
     await screen.findByTestId('preset-row-user/one');
 
+    // Validate exists only where a manifest file does: user and system rows.
+    expect(screen.getByTestId('preset-validate-user/one')).toBeInTheDocument();
+    expect(screen.getByTestId('preset-validate-sys/three')).toBeInTheDocument();
+    expect(screen.queryByTestId('preset-validate-embedded/two')).not.toBeInTheDocument();
+
     await userEvent.click(screen.getByTestId('preset-validate-user/one'));
 
     // The row button names THAT preset: the form arrives pre-filled with its

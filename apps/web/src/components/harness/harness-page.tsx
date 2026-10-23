@@ -172,7 +172,12 @@ export function HarnessPage() {
                 onOpenProfile={() =>
                   navigate(`/strategies/${encodeURIComponent(preset.id)}/profile`)
                 }
-                onValidate={() => void openValidate(preset)}
+                // Embedded presets are compiled into the runtime: no manifest
+                // file exists to validate, so the row renders no button (the
+                // same source gate Delete already uses).
+                onValidate={
+                  preset.source === 'embedded' ? undefined : () => void openValidate(preset)
+                }
                 onReload={() => reload.mutate(preset.id)}
                 reloading={reload.isPending && reload.variables === preset.id}
                 onDelete={preset.source === 'user' ? () => setDeleteTarget(preset.id) : undefined}
