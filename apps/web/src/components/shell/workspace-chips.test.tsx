@@ -352,7 +352,7 @@ describe('WorkspaceChips', () => {
 
     // Activation failed after the create committed: distinct state + copy.
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('切换失败：创建未完成，请重试');
+    expect(alert).toHaveTextContent('切换失败：未切换成功，请重试激活。');
     expect(screen.getByTestId('workspace-create-created')).toBeInTheDocument();
 
     // The chip row now carries the created workspace, but it is not active.
@@ -373,6 +373,23 @@ describe('WorkspaceChips', () => {
       'aria-pressed',
       'true',
     );
+  });
+
+  it('renders activation-failure copy in en without the create fallback', async () => {
+    window.localStorage.setItem('nexus-web-locale', 'en');
+    await i18n.changeLanguage('en');
+    useWorkspaceHandlers();
+    activateFailures = 1;
+    const user = await openCreatePanel();
+
+    await user.type(screen.getByTestId('workspace-create-name'), 'Race EN');
+    await user.click(screen.getByTestId('workspace-create-submit'));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Switch failed: Switching did not complete');
+    // The created-but-not-activated state must never show create-failure copy.
+    expect(alert).not.toHaveTextContent(/not created/i);
+    expect(screen.getByTestId('workspace-create-created')).toBeInTheDocument();
   });
 
   it('shows 创建中… and disables the button while creating', async () => {

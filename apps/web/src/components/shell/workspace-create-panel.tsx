@@ -49,8 +49,14 @@ export function WorkspaceCreatePanel({ onClose }: { onClose: () => void }) {
   const [created, setCreated] = useState<CreatedWorkspace | null>(null);
   const [pending, setPending] = useState(false);
 
-  /** `创建失败：{reason}` — the typed reason per the service fold. */
-  function failureReason(error: unknown): string {
+  /**
+   * Failure copy per phase. `创建失败：{reason}` only describes a create that did
+   * not commit; once the workspace exists, activation failures must never reuse
+   * the create fallback (that would contradict the created state), so they use
+   * the created-state copy.
+   */
+  function failureReason(error: unknown, phase: 'create' | 'activate'): string {
+    if (phase === 'activate') return t('workspaceCreate.activationGeneric');
     if (error instanceof NexusClientError) {
       if (error.code === 'workspace_conflict') return t('workspaceCreate.conflict');
       if (error.code === 'invalid_input') {
@@ -75,7 +81,7 @@ export function WorkspaceCreatePanel({ onClose }: { onClose: () => void }) {
       void qc.invalidateQueries();
       onClose();
     } catch (error) {
-      setFailure(failureReason(error));
+      setFailure(failureReason(error, 'activate'));
     } finally {
       setPending(false);
     }
@@ -107,7 +113,7 @@ export function WorkspaceCreatePanel({ onClose }: { onClose: () => void }) {
         ...(rootOverride === '' ? {} : { creative_root: rootOverride }),
       });
     } catch (error) {
-      setFailure(failureReason(error));
+      setFailure(failureReason(error, 'create'));
       setPending(false);
       return;
     }

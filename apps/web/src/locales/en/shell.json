@@ -278,6 +278,7 @@
     "activationFailurePrefix": "Switch failed: ",
     "createdNotActivated": "The workspace was created, but switching did not finish.",
     "retryActivate": "Retry activation",
+    "activationGeneric": "Switching did not complete; retry activation.",
     "conflict": "That workspace or target directory already exists",
     "notWritable": "The target directory is not writable",
     "invalid": "The workspace name or directory is invalid",
