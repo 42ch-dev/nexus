@@ -755,9 +755,17 @@ fn mint_local_creator_id() -> String {
     format!("ctr_local{random}")
 }
 
+/// Windows reserved device names (case-insensitive): a slug that would create
+/// an unopenable directory on Windows is refused on every platform.
+const RESERVED_SLUG_NAMES: [&str; 22] = [
+    "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8",
+    "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+];
+
 /// Validate a workspace slug: non-empty, single path segment, no `.` / `..`,
-/// no control characters (retained daemon `validate_slug` rule plus the shared
-/// name-safety rule, core error type).
+/// no control characters, no trailing dot, no Windows reserved device name
+/// (retained daemon `validate_slug` rule plus the shared name-safety rule,
+/// core error type).
 fn validate_workspace_slug(slug: &str) -> CoreResult<()> {
     let reason = if slug.is_empty()
         || slug.contains('/')
@@ -768,6 +776,13 @@ fn validate_workspace_slug(slug: &str) -> CoreResult<()> {
         "must be a single path segment"
     } else if slug.chars().any(char::is_control) {
         "must not contain control characters"
+    } else if slug.ends_with('.') {
+        "must not end with '.'"
+    } else if RESERVED_SLUG_NAMES
+        .iter()
+        .any(|reserved| slug.eq_ignore_ascii_case(reserved))
+    {
+        "must not be a reserved device name"
     } else {
         return Ok(());
     };
@@ -839,7 +854,9 @@ fn directory_is_empty(dir: &Path) -> CoreResult<bool> {
         field: "creative_root".to_string(),
         reason: "not readable".to_string(),
     })?;
-    Ok(entries.next().is_none())
+    // Finder's `.DS_Store` is not author content: adopting a directory that
+    // only carries it must not read as "already holds content".
+    Ok(entries.all(|entry| entry.is_ok_and(|entry| entry.file_name() == ".DS_Store")))
 }
 
 /// Prove the creative root is writable before any registration artifact is
@@ -871,6 +888,34 @@ struct PreexistingArtifacts {
     creative_root: bool,
 }
 
+/// How a rollback artifact is removed.
+#[derive(Clone, Copy)]
+enum RollbackRemoval {
+    File,
+    Directory,
+    RecursiveDirectory,
+}
+
+/// Best-effort removal of one rollback artifact. A missing path is the normal
+/// answer (nothing of ours to undo); anything else is logged, never raised —
+/// the caller is already unwinding a failure.
+fn remove_rollback_artifact(path: &Path, how: RollbackRemoval) {
+    let result = match how {
+        RollbackRemoval::File => std::fs::remove_file(path),
+        RollbackRemoval::Directory => std::fs::remove_dir(path),
+        RollbackRemoval::RecursiveDirectory => std::fs::remove_dir_all(path),
+    };
+    if let Err(err) = result {
+        if err.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!(
+                path = %path.display(),
+                error = %err,
+                "workspace rollback could not remove artifact"
+            );
+        }
+    }
+}
+
 /// Undo a failed create by removing only the artifacts this call produced.
 ///
 /// The operational directory is removed recursively only when this call created
@@ -878,7 +923,9 @@ struct PreexistingArtifacts {
 /// is never deleted — only the manifest file this call wrote (and the
 /// `.nexus42` directory when that leaves it empty). `meta.json` is the
 /// registration marker and never pre-existed here (the preflight refuses a
-/// registered slug), so a partial write of it is safe to drop.
+/// registered slug), so a partial write of it is safe to drop. The DB's
+/// `-wal`/`-shm` sidecars belong to this call's database and are removed with
+/// it, so a pre-existing operational directory keeps no half-open SQLite state.
 fn rollback_new_workspace(
     op_dir: &Path,
     db_path: &Path,
@@ -887,23 +934,28 @@ fn rollback_new_workspace(
     preexisting: PreexistingArtifacts,
 ) {
     if !preexisting.db {
-        let _ = std::fs::remove_file(db_path);
+        remove_rollback_artifact(db_path, RollbackRemoval::File);
+        for suffix in ["-wal", "-shm"] {
+            let mut sidecar = db_path.as_os_str().to_owned();
+            sidecar.push(suffix);
+            remove_rollback_artifact(&PathBuf::from(sidecar), RollbackRemoval::File);
+        }
     }
     if !preexisting.manifest {
-        let _ = std::fs::remove_file(manifest_path);
+        remove_rollback_artifact(manifest_path, RollbackRemoval::File);
     }
-    let _ = std::fs::remove_file(op_dir.join("meta.json"));
+    remove_rollback_artifact(&op_dir.join("meta.json"), RollbackRemoval::File);
     if !preexisting.op_dir {
-        let _ = std::fs::remove_dir_all(op_dir);
+        remove_rollback_artifact(op_dir, RollbackRemoval::RecursiveDirectory);
     }
     if preexisting.creative_root {
         let meta_dir = creative_root.join(".nexus42");
         let empty = std::fs::read_dir(&meta_dir).is_ok_and(|mut entries| entries.next().is_none());
         if empty {
-            let _ = std::fs::remove_dir(&meta_dir);
+            remove_rollback_artifact(&meta_dir, RollbackRemoval::Directory);
         }
     } else {
-        let _ = std::fs::remove_dir_all(creative_root);
+        remove_rollback_artifact(creative_root, RollbackRemoval::RecursiveDirectory);
     }
 }
 
