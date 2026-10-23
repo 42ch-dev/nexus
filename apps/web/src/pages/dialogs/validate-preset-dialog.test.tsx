@@ -39,6 +39,10 @@ describe('ValidatePresetDialog', () => {
 
     renderDialog();
     const dialog = await screen.findByRole('dialog');
+    // The field is reachable through its own label (id derived per instance).
+    expect(within(dialog).getByLabelText('Preset path')).toHaveValue(
+      '/home/a/.nexus42/presets/p/preset.yaml',
+    );
     await userEvent.click(within(dialog).getByRole('button', { name: 'Validate' }));
 
     expect(await within(dialog).findByTestId('preset-valid')).toHaveTextContent(

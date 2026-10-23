@@ -10,6 +10,8 @@
  * errors alone and reports warnings alongside it, so a valid preset with
  * warnings renders both blocks.
  */
+import { useId } from 'react';
+
 import { AlertCircle, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -136,6 +138,10 @@ export function ValidatePresetDialogChrome({
   onClose,
   onSubmit,
 }: ValidatePresetDialogChromeProps) {
+  // Per-instance id: the Studio fixture mounts this body four times, so a
+  // literal id would pair every label with the first input in the document.
+  const pathId = useId();
+
   return (
     <form
       className="flex flex-col gap-4"
@@ -146,9 +152,9 @@ export function ValidatePresetDialogChrome({
       }}
     >
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="preset-path">{copy.pathLabel}</Label>
+        <Label htmlFor={pathId}>{copy.pathLabel}</Label>
         <Input
-          id="preset-path"
+          id={pathId}
           value={path}
           onChange={(event) => onPathChange(event.target.value)}
           placeholder={copy.pathPlaceholder}

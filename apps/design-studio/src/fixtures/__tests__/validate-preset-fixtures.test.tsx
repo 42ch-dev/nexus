@@ -29,6 +29,23 @@ describe('ValidatePresetFixtures', () => {
     );
   });
 
+  it('gives every mounted body its own label/input id pair', () => {
+    render(<ValidatePresetFixtures />);
+
+    const ids = ['pending', 'success', 'warning', 'error'].map((state) => {
+      const frame = screen.getByTestId(`validate-preset-fixture-${state}`);
+      // getByLabelText resolves through htmlFor → id: each label reaches the
+      // input rendered beside it, not the first body in the document.
+      return within(frame).getByLabelText('Preset path').id;
+    });
+
+    expect(new Set(ids).size).toBe(4);
+    for (const id of ids) {
+      expect(id.length).toBeGreaterThan(0);
+      expect(document.querySelectorAll(`[id="${id}"]`)).toHaveLength(1);
+    }
+  });
+
   it('renders success and error verdicts', () => {
     render(<ValidatePresetFixtures />);
 
