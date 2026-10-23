@@ -176,8 +176,9 @@ describe('HarnessPage', () => {
       profileHandler('embedded/two', []),
       profileHandler('sys/three', []),
       sessionsHandler([]),
+      // The real route answers the generated `ReloadPresetResponse`.
       http.post(/\/v1\/daemon\/presets\/.*:reload$/, () =>
-        HttpResponse.json({ preset_id: 'user/one', states: [] }),
+        HttpResponse.json({ id: 'user/one', reloaded: true }),
       ),
     );
 

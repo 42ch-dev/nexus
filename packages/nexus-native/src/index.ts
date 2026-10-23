@@ -186,6 +186,7 @@ import type {
   ScaffoldPresetResponse,
   ValidatePresetRequest,
   ValidatePresetResponse,
+  ReloadPresetResponse,
   UpdatePresetRequest,
   UpdatePresetResponse,
   OrchestrationPresetListResponse,
@@ -734,6 +735,10 @@ export interface NativeCore {
     principal: PrincipalHandle,
     request: ValidatePresetRequest,
   ): Promise<ValidatePresetResponse>;
+  reloadPreset(
+    principal: PrincipalHandle,
+    presetId: string,
+  ): Promise<ReloadPresetResponse>;
   updatePreset(
     principal: PrincipalHandle,
     presetId: string,
@@ -1068,6 +1073,7 @@ type DomainSurface = Pick<
   | 'getPreset'
   | 'scaffoldPreset'
   | 'validatePreset'
+  | 'reloadPreset'
   | 'updatePreset'
   | 'deletePreset'
   | 'listOrchestrationPresets'
@@ -1533,6 +1539,9 @@ function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
     },
     async validatePreset(principal, request) {
       return json(await inner.validatePreset(principal, wire(request, 'request')));
+    },
+    async reloadPreset(principal, presetId) {
+      return json(await inner.reloadPreset(principal, presetId));
     },
     async updatePreset(principal, presetId, request) {
       return json(await inner.updatePreset(principal, presetId, wire(request, 'request')));

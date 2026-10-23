@@ -3,7 +3,7 @@
 use crate::{CoreAccess, CoreError, CoreResult, CoreService, Principal};
 use nexus_contracts::{
     CoreStrategyPatchResponse, CoreStrategyPatchResponseValidationSummary, GetPresetResponse,
-    ScaffoldPresetRequest, ScaffoldPresetResponse, StrategyConflictError,
+    ReloadPresetResponse, ScaffoldPresetRequest, ScaffoldPresetResponse, StrategyConflictError,
     StrategyPatchPromptTemplateRequest, StrategyPatchStateRequest, StrategyPatchTransitionRequest,
     ValidatePresetRequest, ValidatePresetResponse,
 };
@@ -308,6 +308,44 @@ impl CoreService {
             })?,
             path: path.map(|p| p.display().to_string()),
             yaml,
+        })
+    }
+
+    /// Re-resolve a preset from disk (`POST /v1/daemon/presets/{id}:reload`).
+    ///
+    /// Every preset read in this core is read-through: the manifest is parsed
+    /// from its on-disk bundle per request, so there is no compiled cache to
+    /// invalidate. `reload` is the explicit form of that read — it forces the
+    /// same 3-tier resolution (user → system → embedded) the profile read uses
+    /// and therefore reports exactly what an author needs after hand-editing:
+    /// the preset still resolves, or it no longer does. An unknown, deleted or
+    /// unparseable bundle is `not_found`, matching the profile read's mapping.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the id is not a
+    /// valid preset id, or the preset does not resolve from the current disk
+    /// state.
+    #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
+    #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
+    pub async fn reload_preset(
+        &self,
+        principal: &Principal,
+        preset_id: String,
+    ) -> CoreResult<ReloadPresetResponse> {
+        self.verify_principal(principal)?;
+        validate_strategy_id(&preset_id).map_err(CoreError::from)?;
+        nexus_preset::resolve_preset(
+            &preset_id,
+            &self.inner.nexus_home,
+            &BuiltinCapabilityCatalog,
+        )
+        .map_err(|error| {
+            PresetError::NotFound(format!("preset '{preset_id}' not found: {error}"))
+        })?;
+        Ok(ReloadPresetResponse {
+            id: preset_id,
+            reloaded: true,
         })
     }
 

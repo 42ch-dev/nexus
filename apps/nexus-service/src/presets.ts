@@ -10,6 +10,7 @@ import type {
   GetPresetResponse,
   OrchestrationPresetListResponse,
   PresetProfileResponse,
+  ReloadPresetResponse,
   ScaffoldPresetRequest,
   ScaffoldPresetResponse,
   StrategyPatchPromptTemplateRequest,
@@ -48,6 +49,14 @@ export function validatePreset(
   request: ValidatePresetRequest,
 ): Promise<ValidatePresetResponse> {
   return withPrincipal(service, (principal) => service.core.validatePreset(principal, request));
+}
+
+/** `POST /v1/daemon/presets/{id}:reload` — re-resolve the manifest from disk. */
+export function reloadPreset(
+  service: ServiceCore,
+  presetId: string,
+): Promise<ReloadPresetResponse> {
+  return withPrincipal(service, (principal) => service.core.reloadPreset(principal, presetId));
 }
 
 /** `PATCH /v1/daemon/presets/{id}`. */
@@ -147,6 +156,13 @@ export const PRESET_ROUTES: readonly DomainRoute[] = [
     handle: async (service, _params, _search, body) => ({
       body: await validatePreset(service, wirePayload<ValidatePresetRequest>(body, 'request')),
     }),
+  },
+  {
+    method: 'POST',
+    pattern: /^\/v1\/daemon\/presets\/([^/]+):reload$/,
+    tier: 'tier2',
+    family: 'presets',
+    handle: async (service, params) => ({ body: await reloadPreset(service, params[0]) }),
   },
   {
     method: 'GET',
