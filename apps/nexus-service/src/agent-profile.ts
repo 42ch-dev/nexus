@@ -88,8 +88,9 @@ export function readAgentProfile(home: string): AgentProfile | null {
 /**
  * Persist the one daemon-global profile and answer with what was stored.
  *
- * Omitting `launch_command` PRESERVES the stored custom command (the fix for
- * a name-only save silently clearing it); an explicit blank string clears it.
+ * Omitting `launch_command` preserves the stored custom command ONLY for the
+ * same profile name (a name-only save never clears its own command; switching
+ * to another agent stores no command). An explicit blank string clears it.
  * A blank name, or a name/command over the documented caps, is `invalid_input`
  * (existing fold → 400) and never touches the stored profile.
  */
@@ -121,8 +122,17 @@ export async function writeAgentProfile(
 
   const document = readConfigDocument(home);
   const existing = document[PROFILE_TABLE];
+  // Preserve-on-omit is NAME-SCOPED: only the same profile keeps its custom
+  // command. Switching to a different agent stores the new name with no
+  // launch_command (the previous agent's override must not leak across).
+  const storedName =
+    isTomlTable(existing) && typeof existing['name'] === 'string'
+      ? existing['name']
+      : undefined;
   const storedCommand =
-    isTomlTable(existing) && typeof existing['launch_command'] === 'string'
+    isTomlTable(existing) &&
+    storedName === name &&
+    typeof existing['launch_command'] === 'string'
       ? existing['launch_command']
       : undefined;
 

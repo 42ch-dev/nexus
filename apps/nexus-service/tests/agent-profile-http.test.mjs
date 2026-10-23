@@ -199,6 +199,28 @@ describe('agent-profile (I-000064)', () => {
     assert.deepEqual(cleared.payload, { profile: { name: 'codex-cli' } });
   });
 
+  test('switching to a different agent with an omitted command stores no command', async () => {
+    const seeded = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`, {
+      method: 'PUT',
+      body: { name: 'claude-code', launch_command: '/custom/claude --flag' },
+    });
+    assert.deepEqual(seeded.payload, {
+      profile: { name: 'claude-code', launch_command: '/custom/claude --flag' },
+    });
+
+    // Different name + omitted command: the previous agent's override must not
+    // leak into the new profile.
+    const switched = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`, {
+      method: 'PUT',
+      body: { name: 'codex-cli' },
+    });
+    assert.equal(switched.status, 200);
+    assert.deepEqual(switched.payload, { profile: { name: 'codex-cli' } });
+
+    const read = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`);
+    assert.deepEqual(read.payload, { profile: { name: 'codex-cli' } });
+  });
+
   test('oversized name and launch_command are invalid_input and leave the profile intact', async () => {
     const before = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`);
 
