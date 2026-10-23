@@ -128,6 +128,25 @@ async fn create_adopts_empty_dir_and_refuses_foreign_content() {
         finder.display().to_string()
     );
 
+    // The Windows equivalents of `.DS_Store` are likewise not author content.
+    let explorer = user_home.join("explorer-root");
+    std::fs::create_dir_all(&explorer).unwrap();
+    std::fs::write(explorer.join("desktop.ini"), b"[.ShellClassInfo]").unwrap();
+    std::fs::write(explorer.join("Thumbs.db"), b"thumbs").unwrap();
+    let adopted_with_explorer = svc
+        .create_workspace(request(
+            &creator_id,
+            "explorer",
+            Some("Explorer"),
+            Some(&explorer.display().to_string()),
+        ))
+        .await
+        .expect("a desktop.ini/Thumbs.db-only directory is adopted");
+    assert_eq!(
+        adopted_with_explorer.creative_root,
+        explorer.display().to_string()
+    );
+
     // A non-empty directory is never adopted as a workspace root.
     let foreign = user_home.join("foreign-root");
     std::fs::create_dir_all(&foreign).unwrap();
@@ -245,6 +264,21 @@ async fn create_refuses_invalid_slug_name_and_override() {
                 if field == "workspace_slug" && reason == "must not end with '.'"
         ),
         "unexpected: {trailing_dot:?}"
+    );
+
+    // Windows strips a trailing space from a directory name, so `"novel "`
+    // would silently name the same directory as `"novel"`.
+    let trailing_space = svc
+        .create_workspace(request(&creator_id, "novel ", Some("Bad"), None))
+        .await
+        .expect_err("trailing space");
+    assert!(
+        matches!(
+            trailing_space,
+            CoreError::InvalidInput { ref field, ref reason }
+                if field == "workspace_slug" && reason == "must not end with whitespace"
+        ),
+        "unexpected: {trailing_space:?}"
     );
 
     let bad_name = svc
