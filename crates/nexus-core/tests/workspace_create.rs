@@ -61,7 +61,9 @@ async fn create_derives_root_and_registers_workspace() {
     assert_eq!(response.creative_root, creative_root.display().to_string());
     assert_eq!(
         response.operational_dir,
-        op_dir(&user_home, &creator_id, "novel").display().to_string()
+        op_dir(&user_home, &creator_id, "novel")
+            .display()
+            .to_string()
     );
     assert_eq!(
         response.state_db_path,
@@ -207,7 +209,12 @@ async fn create_refuses_invalid_slug_name_and_override() {
     );
 
     let relative = svc
-        .create_workspace(request(&creator_id, "relative", Some("Relative"), Some("relative/root")))
+        .create_workspace(request(
+            &creator_id,
+            "relative",
+            Some("Relative"),
+            Some("relative/root"),
+        ))
         .await
         .expect_err("relative override");
     assert!(
@@ -308,7 +315,10 @@ async fn create_probe_failure_leaves_no_directory() {
         ),
         "unexpected: {err:?}"
     );
-    assert!(!derived_root.exists(), "failed probe left its directory behind");
+    assert!(
+        !derived_root.exists(),
+        "failed probe left its directory behind"
+    );
     assert!(locked_parent.is_dir());
     assert!(!op_dir(&user_home, &creator_id, "blocked").exists());
 }
@@ -413,7 +423,11 @@ async fn concurrent_same_root_creates_keep_one_owner() {
     let winner = &listed.items[0];
     assert_eq!(winner.creative_root, root);
     // The loser left no operational directory behind.
-    let loser_slug = if winner.workspace_slug == "left" { "right" } else { "left" };
+    let loser_slug = if winner.workspace_slug == "left" {
+        "right"
+    } else {
+        "left"
+    };
     assert!(!op_dir(&user_home, &creator_id, loser_slug).exists());
 }
 
