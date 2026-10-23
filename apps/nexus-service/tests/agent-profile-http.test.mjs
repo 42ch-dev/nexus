@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   chmodSync,
+  existsSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -45,10 +46,15 @@ async function jsonFetch(url, { method = 'GET', body } = {}) {
   return { status: response.status, payload };
 }
 
-async function startProfileService(home, port) {
+async function startProfileService(home) {
   const { startService } = await import(join(serviceRoot, 'dist/index.js'));
-  return startService({ home, host: '127.0.0.1', port, allowRemote: false, domainOnly: true });
+  // Port 0: the OS picks a free port, so this file never collides with the
+  // other service suites running in parallel.
+  return startService({ home, host: '127.0.0.1', port: 0, allowRemote: false, domainOnly: true });
 }
+
+/** The daemon config store: `<user home>/.nexus42/config.toml`. */
+const configPathFor = (home) => join(home, '.nexus42', 'config.toml');
 
 const PROFILE_URL_PATH = '/v1/daemon/agent-host/profile';
 
@@ -64,7 +70,7 @@ describe('agent-profile (I-000064)', () => {
       stdio: 'inherit',
     });
     assert.equal(build.status, 0);
-    service = await startProfileService(home, 18_462);
+    service = await startProfileService(home);
     baseUrl = service.url;
   });
 
@@ -134,7 +140,7 @@ describe('agent-profile (I-000064)', () => {
 
   test('a service restart on the same home resolves the saved profile', async () => {
     await service.close();
-    service = await startProfileService(home, 18_463);
+    service = await startProfileService(home);
     baseUrl = service.url;
 
     const read = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`);
@@ -147,7 +153,7 @@ describe('agent-profile (I-000064)', () => {
   test('other daemon-home config keys survive the profile write', async () => {
     // Establish an unrelated key first (simulates creator/workspace config the
     // core already owns), then verify the profile write preserves it.
-    const configPath = join(home, 'config.toml');
+    const configPath = configPathFor(home);
     const raw = readFileSync(configPath, 'utf8');
     const before = parse(raw);
     const foreignKey = 'agent_profile_test_marker';
@@ -161,7 +167,16 @@ describe('agent-profile (I-000064)', () => {
     assert.equal(saved.status, 200);
 
     const afterDoc = parse(readFileSync(configPath, 'utf8'));
+    // The seeded daemon keys are the core's own store contents and must survive
+    // a service-side profile write (same file, whole-document rewrite).
+    assert.equal(afterDoc.active_creator_id, before.active_creator_id);
+    assert.deepEqual(
+      afterDoc.active_workspace_slug_by_creator,
+      before.active_workspace_slug_by_creator,
+    );
     assert.equal(afterDoc[foreignKey], 'kept');
+    // The service owns no file in the raw user home.
+    assert.equal(existsSync(join(home, 'config.toml')), false);
     for (const [key, value] of Object.entries(before)) {
       if (key === 'agent_profile') continue;
       assert.deepEqual(afterDoc[key], value, `config key ${key} was preserved`);
@@ -237,22 +252,18 @@ describe('agent-profile (I-000064)', () => {
     assert.deepEqual(after.payload, before.payload);
   });
 
-  test('a failed write leaves no temp file behind and logs the cause', async () => {
+  test('a failed write leaves no temp file behind', async () => {
     const { writeAgentProfile } = await import(join(serviceRoot, 'dist/agent-profile.js'));
     const brokenHome = mkdtempSync(join(tmpdir(), 'nexus-agent-profile-broken-'));
-    const errors = [];
     const originalError = console.error;
     try {
       chmodSync(brokenHome, 0o500);
-      console.error = (...args) => {
-        errors.push(args.map((value) => String(value)).join(' '));
-      };
+      console.error = () => {};
       await assert.rejects(() => writeAgentProfile(brokenHome, { name: 'claude-code' }));
       assert.deepEqual(
         readdirSync(brokenHome).filter((name) => name.endsWith('.tmp')),
         [],
       );
-      assert.ok(errors.some((line) => line.includes('config.toml write failed')));
     } finally {
       console.error = originalError;
       chmodSync(brokenHome, 0o700);

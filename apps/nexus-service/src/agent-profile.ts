@@ -1,6 +1,8 @@
 /**
  * Agent-profile family (I-000064): the daemon-global agent profile persisted in
- * the daemon home `config.toml` under the `agent_profile` table.
+ * the daemon home `<user_home>/.nexus42/config.toml` under the `agent_profile`
+ * table — the same store the native core owns for `active_creator_id` and the
+ * workspace selection.
  *
  * Storage semantics mirror the core CLI config (`read_cli_config` /
  * `write_cli_config` in `crates/nexus-core/src/creators.rs`): a missing file is
@@ -13,9 +15,8 @@
  * web read path, never re-created here.
  */
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { rename, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { parse, stringify, type TomlTable } from 'smol-toml';
 import type { AgentProfile, AgentProfileResponse } from '@42ch/nexus-contracts';
 
@@ -24,11 +25,13 @@ import type { ServiceCore } from './lifecycle.js';
 import type { DomainRoute } from './routes.js';
 import { wirePayload } from './world-kb.js';
 
+/** The daemon home directory inside the raw user home (nexus-home-layout). */
+const NEXUS_DIR = '.nexus42';
 const CONFIG_FILE = 'config.toml';
 const PROFILE_TABLE = 'agent_profile';
-/** Bound on a stored agent name; longer values are rejected at the fold. */
+/** Bound on a stored agent name, in code points; longer values are rejected at the fold. */
 const MAX_NAME_LENGTH = 200;
-/** Bound on a stored launch command; longer values are rejected at the fold. */
+/** Bound on a stored launch command, in code points; longer values are rejected at the fold. */
 const MAX_LAUNCH_COMMAND_LENGTH = 4096;
 
 function isTomlTable(value: unknown): value is TomlTable {
@@ -40,11 +43,10 @@ function isTomlTable(value: unknown): value is TomlTable {
  * existing unreadable/corrupt file is an error (never treated as absent — a
  * silent empty doc would drop the other stored config on the next write).
  */
-function readConfigDocument(home: string): TomlTable {
-  const configPath = join(home, CONFIG_FILE);
+async function readConfigDocument(home: string): Promise<TomlTable> {
   let text: string;
   try {
-    text = readFileSync(configPath, 'utf8');
+    text = await readFile(join(home, NEXUS_DIR, CONFIG_FILE), 'utf8');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
     throw new HttpError(500, 'internal', `${CONFIG_FILE} is unreadable`);
@@ -57,13 +59,31 @@ function readConfigDocument(home: string): TomlTable {
   }
 }
 
-/** Replace the config document atomically (same-directory temp file + rename). */
+/**
+ * Replace the config document atomically: same-directory temp file, fsync of
+ * the content and of the directory entry, then rename into place.
+ */
 async function writeConfigDocument(home: string, document: TomlTable): Promise<void> {
-  const configPath = join(home, CONFIG_FILE);
-  const tempPath = join(home, `.${CONFIG_FILE}.${randomUUID()}.tmp`);
+  const configPath = join(home, NEXUS_DIR, CONFIG_FILE);
+  const directory = dirname(configPath);
+  const tempPath = join(directory, `.${CONFIG_FILE}.${randomUUID()}.tmp`);
   try {
-    await writeFile(tempPath, stringify(document), { mode: 0o600 });
+    await mkdir(directory, { recursive: true });
+    const temp = await open(tempPath, 'w', 0o600);
+    try {
+      await temp.writeFile(stringify(document));
+      await temp.sync();
+    } finally {
+      await temp.close();
+    }
     await rename(tempPath, configPath);
+    // The rename itself is only durable once the directory entry is synced.
+    const dir = await open(directory, 'r');
+    try {
+      await dir.sync();
+    } finally {
+      await dir.close();
+    }
   } catch (error) {
     // The wire answer stays generic; the operator log keeps the cause. A temp
     // file that was already created must not survive the failed write.
@@ -74,8 +94,8 @@ async function writeConfigDocument(home: string, document: TomlTable): Promise<v
 }
 
 /** The stored profile, or null when unset/malformed. */
-export function readAgentProfile(home: string): AgentProfile | null {
-  const table = readConfigDocument(home)[PROFILE_TABLE];
+export async function readAgentProfile(home: string): Promise<AgentProfile | null> {
+  const table = (await readConfigDocument(home))[PROFILE_TABLE];
   if (!isTomlTable(table)) return null;
   const name = table['name'];
   if (typeof name !== 'string' || name.trim().length === 0) return null;
@@ -102,17 +122,15 @@ export async function writeAgentProfile(
   if (name.length === 0) {
     throw new HttpError(400, 'invalid_input', 'name must not be blank');
   }
-  if (request.name.length > MAX_NAME_LENGTH) {
+  if ([...name].length > MAX_NAME_LENGTH) {
     throw new HttpError(
       400,
       'invalid_input',
       `name must be at most ${MAX_NAME_LENGTH} characters`,
     );
   }
-  if (
-    request.launch_command !== undefined &&
-    request.launch_command.length > MAX_LAUNCH_COMMAND_LENGTH
-  ) {
+  const requestedCommand = request.launch_command?.trim();
+  if (requestedCommand !== undefined && [...requestedCommand].length > MAX_LAUNCH_COMMAND_LENGTH) {
     throw new HttpError(
       400,
       'invalid_input',
@@ -120,14 +138,14 @@ export async function writeAgentProfile(
     );
   }
 
-  const document = readConfigDocument(home);
+  const document = await readConfigDocument(home);
   const existing = document[PROFILE_TABLE];
   // Preserve-on-omit is NAME-SCOPED: only the same profile keeps its custom
   // command. Switching to a different agent stores the new name with no
   // launch_command (the previous agent's override must not leak across).
   const storedName =
     isTomlTable(existing) && typeof existing['name'] === 'string'
-      ? existing['name']
+      ? existing['name'].trim()
       : undefined;
   const storedCommand =
     isTomlTable(existing) &&
@@ -139,8 +157,8 @@ export async function writeAgentProfile(
   const command =
     request.launch_command === undefined
       ? storedCommand
-      : request.launch_command.trim().length > 0
-        ? request.launch_command.trim()
+      : requestedCommand !== undefined && requestedCommand.length > 0
+        ? requestedCommand
         : undefined;
 
   document[PROFILE_TABLE] =
@@ -165,8 +183,8 @@ function parseProfileRequest(body: unknown): AgentProfile {
 }
 
 /** `GET /v1/daemon/agent-host/profile` — always 200; `null` = unset. */
-export function getAgentProfile(service: ServiceCore): AgentProfileResponse {
-  return { profile: readAgentProfile(service.home) };
+export async function getAgentProfile(service: ServiceCore): Promise<AgentProfileResponse> {
+  return { profile: await readAgentProfile(service.home) };
 }
 
 /** `PUT /v1/daemon/agent-host/profile`. */
@@ -185,7 +203,7 @@ export const AGENT_PROFILE_ROUTES: readonly DomainRoute[] = [
     pattern: /^\/v1\/daemon\/agent-host\/profile$/,
     tier: 'tier1',
     family: 'host',
-    handle: async (service) => ({ body: getAgentProfile(service) }),
+    handle: async (service) => ({ body: await getAgentProfile(service) }),
   },
   {
     method: 'PUT',

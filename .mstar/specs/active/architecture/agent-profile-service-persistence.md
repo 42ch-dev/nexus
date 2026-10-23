@@ -40,8 +40,9 @@ Both routes live in the existing agent-host family (home of
 - Runtime validation (schema is documentation, not the validator):
   non-object body, missing/non-string `name`, or non-string `launch_command`
   → `invalid_input` (400). Blank/whitespace-only `name` → `invalid_input` (400).
-  Length caps: `name` ≤ 200 characters, `launch_command` ≤ 4096 characters —
-  oversized values are `invalid_input` (400) and never touch the stored profile.
+  Length caps: `name` ≤ 200 characters, `launch_command` ≤ 4096 characters,
+  measured in code points on the trimmed value — oversized values are
+  `invalid_input` (400) and never touch the stored profile.
 - Success `200` with the stored profile: `{ "profile": { … } }`.
 - Name and `launch_command` are stored trimmed; an empty command after trimming
   is stored as "no command" (the key is omitted).
@@ -59,8 +60,10 @@ response object).
 
 ## 3. Storage
 
-- Location: the daemon home `config.toml` (`<home>/config.toml`, the same store
-  that already holds `active_creator_id` and workspace path config).
+- Location: the daemon home `config.toml` (`<user_home>/.nexus42/config.toml` —
+  the same file the core owns for `active_creator_id` and workspace path
+  config; the service `home` is the raw user home, so the `.nexus42` segment is
+  resolved explicitly and the directory is created before the temp write).
 - Shape: one `[agent_profile]` table with `name` and optional `launch_command`.
   `name` is a TOML string; `launch_command` is omitted when unset.
 - ONE daemon-global profile — the desktop semantics. It is deliberately **not**
@@ -69,26 +72,31 @@ response object).
   is an empty document; an existing unparseable file is an error.
 - Write semantics mirror `write_cli_config` plus crash atomicity: read the whole
   document, replace only the `agent_profile` table, every other key is
-  preserved, then write a same-directory temp file and `rename` it into place.
-  `mode 0600` on the temp file; on failure the temp file is removed and the
-  underlying cause is logged while the HTTP error stays generic.
+  preserved, then write a same-directory temp file, `fsync` its content, `rename`
+  it into place and `fsync` the directory entry. `mode 0600` on the temp file;
+  on failure the temp file is removed and the underlying cause is logged while
+  the HTTP error stays generic.
 - The native core may write the same file (creator/workspace selection). Both
   writers are whole-document read-modify-write; the service's writes are
   atomic at the visibility level, so a reader never sees a partial document.
 
-### Risk acceptance (cross-writer race)
+### Risk acceptance (cross-writer race) — now a LIVE shared file
 
-The TypeScript service is a second writer of the daemon-home `config.toml`
-alongside the Rust core, and both do whole-document read-modify-write. A lost
-update is therefore possible: if the core and the service interleave read and
-write within the same millisecond-scale window, one side's key can be dropped
-(e.g. a creator activation landing between the profile read and the profile
-write). The frequency of both writers is low (profile saves, creator/workspace
-activation), no user data beyond the last write is at risk, and no in-process
-lock can cover the core's write path. **Accepted by the PM decision on
-2026-10-23**, tracked as issue I-000065 with the migration trigger (a second
-concurrent writer observed, or any third writer added → move to a file lock or
-a core-owned write). Do not add ad-hoc locking here.
+The TypeScript service is a second writer of `<user_home>/.nexus42/config.toml`
+alongside the Rust core, and both do whole-document read-modify-write. With the
+store at the daemon path this is no longer theoretical: a service `PUT` and a
+core write (creator activation, workspace selection) target the same file. A
+lost update is therefore possible — if the core and the service interleave read
+and write within the same millisecond-scale window, one side's key can be
+dropped (e.g. a creator activation landing between the profile read and the
+profile write). The exposure stays bounded: the service writes only on an
+explicit manual profile save (never on a timer or on read), core writes are
+equally rare, no user data beyond the last write is at risk, and no in-process
+lock can cover the core's write path. The acceptance therefore stands under the
+live condition. **Accepted by the PM decision on 2026-10-23**, tracked as issue
+I-000065 with the migration trigger (a lost update observed in practice, or any
+third writer added → move to a file lock or a core-owned write). Do not add
+ad-hoc locking here.
 
 ## 4. Browser migration read (legacy localStorage)
 
