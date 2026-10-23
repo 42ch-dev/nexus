@@ -18,6 +18,7 @@ import {
   type AgentPickerStatus,
   type AgentVerifyStatus,
 } from '@/components/setup/agent-picker';
+import { Button } from '@/components/ui/button';
 import {
   launchCommandMatches,
   useSavedAgentProfile,
@@ -182,7 +183,9 @@ export function SettingsAgentSection() {
   // service there.
   useEffect(() => {
     if (didInitDefault) return;
-    if (scan.isLoading || scan.isError || saved.isLoading) return;
+    // A failed profile read must not silently fall back to "first installed":
+    // the error surface holds preselect until a refetch succeeds.
+    if (scan.isLoading || scan.isError || saved.isLoading || saved.error) return;
     const scannedMaybe = scan.data?.agents;
     if (scannedMaybe === undefined) return;
 
@@ -213,6 +216,7 @@ export function SettingsAgentSection() {
     scan.isError,
     scan.data?.agents,
     saved.isLoading,
+    saved.error,
     saved.profile,
   ]);
 
@@ -259,30 +263,47 @@ export function SettingsAgentSection() {
         <p className="text-copy-14 text-gray-900">{t('agent.helper')}</p>
       </div>
 
-      <div data-testid="settings-host-picker-region">
-        <AgentPicker
-          status={status}
-          defaultGrid={status === 'ready' ? defaultGrid : []}
-          moreAgents={status === 'ready' ? moreAgents : []}
-          selectedId={selectedId}
-          onSelect={selectById}
-          customLaunchValue={customLaunchCommand}
-          onCustomLaunchChange={handleUseCustom}
-          onVerify={handleVerify}
-          verifyStatus={verifyStatus}
-          errorDescription={
-            scan.isError
-              ? errorMessage(scan.error) || t('agent.scanError')
-              : undefined
-          }
-          onRetry={scan.isError ? () => void scan.refetch() : undefined}
-          emptyTitle={t('agent.emptyTitle')}
-          desktop={desktop ?? undefined}
-          onExternalUrlError={() => {
-            toast({ variant: 'error', title: commonT('error.openExternalFailed') });
-          }}
-        />
-      </div>
+      {saved.error ? (
+        <div
+          className="flex flex-col items-start gap-2"
+          role="alert"
+          data-testid="settings-agent-profile-error"
+        >
+          <p className="text-copy-13 text-red-900">
+            {t('agent.profileError', {
+              reason: errorMessage(saved.error) || commonT('error.requestFailed'),
+            })}
+          </p>
+          <Button type="button" variant="tertiary" size="small" onClick={saved.refetch}>
+            {t('agent.profileRetry')}
+          </Button>
+        </div>
+      ) : (
+        <div data-testid="settings-host-picker-region">
+          <AgentPicker
+            status={status}
+            defaultGrid={status === 'ready' ? defaultGrid : []}
+            moreAgents={status === 'ready' ? moreAgents : []}
+            selectedId={selectedId}
+            onSelect={selectById}
+            customLaunchValue={customLaunchCommand}
+            onCustomLaunchChange={handleUseCustom}
+            onVerify={handleVerify}
+            verifyStatus={verifyStatus}
+            errorDescription={
+              scan.isError
+                ? errorMessage(scan.error) || t('agent.scanError')
+                : undefined
+            }
+            onRetry={scan.isError ? () => void scan.refetch() : undefined}
+            emptyTitle={t('agent.emptyTitle')}
+            desktop={desktop ?? undefined}
+            onExternalUrlError={() => {
+              toast({ variant: 'error', title: commonT('error.openExternalFailed') });
+            }}
+          />
+        </div>
+        )}
     </div>
   );
 }

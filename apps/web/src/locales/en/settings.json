@@ -42,7 +42,9 @@
     "save": "Save",
     "saving": "Saving…",
     "scanError": "The daemon did not respond to the agent scan request.",
-    "emptyTitle": "No agents found on PATH."
+    "emptyTitle": "No agents found on PATH.",
+    "profileError": "Could not load the saved agent profile: {{reason}}",
+    "profileRetry": "Try again"
   },
   "connection": {
     "sectionTitle": "Connection",

@@ -83,6 +83,12 @@ function creatorsHandler() {
   );
 }
 
+function profileHandler(profile: unknown = null) {
+  return http.get('/v1/daemon/agent-host/profile', () =>
+    HttpResponse.json({ profile }),
+  );
+}
+
 const settingsRouteTree = (
   // No layout chrome — section tests assert section testids only.
   <Route path="settings">
@@ -93,7 +99,7 @@ const settingsRouteTree = (
 
 describe('SettingsAgentSection preselect (G1)', () => {
   it('renders the Agent helper and the default grid without desktop', async () => {
-    useHandlers(scanHandler(), creatorsHandler());
+    useHandlers(scanHandler(), creatorsHandler(), profileHandler());
 
     renderInApp(
       <Routes>{settingsRouteTree}</Routes>,
@@ -294,6 +300,49 @@ describe('SettingsAgentSection preselect (G1)', () => {
     );
   });
 
+  it('surfaces a saved-profile read failure instead of auto-selecting an agent', async () => {
+    let attempts = 0;
+    useHandlers(
+      scanHandler(),
+      creatorsHandler(),
+      http.get('/v1/daemon/agent-host/profile', () => {
+        attempts += 1;
+        return attempts === 1
+          ? HttpResponse.json(
+              {
+                success: false,
+                error: { code: 'internal', message: 'config.toml is unreadable' },
+              },
+              { status: 500 },
+            )
+          : HttpResponse.json({ profile: { name: 'codex', launch_command: 'codex' } });
+      }),
+    );
+
+    renderInApp(<Routes>{settingsRouteTree}</Routes>, {
+      client: makeClient(),
+      initialRouterEntries: ['/settings/agent'],
+    });
+
+    expect(await screen.findByTestId('settings-agent-profile-error')).toHaveTextContent(
+      'Could not load the saved agent profile: config.toml is unreadable',
+    );
+    // No picker at all: nothing is auto-highlighted, so no click can persist a
+    // fallback choice.
+    expect(screen.queryByTestId('agent-picker')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
+
+    // Recovery preselects the profile the retry read returned.
+    await waitFor(() => {
+      const pressed = screen
+        .getAllByTestId('agent-card-select-codex-native')
+        .filter((el) => el.getAttribute('aria-pressed') === 'true');
+      expect(pressed.length).toBeGreaterThanOrEqual(1);
+    });
+    expect(screen.queryByTestId('settings-agent-profile-error')).not.toBeInTheDocument();
+  });
+
   it('applies profile instantly on card select (AC-V1125-2)', async () => {
     const user = userEvent.setup();
     const setAgentProfile = vi.fn(() => Promise.resolve());
@@ -415,7 +464,7 @@ describe('SettingsAgentSection preselect (G1)', () => {
         installed: true,
       },
     ];
-    useHandlers(scanHandler(agents), creatorsHandler());
+    useHandlers(scanHandler(agents), creatorsHandler(), profileHandler());
 
     renderInApp(
       <Routes>{settingsRouteTree}</Routes>,

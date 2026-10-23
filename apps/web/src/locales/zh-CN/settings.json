@@ -42,7 +42,9 @@
     "save": "保存",
     "saving": "保存中…",
     "scanError": "守护进程没有响应智能体扫描请求。",
-    "emptyTitle": "在 PATH 中未找到智能体。"
+    "emptyTitle": "在 PATH 中未找到智能体。",
+    "profileError": "无法加载已保存的智能体配置：{{reason}}",
+    "profileRetry": "重试"
   },
   "connection": {
     "sectionTitle": "连接",
