@@ -93,6 +93,8 @@ import type {
   ScaffoldPresetResponse,
   ScanRequest,
   ScanResponse,
+  AgentProfile,
+  AgentProfileResponse,
   SessionDetailResponse,
   SetActiveCreatorRequest,
   SetActiveCreatorResponse,
@@ -309,6 +311,12 @@ export class BrowserClient implements NexusClient {
   }
   scanAgents(request?: ScanRequest): Promise<ScanResponse> {
     return this.post<ScanResponse>('/v1/daemon/agent-host/scan', request);
+  }
+  getAgentProfile(): Promise<AgentProfileResponse> {
+    return this.get<AgentProfileResponse>('/v1/daemon/agent-host/profile');
+  }
+  saveAgentProfile(profile: AgentProfile): Promise<AgentProfileResponse> {
+    return this.put<AgentProfileResponse>('/v1/daemon/agent-host/profile', profile);
   }
 
   // ── Assembly Inspector (V1.151 P1 — DF-76) ────────────────────────────────

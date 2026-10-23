@@ -9,7 +9,7 @@
  * Findings + Works use cursor pagination; the hook exposes TanStack's
  * `fetchNextPage`/`hasNextPage` for "Load more".
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   useInfiniteQuery,
@@ -63,6 +63,7 @@ import type {
   ScaffoldPresetRequest,
   ScanRequest,
   ScanResponse,
+  AgentProfile,
   SoulNarrativeResponse,
   TimelineOverviewResponse,
   TimelineEventInfo,
@@ -947,11 +948,11 @@ export type AgentProfileSnapshot = { name: string; launchCommand?: string };
 const BROWSER_AGENT_PROFILE_PREFIX = 'nexus-agent-profile:';
 
 /**
- * Read the browser-saved agent profile snapshot; absent in fresh browsers.
+ * Read the legacy per-creator browser snapshot; absent in fresh browsers.
  *
- * Extracted out of `AgentChip` (v1220 T2) so the topnav chip and the Hub's
- * Agent card resolve the saved profile from ONE seam — P2 Task 1 replaces this
- * seam (plus {@link useAgentProfile}) with the service-backed surface.
+ * Retained ONLY as the one-time migration source for the service read below:
+ * a null service profile falls back to this snapshot and best-effort PUTs it,
+ * after which the service is authoritative. New saves never write it.
  */
 export function readBrowserAgentProfile(
   creatorId: string | null | undefined,
@@ -973,60 +974,92 @@ export function readBrowserAgentProfile(
   }
 }
 
+/** Wire (`launch_command`) → app snapshot (`launchCommand`). */
+export function snapshotFromWire(profile: AgentProfile): AgentProfileSnapshot {
+  return profile.launch_command !== undefined
+    ? { name: profile.name, launchCommand: profile.launch_command }
+    : { name: profile.name };
+}
+
+/** App snapshot (`launchCommand`) → wire (`launch_command`). */
+export function wireFromSnapshot(profile: AgentProfileSnapshot): AgentProfile {
+  return profile.launchCommand !== undefined
+    ? { name: profile.name, launch_command: profile.launchCommand }
+    : { name: profile.name };
+}
+
+/**
+ * Browser profile read (I-000064): the service is authoritative.
+ *
+ * Read order: service GET → a `null` profile falls back ONCE to the legacy
+ * per-creator localStorage snapshot, which is best-effort PUT to the service
+ * (a failed migration leaves the snapshot in place for the next load). After
+ * any successful service read the legacy snapshot is neither consulted nor
+ * written.
+ */
+async function readServiceAgentProfile(
+  client: NexusClient,
+  creatorId: string | null,
+): Promise<AgentProfileSnapshot | null> {
+  const { profile } = await client.getAgentProfile();
+  if (profile) return snapshotFromWire(profile);
+
+  const legacy = readBrowserAgentProfile(creatorId);
+  if (!legacy) return null;
+  try {
+    const saved = await client.saveAgentProfile(wireFromSnapshot(legacy));
+    return saved.profile ? snapshotFromWire(saved.profile) : legacy;
+  } catch {
+    return legacy;
+  }
+}
+
 /** Saved-profile resolution state — the one seam the topnav and Hub share. */
 export interface SavedAgentProfileState {
-  /** Desktop IPC profile, else the browser snapshot; `null` when neither exists. */
+  /** The daemon-global profile from the service (desktop: the IPC profile). */
   profile: AgentProfileSnapshot | null;
-  /** True only while the enabled desktop profile query is fetching. */
+  /** True only while the profile read is fetching. */
   isLoading: boolean;
   error: Error | null;
   refetch: () => void;
 }
 
 /**
- * Saved agent profile plus its query state: the desktop IPC profile when
- * available, else the browser snapshot. Single seam for the topnav chip and
- * the Hub Agent card; P2 Task 1 swaps this implementation to the service
- * surface without touching either caller.
+ * Saved agent profile plus its query state: the desktop IPC profile on desktop,
+ * the service-backed daemon-global profile in the browser. Single seam for the
+ * topnav chip and the Hub Agent card.
  */
 export function useSavedAgentProfile(): SavedAgentProfileState {
   const profileQuery = useAgentProfile();
-  const desktop = useDesktopCapabilities();
-  const activeCreatorId = useActiveCreatorId();
-  // Browser builds have no desktop IPC bridge, so the profile query is
-  // disabled there (`enabled: Boolean(desktop)`). Forcing it would run its
-  // queryFn against a null bridge; retry re-reads the synchronous browser
-  // snapshot by re-rendering instead.
-  const [, setBrowserReadNonce] = useState(0);
 
   return {
-    profile: profileQuery.data ?? readBrowserAgentProfile(activeCreatorId),
+    profile: profileQuery.data ?? null,
     isLoading: profileQuery.isLoading,
     error: profileQuery.error,
     refetch: () => {
-      if (desktop) {
-        void profileQuery.refetch();
-        return;
-      }
-      setBrowserReadNonce((nonce) => nonce + 1);
+      void profileQuery.refetch();
     },
   };
 }
 
 /**
- * Desktop-only saved agent profile (V1.120 P1 T1).
+ * Saved agent profile read (V1.120 P1 T1).
  *
- * Backed by React Query so the Settings Agent Save handler can invalidate
- * `queryKeys.agentProfile` and the DaemonStatusBar agent badge refreshes
- * immediately after a save — no 10s poll wait (AD-P1-1). Browser build: the
- * hook is disabled (`desktop === null`) and `data` stays `undefined`.
+ * Backed by React Query so a save can invalidate `queryKeys.agentProfile` and
+ * every profile consumer refreshes immediately after it — no 10s poll wait
+ * (AD-P1-1). Desktop keeps the `get_agent_profile` IPC read; the browser reads
+ * the service surface (I-000064).
  */
 export function useAgentProfile() {
   const desktop = useDesktopCapabilities();
+  const client = useNexusClient();
+  const activeCreatorId = useActiveCreatorIdFromContext();
   return useQuery({
     queryKey: queryKeys.agentProfile.detail(),
-    queryFn: (): Promise<AgentProfileSnapshot | null> => desktop!.getAgentProfile(),
-    enabled: Boolean(desktop),
+    queryFn: (): Promise<AgentProfileSnapshot | null> =>
+      desktop
+        ? desktop.getAgentProfile()
+        : readServiceAgentProfile(client, activeCreatorId),
   });
 }
 

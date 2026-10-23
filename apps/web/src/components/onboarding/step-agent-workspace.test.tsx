@@ -6,7 +6,7 @@ import { StepAgentWorkspace } from './step-agent-workspace';
 import { renderInApp } from '@/test/test-providers';
 import type { NexusClient } from '@/lib/nexus';
 import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
-import type { AgentScanEntry } from '@42ch/nexus-contracts';
+import type { AgentProfile, AgentScanEntry } from '@42ch/nexus-contracts';
 
 const AGENTS: AgentScanEntry[] = [
   {
@@ -35,9 +35,18 @@ function withResolvers<T>(): { promise: Promise<T>; resolve: (value: T) => void 
   return { promise, resolve };
 }
 
-function makeClient(creativeRoot?: string): NexusClient {
+function makeClient(
+  creativeRoot?: string,
+  saved: AgentProfile | null = null,
+): NexusClient {
+  let stored = saved;
   return {
     scanAgents: () => Promise.resolve({ agents: AGENTS }),
+    getAgentProfile: () => Promise.resolve({ profile: stored }),
+    saveAgentProfile: vi.fn((profile: AgentProfile) => {
+      stored = profile;
+      return Promise.resolve({ profile: stored });
+    }),
     getActiveWorkspace: () =>
       Promise.resolve({
         creator_id: 'creator-a',
@@ -184,11 +193,11 @@ describe('StepAgentWorkspace (developer agent + workspace)', () => {
   it('restores a saved custom launch command together with its row on re-entry', async () => {
     const user = userEvent.setup();
     const onFinish = vi.fn();
-    window.localStorage.setItem(
-      'nexus-agent-profile:creator-a',
-      JSON.stringify({ name: 'Claude Code', launchCommand: 'claude --opus' }),
-    );
-    renderStep({ client: makeClient('/home/creator/Nexus'), onFinish });
+    const client = makeClient('/home/creator/Nexus', {
+      name: 'Claude Code',
+      launch_command: 'claude --opus',
+    });
+    renderStep({ client, onFinish });
 
     expect(await screen.findByTestId('agent-row-claude')).toHaveAttribute('aria-checked', 'true');
     expect(
@@ -197,9 +206,9 @@ describe('StepAgentWorkspace (developer agent + workspace)', () => {
 
     await user.click(screen.getByRole('button', { name: '进入开发台' }));
     expect(onFinish).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(window.localStorage.getItem('nexus-agent-profile:creator-a')!)).toEqual({
+    expect(vi.mocked(client.saveAgentProfile)).toHaveBeenCalledWith({
       name: 'Claude Code',
-      launchCommand: 'claude --opus',
+      launch_command: 'claude --opus',
     });
   });
 

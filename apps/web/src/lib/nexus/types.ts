@@ -101,6 +101,8 @@ import type {
   ScaffoldPresetResponse,
   ScanRequest,
   ScanResponse,
+  AgentProfile,
+  AgentProfileResponse,
   SessionDetailResponse,
   SetActiveCreatorRequest,
   SetActiveCreatorResponse,
@@ -340,6 +342,16 @@ export interface NexusClient extends CoreSliceClient {
   // ── Agent host (V1.94 P1) ──────────────────────────────────────────────────
   /** `POST /v1/daemon/agent-host/scan` — detect locally available ACP agents. */
   scanAgents(request?: ScanRequest): Promise<ScanResponse>;
+  /**
+   * `GET /v1/daemon/agent-host/profile` — the daemon-global saved agent
+   * profile (I-000064). `profile: null` means none was saved yet.
+   */
+  getAgentProfile(): Promise<AgentProfileResponse>;
+  /**
+   * `PUT /v1/daemon/agent-host/profile` — persist the daemon-global agent
+   * profile on the service (browser path; the desktop IPC path is unchanged).
+   */
+  saveAgentProfile(profile: AgentProfile): Promise<AgentProfileResponse>;
 
   /** `GET /v1/daemon/works` — cursor list (F-P1/F-P3/F-F1; canonical `items` key). */
   listWorks(query?: ListWorksQuery): Promise<ListWorksResponse>;
@@ -820,6 +832,8 @@ export type {
   ReviewResponse,
   ScanRequest,
   ScanResponse,
+  AgentProfile,
+  AgentProfileResponse,
   ActiveCreatorResponse,
   ActiveWorkspaceResponse,
   ListWorkspacesQuery,

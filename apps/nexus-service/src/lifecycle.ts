@@ -15,6 +15,8 @@ import { ProviderRegistry } from './provider-registry.js';
 
 export interface ServiceCore {
   core: NativeCore;
+  /** Absolute daemon home this process opened (owns `config.toml`). */
+  home: string;
   domainOnly: boolean;
   tlsFingerprint: CertFingerprintResponse | null;
   startedAt: string;
@@ -156,6 +158,7 @@ export async function openServiceCore(
   }
   return {
     core,
+    home: config.home,
     domainOnly: Boolean(config.domainOnly),
     tlsFingerprint,
     startedAt: new Date().toISOString(),

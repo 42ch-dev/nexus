@@ -27,6 +27,7 @@ import {
   patchWorldKbEntity,
 } from './world-kb.js';
 import { ACTOR_ROUTES } from './actors.js';
+import { AGENT_PROFILE_ROUTES } from './agent-profile.js';
 import { WORKSPACE_ROUTES } from './workspaces.js';
 import { MEMORY_ROUTES } from './memory.js';
 import { CONTEXT_ROUTES } from './context.js';
@@ -462,6 +463,8 @@ export const HOST_ROUTES: readonly DomainRoute[] = [
       };
     },
   },
+  // I-000064 — daemon-global agent profile (GET/PUT); see agent-profile.ts.
+  ...AGENT_PROFILE_ROUTES,
 ];
 
 /** World-KB and core changes family (tier2; handler bodies unchanged). */

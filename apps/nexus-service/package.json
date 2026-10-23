@@ -24,7 +24,8 @@
   "dependencies": {
     "@42ch/nexus-contracts": "workspace:*",
     "@42ch/nexus-native": "workspace:*",
-    "@42ch/nexus-provider-acp": "workspace:*"
+    "@42ch/nexus-provider-acp": "workspace:*",
+    "smol-toml": "1.9.1"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
