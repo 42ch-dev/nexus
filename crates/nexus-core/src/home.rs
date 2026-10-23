@@ -37,6 +37,16 @@ use crate::error::{local_db_err, CoreError, CoreResult};
 /// reject the same over-long display token.
 pub const MAX_CREATOR_NAME_LENGTH: usize = 64;
 
+/// Serializes workspace creation in-process.
+///
+/// The create transaction is check-then-write (slug registered? root claimed?
+/// root empty? probe writable? then materialize). Two concurrent creates of the
+/// same slug — or of two slugs claiming the same override root — can both pass
+/// the checks before either registers, so the whole sequence runs under this
+/// lock. It must be process-global, not per instance: [`CoreHomeService`] is
+/// opened per call and holds no state between calls.
+static CREATE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Opaque home-control entry point. The layout is private; callers only pass
 /// the raw user home to [`CoreHomeService::open`] and await the typed
 /// operations. No workspace pool is held between calls.
@@ -291,15 +301,17 @@ impl CoreHomeService {
     /// trusted. The creative root is either the caller's override or the one
     /// shared derivation ([`default_creative_root`]).
     ///
-    /// Every preflight check runs before the first write and `meta.json` (the
-    /// registration discovery reads) is written last: a failure after the
-    /// writability probe removes what this create produced before the error
-    /// returns, so `scan_workspaces` never observes a partial registration.
+    /// The check → probe → materialize transaction runs under a process-global
+    /// async mutex ([`CREATE_LOCK`]): two concurrent creates can otherwise both
+    /// pass the preflight (slug absent, root empty) before either registers.
+    /// `meta.json` (the registration discovery reads) is written last; a
+    /// failure removes only the artifacts this call produced, never a
+    /// pre-existing directory that could already hold a sibling registration.
     ///
     /// # Errors
     /// [`CoreError::Uninitialized`] with no active creator,
     /// [`CoreError::InvalidInput`] for an invalid slug, display name or root
-    /// override (including an unwritable target), and
+    /// override (including an unwritable or unreadable target), and
     /// [`CoreError::WorkspaceConflict`] when the slug, the resolved root or the
     /// target directory content is already claimed.
     #[allow(clippy::too_many_lines)] // one linear create transaction
@@ -318,7 +330,11 @@ impl CoreHomeService {
         }
         let slug = request.workspace_slug;
 
+        // Serialize the whole check+register transaction; see `CREATE_LOCK`.
+        let _create_guard = CREATE_LOCK.lock().await;
+
         let op_dir = operational_workspace_dir(&self.user_home, &creator_id, &slug);
+        let op_dir_preexisting = op_dir.exists();
         if op_dir.join("meta.json").exists() {
             return Err(CoreError::WorkspaceConflict(format!(
                 "workspace '{slug}' already exists for creator {creator_id}"
@@ -342,7 +358,7 @@ impl CoreHomeService {
         }
 
         // `Some` means the target already existed: it is adopted only when
-        // empty, and a later failure removes just the manifest tree we added.
+        // empty, and a later failure removes just the artifacts we added.
         let preexisting_root = creative_root.is_dir().then_some(creative_root.as_path());
         if let Some(root) = preexisting_root {
             if !directory_is_empty(root)? {
@@ -352,9 +368,18 @@ impl CoreHomeService {
                 )));
             }
         }
-        probe_creative_dir(&creative_root)?;
+        if let Err(err) = probe_creative_dir(&creative_root) {
+            // The probe is the first writer; undo the root it created.
+            if preexisting_root.is_none() {
+                let _ = std::fs::remove_dir_all(&creative_root);
+            }
+            return Err(err);
+        }
 
         let db_path = workspace_state_db_path(&self.user_home, &creator_id, &slug);
+        let db_preexisting = db_path.exists();
+        let manifest_path = creative_root.join(".nexus42").join("workspace.json");
+        let manifest_preexisting = manifest_path.exists();
         if let Err(err) = self
             .materialize_new_workspace(
                 &creator_id,
@@ -365,17 +390,16 @@ impl CoreHomeService {
             )
             .await
         {
-            // `meta.json` was never written, so dropping these artifacts
-            // returns the home to its pre-create state.
-            let _ = std::fs::remove_dir_all(&op_dir);
-            match preexisting_root {
-                Some(root) => {
-                    let _ = std::fs::remove_dir_all(root.join(".nexus42"));
-                }
-                None => {
-                    let _ = std::fs::remove_dir_all(&creative_root);
-                }
-            }
+            rollback_new_workspace(
+                &op_dir,
+                op_dir_preexisting,
+                &db_path,
+                db_preexisting,
+                &manifest_path,
+                manifest_preexisting,
+                &creative_root,
+                preexisting_root.is_some(),
+            );
             return Err(err);
         }
 
@@ -725,16 +749,22 @@ fn mint_local_creator_id() -> String {
     format!("ctr_local{random}")
 }
 
-/// Validate a workspace slug: non-empty, single path segment, no `.` / `..`
-/// (retained daemon `validate_slug` rule, core error type).
+/// Validate a workspace slug: non-empty, single path segment, no `.` / `..`,
+/// no control characters (retained daemon `validate_slug` rule plus the shared
+/// name-safety rule, core error type).
 fn validate_workspace_slug(slug: &str) -> CoreResult<()> {
-    if slug.is_empty() || slug.contains('/') || slug.contains('\\') || slug == "." || slug == ".." {
-        return Err(CoreError::InvalidInput {
-            field: "workspace_slug".to_string(),
-            reason: "must be a single path segment".to_string(),
-        });
-    }
-    Ok(())
+    let reason = if slug.is_empty() || slug.contains('/') || slug.contains('\\') || slug == "." || slug == ".."
+    {
+        "must be a single path segment"
+    } else if slug.chars().any(char::is_control) {
+        "must not contain control characters"
+    } else {
+        return Ok(());
+    };
+    Err(CoreError::InvalidInput {
+        field: "workspace_slug".to_string(),
+        reason: reason.to_string(),
+    })
 }
 
 /// The creative root of a workspace: only the first workspace (`default`)
@@ -792,24 +822,74 @@ fn validate_creative_root_override(raw: &str) -> CoreResult<()> {
 }
 
 /// True when `dir` has no entries (a freshly chosen empty directory is adopted).
+/// An unreadable directory is a client-side root problem, so it folds to
+/// `invalid_input` rather than an internal fault.
 fn directory_is_empty(dir: &Path) -> CoreResult<bool> {
-    let mut entries = std::fs::read_dir(dir).map_err(|e| CoreError::Internal {
-        category: format!("workspace_root_read: {e}"),
+    let mut entries = std::fs::read_dir(dir).map_err(|_| CoreError::InvalidInput {
+        field: "creative_root".to_string(),
+        reason: "not readable".to_string(),
     })?;
     Ok(entries.next().is_none())
 }
 
 /// Prove the creative root is writable before any registration artifact is
-/// produced: create it with parents, then write/remove a probe file.
+/// produced: create it with parents, then write/remove a probe file. The probe
+/// removes its own file on a failed write; the caller removes a root this create
+/// created when the probe fails.
 fn probe_creative_dir(root: &Path) -> CoreResult<()> {
     let probe = root.join(format!(".nexus42-probe-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(root)
         .and_then(|()| std::fs::write(&probe, b"probe"))
         .and_then(|()| std::fs::remove_file(&probe))
-        .map_err(|_| CoreError::InvalidInput {
-            field: "creative_root".to_string(),
-            reason: "not writable".to_string(),
+        .map_err(|_| {
+            let _ = std::fs::remove_file(&probe);
+            CoreError::InvalidInput {
+                field: "creative_root".to_string(),
+                reason: "not writable".to_string(),
+            }
         })
+}
+
+/// Undo a failed create by removing only the artifacts this call produced.
+///
+/// The operational directory is removed recursively only when this call created
+/// it; a pre-existing directory keeps everything else. An adopted creative root
+/// is never deleted — only the manifest file this call wrote (and the
+/// `.nexus42` directory when that leaves it empty). `meta.json` is the
+/// registration marker and never pre-existed here (the preflight refuses a
+/// registered slug), so a partial write of it is safe to drop.
+#[allow(clippy::too_many_arguments)] // explicit artifact bookkeeping, one call site
+fn rollback_new_workspace(
+    op_dir: &Path,
+    op_dir_preexisting: bool,
+    db_path: &Path,
+    db_preexisting: bool,
+    manifest_path: &Path,
+    manifest_preexisting: bool,
+    creative_root: &Path,
+    root_preexisting: bool,
+) {
+    if !db_preexisting {
+        let _ = std::fs::remove_file(db_path);
+    }
+    if !manifest_preexisting {
+        let _ = std::fs::remove_file(manifest_path);
+    }
+    let _ = std::fs::remove_file(op_dir.join("meta.json"));
+    if !op_dir_preexisting {
+        let _ = std::fs::remove_dir_all(op_dir);
+    }
+    if root_preexisting {
+        let meta_dir = creative_root.join(".nexus42");
+        let empty = std::fs::read_dir(&meta_dir)
+            .map(|mut entries| entries.next().is_none())
+            .unwrap_or(false);
+        if empty {
+            let _ = std::fs::remove_dir(&meta_dir);
+        }
+    } else {
+        let _ = std::fs::remove_dir_all(creative_root);
+    }
 }
 
 /// Pretty-print `value` into `path`; the category names the failing artifact.

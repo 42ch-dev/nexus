@@ -63,6 +63,7 @@ let setActiveRequests: unknown[] = [];
 let createRequests: Array<Record<string, unknown>> = [];
 let createdItems: unknown[] = [];
 let createConflict = false;
+let activateFailures = 0;
 let createGate: Promise<void> | null = null;
 let releaseCreate: (() => void) | null = null;
 
@@ -98,6 +99,13 @@ function useWorkspaceHandlers({ items, active, activeCreatorId }: WorkspaceHandl
     http.post('/v1/daemon/workspace/active', async ({ request }) => {
       const body = (await request.json()) as { workspace_slug: string };
       setActiveRequests.push(body);
+      if (activateFailures > 0) {
+        activateFailures -= 1;
+        return HttpResponse.json(
+          { success: false, error: { code: 'internal', message: 'Internal server error' } },
+          { status: 500 },
+        );
+      }
       activeSlug = body.workspace_slug;
       return HttpResponse.json({ creator_id: activeCreator, workspace_slug: body.workspace_slug });
     }),
@@ -174,6 +182,7 @@ describe('WorkspaceChips', () => {
     createRequests = [];
     createdItems = [];
     createConflict = false;
+    activateFailures = 0;
     createGate = null;
     releaseCreate = null;
     await i18n.changeLanguage('zh-CN');
@@ -331,6 +340,39 @@ describe('WorkspaceChips', () => {
     );
     const chip = await screen.findByRole('button', { name: '星际拓荒志' });
     await waitFor(() => expect(chip).toHaveAttribute('aria-pressed', 'true'));
+  });
+
+  it('treats a failed activation after a committed create as a retry-activate state', async () => {
+    useWorkspaceHandlers();
+    activateFailures = 1;
+    const user = await openCreatePanel();
+
+    await user.type(screen.getByTestId('workspace-create-name'), '星际拓荒志');
+    await user.click(screen.getByTestId('workspace-create-submit'));
+
+    // Activation failed after the create committed: distinct state + copy.
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('切换失败：创建未完成，请重试');
+    expect(screen.getByTestId('workspace-create-created')).toBeInTheDocument();
+
+    // The chip row now carries the created workspace, but it is not active.
+    const chip = await screen.findByRole('button', { name: '星际拓荒志' });
+    expect(chip).toHaveAttribute('aria-pressed', 'false');
+
+    const retry = screen.getByTestId('workspace-create-submit');
+    expect(retry).toHaveTextContent('重试激活');
+    await user.click(retry);
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('workspace-create-panel')).not.toBeInTheDocument(),
+    );
+    // Only activation re-ran: no second create request (a re-create would 409).
+    expect(createRequests).toHaveLength(1);
+    expect(setActiveRequests).toHaveLength(2);
+    expect(await screen.findByRole('button', { name: '星际拓荒志' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
   });
 
   it('shows 创建中… and disables the button while creating', async () => {

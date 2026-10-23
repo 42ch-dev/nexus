@@ -173,7 +173,7 @@ async fn create_refuses_invalid_slug_name_and_override() {
     let user_home = tmp.path().to_path_buf();
     let creator_id = creator(&svc).await;
 
-    for slug in ["", "a/b", "..", "a\\b"] {
+    for slug in ["", "a/b", "..", "a\\b", "a\nb", "a\0b"] {
         let err = svc
             .create_workspace(request(&creator_id, slug, Some("Bad"), None))
             .await
@@ -183,6 +183,19 @@ async fn create_refuses_invalid_slug_name_and_override() {
             "slug {slug:?}: {err:?}"
         );
     }
+    // Control characters are a validation failure, not a path-safety accident.
+    let control = svc
+        .create_workspace(request(&creator_id, "a\nb", Some("Bad"), None))
+        .await
+        .expect_err("control character in slug");
+    assert!(
+        matches!(
+            control,
+            CoreError::InvalidInput { ref field, ref reason }
+                if field == "workspace_slug" && reason == "must not contain control characters"
+        ),
+        "unexpected: {control:?}"
+    );
 
     let bad_name = svc
         .create_workspace(request(&creator_id, "ctrl", Some("bad\u{7}name"), None))
@@ -252,6 +265,156 @@ async fn create_refuses_unwritable_root() {
         "unexpected: {err:?}"
     );
     assert!(!op_dir(&user_home, &creator_id, "denied").exists());
+    // The adopted directory (pre-existing) is kept and carries no probe residue.
+    assert!(locked.is_dir());
+    let residue = std::fs::read_dir(&locked)
+        .expect("locked readable")
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    assert!(residue.is_empty(), "probe left residue: {residue:?}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn create_probe_failure_leaves_no_directory() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (tmp, svc) = home().await;
+    let user_home = tmp.path().to_path_buf();
+    let creator_id = creator(&svc).await;
+
+    // A read-only parent makes `create_dir_all` fail before any artifact.
+    let locked_parent = user_home.join("locked-parent");
+    std::fs::create_dir_all(&locked_parent).unwrap();
+    std::fs::set_permissions(&locked_parent, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let derived_root = locked_parent.join("child");
+    let err = svc
+        .create_workspace(request(
+            &creator_id,
+            "blocked",
+            Some("Blocked"),
+            Some(&derived_root.display().to_string()),
+        ))
+        .await
+        .expect_err("probe cannot create the root");
+    std::fs::set_permissions(&locked_parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    assert!(
+        matches!(
+            err,
+            CoreError::InvalidInput { ref field, ref reason }
+                if field == "creative_root" && reason == "not writable"
+        ),
+        "unexpected: {err:?}"
+    );
+    assert!(!derived_root.exists(), "failed probe left its directory behind");
+    assert!(locked_parent.is_dir());
+    assert!(!op_dir(&user_home, &creator_id, "blocked").exists());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn create_refuses_unreadable_root() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (tmp, svc) = home().await;
+    let user_home = tmp.path().to_path_buf();
+    let creator_id = creator(&svc).await;
+
+    let unreadable = user_home.join("unreadable-root");
+    std::fs::create_dir_all(&unreadable).unwrap();
+    std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let err = svc
+        .create_workspace(request(
+            &creator_id,
+            "unreadable",
+            Some("Unreadable"),
+            Some(&unreadable.display().to_string()),
+        ))
+        .await
+        .expect_err("unreadable root");
+    std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    // A client-side root problem folds to input validation, never an internal fault.
+    assert!(
+        matches!(
+            err,
+            CoreError::InvalidInput { ref field, ref reason }
+                if field == "creative_root" && reason == "not readable"
+        ),
+        "unexpected: {err:?}"
+    );
+    assert!(!op_dir(&user_home, &creator_id, "unreadable").exists());
+}
+
+#[tokio::test]
+async fn concurrent_same_slug_creates_commit_exactly_one() {
+    let (tmp, svc) = home().await;
+    let user_home = tmp.path().to_path_buf();
+    let creator_id = creator(&svc).await;
+
+    let (left, right) = tokio::join!(
+        svc.create_workspace(request(&creator_id, "race", Some("Race A"), None)),
+        svc.create_workspace(request(&creator_id, "race", Some("Race B"), None)),
+    );
+    let successes = usize::from(left.is_ok()) + usize::from(right.is_ok());
+    assert_eq!(successes, 1, "left={left:?} right={right:?}");
+    let loser = if left.is_err() { left } else { right };
+    assert!(
+        matches!(loser, Err(CoreError::WorkspaceConflict(_))),
+        "unexpected: {loser:?}"
+    );
+
+    // One registration, with the committed directory pair intact.
+    let listed = svc.list_workspaces().await.expect("list");
+    assert_eq!(
+        listed
+            .items
+            .iter()
+            .filter(|item| item.workspace_slug == "race")
+            .count(),
+        1
+    );
+    let op_dir = op_dir(&user_home, &creator_id, "race");
+    assert!(op_dir.join("meta.json").is_file());
+    assert!(nexus_home_layout::workspace_state_db_path(&user_home, &creator_id, "race").is_file());
+    assert!(user_home
+        .join("Nexus")
+        .join("race")
+        .join(".nexus42")
+        .join("workspace.json")
+        .is_file());
+}
+
+#[tokio::test]
+async fn concurrent_same_root_creates_keep_one_owner() {
+    let (tmp, svc) = home().await;
+    let user_home = tmp.path().to_path_buf();
+    let creator_id = creator(&svc).await;
+    let shared_root = user_home.join("shared-root");
+    std::fs::create_dir_all(&shared_root).unwrap();
+    let root = shared_root.display().to_string();
+
+    let (left, right) = tokio::join!(
+        svc.create_workspace(request(&creator_id, "left", Some("Left"), Some(&root))),
+        svc.create_workspace(request(&creator_id, "right", Some("Right"), Some(&root))),
+    );
+    let successes = usize::from(left.is_ok()) + usize::from(right.is_ok());
+    assert_eq!(successes, 1, "left={left:?} right={right:?}");
+    let loser = if left.is_err() { left } else { right };
+    assert!(
+        matches!(loser, Err(CoreError::WorkspaceConflict(_))),
+        "unexpected: {loser:?}"
+    );
+
+    let listed = svc.list_workspaces().await.expect("list");
+    assert_eq!(listed.items.len(), 1);
+    let winner = &listed.items[0];
+    assert_eq!(winner.creative_root, root);
+    // The loser left no operational directory behind.
+    let loser_slug = if winner.workspace_slug == "left" { "right" } else { "left" };
+    assert!(!op_dir(&user_home, &creator_id, loser_slug).exists());
 }
 
 #[tokio::test]
