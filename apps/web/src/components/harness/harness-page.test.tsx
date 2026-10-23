@@ -240,4 +240,22 @@ describe('HarnessPage', () => {
       ),
     );
   });
+
+  it('never reports idle for a truncated walk with zero running sessions', async () => {
+    useHandlers(
+      http.get('/v1/daemon/presets', () => HttpResponse.json(presetBody())),
+      profileHandler('user/one', []),
+      profileHandler('embedded/two', []),
+      profileHandler('sys/three', []),
+      truncatedSessionsHandler([]),
+    );
+
+    renderHarness();
+
+    await waitFor(() => {
+      const badge = screen.getByTestId('preset-running-user/one');
+      expect(badge).toHaveTextContent('running ×0+');
+      expect(badge).not.toHaveTextContent('idle');
+    });
+  });
 });

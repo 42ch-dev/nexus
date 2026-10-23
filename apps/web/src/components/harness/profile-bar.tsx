@@ -6,10 +6,19 @@
  * the browser both go through the service surface. A save never writes a
  * different store than the one being displayed.
  *
- * One explicit success state (`已保存`) and one inline failure state; the prior
- * saved profile stays displayed when a save fails. A selected agent that
- * reports no launch command keeps the stored custom command for the same
- * profile (client-side merge — the desktop IPC store does not merge).
+ * Command origin: the launch-command field shows either the stored custom
+ * command (`stored`), the scan's default for the selected agent (`scan`), or
+ * what the user typed (`edited`). Only an `edited` command is sent as an
+ * override — a scan default is the agent's natural launch command, not user
+ * intent, so the browser save omits it and the service preserves the stored
+ * command. The desktop IPC store replaces the command wholesale, so a `stored`
+ * command is re-sent there to preserve it; a switch to another agent never
+ * carries the previous custom command over.
+ *
+ * Scan-first initialization: the saved profile always wins over the
+ * scan-recommended default, whenever it arrives, until the user touches the
+ * controls. Save stays disabled while the profile read is pending so no scan
+ * default is committed as if it were the persisted choice.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -20,7 +29,11 @@ import { useDesktopCapabilities, useNexusClient } from '@/lib/client-context';
 import { errorMessage } from '@/lib/error-message';
 import { queryKeys } from '@/lib/nexus/query-keys';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+
+/** Where the command currently shown in the field came from. */
+type CommandOrigin = 'stored' | 'scan' | 'edited';
 
 export function ProfileBar() {
   const { t } = useTranslation('strategies');
@@ -43,35 +56,72 @@ export function ProfileBar() {
   );
 
   const [selected, setSelected] = useState('');
+  const [command, setCommand] = useState('');
+  const [commandOrigin, setCommandOrigin] = useState<CommandOrigin>('scan');
+  const [touched, setTouched] = useState(false);
   const [pending, setPending] = useState(false);
   const [savedState, setSavedState] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const profileSettled = saved.isFetched;
 
-  // Preselect the saved profile; fall back to the first installed agent.
+  // Converge on the persisted profile whenever it arrives (it wins over the
+  // scan-recommended default), as long as the user has not touched the
+  // controls. Before the read settles the scan default may show; Save is
+  // gated meanwhile, so it is never committed as the persisted choice.
   useEffect(() => {
-    if (selected.length > 0) return;
-    const initial = saved.profile?.name ?? options[0]?.name;
-    if (initial) setSelected(initial);
-  }, [saved.profile, options, selected]);
+    if (touched) return;
+    const stored = saved.profile;
+    const nextName = stored?.name ?? options[0]?.name;
+    if (!nextName) return;
+    const option = options.find((candidate) => candidate.name === nextName);
+    setSelected(nextName);
+    if (stored?.name === nextName && stored.launchCommand) {
+      setCommand(stored.launchCommand);
+      setCommandOrigin('stored');
+      return;
+    }
+    setCommand(option?.launchCommand ?? '');
+    setCommandOrigin('scan');
+  }, [touched, saved.profile, options]);
+
+  function handleAgentChange(name: string) {
+    setTouched(true);
+    setSelected(name);
+    // A switch never inherits the previous custom command: show the new
+    // agent's scan default (or nothing) as a non-override origin.
+    setCommand(options.find((candidate) => candidate.name === name)?.launchCommand ?? '');
+    setCommandOrigin('scan');
+    setSavedState(false);
+    setSaveError(null);
+  }
+
+  function handleCommandChange(value: string) {
+    setTouched(true);
+    setCommand(value);
+    setCommandOrigin('edited');
+    setSavedState(false);
+    setSaveError(null);
+  }
 
   async function handleSave() {
-    if (selected.length === 0) return;
-    const option = options.find((candidate) => candidate.name === selected);
-    // Preserve the stored custom command when the selected agent reports none
-    // and it is the same stored profile.
-    const command =
-      option?.launchCommand ??
-      (saved.profile?.name === selected ? saved.profile.launchCommand : undefined);
+    if (selected.length === 0 || !profileSettled || pending) return;
+    const trimmed = command.trim();
     setPending(true);
     setSaveError(null);
     setSavedState(false);
     try {
       if (desktop) {
-        await desktop.setAgentProfile(selected, command);
+        // The IPC store replaces the command wholesale: send it for a stored or
+        // edited value (preserve/apply), never for a scan default.
+        const ipcCommand =
+          commandOrigin === 'scan' || trimmed.length === 0 ? undefined : trimmed;
+        await desktop.setAgentProfile(selected, ipcCommand);
       } else {
+        // Service preserves an omitted command; only an explicit edit is an
+        // override (a blank edit explicitly clears it).
         await client.saveAgentProfile(
-          command !== undefined
-            ? { name: selected, launch_command: command }
+          commandOrigin === 'edited'
+            ? { name: selected, launch_command: trimmed }
             : { name: selected },
         );
       }
@@ -120,11 +170,7 @@ export function ProfileBar() {
         aria-label={t('harness.profile.label')}
         className="w-56"
         value={selected}
-        onChange={(event) => {
-          setSelected(event.target.value);
-          setSavedState(false);
-          setSaveError(null);
-        }}
+        onChange={(event) => handleAgentChange(event.target.value)}
       >
         {selected.length === 0 && (
           <option value="" disabled>
@@ -141,12 +187,20 @@ export function ProfileBar() {
         )}
       </Select>
 
+      <Input
+        aria-label={t('harness.profile.commandLabel')}
+        className="w-72"
+        value={command}
+        placeholder={t('harness.profile.commandPlaceholder')}
+        onChange={(event) => handleCommandChange(event.target.value)}
+      />
+
       <Button
         type="button"
         variant="primary"
         size="small"
         onClick={handleSave}
-        disabled={selected.length === 0 || pending}
+        disabled={selected.length === 0 || !profileSettled || pending}
       >
         {pending ? t('harness.profile.saving') : t('harness.profile.save')}
       </Button>

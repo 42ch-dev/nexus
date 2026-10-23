@@ -68,7 +68,6 @@ import type {
   TimelineOverviewResponse,
   TimelineEventInfo,
   UpdateFindingRequest,
-  ValidatePresetRequest,
   WorkSummary,
   WorldRuleCreateRequest,
   WorldRuleUpdateRequest,
@@ -362,11 +361,10 @@ export function usePresets() {
  *
  * Staleness contract: the profile changes only when the preset manifest is
  * scaffolded/reloaded/deleted, so it is cached well past the app-wide 15s
- * default before a background refetch. The write mutations clear it
- * explicitly — `useScaffoldPreset` / `useReloadPreset` / `useDeletePreset`
- * invalidate `queryKeys.presets.all`, whose `['presets']` prefix covers the
- * list plus every `['presets','profile',<id>]` key — so a manifest change
- * refetches promptly regardless of staleness (QC1 W-1 / QC3 W-1 fix).
+ * default before a background refetch. `useScaffoldPreset` clears it
+ * explicitly by invalidating `queryKeys.presets.all`, whose `['presets']`
+ * prefix covers the list plus every `['presets','profile',<id>]` key — so a
+ * manifest change refetches promptly regardless of staleness.
  */
 
 /** Query result of {@link usePresetProfile} — consumed by the Harness catalog
@@ -753,65 +751,10 @@ export function useScaffoldPreset() {
     mutationFn: (request: ScaffoldPresetRequest) => client.scaffoldPreset(request),
     onSuccess: () => {
       // Invalidate the whole `['presets']` key set (list + every profile) so
-      // newly scaffolded manifests surface in catalog lanes immediately
-      // (QC1 W-1 / QC3 W-1).
+      // newly scaffolded manifests surface in the catalog immediately.
       void qc.invalidateQueries({ queryKey: queryKeys.presets.all });
     },
     onError: (error) => errorToast(error, 'error.couldNotScaffoldPreset'),
-  });
-}
-
-export function useValidatePreset() {
-  const client = useNexusClient();
-  const errorToast = useErrorToast();
-  return useMutation({
-    mutationFn: (request: ValidatePresetRequest) => client.validatePreset(request),
-    onError: (error) => errorToast(error, 'error.couldNotValidatePreset'),
-    // No UI caller today (the legacy validate dialog was removed with the
-    // list page in v1220 T3); the hook stays for a preset-management surface
-    // and surfaces structured results through the mutation state.
-  });
-}
-
-export function useReloadPreset() {
-  const client = useNexusClient();
-  const qc = useQueryClient();
-  const errorToast = useErrorToast();
-  const { t } = useTranslation('common');
-  const { toast } = useToast();
-  return useMutation({
-    mutationFn: (presetId: string) => client.reloadPreset(presetId),
-    onSuccess: (_data, presetId) => {
-      toast({ variant: 'success', title: t('toast.presetReloaded'), description: presetId });
-      // Reload re-reads the manifest from disk — lanes/roles/capabilities can
-      // change. `presets.all` (prefix `['presets']`) invalidates the list and
-      // every `['presets','profile',<id>]` key so mounted catalog lane badges
-      // refresh without navigation (QC1 W-1 / QC3 W-1).
-      void qc.invalidateQueries({ queryKey: queryKeys.presets.all });
-    },
-    onError: (error) => errorToast(error, 'error.couldNotReloadPreset'),
-  });
-}
-
-/**
- * Delete a user preset (V1.120 strategies-repair). `DELETE /v1/daemon/presets/{id}`
- * then invalidate the grouped presets list so the row disappears. Only user
- * presets are deletable; no UI caller today (the legacy row actions were
- * removed with the list page in v1220 T3), so the hook stays as the client
- * capability for a future preset-management surface.
- */
-export function useDeletePreset() {
-  const client = useNexusClient();
-  const qc = useQueryClient();
-  const errorToast = useErrorToast();
-  return useMutation({
-    mutationFn: (presetId: string) => client.deletePreset(presetId),
-    onSuccess: () => {
-      // Whole `['presets']` key set — the deleted preset leaves the list and
-      // its profile key is dropped from the cache (QC1 W-1 / QC3 W-1).
-      void qc.invalidateQueries({ queryKey: queryKeys.presets.all });
-    },
-    onError: (error) => errorToast(error, 'error.couldNotDeletePreset'),
   });
 }
 
@@ -1024,6 +967,11 @@ export interface SavedAgentProfileState {
   profile: AgentProfileSnapshot | null;
   /** True only while the profile read is fetching. */
   isLoading: boolean;
+  /**
+   * True once the profile read has settled (success or error). Consumers gate
+   * writes on this so a default is never committed as the persisted choice.
+   */
+  isFetched: boolean;
   error: Error | null;
   refetch: () => void;
 }
@@ -1039,6 +987,7 @@ export function useSavedAgentProfile(): SavedAgentProfileState {
   return {
     profile: profileQuery.data ?? null,
     isLoading: profileQuery.isLoading,
+    isFetched: profileQuery.isFetched,
     error: profileQuery.error,
     refetch: () => {
       void profileQuery.refetch();

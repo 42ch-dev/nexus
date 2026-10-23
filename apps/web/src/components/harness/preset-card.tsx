@@ -55,14 +55,18 @@ export function PresetCard({
       ? { variant: 'warning' as const, label: t('harness.runningUnknown') }
       : running.status === 'loading'
         ? { variant: 'neutral' as const, label: t('harness.runningLoading') }
-        : running.count > 0
+        : running.truncated
           ? {
-              variant: 'queued' as const,
-              label: running.truncated
-                ? t('harness.runningTruncated', { count: running.count })
-                : t('harness.running', { count: running.count }),
+              // A truncated walk is a lower bound even at zero: never `idle`.
+              variant: running.count > 0 ? ('queued' as const) : ('neutral' as const),
+              label: t('harness.runningTruncated', { count: running.count }),
             }
-          : { variant: 'neutral' as const, label: t('harness.idle') };
+          : running.count > 0
+            ? {
+                variant: 'queued' as const,
+                label: t('harness.running', { count: running.count }),
+              }
+            : { variant: 'neutral' as const, label: t('harness.idle') };
 
   return (
     <li
