@@ -34,6 +34,12 @@ export default defineConfig({
       '@web-settings': path.resolve(import.meta.dirname, '../web/src/components/settings/presentational'),
       // Gallery-only alias for app-shared canvas node-chrome extracts (V1.115 NodeChromeShell).
       '@web-canvas': path.resolve(import.meta.dirname, '../web/src/components/canvas/presentational'),
+      // Gallery-only alias for Harness presentational extracts (v1220 Validate
+      // Preset dialog body) — mirrors vite.config.ts.
+      '@web-harness': path.resolve(
+        import.meta.dirname,
+        '../web/src/components/harness/presentational',
+      ),
       // Gallery-only alias for Global Timeline list chrome (V1.124 P2).
       '@web-global-timeline': path.resolve(
         import.meta.dirname,

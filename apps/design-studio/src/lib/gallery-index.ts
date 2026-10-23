@@ -55,6 +55,7 @@ const COMPONENT_ENTRIES: readonly GalleryEntry[] = [
   entry('/components', 'comp-detail-parts', 'Detail Parts', ['fieldrow', 'detailcard', 'readonly'], [UI]),
   entry('/components', 'comp-empty-create-card', 'EmptyCreateCard', ['empty', 'create', 'cta'], [UI]),
   entry('/components', 'comp-form-dialog', 'FormDialog', ['form', 'modal', 'submit'], [UI]),
+  entry('/components', 'comp-validate-preset', 'Validate Preset', ['preset', 'validate', 'warnings'], [UI]),
   entry('/components', 'comp-form-section', 'FormSection', ['fieldset', 'group', 'error'], [UI]),
   entry('/components', 'comp-input', 'Input', ['invalid', 'focus'], [UI]),
   entry('/components', 'comp-label', 'Label', ['form'], [UI]),

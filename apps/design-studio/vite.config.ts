@@ -55,6 +55,12 @@ export default defineConfig({
           '../web/src/components/global-timeline/presentational',
         ),
         '@web-lib/utils': path.resolve(__dirname, '../web/src/lib/utils'),
+        // Gallery-only alias for Harness presentational extracts (v1220 Validate
+        // Preset dialog body).
+        '@web-harness': path.resolve(
+          __dirname,
+          '../web/src/components/harness/presentational',
+        ),
         // Gallery-only alias for selection submenu presentational component (V1.126 P0).
         '@web-shell': path.resolve(
           __dirname,
