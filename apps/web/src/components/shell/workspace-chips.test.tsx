@@ -22,7 +22,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { CreatorHubPage } from '@/pages/creator-hub-page';
-import { DeveloperHubPage } from '@/pages/developer-hub-page';
+import { HubPage } from '@/components/developer/hub-page';
 import { WorkspaceProvider } from '@/lib/workspace-context';
 import { WorkspaceChips } from '@/components/shell/workspace-chips';
 import { i18n } from '@/lib/i18n/config';
@@ -231,9 +231,9 @@ describe('WorkspaceChips', () => {
     expect(await screen.findByTestId('sidebar-create-panel')).toBeInTheDocument();
   });
 
-  it('never mounts in the developer shell (developer hub page)', () => {
+  it('never mounts in the developer shell (操作台 hub page)', () => {
     useWorkspaceHandlers();
-    renderInApp(<DeveloperHubPage />, {
+    renderInApp(<HubPage />, {
       client: new BrowserClient(),
       activeCreatorId: 'creator-a',
     });

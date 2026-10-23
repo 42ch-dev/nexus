@@ -175,34 +175,42 @@
     }
   },
   "hub": {
-    "develop": {
-      "title": "Develop",
-      "description": "Your full Control Room — modules, presets, capabilities, Connect, and more.",
-      "presets": {
-        "title": "Presets",
-        "description": "Your saved and built-in presets — inspect, validate, and manage them.",
-        "count_one": "{{count}} preset",
-        "count_other": "{{count}} presets"
+    "operating": {
+      "title": "Hub",
+      "description": "Local runtime at a glance — service, Agent, Harness, and installed modules.",
+      "loading": "Loading…",
+      "error": "Could not load: {{reason}}",
+      "go": {
+        "manage": "Manage →",
+        "enter": "Enter →"
       },
-      "capabilities": {
-        "title": "Capabilities",
-        "description": "Browse the builtin capability schemas the daemon serves."
+      "service": {
+        "title": "Local service",
+        "running": "Running",
+        "degraded": "Degraded",
+        "version": "nexus-service v{{version}}",
+        "subsystemsOk": "db / engine OK",
+        "degradedSubsystems": "Degraded: {{subsystems}}"
+      },
+      "agent": {
+        "title": "Agent (ACP)",
+        "connected": "Connected",
+        "notConnected": "Not connected",
+        "none": "No agent selected"
+      },
+      "harness": {
+        "title": "Harness summary",
+        "counts_one": "{{count}} preset · {{running}} running",
+        "counts_other": "{{count}} presets · {{running}} running",
+        "countsTruncated_one": "{{count}} preset · {{running}}+ running",
+        "countsTruncated_other": "{{count}} presets · {{running}}+ running",
+        "truncatedNote": "Session history capped at {{cap}} sessions — more may exist."
       },
       "modules": {
-        "title": "Compute modules",
-        "description": "Install and run compute modules."
-      },
-      "strategyCanvas": {
-        "title": "Strategy canvas",
-        "description": "See how a preset orchestrates your strategies."
-      },
-      "runStudio": {
-        "title": "Run Studio",
-        "description": "Run, inspect, and accept or discard compute."
-      },
-      "connect": {
-        "title": "Connect",
-        "description": "Host status and connection tokens."
+        "title": "Installed modules",
+        "count_one": "{{count}} compute module",
+        "count_other": "{{count}} compute modules",
+        "empty": "No compute modules installed"
       }
     },
     "tabs": {

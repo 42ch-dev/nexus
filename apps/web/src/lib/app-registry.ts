@@ -100,7 +100,7 @@ const DEVELOPER_APPS: readonly AppDef[] = [
     icon: LayoutDashboard,
     route: '/developer',
     load: () =>
-      import('@/pages/developer-hub-page').then((m) => ({ default: m.DeveloperHubPage })),
+      import('@/components/developer/hub-page').then((m) => ({ default: m.HubPage })),
   },
   {
     id: 'harness',

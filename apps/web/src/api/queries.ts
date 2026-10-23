@@ -9,7 +9,7 @@
  * Findings + Works use cursor pagination; the hook exposes TanStack's
  * `fetchNextPage`/`hasNextPage` for "Load more".
  */
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   useInfiniteQuery,
@@ -942,6 +942,76 @@ export function useScanAgents(request?: ScanRequest) {
 
 /** Saved agent profile snapshot shape (desktop `getAgentProfile` payload). */
 export type AgentProfileSnapshot = { name: string; launchCommand?: string };
+
+/** Browser-snapshot storage key prefix owned by onboarding (T3). */
+const BROWSER_AGENT_PROFILE_PREFIX = 'nexus-agent-profile:';
+
+/**
+ * Read the browser-saved agent profile snapshot; absent in fresh browsers.
+ *
+ * Extracted out of `AgentChip` (v1220 T2) so the topnav chip and the Hub's
+ * Agent card resolve the saved profile from ONE seam — P2 Task 1 replaces this
+ * seam (plus {@link useAgentProfile}) with the service-backed surface.
+ */
+export function readBrowserAgentProfile(
+  creatorId: string | null | undefined,
+): AgentProfileSnapshot | null {
+  if (!creatorId || typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(`${BROWSER_AGENT_PROFILE_PREFIX}${creatorId}`);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== 'object') return null;
+    // Trust boundary: localStorage can hold anything, so both fields are
+    // validated at runtime — a polluted `launchCommand` is dropped rather than
+    // reaching `?.trim()` callers as a non-string.
+    const { name, launchCommand } = parsed as { name?: unknown; launchCommand?: unknown };
+    if (typeof name !== 'string' || name.trim() === '') return null;
+    return { name, launchCommand: typeof launchCommand === 'string' ? launchCommand : undefined };
+  } catch {
+    return null;
+  }
+}
+
+/** Saved-profile resolution state — the one seam the topnav and Hub share. */
+export interface SavedAgentProfileState {
+  /** Desktop IPC profile, else the browser snapshot; `null` when neither exists. */
+  profile: AgentProfileSnapshot | null;
+  /** True only while the enabled desktop profile query is fetching. */
+  isLoading: boolean;
+  error: Error | null;
+  refetch: () => void;
+}
+
+/**
+ * Saved agent profile plus its query state: the desktop IPC profile when
+ * available, else the browser snapshot. Single seam for the topnav chip and
+ * the Hub Agent card; P2 Task 1 swaps this implementation to the service
+ * surface without touching either caller.
+ */
+export function useSavedAgentProfile(): SavedAgentProfileState {
+  const profileQuery = useAgentProfile();
+  const desktop = useDesktopCapabilities();
+  const activeCreatorId = useActiveCreatorId();
+  // Browser builds have no desktop IPC bridge, so the profile query is
+  // disabled there (`enabled: Boolean(desktop)`). Forcing it would run its
+  // queryFn against a null bridge; retry re-reads the synchronous browser
+  // snapshot by re-rendering instead.
+  const [, setBrowserReadNonce] = useState(0);
+
+  return {
+    profile: profileQuery.data ?? readBrowserAgentProfile(activeCreatorId),
+    isLoading: profileQuery.isLoading,
+    error: profileQuery.error,
+    refetch: () => {
+      if (desktop) {
+        void profileQuery.refetch();
+        return;
+      }
+      setBrowserReadNonce((nonce) => nonce + 1);
+    },
+  };
+}
 
 /**
  * Desktop-only saved agent profile (V1.120 P1 T1).

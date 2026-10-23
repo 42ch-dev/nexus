@@ -79,6 +79,16 @@ export const queryKeys = {
     all: ['agentProfile'] as const,
     detail: () => [...queryKeys.agentProfile.all, 'detail'] as const,
   },
+  // v1220 T2 — 操作台 Hub aggregation keys. Section-scoped so a card's retry
+  // refetches only its own sources (per-card error isolation).
+  hub: {
+    all: ['hub'] as const,
+    service: {
+      health: () => [...queryKeys.hub.all, 'service', 'health'] as const,
+      status: () => [...queryKeys.hub.all, 'service', 'status'] as const,
+    },
+    harnessSessions: () => [...queryKeys.hub.all, 'harness', 'sessions'] as const,
+  },
   chapters: {
     all: ['chapters'] as const,
     lists: () => [...queryKeys.chapters.all, 'list'] as const,

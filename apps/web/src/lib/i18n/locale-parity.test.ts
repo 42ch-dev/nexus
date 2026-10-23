@@ -109,7 +109,8 @@ function flattenValues(obj: JsonRecord, values: string[] = []): string[] {
 
 /**
  * Entrance keys owned by the `shell` namespace (AR-21 + EL §2/§4/§5): switch
- * control, bounce toast, layout labels, identity page, Develop hub v1 cards.
+ * control, bounce toast, layout labels, identity page, 操作台 Hub cards
+ * (v1220 T1/T2).
  * Membership is namespace-exact — a shell-owned key must exist in `shell`
  * (and its zh-CN twin), never in `setup` (plan QC F-5: no cross-namespace
  * escape hatch for the entrance pin).
@@ -131,23 +132,33 @@ const SHELL_ENTRANCE_KEYS: readonly string[] = [
   'entrance.page.option.developer.description',
   'entrance.page.continue',
   'entrance.page.persistFailed',
-  // shell — Develop hub v1 cards (EL §4)
-  'hub.develop.title',
-  'hub.develop.description',
-  'hub.develop.presets.title',
-  'hub.develop.presets.description',
-  'hub.develop.presets.count_one',
-  'hub.develop.presets.count_other',
-  'hub.develop.capabilities.title',
-  'hub.develop.capabilities.description',
-  'hub.develop.modules.title',
-  'hub.develop.modules.description',
-  'hub.develop.strategyCanvas.title',
-  'hub.develop.strategyCanvas.description',
-  'hub.develop.runStudio.title',
-  'hub.develop.runStudio.description',
-  'hub.develop.connect.title',
-  'hub.develop.connect.description',
+  // shell — 操作台 Hub cards (v1220 T1/T2)
+  'hub.operating.title',
+  'hub.operating.description',
+  'hub.operating.loading',
+  'hub.operating.error',
+  'hub.operating.go.manage',
+  'hub.operating.go.enter',
+  'hub.operating.service.title',
+  'hub.operating.service.running',
+  'hub.operating.service.degraded',
+  'hub.operating.service.version',
+  'hub.operating.service.subsystemsOk',
+  'hub.operating.service.degradedSubsystems',
+  'hub.operating.agent.title',
+  'hub.operating.agent.connected',
+  'hub.operating.agent.notConnected',
+  'hub.operating.agent.none',
+  'hub.operating.harness.title',
+  'hub.operating.harness.counts_one',
+  'hub.operating.harness.counts_other',
+  'hub.operating.harness.countsTruncated_one',
+  'hub.operating.harness.countsTruncated_other',
+  'hub.operating.harness.truncatedNote',
+  'hub.operating.modules.title',
+  'hub.operating.modules.count_one',
+  'hub.operating.modules.count_other',
+  'hub.operating.modules.empty',
 ];
 
 /** Setup keys owned by the `setup` namespace — wizard step + progress labels (AR-17). */
