@@ -14,7 +14,6 @@ import { ClientProvider } from '@/lib/client-context';
 import { ActiveCreatorProvider } from '@/lib/active-creator-context';
 import { SetupCompletedProvider } from '@/lib/setup-completed-context';
 import { EntranceProvider } from '@/lib/entrance-context';
-import { CreatorEntitySelectionProvider } from '@/components/layout/creator-entity-selection-context';
 import { LocaleProvider } from '@/components/locale-provider';
 import type { NexusClient } from '@/lib/nexus';
 import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
@@ -77,14 +76,12 @@ export function renderInApp(
             <ActiveCreatorProvider initialCreatorId={activeCreatorId}>
               <SetupCompletedProvider initialCompleted={setupCompleted}>
                 <EntranceProvider>
-                  <CreatorEntitySelectionProvider>
-                    <LocaleProvider>
-                      <ToastProvider>
-                        {children}
-                        <Toaster />
-                      </ToastProvider>
-                    </LocaleProvider>
-                  </CreatorEntitySelectionProvider>
+                  <LocaleProvider>
+                    <ToastProvider>
+                      {children}
+                      <Toaster />
+                    </ToastProvider>
+                  </LocaleProvider>
                 </EntranceProvider>
               </SetupCompletedProvider>
             </ActiveCreatorProvider>

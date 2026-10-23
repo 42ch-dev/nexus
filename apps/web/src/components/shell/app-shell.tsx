@@ -14,7 +14,6 @@ import { useTranslation } from 'react-i18next';
 
 import { CanvasNavCommands } from '@/components/canvas/canvas-nav-commands';
 import { CommandPalette, openPalette } from '@/components/command-palette';
-import { CreatorEntitySelectionProvider } from '@/components/layout/creator-entity-selection-context';
 import { DaemonStatusBar } from '@/components/layout/daemon-status-bar';
 import { resolveEntranceBounce } from '@/components/layout/entrance-guard';
 import { ServiceDegradedBanner } from '@/components/setup/service-degraded-surface';
@@ -59,66 +58,64 @@ export function AppShell() {
   );
 
   return (
-    <CreatorEntitySelectionProvider>
-      <div
-        data-testid="app-shell"
-        className="flex h-screen flex-col overflow-hidden bg-background-100 text-gray-1000"
-      >
-        <ServiceDegradedBanner />
-        <Topnav />
+    <div
+      data-testid="app-shell"
+      className="flex h-screen flex-col overflow-hidden bg-background-100 text-gray-1000"
+    >
+      <ServiceDegradedBanner />
+      <Topnav />
 
-        <div className="flex min-h-0 flex-1 overflow-hidden">
-          {/* Desktop dock rail; mobile keeps the horizontal top nav below. */}
-          <AppRail />
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        {/* Desktop dock rail; mobile keeps the horizontal top nav below. */}
+        <AppRail />
 
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            <nav
-              aria-label={t('aria.primary')}
-              className="flex gap-1 overflow-x-auto border-b border-gray-alpha-400 bg-background-100 px-2 py-2 lg:hidden"
-            >
-              {mobileNav.map(({ to, key }) => (
-                <NavLink
-                  key={to}
-                  to={to}
-                  className={({ isActive }) =>
-                    cn(
-                      'whitespace-nowrap rounded-control px-3 py-1.5 text-label-14 transition-colors duration-state ease-standard motion-reduce:transition-none',
-                      isActive
-                        ? 'bg-gray-alpha-100 text-gray-1000'
-                        : 'text-gray-800 hover:bg-gray-alpha-100 hover:text-gray-1000',
-                    )
-                  }
-                >
-                  {t(`route.${key}`)}
-                </NavLink>
-              ))}
-            </nav>
-
-            {/* Content region — the ONLY scroll region (AD-P2-2). The
-                workspace chip row (T3) mounts inside content apps, not here. */}
-            <main className="min-h-0 flex-1 overflow-y-auto" data-testid="shell-main">
-              <div
-                className={cn(
-                  'mx-auto w-full',
-                  workShell
-                    ? 'max-w-none px-0 py-0'
-                    : 'max-w-[1200px] px-4 py-6 md:px-6 md:py-8',
-                )}
-                data-testid={workShell ? 'main-work-shell' : 'main-standard'}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <nav
+            aria-label={t('aria.primary')}
+            className="flex gap-1 overflow-x-auto border-b border-gray-alpha-400 bg-background-100 px-2 py-2 lg:hidden"
+          >
+            {mobileNav.map(({ to, key }) => (
+              <NavLink
+                key={to}
+                to={to}
+                className={({ isActive }) =>
+                  cn(
+                    'whitespace-nowrap rounded-control px-3 py-1.5 text-label-14 transition-colors duration-state ease-standard motion-reduce:transition-none',
+                    isActive
+                      ? 'bg-gray-alpha-100 text-gray-1000'
+                      : 'text-gray-800 hover:bg-gray-alpha-100 hover:text-gray-1000',
+                  )
+                }
               >
-                <Outlet />
-              </div>
-            </main>
+                {t(`route.${key}`)}
+              </NavLink>
+            ))}
+          </nav>
 
-            {/* Desktop-only daemon footer (browser build renders null). */}
-            <DaemonStatusBar />
-          </div>
+          {/* Content region — the ONLY scroll region (AD-P2-2). The
+              workspace chip row (T3) mounts inside content apps, not here. */}
+          <main className="min-h-0 flex-1 overflow-y-auto" data-testid="shell-main">
+            <div
+              className={cn(
+                'mx-auto w-full',
+                workShell
+                  ? 'max-w-none px-0 py-0'
+                  : 'max-w-[1200px] px-4 py-6 md:px-6 md:py-8',
+              )}
+              data-testid={workShell ? 'main-work-shell' : 'main-standard'}
+            >
+              <Outlet />
+            </div>
+          </main>
+
+          {/* Desktop-only daemon footer (browser build renders null). */}
+          <DaemonStatusBar />
         </div>
-
-        <CanvasNavCommands />
-        <CommandPalette />
       </div>
-    </CreatorEntitySelectionProvider>
+
+      <CanvasNavCommands />
+      <CommandPalette />
+    </div>
   );
 }
 
