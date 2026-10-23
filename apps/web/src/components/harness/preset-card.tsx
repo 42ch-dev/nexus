@@ -2,11 +2,12 @@
  * One Harness catalog row (plan v1220 T2): preset name, list facts, strategy
  * binding state, and running-session state.
  *
- * Read-only: the two controls are the canvas drill-down (row name) and the
- * profile drill-down link. Binding is derived from the preset profile's
- * `states.length > 0`; a failed profile renders an explicit unknown state —
- * never "not bound", which would assert a fact the read never established
- * (PL-13 keeps the row itself listed).
+ * Author actions live on the row: the canvas drill-down (row name), the
+ * profile drill-down link, Validate (dry-run of this preset's manifest),
+ * Reload (re-read it from disk), and — user presets only — Delete. Binding is
+ * derived from the preset profile's `states.length > 0`; a failed profile
+ * renders an explicit unknown state — never "not bound", which would assert a
+ * fact the read never established (PL-13 keeps the row itself listed).
  */
 import { useTranslation } from 'react-i18next';
 import { Sparkles, Trash2 } from 'lucide-react';

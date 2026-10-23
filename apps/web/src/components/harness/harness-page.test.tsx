@@ -156,34 +156,60 @@ describe('HarnessPage', () => {
     expect(screen.getByTestId('preset-binding-user/one')).not.toHaveTextContent('未绑定');
   });
 
-  it('offers reload, delete, and validate from the catalog rows again', async () => {
-    const reloads: string[] = [];
-    const deletes: string[] = [];
+  it('reloads the row so manifest changes reach the catalog', async () => {
+    let listCalls = 0;
     useHandlers(
-      http.get('/v1/daemon/presets', () => HttpResponse.json(presetBody())),
+      http.get('/v1/daemon/presets', () => {
+        listCalls += 1;
+        // The reload re-reads the manifest: the refetched catalog carries the
+        // new list facts, which is what the row must show.
+        return HttpResponse.json(
+          listCalls === 1
+            ? presetBody()
+            : {
+                ...presetBody(),
+                user: [{ id: 'user/one', source: 'user', run_intents: ['review'] }],
+              },
+        );
+      }),
       profileHandler('user/one', []),
       profileHandler('embedded/two', []),
       profileHandler('sys/three', []),
       sessionsHandler([]),
-      http.post(/\/v1\/daemon\/presets\/.*:reload$/, ({ request }) => {
-        reloads.push(request.url);
-        return HttpResponse.json({ preset_id: 'user/one', states: [] });
-      }),
-      http.delete(/\/v1\/daemon\/presets\/.*$/, ({ request }) => {
-        deletes.push(request.url);
-        return new HttpResponse(null, { status: 204 });
-      }),
-      http.post('/v1/daemon/presets:validate', () =>
-        HttpResponse.json({ valid: true, errors: [], warnings: [] }),
+      http.post(/\/v1\/daemon\/presets\/.*:reload$/, () =>
+        HttpResponse.json({ preset_id: 'user/one', states: [] }),
       ),
     );
 
     renderHarness();
     await screen.findByTestId('preset-row-user/one');
+    expect(screen.getByTestId('preset-facts-user/one')).toHaveTextContent('用户 · write');
 
     await userEvent.click(screen.getByTestId('preset-reload-user/one'));
-    await waitFor(() => expect(reloads).toHaveLength(1));
-    expect(decodeURIComponent(reloads[0]!)).toContain('/v1/daemon/presets/user/one:reload');
+
+    await waitFor(() =>
+      expect(screen.getByTestId('preset-facts-user/one')).toHaveTextContent('用户 · review'),
+    );
+  });
+
+  it('deletes a user preset and the row leaves the catalog', async () => {
+    let deleted = false;
+    useHandlers(
+      http.get('/v1/daemon/presets', () =>
+        HttpResponse.json(deleted ? { ...presetBody(), user: [] } : presetBody()),
+      ),
+      profileHandler('user/one', []),
+      profileHandler('embedded/two', []),
+      profileHandler('sys/three', []),
+      sessionsHandler([]),
+      http.delete(/\/v1\/daemon\/presets\/.*$/, () => {
+        deleted = true;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    renderHarness();
+    await screen.findByTestId('preset-row-user/one');
 
     // Delete is offered on user presets only.
     expect(screen.getByTestId('preset-delete-user/one')).toBeInTheDocument();
@@ -193,11 +219,56 @@ describe('HarnessPage', () => {
     await userEvent.click(screen.getByTestId('preset-delete-user/one'));
     const confirm = await screen.findByRole('dialog');
     await userEvent.click(within(confirm).getByRole('button', { name: '删除' }));
-    await waitFor(() => expect(deletes).toHaveLength(1));
-    expect(decodeURIComponent(deletes[0]!)).toContain('/v1/daemon/presets/user/one');
 
-    await userEvent.click(screen.getByTestId('preset-validate-embedded/two'));
-    expect(await screen.findByRole('dialog', { name: '验证预设' })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByTestId('preset-row-user/one')).not.toBeInTheDocument(),
+    );
+    // The rest of the catalog survives the delete.
+    expect(screen.getByTestId('preset-row-embedded/two')).toBeInTheDocument();
+    expect(screen.getByTestId('preset-row-sys/three')).toBeInTheDocument();
+  });
+
+  it('validates the row it was opened from', async () => {
+    const validatedPaths: unknown[] = [];
+    useHandlers(
+      http.get('/v1/daemon/presets', () => HttpResponse.json(presetBody())),
+      profileHandler('user/one', []),
+      profileHandler('embedded/two', []),
+      profileHandler('sys/three', []),
+      sessionsHandler([]),
+      http.get(/\/v1\/daemon\/presets\/[^/]+$/, ({ request }) => {
+        const id = decodeURIComponent(request.url.split('/').pop() ?? '');
+        return HttpResponse.json({
+          id,
+          source: 'user',
+          path: `/tmp/nexus42/presets/${id}/preset.yaml`,
+          yaml: 'revision: 1',
+        });
+      }),
+      http.post('/v1/daemon/presets:validate', async ({ request }) => {
+        const body = (await request.json()) as { path: string };
+        validatedPaths.push(body.path);
+        return HttpResponse.json({ valid: true, errors: [], warnings: [] });
+      }),
+    );
+
+    renderHarness();
+    await screen.findByTestId('preset-row-user/one');
+
+    await userEvent.click(screen.getByTestId('preset-validate-user/one'));
+
+    // The row button names THAT preset: the form arrives pre-filled with its
+    // own manifest path (still editable) instead of a blank disk path.
+    const dialog = await screen.findByRole('dialog', { name: '验证预设' });
+    const pathField = within(dialog).getByRole('textbox');
+    expect(pathField).toHaveValue('/tmp/nexus42/presets/user/one/preset.yaml');
+
+    await userEvent.click(within(dialog).getByRole('button', { name: '验证' }));
+
+    await waitFor(() =>
+      expect(validatedPaths).toEqual(['/tmp/nexus42/presets/user/one/preset.yaml']),
+    );
+    expect(await within(dialog).findByText('预设有效')).toBeInTheDocument();
   });
 
   it('shows a single loading state while presets load', async () => {

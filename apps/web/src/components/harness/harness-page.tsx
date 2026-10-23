@@ -34,6 +34,7 @@ import {
 import { useNexusClient } from '@/lib/client-context';
 import { countRunningSessions, useVisibleSessions } from '@/lib/developer/hub-summary';
 import { errorMessage } from '@/lib/error-message';
+import { useToast } from '@/lib/use-toast';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/ui/states';
@@ -48,12 +49,14 @@ export function HarnessPage() {
   const { t: tCommon } = useTranslation('common');
   const client = useNexusClient();
   const navigate = useNavigate();
+  const { toast } = useToast();
   const presets = usePresets();
   const sessions = useVisibleSessions();
   const reload = useReloadPreset();
   const removePreset = useDeletePreset();
   const [scaffoldOpen, setScaffoldOpen] = useState(false);
-  const [validateOpen, setValidateOpen] = useState(false);
+  /** The row whose manifest is being validated; `null` keeps the dialog closed. */
+  const [validateTarget, setValidateTarget] = useState<{ id: string; path: string } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   const catalogPresets = useMemo<PresetSummary[]>(
@@ -92,6 +95,25 @@ export function HarnessPage() {
       truncated: sessions.data.truncated,
     };
   };
+
+  /**
+   * Validate validates a FILE, so the row's own manifest path is resolved first
+   * (`GET /v1/daemon/presets/{id}`). The dialog opens pre-filled with THAT
+   * path — the row button means this preset, not a blank form — and stays
+   * editable.
+   */
+  async function openValidate(preset: PresetSummary) {
+    try {
+      const detail = await client.getPreset(preset.id);
+      setValidateTarget({ id: preset.id, path: detail.path ?? '' });
+    } catch (error) {
+      toast({
+        variant: 'error',
+        title: tCommon('error.requestFailed'),
+        description: errorMessage(error),
+      });
+    }
+  }
 
   function confirmDelete() {
     if (deleteTarget === null) return;
@@ -150,7 +172,7 @@ export function HarnessPage() {
                 onOpenProfile={() =>
                   navigate(`/strategies/${encodeURIComponent(preset.id)}/profile`)
                 }
-                onValidate={() => setValidateOpen(true)}
+                onValidate={() => void openValidate(preset)}
                 onReload={() => reload.mutate(preset.id)}
                 reloading={reload.isPending && reload.variables === preset.id}
                 onDelete={preset.source === 'user' ? () => setDeleteTarget(preset.id) : undefined}
@@ -165,7 +187,15 @@ export function HarnessPage() {
         onOpenChange={setScaffoldOpen}
         onCreated={(id) => navigate(`/strategies/${encodeURIComponent(id)}`)}
       />
-      <ValidatePresetDialog open={validateOpen} onOpenChange={setValidateOpen} />
+      <ValidatePresetDialog
+        // Keyed by row: a different target is a different form instance.
+        key={validateTarget?.id ?? 'closed'}
+        open={validateTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setValidateTarget(null);
+        }}
+        initialPath={validateTarget?.path}
+      />
 
       <Dialog
         open={deleteTarget !== null}
