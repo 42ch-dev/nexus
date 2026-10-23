@@ -78,11 +78,16 @@ async function writeConfigDocument(home: string, document: TomlTable): Promise<v
     }
     await rename(tempPath, configPath);
     // The rename itself is only durable once the directory entry is synced.
-    const dir = await open(directory, 'r');
-    try {
-      await dir.sync();
-    } finally {
-      await dir.close();
+    // POSIX only: Windows cannot open a directory as a file (EPERM/EISDIR), and
+    // the failure would land AFTER the rename — reporting a successful save as
+    // a 500 and inviting a pointless retry.
+    if (process.platform !== 'win32') {
+      const dir = await open(directory, 'r');
+      try {
+        await dir.sync();
+      } finally {
+        await dir.close();
+      }
     }
   } catch (error) {
     // The wire answer stays generic; the operator log keeps the cause. A temp
@@ -93,16 +98,22 @@ async function writeConfigDocument(home: string, document: TomlTable): Promise<v
   }
 }
 
-/** The stored profile, or null when unset/malformed. */
+/**
+ * The stored profile, or null when unset/malformed.
+ *
+ * Values are normalized on READ with the same rule as the write fold, so a
+ * hand-edited/legacy document is presented exactly as the next save would
+ * store it: trimmed name, trimmed command, an all-blank command is no command.
+ */
 export async function readAgentProfile(home: string): Promise<AgentProfile | null> {
   const table = (await readConfigDocument(home))[PROFILE_TABLE];
   if (!isTomlTable(table)) return null;
-  const name = table['name'];
-  if (typeof name !== 'string' || name.trim().length === 0) return null;
-  const command = table['launch_command'];
-  return typeof command === 'string' && command.length > 0
-    ? { name, launch_command: command }
-    : { name };
+  const storedName = table['name'];
+  const name = typeof storedName === 'string' ? storedName.trim() : '';
+  if (name.length === 0) return null;
+  const storedCommand = table['launch_command'];
+  const command = typeof storedCommand === 'string' ? storedCommand.trim() : '';
+  return command.length > 0 ? { name, launch_command: command } : { name };
 }
 
 /**
@@ -147,16 +158,21 @@ export async function writeAgentProfile(
     isTomlTable(existing) && typeof existing['name'] === 'string'
       ? existing['name'].trim()
       : undefined;
+  // A preserved command is normalized on the way through too: preserving an
+  // untrimmed legacy value would re-persist the very shape the write fold
+  // forbids, and an all-blank stored command means "no command".
   const storedCommand =
     isTomlTable(existing) &&
     storedName === name &&
     typeof existing['launch_command'] === 'string'
-      ? existing['launch_command']
+      ? existing['launch_command'].trim()
       : undefined;
 
   const command =
     request.launch_command === undefined
-      ? storedCommand
+      ? storedCommand !== undefined && storedCommand.length > 0
+        ? storedCommand
+        : undefined
       : requestedCommand !== undefined && requestedCommand.length > 0
         ? requestedCommand
         : undefined;

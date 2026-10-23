@@ -13,7 +13,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { after, before, describe, test } from 'node:test';
-import { parse } from 'smol-toml';
+import { parse, stringify } from 'smol-toml';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const serviceRoot = join(__dirname, '..');
@@ -150,6 +150,39 @@ describe('agent-profile (I-000064)', () => {
     });
   });
 
+  test('an untrimmed stored profile is normalized on read and on merge', async () => {
+    const configPath = configPathFor(home);
+    const document = parse(readFileSync(configPath, 'utf8'));
+    document.agent_profile = {
+      name: '  spaced-agent  ',
+      launch_command: '  /opt/bin/spaced --flag  ',
+    };
+    writeFileSync(configPath, stringify(document), 'utf8');
+
+    // A hand-edited/legacy value is presented exactly as the next save stores it.
+    const read = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`);
+    assert.deepEqual(read.payload, {
+      profile: { name: 'spaced-agent', launch_command: '/opt/bin/spaced --flag' },
+    });
+
+    // Name-only PUT preserves the TRIMMED command (and trims the incoming name).
+    const saved = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`, {
+      method: 'PUT',
+      body: { name: ' spaced-agent ' },
+    });
+    assert.equal(saved.status, 200);
+    assert.deepEqual(saved.payload, {
+      profile: { name: 'spaced-agent', launch_command: '/opt/bin/spaced --flag' },
+    });
+
+    // smol-toml tables are null-prototype objects; compare as plain data.
+    const stored = { ...parse(readFileSync(configPath, 'utf8')).agent_profile };
+    assert.deepEqual(stored, {
+      name: 'spaced-agent',
+      launch_command: '/opt/bin/spaced --flag',
+    });
+  });
+
   test('other daemon-home config keys survive the profile write', async () => {
     // Establish an unrelated key first (simulates creator/workspace config the
     // core already owns), then verify the profile write preserves it.
@@ -250,6 +283,23 @@ describe('agent-profile (I-000064)', () => {
 
     const after = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`);
     assert.deepEqual(after.payload, before.payload);
+
+    // The caps are code points, not UTF-16 units: 201 emoji (402 units) is over
+    // the 200-code-point name bound, and exactly 200 is accepted.
+    const emoji = '\u{1F600}';
+    const overEmoji = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`, {
+      method: 'PUT',
+      body: { name: emoji.repeat(201) },
+    });
+    assert.equal(overEmoji.status, 400);
+    assert.equal(overEmoji.payload.error.code, 'invalid_input');
+
+    const atCap = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`, {
+      method: 'PUT',
+      body: { name: emoji.repeat(200) },
+    });
+    assert.equal(atCap.status, 200);
+    assert.equal(atCap.payload.profile.name, emoji.repeat(200));
   });
 
   test('a failed write leaves no temp file behind', async () => {
