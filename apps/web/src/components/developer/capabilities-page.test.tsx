@@ -7,6 +7,11 @@
  *
  * Also verifies the AR-42 provenance surface: `origin: "user"` capabilities
  * render a Local badge + local-only copy; builtins render a plain row.
+ *
+ * v221-caps-sessions-rail T1 — relocated beside the page and extended with the
+ * two branches the chrome split apart: a filtered miss (its own title quoting
+ * the query + a Clear filter action) and registry-empty precedence over that
+ * miss when no capability is registered at all.
  */
 import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -15,8 +20,9 @@ import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import { BrowserClient } from '@/lib/nexus';
 import { i18n } from '@/lib/i18n/config';
-import { CapabilitiesPage } from '@/pages/capabilities-page';
+import { CapabilitiesPage } from '@/components/developer/capabilities-page';
 import { act, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import enCapabilities from '@/locales/en/capabilities.json';
 import zhCapabilities from '@/locales/zh-CN/capabilities.json';
 
@@ -119,6 +125,86 @@ describe('CapabilitiesPage', () => {
     expect(await screen.findByText('nexus.world.describe')).toBeInTheDocument();
     expect(screen.queryByText('nexus.other.cap')).not.toBeInTheDocument();
     expect(screen.getByDisplayValue('nexus.world.describe')).toBeInTheDocument();
+  });
+
+  it('renders the filtered-miss state for a deep link that matches nothing', async () => {
+    useHandlers(
+      http.get('/v1/daemon/orchestration/capabilities', () =>
+        HttpResponse.json({
+          items: [
+            {
+              name: 'nexus.world.describe',
+              inputSchema: '{"type":"object"}',
+              outputSchema: '{"type":"string"}',
+            },
+          ],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+    );
+
+    renderInApp(<CapabilitiesPage />, {
+      client: client(),
+      initialRouterEntries: ['/capabilities?filter=no.such.cap'],
+    });
+
+    // The miss is a state, not an error: its own title quotes the query.
+    expect(
+      await screen.findByText('No capability matches "no.such.cap"'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Clear the filter to see all capabilities.')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByText('No capabilities')).not.toBeInTheDocument();
+  });
+
+  it('clears the filter in place from the filtered-miss action', async () => {
+    const user = userEvent.setup();
+    useHandlers(
+      http.get('/v1/daemon/orchestration/capabilities', () =>
+        HttpResponse.json({
+          items: [
+            {
+              name: 'nexus.world.describe',
+              inputSchema: '{"type":"object"}',
+              outputSchema: '{"type":"string"}',
+            },
+          ],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+    );
+
+    renderInApp(<CapabilitiesPage />, {
+      client: client(),
+      initialRouterEntries: ['/capabilities?filter=no.such.cap'],
+    });
+
+    await user.click(await screen.findByRole('button', { name: 'Clear filter' }));
+
+    // The full registry shows in place and the input is emptied.
+    expect(await screen.findByText('nexus.world.describe')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('')).toBeInTheDocument();
+    expect(screen.queryByText('No capability matches "no.such.cap"')).not.toBeInTheDocument();
+  });
+
+  it('renders the registry-empty state when a filter is typed but nothing is registered', async () => {
+    useHandlers(
+      http.get('/v1/daemon/orchestration/capabilities', () =>
+        HttpResponse.json({ items: [], pagination: { limit: 20, has_more: false } }),
+      ),
+    );
+
+    renderInApp(<CapabilitiesPage />, {
+      client: client(),
+      initialRouterEntries: ['/capabilities?filter=nexus'],
+    });
+
+    // Registry-empty wins: the filter cannot be blamed for an empty registry.
+    expect(
+      await screen.findByText('Capabilities will appear here once the runtime registers them.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/No capability matches/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Clear filter' })).not.toBeInTheDocument();
   });
 
   it('switches to zh-CN locale without remounting', async () => {

@@ -124,7 +124,9 @@ const DEVELOPER_APPS: readonly AppDef[] = [
     icon: Cpu,
     route: '/capabilities',
     load: () =>
-      import('@/pages/capabilities-page').then((m) => ({ default: m.CapabilitiesPage })),
+      import('@/components/developer/capabilities-page').then((m) => ({
+        default: m.CapabilitiesPage,
+      })),
   },
   {
     id: 'session',
