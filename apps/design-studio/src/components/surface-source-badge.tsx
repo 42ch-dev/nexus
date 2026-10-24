@@ -53,6 +53,7 @@ const EXTRACT_IMPORT_ROOTS: readonly string[] = [
   '@web-settings',
   '@web-global-timeline',
   '@web-shell',
+  '@web-developer',
 ];
 
 /**

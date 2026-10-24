@@ -86,6 +86,7 @@ const VOICE_ENTRIES: readonly GalleryEntry[] = [
 const SURFACES_OVERVIEW_ENTRIES: readonly GalleryEntry[] = [
   entry('/surfaces/setup', 'surfaces-setup', 'Setup', ['wizard', 'steps'], ['@/pages/surfaces']),
   entry('/surfaces/shell', 'surfaces-chronos-titlebar', 'Shell', ['sidebar', 'titlebar', 'settings'], ['@/pages/surfaces']),
+  entry('/surfaces/shell', 'surfaces-rail-apps', 'Modules rail', ['modules', 'manifest', 'run studio'], ['@/pages/surfaces']),
   entry('/surfaces/agent-picker', 'surfaces-agent-picker', 'AgentPicker', ['grid', 'loading', 'empty'], ['@/pages/surfaces']),
   entry('/surfaces/canvas', 'surfaces-canvas-mirrored', 'Canvas', ['outline', 'strategy', 'timeline'], ['@/pages/surfaces']),
   entry('/surfaces/daemon', 'surfaces-daemon', 'Daemon', ['status', 'strip'], ['@/pages/surfaces']),
@@ -124,6 +125,10 @@ const SURFACES_SHELL_ENTRIES: readonly GalleryEntry[] = [
   ]),
   entry('/surfaces/shell', 'surfaces-header-health', 'Header health indicator', ['daemon', 'health'], [
     '@web-layout/daemon-health-indicator-chrome',
+  ]),
+  entry('/surfaces/shell', 'surfaces-rail-apps', 'Modules rail — page, manifest and Run Studio chrome', ['modules', 'manifest', 'run studio', 'proposal'], [
+    '@web-developer/modules-page-chrome',
+    '@web-developer/run-studio-chrome',
   ]),
 ];
 

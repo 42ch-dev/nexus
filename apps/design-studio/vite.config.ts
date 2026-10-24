@@ -66,6 +66,11 @@ export default defineConfig({
           __dirname,
           '../web/src/components/selection-submenu',
         ),
+        // Gallery-only alias for developer generation chrome (v221 modules rail).
+        '@web-developer': path.resolve(
+          __dirname,
+          '../web/src/components/developer/presentational',
+        ),
       },
     },
   server: {

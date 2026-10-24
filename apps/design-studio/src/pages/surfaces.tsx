@@ -35,6 +35,7 @@ import { GlobalTimelineFixtures } from '@/fixtures/global-timeline-fixtures';
 import { LayerBreadcrumbFixtures } from '@/fixtures/layer-breadcrumb-fixtures';
 import { MentalSurfacingFixtures } from '@/fixtures/mental-surfacing-fixtures';
 import { ModuleEditingFixtures } from '@/fixtures/module-editing-fixtures';
+import { ModulesRailFixtures } from '@/fixtures/modules-rail-fixtures';
 import { SelectionSubmenuStubFixtures } from '@/fixtures/selection-submenu-fixtures';
 import { NleTimelineCanvasFixtures } from '@/fixtures/nle-timeline-canvas-fixtures';
 import { TimelineCanvasFixtures } from '@/fixtures/timeline-canvas-fixtures';
@@ -793,6 +794,31 @@ export function SurfacesShellPage() {
         </p>
         <FixtureBoundary>
           <DaemonHealthIndicatorFixture />
+        </FixtureBoundary>
+      </section>
+
+      <section className="mt-10" data-testid="surfaces-rail-apps" id="surfaces-rail-apps">
+        <SurfaceHeading id="surfaces-rail-apps">Modules rail — page, manifest and Run Studio</SurfaceHeading>
+        <SurfaceSourceBadges
+          importPaths={[
+            '@web-developer/modules-page-chrome',
+            '@web-developer/run-studio-chrome',
+            '@42ch/nexus-ui',
+          ]}
+        />
+        <p className="text-copy-14 text-gray-700 mb-6">
+          v221 modules rail — the{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            components/developer/presentational
+          </code>{' '}
+          chrome split out of the product page and Run Studio: list with one
+          selected module, manifest detail beside the select prompt, and the
+          Run Studio in pending / success (proposal visible) / deep-linked
+          detail-error states. Pure view models and literal copy — no router,
+          no QueryClient, no daemon. Theme follows the Studio toggle.
+        </p>
+        <FixtureBoundary>
+          <ModulesRailFixtures />
         </FixtureBoundary>
       </section>
     </div>

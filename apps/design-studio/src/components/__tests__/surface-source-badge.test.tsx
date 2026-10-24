@@ -35,6 +35,12 @@ describe('classifySurfaceImport', () => {
     expect(classifySurfaceImport('@web-shell/selection-submenu')).toBe(
       'extract',
     );
+    expect(
+      classifySurfaceImport('@web-developer/modules-page-chrome'),
+    ).toBe('extract');
+    expect(classifySurfaceImport('@web-developer/run-studio-chrome')).toBe(
+      'extract',
+    );
   });
 
   it('rejects lookalike package prefixes at root/subpath boundaries', () => {
