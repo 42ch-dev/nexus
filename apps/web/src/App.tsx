@@ -30,6 +30,7 @@ import { NotFoundPage } from '@/pages/not-found-page';
 import { SchedulePage } from '@/pages/schedule-page';
 import { SessionRunViewPage } from '@/pages/session-run-view';
 import { WorkShellLayout } from '@/components/layout/work-shell-layout';
+import { WorksInspirationPage } from '@/pages/works-inspiration-page';
 import { WizardShell } from '@/components/onboarding/wizard-shell';
 import { EntrancePage } from '@/pages/entrance-page';
 import { LoadingState } from '@/components/ui/states';
@@ -177,6 +178,11 @@ function AppRoutes() {
         <Route path="timeline" element={<GlobalTimelinePage />} />
         <Route path="works" element={<AppModuleRoute appId="work" />} />
         <Route path="works/chapters" element={<ChaptersPage />} />
+        {/* v1.222 P1 T2 — Inspiration Pool. Creator-scoped (the four pool
+            payloads carry no `work_id`), so it is a static sibling of
+            `works/chapters` outside `WorkShellLayout`; the static segment
+            outranks `works/:workId`. Entry: the work rail link. */}
+        <Route path="works/inspiration" element={<WorksInspirationPage />} />
         <Route path="works/:workId" element={<WorkShellLayout />}>
           <Route index element={<Navigate to="outline" replace />} />
           <Route

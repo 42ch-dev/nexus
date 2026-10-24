@@ -21,6 +21,7 @@ import { AgentPickerFixtures } from '@/fixtures/agent-picker-fixtures';
 import { CanvasSurfacesFixtures } from '@/fixtures/canvas-surfaces-fixtures';
 import { CapabilitiesRailFixtures } from '@/fixtures/capabilities-rail-fixtures';
 import { SessionsRailFixtures } from '@/fixtures/sessions-rail-fixtures';
+import { InspirationPoolChromeFixtures } from '@/fixtures/inspiration-pool-chrome-fixtures';
 import { LaunchDaemonFixtures } from '@/fixtures/launch-daemon-fixtures';
 import {
   CREATOR_NAV,
@@ -875,6 +876,30 @@ export function SurfacesShellPage() {
         </p>
         <FixtureBoundary>
           <SessionsRailFixtures />
+        </FixtureBoundary>
+      </section>
+
+      <section
+        className="mt-10"
+        data-testid="surfaces-inspiration-pool"
+        id="surfaces-inspiration-pool"
+      >
+        <SurfaceHeading id="surfaces-inspiration-pool">Inspiration Pool</SurfaceHeading>
+        <SurfaceSourceBadges
+          importPaths={['@web-works/inspiration-pool-chrome', '@42ch/nexus-ui']}
+        />
+        <p className="text-copy-14 text-gray-700 mb-6">
+          v1222 works rail — the Inspiration Pool chrome split out of the page:
+          header copy, the single-field add form (blank title keeps submit
+          disabled), and one row per stored status: an idea with Promote and
+          Archive, a promoted item with its Work link and no Promote, and a
+          read-only archived item. Empty, list, loading, read-error and
+          blank-title frames. Controlled add state and literal copy — the
+          gallery passes a plain anchor where the app passes a router link.
+          Theme follows the Studio toggle.
+        </p>
+        <FixtureBoundary>
+          <InspirationPoolChromeFixtures />
         </FixtureBoundary>
       </section>
     </div>

@@ -71,6 +71,11 @@ export default defineConfig({
           __dirname,
           '../web/src/components/developer/presentational',
         ),
+        // Gallery-only alias for the works Inspiration Pool chrome (v1222 P1).
+        '@web-works': path.resolve(
+          __dirname,
+          '../web/src/components/works/presentational',
+        ),
       },
     },
   server: {

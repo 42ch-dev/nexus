@@ -76,6 +76,21 @@ describe('WorkRail', () => {
     expect(screen.getByTestId('work-rail-item-work-b')).not.toHaveAttribute('aria-current');
   });
 
+  it('links to the Inspiration Pool and marks it current on its route', async () => {
+    useRailHandlers();
+    renderInApp(
+      <Routes>
+        <Route path="/works/inspiration" element={<WorkRail />} />
+      </Routes>,
+      { client: makeClient(), initialRouterEntries: ['/works/inspiration'] },
+    );
+
+    const link = await screen.findByTestId('work-rail-inspiration-link');
+    expect(link).toHaveAttribute('href', '/works/inspiration');
+    expect(link).toHaveTextContent('Inspiration Pool');
+    expect(link).toHaveAttribute('aria-current', 'page');
+  });
+
   it('sets aria-current on the current work while on chapters (visual match)', async () => {
     useRailHandlers();
 
