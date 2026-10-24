@@ -32,6 +32,23 @@ describe('CapabilitiesRailFixtures', () => {
     }
   });
 
+  it('gives every mounted body its own label/input id pair', () => {
+    render(<CapabilitiesRailFixtures />);
+
+    const ids = VARIANTS.map((testId) => {
+      const frame = screen.getByTestId(testId);
+      // getByLabelText resolves through htmlFor → id: each label reaches the
+      // filter rendered beside it, not the first frame in the document.
+      return within(frame).getByLabelText('Filter capabilities').id;
+    });
+
+    expect(new Set(ids).size).toBe(VARIANTS.length);
+    for (const id of ids) {
+      expect(id.length).toBeGreaterThan(0);
+      expect(document.querySelectorAll(`[id="${id}"]`)).toHaveLength(1);
+    }
+  });
+
   it('renders the registry-empty copy even though a filter is typed', () => {
     render(<CapabilitiesRailFixtures />);
     const frame = screen.getByTestId('capabilities-rail-fixture-empty');

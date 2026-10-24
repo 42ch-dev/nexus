@@ -10,6 +10,8 @@
  * Boundary: no transport, no router, no i18n, no QueryClient. Copy arrives in
  * `copy` props, data as view models, behavior as callbacks.
  */
+import { useId } from 'react';
+
 import { Info, RefreshCw } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
@@ -83,8 +85,10 @@ export function CapabilitiesPageChrome({
     ? items.filter((c) => c.name.toLowerCase().includes(query))
     : items;
 
+  const filterId = useId();
+
   return (
-    <Card className="shadow-card" data-testid="capabilities-page-body">
+    <Card className="shadow-card">
       <CardHeader>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
@@ -92,9 +96,9 @@ export function CapabilitiesPageChrome({
             <CardDescription>{copy.description}</CardDescription>
           </div>
           <div className="flex items-center gap-2">
-            <label htmlFor="caps-filter" className="sr-only">{copy.filterLabel}</label>
+            <label htmlFor={filterId} className="sr-only">{copy.filterLabel}</label>
             <Input
-              id="caps-filter"
+              id={filterId}
               type="search"
               value={filter}
               onChange={(e) => onFilterChange(e.target.value)}
