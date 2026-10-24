@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { InspirationPoolChromeFixtures } from '@/fixtures/inspiration-pool-chrome-fixtures';
+import { ThemeProvider } from '@/components/theme-provider';
 
 /**
  * The Inspiration Pool chrome has five states worth eyeballing: the empty pool
@@ -184,17 +185,19 @@ describe('InspirationPoolChromeFixtures', () => {
   });
 
   it('renders every variant under both themes', () => {
-    for (const theme of ['light', 'dark'] as const) {
-      document.documentElement.classList.toggle('dark', theme === 'dark');
+    for (const forced of ['light', 'dark'] as const) {
+      render(
+        <ThemeProvider forcedTheme={forced}>
+          <InspirationPoolChromeFixtures />
+        </ThemeProvider>,
+      );
 
-      render(<InspirationPoolChromeFixtures />);
-
+      // Proves ThemeProvider applied the resolved `<html>.dark` marker, not a
+      // fixture-owned class (vitest css:false leaves class strings uncomputed).
+      expect(document.documentElement.classList.contains('dark')).toBe(forced === 'dark');
       for (const testId of VARIANTS) {
         expect(screen.getByTestId(testId)).toBeInTheDocument();
       }
-      // Token-backed frame class survives the toggle — the chrome has no
-      // theme prop.
-      expect(screen.getAllByTestId('inspiration-pool-chrome')[0]).toHaveClass('shadow-card');
 
       cleanup();
     }
