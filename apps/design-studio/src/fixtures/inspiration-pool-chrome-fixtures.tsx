@@ -68,7 +68,6 @@ const COPY: InspirationPoolCopy = {
   titlePlaceholder: 'One line that captures the idea.',
   submitLabel: 'Add',
   submittingLabel: 'Adding…',
-  addedLabel: 'Added',
   openWork: 'Open Work',
   promoteLabel: 'Promote to Work',
   promotingLabel: 'Promoting…',
@@ -86,14 +85,14 @@ const ROWS: readonly InspirationPoolRow[] = [
     title: 'The lighthouse keeper catalogues the ships it failed to save',
     status: 'idea',
     statusLabel: 'Idea',
-    addedText: 'Oct 22, 2026',
+    addedLabel: 'Added Oct 22, 2026',
   },
   {
     itemId: 'insp-2b8c4a',
     title: 'A cartographer who maps only the roads that disappeared',
     status: 'promoted',
     statusLabel: 'Promoted',
-    addedText: 'Oct 20, 2026',
+    addedLabel: 'Added Oct 20, 2026',
     workId: 'work-9d1e0f42',
   },
   {
@@ -101,7 +100,7 @@ const ROWS: readonly InspirationPoolRow[] = [
     title: 'Two rival archivists trade a single unfinished sentence every winter',
     status: 'archived',
     statusLabel: 'Archived',
-    addedText: 'Oct 18, 2026',
+    addedLabel: 'Added Oct 18, 2026',
   },
 ];
 
@@ -124,6 +123,7 @@ function ChromeFrame({
   addTitleValue,
   onAddTitleChange,
   onAdd,
+  countLabel,
 }: {
   state: InspirationPoolChromeState;
   rows: readonly InspirationPoolRow[];
@@ -131,13 +131,13 @@ function ChromeFrame({
   addTitleValue: string;
   onAddTitleChange: (value: string) => void;
   onAdd: (title: string) => void;
+  countLabel?: string;
 }) {
   return (
     <InspirationPoolChrome
-      copy={COPY}
+      copy={{ ...COPY, countLabel }}
       state={state}
       rows={[...rows]}
-      total={rows.length}
       onRetry={onRetry}
       addTitleValue={addTitleValue}
       onAddTitleChange={onAddTitleChange}
@@ -177,6 +177,7 @@ function ListFrame() {
       <ChromeFrame
         state="ready"
         rows={ROWS}
+        countLabel="Inspiration Pool: 3 / 3"
         addTitleValue={form.addTitleValue}
         onAddTitleChange={form.setAddTitleValue}
         onAdd={form.submit}

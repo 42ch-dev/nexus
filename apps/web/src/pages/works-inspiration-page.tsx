@@ -68,6 +68,20 @@ export function WorksInspirationPage() {
   const archiveMutation = useArchiveWorkInspiration();
 
   const items = inspiration.data?.items ?? [];
+  const total = inspiration.data?.total;
+
+  const rows: InspirationPoolRow[] = items.map((item) => {
+    const statusKey = STATUS_LABEL_KEYS[item.status];
+    return {
+      itemId: item.item_id,
+      title: item.title,
+      status: item.status,
+      // An unexpected status renders verbatim rather than failing the row.
+      statusLabel: statusKey ? t(statusKey) : item.status,
+      addedLabel: t('inspiration.addedAria', { date: formatDate(item.created_at) }),
+      workId: item.promoted_work_id,
+    };
+  });
 
   const copy: InspirationPoolCopy = {
     title: t('inspiration.title'),
@@ -84,26 +98,16 @@ export function WorksInspirationPage() {
     titlePlaceholder: t('inspiration.titlePlaceholder'),
     submitLabel: t('inspiration.submit'),
     submittingLabel: t('inspiration.submitting'),
-    addedLabel: t('inspiration.addedLabel'),
+    countLabel:
+      total === undefined
+        ? undefined
+        : t('inspiration.countAria', { current: rows.length, total }),
     openWork: t('inspiration.openWork'),
     promoteLabel: t('inspiration.promote'),
     promotingLabel: t('inspiration.promoting'),
     archiveLabel: t('inspiration.archive'),
     archivingLabel: t('inspiration.archiving'),
   };
-
-  const rows: InspirationPoolRow[] = items.map((item) => {
-    const statusKey = STATUS_LABEL_KEYS[item.status];
-    return {
-      itemId: item.item_id,
-      title: item.title,
-      status: item.status,
-      // An unexpected status renders verbatim rather than failing the row.
-      statusLabel: statusKey ? t(statusKey) : item.status,
-      addedText: formatDate(item.created_at),
-      workId: item.promoted_work_id,
-    };
-  });
 
   const state: InspirationPoolChromeState = inspiration.isLoading
     ? 'loading'
@@ -157,7 +161,6 @@ export function WorksInspirationPage() {
         copy={copy}
         state={state}
         rows={rows}
-        total={inspiration.data?.total}
         onRetry={() => inspiration.refetch()}
         addTitleValue={title}
         onAddTitleChange={setTitle}
