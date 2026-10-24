@@ -76,7 +76,7 @@ async function main(): Promise<void> {
   if (running.bootstrapUrl) {
     console.error(`[nexus-service] open: ${running.bootstrapUrl}`);
     // Auto-open only when this process actually serves the SPA; `--no-open`
-    // (used by the Electron detached restart) suppresses it.
+    // (used by the desktop host's detached restart) suppresses it.
     if (!args.noOpen && args.webDist) openDefaultBrowser(running.bootstrapUrl);
   }
 }
