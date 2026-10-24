@@ -68,7 +68,6 @@ const COPY: InspirationPoolCopy = {
   titlePlaceholder: 'One line that captures the idea.',
   submitLabel: 'Add',
   submittingLabel: 'Adding…',
-  statusLabel: 'Status',
   addedLabel: 'Added',
   openWork: 'Open Work',
   promoteLabel: 'Promote to Work',

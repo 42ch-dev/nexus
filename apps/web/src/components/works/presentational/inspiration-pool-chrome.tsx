@@ -49,7 +49,6 @@ export interface InspirationPoolCopy {
   titlePlaceholder: string;
   submitLabel: string;
   submittingLabel: string;
-  statusLabel: string;
   addedLabel: string;
   openWork: string;
   promoteLabel: string;
@@ -303,6 +302,8 @@ export function InspirationPoolChrome({
                 className="text-copy-13 text-gray-700"
                 data-testid="inspiration-pool-count"
               >
+                {/* mechanic 7 pins no count key; the list label names what is counted */}
+                <span className="sr-only">{copy.listAriaLabel}: </span>
                 {rows.length} / {total}
               </p>
             ) : null}

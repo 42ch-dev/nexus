@@ -98,8 +98,10 @@ describe('InspirationPoolChromeFixtures', () => {
     expect(within(idea).getByTestId('inspiration-pool-row-added')).toHaveTextContent(
       'Added: Oct 22, 2026',
     );
-    // Row count rendered from the response `total`.
-    expect(within(frame).getByTestId('inspiration-pool-count')).toHaveTextContent('3 / 3');
+    // Row count rendered from the response `total`, labeled for assistive tech.
+    expect(within(frame).getByTestId('inspiration-pool-count')).toHaveTextContent(
+      /^Inspiration Pool: 3 \/ 3$/,
+    );
   });
 
   it('renders the empty state with the add affordance', () => {

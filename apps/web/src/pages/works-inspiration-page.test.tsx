@@ -104,7 +104,10 @@ describe('WorksInspirationPage', () => {
     expect(within(unexpected).queryAllByRole('link')).toHaveLength(0);
 
     expect(screen.getByTestId('inspiration-back-link')).toHaveAttribute('href', '/works');
-    expect(screen.getByTestId('inspiration-pool-count')).toHaveTextContent('4 / 4');
+    // Count is labeled for assistive tech (list label + `rows / total`).
+    expect(screen.getByTestId('inspiration-pool-count')).toHaveTextContent(
+      /^Inspiration Pool: 4 \/ 4$/,
+    );
     expect(screen.getAllByTestId('inspiration-pool-row-added')[0]).toHaveTextContent(/^Added:/);
   });
 

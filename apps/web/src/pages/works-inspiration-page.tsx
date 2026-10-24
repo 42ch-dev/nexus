@@ -76,7 +76,6 @@ export function WorksInspirationPage() {
     titlePlaceholder: t('inspiration.titlePlaceholder'),
     submitLabel: t('inspiration.submit'),
     submittingLabel: t('inspiration.submitting'),
-    statusLabel: t('inspiration.statusLabel'),
     addedLabel: t('inspiration.addedLabel'),
     openWork: t('inspiration.openWork'),
     promoteLabel: t('inspiration.promote'),
