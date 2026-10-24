@@ -1,7 +1,7 @@
 /**
  * Settings modal controller — V1.131 P2.
  *
- * URL is the open-state SSOT for `/settings/*` and `/modules`. The provider
+ * URL is the open-state SSOT for `/settings/*`. The provider
  * owns last-safe-background, section selection, dirty-source registry, and
  * every close vector via `requestClose`.
  *
@@ -10,10 +10,9 @@
  * Settings URL until the user confirms (BrowserRouter-compatible equivalent of
  * `useBlocker`; data-router migration is tracked separately).
  *
- * V1.147 P2 T3 — the context object is exported for null-safe consumption
- * (the Timeline canvas opens Settings → Modules with a World pre-fill deep
- * link; surfaces rendered outside the provider degrade gracefully instead of
- * throwing from `useSettingsModal`).
+ * V1.147 P2 T3 — the context object is exported for null-safe consumption:
+ * surfaces rendered outside the provider degrade gracefully instead of
+ * throwing from `useSettingsModal`.
  */
 
 import {
@@ -68,7 +67,8 @@ export interface SettingsModalContextValue {
   cancelDiscard: () => void;
 }
 
-export const SettingsModalContext = createContext<SettingsModalContextValue | null>(
+/** Provider-scoped only: `useSettingsModal` is the public entry point. */
+const SettingsModalContext = createContext<SettingsModalContextValue | null>(
   null,
 );
 
@@ -123,7 +123,7 @@ export function SettingsModalProvider({ children }: { children: ReactNode }) {
 
   // Normalize aliases and unknown sections to the canonical Settings path.
   // V1.147 P2 T3: `search` is preserved verbatim so deep links into a section
-  // (`/settings/modules?module=…&run=…`) survive the canonicalization instead
+  // (e.g. `/settings/advanced?x=…`) survive the canonicalization instead
   // of having their query params dropped on arrival.
   useEffect(() => {
     if (!resolved) return;

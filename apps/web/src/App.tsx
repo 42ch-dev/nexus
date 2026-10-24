@@ -136,7 +136,7 @@ function StrategyRedirect() {
 
 /**
  * Product routes render against the last safe non-settings location while the
- * browser URL is `/settings/*` or `/modules` (modal-primary, V1.131 P2).
+ * browser URL is `/settings/*` (modal-primary, V1.131 P2).
  */
 function AppRoutes() {
   const location = useLocation();
@@ -272,7 +272,6 @@ function AppRoutes() {
             redirect is replaced by the entrance guard: Create bounces to
             `/works`, Develop renders the browser (AR-15/AR-19). */}
         <Route path="capabilities" element={<AppModuleRoute appId="caps" />} />
-        {/* Compatibility only — Settings modal owns Modules (V1.131 P2). */}
         <Route path="modules" element={<AppModuleRoute appId="modules" />} />
         <Route path="findings" element={<FindingsPage />} />
         <Route path="memory" element={<AppModuleRoute appId="memory" />} />

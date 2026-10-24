@@ -430,7 +430,7 @@ export interface TimelineCanvasAdapterContext {
    * V1.147 P2 T3 — Open Run hand-off from the compute node inspector.
    * Fires with the full run id + module id when the author activates "Open
    * Run" on a Compute result node; the orchestrator navigates to
-   * Settings → Modules run detail (deep link). Undefined when the compute
+   * `/modules` run detail (deep link). Undefined when the compute
    * inspector is read-only (tests without wiring).
    */
   onOpenRun?: (runId: string, moduleId: string) => void;

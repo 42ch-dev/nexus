@@ -29,8 +29,8 @@ export function resolveEntranceBounce(
 ): string | null {
   if (entrance === 'developer') return null; // Develop never bounces
 
-  // Settings-modal paths (`/settings/*`, `/modules`) resolve the section first
-  // via the existing machinery and check section-level visibility (AR-19).
+  // Settings-modal paths (`/settings/*`) resolve the section first via the
+  // existing machinery and check section-level visibility (AR-19).
   if (isSettingsDrivenPath(pathname)) {
     const resolved = resolveSettingsLocation(pathname, hash);
     if (resolved) {

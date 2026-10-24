@@ -3,13 +3,12 @@
  *
  * Single ordered **descriptor** SSOT for the Settings modal host and demoted
  * test shell: each entry carries `id`, i18n label key, icon, and content
- * renderer. Aliases normalize `/settings`, `/settings/connection`,
- * `/settings/setup`, and `/modules` without parallel route trees.
+ * renderer. Aliases normalize `/settings`, `/settings/connection` and
+ * `/settings/setup` without parallel route trees.
  */
 
 import {
   Bot,
-  Cpu,
   FolderOpen,
   Palette,
   Settings,
@@ -20,14 +19,12 @@ import type { ComponentType } from 'react';
 import { SettingsAgentSection } from '@/pages/settings/settings-agent-section';
 import { SettingsAdvancedSection } from '@/pages/settings/settings-advanced-section';
 import { SettingsAppearanceSection } from '@/pages/settings/settings-appearance-section';
-import { SettingsModulesSection } from '@/pages/settings/settings-modules-section';
 import { SettingsWorkspaceSection } from '@/pages/settings/settings-workspace-section';
 
 export type SettingsSectionId =
   | 'agent'
   | 'workspace'
   | 'appearance'
-  | 'modules'
   | 'advanced';
 
 /** Ordered section descriptor — chrome + content share this SSOT. */
@@ -58,12 +55,6 @@ export const SETTINGS_SECTION_DESCRIPTORS: readonly SettingsSectionDescriptor[] 
       labelKey: 'nav.appearance',
       icon: Palette,
       Content: SettingsAppearanceSection,
-    },
-    {
-      id: 'modules',
-      labelKey: 'nav.modules',
-      icon: Cpu,
-      Content: SettingsModulesSection,
     },
     {
       id: 'advanced',
@@ -108,7 +99,6 @@ function isSectionId(value: string): value is SettingsSectionId {
 /** True when the browser URL should drive the Settings modal (not a product page). */
 export function isSettingsDrivenPath(pathname: string): boolean {
   return (
-    pathname === '/modules' ||
     pathname === '/settings' ||
     pathname.startsWith('/settings/')
   );
@@ -125,10 +115,6 @@ export function resolveSettingsLocation(
   if (!isSettingsDrivenPath(pathname)) return null;
 
   const hashId = hash.startsWith('#') ? hash.slice(1) : hash;
-
-  if (pathname === '/modules') {
-    return { section: 'modules', hash: '', pathname: '/settings/modules' };
-  }
 
   if (pathname === '/settings' || pathname === '/settings/') {
     return {

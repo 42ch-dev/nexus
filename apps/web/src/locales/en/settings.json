@@ -8,7 +8,6 @@
     "agent": "Agent",
     "workspace": "Profiles",
     "appearance": "Appearance",
-    "modules": "Modules",
     "advanced": "Advanced"
   },
   "discard": {

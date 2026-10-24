@@ -31,7 +31,8 @@
         "../web/src/components/global-timeline/presentational/*"
       ],
       "@web-lib/utils": ["../web/src/lib/utils.ts"],
-      "@web-shell/*": ["../web/src/components/selection-submenu/*"]
+      "@web-shell/*": ["../web/src/components/selection-submenu/*"],
+      "@web-developer/*": ["../web/src/components/developer/presentational/*"]
     },
 
     /* Strictness */

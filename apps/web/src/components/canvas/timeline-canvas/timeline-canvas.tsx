@@ -53,7 +53,7 @@
  * affordance.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useCallback, useContext } from 'react';
+import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useBeforeUnload, useNavigate, useSearchParams } from 'react-router';
 import type { Node } from '@xyflow/react';
@@ -74,7 +74,6 @@ import {
   useWorks,
 } from '@/api/queries';
 import { useNexusClient } from '@/lib/client-context';
-import { SettingsModalContext } from '@/components/layout/settings-modal-context';
 import { LoadingState, ErrorState, EmptyState, Spinner } from '@/components/ui/states';
 import { Button } from '@42ch/nexus-ui';
 import { useToast } from '@/lib/use-toast';
@@ -396,14 +395,11 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     return map;
   }, [computeModules.data]);
 
-  // ── V1.147 P2 T3 — Settings → Modules Run Studio deep links ─────────────
+  // ── V1.147 P2 T3 — Modules Run Studio deep links ────────────────────────
   //
   // The Run Module entry (toolbar + empty-state) and the compute inspector's
-  // Open Run hand-off both open the Settings modal with the Modules section.
-  // The context is consumed null-safely: surfaces rendered outside
-  // `SettingsModalProvider` (isolated canvas tests) degrade to no entry
-  // chrome; production always provides the provider (App wraps AppRoutes).
-  const settingsModal = useContext(SettingsModalContext);
+  // Open Run hand-off both navigate to the `/modules` page, which owns the
+  // shared Run Studio.
 
   // Timeline-scoped Run Studio: World pre-filled via `?world=` (behavior
   // spec §1 P2 — context pre-fill + entry chrome, not a second studio).
@@ -412,28 +408,22 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   // `branch_id` and compute run/accept writes the fork (not the world
   // root). Root (undefined) → no branch param, unchanged.
   const onRunModule = useCallback(() => {
-    settingsModal?.openSettings(
-      'modules',
-      undefined,
-      undefined,
-      `?world=${encodeURIComponent(worldId)}${
+    navigate(
+      `/modules?world=${encodeURIComponent(worldId)}${
         activeBranchId ? `&branch=${encodeURIComponent(activeBranchId)}` : ''
       }`,
     );
-  }, [settingsModal, worldId, activeBranchId]);
+  }, [navigate, worldId, activeBranchId]);
 
-  // Open Run from a Compute result node → Settings → Modules run detail
-  // (deep link selects the module + opens the run inspector).
+  // Open Run from a Compute result node → `/modules` run detail (deep link
+  // selects the module + opens the run inspector).
   const onOpenRun = useCallback(
     (runId: string, moduleId: string) => {
-      settingsModal?.openSettings(
-        'modules',
-        undefined,
-        undefined,
-        `?module=${encodeURIComponent(moduleId)}&run=${encodeURIComponent(runId)}`,
+      navigate(
+        `/modules?module=${encodeURIComponent(moduleId)}&run=${encodeURIComponent(runId)}`,
       );
     },
-    [settingsModal],
+    [navigate],
   );
 
   // ── V1.123 P3 Task 4 — bound Work (cross-surface navigation) ───────────
@@ -1130,10 +1120,9 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     // the CTA's `data-work-id` matches the actual navigation target.
     boundWorkEventWorkId,
     onViewInWorkTimeline: boundWorkId ? onViewInWorkTimeline : undefined,
-    // V1.147 P2 T3 — Open Run hand-off from the compute node inspector.
-    // Wired only when the Settings modal context exists (production always
-    // provides it; isolated canvas tests degrade to read-only inspectors).
-    onOpenRun: settingsModal ? onOpenRun : undefined,
+    // V1.147 P2 T3 — Open Run hand-off from the compute node inspector to the
+    // `/modules` page.
+    onOpenRun,
     // V1.162 P2 T1 — fork-point hand-off from the compute node inspector.
     // Opens the fork-create dialog pre-seeded with the picked event (the
     // fork point); always wired — the button only renders on compute nodes.
@@ -1458,17 +1447,15 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
           title={t('timeline.empty.title')}
           description={t('timeline.empty.description')}
           action={
-            settingsModal ? (
-              <Button
-                type="button"
-                variant="primary"
-                data-testid="timeline-run-module-empty-cta"
-                onClick={onRunModule}
-              >
-                <Cpu className="h-4 w-4" aria-hidden />
-                {t('timeline.runModuleEntry.button')}
-              </Button>
-            ) : undefined
+            <Button
+              type="button"
+              variant="primary"
+              data-testid="timeline-run-module-empty-cta"
+              onClick={onRunModule}
+            >
+              <Cpu className="h-4 w-4" aria-hidden />
+              {t('timeline.runModuleEntry.button')}
+            </Button>
           }
         />
       ) : isBriefEmpty ? (
@@ -1699,9 +1686,8 @@ function TimelineCanvasHeader({
   showAltViewToggle: boolean;
   /**
    * V1.147 P2 T3 — Run Module entry (behavior spec §1 P2 hero shortcut).
-   * Opens the shared Run Studio (Settings → Modules) with the World
-   * pre-filled. The orchestrator omits it when the Settings modal context
-   * is absent (isolated canvas tests).
+   * Opens the shared Run Studio on the `/modules` page with the World
+   * pre-filled.
    */
   onRunModule?: () => void;
 }) {

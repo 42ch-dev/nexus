@@ -115,7 +115,8 @@ const DEVELOPER_APPS: readonly AppDef[] = [
     label: 'rail.modules',
     icon: Boxes,
     route: '/modules',
-    load: () => import('@/pages/modules-page').then((m) => ({ default: m.ModulesPage })),
+    load: () =>
+      import('@/components/developer/modules-page').then((m) => ({ default: m.ModulesPage })),
   },
   {
     id: 'caps',
