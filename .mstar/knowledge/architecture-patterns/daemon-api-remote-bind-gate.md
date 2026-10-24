@@ -4,7 +4,7 @@ problem_type: architecture_pattern
 category: architecture-patterns
 severity: high
 date: 2026-07-05
-last_updated: 2026-10-12
+last_updated: 2026-10-25
 tags:
   - daemon-api
   - remote-bind
@@ -24,8 +24,13 @@ Pattern for allowing the Nexus daemon to bind to a non-loopback interface only w
 The Nexus service serves the **Daemon API** over HTTP. By default it binds to loopback (`127.0.0.1`, `::1`, `localhost`) so that only local clients can reach it. A non-loopback bind is opt-in and fail-closed: it requires **all** of
 
 1. `--allow-remote` (explicit intent),
-2. `--tls-cert` + `--tls-key` (TLS is mandatory off-loopback — a cleartext non-loopback listener is refused),
-3. an API key in `NEXUS42_DAEMON_API_KEY` (`apps/nexus-service/src/config.ts:373-374`).
+2. an API key in `NEXUS42_DAEMON_API_KEY` (`apps/nexus-service/src/config.ts:373-374`).
+
+TLS (`--tls-cert` + `--tls-key`, supplied together per `config.ts:476-477`) is **optional**
+since the 2026-10-22 browser-access change (`93b2043a4`): a plain-HTTP LAN listener with
+`--allow-remote` + key is admitted, because browser clients cannot present a client-side
+trust anchor and the key plus the tokenized bootstrap URL carry the security weight
+(see Request gate below).
 
 `--allow-remote` / `--tls-cert` / `--tls-key` are parsed in `apps/nexus-service/src/config.ts:439-446` (cert and key must be supplied together, `config.ts:476-477`). The gate is enforced both at startup and per request; neither depends on `NEXUS_DAEMON_REMOTE_BIND`.
 
@@ -39,10 +44,10 @@ Enforce the gate **before the listener is opened** and again on every *guarded* 
 
 - loopback bind host (`isLoopbackBindHost`, `bind.ts:6-25`) → allowed;
 - non-loopback without `--allow-remote` → `403 forbidden`;
-- non-loopback without `--tls-cert`/`--tls-key` → `403 forbidden`;
-- non-loopback without an API key → `401 auth_required`.
+- non-loopback without an API key → `401 auth_required`;
+- TLS is optional (cleartext LAN binds are admitted with the key).
 
-**Request gate** — `checkApiKey` (`apps/nexus-service/src/security.ts:83-89`) re-checks on each **guarded** request via `validateBindPolicy` (`security.ts:44-58`): a non-loopback peer without `--allow-remote` is `403 forbidden`, and non-loopback without TLS cert/key is `403 forbidden`. Keyed mode (`authMode == 'keyed_all'`) requires the `x-api-key` header to constant-time-match `config.apiKey`; in keyless mode a non-loopback peer is refused `403 forbidden`, so loopback bypass can never leak to a remote address. The service invokes it only for routes whose tier is not `unguarded` (`apps/nexus-service/src/server.ts:377-389`); explicitly unguarded runtime surfaces (e.g. the cert-fingerprint route, `apps/nexus-service/src/routes.ts:294-301`) stay unauthenticated **by design**.
+**Request gate** — `checkApiKey` (`apps/nexus-service/src/security.ts:83-89`) re-checks on each **guarded** request via `validateBindPolicy` (`security.ts:44-58`): a non-loopback peer without `--allow-remote` is `403 forbidden`, and a non-loopback peer over cleartext is refused **only while unauthenticated** (`security.ts:44-65` — `authenticated` becomes true after API-key/session-cookie admission, and is always true for the one-time `/__bootstrap` token route, `server.ts:384-389`). SPA static serving sits behind the origin gate and is key-free (`server.ts:517-520`), which is what lets a fresh LAN browser land on the app shell instead of a TLS interstitial. Keyed mode (`authMode == 'keyed_all'`) requires the `x-api-key` header to constant-time-match `config.apiKey`; in keyless mode a non-loopback peer is refused `403 forbidden`, so loopback bypass can never leak to a remote address. The service invokes it only for routes whose tier is not `unguarded` (`apps/nexus-service/src/server.ts:377-389`); explicitly unguarded runtime surfaces (e.g. the cert-fingerprint route, `apps/nexus-service/src/routes.ts:294-301`) stay unauthenticated **by design**.
 
 **Serving** — when both PEMs are present the listener is `node:https` (`createHttpsServer`, `apps/nexus-service/src/server.ts:461-467`); otherwise `node:http`.
 
@@ -54,18 +59,16 @@ The core **Connect peer-tools lane** (`crates/nexus-core/src/connect/accept.rs:2
 
 - **Fail-closed**: a missing flag, cert/key, or key stops the service before a socket is opened, and the request gate refuses too.
 - **Loopback unaffected**: local development and desktop default paths require no extra flags.
-- **TLS mandatory off-loopback**: an opt-in remote listener can never run in cleartext, so the API key and manuscript bytes are not exposed on the LAN.
+- **Key-backed cleartext is bounded**: a plain-HTTP LAN listener requires explicit `--allow-remote` plus the key, and unauthenticated cleartext requests are refused; TLS remains available (and recommended) whenever certificates exist, but is no longer a startup precondition.
 - **Auth middleware remains**: the startup gate protects against accidental bind; the request gate still enforces key presence on every non-loopback **guarded** request.
 
 ## Testing pattern
 
 1. **Pure-function unit test** for `isLoopbackBindHost`: `localhost`, `127.x`, `::1` → true; a public/LAN IP → false.
-2. **Startup-gate unit test** for `validateStartupBind`:
-   - loopback host → allowed with no flags;
-   - non-loopback, no `--allow-remote` → refused;
-   - non-loopback, `--allow-remote` but no cert/key → refused;
-   - non-loopback, `--allow-remote` + cert/key but no `NEXUS42_DAEMON_API_KEY` → refused;
-   - non-loopback with all three → allowed.
+2. **Gate-matrix unit test** (`apps/nexus-service/tests/i-000061-gate-matrix.test.mjs`, pure functions, no socket):
+   - `validateStartupBind`: unix exempt; loopback allowed keyless/TLS-less; non-loopback without `--allow-remote` → 403; non-loopback without key → 401; **plain-HTTP LAN row (`--allow-remote` + key, no TLS) admitted**;
+   - `validateBindPolicy`: non-loopback without `--allow-remote` → 403; TLS admits unauthenticated; **unauthenticated no-TLS → 403**; **authenticated no-TLS → admitted**; `/__bootstrap` needs no TLS.
+   Red-on-revert: reintroducing a TLS startup precondition fails the plain-HTTP LAN row; dropping the `!authenticated` guard fails the unauthenticated-no-TLS row.
 3. **Env-var serialization**: read `NEXUS42_DAEMON_API_KEY` once at config resolution (`config.ts:373-374`); tests set it before building the config rather than mutating process env mid-test.
 
 ## When to apply
