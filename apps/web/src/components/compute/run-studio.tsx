@@ -704,9 +704,7 @@ function runStudioCopy(t: TFunction): RunStudioCopy {
     appliedNote: t('run.appliedNote'),
     discardedNote: t('run.discardedNote'),
     runningNote: t('run.runningNote'),
-    formCopy: runFormCopy(t),
     proposalsCopy: proposalCopy(t),
-    runsTableCopy: runsTableCopy(t),
   };
 }
 

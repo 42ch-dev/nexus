@@ -188,9 +188,7 @@ const RUN_COPY: RunStudioCopy = {
   appliedNote: 'Proposals applied to the World.',
   discardedNote: 'Proposals discarded. World unchanged.',
   runningNote: 'This Run is still executing.',
-  formCopy: FORM_COPY,
   proposalsCopy: PROPOSAL_COPY,
-  runsTableCopy: RUNS_COPY,
 };
 
 /* ------------------------------------------------------------------ */

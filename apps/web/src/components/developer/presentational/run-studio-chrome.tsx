@@ -158,9 +158,7 @@ export interface RunStudioCopy {
   appliedNote: string;
   discardedNote: string;
   runningNote: string;
-  formCopy: RunFormCopy;
   proposalsCopy: ProposalSectionsCopy;
-  runsTableCopy: RunsTableCopy;
 }
 
 export interface RunStudioChromeProps {
