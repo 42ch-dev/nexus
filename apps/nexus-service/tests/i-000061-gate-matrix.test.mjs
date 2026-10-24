@@ -2,8 +2,10 @@
 /**
  * I-000061 — the plain-HTTP LAN entrance gate matrix.
  *
- * Both gates are pure functions, so this suite needs no socket and never opens
- * a listener on a non-loopback address; every row is a direct call.
+ * Both gates are pure functions, so the matrix rows are direct calls and the
+ * suite never opens a non-loopback listener. The gate-before-listen claim is
+ * asserted black-box instead: a refused boot exits non-zero and prints no
+ * ready line, so a startup path that skipped the gate stays red.
  *
  * Startup (`validateStartupBind`, bind.ts:31-52) must stay:
  *  - unix transport exempt (its socket is guarded by directory/file mode);
@@ -25,7 +27,10 @@
  * `!authenticated` guard fails "unauthenticated no-TLS remote request refused".
  */
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import net from 'node:net';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, test } from 'node:test';
@@ -71,9 +76,22 @@ function assertAdmitted(failure) {
   assert.equal(failure, null, 'the gate must admit this row');
 }
 
+/** `--port 0` is refused by the CLI, so reserve a concrete free port first;
+ * a free port also keeps a regression that reaches `listen` observable. */
+function freePort() {
+  return new Promise((resolvePort, rejectPort) => {
+    const probe = net.createServer();
+    probe.once('error', rejectPort);
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address();
+      probe.close(() => resolvePort(port));
+    });
+  });
+}
+
 const LOOPBACK_HOSTS = ['127.0.0.1', '127.0.0.53', 'localhost', 'LOCALHOST', '::1', '[::1]'];
 
-describe('validateStartupBind — gate before listen', () => {
+describe('validateStartupBind — startup gate', () => {
   test('unix transport is exempt from the remote-bind policy', () => {
     assertAdmitted(
       startupError({ transport: 'unix', host: '0.0.0.0', allowRemote: false, apiKey: null }),
@@ -126,18 +144,71 @@ describe('validateStartupBind — gate before listen', () => {
     );
   });
 
-  test('the startup gate throws synchronously and runs before the listener is created', () => {
+  test('the startup gate throws synchronously', () => {
     assert.throws(
       () => validateStartupBind(config({ host: '10.0.0.5' })),
       (error) => error.status === 403,
       'the gate must refuse synchronously, not through a deferred path',
     );
-    const source = readFileSync(join(serviceRoot, 'dist/index.js'), 'utf8');
-    const gateAt = source.indexOf('validateStartupBind(config)');
-    const listenAt = source.indexOf('listenServer(');
-    assert.ok(gateAt >= 0, 'startService must call the startup gate');
-    assert.ok(listenAt >= 0, 'startService must listen through listenServer');
-    assert.ok(gateAt < listenAt, 'the startup gate must run before the listener is created');
+  });
+});
+
+/**
+ * The pure rows above cannot prove the gate runs *before* the listener; only a
+ * real boot can. A refused bind must exit non-zero and never print the ready
+ * line on stdout — wiping the gate call from `startService` turns this red.
+ */
+describe('startService wiring — the gate refuses before listen', () => {
+  test('a non-loopback bind without --allow-remote exits without a ready line', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'nexus-gate-home-'));
+    const port = await freePort();
+    try {
+      const child = spawn(
+        process.execPath,
+        [
+          join(serviceRoot, 'dist/main.js'),
+          '--home',
+          home,
+          '--host',
+          '0.0.0.0',
+          '--port',
+          String(port),
+        ],
+        { stdio: ['ignore', 'pipe', 'pipe'] },
+      );
+      let stdout = '';
+      let stderr = '';
+      child.stdout.setEncoding('utf8');
+      child.stderr.setEncoding('utf8');
+      child.stdout.on('data', (chunk) => {
+        stdout += chunk;
+      });
+      child.stderr.on('data', (chunk) => {
+        stderr += chunk;
+      });
+      const status = await new Promise((resolveExit, rejectExit) => {
+        const timer = setTimeout(() => {
+          child.kill('SIGKILL');
+          rejectExit(
+            new Error(
+              `refused boot never exited; it must not reach listen. stdout: ${JSON.stringify(stdout)}`,
+            ),
+          );
+        }, 20_000);
+        child.once('exit', (code) => {
+          clearTimeout(timer);
+          resolveExit(code);
+        });
+      });
+      assert.notEqual(status, 0, 'a non-loopback bind without --allow-remote must fail the boot');
+      assert.ok(
+        !stdout.includes('NEXUS_SERVICE_READY'),
+        `a refused boot must print no ready line: ${JSON.stringify(stdout)}`,
+      );
+      assert.match(stderr, /--allow-remote/);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });
 
