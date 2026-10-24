@@ -54,6 +54,7 @@ const EXTRACT_IMPORT_ROOTS: readonly string[] = [
   '@web-global-timeline',
   '@web-shell',
   '@web-developer',
+  '@web-works',
 ];
 
 /**

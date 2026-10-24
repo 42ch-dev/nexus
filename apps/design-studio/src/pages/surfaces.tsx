@@ -21,6 +21,7 @@ import { AgentPickerFixtures } from '@/fixtures/agent-picker-fixtures';
 import { CanvasSurfacesFixtures } from '@/fixtures/canvas-surfaces-fixtures';
 import { CapabilitiesRailFixtures } from '@/fixtures/capabilities-rail-fixtures';
 import { SessionsRailFixtures } from '@/fixtures/sessions-rail-fixtures';
+import { InspirationPoolChromeFixtures } from '@/fixtures/inspiration-pool-chrome-fixtures';
 import { LaunchDaemonFixtures } from '@/fixtures/launch-daemon-fixtures';
 import {
   CREATOR_NAV,
@@ -521,8 +522,10 @@ export function SurfacesIndexPage() {
         mirrored Outline/Strategy/WorldKB node chrome, Mental Surfacing,
         NLE/World/Work/Global timelines, Layer Breadcrumb, Conflict Modals;
         Daemon status strip; Launch splash; Selection Submenu (6 variants);
-        Rail apps — Modules (page, manifest detail, Run Studio), Capabilities
-        (registry, filter, empty), Sessions (session cards, zero-session).
+        Rail apps — Modules (ready list, manifest detail, Run Studio pending /
+        success / detail error, Advanced-JSON open), Capabilities (registry
+        hit, filter miss, empty, registry error), Sessions (mixed cards,
+        zero-session).
         Sources span all four categories: promoted primitives (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @42ch/nexus-ui
@@ -823,11 +826,12 @@ export function SurfacesShellPage() {
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             components/developer/presentational
           </code>{' '}
-          chrome split out of the product page and Run Studio: list with one
-          selected module, manifest detail beside the select prompt, and the
-          Run Studio in pending / success (proposal visible) / deep-linked
-          detail-error states. Pure view models and literal copy — no router,
-          no QueryClient, no daemon. Theme follows the Studio toggle.
+          chrome split out of the product page and Run Studio: the ready list
+          with one selected module, manifest detail beside the select prompt,
+          the Run Studio in pending / success (proposal visible) / deep-linked
+          detail-error states, and the Advanced-JSON disclosure driven open.
+          Pure view models and literal copy — no router, no QueryClient, no
+          daemon. Theme follows the Studio toggle.
         </p>
         <FixtureBoundary>
           <ModulesRailFixtures />
@@ -875,6 +879,30 @@ export function SurfacesShellPage() {
         </p>
         <FixtureBoundary>
           <SessionsRailFixtures />
+        </FixtureBoundary>
+      </section>
+
+      <section
+        className="mt-10"
+        data-testid="surfaces-inspiration-pool"
+        id="surfaces-inspiration-pool"
+      >
+        <SurfaceHeading id="surfaces-inspiration-pool">Inspiration Pool</SurfaceHeading>
+        <SurfaceSourceBadges
+          importPaths={['@web-works/inspiration-pool-chrome', '@42ch/nexus-ui']}
+        />
+        <p className="text-copy-14 text-gray-700 mb-6">
+          v1222 works rail — the Inspiration Pool chrome split out of the page:
+          header copy, the single-field add form (blank title keeps submit
+          disabled), and one row per stored status: an idea with Promote and
+          Archive, a promoted item with its Work link and no Promote, and a
+          read-only archived item. Empty, list, loading, read-error and
+          blank-title frames. Controlled add state and literal copy — the
+          gallery passes a plain anchor where the app passes a router link.
+          Theme follows the Studio toggle.
+        </p>
+        <FixtureBoundary>
+          <InspirationPoolChromeFixtures />
         </FixtureBoundary>
       </section>
     </div>

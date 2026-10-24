@@ -92,6 +92,7 @@ const SURFACES_OVERVIEW_ENTRIES: readonly GalleryEntry[] = [
   entry('/surfaces/daemon', 'surfaces-daemon', 'Daemon', ['status', 'strip'], ['@/pages/surfaces']),
   entry('/surfaces/launch', 'surfaces-launch', 'Launch', ['splash', 'waiting', 'recovery'], ['@/pages/surfaces']),
   entry('/surfaces/selection-submenu', 'surfaces-selection-submenu', 'Selection Submenu', ['context', 'rename', 'agent'], ['@/pages/surfaces']),
+  entry('/surfaces/shell', 'surfaces-inspiration-pool', 'Inspiration Pool', ['inspiration', 'pool'], ['@/pages/surfaces']),
 ];
 
 const SURFACES_SETUP_ENTRIES: readonly GalleryEntry[] = [
@@ -135,6 +136,9 @@ const SURFACES_SHELL_ENTRIES: readonly GalleryEntry[] = [
   ]),
   entry('/surfaces/shell', 'surfaces-sessions-rail', 'Sessions rail — session cards and the zero-session state', ['sessions', 'cards', 'status', 'empty', 'run view'], [
     '@web-developer/session-card',
+  ]),
+  entry('/surfaces/shell', 'surfaces-inspiration-pool', 'Inspiration Pool — pool list, add form and row actions', ['inspiration', 'pool', 'add', 'promote', 'archive'], [
+    '@web-works/inspiration-pool-chrome',
   ]),
 ];
 

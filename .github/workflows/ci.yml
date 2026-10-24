@@ -25,6 +25,7 @@ jobs:
       rust: ${{ steps.filter.outputs.rust }}
       codegen: ${{ steps.filter.outputs.codegen }}
       module-dx: ${{ steps.filter.outputs['module-dx'] }}
+      service-native: ${{ steps.filter.outputs['service-native'] }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
@@ -91,6 +92,25 @@ jobs:
               - 'crates/nexus-wasm-host/**'
               - 'tooling/check-module-sdk-drift.sh'
               - '.github/workflows/ci.yml'
+              - '!**/*.md'
+            service-native:
+              # The set that can change what a service boot loads: the service
+              # itself, the native loader facade, the addon crate, and the
+              # workspace crates the addon links.
+              - 'apps/nexus-service/**'
+              - 'packages/nexus-native/**'
+              - 'packages/nexus-native-*/**'
+              - 'packages/nexus-contracts/**'
+              - 'packages/nexus-provider-acp/**'
+              - 'crates/nexus-core-node/**'
+              - 'crates/nexus-core/**'
+              - 'crates/nexus-wasm-host/**'
+              - 'modules/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'pnpm-lock.yaml'
+              - '.github/workflows/ci.yml'
+              - '.github/actions/**'
               - '!**/*.md'
 
   validate-schemas:
@@ -356,6 +376,59 @@ jobs:
           pnpm --filter @42ch/nexus-service run build
       - name: Lint
         run: pnpm run lint
+
+  # v1.222 review (6v6rFh): the boot/bootstrap and bind-gate regressions spawn a
+  # real `dist/main.js`, which loads the gitignored native addon staged by
+  # `packages/nexus-native/scripts/build.mjs`. This job used to run them with no
+  # Rust toolchain, so the boots could never resolve the addon; they get their
+  # own leg that builds exactly the artifact they load.
+  nexus-service-regressions:
+    name: nexus-service boot & bind-gate regressions
+    runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs['service-native'] == 'true'
+    env:
+      SQLX_OFFLINE: "true"
+      CARGO_INCREMENTAL: "0"
+      # CI-only: skip debuginfo for faster codegen/link and far smaller target/.
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: ./.github/actions/free-disk-space
+      - uses: ./.github/actions/setup-monorepo
+        with:
+          # nexus-core-node's graph pulls nexus-wasm-host, whose build.rs
+          # compiles the embedded modules from source.
+          rust-targets: wasm32-unknown-unknown
+      - name: Read workspace version for cargo cache key
+        id: workspace-version
+        run: |
+          v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae  # v2
+        with:
+          shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}-service-native
+          workspaces: .
+          cache-all-crates: false
+          cache-on-failure: false
+      - name: Build workspace type dependencies
+        # The service's `tsc` resolves these through each package's built `dist`
+        # declarations (same order as the TypeScript leg).
+        run: |
+          pnpm --filter @42ch/nexus-contracts run build
+          pnpm --filter @42ch/nexus-native run build
+          pnpm --filter @42ch/nexus-provider-acp run build
+      - name: Stage the native addon
+        # The loader reads exactly `packages/nexus-native-<platform>/native/
+        # nexus_core_node.node`; the artifact is gitignored, so a checkout alone
+        # can never satisfy a boot. Assert the staged pair so a silent build
+        # no-op fails here instead of skipping the real boot.
+        run: |
+          node packages/nexus-native/scripts/build.mjs
+          test -s packages/nexus-native-linux-x64-gnu/native/nexus_core_node.node
+          test -s packages/nexus-native-linux-x64-gnu/native/compatibility.json
+      - name: Test nexus-service boot and bind gate
+        run: pnpm --filter @42ch/nexus-service run test
 
   web-build:
     name: Web app build & typecheck

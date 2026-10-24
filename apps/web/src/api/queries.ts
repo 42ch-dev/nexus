@@ -69,6 +69,7 @@ import type {
   TimelineEventInfo,
   UpdateFindingRequest,
   ValidatePresetRequest,
+  WorkInspirationListQuery,
   WorkSummary,
   WorldRuleCreateRequest,
   WorldRuleUpdateRequest,
@@ -596,6 +597,70 @@ export function useDeleteWork() {
        qc.removeQueries({ queryKey: queryKeys.works.detail(workId) });
     },
     onError: (error) => errorToast(error, 'error.couldNotDeleteWork'),
+  });
+}
+
+// ── Works inspiration pool (v1.222 P1 T1) ───────────────────────────────────
+
+/**
+ * One page of the creator's inspiration pool.
+ *
+ * shortcut: first page only (`offset` is never advanced) — upgrade to
+ * `useInfiniteQuery` over `offset` when a pool can exceed one page.
+ */
+export function useWorkInspiration(query?: WorkInspirationListQuery) {
+  const client = useNexusClient();
+  const limit = query?.limit ?? DEFAULT_PAGE_SIZE;
+  return useQuery({
+    queryKey: queryKeys.inspiration.list({ ...query, limit }),
+    queryFn: () => client.listWorkInspiration({ ...query, limit }),
+  });
+}
+
+/**
+ * Add an inspiration. Takes the primitive, not a request object: the wire
+ * body is exactly `{ title }` and nothing else.
+ */
+export function useAddWorkInspiration() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (title: string) => client.addWorkInspiration({ title }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.inspiration.lists() });
+    },
+  });
+}
+
+/**
+ * Promote an inspiration into a Work (server-side atomic create).
+ *
+ * Sends `item_id` only: `set_default` is inert on the wire (decoded at
+ * `domain.rs:722`, never read), and promotion always activates the new pool
+ * entry server-side. Invalidates `works.lists()` too — promote creates a Work,
+ * and the Works list is the surface that must show it.
+ */
+export function usePromoteWorkInspiration() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (itemId: string) => client.promoteWorkInspiration({ item_id: itemId }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.inspiration.lists() });
+      void qc.invalidateQueries({ queryKey: queryKeys.works.lists() });
+    },
+  });
+}
+
+/** Archive an inspiration (`idea` and `promoted` items only). */
+export function useArchiveWorkInspiration() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (itemId: string) => client.archiveWorkInspiration({ item_id: itemId }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.inspiration.lists() });
+    },
   });
 }
 
@@ -1798,7 +1863,7 @@ export interface WorldTimelineComputeEventsQuery {
  * Invalidation: `useAcceptRun` / `useDiscardRun` already invalidate
  * `queryKeys.timeline.all`, which prefix-matches `['timeline','events',…]` —
  * an accepted Run's new compute_result event appears on the canvas without a
- * manual refresh (the canvas stays mounted behind the Settings modal).
+ * manual refresh.
  */
 export function useWorldTimelineEvents(
   worldId: string | undefined,

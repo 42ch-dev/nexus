@@ -52,6 +52,7 @@ function renderCreatorHubFlow(options?: {
       <Route path="/" element={<CreatorHubPage />} />
       <Route path="works" element={<CreatorHubPage />} />
       <Route path="works/:workId/outline" element={<div data-testid="work-outline-canvas" />} />
+      <Route path="works/inspiration" element={<div data-testid="works-inspiration-page-probe" />} />
       <Route path="worlds" element={<CreatorHubPage />} />
       <Route path="worlds/:worldId" element={<div data-testid="world-app-surface" />} />
       <Route path="worlds/:worldId/timeline" element={<div data-testid="world-timeline-canvas" />} />
@@ -99,6 +100,20 @@ describe('CreatorHubPage browse IA (V1.135 P0)', () => {
     expect(
       screen.queryByTestId('creator-hub-dual-pane-workspace-pane-inline-form'),
     ).not.toBeInTheDocument();
+  });
+
+  it('reaches the Inspiration Pool from the /works landing surface', async () => {
+    // v1.222 review (6v6gGH): the pool entry used to be WorkRail-only, which
+    // mounts under `/works/:workId` — a creator with zero Works could never
+    // reach `/works/inspiration`.
+    renderCreatorHubFlow({ works: [], worlds: [] });
+
+    const link = await screen.findByTestId('creator-hub-inspiration-link');
+    expect(link).toHaveAttribute('href', '/works/inspiration');
+    expect(link).toHaveTextContent('Inspiration Pool');
+
+    fireEvent.click(link);
+    expect(await screen.findByTestId('works-inspiration-page-probe')).toBeInTheDocument();
   });
 
   it('shows Work cards when Work tab is active', async () => {

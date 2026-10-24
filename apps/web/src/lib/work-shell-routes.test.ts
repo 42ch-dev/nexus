@@ -16,6 +16,11 @@ describe('isWorkShellRoute', () => {
     expect(isWorkShellRoute('/works/chapters/')).toBe(false);
   });
 
+  it('does not match the reserved /works/inspiration sibling route', () => {
+    expect(isWorkShellRoute('/works/inspiration')).toBe(false);
+    expect(isWorkShellRoute('/works/inspiration/')).toBe(false);
+  });
+
   it('excludes all /works/chapters/* paths from work shell (I1 workId=collision)', () => {
     // Reserved segment blocks layout detection for a hypothetical Work id `chapters`.
     expect(isWorkShellRoute('/works/chapters/outline')).toBe(false);

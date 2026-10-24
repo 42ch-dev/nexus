@@ -14,6 +14,15 @@ export const queryKeys = {
     details: () => [...queryKeys.works.all, 'detail'] as const,
     detail: (workId: string) => [...queryKeys.works.details(), workId] as const,
   },
+  // v1.222 P1 (T1) — inspiration pool. Top-level on purpose: the pool is
+  // creator-scoped (none of the four payloads carries a `work_id`), so a
+  // `works.lists()` invalidation must not blank the pool cache. No `detail`:
+  // there is no single-item GET route.
+  inspiration: {
+    all: ['inspiration'] as const,
+    lists: () => [...queryKeys.inspiration.all, 'list'] as const,
+    list: (query?: object) => [...queryKeys.inspiration.lists(), query ?? {}] as const,
+  },
   sessions: {
     all: ['sessions'] as const,
     list: (query?: object) => [...queryKeys.sessions.all, 'list', query ?? {}] as const,
