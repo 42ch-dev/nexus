@@ -20,6 +20,7 @@ import {
 import { AgentPickerFixtures } from '@/fixtures/agent-picker-fixtures';
 import { CanvasSurfacesFixtures } from '@/fixtures/canvas-surfaces-fixtures';
 import { CapabilitiesRailFixtures } from '@/fixtures/capabilities-rail-fixtures';
+import { SessionsRailFixtures } from '@/fixtures/sessions-rail-fixtures';
 import { LaunchDaemonFixtures } from '@/fixtures/launch-daemon-fixtures';
 import {
   CREATOR_NAV,
@@ -843,6 +844,27 @@ export function SurfacesShellPage() {
         </p>
         <FixtureBoundary>
           <CapabilitiesRailFixtures />
+        </FixtureBoundary>
+      </section>
+
+      <section className="mt-10" data-testid="surfaces-sessions-rail" id="surfaces-sessions-rail">
+        <SurfaceHeading id="surfaces-sessions-rail">
+          Sessions rail — session cards and the zero-session state
+        </SurfaceHeading>
+        <SurfaceSourceBadges
+          importPaths={['@web-developer/session-card', '@42ch/nexus-ui']}
+        />
+        <p className="text-copy-14 text-gray-700 mb-6">
+          v221 sessions rail — the Hub card frame reused for one orchestration
+          session: short id and status pill in the header, Preset / Creator in
+          the body, and the whole card as the single link into the run view.
+          Mixed running / completed / failed grid plus the zero-session empty
+          state. Static view models and literal copy — the gallery passes a
+          plain anchor where the app passes a router link. Theme follows the
+          Studio toggle.
+        </p>
+        <FixtureBoundary>
+          <SessionsRailFixtures />
         </FixtureBoundary>
       </section>
     </div>

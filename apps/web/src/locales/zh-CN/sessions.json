@@ -8,14 +8,11 @@
   "engineUnavailableTitle": "编排引擎未运行",
   "engineUnavailableDescription": "请启动守护进程编排引擎后重试。",
   "loading": "正在加载会话…",
-  "emptyTitle": "无活跃会话",
-  "emptyDescription": "运行开始运行后，编排会话将显示在此处。",
+  "emptyTitle": "暂无会话",
+  "emptyDescription": "预设运行开始后，会话将显示在此处。",
   "columns": {
-    "session": "会话",
-    "status": "状态",
     "preset": "预设",
-    "creator": "创作者",
-    "currentTask": "当前任务"
+    "creator": "创作者"
   },
   "openRunAria": "打开会话 {{id}} 的运行视图",
   "runView": {
