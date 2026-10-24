@@ -217,9 +217,14 @@ test('--no-open prints the bootstrap URL without opening it, and its token mints
     assert.equal(stdoutLines.length, 1, `stdout must be the single ready line, got: ${JSON.stringify(stdoutLines)}`);
     assert.match(stdoutLines[0], /^NEXUS_SERVICE_READY \{/);
     assert.ok(!service.stdout.includes('[nexus-service]'), 'human logs must stay on stderr');
+    // I-000062 stdout contract: the machine line is the discovery record, never
+    // the tokenized URL — a token in captured logs mints an 8-hour session.
+    const token = new URL(url).searchParams.get('token');
+    assert.ok(token, 'the bootstrap URL must carry a token');
+    assert.ok(!service.stdout.includes(token), 'stdout must not carry the bootstrap token');
+    assert.ok(!service.stdout.includes('__bootstrap'), 'stdout must not carry the bootstrap URL');
 
-    await delay(500);
-    assert.equal(markerText(marker), '', '--no-open must not launch the opener');
+    await assertOpenerNeverRan(marker, '--no-open must not launch the opener');
 
     const response = await get(url);
     assert.equal(response.status, 302);

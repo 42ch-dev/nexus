@@ -354,6 +354,11 @@ jobs:
           pnpm --filter @42ch/nexus-native run build
           pnpm --filter @42ch/nexus-provider-acp run build
           pnpm --filter @42ch/nexus-service run build
+      # The boot/bootstrap and bind-gate regressions spawn dist/main.js, so
+      # they run after the build chain above (the script builds too, keeping
+      # them runnable standalone).
+      - name: Test nexus-service boot and bind gate
+        run: pnpm --filter @42ch/nexus-service run test
       - name: Lint
         run: pnpm run lint
 
