@@ -5,9 +5,12 @@ import { ModulesRailFixtures } from '@/fixtures/modules-rail-fixtures';
 import { ThemeProvider } from '@/components/theme-provider';
 
 /**
- * The `/modules` rail has five states worth eyeballing: the ready list with a
- * selection, the manifest detail beside the no-selection prompt, and the three
- * Run Studio reads (pending / success / deep-linked detail error). Each frame
+ * The `/modules` rail has six states worth eyeballing: the ready list with a
+ * selection, the manifest detail beside the no-selection prompt, the three
+ * Run Studio reads (pending / success / deep-linked detail error), and the
+ * Advanced-JSON disclosure driven open by the controlled `open` prop — jsdom
+ * neither hides `<details>` content nor runs the summary default action, so
+ * that prop is the only observable pin of the disclosure's state. Each frame
  * owns one `data-testid`; the assertions below pin the state that makes the
  * frame different from its siblings.
  */
@@ -17,6 +20,7 @@ const VARIANTS = [
   'modules-rail-fixture-run-pending',
   'modules-rail-fixture-run-success',
   'modules-rail-fixture-run-error',
+  'modules-rail-fixture-run-advanced',
 ] as const;
 
 afterEach(() => {
@@ -40,13 +44,14 @@ describe('ModulesRailFixtures', () => {
       'modules-rail-fixture-run-pending',
       'modules-rail-fixture-run-success',
       'modules-rail-fixture-run-error',
+      'modules-rail-fixture-run-advanced',
     ] as const;
 
     // getByLabelText resolves through htmlFor → id: each label reaches the
     // control rendered beside it, not the first Run Studio in the document.
     // The schema-driven Run form derives its field ids as
     // `${idPrefix}-${name}`; a literal prefix re-duplicated
-    // run-form-attacker_id across the three frames (I-000086 occ 97).
+    // run-form-attacker_id across the four frames (I-000086 occ 97).
     for (const label of [
       'World',
       'Filter by status',
@@ -115,6 +120,30 @@ describe('ModulesRailFixtures', () => {
 
     expect(within(frame).getByText('Could not load this Run')).toBeInTheDocument();
     expect(within(frame).queryByTestId('run-inspector')).not.toBeInTheDocument();
+  });
+
+  it('drives the Advanced JSON disclosure from the controlled open prop', () => {
+    render(<ModulesRailFixtures />);
+
+    // Closed by the prop: each Run read ships the disclosure shut.
+    for (const testId of [
+      'modules-rail-fixture-run-pending',
+      'modules-rail-fixture-run-success',
+      'modules-rail-fixture-run-error',
+    ] as const) {
+      expect(
+        within(screen.getByTestId(testId)).getByTestId('run-studio-advanced-json'),
+      ).not.toHaveAttribute('open');
+    }
+
+    // Open by the prop: jsdom neither hides `<details>` content nor runs the
+    // summary default action, so the attribute is the only honest observable.
+    const disclosure = within(
+      screen.getByTestId('modules-rail-fixture-run-advanced'),
+    ).getByTestId('run-studio-advanced-json');
+
+    expect(disclosure).toHaveAttribute('open');
+    expect(within(disclosure).getByTestId('run-studio-json-textarea')).toBeInTheDocument();
   });
 
   it('renders every variant under both themes', () => {
