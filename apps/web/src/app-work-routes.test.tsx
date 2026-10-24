@@ -31,6 +31,7 @@ function WorkRouteTree() {
     >
       <Routes>
         <Route path="works/chapters" element={<div data-testid="works-chapters-list">Chapters list</div>} />
+        <Route path="works/inspiration" element={<div data-testid="works-inspiration-page">Inspiration pool</div>} />
         <Route path="works/:workId" element={<WorkShellLayout />}>
           <Route index element={<Navigate to="outline" replace />} />
           <Route path="outline" element={<div data-testid="outline-route">Outline</div>} />
@@ -119,6 +120,22 @@ describe('work route nesting (T2)', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('works-chapters-list')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('main-standard')).toBeInTheDocument();
+    expect(screen.queryByTestId('main-work-shell')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('work-shell-layout')).not.toBeInTheDocument();
+  });
+
+  it('keeps standard main width on the reserved /works/inspiration sibling route', async () => {
+    useWorkRouteHandlers();
+
+    renderInApp(<WorkRouteTree />, {
+      client: makeClient(),
+      initialRouterEntries: ['/works/inspiration'],
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('works-inspiration-page')).toBeInTheDocument();
     });
     expect(screen.getByTestId('main-standard')).toBeInTheDocument();
     expect(screen.queryByTestId('main-work-shell')).not.toBeInTheDocument();

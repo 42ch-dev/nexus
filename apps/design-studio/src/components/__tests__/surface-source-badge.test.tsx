@@ -41,6 +41,9 @@ describe('classifySurfaceImport', () => {
     expect(classifySurfaceImport('@web-developer/run-studio-chrome')).toBe(
       'extract',
     );
+    expect(
+      classifySurfaceImport('@web-works/inspiration-pool-chrome'),
+    ).toBe('extract');
   });
 
   it('rejects lookalike package prefixes at root/subpath boundaries', () => {

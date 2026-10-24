@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useMatch, useParams } from 'react-router';
-import { BookOpen } from 'lucide-react';
+import { Link, NavLink, useMatch, useParams } from 'react-router';
+import { BookOpen, Lightbulb } from 'lucide-react';
 
 import { flattenPages, useWork, useWorks } from '@/api/queries';
 import { StatusBadge } from '@/components/status-badge';
@@ -25,6 +25,7 @@ export interface WorkRailProps {
  */
 export function WorkRail({ onWorkSelect, showHeader = true }: WorkRailProps) {
   const { t } = useTranslation('shell');
+  const { t: tWorks } = useTranslation('works');
   const { workId = '' } = useParams<{ workId?: string }>();
   const worksQuery = useWorks({ limit: 12 });
   const works = useMemo(() => flattenPages(worksQuery.data), [worksQuery.data]);
@@ -38,6 +39,25 @@ export function WorkRail({ onWorkSelect, showHeader = true }: WorkRailProps) {
       ) : null}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
+        <nav className="border-b border-gray-alpha-400 p-2" aria-label={tWorks('inspiration.title')}>
+          <NavLink
+            to="/works/inspiration"
+            onClick={() => onWorkSelect?.()}
+            data-testid="work-rail-inspiration-link"
+            className={({ isActive }) =>
+              cn(
+                'flex w-full items-center gap-2 rounded-control px-3 py-2 text-label-14 transition-colors duration-state ease-standard motion-reduce:transition-none',
+                isActive
+                  ? 'bg-gray-alpha-100 text-gray-1000'
+                  : 'text-gray-800 hover:bg-gray-alpha-100 hover:text-gray-1000',
+              )
+            }
+          >
+            <Lightbulb className="h-4 w-4 shrink-0 text-gray-700" aria-hidden />
+            <span className="min-w-0 flex-1 truncate">{tWorks('inspiration.railLink')}</span>
+          </NavLink>
+        </nav>
+
         {worksQuery.isLoading ? (
           <LoadingState label={t('workShell.loadingWorks')} />
         ) : worksQuery.isError ? (

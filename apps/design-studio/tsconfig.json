@@ -32,7 +32,8 @@
       ],
       "@web-lib/utils": ["../web/src/lib/utils.ts"],
       "@web-shell/*": ["../web/src/components/selection-submenu/*"],
-      "@web-developer/*": ["../web/src/components/developer/presentational/*"]
+      "@web-developer/*": ["../web/src/components/developer/presentational/*"],
+      "@web-works/*": ["../web/src/components/works/presentational/*"]
     },
 
     /* Strictness */
