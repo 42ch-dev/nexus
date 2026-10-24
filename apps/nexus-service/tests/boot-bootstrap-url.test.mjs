@@ -30,6 +30,9 @@ const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const isWindows = process.platform === 'win32';
 const OPEN_COMMAND = process.platform === 'darwin' ? 'open' : 'xdg-open';
 const OPEN_LINE = /^\[nexus-service\] open: (\S+)$/m;
+/** Absence window for the opener marker: the spawn-plus-shim write lands ~400 ms
+ * after the `open:` print on this host, so sample for much longer than that. */
+const ABSENCE_WINDOW_MS = 3_000;
 
 const tempDirs = [];
 
@@ -64,6 +67,20 @@ async function waitFor(produce, describe, timeoutMs = 20_000) {
     const value = produce();
     if (value) return value;
     if (Date.now() > deadline) throw new Error(describe());
+    await delay(25);
+  }
+}
+
+/**
+ * Absence proof for the opener marker. Polling the whole window (instead of one
+ * fixed-delay sample) keeps a reverted build red even when the shim write lands
+ * late under load; a fixed 500 ms sample let it pass ~50% of runs.
+ */
+async function assertOpenerNeverRan(marker, message) {
+  const deadline = Date.now() + ABSENCE_WINDOW_MS;
+  for (;;) {
+    assert.equal(markerText(marker), '', `${message} (marker ${marker})`);
+    if (Date.now() >= deadline) return;
     await delay(25);
   }
 }
@@ -246,10 +263,12 @@ test('without --web-dist the URL is still printed but never opened', { skip: isW
     await service.listening();
     const url = await service.openUrl();
     assertBootstrapUrl(url, port);
-
-    await delay(500);
-    assert.equal(markerText(marker), '', 'auto-open without --web-dist would land on route_not_migrated');
   } finally {
     await service.stop();
   }
+  // Stop first, then observe: a build missing the `args.webDist` conjunct calls
+  // the opener synchronously right after the `open:` print, so the shim must
+  // have written by now — but its shell write can trail under load. Poll the
+  // full absence window rather than trusting one sample.
+  await assertOpenerNeverRan(marker, 'auto-open without --web-dist would land on route_not_migrated');
 });
