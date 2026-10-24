@@ -101,6 +101,7 @@ jobs:
               - 'packages/nexus-native/**'
               - 'packages/nexus-native-*/**'
               - 'packages/nexus-contracts/**'
+              - 'packages/nexus-provider-acp/**'
               - 'crates/nexus-core-node/**'
               - 'crates/nexus-core/**'
               - 'crates/nexus-wasm-host/**'
