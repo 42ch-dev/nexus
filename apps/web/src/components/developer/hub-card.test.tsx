@@ -38,6 +38,23 @@ describe('HubCard', () => {
     expect(screen.queryAllByRole('textbox')).toHaveLength(0);
   });
 
+  // v221-caps-sessions-rail T2 — the sessions card needs an inline node title
+  // (mono short id) and `error` for a `failed` session; the markup is unchanged.
+  it('accepts a node title and an error pill', () => {
+    renderInApp(
+      <HubCard
+        id="session"
+        title={<span className="font-mono">sess-0001</span>}
+        status={{ label: 'Failed', variant: 'error' }}
+      />,
+    );
+
+    const card = screen.getByTestId('hub-card-session');
+    expect(screen.getByText('sess-0001')).toBeInTheDocument();
+    expect(screen.getByText('Failed')).toBeInTheDocument();
+    expect(card.innerHTML).toContain('nexus-ui-badge-soft-error-bg');
+  });
+
   it('renders a title-only card without a navigation link', () => {
     renderInApp(<HubCard id="agent" title="Agent (ACP)" />);
 

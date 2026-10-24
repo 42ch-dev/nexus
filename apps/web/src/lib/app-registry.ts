@@ -80,7 +80,10 @@ const CREATOR_APPS: readonly AppDef[] = [
     label: 'rail.session',
     icon: Play,
     route: '/sessions',
-    load: () => import('@/pages/sessions-page').then((m) => ({ default: m.SessionsPage })),
+    load: () =>
+      import('@/components/developer/sessions-page').then((m) => ({
+        default: m.SessionsPage,
+      })),
     lockReason: RAIL_LOCK_REASON.session,
   },
   {
@@ -124,14 +127,19 @@ const DEVELOPER_APPS: readonly AppDef[] = [
     icon: Cpu,
     route: '/capabilities',
     load: () =>
-      import('@/pages/capabilities-page').then((m) => ({ default: m.CapabilitiesPage })),
+      import('@/components/developer/capabilities-page').then((m) => ({
+        default: m.CapabilitiesPage,
+      })),
   },
   {
     id: 'session',
     label: 'rail.session',
     icon: Play,
     route: '/sessions',
-    load: () => import('@/pages/sessions-page').then((m) => ({ default: m.SessionsPage })),
+    load: () =>
+      import('@/components/developer/sessions-page').then((m) => ({
+        default: m.SessionsPage,
+      })),
   },
 ];
 

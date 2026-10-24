@@ -130,6 +130,12 @@ const SURFACES_SHELL_ENTRIES: readonly GalleryEntry[] = [
     '@web-developer/modules-page-chrome',
     '@web-developer/run-studio-chrome',
   ]),
+  entry('/surfaces/shell', 'surfaces-caps-rail', 'Capabilities rail — registry, filter and empty/error states', ['capabilities', 'registry', 'filter', 'empty', 'error'], [
+    '@web-developer/capabilities-page-chrome',
+  ]),
+  entry('/surfaces/shell', 'surfaces-sessions-rail', 'Sessions rail — session cards and the zero-session state', ['sessions', 'cards', 'status', 'empty', 'run view'], [
+    '@web-developer/session-card',
+  ]),
 ];
 
 const SURFACES_AGENT_PICKER_ENTRIES: readonly GalleryEntry[] = [

@@ -26,7 +26,7 @@ import { i18n } from '@/lib/i18n/config';
 import { BrowserClient, NexusClientError, type NexusClient } from '@/lib/nexus';
 import type { WorkflowObservationFrame } from '@/lib/nexus/types';
 import { SessionRunViewPage } from '@/pages/session-run-view';
-import { SessionsPage } from '@/pages/sessions-page';
+import { SessionsPage } from '@/components/developer/sessions-page';
 import { useHandlers } from '@/test/msw-server';
 import { renderInApp } from '@/test/test-providers';
 
