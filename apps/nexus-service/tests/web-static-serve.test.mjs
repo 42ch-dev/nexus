@@ -278,8 +278,8 @@ describe('web static serve (20261019-web-static-serve)', () => {
     // The refusal folds case and Win32 trailing dots/spaces per segment as a
     // pure string check before `stat`, so these are 404 on every host even
     // where the fixture has no `v1/` tier (pre-fix they fell back to 200).
-    for (const path of ['/V1/y', '/v1./y']) {
-      test(`${path} cannot re-open <root>/v1 via case or dot folding`, async () => {
+    for (const path of ['/V1/y', '/v1./y', '/v1%20/y']) {
+      test(`${path} cannot re-open <root>/v1 via case, dot or space folding`, async () => {
         const res = await rawRequest(ENABLED_PORT, path);
         assert.equal(res.status, 404);
         assert.equal(errorCode(res), 'not_found');
@@ -623,6 +623,7 @@ describe('web static serve (20261019-web-static-serve)', () => {
       '/%00',
       '/%2Fetc%2Fpasswd',
       '/escape/secret.txt',
+      'v1 /x',
     ]) {
       test(`${path} resolves to a refusal`, async () => {
         await assert.rejects(
