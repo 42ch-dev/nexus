@@ -52,6 +52,10 @@ describe('HubCard', () => {
     expect(screen.getByTestId('hub-card-session')).toBeInTheDocument();
     expect(screen.getByText('sess-0001')).toBeInTheDocument();
     expect(screen.getByText('Failed')).toBeInTheDocument();
+    // Pins `variant` + `tone="soft"` forwarding without an innerHTML dump.
+    expect(screen.getByText('Failed')).toHaveClass(
+      'text-nexus-ui-badge-soft-error-text',
+    );
   });
 
   it('renders a title-only card without a navigation link', () => {
