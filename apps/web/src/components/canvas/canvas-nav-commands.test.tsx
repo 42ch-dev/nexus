@@ -362,9 +362,9 @@ describe('CanvasNavCommands — live handler reads current id (no remount)', () 
 
 
 describe('CanvasNavCommands — Compute jumps (V1.147 P2 T3)', () => {
-  // Search-aware probe: the compute commands navigate to Settings URLs that
-  // carry query params (`/settings/modules?world=…`), so the plain pathname
-  // probe is not enough here.
+  // Search-aware probe: the compute commands navigate to `/modules` URLs that
+  // carry query params (`/modules?world=…`), so the plain pathname probe is
+  // not enough here.
   function makeFullProbe() {
     let last: string | null = null;
     function LocationProbe(): null {
@@ -391,7 +391,7 @@ describe('CanvasNavCommands — Compute jumps (V1.147 P2 T3)', () => {
           >
             <Route path="worlds/:worldId/timeline" element={<div />} />
             <Route path="sessions" element={<div />} />
-            {/* Catch-all so Settings deep-link navigations keep the layout
+            {/* Catch-all so Modules deep-link navigations keep the layout
                 (and its command registrations + probe) mounted. */}
             <Route path="*" element={<div />} />
           </Route>
@@ -408,7 +408,7 @@ describe('CanvasNavCommands — Compute jumps (V1.147 P2 T3)', () => {
     act(() => {
       cmd?.handler();
     });
-    expect(probe.read()).toBe('/settings/modules');
+    expect(probe.read()).toBe('/modules');
   });
 
   it('Run Module on this World… is hidden without a worldId in the URL', () => {
@@ -423,7 +423,7 @@ describe('CanvasNavCommands — Compute jumps (V1.147 P2 T3)', () => {
     act(() => {
       cmd?.handler();
     });
-    expect(probe.read()).toBe('/settings/modules?world=world-7');
+    expect(probe.read()).toBe('/modules?world=world-7');
   });
 
   it('encodes the worldId so a space-bearing id stays one query value', () => {
@@ -431,6 +431,6 @@ describe('CanvasNavCommands — Compute jumps (V1.147 P2 T3)', () => {
     act(() => {
       findById('compute.run-module-on-world')?.handler();
     });
-    expect(probe.read()).toBe('/settings/modules?world=w%20world');
+    expect(probe.read()).toBe('/modules?world=w%20world');
   });
 });

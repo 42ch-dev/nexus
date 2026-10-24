@@ -186,11 +186,11 @@ export function CanvasNavCommands(): null {
   //
   // Jump-only per plan ⌘K scope ("navigation jumps into the Timeline Run
   // Module entry only; no palette form"):
-  //   - Run Module… — always available → Settings → Modules (the shared Run
-  //     Studio entry).
+  //   - Run Module… — always available → `/modules` (the shared Run Studio
+  //     entry).
   //   - Run Module on this World… — gated on a `worldId` in the current URL
-  //     → Settings → Modules with the World pre-filled (the Timeline-scoped
-  //     Run Studio; spec §1 P2 hero shortcut).
+  //     → `/modules` with the World pre-filled (the Timeline-scoped Run
+  //     Studio; spec §1 P2 hero shortcut).
   useRegisterCommand({
     id: 'compute.run-module',
     labelKey: 'compute.run-module.label',
@@ -202,7 +202,7 @@ export function CanvasNavCommands(): null {
       'compute.run-module.keywords.wasm',
     ],
     icon: Cpu,
-    handler: () => navigate('/settings/modules'),
+    handler: () => navigate('/modules'),
   });
 
   useRegisterCommand({
@@ -218,7 +218,7 @@ export function CanvasNavCommands(): null {
     icon: Cpu,
     handler: () => {
       const { worldId: w } = idsRef.current;
-      if (w) navigate(`/settings/modules?world=${encodeURIComponent(w)}`);
+      if (w) navigate(`/modules?world=${encodeURIComponent(w)}`);
     },
     available: () => Boolean(idsRef.current.worldId),
   });

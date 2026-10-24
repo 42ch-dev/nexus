@@ -13,7 +13,7 @@
  * SAME studio with context pre-fill — the plan's "no parallel studio" hard
  * gate. `initialWorldId` pre-fills the World selector (Timeline entry:
  * World/branch pre-filled per spec §1 P2); `initialRunId` deep-links the run
- * inspector (compute node "Open Run" → Settings → Modules run detail).
+ * inspector (compute node "Open Run" → `/modules` run detail).
  * Selected-event context is intentionally NOT pre-filled (the entry is a
  * fresh-run context; forcing event context would violate the "don't force
  * it" constraint — spec §1 P2 optional, plan brief).
@@ -145,9 +145,9 @@ export function RunStudio({
     }
   }, [initialBranchId]);
 
-  // V1.147 PR #194 — deep-link `?world=` re-sync. The Settings Modules
-  // section stays mounted when a second Timeline "Run Module" entry lands on
-  // the same route (`/settings/modules?module=…&world=…` — search-params-only
+  // V1.147 PR #194 — deep-link `?world=` re-sync. The Modules page stays
+  // mounted when a second Timeline "Run Module" entry lands on the same route
+  // (`/modules?module=…&world=…` — search-params-only
   // navigation), so the `useState(initialWorldId ?? '')` seed alone would
   // keep the previous World selected — a Run would execute against the wrong
   // World. The ref tracks the last-seen prop VALUE: a new value switches the
@@ -282,7 +282,7 @@ export function RunStudio({
   // → Applied/Discarded) renders from refetched data.
   //
   // V1.147 P2 T3 — `initialRunId` deep-links the run inspector (compute node
-  // "Open Run" → Settings → Modules run detail).
+  // "Open Run" → `/modules` run detail).
   const [latestRun, setLatestRun] = useState<RunResponse | null>(null);
   const [inspectorRunId, setInspectorRunId] = useState<string | null>(
     initialRunId ?? null,
@@ -315,9 +315,9 @@ export function RunStudio({
     }
   }, [module.module_id]);
 
-  // V1.147 PR #194 — deep-link `?run=` re-sync. The Settings Modules section
-  // stays mounted when a second compute-node "Open Run" navigates to the same
-  // route (`/settings/modules?module=…&run=…` — search params only), so the
+  // V1.147 PR #194 — deep-link `?run=` re-sync. The Modules page stays
+  // mounted when a second compute-node "Open Run" navigates to the same route
+  // (`/modules?module=…&run=…` — search params only), so the
   // `useState(initialRunId ?? null)` seed alone would keep the stale run open.
   // Keyed on the prop VALUE: a new `initialRunId` switches the inspector;
   // removing `?run=` (module switch deletes the param) closes it. The effect

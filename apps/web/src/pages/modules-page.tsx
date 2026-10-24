@@ -1,9 +1,8 @@
 /**
- * Compute Modules body (Control Room — READ + Run) — V1.114 P2 T4 / V1.131 P2 /
- * V1.147 P1 T3 / V1.147 P2 T3.
+ * Compute Modules page (Control Room — READ + Run) — V1.114 P2 T4 / V1.147 P1 T3
+ * / V1.147 P2 T3.
  *
- * List/detail/query/error live here once. Settings modal mounts the body as
- * the `modules` section; `/modules` is a compatibility redirect only.
+ * List/detail/query/error live here once, rendered as the `/modules` page.
  *
  * V1.147 P1: the detail panel gains the Run Studio — World selector, guided
  * form (manifest `schemas.invocation` → first-class controls), Advanced JSON
@@ -15,7 +14,7 @@
  * `components/compute/run-studio.tsx` (qc1 W-004 hook extraction — the
  * Timeline Run Module entry mounts the SAME studio with context pre-fill).
  * This page gains the deep-link selection mechanism: `?module=<id>&run=<id>`
- * (compute node "Open Run" → Settings → Modules run detail) and
+ * (compute node "Open Run" → Modules run detail) and
  * `?world=<id>` + `?branch=<id>` (Timeline Run Module entry → World + fork
  * branch pre-filled — Bugbot 1). Module
  * selection + run opening write the params back so refresh keeps the detail.
@@ -23,7 +22,7 @@
 import { Cpu, RefreshCw } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Navigate, useSearchParams } from 'react-router';
+import { useSearchParams } from 'react-router';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -34,12 +33,12 @@ import { isOrchestrationEngineUnavailable } from '@/lib/nexus/errors';
 import { RunStudio } from '@/components/compute/run-studio';
 import { cn } from '@/lib/utils';
 
-/** Compatibility adapter — product entry is Settings modal `modules` section. */
+/** `/modules` page entry — the single owner of the Modules surface. */
 export function ModulesPage() {
-  return <Navigate to="/settings/modules" replace />;
+  return <ModulesPageBody />;
 }
 
-/** Shared list/detail body — reused by SettingsModulesSection (no duplicate hooks). */
+/** List/detail body (kept separate so the page and its tests share one body). */
 export function ModulesPageBody() {
   const { t } = useTranslation('modules');
   const modules = useComputeModules();
@@ -56,7 +55,7 @@ export function ModulesPageBody() {
 
   // V1.147 PR #194 — deep-link `?module=` re-sync. The Settings Modules
   // section stays mounted when a second compute-node "Open Run" navigates to
-  // the same route (`/settings/modules?module=…` — search-params-only), so
+  // the same route (`/modules?module=…` — search-params-only), so
   // the `useState` seed alone would keep the stale module selected. Keyed on
   // the URL VALUE: external navigation (Timeline "Open Run", back/forward)
   // switches the detail panel, and `?module=` removal clears the selection.

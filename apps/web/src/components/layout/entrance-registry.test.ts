@@ -49,7 +49,6 @@ describe('entrance registry (AR-15)', () => {
   it('hides the EL §3 settings sections on Create only', () => {
     expect(ENTRANCE_BY_ID['content-creator'].hiddenSettingsSections).toEqual([
       'agent',
-      'modules',
       'advanced',
     ]);
     expect(ENTRANCE_BY_ID['developer'].hiddenSettingsSections).toEqual([]);
@@ -77,7 +76,6 @@ describe('entrance registry (AR-15)', () => {
       '/developer',
       '/works/:workId/inspector',
       '/settings/agent',
-      '/settings/modules',
       '/settings/advanced',
     ]);
   });
@@ -143,7 +141,7 @@ describe('entrance registry (AR-15)', () => {
     // Settings-driven paths resolve via resolveSettingsLocation, not prefix
     // matching — the `/settings/*` rules are section rules, not path rules.
     expect(matchEntranceRouteRule('/settings/agent')).toBeNull();
-    // `/modules` is itself in the develop-only table (settings alias).
+    // `/modules` is itself in the develop-only table (its own page route).
     expect(matchEntranceRouteRule('/modules')?.visibility).toBe('develop-only');
   });
 
@@ -168,7 +166,6 @@ describe('entrance registry (AR-15)', () => {
     expect(developTargets).toContain('/sessions');
     expect(developTargets).toContain('/schedule');
     expect(developTargets).toContain('/capabilities');
-    expect(developTargets).toContain('/settings/modules');
     expect(developTargets).toContain('/memory');
   });
 });

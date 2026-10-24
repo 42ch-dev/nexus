@@ -21,7 +21,6 @@ import {
   BrainCircuit,
   CalendarClock,
   Compass,
-  Cpu,
   FileText,
   Globe,
   History,
@@ -46,7 +45,7 @@ export interface EntranceRouteRule {
   visibility: 'both' | 'develop-only';
   /** Pass-through on the hidden tree (product lock: strategy canvas OK). */
   allowDeepLink?: boolean;
-  /** For /settings/* + /modules modal-alias resolution. */
+  /** For /settings/* section resolution. */
   settingsSection?: SettingsSectionId;
 }
 
@@ -60,7 +59,7 @@ export interface EntranceDescriptor {
   landRoute: string;
   /** Entrance-filtered sidebar tree. */
   navGroups: readonly ShellNavGroup[];
-  /** Sections hidden from the tree (Create: agent | modules | advanced). */
+  /** Sections hidden from the tree (Create: agent | advanced). */
   hiddenSettingsSections: readonly SettingsSectionId[];
   /** i18n shell key for the guard bounce toast (AR-19). */
   bounceToastKey: string;
@@ -79,7 +78,7 @@ export const ENTRANCE_ROUTE_RULES: readonly EntranceRouteRule[] = [
   { path: '/strategies/:presetId', visibility: 'develop-only', allowDeepLink: true },
   { path: '/sessions', visibility: 'develop-only' },
   { path: '/schedule', visibility: 'develop-only' },
-  // Settings modal alias (V1.131 P2) — section resolution owns the check.
+  // Compute modules page (developer rail).
   { path: '/modules', visibility: 'develop-only' },
   { path: '/capabilities', visibility: 'develop-only' },
   { path: '/connect', visibility: 'develop-only' },
@@ -87,7 +86,6 @@ export const ENTRANCE_ROUTE_RULES: readonly EntranceRouteRule[] = [
   { path: '/works/:workId/inspector', visibility: 'develop-only' },
   // Settings sections — section-level visibility via resolveSettingsLocation.
   { path: '/settings/agent', visibility: 'develop-only', settingsSection: 'agent' },
-  { path: '/settings/modules', visibility: 'develop-only', settingsSection: 'modules' },
   { path: '/settings/advanced', visibility: 'develop-only', settingsSection: 'advanced' },
   { path: '/settings/workspace', visibility: 'both', settingsSection: 'workspace' },
   { path: '/settings/appearance', visibility: 'both', settingsSection: 'appearance' },
@@ -144,7 +142,7 @@ export const ENTRANCE_DESCRIPTORS: readonly EntranceDescriptor[] = [
     landRoute: '/works',
     // EL §3 — reduced tree: primary JTBD (works/worlds), Memory, findings.
     navGroups: COMMON_NAV_GROUPS,
-    hiddenSettingsSections: ['agent', 'modules', 'advanced'],
+    hiddenSettingsSections: ['agent', 'advanced'],
     bounceToastKey: 'entrance.bounceToast',
   },
   {
@@ -179,7 +177,6 @@ export const ENTRANCE_DESCRIPTORS: readonly EntranceDescriptor[] = [
         label: 'nav.compute',
         items: [
           { to: '/capabilities', label: 'nav.capabilities', icon: Boxes },
-          { to: '/settings/modules', label: 'nav.modules', icon: Cpu },
         ],
       },
       MEMORY_GROUP,
@@ -212,8 +209,7 @@ export function firstSettingsSectionFor(entrance: EntranceId): SettingsSectionId
 /**
  * Longest-prefix rule match for a pathname (AR-19). `:param` segments match
  * any single segment; settings-section rules are excluded here — the guard
- * resolves `/settings/*` and `/modules` through {@link resolveSettingsLocation}
- * first. No match → `null` → pass through (the `*` NotFoundPage owns unknowns).
+ * resolves `/settings/*` through {@link resolveSettingsLocation} first. No match → `null` → pass through (the `*` NotFoundPage owns unknowns).
  */
 export function matchEntranceRouteRule(pathname: string): EntranceRouteRule | null {
   const segments = pathname.split('/').filter(Boolean);

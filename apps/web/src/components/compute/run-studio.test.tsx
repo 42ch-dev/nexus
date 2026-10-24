@@ -1,8 +1,8 @@
 /**
  * RunStudio deep-link re-sync (V1.147 PR #194 Greptile Issues 1 + 2).
  *
- * The Settings Modules section is NOT remounted when a second compute node
- * "Open Run" navigates to the same `/settings/modules?module=…&run=…` route
+ * The Modules page is NOT remounted when a second compute node "Open Run"
+ * navigates to the same `/modules?module=…&run=…` route
  * (search-params-only navigation), so `useState(initialRunId ?? null)` alone
  * would leave the previous run's inspector open. These tests pin the run
  * re-sync: a new `initialRunId` switches the inspector, removing it closes

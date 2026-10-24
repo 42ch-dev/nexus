@@ -1131,7 +1131,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('renders section nav with Agent, Workspace, Appearance, Modules, Advanced', async () => {
+  it('renders section nav with Agent, Workspace, Appearance, Advanced', async () => {
     const hostRoot = screen.getByTestId('settings-host-fixtures');
     const sectionNav = within(hostRoot).getByTestId('settings-section-nav');
     expect(
@@ -1143,9 +1143,6 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     expect(
       within(sectionNav).getByTestId('settings-section-nav-appearance'),
     ).toHaveTextContent('Appearance');
-    expect(
-      within(sectionNav).getByTestId('settings-section-nav-modules'),
-    ).toHaveTextContent('Modules');
     expect(
       within(sectionNav).getByTestId('settings-section-nav-advanced'),
     ).toHaveTextContent('Advanced');
@@ -1230,9 +1227,6 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).toBeInTheDocument();
     expect(
       within(framesRoot).getByTestId('settings-section-frame-appearance'),
-    ).toBeInTheDocument();
-    expect(
-      within(framesRoot).getByTestId('settings-section-frame-modules'),
     ).toBeInTheDocument();
   });
 
