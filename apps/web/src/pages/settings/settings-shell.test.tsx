@@ -124,12 +124,6 @@ function healthHandler() {
   );
 }
 
-function modulesListHandler() {
-  return http.get('/v1/daemon/compute/modules', () =>
-    HttpResponse.json({ items: [] }),
-  );
-}
-
 function renderModalApp(initialRouterEntries: string[]) {
   // The modal suite pins the full-Control-Room settings surface (modal →
   // agent, full rail, all sections). Post-entrance-split that surface is the
@@ -171,7 +165,7 @@ describe('Settings modal primary', () => {
     expect(screen.queryByTestId('settings-shell-page-chrome')).not.toBeInTheDocument();
   });
 
-  it('renders section nav with Agent, Profiles, Appearance, Modules, and Advanced', async () => {
+  it('renders section nav with Agent, Profiles, Appearance, and Advanced', async () => {
     useHandlers(scanHandler(), creatorsHandler(), healthHandler());
     renderModalApp(['/settings/agent']);
 
@@ -185,9 +179,6 @@ describe('Settings modal primary', () => {
     );
     expect(within(nav).getByTestId('settings-section-nav-appearance')).toHaveTextContent(
       'Appearance',
-    );
-    expect(within(nav).getByTestId('settings-section-nav-modules')).toHaveTextContent(
-      'Modules',
     );
     expect(within(nav).getByTestId('settings-section-nav-advanced')).toHaveTextContent(
       'Advanced',
@@ -204,7 +195,6 @@ describe('Settings modal primary', () => {
     );
     const nav = screen.getByTestId('settings-section-nav');
     expect(within(nav).getByTestId('settings-section-nav-agent')).toHaveTextContent('智能体');
-    expect(within(nav).getByTestId('settings-section-nav-modules')).toHaveTextContent('模块');
     expect(within(nav).getByTestId('settings-section-nav-advanced')).toHaveTextContent('高级');
   });
 
@@ -224,36 +214,6 @@ describe('Settings modal primary', () => {
     );
     expect(screen.queryByTestId('settings-agent-section')).not.toBeInTheDocument();
     expect(screen.getByTestId('location-probe')).toHaveTextContent('/settings/advanced');
-  });
-
-  it('mounts Modules section body inside the modal', async () => {
-    useHandlers(
-      scanHandler(),
-      creatorsHandler(),
-      healthHandler(),
-      modulesListHandler(),
-    );
-    renderModalApp(['/settings/modules']);
-
-    await waitFor(() =>
-      expect(screen.getByTestId('settings-modules-section')).toBeInTheDocument(),
-    );
-    expect(screen.getByTestId('modules-page-body')).toBeInTheDocument();
-  });
-
-  it('normalizes /modules into the Modules section', async () => {
-    useHandlers(
-      scanHandler(),
-      creatorsHandler(),
-      healthHandler(),
-      modulesListHandler(),
-    );
-    renderModalApp(['/modules']);
-
-    await waitFor(() =>
-      expect(screen.getByTestId('settings-modules-section')).toBeInTheDocument(),
-    );
-    expect(screen.getByTestId('location-probe')).toHaveTextContent('/settings/modules');
   });
 
   it('normalizes /settings/connection to advanced#connection', async () => {

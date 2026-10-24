@@ -6,33 +6,27 @@
  *     nodes (two event families, no double-render).
  *   - A World whose only Narrative content is an accepted compute Run is NOT
  *     the empty state — the node renders.
- *   - Run Module entry (toolbar) opens the shared Run Studio (Settings →
- *     Modules) with the World pre-filled; the events query is hard-filtered
- *     to `event_type=compute_result&status=canon` with no branch override
+ *   - Run Module entry (toolbar) opens the shared Run Studio on the `/modules`
+ *     page with the World pre-filled; the events query is hard-filtered to
+ *     `event_type=compute_result&status=canon` with no branch override
  *     (daemon resolves the World's current branch).
  *   - Compute inspector via the alt-view: compute context sections + Open
- *     Run deep link (Settings → Modules run detail).
+ *     Run deep link (`/modules` run detail).
  *   - Accept journey: Timeline entry → Run Studio (World pre-filled) → run →
- *     accept → close Settings → the Compute result node appears WITHOUT a
- *     manual refresh (accept invalidates `timeline.all`, which covers the
- *     events query; the canvas stays mounted behind the modal).
+ *     accept → return to the Timeline → the Compute result node appears
+ *     without a manual refresh (the canvas remounts and refetches).
  *
- * Mount strategy mirrors `settings-shell.test.tsx`: the real
- * `SettingsModalProvider` + `SettingsModalHost` with a mini route tree so the
- * modal-driven navigation is exercised end-to-end (MSW for the daemon wire).
+ * Mount strategy: a mini route tree with the real `ModulesPage` (the page may
+ * only own `/modules`; the modal is no longer mounted there) exercising the
+ * navigation end-to-end (MSW for the daemon wire).
  */
 import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { Route, Routes, useLocation } from 'react-router';
+import { Link, Route, Routes } from 'react-router';
 
-import {
-  SettingsModalProvider,
-  useSettingsModal,
-} from '@/components/layout/settings-modal-context';
-import { SettingsModalHost } from '@/components/layout/settings-modal-host';
-import { SettingsModulesSection } from '@/pages/settings/settings-modules-section';
+import { ModulesPage } from '@/components/developer/modules-page';
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import { BrowserClient } from '@/lib/nexus';
@@ -145,40 +139,36 @@ const SUCCESS_PROPOSALS = {
   battle_report: { kind: 'combat', damage: 6 },
 };
 
-// ─── Mini app (modal + routes) ──────────────────────────────────────────────
+// ─── Mini app (routes) ──────────────────────────────────────────────────────
 
-function ModalAppRoutes() {
-  const location = useLocation();
-  const { open, backgroundLocation } = useSettingsModal();
-  const routesLocation = open ? backgroundLocation : location;
+function PageAppRoutes() {
   return (
-    <Routes location={routesLocation}>
+    <Routes>
       <Route
         path="worlds/:worldId/timeline"
         element={<TimelineCanvas worldId="world-7" />}
       />
-      <Route path="settings/modules" element={<SettingsModulesSection />} />
+      <Route path="modules" element={<ModulesPage />} />
       <Route path="*" element={<div data-testid="fallback-route" />} />
     </Routes>
   );
 }
 
-/** Programmatic Settings close (the Radix dialog has no visible X in tests). */
-function SettingsCloseButton() {
-  const { open, requestClose } = useSettingsModal();
-  if (!open) return null;
+/** Way back to the Timeline from the full-page `/modules` surface. */
+function TimelineReturnLink() {
   return (
-    <button type="button" onClick={() => requestClose()} data-testid="close-settings">
-      close settings
-    </button>
+    <Link to="/worlds/world-7/timeline" data-testid="back-to-timeline">
+      timeline
+    </Link>
   );
 }
 
 /**
  * Full MSW handler set. `state.eventsStore` is mutable: the accept handler
- * appends the compute_result event (simulating the daemon's Accept write), so
- * the canvas events query refetch picks it up through the `timeline.all`
- * invalidation.
+ * appends the compute_result event (simulating the daemon's Accept write).
+ * The journey then navigates back to the Timeline — a different route, so the
+ * canvas remounts and refetches the log; `useAcceptRun`'s `timeline.all`
+ * invalidation only covers a canvas that stays mounted.
  */
 function computeTimelineJourney(
   over: { initialEvents?: unknown[]; kbEntities?: unknown[]; branch?: string } = {},
@@ -308,11 +298,10 @@ function renderTimelineApp(
       ? ['/worlds/world-7/timeline']
       : [`/worlds/world-7/timeline?branch=${over.branch}`];
   const result = renderInApp(
-    <SettingsModalProvider>
-      <ModalAppRoutes />
-      <SettingsModalHost />
-      <SettingsCloseButton />
-    </SettingsModalProvider>,
+    <>
+      <PageAppRoutes />
+      <TimelineReturnLink />
+    </>,
     { client: new BrowserClient(), initialRouterEntries: initial },
   );
   return { ...result, state };
@@ -410,8 +399,8 @@ describe('TimelineCanvas compute-on-Timeline (V1.147 P2 T3)', () => {
 
     await user.click(await screen.findByTestId('timeline-run-module-entry'));
 
-    // Settings modal opened on the Modules section.
-    await screen.findByTestId('settings-modal-body');
+    // The `/modules` page renders the shared Run Studio.
+    await screen.findByTestId('modules-page-body');
     await user.click(await screen.findByRole('button', { name: 'Basic Combat' }));
     await screen.findByTestId('run-studio');
 
@@ -435,10 +424,10 @@ describe('TimelineCanvas compute-on-Timeline (V1.147 P2 T3)', () => {
     expect(screen.getByTestId('compute-inspector-section-module')).toBeInTheDocument();
     expect(screen.getByText('From module run')).toBeInTheDocument();
 
-    // Open Run → Settings modal on the module detail with the run inspector
+    // Open Run → `/modules` page on the module detail with the run inspector
     // deep-linked (run detail query resolves from `?run=run_9`).
     await user.click(screen.getByTestId('compute-inspector-open-run'));
-    await screen.findByTestId('settings-modal-body');
+    await screen.findByTestId('modules-page-body');
     await screen.findByTestId('run-studio');
     await screen.findByTestId('run-inspector');
   });
@@ -449,7 +438,7 @@ describe('TimelineCanvas compute-on-Timeline (V1.147 P2 T3)', () => {
 
     // 1. Entry: Run Module from the Timeline toolbar.
     await user.click(await screen.findByTestId('timeline-run-module-entry'));
-    await screen.findByTestId('settings-modal-body');
+    await screen.findByTestId('modules-page-body');
     await user.click(await screen.findByRole('button', { name: 'Basic Combat' }));
     await screen.findByTestId('run-studio');
 
@@ -480,17 +469,15 @@ describe('TimelineCanvas compute-on-Timeline (V1.147 P2 T3)', () => {
     });
     expect((state.runBodies[0] as Record<string, unknown>).branch_id).toBeUndefined();
 
-    // 4. Accept — the daemon appends the compute_result event; the canvas
-    // (still mounted behind the modal) refetches via the timeline.all
-    // invalidation WITHOUT any manual refresh.
+    // 4. Accept — the daemon appends the compute_result event.
     await user.click(screen.getByTestId('run-inspector-accept'));
     await waitFor(() => expect(state.acceptCalls).toBe(1));
     await screen.findByTestId('run-inspector-applied-note');
 
-    // 5. Close Settings → the Timeline is still mounted; the Compute result
-    // node is already there. (fireEvent: the Radix dialog overlay sits above
-    // the helper button, so userEvent's pointer check refuses it.)
-    fireEvent.click(screen.getByTestId('close-settings'));
+    // 5. Return to the Timeline (`/modules` is a full page, so the canvas
+    // remounts and refetches) WITHOUT a manual refresh — the accepted
+    // Compute result node is already there.
+    await user.click(screen.getByTestId('back-to-timeline'));
     const computeNode = await screen.findByTestId('compute-result-node-chrome');
     expect(within(computeNode).getByText('Aria strikes Brann')).toBeInTheDocument();
     expect(within(computeNode).getByText('Compute result')).toBeInTheDocument();
@@ -504,7 +491,7 @@ describe('TimelineCanvas compute-on-Timeline (V1.147 P2 T3)', () => {
     // 1. Entry: Run Module from the forked-branch Timeline toolbar. The
     // open URL now carries BOTH `?world=` and `?branch=<fork>`.
     await user.click(await screen.findByTestId('timeline-run-module-entry'));
-    await screen.findByTestId('settings-modal-body');
+    await screen.findByTestId('modules-page-body');
     await user.click(await screen.findByRole('button', { name: 'Basic Combat' }));
     await screen.findByTestId('run-studio');
 

@@ -19,6 +19,8 @@ import {
 } from '@/components/surface-source-badge';
 import { AgentPickerFixtures } from '@/fixtures/agent-picker-fixtures';
 import { CanvasSurfacesFixtures } from '@/fixtures/canvas-surfaces-fixtures';
+import { CapabilitiesRailFixtures } from '@/fixtures/capabilities-rail-fixtures';
+import { SessionsRailFixtures } from '@/fixtures/sessions-rail-fixtures';
 import { LaunchDaemonFixtures } from '@/fixtures/launch-daemon-fixtures';
 import {
   CREATOR_NAV,
@@ -35,6 +37,7 @@ import { GlobalTimelineFixtures } from '@/fixtures/global-timeline-fixtures';
 import { LayerBreadcrumbFixtures } from '@/fixtures/layer-breadcrumb-fixtures';
 import { MentalSurfacingFixtures } from '@/fixtures/mental-surfacing-fixtures';
 import { ModuleEditingFixtures } from '@/fixtures/module-editing-fixtures';
+import { ModulesRailFixtures } from '@/fixtures/modules-rail-fixtures';
 import { SelectionSubmenuStubFixtures } from '@/fixtures/selection-submenu-fixtures';
 import { NleTimelineCanvasFixtures } from '@/fixtures/nle-timeline-canvas-fixtures';
 import { TimelineCanvasFixtures } from '@/fixtures/timeline-canvas-fixtures';
@@ -198,6 +201,10 @@ export function SurfacesLayout() {
         ,{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @web-shell/*
+        </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-developer/*
         </code>
         ), transitional primitives (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
@@ -513,7 +520,9 @@ export function SurfacesIndexPage() {
         profiles, Header health indicator; AgentPicker states; Canvas —
         mirrored Outline/Strategy/WorldKB node chrome, Mental Surfacing,
         NLE/World/Work/Global timelines, Layer Breadcrumb, Conflict Modals;
-        Daemon status strip; Launch splash; Selection Submenu (6 variants).
+        Daemon status strip; Launch splash; Selection Submenu (6 variants);
+        Rail apps — Modules (page, manifest detail, Run Studio), Capabilities
+        (registry, filter, empty), Sessions (session cards, zero-session).
         Sources span all four categories: promoted primitives (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @42ch/nexus-ui
@@ -541,6 +550,10 @@ export function SurfacesIndexPage() {
         ,{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @web-shell/*
+        </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-developer/*
         </code>
         ), transitional primitives (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
@@ -793,6 +806,75 @@ export function SurfacesShellPage() {
         </p>
         <FixtureBoundary>
           <DaemonHealthIndicatorFixture />
+        </FixtureBoundary>
+      </section>
+
+      <section className="mt-10" data-testid="surfaces-rail-apps" id="surfaces-rail-apps">
+        <SurfaceHeading id="surfaces-rail-apps">Modules rail — page, manifest and Run Studio</SurfaceHeading>
+        <SurfaceSourceBadges
+          importPaths={[
+            '@web-developer/modules-page-chrome',
+            '@web-developer/run-studio-chrome',
+            '@42ch/nexus-ui',
+          ]}
+        />
+        <p className="text-copy-14 text-gray-700 mb-6">
+          v221 modules rail — the{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            components/developer/presentational
+          </code>{' '}
+          chrome split out of the product page and Run Studio: list with one
+          selected module, manifest detail beside the select prompt, and the
+          Run Studio in pending / success (proposal visible) / deep-linked
+          detail-error states. Pure view models and literal copy — no router,
+          no QueryClient, no daemon. Theme follows the Studio toggle.
+        </p>
+        <FixtureBoundary>
+          <ModulesRailFixtures />
+        </FixtureBoundary>
+      </section>
+
+      <section className="mt-10" data-testid="surfaces-caps-rail" id="surfaces-caps-rail">
+        <SurfaceHeading id="surfaces-caps-rail">
+          Capabilities rail — registry, filter and empty states
+        </SurfaceHeading>
+        <SurfaceSourceBadges
+          importPaths={['@web-developer/capabilities-page-chrome', '@42ch/nexus-ui']}
+        />
+        <p className="text-copy-14 text-gray-700 mb-6">
+          v221 capabilities rail — the{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            components/developer/presentational
+          </code>{' '}
+          chrome split out of the capabilities page: registry empty (wins over a
+          filter with no match), filtered hit, filtered miss quoting the query
+          with a Clear filter action, and the read error. Pure view models and
+          literal copy — no router, no QueryClient, no daemon. Theme follows the
+          Studio toggle.
+        </p>
+        <FixtureBoundary>
+          <CapabilitiesRailFixtures />
+        </FixtureBoundary>
+      </section>
+
+      <section className="mt-10" data-testid="surfaces-sessions-rail" id="surfaces-sessions-rail">
+        <SurfaceHeading id="surfaces-sessions-rail">
+          Sessions rail — session cards and the zero-session state
+        </SurfaceHeading>
+        <SurfaceSourceBadges
+          importPaths={['@web-developer/session-card', '@42ch/nexus-ui']}
+        />
+        <p className="text-copy-14 text-gray-700 mb-6">
+          v221 sessions rail — the Hub card frame reused for one orchestration
+          session: short id and status pill in the header, Preset / Creator in
+          the body, and the whole card as the single link into the run view.
+          Mixed running / completed / failed grid plus the zero-session empty
+          state. Static view models and literal copy — the gallery passes a
+          plain anchor where the app passes a router link. Theme follows the
+          Studio toggle.
+        </p>
+        <FixtureBoundary>
+          <SessionsRailFixtures />
         </FixtureBoundary>
       </section>
     </div>

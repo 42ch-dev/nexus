@@ -20,7 +20,7 @@ import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import { BrowserClient } from '@/lib/nexus';
 import { i18n } from '@/lib/i18n/config';
-import { ModulesPageBody } from '@/pages/modules-page';
+import { ModulesPageBody } from '@/components/developer/modules-page';
 
 const client = () => new BrowserClient();
 
@@ -813,8 +813,8 @@ describe('ModulesPage Run Studio (V1.147 P1 T3)', () => {
 describe('ModulesPage deep-link selection (V1.147 P2 T3)', () => {
   // `?module=basic-combat&run=run_9&world=w1` — the compute node "Open Run"
   // deep link (module + run) and the Timeline Run Module entry (`world`
-  // pre-fill) land here from `/settings/modules`.
-  function renderDeepLinked(initialUrl = '/settings/modules?module=basic-combat&run=run_9&world=w1') {
+  // pre-fill) land here from `/modules`.
+  function renderDeepLinked(initialUrl = '/modules?module=basic-combat&run=run_9&world=w1') {
     return renderInApp(<ModulesPageBody />, {
       client: client(),
       initialRouterEntries: [initialUrl],
@@ -983,8 +983,8 @@ describe('ModulesPage deep-link re-sync (V1.147 PR #194)', () => {
     useHandlers(...moduleSwitchHandlers());
 
     renderWithNav(
-      '/settings/modules?module=basic-combat',
-      '/settings/modules?module=scouting-party',
+      '/modules?module=basic-combat',
+      '/modules?module=scouting-party',
     );
 
     // Deep link opens the basic-combat detail (author copy is detail-only).
@@ -1011,7 +1011,7 @@ describe('ModulesPage deep-link re-sync (V1.147 PR #194)', () => {
     const user = userEvent.setup();
     useHandlers(...moduleSwitchHandlers());
 
-    renderWithNav('/settings/modules?module=basic-combat', '/settings/modules');
+    renderWithNav('/modules?module=basic-combat', '/modules');
 
     // Deep link opens the basic-combat detail.
     await screen.findByText('Nexus Team');
@@ -1019,7 +1019,7 @@ describe('ModulesPage deep-link re-sync (V1.147 PR #194)', () => {
 
     // `?module=` removed (browser back to the plain list) — the selection
     // must clear and the list placeholder return.
-    await user.click(screen.getByRole('button', { name: /go-\/settings\/modules$/ }));
+    await user.click(screen.getByRole('button', { name: /go-\/modules$/ }));
 
     await screen.findByText('Select a module');
     expect(screen.queryByTestId('run-studio')).not.toBeInTheDocument();

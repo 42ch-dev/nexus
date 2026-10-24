@@ -19,7 +19,6 @@ describe('settings-section-registry', () => {
       'agent',
       'workspace',
       'appearance',
-      'modules',
       'advanced',
     ]);
     expect(SETTINGS_SECTION_DESCRIPTORS.map((d) => d.id)).toEqual([
@@ -34,10 +33,10 @@ describe('settings-section-registry', () => {
     }
   });
 
-  it('treats /settings/* and /modules as settings-driven', () => {
+  it('treats only /settings/* as settings-driven', () => {
     expect(isSettingsDrivenPath('/settings')).toBe(true);
     expect(isSettingsDrivenPath('/settings/agent')).toBe(true);
-    expect(isSettingsDrivenPath('/modules')).toBe(true);
+    expect(isSettingsDrivenPath('/modules')).toBe(false);
     expect(isSettingsDrivenPath('/works')).toBe(false);
   });
 
@@ -57,11 +56,7 @@ describe('settings-section-registry', () => {
       hash: 'setup',
       pathname: '/settings/advanced',
     });
-    expect(resolveSettingsLocation('/modules')).toEqual({
-      section: 'modules',
-      hash: '',
-      pathname: '/settings/modules',
-    });
+    expect(resolveSettingsLocation('/modules')).toBeNull();
     expect(resolveSettingsLocation('/settings/nope')).toEqual({
       section: DEFAULT_SETTINGS_SECTION,
       hash: '',
@@ -75,7 +70,6 @@ describe('settings-section-registry', () => {
   });
 
   it('builds canonical settings paths', () => {
-    expect(settingsPathFor('modules')).toBe('/settings/modules');
     expect(settingsPathFor('advanced', 'setup')).toBe('/settings/advanced#setup');
   });
 });

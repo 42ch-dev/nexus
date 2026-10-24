@@ -102,7 +102,7 @@ describe('Sidebar', () => {
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
     await user.click(screen.getByRole('tab', { name: 'Orchestrator' }));
 
-    // Preset manager, sessions, schedule, capability browser, modules settings,
+    // Preset manager, sessions, schedule, capability browser, modules rail,
     // Connect operator chrome, and the Develop hub are absent from Create.
     expect(screen.queryByRole('link', { name: 'Harness' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Sessions' })).not.toBeInTheDocument();
@@ -123,7 +123,7 @@ describe('Sidebar', () => {
     await user.click(screen.getByRole('tab', { name: 'Orchestrator' }));
 
     // Develop hub + full config surface: works/worlds, strategies, runtime,
-    // compute (capability browser + modules), memory.
+    // compute (capability browser), memory.
     expect(screen.getByRole('link', { name: 'Develop' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Works' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Worlds' })).toBeInTheDocument();
@@ -134,10 +134,8 @@ describe('Sidebar', () => {
       'href',
       '/capabilities',
     );
-    expect(screen.getByRole('link', { name: 'Modules' })).toHaveAttribute(
-      'href',
-      '/settings/modules',
-    );
+    // Modules is a rail app (/modules), not a legacy sidebar link.
+    expect(screen.queryByRole('link', { name: 'Modules' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Memory' })).toBeInTheDocument();
   });
 

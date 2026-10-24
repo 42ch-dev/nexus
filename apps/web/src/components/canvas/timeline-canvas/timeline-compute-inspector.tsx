@@ -16,8 +16,8 @@
  * events).
  *
  * Open Run: hands the FULL run id + module id back to the orchestrator via
- * `ctxRef.current.onOpenRun`, which navigates to Settings → Modules run
- * detail (deep link). The Run section displays the short correlation id
+ * `ctxRef.current.onOpenRun`, which navigates to the `/modules` run detail
+ * (deep link). The Run section displays the short correlation id
  * (spec §4 "Short correlation id; monospace") while the callback carries the
  * full id.
  *

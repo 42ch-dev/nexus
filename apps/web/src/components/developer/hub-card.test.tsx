@@ -4,7 +4,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { screen } from '@testing-library/react';
 
-import { HubCard } from '@/components/developer/hub-card';
+import { HubCard } from '@/components/developer/presentational/hub-card';
 import { i18n } from '@/lib/i18n/config';
 import { renderInApp } from '@/test/test-providers';
 
@@ -36,6 +36,23 @@ describe('HubCard', () => {
     // Read-only: no form controls, only the one navigation link.
     expect(screen.queryAllByRole('button')).toHaveLength(0);
     expect(screen.queryAllByRole('textbox')).toHaveLength(0);
+  });
+
+  // v221-caps-sessions-rail T2 — the sessions card needs an inline node title
+  // (mono short id) and `error` for a `failed` session; the markup is unchanged.
+  it('accepts a node title and an error pill', () => {
+    renderInApp(
+      <HubCard
+        id="session"
+        title={<span className="font-mono">sess-0001</span>}
+        status={{ label: 'Failed', variant: 'error' }}
+      />,
+    );
+
+    const card = screen.getByTestId('hub-card-session');
+    expect(screen.getByText('sess-0001')).toBeInTheDocument();
+    expect(screen.getByText('Failed')).toBeInTheDocument();
+    expect(card.innerHTML).toContain('nexus-ui-badge-soft-error-bg');
   });
 
   it('renders a title-only card without a navigation link', () => {

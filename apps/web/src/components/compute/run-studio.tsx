@@ -1,19 +1,16 @@
 /**
  * Run Studio — shared app component for the Compute Run author journey
- * (V1.147 P1, behavior spec §1 / §2 / §3 / §4 / §6). Thin app wiring over the
- * promoted `@42ch/nexus-ui` primitives: this component owns t() copy, data
- * hooks, and callbacks only — no form/proposal/table logic is re-implemented
- * here.
+ * (V1.147 P1, behavior spec §1 / §2 / §3 / §4 / §6).
  *
  * Flow: World → guided form (pickers filtered by `required_key_block_types`)
  * → Run → proposal inspector → Accept / Discard (confirm) → Runs history.
  *
- * V1.147 P2 T3 — extracted from `modules-page.tsx` (absorbs qc1 W-004, the
+ * V1.147 P2 T3 — extracted from the modules page body (absorbs qc1 W-004, the
  * deferred hook extraction) so the Timeline's Run Module entry can mount the
  * SAME studio with context pre-fill — the plan's "no parallel studio" hard
  * gate. `initialWorldId` pre-fills the World selector (Timeline entry:
  * World/branch pre-filled per spec §1 P2); `initialRunId` deep-links the run
- * inspector (compute node "Open Run" → Settings → Modules run detail).
+ * inspector (compute node "Open Run" → `/modules` run detail).
  * Selected-event context is intentionally NOT pre-filled (the entry is a
  * fresh-run context; forcing event context would violate the "don't force
  * it" constraint — spec §1 P2 optional, plan brief).
@@ -23,31 +20,30 @@
  * the forked branch — not the World root. Omitted when the entry came from
  * the root Timeline (no `?branch=`): the daemon defaults to the World's
  * current branch (root fallback), matching the root Timeline's source.
+ *
+ * v221-modules-rail T2 — the markup moved to
+ * `components/developer/presentational/run-studio-chrome.tsx` (pure view, no
+ * transport / router / i18n) so the Design Studio fixture can render it with
+ * static copy. This file keeps every hook, query, mutation, toast and i18n
+ * lookup, and mounts the two destructive confirm dialogs as siblings of the
+ * chrome. Public props are unchanged.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
-import { Play } from 'lucide-react';
 
-import {
-  ProposalSections,
-  RunFormFields,
-  RunStatusBadge,
-  RunsTable,
-  type EntityPickerEntry,
-  type ProposalSectionsCopy,
-  type RunFormCopy,
-  type RunStatus,
-  type RunsTableCopy,
-  type RunTableRow,
+import type {
+  EntityPickerEntry,
+  ProposalSectionsCopy,
+  RunFormCopy,
+  RunStatus,
+  RunsTableCopy,
+  RunTableRow,
 } from '@42ch/nexus-ui';
-import type { ModuleDetail, RunDetail, RunResponse } from '@42ch/nexus-contracts';
+import type { ModuleDetail, RunResponse } from '@42ch/nexus-contracts';
 
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
-import { ErrorState, LoadingState } from '@/components/ui/states';
-import { Select } from '@/components/ui/select';
 import {
   flattenPages,
   useAcceptRun,
@@ -59,6 +55,7 @@ import {
   useRunCompute,
 } from '@/api/queries';
 import { toInvocationSchema } from '@/api/run-studio-schemas';
+import { RunStudioChrome, type RunStudioCopy } from '@/components/developer/presentational/run-studio-chrome';
 import { useWorldKbGraph } from '@/lib/canvas/use-world-kb-data';
 import { formatDateTime, shortId } from '@/lib/format';
 import { useToast } from '@/lib/use-toast';
@@ -117,7 +114,7 @@ export function RunStudio({
   const { toast } = useToast();
 
   // ── World scope ────────────────────────────────────────────────────────────
-  // No active-World shell state exists for the Settings surface, so the World
+  // No active-World shell state exists for the modules surface, so the World
   // selector defaults to the explicit picker (behavior spec §3: "otherwise
   // explicit picker") — or the Timeline pre-fill when the entry came from the
   // World Timeline (V1.147 P2 T3). KnowledgeEntry pickers re-derive when it
@@ -127,15 +124,15 @@ export function RunStudio({
   const worldGraph = useWorldKbGraph(worldId || undefined);
 
   // Bugbot 1 — `?branch=` pre-fill re-sync, mirroring the `?world=` pattern
-  // below: the Settings Modules section stays mounted across Timeline "Run
-  // Module" entries (search-params-only navigation), so the state seed alone
-  // would keep the previous fork's branch on the next run request — a Run
-  // would write the wrong branch. Keyed on the prop VALUE with a ref guard:
-  // a new `?branch=` switches the scoped branch, `?branch=` removal resets
-  // to undefined (world root), and an unchanged prop never clobbers state.
-  // The invocation values are NOT reset here — fork branches share the
-  // World's KB, so params remain valid within the same World (the `?world=`
-  // re-sync below owns cross-World resets).
+  // below: the Modules page stays mounted across Timeline "Run Module"
+  // entries (search-params-only navigation), so the state seed alone would
+  // keep the previous fork's branch on the next run request — a Run would
+  // write the wrong branch. Keyed on the prop VALUE with a ref guard: a new
+  // `?branch=` switches the scoped branch, `?branch=` removal resets to
+  // undefined (world root), and an unchanged prop never clobbers state. The
+  // invocation values are NOT reset here — fork branches share the World's
+  // KB, so params remain valid within the same World (the `?world=` re-sync
+  // below owns cross-World resets).
   const [branchId, setBranchId] = useState(initialBranchId ?? undefined);
   const lastBranchSeedRef = useRef(initialBranchId);
   useEffect(() => {
@@ -145,15 +142,15 @@ export function RunStudio({
     }
   }, [initialBranchId]);
 
-  // V1.147 PR #194 — deep-link `?world=` re-sync. The Settings Modules
-  // section stays mounted when a second Timeline "Run Module" entry lands on
-  // the same route (`/settings/modules?module=…&world=…` — search-params-only
-  // navigation), so the `useState(initialWorldId ?? '')` seed alone would
-  // keep the previous World selected — a Run would execute against the wrong
-  // World. The ref tracks the last-seen prop VALUE: a new value switches the
-  // selector (and `?world=` removal resets it to the empty placeholder),
-  // while an unchanged prop never clobbers a World the author picked manually
-  // (mirror of the round-1 `initialRunId` re-sync pattern).
+  // V1.147 PR #194 — deep-link `?world=` re-sync. The Modules page stays
+  // mounted when a second Timeline "Run Module" entry lands on the same route
+  // (`/modules?module=…&world=…` — search-params-only navigation), so the
+  // `useState(initialWorldId ?? '')` seed alone would keep the previous World
+  // selected — a Run would execute against the wrong World. The ref tracks
+  // the last-seen prop VALUE: a new value switches the selector (and
+  // `?world=` removal resets it to the empty placeholder), while an unchanged
+  // prop never clobbers a World the author picked manually (mirror of the
+  // round-1 `initialRunId` re-sync pattern).
   //
   // Round 3 — a deep-link switch must also reset the invocation authoring
   // state exactly like the manual `handleWorldChange`: otherwise the entity
@@ -180,6 +177,7 @@ export function RunStudio({
   const [jsonText, setJsonText] = useState('{}');
   const [jsonDirty, setJsonDirty] = useState(false);
   const [jsonError, setJsonError] = useState<string | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   // Keep the raw-JSON disclosure in sync with guided-form edits until the
   // author touches it ("form fields sync best-effort" — JSON edits never
@@ -282,7 +280,7 @@ export function RunStudio({
   // → Applied/Discarded) renders from refetched data.
   //
   // V1.147 P2 T3 — `initialRunId` deep-links the run inspector (compute node
-  // "Open Run" → Settings → Modules run detail).
+  // "Open Run" → `/modules` run detail).
   const [latestRun, setLatestRun] = useState<RunResponse | null>(null);
   const [inspectorRunId, setInspectorRunId] = useState<string | null>(
     initialRunId ?? null,
@@ -290,8 +288,8 @@ export function RunStudio({
   const [discardTargetId, setDiscardTargetId] = useState<string | null>(null);
 
   // V1.147 PR #194 round 4 — a module switch must reset the invocation
-  // authoring state exactly like a World switch. The Settings Modules section
-  // stays mounted when the author clicks another module in the list or a
+  // authoring state exactly like a World switch. The Modules page stays
+  // mounted when the author clicks another module in the list or a
   // `?module=` deep-link switches while the target module's detail is cached
   // (no LoadingState remount), so the `useState` seeds alone would keep the
   // previous module's guided values + Advanced JSON — a Run would submit one
@@ -315,9 +313,9 @@ export function RunStudio({
     }
   }, [module.module_id]);
 
-  // V1.147 PR #194 — deep-link `?run=` re-sync. The Settings Modules section
-  // stays mounted when a second compute-node "Open Run" navigates to the same
-  // route (`/settings/modules?module=…&run=…` — search params only), so the
+  // V1.147 PR #194 — deep-link `?run=` re-sync. The Modules page stays
+  // mounted when a second compute-node "Open Run" navigates to the same route
+  // (`/modules?module=…&run=…` — search params only), so the
   // `useState(initialRunId ?? null)` seed alone would keep the stale run open.
   // Keyed on the prop VALUE: a new `initialRunId` switches the inspector;
   // removing `?run=` (module switch deletes the param) closes it. The effect
@@ -464,234 +462,93 @@ export function RunStudio({
   );
 
   return (
-    <div className="flex flex-col gap-4 border-t border-gray-alpha-300 pt-4" data-testid="run-studio">
-      <p className="text-label-12 uppercase tracking-wide text-gray-700">{t('run.title')}</p>
-
-      {/* Product chrome: World selector (always present, spec §3). A data-feed
-          failure here must not collapse into a silent empty select (qc3 W-3
-          fix) — surface the ErrorState with a retry instead. */}
-      {worlds.isError ? (
-        <ErrorState
-          title={t('run.worldsErrorTitle')}
-          description={t('run.worldsErrorDescription')}
-          onRetry={() => worlds.refetch()}
-        />
-      ) : (
-        <div className="flex max-w-xs flex-col gap-1.5">
-          <Label htmlFor="run-studio-world">{t('run.worldLabel')}</Label>
-          <Select
-            id="run-studio-world"
-            value={worldId}
-            onChange={(event) => handleWorldChange(event.target.value)}
-            disabled={worlds.isLoading}
-            data-testid="run-studio-world"
-          >
-            <option value="" disabled>
-              {t('run.worldPlaceholder')}
-            </option>
-            {(worlds.data ?? []).map((w) => (
-              <option key={w.world_id} value={w.world_id}>
-                {w.title}
-              </option>
-            ))}
-          </Select>
-          <p className="text-copy-13 text-gray-700">
-            {worldId ? t('run.branchNote') : t('run.noWorldHint')}
-          </p>
-        </div>
-      )}
-
-      {worldId !== '' && worldGraph.isError ? (
-        <ErrorState
-          title={t('run.worldGraphErrorTitle')}
-          description={t('run.worldGraphErrorDescription')}
-          onRetry={() => worldGraph.refetch()}
-        />
-      ) : worldId !== '' && worldGraph.isLoading ? (
-        <LoadingState label={t('run.kbGraphLoading')} />
-      ) : (
-        <RunFormFields
-          schema={invocationSchema}
-          requiredKeyBlockTypes={module.required_key_block_types}
-          values={values}
-          onChange={setField}
-          entityEntries={entityEntries}
-          copy={runFormCopy(t)}
-          idPrefix="run-form"
-        />
-      )}
-
-      {/* Advanced JSON escape hatch — collapsed by default; form syncs best-effort. */}
-      <details
-        data-testid="run-studio-advanced-json"
-        className="rounded-control border border-gray-alpha-300 bg-background-100 p-3"
-      >
-        <summary className="cursor-pointer text-label-14 text-gray-1000">
-          {t('run.advancedJson')}
-        </summary>
-        <p className="mt-2 text-copy-13 text-gray-700">{t('run.advancedJsonWarning')}</p>
-        <textarea
-          aria-label={t('run.advancedJson')}
-          value={jsonText}
-          onChange={(event) => {
-            setJsonText(event.target.value);
+    <>
+      <RunStudioChrome
+        copy={runStudioCopy(t)}
+        world={{
+          options: worlds.data ?? [],
+          value: worldId,
+          onChange: handleWorldChange,
+          isLoading: worlds.isLoading,
+          isError: worlds.isError,
+          onRetry: () => worlds.refetch(),
+        }}
+        form={{
+          schema: invocationSchema,
+          requiredKeyBlockTypes: module.required_key_block_types,
+          values,
+          onChange: setField,
+          entityEntries,
+          copy: runFormCopy(t),
+          // No World selected → the KB graph is not queried, so the form
+          // renders without gating on it.
+          graph:
+            worldId !== ''
+              ? {
+                  isLoading: worldGraph.isLoading,
+                  isError: worldGraph.isError,
+                  onRetry: () => worldGraph.refetch(),
+                }
+              : null,
+        }}
+        advanced={{
+          open: advancedOpen,
+          onOpenChange: setAdvancedOpen,
+          json: jsonText,
+          onJsonChange: (value) => {
+            setJsonText(value);
             setJsonDirty(true);
             setJsonError(null);
-          }}
-          spellCheck={false}
-          className="mt-2 h-40 w-full rounded-control border border-gray-alpha-400 bg-background-200 p-3 font-mono text-copy-13 text-gray-1000 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-1000 dark:focus-visible:ring-blue-700"
-          data-testid="run-studio-json-textarea"
-        />
-        {jsonError && (
-          <p className="mt-2 text-copy-13 text-red-700" role="alert" data-testid="run-studio-json-error">
-            {jsonError}
-          </p>
-        )}
-      </details>
-
-      <div className="flex items-center gap-3">
-        <Button
-          type="button"
-          variant="primary"
-          onClick={handleRun}
-          disabled={!canRun}
-          data-testid="run-studio-run"
-        >
-          <Play className="h-4 w-4" aria-hidden />
-          {runCompute.isPending ? t('run.runPending') : t('run.runButton')}
-        </Button>
-      </div>
-
-      {inspectorRunId && runDetail.isLoading ? (
-        <LoadingState label={t('run.runLoadingDetail')} />
-      ) : inspectorRunId && runDetail.isError ? (
-        // A deep-linked Run whose detail read fails (cleared by Clear history,
-        // deleted, or transport down) must SAY so — rendering nothing hides the
-        // failure behind an empty space where the inspector should be.
-        <ErrorState
-          title={t('run.runErrorTitle')}
-          description={t('run.runErrorDescription')}
-          onRetry={() => void runDetail.refetch()}
-        />
-      ) : (
-        inspectorRun && (
-          <RunInspector
-            run={inspectorRun}
-            truncated={latestRun?.truncated ?? false}
-            acceptPending={acceptRun.isPending}
-            discardPending={discardRun.isPending}
-            onAccept={handleAccept}
-            onDiscard={() => {
-              const runId = inspectorRunId ?? latestRun?.run_id;
-              if (runId) setDiscardTargetId(runId);
-            }}
-          />
-        )
-      )}
-
-      <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-end justify-between gap-2">
-          <p className="text-label-12 uppercase tracking-wide text-gray-700">
-            {t('run.runsTitle')}
-          </p>
-          {/* Filter chrome (spec §4 + plan Global Constraints). Status + World
-              narrow the module-scoped history. Clear history needs a daemon
-              DELETE API that does not exist in P1 — filtering ships now and a
-              server-backed Clear is registered as a residual (no invented
-              backend route, no disabled "coming soon" affordance). */}
-          <div className="flex flex-wrap items-end gap-2">
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="run-runs-status-filter" className="text-label-12 text-gray-700">
-                {t('run.runsTable.statusFilter')}
-              </Label>
-              <Select
-                id="run-runs-status-filter"
-                value={runStatusFilter}
-                onChange={(event) => setRunStatusFilter(event.target.value as '' | RunStatus)}
-                className="w-44"
-                data-testid="run-runs-status-filter"
-              >
-                <option value="">{t('run.runsTable.allStatuses')}</option>
-                {RUN_STATUS_FILTER_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {t(option.labelKey)}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="run-runs-world-filter" className="text-label-12 text-gray-700">
-                {t('run.runsTable.worldFilter')}
-              </Label>
-              <Select
-                id="run-runs-world-filter"
-                value={runWorldFilter}
-                onChange={(event) => setRunWorldFilter(event.target.value)}
-                disabled={worlds.isLoading || worlds.isError}
-                className="w-44"
-                data-testid="run-runs-world-filter"
-              >
-                <option value="">{t('run.runsTable.allWorlds')}</option>
-                {(worlds.data ?? []).map((w) => (
-                  <option key={w.world_id} value={w.world_id}>
-                    {w.title}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            {/* Clear history (V1.147 P3 T2) — server-backed DELETE. The
-                daemon REQUIRES `world_id`, so the button is gated on the
-                World filter (never a world-wide purge); running / needs-review
-                rows are always kept. */}
-            <div className="flex items-end">
-              <Button
-                type="button"
-                variant="secondary"
-                size="small"
-                onClick={() => {
-                  if (clearScopeWorldId) setClearTargetWorldId(clearScopeWorldId);
-                }}
-                disabled={clearScopeWorldId === null || clearRuns.isPending}
-                title={clearScopeWorldId === null ? t('run.clearDisabledHint') : undefined}
-                aria-label={t('run.clearHistory')}
-                data-testid="run-runs-clear"
-              >
-                {t('run.clearHistory')}
-              </Button>
-            </div>
-          </div>
-        </div>
-
-        {/* Data-feed errors must not collapse into "No runs yet" (qc3 W-3
-            fix): a failed runs query renders ErrorState, and a loading list
-            renders a placeholder instead of flashing the empty state. */}
-        {runs.isLoading ? (
-          <LoadingState label={t('run.runsLoading')} />
-        ) : runs.isError ? (
-          <ErrorState
-            title={t('run.runsErrorTitle')}
-            description={t('run.runsErrorDescription')}
-            onRetry={() => runs.refetch()}
-          />
-        ) : (
-          <RunsTable rows={runRows} copy={runsTableCopy(t)} onOpenRun={openRun} />
-        )}
-
-        {/* Cursor pagination (qc1 W-002 / qc3 W-2 fix): runs beyond the first
-            page — including older Needs-review rows — must stay reachable. */}
-        {runs.hasNextPage && (
-          <Button
-            type="button"
-            variant="tertiary"
-            size="small"
-            onClick={() => void runs.fetchNextPage()}
-            disabled={runs.isFetchingNextPage}
-            data-testid="run-runs-load-more"
-          >
-            {runs.isFetchingNextPage ? t('run.runsTable.loadingMore') : t('run.runsTable.loadMore')}
-          </Button>
-        )}
-      </div>
+          },
+          error: jsonError,
+        }}
+        run={{
+          pending: runCompute.isPending,
+          canRun,
+          onRun: handleRun,
+          detailLoading: Boolean(inspectorRunId) && runDetail.isLoading,
+          detailError: Boolean(inspectorRunId) && runDetail.isError,
+          onDetailRetry: () => void runDetail.refetch(),
+        }}
+        proposal={{
+          run: inspectorRun
+            ? {
+                runIdShort: shortId(inspectorRun.run_id),
+                status: inspectorRun.status,
+                proposals: inspectorRun.proposals,
+                error: inspectorRun.error,
+              }
+            : null,
+          truncated: latestRun?.truncated ?? false,
+          acceptPending: acceptRun.isPending,
+          discardPending: discardRun.isPending,
+          onAccept: handleAccept,
+          onDiscard: () => {
+            const runId = inspectorRunId ?? latestRun?.run_id;
+            if (runId) setDiscardTargetId(runId);
+          },
+        }}
+        runs={{
+          rows: runRows,
+          copy: runsTableCopy(t),
+          isLoading: runs.isLoading,
+          isError: runs.isError,
+          onRetry: () => runs.refetch(),
+          statusFilter: runStatusFilter,
+          onStatusFilterChange: setRunStatusFilter,
+          worldFilter: runWorldFilter,
+          onWorldFilterChange: setRunWorldFilter,
+          clearScopeWorldId,
+          clearPending: clearRuns.isPending,
+          onClear: () => {
+            if (clearScopeWorldId) setClearTargetWorldId(clearScopeWorldId);
+          },
+          onOpenRun: openRun,
+          hasNextPage: runs.hasNextPage,
+          isFetchingNextPage: runs.isFetchingNextPage,
+          onLoadMore: () => void runs.fetchNextPage(),
+        }}
+      />
 
       <DiscardRunDialog
         open={discardTargetId !== null}
@@ -707,107 +564,7 @@ export function RunStudio({
         onCancel={() => setClearTargetWorldId(null)}
         onConfirm={handleClearConfirmed}
       />
-    </div>
-  );
-}
-
-/** Result inspector for one Run — succeeded (proposals + Accept/Discard), failed, or terminal. */
-function RunInspector({
-  run,
-  truncated,
-  acceptPending,
-  discardPending,
-  onAccept,
-  onDiscard,
-}: {
-  run: RunResponse | RunDetail;
-  truncated?: boolean;
-  acceptPending: boolean;
-  discardPending: boolean;
-  onAccept: () => void;
-  onDiscard: () => void;
-}) {
-  const { t } = useTranslation('modules');
-  const isLimit =
-    run.error !== undefined &&
-    ['compute_fuel_exhausted', 'compute_wall_time_exceeded', 'compute_memory_cap_exceeded'].includes(
-      run.error.code,
-    );
-
-  return (
-    <div
-      className="flex flex-col gap-4 rounded-card border border-gray-alpha-300 bg-background-100 p-4"
-      data-testid="run-inspector"
-    >
-      <div className="flex flex-wrap items-center gap-3">
-        <RunStatusBadge status={run.status} label={runStatusLabel(t, run.status)} />
-        <span className="text-copy-13-mono text-gray-700">{shortId(run.run_id)}</span>
-      </div>
-
-      {run.status === 'succeeded' && run.proposals && (
-        <>
-          <ProposalSections proposals={run.proposals} truncated={truncated} copy={proposalCopy(t)} />
-          <div className="flex flex-wrap items-center gap-3">
-            <Button
-              type="button"
-              variant="primary"
-              onClick={onAccept}
-              disabled={acceptPending}
-              aria-label={t('run.acceptAria')}
-              data-testid="run-inspector-accept"
-            >
-              {t('run.accept')}
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={onDiscard}
-              disabled={discardPending}
-              aria-label={t('run.discardAria')}
-              data-testid="run-inspector-discard"
-            >
-              {t('run.discard')}
-            </Button>
-            <p className="text-copy-13 text-gray-700">{t('run.acceptNote')}</p>
-          </div>
-        </>
-      )}
-
-      {run.status === 'failed' && run.error && (
-        <div
-          data-testid="run-inspector-failed"
-          className="rounded-card border border-error-surface-border bg-error-surface p-4"
-        >
-          <p className="text-label-14 font-medium text-gray-1000">
-            {isLimit ? t('run.stoppedTitle') : t('run.failedTitle')}
-          </p>
-          <p className="mt-1 text-copy-13 text-gray-700">
-            {isLimit
-              ? t('run.stoppedDescription')
-              : t('run.failedDescription', { reason: run.error.message ?? '' })}
-          </p>
-          <p className="mt-2 text-copy-13-mono text-gray-700">
-            {t('run.failedCodeLabel')}: {run.error.code}
-          </p>
-        </div>
-      )}
-
-      {run.status === 'applied' && (
-        <p className="text-copy-13 text-gray-700" data-testid="run-inspector-applied-note">
-          {t('run.appliedNote')}
-        </p>
-      )}
-      {run.status === 'discarded' && (
-        <p className="text-copy-13 text-gray-700" data-testid="run-inspector-discarded-note">
-          {t('run.discardedNote')}
-        </p>
-      )}
-      {run.status === 'running' && (
-        <p className="text-copy-13 text-gray-700" data-testid="run-inspector-running-note">
-          {t('run.runningNote')}
-        </p>
-      )}
-    </div>
+    </>
   );
 }
 
@@ -896,6 +653,60 @@ function ClearHistoryDialog({
 }
 
 /* ── Caller-owned copy builders (i18n lives in the app, not the package) ───── */
+
+/** Flat copy for the studio chrome — assembled from the `modules` namespace. */
+function runStudioCopy(t: TFunction): RunStudioCopy {
+  return {
+    title: t('run.title'),
+    worldLabel: t('run.worldLabel'),
+    worldPlaceholder: t('run.worldPlaceholder'),
+    branchNote: t('run.branchNote'),
+    noWorldHint: t('run.noWorldHint'),
+    worldsErrorTitle: t('run.worldsErrorTitle'),
+    worldsErrorDescription: t('run.worldsErrorDescription'),
+    graphErrorTitle: t('run.worldGraphErrorTitle'),
+    graphErrorDescription: t('run.worldGraphErrorDescription'),
+    graphLoading: t('run.kbGraphLoading'),
+    advancedJson: t('run.advancedJson'),
+    advancedJsonWarning: t('run.advancedJsonWarning'),
+    runButton: t('run.runButton'),
+    runPending: t('run.runPending'),
+    runLoadingDetail: t('run.runLoadingDetail'),
+    runErrorTitle: t('run.runErrorTitle'),
+    runErrorDescription: t('run.runErrorDescription'),
+    runsTitle: t('run.runsTitle'),
+    statusFilter: t('run.runsTable.statusFilter'),
+    allStatuses: t('run.runsTable.allStatuses'),
+    worldFilter: t('run.runsTable.worldFilter'),
+    allWorlds: t('run.runsTable.allWorlds'),
+    clearHistory: t('run.clearHistory'),
+    clearDisabledHint: t('run.clearDisabledHint'),
+    runsLoading: t('run.runsLoading'),
+    runsErrorTitle: t('run.runsErrorTitle'),
+    runsErrorDescription: t('run.runsErrorDescription'),
+    loadMore: t('run.runsTable.loadMore'),
+    loadingMore: t('run.runsTable.loadingMore'),
+    statusOptions: RUN_STATUS_FILTER_OPTIONS.map((option) => ({
+      value: option.value,
+      label: t(option.labelKey),
+    })),
+    statusLabel: (status) => runStatusLabel(t, status),
+    accept: t('run.accept'),
+    discard: t('run.discard'),
+    acceptAria: t('run.acceptAria'),
+    discardAria: t('run.discardAria'),
+    acceptNote: t('run.acceptNote'),
+    stoppedTitle: t('run.stoppedTitle'),
+    failedTitle: t('run.failedTitle'),
+    stoppedDescription: t('run.stoppedDescription'),
+    failedDescription: (reason) => t('run.failedDescription', { reason }),
+    failedCodeLabel: t('run.failedCodeLabel'),
+    appliedNote: t('run.appliedNote'),
+    discardedNote: t('run.discardedNote'),
+    runningNote: t('run.runningNote'),
+    proposalsCopy: proposalCopy(t),
+  };
+}
 
 function runFormCopy(t: TFunction): RunFormCopy {
   return {

@@ -290,7 +290,7 @@ function ComputeInspectorFrame() {
   return (
     <FixtureFrame
       title="Compute inspector — provenance + Run link"
-      description="Inspector content for a selected Compute result node (spec §5 Inspector row): Module name + version with provenance chip, Report digest, Parameters digest, affected KnowledgeEntries, and the Run section (id + Open Run affordance). The provenance chip renders in every state so the inspector can always tell direct-run from preset. Open Run hands navigation to the caller (T3 wires Settings → Modules run detail)."
+      description="Inspector content for a selected Compute result node (spec §5 Inspector row): Module name + version with provenance chip, Report digest, Parameters digest, affected KnowledgeEntries, and the Run section (id + Open Run affordance). The provenance chip renders in every state so the inspector can always tell direct-run from preset. Open Run hands navigation to the caller (T3 wires `/modules` run detail)."
       testId="timeline-compute-inspector"
     >
       <div
