@@ -6,7 +6,7 @@
   "helper": "在此处管理你的本地智能体、工作区、守护进程连接和设置选项。",
   "nav": {
     "agent": "智能体",
-    "workspace": "Profiles",
+    "workspace": "个人档案",
     "appearance": "外观",
     "advanced": "高级"
   },

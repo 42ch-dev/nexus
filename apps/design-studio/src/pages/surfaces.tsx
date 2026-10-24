@@ -202,6 +202,10 @@ export function SurfacesLayout() {
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @web-shell/*
         </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-developer/*
+        </code>
         ), transitional primitives (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @web-ui/*
@@ -516,7 +520,9 @@ export function SurfacesIndexPage() {
         profiles, Header health indicator; AgentPicker states; Canvas —
         mirrored Outline/Strategy/WorldKB node chrome, Mental Surfacing,
         NLE/World/Work/Global timelines, Layer Breadcrumb, Conflict Modals;
-        Daemon status strip; Launch splash; Selection Submenu (6 variants).
+        Daemon status strip; Launch splash; Selection Submenu (6 variants);
+        Rail apps — Modules (page, manifest detail, Run Studio), Capabilities
+        (registry, filter, empty), Sessions (session cards, zero-session).
         Sources span all four categories: promoted primitives (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @42ch/nexus-ui
@@ -544,6 +550,10 @@ export function SurfacesIndexPage() {
         ,{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @web-shell/*
+        </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-developer/*
         </code>
         ), transitional primitives (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
