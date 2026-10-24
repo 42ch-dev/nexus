@@ -188,6 +188,7 @@ export function RunStudioChrome({
   const worldSelectId = useId();
   const statusFilterId = useId();
   const worldFilterId = useId();
+  const formIdPrefix = useId();
 
   return (
     <div className="flex flex-col gap-4 border-t border-gray-alpha-300 pt-4" data-testid="run-studio">
@@ -243,7 +244,7 @@ export function RunStudioChrome({
           onChange={form.onChange}
           entityEntries={form.entityEntries}
           copy={form.copy}
-          idPrefix="run-form"
+          idPrefix={formIdPrefix}
         />
       )}
 

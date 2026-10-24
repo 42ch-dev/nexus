@@ -44,7 +44,16 @@ describe('ModulesRailFixtures', () => {
 
     // getByLabelText resolves through htmlFor → id: each label reaches the
     // control rendered beside it, not the first Run Studio in the document.
-    for (const label of ['World', 'Filter by status', 'Filter by World']) {
+    // The schema-driven Run form derives its field ids as
+    // `${idPrefix}-${name}`; a literal prefix re-duplicated
+    // run-form-attacker_id across the three frames (I-000086 occ 97).
+    for (const label of [
+      'World',
+      'Filter by status',
+      'Filter by World',
+      'Attacker',
+      'Defender',
+    ]) {
       const ids = runFrames.map((testId) => {
         const frame = screen.getByTestId(testId);
         return within(frame).getByLabelText(label).id;
