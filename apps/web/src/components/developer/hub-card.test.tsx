@@ -4,7 +4,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { screen } from '@testing-library/react';
 
-import { HubCard } from '@/components/developer/hub-card';
+import { HubCard } from '@/components/developer/presentational/hub-card';
 import { i18n } from '@/lib/i18n/config';
 import { renderInApp } from '@/test/test-providers';
 

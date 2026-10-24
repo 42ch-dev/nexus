@@ -14,9 +14,7 @@
  */
 import type { ReactNode } from 'react';
 
-// Relative (not `@/`) so the Design Studio gallery resolves it through the
-// `@web-developer/session-card` alias; Studio's `@` points at its own src.
-import { HubCard } from '../hub-card';
+import { HubCard } from './hub-card';
 import type { BadgeProps } from '@/components/ui/badge';
 
 /** One session reduced to the fields the card renders. */

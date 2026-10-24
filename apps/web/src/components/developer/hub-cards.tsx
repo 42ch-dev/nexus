@@ -9,7 +9,7 @@
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { HubCard } from '@/components/developer/hub-card';
+import { HubCard } from '@/components/developer/presentational/hub-card';
 import { Button } from '@/components/ui/button';
 import { errorMessage } from '@/lib/error-message';
 import {
