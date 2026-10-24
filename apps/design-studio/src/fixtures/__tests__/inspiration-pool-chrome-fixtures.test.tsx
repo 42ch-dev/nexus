@@ -97,9 +97,9 @@ describe('InspirationPoolChromeFixtures', () => {
       within(idea).getByText('The lighthouse keeper catalogues the ships it failed to save'),
     ).toBeInTheDocument();
     expect(within(idea).getByTestId('inspiration-pool-row-added')).toHaveTextContent(
-      'Added: Oct 22, 2026',
+      'Added Oct 22, 2026',
     );
-    // Row count rendered from the response `total`, labeled for assistive tech.
+    // Pool count arrives as one interpolated string from the caller.
     expect(within(frame).getByTestId('inspiration-pool-count')).toHaveTextContent(
       /^Inspiration Pool: 3 \/ 3$/,
     );

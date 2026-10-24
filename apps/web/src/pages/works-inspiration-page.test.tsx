@@ -104,11 +104,13 @@ describe('WorksInspirationPage', () => {
     expect(within(unexpected).queryAllByRole('link')).toHaveLength(0);
 
     expect(screen.getByTestId('inspiration-back-link')).toHaveAttribute('href', '/works');
-    // Count is labeled for assistive tech (list label + `rows / total`).
+    // Count and added label render as interpolated strings, not joined fragments.
     expect(screen.getByTestId('inspiration-pool-count')).toHaveTextContent(
       /^Inspiration Pool: 4 \/ 4$/,
     );
-    expect(screen.getAllByTestId('inspiration-pool-row-added')[0]).toHaveTextContent(/^Added:/);
+    expect(screen.getAllByTestId('inspiration-pool-row-added')[0]).toHaveTextContent(
+      /^Added \w{3} \d{1,2}, \d{4}$/,
+    );
   });
 
   it('adds a trimmed title and refreshes the pool', async () => {

@@ -49,7 +49,8 @@ export interface InspirationPoolCopy {
   titlePlaceholder: string;
   submitLabel: string;
   submittingLabel: string;
-  addedLabel: string;
+  /** Translatable pool count with both numbers interpolated; absent hides it. */
+  countLabel?: string;
   openWork: string;
   promoteLabel: string;
   promotingLabel: string;
@@ -64,8 +65,8 @@ export interface InspirationPoolRow {
   status: string;
   /** Translated status, or the raw status when it is not one of the three. */
   statusLabel: string;
-  /** Formatted added date. */
-  addedText: string;
+  /** Translated added label with the formatted date interpolated. */
+  addedLabel: string;
   /** Present once the item was promoted to a Work. */
   workId?: string;
 }
@@ -80,8 +81,6 @@ export interface InspirationPoolChromeProps {
   copy: InspirationPoolCopy;
   state?: InspirationPoolChromeState;
   rows: InspirationPoolRow[];
-  /** Response `total` for the rendered page. */
-  total?: number;
   onRetry?: () => void;
   addTitleValue: string;
   onAddTitleChange: (value: string) => void;
@@ -163,7 +162,7 @@ function InspirationPoolRowItem({
               {row.statusLabel}
             </Badge>
             <span data-testid="inspiration-pool-row-added">
-              {copy.addedLabel}: {row.addedText}
+              {row.addedLabel}
             </span>
           </span>
         </span>
@@ -223,7 +222,6 @@ export function InspirationPoolChrome({
   copy,
   state = 'ready',
   rows,
-  total,
   onRetry,
   addTitleValue,
   onAddTitleChange,
@@ -305,14 +303,12 @@ export function InspirationPoolChrome({
                 />
               ))}
             </ul>
-            {typeof total === 'number' ? (
+            {copy.countLabel ? (
               <p
                 className="text-copy-13 text-gray-700"
                 data-testid="inspiration-pool-count"
               >
-                {/* mechanic 7 pins no count key; the list label names what is counted */}
-                <span className="sr-only">{copy.listAriaLabel}: </span>
-                {rows.length} / {total}
+                {copy.countLabel}
               </p>
             ) : null}
           </>
