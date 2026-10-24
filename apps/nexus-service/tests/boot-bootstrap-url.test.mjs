@@ -196,7 +196,10 @@ test('--no-open prints the bootstrap URL without opening it, and its token mints
     await service.listening();
     const url = await service.openUrl();
     assertBootstrapUrl(url, port);
-    assert.ok(!/^NEXUS_SERVICE_READY .*open/m.test(service.stdout), 'stdout carries only the ready line');
+    const stdoutLines = service.stdout.split('\n').filter(Boolean);
+    assert.equal(stdoutLines.length, 1, `stdout must be the single ready line, got: ${JSON.stringify(stdoutLines)}`);
+    assert.match(stdoutLines[0], /^NEXUS_SERVICE_READY \{/);
+    assert.ok(!service.stdout.includes('[nexus-service]'), 'human logs must stay on stderr');
 
     await delay(500);
     assert.equal(markerText(marker), '', '--no-open must not launch the opener');
@@ -234,7 +237,7 @@ test('--web-dist hands the printed bootstrap URL to the opener', { skip: isWindo
   }
 });
 
-test('without --web-dist the URL is still printed but never opened', async () => {
+test('without --web-dist the URL is still printed but never opened', { skip: isWindows }, async () => {
   const marker = join(tempDir('nexus-boot-marker-'), 'opened');
   const shimDir = openShim(marker);
   const port = await freePort();
