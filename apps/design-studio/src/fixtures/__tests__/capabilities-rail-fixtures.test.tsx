@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { CapabilitiesRailFixtures } from '@/fixtures/capabilities-rail-fixtures';
+import { ThemeProvider } from '@/components/theme-provider';
 
 /**
  * The `/capabilities` chrome has four content states worth eyeballing: the
@@ -99,16 +100,20 @@ describe('CapabilitiesRailFixtures', () => {
   });
 
   it('renders every variant under both themes', () => {
-    for (const theme of ['light', 'dark'] as const) {
-      document.documentElement.classList.toggle('dark', theme === 'dark');
+    for (const forced of ['light', 'dark'] as const) {
+      render(
+        <ThemeProvider forcedTheme={forced}>
+          <CapabilitiesRailFixtures />
+        </ThemeProvider>,
+      );
 
-      render(<CapabilitiesRailFixtures />);
-
+      // The Studio theme system is the authority for the marker (`<html>.dark`);
+      // asserting it proves the fixture renders under the resolved theme, not
+      // just that a fixture-owned class survived.
+      expect(document.documentElement.classList.contains('dark')).toBe(forced === 'dark');
       for (const testId of VARIANTS) {
         expect(screen.getByTestId(testId)).toBeInTheDocument();
       }
-      // Token-backed classes survive the toggle — the chrome has no theme prop.
-      expect(screen.getByTestId('capabilities-rail-fixture-hit')).toHaveClass('bg-background-100');
 
       cleanup();
     }
