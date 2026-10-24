@@ -102,7 +102,7 @@ describe('Sidebar', () => {
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
     await user.click(screen.getByRole('tab', { name: 'Orchestrator' }));
 
-    // Preset manager, sessions, schedule, capability browser, modules settings,
+    // Preset manager, sessions, schedule, capability browser, modules rail,
     // Connect operator chrome, and the Develop hub are absent from Create.
     expect(screen.queryByRole('link', { name: 'Harness' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Sessions' })).not.toBeInTheDocument();

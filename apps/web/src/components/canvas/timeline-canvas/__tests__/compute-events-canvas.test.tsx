@@ -26,7 +26,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Link, Route, Routes } from 'react-router';
 
-import { ModulesPage } from '@/pages/modules-page';
+import { ModulesPage } from '@/components/developer/modules-page';
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import { BrowserClient } from '@/lib/nexus';

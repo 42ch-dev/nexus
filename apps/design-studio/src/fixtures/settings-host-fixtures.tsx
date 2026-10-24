@@ -195,7 +195,7 @@ const FIXTURE_AGENTS: AgentPickerItem[] = [
 /**
  * Secondary section nav inside Settings page chrome.
  * Not Creator/Orchestrator tabs; not a second app-wide sidebar.
- * V1.131 P2: five sections — Agent / Workspace / Appearance / Modules / Advanced.
+ * V1.131 P2: four sections — Agent / Workspace / Appearance / Advanced.
  */
 function SettingsSectionNav({
   active,

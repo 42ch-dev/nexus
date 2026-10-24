@@ -1,7 +1,7 @@
 /**
  * Settings modal controller — V1.131 P2.
  *
- * URL is the open-state SSOT for `/settings/*` and `/modules`. The provider
+ * URL is the open-state SSOT for `/settings/*`. The provider
  * owns last-safe-background, section selection, dirty-source registry, and
  * every close vector via `requestClose`.
  *
@@ -67,7 +67,8 @@ export interface SettingsModalContextValue {
   cancelDiscard: () => void;
 }
 
-export const SettingsModalContext = createContext<SettingsModalContextValue | null>(
+/** Provider-scoped only: `useSettingsModal` is the public entry point. */
+const SettingsModalContext = createContext<SettingsModalContextValue | null>(
   null,
 );
 
