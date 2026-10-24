@@ -33,7 +33,8 @@ function SettingsSectionBody({
     const id = sectionHash;
     // Scroll advanced anchors (connection / setup) into view after mount.
     const frame = requestAnimationFrame(() => {
-      document.getElementById(id)?.scrollIntoView({ block: 'start' });
+      // jsdom does not implement scrollIntoView.
+      document.getElementById(id)?.scrollIntoView?.({ block: 'start' });
     });
     return () => cancelAnimationFrame(frame);
   }, [section, sectionHash]);
