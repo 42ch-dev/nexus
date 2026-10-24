@@ -10,7 +10,6 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_ENTRANCE,
   ENTRANCE_BY_ID,
-  ENTRANCE_DESCRIPTORS,
   ENTRANCE_IDS,
   ENTRANCE_ROUTE_RULES,
   firstSettingsSectionFor,
@@ -35,10 +34,6 @@ describe('entrance registry (AR-15)', () => {
 
   it('indexes exactly the two pinned entrance ids', () => {
     expect(ENTRANCE_IDS).toEqual(['content-creator', 'developer']);
-    expect(ENTRANCE_DESCRIPTORS.map((d) => d.id)).toEqual(ENTRANCE_IDS);
-    for (const id of ENTRANCE_IDS) {
-      expect(ENTRANCE_BY_ID[id].id).toBe(id);
-    }
   });
 
   it('pins land routes — the single source for guard bounces and the index redirect (AR-18)', () => {

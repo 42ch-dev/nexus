@@ -90,7 +90,9 @@ describe('ModulesRailFixtures', () => {
     expect(within(frame).getByText('Select a module')).toBeInTheDocument();
     expect(within(frame).getByRole('heading', { name: 'Basic Combat' })).toBeInTheDocument();
     expect(within(frame).getByText('ABI version')).toBeInTheDocument();
-    expect(within(frame).getByText('3')).toBeInTheDocument();
+    // DetailField renders label + value in one div; scope the value to that row.
+    const abiField = within(frame).getByText('ABI version').closest('div') as HTMLElement;
+    expect(within(abiField).getByText('3')).toBeInTheDocument();
     expect(within(frame).getByText('Host functions')).toBeInTheDocument();
     expect(within(frame).getByText('Schemas')).toBeInTheDocument();
   });
@@ -154,9 +156,7 @@ describe('ModulesRailFixtures', () => {
         </ThemeProvider>,
       );
 
-      // The Studio theme system is the authority for the marker (`<html>.dark`);
-      // asserting it proves the fixture renders under the resolved theme, not
-      // just that a fixture-owned class survived.
+      // Proves ThemeProvider applied the resolved `<html>.dark` marker, not a paint difference (vitest css:false leaves the class strings uncomputed).
       expect(document.documentElement.classList.contains('dark')).toBe(forced === 'dark');
       for (const testId of VARIANTS) {
         expect(screen.getByTestId(testId)).toBeInTheDocument();

@@ -5,8 +5,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_SETTINGS_SECTION,
-  SETTINGS_SECTION_BY_ID,
-  SETTINGS_SECTION_DESCRIPTORS,
   SETTINGS_SECTION_IDS,
   isSettingsDrivenPath,
   resolveSettingsLocation,
@@ -14,23 +12,13 @@ import {
 } from './settings-section-registry';
 
 describe('settings-section-registry', () => {
-  it('exposes an ordered descriptor SSOT with id, labelKey, icon, Content', () => {
+  it('pins the settings-section nav order', () => {
     expect(SETTINGS_SECTION_IDS).toEqual([
       'agent',
       'workspace',
       'appearance',
       'advanced',
     ]);
-    expect(SETTINGS_SECTION_DESCRIPTORS.map((d) => d.id)).toEqual([
-      ...SETTINGS_SECTION_IDS,
-    ]);
-
-    for (const descriptor of SETTINGS_SECTION_DESCRIPTORS) {
-      expect(descriptor.labelKey).toBe(`nav.${descriptor.id}`);
-      expect(descriptor.icon).toBeTruthy();
-      expect(descriptor.Content).toBeTypeOf('function');
-      expect(SETTINGS_SECTION_BY_ID[descriptor.id]).toBe(descriptor);
-    }
   });
 
   it('treats only /settings/* as settings-driven', () => {

@@ -107,9 +107,7 @@ describe('CapabilitiesRailFixtures', () => {
         </ThemeProvider>,
       );
 
-      // The Studio theme system is the authority for the marker (`<html>.dark`);
-      // asserting it proves the fixture renders under the resolved theme, not
-      // just that a fixture-owned class survived.
+      // Proves ThemeProvider applied the resolved `<html>.dark` marker, not a paint difference (vitest css:false leaves the class strings uncomputed).
       expect(document.documentElement.classList.contains('dark')).toBe(forced === 'dark');
       for (const testId of VARIANTS) {
         expect(screen.getByTestId(testId)).toBeInTheDocument();

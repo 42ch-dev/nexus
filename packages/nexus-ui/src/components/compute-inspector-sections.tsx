@@ -14,8 +14,8 @@ import { Button } from './button';
  * Content per spec: module name + version, report digest (module event
  * summary), affected KnowledgeEntries, provenance ("From module run" vs
  * "From preset" when distinguishable) + Run id, and an Open Run affordance
- * that hands navigation back to the caller (T3 wires it to
- * Settings → Modules run detail). Parameters digest is a caller-resolved
+ * that hands navigation back to the caller (T3 wires it to the Modules run
+ * detail at `/modules?module=&run=`). Parameters digest is a caller-resolved
  * string (the exact extraction from the event envelope is App-owned).
  *
  * Provenance placement: the chip renders in the Module card in EVERY state —
@@ -67,7 +67,7 @@ export interface ComputeInspectorSectionsProps {
   copy: ComputeInspectorSectionsCopy;
   /**
    * Open Run hand-off — the caller navigates to the Run inspector
-   * (Settings → Modules run detail in the app). Rendered only when `runId`
+   * (`/modules?module=&run=` in the app). Rendered only when `runId`
    * is present. Optional: read-only inspections omit it.
    */
   onOpenRun?: () => void;

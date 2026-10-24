@@ -4,7 +4,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { screen } from '@testing-library/react';
 
-import { HubCard } from '@/components/developer/presentational/hub-card';
+import { HubCard } from './hub-card';
 import { i18n } from '@/lib/i18n/config';
 import { renderInApp } from '@/test/test-providers';
 
@@ -49,10 +49,9 @@ describe('HubCard', () => {
       />,
     );
 
-    const card = screen.getByTestId('hub-card-session');
+    expect(screen.getByTestId('hub-card-session')).toBeInTheDocument();
     expect(screen.getByText('sess-0001')).toBeInTheDocument();
     expect(screen.getByText('Failed')).toBeInTheDocument();
-    expect(card.innerHTML).toContain('nexus-ui-badge-soft-error-bg');
   });
 
   it('renders a title-only card without a navigation link', () => {

@@ -522,8 +522,10 @@ export function SurfacesIndexPage() {
         mirrored Outline/Strategy/WorldKB node chrome, Mental Surfacing,
         NLE/World/Work/Global timelines, Layer Breadcrumb, Conflict Modals;
         Daemon status strip; Launch splash; Selection Submenu (6 variants);
-        Rail apps — Modules (page, manifest detail, Run Studio), Capabilities
-        (registry, filter, empty), Sessions (session cards, zero-session).
+        Rail apps — Modules (ready list, manifest detail, Run Studio pending /
+        success / detail error, Advanced-JSON open), Capabilities (registry
+        hit, filter miss, empty, registry error), Sessions (mixed cards,
+        zero-session).
         Sources span all four categories: promoted primitives (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @42ch/nexus-ui
@@ -824,11 +826,12 @@ export function SurfacesShellPage() {
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             components/developer/presentational
           </code>{' '}
-          chrome split out of the product page and Run Studio: list with one
-          selected module, manifest detail beside the select prompt, and the
-          Run Studio in pending / success (proposal visible) / deep-linked
-          detail-error states. Pure view models and literal copy — no router,
-          no QueryClient, no daemon. Theme follows the Studio toggle.
+          chrome split out of the product page and Run Studio: the ready list
+          with one selected module, manifest detail beside the select prompt,
+          the Run Studio in pending / success (proposal visible) / deep-linked
+          detail-error states, and the Advanced-JSON disclosure driven open.
+          Pure view models and literal copy — no router, no QueryClient, no
+          daemon. Theme follows the Studio toggle.
         </p>
         <FixtureBoundary>
           <ModulesRailFixtures />
