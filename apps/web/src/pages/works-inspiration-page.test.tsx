@@ -157,6 +157,48 @@ describe('WorksInspirationPage', () => {
     expect(await screen.findByTestId('outline-probe')).toHaveTextContent('work-created');
   });
 
+  it('keeps one promote in flight, so a second row cannot create a second Work', async () => {
+    // v1.222 review (6v6gGJ): the server checks the item status once, so two
+    // overlapping promotes of the same pool can mint two Works. The page holds
+    // the lock; the second row must neither fire nor look actionable.
+    const promoteBodies: unknown[] = [];
+    // `lib` stops below ES2024 here, so `Promise.withResolvers` is unavailable;
+    // the neighboring suite uses the same deferred resolver.
+    let releaseFirst: (() => void) | undefined;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    useHandlers(
+      http.get(LIST_ROUTE, () =>
+        HttpResponse.json(
+          listResponse([
+            makeItem({ item_id: 'insp-a', title: 'First idea' }),
+            makeItem({ item_id: 'insp-b', title: 'Second idea' }),
+          ]),
+        ),
+      ),
+      http.post(`${LIST_ROUTE}/promote`, async ({ request }) => {
+        promoteBodies.push(await request.json());
+        await firstGate;
+        return HttpResponse.json({ work_id: 'work-a', pool_entry_id: 'pool-a' });
+      }),
+    );
+
+    renderPage();
+
+    const [rowA, rowB] = await screen.findAllByTestId('inspiration-pool-row');
+    fireEvent.click(within(rowA).getByTestId('inspiration-pool-row-promote'));
+
+    const promoteB = within(rowB).getByTestId('inspiration-pool-row-promote');
+    await waitFor(() => expect(promoteB).toBeDisabled());
+    fireEvent.click(promoteB);
+
+    releaseFirst?.();
+
+    await waitFor(() => expect(promoteBodies).toEqual([{ item_id: 'insp-a' }]));
+    expect(await screen.findByTestId('outline-probe')).toHaveTextContent('work-a');
+  });
+
   it('archives by item_id and refreshes the pool', async () => {
     const archiveBodies: unknown[] = [];
     let items = [makeItem({ item_id: 'insp-1', title: 'First idea', status: 'promoted' })];

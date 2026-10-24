@@ -54,6 +54,14 @@ export function WorksInspirationPage() {
   const errorToast = useErrorToast();
 
   const [title, setTitle] = useState('');
+  /**
+   * The pool's one in-flight promote. The mutation hook's own `variables` only
+   * tracks the LATEST call, so two overlapping promotes re-enabled row A while
+   * B was pending and the server (which checks status once) could mint two
+   * Works from one idea. Own the lock here instead: the first promote holds it
+   * until it settles, and every promote button is disabled while held.
+   */
+  const [promotingItemId, setPromotingItemId] = useState<string | null>(null);
   const inspiration = useWorkInspiration({ limit: DEFAULT_PAGE_SIZE });
   const addMutation = useAddWorkInspiration();
   const promoteMutation = usePromoteWorkInspiration();
@@ -113,10 +121,15 @@ export function WorksInspirationPage() {
   }
 
   function handlePromote(row: InspirationPoolRow) {
+    // Disabled buttons cannot fire, but the guard is the invariant: one
+    // promote at a time, whichever row asked.
+    if (promotingItemId !== null) return;
+    setPromotingItemId(row.itemId);
     promoteMutation.mutate(row.itemId, {
       onSuccess: (result) =>
         navigate(`/works/${encodeURIComponent(result.work_id)}/outline`),
       onError: (error) => errorToast(error, 'error.requestFailed'),
+      onSettled: () => setPromotingItemId(null),
     });
   }
 
@@ -150,7 +163,7 @@ export function WorksInspirationPage() {
         onAddTitleChange={setTitle}
         onAdd={handleAdd}
         adding={addMutation.isPending}
-        promotingItemId={promoteMutation.isPending ? promoteMutation.variables : null}
+        promotingItemId={promotingItemId}
         archivingItemId={archiveMutation.isPending ? archiveMutation.variables : null}
         onPromote={handlePromote}
         onArchive={handleArchive}
