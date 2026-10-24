@@ -165,9 +165,10 @@ function TimelineReturnLink() {
 
 /**
  * Full MSW handler set. `state.eventsStore` is mutable: the accept handler
- * appends the compute_result event (simulating the daemon's Accept write), so
- * the canvas events query refetch picks it up through the `timeline.all`
- * invalidation.
+ * appends the compute_result event (simulating the daemon's Accept write).
+ * The journey then navigates back to the Timeline — a different route, so the
+ * canvas remounts and refetches the log; `useAcceptRun`'s `timeline.all`
+ * invalidation only covers a canvas that stays mounted.
  */
 function computeTimelineJourney(
   over: { initialEvents?: unknown[]; kbEntities?: unknown[]; branch?: string } = {},

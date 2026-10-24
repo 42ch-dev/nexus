@@ -2,6 +2,7 @@ import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { ModulesRailFixtures } from '@/fixtures/modules-rail-fixtures';
+import { ThemeProvider } from '@/components/theme-provider';
 
 /**
  * The `/modules` rail has five states worth eyeballing: the ready list with a
@@ -30,6 +31,30 @@ describe('ModulesRailFixtures', () => {
     expect(screen.getByTestId('modules-rail-fixtures')).toBeInTheDocument();
     for (const testId of VARIANTS) {
       expect(screen.getByTestId(testId)).toBeInTheDocument();
+    }
+  });
+
+  it('gives each mounted Run Studio its own control ids', () => {
+    render(<ModulesRailFixtures />);
+    const runFrames = [
+      'modules-rail-fixture-run-pending',
+      'modules-rail-fixture-run-success',
+      'modules-rail-fixture-run-error',
+    ] as const;
+
+    // getByLabelText resolves through htmlFor → id: each label reaches the
+    // control rendered beside it, not the first Run Studio in the document.
+    for (const label of ['World', 'Filter by status', 'Filter by World']) {
+      const ids = runFrames.map((testId) => {
+        const frame = screen.getByTestId(testId);
+        return within(frame).getByLabelText(label).id;
+      });
+
+      expect(new Set(ids).size).toBe(runFrames.length);
+      for (const id of ids) {
+        expect(id.length).toBeGreaterThan(0);
+        expect(document.querySelectorAll(`[id="${id}"]`)).toHaveLength(1);
+      }
     }
   });
 
@@ -84,16 +109,20 @@ describe('ModulesRailFixtures', () => {
   });
 
   it('renders every variant under both themes', () => {
-    for (const theme of ['light', 'dark'] as const) {
-      document.documentElement.classList.toggle('dark', theme === 'dark');
+    for (const forced of ['light', 'dark'] as const) {
+      render(
+        <ThemeProvider forcedTheme={forced}>
+          <ModulesRailFixtures />
+        </ThemeProvider>,
+      );
 
-      render(<ModulesRailFixtures />);
-
+      // The Studio theme system is the authority for the marker (`<html>.dark`);
+      // asserting it proves the fixture renders under the resolved theme, not
+      // just that a fixture-owned class survived.
+      expect(document.documentElement.classList.contains('dark')).toBe(forced === 'dark');
       for (const testId of VARIANTS) {
         expect(screen.getByTestId(testId)).toBeInTheDocument();
       }
-      // Token-backed classes survive the toggle — the chrome has no theme prop.
-      expect(screen.getByTestId('modules-rail-fixture-list')).toHaveClass('bg-background-100');
 
       cleanup();
     }

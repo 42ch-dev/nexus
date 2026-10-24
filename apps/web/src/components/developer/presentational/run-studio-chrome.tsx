@@ -11,6 +11,8 @@
  * destructive confirm dialogs stay app-owned (they are mounted as siblings of
  * this tree); the chrome only renders their trigger buttons.
  */
+import { useId } from 'react';
+
 import { Play } from 'lucide-react';
 
 import {
@@ -181,6 +183,12 @@ export function RunStudioChrome({
   proposal,
   runs,
 }: RunStudioChromeProps) {
+  // `useId` — the gallery mounts this chrome three times; static ids would
+  // collide and every label after the first would point at frame 1's control.
+  const worldSelectId = useId();
+  const statusFilterId = useId();
+  const worldFilterId = useId();
+
   return (
     <div className="flex flex-col gap-4 border-t border-gray-alpha-300 pt-4" data-testid="run-studio">
       <p className="text-label-12 uppercase tracking-wide text-gray-700">{copy.title}</p>
@@ -196,9 +204,9 @@ export function RunStudioChrome({
         />
       ) : (
         <div className="flex max-w-xs flex-col gap-1.5">
-          <Label htmlFor="run-studio-world">{copy.worldLabel}</Label>
+          <Label htmlFor={worldSelectId}>{copy.worldLabel}</Label>
           <Select
-            id="run-studio-world"
+            id={worldSelectId}
             value={world.value}
             onChange={(event) => world.onChange(event.target.value)}
             disabled={world.isLoading}
@@ -315,11 +323,11 @@ export function RunStudioChrome({
               because the daemon DELETE requires a World. */}
           <div className="flex flex-wrap items-end gap-2">
             <div className="flex flex-col gap-1">
-              <Label htmlFor="run-runs-status-filter" className="text-label-12 text-gray-700">
+              <Label htmlFor={statusFilterId} className="text-label-12 text-gray-700">
                 {copy.statusFilter}
               </Label>
               <Select
-                id="run-runs-status-filter"
+                id={statusFilterId}
                 value={runs.statusFilter}
                 onChange={(event) =>
                   runs.onStatusFilterChange(event.target.value as '' | RunStatus)
@@ -336,11 +344,11 @@ export function RunStudioChrome({
               </Select>
             </div>
             <div className="flex flex-col gap-1">
-              <Label htmlFor="run-runs-world-filter" className="text-label-12 text-gray-700">
+              <Label htmlFor={worldFilterId} className="text-label-12 text-gray-700">
                 {copy.worldFilter}
               </Label>
               <Select
-                id="run-runs-world-filter"
+                id={worldFilterId}
                 value={runs.worldFilter}
                 onChange={(event) => runs.onWorldFilterChange(event.target.value)}
                 disabled={world.isLoading || world.isError}
