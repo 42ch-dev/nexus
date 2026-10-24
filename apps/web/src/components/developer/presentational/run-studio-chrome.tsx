@@ -3,8 +3,8 @@
  *
  * The product studio (`components/compute/run-studio.tsx`) owns every hook,
  * query, mutation, toast and i18n lookup; this module owns the markup so the
- * Design Studio fixture can render the run-pending / run-success / run-error
- * variants from static view models with literal copy.
+ * Design Studio fixture can render the run-pending / run-success / run-error /
+ * run-advanced variants from static view models with literal copy.
  *
  * Boundary: no transport, no router, no i18n, no QueryClient. Every string
  * arrives through `copy`, data as view models, behavior as callbacks. The two

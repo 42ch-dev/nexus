@@ -1863,7 +1863,7 @@ export interface WorldTimelineComputeEventsQuery {
  * Invalidation: `useAcceptRun` / `useDiscardRun` already invalidate
  * `queryKeys.timeline.all`, which prefix-matches `['timeline','events',…]` —
  * an accepted Run's new compute_result event appears on the canvas without a
- * manual refresh (the canvas stays mounted behind the Settings modal).
+ * manual refresh.
  */
 export function useWorldTimelineEvents(
   worldId: string | undefined,

@@ -36,6 +36,7 @@ import {
  *   - list (ready, one selected)
  *   - detail (manifest fields + the `selectTitle` prompt)
  *   - run-pending / run-success (proposal visible) / run-error (detail read error)
+ *   - run-advanced (Advanced-JSON disclosure opened by the controlled `open` prop)
  *
  * The chrome is pure presentation: no transport, no router, no i18n, no
  * QueryClient. Every string below is literal (Studio is developer-auxiliary
@@ -312,6 +313,25 @@ function noop() {
   /* Studio fixture only — actions have nowhere to go. */
 }
 
+/**
+ * The Advanced-JSON disclosure the Run Studio owns: closed for the three Run
+ * reads, open for the dedicated frame. jsdom neither hides `<details>` content
+ * nor runs the summary default action, so the `open` attribute is the only
+ * honest observable of the controlled prop.
+ */
+const CLOSED_ADVANCED: RunStudioChromeProps['advanced'] = {
+  open: false,
+  onOpenChange: noop,
+  json: '{\n  "attacker_id": "char-aria",\n  "defender_id": "char-brann"\n}',
+  onJsonChange: noop,
+  error: null,
+};
+
+const OPEN_ADVANCED: RunStudioChromeProps['advanced'] = {
+  ...CLOSED_ADVANCED,
+  open: true,
+};
+
 /* ------------------------------------------------------------------ */
 /*  View models                                                        */
 /* ------------------------------------------------------------------ */
@@ -343,13 +363,7 @@ function studioProps(
       copy: FORM_COPY,
       graph: null,
     },
-    advanced: {
-      open: false,
-      onOpenChange: noop,
-      json: '{\n  "attacker_id": "char-aria",\n  "defender_id": "char-brann"\n}',
-      onJsonChange: noop,
-      error: null,
-    },
+    advanced: CLOSED_ADVANCED,
     run,
     proposal,
     runs: {
@@ -496,6 +510,17 @@ export function ModulesRailFixtures() {
       >
         <RunStudioChrome
           {...studioProps({ ...IDLE_RUN, detailError: true }, IDLE_PROPOSAL)}
+        />
+      </Frame>
+
+      <Frame
+        title="Run — Advanced JSON open"
+        description="The controlled open prop drives the disclosure: the JSON textarea renders inside an open <details>, not one the browser merely left open."
+        testId="modules-rail-fixture-run-advanced"
+      >
+        <RunStudioChrome
+          {...studioProps(IDLE_RUN, IDLE_PROPOSAL)}
+          advanced={OPEN_ADVANCED}
         />
       </Frame>
     </div>
