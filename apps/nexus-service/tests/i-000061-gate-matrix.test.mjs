@@ -205,6 +205,15 @@ describe('startService wiring — the gate refuses before listen', () => {
         !stdout.includes('NEXUS_SERVICE_READY'),
         `a refused boot must print no ready line: ${JSON.stringify(stdout)}`,
       );
+      // Order pin (6v6rFm): `listening on` is emitted only after the listener
+      // is up, so a refused boot must never report one. The status/ready line
+      // above cannot tell a gate-before-listen refusal from a refusal that
+      // bound the non-loopback socket first; this line keeps a boot that
+      // reaches a listener from looking identical to one that never did.
+      assert.ok(
+        !stderr.includes('listening on'),
+        `a refused boot must never report a listener: ${JSON.stringify(stderr)}`,
+      );
       assert.match(stderr, /--allow-remote/);
     } finally {
       rmSync(home, { recursive: true, force: true });

@@ -87,7 +87,11 @@ export interface InspirationPoolChromeProps {
   onAddTitleChange: (value: string) => void;
   onAdd: (title: string) => void;
   adding?: boolean;
-  /** Row id with an in-flight promote / archive (drives the pending label). */
+  /**
+   * The row whose promote is in flight (drives the pending label and
+   * `aria-busy`). Non-null locks every promote button in the pool: the server
+   * checks status once, so one idea must never have two creates in flight.
+   */
   promotingItemId?: string | null;
   archivingItemId?: string | null;
   onPromote?: (row: InspirationPoolRow) => void;
@@ -118,6 +122,7 @@ function InspirationPoolRowItem({
   row,
   copy,
   promoting,
+  promoteLocked,
   archiving,
   onPromote,
   onArchive,
@@ -126,6 +131,8 @@ function InspirationPoolRowItem({
   row: InspirationPoolRow;
   copy: InspirationPoolCopy;
   promoting: boolean;
+  /** Any promote in the pool is in flight — one at a time across rows. */
+  promoteLocked: boolean;
   archiving: boolean;
   onPromote?: (row: InspirationPoolRow) => void;
   onArchive?: (row: InspirationPoolRow) => void;
@@ -181,7 +188,7 @@ function InspirationPoolRowItem({
             type="button"
             variant="primary"
             size="small"
-            disabled={promoting}
+            disabled={promoteLocked}
             aria-busy={promoting || undefined}
             onClick={() => onPromote?.(row)}
             data-testid="inspiration-pool-row-promote"
@@ -290,6 +297,7 @@ export function InspirationPoolChrome({
                   row={row}
                   copy={copy}
                   promoting={promotingItemId === row.itemId}
+                  promoteLocked={promotingItemId != null}
                   archiving={archivingItemId === row.itemId}
                   onPromote={onPromote}
                   onArchive={onArchive}

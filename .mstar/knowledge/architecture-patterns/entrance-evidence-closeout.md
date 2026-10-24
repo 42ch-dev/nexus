@@ -105,7 +105,7 @@ evidence plan).
 
 - `apps/nexus-service/tests/boot-bootstrap-url.test.mjs` (I-000062)
 - `apps/nexus-service/tests/i-000061-gate-matrix.test.mjs` (I-000061)
-- `.mstar/sdd/v222-entrance-closeout/review/closure-package.md` (evidence assembly +
-  adjudication recording)
+- the iteration's closure evidence package (evidence assembly + adjudication
+  recording; assembled locally from the evidence plan, not tracked)
 - `.mstar/knowledge/architecture-patterns/daemon-api-remote-bind-gate.md` (the gate
   being evidenced)
