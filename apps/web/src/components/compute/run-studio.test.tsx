@@ -29,13 +29,44 @@ import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { ComponentProps } from 'react';
 import type { ModuleDetail } from '@42ch/nexus-contracts';
+import type * as RunStudioChromeModule from '@/components/developer/presentational/run-studio-chrome';
 
 import { RunStudio } from '@/components/compute/run-studio';
 import { i18n } from '@/lib/i18n/config';
 import { BrowserClient } from '@/lib/nexus';
 import { useHandlers } from '@/test/msw-server';
 import { renderInApp } from '@/test/test-providers';
+
+// I-000084 container wiring probe: jsdom's own `summary.click()` writes the
+// `open` attribute, so the DOM cannot distinguish a correct `advanced` wiring
+// from a no-op `onOpenChange` or a hardcoded literal. Observe the
+// container→chrome prop boundary instead, and keep the real chrome markup for
+// every other case in this file.
+vi.mock('@/components/developer/presentational/run-studio-chrome', async (importOriginal) => {
+  const actual = await importOriginal<typeof RunStudioChromeModule>();
+  const ActualRunStudioChrome = actual.RunStudioChrome;
+
+  function ProbedRunStudioChrome({
+    advanced,
+    ...rest
+  }: ComponentProps<typeof ActualRunStudioChrome>) {
+    return (
+      <>
+        <span data-testid="advanced-wiring-probe" data-open={String(advanced.open)} />
+        <button
+          type="button"
+          data-testid="advanced-wiring-flip"
+          onClick={() => advanced.onOpenChange(!advanced.open)}
+        />
+        <ActualRunStudioChrome advanced={advanced} {...rest} />
+      </>
+    );
+  }
+
+  return { ...actual, RunStudioChrome: ProbedRunStudioChrome };
+});
 
 const MODULE: ModuleDetail = {
   module_id: 'basic-combat',
@@ -583,5 +614,27 @@ describe('RunStudio failed-Run review (P2-T4)', () => {
     expect(screen.getByText(/compute_module_error/)).toBeInTheDocument();
     expect(screen.queryByTestId('run-inspector-accept')).not.toBeInTheDocument();
     expect(screen.queryByTestId('run-inspector-discard')).not.toBeInTheDocument();
+  });
+});
+
+describe('RunStudio Advanced disclosure wiring (I-000084)', () => {
+  /**
+   * The container owns `advancedOpen` and must hand both halves of the pair to
+   * the chrome. jsdom flips the `<details open>` attribute on its own, so the
+   * prop boundary is the only honest observation point: a literal `open`, a
+   * no-op `onOpenChange`, or a hardcoded `open: true` all pass an attribute
+   * assertion after a summary click.
+   */
+  it('passes `advanced.open` and a live `onOpenChange` to the chrome', async () => {
+    useHandlers(...deepLinkHandlers());
+
+    renderStudio(undefined, 'w1');
+
+    const probe = screen.getByTestId('advanced-wiring-probe');
+    expect(probe).toHaveAttribute('data-open', 'false');
+
+    fireEvent.click(screen.getByTestId('advanced-wiring-flip'));
+
+    expect(probe).toHaveAttribute('data-open', 'true');
   });
 });
