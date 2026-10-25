@@ -109,7 +109,7 @@ describe('config.toml advisory lock (I-000065)', () => {
     // directory, so its relative imports resolve) and assert the invariant
     // that matters: no lock file left behind for the next writer to wait out.
     const source = readFileSync(join(serviceRoot, 'dist/agent-profile.js'), 'utf8');
-    const marker = 'await lock.writeFile(`${process.pid} ${new Date().toISOString()}\\n`);';
+    const marker = 'await lock.writeFile(`${process.pid} ${new Date().toISOString()} ${token}\\n`);';
     assert.ok(
       source.includes(marker),
       'the diagnostics-write marker must exist in dist/agent-profile.js',
@@ -157,5 +157,66 @@ describe('config.toml advisory lock (I-000065)', () => {
     assert.deepEqual({ ...stored.agent_profile }, { name: 'codex-cli' });
     assert.equal(stored.foreign_marker, 'kept');
     assert.equal(stored.active_creator_id, 'ctr_localaaaaaaaaaaaa');
+  });
+
+  /**
+   * MF-2 (I-000091): a stale lock that cannot be removed (root-owned or
+   * immutable file → EACCES/EPERM) must fail the write instead of hot-looping
+   * create/stat forever. A directory at the lock path is the portable stand-in:
+   * exclusive-create reports EEXIST and removal never succeeds.
+   */
+  test('a stale lock that cannot be removed fails instead of spinning', async () => {
+    const home = seededHome();
+    mkdirSync(lockPathFor(home));
+    const longAgo = new Date(Date.now() - 60_000);
+    utimesSync(lockPathFor(home), longAgo, longAgo);
+
+    await assert.rejects(
+      withDeadline(writeAgentProfile(home, { name: 'codex-cli' }), 90_000, 'the blocked write'),
+      (error) => error.status === 500 && /stale and cannot be removed/.test(error.message),
+    );
+  });
+
+  /**
+   * SF-1 (I-000092): a holder stalled past the stale window is stolen; its
+   * release on resume must not unlink the new owner's lock and so admit a third
+   * writer into the second writer's read-modify-write.
+   */
+  test('a stolen holder does not unlink the new owner\'s lock', async () => {
+    const source = readFileSync(join(serviceRoot, 'dist/agent-profile.js'), 'utf8');
+    // Fault injection (same idiom as the stranded-lock test): stall the holder
+    // inside its read-modify-write, so it can be stolen from in the open.
+    const marker = 'await writeConfigDocument(home, document);';
+    assert.ok(source.includes(marker), 'the write marker must exist in dist/agent-profile.js');
+    const copyPath = join(serviceRoot, 'dist', `__slow-agent-profile-${process.pid}.mjs`);
+    writeFileSync(
+      copyPath,
+      source.replace(
+        marker,
+        `await new Promise((resolve) => setTimeout(resolve, 250)); ${marker}`,
+      ),
+      'utf8',
+    );
+    try {
+      const { writeAgentProfile: slowWrite } = await import(pathToFileURL(copyPath).href);
+      const home = seededHome();
+      const pending = slowWrite(home, { name: 'codex-cli' });
+      await sleep(80); // the writer holds the lock and is inside its RMW
+
+      // A second writer finds the held lock stale and steals it.
+      const longAgo = new Date(Date.now() - 60_000);
+      utimesSync(lockPathFor(home), longAgo, longAgo);
+      rmSync(lockPathFor(home), { force: true });
+      acquireForeignLock(home);
+
+      await withDeadline(pending, 5000, 'the slow write');
+      assert.equal(
+        existsSync(lockPathFor(home)),
+        true,
+        "a stolen holder must not unlink the new owner's lock",
+      );
+    } finally {
+      rmSync(copyPath, { force: true });
+    }
   });
 });

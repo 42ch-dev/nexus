@@ -223,7 +223,7 @@ impl CoreHomeService {
         }
         pool.close().await;
 
-        write_active_selection(&self.nexus_home, &creator_id, None)?;
+        write_active_selection(&self.nexus_home, &creator_id, None, None)?;
 
         Ok(CreatorDetail {
             creator_id,
@@ -253,7 +253,7 @@ impl CoreHomeService {
     ) -> CoreResult<CreatorDetail> {
         let cfg = load_config_snapshot(&self.nexus_home)?;
         if cfg.active_creator_id.as_deref() != Some(creator_id) {
-            write_active_selection(&self.nexus_home, creator_id, None)?;
+            write_active_selection(&self.nexus_home, creator_id, None, None)?;
         }
         Ok(CreatorDetail {
             creator_id: creator_id.to_string(),
@@ -493,7 +493,38 @@ impl CoreHomeService {
         &self,
         request: SetActiveWorkspaceRequest,
     ) -> CoreResult<SetActiveWorkspaceResponse> {
-        let creator_id = match request.creator_id {
+        self.select_workspace_at(request.creator_id, &request.workspace_slug, None)
+            .await
+    }
+
+    /// [`Self::select_workspace`] plus the CLI's active creative root, both
+    /// committed in the SAME config lock epoch. The CLI workspace init must not
+    /// write `config.toml` through two writers: a concurrent writer landing
+    /// between them can diverge the selection from `workspace_path`.
+    ///
+    /// # Errors
+    /// Same as [`Self::select_workspace`].
+    pub async fn select_workspace_with_workspace_path(
+        &self,
+        creator_id: &str,
+        workspace_slug: &str,
+        workspace_path: &Path,
+    ) -> CoreResult<SetActiveWorkspaceResponse> {
+        self.select_workspace_at(
+            Some(creator_id.to_string()),
+            workspace_slug,
+            Some(workspace_path),
+        )
+        .await
+    }
+
+    async fn select_workspace_at(
+        &self,
+        creator_id: Option<String>,
+        workspace_slug: &str,
+        workspace_path: Option<&Path>,
+    ) -> CoreResult<SetActiveWorkspaceResponse> {
+        let creator_id = match creator_id {
             Some(cid) => {
                 validate_creator_id_safe(&cid).map_err(|reason| CoreError::InvalidInput {
                     field: "creator_id".to_string(),
@@ -503,27 +534,24 @@ impl CoreHomeService {
             }
             None => read_active_creator_id(&self.nexus_home).ok_or(CoreError::Uninitialized)?,
         };
-        validate_workspace_slug(&request.workspace_slug)?;
+        validate_workspace_slug(workspace_slug)?;
 
-        let op_dir =
-            operational_workspace_dir(&self.user_home, &creator_id, &request.workspace_slug);
+        let op_dir = operational_workspace_dir(&self.user_home, &creator_id, workspace_slug);
         if !op_dir.is_dir() {
             return Err(CoreError::NotFound {
                 resource: format!(
-                    "Workspace {} does not exist for creator {}",
-                    request.workspace_slug, creator_id
+                    "Workspace {workspace_slug} does not exist for creator {creator_id}"
                 ),
             });
         }
-        deny_foreign_workspace(&op_dir, &creator_id, &request.workspace_slug)?;
+        deny_foreign_workspace(&op_dir, &creator_id, workspace_slug)?;
 
         // Initialize only the chosen workspace BEFORE committing the
         // selection: guarded initialization factory (Direct-writer admission
         // + migrations + seed versions) and the workspace `creators` row the
         // FK-prechecks rely on. The pool is closed before returning — the
         // home entry holds no workspace pool.
-        let db_path =
-            workspace_state_db_path(&self.user_home, &creator_id, &request.workspace_slug);
+        let db_path = workspace_state_db_path(&self.user_home, &creator_id, workspace_slug);
         let row_display_name = self.resolved_display_name(&creator_id).await;
         let pool = nexus_local_db::init_pool(&db_path)
             .await
@@ -536,16 +564,21 @@ impl CoreHomeService {
         // A creator bootstrap only pre-creates the directory: register the
         // workspace's discovery metadata so it is listable (D25 — the first
         // workspace is selected, never created over HTTP).
-        self.ensure_workspace_registration(&creator_id, &request.workspace_slug)?;
+        self.ensure_workspace_registration(&creator_id, workspace_slug)?;
 
         // Failure-atomic selection commit: the config write happens only
         // after initialization fully succeeded, so an initialization failure
         // preserves the previous selection instead of committing a broken one.
-        write_active_selection(&self.nexus_home, &creator_id, Some(&request.workspace_slug))?;
+        write_active_selection(
+            &self.nexus_home,
+            &creator_id,
+            Some(workspace_slug),
+            workspace_path,
+        )?;
 
         Ok(SetActiveWorkspaceResponse {
             creator_id,
-            workspace_slug: request.workspace_slug,
+            workspace_slug: workspace_slug.to_string(),
         })
     }
 
@@ -1062,12 +1095,15 @@ pub fn read_workspace_display_name(creative_root: &Path) -> Option<String> {
 
 /// Write the active `creator_id` — and, when `workspace_slug` is `Some`, the
 /// per-creator active workspace slug — to `config.toml`, preserving every
-/// other key (ported from the daemon `write_active_selection`). The whole
-/// read-modify-write holds the daemon-home `config.toml` advisory lock.
+/// other key (ported from the daemon `write_active_selection`). When
+/// `workspace_path` is `Some`, the CLI's active creative root is committed in
+/// the same write. The whole read-modify-write holds the daemon-home
+/// `config.toml` advisory lock.
 pub fn write_active_selection(
     nexus_home: &Path,
     creator_id: &str,
     workspace_slug: Option<&str>,
+    workspace_path: Option<&Path>,
 ) -> CoreResult<()> {
     with_config_lock(nexus_home, || {
         let config_path = nexus_home.join("config.toml");
@@ -1106,6 +1142,13 @@ pub fn write_active_selection(
             slug_table.insert(
                 creator_id.to_string(),
                 toml::Value::String(workspace_slug.to_string()),
+            );
+        }
+
+        if let Some(workspace_path) = workspace_path {
+            config.insert(
+                "workspace_path".to_string(),
+                toml::Value::String(workspace_path.display().to_string()),
             );
         }
 
