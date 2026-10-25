@@ -69,6 +69,29 @@ fn lock_error(error: impl std::fmt::Display) -> CoreError {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Test-only fault injection: the lock file is created, but its ownership
+    /// token never reaches the disk.
+    static FAIL_TOKEN_WRITE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Write the holder's line into the freshly created lock file.
+fn write_token(file: &mut std::fs::File, token: &str) -> std::io::Result<()> {
+    #[cfg(test)]
+    {
+        if FAIL_TOKEN_WRITE.with(|slot| slot.replace(false)) {
+            return Err(std::io::Error::other("injected token write failure"));
+        }
+    }
+    writeln!(
+        file,
+        "{} {} {token}",
+        std::process::id(),
+        chrono::Utc::now().to_rfc3339()
+    )
+}
+
 /// Take the lock: exclusive create, stale steal, exponential backoff.
 fn acquire(nexus_home: &Path) -> CoreResult<ConfigLock> {
     let path = nexus_home.join(LOCK_FILE);
@@ -87,12 +110,19 @@ fn acquire(nexus_home: &Path) -> CoreResult<ConfigLock> {
                 // Diagnostics only (who/what/when); the age comes from the
                 // mtime. The trailing token is the ownership proof release
                 // checks before unlinking.
-                let _ = writeln!(
-                    file,
-                    "{} {} {token}",
-                    std::process::id(),
-                    chrono::Utc::now().to_rfc3339()
-                );
+                if let Err(write_error) = write_token(&mut file, &token) {
+                    // Never remove it here: any unlink races a thief's
+                    // replacement and can delete a live writer's lock. The
+                    // leftover is reclaimed by the bounded, logged stale steal,
+                    // which cannot mis-own it — acquire returns no ConfigLock,
+                    // so nothing will release by this path's token.
+                    drop(file);
+                    tracing::warn!(
+                        %write_error,
+                        "config.toml.lock ownership token not written; left for the stale steal"
+                    );
+                    return Err(lock_error(write_error));
+                }
                 return Ok(ConfigLock { path, token });
             }
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -315,6 +345,26 @@ mod tests {
             .expect("the writer must give up instead of spinning")
             .expect_err("an unremovable stale lock is an error");
         assert!(matches!(error, crate::error::CoreError::Internal { .. }));
+    }
+
+    /// A lock whose ownership token cannot be written is unusable and is left
+    /// in place: the bounded stale steal reclaims it, and no unlink from this
+    /// path can ever delete another writer's lock.
+    #[test]
+    fn a_token_that_cannot_be_written_fails_and_leaves_the_lock_for_stale_steal() {
+        let tmp = tempfile::tempdir().expect("temp home");
+        let home = tmp.path().to_path_buf();
+        let lock = lock_path(&home);
+        super::FAIL_TOKEN_WRITE.with(|slot| slot.set(true));
+        let result = super::with_config_lock(&home, || Ok(()));
+        super::FAIL_TOKEN_WRITE.with(|slot| slot.set(false));
+
+        let error = result.expect_err("an unwritten ownership token is an error");
+        assert!(matches!(error, crate::error::CoreError::Internal { .. }));
+        assert!(
+            lock.exists(),
+            "the unusable lock is left for the stale steal, never removed here"
+        );
     }
 
     /// SF-1 (I-000092): a holder stalled past the stale window is stolen; the

@@ -24,6 +24,8 @@
  *   * a 302 being followed instead of refused, which would silently turn one
  *     admitted request into a second one;
  *   * a 429 or a reset being retried, or a failed attempt freeing the slot;
+ *   * a short write of the spent token being synced as if it were complete —
+ *     the token is written in full before the sync, or the dispatch is denied;
  *   * `/models`-style probes, a wrong method, or the same path on another
  *     origin being admitted before the network;
  *   * a malformed/unusable guard environment being treated as "no guard" —
@@ -259,6 +261,56 @@ globalThis.fetch = (input, init) => {
 };
 `;
 
+/**
+ * Preload that stubs the spent-token write: `short` writes half the payload on
+ * the first call and reports that count, `stuck` reports zero bytes forever.
+ * The guard must finish the write (or deny) rather than sync a truncation, so
+ * the stub records writes, `fsyncSync` calls and the dispatch in ONE ordered
+ * trace: only that order proves the sync follows a complete payload.
+ */
+const writeStubSource = (mode) => `import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+import { basename } from 'node:path';
+
+const mode = '${mode}';
+const trace = [];
+globalThis.__nexusGuardTrace = trace;
+const openPaths = new Map();
+const openSync = fs.openSync;
+const writeSync = fs.writeSync;
+const fsyncSync = fs.fsyncSync;
+const realFetch = globalThis.fetch;
+const started = new Set();
+
+fs.openSync = (path, flag, flags) => {
+  const fd = flags === undefined ? openSync(path, flag) : openSync(path, flag, flags);
+  openPaths.set(fd, String(path));
+  return fd;
+};
+fs.writeSync = (fd, data, ...rest) => {
+  const path = openPaths.get(fd) ?? null;
+  const text = String(data);
+  if (path === null || basename(path) !== 'spent') return writeSync(fd, data, ...rest);
+  const first = !started.has(path);
+  started.add(path);
+  let wrote = 0;
+  if (mode === 'short' && first) wrote = writeSync(fd, text.slice(0, Math.ceil(text.length / 2)));
+  else if (mode === 'short') wrote = writeSync(fd, data);
+  trace.push({ kind: 'write', requested: text.length, wrote });
+  return wrote;
+};
+fs.fsyncSync = (fd) => {
+  trace.push({ kind: 'sync', path: openPaths.get(fd) ?? null });
+  return fsyncSync(fd);
+};
+syncBuiltinESMExports();
+
+globalThis.fetch = (input, init) => {
+  trace.push({ kind: 'dispatch' });
+  return realFetch(input, init);
+};
+`;
+
 /** Preload that removes global fetch before the guard loads (transport drift). */
 const STRIP_SOURCE = `delete globalThis.fetch;
 globalThis.__nexusFetchStripped = typeof globalThis.fetch;
@@ -292,6 +344,8 @@ const LINKED_ENTRY_PATH = join(FIXTURE_ROOT, 'linked-entry.mjs');
 const SPY_PATH = join(FIXTURE_ROOT, 'spy.mjs');
 const SYNC_SPY_PATH = join(FIXTURE_ROOT, 'sync-spy.mjs');
 const STRIP_PATH = join(FIXTURE_ROOT, 'strip-fetch.mjs');
+const SHORT_WRITE_PATH = join(FIXTURE_ROOT, 'short-write.mjs');
+const STUCK_WRITE_PATH = join(FIXTURE_ROOT, 'stuck-write.mjs');
 /**
  * The launch shape the driver really uses: an executable entry with a node
  * shebang, exec'd directly rather than through `node <entry>`.
@@ -321,6 +375,8 @@ writeFileSync(PACKAGE_CHILD_PATH, ENTRY_SOURCE);
 writeFileSync(SPY_PATH, SPY_SOURCE);
 writeFileSync(SYNC_SPY_PATH, SYNC_SPY_SOURCE);
 writeFileSync(STRIP_PATH, STRIP_SOURCE);
+writeFileSync(SHORT_WRITE_PATH, writeStubSource('short'));
+writeFileSync(STUCK_WRITE_PATH, writeStubSource('stuck'));
 writeFileSync(LOCK_FETCH_PATH, LOCK_FETCH_SOURCE);
 writeFileSync(FREEZE_FETCH_PATH, FREEZE_FETCH_SOURCE);
 writeFileSync(LOCK_EVENTS_PATH, LOCK_EVENTS_SOURCE);
@@ -645,6 +701,89 @@ test(
         { kind: 'sync', path: attemptDir },
         { kind: 'dispatch' },
       ]);
+    });
+  },
+);
+
+test(
+  'a short write of the spent token is completed before the sync',
+  async () => {
+    await withEndpoint('ok', async (endpoint) => {
+      const attemptDir = makeAttemptDir();
+      const child = await runGuardChild({
+        attemptDir,
+        allowedUrl: endpoint.url,
+        dshRealpath: ENTRY_PATH,
+        spec: singleSpec(endpoint.url),
+        preloads: [SHORT_WRITE_PATH, GUARD_PATH],
+      });
+      assertChildRan(child, 'short-write');
+      assert.equal(firstAttempt(child).status, 200);
+      assert.equal(endpoint.requests.length, 1);
+
+      // The stub short-wrote the first call, so the guard must have written the
+      // rest before syncing: one ordered trace proves nothing was synced while
+      // the payload was still incomplete.
+      const entries = child.result.trace;
+      const kinds = entries.map((entry) => entry.kind);
+      const writes = entries.filter((entry) => entry.kind === 'write');
+      const syncs = entries.filter((entry) => entry.kind === 'sync');
+      assert.ok(writes.length >= 2, JSON.stringify(entries));
+      assert.equal(writes[0].wrote < writes[0].requested, true, JSON.stringify(entries));
+      const firstSync = kinds.indexOf('sync');
+      assert.equal(kinds.lastIndexOf('write') < firstSync, true, JSON.stringify(entries));
+      // The first call carries the whole payload; every byte of it is on disk
+      // by the time the sync runs.
+      const writtenBeforeSync = entries
+        .slice(0, firstSync)
+        .filter((entry) => entry.kind === 'write')
+        .reduce((total, entry) => total + entry.wrote, 0);
+      assert.equal(writtenBeforeSync, writes[0].requested, JSON.stringify(entries));
+      // Exactly one sync of the spent token, and the dispatch comes last.
+      assert.equal(syncs[0].path, join(attemptDir, 'spent'), JSON.stringify(entries));
+      assert.equal(syncs.filter((entry) => entry.path === join(attemptDir, 'spent')).length, 1);
+      assert.equal(kinds.at(-1), 'dispatch', JSON.stringify(entries));
+      const token = JSON.parse(readFileSync(join(attemptDir, 'spent'), 'utf8'));
+      assert.equal(token.schema, SPENT_SCHEMA);
+      assert.equal(token.category, ADMITTED_CATEGORY);
+      assert.equal(typeof token.pid, 'number');
+    });
+  },
+);
+
+test(
+  'a spent-token write that cannot complete denies without syncing or dispatching',
+  async () => {
+    await withEndpoint('ok', async (endpoint) => {
+      const attemptDir = makeAttemptDir();
+      const child = await runGuardChild({
+        attemptDir,
+        allowedUrl: endpoint.url,
+        dshRealpath: ENTRY_PATH,
+        spec: { ...singleSpec(endpoint.url), mode: 'sequence' },
+        preloads: [STUCK_WRITE_PATH, GUARD_PATH],
+      });
+      assertChildRan(child, 'stuck-write');
+
+      // Fail closed: no truncation is synced and nothing is dispatched, and the
+      // slot stays spent — a storage failure must not make the call retryable.
+      assert.equal(firstAttempt(child).error?.code, 'filesystem_error');
+      const entries = child.result.trace;
+      assert.equal(entries.filter((entry) => entry.kind === 'sync').length, 0, JSON.stringify(entries));
+      assert.equal(entries.some((entry) => entry.kind === 'dispatch'), false, JSON.stringify(entries));
+      assert.equal(entries.filter((entry) => entry.kind === 'write').length, 1, JSON.stringify(entries));
+      assert.equal(endpoint.requests.length, 0);
+      assert.equal(existsSync(join(attemptDir, 'spent')), true);
+      assert.equal(statSync(join(attemptDir, 'spent')).size, 0);
+      // The truncated token is still a spent slot: a second guarded call in the
+      // same child is denied, so a zero-byte `spent` can never reach ALLOW.
+      assert.equal(child.result.attempts[1].error?.code, 'attempt_already_spent');
+      const events = summarize(readEvents(attemptDir));
+      assert.equal(events.admitted.length, 0);
+      assert.deepEqual(
+        events.denied.map((event) => event.category).sort(),
+        ['attempt_already_spent', 'filesystem_error'],
+      );
     });
   },
 );

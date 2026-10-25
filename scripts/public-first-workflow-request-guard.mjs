@@ -518,7 +518,9 @@ function persistEvent(state, kind, category, problems = null) {
  *
  * The create is made durable before the caller may dispatch: an acknowledged
  * spend that a power loss can erase would leave the one authorized call spent
- * but not retryable. The token file is synced, then its directory entry.
+ * but not retryable. The token is written to its last byte, then synced, then
+ * its directory entry is synced; a write that cannot progress denies instead of
+ * syncing a truncation.
  */
 function spend(state) {
   const spentPath = join(state.attemptDir, SPENT_NAME);
@@ -538,7 +540,14 @@ function spend(state) {
       }
       return DENY.filesystemError;
     }
-    writeSync(fd, payload);
+    // A short write (storage filling) must never be synced as if complete: the
+    // payload is ASCII by construction, so the byte count is its length.
+    let written = 0;
+    while (written < payload.length) {
+      const bytes = writeSync(fd, payload.slice(written));
+      if (!(bytes > 0)) return DENY.filesystemError;
+      written += bytes;
+    }
     // `wx` survives a process crash; only an fsync makes the token survive
     // power loss.
     fsyncSync(fd);
