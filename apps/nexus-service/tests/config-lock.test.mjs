@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { before, describe, test } from 'node:test';
 import { parse, stringify } from 'smol-toml';
 
@@ -99,6 +100,36 @@ describe('config.toml advisory lock (I-000065)', () => {
     const stored = parse(readFileSync(configPathFor(home), 'utf8'));
     assert.deepEqual({ ...stored.agent_profile }, { name: 'codex-cli' });
     assert.equal(stored.active_creator_id, 'ctr_localaaaaaaaaaaaa');
+  });
+
+  test('a failure after the lock file is created releases it instead of stranding it', async () => {
+    // Fault injection: the diagnostics write is the only reachable failure
+    // after a successful exclusive create, and no portable filesystem call
+    // forces it. Patch that one line in a copy of the built module (same
+    // directory, so its relative imports resolve) and assert the invariant
+    // that matters: no lock file left behind for the next writer to wait out.
+    const source = readFileSync(join(serviceRoot, 'dist/agent-profile.js'), 'utf8');
+    const marker = 'await lock.writeFile(`${process.pid} ${new Date().toISOString()}\\n`);';
+    assert.ok(
+      source.includes(marker),
+      'the diagnostics-write marker must exist in dist/agent-profile.js',
+    );
+    const copyPath = join(serviceRoot, 'dist', `__fault-agent-profile-${process.pid}.mjs`);
+    writeFileSync(copyPath, source.replace(marker, `throw new Error('injected');`), 'utf8');
+    try {
+      const { writeAgentProfile: faultyWrite } = await import(pathToFileURL(copyPath).href);
+      const home = seededHome();
+      await assert.rejects(
+        withDeadline(faultyWrite(home, { name: 'codex-cli' }), 5000, 'the faulty write'),
+      );
+      assert.equal(
+        existsSync(lockPathFor(home)),
+        false,
+        'the failed acquisition must not strand the lock',
+      );
+    } finally {
+      rmSync(copyPath, { force: true });
+    }
   });
 
   test('a foreign read-modify-write interleaved in the old race window loses nothing', async () => {

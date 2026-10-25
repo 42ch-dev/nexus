@@ -43,8 +43,8 @@ pub enum ConfigCommand {
 pub fn run(cmd: ConfigCommand, config: &CliConfig) -> Result<()> {
     match cmd {
         ConfigCommand::Get { key } => get(config, &key),
-        ConfigCommand::Set { key, value } => set(config, &key, &value),
-        ConfigCommand::Unset { key } => unset(config, &key),
+        ConfigCommand::Set { key, value } => set(&key, &value),
+        ConfigCommand::Unset { key } => unset(&key),
         ConfigCommand::Path => path(),
     }
 }
@@ -59,19 +59,15 @@ fn get(config: &CliConfig, key: &str) -> Result<()> {
     Ok(())
 }
 
-fn set(config: &CliConfig, key: &str, value: &str) -> Result<()> {
-    let mut updated = config.clone();
-    updated.set(key, value)?;
-    updated.save()?;
+fn set(key: &str, value: &str) -> Result<()> {
+    CliConfig::mutate(|config| config.set(key, value))?;
 
     println!("Set {key} = {value}");
     Ok(())
 }
 
-fn unset(config: &CliConfig, key: &str) -> Result<()> {
-    let mut updated = config.clone();
-    updated.unset(key)?;
-    updated.save()?;
+fn unset(key: &str) -> Result<()> {
+    CliConfig::mutate(|config| config.unset(key))?;
 
     println!("Unset {key} (reverted to default)");
     Ok(())

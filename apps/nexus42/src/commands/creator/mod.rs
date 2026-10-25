@@ -175,13 +175,14 @@ fn persist_cli_workspace_selection(
     creator_id: String,
     workspace_slug: String,
 ) -> Result<()> {
-    let mut config = CliConfig::load()?;
-    config.workspace_path = Some(creative_root);
-    config.active_creator_id = Some(creator_id.clone());
-    config
-        .active_workspace_slug_by_creator
-        .insert(creator_id, workspace_slug);
-    config.save()?;
+    CliConfig::mutate(|config| {
+        config.workspace_path = Some(creative_root);
+        config.active_creator_id = Some(creator_id.clone());
+        config
+            .active_workspace_slug_by_creator
+            .insert(creator_id, workspace_slug);
+        Ok(())
+    })?;
     Ok(())
 }
 
@@ -975,9 +976,10 @@ async fn register_creator(
             }
 
             // Set as active creator
-            let mut cli_config = CliConfig::load()?;
-            cli_config.active_creator_id = Some(creator_id.clone());
-            cli_config.save()?;
+            CliConfig::mutate(|config| {
+                config.active_creator_id = Some(creator_id.clone());
+                Ok(())
+            })?;
 
             println!();
             println!("✓ Verification successful!");
@@ -1229,16 +1231,13 @@ fn creator_status(config: &CliConfig, creator_id: Option<String>) -> Result<()> 
 fn use_creator(_config: &CliConfig, creator_ref: &str) -> Result<()> {
     let resolved_id = creator_identity::resolve_creator_ref(creator_ref)?;
 
-    let mut cli_config = CliConfig::load()?;
-    cli_config.active_creator_id = Some(resolved_id.clone());
-    // Clear workspace slug for the old creator ref and the resolved ID.
-    cli_config
-        .active_workspace_slug_by_creator
-        .remove(creator_ref);
-    cli_config
-        .active_workspace_slug_by_creator
-        .remove(&resolved_id);
-    cli_config.save()?;
+    CliConfig::mutate(|config| {
+        config.active_creator_id = Some(resolved_id.clone());
+        // Clear workspace slug for the old creator ref and the resolved ID.
+        config.active_workspace_slug_by_creator.remove(creator_ref);
+        config.active_workspace_slug_by_creator.remove(&resolved_id);
+        Ok(())
+    })?;
 
     if resolved_id == creator_ref {
         println!("✓ Active Creator set to: {resolved_id}");
@@ -1551,9 +1550,10 @@ fn logout_creator(config: &CliConfig) -> Result<()> {
     }
 
     // Clear active creator from CLI config
-    let mut cli_config = CliConfig::load()?;
-    cli_config.active_creator_id = None;
-    cli_config.save()?;
+    CliConfig::mutate(|config| {
+        config.active_creator_id = None;
+        Ok(())
+    })?;
 
     println!("✓ Creator {creator_id} logged out.");
     Ok(())

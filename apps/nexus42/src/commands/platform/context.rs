@@ -239,10 +239,13 @@ pub fn create_degradation_guard(config: &CliConfig) -> DegradationGuard {
 }
 
 /// Persist degradation guard state to config.
-fn save_degradation_guard(config: &mut CliConfig, guard: &DegradationGuard) -> Result<()> {
+fn save_degradation_guard(guard: &DegradationGuard) -> Result<()> {
     use crate::domain::DegradationSnapshot;
-    config.degradation_snapshot = Some(DegradationSnapshot::from_guard(guard));
-    config.save()?;
+    let snapshot = DegradationSnapshot::from_guard(guard);
+    CliConfig::mutate(|config| {
+        config.degradation_snapshot = Some(snapshot);
+        Ok(())
+    })?;
     Ok(())
 }
 
@@ -279,8 +282,7 @@ async fn assemble_local_with_routing(
     println!("{context}");
 
     // Persist degradation state
-    let mut cfg = config.clone();
-    save_degradation_guard(&mut cfg, &guard)?;
+    save_degradation_guard(&guard)?;
 
     Ok(())
 }

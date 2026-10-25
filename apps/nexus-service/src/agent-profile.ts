@@ -37,16 +37,17 @@ const MAX_NAME_LENGTH = 200;
 const MAX_LAUNCH_COMMAND_LENGTH = 4096;
 
 /**
- * Advisory lock file beside the config document — the ONE protocol this file's
- * three cross-process writers share (see `crates/nexus-core/src/config_lock.rs`
- * and `apps/desktop-electron/src/desktop-config.ts`): exclusive create for the
+ * Advisory lock file beside the config document — the ONE protocol its four
+ * cross-process writers share (see `crates/nexus-core/src/config_lock.rs`, the
+ * CLI `apps/nexus42/src/config.rs` and
+ * `apps/desktop-electron/src/desktop-config.ts`): exclusive create for the
  * whole read-modify-write, stale steal after 10 s, release by unlink. `flock`
  * is not an option: Node's stdlib has none, and mixing lockfile-existence with
  * flock breaks mutual exclusion.
  *
  * A normal hold is milliseconds (a small TOML document, at most two fsyncs);
  * a holder this old has crashed by construction, and the retry cadence of all
- * three writers is user-paced.
+ * four writers is user-paced.
  */
 const LOCK_FILE = `${CONFIG_FILE}.lock`;
 const LOCK_STALE_MS = 10_000;
@@ -68,9 +69,15 @@ async function acquireConfigLock(directory: string): Promise<string> {
       try {
         // Diagnostics only; the age of a held lock comes from its mtime.
         await lock.writeFile(`${process.pid} ${new Date().toISOString()}\n`);
-      } finally {
-        await lock.close();
+      } catch (error) {
+        // The create succeeded, so this attempt owns the file: release it
+        // before failing, or the next writer stalls until the stale steal.
+        await lock.close().catch(() => undefined);
+        await rm(lockPath, { force: true }).catch(() => undefined);
+        throw error;
       }
+      // A close failure cannot strand the lock — the caller releases it.
+      await lock.close().catch(() => undefined);
       return lockPath;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {

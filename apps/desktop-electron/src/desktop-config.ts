@@ -55,12 +55,13 @@ const ENTRANCE_VALUES: readonly string[] = ['developer', 'content-creator'];
 const DEFAULT_WORKSPACE_SLUG = 'default';
 
 /**
- * Daemon-home `config.toml` advisory lock — the ONE protocol its three
- * cross-process writers share (see `crates/nexus-core/src/config_lock.rs` and
+ * Daemon-home `config.toml` advisory lock — the ONE protocol its four
+ * cross-process writers share (see `crates/nexus-core/src/config_lock.rs`,
+ * `apps/nexus42/src/config.rs` and
  * `apps/nexus-service/src/agent-profile.ts`): exclusive create for the whole
  * read-modify-write, stale steal after 10 s, release by unlink. The in-process
- * gates below serialize this process only; the core CLI and the service write
- * this same file. `flock` is not an option: Node's stdlib has none, and mixing
+ * gates below serialize this process only; the core, the CLI and the service
+ * write this same file. `flock` is not an option: Node's stdlib has none, and mixing
  * lockfile-existence with flock breaks mutual exclusion.
  */
 const LOCK_STALE_MS = 10_000;
@@ -81,9 +82,15 @@ async function withConfigLock<T>(lockPath: string, run: () => Promise<T>): Promi
       try {
         // Diagnostics only; the age of a held lock comes from its mtime.
         await lock.writeFile(`${process.pid} ${new Date().toISOString()}\n`);
-      } finally {
-        await lock.close();
+      } catch (err) {
+        // The create succeeded, so this attempt owns the file: release it
+        // before failing, or the next writer stalls until the stale steal.
+        await lock.close().catch(() => undefined);
+        await rm(lockPath, { force: true }).catch(() => undefined);
+        throw err;
       }
+      // A close failure cannot strand the lock — the caller's finally releases.
+      await lock.close().catch(() => undefined);
       held = true;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {

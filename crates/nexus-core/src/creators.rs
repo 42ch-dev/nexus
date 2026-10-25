@@ -535,19 +535,24 @@ impl CoreHomeService {
 
         let cleared = clear_creator_credentials(&self.nexus_home, creator_id)?;
 
-        // If this was the active creator, clear the active selection.
-        if let Some(active) = read_active_creator_id(&self.nexus_home) {
-            if active == creator_id {
-                with_config_lock(&self.nexus_home, || {
-                    let mut config = read_cli_config(&self.nexus_home)?;
-                    if let Some(table) = config.as_table_mut() {
-                        table.remove("active_creator_id");
-                        write_cli_config(&self.nexus_home, &config)?;
-                    }
-                    Ok(())
-                })?;
+        // If this was the active creator, clear the active selection. The
+        // decision is re-made on the locked document: a concurrent switch to
+        // another creator that lands first must not be clobbered by this
+        // logout.
+        with_config_lock(&self.nexus_home, || {
+            let mut config = read_cli_config(&self.nexus_home)?;
+            if config
+                .get("active_creator_id")
+                .and_then(toml::Value::as_str)
+                == Some(creator_id)
+            {
+                if let Some(table) = config.as_table_mut() {
+                    table.remove("active_creator_id");
+                    write_cli_config(&self.nexus_home, &config)?;
+                }
             }
-        }
+            Ok(())
+        })?;
 
         Ok(LogoutResponse {
             creator_id: creator_id.to_string(),

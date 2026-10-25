@@ -1,9 +1,9 @@
 //! I-000065: the daemon-home `config.toml` advisory lock.
 //!
-//! `<user_home>/.nexus42/config.toml` has three cross-process writers: this
-//! core, the nexus-service profile writer
-//! (`apps/nexus-service/src/agent-profile.ts`) and the Electron desktop main
-//! (`apps/desktop-electron/src/desktop-config.ts`). They share ONE protocol:
+//! `<user_home>/.nexus42/config.toml` has four cross-process writers: this
+//! core, the CLI (`apps/nexus42/src/config.rs`), the nexus-service profile
+//! writer (`apps/nexus-service/src/agent-profile.ts`) and the Electron desktop
+//! main (`apps/desktop-electron/src/desktop-config.ts`). They share ONE protocol:
 //! exclusive-create of `<daemon home>/config.toml.lock` for the whole
 //! read-modify-write, stale steal after 10 s, release by unlink. No `flock`:
 //! Node's stdlib has none, and mixing lockfile-existence with flock breaks
@@ -88,8 +88,9 @@ fn acquire(nexus_home: &Path) -> CoreResult<ConfigLock> {
 /// Run one `config.toml` read-modify-write under the daemon-home advisory
 /// lock. Every writer of this file takes it — the service
 /// (`apps/nexus-service/src/agent-profile.ts` `writeAgentProfile`), the
-/// desktop main (`apps/desktop-electron/src/desktop-config.ts` `mutate`) and
-/// the CLI (`apps/nexus42/src/config.rs` `CliConfig::save`) use the same
+/// desktop main (`apps/desktop-electron/src/desktop-config.ts`
+/// `withConfigLock`) and the CLI (`apps/nexus42/src/config.rs`
+/// `CliConfig::mutate`, including its legacy-JSON migration) use the same
 /// `<daemon home>/config.toml.lock` protocol, so the lock excludes writers in
 /// other processes, not just in this one.
 ///
