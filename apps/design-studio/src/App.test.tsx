@@ -871,6 +871,27 @@ describe('Surfaces page — inspiration pool fixture', () => {
   });
 });
 
+/* ---- surfaces page — capabilities rail fixture (v1.223 W5) ------------- */
+
+describe('Surfaces page — capabilities rail fixture', () => {
+  beforeEach(async () => {
+    mockMatchMedia(false);
+    await renderStudio('/surfaces/shell');
+  });
+
+  it('keeps the rail id on the heading only', () => {
+    const section = screen.getByTestId('surfaces-caps-rail');
+    const [surfaceHeading] = within(section).getAllByRole('heading', {
+      name: 'Capabilities rail — registry, filter, empty and read-error states',
+      level: 3,
+    });
+    expect(surfaceHeading).toHaveAttribute('id', 'surfaces-caps-rail');
+    // The heading is the only holder: a section id of the same value would win
+    // the hash lookup as the earlier node.
+    expect(document.querySelectorAll('#surfaces-caps-rail')).toHaveLength(1);
+  });
+});
+
 describe('Surfaces page — daemon status strip', () => {
   it('renders single-line status + soft badge + Restart (no description)', async () => {
     mockMatchMedia(false);
