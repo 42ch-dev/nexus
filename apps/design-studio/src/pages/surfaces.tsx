@@ -838,7 +838,7 @@ export function SurfacesShellPage() {
         </FixtureBoundary>
       </section>
 
-      <section className="mt-10" data-testid="surfaces-caps-rail" id="surfaces-caps-rail">
+      <section className="mt-10" data-testid="surfaces-caps-rail">
         <SurfaceHeading id="surfaces-caps-rail">
           Capabilities rail — registry, filter, empty and read-error states
         </SurfaceHeading>
