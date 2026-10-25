@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { before, describe, test } from 'node:test';
@@ -27,9 +27,11 @@ let cfg;
 const ABSENT = Symbol('absent');
 
 before(async () => {
-  assert.equal(
-    spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], { cwd: serviceRoot, stdio: 'inherit' }).status,
-    0,
+  // The package `test` script builds once before `node --test`; a build here
+  // would race the sibling suites rewriting the same `dist`.
+  assert.ok(
+    existsSync(join(serviceRoot, 'dist', 'provider.js')),
+    'dist/provider.js is missing — run `pnpm --filter @42ch/nexus-service run test` (or `… run build`) first',
   );
   provider = await import(join(serviceRoot, 'dist/provider.js'));
   registryModule = await import(join(serviceRoot, 'dist/provider-registry.js'));

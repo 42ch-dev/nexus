@@ -3,7 +3,6 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, w
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { before, describe, test } from 'node:test';
 import { parse, stringify } from 'smol-toml';
@@ -59,11 +58,12 @@ describe('config.toml advisory lock (I-000065)', () => {
   let writeAgentProfile;
 
   before(async () => {
-    const build = spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], {
-      cwd: serviceRoot,
-      stdio: 'inherit',
-    });
-    assert.equal(build.status, 0);
+    // The package `test` script builds once before `node --test`; a build here
+    // would race the sibling suites rewriting the same `dist`.
+    assert.ok(
+      existsSync(join(serviceRoot, 'dist', 'agent-profile.js')),
+      'dist/agent-profile.js is missing — run `pnpm --filter @42ch/nexus-service run test` (or `… run build`) first',
+    );
     ({ writeAgentProfile } = await import(join(serviceRoot, 'dist/agent-profile.js')));
   });
 
