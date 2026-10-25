@@ -464,28 +464,31 @@ impl CoreHomeService {
             });
         }
 
-        set_active_creator_id(&self.nexus_home, &request.creator_id)?;
-
-        // Reset workspace slug for this creator to the default. Profile switch
-        // previously *removed* the entry and relied on read-path fallback;
-        // write `"default"` explicitly so config stays self-describing and
-        // older read paths that lack the fallback do not surface AuthRequired.
+        // ONE locked write for the whole selection change: the active id and
+        // the workspace slug reset must not straddle two lock epochs, or a
+        // concurrent writer landing between them splits the pair (a slug reset
+        // applied to a creator that is no longer the active one).
+        //
+        // Profile switch previously *removed* the slug entry and relied on
+        // read-path fallback; write `"default"` explicitly so config stays
+        // self-describing and older read paths that lack the fallback do not
+        // surface AuthRequired.
         with_config_lock(&self.nexus_home, || {
             let mut config = read_cli_config(&self.nexus_home)?;
             if let Some(table) = config.as_table_mut() {
-                if table.get("active_workspace_slug_by_creator").is_none() {
-                    table.insert(
-                        "active_workspace_slug_by_creator".to_string(),
-                        toml::Value::Table(toml::map::Map::new()),
+                table.insert(
+                    "active_creator_id".to_string(),
+                    toml::Value::String(request.creator_id.clone()),
+                );
+                if let Some(slugs) = table
+                    .entry("active_workspace_slug_by_creator")
+                    .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+                    .as_table_mut()
+                {
+                    slugs.insert(
+                        request.creator_id.clone(),
+                        toml::Value::String("default".to_string()),
                     );
-                }
-                if let Some(slug_table) = table.get_mut("active_workspace_slug_by_creator") {
-                    if let Some(slugs) = slug_table.as_table_mut() {
-                        slugs.insert(
-                            request.creator_id.clone(),
-                            toml::Value::String("default".to_string()),
-                        );
-                    }
                 }
                 write_cli_config(&self.nexus_home, &config)?;
             }
@@ -725,26 +728,6 @@ pub fn write_cli_config(nexus_home: &Path, config: &toml::Value) -> CoreResult<(
     std::fs::write(&config_path, toml_str).map_err(|e| internal("CONFIG_WRITE_ERROR", e))
 }
 
-/// Set the active `creator_id` in the CLI config under the daemon-home
-/// `config.toml` lock.
-pub fn set_active_creator_id(nexus_home: &Path, creator_id: &str) -> CoreResult<()> {
-    validate_creator_id_safe(creator_id).map_err(|reason| CoreError::InvalidInput {
-        field: "creator_id".to_string(),
-        reason,
-    })?;
-    with_config_lock(nexus_home, || {
-        let mut config = read_cli_config(nexus_home)?;
-        let table = config
-            .as_table_mut()
-            .ok_or_else(|| internal("CONFIG_ERROR", "config root is not a table"))?;
-        table.insert(
-            "active_creator_id".to_string(),
-            toml::Value::String(creator_id.to_string()),
-        );
-        write_cli_config(nexus_home, &config)
-    })
-}
-
 /// Set a creator's `display_name` in the enrichment cache
 /// (`creator_identity_cache.json`), creating the minimal entry when absent.
 /// `list_creators` reads display names from this cache.
@@ -922,4 +905,131 @@ fn clear_creator_credentials(nexus_home: &Path, creator_id: &str) -> CoreResult<
     }
 
     Ok(removed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TARGET: &str = "ctr_localusetarget0";
+    const OTHER: &str = "ctr_localuseother0";
+
+    /// Seed profile membership: `use_creator` accepts a creator present in the
+    /// identity cache or the auth store.
+    fn seed_creator(home: &Path, creator_id: &str) {
+        let cache = serde_json::json!({
+            "creators": {
+                creator_id: { "creator_id": creator_id, "handle": null, "display_name": null }
+            }
+        });
+        std::fs::write(
+            home.join("creator_identity_cache.json"),
+            serde_json::to_string(&cache).expect("cache json"),
+        )
+        .expect("seed identity cache");
+    }
+
+    fn stored_document(home: &Path) -> toml::Table {
+        std::fs::read_to_string(home.join("config.toml"))
+            .expect("config.toml")
+            .parse()
+            .expect("valid toml")
+    }
+
+    /// MF-1 (I-000090): the active-creator commit and the slug reset are ONE
+    /// locked write. A writer interleaved between the old two epochs — it
+    /// clears the target's slug entry and re-selects another creator — leaves
+    /// that slug resurrected as `default` under a different active creator,
+    /// which the single-epoch commit cannot produce.
+    #[test]
+    fn use_creator_commits_the_selection_and_the_slug_reset_together() {
+        let tmp = tempfile::tempdir().expect("temp home");
+        let home = tmp.path().to_path_buf();
+        // The service opens the user home; the config/document store lives in
+        // its `.nexus42` root.
+        let nexus_home = home.join(".nexus42");
+        std::fs::create_dir_all(&nexus_home).expect("nexus home");
+        seed_creator(&nexus_home, TARGET);
+        let svc = CoreHomeService::open(home).expect("open home");
+
+        for round in 0..100 {
+            crate::home::write_active_selection(&nexus_home, TARGET, Some("ws_target"), None)
+                .expect("seed");
+            crate::home::write_active_selection(&nexus_home, OTHER, Some("ws_other"), None)
+                .expect("seed");
+
+            // The concurrent writer reacts to the target becoming active: it
+            // then clears the target's slug and re-selects the other creator.
+            let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let racer = {
+                let racer_home = nexus_home.clone();
+                let stop = std::sync::Arc::clone(&stop);
+                std::thread::spawn(move || {
+                    let poll = || {
+                        with_config_lock(&racer_home, || {
+                            let mut config = read_cli_config(&racer_home)?;
+                            let table = config.as_table_mut().ok_or_else(|| {
+                                internal("CONFIG_ERROR", "config root is not a table")
+                            })?;
+                            if table.get("active_creator_id").and_then(toml::Value::as_str)
+                                != Some(TARGET)
+                            {
+                                return Ok(false);
+                            }
+                            table.insert(
+                                "active_creator_id".to_string(),
+                                toml::Value::String(OTHER.to_string()),
+                            );
+                            if let Some(slugs) = table
+                                .get_mut("active_workspace_slug_by_creator")
+                                .and_then(toml::Value::as_table_mut)
+                            {
+                                slugs.remove(TARGET);
+                            }
+                            write_cli_config(&racer_home, &config)?;
+                            Ok(true)
+                        })
+                        .expect("racer write")
+                    };
+                    loop {
+                        if poll() {
+                            return;
+                        }
+                        if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                            // One final poll after the writer returned: it sees
+                            // the committed selection, or a stale one.
+                            poll();
+                            return;
+                        }
+                        // Yield to the writer: an aggressive loop starves its
+                        // backoff and hides the interleaving we are probing.
+                        std::thread::sleep(std::time::Duration::from_millis(1));
+                    }
+                })
+            };
+
+            svc.use_creator(SetActiveCreatorRequest {
+                creator_id: TARGET.to_string(),
+            })
+            .expect("use creator");
+            stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            racer.join().expect("racer thread");
+
+            let document = stored_document(&nexus_home);
+            let active = document
+                .get("active_creator_id")
+                .and_then(toml::Value::as_str)
+                .unwrap_or_default();
+            if active == OTHER {
+                let slug = document
+                    .get("active_workspace_slug_by_creator")
+                    .and_then(toml::Value::as_table)
+                    .and_then(|slugs| slugs.get(TARGET));
+                assert!(
+                    slug.is_none(),
+                    "round {round}: the target's slug was re-created after the racer cleared it"
+                );
+            }
+        }
+    }
 }

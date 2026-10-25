@@ -169,43 +169,36 @@ async fn materialize_adr014_workspace(
     Ok(db_path)
 }
 
-/// Persist CLI workspace selection to config.
-fn persist_cli_workspace_selection(
-    creative_root: PathBuf,
-    creator_id: String,
-    workspace_slug: String,
-) -> Result<()> {
-    CliConfig::mutate(|config| {
-        config.workspace_path = Some(creative_root);
-        config.active_creator_id = Some(creator_id.clone());
-        config
-            .active_workspace_slug_by_creator
-            .insert(creator_id, workspace_slug);
-        Ok(())
-    })?;
-    Ok(())
-}
-
 /// Commit the active creator/workspace selection through the core home entry.
 ///
 /// This is the local replacement for the daemon `set_active_workspace` round
 /// trip the workspace leaves used to make: [`CoreHomeService::select_workspace`]
 /// initializes the chosen workspace's guarded state DB, materializes its
 /// `creators` row (the FK precheck world/Work creation relies on) and writes
-/// the active creator/slug into `config.toml` — preserving every other key,
-/// including the CLI's `workspace_path` handle.
+/// the active creator/slug into `config.toml` — preserving every other key.
+/// `workspace_path` (the CLI's active creative root) is committed by the same
+/// locked write, so a workspace init never takes the config lock twice.
 async fn select_workspace_via_core(
     user_home: &std::path::Path,
     creator_id: &str,
     workspace_slug: &str,
+    workspace_path: Option<&std::path::Path>,
 ) -> Result<()> {
     let home = CoreHomeService::open(user_home.to_path_buf()).map_err(map_core_error)?;
-    home.select_workspace(SetActiveWorkspaceRequest {
-        creator_id: Some(creator_id.to_string()),
-        workspace_slug: workspace_slug.to_string(),
-    })
-    .await
-    .map_err(map_core_error)?;
+    let selection = match workspace_path {
+        Some(path) => {
+            home.select_workspace_with_workspace_path(creator_id, workspace_slug, path)
+                .await
+        }
+        None => {
+            home.select_workspace(SetActiveWorkspaceRequest {
+                creator_id: Some(creator_id.to_string()),
+                workspace_slug: workspace_slug.to_string(),
+            })
+            .await
+        }
+    };
+    selection.map_err(map_core_error)?;
     Ok(())
 }
 
@@ -265,12 +258,15 @@ async fn init_workspace(
         &display_name,
     )
     .await?;
-    persist_cli_workspace_selection(
-        creative_root.clone(),
-        creator_id.clone(),
-        workspace_slug.clone(),
-    )?;
-    select_workspace_via_core(&user_home, &creator_id, &workspace_slug).await?;
+    // One locked write: the selection and the CLI's `workspace_path` handle
+    // commit together, so a concurrent writer cannot land between them.
+    select_workspace_via_core(
+        &user_home,
+        &creator_id,
+        &workspace_slug,
+        Some(&creative_root),
+    )
+    .await?;
 
     let nh = nexus_home()?;
     std::fs::create_dir_all(&nh)?;
@@ -805,12 +801,10 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
                 &workspace_name,
             )
             .await?;
-            persist_cli_workspace_selection(
-                creative_root.clone(),
-                creator_id.to_string(),
-                workspace_slug.clone(),
-            )?;
-            select_workspace_via_core(&home, creator_id, &workspace_slug).await?;
+            // One locked write: the selection and the CLI's `workspace_path`
+            // handle commit together (see `init_workspace`).
+            select_workspace_via_core(&home, creator_id, &workspace_slug, Some(&creative_root))
+                .await?;
             println!("✓ Workspace {workspace_slug:?} created for creator {creator_id}.");
             println!("  Creative root: {}", creative_root.display());
             println!("  state.db: {}", db_path.display());
@@ -822,7 +816,7 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
             // The core home entry validates the workspace exists on disk under
             // this creator and commits the selection (guarded state-DB init +
             // `creators` row + `config.toml`).
-            select_workspace_via_core(&user_home()?, creator_id, &workspace_slug).await?;
+            select_workspace_via_core(&user_home()?, creator_id, &workspace_slug, None).await?;
             println!("✓ Active workspace slug for {creator_id} set to: {workspace_slug}");
             Ok(())
         }

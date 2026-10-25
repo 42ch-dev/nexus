@@ -67,6 +67,37 @@ const DEFAULT_WORKSPACE_SLUG = 'default';
 const LOCK_STALE_MS = 10_000;
 const LOCK_BACKOFF_INITIAL_MS = 25;
 const LOCK_BACKOFF_CAP_MS = 500;
+/**
+ * A steal retries while the stale file cannot be removed (a root-owned or
+ * immutable file: EACCES/EPERM). Past this deadline the mutation fails instead
+ * of hot-looping — the same 2× stale window the core and service writers use.
+ */
+const LOCK_STEAL_DEADLINE_MS = 2 * LOCK_STALE_MS;
+
+const sleepFor = (ms: number): Promise<void> => {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  setTimeout(resolve, ms);
+  return promise;
+};
+
+/**
+ * Release the lock, but only while this holder still owns it: a holder stalled
+ * past the stale window is stolen, and unlinking on resume would delete the new
+ * owner's lock and admit a third writer into the second's read-modify-write.
+ */
+async function releaseConfigLock(lockPath: string, token: string): Promise<void> {
+  try {
+    const contents = await readFile(lockPath, 'utf8');
+    if (!contents.trimEnd().endsWith(token)) {
+      console.error(`[nexus-desktop] ${lockPath} was stolen; leaving the new owner's lock`);
+      return;
+    }
+    await rm(lockPath, { force: true });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+    console.error(`[nexus-desktop] ${lockPath} release failed:`, err);
+  }
+}
 
 /**
  * Run one config read-modify-write while holding `lockPath`. A normal hold is
@@ -76,14 +107,19 @@ const LOCK_BACKOFF_CAP_MS = 500;
  */
 async function withConfigLock<T>(lockPath: string, run: () => Promise<T>): Promise<T> {
   await mkdir(dirname(lockPath), { recursive: true });
+  // Ownership token written into the lock file: release compares it before
+  // unlinking, so a stolen holder cannot delete the new owner's lock.
+  const token = randomUUID();
   let backoff = LOCK_BACKOFF_INITIAL_MS;
+  let stealDeadlineMs: number | undefined;
+  let unlinkErrorLogged = false;
   let held = false;
   while (!held) {
     try {
       const lock = await open(lockPath, 'wx', 0o600);
       try {
         // Diagnostics only; the age of a held lock comes from its mtime.
-        await lock.writeFile(`${process.pid} ${new Date().toISOString()}\n`);
+        await lock.writeFile(`${process.pid} ${new Date().toISOString()} ${token}\n`);
       } catch (err) {
         // The create succeeded, so this attempt owns the file: release it
         // before failing, or the next writer stalls until the stale steal.
@@ -109,12 +145,28 @@ async function withConfigLock<T>(lockPath: string, run: () => Promise<T>): Promi
         // Stale age is a heuristic: two reclaimers can both unlink and create,
         // leaving two live holders, and a live slow holder can lose its lock.
         // Accepted only because all four writers are user-paced.
-        await rm(lockPath, { force: true }).catch(() => undefined);
-        backoff = LOCK_BACKOFF_INITIAL_MS;
+        try {
+          await rm(lockPath, { force: true });
+        } catch (unlinkError) {
+          stealDeadlineMs ??= Date.now();
+          if (!unlinkErrorLogged) {
+            unlinkErrorLogged = true;
+            console.error(`[nexus-desktop] cannot remove the stale ${lockPath}:`, unlinkError);
+          }
+          if (Date.now() - stealDeadlineMs > LOCK_STEAL_DEADLINE_MS) {
+            throw desktopError(
+              'config_io',
+              `stale ${lockPath} cannot be removed: ${
+                unlinkError instanceof Error ? unlinkError.message : String(unlinkError)
+              }`,
+            );
+          }
+        }
+        // Back off here too: an unremovable stale lock must not hot-loop.
+        await sleepFor(backoff);
+        backoff = Math.min(backoff * 2, LOCK_BACKOFF_CAP_MS);
       } else if (ageMs !== undefined) {
-        const { promise, resolve } = Promise.withResolvers<void>();
-        setTimeout(resolve, backoff);
-        await promise;
+        await sleepFor(backoff);
         backoff = Math.min(backoff * 2, LOCK_BACKOFF_CAP_MS);
       }
     }
@@ -122,7 +174,7 @@ async function withConfigLock<T>(lockPath: string, run: () => Promise<T>): Promi
   try {
     return await run();
   } finally {
-    await rm(lockPath, { force: true }).catch(() => undefined);
+    await releaseConfigLock(lockPath, token);
   }
 }
 

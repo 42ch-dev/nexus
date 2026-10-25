@@ -54,22 +54,41 @@ const LOCK_FILE = `${CONFIG_FILE}.lock`;
 const LOCK_STALE_MS = 10_000;
 const LOCK_BACKOFF_INITIAL_MS = 25;
 const LOCK_BACKOFF_CAP_MS = 500;
+/**
+ * A steal retries while the stale file cannot be removed (a root-owned or
+ * immutable file: EACCES/EPERM). Past this deadline the write fails instead of
+ * hot-looping — the same 2× stale window the core and desktop writers use.
+ */
+const LOCK_STEAL_DEADLINE_MS = 2 * LOCK_STALE_MS;
+
+const sleepFor = (ms: number): Promise<void> => {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  setTimeout(resolve, ms);
+  return promise;
+};
+
+/** A held lock: its path plus the ownership token written inside it. */
+type HeldConfigLock = { lockPath: string; token: string };
 
 function isTomlTable(value: unknown): value is TomlTable {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** Take the config lock, or fail instead of waiting forever behind a live holder. */
-async function acquireConfigLock(directory: string): Promise<string> {
+async function acquireConfigLock(directory: string): Promise<HeldConfigLock> {
   const lockPath = join(directory, LOCK_FILE);
   await mkdir(directory, { recursive: true });
+  const token = randomUUID();
   let backoff = LOCK_BACKOFF_INITIAL_MS;
+  let stealDeadlineMs: number | undefined;
+  let unlinkErrorLogged = false;
   for (;;) {
     try {
       const lock = await open(lockPath, 'wx', 0o600);
       try {
-        // Diagnostics only; the age of a held lock comes from its mtime.
-        await lock.writeFile(`${process.pid} ${new Date().toISOString()}\n`);
+        // Diagnostics only (the age of a held lock comes from its mtime); the
+        // trailing token is the ownership proof release compares.
+        await lock.writeFile(`${process.pid} ${new Date().toISOString()} ${token}\n`);
       } catch (error) {
         // The create succeeded, so this attempt owns the file: release it
         // before failing, or the next writer stalls until the stale steal.
@@ -79,7 +98,7 @@ async function acquireConfigLock(directory: string): Promise<string> {
       }
       // A close failure cannot strand the lock — the caller releases it.
       await lock.close().catch(() => undefined);
-      return lockPath;
+      return { lockPath, token };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
         throw new HttpError(500, 'internal', `${CONFIG_FILE} lock is unavailable`);
@@ -92,15 +111,45 @@ async function acquireConfigLock(directory: string): Promise<string> {
         // Stale age is a heuristic: two reclaimers can both unlink and create,
         // leaving two live holders, and a live slow holder can lose its lock.
         // Accepted only because all four writers are user-paced.
-        await rm(lockPath, { force: true }).catch(() => undefined);
-        backoff = LOCK_BACKOFF_INITIAL_MS;
+        try {
+          await rm(lockPath, { force: true });
+        } catch (unlinkError) {
+          stealDeadlineMs ??= Date.now();
+          if (!unlinkErrorLogged) {
+            unlinkErrorLogged = true;
+            console.error(`[nexus-service] cannot remove the stale ${LOCK_FILE}:`, unlinkError);
+          }
+          if (Date.now() - stealDeadlineMs > LOCK_STEAL_DEADLINE_MS) {
+            throw new HttpError(500, 'internal', `${CONFIG_FILE} lock is stale and cannot be removed`);
+          }
+        }
+        // Back off here too: an unremovable stale lock must not hot-loop.
+        await sleepFor(backoff);
+        backoff = Math.min(backoff * 2, LOCK_BACKOFF_CAP_MS);
       } else if (ageMs !== undefined) {
-        const { promise, resolve } = Promise.withResolvers<void>();
-        setTimeout(resolve, backoff);
-        await promise;
+        await sleepFor(backoff);
         backoff = Math.min(backoff * 2, LOCK_BACKOFF_CAP_MS);
       }
     }
+  }
+}
+
+/**
+ * Release the lock, but only while this holder still owns it: a holder stalled
+ * past the stale window is stolen, and unlinking on resume would delete the new
+ * owner's lock and admit a third writer into the second's read-modify-write.
+ */
+async function releaseConfigLock({ lockPath, token }: HeldConfigLock): Promise<void> {
+  try {
+    const contents = await readFile(lockPath, 'utf8');
+    if (!contents.trimEnd().endsWith(token)) {
+      console.error(`[nexus-service] ${LOCK_FILE} was stolen; leaving the new owner's lock`);
+      return;
+    }
+    await rm(lockPath, { force: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    console.error(`[nexus-service] ${LOCK_FILE} release failed:`, error);
   }
 }
 
@@ -217,7 +266,7 @@ export async function writeAgentProfile(
 
   // The lock spans the whole read-modify-write: a concurrent core/desktop
   // writer's document must be read AFTER it is committed, never before.
-  const lockPath = await acquireConfigLock(join(home, NEXUS_DIR));
+  const heldLock = await acquireConfigLock(join(home, NEXUS_DIR));
   try {
     const document = await readConfigDocument(home);
     const existing = document[PROFILE_TABLE];
@@ -252,7 +301,7 @@ export async function writeAgentProfile(
     await writeConfigDocument(home, document);
     return command !== undefined ? { name, launch_command: command } : { name };
   } finally {
-    await rm(lockPath, { force: true }).catch(() => undefined);
+    await releaseConfigLock(heldLock);
   }
 }
 
