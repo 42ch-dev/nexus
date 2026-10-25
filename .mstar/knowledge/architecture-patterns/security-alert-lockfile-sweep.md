@@ -56,19 +56,37 @@ package.json):
   of the real consumer against the new major is then the honest evidence, not the app
   test suites (v1.223 QC found the app gates could not observe it).
 
-**Gate discipline** (per override, all must be green or the line rolls back):
+**Gate discipline** (per override, in this order; all must be green or the line rolls
+back):
 
-1. Frozen-lockfile consistency: `pnpm install`, then `pnpm install --frozen-lockfile`.
-2. The lock diff must touch **only the intended version pairs** (parse both revisions;
-   integrity hashes must match the registry).
-3. Every suite/build that can actually load the package (trace the import graph —
-   "the app suite runs" is not evidence if the package is resolution-only).
-4. If no gate can observe it, build that evidence (standalone consumer compile).
-5. Lint/typecheck as usual; `minimumReleaseAge` (or equivalent freshness gate) is never
-   lowered to admit the fix.
+1. Plain resolve: `pnpm install`.
+2. Frozen-lockfile consistency: `pnpm install --frozen-lockfile`.
+3. Shared component library: its test suite.
+4. Primary app: typecheck (including whatever its `pretypecheck` rebuilds).
+5. Primary app: test suite.
+6. Primary app: production build.
+7. Second shipped app: typecheck.
+8. Second shipped app: test suite.
+9. Second shipped app: production build (including its `prebuild` codegen).
+10. The package that directly owns a forced edge: its build **and** codegen targets —
+    the riskiest, so last among the consumers.
+11. Remaining tooling consumers: their validate/lint scripts (if lint reports
+    unresolved-import artifacts, run the pre-lint builds first).
+12. Alert end state: open-alert list before and after (live API); alerts may resolve
+    only after the merged lock is re-parsed.
 
-**Verification at merge**: record the pre-merge alert list (live API) 1:1 against the
-resolved graph versions and each GHSA's `first_patched_version`; the alerts clear when
+Three rules sit across the whole list:
+
+- The lock diff must touch **only the intended version pairs** (parse both revisions;
+  integrity hashes must match the registry).
+- A freshness gate (`minimumReleaseAge` or equivalent) is never lowered to admit the
+  fix.
+- Gate only what can actually load the package (trace the import graph). If no gate can
+  observe it — a resolution-only edge — build that evidence (standalone consumer
+  compile); "the app suite runs" is not evidence.
+
+**Verification at merge**: record the resolved lock versions plus the pre-merge alert
+list (live API) 1:1 against each GHSA's `first_patched_version`; the alerts clear when
 Dependabot re-parses the merged lock. The merge-time expectation is "zero open alerts"
 (or the named disclosed exceptions).
 
@@ -94,5 +112,4 @@ plan the real upgrade), or Rust/Cargo graphs (different override mechanism).
 
 - `pnpm-workspace.yaml` `overrides:` (v1.223: four keys incl. the scoped undici and the
   forced postcss-selector-parser major)
-- `.mstar/plans/v223-dependabot-sweep.md` (the 12-step gate list)
 - GitHub advisory API `first_patched_version` — the alert-clear oracle
