@@ -759,3 +759,65 @@ async fn storage_status_reports_healthy_initialized_store() {
     assert!(status.journal_mode.is_some());
     assert!(status.foreign_keys.is_some());
 }
+
+/// F3 (I-000065): "is this still the active creator?" is decided on the
+/// document read *inside* the writer lock, so a switch to another creator
+/// that commits while the logout waits for the lock survives it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn logout_does_not_clear_a_selection_switched_while_it_waited() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    let (tmp, svc) = home().await;
+    let creator_a = register_named(&svc, "Logout Alpha").await;
+    let creator_b = register_named(&svc, "Logout Beta").await;
+    // The second registration is the active one; make the logged-out creator
+    // the current selection.
+    let nexus_home = tmp.path().join(".nexus42");
+    let config_path = nexus_home.join("config.toml");
+    std::fs::write(
+        &config_path,
+        format!("active_creator_id = \"{creator_a}\"\n"),
+    )
+    .expect("seed selection");
+
+    // A foreign writer holds the lock; the logout must wait for it.
+    let lock_path = nexus_home.join("config.toml.lock");
+    std::fs::write(&lock_path, "foreign holder\n").expect("foreign lock");
+
+    let svc = Arc::new(svc);
+    let done = Arc::new(AtomicBool::new(false));
+    let logout = {
+        let svc = Arc::clone(&svc);
+        let done = Arc::clone(&done);
+        let creator_a = creator_a.clone();
+        tokio::task::spawn_blocking(move || {
+            svc.logout_creator(&creator_a).expect("logout");
+            done.store(true, Ordering::SeqCst);
+        })
+    };
+
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(
+        !done.load(Ordering::SeqCst),
+        "logout must wait for config.toml.lock"
+    );
+
+    // The selection switches to another creator while the logout waits. The
+    // logout must not clear it when it finally gets the lock.
+    std::fs::write(
+        &config_path,
+        format!("active_creator_id = \"{creator_b}\"\n"),
+    )
+    .expect("concurrent switch");
+    std::fs::remove_file(&lock_path).expect("release foreign lock");
+    logout.await.expect("logout task");
+
+    let stored = std::fs::read_to_string(&config_path).expect("read config");
+    assert!(
+        stored.contains(&creator_b),
+        "the switched selection must survive an unrelated logout: {stored}"
+    );
+    assert!(!lock_path.exists(), "the logout released its own lock");
+}

@@ -8,14 +8,16 @@
  * `write_cli_config` in `crates/nexus-core/src/creators.rs`): a missing file is
  * an empty document, every other key is preserved on write, and the document is
  * replaced atomically (temp file + rename in the same directory) so a reader
- * never observes a partially written config.
+ * never observes a partially written config. Writes additionally hold the
+ * daemon-home advisory lock (`config.toml.lock`) for the whole read-modify-
+ * write: the core CLI and the desktop main write this file too.
  *
  * ONE daemon-global profile — matching desktop semantics. The legacy
  * per-creator localStorage key was a browser artifact and is migrated by the
  * web read path, never re-created here.
  */
 import { randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { parse, stringify, type TomlTable } from 'smol-toml';
 import type { AgentProfile, AgentProfileResponse } from '@42ch/nexus-contracts';
@@ -34,8 +36,72 @@ const MAX_NAME_LENGTH = 200;
 /** Bound on a stored launch command, in code points; longer values are rejected at the fold. */
 const MAX_LAUNCH_COMMAND_LENGTH = 4096;
 
+/**
+ * Advisory lock file beside the config document — the ONE protocol its four
+ * cross-process writers share (see `crates/nexus-core/src/config_lock.rs`, the
+ * CLI `apps/nexus42/src/config.rs` and
+ * `apps/desktop-electron/src/desktop-config.ts`): exclusive create for the
+ * whole read-modify-write, stale steal after 10 s, release by unlink. `flock`
+ * is not an option: Node's stdlib has none, and mixing lockfile-existence with
+ * flock breaks mutual exclusion.
+ *
+ * A normal hold is milliseconds (a small TOML document, at most two fsyncs);
+ * the 10 s age is a stale heuristic, not proof of a crash: a paused live
+ * holder can look stale, and stealing can transiently yield two holders. Safe
+ * only while all four writers stay user-paced — nothing enforces that.
+ */
+const LOCK_FILE = `${CONFIG_FILE}.lock`;
+const LOCK_STALE_MS = 10_000;
+const LOCK_BACKOFF_INITIAL_MS = 25;
+const LOCK_BACKOFF_CAP_MS = 500;
+
 function isTomlTable(value: unknown): value is TomlTable {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Take the config lock, or fail instead of waiting forever behind a live holder. */
+async function acquireConfigLock(directory: string): Promise<string> {
+  const lockPath = join(directory, LOCK_FILE);
+  await mkdir(directory, { recursive: true });
+  let backoff = LOCK_BACKOFF_INITIAL_MS;
+  for (;;) {
+    try {
+      const lock = await open(lockPath, 'wx', 0o600);
+      try {
+        // Diagnostics only; the age of a held lock comes from its mtime.
+        await lock.writeFile(`${process.pid} ${new Date().toISOString()}\n`);
+      } catch (error) {
+        // The create succeeded, so this attempt owns the file: release it
+        // before failing, or the next writer stalls until the stale steal.
+        await lock.close().catch(() => undefined);
+        await rm(lockPath, { force: true }).catch(() => undefined);
+        throw error;
+      }
+      // A close failure cannot strand the lock — the caller releases it.
+      await lock.close().catch(() => undefined);
+      return lockPath;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+        throw new HttpError(500, 'internal', `${CONFIG_FILE} lock is unavailable`);
+      }
+      const ageMs = await stat(lockPath).then(
+        (metadata) => Date.now() - metadata.mtimeMs,
+        () => undefined, // Released between the create and the stat: retry now.
+      );
+      if (ageMs !== undefined && ageMs > LOCK_STALE_MS) {
+        // Stale age is a heuristic: two reclaimers can both unlink and create,
+        // leaving two live holders, and a live slow holder can lose its lock.
+        // Accepted only because all four writers are user-paced.
+        await rm(lockPath, { force: true }).catch(() => undefined);
+        backoff = LOCK_BACKOFF_INITIAL_MS;
+      } else if (ageMs !== undefined) {
+        const { promise, resolve } = Promise.withResolvers<void>();
+        setTimeout(resolve, backoff);
+        await promise;
+        backoff = Math.min(backoff * 2, LOCK_BACKOFF_CAP_MS);
+      }
+    }
+  }
 }
 
 /**
@@ -149,38 +215,45 @@ export async function writeAgentProfile(
     );
   }
 
-  const document = await readConfigDocument(home);
-  const existing = document[PROFILE_TABLE];
-  // Preserve-on-omit is NAME-SCOPED: only the same profile keeps its custom
-  // command. Switching to a different agent stores the new name with no
-  // launch_command (the previous agent's override must not leak across).
-  const storedName =
-    isTomlTable(existing) && typeof existing['name'] === 'string'
-      ? existing['name'].trim()
-      : undefined;
-  // A preserved command is normalized on the way through too: preserving an
-  // untrimmed legacy value would re-persist the very shape the write fold
-  // forbids, and an all-blank stored command means "no command".
-  const storedCommand =
-    isTomlTable(existing) &&
-    storedName === name &&
-    typeof existing['launch_command'] === 'string'
-      ? existing['launch_command'].trim()
-      : undefined;
-
-  const command =
-    request.launch_command === undefined
-      ? storedCommand !== undefined && storedCommand.length > 0
-        ? storedCommand
-        : undefined
-      : requestedCommand !== undefined && requestedCommand.length > 0
-        ? requestedCommand
+  // The lock spans the whole read-modify-write: a concurrent core/desktop
+  // writer's document must be read AFTER it is committed, never before.
+  const lockPath = await acquireConfigLock(join(home, NEXUS_DIR));
+  try {
+    const document = await readConfigDocument(home);
+    const existing = document[PROFILE_TABLE];
+    // Preserve-on-omit is NAME-SCOPED: only the same profile keeps its custom
+    // command. Switching to a different agent stores the new name with no
+    // launch_command (the previous agent's override must not leak across).
+    const storedName =
+      isTomlTable(existing) && typeof existing['name'] === 'string'
+        ? existing['name'].trim()
+        : undefined;
+    // A preserved command is normalized on the way through too: preserving an
+    // untrimmed legacy value would re-persist the very shape the write fold
+    // forbids, and an all-blank stored command means "no command".
+    const storedCommand =
+      isTomlTable(existing) &&
+      storedName === name &&
+      typeof existing['launch_command'] === 'string'
+        ? existing['launch_command'].trim()
         : undefined;
 
-  document[PROFILE_TABLE] =
-    command !== undefined ? { name, launch_command: command } : { name };
-  await writeConfigDocument(home, document);
-  return command !== undefined ? { name, launch_command: command } : { name };
+    const command =
+      request.launch_command === undefined
+        ? storedCommand !== undefined && storedCommand.length > 0
+          ? storedCommand
+          : undefined
+        : requestedCommand !== undefined && requestedCommand.length > 0
+          ? requestedCommand
+          : undefined;
+
+    document[PROFILE_TABLE] =
+      command !== undefined ? { name, launch_command: command } : { name };
+    await writeConfigDocument(home, document);
+    return command !== undefined ? { name, launch_command: command } : { name };
+  } finally {
+    await rm(lockPath, { force: true }).catch(() => undefined);
+  }
 }
 
 /** Runtime shape check for the PUT body — the schema is not a validator. */

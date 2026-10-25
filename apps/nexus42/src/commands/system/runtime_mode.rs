@@ -111,9 +111,10 @@ fn set(config: &CliConfig, mode_str: &str) -> Result<()> {
     }
 
     // Persist
-    let mut updated = config.clone();
-    updated.runtime_mode = new_mode;
-    updated.save()?;
+    CliConfig::mutate(|config| {
+        config.runtime_mode = new_mode;
+        Ok(())
+    })?;
 
     println!("Runtime mode set to '{new_mode}'.");
     Ok(())

@@ -61,6 +61,15 @@ pub struct CliConfig {
     /// Not serialized to config.toml — resolved at startup from `~/.nexus42/device-id`.
     #[serde(skip)]
     pub device_id: String,
+
+    /// Keys of `config.toml` this type does not own.
+    ///
+    /// `agent_profile` belongs to the service, `entrance` and
+    /// `workspace_path_by_creator` to the desktop main. Flattened so every
+    /// load/write round-trips them instead of silently dropping another
+    /// writer's committed table.
+    #[serde(flatten)]
+    pub extra: toml::Table,
 }
 
 impl Default for CliConfig {
@@ -76,6 +85,7 @@ impl Default for CliConfig {
             #[cfg(feature = "cli")]
             degradation_snapshot: None,
             device_id: String::new(),
+            extra: toml::Table::new(),
         }
     }
 }
@@ -171,68 +181,132 @@ impl CliConfig {
     }
 
     fn load_from_nexus_home(nexus: &Path) -> anyhow::Result<Self> {
+        // Migration writes `config.toml`, so it takes the writer lock. Probe
+        // first so a plain read does not contend with the other writers.
+        if !nexus.join("config.toml").exists() && nexus.join("config.json").exists() {
+            Self::migrate_legacy_json(nexus)?;
+        }
+        Self::read_document(nexus)
+    }
+
+    /// Read `config.toml` as typed config (absent/empty → defaults).
+    ///
+    /// Reads stay unlocked — the lock only excludes writers from each other.
+    /// Unknown keys are retained by the flattened [`Self::extra`] table, so a
+    /// later write round-trips the keys other writers own.
+    fn read_document(nexus: &Path) -> anyhow::Result<Self> {
         let config_path = nexus.join("config.toml");
-
-        // 1. Try loading config.toml
-        if config_path.exists() {
-            let content = std::fs::read_to_string(&config_path)?;
-            if content.trim().is_empty() {
+        let content = match std::fs::read_to_string(&config_path) {
+            Ok(content) => content,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(Self::default());
             }
-            return match toml::from_str::<Self>(&content) {
-                Ok(cfg) => Ok(cfg),
-                Err(e) => {
-                    // Backup corrupted file and re-initialize with defaults
-                    tracing::warn!(
-                        "Config file corrupted, backing up and re-initializing: {}",
-                        e
-                    );
-                    let bak = config_path.with_extension("toml.bak");
-                    if let Err(rename_err) = std::fs::rename(&config_path, &bak) {
-                        tracing::error!("Failed to backup corrupted config: {}", rename_err);
-                    }
-                    Ok(Self::default())
-                }
-            };
+            Err(error) => return Err(error.into()),
+        };
+        if content.trim().is_empty() {
+            return Ok(Self::default());
         }
+        match toml::from_str::<Self>(&content) {
+            Ok(config) => Ok(config),
+            Err(error) => {
+                // Backup corrupted file and re-initialize with defaults
+                // Reader-side exposure: unlocked reads plus non-atomic writes mean this parse failure can be stale, and the rename below can move a file another writer just committed — the lock never excludes readers.
+                tracing::warn!("Config file corrupted, backing up and re-initializing: {error}");
+                let bak = config_path.with_extension("toml.bak");
+                if let Err(rename_error) = std::fs::rename(&config_path, &bak) {
+                    tracing::error!("Failed to backup corrupted config: {rename_error}");
+                }
+                Ok(Self::default())
+            }
+        }
+    }
 
-        // 2. Migration: try loading legacy config.json
+    /// Migrate a legacy `config.json` to `config.toml` under the writer lock.
+    fn migrate_legacy_json(nexus: &Path) -> anyhow::Result<()> {
+        Self::with_writer_lock(nexus, || Self::migrate_legacy_json_locked(nexus))
+    }
+
+    /// Re-checks the TOML's existence after the lock is taken: a
+    /// service/desktop commit that landed first wins over the legacy snapshot
+    /// instead of being overwritten. Caller holds the writer lock.
+    fn migrate_legacy_json_locked(nexus: &Path) -> anyhow::Result<()> {
+        let config_path = nexus.join("config.toml");
         let json_path = nexus.join("config.json");
-        if json_path.exists() {
-            let content = std::fs::read_to_string(&json_path)?;
-            if content.trim().is_empty() {
-                // Empty JSON file — just rename it and return defaults
-                std::fs::rename(&json_path, nexus.join("config.json.migrated"))?;
-                return Ok(Self::default());
-            }
-            match serde_json::from_str::<Self>(&content) {
-                Ok(cfg) => {
-                    // Write config.toml and rename legacy file
-                    let toml_str = toml::to_string_pretty(&cfg)?;
-                    if let Some(parent) = config_path.parent() {
-                        std::fs::create_dir_all(parent)?;
-                    }
-                    std::fs::write(&config_path, toml_str)?;
-                    std::fs::rename(&json_path, nexus.join("config.json.migrated"))?;
-                    tracing::info!("Migrated config.json → config.toml");
-                    return Ok(cfg);
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "Legacy config.json corrupted, backing up and re-initializing: {}",
-                        e
-                    );
-                    let bak = json_path.with_extension("json.bak");
-                    if let Err(rename_err) = std::fs::rename(&json_path, &bak) {
-                        tracing::error!("Failed to backup corrupted config: {}", rename_err);
-                    }
-                    return Ok(Self::default());
-                }
-            };
+        if config_path.exists() {
+            return Ok(());
         }
+        let content = match std::fs::read_to_string(&json_path) {
+            Ok(content) => content,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error.into()),
+        };
+        if content.trim().is_empty() {
+            // Empty JSON file — just rename it and fall back to defaults
+            std::fs::rename(&json_path, nexus.join("config.json.migrated"))?;
+            return Ok(());
+        }
+        match serde_json::from_str::<Self>(&content) {
+            Ok(config) => {
+                std::fs::write(&config_path, toml::to_string_pretty(&config)?)?;
+                std::fs::rename(&json_path, nexus.join("config.json.migrated"))?;
+                tracing::info!("Migrated config.json → config.toml");
+                Ok(())
+            }
+            Err(error) => {
+                tracing::warn!(
+                    "Legacy config.json corrupted, backing up and re-initializing: {error}"
+                );
+                let bak = json_path.with_extension("json.bak");
+                if let Err(rename_error) = std::fs::rename(&json_path, &bak) {
+                    tracing::error!("Failed to backup corrupted config: {rename_error}");
+                }
+                Ok(())
+            }
+        }
+    }
 
-        // 3. No config file — return defaults
-        Ok(Self::default())
+    /// Run `run` while holding the daemon-home `config.toml` writer lock.
+    ///
+    /// The protocol lives in `nexus-core` (one implementation for the core,
+    /// the service, the desktop and this CLI); this adapter keeps the CLI's
+    /// own error type instead of re-labelling every config error as an
+    /// internal core error.
+    fn with_writer_lock<T>(
+        nexus: &Path,
+        run: impl FnOnce() -> anyhow::Result<T>,
+    ) -> anyhow::Result<T> {
+        // `with_config_lock` runs the closure at most once, right after the
+        // lock is taken; `None` therefore means it never ran it.
+        let mut outcome: Option<anyhow::Result<T>> = None;
+        nexus_core::with_config_lock(nexus, || {
+            outcome = Some(run());
+            Ok(())
+        })?;
+        outcome.ok_or_else(|| anyhow::anyhow!("config lock released without running the writer"))?
+    }
+
+    /// Mutate and persist the configuration under the writer lock.
+    ///
+    /// The document is read *inside* the lock, so a concurrent commit by the
+    /// service, the desktop or the daemon core is either seen by this read or
+    /// lands after this write — never lost. Keys this type does not own
+    /// (`agent_profile`, `entrance`, ...) round-trip through [`Self::extra`].
+    /// `run` failing writes nothing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the lock cannot be taken, the document cannot be
+    /// read or written, or `run` fails.
+    pub fn mutate<T>(run: impl FnOnce(&mut Self) -> anyhow::Result<T>) -> anyhow::Result<T> {
+        let nexus = nexus_home()?;
+        Self::with_writer_lock(&nexus, || {
+            Self::migrate_legacy_json_locked(&nexus)?;
+            let config_path = nexus.join("config.toml");
+            let mut config = Self::read_document(&nexus)?;
+            let outcome = run(&mut config)?;
+            std::fs::write(&config_path, toml::to_string_pretty(&config)?)?;
+            Ok(outcome)
+        })
     }
 
     /// Current runtime mode (defaults to `local_only` for V1.2 MVP).
@@ -246,25 +320,6 @@ impl CliConfig {
     #[must_use]
     pub const fn degradation_snapshot(&self) -> Option<&DegradationSnapshot> {
         self.degradation_snapshot.as_ref()
-    }
-
-    /// Save configuration to the standard location.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - Config file path cannot be resolved
-    /// - Directory creation fails
-    /// - TOML serialization fails
-    /// - File write operation fails
-    pub fn save(&self) -> anyhow::Result<()> {
-        let config_path = Self::config_path()?;
-        if let Some(parent) = config_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let content = toml::to_string_pretty(self)?;
-        std::fs::write(&config_path, content)?;
-        Ok(())
     }
 
     /// Path to the configuration file.
@@ -1014,29 +1069,224 @@ platform_url = "https://direct.api.io"
         );
     }
 
-    #[test]
-    fn save_writes_toml() {
-        let _home = crate::testutil::isolated_home();
+    fn isolated_nexus_dir() -> (crate::testutil::IsolatedHome, std::path::PathBuf) {
+        let home = crate::testutil::isolated_home();
         let nexus_dir = std::env::var("HOME")
             .map(std::path::PathBuf::from)
             .unwrap_or_default()
             .join(".nexus42");
         std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
+        (home, nexus_dir)
+    }
 
-        let cfg = CliConfig {
-            active_creator_id: Some("ctr_save_test".to_string()),
-            platform_url: "https://save.test.io".to_string(),
-            ..Default::default()
-        };
+    #[test]
+    fn mutate_writes_toml() {
+        let (_home, nexus_dir) = isolated_nexus_dir();
 
-        cfg.save().expect("save should succeed");
+        CliConfig::mutate(|config| {
+            config.active_creator_id = Some("ctr_save_test".to_string());
+            config.platform_url = "https://save.test.io".to_string();
+            Ok(())
+        })
+        .expect("mutate should succeed");
 
         let config_path = nexus_dir.join("config.toml");
-        assert!(config_path.exists(), "config.toml should exist after save");
+        assert!(
+            config_path.exists(),
+            "config.toml should exist after mutate"
+        );
 
         let content = std::fs::read_to_string(&config_path).expect("read config.toml");
         let loaded: CliConfig = toml::from_str(&content).expect("parse config.toml");
         assert_eq!(loaded.active_creator_id.as_deref(), Some("ctr_save_test"));
         assert_eq!(loaded.platform_url, "https://save.test.io");
+    }
+
+    /// I-000065: the CLI is the fourth daemon-home `config.toml` writer, so its
+    /// whole read-modify-write takes the same `config.toml.lock` protocol as
+    /// the core/service/desktop.
+    #[test]
+    fn mutate_waits_for_a_foreign_holder_of_the_config_lock() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let (_home, nexus_dir) = isolated_nexus_dir();
+        let lock_path = nexus_dir.join("config.toml.lock");
+        // A foreign process holds the lock: created out of band, never through
+        // this writer's helper.
+        std::fs::write(&lock_path, "foreign holder\n").expect("foreign lock");
+
+        let done = Arc::new(AtomicBool::new(false));
+        let writer = {
+            let done = Arc::clone(&done);
+            std::thread::spawn(move || {
+                CliConfig::mutate(|_| Ok(())).expect("mutate");
+                done.store(true, Ordering::SeqCst);
+            })
+        };
+
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            !done.load(Ordering::SeqCst),
+            "CliConfig::mutate must wait for config.toml.lock"
+        );
+
+        std::fs::remove_file(&lock_path).expect("release foreign lock");
+        writer.join().expect("writer thread");
+        assert!(done.load(Ordering::SeqCst));
+        assert!(nexus_dir.join("config.toml").exists());
+        assert!(!lock_path.exists(), "the writer released its own lock");
+    }
+
+    /// F1 regression: the CLI reads the document *inside* the lock, so a
+    /// foreign commit that lands while this CLI waits for the lock is seen,
+    /// not overwritten — and the foreign keys it carried survive.
+    #[test]
+    fn mutate_reads_the_document_inside_the_lock() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let (_home, nexus_dir) = isolated_nexus_dir();
+        let config_path = nexus_dir.join("config.toml");
+        let lock_path = nexus_dir.join("config.toml.lock");
+        std::fs::write(&config_path, "active_creator_id = \"ctr_a\"\n").expect("seed config");
+        std::fs::write(&lock_path, "foreign holder\n").expect("foreign lock");
+
+        let done = Arc::new(AtomicBool::new(false));
+        let writer = {
+            let done = Arc::clone(&done);
+            std::thread::spawn(move || {
+                CliConfig::mutate(|config| {
+                    config.daemon_url = "http://127.0.0.1:9000".to_string();
+                    Ok(())
+                })
+                .expect("mutate");
+                done.store(true, Ordering::SeqCst);
+            })
+        };
+
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            !done.load(Ordering::SeqCst),
+            "the CLI write must wait for config.toml.lock"
+        );
+
+        // The service/desktop commit while the CLI waits for the lock: both
+        // its selection and its `agent_profile` table must survive the CLI's
+        // write that follows.
+        std::fs::write(
+            &config_path,
+            "active_creator_id = \"ctr_foreign\"\n\n[agent_profile]\nname = \"codex-cli\"\n",
+        )
+        .expect("foreign commit");
+        std::fs::remove_file(&lock_path).expect("release foreign lock");
+        writer.join().expect("writer thread");
+
+        let stored = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(
+            stored.contains("ctr_foreign"),
+            "the foreign selection must survive: {stored}"
+        );
+        assert!(
+            stored.contains("agent_profile"),
+            "the foreign table must survive: {stored}"
+        );
+        assert!(
+            stored.contains("http://127.0.0.1:9000"),
+            "the CLI change must land: {stored}"
+        );
+    }
+
+    /// F1: keys owned by other writers round-trip through [`CliConfig::extra`]
+    /// instead of being dropped by typed serialization.
+    #[test]
+    fn mutate_preserves_keys_other_writers_own() {
+        let (_home, nexus_dir) = isolated_nexus_dir();
+        std::fs::write(
+            nexus_dir.join("config.toml"),
+            concat!(
+                "active_creator_id = \"ctr_a\"\n",
+                "workspace_path_by_creator = { ctr_a = \"/tmp/ws-a\" }\n",
+                "\n[agent_profile]\nname = \"codex-cli\"\n",
+                "\n[entrance]\nid = \"door-1\"\n",
+            ),
+        )
+        .expect("seed config");
+
+        CliConfig::mutate(|config| {
+            config.platform_url = "https://cli.test".to_string();
+            Ok(())
+        })
+        .expect("mutate");
+
+        let stored = std::fs::read_to_string(nexus_dir.join("config.toml")).expect("read config");
+        for expected in [
+            "https://cli.test",
+            "agent_profile",
+            "codex-cli",
+            "workspace_path_by_creator",
+            "/tmp/ws-a",
+            "door-1",
+        ] {
+            assert!(stored.contains(expected), "missing {expected}: {stored}");
+        }
+    }
+
+    /// F2 regression: the legacy-JSON migration writes `config.toml`, so it
+    /// takes the writer lock and re-checks the TOML after acquiring it — a
+    /// foreign writer that committed the TOML first is not overwritten.
+    #[test]
+    fn migration_waits_for_the_lock_and_respects_a_committed_toml() {
+        use std::sync::{Arc, Mutex};
+        use std::time::Duration;
+
+        let (_home, nexus_dir) = isolated_nexus_dir();
+        let json_path = nexus_dir.join("config.json");
+        let config_path = nexus_dir.join("config.toml");
+        let lock_path = nexus_dir.join("config.toml.lock");
+        std::fs::write(&json_path, "{\"active_creator_id\":\"ctr_legacy\"}").expect("legacy json");
+        std::fs::write(&lock_path, "foreign holder\n").expect("foreign lock");
+
+        let loaded = Arc::new(Mutex::new(None));
+        let reader = {
+            let loaded = Arc::clone(&loaded);
+            std::thread::spawn(move || {
+                *loaded.lock().expect("loaded") = Some(CliConfig::load().expect("load"));
+            })
+        };
+
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            !config_path.exists(),
+            "the migration must not write config.toml while the lock is held"
+        );
+
+        // A concurrent writer commits the TOML first; the migration must leave
+        // that document (and its foreign table) alone.
+        std::fs::write(
+            &config_path,
+            "active_creator_id = \"ctr_new\"\n\n[agent_profile]\nname = \"codex-cli\"\n",
+        )
+        .expect("foreign commit");
+        std::fs::remove_file(&lock_path).expect("release foreign lock");
+        reader.join().expect("reader thread");
+
+        let config = loaded
+            .lock()
+            .expect("loaded")
+            .take()
+            .expect("the reader ran");
+        assert_eq!(config.active_creator_id.as_deref(), Some("ctr_new"));
+        let stored = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(
+            stored.contains("agent_profile"),
+            "the foreign table must survive: {stored}"
+        );
+        assert!(
+            !stored.contains("ctr_legacy"),
+            "the legacy snapshot must not win: {stored}"
+        );
     }
 }

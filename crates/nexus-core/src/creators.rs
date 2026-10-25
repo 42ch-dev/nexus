@@ -29,6 +29,7 @@ use nexus_contracts::{CreatorDetail, CreatorDetailHolderEntryId};
 use nexus_home_layout::active_context::{read_active_creator_id, try_resolve_state_db_path};
 use nexus_home_layout::validate_creator_id_safe;
 
+use crate::config_lock::with_config_lock;
 use crate::error::{db_err, CoreError, CoreResult};
 use crate::home::CoreHomeService;
 use sqlx::Row;
@@ -469,24 +470,27 @@ impl CoreHomeService {
         // previously *removed* the entry and relied on read-path fallback;
         // write `"default"` explicitly so config stays self-describing and
         // older read paths that lack the fallback do not surface AuthRequired.
-        let mut config = read_cli_config(&self.nexus_home)?;
-        if let Some(table) = config.as_table_mut() {
-            if table.get("active_workspace_slug_by_creator").is_none() {
-                table.insert(
-                    "active_workspace_slug_by_creator".to_string(),
-                    toml::Value::Table(toml::map::Map::new()),
-                );
-            }
-            if let Some(slug_table) = table.get_mut("active_workspace_slug_by_creator") {
-                if let Some(slugs) = slug_table.as_table_mut() {
-                    slugs.insert(
-                        request.creator_id.clone(),
-                        toml::Value::String("default".to_string()),
+        with_config_lock(&self.nexus_home, || {
+            let mut config = read_cli_config(&self.nexus_home)?;
+            if let Some(table) = config.as_table_mut() {
+                if table.get("active_workspace_slug_by_creator").is_none() {
+                    table.insert(
+                        "active_workspace_slug_by_creator".to_string(),
+                        toml::Value::Table(toml::map::Map::new()),
                     );
                 }
+                if let Some(slug_table) = table.get_mut("active_workspace_slug_by_creator") {
+                    if let Some(slugs) = slug_table.as_table_mut() {
+                        slugs.insert(
+                            request.creator_id.clone(),
+                            toml::Value::String("default".to_string()),
+                        );
+                    }
+                }
+                write_cli_config(&self.nexus_home, &config)?;
             }
-            write_cli_config(&self.nexus_home, &config)?;
-        }
+            Ok(())
+        })?;
 
         Ok(SetActiveCreatorResponse {
             creator_id: request.creator_id,
@@ -531,16 +535,24 @@ impl CoreHomeService {
 
         let cleared = clear_creator_credentials(&self.nexus_home, creator_id)?;
 
-        // If this was the active creator, clear the active selection.
-        if let Some(active) = read_active_creator_id(&self.nexus_home) {
-            if active == creator_id {
-                let mut config = read_cli_config(&self.nexus_home)?;
+        // If this was the active creator, clear the active selection. The
+        // decision is re-made on the locked document: a concurrent switch to
+        // another creator that lands first must not be clobbered by this
+        // logout.
+        with_config_lock(&self.nexus_home, || {
+            let mut config = read_cli_config(&self.nexus_home)?;
+            if config
+                .get("active_creator_id")
+                .and_then(toml::Value::as_str)
+                == Some(creator_id)
+            {
                 if let Some(table) = config.as_table_mut() {
                     table.remove("active_creator_id");
                     write_cli_config(&self.nexus_home, &config)?;
                 }
             }
-        }
+            Ok(())
+        })?;
 
         Ok(LogoutResponse {
             creator_id: creator_id.to_string(),
@@ -713,21 +725,24 @@ pub fn write_cli_config(nexus_home: &Path, config: &toml::Value) -> CoreResult<(
     std::fs::write(&config_path, toml_str).map_err(|e| internal("CONFIG_WRITE_ERROR", e))
 }
 
-/// Set the active `creator_id` in the CLI config.
+/// Set the active `creator_id` in the CLI config under the daemon-home
+/// `config.toml` lock.
 pub fn set_active_creator_id(nexus_home: &Path, creator_id: &str) -> CoreResult<()> {
     validate_creator_id_safe(creator_id).map_err(|reason| CoreError::InvalidInput {
         field: "creator_id".to_string(),
         reason,
     })?;
-    let mut config = read_cli_config(nexus_home)?;
-    let table = config
-        .as_table_mut()
-        .ok_or_else(|| internal("CONFIG_ERROR", "config root is not a table"))?;
-    table.insert(
-        "active_creator_id".to_string(),
-        toml::Value::String(creator_id.to_string()),
-    );
-    write_cli_config(nexus_home, &config)
+    with_config_lock(nexus_home, || {
+        let mut config = read_cli_config(nexus_home)?;
+        let table = config
+            .as_table_mut()
+            .ok_or_else(|| internal("CONFIG_ERROR", "config root is not a table"))?;
+        table.insert(
+            "active_creator_id".to_string(),
+            toml::Value::String(creator_id.to_string()),
+        );
+        write_cli_config(nexus_home, &config)
+    })
 }
 
 /// Set a creator's `display_name` in the enrichment cache

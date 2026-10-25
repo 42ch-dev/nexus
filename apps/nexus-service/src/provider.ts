@@ -13,6 +13,7 @@ import type {
   ShutdownSessionResponse,
 } from '@42ch/nexus-contracts';
 import type { ServiceCore } from './lifecycle.js';
+import type { PrincipalHandle } from '@42ch/nexus-native';
 import { PROVIDER_DEFAULT_DEADLINE_MS } from './config.js';
 import { HttpError, isAbsentHostError, mapNativeError, routeNotMigrated } from './errors.js';
 import {
@@ -342,19 +343,34 @@ async function isActorOwnedOperation(service: ServiceCore, operationId: string):
  * admission, the sweep keeps the Actor arm from outliving the core's own
  * retention by more than the operation being admitted — with the existing caps
  * and with no change to the no-subscriber settlement the authority already has.
+ *
+ * One mint, one wave: the sweep's authority reads are its own crossings of the
+ * native boundary, so it mints a single principal for every record's lookups and
+ * issues them all at once. The wave is bounded by the Actor arm's own retention
+ * cap (≤64 records), so it needs no batching contract and no extra throttle —
+ * and the admission already sits in its path.
  */
 async function ageSettledActorOperations(service: ServiceCore): Promise<void> {
-  for (const record of service.providerRegistry.actorBackedOperations()) {
-    const character = await lookupCharacterOperation(service, record.operationId);
-    if (character) {
-      // A Character operation's own outcome is its liveness.
-      if (character.run_status === 'running') continue;
-    } else if (await nativeOperationRow(service, record.operationId)) {
-      // A Creator Actor operation keeps the generic observation: its own
-      // authority row is what makes it live.
-      continue;
-    }
-    service.providerRegistry.retireActorOperation(record.operationId);
+  const records = service.providerRegistry.actorBackedOperations();
+  // No record, no crossing: an idle arm mints nothing here.
+  if (records.length === 0) return;
+  const retire = await withPrincipal(service, async (principal) =>
+    Promise.all(
+      records.map(async (record) => {
+        parseUuid(record.operationId, 'operation_id');
+        const character = await characterOperationRead(service, principal, record.operationId);
+        if (character) {
+          // A Character operation's own outcome is its liveness.
+          return character.run_status !== 'running';
+        }
+        // A Creator Actor operation keeps the generic observation: its own
+        // authority row is what makes it live; a miss retires it.
+        return (await nativeOperationRow(service, record.operationId)) === null;
+      }),
+    ),
+  );
+  for (let index = 0; index < records.length; index += 1) {
+    if (retire[index]) service.providerRegistry.retireActorOperation(records[index].operationId);
   }
 }
 
@@ -369,10 +385,23 @@ export async function lookupCharacterOperation(
   operationId: string,
 ): Promise<CharacterOperationResult | null> {
   parseUuid(operationId, 'operation_id');
+  return withPrincipal(service, (principal) =>
+    characterOperationRead(service, principal, operationId),
+  );
+}
+
+/**
+ * One record's Character read under an already-minted principal: `null` when the
+ * authority serves no such Character operation (the id is not live/retained, or
+ * the authority is not attached), every other rejection mapped and propagated.
+ */
+async function characterOperationRead(
+  service: ServiceCore,
+  principal: PrincipalHandle,
+  operationId: string,
+): Promise<CharacterOperationResult | null> {
   try {
-    return await withPrincipal(service, (principal) =>
-      service.core.hostCharacterOperation(principal, operationId),
-    );
+    return await service.core.hostCharacterOperation(principal, operationId);
   } catch (error) {
     const mapped = mapNativeError(error);
     if (mapped.code === 'not_found' || isAbsentHostError(mapped)) return null;

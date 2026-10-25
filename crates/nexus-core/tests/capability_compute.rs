@@ -3994,3 +3994,149 @@ async fn failed_request_replay_restores_the_structured_refusal() {
         "the refused retry never re-ran the module"
     );
 }
+
+// ---------------------------------------------------------------------------
+// v1.224 P1 T3 — the compute-side settlement fault, driven through compute_run
+// ---------------------------------------------------------------------------
+
+/// A deterministic fault at the receipt store's settlement boundary: a
+/// test-installed `BEFORE UPDATE` trigger over `operation_receipts` that aborts
+/// every terminal transition with `TEST_SETTLE_FAULT`.
+///
+/// The brief's pre-seeded-conflicting-terminal-row seam cannot reach this
+/// branch: `settle_operation`'s UPDATE is gated on `WHERE operation_id = ? AND
+/// status = 'running'`, so a terminal row matches zero rows, fires no per-row
+/// trigger and settles as a silent success; and a terminal row planted before
+/// the call is answered by the §B.3 replay pre-check, so the module never runs.
+/// The abort trigger uses the same channel as the schema's own immutability
+/// guards (`RAISE(ABORT, …)` ⇒ a statement `Err`) with zero product-code change.
+async fn install_settle_fault(pool: &sqlx::SqlitePool) {
+    sqlx::query(
+        "CREATE TRIGGER test_settle_fault BEFORE UPDATE ON operation_receipts \
+         FOR EACH ROW \
+         WHEN NEW.status IN ('finished', 'failed', 'cancelled', 'interrupted') \
+         BEGIN SELECT RAISE(ABORT, 'TEST_SETTLE_FAULT'); END",
+    )
+    .execute(pool)
+    .await
+    .expect("install the settlement-fault trigger");
+}
+
+/// I-000031 item 2 — `compute_run` driven into its settle failure
+/// (`compute.rs:593-601`) and answered with the typed
+/// [`effect_committed_refusal`] refusal, not a helper-level return.
+///
+/// The fixture is the shipped one (engine-owned core, embedded `basic-combat`
+/// module, one computable character each side), so the run takes the production
+/// path: ownership gate ⇒ §B.3 replay pre-check ⇒ `running` receipt ⇒ WASM
+/// effect ⇒ `succeeded` run row ⇒ settlement. The injected fault lands ONLY on
+/// the settlement, so the assertions are the marker of §B.3 item 4:
+///
+/// 1. the caller gets the typed `Internal` refusal naming the operation, the
+///    run and the store fault, and saying the call is not retryable;
+/// 2. the effect really committed — the run row it names is durably
+///    `succeeded` with its proposals, and the receipt stayed `running` (no
+///    terminal fabricated, nothing rolled back);
+/// 3. a retry is the typed `uncertain` refusal and creates no second run row:
+///    the effect is never re-applied.
+#[tokio::test]
+#[serial_test::serial]
+async fn compute_run_settlement_fault_answers_the_committed_effect_refusal() {
+    const OPERATION_ID: &str = "op_b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2";
+
+    let f = fixture().await;
+    install_settle_fault(f.core.pool()).await;
+
+    let request: RunRequest = serde_json::from_value(json!({
+        "world_id": WORLD,
+        "module_id": MODULE,
+        "operation_id": OPERATION_ID,
+        "invocation_params": { "attacker_id": "kb_atk", "defender_id": "kb_def" },
+    }))
+    .unwrap();
+
+    let error = compute_run(&f.core, &f.compute, request.clone())
+        .await
+        .expect_err("a settlement fault must never answer as a succeeded run");
+    let category = match &error {
+        CoreError::Internal { category } => category.clone(),
+        other => panic!("the refusal must be the typed Internal refusal, got {other:?}"),
+    };
+    assert!(
+        category.contains("effect_committed"),
+        "the refusal must name the committed effect: {category}"
+    );
+    assert!(
+        category.contains("not retryable"),
+        "the refusal must forbid a blind retry: {category}"
+    );
+    assert!(
+        category.contains(OPERATION_ID),
+        "the refusal must name the operation to inspect: {category}"
+    );
+    assert!(
+        category.contains("TEST_SETTLE_FAULT"),
+        "the refusal must carry the store fault verbatim: {category}"
+    );
+
+    // 2. The effect committed and stayed committed. The receipt the run wrote is
+    //    still `running` — it shadows the run's own id, which is how the run row
+    //    is located without trusting the refused answer.
+    let receipt =
+        nexus_local_db::operation_receipts::get_operation_receipt(f.core.pool(), OPERATION_ID)
+            .await
+            .expect("receipt read")
+            .expect("the acquired receipt exists");
+    assert_eq!(
+        receipt.status,
+        nexus_local_db::operation_receipts::STATUS_RUNNING,
+        "an unsettled operation must stay `running`, not be settled for it"
+    );
+    assert!(receipt.terminal_at.is_none());
+    assert!(receipt.result_json.is_none() && receipt.error_json.is_none());
+    let run_id = receipt.subject_id.clone();
+    assert!(
+        category.contains(&run_id),
+        "the refusal must name the run it left durable: {category}"
+    );
+
+    let row = nexus_local_db::compute_runs::get_run(f.core.pool(), &run_id)
+        .await
+        .expect("run row read")
+        .expect("the run row exists");
+    assert_eq!(
+        row.status, "succeeded",
+        "the effect is durable: the settlement fault is not a rollback"
+    );
+    assert!(
+        row.proposals_json.is_some(),
+        "the succeeded run keeps its proposals"
+    );
+    assert!(row.error_json.is_none());
+
+    // 3. With the fault gone, a retry of the same operation id is the typed
+    //    `uncertain` refusal (a `running` receipt whose owner is gone) and the
+    //    module is never executed a second time.
+    sqlx::query("DROP TRIGGER test_settle_fault")
+        .execute(f.core.pool())
+        .await
+        .expect("drop the settlement-fault trigger");
+    let retry = compute_run(&f.core, &f.compute, request).await;
+    match &retry {
+        Err(CoreError::Coded { code, .. }) => assert_eq!(
+            code, "uncertain",
+            "a retry over an unsettled receipt must be `uncertain`, got {retry:?}"
+        ),
+        other => panic!("expected the typed `uncertain` refusal, got {other:?}"),
+    }
+    let run_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM compute_sessions WHERE world_id = ?")
+            .bind(WORLD)
+            .fetch_one(f.core.pool())
+            .await
+            .expect("count run rows");
+    assert_eq!(
+        run_count, 1,
+        "the retry must not re-apply the committed effect"
+    );
+}
