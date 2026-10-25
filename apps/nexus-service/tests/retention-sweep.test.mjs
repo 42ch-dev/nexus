@@ -162,10 +162,13 @@ describe('retention sweep (one principal, one wave)', () => {
       fixture.mints.length <= 2,
       `an admission of ${retained.length} retained records mints at most twice (minted ${fixture.mints.length})`,
     );
-    // A wave runs more than one read at a time, and never widens past the arm.
-    assert.ok(
-      fixture.peak() > 1 && fixture.peak() <= retained.length,
-      `the sweep issues a bounded wave (peak ${fixture.peak()} of ${retained.length})`,
+    // One wave means every read of the arm is in flight at the same time: the
+    // sweep has no chunking cap (the arm's retention cap is its bound), so a
+    // partial peak is a regression to batched concurrency, not slack.
+    assert.equal(
+      fixture.peak(),
+      retained.length,
+      `the sweep issues one wave over the whole arm (peak ${fixture.peak()} of ${retained.length})`,
     );
   });
 

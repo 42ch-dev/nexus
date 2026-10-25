@@ -201,7 +201,16 @@ describe('config.toml advisory lock (I-000065)', () => {
       const { writeAgentProfile: slowWrite } = await import(pathToFileURL(copyPath).href);
       const home = seededHome();
       const pending = slowWrite(home, { name: 'codex-cli' });
-      await sleep(80); // the writer holds the lock and is inside its RMW
+      // The writer must hold the lock and be inside its RMW before the steal:
+      // poll for the lock file (bounded) instead of assuming a fixed delay.
+      const lockDeadline = Date.now() + 2000;
+      while (!existsSync(lockPathFor(home))) {
+        assert.ok(
+          Date.now() < lockDeadline,
+          'the slow writer must acquire config.toml.lock within 2000 ms',
+        );
+        await sleep(5);
+      }
 
       // A second writer finds the held lock stale and steals it.
       const longAgo = new Date(Date.now() - 60_000);
