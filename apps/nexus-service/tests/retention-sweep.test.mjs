@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { before, describe, test } from 'node:test';
@@ -30,10 +30,10 @@ before(async () => {
   // The package `test` script builds once before `node --test`; a build here
   // would race the sibling suites rewriting the same `dist`. A stale or empty
   // `dist` fails here with the build hint, not as a misleading import error.
+  const providerDist = join(serviceRoot, 'dist', 'provider.js');
   assert.ok(
-    readFileSync(join(serviceRoot, 'dist', 'provider.js'), 'utf8').includes(
-      'ageSettledActorOperations',
-    ),
+    existsSync(providerDist) &&
+      readFileSync(providerDist, 'utf8').includes('ageSettledActorOperations'),
     'dist/provider.js is missing or stale — run `pnpm --filter @42ch/nexus-service run test` (or `… run build`) first',
   );
   provider = await import(join(serviceRoot, 'dist/provider.js'));
