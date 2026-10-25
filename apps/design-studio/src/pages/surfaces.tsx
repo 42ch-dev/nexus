@@ -882,11 +882,7 @@ export function SurfacesShellPage() {
         </FixtureBoundary>
       </section>
 
-      <section
-        className="mt-10"
-        data-testid="surfaces-inspiration-pool"
-        id="surfaces-inspiration-pool"
-      >
+      <section className="mt-10" data-testid="surfaces-inspiration-pool">
         <SurfaceHeading id="surfaces-inspiration-pool">Inspiration Pool</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={['@web-works/inspiration-pool-chrome', '@42ch/nexus-ui']}
