@@ -1,4 +1,4 @@
-import { useRef, type KeyboardEvent } from 'react';
+import { useId, useRef, type KeyboardEvent } from 'react';
 
 import { cn } from '@/lib/utils';
 
@@ -38,11 +38,15 @@ export function HubTabBar({
   onTabChange,
   labels,
   ariaLabel = 'Creator hub entity kind',
-  tabIdPrefix = 'hub-tab',
-  tabPanelId = 'hub-tabpanel',
+  tabIdPrefix,
+  tabPanelId,
   'data-testid': testId = 'hub-tab-bar',
 }: HubTabBarProps) {
   const tabRefs = useRef<Partial<Record<HubTab, HTMLButtonElement | null>>>({});
+  // Instance-unique fallbacks: two bars on one page must never share ids.
+  const uid = useId();
+  const resolvedTabIdPrefix = tabIdPrefix ?? `hub-tab-${uid}`;
+  const resolvedTabPanelId = tabPanelId ?? `hub-tabpanel-${uid}`;
 
   function focusTab(tab: HubTab) {
     tabRefs.current[tab]?.focus();
@@ -104,9 +108,9 @@ export function HubTabBar({
               }}
               type="button"
               role="tab"
-              id={`${tabIdPrefix}-${tab}`}
+              id={`${resolvedTabIdPrefix}-${tab}`}
               aria-selected={active}
-              aria-controls={tabPanelId}
+              aria-controls={resolvedTabPanelId}
               tabIndex={tabIndex(activeTab, tab)}
               data-testid={`${testId}-${tab}`}
               onClick={() => onTabChange(tab)}

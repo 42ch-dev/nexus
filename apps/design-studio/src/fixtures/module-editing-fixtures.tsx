@@ -29,7 +29,7 @@
  * (read-only seeded values — this fixture pins the visual contract, not the
  * interaction), data-driven from the fixture records below.
  */
-import { type ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 import { ChevronDown, Eye, User } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
@@ -526,6 +526,7 @@ function ObservationEditingSection({ event }: { event: ModuleEditingEvent }) {
   // PD-9: `observers: []` is the explicit "no observers" claim, distinct
   // from an absent key (unrecorded) — the claim checkbox renders checked.
   const claimNone = observation.observers?.length === 0;
+  const accessFieldId = `${useId()}-fixture-observation-access`;
   return (
     <section data-testid="observation-editing-section" aria-label="Observation">
       <h4 className="mt-3 border-t border-gray-alpha-300 pt-2 text-label-14 font-semibold text-gray-900">
@@ -560,7 +561,7 @@ function ObservationEditingSection({ event }: { event: ModuleEditingEvent }) {
       </div>
       <div className="mt-2 flex flex-col gap-1">
         <SeededInput
-          id="fixture-observation-access"
+          id={accessFieldId}
           label="Access"
           value={observation.access !== undefined ? JSON.stringify(observation.access, null, 2) : ''}
           rows={3}

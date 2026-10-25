@@ -293,7 +293,7 @@ export function ModuleDetailChrome({ copy, detail, runStudio }: ModuleDetailChro
       {m.description && <p className="text-copy-14 text-gray-900">{m.description}</p>}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <DetailField label={copy.abiVersion} value={m.nexus_abi_version} />
+        <DetailField label={copy.abiVersion} value={m.nexus_abi_version} testId="module-abi-version" />
         <DetailField label={copy.author} value={m.author} />
         <DetailField label={copy.computeExport} value={m.compute_export} />
         <DetailField label={copy.initExport} value={m.init_export} />
@@ -358,16 +358,19 @@ export function ModuleDetailChrome({ copy, detail, runStudio }: ModuleDetailChro
 export function DetailField({
   label,
   value,
+  testId,
 }: {
   label: string;
   value: string | number | undefined;
+  /** Stable hook for row-scoped assertions (survives markup changes). */
+  testId?: string;
 }) {
   if (value === undefined || value === null || value === '') {
     return null;
   }
 
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-1" data-testid={testId}>
       <p className="text-label-12 uppercase tracking-wide text-gray-700">{label}</p>
       <p className="text-copy-14 text-gray-1000">{value}</p>
     </div>

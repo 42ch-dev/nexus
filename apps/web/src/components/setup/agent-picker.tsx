@@ -20,7 +20,7 @@
  */
 
 import { ArrowUpRight, Loader2, Terminal, User } from 'lucide-react';
-import { memo, useCallback, useRef, useState, type ReactNode } from 'react';
+import { memo, useCallback, useId, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
@@ -561,11 +561,13 @@ function CustomLaunchField({
 }) {
   const { t } = useTranslation('setup');
   const canVerify = value.trim().length > 0 && verifyStatus !== 'loading';
+  // Instance-unique: the Studio mounts several pickers on one page.
+  const inputId = `${useId()}-agent-picker-custom-launch`;
 
   return (
     <div className={cn('flex flex-col', compact ? 'gap-1.5' : 'gap-2')} data-testid="agent-picker-custom-launch">
       <Label
-        htmlFor="agent-picker-custom-launch"
+        htmlFor={inputId}
         className="flex items-center gap-1.5 text-copy-14 text-gray-900"
       >
         <Terminal className="h-4 w-4 text-gray-700" aria-hidden />
@@ -573,7 +575,7 @@ function CustomLaunchField({
       </Label>
       <div className="flex gap-2">
         <Input
-          id="agent-picker-custom-launch"
+          id={inputId}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={t('agentPicker.customLaunch.placeholder')}

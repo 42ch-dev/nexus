@@ -578,7 +578,7 @@ export function SurfacesIndexPage() {
 
 export function SurfacesSetupPage() {
   return (
-    <section data-testid="surfaces-setup" id="surfaces-setup">
+    <section data-testid="surfaces-setup">
       <SurfaceHeading id="surfaces-setup">Setup — Wizard chrome</SurfaceHeading>
       <SurfaceSourceBadges
         importPaths={[
@@ -612,7 +612,7 @@ export function SurfacesSetupPage() {
 export function SurfacesShellPage() {
   return (
     <div data-testid="surfaces-shell">
-      <section data-testid="surfaces-chronos-titlebar" id="surfaces-chronos-titlebar">
+      <section data-testid="surfaces-chronos-titlebar">
         <SurfaceHeading id="surfaces-chronos-titlebar">Chronos titlebar</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={['@web-layout/chronos-titlebar-chrome', '@42ch/nexus-ui']}
@@ -631,7 +631,7 @@ export function SurfacesShellPage() {
         </FixtureBoundary>
       </section>
 
-      <section className="mt-10" id="surfaces-app-shell-chrome">
+      <section className="mt-10">
         <SurfaceHeading id="surfaces-app-shell-chrome">App shell chrome</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={[
@@ -658,7 +658,7 @@ export function SurfacesShellPage() {
         </FixtureBoundary>
       </section>
 
-      <section className="mt-10" data-testid="surfaces-creator-hub-dual-pane-ia" id="surfaces-creator-hub-dual-pane-ia">
+      <section className="mt-10" data-testid="surfaces-creator-hub-dual-pane-ia">
         <SurfaceHeading id="surfaces-creator-hub-dual-pane-ia">Creator Hub — sidebar create IA (V1.135 P0)</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={[
@@ -686,7 +686,7 @@ export function SurfacesShellPage() {
         </FixtureBoundary>
       </section>
 
-      <section className="mt-10" data-testid="surfaces-creator-orch-gongnengqu-ia" id="surfaces-creator-orch-gongnengqu-ia">
+      <section className="mt-10" data-testid="surfaces-creator-orch-gongnengqu-ia">
         <SurfaceHeading id="surfaces-creator-orch-gongnengqu-ia">Creator / Orchestrator 功能区 IA (P3)</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={[
@@ -709,7 +709,7 @@ export function SurfacesShellPage() {
         </FixtureBoundary>
       </section>
 
-      <section className="mt-10" data-testid="surfaces-creator-shell" id="surfaces-creator-shell">
+      <section className="mt-10" data-testid="surfaces-creator-shell">
         <SurfaceHeading id="surfaces-creator-shell">Creator shell — Create vs Controller</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={[
@@ -737,7 +737,7 @@ export function SurfacesShellPage() {
       </section>
 
       {/* Settings shell chrome stays discoverable under Shell (V1.103 P0) */}
-      <section className="mt-10" id="surfaces-settings-shell">
+      <section className="mt-10">
         <SurfaceHeading id="surfaces-settings-shell">Settings — Shell chrome</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={[
@@ -777,7 +777,7 @@ export function SurfacesShellPage() {
         </FixtureBoundary>
       </section>
 
-      <section className="mt-10" id="surfaces-footer-profiles">
+      <section className="mt-10">
         <SurfaceHeading id="surfaces-footer-profiles">Footer profiles</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={['@web-layout/footer-profiles-chrome']}
@@ -794,7 +794,7 @@ export function SurfacesShellPage() {
         </FixtureBoundary>
       </section>
 
-      <section className="mt-10" id="surfaces-header-health">
+      <section className="mt-10">
         <SurfaceHeading id="surfaces-header-health">Header health indicator</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={['@web-layout/daemon-health-indicator-chrome']}
@@ -812,7 +812,7 @@ export function SurfacesShellPage() {
         </FixtureBoundary>
       </section>
 
-      <section className="mt-10" data-testid="surfaces-rail-apps" id="surfaces-rail-apps">
+      <section className="mt-10" data-testid="surfaces-rail-apps">
         <SurfaceHeading id="surfaces-rail-apps">Modules rail — page, manifest and Run Studio</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={[
@@ -907,7 +907,7 @@ export function SurfacesShellPage() {
 
 export function SurfacesAgentPickerPage() {
   return (
-    <section className="mt-0" data-testid="surfaces-agent-picker" id="surfaces-agent-picker">
+    <section className="mt-0" data-testid="surfaces-agent-picker">
       <SurfaceHeading id="surfaces-agent-picker">Setup — AgentPicker</SurfaceHeading>
       <SurfaceSourceBadges importPaths={['@web-setup/agent-picker']} />
       <p className="text-copy-14 text-gray-700 mb-6">
@@ -933,7 +933,7 @@ export function SurfacesAgentPickerPage() {
 export function SurfacesDaemonPage() {
   return (
     <div data-testid="surfaces-daemon">
-      <section id="surfaces-daemon">
+      <section>
         <SurfaceHeading id="surfaces-daemon">Daemon status strip</SurfaceHeading>
         <SurfaceSourceBadges importPaths={['@42ch/nexus-ui']} />
         <p className="text-copy-14 text-gray-700 mb-6">
@@ -953,7 +953,7 @@ export function SurfacesDaemonPage() {
         </FixtureBoundary>
       </section>
 
-      <section className="mt-10" id="surfaces-run-observation">
+      <section className="mt-10">
         <SurfaceHeading id="surfaces-run-observation">Session run view</SurfaceHeading>
         <SurfaceSourceBadges importPaths={['@42ch/nexus-ui']} />
         <p className="text-copy-14 text-gray-700 mb-6">
@@ -977,7 +977,7 @@ export function SurfacesDaemonPage() {
 
 export function SurfacesLaunchPage() {
   return (
-    <section data-testid="surfaces-launch" id="surfaces-launch">
+    <section data-testid="surfaces-launch">
       <SurfaceHeading id="surfaces-launch">Launch — Daemon splash</SurfaceHeading>
       <SurfaceSourceBadges
         importPaths={['@web-setup/daemon-ready-splash']}
@@ -999,7 +999,7 @@ export function SurfacesLaunchPage() {
 
 export function SurfacesSelectionSubmenuPage() {
   return (
-    <section data-testid="surfaces-selection-submenu" id="surfaces-selection-submenu">
+    <section data-testid="surfaces-selection-submenu">
       <SurfaceHeading id="surfaces-selection-submenu">Selection Submenu — 6 variants (V1.126 P0 T4)</SurfaceHeading>
       <SurfaceSourceBadges
         importPaths={['@web-shell/selection-submenu']}
@@ -1033,7 +1033,7 @@ export function SurfacesSelectionSubmenuPage() {
 export function SurfacesCanvasPage() {
   return (
     <div data-testid="surfaces-canvas">
-      <section id="surfaces-canvas-mirrored">
+      <section>
         <SurfaceHeading id="surfaces-canvas-mirrored">Canvas — Three mirrored surfaces + shared chrome</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={['@web-canvas/node-chrome-shell']}
@@ -1111,7 +1111,7 @@ export function SurfacesCanvasPage() {
       </section>
 
       {/* V1.164 P3 T2 — Mental surfacing inspector states (AR-6 studio-first) */}
-      <section className="mt-10" data-testid="surfaces-mental-surfacing" id="surfaces-mental-surfacing">
+      <section className="mt-10" data-testid="surfaces-mental-surfacing">
         <SurfaceHeading id="surfaces-mental-surfacing">Mental Surfacing</SurfaceHeading>
         <SurfaceSourceBadges importPaths={["@/fixtures/mental-surfacing-fixtures"]} />
         <p className="text-copy-14 text-gray-700 mb-6">
@@ -1145,7 +1145,7 @@ export function SurfacesCanvasPage() {
       </section>
 
       {/* v1.203 P2 O1/O2/O3 + PR #355 Greptile P3 — Module editing inspector states (studio-first) */}
-      <section className="mt-10" data-testid="surfaces-module-editing" id="surfaces-module-editing">
+      <section className="mt-10" data-testid="surfaces-module-editing">
         <SurfaceHeading id="surfaces-module-editing">Module Editing</SurfaceHeading>
         <SurfaceSourceBadges importPaths={['@/fixtures/module-editing-fixtures']} />
         <p className="text-copy-14 text-gray-700 mb-6">
@@ -1177,7 +1177,7 @@ export function SurfacesCanvasPage() {
       </section>
 
       {/* V1.128 P1 T1 — NLE multi-track Timeline band */}
-      <section className="mt-10" data-testid="surfaces-nle-timeline" id="surfaces-nle-timeline">
+      <section className="mt-10" data-testid="surfaces-nle-timeline">
         <SurfaceHeading id="surfaces-nle-timeline">NLE Timeline</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={['@web-canvas/nle-timeline-chrome']}
@@ -1208,7 +1208,7 @@ export function SurfacesCanvasPage() {
       </section>
 
       {/* V1.124 P0 T3 — World Timeline node chrome (Brief-era / Event / KnowledgeEntry) */}
-      <section className="mt-10" data-testid="surfaces-world-timeline" id="surfaces-world-timeline">
+      <section className="mt-10" data-testid="surfaces-world-timeline">
         <SurfaceHeading id="surfaces-world-timeline">World Timeline</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={[
@@ -1258,7 +1258,7 @@ export function SurfacesCanvasPage() {
       </section>
 
       {/* V1.124 P0 T4 — Work Timeline node chrome (Narrative + Moment scene + beat) */}
-      <section className="mt-10" data-testid="surfaces-work-timeline" id="surfaces-work-timeline">
+      <section className="mt-10" data-testid="surfaces-work-timeline">
         <SurfaceHeading id="surfaces-work-timeline">Work Timeline</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={[
@@ -1309,7 +1309,6 @@ export function SurfacesCanvasPage() {
       <section
         className="mt-10"
         data-testid="surfaces-outline-authoring"
-        id="surfaces-outline-authoring"
       >
         <SurfaceHeading id="surfaces-outline-authoring">
           Outline Authoring &amp; Binding
@@ -1339,7 +1338,7 @@ export function SurfacesCanvasPage() {
       </section>
 
       {/* V1.124 P2 T2 — Global Timeline list chrome */}
-      <section className="mt-10" data-testid="surfaces-global-timeline" id="surfaces-global-timeline">
+      <section className="mt-10" data-testid="surfaces-global-timeline">
         <SurfaceHeading id="surfaces-global-timeline">Global Timeline</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={['@web-global-timeline/global-timeline-list-chrome']}
@@ -1362,7 +1361,7 @@ export function SurfacesCanvasPage() {
       </section>
 
       {/* V1.124 P2 T3a — Layer breadcrumb */}
-      <section className="mt-10" data-testid="surfaces-layer-breadcrumb" id="surfaces-layer-breadcrumb">
+      <section className="mt-10" data-testid="surfaces-layer-breadcrumb">
         <SurfaceHeading id="surfaces-layer-breadcrumb">Layer Breadcrumb</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={['@web-canvas/layer-breadcrumb']}
@@ -1383,7 +1382,7 @@ export function SurfacesCanvasPage() {
       </section>
 
       {/* V1.124 P2 T3b — Conflict-modal shared chrome */}
-      <section className="mt-10" data-testid="surfaces-conflict-modals" id="surfaces-conflict-modals">
+      <section className="mt-10" data-testid="surfaces-conflict-modals">
         <SurfaceHeading id="surfaces-conflict-modals">Conflict Modals</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={['@web-canvas/conflict-modal-chrome']}

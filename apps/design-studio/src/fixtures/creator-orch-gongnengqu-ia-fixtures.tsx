@@ -156,12 +156,14 @@ function HubBrowseContent({
         onTabChange={onTabChange}
         labels={HUB_BROWSE_LABELS.tabs}
         ariaLabel="Creator hub entity kind"
+        tabIdPrefix={`${testId}-hub-tab`}
+        tabPanelId={`${testId}-hub-tabpanel`}
         data-testid={`${testId}-tab-bar`}
       />
       <div
-        id="hub-tabpanel"
+        id={`${testId}-hub-tabpanel`}
         role="tabpanel"
-        aria-labelledby={`hub-tab-${activeTab}`}
+        aria-labelledby={`${testId}-hub-tab-${activeTab}`}
         className="min-h-0 flex-1"
         data-testid={`${testId}-tabpanel`}
       >

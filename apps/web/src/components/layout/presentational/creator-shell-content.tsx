@@ -1,4 +1,4 @@
-import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
+import { useEffect, useId, useState, type ChangeEvent, type FormEvent } from 'react';
 import { Globe, Plus, type LucideIcon } from 'lucide-react';
 
 import {
@@ -125,6 +125,7 @@ function InlineWorldForm({
 }) {
   const [title, setTitle] = useState('');
   const valid = title.trim().length > 0;
+  const titleId = `${useId()}-sidebar-create-world-title`;
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -146,9 +147,9 @@ function InlineWorldForm({
       title={!canCreateWorld ? labels.disabledTitle : undefined}
     >
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="sidebar-create-world-title">{labels.titleLabel}</Label>
+        <Label htmlFor={titleId}>{labels.titleLabel}</Label>
         <Input
-          id="sidebar-create-world-title"
+          id={titleId}
           value={title}
           onChange={(event: ChangeEvent<HTMLInputElement>) => setTitle(event.target.value)}
           placeholder={labels.titlePlaceholder}
@@ -193,6 +194,12 @@ function InlineWorkForm({
   const [workProfile, setWorkProfile] = useState(defaultProfile);
   const [workProfileTouched, setWorkProfileTouched] = useState(false);
   const [worldId, setWorldId] = useState('');
+  const uid = useId();
+  const titleId = `${uid}-sidebar-create-work-title`;
+  const goalId = `${uid}-sidebar-create-work-goal`;
+  const ideaId = `${uid}-sidebar-create-work-idea`;
+  const worldIdField = `${uid}-sidebar-create-work-world`;
+  const profileId = `${uid}-sidebar-create-work-profile`;
 
   // Single-world preselect (F-01 W1): when the workspace has exactly one
   // World, the create is unambiguous — select it automatically so the author
@@ -239,9 +246,9 @@ function InlineWorkForm({
       data-testid="sidebar-create-form-work"
     >
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="sidebar-create-work-title">{labels.titleLabel}</Label>
+        <Label htmlFor={titleId}>{labels.titleLabel}</Label>
         <Input
-          id="sidebar-create-work-title"
+          id={titleId}
           value={title}
           onChange={(event: ChangeEvent<HTMLInputElement>) => setTitle(event.target.value)}
           placeholder={labels.titlePlaceholder}
@@ -249,9 +256,9 @@ function InlineWorkForm({
         />
       </div>
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="sidebar-create-work-goal">{labels.goalLabel}</Label>
+        <Label htmlFor={goalId}>{labels.goalLabel}</Label>
         <Textarea
-          id="sidebar-create-work-goal"
+          id={goalId}
           value={longTermGoal}
           onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
             setLongTermGoal(event.target.value)
@@ -261,9 +268,9 @@ function InlineWorkForm({
         />
       </div>
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="sidebar-create-work-idea">{labels.ideaLabel}</Label>
+        <Label htmlFor={ideaId}>{labels.ideaLabel}</Label>
         <Textarea
-          id="sidebar-create-work-idea"
+          id={ideaId}
           value={initialIdea}
           onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
             setInitialIdea(event.target.value)
@@ -273,7 +280,7 @@ function InlineWorkForm({
         />
       </div>
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="sidebar-create-work-world">{labels.worldLabel}</Label>
+        <Label htmlFor={worldIdField}>{labels.worldLabel}</Label>
         {worldsError ? (
           <ErrorState
             title={labels.worldErrorTitle}
@@ -282,7 +289,7 @@ function InlineWorkForm({
           />
         ) : (
           <Select
-            id="sidebar-create-work-world"
+            id={worldIdField}
             value={worldId}
             disabled={worldsLoading || isPending}
             onChange={(event: ChangeEvent<HTMLSelectElement>) =>
@@ -305,9 +312,9 @@ function InlineWorkForm({
         )}
       </div>
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="sidebar-create-work-profile">{labels.profileLabel}</Label>
+        <Label htmlFor={profileId}>{labels.profileLabel}</Label>
         <Select
-          id="sidebar-create-work-profile"
+          id={profileId}
           value={workProfile}
           disabled={isPending}
           onChange={(event: ChangeEvent<HTMLSelectElement>) => {
@@ -398,6 +405,9 @@ function CreatorShellInlineCreate({
   onWorkSubmit?: (payload: CreatorShellInlineWorkSubmit) => void | Promise<void>;
 }) {
   const [createTab, setCreateTab] = useState<HubTab>('world');
+  const uid = useId();
+  const tabIdPrefix = `${uid}-sidebar-create-tab`;
+  const tabPanelId = `${uid}-sidebar-create-tabpanel`;
 
   return (
     <div
@@ -411,15 +421,15 @@ function CreatorShellInlineCreate({
           onTabChange={setCreateTab}
           labels={labels.tabs}
           ariaLabel={labels.tabsAriaLabel}
-          tabIdPrefix="sidebar-create-tab"
-          tabPanelId="sidebar-create-tabpanel"
+          tabIdPrefix={tabIdPrefix}
+          tabPanelId={tabPanelId}
           data-testid="sidebar-create-tab"
         />
       </div>
       <div
-        id="sidebar-create-tabpanel"
+        id={tabPanelId}
         role="tabpanel"
-        aria-labelledby={`sidebar-create-tab-${createTab}`}
+        aria-labelledby={`${tabIdPrefix}-${createTab}`}
         className="px-1"
       >
         {createTab === 'world' ? (

@@ -73,7 +73,6 @@ export interface InspirationPoolRow {
 
 export interface InspirationPoolWorkLinkArgs {
   workId: string;
-  className: string;
   children: ReactNode;
 }
 
@@ -100,15 +99,8 @@ export interface InspirationPoolChromeProps {
   'data-testid'?: string;
 }
 
-const ROW_ACTION_CLASS_NAME =
-  'inline-flex items-center gap-1.5 rounded-control border border-gray-500 bg-background-100 px-2 h-8 text-button-12 font-button text-gray-1000 transition-colors duration-state ease-standard hover:bg-background-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-1000 dark:focus-visible:ring-blue-700';
-
-function DefaultWorkLink({ workId, className, children }: InspirationPoolWorkLinkArgs) {
-  return (
-    <a href={`/works/${encodeURIComponent(workId)}/outline`} className={className}>
-      {children}
-    </a>
-  );
+function DefaultWorkLink({ workId, children }: InspirationPoolWorkLinkArgs) {
+  return <a href={`/works/${encodeURIComponent(workId)}/outline`}>{children}</a>;
 }
 
 function InspirationPoolRowItem({
@@ -164,16 +156,17 @@ function InspirationPoolRowItem({
 
       <span className="flex flex-wrap items-center gap-2">
         {row.status === 'promoted' && row.workId ? (
-          workLink({
-            workId: row.workId,
-            className: ROW_ACTION_CLASS_NAME,
-            children: (
-              <>
-                <ArrowUpRight className="h-3.5 w-3.5" aria-hidden />
-                {copy.openWork}
-              </>
-            ),
-          })
+          <Button asChild variant="secondary" size="small">
+            {workLink({
+              workId: row.workId,
+              children: (
+                <>
+                  <ArrowUpRight className="h-3.5 w-3.5" aria-hidden />
+                  {copy.openWork}
+                </>
+              ),
+            })}
+          </Button>
         ) : null}
 
         {canPromote ? (
@@ -282,7 +275,13 @@ export function InspirationPoolChrome({
           <EmptyState title={copy.emptyTitle} description={copy.emptyDescription} />
         ) : (
           <>
-            <ul className="flex flex-col gap-2" aria-label={copy.listAriaLabel}>
+            <ul
+              className="flex flex-col gap-2"
+              // One announcement: the pooled count string already carries the
+              // pool name, so it replaces the list label (see the aria-hidden
+              // count paragraph below) instead of repeating it.
+              aria-label={copy.countLabel ?? copy.listAriaLabel}
+            >
               {rows.map((row) => (
                 <InspirationPoolRowItem
                   key={row.itemId}
@@ -300,6 +299,7 @@ export function InspirationPoolChrome({
             {copy.countLabel ? (
               <p
                 className="text-copy-13 text-gray-700"
+                aria-hidden="true"
                 data-testid="inspiration-pool-count"
               >
                 {copy.countLabel}
