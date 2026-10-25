@@ -32,8 +32,11 @@ function makeItem(over: Partial<WorkInspirationItem> = {}): WorkInspirationItem 
   };
 }
 
-function listResponse(items: WorkInspirationItem[]): WorkInspirationListResponse {
-  return { items, total: items.length, limit: 20, offset: 0 };
+function listResponse(
+  items: WorkInspirationItem[],
+  total = items.length,
+): WorkInspirationListResponse {
+  return { items, total, limit: 20, offset: 0 };
 }
 
 function OutlineProbe() {
@@ -239,6 +242,74 @@ describe('WorksInspirationPage', () => {
     expect(await screen.findByText('Request failed')).toBeInTheDocument();
     // The row stays on screen mid-failure; no navigation, no silent drop.
     expect(row).toHaveAttribute('data-status', 'idea');
+  });
+
+  it('surfaces a read failure as page error chrome and recovers on retry', async () => {
+    // W5.1: the page owns the error frame and `onRetry`; the query client has
+    // retry disabled, so the first 500 lands on screen as-is.
+    let calls = 0;
+    useHandlers(
+      http.get(LIST_ROUTE, () => {
+        calls += 1;
+        return calls === 1
+          ? HttpResponse.json(
+              { success: false, error: { code: 'internal', message: 'boom' } },
+              { status: 500 },
+            )
+          : HttpResponse.json(listResponse([makeItem({ title: 'Recovered idea' })]));
+      }),
+    );
+
+    renderPage();
+
+    const alert = await screen.findByRole('alert');
+    expect(
+      within(alert).getByText(
+        'The daemon did not return the inspiration pool. Check that the local daemon is running.',
+      ),
+    ).toBeInTheDocument();
+    // The error frame must not degrade to the empty frame.
+    expect(screen.queryByText('No inspiration yet')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+
+    expect(await screen.findByText('Recovered idea')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('renders the empty pool frame with the add form still available', async () => {
+    useHandlers(http.get(LIST_ROUTE, () => HttpResponse.json(listResponse([]))));
+
+    renderPage();
+
+    expect(await screen.findByText('No inspiration yet')).toBeInTheDocument();
+    expect(screen.getByText('Add a first idea to start the pool.')).toBeInTheDocument();
+    expect(screen.queryAllByTestId('inspiration-pool-row')).toHaveLength(0);
+    expect(screen.getByLabelText('Title')).toBeInTheDocument();
+  });
+
+  it('reports the response total, not the page length, in the pool count', async () => {
+    useHandlers(
+      http.get(LIST_ROUTE, () =>
+        HttpResponse.json(
+          listResponse(
+            [
+              makeItem({ item_id: 'insp-1', title: 'First idea' }),
+              makeItem({ item_id: 'insp-2', title: 'Second idea' }),
+              makeItem({ item_id: 'insp-3', title: 'Third idea' }),
+              makeItem({ item_id: 'insp-4', title: 'Fourth idea' }),
+            ],
+            57,
+          ),
+        ),
+      ),
+    );
+
+    renderPage();
+
+    expect(await screen.findByTestId('inspiration-pool-count')).toHaveTextContent(
+      /^Inspiration Pool: 4 \/ 57$/,
+    );
   });
 
   it('titles the surface "Inspiration Pool" / "灵感池" (compass D8)', async () => {
