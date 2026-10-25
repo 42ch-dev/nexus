@@ -18,6 +18,11 @@ export default defineConfig({
       // web components import @/lib/utils — resolve it to apps/web before the
       // general `@` -> design-studio/src alias catches it (matches vite.config.ts).
       '@/lib/utils': path.resolve(import.meta.dirname, '../web/src/lib/utils'),
+      // Matches vite.config.ts — the works chrome's status matcher (v1.223 W1).
+      '@/lib/status-variant': path.resolve(
+        import.meta.dirname,
+        '../web/src/lib/status-variant',
+      ),
       // Studio imports web's English source locale catalogs for its own i18next
       // instance (matches vite.config.ts).
       '@web-locales/en': path.resolve(import.meta.dirname, '../web/src/locales/en'),

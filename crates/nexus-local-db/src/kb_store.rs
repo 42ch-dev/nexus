@@ -2728,6 +2728,9 @@ impl SqliteKbStore {
 ///
 /// `expr` is a column name or a `?` placeholder. A value without a `.` — the
 /// `datetime('now')` form — has no fraction.
+///
+/// Stored forms are only `to_rfc3339()` (digit fraction) and `datetime('now')`
+/// (no `.`); a third writer must revisit this key.
 fn fraction_millis(expr: &str) -> String {
     format!(
         "(CASE WHEN instr({expr}, '.') = 0 THEN 0 \

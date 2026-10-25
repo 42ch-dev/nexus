@@ -265,6 +265,71 @@ pub(crate) mod test_support {
     /// across `.await` points do not hold a blocking guard: async tests take
     /// it with `.lock().await`, sync `#[test]` fns with `.blocking_lock()`.
     pub static PROCESS_ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    /// Directory holding the Windows `fixture_launch` `.cmd` shims.
+    ///
+    /// Statics are never dropped, so a `TempDir` in a static never removes its
+    /// directory. A fixed path reuses one directory across test processes and
+    /// the first launch sweeps it ([`sweep_shims`]), so leftover wrappers do
+    /// not accumulate. A CRT `atexit` hook would remove it at exit instead, but
+    /// that FFI call is `unsafe` and the workspace lints forbid `unsafe_code`.
+    ///
+    /// shortcut: the directory survives the process until the next run's sweep,
+    /// and two test processes sharing one temp dir would sweep each other's
+    /// shims — upgrade if that ever runs on one machine.
+    #[cfg(windows)]
+    static SHIM_DIR: std::sync::LazyLock<std::path::PathBuf> = std::sync::LazyLock::new(|| {
+        let dir = std::env::temp_dir().join("nexus-agent-host-fixture-shims");
+        if let Some(diagnostic) = sweep_shims(&dir) {
+            tracing::warn!("{diagnostic}");
+        }
+        dir
+    });
+
+    /// Remove a shim directory, returning one diagnostic line when the
+    /// removal failed for any reason other than the directory being absent.
+    ///
+    /// Never panics and never locks. The failure is returned rather than
+    /// printed here so it can be pinned by a test: a stale `.cmd` wrapper
+    /// surviving at a reused path would otherwise be spawned by a later
+    /// `fixture_launch` while the sweep looked clean. `remove_dir_all` reports
+    /// the first entry it could not delete.
+    #[cfg(windows)]
+    fn sweep_shims(dir: &std::path::Path) -> Option<String> {
+        sweep_diagnostic(dir, std::fs::remove_dir_all(dir))
+    }
+
+    #[cfg(windows)]
+    fn sweep_diagnostic(dir: &std::path::Path, removed: std::io::Result<()>) -> Option<String> {
+        match removed {
+            Ok(()) => None,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => Some(format!(
+                "fixture shim sweep failed for {}: {error}",
+                dir.display()
+            )),
+        }
+    }
+
+    /// Write the `.cmd` wrapper for `fixture` into `shim_dir`, creating the
+    /// directory when it is missing (a previous sweep may have removed it).
+    #[cfg(windows)]
+    fn write_shim(shim_dir: &std::path::Path, fixture: &std::path::Path) -> std::path::PathBuf {
+        std::fs::create_dir_all(shim_dir).expect("recreate fixture shim dir");
+        let interpreter = python_path();
+        let name = fixture
+            .file_stem()
+            .expect("fixture filename")
+            .to_string_lossy();
+        let shim = shim_dir.join(format!("{name}.cmd"));
+        let body = format!(
+            "@echo off\r\n\"{}\" \"{}\" %*\r\n",
+            interpreter.display(),
+            fixture.display()
+        );
+        std::fs::write(&shim, body).expect("write fixture shim");
+        shim
+    }
+
     /// Resolve a Python fixture to a program the current platform can spawn.
     /// Callers must hold `PROCESS_ENV_LOCK` throughout construction: on
     /// Windows, PATH-dependent `python_path()` discovery happens before this
@@ -277,28 +342,10 @@ pub(crate) mod test_support {
         }
         #[cfg(windows)]
         {
-            use std::sync::{LazyLock, Mutex};
-            static SHIMS: LazyLock<tempfile::TempDir> =
-                LazyLock::new(|| tempfile::tempdir().expect("fixture shim dir"));
-            // cleanup deferred: this process-static TempDir is not dropped at
-            // test-process exit, so its shim directory may remain in the temp
-            // directory until external cleanup.
+            use std::sync::Mutex;
             static SHIM_LOCK: Mutex<()> = Mutex::new(());
             let _guard = SHIM_LOCK.lock().expect("fixture shim lock");
-            let shim_dir = &*SHIMS;
-            let interpreter = python_path();
-            let name = fixture
-                .file_stem()
-                .expect("fixture filename")
-                .to_string_lossy();
-            let shim = shim_dir.path().join(format!("{name}.cmd"));
-            let body = format!(
-                "@echo off\r\n\"{}\" \"{}\" %*\r\n",
-                interpreter.display(),
-                fixture.display()
-            );
-            std::fs::write(&shim, body).expect("write fixture shim");
-            shim
+            write_shim(&SHIM_DIR, fixture)
         }
     }
 
@@ -324,5 +371,67 @@ pub(crate) mod test_support {
             panic!("Python is unavailable through `py -3` and `python`");
         });
         PYTHON.clone()
+    }
+
+    /// Pins the shim lifecycle: `fixture_launch` writes into `SHIM_DIR`, a
+    /// sweep removes a shim directory, and the next write recreates it.
+    ///
+    /// The sweep is exercised on a private directory, never on `SHIM_DIR`:
+    /// other tests capture a shim path at provider construction and spawn it
+    /// later, so deleting the shared directory here would strand them. The
+    /// once-per-process sweep inside `SHIM_DIR`'s initializer cannot be
+    /// asserted from within the same process anyway (it runs on first use).
+    #[cfg(windows)]
+    #[test]
+    fn fixture_shims_survive_sweep_through_recreation() {
+        let fixture = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/native_protocol/mock_claude_cli.py"
+        );
+        let _guard = PROCESS_ENV_LOCK.blocking_lock();
+        let shim = fixture_launch(fixture);
+        assert!(
+            shim.starts_with(&*SHIM_DIR),
+            "shim outside the shim dir: {}",
+            shim.display()
+        );
+        assert!(shim.is_file(), "shim not written: {}", shim.display());
+
+        let private = tempfile::tempdir().expect("temp dir");
+        let shims = private.path().join("shims");
+        let shim = write_shim(&shims, std::path::Path::new(fixture));
+        assert!(shim.is_file(), "shim not written: {}", shim.display());
+        assert!(
+            sweep_shims(&shims).is_none(),
+            "a removable shim dir must not report a sweep failure"
+        );
+        assert!(!shims.exists(), "sweep left the shim dir behind");
+        let shim = write_shim(&shims, std::path::Path::new(fixture));
+        assert!(shim.is_file(), "write did not recreate: {}", shim.display());
+    }
+
+    /// Pins that a failed sweep is reported instead of swallowed: an
+    /// undeletable entry (simulated as a permission error, e.g. a wrapper
+    /// another process still holds open) yields one diagnostic line naming
+    /// the directory, while an absent directory stays silent.
+    #[cfg(windows)]
+    #[test]
+    fn sweep_reports_removal_failure() {
+        let dir = std::path::Path::new(r"C:\Temp\nexus-agent-host-fixture-shims");
+        let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        let diagnostic = sweep_diagnostic(dir, Err(denied)).expect("failure must be reported");
+        assert!(
+            diagnostic.contains(&dir.display().to_string()),
+            "diagnostic omits the shim dir: {diagnostic}"
+        );
+        assert!(
+            diagnostic.contains("denied"),
+            "diagnostic omits the cause: {diagnostic}"
+        );
+        assert!(
+            sweep_diagnostic(dir, Err(std::io::ErrorKind::NotFound.into())).is_none(),
+            "an absent shim dir is a clean sweep"
+        );
+        assert!(sweep_diagnostic(dir, Ok(())).is_none());
     }
 }

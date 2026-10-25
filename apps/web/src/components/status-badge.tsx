@@ -1,28 +1,10 @@
 import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { humanizeStatus } from '@/lib/format';
 import { FINDING_STATUSES, type FindingStatus } from '@/lib/findings-lifecycle';
+import { statusVariant } from '@/lib/status-variant';
 import { cn } from '@/lib/utils';
 import type { ChapterStatus } from '@42ch/nexus-contracts';
 import { useTranslation } from 'react-i18next';
-
-/**
- * Map a free-string status to a Badge variant by keyword.
- *
- * Daemon API statuses are free-strings (no enum contract), so we match on
- * known substrings with sensible fallbacks. DESIGN.md semantic mapping:
- * running/healthy/completed → green; queued/informational → teal;
- * warning/needs-review → amber; failed/error → red; everything else → neutral.
- */
-export function statusVariant(status: string | undefined | null): BadgeProps['variant'] {
-  if (!status) return 'neutral';
-  const s = status.toLowerCase();
-  if (/(^|_)(running|active|healthy|completed|ok|success)($|_)/.test(s)) return 'running';
-  if (/(^|_)(queued|pending|info|informational|waiting)($|_)/.test(s)) return 'queued';
-  if (/(^|_)(warning|stale|needs_?review|review|paused|partial)($|_)/.test(s)) return 'warning';
-  if (/(^|_)(failed|error|critical|fatal|archived|cancelled|canceled)($|_)/.test(s))
-    return 'error';
-  return 'neutral';
-}
 
 /** Severity uses the same mapping but leans stricter on the error band. */
 export function severityVariant(severity: string | undefined | null): BadgeProps['variant'] {
@@ -146,3 +128,6 @@ export function FindingStatusBadge({ status, className }: FindingStatusBadgeProp
 
 /** Re-export the status set for affordance rendering (row actions / dropdowns). */
 export { FINDING_STATUSES };
+
+/** Canonical source is `@/lib/status-variant`; re-exported for call-site stability. */
+export { statusVariant };

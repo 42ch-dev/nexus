@@ -841,6 +841,78 @@ describe('Surfaces page — app shell fixture', () => {
   });
 });
 
+/* ---- surfaces page — inspiration pool fixture (v1.223 W5) -------------- */
+
+describe('Surfaces page — inspiration pool fixture', () => {
+  beforeEach(async () => {
+    mockMatchMedia(false);
+    await renderStudio('/surfaces/shell');
+  });
+
+  it('mounts the fixture block under the section heading', () => {
+    const section = screen.getByTestId('surfaces-inspiration-pool');
+    const fixtures = within(section).getByTestId('works-inspiration-fixtures');
+
+    expect(within(fixtures).getByTestId('works-inspiration-fixture-list')).toBeInTheDocument();
+    // The SurfaceHeading is the section's own h3, identified for the gallery anchor.
+    const [surfaceHeading] = within(section).getAllByRole('heading', {
+      name: 'Inspiration Pool',
+      level: 3,
+    });
+    expect(surfaceHeading).toHaveAttribute('id', 'surfaces-inspiration-pool');
+    // The heading is the only holder: a section id of the same value would win
+    // the hash lookup as the earlier node.
+    expect(document.querySelectorAll('#surfaces-inspiration-pool')).toHaveLength(1);
+    expect(
+      within(fixtures)
+        .getAllByTestId('inspiration-pool-row')
+        .map((row) => row.getAttribute('data-status')),
+    ).toEqual(['idea', 'promoted', 'archived']);
+  });
+});
+
+/* ---- surfaces page — sessions rail fixture (v1.223 W5) ----------------- */
+
+describe('Surfaces page — sessions rail fixture', () => {
+  beforeEach(async () => {
+    mockMatchMedia(false);
+    await renderStudio('/surfaces/shell');
+  });
+
+  it('keeps the rail id on the heading only', () => {
+    const section = screen.getByTestId('surfaces-sessions-rail');
+    const [surfaceHeading] = within(section).getAllByRole('heading', {
+      name: 'Sessions rail — session cards and the zero-session state',
+      level: 3,
+    });
+    expect(surfaceHeading).toHaveAttribute('id', 'surfaces-sessions-rail');
+    // The heading is the only holder: a section id of the same value would win
+    // the hash lookup as the earlier node.
+    expect(document.querySelectorAll('#surfaces-sessions-rail')).toHaveLength(1);
+  });
+});
+
+/* ---- surfaces page — capabilities rail fixture (v1.223 W5) ------------- */
+
+describe('Surfaces page — capabilities rail fixture', () => {
+  beforeEach(async () => {
+    mockMatchMedia(false);
+    await renderStudio('/surfaces/shell');
+  });
+
+  it('keeps the rail id on the heading only', () => {
+    const section = screen.getByTestId('surfaces-caps-rail');
+    const [surfaceHeading] = within(section).getAllByRole('heading', {
+      name: 'Capabilities rail — registry, filter, empty and read-error states',
+      level: 3,
+    });
+    expect(surfaceHeading).toHaveAttribute('id', 'surfaces-caps-rail');
+    // The heading is the only holder: a section id of the same value would win
+    // the hash lookup as the earlier node.
+    expect(document.querySelectorAll('#surfaces-caps-rail')).toHaveLength(1);
+  });
+});
+
 describe('Surfaces page — daemon status strip', () => {
   it('renders single-line status + soft badge + Restart (no description)', async () => {
     mockMatchMedia(false);

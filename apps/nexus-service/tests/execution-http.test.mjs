@@ -324,11 +324,12 @@ describe('execution-http (P5-T3)', () => {
     }
   });
 
-  // E4 (errors.ts:64) and E5 (errors.ts:111) are classification arms that no
-  // synthetic wire can drive: the parser gate (`CORE_ERROR_CODES`) rejects an
-  // unknown code before the mapper (so E4 is a defensive arm), and E5 catches
-  // the non-native rejections the wire cannot carry. Both are pinned directly
-  // on the exported helpers.
+  // E4 (errors.ts:64) is unreachable through the mapper: the parser gate
+  // (`CORE_ERROR_CODES`) rejects an unknown code before the mapper and every
+  // accepted code is in `STATUS_BY_CODE`, so the fallback is a defensive arm.
+  // E5 (errors.ts:111) is wire-reachable — a plain `Error` rejection at the
+  // stubbed `providerCall` seam reaches the route and classifies here — but is
+  // pinned at unit level for stability, not because the wire cannot carry it.
   test('every mapper 500 fallback arm is classified internal and sanitized', async () => {
     const { mapNativeError, statusForCode } = await import(join(serviceRoot, 'dist/errors.js'));
 

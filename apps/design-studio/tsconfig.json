@@ -19,6 +19,7 @@
     "paths": {
       "@/*": ["./src/*"],
       "@/lib/utils": ["../web/src/lib/utils.ts"],
+      "@/lib/status-variant": ["../web/src/lib/status-variant.ts"],
       "@web-locales/en": ["../web/src/locales/en"],
       "@/components/ui/*": ["../web/src/components/ui/*"],
       "@web-ui/*": ["../web/src/components/ui/*"],

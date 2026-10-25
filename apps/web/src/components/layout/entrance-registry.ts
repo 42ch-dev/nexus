@@ -91,8 +91,6 @@ export const ENTRANCE_ROUTE_RULES: readonly EntranceRouteRule[] = [
   { path: '/settings/appearance', visibility: 'both', settingsSection: 'appearance' },
 ] as const;
 
-export const ENTRANCE_IDS: readonly EntranceId[] = ['content-creator', 'developer'];
-
 export const DEFAULT_ENTRANCE: EntranceId = 'content-creator';
 
 /** Type guard for persisted/stored entrance strings (AR-16). Unparseable

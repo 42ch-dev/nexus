@@ -3,6 +3,9 @@
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Navigate, Route, Routes, useLocation } from 'react-router';
 
 import { WorkShellLayout } from '@/components/layout/work-shell-layout';
@@ -13,6 +16,8 @@ import { useHandlers } from '@/test/msw-server';
 import { worksList, workDetail } from '@/test/handlers';
 import { BrowserClient } from '@/lib/nexus';
 import { i18n } from '@/lib/i18n/config';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function makeClient() {
   return new BrowserClient();
@@ -140,5 +145,19 @@ describe('work route nesting (T2)', () => {
     expect(screen.getByTestId('main-standard')).toBeInTheDocument();
     expect(screen.queryByTestId('main-work-shell')).not.toBeInTheDocument();
     expect(screen.queryByTestId('work-shell-layout')).not.toBeInTheDocument();
+  });
+
+  // v1.223 W2 — a static `works/<segment>` route outranks `works/:workId`, so a
+  // Work whose id is one of these literals loses WorkShellLayout. The source is
+  // the independent truth: adding a static sibling reds until the reservation
+  // is re-decided.
+  it('reserves exactly the static /works sibling segments in App.tsx', () => {
+    const source = readFileSync(path.resolve(__dirname, 'App.tsx'), 'utf8');
+    const segments = Array.from(
+      source.matchAll(/path="works\/([^"]+)"/g),
+      (match) => match[1],
+    ).filter((segment) => !segment.startsWith(':'));
+
+    expect([...new Set(segments)].sort()).toEqual(['chapters', 'inspiration']);
   });
 });
