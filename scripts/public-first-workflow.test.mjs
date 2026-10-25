@@ -693,11 +693,12 @@ test('a small artifact identity is unchanged: path, size, mtime and a streamed d
   try {
     writePinnedArtifact(path, 64, 0x61);
     const identity = await artifactIdentity(path);
-    assert.deepEqual(Object.keys(identity), ['path', 'present', 'bytes', 'mtime_ms', 'sha256']);
     assert.equal(identity.present, true);
     assert.equal(identity.bytes, 64);
     assert.equal(identity.mtime_ms, PINNED_MTIME.getTime());
-    assert.match(identity.sha256, /^[0-9a-f]{64}$/);
+    // Exact digest for a known fixture (64 bytes of 0x61) — a behavioral check
+    // that the streamed hash really covers the bytes, independent of key order.
+    assert.equal(identity.sha256, 'ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb');
     // An absent optional artifact still records its absence rather than throwing.
     assert.deepEqual(await artifactIdentity(absent, { required: false }), { path: absent, present: false });
     assert.equal(sameArtifact({ path, present: false }, { path, present: false }), true);

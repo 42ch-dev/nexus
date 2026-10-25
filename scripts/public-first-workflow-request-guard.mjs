@@ -33,11 +33,16 @@
  *     and every other endpoint is denied before any network I/O, and cleartext
  *     is accepted only for the deterministic loopback origin (a non-loopback
  *     `http:` selection is a configuration refusal, never cleartext egress).
- *  4. Denials never reach the network and never consume the slot. Anything the
- *     guard cannot classify, cannot resolve, cannot record or cannot verify
- *     fails closed: malformed env, an unusable attempt directory, a missing
- *     `fetch`, a non-dsh runtime, an unclassifiable argument, an unexpected URL
- *     or method, a spent slot, and filesystem errors are all denials.
+ *  4. Denials never reach the network. Slot accounting is fail-closed rather
+ *     than uniformly free: a denial raised BEFORE the exclusive create
+ *     (malformed env, unusable attempt directory, missing `fetch`, non-dsh
+ *     runtime, unclassifiable argument, unexpected URL or method, an already
+ *     spent slot) never consumes the slot, while a spend whose write, `fsync`,
+ *     directory `fsync` or `close` fails denies the dispatch AND leaves the
+ *     slot spent — the attempt is over either way and the one authorized call
+ *     is never silently retryable. Anything the guard cannot classify, cannot
+ *     resolve, cannot record or cannot verify fails closed: the cases above,
+ *     plus filesystem errors, are all denials.
  *  5. The request is forwarded opaque: `originalFetch(input, {...init,
  *     redirect: 'error'})`. `headers`, `body` and `signal` are the caller's own
  *     objects (same references, uninspected, unmodified); only `redirect` is

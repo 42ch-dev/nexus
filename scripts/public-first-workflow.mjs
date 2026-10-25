@@ -1442,7 +1442,11 @@ function captureGuardAttempt(dir) {
  * One prepared-artifact identity in the receipt: canonical absolute path, byte
  * size and a streamed content digest. Every present artifact is hashed whatever
  * its size, so an equal-size equal-mtime replacement (a debug CLI binary is
- * ~175 MB) cannot pass as the same artifact. `mtime_ms` stays as diagnostics.
+ * ~175 MB) cannot pass as the same artifact **as sampled at check time**.
+ * Time scope: the digest proves identity only for the bytes that were read. A
+ * replacement landing after that read, or concurrently with it, is outside what
+ * this operator-owned workflow can guarantee — the receipt is a check-time
+ * equality proof, not an immutability claim. `mtime_ms` stays as diagnostics.
  */
 async function artifactIdentity(path, { required = true } = {}) {
   if (!existsSync(path)) {
@@ -1459,7 +1463,12 @@ async function artifactIdentity(path, { required = true } = {}) {
   };
 }
 
-/** Does the live action's CURRENT artifact match the one the receipt recorded? */
+/**
+ * Does the live action's CURRENT artifact match the one the receipt recorded?
+ * Both sides are samples: the receipt's digest is the bytes read when it was
+ * written, the `current` argument is whatever `artifactIdentity` just read — so
+ * this answers "equal at this check", not "never replaced since".
+ */
 function sameArtifact(recorded, current) {
   if (recorded === null || typeof recorded !== 'object') return false;
   if (current === null || typeof current !== 'object') return false;
