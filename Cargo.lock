@@ -3775,7 +3775,6 @@ dependencies = [
  "nix 0.31.3",
  "parking_lot",
  "rmcp",
- "same-file",
  "serde",
  "serde_json",
  "serde_yaml",
