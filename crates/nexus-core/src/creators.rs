@@ -475,24 +475,8 @@ impl CoreHomeService {
         // surface AuthRequired.
         with_config_lock(&self.nexus_home, || {
             let mut config = read_cli_config(&self.nexus_home)?;
-            if let Some(table) = config.as_table_mut() {
-                table.insert(
-                    "active_creator_id".to_string(),
-                    toml::Value::String(request.creator_id.clone()),
-                );
-                if let Some(slugs) = table
-                    .entry("active_workspace_slug_by_creator")
-                    .or_insert_with(|| toml::Value::Table(toml::Table::new()))
-                    .as_table_mut()
-                {
-                    slugs.insert(
-                        request.creator_id.clone(),
-                        toml::Value::String("default".to_string()),
-                    );
-                }
-                write_cli_config(&self.nexus_home, &config)?;
-            }
-            Ok(())
+            apply_active_selection(&mut config, &request.creator_id)?;
+            write_cli_config(&self.nexus_home, &config)
         })?;
 
         Ok(SetActiveCreatorResponse {
@@ -726,6 +710,34 @@ pub fn write_cli_config(nexus_home: &Path, config: &toml::Value) -> CoreResult<(
     let toml_str =
         toml::to_string_pretty(config).map_err(|e| internal("CONFIG_SERIALIZE_ERROR", e))?;
     std::fs::write(&config_path, toml_str).map_err(|e| internal("CONFIG_WRITE_ERROR", e))
+}
+
+/// Commit the active-creator selection and its `default` workspace slug into
+/// one document, so the pair cannot be split by a second read-modify-write.
+///
+/// # Errors
+/// Returns the `CONFIG_ERROR` internal carrier when the document root is not a
+/// table — the selection cannot be stored, and reporting success would tell the
+/// caller a change happened that never reached the file.
+fn apply_active_selection(config: &mut toml::Value, creator_id: &str) -> CoreResult<()> {
+    let table = config
+        .as_table_mut()
+        .ok_or_else(|| internal("CONFIG_ERROR", "config root is not a table"))?;
+    table.insert(
+        "active_creator_id".to_string(),
+        toml::Value::String(creator_id.to_string()),
+    );
+    if let Some(slugs) = table
+        .entry("active_workspace_slug_by_creator")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+        .as_table_mut()
+    {
+        slugs.insert(
+            creator_id.to_string(),
+            toml::Value::String("default".to_string()),
+        );
+    }
+    Ok(())
 }
 
 /// Set a creator's `display_name` in the enrichment cache
@@ -1031,5 +1043,28 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// BUG (I-000104): a config document whose root is not a table cannot hold
+    /// the selection, so the commit must surface the wire-internal
+    /// `CONFIG_ERROR` carrier instead of reporting a change it never made.
+    ///
+    /// `read_cli_config` parses a scalar document as a parse error, so the
+    /// non-table root is driven at the mutation seam the writer uses.
+    #[test]
+    fn use_creator_rejects_a_non_table_config_root() {
+        let mut config = toml::Value::String("corrupt".to_string());
+        let error = apply_active_selection(&mut config, TARGET).expect_err("non-table root");
+        match error {
+            CoreError::Internal { category } => {
+                assert_eq!(category, "CONFIG_ERROR: config root is not a table");
+            }
+            other => panic!("expected the CONFIG_ERROR carrier, got {other:?}"),
+        }
+        assert_eq!(
+            config.as_str(),
+            Some("corrupt"),
+            "a rejected document is left untouched"
+        );
     }
 }
