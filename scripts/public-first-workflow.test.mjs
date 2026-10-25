@@ -27,13 +27,14 @@
  */
 import { strict as assert } from 'node:assert';
 import { createServer } from 'node:http';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
 import {
   applyCleanupDisposition,
+  artifactIdentity,
   assertDeterministicReceipt,
   assertLiveCredentialChannel,
   assertGuardAttempt,
@@ -49,6 +50,7 @@ import {
   readEventStream,
   readEventStreamOrStop,
   readSpentToken,
+  sameArtifact,
   startModelEndpoint,
   summarizeChildEnv,
 } from './public-first-workflow.mjs';
@@ -648,4 +650,92 @@ test('an explicitly selected live attempt requires an inherited channel name wit
   );
   const named = { key: 'DEEPSEEK_API_KEY', observation: 'present_unverifiable', values_read: false };
   assert.equal(assertLiveCredentialChannel(named), named);
+});
+
+/** Fixed mtime shared by both sides of an artifact swap. */
+const PINNED_MTIME = new Date('2026-01-02T03:04:05.000Z');
+
+/** (Re)write `path` at a pinned size and mtime, so only its content differs. */
+function writePinnedArtifact(path, size, fill) {
+  writeFileSync(path, Buffer.alloc(size, fill));
+  utimesSync(path, PINNED_MTIME, PINNED_MTIME);
+}
+
+test('a same-size same-mtime large artifact with different content is not the same artifact', async () => {
+  // Just past the old 8 MiB hash cap: the identity the issue named, which used
+  // to be size + mtime only and let an equal-shape replacement pass.
+  const dir = mkdtempSync(join(tmpdir(), 'pfw-artifact-identity-'));
+  const path = join(dir, 'cli.bin');
+  const size = 8 * 1024 * 1024 + 1;
+  try {
+    writePinnedArtifact(path, size, 0x61);
+    const recorded = await artifactIdentity(path);
+    writePinnedArtifact(path, size, 0x62);
+    const current = await artifactIdentity(path);
+    assert.equal(current.bytes, recorded.bytes);
+    assert.equal(current.mtime_ms, recorded.mtime_ms);
+    assert.match(recorded.sha256, /^[0-9a-f]{64}$/);
+    assert.notEqual(current.sha256, recorded.sha256);
+    assert.equal(sameArtifact(recorded, current), false);
+
+    // Identical content still passes, whatever the mtime says.
+    writePinnedArtifact(path, size, 0x61);
+    assert.equal(sameArtifact(recorded, await artifactIdentity(path)), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a small artifact identity is unchanged: path, size, mtime and a streamed digest', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pfw-artifact-identity-'));
+  const path = join(dir, 'preset.yaml');
+  const absent = join(dir, 'dsh-transport.js');
+  try {
+    writePinnedArtifact(path, 64, 0x61);
+    const identity = await artifactIdentity(path);
+    assert.equal(identity.present, true);
+    assert.equal(identity.bytes, 64);
+    assert.equal(identity.mtime_ms, PINNED_MTIME.getTime());
+    // Exact digest for a known fixture (64 bytes of 0x61) — a behavioral check
+    // that the streamed hash really covers the bytes, independent of key order.
+    assert.equal(identity.sha256, 'ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb');
+    // An absent optional artifact still records its absence rather than throwing.
+    assert.deepEqual(await artifactIdentity(absent, { required: false }), { path: absent, present: false });
+    assert.equal(sameArtifact({ path, present: false }, { path, present: false }), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a receipt recorded before artifact digests existed is stale, and the deterministic re-run is the remedy', () => {
+  // The pre-change receipt carried `sha256: null` for a large artifact; the
+  // re-check must treat it as stale (receipt_mismatch -> re-run) rather than as
+  // an authorization or a silent pass.
+  const stale = { path: '/tmp/cli.bin', present: true, bytes: 9, mtime_ms: 1, sha256: null };
+  const current = { path: '/tmp/cli.bin', present: true, bytes: 9, mtime_ms: 1, sha256: 'aa' };
+  assert.equal(sameArtifact(stale, current), false);
+  const runtime = { node: '22.0.0', platform: 'darwin', arch: 'arm64' };
+  const dir = mkdtempSync(join(tmpdir(), 'pfw-artifact-identity-'));
+  const receiptPath = join(dir, 'stale-receipt.json');
+  writeFileSync(
+    receiptPath,
+    JSON.stringify({
+      schema: 'public-first-workflow-receipt/1',
+      mode: 'deterministic',
+      outcome: 'ok',
+      facts: { artifacts: { cli: stale, runtime }, guard: {} },
+    }),
+  );
+  try {
+    assert.throws(
+      () => assertDeterministicReceipt(receiptPath, { current: { cli: current, runtime } }),
+      (error) => {
+        assertDriverFailure(error, 'blocked', 'receipt_mismatch');
+        assert.match(error.message, /re-run --mode deterministic/);
+        return true;
+      },
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

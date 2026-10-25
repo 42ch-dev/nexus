@@ -22,20 +22,27 @@
  *  2. At most ONE request reaches the original fetch in a whole attempt. The
  *     slot is a file named `spent` inside the attempt directory, taken with a
  *     filesystem exclusive create (`wx`) BEFORE the original fetch is called;
- *     that is atomic across processes, is consumed even when DNS/TLS/HTTP
- *     fails, is never reset by the guard (no unlink, no recreate, no reset
- *     path) and therefore survives a crash, a restart and a second launch.
+ *     that is atomic across processes and made durable (the token, then its
+ *     directory entry on POSIX) before the admission is acknowledged, is
+ *     consumed even when DNS/TLS/HTTP fails, is never reset by the guard (no
+ *     unlink, no recreate, no reset path) and therefore survives a crash, a
+ *     restart and a second launch.
  *  3. The only admissible request is `POST` to the exact preselected model URL
  *     — canonical `href` equality, no wildcard host or suffix matching. The
  *     path is pinned to `/chat/completions`, so `/models`, `/files`, telemetry
  *     and every other endpoint is denied before any network I/O, and cleartext
  *     is accepted only for the deterministic loopback origin (a non-loopback
  *     `http:` selection is a configuration refusal, never cleartext egress).
- *  4. Denials never reach the network and never consume the slot. Anything the
- *     guard cannot classify, cannot resolve, cannot record or cannot verify
- *     fails closed: malformed env, an unusable attempt directory, a missing
- *     `fetch`, a non-dsh runtime, an unclassifiable argument, an unexpected URL
- *     or method, a spent slot, and filesystem errors are all denials.
+ *  4. Denials never reach the network. Slot accounting is fail-closed rather
+ *     than uniformly free: a denial raised BEFORE the exclusive create
+ *     (malformed env, unusable attempt directory, missing `fetch`, non-dsh
+ *     runtime, unclassifiable argument, unexpected URL or method, an already
+ *     spent slot) never consumes the slot, while a spend whose write, `fsync`,
+ *     directory `fsync` or `close` fails denies the dispatch AND leaves the
+ *     slot spent — the attempt is over either way and the one authorized call
+ *     is never silently retryable. Anything the guard cannot classify, cannot
+ *     resolve, cannot record or cannot verify fails closed: the cases above,
+ *     plus filesystem errors, are all denials.
  *  5. The request is forwarded opaque: `originalFetch(input, {...init,
  *     redirect: 'error'})`. `headers`, `body` and `signal` are the caller's own
  *     objects (same references, uninspected, unmodified); only `redirect` is
@@ -84,7 +91,17 @@
  * worked around.
  */
 
-import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+  writeSync,
+} from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
 
@@ -498,6 +515,10 @@ function persistEvent(state, kind, category, problems = null) {
  * across processes; an existing slot is the second attempt and is denied
  * without any further inspection. The slot is never created, deleted or
  * recreated anywhere else in this file.
+ *
+ * The create is made durable before the caller may dispatch: an acknowledged
+ * spend that a power loss can erase would leave the one authorized call spent
+ * but not retryable. The token file is synced, then its directory entry.
  */
 function spend(state) {
   const spentPath = join(state.attemptDir, SPENT_NAME);
@@ -507,14 +528,47 @@ function spend(state) {
     at: new Date().toISOString(),
     category: ADMITTED_CATEGORY,
   });
+  let fd = null;
   try {
-    writeFileSync(spentPath, payload, { flag: 'wx', mode: 0o600 });
-    return null;
-  } catch (error) {
-    if (error !== null && typeof error === 'object' && error.code === 'EEXIST') {
-      return DENY.alreadySpent;
+    try {
+      fd = openSync(spentPath, 'wx', 0o600);
+    } catch (error) {
+      if (error !== null && typeof error === 'object' && error.code === 'EEXIST') {
+        return DENY.alreadySpent;
+      }
+      return DENY.filesystemError;
     }
+    writeSync(fd, payload);
+    // `wx` survives a process crash; only an fsync makes the token survive
+    // power loss.
+    fsyncSync(fd);
+    try {
+      closeSync(fd);
+    } finally {
+      fd = null;
+    }
+    // The file is durable only once its directory entry is synced as well.
+    // POSIX only: Windows cannot open a directory as a file (EPERM/EISDIR), and
+    // the failure would land AFTER the slot is spent.
+    if (process.platform !== 'win32') {
+      const dirFd = openSync(state.attemptDir, 'r');
+      try {
+        fsyncSync(dirFd);
+      } finally {
+        closeSync(dirFd);
+      }
+    }
+    return null;
+  } catch {
     return DENY.filesystemError;
+  } finally {
+    if (fd !== null) {
+      try {
+        closeSync(fd);
+      } catch {
+        // The denial fails closed; the slot stays spent either way.
+      }
+    }
   }
 }
 
