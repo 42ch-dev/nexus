@@ -10,6 +10,13 @@
  *
  * Five frames: empty, populated list, loading, read error, and the add form
  * with a blank (invalid) title.
+ *
+ * Row status badges (v1.223 W1) come from the app-wide `statusVariant` keyword
+ * matcher, replacing the fixture's former local `STATUS_BADGE_VARIANT` map.
+ * Recorded colour delta on all three rows: `idea` queued → neutral,
+ * `promoted` running → neutral (the matcher has no keyword for either), and
+ * `archived` neutral → error (red). The `Archived` label keeps the read-only
+ * row legible once its tint is the red error band.
  */
 import { useState, type ReactNode } from 'react';
 

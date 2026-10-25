@@ -177,11 +177,13 @@ function AppRoutes() {
             Timeline stays at `/works/:workId/timeline` (V1.123 P2 T5). */}
         <Route path="timeline" element={<GlobalTimelinePage />} />
         <Route path="works" element={<AppModuleRoute appId="work" />} />
+        {/* Reserved works/<segment>: outranks works/:workId — see app-work-routes.test.tsx */}
         <Route path="works/chapters" element={<ChaptersPage />} />
         {/* v1.222 P1 T2 — Inspiration Pool. Creator-scoped (the four pool
             payloads carry no `work_id`), so it is a static sibling of
             `works/chapters` outside `WorkShellLayout`; the static segment
             outranks `works/:workId`. Entry: the work rail link. */}
+        {/* Reserved works/<segment>: outranks works/:workId — see app-work-routes.test.tsx */}
         <Route path="works/inspiration" element={<WorksInspirationPage />} />
         <Route path="works/:workId" element={<WorkShellLayout />}>
           <Route index element={<Navigate to="outline" replace />} />

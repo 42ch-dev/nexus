@@ -32,6 +32,9 @@ export default defineConfig({
       // web components import @/lib/utils — resolve it to apps/web before the
       // general `@` -> design-studio/src alias catches it.
       '@/lib/utils': path.resolve(__dirname, '../web/src/lib/utils'),
+      // The works chrome imports the canonical status matcher via @/lib/*;
+      // the specific alias keeps it out of design-studio/src (v1.223 W1).
+      '@/lib/status-variant': path.resolve(__dirname, '../web/src/lib/status-variant'),
       // Studio imports web's English source locale catalogs for its own i18next
       // instance. This alias must appear before the general `@` catch-all.
       '@web-locales/en': path.resolve(__dirname, '../web/src/locales/en'),

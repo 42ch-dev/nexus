@@ -15,6 +15,7 @@
 import { useId, type ReactNode } from 'react';
 import { ArrowUpRight, Lightbulb } from 'lucide-react';
 
+import { statusVariant } from '@/lib/status-variant';
 import {
   Badge,
   Button,
@@ -28,7 +29,6 @@ import {
   Input,
   Label,
   LoadingState,
-  type BadgeProps,
 } from '@42ch/nexus-ui';
 
 export type InspirationPoolChromeState = 'ready' | 'empty' | 'loading' | 'error';
@@ -100,12 +100,6 @@ export interface InspirationPoolChromeProps {
   'data-testid'?: string;
 }
 
-const STATUS_BADGE_VARIANT: Readonly<Record<string, BadgeProps['variant']>> = {
-  idea: 'queued',
-  promoted: 'running',
-  archived: 'neutral',
-};
-
 const ROW_ACTION_CLASS_NAME =
   'inline-flex items-center gap-1.5 rounded-control border border-gray-500 bg-background-100 px-2 h-8 text-button-12 font-button text-gray-1000 transition-colors duration-state ease-standard hover:bg-background-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-1000 dark:focus-visible:ring-blue-700';
 
@@ -156,7 +150,7 @@ function InspirationPoolRowItem({
           </span>
           <span className="flex flex-wrap items-center gap-2 text-copy-13 text-gray-700">
             <Badge
-              variant={STATUS_BADGE_VARIANT[row.status] ?? 'neutral'}
+              variant={statusVariant(row.status)}
               data-testid="inspiration-pool-row-status"
             >
               {row.statusLabel}
