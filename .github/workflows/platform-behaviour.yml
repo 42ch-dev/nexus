@@ -112,7 +112,9 @@ jobs:
         if: always()
         # One feature graph, one compile: libtest filters are OR-combined.
         # always(): keep provider results visible when explicit_home fails.
-        run: cargo test -p nexus-agent-host --lib -- 'discovery::' 'providers::native_cli'
+        # `test_support::` carries the Windows-only fixture-shim cleanup pin;
+        # on Unix it matches nothing (the test is `#[cfg(windows)]`).
+        run: cargo test -p nexus-agent-host --lib -- 'discovery::' 'providers::native_cli' 'test_support::'
 
       # Keep provider semantics unchanged. If any per-test dispositions remain
       # after Task 3, gate them in test sources with a named register row.
