@@ -1532,26 +1532,25 @@ fn unpair_creator(_config: &CliConfig, _creator_id: &str) -> Result<()> {
 ///
 /// Returns I/O errors if config or auth store cannot be read or written.
 fn logout_creator(config: &CliConfig) -> Result<()> {
-    let creator_id = config.active_creator_id.as_deref();
-
-    if creator_id.is_none() {
+    let Some(creator_id) = config.active_creator_id.clone() else {
         println!("No active Creator to logout.");
         return Ok(());
-    }
+    };
 
-    let creator_id = creator_id.expect("checked above");
-
-    // Always clear local state
+    // Always clear this creator's cached credentials
     let mut store = auth::AuthStore::load()?;
     if let Some(creators) = &mut store.creators {
-        if creators.remove(creator_id).is_some() {
+        if creators.remove(&creator_id).is_some() {
             store.save()?;
         }
     }
 
-    // Clear active creator from CLI config
+    // Clear the selection only when the locked document still selects this
+    // creator: a concurrent A→B switch must survive this logout.
     CliConfig::mutate(|config| {
-        config.active_creator_id = None;
+        if config.active_creator_id.as_deref() == Some(creator_id.as_str()) {
+            config.active_creator_id = None;
+        }
         Ok(())
     })?;
 
@@ -2317,6 +2316,61 @@ mod tests {
         assert!(
             result.verify.is_none(),
             "gate-B2 verify should not be reached when gate-B1 fails"
+        );
+    }
+
+    // ── I-000065 F1-R2: logout decides on the locked document ─────
+
+    /// The selection is snapshotted before the lock is taken, so a concurrent
+    /// A→B switch must survive `logout A`: only A's credentials are removed.
+    #[test]
+    fn logout_keeps_a_selection_switched_while_it_waited() {
+        let _home = crate::testutil::isolated_home();
+
+        CliConfig::mutate(|config| {
+            config.active_creator_id = Some("ctr_a".to_string());
+            Ok(())
+        })
+        .expect("seed selection A");
+        let snapshot = CliConfig::load().expect("snapshot config");
+        assert_eq!(snapshot.active_creator_id.as_deref(), Some("ctr_a"));
+
+        let mut store = store_with_token("ctr_a", "token_a");
+        store.creators.as_mut().expect("creators").insert(
+            "ctr_b".to_string(),
+            CreatorAuthState {
+                creator_id: "ctr_b".to_string(),
+                access_token: "token_b".to_string(),
+                expires_at: "2099-01-01T00:00:00Z".to_string(),
+                creator_api_key: None,
+            },
+        );
+        store.save().expect("seed auth store");
+
+        // Another writer switches the selection to B before logout locks.
+        CliConfig::mutate(|config| {
+            config.active_creator_id = Some("ctr_b".to_string());
+            Ok(())
+        })
+        .expect("concurrent switch to B");
+
+        logout_creator(&snapshot).expect("logout A");
+
+        let after = CliConfig::load().expect("reload config");
+        assert_eq!(
+            after.active_creator_id.as_deref(),
+            Some("ctr_b"),
+            "logout(A) must not clear a selection another writer switched to B"
+        );
+        let store = AuthStore::load().expect("reload auth store");
+        let creators = store.creators.as_ref().expect("creators");
+        assert!(
+            !creators.contains_key("ctr_a"),
+            "A's credentials must be gone"
+        );
+        assert!(
+            creators.contains_key("ctr_b"),
+            "B's credentials must survive"
         );
     }
 
