@@ -913,6 +913,44 @@ describe('Surfaces page — capabilities rail fixture', () => {
   });
 });
 
+/* ---- surfaces page — route-level duplicate ids (v1.224 I-000088) -------- */
+
+/**
+ * A duplicate DOM id silently breaks hash deep links: `getElementById` returns
+ * the first match, so a section reusing its heading's id steals the gallery
+ * anchor. Sweeping every section route replaces the per-pair pins (`v1.223`
+ * R1-R3) with one assertion that catches the whole class.
+ */
+function duplicateIdDiagnostics(route: string): string[] {
+  const counts = new Map<string, number>();
+  for (const element of document.querySelectorAll<HTMLElement>('[id]')) {
+    counts.set(element.id, (counts.get(element.id) ?? 0) + 1);
+  }
+  return [...counts]
+    .filter(([, count]) => count > 1)
+    .map(([id, count]) => `${route.padEnd(28)} #${id} → ${count} nodes`);
+}
+
+describe('Surfaces page — route-level duplicate ids', () => {
+  it('gives every rendered id exactly one owner on every section route', async () => {
+    mockMatchMedia(false);
+    const duplicates: string[] = [];
+    for (const { route, testId } of SURFACES_SECTION_ROUTES) {
+      const { unmount } = await renderStudio(route);
+      // A route still on its Suspense fallback renders no ids and would pass
+      // silently, so the sweep only counts a route once it has mounted.
+      await screen.findByTestId(testId);
+      duplicates.push(...duplicateIdDiagnostics(route));
+      unmount();
+    }
+
+    expect(
+      duplicates,
+      'Duplicate DOM ids on the surfaces routes (each id must own exactly one node):',
+    ).toEqual([]);
+  });
+});
+
 describe('Surfaces page — daemon status strip', () => {
   it('renders single-line status + soft badge + Restart (no description)', async () => {
     mockMatchMedia(false);
