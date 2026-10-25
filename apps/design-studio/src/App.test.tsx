@@ -918,8 +918,9 @@ describe('Surfaces page — capabilities rail fixture', () => {
 /**
  * A duplicate DOM id silently breaks hash deep links: `getElementById` returns
  * the first match, so a section reusing its heading's id steals the gallery
- * anchor. Sweeping every section route replaces the per-pair pins (`v1.223`
- * R1-R3) with one assertion that catches the whole class.
+ * anchor. Sweeping every section route augments the three `v1.223` W5 rail
+ * pins (pool / sessions / caps): those keep pinning their own pair, and this
+ * assertion catches the whole class anywhere else.
  */
 function duplicateIdDiagnostics(route: string): string[] {
   const counts = new Map<string, number>();
