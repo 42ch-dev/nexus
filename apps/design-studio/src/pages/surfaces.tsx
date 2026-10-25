@@ -840,7 +840,7 @@ export function SurfacesShellPage() {
 
       <section className="mt-10" data-testid="surfaces-caps-rail" id="surfaces-caps-rail">
         <SurfaceHeading id="surfaces-caps-rail">
-          Capabilities rail — registry, filter and empty states
+          Capabilities rail — registry, filter, empty and read-error states
         </SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={['@web-developer/capabilities-page-chrome', '@42ch/nexus-ui']}

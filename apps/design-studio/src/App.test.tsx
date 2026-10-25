@@ -841,6 +841,33 @@ describe('Surfaces page — app shell fixture', () => {
   });
 });
 
+/* ---- surfaces page — inspiration pool fixture (v1.223 W5) -------------- */
+
+describe('Surfaces page — inspiration pool fixture', () => {
+  beforeEach(async () => {
+    mockMatchMedia(false);
+    await renderStudio('/surfaces/shell');
+  });
+
+  it('mounts the fixture block under the section heading', () => {
+    const section = screen.getByTestId('surfaces-inspiration-pool');
+    const fixtures = within(section).getByTestId('works-inspiration-fixtures');
+
+    expect(within(fixtures).getByTestId('works-inspiration-fixture-list')).toBeInTheDocument();
+    // The SurfaceHeading is the section's own h3, identified for the gallery anchor.
+    const [surfaceHeading] = within(section).getAllByRole('heading', {
+      name: 'Inspiration Pool',
+      level: 3,
+    });
+    expect(surfaceHeading).toHaveAttribute('id', 'surfaces-inspiration-pool');
+    expect(
+      within(fixtures)
+        .getAllByTestId('inspiration-pool-row')
+        .map((row) => row.getAttribute('data-status')),
+    ).toEqual(['idea', 'promoted', 'archived']);
+  });
+});
+
 describe('Surfaces page — daemon status strip', () => {
   it('renders single-line status + soft badge + Restart (no description)', async () => {
     mockMatchMedia(false);

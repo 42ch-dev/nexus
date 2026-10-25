@@ -92,6 +92,17 @@ describe('InspirationPoolChromeFixtures', () => {
     expect(within(archived).queryAllByRole('link')).toHaveLength(0);
     expect(within(archived).getByText('Archived')).toBeInTheDocument();
 
+    // v1.223 W1 — the app-wide matcher decides the tint: `idea`/`promoted` have
+    // no keyword so they fall to neutral; `archived` lands in the red error band.
+    for (const neutral of [idea, promoted]) {
+      const badge = within(neutral).getByTestId('inspiration-pool-row-status');
+      expect(badge).toHaveClass('bg-gray-alpha-100');
+      expect(badge.className).not.toMatch(/badge-soft-(queued|running)-/);
+    }
+    const archivedBadge = within(archived).getByTestId('inspiration-pool-row-status');
+    expect(archivedBadge).toHaveClass('text-nexus-ui-badge-soft-error-text');
+    expect(archivedBadge).toHaveClass('bg-nexus-ui-badge-soft-error-bg');
+
     // Title + added date on every row.
     expect(
       within(idea).getByText('The lighthouse keeper catalogues the ships it failed to save'),
