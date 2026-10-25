@@ -145,6 +145,8 @@ impl NexusAdapter<'static> {
         Self::with_read_scope(pool, None)
     }
 
+    // Clippy wants const, but the `compute` feature builds `Arc::new` here; suppress.
+    #[allow(clippy::missing_const_for_fn)]
     fn with_read_scope(pool: SqlitePool, read_scope: Option<KnowledgeReadScope>) -> Self {
         NexusAdapter {
             pool,

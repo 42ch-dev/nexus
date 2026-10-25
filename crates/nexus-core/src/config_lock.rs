@@ -102,7 +102,7 @@ fn acquire(nexus_home: &Path) -> CoreResult<ConfigLock> {
                     .and_then(|modified| SystemTime::now().duration_since(modified).ok());
                 match age {
                     // Released between the create and the stat: retry at once.
-                    None => continue,
+                    None => {}
                     Some(age) if age > STALE_AFTER => {
                         // Stale age is a heuristic: two reclaimers can both
                         // unlink and create, leaving two live holders, and a
@@ -145,7 +145,9 @@ fn acquire(nexus_home: &Path) -> CoreResult<ConfigLock> {
 }
 
 /// Run one `config.toml` read-modify-write under the daemon-home advisory
-/// lock. Every writer of this file takes it — the service
+/// lock.
+///
+/// Every writer of this file takes it — the service
 /// (`apps/nexus-service/src/agent-profile.ts` `writeAgentProfile`), the
 /// desktop main (`apps/desktop-electron/src/desktop-config.ts`
 /// `withConfigLock`) and the CLI (`apps/nexus42/src/config.rs`
