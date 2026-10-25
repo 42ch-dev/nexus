@@ -922,32 +922,90 @@ describe('Surfaces page — capabilities rail fixture', () => {
  * pins (pool / sessions / caps): those keep pinning their own pair, and this
  * assertion catches the whole class anywhere else.
  */
-function duplicateIdDiagnostics(route: string): string[] {
+function idCounts(): Map<string, number> {
   const counts = new Map<string, number>();
   for (const element of document.querySelectorAll<HTMLElement>('[id]')) {
     counts.set(element.id, (counts.get(element.id) ?? 0) + 1);
   }
+  return counts;
+}
+
+function duplicateIdDiagnostics(route: string, counts = idCounts()): string[] {
   return [...counts]
     .filter(([, count]) => count > 1)
     .map(([id, count]) => `${route.padEnd(28)} #${id} → ${count} nodes`);
 }
 
-describe('Surfaces page — route-level duplicate ids', () => {
+const ARIA_REFERENCE_ATTRS = [
+  'aria-controls',
+  'aria-labelledby',
+  'aria-describedby',
+] as const;
+
+/**
+ * A reference token that resolves to zero nodes dangles, and one that resolves
+ * to several lands on whichever node `getElementById` returns first — both are
+ * broken for assistive tech, so every token must own exactly one id.
+ */
+function ariaReferenceDiagnostics(route: string, counts = idCounts()): string[] {
+  const dangling: string[] = [];
+  for (const attr of ARIA_REFERENCE_ATTRS) {
+    for (const element of document.querySelectorAll<HTMLElement>(`[${attr}]`)) {
+      for (const token of (element.getAttribute(attr) ?? '').split(/\s+/).filter(Boolean)) {
+        const owners = counts.get(token) ?? 0;
+        if (owners !== 1) {
+          dangling.push(`${route.padEnd(28)} ${attr}="${token}" → ${owners} nodes`);
+        }
+      }
+    }
+  }
+  return dangling;
+}
+
+function pageIntegrityDiagnostics(route: string): string[] {
+  const counts = idCounts();
+  return [
+    ...duplicateIdDiagnostics(route, counts),
+    ...ariaReferenceDiagnostics(route, counts),
+  ];
+}
+
+describe('Surfaces page — route-level id integrity', () => {
   it('gives every rendered id exactly one owner on every section route', async () => {
     mockMatchMedia(false);
-    const duplicates: string[] = [];
+    const problems: string[] = [];
     for (const { route, testId } of SURFACES_SECTION_ROUTES) {
       const { unmount } = await renderStudio(route);
       // A route still on its Suspense fallback renders no ids and would pass
       // silently, so the sweep only counts a route once it has mounted.
       await screen.findByTestId(testId);
-      duplicates.push(...duplicateIdDiagnostics(route));
+      problems.push(...pageIntegrityDiagnostics(route));
       unmount();
     }
 
     expect(
-      duplicates,
-      'Duplicate DOM ids on the surfaces routes (each id must own exactly one node):',
+      problems,
+      'Duplicate ids or unresolved aria references on the surfaces routes:',
+    ).toEqual([]);
+  });
+
+  it('keeps ids and aria references single-owner after the Settings tab switch', async () => {
+    mockMatchMedia(false);
+    await renderStudio('/surfaces/shell');
+    const hostRoot = await screen.findByTestId('settings-host-fixtures');
+    // Section bodies are interaction-gated, so the default-state sweep above
+    // never mounts Advanced — which stacks the resident Connection section a
+    // second time on the same route.
+    fireEvent.click(
+      within(hostRoot).getByTestId('settings-section-nav-advanced'),
+    );
+    expect(
+      within(hostRoot).getByTestId('settings-advanced-section'),
+    ).toBeInTheDocument();
+
+    expect(
+      pageIntegrityDiagnostics('/surfaces/shell [advanced]'),
+      'Duplicate ids or unresolved aria references after the Settings tab switch:',
     ).toEqual([]);
   });
 });

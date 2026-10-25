@@ -378,11 +378,7 @@ function SettingsAgentSectionChrome({
  */
 function SettingsConnectionSectionChrome() {
   return (
-    <div
-      className="flex flex-col gap-6"
-      data-testid="settings-connection-section"
-      id="connection"
-    >
+    <div className="flex flex-col gap-6" data-testid="settings-connection-section">
       <div className="flex flex-col gap-2">
         <h3 className="text-heading-16 font-heading text-gray-1000">
           Connection
@@ -502,7 +498,8 @@ function SettingsWorkspaceSectionChrome({
 
 /**
  * Advanced section body chrome — stacks Connection and Setup on one page
- * with hash anchors (V1.106 P2).
+ * (V1.106 P2). The `#connection` / `#setup` deep-link anchors belong to the
+ * real pages, not this gallery composition.
  */
 function SettingsAdvancedSectionChrome() {
   return (

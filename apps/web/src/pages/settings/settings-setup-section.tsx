@@ -17,12 +17,16 @@ export function SettingsSetupSection() {
   const navigate = useNavigate();
 
   return (
-    <SettingsSetupSectionChrome
-      data-testid="settings-setup-section"
-      onReRunSetup={() => navigate('/setup')}
-      title={t('setup.title')}
-      helper={t('setup.helper')}
-      rerunLabel={t('setup.rerun')}
-    />
+    // The `#setup` deep-link anchor belongs to the composed section, not the
+    // reusable chrome: a page may mount this chrome more than once per route.
+    <div id="setup">
+      <SettingsSetupSectionChrome
+        data-testid="settings-setup-section"
+        onReRunSetup={() => navigate('/setup')}
+        title={t('setup.title')}
+        helper={t('setup.helper')}
+        rerunLabel={t('setup.rerun')}
+      />
+    </div>
   );
 }
