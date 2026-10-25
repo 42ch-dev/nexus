@@ -169,42 +169,36 @@ async fn materialize_adr014_workspace(
     Ok(db_path)
 }
 
-/// Persist CLI workspace selection to config.
-fn persist_cli_workspace_selection(
-    creative_root: PathBuf,
-    creator_id: String,
-    workspace_slug: String,
-) -> Result<()> {
-    let mut config = CliConfig::load()?;
-    config.workspace_path = Some(creative_root);
-    config.active_creator_id = Some(creator_id.clone());
-    config
-        .active_workspace_slug_by_creator
-        .insert(creator_id, workspace_slug);
-    config.save()?;
-    Ok(())
-}
-
 /// Commit the active creator/workspace selection through the core home entry.
 ///
 /// This is the local replacement for the daemon `set_active_workspace` round
 /// trip the workspace leaves used to make: [`CoreHomeService::select_workspace`]
 /// initializes the chosen workspace's guarded state DB, materializes its
 /// `creators` row (the FK precheck world/Work creation relies on) and writes
-/// the active creator/slug into `config.toml` — preserving every other key,
-/// including the CLI's `workspace_path` handle.
+/// the active creator/slug into `config.toml` — preserving every other key.
+/// `workspace_path` (the CLI's active creative root) is committed by the same
+/// locked write, so a workspace init never takes the config lock twice.
 async fn select_workspace_via_core(
     user_home: &std::path::Path,
     creator_id: &str,
     workspace_slug: &str,
+    workspace_path: Option<&std::path::Path>,
 ) -> Result<()> {
     let home = CoreHomeService::open(user_home.to_path_buf()).map_err(map_core_error)?;
-    home.select_workspace(SetActiveWorkspaceRequest {
-        creator_id: Some(creator_id.to_string()),
-        workspace_slug: workspace_slug.to_string(),
-    })
-    .await
-    .map_err(map_core_error)?;
+    let selection = match workspace_path {
+        Some(path) => {
+            home.select_workspace_with_workspace_path(creator_id, workspace_slug, path)
+                .await
+        }
+        None => {
+            home.select_workspace(SetActiveWorkspaceRequest {
+                creator_id: Some(creator_id.to_string()),
+                workspace_slug: workspace_slug.to_string(),
+            })
+            .await
+        }
+    };
+    selection.map_err(map_core_error)?;
     Ok(())
 }
 
@@ -264,12 +258,15 @@ async fn init_workspace(
         &display_name,
     )
     .await?;
-    persist_cli_workspace_selection(
-        creative_root.clone(),
-        creator_id.clone(),
-        workspace_slug.clone(),
-    )?;
-    select_workspace_via_core(&user_home, &creator_id, &workspace_slug).await?;
+    // One locked write: the selection and the CLI's `workspace_path` handle
+    // commit together, so a concurrent writer cannot land between them.
+    select_workspace_via_core(
+        &user_home,
+        &creator_id,
+        &workspace_slug,
+        Some(&creative_root),
+    )
+    .await?;
 
     let nh = nexus_home()?;
     std::fs::create_dir_all(&nh)?;
@@ -804,12 +801,10 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
                 &workspace_name,
             )
             .await?;
-            persist_cli_workspace_selection(
-                creative_root.clone(),
-                creator_id.to_string(),
-                workspace_slug.clone(),
-            )?;
-            select_workspace_via_core(&home, creator_id, &workspace_slug).await?;
+            // One locked write: the selection and the CLI's `workspace_path`
+            // handle commit together (see `init_workspace`).
+            select_workspace_via_core(&home, creator_id, &workspace_slug, Some(&creative_root))
+                .await?;
             println!("✓ Workspace {workspace_slug:?} created for creator {creator_id}.");
             println!("  Creative root: {}", creative_root.display());
             println!("  state.db: {}", db_path.display());
@@ -821,7 +816,7 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
             // The core home entry validates the workspace exists on disk under
             // this creator and commits the selection (guarded state-DB init +
             // `creators` row + `config.toml`).
-            select_workspace_via_core(&user_home()?, creator_id, &workspace_slug).await?;
+            select_workspace_via_core(&user_home()?, creator_id, &workspace_slug, None).await?;
             println!("✓ Active workspace slug for {creator_id} set to: {workspace_slug}");
             Ok(())
         }
@@ -975,9 +970,10 @@ async fn register_creator(
             }
 
             // Set as active creator
-            let mut cli_config = CliConfig::load()?;
-            cli_config.active_creator_id = Some(creator_id.clone());
-            cli_config.save()?;
+            CliConfig::mutate(|config| {
+                config.active_creator_id = Some(creator_id.clone());
+                Ok(())
+            })?;
 
             println!();
             println!("✓ Verification successful!");
@@ -1229,16 +1225,13 @@ fn creator_status(config: &CliConfig, creator_id: Option<String>) -> Result<()> 
 fn use_creator(_config: &CliConfig, creator_ref: &str) -> Result<()> {
     let resolved_id = creator_identity::resolve_creator_ref(creator_ref)?;
 
-    let mut cli_config = CliConfig::load()?;
-    cli_config.active_creator_id = Some(resolved_id.clone());
-    // Clear workspace slug for the old creator ref and the resolved ID.
-    cli_config
-        .active_workspace_slug_by_creator
-        .remove(creator_ref);
-    cli_config
-        .active_workspace_slug_by_creator
-        .remove(&resolved_id);
-    cli_config.save()?;
+    CliConfig::mutate(|config| {
+        config.active_creator_id = Some(resolved_id.clone());
+        // Clear workspace slug for the old creator ref and the resolved ID.
+        config.active_workspace_slug_by_creator.remove(creator_ref);
+        config.active_workspace_slug_by_creator.remove(&resolved_id);
+        Ok(())
+    })?;
 
     if resolved_id == creator_ref {
         println!("✓ Active Creator set to: {resolved_id}");
@@ -1533,27 +1526,27 @@ fn unpair_creator(_config: &CliConfig, _creator_id: &str) -> Result<()> {
 ///
 /// Returns I/O errors if config or auth store cannot be read or written.
 fn logout_creator(config: &CliConfig) -> Result<()> {
-    let creator_id = config.active_creator_id.as_deref();
-
-    if creator_id.is_none() {
+    let Some(creator_id) = config.active_creator_id.clone() else {
         println!("No active Creator to logout.");
         return Ok(());
-    }
+    };
 
-    let creator_id = creator_id.expect("checked above");
-
-    // Always clear local state
+    // Always clear this creator's cached credentials
     let mut store = auth::AuthStore::load()?;
     if let Some(creators) = &mut store.creators {
-        if creators.remove(creator_id).is_some() {
+        if creators.remove(&creator_id).is_some() {
             store.save()?;
         }
     }
 
-    // Clear active creator from CLI config
-    let mut cli_config = CliConfig::load()?;
-    cli_config.active_creator_id = None;
-    cli_config.save()?;
+    // Clear the selection only when the locked document still selects this
+    // creator: a concurrent A→B switch must survive this logout.
+    CliConfig::mutate(|config| {
+        if config.active_creator_id.as_deref() == Some(creator_id.as_str()) {
+            config.active_creator_id = None;
+        }
+        Ok(())
+    })?;
 
     println!("✓ Creator {creator_id} logged out.");
     Ok(())
@@ -2317,6 +2310,61 @@ mod tests {
         assert!(
             result.verify.is_none(),
             "gate-B2 verify should not be reached when gate-B1 fails"
+        );
+    }
+
+    // ── I-000065 F1-R2: logout decides on the locked document ─────
+
+    /// The selection is snapshotted before the lock is taken, so a concurrent
+    /// A→B switch must survive `logout A`: only A's credentials are removed.
+    #[test]
+    fn logout_keeps_a_selection_switched_while_it_waited() {
+        let _home = crate::testutil::isolated_home();
+
+        CliConfig::mutate(|config| {
+            config.active_creator_id = Some("ctr_a".to_string());
+            Ok(())
+        })
+        .expect("seed selection A");
+        let snapshot = CliConfig::load().expect("snapshot config");
+        assert_eq!(snapshot.active_creator_id.as_deref(), Some("ctr_a"));
+
+        let mut store = store_with_token("ctr_a", "token_a");
+        store.creators.as_mut().expect("creators").insert(
+            "ctr_b".to_string(),
+            CreatorAuthState {
+                creator_id: "ctr_b".to_string(),
+                access_token: "token_b".to_string(),
+                expires_at: "2099-01-01T00:00:00Z".to_string(),
+                creator_api_key: None,
+            },
+        );
+        store.save().expect("seed auth store");
+
+        // Another writer switches the selection to B before logout locks.
+        CliConfig::mutate(|config| {
+            config.active_creator_id = Some("ctr_b".to_string());
+            Ok(())
+        })
+        .expect("concurrent switch to B");
+
+        logout_creator(&snapshot).expect("logout A");
+
+        let after = CliConfig::load().expect("reload config");
+        assert_eq!(
+            after.active_creator_id.as_deref(),
+            Some("ctr_b"),
+            "logout(A) must not clear a selection another writer switched to B"
+        );
+        let store = AuthStore::load().expect("reload auth store");
+        let creators = store.creators.as_ref().expect("creators");
+        assert!(
+            !creators.contains_key("ctr_a"),
+            "A's credentials must be gone"
+        );
+        assert!(
+            creators.contains_key("ctr_b"),
+            "B's credentials must survive"
         );
     }
 

@@ -83,6 +83,11 @@ describe('InspirationPoolChromeFixtures', () => {
     // promoted → Work link, Archive, no Promote.
     const workLink = within(promoted).getByRole('link', { name: 'Open Work' });
     expect(workLink).toHaveAttribute('href', '/works/work-9d1e0f42/outline');
+    // v1.224: the Work link is the same Button secondary/small pill as Archive,
+    // not a hand-rolled class string that can drift from it.
+    expect(workLink.className).toBe(
+      within(promoted).getByTestId('inspiration-pool-row-archive').className,
+    );
     expect(within(promoted).queryByTestId('inspiration-pool-row-promote')).toBeNull();
     expect(within(promoted).getByTestId('inspiration-pool-row-archive')).toBeEnabled();
     expect(within(promoted).getByText('Promoted')).toBeInTheDocument();
@@ -111,9 +116,14 @@ describe('InspirationPoolChromeFixtures', () => {
       'Added Oct 22, 2026',
     );
     // Pool count arrives as one interpolated string from the caller.
-    expect(within(frame).getByTestId('inspiration-pool-count')).toHaveTextContent(
-      /^Inspiration Pool: 3 \/ 3$/,
-    );
+    const count = within(frame).getByTestId('inspiration-pool-count');
+    expect(count).toHaveTextContent(/^Inspiration Pool: 3 \/ 3$/);
+    // v1.224: one AT announcement — the count string is the list's name and
+    // the mirrored paragraph is hidden, so nothing is announced twice.
+    expect(count).toHaveAttribute('aria-hidden', 'true');
+    expect(
+      within(frame).getByRole('list', { name: 'Inspiration Pool: 3 / 3' }),
+    ).toBeInTheDocument();
   });
 
   it('renders the empty state with the add affordance', () => {

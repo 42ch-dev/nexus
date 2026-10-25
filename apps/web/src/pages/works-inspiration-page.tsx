@@ -39,11 +39,9 @@ const STATUS_LABEL_KEYS: Readonly<Record<string, string>> = {
   archived: 'inspiration.statusArchived',
 };
 
-function renderWorkLink({ workId, className, children }: InspirationPoolWorkLinkArgs) {
+function renderWorkLink({ workId, children }: InspirationPoolWorkLinkArgs) {
   return (
-    <Link to={`/works/${encodeURIComponent(workId)}/outline`} className={className}>
-      {children}
-    </Link>
+    <Link to={`/works/${encodeURIComponent(workId)}/outline`}>{children}</Link>
   );
 }
 

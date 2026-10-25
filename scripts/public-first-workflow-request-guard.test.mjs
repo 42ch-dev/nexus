@@ -193,6 +193,7 @@ const first = records()[0] ?? null;
 process.stdout.write(
   JSON.stringify({
     attempts,
+    trace: globalThis.__nexusGuardTrace ?? [],
     transport: {
       dispatches: records().length,
       first:
@@ -221,6 +222,39 @@ const SPY_SOURCE = `const realFetch = globalThis.fetch;
 globalThis.__nexusGuardProbe = { records: [] };
 globalThis.fetch = (input, init) => {
   globalThis.__nexusGuardProbe.records.push({ input, init, at: Date.now() });
+  return realFetch(input, init);
+};
+`;
+
+/**
+ * Preload that records, in one ordered trace, every `fsyncSync` (with the path
+ * the fd was opened for) and the moment a dispatch reaches the transport. The
+ * fs wrappers are installed before the guard loads, so the guard's own named
+ * `node:fs` bindings are the wrappers.
+ */
+const SYNC_SPY_SOURCE = `import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+
+const trace = [];
+globalThis.__nexusGuardTrace = trace;
+const openPaths = new Map();
+const openSync = fs.openSync;
+const fsyncSync = fs.fsyncSync;
+const realFetch = globalThis.fetch;
+
+fs.openSync = (path, flag, mode) => {
+  const fd = mode === undefined ? openSync(path, flag) : openSync(path, flag, mode);
+  openPaths.set(fd, String(path));
+  return fd;
+};
+fs.fsyncSync = (fd) => {
+  trace.push({ kind: 'sync', path: openPaths.get(fd) ?? null });
+  return fsyncSync(fd);
+};
+syncBuiltinESMExports();
+
+globalThis.fetch = (input, init) => {
+  trace.push({ kind: 'dispatch' });
   return realFetch(input, init);
 };
 `;
@@ -256,6 +290,7 @@ const ENTRY_PATH = join(FIXTURE_ROOT, 'entry.mjs');
 const DOMAIN_ENTRY_PATH = join(FIXTURE_ROOT, 'foreign-entry.mjs');
 const LINKED_ENTRY_PATH = join(FIXTURE_ROOT, 'linked-entry.mjs');
 const SPY_PATH = join(FIXTURE_ROOT, 'spy.mjs');
+const SYNC_SPY_PATH = join(FIXTURE_ROOT, 'sync-spy.mjs');
 const STRIP_PATH = join(FIXTURE_ROOT, 'strip-fetch.mjs');
 /**
  * The launch shape the driver really uses: an executable entry with a node
@@ -284,6 +319,7 @@ writeFileSync(SHEBANG_ENTRY_PATH, `#!/usr/bin/env node\n${ENTRY_SOURCE}`, { mode
 writeFileSync(PACKAGE_ENTRY_PATH, ENTRY_SOURCE);
 writeFileSync(PACKAGE_CHILD_PATH, ENTRY_SOURCE);
 writeFileSync(SPY_PATH, SPY_SOURCE);
+writeFileSync(SYNC_SPY_PATH, SYNC_SPY_SOURCE);
 writeFileSync(STRIP_PATH, STRIP_SOURCE);
 writeFileSync(LOCK_FETCH_PATH, LOCK_FETCH_SOURCE);
 writeFileSync(FREEZE_FETCH_PATH, FREEZE_FETCH_SOURCE);
@@ -582,6 +618,36 @@ test('one dsh-runtime POST is admitted, forwarded opaque, and recorded', async (
     assert.equal(existsSync(join(attemptDir, 'spent')), true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Durability of the acknowledgment
+// ---------------------------------------------------------------------------
+
+test(
+  'the spent token and its directory are synced before the admission is acknowledged',
+  { skip: process.platform === 'win32' },
+  async () => {
+    await withEndpoint('ok', async (endpoint) => {
+      const attemptDir = makeAttemptDir();
+      const child = await runGuardChild({
+        attemptDir,
+        allowedUrl: endpoint.url,
+        dshRealpath: ENTRY_PATH,
+        spec: singleSpec(endpoint.url),
+        preloads: [SYNC_SPY_PATH, GUARD_PATH],
+      });
+      assertChildRan(child, 'sync');
+      assert.equal(firstAttempt(child).status, 200);
+      // Ordered trace: the token, then its directory entry, and only then the
+      // dispatch — a spend the driver is told succeeded must survive power loss.
+      assert.deepEqual(child.result.trace, [
+        { kind: 'sync', path: join(attemptDir, 'spent') },
+        { kind: 'sync', path: attemptDir },
+        { kind: 'dispatch' },
+      ]);
+    });
+  },
+);
 
 // ---------------------------------------------------------------------------
 // One slot per attempt: same process, concurrent, racing child, second launch

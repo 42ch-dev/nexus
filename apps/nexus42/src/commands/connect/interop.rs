@@ -5044,3 +5044,251 @@ async fn ac_v173_1_two_node_interop_for_each_served_tool() {
         .await
         .expect("absent peer shuts down");
 }
+
+// ── v1.224 P1 T3: the mid-invoke settlement fault, driven end-to-end ──
+
+/// A deterministic fault at the receipt store's settlement boundary: a
+/// test-installed `BEFORE UPDATE` trigger over `operation_receipts` that aborts
+/// every terminal transition with `TEST_SETTLE_FAULT`.
+///
+/// Why this seam instead of the brief's pre-seeded-conflicting-terminal-row:
+/// the store's settlement UPDATE is gated on `WHERE operation_id = ? AND
+/// status = 'running'`, so a pre-seeded terminal row makes the statement match
+/// zero rows — SQLite fires no per-row trigger and `settle_operation` answers
+/// the stored row as a silent success, never the fault. A terminal row planted
+/// before the invoke is also answered by the §B.3 read gate (`recover` ⇒
+/// `AnswerFromReceipt`), so the effect would never run at all.
+///
+/// The abort trigger rides exactly the channel the schema's own immutability
+/// guards use (`RAISE(ABORT, …)` ⇒ an `Err` from the settlement statement) and
+/// is test-only: zero product-code change, and it disappears with the temp
+/// workspace.
+async fn install_settle_fault(pool: &sqlx::SqlitePool) {
+    sqlx::query(
+        "CREATE TRIGGER test_settle_fault BEFORE UPDATE ON operation_receipts \
+         FOR EACH ROW \
+         WHEN NEW.status IN ('finished', 'failed', 'cancelled', 'interrupted') \
+         BEGIN SELECT RAISE(ABORT, 'TEST_SETTLE_FAULT'); END",
+    )
+    .execute(pool)
+    .await
+    .expect("install the settlement-fault trigger");
+}
+
+/// The refusal the peer must see from a settlement fault (spec §B.3 item 4):
+/// `internal` with `details.effect_committed = true`, naming the operation and
+/// the receipt subject, and carrying the store fault — never a fabricated
+/// success and never a rollback claim.
+fn assert_effect_committed_refusal(
+    result: Result<spoke_connect::InvokeSuccess, InvokeError>,
+    operation_id: &str,
+    subject_id: &str,
+) {
+    match result {
+        Err(InvokeError::Wire(envelope)) => {
+            assert_eq!(
+                envelope.code, "internal",
+                "a settlement fault is the `internal` family, got: {envelope:?}"
+            );
+            assert_eq!(
+                envelope.details.get("effect_committed"),
+                Some(&serde_json::Value::Bool(true)),
+                "the refusal must disclose that the effect committed: {envelope:?}"
+            );
+            assert_eq!(
+                envelope.details.get("operation_id"),
+                Some(&serde_json::Value::String(operation_id.to_string())),
+                "the refusal must name the operation to inspect: {envelope:?}"
+            );
+            assert_eq!(
+                envelope.details.get("subject_id"),
+                Some(&serde_json::Value::String(subject_id.to_string())),
+                "the refusal must name the receipt subject: {envelope:?}"
+            );
+            assert!(
+                envelope.message.contains("effect committed"),
+                "the refusal must say the effect committed, got: {}",
+                envelope.message
+            );
+            assert!(
+                envelope.message.contains(operation_id),
+                "the refusal must carry the operation id in its message: {}",
+                envelope.message
+            );
+            assert!(
+                envelope.message.contains("TEST_SETTLE_FAULT"),
+                "the refusal must carry the injected store fault verbatim: {}",
+                envelope.message
+            );
+        }
+        Ok(response) => panic!(
+            "a settlement fault must never be answered as success, got {}",
+            response.payload
+        ),
+        other => panic!("expected the committed-effect refusal envelope, got {other:?}"),
+    }
+}
+
+/// I-000031 item 1 — a real connect `LiveWrite` invocation driven into a
+/// mid-invoke settlement fault, observed as the committed-effect refusal on the
+/// wire.
+///
+/// The invoke goes through the same handler entry every interop test uses
+/// (`session.invoke` ⇒ `dispatch` ⇒ `run_in_lane` ⇒ `settle_write_receipt`), so
+/// the refusal is the handler's answer, not a helper-level return. The fault is
+/// injected after the scoped peer is established (a test-only trigger on the
+/// hermetic workspace DB), and the assertions are the whole §B.3 item-4
+/// contract:
+///
+/// 1. the peer is refused `internal` with `details.effect_committed = true`;
+/// 2. the effect really committed — the upserted row is durable in the
+///    workspace DB (a rollback would have removed it);
+/// 3. the receipt stayed `running` — no terminal was fabricated for an
+///    unsettled operation;
+/// 4. a retry of the same operation id is answered `uncertain` (no terminal
+///    receipt, no in-process owner) and never re-applied: the stored entry is
+///    still exactly the one row the first call wrote.
+// The four-item §B.3 contract reads as one linear scenario; splitting it hides the cause.
+#[allow(clippy::too_many_lines)]
+#[tokio::test(flavor = "multi_thread")]
+async fn connect_live_write_settlement_fault_answers_the_committed_effect_refusal() {
+    const WORLD: &str = "wld_settle_fault";
+    const OPERATION_ID: &str = "op_a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1";
+
+    let _guard = network_test_guard().await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let home = temp.path();
+    let peer_key = fixed_keypair(64);
+    let peer_peer = peer_key.public().to_peer_id();
+
+    let db_path = temp.path().join("workspace").join("state.db");
+    let pool = crate::db::Schema::init(&db_path)
+        .await
+        .expect("workspace DB initializes");
+    seed_world(&pool, "ctr_test", WORLD).await;
+
+    let allow_path = nexus_home_layout::connect_allowlist_path(home);
+    std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
+    std::fs::write(
+        &allow_path,
+        serde_json::json!({ "peer_ids": [{
+            "peer_id": peer_peer.to_string(),
+            "world_scope": [WORLD],
+            "grant": {
+                "creator_id": "ctr_test",
+                "actor": { "kind": "creator", "id": "ctr_test" },
+                "world_id": WORLD,
+            },
+            "op_scope": ["upsert"],
+        }] })
+        .to_string(),
+    )
+    .expect("write allowlist");
+
+    let (config, _, _, _) = super::build_host_config(
+        home,
+        &[],
+        &["/ip4/127.0.0.1/tcp/0".to_string()],
+        Some(&db_path),
+    )
+    .await
+    .expect("N-C1 host config builds");
+    let host_peer = config.identity.public().to_peer_id();
+    let host = start(config).await;
+    let peer_node = start(peer_config(peer_key, vec![host_peer])).await;
+    let session = peer_node
+        .connect(host.listen_addrs()[0].clone())
+        .await
+        .expect("scoped peer handshake");
+
+    let payload = serde_json::json!({
+        "operation_id": OPERATION_ID,
+        "extensions": { "nexus": { "peer_id": peer_peer.to_string() } },
+        "knowledge_entries": [entry_fixture("kb_settle", "Mira", WORLD, "confirmed", None)],
+    });
+    let subject_id = format!("{peer_peer}/upsert");
+
+    install_settle_fault(&pool).await;
+    let refused = session.invoke("upsert", payload.clone()).await;
+    assert_effect_committed_refusal(refused, OPERATION_ID, &subject_id);
+
+    // 2. The effect committed: the upsert's row is durable. The settlement fault
+    //    is not a rollback.
+    let stored_rev: Option<i64> = sqlx::query_scalar(
+        "SELECT revision FROM kb_key_blocks WHERE world_id = ? AND key_block_id = ?",
+    )
+    .bind(WORLD)
+    .bind("kb_settle")
+    .fetch_optional(&pool)
+    .await
+    .expect("read persisted row");
+    assert_eq!(
+        stored_rev,
+        Some(1),
+        "the committed effect must survive the settlement fault"
+    );
+
+    // 3. No terminal was fabricated: the receipt is still the `running` row the
+    //    acquirer wrote, with neither terminal payload nor stamp.
+    let receipt = nexus_local_db::operation_receipts::get_operation_receipt(&pool, OPERATION_ID)
+        .await
+        .expect("receipt read")
+        .expect("the acquired receipt exists");
+    assert_eq!(
+        receipt.status,
+        nexus_local_db::operation_receipts::STATUS_RUNNING,
+        "an unsettled operation must stay `running`, not be settled for it"
+    );
+    assert_eq!(receipt.subject_id, subject_id);
+    assert!(receipt.terminal_at.is_none());
+    assert!(receipt.result_json.is_none() && receipt.error_json.is_none());
+
+    // 4. With the fault gone, a retry of the same operation id is the typed
+    //    `uncertain` answer (a `running` receipt with no in-process owner) — and
+    //    the effect is never re-applied.
+    sqlx::query("DROP TRIGGER test_settle_fault")
+        .execute(&pool)
+        .await
+        .expect("drop the settlement-fault trigger");
+    match session.invoke("upsert", payload).await {
+        Err(InvokeError::Wire(envelope)) => {
+            assert_eq!(
+                envelope.code, "uncertain",
+                "a retry after an unsettled settlement must be `uncertain`, got: {envelope:?}"
+            );
+            assert_eq!(
+                envelope.details.get("operation_id"),
+                Some(&serde_json::Value::String(OPERATION_ID.to_string()))
+            );
+        }
+        Ok(response) => panic!(
+            "a retry over an unsettled receipt must never be served, got {}",
+            response.payload
+        ),
+        other => panic!("expected the typed `uncertain` refusal, got {other:?}"),
+    }
+    let row_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM kb_key_blocks WHERE world_id = ? AND key_block_id = ?",
+    )
+    .bind(WORLD)
+    .bind("kb_settle")
+    .fetch_one(&pool)
+    .await
+    .expect("count persisted rows");
+    assert_eq!(
+        row_count, 1,
+        "the retry must not re-apply the committed effect"
+    );
+    let revision: Option<i64> = sqlx::query_scalar(
+        "SELECT revision FROM kb_key_blocks WHERE world_id = ? AND key_block_id = ?",
+    )
+    .bind(WORLD)
+    .bind("kb_settle")
+    .fetch_optional(&pool)
+    .await
+    .expect("read persisted revision");
+    assert_eq!(revision, Some(1), "the retry must leave the row untouched");
+
+    host.shutdown().await.expect("host shuts down");
+    peer_node.shutdown().await.expect("peer shuts down");
+}

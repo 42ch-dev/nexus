@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useId, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
@@ -81,6 +81,10 @@ export function CreatorHubDualPane() {
     [activeTab, navigate],
   );
 
+  const uid = useId();
+  const tabIdPrefix = `${uid}-hub-tab`;
+  const tabPanelId = `${uid}-hub-tabpanel`;
+
   return (
     <div
       className={cn(
@@ -94,12 +98,14 @@ export function CreatorHubDualPane() {
         onTabChange={onTabChange}
         labels={labels.tabs}
         ariaLabel={t('shell:hub.tabs.ariaLabel')}
+        tabIdPrefix={tabIdPrefix}
+        tabPanelId={tabPanelId}
         data-testid="creator-hub-dual-pane-tab-bar"
       />
       <div
-        id="hub-tabpanel"
+        id={tabPanelId}
         role="tabpanel"
-        aria-labelledby={`hub-tab-${activeTab}`}
+        aria-labelledby={`${tabIdPrefix}-${activeTab}`}
         className="min-h-0 flex-1"
         data-testid="creator-hub-dual-pane-tabpanel"
       >

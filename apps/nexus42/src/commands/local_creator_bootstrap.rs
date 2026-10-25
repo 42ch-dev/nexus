@@ -238,9 +238,10 @@ async fn mint_and_materialize(
     }
 
     // Set as active creator (store 2 of 3).
-    let mut cli_config = CliConfig::load()?;
-    cli_config.active_creator_id = Some(identity.creator_id.clone());
-    cli_config.save()?;
+    let cli_config = CliConfig::mutate(|config| {
+        config.active_creator_id = Some(identity.creator_id.clone());
+        Ok(config.clone())
+    })?;
 
     // Materialize the workspace `creators` row (store 3 of 3) in the same
     // per-creator+workspace db `creator world create` FK-prechecks.
@@ -328,7 +329,10 @@ async fn converge_identity(row: &nexus_local_db::LocalIdentityRow) -> Result<()>
     }
 
     if !already_active {
-        cli_config.save()?;
+        CliConfig::mutate(|config| {
+            config.active_creator_id = Some(creator_id.clone());
+            Ok(())
+        })?;
     }
 
     if repaired {
@@ -857,9 +861,11 @@ mod tests {
         )
         .await
         .expect("seed other identity");
-        let mut cli_config = CliConfig::load().expect("load config");
-        cli_config.active_creator_id = Some("ctr_localother".to_string());
-        cli_config.save().expect("save config");
+        CliConfig::mutate(|config| {
+            config.active_creator_id = Some("ctr_localother".to_string());
+            Ok(())
+        })
+        .expect("save config");
 
         // Re-run the target name → single match → converge (activate) the target.
         bootstrap_local_creator(Some("Target Name".to_string()))

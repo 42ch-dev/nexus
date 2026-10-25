@@ -171,6 +171,7 @@ import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import {
   chmodSync,
+  createReadStream,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -379,8 +380,6 @@ const GUARD_SAFE_STRING_MAX_LENGTH = 200;
 const LIVE_CREDENTIAL_ENV_KEYS = ['DEEPSEEK_API_KEY'];
 /** Inherited variables that would move the live request off the pinned origin. */
 const LIVE_ENDPOINT_OVERRIDE_ENV_KEYS = ['DEEPSEEK_BASE_URL'];
-/** Local preparation identity recorded in the receipt and required to match for live. */
-const ARTIFACT_HASH_MAX_BYTES = 8 * 1024 * 1024;
 /** A receipt is a bounded JSON document; anything larger is not one. */
 const RECEIPT_READ_MAX_BYTES = 4 * 1024 * 1024;
 
@@ -860,6 +859,13 @@ function readFixture() {
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
+}
+
+/** Streamed digest: a debug CLI binary is ~175 MB and is never buffered whole. */
+async function sha256File(path) {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest('hex');
 }
 
 function sleep(ms) {
@@ -1434,12 +1440,15 @@ function captureGuardAttempt(dir) {
 
 /**
  * One prepared-artifact identity in the receipt: canonical absolute path, byte
- * size, and a content hash when the file is small enough that hashing it is
- * cheap. A large file (a debug CLI binary is ~175 MB) is identified by path,
- * size and mtime instead — the identity is still comparable across the
- * deterministic run and the live action, which is all the live gate needs.
+ * size and a streamed content digest. Every present artifact is hashed whatever
+ * its size, so an equal-size equal-mtime replacement (a debug CLI binary is
+ * ~175 MB) cannot pass as the same artifact **as sampled at check time**.
+ * Time scope: the digest proves identity only for the bytes that were read. A
+ * replacement landing after that read, or concurrently with it, is outside what
+ * this operator-owned workflow can guarantee — the receipt is a check-time
+ * equality proof, not an immutability claim. `mtime_ms` stays as diagnostics.
  */
-function artifactIdentity(path, { required = true } = {}) {
+async function artifactIdentity(path, { required = true } = {}) {
   if (!existsSync(path)) {
     if (required) throw blocked('missing_prerequisite', `prepared artifact missing at ${path}`);
     return { path, present: false };
@@ -1450,21 +1459,23 @@ function artifactIdentity(path, { required = true } = {}) {
     present: true,
     bytes: stat.size,
     mtime_ms: Math.floor(stat.mtimeMs),
-    sha256: stat.size <= ARTIFACT_HASH_MAX_BYTES ? sha256(readFileSync(path)) : null,
+    sha256: await sha256File(path),
   };
 }
 
-/** Does the live action's CURRENT artifact match the one the receipt recorded? */
+/**
+ * Does the live action's CURRENT artifact match the one the receipt recorded?
+ * Both sides are samples: the receipt's digest is the bytes read when it was
+ * written, the `current` argument is whatever `artifactIdentity` just read — so
+ * this answers "equal at this check", not "never replaced since".
+ */
 function sameArtifact(recorded, current) {
   if (recorded === null || typeof recorded !== 'object') return false;
   if (current === null || typeof current !== 'object') return false;
   if (recorded.path !== current.path || recorded.present !== current.present) return false;
   if (!current.present) return true;
   if (recorded.bytes !== current.bytes) return false;
-  if (recorded.sha256 !== current.sha256) return false;
-  // Only the un-hashed (large) identities fall back to mtime, and only then.
-  if (recorded.sha256 === null && recorded.mtime_ms !== current.mtime_ms) return false;
-  return true;
+  return recorded.sha256 === current.sha256;
 }
 
 /**
@@ -1475,16 +1486,16 @@ function sameArtifact(recorded, current) {
  * derivable — the installed transport module whose `fetch` dispatch is the
  * guard's whole premise.
  */
-function localArtifactIdentities({ cliBinary, dshRealpath }) {
+async function localArtifactIdentities({ cliBinary, dshRealpath }) {
   const dshLibDir = dirname(dshRealpath);
   return {
-    driver: artifactIdentity(SCRIPT_PATH),
-    guard: artifactIdentity(GUARD_PATH),
-    fixture: artifactIdentity(FIXTURE_PATH),
-    service_entry: artifactIdentity(SERVICE_ENTRY),
-    cli: artifactIdentity(cliBinary),
-    dsh: artifactIdentity(dshRealpath),
-    dsh_transport: artifactIdentity(
+    driver: await artifactIdentity(SCRIPT_PATH),
+    guard: await artifactIdentity(GUARD_PATH),
+    fixture: await artifactIdentity(FIXTURE_PATH),
+    service_entry: await artifactIdentity(SERVICE_ENTRY),
+    cli: await artifactIdentity(cliBinary),
+    dsh: await artifactIdentity(dshRealpath),
+    dsh_transport: await artifactIdentity(
       join(dirname(dshLibDir), 'node_modules', '@deepseek-ai', 'dsh-llm-deepseek', 'lib', 'index.js'),
       { required: false },
     ),
@@ -3834,7 +3845,7 @@ async function runJourney(options) {
     // artifacts and runtime, so a stale receipt can never authorize a request;
     // and it establishes the inherited credential channel by NAME before any
     // child exists.
-    const artifacts = localArtifactIdentities({ cliBinary, dshRealpath });
+    const artifacts = await localArtifactIdentities({ cliBinary, dshRealpath });
     facts.artifacts = artifacts;
     if (live) {
       const authorized = assertDeterministicReceipt(options.deterministicReceipt, { current: artifacts });

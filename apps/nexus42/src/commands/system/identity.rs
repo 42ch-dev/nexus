@@ -177,9 +177,10 @@ pub(crate) async fn create_identity(kind: IdentityKindArg, name: Option<String>)
     println!("  (run `nexus42 system identity create --persistent` for a saved identity)");
 
     // Auto-set as active
-    let mut cli_config = CliConfig::load()?;
-    cli_config.active_creator_id = Some(identity.creator_id);
-    cli_config.save()?;
+    CliConfig::mutate(|config| {
+        config.active_creator_id = Some(identity.creator_id);
+        Ok(())
+    })?;
     println!("  Set as active identity.");
 
     Ok(())
@@ -199,9 +200,10 @@ async fn use_identity(creator_id: String) -> Result<()> {
         ))
     })?;
 
-    let mut cli_config = CliConfig::load()?;
-    cli_config.active_creator_id = Some(creator_id.clone());
-    cli_config.save()?;
+    CliConfig::mutate(|config| {
+        config.active_creator_id = Some(creator_id.clone());
+        Ok(())
+    })?;
 
     // Verify the resolution path works
     let resolved = resolve_active_identity().await?;

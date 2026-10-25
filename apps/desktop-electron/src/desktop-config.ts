@@ -19,7 +19,10 @@
  * TOML discipline (plan §"Config, OS actions and secure storage"):
  *  - one maintained parser (`smol-toml`, lockfile-pinned) — no regex parsing;
  *  - every mutation is serialized per file and re-reads the document inside the
- *    gate, so concurrent writers cannot drop each other's keys;
+ *    gate, so concurrent writers cannot drop each other's keys; the gate is
+ *    in-process only, so each mutation also holds the cross-process advisory
+ *    lock (`config.toml.lock`) for its whole read-modify-write — the core CLI
+ *    and the service write this same file;
  *  - replacement is atomic (sibling temp file + rename);
  *  - unrelated keys are preserved by a parse → mutate → stringify round-trip;
  *  - an existing document that cannot be parsed is an error — it is never
@@ -27,7 +30,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { TomlDate, parse, stringify, type TomlTable, type TomlValue } from 'smol-toml';
 import {
@@ -50,6 +53,130 @@ const ENTRANCE_VALUES: readonly string[] = ['developer', 'content-creator'];
 
 /** Slug written for a creator whose workspace was never explicitly chosen. */
 const DEFAULT_WORKSPACE_SLUG = 'default';
+
+/**
+ * Daemon-home `config.toml` advisory lock — the ONE protocol its four
+ * cross-process writers share (see `crates/nexus-core/src/config_lock.rs`,
+ * `apps/nexus42/src/config.rs` and
+ * `apps/nexus-service/src/agent-profile.ts`): exclusive create for the whole
+ * read-modify-write, stale steal after 10 s, release by unlink. The in-process
+ * gates below serialize this process only; the core, the CLI and the service
+ * write this same file. `flock` is not an option: Node's stdlib has none, and mixing
+ * lockfile-existence with flock breaks mutual exclusion.
+ */
+const LOCK_STALE_MS = 10_000;
+const LOCK_BACKOFF_INITIAL_MS = 25;
+const LOCK_BACKOFF_CAP_MS = 500;
+/**
+ * A steal retries while the stale file cannot be removed (a root-owned or
+ * immutable file: EACCES/EPERM). Past this deadline the mutation fails instead
+ * of hot-looping — the same 2× stale window the core and service writers use.
+ */
+const LOCK_STEAL_DEADLINE_MS = 2 * LOCK_STALE_MS;
+
+const sleepFor = (ms: number): Promise<void> => {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  setTimeout(resolve, ms);
+  return promise;
+};
+
+/**
+ * Release the lock, but only while this holder still owns it: a holder stalled
+ * past the stale window is stolen, and unlinking on resume would delete the new
+ * owner's lock and admit a third writer into the second's read-modify-write.
+ */
+async function releaseConfigLock(lockPath: string, token: string): Promise<void> {
+  try {
+    const contents = await readFile(lockPath, 'utf8');
+    if (!contents.trimEnd().endsWith(token)) {
+      console.error(`[nexus-desktop] ${lockPath} was stolen; leaving the new owner's lock`);
+      return;
+    }
+    await rm(lockPath, { force: true });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+    console.error(`[nexus-desktop] ${lockPath} release failed:`, err);
+  }
+}
+
+/**
+ * Run one config read-modify-write while holding `lockPath`. A normal hold is
+ * milliseconds; `LOCK_STALE_MS` is a stale heuristic, not proof of a crash — a
+ * paused live holder can look stale, and stealing can transiently yield two
+ * holders. Safe only while all four writers stay user-paced.
+ */
+async function withConfigLock<T>(lockPath: string, run: () => Promise<T>): Promise<T> {
+  await mkdir(dirname(lockPath), { recursive: true });
+  // Ownership token written into the lock file: release compares it before
+  // unlinking, so a stolen holder cannot delete the new owner's lock.
+  const token = randomUUID();
+  let backoff = LOCK_BACKOFF_INITIAL_MS;
+  let stealDeadlineMs: number | undefined;
+  let unlinkErrorLogged = false;
+  let held = false;
+  while (!held) {
+    try {
+      const lock = await open(lockPath, 'wx', 0o600);
+      try {
+        // Diagnostics only; the age of a held lock comes from its mtime.
+        await lock.writeFile(`${process.pid} ${new Date().toISOString()} ${token}\n`);
+      } catch (err) {
+        // The create succeeded, so this attempt owns the file: release it
+        // before failing, or the next writer stalls until the stale steal.
+        await lock.close().catch(() => undefined);
+        await rm(lockPath, { force: true }).catch(() => undefined);
+        throw err;
+      }
+      // A close failure cannot strand the lock — the caller's finally releases.
+      await lock.close().catch(() => undefined);
+      held = true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
+        throw desktopError(
+          'config_io',
+          `cannot take ${lockPath}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      const ageMs = await stat(lockPath).then(
+        (metadata) => Date.now() - metadata.mtimeMs,
+        () => undefined, // Released between the create and the stat: retry now.
+      );
+      if (ageMs !== undefined && ageMs > LOCK_STALE_MS) {
+        // Stale age is a heuristic: two reclaimers can both unlink and create,
+        // leaving two live holders, and a live slow holder can lose its lock.
+        // Accepted only because all four writers are user-paced.
+        try {
+          await rm(lockPath, { force: true });
+        } catch (unlinkError) {
+          stealDeadlineMs ??= Date.now();
+          if (!unlinkErrorLogged) {
+            unlinkErrorLogged = true;
+            console.error(`[nexus-desktop] cannot remove the stale ${lockPath}:`, unlinkError);
+          }
+          if (Date.now() - stealDeadlineMs > LOCK_STEAL_DEADLINE_MS) {
+            throw desktopError(
+              'config_io',
+              `stale ${lockPath} cannot be removed: ${
+                unlinkError instanceof Error ? unlinkError.message : String(unlinkError)
+              }`,
+            );
+          }
+        }
+        // Back off here too: an unremovable stale lock must not hot-loop.
+        await sleepFor(backoff);
+        backoff = Math.min(backoff * 2, LOCK_BACKOFF_CAP_MS);
+      } else if (ageMs !== undefined) {
+        await sleepFor(backoff);
+        backoff = Math.min(backoff * 2, LOCK_BACKOFF_CAP_MS);
+      }
+    }
+  }
+  try {
+    return await run();
+  } finally {
+    await releaseConfigLock(lockPath, token);
+  }
+}
 
 /** Operations P0-T2 owns in the frozen host-contract table. */
 export type DesktopConfigOperation =
@@ -155,6 +282,8 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
   }
 
   const configPath = join(home, NEXUS_DIR, CONFIG_FILE);
+  /** Cross-process lock for `configPath` — `agent-host/config.toml` is not shared. */
+  const configLockPath = `${configPath}.lock`;
   const agentProfilePath = join(home, NEXUS_DIR, AGENT_HOST_DIR, CONFIG_FILE);
   const defaultWorkspaceRoot = join(documentsPath, ...DEFAULT_WORKSPACE_SEGMENTS);
 
@@ -235,17 +364,25 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
     }
   }
 
-  /** Serialized read-modify-write: re-read inside the gate, then replace atomically. */
+  /**
+   * Serialized read-modify-write: re-read inside the gate, then replace
+   * atomically. With `lockPath` the whole read-modify-write also holds the
+   * cross-process advisory lock.
+   */
   function mutate<T>(
     gate: { tail: Promise<unknown> },
     path: string,
     apply: (doc: TomlTable) => T,
+    lockPath?: string,
   ): Promise<T> {
     return serialized(gate, async () => {
-      const doc = await readDocument(path);
-      const value = apply(doc);
-      await writeDocument(path, doc);
-      return value;
+      const run = async (): Promise<T> => {
+        const doc = await readDocument(path);
+        const value = apply(doc);
+        await writeDocument(path, doc);
+        return value;
+      };
+      return lockPath === undefined ? run() : withConfigLock(lockPath, run);
     });
   }
 
@@ -316,7 +453,7 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
         }
         ownedTableForWrite(doc, 'workspace_path_by_creator', configPath)[creatorId] = path;
         doc['workspace_path'] = path;
-      });
+      }, configLockPath);
       return null;
     },
 
@@ -333,24 +470,26 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
         ownedTableForWrite(doc, 'active_workspace_slug_by_creator', configPath)[creatorId] =
           DEFAULT_WORKSPACE_SLUG;
         return targetPath;
-      });
+      }, configLockPath);
     },
 
     async ensure_setup_bootstrap() {
-      return serialized<SetupBootstrapResult>(configGate, async () => {
-        const doc = await readDocument(configPath);
-        const existing = ownedString(doc, 'active_creator_id', configPath);
-        if (existing !== undefined) {
-          // Never replaces an existing creator, and never rewrites the file.
-          return { creator_id: existing, already_bootstrapped: true };
-        }
-        const creatorId = generateLocalCreatorId();
-        doc['active_creator_id'] = creatorId;
-        ownedTableForWrite(doc, 'active_workspace_slug_by_creator', configPath)[creatorId] =
-          DEFAULT_WORKSPACE_SLUG;
-        await writeDocument(configPath, doc);
-        return { creator_id: creatorId, already_bootstrapped: false };
-      });
+      return serialized<SetupBootstrapResult>(configGate, () =>
+        withConfigLock(configLockPath, async () => {
+          const doc = await readDocument(configPath);
+          const existing = ownedString(doc, 'active_creator_id', configPath);
+          if (existing !== undefined) {
+            // Never replaces an existing creator, and never rewrites the file.
+            return { creator_id: existing, already_bootstrapped: true };
+          }
+          const creatorId = generateLocalCreatorId();
+          doc['active_creator_id'] = creatorId;
+          ownedTableForWrite(doc, 'active_workspace_slug_by_creator', configPath)[creatorId] =
+            DEFAULT_WORKSPACE_SLUG;
+          await writeDocument(configPath, doc);
+          return { creator_id: creatorId, already_bootstrapped: false };
+        }),
+      );
     },
 
     async get_entrance() {
@@ -373,7 +512,7 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
       }
       await mutate(configGate, configPath, (doc) => {
         doc['entrance'] = value;
-      });
+      }, configLockPath);
       return null;
     },
 
@@ -386,7 +525,7 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
     async set_setup_completed({ value }) {
       await mutate(configGate, configPath, (doc) => {
         doc['setup_completed'] = value;
-      });
+      }, configLockPath);
       return null;
     },
 
