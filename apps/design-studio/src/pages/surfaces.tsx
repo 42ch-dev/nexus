@@ -861,7 +861,7 @@ export function SurfacesShellPage() {
         </FixtureBoundary>
       </section>
 
-      <section className="mt-10" data-testid="surfaces-sessions-rail" id="surfaces-sessions-rail">
+      <section className="mt-10" data-testid="surfaces-sessions-rail">
         <SurfaceHeading id="surfaces-sessions-rail">
           Sessions rail — session cards and the zero-session state
         </SurfaceHeading>
