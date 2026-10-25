@@ -30,7 +30,7 @@ export function SettingsSetupSectionChrome({
   'data-testid': dataTestId,
 }: SettingsSetupSectionChromeProps) {
   return (
-    <div className="flex flex-col gap-6" data-testid={dataTestId} id="setup">
+    <div className="flex flex-col gap-6" data-testid={dataTestId}>
       <div className="flex flex-col gap-2">
         <h3 className="text-heading-16 font-heading text-gray-1000">{title}</h3>
         <p className="text-copy-14 text-gray-900">{helper}</p>
