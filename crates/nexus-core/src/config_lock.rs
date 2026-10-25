@@ -72,15 +72,18 @@ fn lock_error(error: impl std::fmt::Display) -> CoreError {
 #[cfg(test)]
 thread_local! {
     /// Test-only fault injection: the lock file is created, but its ownership
-    /// token never reaches the disk.
-    static FAIL_TOKEN_WRITE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// token never reaches the disk. The optional action runs at that seam, so a
+    /// test can simulate a steal happening before the cleanup.
+    static FAIL_TOKEN_WRITE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 /// Write the holder's line into the freshly created lock file.
 fn write_token(file: &mut std::fs::File, token: &str) -> std::io::Result<()> {
     #[cfg(test)]
     {
-        if FAIL_TOKEN_WRITE.with(std::cell::Cell::get) {
+        if let Some(action) = FAIL_TOKEN_WRITE.with(|slot| slot.borrow_mut().take()) {
+            action();
             return Err(std::io::Error::other("injected token write failure"));
         }
     }
@@ -90,6 +93,40 @@ fn write_token(file: &mut std::fs::File, token: &str) -> std::io::Result<()> {
         std::process::id(),
         chrono::Utc::now().to_rfc3339()
     )
+}
+
+/// Identity of the lock file this holder created. The exclusive create and the
+/// cleanup after a failed token write are separated by an unbounded pause, so a
+/// paused holder must be able to tell its own file from a replacement created
+/// after another writer stole the lock. `same-file` compares the Unix
+/// device/inode pair and the Windows volume/file index — the latter is not
+/// available in `std` without the unstable `windows_by_handle` feature.
+type LockIdentity = same_file::Handle;
+
+/// Identity of an open file, or `None` when it cannot be read.
+fn lock_identity(file: &std::fs::File) -> Option<LockIdentity> {
+    LockIdentity::from_file(file.try_clone().ok()?).ok()
+}
+
+/// Remove the lock file this holder created after its token write failed, but
+/// only while the path still names that very file.
+///
+/// An unidentifiable file (`created` unreadable, or the path unreadable) is
+/// left in place: the stale steal bounds the cost of a leftover lock, while
+/// deleting a live writer's lock would admit a third writer.
+fn remove_unwritable_lock(path: &Path, created: Option<&LockIdentity>) {
+    let Some(current) = LockIdentity::from_path(path).ok() else {
+        // Already gone: nothing to clean up.
+        return;
+    };
+    if created != Some(&current) {
+        // Stolen while paused (or not identifiable): not this holder's to remove.
+        tracing::warn!("config.toml.lock is no longer this holder's; leaving it");
+        return;
+    }
+    if let Err(error) = std::fs::remove_file(path) {
+        tracing::warn!(%error, "cannot remove the unusable config.toml.lock");
+    }
 }
 
 /// Take the lock: exclusive create, stale steal, exponential backoff.
@@ -107,6 +144,11 @@ fn acquire(nexus_home: &Path) -> CoreResult<ConfigLock> {
             .open(&path)
         {
             Ok(mut file) => {
+                // The exclusive create is the lock; its identity is taken
+                // before the token write so a cleanup after a failed write can
+                // tell this file from a replacement (a pause longer than the
+                // stale window lets another writer steal the lock in between).
+                let created = lock_identity(&file);
                 // Diagnostics only (who/what/when); the age comes from the
                 // mtime. The trailing token is the ownership proof release
                 // checks before unlinking.
@@ -115,9 +157,7 @@ fn acquire(nexus_home: &Path) -> CoreResult<ConfigLock> {
                     // so the file would strand every writer until the stale
                     // steal. Remove it (closed first, unlinkable on Windows).
                     drop(file);
-                    if let Err(error) = std::fs::remove_file(&path) {
-                        tracing::warn!(%error, "cannot remove the unusable config.toml.lock");
-                    }
+                    remove_unwritable_lock(&path, created.as_ref());
                     return Err(lock_error(write_error));
                 }
                 return Ok(ConfigLock { path, token });
@@ -351,15 +391,48 @@ mod tests {
     fn a_token_that_cannot_be_written_fails_and_removes_the_lock() {
         let tmp = tempfile::tempdir().expect("temp home");
         let home = tmp.path().to_path_buf();
-        super::FAIL_TOKEN_WRITE.with(|flag| flag.set(true));
+        super::FAIL_TOKEN_WRITE.with(|slot| *slot.borrow_mut() = Some(Box::new(|| {})));
         let result = super::with_config_lock(&home, || Ok(()));
-        super::FAIL_TOKEN_WRITE.with(|flag| flag.set(false));
+        super::FAIL_TOKEN_WRITE.with(|slot| slot.borrow_mut().take());
 
         let error = result.expect_err("an unwritten ownership token is an error");
         assert!(matches!(error, crate::error::CoreError::Internal { .. }));
         assert!(
             !lock_path(&home).exists(),
             "the unusable lock must be removed, not left for the stale steal"
+        );
+    }
+
+    /// A holder paused past the stale window between its exclusive create and
+    /// the cleanup of a failed token write was stolen; the cleanup must not
+    /// delete the replacement, which would admit a third writer into the new
+    /// owner's read-modify-write.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_token_write_never_removes_a_replacement_lock() {
+        let tmp = tempfile::tempdir().expect("temp home");
+        let home = tmp.path().to_path_buf();
+        let lock = lock_path(&home);
+        super::FAIL_TOKEN_WRITE.with(|slot| {
+            let lock = lock.clone();
+            *slot.borrow_mut() = Some(Box::new(move || {
+                std::fs::remove_file(&lock).expect("steal the paused holder's lock");
+                std::fs::write(&lock, "999999 stolen\n").expect("the new owner's lock");
+            }));
+        });
+
+        let error = super::with_config_lock(&home, || Ok(()))
+            .expect_err("an unwritten ownership token is an error");
+        super::FAIL_TOKEN_WRITE.with(|slot| slot.borrow_mut().take());
+
+        assert!(matches!(error, crate::error::CoreError::Internal { .. }));
+        assert!(
+            lock.exists(),
+            "a paused holder must not remove the replacement lock"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&lock).expect("the replacement lock"),
+            "999999 stolen\n"
         );
     }
 

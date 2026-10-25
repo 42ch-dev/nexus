@@ -132,6 +132,8 @@ sha2 = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
+# File identity for config_lock's post-failure cleanup.
+same-file.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
