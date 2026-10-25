@@ -1,5 +1,5 @@
 import { ChevronRight, Ellipsis, type LucideIcon } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState, memo, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, memo, type ReactNode } from 'react';
 import { useLocation } from 'react-router';
 
 import { cn } from '@/lib/utils';
@@ -114,6 +114,8 @@ export function ShellSidebarChrome({
   const [submenuAnchor, setSubmenuAnchor] = useState<HTMLElement | null>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
   const { pathname } = useLocation();
+  // Instance-unique: several sidebar chromes render on one page in the Studio.
+  const modeTabIdBase = `${useId()}-shell-mode-tab`;
 
   const closeSubmenu = useCallback(() => {
     setSubmenuItem(null);
@@ -168,7 +170,7 @@ export function ShellSidebarChrome({
         <div
           className="flex flex-1 flex-col overflow-auto py-2"
           role="tabpanel"
-          aria-labelledby={activeTab}
+          aria-labelledby={`${modeTabIdBase}-${activeTab}`}
           data-testid="shell-sidebar-panel"
         >
           {panelContent}
@@ -177,7 +179,7 @@ export function ShellSidebarChrome({
         <ul
           className="flex flex-1 flex-col gap-4 overflow-auto py-1"
           role="tabpanel"
-          aria-labelledby={activeTab}
+          aria-labelledby={`${modeTabIdBase}-${activeTab}`}
         >
           {navGroups.map((group) => (
             <NavGroupChrome
@@ -208,13 +210,13 @@ export function ShellSidebarChrome({
           data-testid="shell-mode-switch"
         >
           <TabButton
-            id="creator"
+            id={`${modeTabIdBase}-creator`}
             label={creatorTabLabel}
             active={activeTab === 'creator'}
             onClick={() => onTabChange('creator')}
           />
           <TabButton
-            id="orchestrator"
+            id={`${modeTabIdBase}-orchestrator`}
             label={orchestratorTabLabel}
             active={activeTab === 'orchestrator'}
             onClick={() => onTabChange('orchestrator')}
@@ -248,7 +250,7 @@ function TabButton({
   active,
   onClick,
 }: {
-  id: ShellSidebarTab;
+  id: string;
   label: string;
   active: boolean;
   onClick: () => void;

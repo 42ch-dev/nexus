@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 
 import {
   Button,
@@ -91,6 +91,10 @@ export function ConnectDaemonFormChrome({
   'data-testid': dataTestId,
 }: ConnectDaemonFormChromeProps) {
   const [showKey, setShowKey] = useState(false);
+  // Instance-unique: the Studio renders this chrome several times per page.
+  const uid = useId();
+  const daemonUrlId = `${uid}-studio-daemon-url`;
+  const apiKeyId = `${uid}-studio-api-key`;
   const isLoopback = state === 'loopbackOnly';
   const isMismatch = state === 'fingerprintMismatch';
   const isFirstUse = state === 'firstUse';
@@ -115,9 +119,9 @@ export function ConnectDaemonFormChrome({
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="space-y-2">
-          <Label htmlFor="studio-daemon-url">Daemon URL</Label>
+          <Label htmlFor={daemonUrlId}>Daemon URL</Label>
           <Input
-            id="studio-daemon-url"
+            id={daemonUrlId}
             type="url"
             defaultValue={isFirstUse ? '' : daemonUrl}
             placeholder="https://192.168.1.42:8420"
@@ -129,9 +133,9 @@ export function ConnectDaemonFormChrome({
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="studio-api-key">API Key</Label>
+          <Label htmlFor={apiKeyId}>API Key</Label>
           <Input
-            id="studio-api-key"
+            id={apiKeyId}
             type={showKey ? 'text' : 'password'}
             defaultValue={isFirstUse ? '' : apiKey}
             placeholder="Enter the API key from the daemon machine"

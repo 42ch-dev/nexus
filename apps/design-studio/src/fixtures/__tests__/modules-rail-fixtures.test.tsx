@@ -90,8 +90,8 @@ describe('ModulesRailFixtures', () => {
     expect(within(frame).getByText('Select a module')).toBeInTheDocument();
     expect(within(frame).getByRole('heading', { name: 'Basic Combat' })).toBeInTheDocument();
     expect(within(frame).getByText('ABI version')).toBeInTheDocument();
-    // DetailField renders label + value in one div; scope the value to that row.
-    const abiField = within(frame).getByText('ABI version').closest('div') as HTMLElement;
+    // Row hook owned by DetailField — no dependency on its wrapper markup.
+    const abiField = within(frame).getByTestId('module-abi-version');
     expect(within(abiField).getByText('3')).toBeInTheDocument();
     expect(within(frame).getByText('Host functions')).toBeInTheDocument();
     expect(within(frame).getByText('Schemas')).toBeInTheDocument();

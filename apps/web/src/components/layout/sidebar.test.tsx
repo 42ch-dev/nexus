@@ -145,7 +145,10 @@ describe('Sidebar', () => {
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
     expect(screen.getByRole('tablist', { name: 'Primary navigation' })).toBeInTheDocument();
-    expect(screen.getByTestId('shell-sidebar-panel')).toHaveAttribute('aria-labelledby', 'creator');
+    expect(screen.getByTestId('shell-sidebar-panel')).toHaveAttribute(
+      'aria-labelledby',
+      screen.getByRole('tab', { name: 'Creator' }).id,
+    );
   });
 
   it('mounts the 工作区 footer profile switcher on both Creator and Orchestrator (V1.132 P3 AC-6)', async () => {

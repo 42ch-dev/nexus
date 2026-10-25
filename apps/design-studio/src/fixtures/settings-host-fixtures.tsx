@@ -19,7 +19,7 @@
  * `activeDisplayName`).
  */
 
-import { useState, type ReactNode } from 'react';
+import { useId, useState, type ReactNode } from 'react';
 
 import {
   Bot,
@@ -444,6 +444,7 @@ function SettingsWorkspaceSectionChrome({
   saved?: boolean;
   path?: string;
 }) {
+  const workspacePathId = `${useId()}-studio-workspace-path`;
   return (
     <div
       className="flex flex-col gap-6"
@@ -467,7 +468,7 @@ function SettingsWorkspaceSectionChrome({
         </CardHeader>
         <CardContent className="space-y-6">
           <WorkspacePathField
-            id="studio-workspace-path"
+            id={workspacePathId}
             path={path}
             desktopAvailable={desktopAvailable}
             onChangeClick={() => {}}
