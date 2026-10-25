@@ -210,6 +210,7 @@ impl CliConfig {
             Ok(config) => Ok(config),
             Err(error) => {
                 // Backup corrupted file and re-initialize with defaults
+                // Reader-side exposure: unlocked reads plus non-atomic writes mean this parse failure can be stale, and the rename below can move a file another writer just committed — the lock never excludes readers.
                 tracing::warn!("Config file corrupted, backing up and re-initializing: {error}");
                 let bak = config_path.with_extension("toml.bak");
                 if let Err(rename_error) = std::fs::rename(&config_path, &bak) {

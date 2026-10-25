@@ -16,8 +16,10 @@ use std::time::{Duration, SystemTime};
 use crate::error::{CoreError, CoreResult};
 
 const LOCK_FILE: &str = "config.toml.lock";
-/// A normal hold is milliseconds (a small TOML document, at most two fsyncs);
-/// a holder this old has crashed by construction.
+/// A normal hold is milliseconds (a small TOML document, at most two fsyncs).
+/// Ten seconds is a stale heuristic, not proof of death: a paused or suspended
+/// live holder can look stale, and stealing can transiently leave two holders.
+/// Safe only because all four writers are user-paced — nothing enforces that.
 const STALE_AFTER: Duration = Duration::from_secs(10);
 const BACKOFF_START: Duration = Duration::from_millis(25);
 const BACKOFF_CAP: Duration = Duration::from_millis(500);
@@ -69,8 +71,10 @@ fn acquire(nexus_home: &Path) -> CoreResult<ConfigLock> {
                     // Released between the create and the stat: retry at once.
                     None => continue,
                     Some(age) if age > STALE_AFTER => {
-                        // Racy by design: a live successor's fresh lock simply
-                        // wins the next exclusive create; a crashed holder heals.
+                        // Stale age is a heuristic: two reclaimers can both
+                        // unlink and create, leaving two live holders, and a
+                        // live slow holder can lose its lock here. Accepted only
+                        // because all four writers are user-paced.
                         let _ = std::fs::remove_file(&path);
                         backoff = BACKOFF_START;
                     }
@@ -153,8 +157,8 @@ mod tests {
         assert!(config_path(&home).exists());
     }
 
-    /// A holder older than 10 s is crashed by construction, so the next writer
-    /// steals the lock instead of blocking behind a dead process.
+    /// A lock older than 10 s is treated as stale, so the next writer steals it
+    /// instead of blocking behind a presumed-dead holder.
     #[test]
     fn a_stale_lock_is_stolen() {
         let tmp = tempfile::tempdir().expect("temp home");

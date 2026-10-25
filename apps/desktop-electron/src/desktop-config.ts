@@ -70,7 +70,9 @@ const LOCK_BACKOFF_CAP_MS = 500;
 
 /**
  * Run one config read-modify-write while holding `lockPath`. A normal hold is
- * milliseconds; a holder older than `LOCK_STALE_MS` has crashed and is stolen.
+ * milliseconds; `LOCK_STALE_MS` is a stale heuristic, not proof of a crash — a
+ * paused live holder can look stale, and stealing can transiently yield two
+ * holders. Safe only while all four writers stay user-paced.
  */
 async function withConfigLock<T>(lockPath: string, run: () => Promise<T>): Promise<T> {
   await mkdir(dirname(lockPath), { recursive: true });
@@ -104,8 +106,9 @@ async function withConfigLock<T>(lockPath: string, run: () => Promise<T>): Promi
         () => undefined, // Released between the create and the stat: retry now.
       );
       if (ageMs !== undefined && ageMs > LOCK_STALE_MS) {
-        // Racy by design: a live successor's fresh lock simply wins the next
-        // exclusive create; a crashed holder is healed.
+        // Stale age is a heuristic: two reclaimers can both unlink and create,
+        // leaving two live holders, and a live slow holder can lose its lock.
+        // Accepted only because all four writers are user-paced.
         await rm(lockPath, { force: true }).catch(() => undefined);
         backoff = LOCK_BACKOFF_INITIAL_MS;
       } else if (ageMs !== undefined) {
