@@ -270,6 +270,7 @@ globalThis.fetch = (input, init) => {
  */
 const writeStubSource = (mode) => `import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
+import { basename } from 'node:path';
 
 const mode = '${mode}';
 const trace = [];
@@ -289,7 +290,7 @@ fs.openSync = (path, flag, flags) => {
 fs.writeSync = (fd, data, ...rest) => {
   const path = openPaths.get(fd) ?? null;
   const text = String(data);
-  if (path === null || !path.endsWith('/spent')) return writeSync(fd, data, ...rest);
+  if (path === null || basename(path) !== 'spent') return writeSync(fd, data, ...rest);
   const first = !started.has(path);
   started.add(path);
   let wrote = 0;
@@ -759,7 +760,7 @@ test(
         attemptDir,
         allowedUrl: endpoint.url,
         dshRealpath: ENTRY_PATH,
-        spec: singleSpec(endpoint.url),
+        spec: { ...singleSpec(endpoint.url), mode: 'sequence' },
         preloads: [STUCK_WRITE_PATH, GUARD_PATH],
       });
       assertChildRan(child, 'stuck-write');
@@ -774,10 +775,15 @@ test(
       assert.equal(endpoint.requests.length, 0);
       assert.equal(existsSync(join(attemptDir, 'spent')), true);
       assert.equal(statSync(join(attemptDir, 'spent')).size, 0);
+      // The truncated token is still a spent slot: a second guarded call in the
+      // same child is denied, so a zero-byte `spent` can never reach ALLOW.
+      assert.equal(child.result.attempts[1].error?.code, 'attempt_already_spent');
       const events = summarize(readEvents(attemptDir));
       assert.equal(events.admitted.length, 0);
-      assert.equal(events.denied.length, 1);
-      assert.equal(events.denied[0].category, 'filesystem_error');
+      assert.deepEqual(
+        events.denied.map((event) => event.category).sort(),
+        ['attempt_already_spent', 'filesystem_error'],
+      );
     });
   },
 );

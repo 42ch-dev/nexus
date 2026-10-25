@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { before, describe, test } from 'node:test';
@@ -28,10 +28,13 @@ const ABSENT = Symbol('absent');
 
 before(async () => {
   // The package `test` script builds once before `node --test`; a build here
-  // would race the sibling suites rewriting the same `dist`.
+  // would race the sibling suites rewriting the same `dist`. A stale or empty
+  // `dist` fails here with the build hint, not as a misleading import error.
   assert.ok(
-    existsSync(join(serviceRoot, 'dist', 'provider.js')),
-    'dist/provider.js is missing — run `pnpm --filter @42ch/nexus-service run test` (or `… run build`) first',
+    readFileSync(join(serviceRoot, 'dist', 'provider.js'), 'utf8').includes(
+      'ageSettledActorOperations',
+    ),
+    'dist/provider.js is missing or stale — run `pnpm --filter @42ch/nexus-service run test` (or `… run build`) first',
   );
   provider = await import(join(serviceRoot, 'dist/provider.js'));
   registryModule = await import(join(serviceRoot, 'dist/provider-registry.js'));
