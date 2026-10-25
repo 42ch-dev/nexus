@@ -10,6 +10,7 @@ mod chronology;
 // `connect-host` is the Connect-host product cohort (WS accept loop +
 // peer-tools event lane, no rmcp); `connect-client` is the superset
 // (connect-host + the rmcp reverse-invoke bridge). Either exposes the module.
+mod config_lock;
 #[cfg(any(feature = "connect-client", feature = "connect-host"))]
 pub mod connect;
 mod content;
@@ -71,6 +72,7 @@ pub use actors::{
     CoreActorAdmission, CHARACTER_WIRE_INVALID_PREFIX,
 };
 pub use chronology::CoreWorkChronology;
+pub use config_lock::with_config_lock;
 pub use content::{resolve_guarded_path, resolve_guarded_path_async, CoreChapterContentQuery};
 pub use context::{LocalDirectiveStore, ReadOnlyDirectiveStore};
 pub use creators::CREATOR_INTERNAL_CODES;

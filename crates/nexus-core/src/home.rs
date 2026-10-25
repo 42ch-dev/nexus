@@ -30,6 +30,7 @@ use nexus_home_layout::{
 };
 use nexus_local_db::open_pool_read_only;
 
+use crate::config_lock::with_config_lock;
 use crate::error::{local_db_err, CoreError, CoreResult};
 
 /// Maximum length for a creator display name — parity with the CLI identity
@@ -1061,58 +1062,62 @@ pub fn read_workspace_display_name(creative_root: &Path) -> Option<String> {
 
 /// Write the active `creator_id` — and, when `workspace_slug` is `Some`, the
 /// per-creator active workspace slug — to `config.toml`, preserving every
-/// other key (ported from the daemon `write_active_selection`).
+/// other key (ported from the daemon `write_active_selection`). The whole
+/// read-modify-write holds the daemon-home `config.toml` advisory lock.
 pub fn write_active_selection(
     nexus_home: &Path,
     creator_id: &str,
     workspace_slug: Option<&str>,
 ) -> CoreResult<()> {
-    let config_path = nexus_home.join("config.toml");
+    with_config_lock(nexus_home, || {
+        let config_path = nexus_home.join("config.toml");
 
-    let mut config: toml::Table = if config_path.exists() {
-        let content = std::fs::read_to_string(&config_path).map_err(|e| CoreError::Internal {
-            category: format!("config_read: {e}"),
-        })?;
-        if content.trim().is_empty() {
-            toml::Table::new()
+        let mut config: toml::Table = if config_path.exists() {
+            let content =
+                std::fs::read_to_string(&config_path).map_err(|e| CoreError::Internal {
+                    category: format!("config_read: {e}"),
+                })?;
+            if content.trim().is_empty() {
+                toml::Table::new()
+            } else {
+                content.parse().map_err(|e| CoreError::Internal {
+                    category: format!("config_parse: {e}"),
+                })?
+            }
         } else {
-            content.parse().map_err(|e| CoreError::Internal {
-                category: format!("config_parse: {e}"),
-            })?
-        }
-    } else {
-        toml::Table::new()
-    };
-
-    config.insert(
-        "active_creator_id".to_string(),
-        toml::Value::String(creator_id.to_string()),
-    );
-
-    if let Some(workspace_slug) = workspace_slug {
-        let Some(slug_table) = config
-            .entry("active_workspace_slug_by_creator")
-            .or_insert_with(|| toml::Value::Table(toml::Table::new()))
-            .as_table_mut()
-        else {
-            return Err(CoreError::Internal {
-                category: "config: active_workspace_slug_by_creator is not a table".to_string(),
-            });
+            toml::Table::new()
         };
-        slug_table.insert(
-            creator_id.to_string(),
-            toml::Value::String(workspace_slug.to_string()),
+
+        config.insert(
+            "active_creator_id".to_string(),
+            toml::Value::String(creator_id.to_string()),
         );
-    }
 
-    let toml_str = toml::to_string_pretty(&config).map_err(|e| CoreError::Internal {
-        category: format!("config_serialize: {e}"),
-    })?;
-    std::fs::write(&config_path, toml_str).map_err(|e| CoreError::Internal {
-        category: format!("config_write: {e}"),
-    })?;
+        if let Some(workspace_slug) = workspace_slug {
+            let Some(slug_table) = config
+                .entry("active_workspace_slug_by_creator")
+                .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+                .as_table_mut()
+            else {
+                return Err(CoreError::Internal {
+                    category: "config: active_workspace_slug_by_creator is not a table".to_string(),
+                });
+            };
+            slug_table.insert(
+                creator_id.to_string(),
+                toml::Value::String(workspace_slug.to_string()),
+            );
+        }
 
-    Ok(())
+        let toml_str = toml::to_string_pretty(&config).map_err(|e| CoreError::Internal {
+            category: format!("config_serialize: {e}"),
+        })?;
+        std::fs::write(&config_path, toml_str).map_err(|e| CoreError::Internal {
+            category: format!("config_write: {e}"),
+        })?;
+
+        Ok(())
+    })
 }
 
 /// Build a generated string newtype from a plain `str`; the generated

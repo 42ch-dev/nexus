@@ -259,11 +259,22 @@ impl CliConfig {
     /// - File write operation fails
     pub fn save(&self) -> anyhow::Result<()> {
         let config_path = Self::config_path()?;
-        if let Some(parent) = config_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
+        let nexus_home = config_path
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("config.toml path has no parent directory"))?
+            .to_path_buf();
         let content = toml::to_string_pretty(self)?;
-        std::fs::write(&config_path, content)?;
+        // I-000065: the CLI is one of the daemon-home `config.toml` writers, so
+        // it holds the same `<daemon home>/config.toml.lock` advisory lock the
+        // core, the service and the desktop main use for their whole
+        // read-modify-write.
+        nexus_core::with_config_lock(&nexus_home, || {
+            std::fs::write(&config_path, &content).map_err(|error| {
+                nexus_core::CoreError::Internal {
+                    category: format!("config_write: {error}"),
+                }
+            })
+        })?;
         Ok(())
     }
 
@@ -1038,5 +1049,46 @@ platform_url = "https://direct.api.io"
         let loaded: CliConfig = toml::from_str(&content).expect("parse config.toml");
         assert_eq!(loaded.active_creator_id.as_deref(), Some("ctr_save_test"));
         assert_eq!(loaded.platform_url, "https://save.test.io");
+    }
+
+    /// I-000065: the CLI is the fourth daemon-home `config.toml` writer, so it
+    /// takes the same `config.toml.lock` protocol as the core/service/desktop.
+    #[test]
+    fn save_waits_for_a_foreign_holder_of_the_config_lock() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let _home = crate::testutil::isolated_home();
+        let nexus_dir = std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default()
+            .join(".nexus42");
+        std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
+        let lock_path = nexus_dir.join("config.toml.lock");
+        // A foreign process holds the lock: created out of band, never through
+        // this writer's helper.
+        std::fs::write(&lock_path, "foreign holder\n").expect("foreign lock");
+
+        let done = Arc::new(AtomicBool::new(false));
+        let saver = {
+            let done = Arc::clone(&done);
+            std::thread::spawn(move || {
+                CliConfig::default().save().expect("save");
+                done.store(true, Ordering::SeqCst);
+            })
+        };
+
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            !done.load(Ordering::SeqCst),
+            "Config::save must wait for config.toml.lock"
+        );
+
+        std::fs::remove_file(&lock_path).expect("release foreign lock");
+        saver.join().expect("saver thread");
+        assert!(done.load(Ordering::SeqCst));
+        assert!(nexus_dir.join("config.toml").exists());
+        assert!(!lock_path.exists(), "the writer released its own lock");
     }
 }
