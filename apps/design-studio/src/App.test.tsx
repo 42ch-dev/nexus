@@ -860,6 +860,9 @@ describe('Surfaces page — inspiration pool fixture', () => {
       level: 3,
     });
     expect(surfaceHeading).toHaveAttribute('id', 'surfaces-inspiration-pool');
+    // The heading is the only holder: a section id of the same value would win
+    // the hash lookup as the earlier node.
+    expect(document.querySelectorAll('#surfaces-inspiration-pool')).toHaveLength(1);
     expect(
       within(fixtures)
         .getAllByTestId('inspiration-pool-row')

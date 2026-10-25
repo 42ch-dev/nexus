@@ -279,15 +279,35 @@ pub(crate) mod test_support {
     #[cfg(windows)]
     static SHIM_DIR: std::sync::LazyLock<std::path::PathBuf> = std::sync::LazyLock::new(|| {
         let dir = std::env::temp_dir().join("nexus-agent-host-fixture-shims");
-        sweep_shims(&dir);
+        if let Some(diagnostic) = sweep_shims(&dir) {
+            tracing::warn!("{diagnostic}");
+        }
         dir
     });
 
-    /// Remove a shim directory. Never panics and never locks; a missing
-    /// directory is fine.
+    /// Remove a shim directory, returning one diagnostic line when the
+    /// removal failed for any reason other than the directory being absent.
+    ///
+    /// Never panics and never locks. The failure is returned rather than
+    /// printed here so it can be pinned by a test: a stale `.cmd` wrapper
+    /// surviving at a reused path would otherwise be spawned by a later
+    /// `fixture_launch` while the sweep looked clean. `remove_dir_all` reports
+    /// the first entry it could not delete.
     #[cfg(windows)]
-    fn sweep_shims(dir: &std::path::Path) {
-        let _ = std::fs::remove_dir_all(dir);
+    fn sweep_shims(dir: &std::path::Path) -> Option<String> {
+        sweep_diagnostic(dir, std::fs::remove_dir_all(dir))
+    }
+
+    #[cfg(windows)]
+    fn sweep_diagnostic(dir: &std::path::Path, removed: std::io::Result<()>) -> Option<String> {
+        match removed {
+            Ok(()) => None,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => Some(format!(
+                "fixture shim sweep failed for {}: {error}",
+                dir.display()
+            )),
+        }
     }
 
     /// Write the `.cmd` wrapper for `fixture` into `shim_dir`, creating the
@@ -381,9 +401,37 @@ pub(crate) mod test_support {
         let shims = private.path().join("shims");
         let shim = write_shim(&shims, std::path::Path::new(fixture));
         assert!(shim.is_file(), "shim not written: {}", shim.display());
-        sweep_shims(&shims);
+        assert!(
+            sweep_shims(&shims).is_none(),
+            "a removable shim dir must not report a sweep failure"
+        );
         assert!(!shims.exists(), "sweep left the shim dir behind");
         let shim = write_shim(&shims, std::path::Path::new(fixture));
         assert!(shim.is_file(), "write did not recreate: {}", shim.display());
+    }
+
+    /// Pins that a failed sweep is reported instead of swallowed: an
+    /// undeletable entry (simulated as a permission error, e.g. a wrapper
+    /// another process still holds open) yields one diagnostic line naming
+    /// the directory, while an absent directory stays silent.
+    #[cfg(windows)]
+    #[test]
+    fn sweep_reports_removal_failure() {
+        let dir = std::path::Path::new(r"C:\Temp\nexus-agent-host-fixture-shims");
+        let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        let diagnostic = sweep_diagnostic(dir, Err(denied)).expect("failure must be reported");
+        assert!(
+            diagnostic.contains(&dir.display().to_string()),
+            "diagnostic omits the shim dir: {diagnostic}"
+        );
+        assert!(
+            diagnostic.contains("denied"),
+            "diagnostic omits the cause: {diagnostic}"
+        );
+        assert!(
+            sweep_diagnostic(dir, Err(std::io::ErrorKind::NotFound.into())).is_none(),
+            "an absent shim dir is a clean sweep"
+        );
+        assert!(sweep_diagnostic(dir, Ok(())).is_none());
     }
 }

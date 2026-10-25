@@ -47,10 +47,14 @@ package.json):
   its own key.
 - A forced major (e.g. `postcss-selector-parser` 6→7 under Tailwind 3's `^6.1.2`) may be
   attempted under the D6-style gate, but first prove whether the override is even
-  **loaded by the shipped graph**: a leaf peer with no lock dependents (Tailwind 3 was
-  auto-installed with zero dependents) makes the override inert — a standalone compile of
-  the real consumer against the new major is then the honest evidence, not the app test
-  suites (v1.223 QC found the app gates could not observe it).
+  **loaded by the runtime app graph**. The edge is real in the lockfile —
+  `tailwindcss@3.4.19` and `postcss-nested@6.2.0` both depend on
+  `postcss-selector-parser@7.1.7`, and `tooling/design-tokens` depends on
+  `tailwindcss@3.4.19` — but every one of those edges is tooling-time (no app or runtime
+  gate loads `postcss-selector-parser` 7.1.7; apps resolve Tailwind 4, which has no
+  dependency edges), so the override is inert for the shipped app. A standalone compile
+  of the real consumer against the new major is then the honest evidence, not the app
+  test suites (v1.223 QC found the app gates could not observe it).
 
 **Gate discipline** (per override, all must be green or the line rolls back):
 
