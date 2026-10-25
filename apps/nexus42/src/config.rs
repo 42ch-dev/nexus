@@ -250,7 +250,6 @@ impl CliConfig {
                 std::fs::write(&config_path, toml::to_string_pretty(&config)?)?;
                 std::fs::rename(&json_path, nexus.join("config.json.migrated"))?;
                 tracing::info!("Migrated config.json → config.toml");
-                Ok(())
             }
             Err(error) => {
                 tracing::warn!(
@@ -260,9 +259,9 @@ impl CliConfig {
                 if let Err(rename_error) = std::fs::rename(&json_path, &bak) {
                     tracing::error!("Failed to backup corrupted config: {rename_error}");
                 }
-                Ok(())
             }
         }
+        Ok(())
     }
 
     /// Run `run` while holding the daemon-home `config.toml` writer lock.

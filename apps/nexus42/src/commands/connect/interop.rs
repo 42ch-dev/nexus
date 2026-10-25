@@ -5148,6 +5148,8 @@ fn assert_effect_committed_refusal(
 /// 4. a retry of the same operation id is answered `uncertain` (no terminal
 ///    receipt, no in-process owner) and never re-applied: the stored entry is
 ///    still exactly the one row the first call wrote.
+// The four-item §B.3 contract reads as one linear scenario; splitting it hides the cause.
+#[allow(clippy::too_many_lines)]
 #[tokio::test(flavor = "multi_thread")]
 async fn connect_live_write_settlement_fault_answers_the_committed_effect_refusal() {
     const WORLD: &str = "wld_settle_fault";
