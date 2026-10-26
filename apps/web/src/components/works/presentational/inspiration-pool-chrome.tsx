@@ -12,7 +12,7 @@
  * status renders verbatim with no actions. There is no `set_default` control —
  * promotion always activates the new pool entry server-side.
  */
-import { useId, type ReactNode } from 'react';
+import { useId, type ReactElement, type ReactNode } from 'react';
 import { ArrowUpRight, Lightbulb } from 'lucide-react';
 
 import { statusVariant } from '@/lib/status-variant';
@@ -94,8 +94,12 @@ export interface InspirationPoolChromeProps {
   archivingItemId?: string | null;
   onPromote?: (row: InspirationPoolRow) => void;
   onArchive?: (row: InspirationPoolRow) => void;
-  /** Host-owned Work link — the App injects a router `Link`. */
-  renderWorkLink?: (args: InspirationPoolWorkLinkArgs) => ReactNode;
+  /**
+   * Host-owned Work link — the App injects a router `Link`. Must return a
+   * single element (or null): the result is rendered inside `<Button
+   * asChild>` (Radix Slot), which throws on fragments/multi-element output.
+   */
+  renderWorkLink?: (args: InspirationPoolWorkLinkArgs) => ReactElement | null;
   'data-testid'?: string;
 }
 
@@ -121,7 +125,7 @@ function InspirationPoolRowItem({
   archiving: boolean;
   onPromote?: (row: InspirationPoolRow) => void;
   onArchive?: (row: InspirationPoolRow) => void;
-  renderWorkLink?: (args: InspirationPoolWorkLinkArgs) => ReactNode;
+  renderWorkLink?: (args: InspirationPoolWorkLinkArgs) => ReactElement | null;
 }) {
   const canPromote = row.status === 'idea';
   const canArchive = row.status === 'idea' || row.status === 'promoted';

@@ -109,7 +109,7 @@ describe('config.toml advisory lock (I-000065)', () => {
     // directory, so its relative imports resolve) and assert the invariant
     // that matters: no lock file left behind for the next writer to wait out.
     const source = readFileSync(join(serviceRoot, 'dist/agent-profile.js'), 'utf8');
-    const marker = 'await lock.writeFile(`${process.pid} ${new Date().toISOString()} ${token}\\n`);';
+    const marker = 'await lock.writeFile(`${token}\\n`);';
     assert.ok(
       source.includes(marker),
       'the diagnostics-write marker must exist in dist/agent-profile.js',
@@ -224,6 +224,54 @@ describe('config.toml advisory lock (I-000065)', () => {
         true,
         "a stolen holder must not unlink the new owner's lock",
       );
+    } finally {
+      rmSync(copyPath, { force: true });
+    }
+  });
+
+  /**
+   * QC1-002 (I-000105, contract §2): the whole line is the token. A foreign
+   * lock that merely ends with our token line — a prefix was prepended — must
+   * never be unlinked; only byte equality proves this holder still owns it.
+   */
+  test('a release never unlinks a lock that only ends with our token', async () => {
+    const source = readFileSync(join(serviceRoot, 'dist/agent-profile.js'), 'utf8');
+    // Fault injection (same idiom as the stolen-holder test): stall the holder
+    // inside its read-modify-write so the lock can be rewritten underneath it.
+    const marker = 'await writeConfigDocument(home, document);';
+    assert.ok(source.includes(marker), 'the write marker must exist in dist/agent-profile.js');
+    const copyPath = join(serviceRoot, 'dist', `__rewritten-agent-profile-${process.pid}.mjs`);
+    writeFileSync(
+      copyPath,
+      source.replace(
+        marker,
+        `await new Promise((resolve) => setTimeout(resolve, 250)); ${marker}`,
+      ),
+      'utf8',
+    );
+    try {
+      const { writeAgentProfile: slowWrite } = await import(pathToFileURL(copyPath).href);
+      const home = seededHome();
+      const pending = slowWrite(home, { name: 'codex-cli' });
+
+      // Capture the held token line, then prepend a foreign marker: the result
+      // still ends with our token, so a suffix compare would unlink it.
+      const lockDeadline = Date.now() + 2000;
+      let held = '';
+      while (!held.endsWith('\n')) {
+        assert.ok(
+          Date.now() < lockDeadline,
+          'the slow writer must write config.toml.lock within 2000 ms',
+        );
+        held = existsSync(lockPathFor(home)) ? readFileSync(lockPathFor(home), 'utf8') : '';
+        if (!held.endsWith('\n')) await sleep(5);
+      }
+      const rewritten = `foreign-prefix ${held}`;
+      writeFileSync(lockPathFor(home), rewritten, 'utf8');
+
+      await withDeadline(pending, 5000, 'the slow write');
+      assert.equal(existsSync(lockPathFor(home)), true, 'a foreign lock must never be unlinked');
+      assert.equal(readFileSync(lockPathFor(home), 'utf8'), rewritten);
     } finally {
       rmSync(copyPath, { force: true });
     }

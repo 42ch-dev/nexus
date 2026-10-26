@@ -151,7 +151,13 @@ export function ShellSidebarChrome({
       {/* V1.130: tab switch moved to footer (功能区 footer) */}
 
       {drillInItems ? (
-        <ul className="flex flex-1 flex-col gap-0.5 overflow-auto py-1">
+        <ul
+          className="flex flex-1 flex-col gap-0.5 overflow-auto py-1"
+          role="tabpanel"
+          id={`${modeTabIdBase}-panel`}
+          aria-labelledby={`${modeTabIdBase}-${activeTab}`}
+          data-testid="shell-sidebar-panel"
+        >
           {drillInItems.map((item) => (
             <NavItemLi
               key={item.to}
@@ -170,6 +176,7 @@ export function ShellSidebarChrome({
         <div
           className="flex flex-1 flex-col overflow-auto py-2"
           role="tabpanel"
+          id={`${modeTabIdBase}-panel`}
           aria-labelledby={`${modeTabIdBase}-${activeTab}`}
           data-testid="shell-sidebar-panel"
         >
@@ -179,6 +186,7 @@ export function ShellSidebarChrome({
         <ul
           className="flex flex-1 flex-col gap-4 overflow-auto py-1"
           role="tabpanel"
+          id={`${modeTabIdBase}-panel`}
           aria-labelledby={`${modeTabIdBase}-${activeTab}`}
         >
           {navGroups.map((group) => (
@@ -211,12 +219,14 @@ export function ShellSidebarChrome({
         >
           <TabButton
             id={`${modeTabIdBase}-creator`}
+            panelId={`${modeTabIdBase}-panel`}
             label={creatorTabLabel}
             active={activeTab === 'creator'}
             onClick={() => onTabChange('creator')}
           />
           <TabButton
             id={`${modeTabIdBase}-orchestrator`}
+            panelId={`${modeTabIdBase}-panel`}
             label={orchestratorTabLabel}
             active={activeTab === 'orchestrator'}
             onClick={() => onTabChange('orchestrator')}
@@ -246,11 +256,13 @@ function defaultRenderNavItem(
 
 function TabButton({
   id,
+  panelId,
   label,
   active,
   onClick,
 }: {
   id: string;
+  panelId: string;
   label: string;
   active: boolean;
   onClick: () => void;
@@ -261,6 +273,7 @@ function TabButton({
       id={id}
       role="tab"
       aria-selected={active}
+      aria-controls={panelId}
       onClick={onClick}
       className={cn(
         'rounded-control px-2 py-1.5 text-button-14 font-button transition-colors duration-state ease-standard motion-reduce:transition-none',

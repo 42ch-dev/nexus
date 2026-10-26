@@ -84,14 +84,22 @@ const sleepFor = (ms: number): Promise<void> => {
  * Release the lock, but only while this holder still owns it: a holder stalled
  * past the stale window is stolen, and unlinking on resume would delete the new
  * owner's lock and admit a third writer into the second's read-modify-write.
+ * The whole line is the token, so the compare is byte-for-byte: a file that
+ * merely contains or ends with our token belongs to another writer.
  */
 async function releaseConfigLock(lockPath: string, token: string): Promise<void> {
   try {
     const contents = await readFile(lockPath, 'utf8');
-    if (!contents.trimEnd().endsWith(token)) {
+    // Strip the single trailing newline acquire writes; the remaining line is
+    // the ownership proof, compared whole rather than by a token suffix.
+    if (contents.replace(/\n$/, '') !== token) {
       console.error(`[nexus-desktop] ${lockPath} was stolen; leaving the new owner's lock`);
       return;
     }
+    // Residual TOCTOU (accepted, contract §2): the compare above and this
+    // unlink are not atomic, so a stale-steal interleaving can delete a new
+    // owner's lock. Atomizing (rename-then-verify) is deferred while every
+    // writer stays user-paced.
     await rm(lockPath, { force: true });
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
@@ -107,9 +115,10 @@ async function releaseConfigLock(lockPath: string, token: string): Promise<void>
  */
 async function withConfigLock<T>(lockPath: string, run: () => Promise<T>): Promise<T> {
   await mkdir(dirname(lockPath), { recursive: true });
-  // Ownership token written into the lock file: release compares it before
-  // unlinking, so a stolen holder cannot delete the new owner's lock.
-  const token = randomUUID();
+  // Ownership token line written into the lock file: release compares the
+  // whole line before unlinking, so a stolen holder cannot delete the new
+  // owner's lock.
+  const token = `${process.pid} ${new Date().toISOString()} ${randomUUID()}`;
   let backoff = LOCK_BACKOFF_INITIAL_MS;
   let stealDeadlineMs: number | undefined;
   let unlinkErrorLogged = false;
@@ -118,8 +127,9 @@ async function withConfigLock<T>(lockPath: string, run: () => Promise<T>): Promi
     try {
       const lock = await open(lockPath, 'wx', 0o600);
       try {
-        // Diagnostics only; the age of a held lock comes from its mtime.
-        await lock.writeFile(`${process.pid} ${new Date().toISOString()} ${token}\n`);
+        // Diagnostics only; the age of a held lock comes from its mtime, and
+        // the whole line is the ownership proof release compares.
+        await lock.writeFile(`${token}\n`);
       } catch (err) {
         // The create succeeded, so this attempt owns the file: release it
         // before failing, or the next writer stalls until the stale steal.

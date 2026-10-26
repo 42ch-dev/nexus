@@ -23,7 +23,8 @@
  *     slot is a file named `spent` inside the attempt directory, taken with a
  *     filesystem exclusive create (`wx`) BEFORE the original fetch is called;
  *     that is atomic across processes and made durable (the token, then its
- *     directory entry on POSIX) before the admission is acknowledged, is
+ *     directory entry and the parent's entry for it on POSIX) before the
+ *     admission is acknowledged, is
  *     consumed even when DNS/TLS/HTTP fails, is never reset by the guard (no
  *     unlink, no recreate, no reset path) and therefore survives a crash, a
  *     restart and a second launch.
@@ -556,15 +557,24 @@ function spend(state) {
     } finally {
       fd = null;
     }
-    // The file is durable only once its directory entry is synced as well.
-    // POSIX only: Windows cannot open a directory as a file (EPERM/EISDIR), and
-    // the failure would land AFTER the slot is spent.
+    // The file is durable only once its directory entry is synced as well, and
+    // that directory is durable only once ITS entry in the parent is synced: a
+    // power loss right after creation can otherwise erase a fresh attempt
+    // directory and the spent slot with it (I-000120). POSIX only: Windows
+    // cannot open a directory as a file (EPERM/EISDIR), and the failure would
+    // land AFTER the slot is spent.
     if (process.platform !== 'win32') {
       const dirFd = openSync(state.attemptDir, 'r');
       try {
         fsyncSync(dirFd);
       } finally {
         closeSync(dirFd);
+      }
+      const parentFd = openSync(dirname(state.attemptDir), 'r');
+      try {
+        fsyncSync(parentFd);
+      } finally {
+        closeSync(parentFd);
       }
     }
     return null;

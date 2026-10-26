@@ -5,6 +5,8 @@ import userEvent from '@testing-library/user-event';
 import { Route, Routes, useLocation } from 'react-router';
 
 import { Sidebar } from './sidebar';
+import { ShellSidebarChrome } from './presentational/shell-sidebar-chrome';
+import { ChevronRight } from 'lucide-react';
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import { worksList } from '@/test/handlers';
@@ -145,10 +147,38 @@ describe('Sidebar', () => {
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
     expect(screen.getByRole('tablist', { name: 'Primary navigation' })).toBeInTheDocument();
+    const creatorTab = screen.getByRole('tab', { name: 'Creator' });
     expect(screen.getByTestId('shell-sidebar-panel')).toHaveAttribute(
       'aria-labelledby',
-      screen.getByRole('tab', { name: 'Creator' }).id,
+      creatorTab.id,
     );
+    expect(creatorTab).toHaveAttribute(
+      'aria-controls',
+      screen.getByTestId('shell-sidebar-panel').id,
+    );
+    expect(screen.getByRole('tab', { name: 'Orchestrator' })).toHaveAttribute(
+      'aria-controls',
+      screen.getByTestId('shell-sidebar-panel').id,
+    );
+  });
+
+  it('keeps tab aria-controls pointing at the mounted panel in the drill-in branch', () => {
+    renderInApp(
+      <ShellSidebarChrome
+        activeTab="creator"
+        activeRoute="/drill"
+        navGroups={[]}
+        drillInItems={[{ to: '/drill', label: 'Drill', icon: ChevronRight }]}
+        onTabChange={() => {}}
+      />,
+      { client: makeClient() },
+    );
+
+    const panel = screen.getByTestId('shell-sidebar-panel');
+    expect(panel).toHaveAttribute('role', 'tabpanel');
+    const creatorTab = screen.getByRole('tab', { name: 'Creator' });
+    expect(creatorTab).toHaveAttribute('aria-controls', panel.id);
+    expect(panel).toHaveAttribute('aria-labelledby', creatorTab.id);
   });
 
   it('mounts the 工作区 footer profile switcher on both Creator and Orchestrator (V1.132 P3 AC-6)', async () => {
