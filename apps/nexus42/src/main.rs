@@ -11,6 +11,7 @@ use clap::Parser;
 use nexus42::cli::{Cli, Commands};
 use nexus42::config::CliConfig;
 use nexus42::errors::Result;
+use std::path::Path;
 
 fn main() {
     let cli = Cli::parse();
@@ -66,29 +67,40 @@ fn main() {
     }
 }
 
-/// Loads the startup config, degrading to defaults with a user-facing
-/// warning message when the file cannot be parsed.
+/// Loads the startup config from an explicit Nexus root (`~/.nexus42`),
+/// degrading to defaults with a user-facing warning message when it cannot be
+/// loaded.
 ///
-/// A corrupt `config.toml` must not fail startup: read-only commands keep
-/// working on defaults. The message carries the config path and parse reason
-/// from `CliConfig::load`'s error context.
-fn load_startup_config() -> (CliConfig, Option<String>) {
-    match CliConfig::load() {
+/// Taking the root as an argument keeps the failure path testable without
+/// mutating process state.
+fn load_at(nexus: &Path) -> (CliConfig, Option<String>) {
+    match CliConfig::load_from_nexus_root(nexus) {
         Ok(config) => (config, None),
         Err(error) => {
             // `{:#}` keeps the cause chain (e.g. the TOML parser's reason).
             let mut message = format!("config unreadable — {error:#}");
-            // Non-parse failures (e.g. invalid UTF-8) carry no path, so name
-            // the loader's own config path unless the error already does.
-            if let Ok(path) = CliConfig::path() {
-                let path = path.display().to_string();
-                if !message.contains(&path) {
-                    message = format!("{message} ({path})");
-                }
+            // Non-parse failures (e.g. invalid UTF-8) carry no path.
+            let path = CliConfig::path_in(nexus).display().to_string();
+            if !message.contains(&path) {
+                message = format!("{message} ({path})");
             }
             message.push_str(" (continuing with defaults)");
             (CliConfig::default(), Some(message))
         }
+    }
+}
+
+/// Startup wrapper: resolves the Nexus root the loader uses, then loads
+/// through [`load_at`]. A corrupt config must not fail startup.
+fn load_startup_config() -> (CliConfig, Option<String>) {
+    match nexus42::config::nexus_home() {
+        Ok(nexus) => load_at(&nexus),
+        Err(error) => (
+            CliConfig::default(),
+            Some(format!(
+                "config unreadable — {error:#} (continuing with defaults)"
+            )),
+        ),
     }
 }
 
@@ -176,53 +188,16 @@ fn init_logging(verbose: bool, stderr_only: bool) {
 mod tests {
     use super::*;
 
-    /// The env var `dirs::home_dir()` reads on this platform (mirrors
-    /// `bin/nexus-runtime.rs::resolve_home`).
-    #[cfg(windows)]
-    const HOME_ENV: &str = "USERPROFILE";
-    #[cfg(not(windows))]
-    const HOME_ENV: &str = "HOME";
-
-    /// Points the platform home at a fresh temp dir and restores it on drop.
-    struct TempHome {
-        tmp: tempfile::TempDir,
-        previous: Option<std::ffi::OsString>,
-    }
-
-    impl TempHome {
-        fn new() -> Self {
-            let previous = std::env::var_os(HOME_ENV);
-            let tmp = tempfile::TempDir::new().expect("tempdir");
-            std::env::set_var(HOME_ENV, tmp.path());
-            Self { tmp, previous }
-        }
-
-        fn nexus_dir(&self) -> std::path::PathBuf {
-            self.tmp.path().join(".nexus42")
-        }
-    }
-
-    impl Drop for TempHome {
-        fn drop(&mut self) {
-            match &self.previous {
-                Some(home) => std::env::set_var(HOME_ENV, home),
-                None => std::env::remove_var(HOME_ENV),
-            }
-        }
-    }
-
     #[test]
-    #[serial_test::serial]
     fn corrupt_config_yields_defaults_and_path_warning() {
-        let home = TempHome::new();
-        let nexus = home.nexus_dir();
-        std::fs::create_dir_all(&nexus).expect("create nexus dir");
-        std::fs::write(nexus.join("config.toml"), "not = [valid toml").expect("write config");
+        let nexus = tempfile::TempDir::new().expect("tempdir");
+        let config_path = CliConfig::path_in(nexus.path());
+        std::fs::write(&config_path, "not = [valid toml").expect("write config");
 
-        let (config, warning) = load_startup_config();
+        let (config, warning) = load_at(nexus.path());
         let warning = warning.expect("corrupt config must produce a warning");
         assert!(
-            warning.contains(&nexus.join("config.toml").display().to_string()),
+            warning.contains(&config_path.display().to_string()),
             "warning must name the config path: {warning}"
         );
         assert!(
@@ -233,19 +208,17 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial]
     fn unreadable_config_warning_still_names_the_path() {
-        let home = TempHome::new();
-        let nexus = home.nexus_dir();
-        std::fs::create_dir_all(&nexus).expect("create nexus dir");
+        let nexus = tempfile::TempDir::new().expect("tempdir");
+        let config_path = CliConfig::path_in(nexus.path());
         // Invalid UTF-8 fails in `read_to_string` before any TOML context is
         // attached, so this exercises the path-less error class.
-        std::fs::write(nexus.join("config.toml"), [0xff, 0xfe]).expect("write config");
+        std::fs::write(&config_path, [0xff, 0xfe]).expect("write config");
 
-        let (config, warning) = load_startup_config();
+        let (config, warning) = load_at(nexus.path());
         let warning = warning.expect("unreadable config must produce a warning");
         assert!(
-            warning.contains(&nexus.join("config.toml").display().to_string()),
+            warning.contains(&config_path.display().to_string()),
             "warning must name the config path: {warning}"
         );
         assert!(
@@ -256,18 +229,15 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial]
     fn valid_config_loads_without_warning() {
-        let home = TempHome::new();
-        let nexus = home.nexus_dir();
-        std::fs::create_dir_all(&nexus).expect("create nexus dir");
+        let nexus = tempfile::TempDir::new().expect("tempdir");
         std::fs::write(
-            nexus.join("config.toml"),
+            CliConfig::path_in(nexus.path()),
             "platform_url = \"https://example.test\"\n",
         )
         .expect("write config");
 
-        let (config, warning) = load_startup_config();
+        let (config, warning) = load_at(nexus.path());
         assert!(warning.is_none(), "valid config must not warn: {warning:?}");
         assert_eq!(config.platform_url, "https://example.test");
     }
