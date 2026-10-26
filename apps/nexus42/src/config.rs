@@ -180,6 +180,25 @@ impl CliConfig {
         Self::load_from_nexus_home(&nexus)
     }
 
+    /// Load configuration from an explicit Nexus root (`~/.nexus42`).
+    ///
+    /// Path-taking counterpart to [`Self::load`]: same legacy migration and
+    /// reader, without a platform home lookup. The CLI startup seam uses it so
+    /// the failure path stays testable without mutating the process home.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if migration, file reads, or serialization fail.
+    pub fn load_from_nexus_root(nexus: &Path) -> anyhow::Result<Self> {
+        Self::load_from_nexus_home(nexus)
+    }
+
+    /// Path to `config.toml` under an explicit Nexus root.
+    #[must_use]
+    pub fn path_in(nexus: &Path) -> PathBuf {
+        nexus.join("config.toml")
+    }
+
     fn load_from_nexus_home(nexus: &Path) -> anyhow::Result<Self> {
         // Migration writes `config.toml`, so it takes the writer lock. Probe
         // first so a plain read does not contend with the other writers.
@@ -195,7 +214,7 @@ impl CliConfig {
     /// Unknown keys are retained by the flattened [`Self::extra`] table, so a
     /// later write round-trips the keys other writers own.
     fn read_document(nexus: &Path) -> anyhow::Result<Self> {
-        let config_path = nexus.join("config.toml");
+        let config_path = Self::path_in(nexus);
         let content = match std::fs::read_to_string(&config_path) {
             Ok(content) => content,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -328,7 +347,7 @@ impl CliConfig {
     ///
     /// Returns an error if the Nexus home directory cannot be resolved.
     fn config_path() -> anyhow::Result<PathBuf> {
-        Ok(nexus_home()?.join("config.toml"))
+        Ok(Self::path_in(&nexus_home()?))
     }
 
     /// Public path to the configuration file (for `config path` command).

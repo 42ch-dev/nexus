@@ -11,6 +11,7 @@ use clap::Parser;
 use nexus42::cli::{Cli, Commands};
 use nexus42::config::CliConfig;
 use nexus42::errors::Result;
+use std::path::Path;
 
 fn main() {
     let cli = Cli::parse();
@@ -66,9 +67,49 @@ fn main() {
     }
 }
 
+/// Loads the startup config from an explicit Nexus root (`~/.nexus42`),
+/// degrading to defaults with a user-facing warning message when it cannot be
+/// loaded.
+///
+/// Taking the root as an argument keeps the failure path testable without
+/// mutating process state.
+fn load_at(nexus: &Path) -> (CliConfig, Option<String>) {
+    match CliConfig::load_from_nexus_root(nexus) {
+        Ok(config) => (config, None),
+        Err(error) => {
+            // `{:#}` keeps the cause chain (e.g. the TOML parser's reason).
+            let mut message = format!("config unreadable — {error:#}");
+            // Non-parse failures (e.g. invalid UTF-8) carry no path.
+            let path = CliConfig::path_in(nexus).display().to_string();
+            if !message.contains(&path) {
+                message = format!("{message} ({path})");
+            }
+            message.push_str(" (continuing with defaults)");
+            (CliConfig::default(), Some(message))
+        }
+    }
+}
+
+/// Startup wrapper: resolves the Nexus root the loader uses, then loads
+/// through [`load_at`]. A corrupt config must not fail startup.
+fn load_startup_config() -> (CliConfig, Option<String>) {
+    match nexus42::config::nexus_home() {
+        Ok(nexus) => load_at(&nexus),
+        Err(error) => (
+            CliConfig::default(),
+            Some(format!(
+                "config unreadable — {error:#} (continuing with defaults)"
+            )),
+        ),
+    }
+}
+
 async fn async_main(cli: Cli) -> Result<()> {
     // Load configuration
-    let mut config = CliConfig::load().unwrap_or_default();
+    let (mut config, config_warning) = load_startup_config();
+    if let Some(warning) = config_warning {
+        eprintln!("nexus42: {warning}");
+    }
 
     // Resolve persistent device ID (UUID v4) for platform HTTP requests.
     if let (Ok(nexus_home), Some(raw_home)) = (nexus42::config::nexus_home(), dirs::home_dir()) {
@@ -140,5 +181,64 @@ fn init_logging(verbose: bool, stderr_only: bool) {
         builder.with_writer(std::io::stderr).init();
     } else {
         builder.init();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn corrupt_config_yields_defaults_and_path_warning() {
+        let nexus = tempfile::TempDir::new().expect("tempdir");
+        let config_path = CliConfig::path_in(nexus.path());
+        std::fs::write(&config_path, "not = [valid toml").expect("write config");
+
+        let (config, warning) = load_at(nexus.path());
+        let warning = warning.expect("corrupt config must produce a warning");
+        assert!(
+            warning.contains(&config_path.display().to_string()),
+            "warning must name the config path: {warning}"
+        );
+        assert!(
+            warning.contains("unclosed array"),
+            "warning must carry the TOML reason: {warning}"
+        );
+        assert_eq!(config.platform_url, CliConfig::default().platform_url);
+    }
+
+    #[test]
+    fn unreadable_config_warning_still_names_the_path() {
+        let nexus = tempfile::TempDir::new().expect("tempdir");
+        let config_path = CliConfig::path_in(nexus.path());
+        // Invalid UTF-8 fails in `read_to_string` before any TOML context is
+        // attached, so this exercises the path-less error class.
+        std::fs::write(&config_path, [0xff, 0xfe]).expect("write config");
+
+        let (config, warning) = load_at(nexus.path());
+        let warning = warning.expect("unreadable config must produce a warning");
+        assert!(
+            warning.contains(&config_path.display().to_string()),
+            "warning must name the config path: {warning}"
+        );
+        assert!(
+            warning.contains("UTF-8"),
+            "warning must carry the read-failure reason: {warning}"
+        );
+        assert_eq!(config.platform_url, CliConfig::default().platform_url);
+    }
+
+    #[test]
+    fn valid_config_loads_without_warning() {
+        let nexus = tempfile::TempDir::new().expect("tempdir");
+        std::fs::write(
+            CliConfig::path_in(nexus.path()),
+            "platform_url = \"https://example.test\"\n",
+        )
+        .expect("write config");
+
+        let (config, warning) = load_at(nexus.path());
+        assert!(warning.is_none(), "valid config must not warn: {warning:?}");
+        assert_eq!(config.platform_url, "https://example.test");
     }
 }
