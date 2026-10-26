@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 /// V1.148 P3 N-C0: moved here from `nexus-cloud-sync` so the path-layout SSOT
 /// also owns the value; `nexus-cloud-sync::device_id` re-exports it.
 pub mod active_context;
+pub mod config_lock;
 pub mod device_id;
 
 const NEXUS_DIR: &str = ".nexus42";
@@ -49,11 +50,19 @@ pub fn ensure_system_layout(nexus_home: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(nexus_home.join("acp").join("runs"))?;
     std::fs::create_dir_all(nexus_home.join("rules"))?;
 
-    // Write empty config.toml if it does not exist (no config.json either)
+    // Write empty config.toml if it does not exist (no config.json either).
+    // I-000113: this is the fifth writer of the shared `config.toml` document,
+    // so it takes the same `config.toml.lock` protocol as the CLI/service/
+    // desktop/core writers. The existence check is repeated under the lock: a
+    // writer that committed while this acquisition waited must not be
+    // overwritten with the empty skeleton.
     let toml_path = nexus_home.join("config.toml");
     let json_path = nexus_home.join("config.json");
     if !toml_path.exists() && !json_path.exists() {
-        std::fs::write(&toml_path, "")?;
+        let _lock = config_lock::acquire(nexus_home)?;
+        if !toml_path.exists() && !json_path.exists() {
+            std::fs::write(&toml_path, "")?;
+        }
     }
 
     Ok(())
@@ -1494,5 +1503,79 @@ mod tests {
         assert!(!is_valid_character_id(
             "chr_0123456789abcdef0123456789abcdeff"
         ));
+    }
+
+    /// I-000113: the startup skeleton write is the fifth `config.toml` writer,
+    /// so it waits for a foreign holder of `config.toml.lock` instead of
+    /// writing beside it.
+    #[test]
+    fn ensure_system_layout_waits_for_a_foreign_holder_of_the_config_lock() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let tmp = tempfile::tempdir().expect("temp home");
+        let home = tmp.path().to_path_buf();
+        std::fs::create_dir_all(&home).expect("home");
+        let lock = home.join("config.toml.lock");
+        std::fs::write(&lock, format!("{} foreign\n", std::process::id())).expect("foreign lock");
+
+        let done = Arc::new(AtomicBool::new(false));
+        let boot = {
+            let done = Arc::clone(&done);
+            let home = home.clone();
+            std::thread::spawn(move || {
+                ensure_system_layout(&home).expect("system layout");
+                done.store(true, Ordering::SeqCst);
+            })
+        };
+
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            !done.load(Ordering::SeqCst),
+            "the startup write must wait for config.toml.lock"
+        );
+        assert!(!home.join("config.toml").exists());
+
+        std::fs::remove_file(&lock).expect("release foreign lock");
+        boot.join().expect("boot thread");
+        assert!(done.load(Ordering::SeqCst));
+        assert!(home.join("config.toml").exists());
+        assert!(!lock.exists(), "the startup write released its own lock");
+    }
+
+    /// The existence check is repeated under the lock: a document committed
+    /// while the startup acquisition waited must not be overwritten with the
+    /// empty skeleton.
+    #[test]
+    fn ensure_system_layout_keeps_a_document_committed_while_it_waited() {
+        use std::time::Duration;
+
+        let tmp = tempfile::tempdir().expect("temp home");
+        let home = tmp.path().to_path_buf();
+        std::fs::create_dir_all(&home).expect("home");
+        let lock = home.join("config.toml.lock");
+        std::fs::write(&lock, format!("{} foreign\n", std::process::id())).expect("foreign lock");
+
+        let boot = {
+            let home = home.clone();
+            std::thread::spawn(move || ensure_system_layout(&home).expect("system layout"))
+        };
+
+        // The committed document lands while the startup write waits.
+        std::thread::sleep(Duration::from_millis(100));
+        std::fs::write(
+            home.join("config.toml"),
+            "active_creator_id = \"ctr_kept\"\n",
+        )
+        .expect("writer document");
+        std::fs::remove_file(&lock).expect("release foreign lock");
+
+        boot.join().expect("boot thread");
+        let stored = std::fs::read_to_string(home.join("config.toml")).expect("config");
+        assert!(
+            stored.contains("ctr_kept"),
+            "the committed document was overwritten by the empty skeleton"
+        );
     }
 }
