@@ -75,12 +75,20 @@ fn main() {
 fn load_startup_config() -> (CliConfig, Option<String>) {
     match CliConfig::load() {
         Ok(config) => (config, None),
-        Err(error) => (
-            CliConfig::default(),
-            Some(format!(
-                "config unreadable — {error} (continuing with defaults)"
-            )),
-        ),
+        Err(error) => {
+            // `{:#}` keeps the cause chain (e.g. the TOML parser's reason).
+            let mut message = format!("config unreadable — {error:#}");
+            // Non-parse failures (e.g. invalid UTF-8) carry no path, so name
+            // the loader's own config path unless the error already does.
+            if let Ok(path) = CliConfig::path() {
+                let path = path.display().to_string();
+                if !message.contains(&path) {
+                    message = format!("{message} ({path})");
+                }
+            }
+            message.push_str(" (continuing with defaults)");
+            (CliConfig::default(), Some(message))
+        }
     }
 }
 
@@ -209,6 +217,33 @@ mod tests {
         assert!(
             warning.contains(&nexus.join("config.toml").display().to_string()),
             "warning must name the config path: {warning}"
+        );
+        assert!(
+            warning.contains("unclosed array"),
+            "warning must carry the TOML reason: {warning}"
+        );
+        assert_eq!(config.platform_url, CliConfig::default().platform_url);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn unreadable_config_warning_still_names_the_path() {
+        let home = TempHome::new();
+        let nexus = home.nexus_dir();
+        std::fs::create_dir_all(&nexus).expect("create nexus dir");
+        // Invalid UTF-8 fails in `read_to_string` before any TOML context is
+        // attached, so this exercises the path-less error class.
+        std::fs::write(nexus.join("config.toml"), [0xff, 0xfe]).expect("write config");
+
+        let (config, warning) = load_startup_config();
+        let warning = warning.expect("unreadable config must produce a warning");
+        assert!(
+            warning.contains(&nexus.join("config.toml").display().to_string()),
+            "warning must name the config path: {warning}"
+        );
+        assert!(
+            warning.contains("UTF-8"),
+            "warning must carry the read-failure reason: {warning}"
         );
         assert_eq!(config.platform_url, CliConfig::default().platform_url);
     }
