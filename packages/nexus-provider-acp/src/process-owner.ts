@@ -2,11 +2,13 @@ import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child
 import { PassThrough, Readable, Writable } from 'node:stream';
 import type { ValidatedProviderRecipe } from '@42ch/nexus-contracts';
 import {
-  ClientSideConnection,
+  AGENT_METHODS,
+  CLIENT_METHODS,
+  client,
   ndJsonStream,
-  type Client,
+  type ClientConnection,
   type Stream,
-} from '@agentclientprotocol/sdk';
+} from '@agentclientprotocol/sdk/unstable';
 import { CleanupUnconfirmedError } from './errors.js';
 import {
   bindProcessIdentity,
@@ -34,7 +36,7 @@ export type SessionUpdateHandler = (params: { sessionId: string; update: unknown
 export type OwnedConnection = {
   recipeGeneration: string;
   child: ChildProcessWithoutNullStreams;
-  connection: ClientSideConnection;
+  connection: ClientConnection;
   acpSessionId: string | null;
   stdinWritable: Writable;
   admittedIdentity: ProcessIdentity | null;
@@ -165,7 +167,7 @@ function makeOwnedStub(
   return {
     recipeGeneration: recipe.recipe_generation,
     child,
-    connection: null as unknown as ClientSideConnection,
+    connection: null as unknown as ClientConnection,
     acpSessionId: null,
     stdinWritable,
     admittedIdentity,
@@ -261,19 +263,20 @@ export async function spawnOwnedConnection(
   );
   const stream: Stream = ndJsonStream(nodeToWebWritable(child.stdin), guardedStdout);
 
-  const client: Client = {
-    sessionUpdate: async (params) => {
+  const app = client()
+    .onNotification(CLIENT_METHODS.session_update, async ({ params }) => {
       onSessionUpdate({ sessionId: String(params.sessionId), update: params.update });
-    },
-    requestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
-  };
+    })
+    .onRequest(CLIENT_METHODS.session_request_permission, async () => ({
+      outcome: { outcome: 'cancelled' },
+    }));
 
-  const connection = new ClientSideConnection(() => client, stream);
+  const connection = app.connect(stream);
   ownedStub.connection = connection;
 
   try {
     await Promise.race([
-      connection.initialize({
+      connection.agent.request(AGENT_METHODS.initialize, {
         protocolVersion: 1,
         clientInfo: { name: 'nexus-provider-acp', version: '0.1.0' },
       }),
@@ -303,7 +306,7 @@ export async function createAcpSession(owned: OwnedConnection, cwd: string): Pro
   const exitRace = attachExitRace(owned.child);
   try {
     const response = await Promise.race([
-      owned.connection.newSession({ cwd, mcpServers: [] }),
+      owned.connection.agent.request(AGENT_METHODS.session_new, { cwd, mcpServers: [] }),
       exitRace.promise,
     ]);
     const sessionId = String(response.sessionId);
@@ -362,7 +365,7 @@ export async function reapChild(
   const owned: OwnedConnection = {
     recipeGeneration: '',
     child,
-    connection: null as unknown as ClientSideConnection,
+    connection: null as unknown as ClientConnection,
     acpSessionId: null,
     stdinWritable: child.stdin as Writable,
     admittedIdentity: null,

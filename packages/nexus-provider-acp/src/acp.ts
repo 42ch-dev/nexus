@@ -1,5 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import type { ContentBlock, SessionConfigOption } from '@agentclientprotocol/sdk';
+import {
+  AGENT_METHODS,
+  type ContentBlock,
+  type SessionConfigOption,
+} from '@agentclientprotocol/sdk/unstable';
 import type { ProviderCallbacks } from './contracts.js';
 import type {
   ProviderCall,
@@ -540,7 +544,10 @@ export class AcpProviderEngine {
     try {
       await this.evictStaleGeneration(recipe.provider_id, recipe.recipe_generation);
       owned = await this.connectForRecipe(recipe, sessionId);
-      const created = await owned.connection.newSession({ cwd: recipe.cwd, mcpServers: [] });
+      const created = await owned.connection.agent.request(AGENT_METHODS.session_new, {
+        cwd: recipe.cwd,
+        mcpServers: [],
+      });
       owned.acpSessionId = created.sessionId;
       const session: SessionState = {
         sessionId,
@@ -649,7 +656,7 @@ export class AcpProviderEngine {
 
   private async setMode(session: SessionState, mode: string): Promise<void> {
     try {
-      await session.owned.connection.setSessionMode({
+      await session.owned.connection.agent.request(AGENT_METHODS.session_set_mode, {
         sessionId: string(session.owned.acpSessionId), modeId: mode,
       });
     } catch {
@@ -661,9 +668,12 @@ export class AcpProviderEngine {
     const option = session.configOptions.find((config) => config.category === 'model');
     if (!option) throw new OperationError('not_supported', 'no_model_config_option');
     try {
-      const response = await session.owned.connection.setSessionConfigOption({
-        sessionId: string(session.owned.acpSessionId), configId: option.id, value: model,
-      });
+      const response = await session.owned.connection.agent.request(
+        AGENT_METHODS.session_set_config_option,
+        {
+          sessionId: string(session.owned.acpSessionId), configId: option.id, value: model,
+        },
+      );
       session.configOptions = response.configOptions;
     } catch {
       throw new OperationError('not_supported', 'set_model_failed');
@@ -705,7 +715,7 @@ export class AcpProviderEngine {
       return;
     }
     try {
-      const response = await session.owned.connection.prompt({
+      const response = await session.owned.connection.agent.request(AGENT_METHODS.session_prompt, {
         sessionId: acpSessionId,
         prompt: content,
       });
@@ -770,7 +780,9 @@ export class AcpProviderEngine {
       remainingBudgetMs(deadline),
       (async () => {
         try {
-          await session.owned.connection.cancel({ sessionId: acpSessionId });
+          await session.owned.connection.agent.notify(AGENT_METHODS.session_cancel, {
+            sessionId: acpSessionId,
+          });
         } catch {
           // best effort; the reap below is what must be confirmed
         }
@@ -821,7 +833,9 @@ export class AcpProviderEngine {
           (async () => {
             if (acpSessionId) {
               try {
-                await session.owned.connection.cancel({ sessionId: acpSessionId });
+                await session.owned.connection.agent.notify(AGENT_METHODS.session_cancel, {
+                  sessionId: acpSessionId,
+                });
               } catch {
                 // best effort; the owned reap below is what must be confirmed
               }

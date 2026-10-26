@@ -14,14 +14,17 @@ dependency of the daemon), so the pins below are the compatibility contract.
 - Public entry: `createAcpProvider(): ProviderCallbacks` from `src/index.ts`.
   The caller supplies no launch recipe; Rust probe/launch payloads carry the
   generated `ValidatedProviderRecipe` after native admission.
-- Stable SDK surface only (`ClientSideConnection`, `ndJsonStream`,
-  initialize/newSession/prompt/cancel/sessionUpdate). No `experimental/*`
-  exports, no copied JSON-RPC stack.
+- SDK 2.0 app API on `@agentclientprotocol/sdk/unstable` (`client()`,
+  `ndJsonStream`, `onNotification`/`onRequest`, and
+  `connection.agent.request`/`notify` for initialize, session/new,
+  session/set_mode, session/set_config_option, session/prompt, session/cancel).
+  The `unstable` entrypoint is required for `session/set_config_option`; no
+  `experimental/*` exports, no copied JSON-RPC stack.
 - Retain process/SDK state per recipe generation; keep
   child/stdin/stdout/stderr/connection until cleanup; readiness requires a
   no-model handshake and a reaped probe child.
 
 ## Pins
 
-`@agentclientprotocol/sdk` 1.4.0, `zod` 4.6.2 (exact), `@42ch/nexus-contracts`
-workspace. `zod` satisfies the SDK peer range `^3.25 || ^4`.
+`@agentclientprotocol/sdk` 2.0.0, `zod` 4.6.7 (exact), `@42ch/nexus-contracts`
+workspace. `zod` satisfies the SDK peer range `^3.25.76 || ^4.0.0`.
