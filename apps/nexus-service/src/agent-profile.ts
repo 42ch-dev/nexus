@@ -67,7 +67,7 @@ const sleepFor = (ms: number): Promise<void> => {
   return promise;
 };
 
-/** A held lock: its path plus the ownership token written inside it. */
+/** A held lock: its path plus the whole ownership-token line written inside it. */
 type HeldConfigLock = { lockPath: string; token: string };
 
 function isTomlTable(value: unknown): value is TomlTable {
@@ -78,7 +78,8 @@ function isTomlTable(value: unknown): value is TomlTable {
 async function acquireConfigLock(directory: string): Promise<HeldConfigLock> {
   const lockPath = join(directory, LOCK_FILE);
   await mkdir(directory, { recursive: true });
-  const token = randomUUID();
+  // The whole line is the token: release compares it byte-for-byte.
+  const token = `${process.pid} ${new Date().toISOString()} ${randomUUID()}`;
   let backoff = LOCK_BACKOFF_INITIAL_MS;
   let stealDeadlineMs: number | undefined;
   let unlinkErrorLogged = false;
@@ -87,8 +88,8 @@ async function acquireConfigLock(directory: string): Promise<HeldConfigLock> {
       const lock = await open(lockPath, 'wx', 0o600);
       try {
         // Diagnostics only (the age of a held lock comes from its mtime); the
-        // trailing token is the ownership proof release compares.
-        await lock.writeFile(`${process.pid} ${new Date().toISOString()} ${token}\n`);
+        // whole line is the ownership proof release compares.
+        await lock.writeFile(`${token}\n`);
       } catch (error) {
         // The create succeeded, so this attempt owns the file: release it
         // before failing, or the next writer stalls until the stale steal.
@@ -138,14 +139,22 @@ async function acquireConfigLock(directory: string): Promise<HeldConfigLock> {
  * Release the lock, but only while this holder still owns it: a holder stalled
  * past the stale window is stolen, and unlinking on resume would delete the new
  * owner's lock and admit a third writer into the second's read-modify-write.
+ * The whole line is the token, so the compare is byte-for-byte: a file that
+ * merely contains or ends with our token belongs to another writer.
  */
 async function releaseConfigLock({ lockPath, token }: HeldConfigLock): Promise<void> {
   try {
     const contents = await readFile(lockPath, 'utf8');
-    if (!contents.trimEnd().endsWith(token)) {
+    // Strip the single trailing newline acquire writes; the remaining line is
+    // the ownership proof, compared whole rather than by a token suffix.
+    if (contents.replace(/\n$/, '') !== token) {
       console.error(`[nexus-service] ${LOCK_FILE} was stolen; leaving the new owner's lock`);
       return;
     }
+    // Residual TOCTOU (accepted, contract §2): the compare above and this
+    // unlink are not atomic, so a stale-steal interleaving can delete a new
+    // owner's lock. Atomizing (rename-then-verify) is deferred while every
+    // writer stays user-paced.
     await rm(lockPath, { force: true });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;

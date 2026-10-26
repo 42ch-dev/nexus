@@ -494,3 +494,57 @@ test('a saved launch command is never executed here', async (t) => {
     launchCommand: `touch ${sentinel}`,
   });
 });
+
+/**
+ * QC1-002 (I-000105, contract §2): the whole line is the token. A foreign lock
+ * that merely ends with our token line — a prefix was prepended — must never
+ * be unlinked; only byte equality proves this holder still owns it.
+ */
+test('a release never unlinks a lock that only ends with our token', async (t) => {
+  const source = readFileSync(new URL('../dist/desktop-config.js', import.meta.url), 'utf8');
+  // Fault injection: stall the holder inside its read-modify-write (after the
+  // lock is taken) so the lock can be rewritten underneath it.
+  const marker = 'await writeDocument(path, doc);';
+  assert.ok(source.includes(marker), 'the write marker must exist in dist/desktop-config.js');
+  const copyUrl = new URL(
+    `../dist/__rewritten-desktop-config-${process.pid}.mjs`,
+    import.meta.url,
+  );
+  writeFileSync(
+    copyUrl,
+    source.replace(
+      marker,
+      `await new Promise((resolve) => setTimeout(resolve, 250)); ${marker}`,
+    ),
+    'utf8',
+  );
+  try {
+    const { createDesktopConfig: createSlowConfig } = await import(copyUrl.href);
+    const home = mkdtempSync(join(tmpdir(), 'nexus-desktop-lock-'));
+    t.after(() => rmSync(home, { recursive: true, force: true }));
+    const config = createSlowConfig(home, join(home, 'Documents'));
+    writeTomlFile(configPath(home), 'active_creator_id = "ctr_a"\n');
+    const lockPath = `${configPath(home)}.lock`;
+
+    const pending = config.set_workspace_path({ path: '/ws' });
+    // Capture the held token line, then prepend a foreign marker: the result
+    // still ends with our token, so a suffix compare would unlink it.
+    const lockDeadline = Date.now() + 2000;
+    let held = '';
+    while (!held.endsWith('\n')) {
+      assert.ok(Date.now() < lockDeadline, 'the writer must write the lock within 2000 ms');
+      held = existsSync(lockPath) ? readFileSync(lockPath, 'utf8') : '';
+      if (!held.endsWith('\n')) await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    const rewritten = `foreign-prefix ${held}`;
+    writeFileSync(lockPath, rewritten, 'utf8');
+
+    await pending;
+    assert.equal(existsSync(lockPath), true, 'a foreign lock must never be unlinked');
+    assert.equal(readFileSync(lockPath, 'utf8'), rewritten);
+    // The mutation itself completed; only the foreign lock survived release.
+    assert.equal(parseToml(configPath(home)).workspace_path, '/ws');
+  } finally {
+    rmSync(copyUrl, { force: true });
+  }
+});
