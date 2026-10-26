@@ -1085,13 +1085,10 @@ mod tests {
     #[test]
     fn use_creator_rejects_a_non_table_slug_table() {
         let mut config = toml::Value::Table(toml::Table::new());
-        config
-            .as_table_mut()
-            .expect("table root")
-            .insert(
-                "active_workspace_slug_by_creator".to_string(),
-                toml::Value::String("corrupt".to_string()),
-            );
+        config.as_table_mut().expect("table root").insert(
+            "active_workspace_slug_by_creator".to_string(),
+            toml::Value::String("corrupt".to_string()),
+        );
         let error = apply_active_selection(&mut config, TARGET).expect_err("non-table slugs");
         match error {
             CoreError::Internal { category } => {
@@ -1103,9 +1100,7 @@ mod tests {
             other => panic!("expected the CONFIG_ERROR carrier, got {other:?}"),
         }
         assert!(
-            config
-                .get("active_creator_id")
-                .is_none(),
+            config.get("active_creator_id").is_none(),
             "a rejected commit must not persist active_creator_id"
         );
         assert_eq!(
