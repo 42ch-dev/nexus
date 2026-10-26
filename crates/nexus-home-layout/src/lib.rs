@@ -59,6 +59,8 @@ pub fn ensure_system_layout(nexus_home: &Path) -> std::io::Result<()> {
     let toml_path = nexus_home.join("config.toml");
     let json_path = nexus_home.join("config.json");
     if !toml_path.exists() && !json_path.exists() {
+        #[cfg(test)]
+        tests::after_existence_check(nexus_home);
         let _lock = config_lock::acquire(nexus_home)?;
         if !toml_path.exists() && !json_path.exists() {
             std::fs::write(&toml_path, "")?;
@@ -804,6 +806,28 @@ pub fn validate_reference_id_safe(id: &str) -> std::result::Result<(), String> {
 mod tests {
     use super::*;
 
+    /// Test-only rendezvous at the pre-lock existence check: the startup path
+    /// calls it before acquiring `config.toml.lock`, so a test can order a
+    /// concurrent document write strictly into the acquisition wait — the
+    /// window the under-lock re-check exists to cover — with no fixed wait.
+    static AFTER_EXISTENCE_CHECK: std::sync::Mutex<
+        Option<(std::path::PathBuf, std::sync::Arc<std::sync::Barrier>)>,
+    > = std::sync::Mutex::new(None);
+
+    /// Blocks the startup caller until the test that installed the rendezvous
+    /// for this home arrives.
+    pub fn after_existence_check(home: &std::path::Path) {
+        let barrier = AFTER_EXISTENCE_CHECK
+            .lock()
+            .expect("rendezvous")
+            .as_ref()
+            .filter(|(path, _)| path == home)
+            .map(|(_, barrier)| std::sync::Arc::clone(barrier));
+        if let Some(barrier) = barrier {
+            barrier.wait();
+        }
+    }
+
     #[test]
     fn operational_dir_layout() {
         let home = PathBuf::from("/fake/home");
@@ -1546,24 +1570,29 @@ mod tests {
 
     /// The existence check is repeated under the lock: a document committed
     /// while the startup acquisition waited must not be overwritten with the
-    /// empty skeleton.
+    /// empty skeleton. The rendezvous orders the commit strictly after the
+    /// pre-lock check and before the lock acquisition, so the window is
+    /// exercised deterministically instead of raced against a sleep.
     #[test]
     fn ensure_system_layout_keeps_a_document_committed_while_it_waited() {
-        use std::time::Duration;
-
         let tmp = tempfile::tempdir().expect("temp home");
         let home = tmp.path().to_path_buf();
         std::fs::create_dir_all(&home).expect("home");
         let lock = home.join("config.toml.lock");
         std::fs::write(&lock, format!("{} foreign\n", std::process::id())).expect("foreign lock");
 
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        *AFTER_EXISTENCE_CHECK.lock().expect("rendezvous") =
+            Some((home.clone(), std::sync::Arc::clone(&barrier)));
+
         let boot = {
             let home = home.clone();
             std::thread::spawn(move || ensure_system_layout(&home).expect("system layout"))
         };
 
-        // The committed document lands while the startup write waits.
-        std::thread::sleep(Duration::from_millis(100));
+        // Startup is past its pre-lock existence check and cannot acquire
+        // until the foreign lock is released: no timing assumption.
+        barrier.wait();
         std::fs::write(
             home.join("config.toml"),
             "active_creator_id = \"ctr_kept\"\n",
@@ -1572,6 +1601,7 @@ mod tests {
         std::fs::remove_file(&lock).expect("release foreign lock");
 
         boot.join().expect("boot thread");
+        *AFTER_EXISTENCE_CHECK.lock().expect("rendezvous") = None;
         let stored = std::fs::read_to_string(home.join("config.toml")).expect("config");
         assert!(
             stored.contains("ctr_kept"),
