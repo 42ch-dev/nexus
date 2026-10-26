@@ -48,10 +48,16 @@ impl Drop for ConfigLock {
 ///
 /// A holder stalled past [`STALE_AFTER`] is stolen; unlinking on resume would
 /// delete the *new* owner's lock and admit a third writer into the second
-/// writer's read-modify-write.
+/// writer's read-modify-write. The whole line is the token, so the compare is
+/// byte-for-byte: a file that merely contains or ends with our token belongs to
+/// another writer.
 fn release(path: &Path, token: &str) {
     match std::fs::read_to_string(path) {
-        Ok(contents) if contents.trim_end().ends_with(token) => {
+        Ok(contents) if contents.strip_suffix('\n').unwrap_or(&contents) == token => {
+            // Residual TOCTOU (accepted, contract §2): the compare above and
+            // this unlink are not atomic, so a stale-steal interleaving can
+            // delete a new owner's lock. Atomizing (rename-then-verify) is
+            // deferred while every writer stays user-paced.
             if let Err(error) = std::fs::remove_file(path) {
                 tracing::warn!(%error, "config.toml.lock release failed");
             }
@@ -76,6 +82,22 @@ thread_local! {
     static FAIL_TOKEN_WRITE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
+/// Exclusive-create options for the lock file.
+///
+/// Owner-only mode is applied at creation (umask can only tighten it), never a
+/// post-create chmod, so the lock is never observable at a permissive mode.
+/// win32 has no POSIX mode to set; the default DACL applies.
+fn lock_options() -> std::fs::OpenOptions {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    options
+}
+
 /// Write the holder's line into the freshly created lock file.
 fn write_token(file: &mut std::fs::File, token: &str) -> std::io::Result<()> {
     #[cfg(test)]
@@ -84,42 +106,44 @@ fn write_token(file: &mut std::fs::File, token: &str) -> std::io::Result<()> {
             return Err(std::io::Error::other("injected token write failure"));
         }
     }
-    writeln!(
-        file,
-        "{} {} {token}",
-        std::process::id(),
-        chrono::Utc::now().to_rfc3339()
-    )
+    writeln!(file, "{token}")
 }
 
 /// Take the lock: exclusive create, stale steal, exponential backoff.
 fn acquire(nexus_home: &Path) -> CoreResult<ConfigLock> {
     let path = nexus_home.join(LOCK_FILE);
     std::fs::create_dir_all(nexus_home).map_err(lock_error)?;
-    let token = uuid::Uuid::new_v4().to_string();
+    // The whole line, not just the UUID: release compares it byte-for-byte.
+    let token = format!(
+        "{} {} {}",
+        std::process::id(),
+        chrono::Utc::now().to_rfc3339(),
+        uuid::Uuid::new_v4()
+    );
     let mut backoff = BACKOFF_START;
     let mut steal_since: Option<SystemTime> = None;
     let mut logged_unlink_error = false;
     loop {
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-        {
+        match lock_options().open(&path) {
             Ok(mut file) => {
                 // Diagnostics only (who/what/when); the age comes from the
-                // mtime. The trailing token is the ownership proof release
-                // checks before unlinking.
+                // mtime. The whole line is the ownership proof release checks
+                // before unlinking.
                 if let Err(write_error) = write_token(&mut file, &token) {
-                    // Never remove it here: any unlink races a thief's
-                    // replacement and can delete a live writer's lock. The
-                    // leftover is reclaimed by the bounded, logged stale steal,
-                    // which cannot mis-own it — acquire returns no ConfigLock,
-                    // so nothing will release by this path's token.
+                    // Contract §3: a tokenless lock is unusable. Close the
+                    // handle and unlink the file we just created instead of
+                    // leaving the next writer to wait out the stale threshold;
+                    // the mtime is fresh, so no other writer owns it yet.
                     drop(file);
+                    if let Err(unlink_error) = std::fs::remove_file(&path) {
+                        tracing::warn!(
+                            %unlink_error,
+                            "config.toml.lock cleanup after a failed token write failed"
+                        );
+                    }
                     tracing::warn!(
                         %write_error,
-                        "config.toml.lock ownership token not written; left for the stale steal"
+                        "config.toml.lock ownership token not written; lock unlinked"
                     );
                     return Err(lock_error(write_error));
                 }
@@ -347,23 +371,77 @@ mod tests {
         assert!(matches!(error, crate::error::CoreError::Internal { .. }));
     }
 
-    /// A lock whose ownership token cannot be written is unusable and is left
-    /// in place: the bounded stale steal reclaims it, and no unlink from this
-    /// path can ever delete another writer's lock.
+    /// I-000107: a token write that fails after the exclusive create leaves an
+    /// unusable lock. Acquire must close it, unlink the file it just created,
+    /// and return the lock error at once — never strand a tokenless lock.
     #[test]
-    fn a_token_that_cannot_be_written_fails_and_leaves_the_lock_for_stale_steal() {
+    fn a_token_that_cannot_be_written_unlinks_the_lock_and_fails() {
         let tmp = tempfile::tempdir().expect("temp home");
         let home = tmp.path().to_path_buf();
         let lock = lock_path(&home);
         super::FAIL_TOKEN_WRITE.with(|slot| slot.set(true));
+        let started = std::time::Instant::now();
         let result = super::with_config_lock(&home, || Ok(()));
+        let elapsed = started.elapsed();
         super::FAIL_TOKEN_WRITE.with(|slot| slot.set(false));
 
         let error = result.expect_err("an unwritten ownership token is an error");
         assert!(matches!(error, crate::error::CoreError::Internal { .. }));
         assert!(
+            !lock.exists(),
+            "the tokenless lock must be unlinked before the error is returned"
+        );
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "the caller must fail fast instead of waiting out the stale steal"
+        );
+    }
+
+    /// I-000106: the lock is created owner-only, with the mode applied at
+    /// creation (`OpenOptions::mode`), so it is never observable as 0644.
+    #[cfg(unix)]
+    #[test]
+    fn the_lock_file_is_created_owner_only() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let tmp = tempfile::tempdir().expect("temp home");
+        let home = tmp.path().to_path_buf();
+        let lock = lock_path(&home);
+
+        super::with_config_lock(&home, || {
+            let mode = std::fs::metadata(&lock)
+                .expect("the held lock")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600, "the lock must be created 0600");
+            Ok(())
+        })
+        .expect("the RMW succeeds");
+        assert!(!lock.exists(), "the writer released its own lock");
+    }
+
+    /// I-000105: a lock whose line only *ends with* our token (a rewritten or
+    /// foreign file) is not byte-identical to the held token and must never be
+    /// unlinked.
+    #[test]
+    fn a_release_never_unlinks_a_lock_that_only_ends_with_our_token() {
+        let tmp = tempfile::tempdir().expect("temp home");
+        let home = tmp.path().to_path_buf();
+        let lock = lock_path(&home);
+
+        super::with_config_lock(&home, || {
+            let owned = std::fs::read_to_string(&lock).expect("held lock");
+            // Another writer's line prefixed onto ours: same trailing token,
+            // different line.
+            std::fs::write(&lock, format!("999999 foreign {owned}")).expect("foreign lock");
+            Ok(())
+        })
+        .expect("the RMW itself succeeds");
+
+        assert!(
             lock.exists(),
-            "the unusable lock is left for the stale steal, never removed here"
+            "release must compare the whole line, never a token suffix"
         );
     }
 
