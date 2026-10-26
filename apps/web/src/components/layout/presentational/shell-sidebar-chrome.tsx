@@ -151,7 +151,13 @@ export function ShellSidebarChrome({
       {/* V1.130: tab switch moved to footer (功能区 footer) */}
 
       {drillInItems ? (
-        <ul className="flex flex-1 flex-col gap-0.5 overflow-auto py-1">
+        <ul
+          className="flex flex-1 flex-col gap-0.5 overflow-auto py-1"
+          role="tabpanel"
+          id={`${modeTabIdBase}-panel`}
+          aria-labelledby={`${modeTabIdBase}-${activeTab}`}
+          data-testid="shell-sidebar-panel"
+        >
           {drillInItems.map((item) => (
             <NavItemLi
               key={item.to}
