@@ -176,7 +176,14 @@ fn init_logging(verbose: bool, stderr_only: bool) {
 mod tests {
     use super::*;
 
-    /// Points `HOME` at a fresh temp dir and restores it on drop.
+    /// The env var `dirs::home_dir()` reads on this platform (mirrors
+    /// `bin/nexus-runtime.rs::resolve_home`).
+    #[cfg(windows)]
+    const HOME_ENV: &str = "USERPROFILE";
+    #[cfg(not(windows))]
+    const HOME_ENV: &str = "HOME";
+
+    /// Points the platform home at a fresh temp dir and restores it on drop.
     struct TempHome {
         tmp: tempfile::TempDir,
         previous: Option<std::ffi::OsString>,
@@ -184,9 +191,9 @@ mod tests {
 
     impl TempHome {
         fn new() -> Self {
-            let previous = std::env::var_os("HOME");
+            let previous = std::env::var_os(HOME_ENV);
             let tmp = tempfile::TempDir::new().expect("tempdir");
-            std::env::set_var("HOME", tmp.path());
+            std::env::set_var(HOME_ENV, tmp.path());
             Self { tmp, previous }
         }
 
@@ -198,8 +205,8 @@ mod tests {
     impl Drop for TempHome {
         fn drop(&mut self) {
             match &self.previous {
-                Some(home) => std::env::set_var("HOME", home),
-                None => std::env::remove_var("HOME"),
+                Some(home) => std::env::set_var(HOME_ENV, home),
+                None => std::env::remove_var(HOME_ENV),
             }
         }
     }
