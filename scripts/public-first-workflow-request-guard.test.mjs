@@ -680,7 +680,7 @@ test('one dsh-runtime POST is admitted, forwarded opaque, and recorded', async (
 // ---------------------------------------------------------------------------
 
 test(
-  'the spent token and its directory are synced before the admission is acknowledged',
+  'the spent token, its directory and its parent entry are synced before the admission is acknowledged',
   { skip: process.platform === 'win32' },
   async () => {
     await withEndpoint('ok', async (endpoint) => {
@@ -694,11 +694,13 @@ test(
       });
       assertChildRan(child, 'sync');
       assert.equal(firstAttempt(child).status, 200);
-      // Ordered trace: the token, then its directory entry, and only then the
+      // Ordered trace: the token, then its directory entry, then the attempt
+      // directory's own entry in the parent (I-000120), and only then the
       // dispatch — a spend the driver is told succeeded must survive power loss.
       assert.deepEqual(child.result.trace, [
         { kind: 'sync', path: join(attemptDir, 'spent') },
         { kind: 'sync', path: attemptDir },
+        { kind: 'sync', path: dirname(attemptDir) },
         { kind: 'dispatch' },
       ]);
     });
@@ -742,6 +744,15 @@ test(
       // Exactly one sync of the spent token, and the dispatch comes last.
       assert.equal(syncs[0].path, join(attemptDir, 'spent'), JSON.stringify(entries));
       assert.equal(syncs.filter((entry) => entry.path === join(attemptDir, 'spent')).length, 1);
+      // I-000118: this success path must also sync the attempt directory (and
+      // its parent entry, I-000120) before the dispatch — not just the token.
+      if (process.platform !== 'win32') {
+        assert.deepEqual(
+          syncs.map((entry) => entry.path),
+          [join(attemptDir, 'spent'), attemptDir, dirname(attemptDir)],
+          JSON.stringify(entries),
+        );
+      }
       assert.equal(kinds.at(-1), 'dispatch', JSON.stringify(entries));
       const token = JSON.parse(readFileSync(join(attemptDir, 'spent'), 'utf8'));
       assert.equal(token.schema, SPENT_SCHEMA);

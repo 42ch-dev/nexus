@@ -344,11 +344,13 @@ async function isActorOwnedOperation(service: ServiceCore, operationId: string):
  * retention by more than the operation being admitted — with the existing caps
  * and with no change to the no-subscriber settlement the authority already has.
  *
- * One mint, one wave: the sweep's authority reads are its own crossings of the
- * native boundary, so it mints a single principal for every record's lookups and
- * issues them all at once. The wave is bounded by the Actor arm's own retention
- * cap (≤64 records), so it needs no batching contract and no extra throttle —
- * and the admission already sits in its path.
+ * One mint, one wave: the sweep mints a single principal per admission and uses
+ * it for every Character-arm read; the Creator Actor fallback reads the
+ * authority through the direct `get_operation` query (`hostQuery`), which takes
+ * no principal. Each record's lookups are issued together in one wave. The wave
+ * is bounded by the Actor arm's own retention cap (≤64 records), so it needs no
+ * batching contract and no extra throttle — and the admission already sits in
+ * its path.
  */
 async function ageSettledActorOperations(service: ServiceCore): Promise<void> {
   const records = service.providerRegistry.actorBackedOperations();

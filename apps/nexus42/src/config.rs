@@ -209,14 +209,15 @@ impl CliConfig {
         match toml::from_str::<Self>(&content) {
             Ok(config) => Ok(config),
             Err(error) => {
-                // Backup corrupted file and re-initialize with defaults
-                // Reader-side exposure: unlocked reads plus non-atomic writes mean this parse failure can be stale, and the rename below can move a file another writer just committed — the lock never excludes readers.
-                tracing::warn!("Config file corrupted, backing up and re-initializing: {error}");
-                let bak = config_path.with_extension("toml.bak");
-                if let Err(rename_error) = std::fs::rename(&config_path, &bak) {
-                    tracing::error!("Failed to backup corrupted config: {rename_error}");
-                }
-                Ok(Self::default())
+                // I-000089 (contract §6): a parse failure reports the error and
+                // reads nothing. Never rename or move the committed file here:
+                // reads are unlocked and writers are not atomic, so this
+                // snapshot can be stale, and a rename could relocate a document
+                // another writer just committed. Repair is an explicit
+                // user/writer action under the lock.
+                tracing::warn!("Config file unreadable; leaving it untouched: {error}");
+                Err(anyhow::Error::new(error)
+                    .context(format!("cannot parse {}", config_path.display())))
             }
         }
     }
@@ -1004,8 +1005,11 @@ platform_url = "https://direct.api.io"
         assert_eq!(result.platform_url, "https://direct.api.io");
     }
 
+    /// I-000089 (contract §6): a parse failure reports the error and never
+    /// renames or moves the committed file — reads are unlocked, so a stale
+    /// snapshot must not relocate a document another writer just committed.
     #[test]
-    fn load_corrupt_toml_recovers_to_defaults_with_backup() {
+    fn load_corrupt_toml_reports_and_leaves_the_file_untouched() {
         let _home = crate::testutil::isolated_home();
         let nexus_dir = std::env::var("HOME")
             .map(std::path::PathBuf::from)
@@ -1014,22 +1018,33 @@ platform_url = "https://direct.api.io"
         std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
 
         let corrupt = "this is not valid toml {{{{";
-        std::fs::write(nexus_dir.join("config.toml"), corrupt).expect("write corrupt toml");
+        let config_path = nexus_dir.join("config.toml");
+        std::fs::write(&config_path, corrupt).expect("write corrupt toml");
+        let before = std::fs::metadata(&config_path).expect("config metadata");
 
-        let result = CliConfig::load().expect("corrupt config still loads");
-
-        // A malformed config is never silently accepted: the user gets defaults
-        // and their original bytes are moved aside verbatim, not rewritten.
-        assert_eq!(result.active_creator_id, None);
-        assert!(result.workspace_path.is_none());
         assert!(
-            !nexus_dir.join("config.toml").exists(),
-            "corrupt config.toml should be moved aside"
+            CliConfig::load().is_err(),
+            "a corrupt config must fail the read instead of returning defaults"
+        );
+
+        assert!(
+            config_path.exists(),
+            "the committed file must stay in place"
+        );
+        assert!(
+            !nexus_dir.join("config.toml.bak").exists(),
+            "a parse failure must never move the file aside"
         );
         assert_eq!(
-            std::fs::read_to_string(nexus_dir.join("config.toml.bak")).expect("read backup"),
+            std::fs::read_to_string(&config_path).expect("read untouched config"),
             corrupt
         );
+        let after = std::fs::metadata(&config_path).expect("config metadata after");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt as _;
+            assert_eq!(before.ino(), after.ino(), "the file inode must not change");
+        }
     }
 
     #[test]
