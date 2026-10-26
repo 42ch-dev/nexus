@@ -145,9 +145,18 @@ describe('Sidebar', () => {
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
     expect(screen.getByRole('tablist', { name: 'Primary navigation' })).toBeInTheDocument();
+    const creatorTab = screen.getByRole('tab', { name: 'Creator' });
     expect(screen.getByTestId('shell-sidebar-panel')).toHaveAttribute(
       'aria-labelledby',
-      screen.getByRole('tab', { name: 'Creator' }).id,
+      creatorTab.id,
+    );
+    expect(creatorTab).toHaveAttribute(
+      'aria-controls',
+      screen.getByTestId('shell-sidebar-panel').id,
+    );
+    expect(screen.getByRole('tab', { name: 'Orchestrator' })).toHaveAttribute(
+      'aria-controls',
+      screen.getByTestId('shell-sidebar-panel').id,
     );
   });
 
