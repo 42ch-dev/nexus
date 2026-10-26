@@ -14,9 +14,13 @@ export type HubTabBarProps = {
   onTabChange: (tab: HubTab) => void;
   labels: HubTabBarLabels;
   ariaLabel?: string;
-  /** Prefix for tab button `id` / `aria-controls` targets (default `hub-tab`). */
+  /** Prefix for tab button `id` (fallback `hub-tab-${useId()}`). */
   tabIdPrefix?: string;
-  /** `aria-controls` target id for the active tab panel (default `hub-tabpanel`). */
+  /**
+   * `aria-controls` target id for the active tab panel (fallback
+   * `hub-tabpanel-${useId()}` — the SAME instance uid as the tab fallback,
+   * with a distinct prefix; a host overriding one prefix should pass both).
+   */
   tabPanelId?: string;
   'data-testid'?: string;
 };

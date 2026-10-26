@@ -717,26 +717,35 @@ pub fn write_cli_config(nexus_home: &Path, config: &toml::Value) -> CoreResult<(
 ///
 /// # Errors
 /// Returns the `CONFIG_ERROR` internal carrier when the document root is not a
-/// table — the selection cannot be stored, and reporting success would tell the
-/// caller a change happened that never reached the file.
+/// table, or when `active_workspace_slug_by_creator` exists but is not a
+/// table — the selection cannot be stored without a partial commit, and
+/// reporting success would tell the caller a change happened that never
+/// reached the file (parity with `home::write_active_selection`).
 fn apply_active_selection(config: &mut toml::Value, creator_id: &str) -> CoreResult<()> {
     let table = config
         .as_table_mut()
         .ok_or_else(|| internal("CONFIG_ERROR", "config root is not a table"))?;
+    let mut slugs = table
+        .remove("active_workspace_slug_by_creator")
+        .unwrap_or_else(|| toml::Value::Table(toml::Table::new()));
+    let Some(slug_table) = slugs.as_table_mut() else {
+        // Restore the untouched entry so a rejected commit leaves the
+        // document exactly as it was.
+        table.insert("active_workspace_slug_by_creator".to_string(), slugs);
+        return Err(internal(
+            "CONFIG_ERROR",
+            "active_workspace_slug_by_creator is not a table",
+        ));
+    };
+    slug_table.insert(
+        creator_id.to_string(),
+        toml::Value::String("default".to_string()),
+    );
     table.insert(
         "active_creator_id".to_string(),
         toml::Value::String(creator_id.to_string()),
     );
-    if let Some(slugs) = table
-        .entry("active_workspace_slug_by_creator")
-        .or_insert_with(|| toml::Value::Table(toml::Table::new()))
-        .as_table_mut()
-    {
-        slugs.insert(
-            creator_id.to_string(),
-            toml::Value::String("default".to_string()),
-        );
-    }
+    table.insert("active_workspace_slug_by_creator".to_string(), slugs);
     Ok(())
 }
 
@@ -1063,6 +1072,46 @@ mod tests {
         }
         assert_eq!(
             config.as_str(),
+            Some("corrupt"),
+            "a rejected document is left untouched"
+        );
+    }
+
+    /// BUG (I-000112): a pre-existing `active_workspace_slug_by_creator` that
+    /// is not a table would silently skip the slug write while still
+    /// committing `active_creator_id` — a partial commit. The writer must
+    /// surface the wire-internal `CONFIG_ERROR` carrier instead, matching
+    /// `home::write_active_selection`.
+    #[test]
+    fn use_creator_rejects_a_non_table_slug_table() {
+        let mut config = toml::Value::Table(toml::Table::new());
+        config
+            .as_table_mut()
+            .expect("table root")
+            .insert(
+                "active_workspace_slug_by_creator".to_string(),
+                toml::Value::String("corrupt".to_string()),
+            );
+        let error = apply_active_selection(&mut config, TARGET).expect_err("non-table slugs");
+        match error {
+            CoreError::Internal { category } => {
+                assert_eq!(
+                    category,
+                    "CONFIG_ERROR: active_workspace_slug_by_creator is not a table"
+                );
+            }
+            other => panic!("expected the CONFIG_ERROR carrier, got {other:?}"),
+        }
+        assert!(
+            config
+                .get("active_creator_id")
+                .is_none(),
+            "a rejected commit must not persist active_creator_id"
+        );
+        assert_eq!(
+            config
+                .get("active_workspace_slug_by_creator")
+                .and_then(toml::Value::as_str),
             Some("corrupt"),
             "a rejected document is left untouched"
         );
