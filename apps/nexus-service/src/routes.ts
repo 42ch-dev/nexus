@@ -341,7 +341,9 @@ export const HOST_ROUTES: readonly DomainRoute[] = [
     family: 'host',
     handle: async (service) => {
       const response = await tryHostQuery(service, { query: 'catalog', format: 'scan' });
-      return { body: response?.scan ?? { entries: [] } };
+      // The native catalog arm names its list `entries`; this endpoint's wire
+      // contract (`ScanResponse`) names it `agents`, so normalize at the seam.
+      return { body: { agents: response?.scan?.entries ?? [] } };
     },
   },
   {
@@ -547,6 +549,12 @@ async function tryHostQuery(service: ServiceCore, request: Parameters<typeof hos
   } catch (error) {
     const mapped = mapNativeError(error);
     if (isAbsentHostError(mapped)) {
+      return null;
+    }
+    // The service-only shell has no Host authority to publish, so tier1
+    // readiness degrades exactly like an absent host until promotion. After
+    // promotion the core exists and an `uninitialized` rejection still surfaces.
+    if (mapped.code === 'uninitialized' && !service.workspaceInitialized) {
       return null;
     }
     throw mapped;
