@@ -259,6 +259,9 @@ describe('ServiceDegradedGate', () => {
     expect(geminiUse).toBeEnabled();
     await user.click(geminiUse);
     expect(screen.getByLabelText('提供方 ID')).toHaveValue('gemini');
+    // Regression lock for the configured-prefill fix: the stored command
+    // must back the form (never blanked), and the saved payload keeps it.
+    expect(screen.getByLabelText('启动命令')).toHaveValue('gemini');
   });
 
   it('renders the full roster and disables not-installed candidates', async () => {
