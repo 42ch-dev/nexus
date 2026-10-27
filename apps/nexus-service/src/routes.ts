@@ -341,7 +341,9 @@ export const HOST_ROUTES: readonly DomainRoute[] = [
     family: 'host',
     handle: async (service) => {
       const response = await tryHostQuery(service, { query: 'catalog', format: 'scan' });
-      return { body: response?.scan ?? { entries: [] } };
+      // The native catalog arm names its list `entries`; this endpoint's wire
+      // contract (`ScanResponse`) names it `agents`, so normalize at the seam.
+      return { body: { agents: response?.scan?.entries ?? [] } };
     },
   },
   {

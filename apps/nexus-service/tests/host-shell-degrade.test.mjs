@@ -50,6 +50,8 @@ function shellService(workspaceInitialized) {
   };
 }
 
+const SCAN = { method: 'POST', path: '/v1/daemon/agent-host/scan' };
+
 const TIER1 = [
   {
     method: 'GET',
@@ -57,7 +59,7 @@ const TIER1 = [
     degraded: { running: false, active_sessions: 0, active_operations: 0 },
   },
   { method: 'GET', path: '/v1/daemon/agent-host/providers', degraded: { providers: [] } },
-  { method: 'POST', path: '/v1/daemon/agent-host/scan', degraded: { entries: [] } },
+  { ...SCAN, degraded: { agents: [] } },
 ];
 
 function routeFor({ method, path }) {
@@ -78,6 +80,22 @@ describe('tier1 host queries on the uninitialized shell (I-000123)', () => {
       const response = await handle(tier1, shellService(false));
       assert.deepEqual(response.body, tier1.degraded, `${tier1.method} ${tier1.path}`);
     }
+  });
+
+  test('a promoted host publishes native scan entries under the wire `agents` field', async () => {
+    const entry = {
+      name: 'claude-acp',
+      registry_agent_id: 'claude-acp',
+      launch_command: 'claude-acp',
+      installed: true,
+      version: '1.2.3',
+    };
+    const service = {
+      workspaceInitialized: true,
+      core: { hostQuery: async () => ({ scan: { entries: [entry] } }) },
+    };
+    const response = await handle(SCAN, service);
+    assert.deepEqual(response.body, { agents: [entry] });
   });
 
   test('after promotion the same rejection still surfaces as the mapped 409', async () => {
