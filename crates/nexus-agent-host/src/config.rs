@@ -1014,9 +1014,15 @@ enabled = true
         assert_eq!(loaded.providers.len(), 1);
         assert_eq!(loaded.providers[0].id, "claude");
         assert_eq!(loaded.providers[0].protocol, "acp");
-        assert_eq!(loaded.providers[0].command.as_deref(), Some("claude-agent-acp"));
+        assert_eq!(
+            loaded.providers[0].command.as_deref(),
+            Some("claude-agent-acp")
+        );
         assert_eq!(loaded.providers[0].args, vec!["--stdio".to_string()]);
-        assert_eq!(loaded.providers[0].env.get("MODE").map(String::as_str), Some("test"));
+        assert_eq!(
+            loaded.providers[0].env.get("MODE").map(String::as_str),
+            Some("test")
+        );
         assert!(loaded.providers[0].enabled);
         assert_eq!(loaded.policy.unknown_provider, "deny");
     }
@@ -1042,9 +1048,14 @@ enabled = true
             .filter_map(std::result::Result::ok)
             .map(|entry| entry.file_name().to_string_lossy().into_owned())
             .filter(|name| {
-                std::path::Path::new(name).extension().is_some_and(|extension| extension == "tmp")
+                std::path::Path::new(name)
+                    .extension()
+                    .is_some_and(|extension| extension == "tmp")
             })
             .collect();
-        assert!(leftovers.is_empty(), "temp files left behind: {leftovers:?}");
+        assert!(
+            leftovers.is_empty(),
+            "temp files left behind: {leftovers:?}"
+        );
     }
 }

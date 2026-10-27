@@ -2780,7 +2780,10 @@ mod tests {
             }],
             ..AgentHostConfig::default()
         };
-        manager.reload(start_config(selected.clone())).await.expect("reload");
+        manager
+            .reload(start_config(selected.clone()))
+            .await
+            .expect("reload");
         assert_eq!(manager.agent_config().await.providers.len(), 1);
         assert!(manager
             .provider_catalog()

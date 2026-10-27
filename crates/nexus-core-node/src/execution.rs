@@ -318,7 +318,6 @@ impl NativeCore {
         )?))
     }
 
-
     /// The established execution owner, or a truthful rejection naming the
     /// missing establishment (never a silently degraded write).
     fn execution_handle(&self) -> Result<std::sync::Arc<nexus_core::ExecutionHandle>> {
