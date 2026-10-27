@@ -32,13 +32,21 @@ function withResolvers<T>(): Deferred<T> {
   return { promise, resolve };
 }
 
+type ProfileRead = () => Promise<{ profile: { name: string } | null }>;
+
+/** A stored agent profile = a provider is selected (its readiness probe failed). */
+const SELECTED_PROFILE: ProfileRead = () => Promise.resolve({ profile: { name: 'Claude Code' } });
+const UNSELECTED_PROFILE: ProfileRead = () => Promise.resolve({ profile: null });
+
 function clientWith(
   read: () => Promise<DaemonRuntimeStatus>,
   runtime: RuntimeStatus = { workspace_initialized: false },
+  profile: ProfileRead = SELECTED_PROFILE,
 ): NexusClient {
   return {
     daemonStatus: read,
     runtimeStatus: () => Promise.resolve(runtime),
+    getAgentProfile: profile,
   } as unknown as NexusClient;
 }
 
@@ -94,9 +102,11 @@ describe('ServiceDegradedGate', () => {
   it('guides provider selection when the workspace is ready but no provider is selected', async () => {
     renderSurface({
       setupCompleted: true,
-      client: clientWith(() => Promise.resolve(ENGINE_DEGRADED), {
-        workspace_initialized: true,
-      }),
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+      ),
     });
 
     const surface = await screen.findByTestId('service-degraded-surface');
@@ -106,6 +116,49 @@ describe('ServiceDegradedGate', () => {
     // A setup step, not a transport failure: no retry affordance.
     expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
     expect(screen.getByTestId('app-content')).toBeInTheDocument();
+  });
+
+  it('keeps the failure surface when a selected provider is not ready', async () => {
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        SELECTED_PROFILE,
+      ),
+    });
+
+    const surface = await screen.findByTestId('service-degraded-surface');
+    expect(surface).toHaveTextContent(
+      'Nexus 服务暂不可用：编排引擎未就绪。请确认本地服务正在运行后重试。',
+    );
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
+  });
+
+  it('keeps the failure surface while the profile selection is still loading', async () => {
+    const profile = withResolvers<{ profile: { name: string } | null }>();
+    const getAgentProfile = vi.fn(() => profile.promise);
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        getAgentProfile,
+      ),
+    });
+
+    await waitFor(() => expect(getAgentProfile).toHaveBeenCalledTimes(1));
+    // Never a flash of setup guidance while the selection read is in flight.
+    expect(screen.getByTestId('service-degraded-surface')).toHaveTextContent('服务暂不可用');
+
+    await act(async () => {
+      profile.resolve({ profile: null });
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('service-degraded-surface')).toHaveTextContent(
+        '尚未选择编排引擎提供方',
+      ),
+    );
   });
 
   it('ignores an uninitialized service so onboarding stays reachable', async () => {

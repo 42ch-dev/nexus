@@ -79,17 +79,27 @@ export function ServiceStatusProvider({ children }: { children: ReactNode }) {
       const status = await client.daemonStatus();
       if (!isLatest()) return false;
       const subsystems = completed ? status.degraded.subsystems : [];
+      // Publish the failure surface first: a lazy selection read must never
+      // flash setup guidance while it is still in flight.
+      setReason(subsystems.length > 0 ? { kind: 'subsystems', subsystems } : null);
       if (subsystems.length === 1 && subsystems[0] === 'engine') {
-        // A ready workspace whose only degraded subsystem is the engine has no
-        // provider selected yet (the owner itself is established at startup).
+        // A ready workspace whose only degraded subsystem is the engine has
+        // either no provider selected (setup guidance) or a selected provider
+        // whose readiness probe failed (a real failure — keep the surface).
         const runtime = await client.runtimeStatus().catch(() => null);
         if (!isLatest()) return false;
         if (runtime?.workspace_initialized) {
-          setReason({ kind: 'provider_unselected' });
-          return true;
+          const selected = await client
+            .getAgentProfile()
+            .then(
+              (response) => response.profile,
+              // An unreadable profile proves nothing about selection.
+              () => undefined,
+            );
+          if (!isLatest()) return false;
+          if (selected === null) setReason({ kind: 'provider_unselected' });
         }
       }
-      setReason(subsystems.length > 0 ? { kind: 'subsystems', subsystems } : null);
       return true;
     } catch (error) {
       if (isLatest()) {
