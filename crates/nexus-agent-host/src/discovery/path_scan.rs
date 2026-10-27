@@ -174,6 +174,15 @@ pub fn scan_path_in(
     Ok(entries)
 }
 
+/// Whether `command` resolves to an executable on the given PATH dirs (or the
+/// process PATH as the same `which` fallback the scan uses). Discovery
+/// surfaces that classify already-listed candidates use this without
+/// re-running the full scan.
+#[must_use]
+pub fn command_on_path(path_dirs: &[PathBuf], command: &str) -> bool {
+    find_command(path_dirs, command).is_some()
+}
+
 /// Resolve a command name to its full path using cross-platform resolution.
 ///
 /// Uses the `which` crate for proper PATH lookup across all platforms.

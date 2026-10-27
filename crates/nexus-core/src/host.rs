@@ -33,7 +33,7 @@ use nexus_contracts::core_host_query_response::{
     CoreHostQueryResponse, CoreHostQueryResponseCatalog, CoreHostQueryResponseCatalogProvidersItem,
     CoreHostQueryResponseHealth, CoreHostQueryResponseScan, NexusAgentHostOperationResponse,
     NexusAgentHostSessionListResponse, NexusAgentHostSessionResponse, NexusAgentScanEntry,
-    NexusPaginationInfo,
+    NexusAgentScanEntryProtocolKind, NexusPaginationInfo,
 };
 use nexus_contracts::generated::daemon_api::agent_host::character_operation_result::CharacterOperationResult;
 // Only the `test-hooks`-gated direct-settlement seam names these, so they are
@@ -306,6 +306,58 @@ impl AuthorityState {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(report.clone());
     }
+}
+
+/// Discoverable ACP registry agents whose launch binary resolves on this PATH.
+///
+/// The repair form stores a bare command (no argv), so only binary
+/// distributions qualify: an `npx` recipe without its package argument would be
+/// an unusable command string. A registry that cannot be read yields no
+/// registry rows — never a fabricated candidate; native PATH rows stand on
+/// their own.
+async fn registry_scan_entries(
+    config: &AgentHostConfig,
+    probe_dirs: &[PathBuf],
+) -> Vec<NexusAgentScanEntry> {
+    let Ok(client) = nexus_acp_host::registry::RegistryClient::new() else {
+        return Vec::new();
+    };
+    // Cache hits answer immediately; a cold fetch gets a bounded window so the
+    // scan endpoint cannot hang on the CDN.
+    let Ok(Ok(registry)) = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        client.get_registry(),
+    )
+    .await
+    else {
+        return Vec::new();
+    };
+    let Ok(registry_entries) =
+        nexus_agent_host::discovery::acp_registry::entries_from_registry(config, &registry.agents)
+    else {
+        return Vec::new();
+    };
+    registry_entries
+        .into_iter()
+        .filter_map(|entry| {
+            let LaunchStrategy::Acp { command, args, .. } = &entry.launch else {
+                return None;
+            };
+            if !args.is_empty() || !path_scan::command_on_path(probe_dirs, command) {
+                return None;
+            }
+            Some(NexusAgentScanEntry {
+                name: entry.display_name,
+                registry_agent_id: Some(entry.provider_id.to_string()),
+                launch_command: Some(command.clone()),
+                protocol_kind: Some(NexusAgentScanEntryProtocolKind::Acp),
+                installed: true,
+                version: None,
+                description: None,
+                icon_url: None,
+            })
+        })
+        .collect()
 }
 
 /// One open Host authority: the started [`HostManager`], its composed
@@ -1318,7 +1370,7 @@ impl HostHandle {
                             .unwrap_or_default();
                         let native_entries =
                             path_scan::scan_path_in(&config, &[], &probe_dirs).map_err(host_err)?;
-                        let entries: Vec<NexusAgentScanEntry> = native_entries
+                        let mut entries: Vec<NexusAgentScanEntry> = native_entries
                             .into_iter()
                             .map(|entry| {
                                 let launch_command = match &entry.launch {
@@ -1333,11 +1385,18 @@ impl HostHandle {
                                     launch_command,
                                     description: entry.health.message,
                                     icon_url: None,
-                                    registry_agent_id: None,
+                                    // The provider id IS the join key the repair
+                                    // page saves; PATH rows are native CLI.
+                                    registry_agent_id: Some(entry.provider_id.to_string()),
+                                    protocol_kind: Some(NexusAgentScanEntryProtocolKind::NativeCli),
                                     version: None,
                                 }
                             })
                             .collect();
+                        // Registry agents that are actually launchable on this
+                        // machine join the list, so an unconfigured home still
+                        // offers a working candidate.
+                        entries.extend(registry_scan_entries(&config, &probe_dirs).await);
                         Ok(CoreHostQueryResponse {
                             scan: Some(CoreHostQueryResponseScan { entries }),
                             health: None,

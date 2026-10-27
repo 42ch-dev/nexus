@@ -148,6 +148,10 @@ export interface NexusAgentScanEntry {
    */
   launch_command?: string | null;
   /**
+   * Wire protocol kind of the candidate (additive, I-000134 F-7). Null for a legacy producer that does not publish it. A provider entry saved from this candidate uses the same kind.
+   */
+  protocol_kind?: "acp" | "native_cli" | null;
+  /**
    * True when the binary referenced by launch_command (or derived from registry distribution metadata) is found on the system PATH via a which-equivalent lookup.
    */
   installed: boolean;

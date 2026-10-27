@@ -152,26 +152,38 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
     }
   };
 
-  const scanById = new Map(
-    scanEntries.flatMap((entry) =>
-      entry.registry_agent_id ? [[entry.registry_agent_id, entry] as const] : [],
-    ),
-  );
-  const candidates: ProviderCandidate[] = (catalog ?? []).flatMap((entry) => {
+  // Scan rows carry the discoverable candidates on an unconfigured home (id,
+  // protocol, launch command, install state). The catalog adds the providers
+  // that are configured but absent from the scan (e.g. a failing one).
+  const scanCandidates: ProviderCandidate[] = scanEntries.flatMap((entry) => {
+    if (!entry.registry_agent_id) return [];
     if (entry.protocol_kind !== 'acp' && entry.protocol_kind !== 'native_cli') return [];
-    const scanned = scanById.get(entry.provider_id);
+    return [
+      {
+        id: entry.registry_agent_id,
+        displayName: entry.name,
+        protocol: entry.protocol_kind,
+        command: entry.launch_command ?? null,
+        installed: entry.installed,
+      },
+    ];
+  });
+  const scannedIds = new Set(scanCandidates.map((candidate) => candidate.id));
+  const catalogCandidates: ProviderCandidate[] = (catalog ?? []).flatMap((entry) => {
+    if (entry.protocol_kind !== 'acp' && entry.protocol_kind !== 'native_cli') return [];
+    if (scannedIds.has(entry.provider_id)) return [];
     return [
       {
         id: entry.provider_id,
         displayName: entry.display_name,
         protocol: entry.protocol_kind,
-        command: scanned?.launch_command ?? null,
-        installed: scanned?.installed ?? false,
+        command: null,
+        installed: false,
       },
     ];
   });
-  // Installed candidates first; the rest keep the catalog's registry order.
-  const orderedCandidates = [...candidates].sort(
+  // Installed candidates first; scan order then catalog order within a group.
+  const orderedCandidates = [...scanCandidates, ...catalogCandidates].sort(
     (left, right) => Number(right.installed) - Number(left.installed),
   );
 
@@ -180,7 +192,7 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
       <h2 className="text-copy-16 text-gray-1000">{t('degraded.repair.form.title')}</h2>
       <div className="flex flex-col gap-2">
         <h3 className="text-copy-14 text-gray-1000">{t('degraded.repair.form.candidatesTitle')}</h3>
-        {catalogFailed && (
+        {catalogFailed && orderedCandidates.length === 0 && (
           <p data-testid="provider-catalog-failed" className="text-copy-13 text-red-1000">
             {t('degraded.repair.form.candidatesError')}
           </p>

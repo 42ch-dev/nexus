@@ -125,8 +125,20 @@ describe('ServiceDegradedGate', () => {
   it('joins the provider catalog with scan data and fills id/protocol/command', async () => {
     const user = userEvent.setup();
     const agents: AgentScanEntry[] = [
-      { name: 'Beta CLI', registry_agent_id: 'beta-cli', launch_command: 'beta-cli', installed: false },
-      { name: 'Alpha Agent', registry_agent_id: 'alpha-acp', launch_command: 'alpha-acp', installed: true },
+      {
+        name: 'Beta CLI',
+        registry_agent_id: 'beta-cli',
+        launch_command: 'beta-cli',
+        installed: false,
+        protocol_kind: 'native_cli',
+      },
+      {
+        name: 'Alpha Agent',
+        registry_agent_id: 'alpha-acp',
+        launch_command: 'alpha-acp',
+        installed: true,
+        protocol_kind: 'acp',
+      },
     ];
     renderSurface({
       setupCompleted: true,
@@ -174,6 +186,40 @@ describe('ServiceDegradedGate', () => {
     expect(screen.getByLabelText('协议')).toHaveValue('acp');
     expect(screen.getByLabelText('启动命令')).toHaveValue('alpha-acp');
     expect(screen.getByRole('button', { name: '重新检测' })).toBeInTheDocument();
+  });
+
+  it('offers installed agents from the scan alone on an unconfigured home', async () => {
+    const user = userEvent.setup();
+    const agents: AgentScanEntry[] = [
+      {
+        name: 'Claude Code',
+        registry_agent_id: 'claude-native',
+        launch_command: '/opt/homebrew/bin/claude',
+        installed: true,
+        protocol_kind: 'native_cli',
+      },
+    ];
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        { scan: () => Promise.resolve({ agents }) },
+      ),
+    });
+
+    // The catalog is empty on an unconfigured home; the scan is the source.
+    const candidates = await screen.findAllByRole('listitem');
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toHaveTextContent('Claude Code');
+    expect(candidates[0]).toHaveTextContent('已安装');
+
+    await user.click(within(candidates[0]!).getByRole('button', { name: '启用' }));
+    expect(screen.getByLabelText('提供方 ID')).toHaveValue('claude-native');
+    expect(screen.getByLabelText('协议')).toHaveValue('native_cli');
+    expect(screen.getByLabelText('启动命令')).toHaveValue('/opt/homebrew/bin/claude');
+    expect(screen.getByRole('button', { name: '保存并重启检测' })).toBeEnabled();
   });
 
   it('saves the upserted provider and re-runs the readiness probe', async () => {
