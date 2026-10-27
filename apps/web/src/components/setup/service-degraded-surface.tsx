@@ -101,6 +101,10 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
   const [configuredRows, setConfiguredRows] = useState<
     Map<string, AgentHostProviderConfig>
   >(new Map());
+  // Every id in the SAVED document (enabled or not). The catalog also lists
+  // auto-discovered PATH roster providers, whose protocol is only a default —
+  // authority over a scan row belongs to the user's actual configuration.
+  const [savedProviderIds, setSavedProviderIds] = useState<Set<string>>(new Set());
   const [id, setId] = useState('');
   const [protocol, setProtocol] = useState<AgentHostProviderConfig['protocol']>('acp');
   const [command, setCommand] = useState('');
@@ -137,6 +141,7 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
                 .map((p) => [p.id, p]),
             ),
           );
+          setSavedProviderIds(new Set(config.providers.map((p) => p.id)));
         }
       },
       () => {
@@ -231,13 +236,22 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
     seenCandidateKeys.add(key);
     candidateKeys.push(key);
   };
-  // A catalog row is authoritative for the provider's protocol; scan-only
-  // providers keep one candidate per protocol they were discovered under.
+  // Only a SAVED provider's protocol is authoritative. A catalog row for an
+  // auto-discovered provider (PATH roster) must not hide a different-protocol
+  // scan row: those keep one candidate per discovered protocol.
   for (const [providerId, row] of catalogById) {
     addCandidateKey(scanKey(providerId, row.protocol_kind));
   }
   for (const key of scanByKey.keys()) {
-    if (!catalogById.has(providerIdOf(key))) addCandidateKey(key);
+    const providerId = providerIdOf(key);
+    // A saved provider's protocol is authoritative: scan rows of another
+    // protocol must not add a second choice for the same saved id.
+    if (savedProviderIds.has(providerId)) continue;
+    // A legacy scan row without a protocol annotates the catalog candidate
+    // instead of adding a protocol-less duplicate of it.
+    const protocol = key.slice(key.indexOf('\u0000') + 1);
+    if (protocol === 'unknown' && catalogById.has(providerId)) continue;
+    addCandidateKey(key);
   }
   const candidates: ProviderCandidate[] = candidateKeys.flatMap((key) => {
     const providerId = providerIdOf(key);
@@ -246,7 +260,11 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
     // catalog's provider; a row with a DIFFERENT protocol never does.
     const scanned =
       scanByKey.get(key) ?? scanByKey.get(scanKey(providerId, undefined));
-    const candidateProtocol = row?.protocol_kind ?? scanned?.protocol_kind;
+    // Saved providers keep the catalog protocol; auto-discovered rows take the
+    // protocol of the scan candidate that produced this key.
+    const candidateProtocol = savedProviderIds.has(providerId)
+      ? (row?.protocol_kind ?? scanned?.protocol_kind)
+      : (scanned?.protocol_kind ?? row?.protocol_kind);
     if (candidateProtocol !== 'acp' && candidateProtocol !== 'native_cli') return [];
     return [
       {

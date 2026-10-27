@@ -646,6 +646,62 @@ describe('ServiceDegradedGate', () => {
     expect(within(roster[0]!).queryByTestId('detection-only-badge')).not.toBeInTheDocument();
   });
 
+  it('does not let an auto-discovered catalog row hide a working ACP scan row', async () => {
+    const user = userEvent.setup();
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        {
+          scan: () =>
+            Promise.resolve({
+              agents: [
+                {
+                  name: 'kimi (ACP)',
+                  registry_agent_id: 'kimi',
+                  launch_command: '/usr/local/bin/kimi-acp',
+                  launch_args: [],
+                  installed: true,
+                  protocol_kind: 'acp',
+                },
+                {
+                  name: 'kimi (native CLI)',
+                  registry_agent_id: 'kimi',
+                  launch_command: 'kimi',
+                  launch_args: [],
+                  installed: false,
+                  protocol_kind: 'native_cli',
+                },
+              ],
+            }),
+          // Auto-discovered PATH roster row only — kimi is NOT saved.
+          listProviders: () =>
+            Promise.resolve({
+              providers: [{ provider_id: 'kimi', display_name: 'Kimi CLI', protocol_kind: 'native_cli' }],
+            }),
+          getConfig: () => Promise.resolve(EMPTY_CONFIG),
+        },
+      ),
+    });
+
+    // Both protocols stay as separate choices; the catalog only polishes the
+    // label. The installed ACP row is selectable, the detection row is not.
+    const roster = await screen.findAllByRole('listitem');
+    expect(roster).toHaveLength(2);
+    const acpRow = roster.find(
+      (row) => within(row).getByRole('button', { name: '启用' }).hasAttribute('disabled') === false,
+    )!;
+    const detectionRow = roster.find((row) => row !== acpRow)!;
+    expect(within(detectionRow).getByTestId('detection-only-badge')).toBeInTheDocument();
+
+    await user.click(within(acpRow).getByRole('button', { name: '启用' }));
+    expect(screen.getByLabelText('提供方 ID')).toHaveValue('kimi');
+    expect(screen.getByLabelText('协议')).toHaveValue('acp');
+    expect(screen.getByLabelText('启动命令')).toHaveValue('/usr/local/bin/kimi-acp');
+  });
+
   it('disables every other provider when saving a replacement provider', async () => {
     const user = userEvent.setup();
     const saveConfig = vi.fn((config: AgentHostConfig) => Promise.resolve(config));
