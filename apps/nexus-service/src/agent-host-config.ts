@@ -80,35 +80,57 @@ interface EngineOwnerFacts {
   provider_ready: boolean;
 }
 
-export async function putAgentHostConfig(
+/**
+ * Serializes the whole save → restart → publish sequence per service. Two
+ * concurrent PUTs must apply strictly in order: the second restart reads the
+ * document the first one wrote, so the final engine owner reflects both.
+ */
+const saveQueues = new WeakMap<ServiceCore, Promise<unknown>>();
+
+function withSaveLock<T>(service: ServiceCore, work: () => Promise<T>): Promise<T> {
+  const previous = saveQueues.get(service) ?? Promise.resolve();
+  const run = previous.then(work, work);
+  saveQueues.set(
+    service,
+    run.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return run;
+}
+
+export function putAgentHostConfig(
   service: ServiceCore,
   body: unknown,
 ): Promise<AgentHostConfig> {
   const config = parseAgentHostConfig(body);
-  try {
-    await service.core.saveAgentHostConfig(config);
-  } catch (error) {
-    throw mapNativeError(error);
-  }
+  return withSaveLock(service, async () => {
+    try {
+      await service.core.saveAgentHostConfig(config);
+    } catch (error) {
+      throw mapNativeError(error);
+    }
 
-  // The saved document is only real once the engine has re-read it: settle and
-  // re-establish the owner, then publish the fresh facts. A failed restart is a
-  // typed 503 — the old facts stay untouched, so nothing claims readiness the
-  // probe did not produce.
-  let facts: EngineOwnerFacts;
-  try {
-    facts = (await service.core.restartExecutionOwner()) as EngineOwnerFacts;
-  } catch {
-    throw new HttpError(
-      503,
-      'engine_restart_failed',
-      'Provider configuration was saved, but the engine owner could not be restarted',
-    );
-  }
-  service.providerReady = facts.provider_ready;
-  service.engineEpoch = facts.engine_epoch ?? 0;
+    // The saved document is only real once the engine has re-read it: settle and
+    // re-establish the owner, then publish the fresh facts. A failed restart is
+    // a typed 503 — the old facts stay untouched, so nothing claims readiness
+    // the probe did not produce.
+    let facts: EngineOwnerFacts;
+    try {
+      facts = (await service.core.restartExecutionOwner()) as EngineOwnerFacts;
+    } catch {
+      throw new HttpError(
+        503,
+        'engine_restart_failed',
+        'Provider configuration was saved, but the engine owner could not be restarted',
+      );
+    }
+    service.providerReady = facts.provider_ready;
+    service.engineEpoch = facts.engine_epoch ?? 0;
 
-  return getAgentHostConfig(service);
+    return getAgentHostConfig(service);
+  });
 }
 
 export const AGENT_HOST_CONFIG_ROUTES: readonly DomainRoute[] = [

@@ -112,6 +112,50 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
     assert.equal(response.body.providers[0].id, 'claude-acp');
   });
 
+  test('two overlapping PUTs apply in order and both restart', async () => {
+    let stored = { ...DEFAULT_CONFIG };
+    const restarts = [];
+    const service = {
+      workspaceInitialized: true,
+      providerReady: false,
+      engineEpoch: 0,
+      core: {
+        getAgentHostConfig: async () => stored,
+        saveAgentHostConfig: async (config) => {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          stored = config;
+        },
+        restartExecutionOwner: async () => {
+          restarts.push(stored.providers.map((provider) => provider.id));
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          return { engine_epoch: restarts.length, provider_ready: true };
+        },
+      },
+    };
+    const first = {
+      ...DEFAULT_CONFIG,
+      providers: [{ id: 'first-acp', protocol: 'acp', command: 'first-agent', enabled: true }],
+    };
+    const second = {
+      ...DEFAULT_CONFIG,
+      providers: [...first.providers, { id: 'second-acp', protocol: 'acp', command: 'second-agent', enabled: true }],
+    };
+
+    const [a, b] = await Promise.all([
+      handle('PUT', service, first),
+      handle('PUT', service, second),
+    ]);
+
+    assert.equal(a.body.providers.length, 1, 'the first response precedes the second write');
+    assert.equal(b.body.providers.length, 2);
+    assert.deepEqual(
+      stored.providers.map((provider) => provider.id),
+      ['first-acp', 'second-acp'],
+    );
+    // Each restart saw the document its own save had just written.
+    assert.deepEqual(restarts, [['first-acp'], ['first-acp', 'second-acp']]);
+  });
+
   test('a restart failure is a typed 503 and keeps the old facts', async () => {
     const { service, saves } = storeService(DEFAULT_CONFIG, async () => {
       throw new Error('owner refused');
