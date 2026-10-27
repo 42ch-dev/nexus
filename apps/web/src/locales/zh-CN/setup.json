@@ -115,7 +115,6 @@
   },
   "degraded": {
     "body": "Nexus 服务暂不可用：{{reason}}。请确认本地服务正在运行后重试。",
-    "providerUnselected": "尚未配置编排提供方 —— 运行 `nexus42 connect` 完成提供方配置后即可启用运行能力。",
     "retry": "重试",
     "separator": "、",
     "reason": {
@@ -124,6 +123,22 @@
     "subsystem": {
       "db": "本地数据库未就绪",
       "engine": "编排引擎未就绪"
+    },
+    "repair": {
+      "title": "编排引擎未就绪",
+      "description": "Nexus 需要编排提供方才能运行任务。完成以下两步后重新检测。",
+      "stepConnect": {
+        "title": "配置编排提供方",
+        "body": "在终端运行以下命令："
+      },
+      "copy": "复制",
+      "copied": "已复制",
+      "failure": "已选择编排提供方，但就绪检测未通过：{{reason}}。",
+      "stepRecheck": {
+        "title": "重新检测",
+        "body": "配置完成后，点击下方按钮重新检测引擎状态。"
+      },
+      "recheck": "重新检测"
     }
   },
   "continueError": {

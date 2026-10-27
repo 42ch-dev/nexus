@@ -96,30 +96,32 @@ describe('Setup wizard active contrast — Studio fixture (P0G-4)', () => {
   });
 });
 
-describe('Setup service banner variants — Studio fixture (I-000124)', () => {
-  it('provider-unconfigured shows the nexus42 connect guidance without retry', () => {
+describe('Setup engine repair page variants — Studio fixture (I-000124)', () => {
+  it('provider-unconfigured shows the repair steps without a failure note', () => {
     mockMatchMediaFull({ dark: false });
     renderWizardFixtures();
 
     const frame = screen.getByTestId('wizard-chrome-service-provider-unconfigured');
-    expect(frame).toHaveTextContent('run `nexus42 connect`');
-    expect(frame).not.toHaveTextContent('Agent settings');
-    // Setup guidance, not a failure: no retry affordance.
-    expect(within(frame).queryByRole('button')).not.toBeInTheDocument();
+    expect(frame).toHaveTextContent('Orchestration engine is not ready');
+    expect(frame).toHaveTextContent('nexus42 connect');
+    expect(frame).not.toHaveTextContent('readiness check failed');
+    expect(within(frame).getByRole('button', { name: 'Recheck' })).toBeInTheDocument();
+    expect(within(frame).getByRole('button', { name: 'Copy' })).toBeInTheDocument();
   });
 
-  it('engine-unavailable keeps the retry action in light and dark', () => {
+  it('engine-failed keeps the failure note and recheck action in light and dark', () => {
     mockMatchMediaFull({ dark: false });
     renderWizardFixtures();
 
-    const light = screen.getByTestId('wizard-chrome-service-engine-unavailable');
-    expect(within(light).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    const light = screen.getByTestId('wizard-chrome-service-engine-failed');
+    expect(light).toHaveTextContent('readiness check failed');
+    expect(within(light).getByRole('button', { name: 'Recheck' })).toBeInTheDocument();
 
     act(() => {
       document.documentElement.classList.add('dark');
     });
-    const dark = screen.getByTestId('wizard-chrome-service-engine-unavailable');
-    expect(dark).toHaveTextContent('Nexus service unavailable');
-    expect(within(dark).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    const dark = screen.getByTestId('wizard-chrome-service-engine-failed');
+    expect(dark).toHaveTextContent('readiness check failed');
+    expect(within(dark).getByRole('button', { name: 'Recheck' })).toBeInTheDocument();
   });
 });

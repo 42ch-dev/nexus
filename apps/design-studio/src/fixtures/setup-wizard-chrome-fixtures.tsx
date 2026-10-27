@@ -199,33 +199,55 @@ function WorkspaceBody() {
 }
 
 /**
- * Studio-local replica of the shell service banner (apps/web
- * service-degraded-surface): `provider-unconfigured` is setup guidance with no
- * retry, `unavailable` is a genuine failure that keeps the retry action.
+ * Studio-local replica of the engine repair page (apps/web
+ * service-degraded-surface `EngineRepair`): `provider-unconfigured` is the
+ * steps-only state, `failed` adds the readiness failure note under step 1.
  */
-function ServiceBanner({ variant }: { variant: 'provider-unconfigured' | 'unavailable' }) {
-  const unconfigured = variant === 'provider-unconfigured';
+function ServiceRepair({ variant }: { variant: 'provider-unconfigured' | 'failed' }) {
+  const failed = variant === 'failed';
   return (
     <div
       role="alert"
-      data-testid={`service-banner-${variant}`}
-      data-variant="banner"
-      className={
-        unconfigured
-          ? 'flex flex-wrap items-center justify-between gap-3 border-b border-gray-alpha-400 bg-background-200 px-4 py-2 text-copy-13 text-gray-1000'
-          : 'flex flex-wrap items-center justify-between gap-3 border-b border-red-700/30 bg-red-700/10 px-4 py-2 text-copy-13 text-red-1000'
-      }
+      data-testid={`service-repair-${variant}`}
+      data-state={failed ? 'failed' : 'unconfigured'}
+      className="flex w-full max-w-lg flex-col gap-6 rounded-popover bg-background-100 p-6"
     >
-      <p className="min-w-0">
-        {unconfigured
-          ? 'No orchestration provider is configured — run `nexus42 connect` to configure a provider and enable run capabilities.'
-          : 'Nexus service unavailable: the orchestration engine is not ready. Make sure the local service is running, then retry.'}
+      <h1 className="font-display text-display-24 text-gray-1000">
+        Orchestration engine is not ready
+      </h1>
+      <p className="text-copy-14 text-gray-900">
+        Nexus needs an orchestration provider to run tasks. Complete the two steps below, then
+        recheck.
       </p>
-      {!unconfigured && (
-        <Button variant="secondary" size="small" type="button">
-          Retry
-        </Button>
-      )}
+      <ol className="flex list-none flex-col gap-5 p-0">
+        <li className="flex flex-col gap-2">
+          <h2 className="text-copy-16 text-gray-1000">Configure an orchestration provider</h2>
+          <p className="text-copy-14 text-gray-900">Run this command in your terminal:</p>
+          <div className="flex items-center gap-2">
+            <code className="min-w-0 flex-1 rounded-md bg-background-200 px-3 py-2 font-mono text-copy-13 text-gray-1000">
+              nexus42 connect
+            </code>
+            <Button variant="secondary" size="small" type="button">
+              Copy
+            </Button>
+          </div>
+          {failed && (
+            <p className="text-copy-13 text-red-1000">
+              A provider is selected, but its readiness check failed: the orchestration engine is
+              not ready.
+            </p>
+          )}
+        </li>
+        <li className="flex flex-col items-start gap-2">
+          <h2 className="text-copy-16 text-gray-1000">Recheck</h2>
+          <p className="text-copy-14 text-gray-900">
+            After configuring, click the button below to recheck the engine status.
+          </p>
+          <Button variant="secondary" type="button">
+            Recheck
+          </Button>
+        </li>
+      </ol>
     </div>
   );
 }
@@ -386,19 +408,19 @@ export function SetupWizardChromeFixtures() {
       </FixtureFrame>
 
       <FixtureFrame
-        title="Service banner — provider unconfigured"
-        description="Ready workspace, no orchestration provider: setup guidance pointing at `nexus42 connect`; no retry affordance."
+        title="Engine repair — no provider selected"
+        description="Full-screen repair steps: run `nexus42 connect`, then recheck."
         testId="wizard-chrome-service-provider-unconfigured"
       >
-        <ServiceBanner variant="provider-unconfigured" />
+        <ServiceRepair variant="provider-unconfigured" />
       </FixtureFrame>
 
       <FixtureFrame
-        title="Service banner — engine unavailable"
-        description="Genuine service failure: localized reason with the retry action."
-        testId="wizard-chrome-service-engine-unavailable"
+        title="Engine repair — selected provider failed readiness"
+        description="Same repair steps with the readiness failure note under step 1."
+        testId="wizard-chrome-service-engine-failed"
       >
-        <ServiceBanner variant="unavailable" />
+        <ServiceRepair variant="failed" />
       </FixtureFrame>
     </div>
   );

@@ -78,20 +78,25 @@ const HEALTHY: DaemonRuntimeStatus = {
   degraded: { subsystems: [], reasons: [] },
 };
 
+/** Any non-engine cause keeps the banner/full-screen split. */
+const DB_DEGRADED: DaemonRuntimeStatus = {
+  degraded: { subsystems: ['db'], reasons: ['db not ready'] },
+};
+
 /** jsdom resolves the system locale to `en`; pin zh-CN to assert the product copy. */
 beforeEach(() => window.localStorage.setItem('nexus-web-locale', 'zh-CN'));
 
 describe('ServiceDegradedGate', () => {
-  it('shows one banner inside the shell when a subsystem is degraded', async () => {
+  it('shows one banner inside the shell when a non-engine subsystem is degraded', async () => {
     renderSurface({
       setupCompleted: true,
-      client: clientWith(() => Promise.resolve(ENGINE_DEGRADED)),
+      client: clientWith(() => Promise.resolve(DB_DEGRADED)),
     });
 
     const surface = await screen.findByTestId('service-degraded-surface');
     expect(surface).toHaveAttribute('data-variant', 'banner');
     expect(surface).toHaveTextContent(
-      'Nexus 服务暂不可用：编排引擎未就绪。请确认本地服务正在运行后重试。',
+      'Nexus 服务暂不可用：本地数据库未就绪。请确认本地服务正在运行后重试。',
     );
     expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
     // The shell stays usable behind the single surface — no toasts.
@@ -99,7 +104,13 @@ describe('ServiceDegradedGate', () => {
     expect(screen.getAllByRole('alert')).toHaveLength(1);
   });
 
-  it('guides provider selection when the workspace is ready but no provider is selected', async () => {
+  it('takes over every route with the repair page when no provider is selected', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
     renderSurface({
       setupCompleted: true,
       client: clientWith(
@@ -110,15 +121,22 @@ describe('ServiceDegradedGate', () => {
     });
 
     const surface = await screen.findByTestId('service-degraded-surface');
-    expect(surface).toHaveTextContent(
-      '尚未配置编排提供方 —— 运行 `nexus42 connect` 完成提供方配置后即可启用运行能力。',
-    );
-    // A setup step, not a transport failure: no retry affordance.
-    expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
-    expect(screen.getByTestId('app-content')).toBeInTheDocument();
+    expect(surface).toHaveAttribute('data-variant', 'full');
+    expect(surface).toHaveAttribute('data-state', 'unconfigured');
+    expect(surface).toHaveTextContent('编排引擎未就绪');
+    expect(surface).toHaveTextContent('配置编排提供方');
+    expect(surface).toHaveTextContent('nexus42 connect');
+    expect(screen.queryByTestId('engine-repair-failure')).not.toBeInTheDocument();
+    // The app is not usable until the engine is configured.
+    expect(screen.queryByTestId('app-content')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '复制' }));
+    expect(writeText).toHaveBeenCalledWith('nexus42 connect');
+    expect(screen.getByRole('button', { name: '已复制' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '重新检测' })).toBeInTheDocument();
   });
 
-  it('keeps the failure surface when a selected provider is not ready', async () => {
+  it('adds the failure note when a selected provider is not ready', async () => {
     renderSurface({
       setupCompleted: true,
       client: clientWith(
@@ -129,13 +147,15 @@ describe('ServiceDegradedGate', () => {
     });
 
     const surface = await screen.findByTestId('service-degraded-surface');
-    expect(surface).toHaveTextContent(
-      'Nexus 服务暂不可用：编排引擎未就绪。请确认本地服务正在运行后重试。',
+    expect(surface).toHaveAttribute('data-variant', 'full');
+    expect(surface).toHaveAttribute('data-state', 'failed');
+    expect(screen.getByTestId('engine-repair-failure')).toHaveTextContent(
+      '已选择编排提供方，但就绪检测未通过：编排引擎未就绪。',
     );
-    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '重新检测' })).toBeInTheDocument();
   });
 
-  it('keeps the failure surface while the profile selection is still loading', async () => {
+  it('keeps the failure repair page while the profile selection is still loading', async () => {
     const profile = withResolvers<{ profile: { name: string } | null }>();
     const getAgentProfile = vi.fn(() => profile.promise);
     renderSurface({
@@ -149,16 +169,22 @@ describe('ServiceDegradedGate', () => {
 
     await waitFor(() => expect(getAgentProfile).toHaveBeenCalledTimes(1));
     // Never a flash of setup guidance while the selection read is in flight.
-    expect(screen.getByTestId('service-degraded-surface')).toHaveTextContent('服务暂不可用');
+    expect(screen.getByTestId('service-degraded-surface')).toHaveAttribute(
+      'data-state',
+      'failed',
+    );
+    expect(screen.getByTestId('engine-repair-failure')).toBeInTheDocument();
 
     await act(async () => {
       profile.resolve({ profile: null });
     });
     await waitFor(() =>
-      expect(screen.getByTestId('service-degraded-surface')).toHaveTextContent(
-        '尚未配置编排提供方',
+      expect(screen.getByTestId('service-degraded-surface')).toHaveAttribute(
+        'data-state',
+        'unconfigured',
       ),
     );
+    expect(screen.queryByTestId('engine-repair-failure')).not.toBeInTheDocument();
   });
 
   it('ignores an uninitialized service so onboarding stays reachable', async () => {
@@ -214,7 +240,7 @@ describe('ServiceDegradedGate', () => {
     expect(surface).toHaveAttribute('data-variant', 'full');
   });
 
-  it('updates the same banner on retry instead of stacking surfaces', async () => {
+  it('replaces the banner with the repair page when the retry reports the engine', async () => {
     const user = userEvent.setup();
     const daemonStatus = vi
       .fn()
@@ -223,15 +249,21 @@ describe('ServiceDegradedGate', () => {
     renderSurface({ setupCompleted: true, client: clientWith(daemonStatus) });
 
     const first = await screen.findByTestId('service-degraded-surface');
+    expect(first).toHaveAttribute('data-variant', 'banner');
     expect(first).toHaveTextContent('无法连接本地服务');
 
     await user.click(screen.getByRole('button', { name: '重试' }));
 
     await waitFor(() =>
-      expect(screen.getByTestId('service-degraded-surface')).toHaveTextContent('编排引擎未就绪'),
+      expect(screen.getByTestId('service-degraded-surface')).toHaveAttribute(
+        'data-variant',
+        'full',
+      ),
     );
-    // One instance throughout: the retry updates the existing banner.
+    expect(screen.getByTestId('service-degraded-surface')).toHaveTextContent('编排引擎未就绪');
+    // One instance throughout: the retry updates the existing surface.
     expect(screen.getAllByTestId('service-degraded-surface')).toHaveLength(1);
+    expect(screen.queryByTestId('app-content')).not.toBeInTheDocument();
     expect(daemonStatus.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
@@ -265,7 +297,7 @@ describe('ServiceDegradedGate', () => {
     expect(screen.queryByTestId('service-degraded-surface')).not.toBeInTheDocument();
   });
 
-  it('renders the EN fallback copy', async () => {
+  it('renders the EN repair copy', async () => {
     window.localStorage.setItem('nexus-web-locale', 'en');
     renderSurface({
       setupCompleted: true,
@@ -273,9 +305,9 @@ describe('ServiceDegradedGate', () => {
     });
 
     const surface = await screen.findByTestId('service-degraded-surface');
-    expect(surface).toHaveTextContent(
-      'Nexus service unavailable: the orchestration engine is not ready. Make sure the local service is running, then retry.',
-    );
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(surface).toHaveTextContent('Orchestration engine is not ready');
+    expect(surface).toHaveTextContent('nexus42 connect');
+    expect(screen.getByRole('button', { name: 'Recheck' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
   });
 });
