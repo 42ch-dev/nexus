@@ -198,6 +198,38 @@ function WorkspaceBody() {
   );
 }
 
+/**
+ * Studio-local replica of the shell service banner (apps/web
+ * service-degraded-surface): `provider-unconfigured` is setup guidance with no
+ * retry, `unavailable` is a genuine failure that keeps the retry action.
+ */
+function ServiceBanner({ variant }: { variant: 'provider-unconfigured' | 'unavailable' }) {
+  const unconfigured = variant === 'provider-unconfigured';
+  return (
+    <div
+      role="alert"
+      data-testid={`service-banner-${variant}`}
+      data-variant="banner"
+      className={
+        unconfigured
+          ? 'flex flex-wrap items-center justify-between gap-3 border-b border-gray-alpha-400 bg-background-200 px-4 py-2 text-copy-13 text-gray-1000'
+          : 'flex flex-wrap items-center justify-between gap-3 border-b border-red-700/30 bg-red-700/10 px-4 py-2 text-copy-13 text-red-1000'
+      }
+    >
+      <p className="min-w-0">
+        {unconfigured
+          ? 'No orchestration provider is configured — run `nexus42 connect` to configure a provider and enable run capabilities.'
+          : 'Nexus service unavailable: the orchestration engine is not ready. Make sure the local service is running, then retry.'}
+      </p>
+      {!unconfigured && (
+        <Button variant="secondary" size="small" type="button">
+          Retry
+        </Button>
+      )}
+    </div>
+  );
+}
+
 function WizardChromeCard({
   currentStep,
   agentStatus = 'ready',
@@ -351,6 +383,22 @@ export function SetupWizardChromeFixtures() {
         testId="wizard-chrome-agent-error"
       >
         <WizardChromeCard currentStep="agent" agentStatus="error" />
+      </FixtureFrame>
+
+      <FixtureFrame
+        title="Service banner — provider unconfigured"
+        description="Ready workspace, no orchestration provider: setup guidance pointing at `nexus42 connect`; no retry affordance."
+        testId="wizard-chrome-service-provider-unconfigured"
+      >
+        <ServiceBanner variant="provider-unconfigured" />
+      </FixtureFrame>
+
+      <FixtureFrame
+        title="Service banner — engine unavailable"
+        description="Genuine service failure: localized reason with the retry action."
+        testId="wizard-chrome-service-engine-unavailable"
+      >
+        <ServiceBanner variant="unavailable" />
       </FixtureFrame>
     </div>
   );

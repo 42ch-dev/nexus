@@ -38,11 +38,15 @@ import { useSetupCompleted } from '@/lib/setup-completed-context';
  *   actionable reason and is shown as-is.
  * - `subsystems` — the service answers but reports degraded subsystems; the
  *   surface localizes each name.
+ * - `provider_unselected` — the workspace is ready and only the orchestration
+ *   engine is degraded because no provider is selected yet. That is a setup
+ *   step, not an unavailable service: the surface guides instead of retrying.
  */
 export type ServiceDegradedReason =
   | { kind: 'unreachable' }
   | { kind: 'server'; message: string }
-  | { kind: 'subsystems'; subsystems: string[] };
+  | { kind: 'subsystems'; subsystems: string[] }
+  | { kind: 'provider_unselected' };
 
 interface ServiceStatusValue {
   /** Set while the service is unreachable or degraded; `null` when healthy. */
@@ -75,7 +79,27 @@ export function ServiceStatusProvider({ children }: { children: ReactNode }) {
       const status = await client.daemonStatus();
       if (!isLatest()) return false;
       const subsystems = completed ? status.degraded.subsystems : [];
+      // Publish the failure surface first: a lazy selection read must never
+      // flash setup guidance while it is still in flight.
       setReason(subsystems.length > 0 ? { kind: 'subsystems', subsystems } : null);
+      if (subsystems.length === 1 && subsystems[0] === 'engine') {
+        // A ready workspace whose only degraded subsystem is the engine has
+        // either no provider selected (setup guidance) or a selected provider
+        // whose readiness probe failed (a real failure — keep the surface).
+        const runtime = await client.runtimeStatus().catch(() => null);
+        if (!isLatest()) return false;
+        if (runtime?.workspace_initialized) {
+          const selected = await client
+            .getAgentProfile()
+            .then(
+              (response) => response.profile,
+              // An unreadable profile proves nothing about selection.
+              () => undefined,
+            );
+          if (!isLatest()) return false;
+          if (selected === null) setReason({ kind: 'provider_unselected' });
+        }
+      }
       return true;
     } catch (error) {
       if (isLatest()) {

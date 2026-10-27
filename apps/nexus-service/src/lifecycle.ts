@@ -71,6 +71,42 @@ function parsePrincipalIdentity(handle: string): { creatorId: string; workspaceS
   return { creatorId, workspaceSlug };
 }
 
+/**
+ * Start the ONE hosted execution owner, compensating a pre-IA home first.
+ *
+ * A home initialized before the workspace IA has no admission pin. The native
+ * core tolerates the missing hosted-workspace deps as `engine_epoch: null`
+ * WITHOUT establishing the owner, so every later compute call fails. Selecting
+ * the canonical workspace pins admission (exactly the primitive the workspace
+ * API uses), and the second start then establishes the owner. A failed
+ * compensation degrades to the tolerated shape instead of crashing startup.
+ */
+export async function startExecutionOwnerWithCompensation(
+  core: Pick<NativeCore, 'startExecutionOwner' | 'selectWorkspace'>,
+  identity: { creatorId: string; workspaceSlug: string },
+): Promise<{ engine_epoch: number | null; provider_ready: boolean }> {
+  const owner = await core.startExecutionOwner();
+  if (owner.engine_epoch != null) return owner;
+
+  try {
+    await core.selectWorkspace({
+      creator_id: identity.creatorId,
+      workspace_slug: identity.workspaceSlug,
+    });
+    const retried = await core.startExecutionOwner();
+    process.stderr.write(
+      '[nexus-service] pre-IA home: selected default workspace to start the execution owner\n',
+    );
+    return retried;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    process.stderr.write(
+      `[nexus-service] pre-IA home: workspace selection compensation failed: ${reason}\n`,
+    );
+    return owner;
+  }
+}
+
 export async function openServiceCore(
   config: ResolvedServiceConfig,
   providers?: ProviderCallbacks,
@@ -132,7 +168,8 @@ export async function openServiceCore(
 
   let providerReady = false;
   let engineEpoch: number | null = null;
-  if (workspaceInitialized) {
+  // `identity` is published exactly when the profile is initialized.
+  if (identity) {
     try {
       if (config.domainOnly) {
         // The domain-only profile owns no execution engine; it also acquires
@@ -146,8 +183,10 @@ export async function openServiceCore(
         // composes the complete owner (selected-root workspace ports and
         // startup recovery, prompt executor, catalog, run-event registry,
         // cancellation map, scheduler) and reports the ACTUAL epoch plus the
-        // native-owned selected-provider readiness — never a default.
-        const owner = await core.startExecutionOwner();
+        // native-owned selected-provider readiness — never a default. A pre-IA
+        // home has no admission pin yet; the helper selects the canonical
+        // workspace once and retries before readiness is published.
+        const owner = await startExecutionOwnerWithCompensation(core, identity);
         engineEpoch = owner.engine_epoch ?? 0;
         providerReady = owner.provider_ready;
       }

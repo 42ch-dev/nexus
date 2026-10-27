@@ -115,6 +115,7 @@
   },
   "degraded": {
     "body": "Nexus service unavailable: {{reason}}. Make sure the local service is running, then retry.",
+    "providerUnselected": "No orchestration provider is configured — run `nexus42 connect` to configure a provider and enable run capabilities.",
     "retry": "Retry",
     "separator": ", ",
     "reason": {

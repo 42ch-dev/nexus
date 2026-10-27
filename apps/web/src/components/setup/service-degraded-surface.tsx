@@ -22,7 +22,10 @@ import { useSetupCompleted } from '@/lib/setup-completed-context';
  * The `{reason}` slot. A server-provided message is already human copy, so it
  * is kept as-is; transport and subsystem reasons are localized.
  */
-function reasonText(reason: ServiceDegradedReason, t: TFunction<'setup'>): string {
+function reasonText(
+  reason: Exclude<ServiceDegradedReason, { kind: 'provider_unselected' }>,
+  t: TFunction<'setup'>,
+): string {
   switch (reason.kind) {
     case 'unreachable':
       return t('degraded.reason.unreachable');
@@ -44,8 +47,12 @@ function ServiceUnavailable({
 }) {
   const { t } = useTranslation('setup');
   const { checking, retry } = useServiceStatus();
-  const body = t('degraded.body', { reason: reasonText(reason, t) });
-  const action = (
+  const providerUnselected = reason.kind === 'provider_unselected';
+  // A ready workspace without a provider is a setup step, not a failure.
+  const body = providerUnselected
+    ? t('degraded.providerUnselected')
+    : t('degraded.body', { reason: reasonText(reason, t) });
+  const action = providerUnselected ? null : (
     <Button
       type="button"
       variant="secondary"
@@ -78,7 +85,11 @@ function ServiceUnavailable({
       role="alert"
       data-testid="service-degraded-surface"
       data-variant="banner"
-      className="flex flex-wrap items-center justify-between gap-3 border-b border-red-700/30 bg-red-700/10 px-4 py-2 text-copy-13 text-red-1000"
+      className={
+        providerUnselected
+          ? 'flex flex-wrap items-center justify-between gap-3 border-b border-gray-alpha-400 bg-background-200 px-4 py-2 text-copy-13 text-gray-1000'
+          : 'flex flex-wrap items-center justify-between gap-3 border-b border-red-700/30 bg-red-700/10 px-4 py-2 text-copy-13 text-red-1000'
+      }
     >
       <p className="min-w-0">{body}</p>
       {action}
@@ -97,7 +108,13 @@ export function ServiceDegradedGate({ children }: { children: ReactNode }) {
   const { completed } = useSetupCompleted();
   const { pathname } = useLocation();
 
-  if (reason !== null && (!completed || pathname === '/setup')) {
+  // Provider-selection guidance never takes over the screen: the workspace is
+  // ready, so the shell (and its banner) stays available.
+  if (
+    reason !== null &&
+    reason.kind !== 'provider_unselected' &&
+    (!completed || pathname === '/setup')
+  ) {
     return <ServiceUnavailable reason={reason} variant="full" />;
   }
   return <>{children}</>;
