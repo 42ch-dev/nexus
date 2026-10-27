@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { before, describe, test } from 'node:test';
@@ -198,6 +198,38 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
       },
     );
     assert.equal(saves.length, 0);
+  });
+
+  test('validation key sets match the registered schema properties', async () => {
+    const schema = JSON.parse(
+      readFileSync(
+        join(
+          serviceRoot,
+          '..',
+          '..',
+          'schemas',
+          'daemon-api',
+          'agent-host',
+          'agent-host-config.schema.json',
+        ),
+        'utf8',
+      ),
+    );
+    const module = await import(join(serviceRoot, 'dist', 'agent-host-config.js'));
+    const sorted = (values) => [...values].sort();
+    assert.deepEqual(sorted(module.CONFIG_KEYS), Object.keys(schema.properties).sort());
+    assert.deepEqual(
+      sorted(module.TIMEOUT_KEYS),
+      Object.keys(schema.properties.timeouts.properties).sort(),
+    );
+    assert.deepEqual(
+      sorted(module.POLICY_KEYS),
+      Object.keys(schema.properties.policy.properties).sort(),
+    );
+    assert.deepEqual(
+      sorted(module.PROVIDER_KEYS),
+      Object.keys(schema.properties.providers.items.properties).sort(),
+    );
   });
 
   test('PUT enforces the wire schema constraints per field', async () => {

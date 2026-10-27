@@ -17,26 +17,39 @@ import { withSelectionLock } from './workspaces.js';
 const PROTOCOL_ACP = 'acp';
 const PROTOCOL_NATIVE_CLI = 'native_cli';
 
-const CONFIG_KEYS = [
+/**
+ * Allowed-key sets, derived from the generated contract: the `satisfies`
+ * clauses make a schema/codegen rename or addition fail the validator's
+ * compile instead of silently rejecting (or accepting) the new field. Exported
+ * for the schema drift test.
+ */
+export const CONFIG_KEYS = [
   'max_sessions',
   'max_ops_per_session',
   'timeouts',
   'policy',
   'providers',
-] as const;
-const TIMEOUT_KEYS = [
+] as const satisfies readonly (keyof AgentHostConfig)[];
+export const TIMEOUT_KEYS = [
   'launch_ms',
   'initialize_ms',
   'session_ms',
   'prompt_ms',
   'shutdown_ms',
-] as const;
-const POLICY_KEYS = [
+] as const satisfies readonly (keyof NonNullable<AgentHostConfig['timeouts']>)[];
+export const POLICY_KEYS = [
   'unknown_provider',
   'unknown_tool_risk',
   'allow_model_fallback',
-] as const;
-const PROVIDER_KEYS = ['id', 'protocol', 'command', 'args', 'env', 'enabled'] as const;
+] as const satisfies readonly (keyof NonNullable<AgentHostConfig['policy']>)[];
+export const PROVIDER_KEYS = [
+  'id',
+  'protocol',
+  'command',
+  'args',
+  'env',
+  'enabled',
+] as const satisfies readonly (keyof AgentHostConfig['providers'][number])[];
 
 function invalidInput(message: string): HttpError {
   return new HttpError(400, 'invalid_input', message);
