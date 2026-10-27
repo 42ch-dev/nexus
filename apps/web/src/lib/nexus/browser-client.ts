@@ -187,6 +187,7 @@ import type { CapabilityListResponse } from './capability-info';
 import { NexusClientError, UNAUTHORIZED_EVENT, type TransportErrorKind } from './errors';
 import type {
   AgentHostConfig,
+  AgentHostProvidersResponse,
   ClearRunsQuery,
   ClearRunsResponse,
   DaemonHealth,
@@ -317,6 +318,9 @@ export class BrowserClient implements NexusClient {
   }
   scanAgents(request?: ScanRequest): Promise<ScanResponse> {
     return this.post<ScanResponse>('/v1/daemon/agent-host/scan', request);
+  }
+  listAgentHostProviders(): Promise<AgentHostProvidersResponse> {
+    return this.get<AgentHostProvidersResponse>('/v1/daemon/agent-host/providers');
   }
   getAgentProfile(): Promise<AgentProfileResponse> {
     return this.get<AgentProfileResponse>('/v1/daemon/agent-host/profile');

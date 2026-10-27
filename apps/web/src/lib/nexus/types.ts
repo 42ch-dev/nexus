@@ -298,6 +298,18 @@ export interface AgentHostConfig {
   [key: string]: unknown;
 }
 
+/** One registered agent-host provider (the authoritative id/protocol source). */
+export interface AgentHostCatalogEntry {
+  provider_id: string;
+  display_name: string;
+  protocol_kind: string;
+}
+
+/** `GET /v1/daemon/agent-host/providers` — the registered provider catalog. */
+export interface AgentHostProvidersResponse {
+  providers: AgentHostCatalogEntry[];
+}
+
 /**
  * Transport-agnostic client for the Nexus Daemon API.
  *
@@ -377,6 +389,12 @@ export interface NexusClient extends CoreSliceClient {
   // ── Agent host (V1.94 P1) ──────────────────────────────────────────────────
   /** `POST /v1/daemon/agent-host/scan` — detect locally available ACP agents. */
   scanAgents(request?: ScanRequest): Promise<ScanResponse>;
+  /**
+   * `GET /v1/daemon/agent-host/providers` — the registered provider catalog
+   * (authoritative `provider_id` + `protocol_kind`). The scan response adds
+   * install state and launch commands on top of these ids.
+   */
+  listAgentHostProviders(): Promise<AgentHostProvidersResponse>;
   /**
    * `GET /v1/daemon/agent-host/profile` — the daemon-global saved agent
    * profile (I-000064). `profile: null` means none was saved yet.

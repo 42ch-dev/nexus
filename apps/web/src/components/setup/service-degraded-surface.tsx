@@ -23,7 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { useNexusClient } from '@/lib/client-context';
-import type { AgentHostProviderConfig } from '@/lib/nexus/types';
+import type { AgentHostCatalogEntry, AgentHostProviderConfig } from '@/lib/nexus/types';
 import type { ServiceDegradedReason } from '@/lib/service-status-context';
 import { useOptionalServiceStatus, useServiceStatus } from '@/lib/service-status-context';
 import { useSetupCompleted } from '@/lib/setup-completed-context';
@@ -60,24 +60,29 @@ function isEngineFailure(reason: ServiceDegradedReason): reason is EngineFailure
   );
 }
 
-function slugify(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
-
 /**
  * Step 1 of the repair page: configure a provider through the service, never
- * the CLI. Scan candidates are a convenience over the manual fields; both
- * paths submit the same upsert (load the document, replace or append this
- * provider id, save), and a successful save re-runs the readiness probe.
+ * the CLI. The candidate list is the provider catalog (authoritative id +
+ * protocol) joined with scan data (installed + launch command); the manual
+ * fields cover anything the catalog does not list. Both paths submit the same
+ * upsert (load the document, replace or append this provider id, save), and a
+ * successful save re-runs the readiness probe.
  */
+/** One actionable candidate: catalog id/protocol, scan install state/command. */
+interface ProviderCandidate {
+  id: string;
+  displayName: string;
+  protocol: AgentHostProviderConfig['protocol'];
+  command: string | null;
+  installed: boolean;
+}
+
 function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
   const { t } = useTranslation('setup');
   const client = useNexusClient();
-  const [agents, setAgents] = useState<AgentScanEntry[] | null>(null);
-  const [scanFailed, setScanFailed] = useState(false);
+  const [catalog, setCatalog] = useState<AgentHostCatalogEntry[] | null>(null);
+  const [scanEntries, setScanEntries] = useState<AgentScanEntry[]>([]);
+  const [catalogFailed, setCatalogFailed] = useState(false);
   const [id, setId] = useState('');
   const [protocol, setProtocol] = useState<AgentHostProviderConfig['protocol']>('acp');
   const [command, setCommand] = useState('');
@@ -86,15 +91,26 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
 
   useEffect(() => {
     let cancelled = false;
-    client.scanAgents().then(
+    // The catalog is authoritative for provider id + protocol; the scan only
+    // annotates install state and the launch command. A scan failure therefore
+    // costs the badges, never the list.
+    void client.listAgentHostProviders().then(
       (response) => {
-        if (!cancelled) setAgents(response.agents);
+        if (!cancelled) setCatalog(response.providers);
       },
       () => {
         if (!cancelled) {
-          setScanFailed(true);
-          setAgents([]);
+          setCatalog([]);
+          setCatalogFailed(true);
         }
+      },
+    );
+    void client.scanAgents().then(
+      (response) => {
+        if (!cancelled) setScanEntries(response.agents);
+      },
+      () => {
+        if (!cancelled) setScanEntries([]);
       },
     );
     return () => {
@@ -102,10 +118,10 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
     };
   }, [client]);
 
-  const choose = (entry: AgentScanEntry) => {
-    setId(entry.registry_agent_id ?? slugify(entry.name));
-    setProtocol('acp');
-    setCommand(entry.launch_command ?? '');
+  const choose = (candidate: ProviderCandidate) => {
+    setId(candidate.id);
+    setProtocol(candidate.protocol);
+    setCommand(candidate.command ?? '');
   };
 
   const save = async () => {
@@ -134,31 +150,49 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
     }
   };
 
-  // Installed candidates first; the rest keep the scan order.
-  const orderedAgents = agents
-    ? [...agents].sort((left, right) => Number(right.installed) - Number(left.installed))
-    : [];
+  const scanById = new Map(
+    scanEntries.flatMap((entry) =>
+      entry.registry_agent_id ? [[entry.registry_agent_id, entry] as const] : [],
+    ),
+  );
+  const candidates: ProviderCandidate[] = (catalog ?? []).flatMap((entry) => {
+    if (entry.protocol_kind !== 'acp' && entry.protocol_kind !== 'native_cli') return [];
+    const scanned = scanById.get(entry.provider_id);
+    return [
+      {
+        id: entry.provider_id,
+        displayName: entry.display_name,
+        protocol: entry.protocol_kind,
+        command: scanned?.launch_command ?? null,
+        installed: scanned?.installed ?? false,
+      },
+    ];
+  });
+  // Installed candidates first; the rest keep the catalog's registry order.
+  const orderedCandidates = [...candidates].sort(
+    (left, right) => Number(right.installed) - Number(left.installed),
+  );
 
   return (
     <section className="flex flex-col gap-3">
       <h2 className="text-copy-16 text-gray-1000">{t('degraded.repair.form.title')}</h2>
       <div className="flex flex-col gap-2">
         <h3 className="text-copy-14 text-gray-1000">{t('degraded.repair.form.candidatesTitle')}</h3>
-        {scanFailed && (
-          <p data-testid="provider-scan-failed" className="text-copy-13 text-red-1000">
+        {catalogFailed && (
+          <p data-testid="provider-catalog-failed" className="text-copy-13 text-red-1000">
             {t('degraded.repair.form.candidatesError')}
           </p>
         )}
-        {orderedAgents.length > 0 && (
+        {orderedCandidates.length > 0 && (
           <ul className="flex max-h-56 list-none flex-col gap-1 overflow-y-auto p-0">
-            {orderedAgents.map((entry) => (
+            {orderedCandidates.map((candidate) => (
               <li
-                key={`${entry.registry_agent_id ?? entry.name}:${entry.launch_command ?? ''}`}
+                key={candidate.id}
                 className="flex items-center justify-between gap-3 rounded-md bg-background-200 px-3 py-2"
               >
                 <span className="min-w-0 truncate text-copy-13 text-gray-1000">
-                  {entry.name}
-                  {entry.installed && (
+                  {candidate.displayName}
+                  {candidate.installed && (
                     <span className="ml-2 text-label-12 text-gray-700">
                       {t('degraded.repair.form.installed')}
                     </span>
@@ -168,7 +202,7 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
                   type="button"
                   variant="secondary"
                   size="small"
-                  onClick={() => choose(entry)}
+                  onClick={() => choose(candidate)}
                 >
                   {t('degraded.repair.form.enable')}
                 </Button>

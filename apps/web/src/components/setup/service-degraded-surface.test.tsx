@@ -16,7 +16,7 @@ import { ServiceStatusProvider } from '@/lib/service-status-context';
 import { renderInApp } from '@/test/test-providers';
 import { NexusClientError } from '@/lib/nexus';
 import type { DaemonRuntimeStatus, NexusClient, RuntimeStatus } from '@/lib/nexus';
-import type { AgentHostConfig } from '@/lib/nexus/types';
+import type { AgentHostConfig, AgentHostProvidersResponse } from '@/lib/nexus/types';
 import type { AgentScanEntry, ScanResponse } from '@42ch/nexus-contracts';
 
 interface Deferred<T> {
@@ -42,6 +42,7 @@ const UNSELECTED_PROFILE: ProfileRead = () => Promise.resolve({ profile: null })
 
 interface ConfigStubs {
   scan?: () => Promise<ScanResponse>;
+  listProviders?: () => Promise<AgentHostProvidersResponse>;
   getConfig?: () => Promise<AgentHostConfig>;
   saveConfig?: (config: AgentHostConfig) => Promise<AgentHostConfig>;
 }
@@ -59,6 +60,8 @@ function clientWith(
     runtimeStatus: () => Promise.resolve(runtime),
     getAgentProfile: profile,
     scanAgents: config.scan ?? (() => Promise.resolve({ agents: [] })),
+    listAgentHostProviders:
+      config.listProviders ?? (() => Promise.resolve({ providers: [] })),
     getAgentHostConfig: config.getConfig ?? (() => Promise.resolve(EMPTY_CONFIG)),
     saveAgentHostConfig:
       config.saveConfig ?? ((saved: AgentHostConfig) => Promise.resolve(saved)),
@@ -119,10 +122,10 @@ describe('ServiceDegradedGate', () => {
     expect(screen.getAllByRole('alert')).toHaveLength(1);
   });
 
-  it('lists installed candidates first and pre-fills the manual fields', async () => {
+  it('joins the provider catalog with scan data and fills id/protocol/command', async () => {
     const user = userEvent.setup();
     const agents: AgentScanEntry[] = [
-      { name: 'Beta Agent', registry_agent_id: 'beta-acp', launch_command: 'beta-acp', installed: false },
+      { name: 'Beta CLI', registry_agent_id: 'beta-cli', launch_command: 'beta-cli', installed: false },
       { name: 'Alpha Agent', registry_agent_id: 'alpha-acp', launch_command: 'alpha-acp', installed: true },
     ];
     renderSurface({
@@ -131,7 +134,16 @@ describe('ServiceDegradedGate', () => {
         () => Promise.resolve(ENGINE_DEGRADED),
         { workspace_initialized: true },
         UNSELECTED_PROFILE,
-        { scan: () => Promise.resolve({ agents }) },
+        {
+          scan: () => Promise.resolve({ agents }),
+          listProviders: () =>
+            Promise.resolve({
+              providers: [
+                { provider_id: 'beta-cli', display_name: 'Beta CLI', protocol_kind: 'native_cli' },
+                { provider_id: 'alpha-acp', display_name: 'Alpha Agent', protocol_kind: 'acp' },
+              ],
+            }),
+        },
       ),
     });
 
@@ -146,14 +158,21 @@ describe('ServiceDegradedGate', () => {
     // The app is not usable until the engine is configured.
     expect(screen.queryByTestId('app-content')).not.toBeInTheDocument();
 
+    // Installed first, then the catalog's registry order.
     const candidates = await screen.findAllByRole('listitem');
     expect(candidates[0]).toHaveTextContent('Alpha Agent');
-    expect(candidates[1]).toHaveTextContent('Beta Agent');
+    expect(candidates[1]).toHaveTextContent('Beta CLI');
+
+    await user.click(within(candidates[1]!).getByRole('button', { name: '启用' }));
+    expect(screen.getByLabelText('提供方 ID')).toHaveValue('beta-cli');
+    expect(screen.getByLabelText('协议')).toHaveValue('native_cli');
+    expect(screen.getByLabelText('启动命令')).toHaveValue('beta-cli');
+    expect(screen.getByRole('button', { name: '保存并重启检测' })).toBeEnabled();
 
     await user.click(within(candidates[0]!).getByRole('button', { name: '启用' }));
     expect(screen.getByLabelText('提供方 ID')).toHaveValue('alpha-acp');
+    expect(screen.getByLabelText('协议')).toHaveValue('acp');
     expect(screen.getByLabelText('启动命令')).toHaveValue('alpha-acp');
-    expect(screen.getByRole('button', { name: '保存并重启检测' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '重新检测' })).toBeInTheDocument();
   });
 
@@ -193,7 +212,7 @@ describe('ServiceDegradedGate', () => {
     );
   });
 
-  it('keeps the manual path usable when the agent scan fails', async () => {
+  it('keeps the catalog candidates when the agent scan fails', async () => {
     const user = userEvent.setup();
     const saveConfig = vi.fn((config: AgentHostConfig) => Promise.resolve(config));
     renderSurface({
@@ -204,12 +223,47 @@ describe('ServiceDegradedGate', () => {
         UNSELECTED_PROFILE,
         {
           scan: () => Promise.reject(new Error('scan offline')),
+          listProviders: () =>
+            Promise.resolve({
+              providers: [
+                { provider_id: 'alpha-acp', display_name: 'Alpha Agent', protocol_kind: 'acp' },
+              ],
+            }),
           saveConfig,
         },
       ),
     });
 
-    expect(await screen.findByTestId('provider-scan-failed')).toHaveTextContent(
+    const candidates = await screen.findAllByRole('listitem');
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toHaveTextContent('Alpha Agent');
+    expect(screen.queryByText('已安装')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('provider-catalog-failed')).not.toBeInTheDocument();
+
+    await user.click(within(candidates[0]!).getByRole('button', { name: '启用' }));
+    expect(screen.getByLabelText('提供方 ID')).toHaveValue('alpha-acp');
+    await user.type(screen.getByLabelText('启动命令'), 'alpha-acp');
+    await user.click(screen.getByRole('button', { name: '保存并重启检测' }));
+    await waitFor(() => expect(saveConfig).toHaveBeenCalledTimes(1));
+  });
+
+  it('shows the catalog error and keeps the manual path usable', async () => {
+    const user = userEvent.setup();
+    const saveConfig = vi.fn((config: AgentHostConfig) => Promise.resolve(config));
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        {
+          listProviders: () => Promise.reject(new Error('catalog offline')),
+          saveConfig,
+        },
+      ),
+    });
+
+    expect(await screen.findByTestId('provider-catalog-failed')).toHaveTextContent(
       '无法读取本机的智能体列表',
     );
     await user.type(screen.getByLabelText('提供方 ID'), 'manual-agent');
