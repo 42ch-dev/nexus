@@ -125,7 +125,7 @@ describe('ServiceDegradedGate', () => {
   it('joins the provider catalog with scan data and fills id/protocol/command', async () => {
     const user = userEvent.setup();
     const agents: AgentScanEntry[] = [
-      { name: 'Beta CLI', registry_agent_id: 'beta-cli', launch_command: 'beta-cli', launch_args: [], installed: true },
+      { name: 'dsh (native CLI)', registry_agent_id: 'dsh-native', launch_command: 'dsh', launch_args: [], installed: true },
       { name: 'Alpha Agent', registry_agent_id: 'alpha-acp', launch_command: 'alpha-acp', launch_args: ['acp'], installed: true },
     ];
     renderSurface({
@@ -139,7 +139,7 @@ describe('ServiceDegradedGate', () => {
           listProviders: () =>
             Promise.resolve({
               providers: [
-                { provider_id: 'beta-cli', display_name: 'Beta CLI', protocol_kind: 'native_cli' },
+                { provider_id: 'dsh-native', display_name: 'dsh (native CLI)', protocol_kind: 'native_cli' },
                 { provider_id: 'alpha-acp', display_name: 'Alpha Agent', protocol_kind: 'acp' },
               ],
             }),
@@ -160,16 +160,16 @@ describe('ServiceDegradedGate', () => {
 
     // Same install state + no curated priority → display-name order.
     const candidates = await screen.findAllByRole('listitem');
-    expect(candidates[0]).toHaveTextContent('Alpha Agent');
-    expect(candidates[1]).toHaveTextContent('Beta CLI');
-
-    await user.click(within(candidates[1]!).getByRole('button', { name: '启用' }));
-    expect(screen.getByLabelText('提供方 ID')).toHaveValue('beta-cli');
-    expect(screen.getByLabelText('协议')).toHaveValue('native_cli');
-    expect(screen.getByLabelText('启动命令')).toHaveValue('beta-cli');
-    expect(screen.getByRole('button', { name: '保存并重启检测' })).toBeEnabled();
+    expect(candidates[0]).toHaveTextContent('dsh (native CLI)');
+    expect(candidates[1]).toHaveTextContent('Alpha Agent');
 
     await user.click(within(candidates[0]!).getByRole('button', { name: '启用' }));
+    expect(screen.getByLabelText('提供方 ID')).toHaveValue('dsh-native');
+    expect(screen.getByLabelText('协议')).toHaveValue('native_cli');
+    expect(screen.getByLabelText('启动命令')).toHaveValue('dsh');
+    expect(screen.getByRole('button', { name: '保存并重启检测' })).toBeEnabled();
+
+    await user.click(within(candidates[1]!).getByRole('button', { name: '启用' }));
     expect(screen.getByLabelText('提供方 ID')).toHaveValue('alpha-acp');
     expect(screen.getByLabelText('协议')).toHaveValue('acp');
     expect(screen.getByLabelText('启动命令')).toHaveValue('alpha-acp');
@@ -214,6 +214,48 @@ describe('ServiceDegradedGate', () => {
     // (`omp acp` / `hermes acp`) boots as an ACP server, not bare.
     expect(saved[0]!.providers).toEqual([
       { id: 'alpha-acp', protocol: 'acp', command: 'alpha-acp', args: ['acp'], enabled: true },
+    ]);
+  });
+
+  it('clears scan args when the recipe is edited manually', async () => {
+    const user = userEvent.setup();
+    const agents: AgentScanEntry[] = [
+      { name: 'omp (ACP)', registry_agent_id: 'omp', launch_command: 'omp', launch_args: ['acp'], installed: true },
+    ];
+    const saved: AgentHostConfig[] = [];
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        {
+          scan: () => Promise.resolve({ agents }),
+          listProviders: () =>
+            Promise.resolve({
+              providers: [
+                { provider_id: 'omp', display_name: 'omp (ACP)', protocol_kind: 'acp' },
+              ],
+            }),
+          getConfig: () =>
+            Promise.resolve({ providers: [], max_sessions: 2 } as AgentHostConfig),
+          saveConfig: (config: AgentHostConfig) => {
+            saved.push(config);
+            return Promise.resolve(config);
+          },
+        },
+      ),
+    });
+
+    const roster = await screen.findAllByRole('listitem');
+    await user.click(within(roster[0]!).getByRole('button', { name: '启用' }));
+    // Editing the manual recipe leaves the chosen row's hidden args behind.
+    await user.clear(screen.getByLabelText('提供方 ID'));
+    await user.type(screen.getByLabelText('提供方 ID'), 'custom-acp');
+    await user.click(screen.getByRole('button', { name: '保存并重启检测' }));
+    await waitFor(() => expect(saved.length).toBe(1));
+    expect(saved[0]!.providers).toEqual([
+      { id: 'custom-acp', protocol: 'acp', command: 'omp', args: [], enabled: true },
     ]);
   });
 
@@ -282,7 +324,7 @@ describe('ServiceDegradedGate', () => {
             Promise.resolve({
               providers: [
                 { provider_id: 'alpha-acp', display_name: 'Alpha Agent', protocol_kind: 'acp' },
-                { provider_id: 'beta-cli', display_name: 'Beta CLI', protocol_kind: 'native_cli' },
+                { provider_id: 'dsh-native', display_name: 'dsh (native CLI)', protocol_kind: 'native_cli' },
               ],
             }),
         },
@@ -292,7 +334,7 @@ describe('ServiceDegradedGate', () => {
     // Roster order: installed first; the not-installed row stays visible.
     const candidates = await screen.findAllByRole('listitem');
     expect(candidates[0]).toHaveTextContent('Alpha Agent');
-    expect(candidates[1]).toHaveTextContent('Beta CLI');
+    expect(candidates[1]).toHaveTextContent('dsh (native CLI)');
     expect(candidates[1]).toHaveTextContent('未安装');
 
     const betaUse = within(candidates[1]!).getByRole('button', { name: '启用' });

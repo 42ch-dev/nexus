@@ -69,6 +69,17 @@ function isEngineFailure(reason: ServiceDegradedReason): reason is EngineFailure
  * upsert (load the document, replace or append this provider id, save), and a
  * successful save re-runs the readiness probe.
  */
+/**
+ * Native provider ids that have a real launch adapter in this build. Every
+ * other native_cli detection row is detection-only: rendered for visibility,
+ * never offered for launch (the daemon would honestly refuse at admission).
+ */
+const SUPPORTED_NATIVE_LAUNCH: Record<string, true> = {
+  'dsh-native': true,
+  'codex-native': true,
+  'claude-native': true,
+};
+
 /** One actionable candidate: catalog id/protocol, scan install state/command. */
 interface ProviderCandidate {
   id: string;
@@ -246,6 +257,11 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
               // selectable regardless of scan state (the scan skips enabled
               // configured providers, so its row is missing by design).
               const configured = configuredRows.has(candidate.id);
+              // Generic ACP recipes launch through the shared ACP adapter;
+              // only the built-in trio has native launch adapters. Other
+              // native ids are detection-only: shown, never offered.
+              const launchable =
+                candidate.protocol === 'acp' || SUPPORTED_NATIVE_LAUNCH[candidate.id] === true;
               const installState = scanFailed
                 ? 'unknown'
                 : candidate.installed
@@ -276,9 +292,16 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
                     type="button"
                     variant="secondary"
                     size="small"
-                    // Disabled only for a scan-confirmed absent target that
-                    // the user has not configured themselves.
-                    disabled={installState === 'missing' && !configured}
+                    // Disabled for a scan-confirmed absent target and for
+                    // detection-only native rows without a launch adapter
+                    // (unless the user configured them — the repair target
+                    // itself must stay editable).
+                    disabled={!configured && (installState === 'missing' || !launchable)}
+                    title={
+                      !configured && !launchable
+                        ? t('degraded.repair.form.detectionOnly')
+                        : undefined
+                    }
                     onClick={() => choose(candidate)}
                   >
                     {t('degraded.repair.form.enable')}
@@ -300,7 +323,13 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
             id="repair-provider-id"
             value={id}
             placeholder={t('degraded.repair.form.idPlaceholder')}
-            onChange={(event) => setId(event.target.value)}
+            // Manual edits leave the chosen scan row's recipe: the hidden
+            // launch args belong to that row and must not leak into a
+            // different manual provider.
+            onChange={(event) => {
+              setId(event.target.value);
+              setArgs([]);
+            }}
           />
         </div>
         <div className="flex flex-col gap-1">
@@ -310,9 +339,10 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
           <Select
             id="repair-provider-protocol"
             value={protocol}
-            onChange={(event) =>
-              setProtocol(event.target.value as AgentHostProviderConfig['protocol'])
-            }
+            onChange={(event) => {
+              setProtocol(event.target.value as AgentHostProviderConfig['protocol']);
+              setArgs([]);
+            }}
           >
             <option value="acp">{t('degraded.repair.form.protocolAcp')}</option>
             <option value="native_cli">{t('degraded.repair.form.protocolNativeCli')}</option>
@@ -326,7 +356,10 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
             id="repair-provider-command"
             value={command}
             placeholder={t('degraded.repair.form.commandPlaceholder')}
-            onChange={(event) => setCommand(event.target.value)}
+            onChange={(event) => {
+              setCommand(event.target.value);
+              setArgs([]);
+            }}
           />
         </div>
         {saveError && (

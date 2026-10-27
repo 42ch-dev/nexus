@@ -137,6 +137,7 @@
         "notInstalled": "未安装",
         "installUnknown": "未检测",
         "configured": "已配置",
+        "detectionOnly": "已检测，暂不支持从此处启用",
         "manualTitle": "手动配置",
         "idLabel": "提供方 ID",
         "idPlaceholder": "例如 claude-acp",

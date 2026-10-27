@@ -241,8 +241,32 @@ function ServiceRepair({ variant }: { variant: 'provider-unconfigured' | 'failed
               </Button>
             </li>
             <li className="flex items-center justify-between gap-3 rounded-md bg-background-200 px-3 py-2">
-              <span className="min-w-0 truncate text-copy-13 text-gray-1000">Codex CLI</span>
+              <span className="min-w-0 truncate text-copy-13 text-gray-1000">
+                Gemini CLI
+                <span className="ml-2 text-label-12 text-gray-700">Configured</span>
+              </span>
               <Button variant="secondary" size="small" type="button">
+                Use
+              </Button>
+            </li>
+            <li className="flex items-center justify-between gap-3 rounded-md bg-background-200 px-3 py-2">
+              <span className="min-w-0 truncate text-copy-13 text-gray-1000">
+                Hermes
+                <span className="ml-2 text-label-12 text-gray-500">Not detected</span>
+              </span>
+              <Button variant="secondary" size="small" type="button">
+                Use
+              </Button>
+            </li>
+            <li className="flex items-center justify-between gap-3 rounded-md bg-background-200 px-3 py-2">
+              <span className="min-w-0 truncate text-copy-13 text-gray-1000">Codex CLI</span>
+              <Button
+                variant="secondary"
+                size="small"
+                type="button"
+                disabled
+                title="Detected, not launchable from here yet"
+              >
                 Use
               </Button>
             </li>

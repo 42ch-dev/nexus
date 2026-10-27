@@ -137,6 +137,7 @@
         "notInstalled": "Not installed",
         "installUnknown": "Not detected",
         "configured": "Configured",
+        "detectionOnly": "Detected, not launchable from here yet",
         "manualTitle": "Manual configuration",
         "idLabel": "Provider ID",
         "idPlaceholder": "e.g. claude-acp",
