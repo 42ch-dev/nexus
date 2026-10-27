@@ -702,6 +702,99 @@ describe('ServiceDegradedGate', () => {
     expect(screen.getByLabelText('启动命令')).toHaveValue('/usr/local/bin/kimi-acp');
   });
 
+  it('keeps a disabled saved provider as a repair candidate after replacement', async () => {
+    const user = userEvent.setup();
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        {
+          scan: () =>
+            Promise.resolve({
+              agents: [
+                {
+                  name: 'alpha (ACP)',
+                  registry_agent_id: 'alpha-acp',
+                  launch_command: '/usr/local/bin/alpha-acp',
+                  launch_args: [],
+                  installed: true,
+                  protocol_kind: 'acp',
+                },
+                {
+                  name: 'beta (ACP)',
+                  registry_agent_id: 'beta-acp',
+                  launch_command: '/usr/local/bin/beta-acp',
+                  launch_args: [],
+                  installed: true,
+                  protocol_kind: 'acp',
+                },
+              ],
+            }),
+          // The catalog lists enabled providers only: B is disabled and absent.
+          listProviders: () =>
+            Promise.resolve({
+              providers: [
+                { provider_id: 'alpha-acp', display_name: 'Alpha Agent', protocol_kind: 'acp' },
+              ],
+            }),
+          getConfig: () =>
+            Promise.resolve({
+              providers: [
+                { id: 'alpha-acp', protocol: 'acp', command: '/usr/local/bin/alpha-acp', enabled: true },
+                { id: 'beta-acp', protocol: 'acp', command: '/usr/local/bin/beta-acp', enabled: false },
+              ],
+              max_sessions: 2,
+            } as AgentHostConfig),
+        },
+      ),
+    });
+
+    const roster = await screen.findAllByRole('listitem');
+    // A appears once (catalog), B survives from its installed scan row.
+    expect(roster).toHaveLength(2);
+    const alphaRow = roster.find((row) => row.textContent?.includes('Alpha Agent'))!;
+    const betaRow = roster.find((row) => row.textContent?.includes('beta (ACP)'))!;
+    expect(betaRow).toHaveTextContent('已安装');
+
+    // B is selectable again and keeps its saved command.
+    await user.click(within(betaRow).getByRole('button', { name: '启用' }));
+    expect(screen.getByLabelText('提供方 ID')).toHaveValue('beta-acp');
+    expect(screen.getByLabelText('启动命令')).toHaveValue('/usr/local/bin/beta-acp');
+    // A was not duplicated by its scan row.
+    expect(roster.filter((row) => row.textContent?.includes('Alpha Agent'))).toHaveLength(1);
+    expect(within(alphaRow).getByRole('button', { name: '启用' })).toBeInTheDocument();
+  });
+
+  it('rebuilds a saved candidate from config when the scan has no row', async () => {
+    const user = userEvent.setup();
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        {
+          scan: () => Promise.resolve({ agents: [] }),
+          getConfig: () =>
+            Promise.resolve({
+              providers: [
+                { id: 'stored-acp', protocol: 'acp', command: '/opt/stored/acp', enabled: false },
+              ],
+              max_sessions: 2,
+            } as AgentHostConfig),
+        },
+      ),
+    });
+
+    const roster = await screen.findAllByRole('listitem');
+    expect(roster).toHaveLength(1);
+    await user.click(within(roster[0]!).getByRole('button', { name: '启用' }));
+    expect(screen.getByLabelText('提供方 ID')).toHaveValue('stored-acp');
+    expect(screen.getByLabelText('启动命令')).toHaveValue('/opt/stored/acp');
+  });
+
   it('disables every other provider when saving a replacement provider', async () => {
     const user = userEvent.setup();
     const saveConfig = vi.fn((config: AgentHostConfig) => Promise.resolve(config));

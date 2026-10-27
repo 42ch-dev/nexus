@@ -98,13 +98,13 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
   // scan has no row for it (the scan skips enabled configured providers, and
   // catalog-only targets like gemini have no detection row at all), and its
   // stored command/args back the form when the scan cannot supply them.
-  const [configuredRows, setConfiguredRows] = useState<
+  // Every entry in the SAVED document, enabled or not: a disabled saved
+  // provider must still keep a repair candidate and back the form when the
+  // scan has no recipe for it. The catalog also lists auto-discovered PATH
+  // roster providers, whose protocol is only a default.
+  const [savedProviders, setSavedProviders] = useState<
     Map<string, AgentHostProviderConfig>
   >(new Map());
-  // Every id in the SAVED document (enabled or not). The catalog also lists
-  // auto-discovered PATH roster providers, whose protocol is only a default —
-  // authority over a scan row belongs to the user's actual configuration.
-  const [savedProviderIds, setSavedProviderIds] = useState<Set<string>>(new Set());
   const [id, setId] = useState('');
   const [protocol, setProtocol] = useState<AgentHostProviderConfig['protocol']>('acp');
   const [command, setCommand] = useState('');
@@ -134,14 +134,7 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
     void client.getAgentHostConfig().then(
       (config) => {
         if (!cancelled) {
-          setConfiguredRows(
-            new Map(
-              config.providers
-                .filter((p) => p.enabled)
-                .map((p) => [p.id, p]),
-            ),
-          );
-          setSavedProviderIds(new Set(config.providers.map((p) => p.id)));
+          setSavedProviders(new Map(config.providers.map((p) => [p.id, p])));
         }
       },
       () => {
@@ -168,7 +161,7 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
     // Prefer scan-provided launch data; fall back to what the user already
     // had configured, so choosing a configured row without a scan row never
     // blanks the stored command/args.
-    const configured = configuredRows.get(candidate.id);
+    const configured = savedProviders.get(candidate.id);
     setId(candidate.id);
     setProtocol(candidate.protocol);
     setCommand(candidate.command ?? configured?.command ?? '');
@@ -246,7 +239,19 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
     const providerId = providerIdOf(key);
     // A saved provider's protocol is authoritative: scan rows of another
     // protocol must not add a second choice for the same saved id.
-    if (savedProviderIds.has(providerId)) continue;
+    if (savedProviders.has(providerId)) {
+      // A saved provider's protocol is authoritative ONLY while its
+      // authoritative candidate exists. A disabled saved entry drops out of
+      // the catalog, so its installed scan row must survive instead.
+      const savedProtocol = savedProviders.get(providerId)?.protocol;
+      const authoritativeProtocol =
+        catalogById.get(providerId)?.protocol_kind ?? savedProtocol;
+      if (catalogById.has(providerId)) continue;
+      const keyProtocol = key.slice(key.indexOf('\u0000') + 1);
+      if (keyProtocol !== authoritativeProtocol) continue;
+      addCandidateKey(key);
+      continue;
+    }
     // A legacy scan row without a protocol annotates the catalog candidate
     // instead of adding a protocol-less duplicate of it.
     const protocol = key.slice(key.indexOf('\u0000') + 1);
@@ -262,7 +267,7 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
       scanByKey.get(key) ?? scanByKey.get(scanKey(providerId, undefined));
     // Saved providers keep the catalog protocol; auto-discovered rows take the
     // protocol of the scan candidate that produced this key.
-    const candidateProtocol = savedProviderIds.has(providerId)
+    const candidateProtocol = savedProviders.has(providerId)
       ? (row?.protocol_kind ?? scanned?.protocol_kind)
       : (scanned?.protocol_kind ?? row?.protocol_kind);
     if (candidateProtocol !== 'acp' && candidateProtocol !== 'native_cli') return [];
@@ -279,7 +284,22 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
       },
     ];
   });
-  const configured = (c: ProviderCandidate) => (configuredRows.has(c.id) ? 1 : 0);
+  // Never orphan a saved provider: when neither the catalog nor the scan
+  // produced a row, rebuild it from the saved configuration (id + protocol +
+  // command), selectable so switching back needs no typing.
+  const representedIds = new Set(candidates.map((candidate) => candidate.id));
+  for (const [providerId, saved] of savedProviders) {
+    if (representedIds.has(providerId)) continue;
+    candidates.push({
+      id: providerId,
+      displayName: providerId,
+      protocol: saved.protocol,
+      command: saved.command ?? null,
+      args: saved.args ?? [],
+      installed: false,
+    });
+  }
+  const configured = (c: ProviderCandidate) => (savedProviders.has(c.id) ? 1 : 0);
   // Sort: installed first, then configured (the repair target), then curated
   // priority (unranked last, display name as the final tie-break); the
   // catalog's registry order falls out as the stable default.
@@ -309,7 +329,7 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
               // A configured provider is the repair target itself: it stays
               // selectable regardless of scan state (the scan skips enabled
               // configured providers, so its row is missing by design).
-              const configured = configuredRows.has(candidate.id);
+              const configured = savedProviders.has(candidate.id);
               // Generic ACP recipes launch through the shared ACP adapter;
               // only the built-in trio has native launch adapters. Other
               // native ids are detection-only: shown, never offered.
