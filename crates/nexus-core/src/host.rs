@@ -308,6 +308,47 @@ impl AuthorityState {
     }
 }
 
+/// Native PATH candidates for the repair page.
+///
+/// The configured provider ids are NOT treated as already-supplied here: a
+/// saved-but-broken entry (its command removed from disk) must not filter out
+/// the working binary that shares its id. The provider id is the scan's
+/// `provider_id`, which the repair form saves as the replacement entry.
+fn native_scan_entries(
+    config: &AgentHostConfig,
+    probe_dirs: &[PathBuf],
+) -> nexus_agent_host::error::HostResult<Vec<NexusAgentScanEntry>> {
+    let mut repair_config = config.clone();
+    repair_config.providers.clear();
+    let native_entries = path_scan::scan_path_in(&repair_config, &[], probe_dirs)?;
+    Ok(native_entries
+        .into_iter()
+        .map(|entry| {
+            let launch_command = match &entry.launch {
+                LaunchStrategy::Acp { command, .. }
+                | LaunchStrategy::NativeCli { command, .. } => command.clone(),
+            };
+            // The scan only emits a PATH row when it resolved the binary (or a
+            // validated DSH_RUNTIME_BIN), so presence is the install signal —
+            // not the probe-pending health the catalog carries.
+            let installed = path_scan::command_on_path(probe_dirs, &launch_command)
+                || std::path::Path::new(&launch_command).is_file();
+            NexusAgentScanEntry {
+                name: entry.display_name,
+                installed,
+                launch_command: Some(launch_command),
+                description: entry.health.message,
+                icon_url: None,
+                // The provider id IS the join key the repair page saves; PATH
+                // rows are native CLI.
+                registry_agent_id: Some(entry.provider_id.to_string()),
+                protocol_kind: Some(NexusAgentScanEntryProtocolKind::NativeCli),
+                version: None,
+            }
+        })
+        .collect())
+}
+
 /// Discoverable ACP registry agents whose launch binary resolves on this PATH.
 ///
 /// The repair form stores a bare command (no argv), so only binary
@@ -1365,31 +1406,10 @@ impl HostHandle {
                         let probe_dirs: Vec<std::path::PathBuf> = std::env::var_os("PATH")
                             .map(|path| std::env::split_paths(&path).collect())
                             .unwrap_or_default();
-                        let native_entries =
-                            path_scan::scan_path_in(&config, &[], &probe_dirs).map_err(host_err)?;
-                        let mut entries: Vec<NexusAgentScanEntry> = native_entries
-                            .into_iter()
-                            .map(|entry| {
-                                let launch_command = match &entry.launch {
-                                    LaunchStrategy::Acp { command, .. }
-                                    | LaunchStrategy::NativeCli { command, .. } => {
-                                        Some(command.clone())
-                                    }
-                                };
-                                NexusAgentScanEntry {
-                                    name: entry.display_name,
-                                    installed: entry.health.available,
-                                    launch_command,
-                                    description: entry.health.message,
-                                    icon_url: None,
-                                    // The provider id IS the join key the repair
-                                    // page saves; PATH rows are native CLI.
-                                    registry_agent_id: Some(entry.provider_id.to_string()),
-                                    protocol_kind: Some(NexusAgentScanEntryProtocolKind::NativeCli),
-                                    version: None,
-                                }
-                            })
-                            .collect();
+                        // Repair discovery deliberately ignores the configured
+                        // ids: an enabled-but-stale entry (its command removed)
+                        // must not hide the working PATH binary of the same id.
+                        let mut entries = native_scan_entries(&config, &probe_dirs).map_err(host_err)?;
                         // Registry agents that are actually launchable on this
                         // machine join the list, so an unconfigured home still
                         // offers a working candidate.
@@ -2296,5 +2316,44 @@ impl ActorSessionKey {
             ctx,
             knowledge,
         )
+    }
+}
+
+#[cfg(test)]
+mod scan_tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn repair_scan_lists_a_working_candidate_over_a_stale_enabled_entry() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let binary = dir.path().join("claude");
+        std::fs::copy("/bin/sh", &binary).expect("copy executable");
+
+        let mut config = AgentHostConfig::default();
+        config.providers.push(nexus_agent_host::config::ProviderConfig {
+            id: "claude-native".to_string(),
+            protocol: "native_cli".to_string(),
+            command: Some("/definitely/removed/claude".to_string()),
+            args: Vec::new(),
+            env: std::collections::HashMap::new(),
+            enabled: true,
+        });
+
+        let entries =
+            native_scan_entries(&config, &[dir.path().to_path_buf()]).expect("scan entries");
+        let entry = entries
+            .iter()
+            .find(|entry| entry.registry_agent_id.as_deref() == Some("claude-native"))
+            .expect("the working PATH binary is listed despite the stale enabled entry");
+        assert!(entry.installed);
+        assert_eq!(
+            entry.launch_command.as_deref(),
+            Some(binary.to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            entry.protocol_kind,
+            Some(NexusAgentScanEntryProtocolKind::NativeCli)
+        );
     }
 }
