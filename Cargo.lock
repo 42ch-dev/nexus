@@ -3810,6 +3810,7 @@ dependencies = [
  "nexus-home-layout",
  "nexus-knowledge",
  "nexus-local-db",
+ "nexus-orchestration",
  "nexus-provider-ports",
  "serde",
  "serde_json",

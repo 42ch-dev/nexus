@@ -186,6 +186,8 @@ import type { CapabilityListResponse } from './capability-info';
 
 import { NexusClientError, UNAUTHORIZED_EVENT, type TransportErrorKind } from './errors';
 import type {
+  AgentHostConfig,
+  AgentHostProvidersResponse,
   ClearRunsQuery,
   ClearRunsResponse,
   DaemonHealth,
@@ -317,11 +319,20 @@ export class BrowserClient implements NexusClient {
   scanAgents(request?: ScanRequest): Promise<ScanResponse> {
     return this.post<ScanResponse>('/v1/daemon/agent-host/scan', request);
   }
+  listAgentHostProviders(): Promise<AgentHostProvidersResponse> {
+    return this.get<AgentHostProvidersResponse>('/v1/daemon/agent-host/providers');
+  }
   getAgentProfile(): Promise<AgentProfileResponse> {
     return this.get<AgentProfileResponse>('/v1/daemon/agent-host/profile');
   }
   saveAgentProfile(profile: AgentProfile): Promise<AgentProfileResponse> {
     return this.put<AgentProfileResponse>('/v1/daemon/agent-host/profile', profile);
+  }
+  getAgentHostConfig(): Promise<AgentHostConfig> {
+    return this.get<AgentHostConfig>('/v1/daemon/agent-host/config');
+  }
+  saveAgentHostConfig(config: AgentHostConfig): Promise<AgentHostConfig> {
+    return this.put<AgentHostConfig>('/v1/daemon/agent-host/config', config);
   }
 
   // ── Assembly Inspector (V1.151 P1 — DF-76) ────────────────────────────────

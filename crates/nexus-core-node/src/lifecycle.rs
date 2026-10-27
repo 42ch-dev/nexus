@@ -62,17 +62,17 @@ fn is_genuinely_uninitialized(user_home: &Path, access: CoreAccess) -> bool {
     }
 }
 
-struct ValidatedHostAdmission {
-    config_path: PathBuf,
-    host_config: AgentHostConfig,
-    admitted_catalog: Vec<ProviderCatalogEntry>,
+pub(crate) struct ValidatedHostAdmission {
+    pub(crate) config_path: PathBuf,
+    pub(crate) host_config: AgentHostConfig,
+    pub(crate) admitted_catalog: Vec<ProviderCatalogEntry>,
 }
 
 fn host_err(err: HostError) -> nexus_contracts::CoreError {
     core_error::wire_core_error_from_host(err)
 }
 
-fn validate_host_admission(
+pub(crate) fn validate_host_admission(
     user_home: &Path,
 ) -> Result<ValidatedHostAdmission, nexus_contracts::CoreError> {
     validate_workspace_path(user_home).map_err(host_err)?;

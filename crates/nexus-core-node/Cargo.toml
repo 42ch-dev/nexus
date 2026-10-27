@@ -37,6 +37,7 @@ uuid = { workspace = true }
 
 sqlx = { workspace = true }
 nexus-home-layout = { path = "../nexus-home-layout" }
+nexus-orchestration = { path = "../nexus-orchestration" }
 nexus-local-db = { path = "../nexus-local-db" }
 nexus-knowledge = { path = "../nexus-knowledge" }
 nexus-creator-memory = { path = "../nexus-creator-memory" }

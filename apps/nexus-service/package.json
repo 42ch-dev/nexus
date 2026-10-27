@@ -17,7 +17,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "tsc -p tsconfig.json && node --test tests/boot-bootstrap-url.test.mjs tests/i-000061-gate-matrix.test.mjs tests/config-lock.test.mjs tests/retention-sweep.test.mjs tests/host-shell-degrade.test.mjs tests/pre-ia-home-start.test.mjs",
+    "test": "tsc -p tsconfig.json && node --test tests/boot-bootstrap-url.test.mjs tests/i-000061-gate-matrix.test.mjs tests/config-lock.test.mjs tests/retention-sweep.test.mjs tests/host-shell-degrade.test.mjs tests/pre-ia-home-start.test.mjs tests/agent-host-config-http.test.mjs tests/capabilities-http.test.mjs tests/provider-operations-http.test.mjs tests/contract-drift.test.mjs",
     "dev": "node --import tsx src/main.ts",
     "start": "node dist/main.js",
     "proof:open-smoke": "node src/open-smoke.mjs"

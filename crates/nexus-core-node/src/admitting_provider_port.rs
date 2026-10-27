@@ -582,26 +582,18 @@ mod tests {
     /// Build a real [`nexus_core::CoreService`] and install it on the env as
     /// the journal owner (P4-T2 seam). A read-only core refuses journal
     /// writes for real; an engine-owner core accepts them.
+    ///
+    /// The home is seeded through the crate's ONE disposable-home fixture
+    /// (`seed_wire_home`): post-workspace-IA open semantics require the
+    /// workspace state DB, not just `config.toml`, so a hand-written config
+    /// alone opens a core whose journal has no workspace to write into.
     async fn install_journal_core(
         state: &EnvState,
         access: nexus_core::CoreAccess,
     ) -> (tempfile::TempDir, Arc<nexus_core::CoreService>) {
         let tmp = tempfile::tempdir().expect("tempdir");
         let user_home = tmp.path().to_path_buf();
-        let nexus_home = nexus_home_layout::nexus_root_from_home(&user_home);
-        std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
-            &user_home,
-            "creator-journal",
-            "default",
-        ))
-        .expect("workspace dir");
-        std::fs::write(
-            nexus_home.join("config.toml"),
-            "active_creator_id = \"creator-journal\"\n\
-             [active_workspace_slug_by_creator]\n\
-             \"creator-journal\" = \"default\"",
-        )
-        .expect("config");
+        crate::wire_fixture::seed_wire_home(&user_home).await;
         let core = nexus_core::CoreService::open(nexus_core::CoreOpenOptions { user_home, access })
             .await
             .expect("core open");
@@ -874,7 +866,9 @@ mod tests {
             .await
             .expect("journal read")
             .expect("the durable mirror row exists");
-        assert_eq!(journaled.2, "failed");
+        // The row seam is (operation_id, session_id, provider_id, status).
+        assert_eq!(journaled.3, "failed");
+        assert_eq!(journaled.2, "mock-acp");
         assert_eq!(journaled.1, "sess-j");
 
         // A later pull reaches the provider again and carries no terminal:
@@ -1004,7 +998,7 @@ mod tests {
             .await
             .expect("journal read")
             .expect("the durable mirror row exists for the requested op");
-        assert_eq!(journaled.2, "cancelled");
+        assert_eq!(journaled.3, "cancelled");
         assert!(
             core.provider_operation_row_internal("op-y")
                 .await

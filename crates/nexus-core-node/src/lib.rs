@@ -6,6 +6,7 @@
 
 mod actors;
 mod admitting_provider_port;
+mod agent_host_config;
 mod callbacks;
 mod cleanup_registry;
 mod core_error;

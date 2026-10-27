@@ -115,7 +115,6 @@
   },
   "degraded": {
     "body": "Nexus service unavailable: {{reason}}. Make sure the local service is running, then retry.",
-    "providerUnselected": "No orchestration provider is configured — run `nexus42 connect` to configure a provider and enable run capabilities.",
     "retry": "Retry",
     "separator": ", ",
     "reason": {
@@ -124,6 +123,34 @@
     "subsystem": {
       "db": "the local database is not ready",
       "engine": "the orchestration engine is not ready"
+    },
+    "repair": {
+      "title": "Orchestration engine is not ready",
+      "description": "Nexus needs an orchestration provider to run tasks. Complete the two steps below, then recheck.",
+      "failure": "A provider is selected, but its readiness check failed: {{reason}}.",
+      "form": {
+        "title": "Configure an orchestration provider",
+        "candidatesTitle": "Agents on this machine",
+        "candidatesError": "Could not read the local agent list. You can still fill in the configuration below.",
+        "enable": "Use",
+        "installed": "Installed",
+        "manualTitle": "Manual configuration",
+        "idLabel": "Provider ID",
+        "idPlaceholder": "e.g. claude-acp",
+        "protocolLabel": "Protocol",
+        "protocolAcp": "ACP",
+        "protocolNativeCli": "Native CLI",
+        "commandLabel": "Launch command",
+        "commandPlaceholder": "e.g. claude-agent-acp",
+        "save": "Save and recheck",
+        "saving": "Saving…",
+        "saveFailed": "Could not save the configuration: {{message}}"
+      },
+      "stepRecheck": {
+        "title": "Recheck",
+        "body": "After configuring, click the button below to recheck the engine status."
+      },
+      "recheck": "Recheck"
     }
   },
   "continueError": {

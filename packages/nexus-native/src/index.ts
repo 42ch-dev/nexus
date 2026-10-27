@@ -276,6 +276,22 @@ export interface NativeCore {
     cursor?: string,
   ): Promise<WorldKbCandidatesResponse>;
   hostQuery(request: CoreHostQuery): Promise<CoreHostQueryResponse>;
+  /**
+   * Agent-host config (`{home}/agent-host/config.toml`). The shape is the
+   * native serde document and is owned by the service wire type; this facade
+   * only crosses the JSON buffer, exactly like `hostQuery`.
+   */
+  getAgentHostConfig(): Promise<unknown>;
+  saveAgentHostConfig(config: unknown): Promise<void>;
+  /**
+   * Apply the saved provider config in-process: settle the hosted execution
+   * owner, re-read the config document, re-probe, and establish a fresh owner.
+   * Returns the same `{ engine_epoch, provider_ready }` facts as
+   * `startExecutionOwner`.
+   */
+  restartExecutionOwner(): Promise<unknown>;
+  /** The live orchestration capability registry rows (`{ items }`). */
+  listCapabilities(): Promise<unknown>;
   changes(principal: PrincipalHandle, request: CoreChangesRequest): Promise<CoreChangesResponse>;
   providerCall(request: ProviderCall): Promise<ProviderReply>;
   nextProviderEvents(
@@ -881,6 +897,18 @@ function wrapCore(inner: NativeCoreBinding): NativeCore {
       return parseJsonBuffer(
         await inner.hostQuery(encodeWireBuffer(request, CORE_HOST_QUERY_SHAPE, 'request')),
       );
+    },
+    async getAgentHostConfig() {
+      return parseJsonBuffer<unknown>(await inner.getAgentHostConfig());
+    },
+    async saveAgentHostConfig(config) {
+      await inner.saveAgentHostConfig(encodeWireBuffer(config, undefined, 'config'));
+    },
+    async restartExecutionOwner() {
+      return parseJsonBuffer<unknown>(await inner.restartExecutionOwner());
+    },
+    async listCapabilities() {
+      return parseJsonBuffer<unknown>(await inner.listCapabilities());
     },
     async changes(principal, request) {
       return parseJsonBuffer(

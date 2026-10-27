@@ -8,7 +8,7 @@
  * zh-CN product copy and the EN fallback.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { ServiceDegradedBanner, ServiceDegradedGate } from './service-degraded-surface';
@@ -16,6 +16,8 @@ import { ServiceStatusProvider } from '@/lib/service-status-context';
 import { renderInApp } from '@/test/test-providers';
 import { NexusClientError } from '@/lib/nexus';
 import type { DaemonRuntimeStatus, NexusClient, RuntimeStatus } from '@/lib/nexus';
+import type { AgentHostConfig, AgentHostProvidersResponse } from '@/lib/nexus/types';
+import type { AgentScanEntry, ScanResponse } from '@42ch/nexus-contracts';
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -38,15 +40,31 @@ type ProfileRead = () => Promise<{ profile: { name: string } | null }>;
 const SELECTED_PROFILE: ProfileRead = () => Promise.resolve({ profile: { name: 'Claude Code' } });
 const UNSELECTED_PROFILE: ProfileRead = () => Promise.resolve({ profile: null });
 
+interface ConfigStubs {
+  scan?: () => Promise<ScanResponse>;
+  listProviders?: () => Promise<AgentHostProvidersResponse>;
+  getConfig?: () => Promise<AgentHostConfig>;
+  saveConfig?: (config: AgentHostConfig) => Promise<AgentHostConfig>;
+}
+
+const EMPTY_CONFIG: AgentHostConfig = { providers: [] };
+
 function clientWith(
   read: () => Promise<DaemonRuntimeStatus>,
   runtime: RuntimeStatus = { workspace_initialized: false },
   profile: ProfileRead = SELECTED_PROFILE,
+  config: ConfigStubs = {},
 ): NexusClient {
   return {
     daemonStatus: read,
     runtimeStatus: () => Promise.resolve(runtime),
     getAgentProfile: profile,
+    scanAgents: config.scan ?? (() => Promise.resolve({ agents: [] })),
+    listAgentHostProviders:
+      config.listProviders ?? (() => Promise.resolve({ providers: [] })),
+    getAgentHostConfig: config.getConfig ?? (() => Promise.resolve(EMPTY_CONFIG)),
+    saveAgentHostConfig:
+      config.saveConfig ?? ((saved: AgentHostConfig) => Promise.resolve(saved)),
   } as unknown as NexusClient;
 }
 
@@ -78,20 +96,25 @@ const HEALTHY: DaemonRuntimeStatus = {
   degraded: { subsystems: [], reasons: [] },
 };
 
+/** Any non-engine cause keeps the banner/full-screen split. */
+const DB_DEGRADED: DaemonRuntimeStatus = {
+  degraded: { subsystems: ['db'], reasons: ['db not ready'] },
+};
+
 /** jsdom resolves the system locale to `en`; pin zh-CN to assert the product copy. */
 beforeEach(() => window.localStorage.setItem('nexus-web-locale', 'zh-CN'));
 
 describe('ServiceDegradedGate', () => {
-  it('shows one banner inside the shell when a subsystem is degraded', async () => {
+  it('shows one banner inside the shell when a non-engine subsystem is degraded', async () => {
     renderSurface({
       setupCompleted: true,
-      client: clientWith(() => Promise.resolve(ENGINE_DEGRADED)),
+      client: clientWith(() => Promise.resolve(DB_DEGRADED)),
     });
 
     const surface = await screen.findByTestId('service-degraded-surface');
     expect(surface).toHaveAttribute('data-variant', 'banner');
     expect(surface).toHaveTextContent(
-      'Nexus 服务暂不可用：编排引擎未就绪。请确认本地服务正在运行后重试。',
+      'Nexus 服务暂不可用：本地数据库未就绪。请确认本地服务正在运行后重试。',
     );
     expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
     // The shell stays usable behind the single surface — no toasts.
@@ -99,26 +122,157 @@ describe('ServiceDegradedGate', () => {
     expect(screen.getAllByRole('alert')).toHaveLength(1);
   });
 
-  it('guides provider selection when the workspace is ready but no provider is selected', async () => {
+  it('joins the provider catalog with scan data and fills id/protocol/command', async () => {
+    const user = userEvent.setup();
+    const agents: AgentScanEntry[] = [
+      { name: 'Beta CLI', registry_agent_id: 'beta-cli', launch_command: 'beta-cli', installed: false },
+      { name: 'Alpha Agent', registry_agent_id: 'alpha-acp', launch_command: 'alpha-acp', installed: true },
+    ];
     renderSurface({
       setupCompleted: true,
       client: clientWith(
         () => Promise.resolve(ENGINE_DEGRADED),
         { workspace_initialized: true },
         UNSELECTED_PROFILE,
+        {
+          scan: () => Promise.resolve({ agents }),
+          listProviders: () =>
+            Promise.resolve({
+              providers: [
+                { provider_id: 'beta-cli', display_name: 'Beta CLI', protocol_kind: 'native_cli' },
+                { provider_id: 'alpha-acp', display_name: 'Alpha Agent', protocol_kind: 'acp' },
+              ],
+            }),
+        },
       ),
     });
 
     const surface = await screen.findByTestId('service-degraded-surface');
-    expect(surface).toHaveTextContent(
-      '尚未配置编排提供方 —— 运行 `nexus42 connect` 完成提供方配置后即可启用运行能力。',
-    );
-    // A setup step, not a transport failure: no retry affordance.
-    expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
-    expect(screen.getByTestId('app-content')).toBeInTheDocument();
+    expect(surface).toHaveAttribute('data-variant', 'full');
+    expect(surface).toHaveAttribute('data-state', 'unconfigured');
+    expect(surface).toHaveTextContent('编排引擎未就绪');
+    expect(surface).toHaveTextContent('配置编排提供方');
+    // The CLI escape hatch is gone: configuration is in-page only.
+    expect(surface).not.toHaveTextContent('nexus42 connect');
+    expect(screen.queryByTestId('engine-repair-failure')).not.toBeInTheDocument();
+    // The app is not usable until the engine is configured.
+    expect(screen.queryByTestId('app-content')).not.toBeInTheDocument();
+
+    // Installed first, then the catalog's registry order.
+    const candidates = await screen.findAllByRole('listitem');
+    expect(candidates[0]).toHaveTextContent('Alpha Agent');
+    expect(candidates[1]).toHaveTextContent('Beta CLI');
+
+    await user.click(within(candidates[1]!).getByRole('button', { name: '启用' }));
+    expect(screen.getByLabelText('提供方 ID')).toHaveValue('beta-cli');
+    expect(screen.getByLabelText('协议')).toHaveValue('native_cli');
+    expect(screen.getByLabelText('启动命令')).toHaveValue('beta-cli');
+    expect(screen.getByRole('button', { name: '保存并重启检测' })).toBeEnabled();
+
+    await user.click(within(candidates[0]!).getByRole('button', { name: '启用' }));
+    expect(screen.getByLabelText('提供方 ID')).toHaveValue('alpha-acp');
+    expect(screen.getByLabelText('协议')).toHaveValue('acp');
+    expect(screen.getByLabelText('启动命令')).toHaveValue('alpha-acp');
+    expect(screen.getByRole('button', { name: '重新检测' })).toBeInTheDocument();
   });
 
-  it('keeps the failure surface when a selected provider is not ready', async () => {
+  it('saves the upserted provider and re-runs the readiness probe', async () => {
+    const user = userEvent.setup();
+    const daemonStatus = vi.fn(() => Promise.resolve(ENGINE_DEGRADED));
+    const saved = { providers: [], max_sessions: 2 } as AgentHostConfig;
+    const saveConfig = vi.fn((config: AgentHostConfig) => {
+      Object.assign(saved, config);
+      return Promise.resolve(config);
+    });
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        daemonStatus,
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        { getConfig: () => Promise.resolve(saved), saveConfig },
+      ),
+    });
+
+    await screen.findByLabelText('提供方 ID');
+    await user.type(screen.getByLabelText('提供方 ID'), 'manual-agent');
+    await user.selectOptions(screen.getByLabelText('协议'), 'native_cli');
+    await user.type(screen.getByLabelText('启动命令'), '/usr/local/bin/manual-agent');
+    await user.click(screen.getByRole('button', { name: '保存并重启检测' }));
+
+    await waitFor(() => expect(saveConfig).toHaveBeenCalledTimes(1));
+    const written = saveConfig.mock.calls[0]![0];
+    expect(written.max_sessions).toBe(2);
+    expect(written.providers).toEqual([
+      { id: 'manual-agent', protocol: 'native_cli', command: '/usr/local/bin/manual-agent', enabled: true },
+    ]);
+    // A successful save re-runs the same probe the recheck button uses.
+    await waitFor(() =>
+      expect(daemonStatus.mock.calls.length).toBeGreaterThanOrEqual(2),
+    );
+  });
+
+  it('keeps the catalog candidates when the agent scan fails', async () => {
+    const user = userEvent.setup();
+    const saveConfig = vi.fn((config: AgentHostConfig) => Promise.resolve(config));
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        {
+          scan: () => Promise.reject(new Error('scan offline')),
+          listProviders: () =>
+            Promise.resolve({
+              providers: [
+                { provider_id: 'alpha-acp', display_name: 'Alpha Agent', protocol_kind: 'acp' },
+              ],
+            }),
+          saveConfig,
+        },
+      ),
+    });
+
+    const candidates = await screen.findAllByRole('listitem');
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toHaveTextContent('Alpha Agent');
+    expect(screen.queryByText('已安装')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('provider-catalog-failed')).not.toBeInTheDocument();
+
+    await user.click(within(candidates[0]!).getByRole('button', { name: '启用' }));
+    expect(screen.getByLabelText('提供方 ID')).toHaveValue('alpha-acp');
+    await user.type(screen.getByLabelText('启动命令'), 'alpha-acp');
+    await user.click(screen.getByRole('button', { name: '保存并重启检测' }));
+    await waitFor(() => expect(saveConfig).toHaveBeenCalledTimes(1));
+  });
+
+  it('shows the catalog error and keeps the manual path usable', async () => {
+    const user = userEvent.setup();
+    const saveConfig = vi.fn((config: AgentHostConfig) => Promise.resolve(config));
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        {
+          listProviders: () => Promise.reject(new Error('catalog offline')),
+          saveConfig,
+        },
+      ),
+    });
+
+    expect(await screen.findByTestId('provider-catalog-failed')).toHaveTextContent(
+      '无法读取本机的智能体列表',
+    );
+    await user.type(screen.getByLabelText('提供方 ID'), 'manual-agent');
+    await user.type(screen.getByLabelText('启动命令'), 'manual-agent');
+    await user.click(screen.getByRole('button', { name: '保存并重启检测' }));
+    await waitFor(() => expect(saveConfig).toHaveBeenCalledTimes(1));
+  });
+
+  it('adds the failure note when a selected provider is not ready', async () => {
     renderSurface({
       setupCompleted: true,
       client: clientWith(
@@ -129,13 +283,19 @@ describe('ServiceDegradedGate', () => {
     });
 
     const surface = await screen.findByTestId('service-degraded-surface');
-    expect(surface).toHaveTextContent(
-      'Nexus 服务暂不可用：编排引擎未就绪。请确认本地服务正在运行后重试。',
+    expect(surface).toHaveAttribute('data-variant', 'full');
+    expect(surface).toHaveAttribute('data-state', 'failed');
+    expect(screen.getByTestId('engine-repair-failure')).toHaveTextContent(
+      '已选择编排提供方，但就绪检测未通过：编排引擎未就绪。',
     );
-    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
+    // The failure note sits above the same configuration form: the saved
+    // profile alone cannot make the recheck succeed.
+    expect(screen.getByLabelText('提供方 ID')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '保存并重启检测' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '重新检测' })).toBeInTheDocument();
   });
 
-  it('keeps the failure surface while the profile selection is still loading', async () => {
+  it('keeps the failure repair page while the profile selection is still loading', async () => {
     const profile = withResolvers<{ profile: { name: string } | null }>();
     const getAgentProfile = vi.fn(() => profile.promise);
     renderSurface({
@@ -149,16 +309,22 @@ describe('ServiceDegradedGate', () => {
 
     await waitFor(() => expect(getAgentProfile).toHaveBeenCalledTimes(1));
     // Never a flash of setup guidance while the selection read is in flight.
-    expect(screen.getByTestId('service-degraded-surface')).toHaveTextContent('服务暂不可用');
+    expect(screen.getByTestId('service-degraded-surface')).toHaveAttribute(
+      'data-state',
+      'failed',
+    );
+    expect(screen.getByTestId('engine-repair-failure')).toBeInTheDocument();
 
     await act(async () => {
       profile.resolve({ profile: null });
     });
     await waitFor(() =>
-      expect(screen.getByTestId('service-degraded-surface')).toHaveTextContent(
-        '尚未配置编排提供方',
+      expect(screen.getByTestId('service-degraded-surface')).toHaveAttribute(
+        'data-state',
+        'unconfigured',
       ),
     );
+    expect(screen.queryByTestId('engine-repair-failure')).not.toBeInTheDocument();
   });
 
   it('ignores an uninitialized service so onboarding stays reachable', async () => {
@@ -214,7 +380,7 @@ describe('ServiceDegradedGate', () => {
     expect(surface).toHaveAttribute('data-variant', 'full');
   });
 
-  it('updates the same banner on retry instead of stacking surfaces', async () => {
+  it('replaces the banner with the repair page when the retry reports the engine', async () => {
     const user = userEvent.setup();
     const daemonStatus = vi
       .fn()
@@ -223,15 +389,21 @@ describe('ServiceDegradedGate', () => {
     renderSurface({ setupCompleted: true, client: clientWith(daemonStatus) });
 
     const first = await screen.findByTestId('service-degraded-surface');
+    expect(first).toHaveAttribute('data-variant', 'banner');
     expect(first).toHaveTextContent('无法连接本地服务');
 
     await user.click(screen.getByRole('button', { name: '重试' }));
 
     await waitFor(() =>
-      expect(screen.getByTestId('service-degraded-surface')).toHaveTextContent('编排引擎未就绪'),
+      expect(screen.getByTestId('service-degraded-surface')).toHaveAttribute(
+        'data-variant',
+        'full',
+      ),
     );
-    // One instance throughout: the retry updates the existing banner.
+    expect(screen.getByTestId('service-degraded-surface')).toHaveTextContent('编排引擎未就绪');
+    // One instance throughout: the retry updates the existing surface.
     expect(screen.getAllByTestId('service-degraded-surface')).toHaveLength(1);
+    expect(screen.queryByTestId('app-content')).not.toBeInTheDocument();
     expect(daemonStatus.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
@@ -265,17 +437,23 @@ describe('ServiceDegradedGate', () => {
     expect(screen.queryByTestId('service-degraded-surface')).not.toBeInTheDocument();
   });
 
-  it('renders the EN fallback copy', async () => {
+  it('renders the EN repair copy', async () => {
     window.localStorage.setItem('nexus-web-locale', 'en');
     renderSurface({
       setupCompleted: true,
-      client: clientWith(() => Promise.resolve(ENGINE_DEGRADED)),
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+      ),
     });
 
     const surface = await screen.findByTestId('service-degraded-surface');
-    expect(surface).toHaveTextContent(
-      'Nexus service unavailable: the orchestration engine is not ready. Make sure the local service is running, then retry.',
-    );
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(surface).toHaveTextContent('Orchestration engine is not ready');
+    expect(surface).toHaveTextContent('Configure an orchestration provider');
+    expect(surface).not.toHaveTextContent('nexus42 connect');
+    expect(await screen.findByLabelText('Provider ID')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save and recheck' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Recheck' })).toBeInTheDocument();
   });
 });
