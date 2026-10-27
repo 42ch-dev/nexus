@@ -115,7 +115,7 @@
   },
   "degraded": {
     "body": "Nexus 服务暂不可用：{{reason}}。请确认本地服务正在运行后重试。",
-    "providerUnselected": "尚未选择编排引擎提供方 —— 在 Agent 设置中选择后即可启用运行能力。",
+    "providerUnselected": "尚未配置编排提供方 —— 运行 `nexus42 connect` 完成提供方配置后即可启用运行能力。",
     "retry": "重试",
     "separator": "、",
     "reason": {

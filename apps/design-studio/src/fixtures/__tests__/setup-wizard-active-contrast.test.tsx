@@ -12,7 +12,7 @@
  * the resolved output. The remaining assertions guard observable rendered
  * classes across the theme toggle.
  */
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import { I18nextProvider } from 'react-i18next';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -93,5 +93,33 @@ describe('Setup wizard active contrast — Studio fixture (P0G-4)', () => {
       document.documentElement.classList.remove('dark');
     });
     expect(workspaceActiveCircle()).toHaveClass('text-setup-wizard-step-circle-active-text');
+  });
+});
+
+describe('Setup service banner variants — Studio fixture (I-000124)', () => {
+  it('provider-unconfigured shows the nexus42 connect guidance without retry', () => {
+    mockMatchMediaFull({ dark: false });
+    renderWizardFixtures();
+
+    const frame = screen.getByTestId('wizard-chrome-service-provider-unconfigured');
+    expect(frame).toHaveTextContent('run `nexus42 connect`');
+    expect(frame).not.toHaveTextContent('Agent settings');
+    // Setup guidance, not a failure: no retry affordance.
+    expect(within(frame).queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('engine-unavailable keeps the retry action in light and dark', () => {
+    mockMatchMediaFull({ dark: false });
+    renderWizardFixtures();
+
+    const light = screen.getByTestId('wizard-chrome-service-engine-unavailable');
+    expect(within(light).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+
+    act(() => {
+      document.documentElement.classList.add('dark');
+    });
+    const dark = screen.getByTestId('wizard-chrome-service-engine-unavailable');
+    expect(dark).toHaveTextContent('Nexus service unavailable');
+    expect(within(dark).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
   });
 });

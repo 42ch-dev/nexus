@@ -111,7 +111,7 @@ describe('ServiceDegradedGate', () => {
 
     const surface = await screen.findByTestId('service-degraded-surface');
     expect(surface).toHaveTextContent(
-      '尚未选择编排引擎提供方 —— 在 Agent 设置中选择后即可启用运行能力。',
+      '尚未配置编排提供方 —— 运行 `nexus42 connect` 完成提供方配置后即可启用运行能力。',
     );
     // A setup step, not a transport failure: no retry affordance.
     expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
@@ -156,7 +156,7 @@ describe('ServiceDegradedGate', () => {
     });
     await waitFor(() =>
       expect(screen.getByTestId('service-degraded-surface')).toHaveTextContent(
-        '尚未选择编排引擎提供方',
+        '尚未配置编排提供方',
       ),
     );
   });
