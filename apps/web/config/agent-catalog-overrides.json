@@ -6,7 +6,9 @@
     "opencode": "https://opencode.ai/download",
     "cursor": "https://cursor.com/download",
     "kimi": "https://www.kimi.com/code",
-    "pi": "https://pi.dev/"
+    "pi": "https://pi.dev/",
+    "omp": "https://omp.sh",
+    "hermes": "https://hermes-agent.nousresearch.com"
   },
   "agents": {
     "claude-acp": { "excludeFromPicker": true },
@@ -26,12 +28,57 @@
     "cursor": { "priority": 2 },
     "kimi": { "priority": 3 },
     "opencode": { "priority": 4 },
-    "hermes": { "priority": 5 },
-    "gemini": { "priority": 6 },
-    "grok-build": { "priority": 7 },
-    "kilo": { "priority": 8 },
-    "pi-acp": { "displayName": "Pi", "priority": 9 },
-    "qoder": { "priority": 10 },
-    "qwen-code": { "priority": 11 }
+    "hermes": {
+      "displayName": "Hermes",
+      "priority": 5,
+      "description": "Nous Research's Hermes Agent with a native ACP server."
+    },
+    "omp": {
+      "displayName": "omp",
+      "priority": 6,
+      "description": "Oh My Pi (omp) with a native ACP server."
+    },
+    "gemini": { "priority": 7 },
+    "grok-build": { "priority": 8 },
+    "kilo": { "priority": 9 },
+    "pi-acp": { "displayName": "Pi", "priority": 10 },
+    "qoder": { "priority": 11 },
+    "qwen-code": { "priority": 12 },
+    "amp-acp": {
+      "displayName": "Amp",
+      "priority": 20,
+      "iconUrl": "https://cdn.agentclientprotocol.com/registry/v1/latest/amp-acp.svg"
+    },
+    "github-copilot-cli": {
+      "displayName": "GitHub Copilot CLI",
+      "priority": 21,
+      "iconUrl": "https://cdn.agentclientprotocol.com/registry/v1/latest/github-copilot-cli.svg"
+    },
+    "devin": {
+      "displayName": "Devin",
+      "priority": 22,
+      "iconUrl": "https://cdn.agentclientprotocol.com/registry/v1/latest/devin.svg"
+    },
+    "antigravity-acp": {
+      "displayName": "Google Antigravity",
+      "priority": 23,
+      "iconUrl": "https://cdn.agentclientprotocol.com/registry/v1/latest/antigravity-acp.svg"
+    },
+    "codebuddy-code": {
+      "displayName": "Codebuddy Code",
+      "priority": 24,
+      "iconUrl": "https://cdn.agentclientprotocol.com/registry/v1/latest/codebuddy-code.svg"
+    },
+    "dsh-native": { "displayName": "dsh", "priority": 25 },
+    "amr": { "displayName": "AMR (vela)", "priority": 26 },
+    "byok-opencode": { "displayName": "OpenCode CLI (BYOK)", "priority": 27 },
+    "trae-cli": { "displayName": "Trae CLI", "priority": 28 },
+    "kiro": { "displayName": "Kiro CLI", "priority": 29 },
+    "vibe": { "displayName": "Vibe", "priority": 30 },
+    "deepseek": { "displayName": "DeepSeek", "priority": 31 },
+    "aider": { "displayName": "Aider", "priority": 32 },
+    "reasonix": { "displayName": "Reasonix", "priority": 33 },
+    "mimo": { "displayName": "MiMo", "priority": 34 },
+    "atomcode": { "displayName": "AtomCode", "priority": 35 }
   }
 }

@@ -83,6 +83,8 @@ export function isExcludedFromPicker(key: string): boolean {
 const NATIVE_LAUNCH_MAP: Record<string, string> = {
   claude: 'claude-native',
   codex: 'codex-native',
+  omp: 'omp',
+  hermes: 'hermes',
 };
 
 /**

@@ -82,6 +82,10 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
   const client = useNexusClient();
   const [catalog, setCatalog] = useState<AgentHostCatalogEntry[] | null>(null);
   const [scanEntries, setScanEntries] = useState<AgentScanEntry[]>([]);
+  // A failed scan means install state is UNKNOWN, not "not installed":
+  // candidates stay selectable so a transient scan outage never locks the
+  // user out of the catalog.
+  const [scanFailed, setScanFailed] = useState(false);
   const [catalogFailed, setCatalogFailed] = useState(false);
   const [id, setId] = useState('');
   const [protocol, setProtocol] = useState<AgentHostProviderConfig['protocol']>('acp');
@@ -110,7 +114,10 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
         if (!cancelled) setScanEntries(response.agents);
       },
       () => {
-        if (!cancelled) setScanEntries([]);
+        if (!cancelled) {
+          setScanEntries([]);
+          setScanFailed(true);
+        }
       },
     );
     return () => {
@@ -135,12 +142,14 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
         command: command.trim(),
         enabled: true,
       };
+      // Replacement semantics: the saved provider is the ONE enabled entry.
+      // Known-good entries stay in the document (disabled) so settings can
+      // re-enable them later; they are never deleted here.
       const exists = current.providers.some((entry) => entry.id === provider.id);
-      const providers = exists
-        ? current.providers.map((entry) =>
-            entry.id === provider.id ? { ...entry, ...provider } : entry,
-          )
-        : [...current.providers, provider];
+      const providers = current.providers.map((entry) =>
+        entry.id === provider.id ? { ...entry, ...provider } : { ...entry, enabled: false },
+      );
+      if (!exists) providers.push(provider);
       await client.saveAgentHostConfig({ ...current, providers });
       await onSaved();
     } catch (error) {
@@ -192,16 +201,23 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
               >
                 <span className="min-w-0 truncate text-copy-13 text-gray-1000">
                   {candidate.displayName}
-                  {candidate.installed && (
-                    <span className="ml-2 text-label-12 text-gray-700">
-                      {t('degraded.repair.form.installed')}
-                    </span>
-                  )}
+                  <span
+                    className={`ml-2 text-label-12 ${
+                      candidate.installed ? 'text-gray-700' : 'text-gray-500'
+                    }`}
+                  >
+                    {candidate.installed
+                      ? t('degraded.repair.form.installed')
+                      : t('degraded.repair.form.notInstalled')}
+                  </span>
                 </span>
                 <Button
                   type="button"
                   variant="secondary"
                   size="small"
+                  // Confirmed not-installed (scan succeeded): disabled, per
+                  // the roster contract. A failed scan leaves rows selectable.
+                  disabled={!candidate.installed && !scanFailed}
                   onClick={() => choose(candidate)}
                 >
                   {t('degraded.repair.form.enable')}

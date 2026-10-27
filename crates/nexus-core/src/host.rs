@@ -1327,13 +1327,24 @@ impl HostHandle {
                                         Some(command.clone())
                                     }
                                 };
+                                // Wire contracts (see `path_scan::scan_path_in`):
+                                // `registry_agent_id` is the provider id so the
+                                // web repair surface can join scan rows to the
+                                // provider catalog; `installed` mirrors the PATH
+                                // roster (the "path candidate" discovery marker),
+                                // NOT provider readiness.
+                                let installed = entry
+                                    .health
+                                    .message
+                                    .as_deref()
+                                    .is_some_and(|message| message.starts_with("path candidate"));
                                 NexusAgentScanEntry {
                                     name: entry.display_name,
-                                    installed: entry.health.available,
+                                    installed,
                                     launch_command,
                                     description: entry.health.message,
                                     icon_url: None,
-                                    registry_agent_id: None,
+                                    registry_agent_id: Some(entry.provider_id.to_string()),
                                     version: None,
                                 }
                             })

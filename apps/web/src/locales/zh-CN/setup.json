@@ -134,6 +134,7 @@
         "candidatesError": "无法读取本机的智能体列表。你仍可手动填写下方配置。",
         "enable": "启用",
         "installed": "已安装",
+        "notInstalled": "未安装",
         "manualTitle": "手动配置",
         "idLabel": "提供方 ID",
         "idPlaceholder": "例如 claude-acp",

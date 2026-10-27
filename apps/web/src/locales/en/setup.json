@@ -134,6 +134,7 @@
         "candidatesError": "Could not read the local agent list. You can still fill in the configuration below.",
         "enable": "Use",
         "installed": "Installed",
+        "notInstalled": "Not installed",
         "manualTitle": "Manual configuration",
         "idLabel": "Provider ID",
         "idPlaceholder": "e.g. claude-acp",
