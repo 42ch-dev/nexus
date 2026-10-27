@@ -139,6 +139,24 @@ impl HostManager {
         self.config.read().await.clone().unwrap_or_default()
     }
 
+    /// Re-run the start over a freshly admitted configuration, replacing the
+    /// registered provider set so the next readiness probe reads the providers
+    /// the saved config selects.
+    ///
+    /// The caller has already settled the execution owner that used the
+    /// previous provider set (the owner-restart seam). Clearing first is what
+    /// lets [`HostFacade::start`]'s discovery run instead of skipping it as
+    /// "pre-registered"; every other start step — config snapshot, admission
+    /// policy, bounded owner-bound probes — runs unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same rejections [`HostFacade::start`] produces.
+    pub async fn reload(&self, config: HostStartConfig) -> HostResult<()> {
+        self.providers.write().await.clear();
+        <Self as crate::HostFacade>::start(self, config).await
+    }
+
     /// Admit the catalog-owned launch recipe for JS provider callbacks.
     ///
     /// # Errors
@@ -2705,6 +2723,88 @@ mod tests {
         assert!(
             !entry.health.available,
             "launch failure must invalidate readiness"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn reload_replaces_the_provider_set_and_is_idempotent() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let manager = HostManager::new();
+        let provider_id = ProviderId::new("dsh-native");
+        let catalog_entry = crate::ProviderCatalogEntry {
+            provider_id: provider_id.clone(),
+            display_name: "dsh-native".to_string(),
+            protocol_kind: crate::capability::model::ProtocolKind::Acp,
+            launch: crate::LaunchStrategy::Acp {
+                command: "/bin/true".to_string(),
+                args: Vec::new(),
+                env: std::collections::HashMap::new(),
+            },
+            source: crate::DiscoverySource::Config,
+            trust: crate::TrustLevel::Explicit,
+            capabilities: CapabilityDescriptor::acp_full(),
+            health: crate::capability::model::ProviderHealth {
+                provider_id: provider_id.clone(),
+                available: false,
+                latency_ms: None,
+                message: None,
+            },
+        };
+        let start_config = |config: AgentHostConfig| HostStartConfig {
+            config_path: temp_dir.path().join("config.toml"),
+            workspace_root: temp_dir.path().to_path_buf(),
+            max_sessions: config.max_sessions,
+            max_ops_per_session: config.max_ops_per_session,
+            timeouts: config.timeouts.clone(),
+            host_config: Some(config),
+            admitted_catalog: Some(vec![catalog_entry.clone()]),
+            probe_owner: Some(test_owner_for(temp_dir.path().to_path_buf())),
+        };
+
+        // Initial start with an empty selection.
+        manager
+            .reload(start_config(AgentHostConfig::default()))
+            .await
+            .expect("initial start");
+        assert!(manager.agent_config().await.providers.is_empty());
+
+        // A saved config with one selected provider takes effect on reload.
+        let selected = AgentHostConfig {
+            providers: vec![crate::config::ProviderConfig {
+                id: "dsh-native".to_string(),
+                protocol: "acp".to_string(),
+                command: Some("/bin/true".to_string()),
+                args: Vec::new(),
+                env: std::collections::HashMap::new(),
+                enabled: true,
+            }],
+            ..AgentHostConfig::default()
+        };
+        manager.reload(start_config(selected.clone())).await.expect("reload");
+        assert_eq!(manager.agent_config().await.providers.len(), 1);
+        assert!(manager
+            .provider_catalog()
+            .await
+            .expect("catalog")
+            .find(&provider_id)
+            .is_some());
+
+        // Reloading the same config again replaces, never duplicates.
+        manager
+            .reload(start_config(selected))
+            .await
+            .expect("idempotent reload");
+        assert_eq!(manager.agent_config().await.providers.len(), 1);
+        assert_eq!(
+            manager
+                .provider_catalog()
+                .await
+                .expect("catalog")
+                .entries
+                .iter()
+                .filter(|entry| entry.provider_id == provider_id)
+                .count(),
+            1
         );
     }
 }

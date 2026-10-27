@@ -118,6 +118,41 @@ fn selected_providers_available(config: &AgentHostConfig, catalog: &ProviderCata
     })
 }
 
+/// Readiness read + owner establishment shared by the boot start and the
+/// provider-config restart. The readiness answer is read BEFORE establishment
+/// so a workspace refusal still reports the truth about the provider lane.
+async fn publish_execution_owner(
+    core: &std::sync::Arc<nexus_core::CoreService>,
+    providers: std::sync::Arc<dyn nexus_provider_ports::ProviderPort>,
+    manager: std::sync::Arc<HostManager>,
+) -> Result<Buffer> {
+    let provider_ready = selected_providers_ready(&manager)
+        .await
+        .map_err(|error| Error::from_reason(format!("provider readiness: {error}")))?;
+    let timeouts = manager.agent_config().await.timeouts;
+    let engine_epoch = match core
+        .start_hosted_execution(manager, providers, timeouts)
+        .await
+    {
+        Ok(handle) => Some(handle.engine_epoch()),
+        // A workspace that cannot host an owner is the ONE shape this profile
+        // reports as "no engine epoch": the admission pinned no usable creative
+        // root, so the caller publishes the null sentinel.
+        Err(ExecutionOpenError::Workspace(CoreError::Uninitialized)) => None,
+        // Every other workspace refusal keeps its neutral class on the wire.
+        Err(ExecutionOpenError::Workspace(err)) => {
+            return Err(core_error::napi_error_from_domain(err));
+        }
+        Err(error) => {
+            return Err(Error::from_reason(format!("execution owner: {error}")));
+        }
+    };
+    Ok(Buffer::from(serde_json::to_vec(&serde_json::json!({
+        "engine_epoch": engine_epoch,
+        "provider_ready": provider_ready,
+    }))?))
+}
+
 #[napi]
 impl NativeCore {
     /// Establish the single hosted execution owner for this engine-owner core.
@@ -170,38 +205,82 @@ impl NativeCore {
         // The attached authority's manager IS the manager the open started with
         // the admitted pinned-root configuration: readiness and the hosted
         // execution owner borrow that same instance instead of a second one.
+        publish_execution_owner(&core, providers, host.manager()).await
+    }
+
+    /// Apply the saved provider config in-process: settle the current hosted
+    /// owner, re-admit the config file's provider catalog, re-run the same
+    /// manager start (config snapshot + bounded owner-bound probes), then
+    /// establish a fresh owner and publish the fresh facts.
+    ///
+    /// The prior owner is settled through the existing retirement seam
+    /// (`CoreService::retire_execution`) before the new generation claims the
+    /// same DB; a service that never established one is a no-op there.
+    #[napi]
+    pub async fn restart_execution_owner(&self) -> Result<Buffer> {
+        self.deny_service_only()?;
+        let core = self
+            .inner
+            .core
+            .lock()
+            .map_err(|_| Error::from_reason("core mutex poisoned"))?
+            .clone()
+            .ok_or_else(|| Error::from_reason("core not open"))?;
+        let providers = self
+            .inner
+            .provider_port
+            .lock()
+            .map_err(|_| Error::from_reason("port mutex poisoned"))?
+            .clone()
+            .ok_or_else(|| Error::from_reason("provider port unavailable"))?;
+        let host = self
+            .inner
+            .host_authority()
+            .ok_or_else(core_error::napi_error_host_not_started)?;
         let manager = host.manager();
-        // The readiness answer is read BEFORE establishment so a workspace
-        // refusal still reports the truth about the provider lane.
-        let provider_ready = selected_providers_ready(&manager)
+        let home = self.agent_host_home()?;
+
+        core.retire_execution().await;
+
+        // Re-read the document the save just wrote and re-admit its catalog,
+        // then run the manager start against the SAME manager the authority
+        // exposes, so `selected_providers_ready` reads the saved selection.
+        let admission = crate::lifecycle::validate_host_admission(&home)
+            .map_err(core_error::napi_error_from_wire)?;
+        let principal = core
+            .active_principal()
             .await
-            .map_err(|error| Error::from_reason(format!("provider readiness: {error}")))?;
-        let timeouts = manager.agent_config().await.timeouts;
-        let engine_epoch = match core
-            .start_hosted_execution(manager, providers, timeouts)
-            .await
-        {
-            Ok(handle) => Some(handle.engine_epoch()),
-            // A workspace that cannot host an owner is the ONE shape this
-            // profile reports as "no engine epoch": the admission pinned no
-            // usable creative root, so the caller publishes the null sentinel.
-            Err(ExecutionOpenError::Workspace(CoreError::Uninitialized)) => None,
-            // Every other workspace refusal — a selected root that moved since
-            // the admission was pinned, a rival commit authority, a storage
-            // fault — keeps its neutral class on the wire instead of decaying
-            // into an unstructured reason the caller can only read as
-            // "internal".
-            Err(ExecutionOpenError::Workspace(err)) => {
-                return Err(core_error::napi_error_from_domain(err));
+            .map_err(core_error::napi_error_from_domain)?;
+        // The probe boundary is the same pinned creative root the open used;
+        // an admission without one keeps the owner-less shape (no fabricated
+        // readiness).
+        let probe_owner = core.admission_creative_root().map(|root| {
+            nexus_agent_host::capability::model::SessionOwner {
+                creator_id: principal.creator_id().to_string(),
+                workspace_root: root.to_path_buf(),
+                orchestration_run_id: None,
             }
-            Err(error) => {
-                return Err(Error::from_reason(format!("execution owner: {error}")));
-            }
+        });
+        let workspace_root = probe_owner
+            .as_ref()
+            .map_or_else(|| home.clone(), |owner| owner.workspace_root.clone());
+        let start_config = nexus_agent_host::capability::model::HostStartConfig {
+            config_path: admission.config_path,
+            workspace_root,
+            max_sessions: admission.host_config.max_sessions,
+            max_ops_per_session: admission.host_config.max_ops_per_session,
+            timeouts: admission.host_config.timeouts.clone(),
+            host_config: Some(admission.host_config),
+            admitted_catalog: Some(admission.admitted_catalog),
+            probe_owner,
         };
-        Ok(Buffer::from(serde_json::to_vec(&serde_json::json!({
-            "engine_epoch": engine_epoch,
-            "provider_ready": provider_ready,
-        }))?))
+        manager.reload(start_config).await.map_err(|error| {
+            core_error::napi_error_from_wire(
+                nexus_agent_host::providers::port::host_error_to_core_error(&error),
+            )
+        })?;
+
+        publish_execution_owner(&core, providers, manager).await
     }
 
     // ── Durable schedule mutations (P3 ExecutionHandle authority) ───────────

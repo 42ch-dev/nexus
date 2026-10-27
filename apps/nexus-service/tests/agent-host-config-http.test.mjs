@@ -47,21 +47,32 @@ const DEFAULT_CONFIG = {
 };
 
 /** A core stub backed by an in-memory document, mirroring the native save/load pair. */
-function storeService(initial) {
+function storeService(
+  initial,
+  restart = async () => ({ engine_epoch: 7, provider_ready: true }),
+) {
   let stored = initial;
   const saves = [];
+  const restarts = [];
   return {
     service: {
       workspaceInitialized: true,
+      providerReady: false,
+      engineEpoch: 0,
       core: {
         getAgentHostConfig: async () => stored,
         saveAgentHostConfig: async (config) => {
           saves.push(config);
           stored = config;
         },
+        restartExecutionOwner: async () => {
+          restarts.push(stored);
+          return restart();
+        },
       },
     },
     saves,
+    restarts,
   };
 }
 
@@ -84,6 +95,46 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
     assert.deepEqual(response.body, request);
     assert.equal(saves.length, 1);
     assert.deepEqual(saves[0].providers, request.providers);
+  });
+
+  test('PUT restarts the engine owner and publishes the fresh readiness facts', async () => {
+    const { service, restarts } = storeService(DEFAULT_CONFIG);
+    const response = await handle('PUT', service, {
+      ...DEFAULT_CONFIG,
+      providers: [
+        { id: 'claude-acp', protocol: 'acp', command: 'claude-agent-acp', enabled: true },
+      ],
+    });
+
+    assert.equal(restarts.length, 1, 'the saved config must be applied in-process');
+    assert.equal(service.providerReady, true);
+    assert.equal(service.engineEpoch, 7);
+    assert.equal(response.body.providers[0].id, 'claude-acp');
+  });
+
+  test('a restart failure is a typed 503 and keeps the old facts', async () => {
+    const { service, saves } = storeService(DEFAULT_CONFIG, async () => {
+      throw new Error('owner refused');
+    });
+
+    await assert.rejects(
+      () =>
+        handle('PUT', service, {
+          ...DEFAULT_CONFIG,
+          providers: [
+            { id: 'claude-acp', protocol: 'acp', command: 'claude-agent-acp', enabled: true },
+          ],
+        }),
+      (error) => {
+        assert.equal(error.status, 503);
+        assert.equal(error.code, 'engine_restart_failed');
+        return true;
+      },
+    );
+    // The document was saved, but nothing fabricates readiness.
+    assert.equal(saves.length, 1);
+    assert.equal(service.providerReady, false);
+    assert.equal(service.engineEpoch, 0);
   });
 
   test('PUT rejects an invalid protocol before reaching the native save path', async () => {

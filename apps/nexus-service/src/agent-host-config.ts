@@ -74,6 +74,12 @@ export async function getAgentHostConfig(service: ServiceCore): Promise<AgentHos
   }
 }
 
+/** The owner facts the restart publishes; the same shape the boot start returns. */
+interface EngineOwnerFacts {
+  engine_epoch: number | null;
+  provider_ready: boolean;
+}
+
 export async function putAgentHostConfig(
   service: ServiceCore,
   body: unknown,
@@ -84,6 +90,24 @@ export async function putAgentHostConfig(
   } catch (error) {
     throw mapNativeError(error);
   }
+
+  // The saved document is only real once the engine has re-read it: settle and
+  // re-establish the owner, then publish the fresh facts. A failed restart is a
+  // typed 503 — the old facts stay untouched, so nothing claims readiness the
+  // probe did not produce.
+  let facts: EngineOwnerFacts;
+  try {
+    facts = (await service.core.restartExecutionOwner()) as EngineOwnerFacts;
+  } catch {
+    throw new HttpError(
+      503,
+      'engine_restart_failed',
+      'Provider configuration was saved, but the engine owner could not be restarted',
+    );
+  }
+  service.providerReady = facts.provider_ready;
+  service.engineEpoch = facts.engine_epoch ?? 0;
+
   return getAgentHostConfig(service);
 }
 

@@ -35,7 +35,7 @@ fn validate(config: &AgentHostConfig) -> Result<()> {
 }
 
 impl NativeCore {
-    fn agent_host_home(&self) -> Result<PathBuf> {
+    pub(crate) fn agent_host_home(&self) -> Result<PathBuf> {
         self.inner
             .user_home
             .lock()

@@ -283,6 +283,13 @@ export interface NativeCore {
    */
   getAgentHostConfig(): Promise<unknown>;
   saveAgentHostConfig(config: unknown): Promise<void>;
+  /**
+   * Apply the saved provider config in-process: settle the hosted execution
+   * owner, re-read the config document, re-probe, and establish a fresh owner.
+   * Returns the same `{ engine_epoch, provider_ready }` facts as
+   * `startExecutionOwner`.
+   */
+  restartExecutionOwner(): Promise<unknown>;
   changes(principal: PrincipalHandle, request: CoreChangesRequest): Promise<CoreChangesResponse>;
   providerCall(request: ProviderCall): Promise<ProviderReply>;
   nextProviderEvents(
@@ -894,6 +901,9 @@ function wrapCore(inner: NativeCoreBinding): NativeCore {
     },
     async saveAgentHostConfig(config) {
       await inner.saveAgentHostConfig(encodeWireBuffer(config, undefined, 'config'));
+    },
+    async restartExecutionOwner() {
+      return parseJsonBuffer<unknown>(await inner.restartExecutionOwner());
     },
     async changes(principal, request) {
       return parseJsonBuffer(
