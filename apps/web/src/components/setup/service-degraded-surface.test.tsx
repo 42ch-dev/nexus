@@ -176,6 +176,8 @@ describe('ServiceDegradedGate', () => {
     expect(screen.getByRole('button', { name: '重新检测' })).toBeInTheDocument();
   });
 
+  // Defense-in-depth: the scan producer already dedupes by provider id; this
+  // pins the page's independent guard for a producer that regresses.
   it('dedupes scan rows by provider id and keeps the curated launch recipe', async () => {
     const user = userEvent.setup();
     const agents: AgentScanEntry[] = [

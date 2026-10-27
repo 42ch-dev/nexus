@@ -11,6 +11,7 @@
 //! Actor/viewpoint creates and `set_model`/`set_mode` operations route into
 //! the real Host authority here — there is no `not_migrated` fallback.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -359,6 +360,38 @@ const fn wire_scan_protocol(kind: ProtocolKind) -> NexusAgentScanEntryProtocolKi
         ProtocolKind::Acp => NexusAgentScanEntryProtocolKind::Acp,
         ProtocolKind::NativeCli => NexusAgentScanEntryProtocolKind::NativeCli,
     }
+}
+
+/// One row per provider id across the native roster and registry candidates.
+///
+/// The curated/native row wins (it carries the launch recipe, e.g. `["acp"]`);
+/// a bare registry duplicate is dropped instead of replacing it. Native rows
+/// keep their order and non-duplicated registry rows follow in their own order.
+fn merge_scan_entries(
+    native: Vec<NexusAgentScanEntry>,
+    registry: Vec<NexusAgentScanEntry>,
+) -> Vec<NexusAgentScanEntry> {
+    let mut merged: Vec<NexusAgentScanEntry> = Vec::with_capacity(native.len() + registry.len());
+    let mut positions: HashMap<String, usize> = HashMap::new();
+    for entry in native.into_iter().chain(registry) {
+        let Some(provider_id) = entry.registry_agent_id.clone() else {
+            merged.push(entry);
+            continue;
+        };
+        match positions.get(&provider_id).copied() {
+            None => {
+                positions.insert(provider_id, merged.len());
+                merged.push(entry);
+            }
+            Some(position) => {
+                // A recipe-bearing row always beats a bare duplicate.
+                if merged[position].launch_args.is_empty() && !entry.launch_args.is_empty() {
+                    merged[position] = entry;
+                }
+            }
+        }
+    }
+    merged
 }
 
 /// Discoverable ACP registry agents whose launch binary resolves on this PATH.
@@ -1422,12 +1455,12 @@ impl HostHandle {
                         // Repair discovery deliberately ignores the configured
                         // ids: an enabled-but-stale entry (its command removed)
                         // must not hide the working PATH binary of the same id.
-                        let mut entries =
-                            native_scan_entries(&config, &probe_dirs).map_err(host_err)?;
+                        let native = native_scan_entries(&config, &probe_dirs).map_err(host_err)?;
                         // Registry agents that are actually launchable on this
                         // machine join the list, so an unconfigured home still
                         // offers a working candidate.
-                        entries.extend(registry_scan_entries(&config, &probe_dirs).await);
+                        let registry = registry_scan_entries(&config, &probe_dirs).await;
+                        let entries = merge_scan_entries(native, registry);
                         Ok(CoreHostQueryResponse {
                             scan: Some(CoreHostQueryResponseScan { entries }),
                             health: None,
@@ -2370,6 +2403,46 @@ mod scan_tests {
         assert_eq!(
             entry.protocol_kind,
             Some(NexusAgentScanEntryProtocolKind::NativeCli)
+        );
+    }
+
+    fn scan_row(provider_id: &str, command: &str, args: &[&str]) -> NexusAgentScanEntry {
+        NexusAgentScanEntry {
+            name: format!("{provider_id} (row)"),
+            installed: true,
+            launch_command: Some(command.to_string()),
+            launch_args: args.iter().map(ToString::to_string).collect(),
+            version: None,
+            description: None,
+            icon_url: None,
+            registry_agent_id: Some(provider_id.to_string()),
+            protocol_kind: Some(NexusAgentScanEntryProtocolKind::Acp),
+        }
+    }
+
+    #[test]
+    fn merge_keeps_the_curated_row_over_a_bare_registry_duplicate() {
+        let merged = merge_scan_entries(
+            vec![scan_row("omp", "/opt/homebrew/bin/omp", &["acp"])],
+            vec![
+                scan_row("omp", "omp", &[]),
+                scan_row("registry-only", "registry-only", &[]),
+            ],
+        );
+        assert_eq!(
+            merged.len(),
+            2,
+            "duplicate provider id collapses to one row"
+        );
+        assert_eq!(merged[0].registry_agent_id.as_deref(), Some("omp"));
+        assert_eq!(merged[0].launch_args, vec!["acp".to_string()]);
+        assert_eq!(
+            merged[0].launch_command.as_deref(),
+            Some("/opt/homebrew/bin/omp")
+        );
+        assert_eq!(
+            merged[1].registry_agent_id.as_deref(),
+            Some("registry-only")
         );
     }
 
