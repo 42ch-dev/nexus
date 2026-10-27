@@ -208,12 +208,19 @@ describe('ServiceDegradedGate', () => {
 
     const roster = await screen.findAllByRole('listitem');
     await user.click(within(roster[0]!).getByRole('button', { name: '启用' }));
+    // Correcting the executable path of the same recipe preserves args.
+    await user.clear(screen.getByLabelText('启动命令'));
+    await user.type(screen.getByLabelText('启动命令'), '/usr/local/bin/alpha-acp');
     await user.click(screen.getByRole('button', { name: '保存并重启检测' }));
     await waitFor(() => expect(saved.length).toBe(1));
-    // The scan-provided args ride along so an ACP-subcommand agent
-    // (`omp acp` / `hermes acp`) boots as an ACP server, not bare.
     expect(saved[0]!.providers).toEqual([
-      { id: 'alpha-acp', protocol: 'acp', command: 'alpha-acp', args: ['acp'], enabled: true },
+      {
+        id: 'alpha-acp',
+        protocol: 'acp',
+        command: '/usr/local/bin/alpha-acp',
+        args: ['acp'],
+        enabled: true,
+      },
     ]);
   });
 

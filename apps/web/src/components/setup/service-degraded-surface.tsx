@@ -356,10 +356,10 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
             id="repair-provider-command"
             value={command}
             placeholder={t('degraded.repair.form.commandPlaceholder')}
-            onChange={(event) => {
-              setCommand(event.target.value);
-              setArgs([]);
-            }}
+            // Correcting the executable path of the SAME recipe keeps the
+            // scan-provided args (omp → /opt/homebrew/bin/omp still needs
+            // "acp"); only switching id or protocol invalidates them.
+            onChange={(event) => setCommand(event.target.value)}
           />
         </div>
         {saveError && (
