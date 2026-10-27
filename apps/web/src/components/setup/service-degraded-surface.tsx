@@ -203,34 +203,58 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
   // unconfigured home, with install state + launch recipe) and the provider
   // catalog (authoritative display name/protocol + curated priority for rows
   // the scan does not emit, e.g. a configured target without a detection row).
-  // One row per provider id: a curated native row carries the launch recipe
-  // (e.g. ["acp"]) and must win over a bare registry row for the same id —
-  // keeping the bare one would save a binary that never speaks ACP.
-  const scanById = new Map<string, AgentScanEntry>();
+  // Scan rows are keyed by (provider id, protocol): an ACP registry agent and
+  // a detection-only native row that share an id are different providers. A
+  // curated row (with its launch recipe) wins within the same key.
+  const scanKey = (providerId: string, protocol: string | null | undefined) =>
+    `${providerId}\u0000${protocol ?? 'unknown'}`;
+  const scanByKey = new Map<string, AgentScanEntry>();
   for (const entry of scanEntries) {
     const providerId = entry.registry_agent_id;
     if (!providerId) continue;
-    const existing = scanById.get(providerId);
+    const key = scanKey(providerId, entry.protocol_kind);
+    const existing = scanByKey.get(key);
     const existingHasRecipe = (existing?.launch_args ?? []).length > 0;
     const entryHasRecipe = (entry.launch_args ?? []).length > 0;
     if (!existing || (!existingHasRecipe && entryHasRecipe)) {
-      scanById.set(providerId, entry);
+      scanByKey.set(key, entry);
     }
   }
   const catalogById = new Map(
     (catalog ?? []).map((entry) => [entry.provider_id, entry] as const),
   );
-  const candidateIds = [...new Set([...scanById.keys(), ...catalogById.keys()])];
-  const candidates: ProviderCandidate[] = candidateIds.flatMap((candidateId) => {
-    const scanned = scanById.get(candidateId);
-    const row = catalogById.get(candidateId);
-    const candidateProtocol = scanned?.protocol_kind ?? row?.protocol_kind;
+  const providerIdOf = (key: string) => key.slice(0, key.indexOf('\u0000'));
+  const candidateKeys: string[] = [];
+  const seenCandidateKeys = new Set<string>();
+  const addCandidateKey = (key: string) => {
+    if (seenCandidateKeys.has(key)) return;
+    seenCandidateKeys.add(key);
+    candidateKeys.push(key);
+  };
+  // A catalog row is authoritative for the provider's protocol; scan-only
+  // providers keep one candidate per protocol they were discovered under.
+  for (const [providerId, row] of catalogById) {
+    addCandidateKey(scanKey(providerId, row.protocol_kind));
+  }
+  for (const key of scanByKey.keys()) {
+    if (!catalogById.has(providerIdOf(key))) addCandidateKey(key);
+  }
+  const candidates: ProviderCandidate[] = candidateKeys.flatMap((key) => {
+    const providerId = providerIdOf(key);
+    const row = catalogById.get(providerId);
+    // A legacy scan row that publishes no protocol still annotates the
+    // catalog's provider; a row with a DIFFERENT protocol never does.
+    const scanned =
+      scanByKey.get(key) ?? scanByKey.get(scanKey(providerId, undefined));
+    const candidateProtocol = row?.protocol_kind ?? scanned?.protocol_kind;
     if (candidateProtocol !== 'acp' && candidateProtocol !== 'native_cli') return [];
     return [
       {
-        id: candidateId,
-        displayName: row?.display_name ?? scanned?.name ?? candidateId,
+        id: providerId,
+        displayName: row?.display_name ?? scanned?.name ?? providerId,
         protocol: candidateProtocol,
+        // Launch data is only read from the scan row for THIS protocol; a
+        // configured ACP provider never inherits a native row's recipe.
         command: scanned?.launch_command ?? null,
         args: scanned?.launch_args ?? [],
         installed: scanned?.installed ?? false,
@@ -280,7 +304,7 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
                   : 'missing';
               return (
                 <li
-                  key={candidate.id}
+                  key={`${candidate.id}:${candidate.protocol}`}
                   className="flex items-center justify-between gap-3 rounded-md bg-background-200 px-3 py-2"
                 >
                   <span className="min-w-0 truncate text-copy-13 text-gray-1000">

@@ -545,6 +545,107 @@ describe('ServiceDegradedGate', () => {
     );
   });
 
+  it('keeps a configured protocol authoritative over a conflicting scan row', async () => {
+    const user = userEvent.setup();
+    const saved: AgentHostConfig[] = [];
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        {
+          scan: () =>
+            Promise.resolve({
+              agents: [
+                {
+                  name: 'alpha native',
+                  registry_agent_id: 'alpha-acp',
+                  launch_command: '/usr/local/bin/alpha-native',
+                  launch_args: [],
+                  installed: true,
+                  protocol_kind: 'native_cli',
+                },
+              ],
+            }),
+          listProviders: () =>
+            Promise.resolve({
+              providers: [
+                { provider_id: 'alpha-acp', display_name: 'Alpha Agent', protocol_kind: 'acp' },
+              ],
+            }),
+          getConfig: () =>
+            Promise.resolve({
+              providers: [
+                { id: 'alpha-acp', protocol: 'acp', command: 'alpha-acp', enabled: true },
+              ],
+              max_sessions: 2,
+            } as AgentHostConfig),
+          saveConfig: (config: AgentHostConfig) => {
+            saved.push(config);
+            return Promise.resolve(config);
+          },
+        },
+      ),
+    });
+
+    const roster = await screen.findAllByRole('listitem');
+    expect(roster).toHaveLength(1);
+    await user.click(within(roster[0]!).getByRole('button', { name: '启用' }));
+    // The configured ACP provider keeps ACP + its own command; the native
+    // scan row for the same id is not its recipe.
+    expect(screen.getByLabelText('协议')).toHaveValue('acp');
+    expect(screen.getByLabelText('启动命令')).toHaveValue('alpha-acp');
+
+    await user.click(screen.getByRole('button', { name: '保存并重启检测' }));
+    await waitFor(() => expect(saved.length).toBe(1));
+    expect(saved[0]!.providers).toEqual([
+      { id: 'alpha-acp', protocol: 'acp', command: 'alpha-acp', args: [], enabled: true },
+    ]);
+  });
+
+  it('keeps cross-protocol scan rows as separate candidates', async () => {
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        {
+          scan: () =>
+            Promise.resolve({
+              agents: [
+                {
+                  name: 'omp (ACP)',
+                  registry_agent_id: 'omp',
+                  launch_command: '/opt/homebrew/bin/omp',
+                  launch_args: ['acp'],
+                  installed: true,
+                  protocol_kind: 'acp',
+                },
+                {
+                  name: 'omp (native CLI)',
+                  registry_agent_id: 'omp',
+                  launch_command: 'omp',
+                  launch_args: [],
+                  installed: false,
+                  protocol_kind: 'native_cli',
+                },
+              ],
+            }),
+        },
+      ),
+    });
+
+    const roster = await screen.findAllByRole('listitem');
+    expect(roster).toHaveLength(2);
+    expect(roster[0]).toHaveTextContent('omp (ACP)');
+    expect(roster[1]).toHaveTextContent('omp (native CLI)');
+    // The detection-only native row is badged and disabled; the ACP row is not.
+    expect(within(roster[1]!).getByTestId('detection-only-badge')).toBeInTheDocument();
+    expect(within(roster[0]!).queryByTestId('detection-only-badge')).not.toBeInTheDocument();
+  });
+
   it('disables every other provider when saving a replacement provider', async () => {
     const user = userEvent.setup();
     const saveConfig = vi.fn((config: AgentHostConfig) => Promise.resolve(config));

@@ -109,6 +109,27 @@ describe('Setup engine repair page variants — Studio fixture (I-000124)', () =
     expect(frame).not.toHaveTextContent('readiness check failed');
     expect(within(frame).getByRole('button', { name: 'Save and recheck' })).toBeInTheDocument();
     expect(within(frame).getByRole('button', { name: 'Recheck' })).toBeInTheDocument();
+
+    // Detection-only row: badged and not selectable, long copy fits the row.
+    // Asserted in both themes (spacing/contrast tokens).
+    const detectionOnly = within(frame)
+      .getAllByRole('listitem')
+      .find((row) => row.textContent?.includes('Codex CLI'))!;
+    expect(detectionOnly).toHaveTextContent('Detected, not launchable from here yet');
+    expect(within(detectionOnly).getByRole('button', { name: 'Use' })).toBeDisabled();
+
+    act(() => {
+      document.documentElement.classList.add('dark');
+    });
+    const darkFrame = screen.getByTestId('wizard-chrome-service-provider-unconfigured');
+    const darkDetectionOnly = within(darkFrame)
+      .getAllByRole('listitem')
+      .find((row) => row.textContent?.includes('Codex CLI'))!;
+    expect(darkDetectionOnly).toHaveTextContent('Detected, not launchable from here yet');
+    expect(within(darkDetectionOnly).getByRole('button', { name: 'Use' })).toBeDisabled();
+    act(() => {
+      document.documentElement.classList.remove('dark');
+    });
   });
 
   it('engine-failed keeps the failure note and recheck action in light and dark', () => {

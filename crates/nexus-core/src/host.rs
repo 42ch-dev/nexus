@@ -11,7 +11,7 @@
 //! Actor/viewpoint creates and `set_model`/`set_mode` operations route into
 //! the real Host authority here — there is no `not_migrated` fallback.
 
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -362,36 +362,55 @@ const fn wire_scan_protocol(kind: ProtocolKind) -> NexusAgentScanEntryProtocolKi
     }
 }
 
-/// One row per provider id across the native roster and registry candidates.
+/// One row per (provider id, protocol) across the native roster and registry
+/// candidates.
 ///
-/// The curated/native row wins (it carries the launch recipe, e.g. `["acp"]`);
-/// a bare registry duplicate is dropped instead of replacing it. Native rows
-/// keep their order and non-duplicated registry rows follow in their own order.
+/// An ACP registry agent and a detection-only native row that share a provider
+/// id are DIFFERENT providers, so the key includes the protocol kind. Rows are
+/// ordered curated/recipe first, then installed rows, then detection-only rows,
+/// and the first row for a key wins: a curated row always beats a bare
+/// duplicate, and an installed registry row keeps its command instead of being
+/// shadowed by a not-installed detection row that arrived earlier.
 fn merge_scan_entries(
     native: Vec<NexusAgentScanEntry>,
     registry: Vec<NexusAgentScanEntry>,
 ) -> Vec<NexusAgentScanEntry> {
-    let mut merged: Vec<NexusAgentScanEntry> = Vec::with_capacity(native.len() + registry.len());
-    let mut positions: HashMap<String, usize> = HashMap::new();
+    let mut curated: Vec<NexusAgentScanEntry> = Vec::new();
+    let mut installed: Vec<NexusAgentScanEntry> = Vec::new();
+    let mut detection_only: Vec<NexusAgentScanEntry> = Vec::new();
     for entry in native.into_iter().chain(registry) {
+        if !entry.launch_args.is_empty() {
+            curated.push(entry);
+        } else if entry.installed {
+            installed.push(entry);
+        } else {
+            detection_only.push(entry);
+        }
+    }
+
+    let mut merged: Vec<NexusAgentScanEntry> = Vec::new();
+    let mut seen: HashSet<(String, &'static str)> = HashSet::new();
+    for entry in curated.into_iter().chain(installed).chain(detection_only) {
         let Some(provider_id) = entry.registry_agent_id.clone() else {
             merged.push(entry);
             continue;
         };
-        match positions.get(&provider_id).copied() {
-            None => {
-                positions.insert(provider_id, merged.len());
-                merged.push(entry);
-            }
-            Some(position) => {
-                // A recipe-bearing row always beats a bare duplicate.
-                if merged[position].launch_args.is_empty() && !entry.launch_args.is_empty() {
-                    merged[position] = entry;
-                }
-            }
+        let key = (provider_id, scan_protocol_key(entry.protocol_kind.as_ref()));
+        if seen.insert(key) {
+            merged.push(entry);
         }
     }
     merged
+}
+
+/// Stable dedupe key for a wire protocol kind (the enum is generated without
+/// `Eq`/`Hash`).
+const fn scan_protocol_key(kind: Option<&NexusAgentScanEntryProtocolKind>) -> &'static str {
+    match kind {
+        Some(NexusAgentScanEntryProtocolKind::Acp) => "acp",
+        Some(NexusAgentScanEntryProtocolKind::NativeCli) => "native_cli",
+        None => "unknown",
+    }
 }
 
 /// Discoverable ACP registry agents whose launch binary resolves on this PATH.
@@ -2406,18 +2425,78 @@ mod scan_tests {
         );
     }
 
-    fn scan_row(provider_id: &str, command: &str, args: &[&str]) -> NexusAgentScanEntry {
+    fn scan_row_with(
+        provider_id: &str,
+        command: &str,
+        args: &[&str],
+        protocol_kind: NexusAgentScanEntryProtocolKind,
+        installed: bool,
+    ) -> NexusAgentScanEntry {
         NexusAgentScanEntry {
             name: format!("{provider_id} (row)"),
-            installed: true,
+            installed,
             launch_command: Some(command.to_string()),
             launch_args: args.iter().map(ToString::to_string).collect(),
             version: None,
             description: None,
             icon_url: None,
             registry_agent_id: Some(provider_id.to_string()),
-            protocol_kind: Some(NexusAgentScanEntryProtocolKind::Acp),
+            protocol_kind: Some(protocol_kind),
         }
+    }
+
+    fn scan_row(provider_id: &str, command: &str, args: &[&str]) -> NexusAgentScanEntry {
+        scan_row_with(
+            provider_id,
+            command,
+            args,
+            NexusAgentScanEntryProtocolKind::Acp,
+            true,
+        )
+    }
+
+    #[test]
+    fn merge_keeps_protocols_apart_and_orders_installed_ahead_of_detection() {
+        let detection_native = scan_row_with(
+            "omp",
+            "omp",
+            &[],
+            NexusAgentScanEntryProtocolKind::NativeCli,
+            false,
+        );
+        let installed_acp = scan_row_with(
+            "omp",
+            "/usr/local/bin/omp",
+            &[],
+            NexusAgentScanEntryProtocolKind::Acp,
+            true,
+        );
+
+        let merged = merge_scan_entries(vec![detection_native], vec![installed_acp]);
+
+        // Same provider id, different protocols: two distinct providers.
+        assert_eq!(merged.len(), 2);
+        assert!(merged[0].installed, "installed rows sort before detection");
+        let acp = merged
+            .iter()
+            .find(|entry| {
+                matches!(
+                    entry.protocol_kind,
+                    Some(NexusAgentScanEntryProtocolKind::Acp)
+                )
+            })
+            .expect("ACP registry row survives");
+        assert_eq!(acp.launch_command.as_deref(), Some("/usr/local/bin/omp"));
+        let native = merged
+            .iter()
+            .find(|entry| {
+                matches!(
+                    entry.protocol_kind,
+                    Some(NexusAgentScanEntryProtocolKind::NativeCli)
+                )
+            })
+            .expect("detection-only native row survives");
+        assert!(!native.installed);
     }
 
     #[test]
