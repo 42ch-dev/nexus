@@ -148,6 +148,10 @@ export interface NexusAgentScanEntry {
    */
   launch_command?: string | null;
   /**
+   * Launch arguments that accompany launch_command, e.g. a single "acp" element for agents whose ACP server is a subcommand. Empty for bare native CLI launches and custom wizard-supplied commands.
+   */
+  launch_args?: string[];
+  /**
    * True when the binary referenced by launch_command (or derived from registry distribution metadata) is found on the system PATH via a which-equivalent lookup.
    */
   installed: boolean;

@@ -14,6 +14,9 @@ pub struct NexusAgentScanEntry {
     pub icon_url: ::std::option::Option<::std::string::String>,
     ///True when the binary referenced by launch_command (or derived from registry distribution metadata) is found on the system PATH via a which-equivalent lookup.
     pub installed: bool,
+    ///Launch arguments that accompany launch_command, e.g. a single "acp" element for agents whose ACP server is a subcommand. Empty for bare native CLI launches and custom wizard-supplied commands.
+    #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+    pub launch_args: ::std::vec::Vec<::std::string::String>,
     ///Known launch command for this agent. Sourced from the registry's per-platform binary cmd field (e.g. 'claude-acp') or supplied by the user in the wizard's custom path input. Null when neither is available.
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub launch_command: ::std::option::Option<::std::string::String>,
@@ -56,6 +59,10 @@ pub mod builder {
             ::std::string::String,
         >,
         installed: ::std::result::Result<bool, ::std::string::String>,
+        launch_args: ::std::result::Result<
+            ::std::vec::Vec<::std::string::String>,
+            ::std::string::String,
+        >,
         launch_command: ::std::result::Result<
             ::std::option::Option<::std::string::String>,
             ::std::string::String,
@@ -76,6 +83,7 @@ pub mod builder {
                 description: Ok(Default::default()),
                 icon_url: Ok(Default::default()),
                 installed: Err("no value supplied for installed".to_string()),
+                launch_args: Ok(Default::default()),
                 launch_command: Ok(Default::default()),
                 name: Err("no value supplied for name".to_string()),
                 registry_agent_id: Ok(Default::default()),
@@ -117,6 +125,18 @@ pub mod builder {
                 .try_into()
                 .map_err(|e| {
                     format!("error converting supplied value for installed: {e}")
+                });
+            self
+        }
+        pub fn launch_args<T>(mut self, value: T) -> Self
+        where
+            T: ::std::convert::TryInto<::std::vec::Vec<::std::string::String>>,
+            T::Error: ::std::fmt::Display,
+        {
+            self.launch_args = value
+                .try_into()
+                .map_err(|e| {
+                    format!("error converting supplied value for launch_args: {e}")
                 });
             self
         }
@@ -176,6 +196,7 @@ pub mod builder {
                 description: value.description?,
                 icon_url: value.icon_url?,
                 installed: value.installed?,
+                launch_args: value.launch_args?,
                 launch_command: value.launch_command?,
                 name: value.name?,
                 registry_agent_id: value.registry_agent_id?,
@@ -189,6 +210,7 @@ pub mod builder {
                 description: Ok(value.description),
                 icon_url: Ok(value.icon_url),
                 installed: Ok(value.installed),
+                launch_args: Ok(value.launch_args),
                 launch_command: Ok(value.launch_command),
                 name: Ok(value.name),
                 registry_agent_id: Ok(value.registry_agent_id),

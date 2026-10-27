@@ -125,8 +125,8 @@ describe('ServiceDegradedGate', () => {
   it('joins the provider catalog with scan data and fills id/protocol/command', async () => {
     const user = userEvent.setup();
     const agents: AgentScanEntry[] = [
-      { name: 'Beta CLI', registry_agent_id: 'beta-cli', launch_command: 'beta-cli', installed: true },
-      { name: 'Alpha Agent', registry_agent_id: 'alpha-acp', launch_command: 'alpha-acp', installed: true },
+      { name: 'Beta CLI', registry_agent_id: 'beta-cli', launch_command: 'beta-cli', launch_args: [], installed: true },
+      { name: 'Alpha Agent', registry_agent_id: 'alpha-acp', launch_command: 'alpha-acp', launch_args: ['acp'], installed: true },
     ];
     renderSurface({
       setupCompleted: true,
@@ -158,22 +158,107 @@ describe('ServiceDegradedGate', () => {
     // The app is not usable until the engine is configured.
     expect(screen.queryByTestId('app-content')).not.toBeInTheDocument();
 
-    // Both installed → the catalog's registry order.
+    // Same install state + no curated priority → display-name order.
     const candidates = await screen.findAllByRole('listitem');
-    expect(candidates[0]).toHaveTextContent('Beta CLI');
-    expect(candidates[1]).toHaveTextContent('Alpha Agent');
+    expect(candidates[0]).toHaveTextContent('Alpha Agent');
+    expect(candidates[1]).toHaveTextContent('Beta CLI');
 
-    await user.click(within(candidates[0]!).getByRole('button', { name: '启用' }));
+    await user.click(within(candidates[1]!).getByRole('button', { name: '启用' }));
     expect(screen.getByLabelText('提供方 ID')).toHaveValue('beta-cli');
     expect(screen.getByLabelText('协议')).toHaveValue('native_cli');
     expect(screen.getByLabelText('启动命令')).toHaveValue('beta-cli');
     expect(screen.getByRole('button', { name: '保存并重启检测' })).toBeEnabled();
 
-    await user.click(within(candidates[1]!).getByRole('button', { name: '启用' }));
+    await user.click(within(candidates[0]!).getByRole('button', { name: '启用' }));
     expect(screen.getByLabelText('提供方 ID')).toHaveValue('alpha-acp');
     expect(screen.getByLabelText('协议')).toHaveValue('acp');
     expect(screen.getByLabelText('启动命令')).toHaveValue('alpha-acp');
     expect(screen.getByRole('button', { name: '重新检测' })).toBeInTheDocument();
+  });
+
+  it('persists the scan-provided launch args when saving a chosen candidate', async () => {
+    const user = userEvent.setup();
+    const agents: AgentScanEntry[] = [
+      { name: 'Alpha Agent', registry_agent_id: 'alpha-acp', launch_command: 'alpha-acp', launch_args: ['acp'], installed: true },
+    ];
+    const saved: AgentHostConfig[] = [];
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        {
+          scan: () => Promise.resolve({ agents }),
+          listProviders: () =>
+            Promise.resolve({
+              providers: [
+                { provider_id: 'alpha-acp', display_name: 'Alpha Agent', protocol_kind: 'acp' },
+              ],
+            }),
+          getConfig: () =>
+            Promise.resolve({ providers: [], max_sessions: 2 } as AgentHostConfig),
+          saveConfig: (config: AgentHostConfig) => {
+            saved.push(config);
+            return Promise.resolve(config);
+          },
+        },
+      ),
+    });
+
+    const roster = await screen.findAllByRole('listitem');
+    await user.click(within(roster[0]!).getByRole('button', { name: '启用' }));
+    await user.click(screen.getByRole('button', { name: '保存并重启检测' }));
+    await waitFor(() => expect(saved.length).toBe(1));
+    // The scan-provided args ride along so an ACP-subcommand agent
+    // (`omp acp` / `hermes acp`) boots as an ACP server, not bare.
+    expect(saved[0]!.providers).toEqual([
+      { id: 'alpha-acp', protocol: 'acp', command: 'alpha-acp', args: ['acp'], enabled: true },
+    ]);
+  });
+
+  it('keeps a configured provider selectable even without a scan row', async () => {
+    const user = userEvent.setup();
+    // gemini-style catalog-only target: no detection row, but the user has
+    // it configured and enabled — it is the repair target, never disabled.
+    const agents: AgentScanEntry[] = [
+      { name: 'Alpha Agent', registry_agent_id: 'alpha-acp', launch_command: 'alpha-acp', launch_args: ['acp'], installed: true },
+    ];
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        {
+          scan: () => Promise.resolve({ agents }),
+          listProviders: () =>
+            Promise.resolve({
+              providers: [
+                { provider_id: 'alpha-acp', display_name: 'Alpha Agent', protocol_kind: 'acp' },
+                { provider_id: 'gemini', display_name: 'Gemini CLI', protocol_kind: 'acp' },
+              ],
+            }),
+          getConfig: () =>
+            Promise.resolve({
+              providers: [
+                { id: 'gemini', protocol: 'acp', command: 'gemini', enabled: true },
+              ],
+              max_sessions: 2,
+            } as AgentHostConfig),
+        },
+      ),
+    });
+
+    const candidates = await screen.findAllByRole('listitem');
+    expect(candidates[0]).toHaveTextContent('Alpha Agent');
+    const geminiRow = candidates[1]!;
+    expect(geminiRow).toHaveTextContent('已配置');
+
+    const geminiUse = within(geminiRow).getByRole('button', { name: '启用' });
+    expect(geminiUse).toBeEnabled();
+    await user.click(geminiUse);
+    expect(screen.getByLabelText('提供方 ID')).toHaveValue('gemini');
   });
 
   it('renders the full roster and disables not-installed candidates', async () => {
@@ -243,7 +328,7 @@ describe('ServiceDegradedGate', () => {
     const written = saveConfig.mock.calls[0]![0];
     expect(written.max_sessions).toBe(2);
     expect(written.providers).toEqual([
-      { id: 'manual-agent', protocol: 'native_cli', command: '/usr/local/bin/manual-agent', enabled: true },
+      { id: 'manual-agent', protocol: 'native_cli', command: '/usr/local/bin/manual-agent', args: [], enabled: true },
     ]);
     // A successful save re-runs the same probe the recheck button uses.
     await waitFor(() =>
@@ -280,7 +365,7 @@ describe('ServiceDegradedGate', () => {
     expect(written.max_sessions).toBe(2);
     expect(written.providers).toEqual([
       { id: 'stale-acp', protocol: 'acp', command: 'stale-agent', enabled: false },
-      { id: 'fresh-acp', protocol: 'acp', command: 'fresh-agent', enabled: true },
+      { id: 'fresh-acp', protocol: 'acp', command: 'fresh-agent', args: [], enabled: true },
     ]);
   });
 

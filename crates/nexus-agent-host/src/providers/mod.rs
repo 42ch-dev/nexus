@@ -71,7 +71,13 @@ pub fn validate_provider_config(pc: &ProviderConfig) -> HostResult<()> {
             pc.id
         )));
     }
-    if protocol == "native_cli" && !NATIVE_PROVIDER_IDS.contains(&pc.id.as_str()) {
+    // The built-in trio plus every plain native-CLI row the detection
+    // roster can emit (`opencode`, `kimi`, …): a configured provider that
+    // came from a scan row must pass the same validation at boot.
+    if protocol == "native_cli"
+        && !NATIVE_PROVIDER_IDS.contains(&pc.id.as_str())
+        && !crate::discovery::path_scan::known_native_cli_provider_ids().any(|id| id == pc.id)
+    {
         return Err(HostError::internal(format!(
             "unsupported native_cli provider id '{}'; expected one of {}",
             pc.id,

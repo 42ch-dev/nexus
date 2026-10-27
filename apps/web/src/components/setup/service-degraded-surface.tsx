@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { useNexusClient } from '@/lib/client-context';
+import { catalogPriority } from '@/lib/agent-catalog';
 import type { AgentHostCatalogEntry, AgentHostProviderConfig } from '@/lib/nexus/types';
 import type { ServiceDegradedReason } from '@/lib/service-status-context';
 import { useOptionalServiceStatus, useServiceStatus } from '@/lib/service-status-context';
@@ -74,6 +75,8 @@ interface ProviderCandidate {
   displayName: string;
   protocol: AgentHostProviderConfig['protocol'];
   command: string | null;
+  /** Scan-provided launch arguments (e.g. ["acp"] for `omp acp`). */
+  args: string[];
   installed: boolean;
 }
 
@@ -87,9 +90,18 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
   // user out of the catalog.
   const [scanFailed, setScanFailed] = useState(false);
   const [catalogFailed, setCatalogFailed] = useState(false);
+  // Enabled provider ids from the on-disk config. A configured provider is
+  // the thing being repaired: it stays selectable even when the scan has no
+  // row for it (the scan skips enabled configured providers, and catalog-only
+  // targets like gemini have no detection row at all).
+  const [configuredIds, setConfiguredIds] = useState<Set<string>>(new Set());
   const [id, setId] = useState('');
   const [protocol, setProtocol] = useState<AgentHostProviderConfig['protocol']>('acp');
   const [command, setCommand] = useState('');
+  // Scan-provided launch args for the chosen candidate (e.g. ["acp"]); the
+  // manual path keeps them empty. Without them an ACP subcommand agent
+  // (omp/hermes) would be spawned bare and never speak ACP.
+  const [args, setArgs] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -107,6 +119,20 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
           setCatalog([]);
           setCatalogFailed(true);
         }
+      },
+    );
+    void client.getAgentHostConfig().then(
+      (config) => {
+        if (!cancelled) {
+          setConfiguredIds(
+            new Set(
+              config.providers.filter((p) => p.enabled).map((p) => p.id),
+            ),
+          );
+        }
+      },
+      () => {
+        // A failed config read only costs the configured-row affordance.
       },
     );
     void client.scanAgents().then(
@@ -129,6 +155,7 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
     setId(candidate.id);
     setProtocol(candidate.protocol);
     setCommand(candidate.command ?? '');
+    setArgs(candidate.args);
   };
 
   const save = async () => {
@@ -140,6 +167,7 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
         id: id.trim(),
         protocol,
         command: command.trim(),
+        args,
         enabled: true,
       };
       // Replacement semantics: the saved provider is the ONE enabled entry.
@@ -173,14 +201,25 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
         displayName: entry.display_name,
         protocol: entry.protocol_kind,
         command: scanned?.launch_command ?? null,
+        args: scanned?.launch_args ?? [],
         installed: scanned?.installed ?? false,
       },
     ];
   });
-  // Installed candidates first; the rest keep the catalog's registry order.
-  const orderedCandidates = [...candidates].sort(
-    (left, right) => Number(right.installed) - Number(left.installed),
-  );
+  // Sort: installed first, then configured (the repair target), then curated
+  // priority (unranked last, display name as the final tie-break); the
+  // catalog's registry order falls out as the stable default.
+  const configured = (c: ProviderCandidate) =>
+    configuredIds.has(c.id) || scanFailed ? 1 : 0;
+  const orderedCandidates = [...candidates].sort((left, right) => {
+    return (
+      Number(right.installed) - Number(left.installed) ||
+      configured(right) - configured(left) ||
+      (catalogPriority(left.id) ?? Number.POSITIVE_INFINITY) -
+        (catalogPriority(right.id) ?? Number.POSITIVE_INFINITY) ||
+      left.displayName.localeCompare(right.displayName)
+    );
+  });
 
   return (
     <section className="flex flex-col gap-3">
@@ -194,36 +233,51 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
         )}
         {orderedCandidates.length > 0 && (
           <ul className="flex max-h-56 list-none flex-col gap-1 overflow-y-auto p-0">
-            {orderedCandidates.map((candidate) => (
-              <li
-                key={candidate.id}
-                className="flex items-center justify-between gap-3 rounded-md bg-background-200 px-3 py-2"
-              >
-                <span className="min-w-0 truncate text-copy-13 text-gray-1000">
-                  {candidate.displayName}
-                  <span
-                    className={`ml-2 text-label-12 ${
-                      candidate.installed ? 'text-gray-700' : 'text-gray-500'
-                    }`}
-                  >
-                    {candidate.installed
-                      ? t('degraded.repair.form.installed')
-                      : t('degraded.repair.form.notInstalled')}
-                  </span>
-                </span>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="small"
-                  // Confirmed not-installed (scan succeeded): disabled, per
-                  // the roster contract. A failed scan leaves rows selectable.
-                  disabled={!candidate.installed && !scanFailed}
-                  onClick={() => choose(candidate)}
+            {orderedCandidates.map((candidate) => {
+              // A configured provider is the repair target itself: it stays
+              // selectable regardless of scan state (the scan skips enabled
+              // configured providers, so its row is missing by design).
+              const configured = configuredIds.has(candidate.id);
+              const installState = scanFailed
+                ? 'unknown'
+                : candidate.installed
+                  ? 'installed'
+                  : 'missing';
+              return (
+                <li
+                  key={candidate.id}
+                  className="flex items-center justify-between gap-3 rounded-md bg-background-200 px-3 py-2"
                 >
-                  {t('degraded.repair.form.enable')}
-                </Button>
-              </li>
-            ))}
+                  <span className="min-w-0 truncate text-copy-13 text-gray-1000">
+                    {candidate.displayName}
+                    {installState !== 'missing' || configured ? (
+                      <span className="ml-2 text-label-12 text-gray-700">
+                        {installState === 'installed'
+                          ? t('degraded.repair.form.installed')
+                          : installState === 'unknown'
+                            ? t('degraded.repair.form.installUnknown')
+                            : t('degraded.repair.form.configured')}
+                      </span>
+                    ) : (
+                      <span className="ml-2 text-label-12 text-gray-500">
+                        {t('degraded.repair.form.notInstalled')}
+                      </span>
+                    )}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="small"
+                    // Disabled only for a scan-confirmed absent target that
+                    // the user has not configured themselves.
+                    disabled={installState === 'missing' && !configured}
+                    onClick={() => choose(candidate)}
+                  >
+                    {t('degraded.repair.form.enable')}
+                  </Button>
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>

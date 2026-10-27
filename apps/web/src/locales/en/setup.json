@@ -135,6 +135,8 @@
         "enable": "Use",
         "installed": "Installed",
         "notInstalled": "Not installed",
+        "installUnknown": "Not detected",
+        "configured": "Configured",
         "manualTitle": "Manual configuration",
         "idLabel": "Provider ID",
         "idPlaceholder": "e.g. claude-acp",

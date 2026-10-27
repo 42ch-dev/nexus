@@ -1111,12 +1111,15 @@ async fn catalog_health_and_admission_agree_on_suppressed_and_missing_providers(
         "a disabled provider must not appear: {:?}",
         catalog.entries
     );
+    // Full-roster discovery keeps a row for a PATH-absent dsh (unavailable),
+    // so the safety guarantee is availability, not absence.
     assert!(
         catalog
             .entries
             .iter()
-            .all(|e| e.provider_id.0 != "dsh-native"),
-        "a PATH-absent dsh must not appear: {:?}",
+            .find(|e| e.provider_id.0 == "dsh-native")
+            .is_none_or(|dsh| !dsh.health.available),
+        "a PATH-absent dsh must never be ready: {:?}",
         catalog.entries
     );
 
