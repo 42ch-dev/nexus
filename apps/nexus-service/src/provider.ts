@@ -152,19 +152,18 @@ function validateCreateSessionRequest(body: unknown): CreateSessionRequest {
   return validated;
 }
 
-/** The only operation branch the service supports is a validated prompt. */
-interface ValidatedPrompt {
-  kind: 'prompt';
-  content: string;
-  remember?: boolean;
-}
+/** The validated `ExecuteOperationRequest` oneOf branches this service serves. */
+type ValidatedOperation =
+  | { kind: 'prompt'; content: string; remember?: boolean }
+  | { kind: 'set_model'; model: string }
+  | { kind: 'set_mode'; mode: string };
 
 /**
  * Enforce the generated `ExecuteOperationRequest` oneOf before any provider
- * effect. A malformed branch is `invalid_input` (400); a well-formed
- * `set_model`/`set_mode` branch is `not_migrated` (501).
+ * effect. A malformed branch is `invalid_input` (400); all three generated
+ * branches are served.
  */
-function validateExecuteOperationRequest(body: unknown): ValidatedPrompt {
+function validateExecuteOperationRequest(body: unknown): ValidatedOperation {
   const req = requirePlainObject(body, 'operation request body');
   const kind = req.kind;
   if (typeof kind !== 'string') {
@@ -176,19 +175,19 @@ function validateExecuteOperationRequest(body: unknown): ValidatedPrompt {
     if (req.remember !== undefined && typeof req.remember !== 'boolean') {
       throw new HttpError(400, 'invalid_input', 'remember must be a boolean', { field: 'remember' });
     }
-    const prompt: ValidatedPrompt = { kind: 'prompt', content: req.content as string };
+    const prompt: ValidatedOperation = { kind: 'prompt', content: req.content as string };
     if (req.remember !== undefined) prompt.remember = req.remember;
     return prompt;
   }
   if (kind === 'set_model') {
     rejectUnknownKeys(req, ['kind', 'model'], 'set_model request');
     expectString(req.model, 'model');
-    throw routeNotMigrated('operation kind set_model');
+    return { kind: 'set_model', model: req.model as string };
   }
   if (kind === 'set_mode') {
     rejectUnknownKeys(req, ['kind', 'mode'], 'set_mode request');
     expectString(req.mode, 'mode');
-    throw routeNotMigrated('operation kind set_mode');
+    return { kind: 'set_mode', mode: req.mode as string };
   }
   throw new HttpError(400, 'invalid_input', `unknown operation kind: ${kind}`, { field: 'kind' });
 }
@@ -411,8 +410,21 @@ async function characterOperationRead(
   }
 }
 
+/**
+ * Domain-only profiles own no provider lane: the agent-host session family is
+ * outside the retained profile, not an unmigrated route. The distinct
+ * `not_supported` code lets a client tell the two 501s apart.
+ */
+function refuseDomainOnly(): never {
+  throw new HttpError(
+    501,
+    'not_supported',
+    'agent-host sessions require a provider-enabled profile',
+  );
+}
+
 export async function createProviderSession(service: ServiceCore, body: unknown): Promise<SessionResponse> {
-  if (service.domainOnly) throw routeNotMigrated('POST /v1/daemon/agent-host/sessions');
+  if (service.domainOnly) refuseDomainOnly();
   const req = validateCreateSessionRequest(body);
   // Actor mode is served by the ONE core Host authority: it admits the stored
   // Actor/binding/World, owns the session identity and echoes the pair. The
@@ -454,7 +466,7 @@ export async function createProviderSession(service: ServiceCore, body: unknown)
 }
 
 export async function shutdownProviderSession(service: ServiceCore, sessionId: string): Promise<ShutdownSessionResponse> {
-  if (service.domainOnly) throw routeNotMigrated(`DELETE /v1/daemon/agent-host/sessions/${sessionId}`);
+  if (service.domainOnly) refuseDomainOnly();
   parseUuid(sessionId, 'session_id');
   const placement = await resolveSessionPlacement(service, sessionId);
   if (placement.actorBacked) {
@@ -480,7 +492,7 @@ export async function shutdownProviderSession(service: ServiceCore, sessionId: s
 }
 
 export async function executeProviderOperation(service: ServiceCore, sessionId: string, body: unknown): Promise<OperationResponse> {
-  if (service.domainOnly) throw routeNotMigrated(`POST /v1/daemon/agent-host/sessions/${sessionId}/operations`);
+  if (service.domainOnly) refuseDomainOnly();
   parseUuid(sessionId, 'session_id');
   const placement = await resolveSessionPlacement(service, sessionId);
   const req = validateExecuteOperationRequest(body);
@@ -489,11 +501,17 @@ export async function executeProviderOperation(service: ServiceCore, sessionId: 
     // Character `remember:true` is refused BEFORE any effect — no reservation,
     // no provider work, no pending/captured result. Absent/false captures
     // nothing and executes normally with the authority's disabled capture.
-    if (req.remember === true) {
+    if (req.kind === 'prompt' && req.remember === true) {
       throw routeNotMigrated('character prompt remember is not supported by this host');
     }
-    const request: ExecuteOperationRequest = { kind: 'prompt', content: req.content };
-    if (req.remember !== undefined) request.remember = req.remember;
+    const request: ExecuteOperationRequest =
+      req.kind === 'prompt'
+        ? {
+            kind: 'prompt',
+            content: req.content,
+            ...(req.remember !== undefined ? { remember: req.remember } : {}),
+          }
+        : req;
     const reply = await withPrincipal(service, (principal) =>
       service.core.hostExecuteOperation(principal, sessionId, request),
     );
@@ -539,16 +557,21 @@ export async function executeProviderOperation(service: ServiceCore, sessionId: 
   try {
     // The provider protocol accepts the Rust HostOperation wire shape, not the
     // public HTTP request. A legacy session cannot authorize memory capture.
-    if (req.remember === true) {
+    if (req.kind === 'prompt' && req.remember === true) {
       throw new HttpError(422, 'invalid_input', 'remember requires an admitted Character session');
     }
-    const executePayload = {
-      Prompt: {
-        op_id: randomUUID(),
-        content: [{ Text: { text: req.content } }],
-        permission_scope: null,
-      },
-    };
+    const executePayload =
+      req.kind === 'prompt'
+        ? {
+            Prompt: {
+              op_id: randomUUID(),
+              content: [{ Text: { text: req.content } }],
+              permission_scope: null,
+            },
+          }
+        : req.kind === 'set_model'
+          ? { SetModel: { model: req.model } }
+          : { SetMode: { mode: req.mode } };
     const reply = await providerCall(service, {
       method: 'execute',
       request_id: dispatchId,
@@ -578,7 +601,7 @@ export async function executeProviderOperation(service: ServiceCore, sessionId: 
 }
 
 export async function cancelProviderOperation(service: ServiceCore, operationId: string): Promise<CancelOperationResponse> {
-  if (service.domainOnly) throw routeNotMigrated(`POST /v1/daemon/agent-host/operations/${operationId}`);
+  if (service.domainOnly) refuseDomainOnly();
   parseUuid(operationId, 'operation_id');
   // Every Actor kind is cancelled by the AUTHORITY, decided from the Actor
   // mark or from fresh native identity BEFORE any provider mutation: this host's
