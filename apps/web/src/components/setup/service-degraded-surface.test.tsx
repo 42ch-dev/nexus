@@ -212,6 +212,39 @@ describe('ServiceDegradedGate', () => {
     );
   });
 
+  it('disables every other provider when saving a replacement provider', async () => {
+    const user = userEvent.setup();
+    const saveConfig = vi.fn((config: AgentHostConfig) => Promise.resolve(config));
+    const current: AgentHostConfig = {
+      max_sessions: 2,
+      providers: [
+        { id: 'stale-acp', protocol: 'acp', command: 'stale-agent', enabled: true },
+      ],
+    };
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        { getConfig: () => Promise.resolve(current), saveConfig },
+      ),
+    });
+
+    await screen.findByLabelText('提供方 ID');
+    await user.type(screen.getByLabelText('提供方 ID'), 'fresh-acp');
+    await user.type(screen.getByLabelText('启动命令'), 'fresh-agent');
+    await user.click(screen.getByRole('button', { name: '保存并重启检测' }));
+
+    await waitFor(() => expect(saveConfig).toHaveBeenCalledTimes(1));
+    const written = saveConfig.mock.calls[0]![0];
+    expect(written.max_sessions).toBe(2);
+    expect(written.providers).toEqual([
+      { id: 'stale-acp', protocol: 'acp', command: 'stale-agent', enabled: false },
+      { id: 'fresh-acp', protocol: 'acp', command: 'fresh-agent', enabled: true },
+    ]);
+  });
+
   it('keeps the catalog candidates when the agent scan fails', async () => {
     const user = userEvent.setup();
     const saveConfig = vi.fn((config: AgentHostConfig) => Promise.resolve(config));

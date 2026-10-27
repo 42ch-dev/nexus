@@ -135,12 +135,14 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
         command: command.trim(),
         enabled: true,
       };
+      // Replacement semantics: the saved provider is the ONE enabled entry.
+      // Known-good entries stay in the document (disabled) so settings can
+      // re-enable them later; they are never deleted here.
       const exists = current.providers.some((entry) => entry.id === provider.id);
-      const providers = exists
-        ? current.providers.map((entry) =>
-            entry.id === provider.id ? { ...entry, ...provider } : entry,
-          )
-        : [...current.providers, provider];
+      const providers = current.providers.map((entry) =>
+        entry.id === provider.id ? { ...entry, ...provider } : { ...entry, enabled: false },
+      );
+      if (!exists) providers.push(provider);
       await client.saveAgentHostConfig({ ...current, providers });
       await onSaved();
     } catch (error) {
