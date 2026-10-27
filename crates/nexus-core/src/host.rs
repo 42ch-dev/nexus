@@ -11,13 +11,14 @@
 //! Actor/viewpoint creates and `set_model`/`set_mode` operations route into
 //! the real Host authority here — there is no `not_migrated` fallback.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use nexus_agent_host::capability::model::HostOperation;
 use nexus_agent_host::capability::model::{
-    HostEvent, HostEventStream, HostStartConfig, SessionOwner,
+    HostEvent, HostEventStream, HostStartConfig, ProtocolKind, SessionOwner,
 };
 use nexus_agent_host::capability::CreateSessionRequest as HostCreateRequest;
 use nexus_agent_host::config::{load_config_from_path, validate_workspace_path, AgentHostConfig};
@@ -33,7 +34,7 @@ use nexus_contracts::core_host_query_response::{
     CoreHostQueryResponse, CoreHostQueryResponseCatalog, CoreHostQueryResponseCatalogProvidersItem,
     CoreHostQueryResponseHealth, CoreHostQueryResponseScan, NexusAgentHostOperationResponse,
     NexusAgentHostSessionListResponse, NexusAgentHostSessionResponse, NexusAgentScanEntry,
-    NexusPaginationInfo,
+    NexusAgentScanEntryProtocolKind, NexusPaginationInfo,
 };
 use nexus_contracts::generated::daemon_api::agent_host::character_operation_result::CharacterOperationResult;
 // Only the `test-hooks`-gated direct-settlement seam names these, so they are
@@ -306,6 +307,160 @@ impl AuthorityState {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(report.clone());
     }
+}
+
+/// Native PATH candidates for the repair page.
+///
+/// The configured provider ids are NOT treated as already-supplied here: a
+/// saved-but-broken entry (its command removed from disk) must not filter out
+/// the working binary that shares its id. The provider id is the scan's
+/// `provider_id`, which the repair form saves as the replacement entry.
+fn native_scan_entries(
+    config: &AgentHostConfig,
+    probe_dirs: &[PathBuf],
+) -> nexus_agent_host::error::HostResult<Vec<NexusAgentScanEntry>> {
+    let mut repair_config = config.clone();
+    repair_config.providers.clear();
+    let native_entries = path_scan::scan_path_in(&repair_config, &[], probe_dirs)?;
+    Ok(native_entries
+        .into_iter()
+        .map(|entry| {
+            let (launch_command, launch_args) = match &entry.launch {
+                LaunchStrategy::Acp { command, args, .. }
+                | LaunchStrategy::NativeCli { command, args, .. } => {
+                    (command.clone(), args.clone())
+                }
+            };
+            // Only an executable file counts as installed (a found PATH row,
+            // a resolved DSH_RUNTIME_BIN, or a bare roster command that is not
+            // on PATH — the latter resolves to false).
+            let installed = path_scan::command_on_path(probe_dirs, &launch_command)
+                || path_scan::is_executable_file(std::path::Path::new(&launch_command));
+            NexusAgentScanEntry {
+                name: entry.display_name,
+                installed,
+                launch_command: Some(launch_command),
+                launch_args,
+                // Discovery health messages are internal diagnostics, never
+                // user-facing descriptions.
+                description: None,
+                icon_url: None,
+                // The provider id IS the join key the repair page saves.
+                registry_agent_id: Some(entry.provider_id.to_string()),
+                protocol_kind: Some(wire_scan_protocol(entry.protocol_kind)),
+                version: None,
+            }
+        })
+        .collect())
+}
+
+/// Map a catalog protocol kind to the scan wire enum.
+const fn wire_scan_protocol(kind: ProtocolKind) -> NexusAgentScanEntryProtocolKind {
+    match kind {
+        ProtocolKind::Acp => NexusAgentScanEntryProtocolKind::Acp,
+        ProtocolKind::NativeCli => NexusAgentScanEntryProtocolKind::NativeCli,
+    }
+}
+
+/// One row per (provider id, protocol) across the native roster and registry
+/// candidates.
+///
+/// An ACP registry agent and a detection-only native row that share a provider
+/// id are DIFFERENT providers, so the key includes the protocol kind. Rows are
+/// ordered curated/recipe first, then installed rows, then detection-only rows,
+/// and the first row for a key wins: a curated row always beats a bare
+/// duplicate, and an installed registry row keeps its command instead of being
+/// shadowed by a not-installed detection row that arrived earlier.
+fn merge_scan_entries(
+    native: Vec<NexusAgentScanEntry>,
+    registry: Vec<NexusAgentScanEntry>,
+) -> Vec<NexusAgentScanEntry> {
+    let mut curated: Vec<NexusAgentScanEntry> = Vec::new();
+    let mut installed: Vec<NexusAgentScanEntry> = Vec::new();
+    let mut detection_only: Vec<NexusAgentScanEntry> = Vec::new();
+    for entry in native.into_iter().chain(registry) {
+        if !entry.launch_args.is_empty() {
+            curated.push(entry);
+        } else if entry.installed {
+            installed.push(entry);
+        } else {
+            detection_only.push(entry);
+        }
+    }
+
+    let mut merged: Vec<NexusAgentScanEntry> = Vec::new();
+    let mut seen: HashSet<(String, &'static str)> = HashSet::new();
+    for entry in curated.into_iter().chain(installed).chain(detection_only) {
+        let Some(provider_id) = entry.registry_agent_id.clone() else {
+            merged.push(entry);
+            continue;
+        };
+        let key = (provider_id, scan_protocol_key(entry.protocol_kind.as_ref()));
+        if seen.insert(key) {
+            merged.push(entry);
+        }
+    }
+    merged
+}
+
+/// Stable dedupe key for a wire protocol kind (the enum is generated without
+/// `Eq`/`Hash`).
+const fn scan_protocol_key(kind: Option<&NexusAgentScanEntryProtocolKind>) -> &'static str {
+    match kind {
+        Some(NexusAgentScanEntryProtocolKind::Acp) => "acp",
+        Some(NexusAgentScanEntryProtocolKind::NativeCli) => "native_cli",
+        None => "unknown",
+    }
+}
+
+/// Discoverable ACP registry agents whose launch binary resolves on this PATH.
+///
+/// The repair form stores a bare command (no argv), so only binary
+/// distributions qualify: an `npx` recipe without its package argument would be
+/// an unusable command string. A registry that cannot be read yields no
+/// registry rows — never a fabricated candidate; native PATH rows stand on
+/// their own.
+async fn registry_scan_entries(
+    config: &AgentHostConfig,
+    probe_dirs: &[PathBuf],
+) -> Vec<NexusAgentScanEntry> {
+    let Ok(client) = nexus_acp_host::registry::RegistryClient::new() else {
+        return Vec::new();
+    };
+    // Cache hits answer immediately; a cold fetch gets a bounded window so the
+    // scan endpoint cannot hang on the CDN.
+    let Ok(Ok(registry)) =
+        tokio::time::timeout(std::time::Duration::from_secs(10), client.get_registry()).await
+    else {
+        return Vec::new();
+    };
+    let Ok(registry_entries) =
+        nexus_agent_host::discovery::acp_registry::entries_from_registry(config, &registry.agents)
+    else {
+        return Vec::new();
+    };
+    registry_entries
+        .into_iter()
+        .filter_map(|entry| {
+            let LaunchStrategy::Acp { command, args, .. } = &entry.launch else {
+                return None;
+            };
+            if !args.is_empty() || !path_scan::command_on_path(probe_dirs, command) {
+                return None;
+            }
+            Some(NexusAgentScanEntry {
+                name: entry.display_name,
+                registry_agent_id: Some(entry.provider_id.to_string()),
+                launch_command: Some(command.clone()),
+                launch_args: Vec::new(),
+                protocol_kind: Some(NexusAgentScanEntryProtocolKind::Acp),
+                installed: true,
+                version: None,
+                description: None,
+                icon_url: None,
+            })
+        })
+        .collect()
 }
 
 /// One open Host authority: the started [`HostManager`], its composed
@@ -1316,47 +1471,15 @@ impl HostHandle {
                         let probe_dirs: Vec<std::path::PathBuf> = std::env::var_os("PATH")
                             .map(|path| std::env::split_paths(&path).collect())
                             .unwrap_or_default();
-                        let native_entries =
-                            path_scan::scan_path_in(&config, &[], &probe_dirs).map_err(host_err)?;
-                        let entries: Vec<NexusAgentScanEntry> = native_entries
-                            .into_iter()
-                            .map(|entry| {
-                                let launch = match &entry.launch {
-                                    LaunchStrategy::Acp { command, args, .. }
-                                    | LaunchStrategy::NativeCli { command, args, .. } => {
-                                        Some((command.clone(), args.clone()))
-                                    }
-                                };
-                                let (launch_command, launch_args) = match launch {
-                                    Some((command, args)) => (Some(command), args),
-                                    None => (None, Vec::new()),
-                                };
-                                // Wire contracts (see `path_scan::scan_path_in`):
-                                // `registry_agent_id` is the provider id so the
-                                // web repair surface can join scan rows to the
-                                // provider catalog; `installed` mirrors the PATH
-                                // roster (the "path candidate" discovery marker),
-                                // NOT provider readiness.
-                                let installed =
-                                    entry.health.message.as_deref().is_some_and(|message| {
-                                        message.starts_with("path candidate")
-                                    });
-                                NexusAgentScanEntry {
-                                    name: entry.display_name,
-                                    installed,
-                                    launch_command,
-                                    launch_args,
-                                    // The wire field is reserved for registry
-                                    // copy; discovery health messages are
-                                    // internal diagnostics, never user-facing
-                                    // descriptions.
-                                    description: None,
-                                    icon_url: None,
-                                    registry_agent_id: Some(entry.provider_id.to_string()),
-                                    version: None,
-                                }
-                            })
-                            .collect();
+                        // Repair discovery deliberately ignores the configured
+                        // ids: an enabled-but-stale entry (its command removed)
+                        // must not hide the working PATH binary of the same id.
+                        let native = native_scan_entries(&config, &probe_dirs).map_err(host_err)?;
+                        // Registry agents that are actually launchable on this
+                        // machine join the list, so an unconfigured home still
+                        // offers a working candidate.
+                        let registry = registry_scan_entries(&config, &probe_dirs).await;
+                        let entries = merge_scan_entries(native, registry);
                         Ok(CoreHostQueryResponse {
                             scan: Some(CoreHostQueryResponseScan { entries }),
                             health: None,
@@ -2259,5 +2382,189 @@ impl ActorSessionKey {
             ctx,
             knowledge,
         )
+    }
+}
+
+#[cfg(test)]
+mod scan_tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn repair_scan_lists_a_working_candidate_over_a_stale_enabled_entry() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let binary = dir.path().join("claude");
+        std::fs::copy("/bin/sh", &binary).expect("copy executable");
+
+        let mut config = AgentHostConfig::default();
+        config
+            .providers
+            .push(nexus_agent_host::config::ProviderConfig {
+                id: "claude-native".to_string(),
+                protocol: "native_cli".to_string(),
+                command: Some("/definitely/removed/claude".to_string()),
+                args: Vec::new(),
+                env: std::collections::HashMap::new(),
+                enabled: true,
+            });
+
+        let entries =
+            native_scan_entries(&config, &[dir.path().to_path_buf()]).expect("scan entries");
+        let entry = entries
+            .iter()
+            .find(|entry| entry.registry_agent_id.as_deref() == Some("claude-native"))
+            .expect("the working PATH binary is listed despite the stale enabled entry");
+        assert!(entry.installed);
+        assert_eq!(
+            entry.launch_command.as_deref(),
+            Some(binary.to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            entry.protocol_kind,
+            Some(NexusAgentScanEntryProtocolKind::NativeCli)
+        );
+    }
+
+    fn scan_row_with(
+        provider_id: &str,
+        command: &str,
+        args: &[&str],
+        protocol_kind: NexusAgentScanEntryProtocolKind,
+        installed: bool,
+    ) -> NexusAgentScanEntry {
+        NexusAgentScanEntry {
+            name: format!("{provider_id} (row)"),
+            installed,
+            launch_command: Some(command.to_string()),
+            launch_args: args.iter().map(ToString::to_string).collect(),
+            version: None,
+            description: None,
+            icon_url: None,
+            registry_agent_id: Some(provider_id.to_string()),
+            protocol_kind: Some(protocol_kind),
+        }
+    }
+
+    fn scan_row(provider_id: &str, command: &str, args: &[&str]) -> NexusAgentScanEntry {
+        scan_row_with(
+            provider_id,
+            command,
+            args,
+            NexusAgentScanEntryProtocolKind::Acp,
+            true,
+        )
+    }
+
+    #[test]
+    fn merge_keeps_protocols_apart_and_orders_installed_ahead_of_detection() {
+        let detection_native = scan_row_with(
+            "omp",
+            "omp",
+            &[],
+            NexusAgentScanEntryProtocolKind::NativeCli,
+            false,
+        );
+        let installed_acp = scan_row_with(
+            "omp",
+            "/usr/local/bin/omp",
+            &[],
+            NexusAgentScanEntryProtocolKind::Acp,
+            true,
+        );
+
+        let merged = merge_scan_entries(vec![detection_native], vec![installed_acp]);
+
+        // Same provider id, different protocols: two distinct providers.
+        assert_eq!(merged.len(), 2);
+        assert!(merged[0].installed, "installed rows sort before detection");
+        let acp = merged
+            .iter()
+            .find(|entry| {
+                matches!(
+                    entry.protocol_kind,
+                    Some(NexusAgentScanEntryProtocolKind::Acp)
+                )
+            })
+            .expect("ACP registry row survives");
+        assert_eq!(acp.launch_command.as_deref(), Some("/usr/local/bin/omp"));
+        let native = merged
+            .iter()
+            .find(|entry| {
+                matches!(
+                    entry.protocol_kind,
+                    Some(NexusAgentScanEntryProtocolKind::NativeCli)
+                )
+            })
+            .expect("detection-only native row survives");
+        assert!(!native.installed);
+    }
+
+    #[test]
+    fn merge_keeps_the_curated_row_over_a_bare_registry_duplicate() {
+        let merged = merge_scan_entries(
+            vec![scan_row("omp", "/opt/homebrew/bin/omp", &["acp"])],
+            vec![
+                scan_row("omp", "omp", &[]),
+                scan_row("registry-only", "registry-only", &[]),
+            ],
+        );
+        assert_eq!(
+            merged.len(),
+            2,
+            "duplicate provider id collapses to one row"
+        );
+        assert_eq!(merged[0].registry_agent_id.as_deref(), Some("omp"));
+        assert_eq!(merged[0].launch_args, vec!["acp".to_string()]);
+        assert_eq!(
+            merged[0].launch_command.as_deref(),
+            Some("/opt/homebrew/bin/omp")
+        );
+        assert_eq!(
+            merged[1].registry_agent_id.as_deref(),
+            Some("registry-only")
+        );
+    }
+
+    /// A resolved override only counts as installed when it is executable: a
+    /// bare existing file would save a provider the launcher cannot start.
+    #[cfg(unix)]
+    #[test]
+    fn dsh_env_override_is_installed_only_when_executable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let empty_path = dir.path().join("empty-path");
+        std::fs::create_dir(&empty_path).expect("empty path dir");
+        let plain = dir.path().join("plain-dsh");
+        std::fs::write(&plain, "not executable").expect("plain file");
+        let executable = dir.path().join("exec-dsh");
+        std::fs::copy("/bin/sh", &executable).expect("executable file");
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod");
+
+        let previous_path = std::env::var_os("PATH");
+        std::env::set_var("PATH", &empty_path);
+        let scan = |value: &std::path::Path| {
+            std::env::set_var("DSH_RUNTIME_BIN", value);
+            native_scan_entries(&AgentHostConfig::default(), &[])
+                .expect("scan entries")
+                .into_iter()
+                .find(|entry| entry.registry_agent_id.as_deref() == Some("dsh-native"))
+                .expect("dsh row")
+        };
+
+        assert!(!scan(&plain).installed, "non-executable override");
+        assert!(scan(&executable).installed, "executable override");
+
+        std::env::remove_var("DSH_RUNTIME_BIN");
+        match previous_path {
+            Some(path) => std::env::set_var("PATH", path),
+            None => std::env::remove_var("PATH"),
+        }
     }
 }

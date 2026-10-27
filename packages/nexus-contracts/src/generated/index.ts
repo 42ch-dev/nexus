@@ -144,6 +144,7 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   UpdateKnowledgeEntryRequest: 1,
   ViewRequest: 1,
   ViewResponse: 1,
+  AgentHostConfig: 1,
   AgentHostListSessionsQuery: 1,
   AgentProfileResponse: 1,
   AgentProfile: 1,

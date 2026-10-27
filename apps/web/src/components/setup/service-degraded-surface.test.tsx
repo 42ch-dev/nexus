@@ -176,6 +176,129 @@ describe('ServiceDegradedGate', () => {
     expect(screen.getByRole('button', { name: '重新检测' })).toBeInTheDocument();
   });
 
+  // Defense-in-depth: the scan producer already dedupes by provider id; this
+  // pins the page's independent guard for a producer that regresses.
+  it('dedupes scan rows by provider id and keeps the curated launch recipe', async () => {
+    const user = userEvent.setup();
+    const agents: AgentScanEntry[] = [
+      {
+        name: 'omp (ACP)',
+        registry_agent_id: 'omp',
+        launch_command: '/opt/homebrew/bin/omp',
+        launch_args: ['acp'],
+        installed: true,
+        protocol_kind: 'acp',
+      },
+      {
+        name: 'omp',
+        registry_agent_id: 'omp',
+        launch_command: 'omp',
+        launch_args: [],
+        installed: true,
+        protocol_kind: 'acp',
+      },
+    ];
+    const saved: AgentHostConfig[] = [];
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        {
+          scan: () => Promise.resolve({ agents }),
+          getConfig: () => Promise.resolve(EMPTY_CONFIG),
+          saveConfig: (config: AgentHostConfig) => {
+            saved.push(config);
+            return Promise.resolve(config);
+          },
+        },
+      ),
+    });
+
+    const roster = await screen.findAllByRole('listitem');
+    expect(roster).toHaveLength(1);
+    expect(roster[0]).toHaveTextContent('omp (ACP)');
+
+    await user.click(within(roster[0]!).getByRole('button', { name: '启用' }));
+    expect(screen.getByLabelText('启动命令')).toHaveValue('/opt/homebrew/bin/omp');
+    await user.click(screen.getByRole('button', { name: '保存并重启检测' }));
+    await waitFor(() => expect(saved.length).toBe(1));
+    // The curated row's recipe (not the bare registry duplicate) is saved.
+    expect(saved[0]!.providers).toEqual([
+      {
+        id: 'omp',
+        protocol: 'acp',
+        command: '/opt/homebrew/bin/omp',
+        args: ['acp'],
+        enabled: true,
+      },
+    ]);
+  });
+
+  it('renders detection-only rows disabled while a supported row stays selectable', async () => {
+    const user = userEvent.setup();
+    const agents: AgentScanEntry[] = [
+      {
+        name: 'kimi (native CLI)',
+        registry_agent_id: 'kimi',
+        launch_command: '/usr/local/bin/kimi',
+        launch_args: [],
+        installed: true,
+        protocol_kind: 'native_cli',
+      },
+      {
+        name: 'claude (native CLI)',
+        registry_agent_id: 'claude-native',
+        launch_command: '/usr/local/bin/claude',
+        launch_args: [],
+        installed: true,
+        protocol_kind: 'native_cli',
+      },
+    ];
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        {
+          scan: () => Promise.resolve({ agents }),
+          listProviders: () =>
+            Promise.resolve({
+              providers: [
+                { provider_id: 'kimi', display_name: 'Kimi CLI', protocol_kind: 'native_cli' },
+                {
+                  provider_id: 'claude-native',
+                  display_name: 'Claude Code',
+                  protocol_kind: 'native_cli',
+                },
+              ],
+            }),
+        },
+      ),
+    });
+
+    const roster = await screen.findAllByRole('listitem');
+    const kimiRow = roster.find((row) => row.textContent?.includes('Kimi CLI'))!;
+    const claudeRow = roster.find((row) => row.textContent?.includes('Claude Code'))!;
+
+    // Detection-only: rendered, badged, and impossible to choose.
+    expect(within(kimiRow).getByTestId('detection-only-badge')).toHaveTextContent(
+      '已检测，暂不支持从此处启用',
+    );
+    const kimiUse = within(kimiRow).getByRole('button', { name: '启用' });
+    expect(kimiUse).toBeDisabled();
+    await user.click(kimiUse);
+    expect(screen.getByLabelText('提供方 ID')).toHaveValue('');
+
+    // A supported native row in the same render stays selectable.
+    const claudeUse = within(claudeRow).getByRole('button', { name: '启用' });
+    expect(claudeUse).toBeEnabled();
+    await user.click(claudeUse);
+    expect(screen.getByLabelText('提供方 ID')).toHaveValue('claude-native');
+  });
+
   it('persists the scan-provided launch args when saving a chosen candidate', async () => {
     const user = userEvent.setup();
     const agents: AgentScanEntry[] = [
@@ -352,6 +475,40 @@ describe('ServiceDegradedGate', () => {
     expect(screen.getByLabelText('提供方 ID')).toHaveValue('alpha-acp');
   });
 
+  it('offers installed agents from the scan alone on an unconfigured home', async () => {
+    const user = userEvent.setup();
+    const agents: AgentScanEntry[] = [
+      {
+        name: 'Claude Code',
+        registry_agent_id: 'claude-native',
+        launch_command: '/opt/homebrew/bin/claude',
+        installed: true,
+        protocol_kind: 'native_cli',
+      },
+    ];
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        { scan: () => Promise.resolve({ agents }) },
+      ),
+    });
+
+    // The catalog is empty on an unconfigured home; the scan is the source.
+    const candidates = await screen.findAllByRole('listitem');
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toHaveTextContent('Claude Code');
+    expect(candidates[0]).toHaveTextContent('已安装');
+
+    await user.click(within(candidates[0]!).getByRole('button', { name: '启用' }));
+    expect(screen.getByLabelText('提供方 ID')).toHaveValue('claude-native');
+    expect(screen.getByLabelText('协议')).toHaveValue('native_cli');
+    expect(screen.getByLabelText('启动命令')).toHaveValue('/opt/homebrew/bin/claude');
+    expect(screen.getByRole('button', { name: '保存并重启检测' })).toBeEnabled();
+  });
+
   it('saves the upserted provider and re-runs the readiness probe', async () => {
     const user = userEvent.setup();
     const daemonStatus = vi.fn(() => Promise.resolve(ENGINE_DEGRADED));
@@ -386,6 +543,346 @@ describe('ServiceDegradedGate', () => {
     await waitFor(() =>
       expect(daemonStatus.mock.calls.length).toBeGreaterThanOrEqual(2),
     );
+  });
+
+  it('keeps a configured protocol authoritative over a conflicting scan row', async () => {
+    const user = userEvent.setup();
+    const saved: AgentHostConfig[] = [];
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        {
+          scan: () =>
+            Promise.resolve({
+              agents: [
+                {
+                  name: 'alpha native',
+                  registry_agent_id: 'alpha-acp',
+                  launch_command: '/usr/local/bin/alpha-native',
+                  launch_args: [],
+                  installed: true,
+                  protocol_kind: 'native_cli',
+                },
+              ],
+            }),
+          listProviders: () =>
+            Promise.resolve({
+              providers: [
+                { provider_id: 'alpha-acp', display_name: 'Alpha Agent', protocol_kind: 'acp' },
+              ],
+            }),
+          getConfig: () =>
+            Promise.resolve({
+              providers: [
+                { id: 'alpha-acp', protocol: 'acp', command: 'alpha-acp', enabled: true },
+              ],
+              max_sessions: 2,
+            } as AgentHostConfig),
+          saveConfig: (config: AgentHostConfig) => {
+            saved.push(config);
+            return Promise.resolve(config);
+          },
+        },
+      ),
+    });
+
+    const roster = await screen.findAllByRole('listitem');
+    expect(roster).toHaveLength(1);
+    await user.click(within(roster[0]!).getByRole('button', { name: '启用' }));
+    // The configured ACP provider keeps ACP + its own command; the native
+    // scan row for the same id is not its recipe.
+    expect(screen.getByLabelText('协议')).toHaveValue('acp');
+    expect(screen.getByLabelText('启动命令')).toHaveValue('alpha-acp');
+
+    await user.click(screen.getByRole('button', { name: '保存并重启检测' }));
+    await waitFor(() => expect(saved.length).toBe(1));
+    expect(saved[0]!.providers).toEqual([
+      { id: 'alpha-acp', protocol: 'acp', command: 'alpha-acp', args: [], enabled: true },
+    ]);
+  });
+
+  it('keeps cross-protocol scan rows as separate candidates', async () => {
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        {
+          scan: () =>
+            Promise.resolve({
+              agents: [
+                {
+                  name: 'omp (ACP)',
+                  registry_agent_id: 'omp',
+                  launch_command: '/opt/homebrew/bin/omp',
+                  launch_args: ['acp'],
+                  installed: true,
+                  protocol_kind: 'acp',
+                },
+                {
+                  name: 'omp (native CLI)',
+                  registry_agent_id: 'omp',
+                  launch_command: 'omp',
+                  launch_args: [],
+                  installed: false,
+                  protocol_kind: 'native_cli',
+                },
+              ],
+            }),
+        },
+      ),
+    });
+
+    const roster = await screen.findAllByRole('listitem');
+    expect(roster).toHaveLength(2);
+    expect(roster[0]).toHaveTextContent('omp (ACP)');
+    expect(roster[1]).toHaveTextContent('omp (native CLI)');
+    // The detection-only native row is badged and disabled; the ACP row is not.
+    expect(within(roster[1]!).getByTestId('detection-only-badge')).toBeInTheDocument();
+    expect(within(roster[0]!).queryByTestId('detection-only-badge')).not.toBeInTheDocument();
+  });
+
+  it('does not let an auto-discovered catalog row hide a working ACP scan row', async () => {
+    const user = userEvent.setup();
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        {
+          scan: () =>
+            Promise.resolve({
+              agents: [
+                {
+                  name: 'kimi (ACP)',
+                  registry_agent_id: 'kimi',
+                  launch_command: '/usr/local/bin/kimi-acp',
+                  launch_args: [],
+                  installed: true,
+                  protocol_kind: 'acp',
+                },
+                {
+                  name: 'kimi (native CLI)',
+                  registry_agent_id: 'kimi',
+                  launch_command: 'kimi',
+                  launch_args: [],
+                  installed: false,
+                  protocol_kind: 'native_cli',
+                },
+              ],
+            }),
+          // Auto-discovered PATH roster row only — kimi is NOT saved.
+          listProviders: () =>
+            Promise.resolve({
+              providers: [{ provider_id: 'kimi', display_name: 'Kimi CLI', protocol_kind: 'native_cli' }],
+            }),
+          getConfig: () => Promise.resolve(EMPTY_CONFIG),
+        },
+      ),
+    });
+
+    // Both protocols stay as separate choices; the catalog only polishes the
+    // label. The installed ACP row is selectable, the detection row is not.
+    const roster = await screen.findAllByRole('listitem');
+    expect(roster).toHaveLength(2);
+    const acpRow = roster.find(
+      (row) => within(row).getByRole('button', { name: '启用' }).hasAttribute('disabled') === false,
+    )!;
+    const detectionRow = roster.find((row) => row !== acpRow)!;
+    expect(within(detectionRow).getByTestId('detection-only-badge')).toBeInTheDocument();
+
+    await user.click(within(acpRow).getByRole('button', { name: '启用' }));
+    expect(screen.getByLabelText('提供方 ID')).toHaveValue('kimi');
+    expect(screen.getByLabelText('协议')).toHaveValue('acp');
+    expect(screen.getByLabelText('启动命令')).toHaveValue('/usr/local/bin/kimi-acp');
+  });
+
+  it('keeps a disabled saved provider as a repair candidate after replacement', async () => {
+    const user = userEvent.setup();
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        {
+          scan: () =>
+            Promise.resolve({
+              agents: [
+                {
+                  name: 'alpha (ACP)',
+                  registry_agent_id: 'alpha-acp',
+                  launch_command: '/usr/local/bin/alpha-acp',
+                  launch_args: [],
+                  installed: true,
+                  protocol_kind: 'acp',
+                },
+                {
+                  name: 'beta (ACP)',
+                  registry_agent_id: 'beta-acp',
+                  launch_command: '/usr/local/bin/beta-acp',
+                  launch_args: [],
+                  installed: true,
+                  protocol_kind: 'acp',
+                },
+              ],
+            }),
+          // The catalog lists enabled providers only: B is disabled and absent.
+          listProviders: () =>
+            Promise.resolve({
+              providers: [
+                { provider_id: 'alpha-acp', display_name: 'Alpha Agent', protocol_kind: 'acp' },
+              ],
+            }),
+          getConfig: () =>
+            Promise.resolve({
+              providers: [
+                { id: 'alpha-acp', protocol: 'acp', command: '/usr/local/bin/alpha-acp', enabled: true },
+                { id: 'beta-acp', protocol: 'acp', command: '/usr/local/bin/beta-acp', enabled: false },
+              ],
+              max_sessions: 2,
+            } as AgentHostConfig),
+        },
+      ),
+    });
+
+    const roster = await screen.findAllByRole('listitem');
+    // A appears once (catalog), B survives from its installed scan row.
+    expect(roster).toHaveLength(2);
+    const alphaRow = roster.find((row) => row.textContent?.includes('Alpha Agent'))!;
+    const betaRow = roster.find((row) => row.textContent?.includes('beta (ACP)'))!;
+    expect(betaRow).toHaveTextContent('已安装');
+
+    // B is selectable again and keeps its saved command.
+    await user.click(within(betaRow).getByRole('button', { name: '启用' }));
+    expect(screen.getByLabelText('提供方 ID')).toHaveValue('beta-acp');
+    expect(screen.getByLabelText('启动命令')).toHaveValue('/usr/local/bin/beta-acp');
+    // A was not duplicated by its scan row.
+    expect(roster.filter((row) => row.textContent?.includes('Alpha Agent'))).toHaveLength(1);
+    expect(within(alphaRow).getByRole('button', { name: '启用' })).toBeInTheDocument();
+  });
+
+  it('rebuilds a saved candidate from config when the scan has no row', async () => {
+    const user = userEvent.setup();
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        {
+          scan: () => Promise.resolve({ agents: [] }),
+          getConfig: () =>
+            Promise.resolve({
+              providers: [
+                { id: 'stored-acp', protocol: 'acp', command: '/opt/stored/acp', enabled: false },
+              ],
+              max_sessions: 2,
+            } as AgentHostConfig),
+        },
+      ),
+    });
+
+    const roster = await screen.findAllByRole('listitem');
+    expect(roster).toHaveLength(1);
+    await user.click(within(roster[0]!).getByRole('button', { name: '启用' }));
+    expect(screen.getByLabelText('提供方 ID')).toHaveValue('stored-acp');
+    expect(screen.getByLabelText('启动命令')).toHaveValue('/opt/stored/acp');
+  });
+
+  it('keeps the saved recipe when the disabled saved provider scan row is not installed', async () => {
+    const user = userEvent.setup();
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        {
+          scan: () =>
+            Promise.resolve({
+              agents: [
+                {
+                  name: 'claude (native CLI)',
+                  registry_agent_id: 'claude-native',
+                  launch_command: 'claude',
+                  launch_args: [],
+                  installed: false,
+                  protocol_kind: 'native_cli',
+                },
+              ],
+            }),
+          getConfig: () =>
+            Promise.resolve({
+              providers: [
+                {
+                  id: 'claude-native',
+                  protocol: 'native_cli',
+                  command: '/opt/private/claude',
+                  enabled: false,
+                },
+              ],
+              max_sessions: 2,
+            } as AgentHostConfig),
+        },
+      ),
+    });
+
+    const roster = await screen.findAllByRole('listitem');
+    expect(roster).toHaveLength(1);
+    await user.click(within(roster[0]!).getByRole('button', { name: '启用' }));
+    // The not-installed scan row's bare "claude" must not replace the working
+    // saved command.
+    expect(screen.getByLabelText('启动命令')).toHaveValue('/opt/private/claude');
+  });
+
+  it('uses the scan recipe when the disabled saved provider scan row is installed', async () => {
+    const user = userEvent.setup();
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        {
+          scan: () =>
+            Promise.resolve({
+              agents: [
+                {
+                  name: 'claude (native CLI)',
+                  registry_agent_id: 'claude-native',
+                  launch_command: '/usr/local/bin/claude',
+                  launch_args: [],
+                  installed: true,
+                  protocol_kind: 'native_cli',
+                },
+              ],
+            }),
+          getConfig: () =>
+            Promise.resolve({
+              providers: [
+                {
+                  id: 'claude-native',
+                  protocol: 'native_cli',
+                  command: '/opt/private/claude',
+                  enabled: false,
+                },
+              ],
+              max_sessions: 2,
+            } as AgentHostConfig),
+        },
+      ),
+    });
+
+    const roster = await screen.findAllByRole('listitem');
+    expect(roster).toHaveLength(1);
+    await user.click(within(roster[0]!).getByRole('button', { name: '启用' }));
+    expect(screen.getByLabelText('启动命令')).toHaveValue('/usr/local/bin/claude');
   });
 
   it('disables every other provider when saving a replacement provider', async () => {

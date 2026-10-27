@@ -1561,6 +1561,11 @@ fn build_schema_map() -> Vec<SchemaEntry> {
         ),
         // v1.184 P2 Task 1 — agent-host session/operation/scan contracts.
         entry!(
+            "schemas/daemon-api/agent-host/agent-host-config.schema.json",
+            Strict,
+            AgentHostConfig
+        ),
+        entry!(
             "schemas/daemon-api/agent-host/agent-host-list-sessions-query.schema.json",
             Strict,
             AgentHostListSessionsQuery

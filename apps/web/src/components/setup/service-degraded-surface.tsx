@@ -62,14 +62,6 @@ function isEngineFailure(reason: ServiceDegradedReason): reason is EngineFailure
 }
 
 /**
- * Step 1 of the repair page: configure a provider through the service, never
- * the CLI. The candidate list is the provider catalog (authoritative id +
- * protocol) joined with scan data (installed + launch command); the manual
- * fields cover anything the catalog does not list. Both paths submit the same
- * upsert (load the document, replace or append this provider id, save), and a
- * successful save re-runs the readiness probe.
- */
-/**
  * Native provider ids that have a real launch adapter in this build. Every
  * other native_cli detection row is detection-only: rendered for visibility,
  * never offered for launch (the daemon would honestly refuse at admission).
@@ -106,7 +98,11 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
   // scan has no row for it (the scan skips enabled configured providers, and
   // catalog-only targets like gemini have no detection row at all), and its
   // stored command/args back the form when the scan cannot supply them.
-  const [configuredRows, setConfiguredRows] = useState<
+  // Every entry in the SAVED document, enabled or not: a disabled saved
+  // provider must still keep a repair candidate and back the form when the
+  // scan has no recipe for it. The catalog also lists auto-discovered PATH
+  // roster providers, whose protocol is only a default.
+  const [savedProviders, setSavedProviders] = useState<
     Map<string, AgentHostProviderConfig>
   >(new Map());
   const [id, setId] = useState('');
@@ -138,13 +134,7 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
     void client.getAgentHostConfig().then(
       (config) => {
         if (!cancelled) {
-          setConfiguredRows(
-            new Map(
-              config.providers
-                .filter((p) => p.enabled)
-                .map((p) => [p.id, p]),
-            ),
-          );
+          setSavedProviders(new Map(config.providers.map((p) => [p.id, p])));
         }
       },
       () => {
@@ -171,7 +161,7 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
     // Prefer scan-provided launch data; fall back to what the user already
     // had configured, so choosing a configured row without a scan row never
     // blanks the stored command/args.
-    const configured = configuredRows.get(candidate.id);
+    const configured = savedProviders.get(candidate.id);
     setId(candidate.id);
     setProtocol(candidate.protocol);
     setCommand(candidate.command ?? configured?.command ?? '');
@@ -207,29 +197,115 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
     }
   };
 
-  const scanById = new Map(
-    scanEntries.flatMap((entry) =>
-      entry.registry_agent_id ? [[entry.registry_agent_id, entry] as const] : [],
-    ),
+  // Candidates are the union of the machine scan (discoverable agents on an
+  // unconfigured home, with install state + launch recipe) and the provider
+  // catalog (authoritative display name/protocol + curated priority for rows
+  // the scan does not emit, e.g. a configured target without a detection row).
+  // Scan rows are keyed by (provider id, protocol): an ACP registry agent and
+  // a detection-only native row that share an id are different providers. A
+  // curated row (with its launch recipe) wins within the same key.
+  const scanKey = (providerId: string, protocol: string | null | undefined) =>
+    `${providerId}\u0000${protocol ?? 'unknown'}`;
+  const scanByKey = new Map<string, AgentScanEntry>();
+  for (const entry of scanEntries) {
+    const providerId = entry.registry_agent_id;
+    if (!providerId) continue;
+    const key = scanKey(providerId, entry.protocol_kind);
+    const existing = scanByKey.get(key);
+    const existingHasRecipe = (existing?.launch_args ?? []).length > 0;
+    const entryHasRecipe = (entry.launch_args ?? []).length > 0;
+    if (!existing || (!existingHasRecipe && entryHasRecipe)) {
+      scanByKey.set(key, entry);
+    }
+  }
+  const catalogById = new Map(
+    (catalog ?? []).map((entry) => [entry.provider_id, entry] as const),
   );
-  const candidates: ProviderCandidate[] = (catalog ?? []).flatMap((entry) => {
-    if (entry.protocol_kind !== 'acp' && entry.protocol_kind !== 'native_cli') return [];
-    const scanned = scanById.get(entry.provider_id);
+  const providerIdOf = (key: string) => key.slice(0, key.indexOf('\u0000'));
+  const candidateKeys: string[] = [];
+  const seenCandidateKeys = new Set<string>();
+  const addCandidateKey = (key: string) => {
+    if (seenCandidateKeys.has(key)) return;
+    seenCandidateKeys.add(key);
+    candidateKeys.push(key);
+  };
+  // Only a SAVED provider's protocol is authoritative. A catalog row for an
+  // auto-discovered provider (PATH roster) must not hide a different-protocol
+  // scan row: those keep one candidate per discovered protocol.
+  for (const [providerId, row] of catalogById) {
+    addCandidateKey(scanKey(providerId, row.protocol_kind));
+  }
+  for (const key of scanByKey.keys()) {
+    const providerId = providerIdOf(key);
+    // A saved provider's protocol is authoritative: scan rows of another
+    // protocol must not add a second choice for the same saved id.
+    if (savedProviders.has(providerId)) {
+      // A saved provider's protocol is authoritative ONLY while its
+      // authoritative candidate exists. A disabled saved entry drops out of
+      // the catalog, so its installed scan row must survive instead.
+      const savedProtocol = savedProviders.get(providerId)?.protocol;
+      const authoritativeProtocol =
+        catalogById.get(providerId)?.protocol_kind ?? savedProtocol;
+      if (catalogById.has(providerId)) continue;
+      const keyProtocol = key.slice(key.indexOf('\u0000') + 1);
+      if (keyProtocol !== authoritativeProtocol) continue;
+      // Only an INSTALLED scan row may replace the saved recipe: a not-found
+      // row's bare command would overwrite a working saved command.
+      if (scanByKey.get(key)?.installed !== true) continue;
+      addCandidateKey(key);
+      continue;
+    }
+    // A legacy scan row without a protocol annotates the catalog candidate
+    // instead of adding a protocol-less duplicate of it.
+    const protocol = key.slice(key.indexOf('\u0000') + 1);
+    if (protocol === 'unknown' && catalogById.has(providerId)) continue;
+    addCandidateKey(key);
+  }
+  const candidates: ProviderCandidate[] = candidateKeys.flatMap((key) => {
+    const providerId = providerIdOf(key);
+    const row = catalogById.get(providerId);
+    // A legacy scan row that publishes no protocol still annotates the
+    // catalog's provider; a row with a DIFFERENT protocol never does.
+    const scanned =
+      scanByKey.get(key) ?? scanByKey.get(scanKey(providerId, undefined));
+    // Saved providers keep the catalog protocol; auto-discovered rows take the
+    // protocol of the scan candidate that produced this key.
+    const candidateProtocol = savedProviders.has(providerId)
+      ? (row?.protocol_kind ?? scanned?.protocol_kind)
+      : (scanned?.protocol_kind ?? row?.protocol_kind);
+    if (candidateProtocol !== 'acp' && candidateProtocol !== 'native_cli') return [];
     return [
       {
-        id: entry.provider_id,
-        displayName: entry.display_name,
-        protocol: entry.protocol_kind,
+        id: providerId,
+        displayName: row?.display_name ?? scanned?.name ?? providerId,
+        protocol: candidateProtocol,
+        // Launch data is only read from the scan row for THIS protocol; a
+        // configured ACP provider never inherits a native row's recipe.
         command: scanned?.launch_command ?? null,
         args: scanned?.launch_args ?? [],
         installed: scanned?.installed ?? false,
       },
     ];
   });
+  // Never orphan a saved provider: when neither the catalog nor the scan
+  // produced a row, rebuild it from the saved configuration (id + protocol +
+  // command), selectable so switching back needs no typing.
+  const representedIds = new Set(candidates.map((candidate) => candidate.id));
+  for (const [providerId, saved] of savedProviders) {
+    if (representedIds.has(providerId)) continue;
+    candidates.push({
+      id: providerId,
+      displayName: providerId,
+      protocol: saved.protocol,
+      command: saved.command ?? null,
+      args: saved.args ?? [],
+      installed: false,
+    });
+  }
+  const configured = (c: ProviderCandidate) => (savedProviders.has(c.id) ? 1 : 0);
   // Sort: installed first, then configured (the repair target), then curated
   // priority (unranked last, display name as the final tie-break); the
   // catalog's registry order falls out as the stable default.
-  const configured = (c: ProviderCandidate) => (configuredRows.has(c.id) ? 1 : 0);
   const orderedCandidates = [...candidates].sort((left, right) => {
     return (
       Number(right.installed) - Number(left.installed) ||
@@ -245,7 +321,7 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
       <h2 className="text-copy-16 text-gray-1000">{t('degraded.repair.form.title')}</h2>
       <div className="flex flex-col gap-2">
         <h3 className="text-copy-14 text-gray-1000">{t('degraded.repair.form.candidatesTitle')}</h3>
-        {catalogFailed && (
+        {catalogFailed && orderedCandidates.length === 0 && (
           <p data-testid="provider-catalog-failed" className="text-copy-13 text-red-1000">
             {t('degraded.repair.form.candidatesError')}
           </p>
@@ -256,7 +332,7 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
               // A configured provider is the repair target itself: it stays
               // selectable regardless of scan state (the scan skips enabled
               // configured providers, so its row is missing by design).
-              const configured = configuredRows.has(candidate.id);
+              const configured = savedProviders.has(candidate.id);
               // Generic ACP recipes launch through the shared ACP adapter;
               // only the built-in trio has native launch adapters. Other
               // native ids are detection-only: shown, never offered.
@@ -269,12 +345,19 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
                   : 'missing';
               return (
                 <li
-                  key={candidate.id}
+                  key={`${candidate.id}:${candidate.protocol}`}
                   className="flex items-center justify-between gap-3 rounded-md bg-background-200 px-3 py-2"
                 >
                   <span className="min-w-0 truncate text-copy-13 text-gray-1000">
                     {candidate.displayName}
-                    {installState !== 'missing' || configured ? (
+                    {!launchable && !configured ? (
+                      <span
+                        data-testid="detection-only-badge"
+                        className="ml-2 text-label-12 text-gray-500"
+                      >
+                        {t('degraded.repair.form.detectionOnly')}
+                      </span>
+                    ) : installState !== 'missing' || configured ? (
                       <span className="ml-2 text-label-12 text-gray-700">
                         {installState === 'installed'
                           ? t('degraded.repair.form.installed')

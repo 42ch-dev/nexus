@@ -95,13 +95,18 @@ export function getActiveWorkspace(service: ServiceCore): Promise<ActiveWorkspac
 }
 
 /**
- * Serializes the select+promote pair per service. Two concurrent finish
- * requests must not both observe an uninitialized shell and publish two cores;
- * the second waits for the first and then finds the process ready.
+ * Serializes every owner-lifecycle mutation per service: select+promote and
+ * the provider save → engine-restart sequence. Two concurrent finish requests
+ * must not both observe an uninitialized shell and publish two cores, and a
+ * provider save must never interleave with a selection that rebuilds the same
+ * owner; the second waits for the first and then observes its outcome.
  */
 const selectionQueues = new WeakMap<ServiceCore, Promise<unknown>>();
 
-function withSelectionLock<T>(service: ServiceCore, work: () => Promise<T>): Promise<T> {
+export function withSelectionLock<T>(
+  service: ServiceCore,
+  work: () => Promise<T>,
+): Promise<T> {
   const previous = selectionQueues.get(service) ?? Promise.resolve();
   const run = previous.then(work, work);
   selectionQueues.set(

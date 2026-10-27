@@ -29,6 +29,7 @@
 import type {
   AddScheduleRequest,
   AddScheduleResponse,
+  AgentHostConfig,
   BatchUpdateFindingsRequest,
   BatchUpdateFindingsResponse,
   CertFingerprintResponse,
@@ -271,32 +272,8 @@ export type WorkflowObservationFrame =
   | { kind: 'gap' }
   | { kind: 'history_unavailable' };
 
-/**
- * One provider entry in the agent-host config document
- * (`{home}/agent-host/config.toml`, `nexus_agent_host::config::ProviderConfig`).
- */
-export interface AgentHostProviderConfig {
-  id: string;
-  protocol: 'acp' | 'native_cli';
-  command?: string | null;
-  args?: string[];
-  env?: Record<string, string>;
-  enabled?: boolean;
-}
-
-/** The agent-host config document; unknown fields are preserved on save. */
-export interface AgentHostConfig {
-  max_sessions?: number;
-  max_ops_per_session?: number;
-  timeouts?: Record<string, number>;
-  policy?: {
-    unknown_provider?: string;
-    unknown_tool_risk?: string;
-    allow_model_fallback?: boolean;
-  };
-  providers: AgentHostProviderConfig[];
-  [key: string]: unknown;
-}
+/** One provider entry of the generated agent-host config document. */
+export type AgentHostProviderConfig = AgentHostConfig['providers'][number];
 
 /** One registered agent-host provider (the authoritative id/protocol source). */
 export interface AgentHostCatalogEntry {
@@ -868,6 +845,7 @@ export interface NexusClient extends CoreSliceClient {
 
 /** Re-exported for consumers building query/mutation hooks. */
 export type {
+  AgentHostConfig,
   CapabilityInfo,
   ClearRunsQuery,
   ClearRunsResponse,

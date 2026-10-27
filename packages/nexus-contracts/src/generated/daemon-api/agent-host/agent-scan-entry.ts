@@ -21,6 +21,10 @@ export interface AgentScanEntry {
    */
   launch_command?: string | null;
   /**
+   * Wire protocol kind of the candidate (additive, I-000134 F-7). Null for a legacy producer that does not publish it. A provider entry saved from this candidate uses the same kind.
+   */
+  protocol_kind?: "acp" | "native_cli" | null;
+  /**
    * Launch arguments that accompany launch_command, e.g. a single "acp" element for agents whose ACP server is a subcommand. Empty for bare native CLI launches and custom wizard-supplied commands.
    */
   launch_args?: string[];

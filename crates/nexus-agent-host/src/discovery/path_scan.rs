@@ -169,9 +169,9 @@ pub fn scan_path_in(
             continue;
         }
 
-        // Wire contract: the scan handler in `nexus-core` maps the
-        // "path candidate" health-message prefix to `installed: true`.
-        // Both markers below MUST keep that prefix.
+        // Health messages are diagnostics only: the scan handler in
+        // `nexus-core` derives `installed` from the resolved executable, never
+        // from this message text.
         let acp = !acp_args.is_empty();
         let capabilities = if acp {
             CapabilityDescriptor::acp_full()
@@ -261,9 +261,8 @@ pub fn scan_path_in(
         } else {
             // Full-roster contract: a detection target that is not installed
             // still gets a row so the UI renders it disabled. The launch
-            // command stays the bare name and is never spawned in this
-            // state; the message MUST NOT carry the "path candidate" prefix
-            // (it maps to `installed: true` in the daemon scan handler).
+            // command stays the bare name; the daemon's executable check
+            // resolves it as not installed, so it is never spawned.
             push_row(
                 cmd.to_string(),
                 unavailable(format!("{cmd} not found on PATH")),
@@ -272,6 +271,36 @@ pub fn scan_path_in(
     }
 
     Ok(entries)
+}
+
+/// Whether `command` resolves to an executable on the given PATH dirs.
+///
+/// Uses the same `which` fallback the scan uses; discovery surfaces that
+/// classify already-listed candidates call this without re-running the full
+/// scan.
+#[must_use]
+pub fn command_on_path(path_dirs: &[PathBuf], command: &str) -> bool {
+    find_command(path_dirs, command).is_some()
+}
+
+/// Whether `path` is an existing executable file (unix mode bits; other
+/// targets keep the existence check). A file that merely exists is not a
+/// command a provider can launch.
+#[must_use]
+pub fn is_executable_file(path: &std::path::Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        path.metadata()
+            .is_ok_and(|metadata| metadata.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 /// Resolve a command name to its full path using cross-platform resolution.
@@ -307,7 +336,9 @@ fn find_command(path_dirs: &[PathBuf], command: &str) -> Option<PathBuf> {
 
     for dir in search_dirs {
         let candidate = dir.join(command);
-        if candidate.is_file() {
+        // A non-executable file is not a command: `which` already enforces
+        // this, so the manual fallback must too.
+        if is_executable_file(&candidate) {
             return Some(candidate);
         }
 

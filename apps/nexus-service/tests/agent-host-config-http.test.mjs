@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { before, describe, test } from 'node:test';
@@ -15,6 +15,7 @@ const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
  */
 
 let routes;
+let workspaces;
 
 before(async () => {
   const routesDist = join(serviceRoot, 'dist', 'routes.js');
@@ -23,6 +24,7 @@ before(async () => {
     'dist/routes.js is missing — run `pnpm --filter @42ch/nexus-service run test` (or `… run build`) first',
   );
   routes = await import(join(serviceRoot, 'dist', 'routes.js'));
+  workspaces = await import(join(serviceRoot, 'dist', 'workspaces.js'));
 });
 
 const PATH = '/v1/daemon/agent-host/config';
@@ -112,6 +114,50 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
     assert.equal(response.body.providers[0].id, 'claude-acp');
   });
 
+  test('two overlapping PUTs apply in order and both restart', async () => {
+    let stored = { ...DEFAULT_CONFIG };
+    const restarts = [];
+    const service = {
+      workspaceInitialized: true,
+      providerReady: false,
+      engineEpoch: 0,
+      core: {
+        getAgentHostConfig: async () => stored,
+        saveAgentHostConfig: async (config) => {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          stored = config;
+        },
+        restartExecutionOwner: async () => {
+          restarts.push(stored.providers.map((provider) => provider.id));
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          return { engine_epoch: restarts.length, provider_ready: true };
+        },
+      },
+    };
+    const first = {
+      ...DEFAULT_CONFIG,
+      providers: [{ id: 'first-acp', protocol: 'acp', command: 'first-agent', enabled: true }],
+    };
+    const second = {
+      ...DEFAULT_CONFIG,
+      providers: [...first.providers, { id: 'second-acp', protocol: 'acp', command: 'second-agent', enabled: true }],
+    };
+
+    const [a, b] = await Promise.all([
+      handle('PUT', service, first),
+      handle('PUT', service, second),
+    ]);
+
+    assert.equal(a.body.providers.length, 1, 'the first response precedes the second write');
+    assert.equal(b.body.providers.length, 2);
+    assert.deepEqual(
+      stored.providers.map((provider) => provider.id),
+      ['first-acp', 'second-acp'],
+    );
+    // Each restart saw the document its own save had just written.
+    assert.deepEqual(restarts, [['first-acp'], ['first-acp', 'second-acp']]);
+  });
+
   test('a restart failure is a typed 503 and keeps the old facts', async () => {
     const { service, saves } = storeService(DEFAULT_CONFIG, async () => {
       throw new Error('owner refused');
@@ -152,6 +198,152 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
       },
     );
     assert.equal(saves.length, 0);
+  });
+
+  test('validation key sets match the registered schema properties', async () => {
+    const schema = JSON.parse(
+      readFileSync(
+        join(
+          serviceRoot,
+          '..',
+          '..',
+          'schemas',
+          'daemon-api',
+          'agent-host',
+          'agent-host-config.schema.json',
+        ),
+        'utf8',
+      ),
+    );
+    const module = await import(join(serviceRoot, 'dist', 'agent-host-config.js'));
+    const byName = (left, right) => left.localeCompare(right);
+    const sorted = (values) => [...values].sort(byName);
+    assert.deepEqual(sorted(module.CONFIG_KEYS), Object.keys(schema.properties).sort(byName));
+    assert.deepEqual(
+      sorted(module.TIMEOUT_KEYS),
+      Object.keys(schema.properties.timeouts.properties).sort(byName),
+    );
+    assert.deepEqual(
+      sorted(module.POLICY_KEYS),
+      Object.keys(schema.properties.policy.properties).sort(byName),
+    );
+    assert.deepEqual(
+      sorted(module.PROVIDER_KEYS),
+      Object.keys(schema.properties.providers.items.properties).sort(byName),
+    );
+  });
+
+  test('PUT enforces the wire schema constraints per field', async () => {
+    const cases = [
+      [{ ...DEFAULT_CONFIG, max_sessions: 0 }, /max_sessions/],
+      [{ ...DEFAULT_CONFIG, max_sessions: 1.5 }, /max_sessions/],
+      [{ ...DEFAULT_CONFIG, max_ops_per_session: -1 }, /max_ops_per_session/],
+      [
+        { ...DEFAULT_CONFIG, timeouts: { ...DEFAULT_CONFIG.timeouts, launch_ms: 0 } },
+        /timeouts\.launch_ms/,
+      ],
+      [
+        { ...DEFAULT_CONFIG, timeouts: { ...DEFAULT_CONFIG.timeouts, unknown_ms: 1 } },
+        /unknown field 'unknown_ms' at timeouts/,
+      ],
+      [
+        { ...DEFAULT_CONFIG, policy: { ...DEFAULT_CONFIG.policy, unknown_provider: 'maybe' } },
+        /policy\.unknown_provider/,
+      ],
+      [
+        { ...DEFAULT_CONFIG, policy: { ...DEFAULT_CONFIG.policy, unknown_tool_risk: 'maybe' } },
+        /policy\.unknown_tool_risk/,
+      ],
+      [
+        { ...DEFAULT_CONFIG, policy: { ...DEFAULT_CONFIG.policy, allow_model_fallback: 'yes' } },
+        /policy\.allow_model_fallback/,
+      ],
+      [{ ...DEFAULT_CONFIG, extra: true }, /unknown field 'extra' at config/],
+      [
+        {
+          ...DEFAULT_CONFIG,
+          providers: [{ id: 'claude-acp', protocol: 'acp', command: 'x', shell: true }],
+        },
+        /unknown field 'shell' at providers\[0\]/,
+      ],
+      [
+        {
+          ...DEFAULT_CONFIG,
+          providers: [{ id: 'claude-acp', protocol: 'acp', command: 'x', args: ['ok', 1] }],
+        },
+        /providers\[0\]\.args/,
+      ],
+    ];
+    for (const [body, pattern] of cases) {
+      const { service, saves } = storeService(DEFAULT_CONFIG);
+      await assert.rejects(
+        () => handle('PUT', service, body),
+        (error) => {
+          assert.equal(error.status, 400, JSON.stringify(body));
+          assert.equal(error.code, 'invalid_input');
+          assert.match(error.message, pattern);
+          return true;
+        },
+      );
+      assert.equal(saves.length, 0, 'an invalid document never reaches the native save path');
+    }
+  });
+
+  test('a PUT and a workspace selection never interleave on the owner lifecycle', async () => {
+    const log = [];
+    const pause = () => new Promise((resolve) => setTimeout(resolve, 10));
+    const service = {
+      workspaceInitialized: true,
+      providerReady: false,
+      engineEpoch: 0,
+      creatorId: null,
+      workspaceSlug: null,
+      core: {
+        selectWorkspace: async () => {
+          log.push('select:start');
+          await pause();
+          log.push('select:end');
+          return { creator_id: 'ctr_x', workspace_slug: 'default' };
+        },
+        getAgentHostConfig: async () => {
+          log.push('config:get');
+          return DEFAULT_CONFIG;
+        },
+        saveAgentHostConfig: async () => {
+          log.push('save:start');
+          await pause();
+          log.push('save:end');
+        },
+        restartExecutionOwner: async () => {
+          log.push('restart:start');
+          await pause();
+          log.push('restart:end');
+          return { engine_epoch: 1, provider_ready: true };
+        },
+      },
+    };
+
+    await Promise.all([
+      handle('PUT', service, {
+        ...DEFAULT_CONFIG,
+        providers: [{ id: 'claude-acp', protocol: 'acp', command: 'claude-agent-acp', enabled: true }],
+      }),
+      workspaces.setActiveWorkspace(service, {
+        creator_id: 'ctr_x',
+        workspace_slug: 'default',
+      }),
+    ]);
+
+    // ONE queue: the save+restart completes before the selection starts.
+    assert.deepEqual(log, [
+      'save:start',
+      'save:end',
+      'restart:start',
+      'restart:end',
+      'config:get',
+      'select:start',
+      'select:end',
+    ]);
   });
 
   test('PUT rejects a document without a providers array', async () => {

@@ -6,6 +6,7 @@ JSON Schemas for Agent Host session and operation contracts under `/v1/daemon/ag
 
 | Endpoint | Schema files |
 |----------|-------------|
+| `GET/PUT /v1/daemon/agent-host/config` | `agent-host-config.schema.json` |
 | `POST /v1/daemon/agent-host/scan` | `scan-request.schema.json`, `scan-response.schema.json`, `agent-scan-entry.schema.json` |
 | `POST /v1/daemon/agent-host/sessions` | `create-session-request.schema.json`, `session-response.schema.json` |
 | `GET /v1/daemon/agent-host/sessions` | `agent-host-list-sessions-query.schema.json`, `session-list-response.schema.json` |

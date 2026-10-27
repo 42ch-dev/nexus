@@ -62,8 +62,17 @@ export const CAPABILITY_ROUTES: readonly DomainRoute[] = [
     pattern: /^\/v1\/daemon\/orchestration\/capabilities$/,
     tier: 'tier2',
     family: 'execution',
-    handle: async (service, _params, search) => ({
-      body: await listCapabilities(service, search),
-    }),
+    handle: async (service, _params, search) => {
+      // A domain-only profile owns no provider lane: the capability registry
+      // is outside that profile, not an unmigrated route.
+      if (service.domainOnly) {
+        throw new HttpError(
+          501,
+          'not_supported',
+          'capabilities require a provider-enabled profile',
+        );
+      }
+      return { body: await listCapabilities(service, search) };
+    },
   },
 ];

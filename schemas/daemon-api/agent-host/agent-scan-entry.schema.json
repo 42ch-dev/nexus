@@ -28,6 +28,11 @@
       ],
       "description": "Known launch command for this agent. Sourced from the registry's per-platform binary cmd field (e.g. 'claude-acp') or supplied by the user in the wizard's custom path input. Null when neither is available."
     },
+    "protocol_kind": {
+      "type": ["string", "null"],
+      "enum": ["acp", "native_cli", null],
+      "description": "Wire protocol kind of the candidate (additive, I-000134 F-7). Null for a legacy producer that does not publish it. A provider entry saved from this candidate uses the same kind."
+    },
     "launch_args": {
       "type": "array",
       "items": {

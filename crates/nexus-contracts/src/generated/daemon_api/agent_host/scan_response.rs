@@ -22,6 +22,9 @@ pub struct NexusAgentScanEntry {
     pub launch_command: ::std::option::Option<::std::string::String>,
     ///Agent display name from the ACP registry.
     pub name: ::std::string::String,
+    ///Wire protocol kind of the candidate (additive, I-000134 F-7). Null for a legacy producer that does not publish it. A provider entry saved from this candidate uses the same kind.
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub protocol_kind: ::std::option::Option<NexusAgentScanEntryProtocolKind>,
     ///Matching ACP registry agent ID (e.g. 'claude-acp'). Null for custom wizard-supplied entries that have no registry match.
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub registry_agent_id: ::std::option::Option<::std::string::String>,
@@ -32,6 +35,61 @@ pub struct NexusAgentScanEntry {
 impl NexusAgentScanEntry {
     pub fn builder() -> builder::NexusAgentScanEntry {
         Default::default()
+    }
+}
+///Wire protocol kind of the candidate (additive, I-000134 F-7). Null for a legacy producer that does not publish it. A provider entry saved from this candidate uses the same kind.
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
+)]
+pub enum NexusAgentScanEntryProtocolKind {
+    #[serde(rename = "acp")]
+    Acp,
+    #[serde(rename = "native_cli")]
+    NativeCli,
+}
+impl ::std::fmt::Display for NexusAgentScanEntryProtocolKind {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Acp => f.write_str("acp"),
+            Self::NativeCli => f.write_str("native_cli"),
+        }
+    }
+}
+impl ::std::str::FromStr for NexusAgentScanEntryProtocolKind {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "acp" => Ok(Self::Acp),
+            "native_cli" => Ok(Self::NativeCli),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for NexusAgentScanEntryProtocolKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for NexusAgentScanEntryProtocolKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
     }
 }
 ///Response for POST /v1/daemon/agent-host/scan. Returns the ACP registry agent list annotated with local PATH-install availability. Additive V1.94 endpoint.
@@ -68,6 +126,10 @@ pub mod builder {
             ::std::string::String,
         >,
         name: ::std::result::Result<::std::string::String, ::std::string::String>,
+        protocol_kind: ::std::result::Result<
+            ::std::option::Option<super::NexusAgentScanEntryProtocolKind>,
+            ::std::string::String,
+        >,
         registry_agent_id: ::std::result::Result<
             ::std::option::Option<::std::string::String>,
             ::std::string::String,
@@ -86,6 +148,7 @@ pub mod builder {
                 launch_args: Ok(Default::default()),
                 launch_command: Ok(Default::default()),
                 name: Err("no value supplied for name".to_string()),
+                protocol_kind: Ok(Default::default()),
                 registry_agent_id: Ok(Default::default()),
                 version: Ok(Default::default()),
             }
@@ -162,6 +225,20 @@ pub mod builder {
                 .map_err(|e| format!("error converting supplied value for name: {e}"));
             self
         }
+        pub fn protocol_kind<T>(mut self, value: T) -> Self
+        where
+            T: ::std::convert::TryInto<
+                ::std::option::Option<super::NexusAgentScanEntryProtocolKind>,
+            >,
+            T::Error: ::std::fmt::Display,
+        {
+            self.protocol_kind = value
+                .try_into()
+                .map_err(|e| {
+                    format!("error converting supplied value for protocol_kind: {e}")
+                });
+            self
+        }
         pub fn registry_agent_id<T>(mut self, value: T) -> Self
         where
             T: ::std::convert::TryInto<::std::option::Option<::std::string::String>>,
@@ -199,6 +276,7 @@ pub mod builder {
                 launch_args: value.launch_args?,
                 launch_command: value.launch_command?,
                 name: value.name?,
+                protocol_kind: value.protocol_kind?,
                 registry_agent_id: value.registry_agent_id?,
                 version: value.version?,
             })
@@ -213,6 +291,7 @@ pub mod builder {
                 launch_args: Ok(value.launch_args),
                 launch_command: Ok(value.launch_command),
                 name: Ok(value.name),
+                protocol_kind: Ok(value.protocol_kind),
                 registry_agent_id: Ok(value.registry_agent_id),
                 version: Ok(value.version),
             }
