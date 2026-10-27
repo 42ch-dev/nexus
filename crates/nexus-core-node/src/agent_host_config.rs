@@ -29,14 +29,15 @@ fn invalid_input(message: impl Into<String>) -> Error {
 
 fn validate(config: &AgentHostConfig) -> Result<()> {
     if config.policy.unknown_provider != "deny" && config.policy.unknown_provider != "allow" {
-        return Err(invalid_input("unknown_provider must be \"deny\" or \"allow\""));
+        return Err(invalid_input(
+            "unknown_provider must be \"deny\" or \"allow\"",
+        ));
     }
     for provider in &config.providers {
         // The launcher's own admission check is the single source of truth:
         // id non-empty; enabled entries need a supported protocol AND a
         // non-empty command. A save can never accept what the launcher rejects.
-        validate_provider_config(provider)
-            .map_err(|error| invalid_input(error.to_string()))?;
+        validate_provider_config(provider).map_err(|error| invalid_input(error.to_string()))?;
     }
     Ok(())
 }

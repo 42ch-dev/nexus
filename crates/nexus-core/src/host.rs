@@ -324,11 +324,8 @@ async fn registry_scan_entries(
     };
     // Cache hits answer immediately; a cold fetch gets a bounded window so the
     // scan endpoint cannot hang on the CDN.
-    let Ok(Ok(registry)) = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        client.get_registry(),
-    )
-    .await
+    let Ok(Ok(registry)) =
+        tokio::time::timeout(std::time::Duration::from_secs(10), client.get_registry()).await
     else {
         return Vec::new();
     };
