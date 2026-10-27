@@ -1,10 +1,15 @@
-//! PATH-based discovery for native CLI providers.
+//! PATH-based discovery for native CLI and curated ACP providers.
 //!
-//! Scans the `PATH` environment variable for known commands (`claude`,
-//! `codex`, `dsh` — the ordinary upstream executable since the v1.188 P0
-//! T2 cutover; the retired `dsh-jsonrpc-agent` helper name is gone).
-//! Native CLI entries use distinct `provider_ids` (e.g., `claude-native`)
-//! to avoid collision with ACP registry's `claude` (R-004, R-008).
+//! Scans the `PATH` environment variable for the known commands in
+//! [`KNOWN_COMMANDS`] (`claude`, `codex`, `dsh` — the ordinary upstream
+//! executables since the v1.188 P0 T2 cutover — plus `omp`, `hermes`, and the
+//! open-design detection targets). CLI entries use distinct `provider_ids`
+//! (e.g., `claude-native`) to avoid collision with ACP registry's `claude`
+//! (R-004, R-008); curated ACP rows reuse the registry id where one exists.
+//!
+//! The scan emits the FULL detection roster: a command that is not on PATH
+//! still produces a row (unavailable health, bare launch command) so the UI
+//! can render the whole priority list with not-installed entries disabled.
 //!
 //! # Cross-platform probe (DF-26)
 //!
@@ -30,23 +35,82 @@ use crate::{DiscoverySource, LaunchStrategy, ProviderCatalogEntry, TrustLevel};
 
 /// Known CLI commands and their provider ID mappings.
 ///
-/// Each entry maps a command name to a distinct `provider_id` that won't collide
-/// with ACP registry agent IDs. `dsh` maps to `dsh-native` (PD-4): the
-/// same binary is also honored via the `DSH_RUNTIME_BIN` env var, and the
-/// scan emits a `dsh-native` row for that route too — a non-empty
-/// `DSH_RUNTIME_BIN` counts as present even when the command is not on
-/// PATH (same catalog fields, same dedup/suppression rules). Explicit
-/// configured overrides are validated at provider launch, not here.
-const KNOWN_COMMANDS: &[(&str, &str)] = &[
-    ("claude", "claude-native"),
-    ("codex", "codex-native"),
-    ("dsh", "dsh-native"),
+/// Each entry is `(command, provider_id, acp_args)`. `acp_args` non-empty
+/// marks a curated native ACP server: the row becomes `ProtocolKind::Acp`
+/// with `LaunchStrategy::Acp` carrying these arguments and `acp_full()`
+/// capabilities; empty args keep the historical native CLI row (limited
+/// descriptor). Provider IDs for open-design targets reuse the ACP CDN
+/// registry id where one exists, so the web catalog overrides and a future
+/// registry-fed scan dedupe against the same key.
+///
+/// `dsh` maps to `dsh-native` (PD-4): the same binary is also honored via
+/// the `DSH_RUNTIME_BIN` env var, and the scan emits a `dsh-native` row for
+/// that route too — a non-empty `DSH_RUNTIME_BIN` counts as present even
+/// when the command is not on PATH (same catalog fields, same
+/// dedup/suppression rules). Explicit configured overrides are validated at
+/// provider launch, not here.
+///
+/// omp / hermes launch args are doc-verified native ACP servers:
+/// - omp: <https://omp.sh/docs/acp> (`omp acp`, stdio)
+/// - hermes: <https://hermes-agent.nousresearch.com/docs/user-guide/features/acp>
+///   (`hermes acp`, stdio)
+///
+/// The remaining rows port the open-design detection targets
+/// (nexu-io/open-design `apps/daemon/src/runtimes/defs`); their launch args
+/// are NOT verified, so they stay detection-only native CLI rows.
+const KNOWN_COMMANDS: &[(&str, &str, &[&str])] = &[
+    ("claude", "claude-native", &[]),
+    ("codex", "codex-native", &[]),
+    ("dsh", "dsh-native", &[]),
+    // Curated native ACP servers (launch args verified against docs).
+    ("omp", "omp", &["acp"]),
+    ("hermes", "hermes", &["acp"]),
+    // open-design detection targets (nexu-io/open-design runtimes/defs).
+    ("vela", "amr", &[]),
+    ("devin", "devin", &[]),
+    ("opencode", "opencode", &[]),
+    ("opencode-cli", "byok-opencode", &[]),
+    ("traecli", "trae-cli", &[]),
+    ("grok", "grok-build", &[]),
+    ("kimi", "kimi", &[]),
+    ("cursor-agent", "cursor", &[]),
+    ("qwen", "qwen-code", &[]),
+    ("qodercli", "qoder", &[]),
+    ("copilot", "github-copilot-cli", &[]),
+    ("amp", "amp-acp", &[]),
+    ("kiro-cli", "kiro", &[]),
+    ("kilo", "kilo", &[]),
+    ("vibe-acp", "vibe", &[]),
+    ("deepseek", "deepseek", &[]),
+    ("aider", "aider", &[]),
+    ("agy", "antigravity-acp", &[]),
+    ("reasonix", "reasonix", &[]),
+    ("codebuddy", "codebuddy-code", &[]),
+    ("mimo", "mimo", &[]),
+    ("atomcode", "atomcode", &[]),
 ];
 
-/// Discover native CLI providers by scanning PATH.
+/// Provider IDs the roster can emit for plain native-CLI rows (no ACP args).
 ///
-/// For each found command, creates a `ProviderCatalogEntry` with:
-/// - `protocol_kind = NativeCli`
+/// Consumed by `validate_provider_config` so a configured provider that came
+/// from a detection row (`opencode`, `kimi`, …) passes the same validation
+/// the built-in trio passes.
+pub fn known_native_cli_provider_ids() -> impl Iterator<Item = &'static str> {
+    KNOWN_COMMANDS
+        .iter()
+        .filter(|(_, _, acp_args)| acp_args.is_empty())
+        .map(|&(_, id, _)| id)
+}
+
+/// Discover native CLI and curated ACP providers by scanning PATH.
+///
+/// Emits the FULL detection roster: one row per [`KNOWN_COMMANDS`] entry.
+/// A command found on PATH becomes a candidate row; a command that is not
+/// found still produces an unavailable row so callers can render the whole
+/// list with not-installed entries disabled.
+///
+/// Found rows carry:
+/// - `protocol_kind = NativeCli` (or `Acp` for curated rows with `acp_args`)
 /// - `source = PathScan`
 /// - `trust = LocalPath`
 ///
@@ -97,7 +161,7 @@ pub fn scan_path_in(
 
     let mut entries = Vec::new();
 
-    for &(cmd, provider_id_str) in KNOWN_COMMANDS {
+    for &(cmd, provider_id_str, acp_args) in KNOWN_COMMANDS {
         let pid = ProviderId::new(provider_id_str);
 
         // Skip if already configured or suppressed
@@ -105,27 +169,43 @@ pub fn scan_path_in(
             continue;
         }
 
-        // The dsh row advertises the AR-6 documented narrower descriptor
-        // (`cancellation` false — the SDK surface has no cancel RPC;
-        // `streaming` true since v1.188 P1 message-level proof), never
-        // the broader native CLI claim; claude/codex keep
-        // `native_cli_limited()`.
-        let capabilities = if provider_id_str == "dsh-native" {
+        // Wire contract: the scan handler in `nexus-core` maps the
+        // "path candidate" health-message prefix to `installed: true`.
+        // Both markers below MUST keep that prefix.
+        let acp = !acp_args.is_empty();
+        let capabilities = if acp {
+            CapabilityDescriptor::acp_full()
+        } else if provider_id_str == "dsh-native" {
             CapabilityDescriptor::dsh_limited()
         } else {
             CapabilityDescriptor::native_cli_limited()
         };
+        let (protocol_kind, display_name) = if acp {
+            (ProtocolKind::Acp, format!("{cmd} (ACP)"))
+        } else {
+            (ProtocolKind::NativeCli, format!("{cmd} (native CLI)"))
+        };
 
         let mut push_row = |command: String, health: ProviderHealth| {
+            let args: Vec<String> = acp_args.iter().map(ToString::to_string).collect();
+            let launch = if acp {
+                LaunchStrategy::Acp {
+                    command,
+                    args,
+                    env: HashMap::new(),
+                }
+            } else {
+                LaunchStrategy::NativeCli {
+                    command,
+                    args,
+                    env: HashMap::new(),
+                }
+            };
             entries.push(ProviderCatalogEntry {
                 provider_id: pid.clone(),
-                display_name: format!("{cmd} (native CLI)"),
-                protocol_kind: ProtocolKind::NativeCli,
-                launch: LaunchStrategy::NativeCli {
-                    command,
-                    args: vec![],
-                    env: HashMap::new(),
-                },
+                display_name: display_name.clone(),
+                protocol_kind,
+                launch,
                 source: DiscoverySource::PathScan,
                 trust: TrustLevel::LocalPath,
                 capabilities: capabilities.clone(),
@@ -155,8 +235,10 @@ pub fn scan_path_in(
             // static reason, never a healthy row the provider cannot
             // launch. Only reached when the PATH lookup missed, so the
             // two routes can never duplicate the row.
+            let mut routed = false;
             if let Some(env_bin) = std::env::var_os("DSH_RUNTIME_BIN") {
                 if !env_bin.to_string_lossy().trim().is_empty() {
+                    routed = true;
                     match crate::providers::native_cli::dsh::resolve_dsh_executable(None) {
                         Ok(resolved) => push_row(
                             resolved.to_string_lossy().into_owned(),
@@ -168,6 +250,24 @@ pub fn scan_path_in(
                     }
                 }
             }
+            if !routed {
+                // Env route not taken: keep the not-found roster row so the
+                // dsh entry still shows up (disabled) in the UI.
+                push_row(
+                    cmd.to_string(),
+                    unavailable(format!("{cmd} not found on PATH")),
+                );
+            }
+        } else {
+            // Full-roster contract: a detection target that is not installed
+            // still gets a row so the UI renders it disabled. The launch
+            // command stays the bare name and is never spawned in this
+            // state; the message MUST NOT carry the "path candidate" prefix
+            // (it maps to `installed: true` in the daemon scan handler).
+            push_row(
+                cmd.to_string(),
+                unavailable(format!("{cmd} not found on PATH")),
+            );
         }
     }
 
@@ -275,41 +375,92 @@ pub fn scan_custom_path(
 
     let mut entries = Vec::new();
 
-    for &(cmd, provider_id_str) in KNOWN_COMMANDS {
+    for &(cmd, provider_id_str, acp_args) in KNOWN_COMMANDS {
         let pid = ProviderId::new(provider_id_str);
 
         if suppressed.contains(&pid) {
             continue;
         }
         let candidate = |message: &str| candidate_unavailable_health(&pid, message);
+        let unavailable = |message: String| ProviderHealth {
+            provider_id: pid.clone(),
+            available: false,
+            latency_ms: None,
+            message: Some(message),
+        };
 
         // Same capability honesty as the production scan: the dsh row
         // carries the AR-6 narrower descriptor. The `DSH_RUNTIME_BIN`
         // env route is intentionally absent here — this helper is the
         // custom-PATH test seam and stays deterministic against the
         // process environment.
-        let capabilities = if provider_id_str == "dsh-native" {
+        let acp = !acp_args.is_empty();
+        let capabilities = if acp {
+            CapabilityDescriptor::acp_full()
+        } else if provider_id_str == "dsh-native" {
             CapabilityDescriptor::dsh_limited()
         } else {
             CapabilityDescriptor::native_cli_limited()
         };
+        let (protocol_kind, display_name) = if acp {
+            (ProtocolKind::Acp, format!("{cmd} (ACP)"))
+        } else {
+            (ProtocolKind::NativeCli, format!("{cmd} (native CLI)"))
+        };
 
         if let Some(found_path) = find_command_in_dirs(custom_path_dirs, cmd) {
+            let args: Vec<String> = acp_args.iter().map(ToString::to_string).collect();
+            let launch = if acp {
+                LaunchStrategy::Acp {
+                    command: found_path.to_string_lossy().into_owned(),
+                    args,
+                    env: HashMap::new(),
+                }
+            } else {
+                LaunchStrategy::NativeCli {
+                    command: found_path.to_string_lossy().into_owned(),
+                    args,
+                    env: HashMap::new(),
+                }
+            };
             entries.push(ProviderCatalogEntry {
                 provider_id: pid.clone(),
-                display_name: format!("{cmd} (native CLI)"),
-                protocol_kind: ProtocolKind::NativeCli,
-                launch: LaunchStrategy::NativeCli {
-                    command: found_path.to_string_lossy().into_owned(),
-                    args: vec![],
-                    env: HashMap::new(),
-                },
+                display_name,
+                protocol_kind,
+                launch,
                 source: DiscoverySource::PathScan,
                 trust: TrustLevel::LocalPath,
                 capabilities,
                 // Same truthful-candidate contract as the production scan: an
                 // executable on a scanned dir is a candidate, not readiness.
                 health: candidate("path candidate; bounded probe required"),
+            });
+        } else {
+            // Same full-roster contract as the production scan (the dsh env
+            // route stays intentionally absent here): a missing target is an
+            // unavailable row whose message never carries the "path
+            // candidate" installed marker.
+            entries.push(ProviderCatalogEntry {
+                provider_id: pid.clone(),
+                display_name,
+                protocol_kind,
+                launch: if acp {
+                    LaunchStrategy::Acp {
+                        command: cmd.to_string(),
+                        args: acp_args.iter().map(ToString::to_string).collect(),
+                        env: HashMap::new(),
+                    }
+                } else {
+                    LaunchStrategy::NativeCli {
+                        command: cmd.to_string(),
+                        args: vec![],
+                        env: HashMap::new(),
+                    }
+                },
+                source: DiscoverySource::PathScan,
+                trust: TrustLevel::LocalPath,
+                capabilities,
+                health: unavailable(format!("{cmd} not found on PATH")),
             });
         }
     }
@@ -349,11 +500,21 @@ mod tests {
         std::fs::write(&claude_path, "#!/bin/sh\necho hello\n").expect("Failed to write fixture");
 
         let entries = scan_custom_path(&[temp_dir.path().to_path_buf()], &[]);
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].provider_id.0, "claude-native");
-        assert_eq!(entries[0].protocol_kind, ProtocolKind::NativeCli);
-        assert_eq!(entries[0].source, DiscoverySource::PathScan);
-        assert_eq!(entries[0].trust, TrustLevel::LocalPath);
+        let claude = entries
+            .iter()
+            .find(|e| e.provider_id.0 == "claude-native")
+            .expect("claude row");
+        assert_eq!(claude.protocol_kind, ProtocolKind::NativeCli);
+        assert_eq!(claude.source, DiscoverySource::PathScan);
+        assert_eq!(claude.trust, TrustLevel::LocalPath);
+        // Full roster: every other target is an unavailable not-found row.
+        assert!(
+            entries
+                .iter()
+                .filter(|e| e.provider_id.0 != "claude-native")
+                .all(|e| !e.health.available),
+            "non-found rows must stay unavailable"
+        );
     }
 
     #[test]
@@ -364,18 +525,25 @@ mod tests {
         std::fs::write(&codex_path, "#!/bin/sh\necho hello\n").expect("Failed to write fixture");
 
         let entries = scan_custom_path(&[temp_dir.path().to_path_buf()], &[]);
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].provider_id.0, "codex-native");
-        assert_eq!(entries[0].protocol_kind, ProtocolKind::NativeCli);
-        assert_eq!(entries[0].source, DiscoverySource::PathScan);
-        assert_eq!(entries[0].trust, TrustLevel::LocalPath);
+        let codex = entries
+            .iter()
+            .find(|e| e.provider_id.0 == "codex-native")
+            .expect("codex row");
+        assert_eq!(codex.protocol_kind, ProtocolKind::NativeCli);
+        assert_eq!(codex.source, DiscoverySource::PathScan);
+        assert_eq!(codex.trust, TrustLevel::LocalPath);
     }
 
     #[test]
     fn scan_custom_path_empty_dir() {
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
         let entries = scan_custom_path(&[temp_dir.path().to_path_buf()], &[]);
-        assert!(entries.is_empty());
+        // Full roster: an empty dir yields all-unavailable rows, never candidates.
+        assert_eq!(entries.len(), KNOWN_COMMANDS.len());
+        assert!(
+            entries.iter().all(|e| !e.health.available),
+            "nothing is installed in an empty dir"
+        );
     }
 
     #[test]
@@ -388,7 +556,10 @@ mod tests {
             &[temp_dir.path().to_path_buf()],
             &[ProviderId::new("claude-native")],
         );
-        assert!(entries.is_empty(), "suppressed ID should be skipped");
+        assert!(
+            entries.iter().all(|e| e.provider_id.0 != "claude-native"),
+            "suppressed ID should be skipped"
+        );
     }
 
     // PATH / DSH_RUNTIME_BIN mutations below use the crate-wide
@@ -505,6 +676,7 @@ mod tests {
     /// replaces PATH with the temp directory for the test scope so the test
     /// genuinely depends on the stubs.
     #[test]
+    #[allow(clippy::too_many_lines)] // roster + ACP + marker assertions read best as one scenario
     fn scan_path_in_discovers_all_native_providers_when_stubs_executable() {
         let _lock = crate::test_support::PROCESS_ENV_LOCK.blocking_lock();
 
@@ -513,13 +685,19 @@ mod tests {
         let claude_path = temp_dir.path().join("claude");
         let codex_path = temp_dir.path().join("codex");
         let dsh_path = temp_dir.path().join("dsh");
+        let omp_path = temp_dir.path().join("omp");
+        let hermes_path = temp_dir.path().join("hermes");
         std::fs::write(&claude_path, "#!/bin/sh\necho hello\n").expect("write claude stub");
         std::fs::write(&codex_path, "#!/bin/sh\necho hello\n").expect("write codex stub");
         std::fs::write(&dsh_path, "#!/bin/sh\necho hello\n").expect("write dsh stub");
+        std::fs::write(&omp_path, "#!/bin/sh\necho hello\n").expect("write omp stub");
+        std::fs::write(&hermes_path, "#!/bin/sh\necho hello\n").expect("write hermes stub");
 
         set_executable(&claude_path);
         set_executable(&codex_path);
         set_executable(&dsh_path);
+        set_executable(&omp_path);
+        set_executable(&hermes_path);
 
         // Isolate PATH so the test depends on the stubs, not on any real
         // codex/claude/dsh that might be installed on the host
@@ -533,24 +711,29 @@ mod tests {
         let entries = scan_path_in(&config, &[], &[temp_dir.path().to_path_buf()])
             .expect("scan_path_in should succeed");
 
+        // Full-roster contract: EVERY detection target gets a row, installed
+        // or not — the UI renders the whole priority list and disables the
+        // not-installed entries.
         assert_eq!(
             entries.len(),
-            3,
-            "codex, claude, and dsh should all be discovered"
+            KNOWN_COMMANDS.len(),
+            "every detection target must produce a row: {}",
+            entries
+                .iter()
+                .map(|e| e.provider_id.0.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
         );
 
-        let ids: Vec<&str> = entries.iter().map(|e| e.provider_id.0.as_str()).collect();
-        assert!(
-            ids.contains(&"codex-native"),
-            "codex-native missing: {ids:?}"
-        );
-        assert!(
-            ids.contains(&"claude-native"),
-            "claude-native missing: {ids:?}"
-        );
-        assert!(ids.contains(&"dsh-native"), "dsh-native missing: {ids:?}");
+        let by_id = |id: &str| {
+            entries
+                .iter()
+                .find(|e| e.provider_id.0.as_str() == id)
+                .unwrap_or_else(|| panic!("{id} row missing"))
+        };
 
-        for entry in &entries {
+        for id in ["codex-native", "claude-native", "dsh-native"] {
+            let entry = by_id(id);
             assert_eq!(entry.protocol_kind, ProtocolKind::NativeCli);
             assert_eq!(entry.source, DiscoverySource::PathScan);
             assert_eq!(entry.trust, TrustLevel::LocalPath);
@@ -571,29 +754,87 @@ mod tests {
             );
         }
 
+        // Curated ACP rows: omp and hermes are doc-verified native ACP
+        // servers — the stubbed row must carry the ACP launch strategy.
+        for (id, cmd) in [("omp", "omp"), ("hermes", "hermes")] {
+            let entry = by_id(id);
+            assert_eq!(entry.protocol_kind, ProtocolKind::Acp, "{id}");
+            assert!(
+                entry.capabilities.set_mode,
+                "{id} must advertise the full ACP descriptor"
+            );
+            match &entry.launch {
+                LaunchStrategy::NativeCli { command, .. } => {
+                    panic!("{id} must launch via ACP, got NativeCli {command:?}");
+                }
+                LaunchStrategy::Acp { command, args, env } => {
+                    assert_eq!(args, &["acp".to_string()], "{id} acp args");
+                    assert!(env.is_empty(), "{id} carries no env overrides");
+                    assert!(
+                        command.ends_with(cmd),
+                        "{id} resolves the stub path: {command}"
+                    );
+                }
+            }
+            assert!(
+                entry
+                    .health
+                    .message
+                    .as_deref()
+                    .is_some_and(|m| m.starts_with("path candidate")),
+                "{id} stub is a PATH candidate"
+            );
+        }
+
+        // Not-installed targets stay in the roster, marked unavailable with a
+        // message that NEVER carries the "path candidate" installed marker.
+        let not_installed: Vec<&str> = entries
+            .iter()
+            .filter(|e| {
+                e.health
+                    .message
+                    .as_deref()
+                    .is_some_and(|m| m.ends_with("not found on PATH"))
+            })
+            .map(|e| e.provider_id.0.as_str())
+            .collect();
+        assert!(
+            not_installed.len() == KNOWN_COMMANDS.len() - 5,
+            "exactly the stubbed trio plus omp/hermes are installed; not-installed: {not_installed:?}"
+        );
+        for id in &not_installed {
+            let entry = by_id(id);
+            assert!(!entry.health.available, "{id}");
+            assert!(
+                !entry
+                    .health
+                    .message
+                    .as_deref()
+                    .is_some_and(|m| m.starts_with("path candidate")),
+                "{id} must not be marked as a PATH candidate"
+            );
+        }
+
         // B-2: the dsh row advertises the AR-6 narrower descriptor —
         // message-level streaming (proven on actual dsh in v1.188 P1 T3)
         // but no cancellation; claude/codex keep the broader native CLI
         // descriptor.
-        for entry in &entries {
-            match entry.provider_id.0.as_str() {
-                "dsh-native" => {
-                    assert!(
-                        entry.capabilities.streaming,
-                        "dsh-native streams committed messages (v1.188 P1, AR-6)"
-                    );
-                    assert!(
-                        !entry.capabilities.cancellation,
-                        "dsh-native must not claim cancellation (AR-6)"
-                    );
-                    assert!(entry.capabilities.session_restore);
-                }
-                "claude-native" | "codex-native" => {
-                    assert!(entry.capabilities.streaming);
-                    assert!(entry.capabilities.cancellation);
-                }
-                other => panic!("unexpected entry: {other}"),
-            }
+        {
+            let dsh = by_id("dsh-native");
+            assert!(
+                dsh.capabilities.streaming,
+                "dsh-native streams committed messages (v1.188 P1, AR-6)"
+            );
+            assert!(
+                !dsh.capabilities.cancellation,
+                "dsh-native must not claim cancellation (AR-6)"
+            );
+            assert!(dsh.capabilities.session_restore);
+        }
+        for id in ["claude-native", "codex-native"] {
+            let entry = by_id(id);
+            assert!(entry.capabilities.streaming);
+            assert!(entry.capabilities.cancellation);
         }
     }
 
@@ -620,12 +861,11 @@ mod tests {
         let entries = scan_path_in(&config, &[], &[temp_dir.path().to_path_buf()])
             .expect("scan_path_in should succeed");
 
-        assert_eq!(
-            entries.len(),
-            1,
-            "env-only dsh must be the only entry: {entries:?}"
-        );
-        let dsh = &entries[0];
+        // Full roster: the non-dsh targets appear as not-found rows.
+        let dsh = entries
+            .iter()
+            .find(|e| e.provider_id.0.as_str() == "dsh-native")
+            .expect("env-only dsh must produce the dsh-native row");
         assert_eq!(dsh.provider_id.0, "dsh-native");
         assert_eq!(dsh.protocol_kind, ProtocolKind::NativeCli);
         assert_eq!(dsh.source, DiscoverySource::PathScan);
@@ -688,13 +928,11 @@ mod tests {
         let entries = scan_path_in(&config, &[], &[temp_dir.path().to_path_buf()])
             .expect("scan_path_in should succeed");
 
-        assert_eq!(
-            entries.len(),
-            1,
-            "the invalid override still surfaces as a row: {entries:?}"
-        );
-        let dsh = &entries[0];
-        assert_eq!(dsh.provider_id.0, "dsh-native");
+        // Full roster: the non-dsh targets appear as not-found rows.
+        let dsh = entries
+            .iter()
+            .find(|e| e.provider_id.0.as_str() == "dsh-native")
+            .expect("the invalid override still surfaces as a row");
         assert!(
             !dsh.health.available,
             "an invalid override must not claim availability"
@@ -710,9 +948,10 @@ mod tests {
     }
 
     /// B-1 absent case: no `dsh` on the scanned dirs and
-    /// `DSH_RUNTIME_BIN` unset/empty → no `dsh-native` row at all.
+    /// `DSH_RUNTIME_BIN` unset/empty → the `dsh-native` row is the
+    /// not-found roster row (unavailable, never a PATH candidate).
     #[test]
-    fn scan_path_in_omits_dsh_row_when_command_absent_and_env_unset() {
+    fn scan_path_in_marks_dsh_unavailable_when_command_absent_and_env_unset() {
         let _lock = crate::test_support::PROCESS_ENV_LOCK.blocking_lock();
 
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
@@ -723,9 +962,27 @@ mod tests {
         let entries = scan_path_in(&config, &[], &[temp_dir.path().to_path_buf()])
             .expect("scan_path_in should succeed");
 
+        let dsh = entries
+            .iter()
+            .find(|e| e.provider_id.0.as_str() == "dsh-native")
+            .expect("full roster keeps the dsh-native row");
+        assert!(!dsh.health.available);
         assert!(
-            entries.is_empty(),
-            "no provider may be listed when nothing is discoverable: {entries:?}"
+            dsh.health
+                .message
+                .as_deref()
+                .is_some_and(|m| m.ends_with("not found on PATH")),
+            "absent dsh must be a not-found roster row: {:?}",
+            dsh.health.message
+        );
+        // And nothing anywhere on the roster claims to be a PATH candidate.
+        assert!(
+            entries.iter().all(|e| !e
+                .health
+                .message
+                .as_deref()
+                .is_some_and(|m| m.starts_with("path candidate"))),
+            "nothing is discoverable in this fixture: {entries:?}"
         );
     }
 
@@ -749,7 +1006,9 @@ mod tests {
         .expect("scan_path_in should succeed");
 
         assert!(
-            entries.is_empty(),
+            entries
+                .iter()
+                .all(|e| e.provider_id.0.as_str() != "dsh-native"),
             "suppressed dsh-native must stay absent even with DSH_RUNTIME_BIN set: {entries:?}"
         );
     }
@@ -776,15 +1035,37 @@ mod tests {
 
     #[test]
     fn known_commands_mapping() {
-        // Verify the mapping: claude -> claude-native, codex -> codex-native,
-        // dsh -> dsh-native
-        assert_eq!(KNOWN_COMMANDS.len(), 3);
-        assert_eq!(KNOWN_COMMANDS[0].0, "claude");
-        assert_eq!(KNOWN_COMMANDS[0].1, "claude-native");
-        assert_eq!(KNOWN_COMMANDS[1].0, "codex");
-        assert_eq!(KNOWN_COMMANDS[1].1, "codex-native");
-        assert_eq!(KNOWN_COMMANDS[2].0, "dsh");
-        assert_eq!(KNOWN_COMMANDS[2].1, "dsh-native");
+        // Verify the mapping by SEMANTICS (command → provider id + acp args),
+        // never by table position: the roster is append-ordered by feature.
+        let by_command = |cmd: &str| {
+            KNOWN_COMMANDS
+                .iter()
+                .find(|&&(c, _, _)| c == cmd)
+                .unwrap_or_else(|| panic!("{cmd} detection row"))
+        };
+        assert_eq!(by_command("claude").1, "claude-native");
+        assert_eq!(by_command("claude").2, &[] as &[&str]);
+        assert_eq!(by_command("codex").1, "codex-native");
+        assert_eq!(by_command("dsh").1, "dsh-native");
+
+        let omp = KNOWN_COMMANDS
+            .iter()
+            .find(|&&(cmd, _, _)| cmd == "omp")
+            .expect("omp detection row");
+        assert_eq!(omp.1, "omp");
+        assert_eq!(omp.2, &["acp"]);
+        let hermes = KNOWN_COMMANDS
+            .iter()
+            .find(|&&(cmd, _, _)| cmd == "hermes")
+            .expect("hermes detection row");
+        assert_eq!(hermes.1, "hermes");
+        assert_eq!(hermes.2, &["acp"]);
+
+        let mut ids: Vec<&str> = KNOWN_COMMANDS.iter().map(|&(_, id, _)| id).collect();
+        ids.sort_unstable();
+        let deduped = ids.len();
+        ids.dedup();
+        assert_eq!(ids.len(), deduped, "provider ids must be unique: {ids:?}");
     }
 
     // ── DF-26: Cross-platform probe tests (AH5.1) ─────────────────────

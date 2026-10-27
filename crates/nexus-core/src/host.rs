@@ -17,7 +17,7 @@ use std::time::Instant;
 
 use nexus_agent_host::capability::model::HostOperation;
 use nexus_agent_host::capability::model::{
-    HostEvent, HostEventStream, HostStartConfig, SessionOwner,
+    HostEvent, HostEventStream, HostStartConfig, ProtocolKind, SessionOwner,
 };
 use nexus_agent_host::capability::CreateSessionRequest as HostCreateRequest;
 use nexus_agent_host::config::{load_config_from_path, validate_workspace_path, AgentHostConfig};
@@ -324,30 +324,41 @@ fn native_scan_entries(
     Ok(native_entries
         .into_iter()
         .map(|entry| {
-            let launch_command = match &entry.launch {
-                LaunchStrategy::Acp { command, .. } | LaunchStrategy::NativeCli { command, .. } => {
-                    command.clone()
+            let (launch_command, launch_args) = match &entry.launch {
+                LaunchStrategy::Acp { command, args, .. }
+                | LaunchStrategy::NativeCli { command, args, .. } => {
+                    (command.clone(), args.clone())
                 }
             };
-            // The scan only emits a PATH row when it resolved the binary (or a
-            // validated DSH_RUNTIME_BIN), so presence is the install signal —
-            // not the probe-pending health the catalog carries.
+            // Only an executable file counts as installed (a found PATH row,
+            // a resolved DSH_RUNTIME_BIN, or a bare roster command that is not
+            // on PATH — the latter resolves to false).
             let installed = path_scan::command_on_path(probe_dirs, &launch_command)
                 || path_scan::is_executable_file(std::path::Path::new(&launch_command));
             NexusAgentScanEntry {
                 name: entry.display_name,
                 installed,
                 launch_command: Some(launch_command),
-                description: entry.health.message,
+                launch_args,
+                // Discovery health messages are internal diagnostics, never
+                // user-facing descriptions.
+                description: None,
                 icon_url: None,
-                // The provider id IS the join key the repair page saves; PATH
-                // rows are native CLI.
+                // The provider id IS the join key the repair page saves.
                 registry_agent_id: Some(entry.provider_id.to_string()),
-                protocol_kind: Some(NexusAgentScanEntryProtocolKind::NativeCli),
+                protocol_kind: Some(wire_scan_protocol(entry.protocol_kind)),
                 version: None,
             }
         })
         .collect())
+}
+
+/// Map a catalog protocol kind to the scan wire enum.
+const fn wire_scan_protocol(kind: ProtocolKind) -> NexusAgentScanEntryProtocolKind {
+    match kind {
+        ProtocolKind::Acp => NexusAgentScanEntryProtocolKind::Acp,
+        ProtocolKind::NativeCli => NexusAgentScanEntryProtocolKind::NativeCli,
+    }
 }
 
 /// Discoverable ACP registry agents whose launch binary resolves on this PATH.
@@ -389,6 +400,7 @@ async fn registry_scan_entries(
                 name: entry.display_name,
                 registry_agent_id: Some(entry.provider_id.to_string()),
                 launch_command: Some(command.clone()),
+                launch_args: Vec::new(),
                 protocol_kind: Some(NexusAgentScanEntryProtocolKind::Acp),
                 installed: true,
                 version: None,
