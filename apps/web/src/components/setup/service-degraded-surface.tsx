@@ -90,11 +90,14 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
   // user out of the catalog.
   const [scanFailed, setScanFailed] = useState(false);
   const [catalogFailed, setCatalogFailed] = useState(false);
-  // Enabled provider ids from the on-disk config. A configured provider is
-  // the thing being repaired: it stays selectable even when the scan has no
-  // row for it (the scan skips enabled configured providers, and catalog-only
-  // targets like gemini have no detection row at all).
-  const [configuredIds, setConfiguredIds] = useState<Set<string>>(new Set());
+  // Enabled provider rows from the on-disk config, by id. A configured
+  // provider is the thing being repaired: it stays selectable even when the
+  // scan has no row for it (the scan skips enabled configured providers, and
+  // catalog-only targets like gemini have no detection row at all), and its
+  // stored command/args back the form when the scan cannot supply them.
+  const [configuredRows, setConfiguredRows] = useState<
+    Map<string, AgentHostProviderConfig>
+  >(new Map());
   const [id, setId] = useState('');
   const [protocol, setProtocol] = useState<AgentHostProviderConfig['protocol']>('acp');
   const [command, setCommand] = useState('');
@@ -124,9 +127,11 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
     void client.getAgentHostConfig().then(
       (config) => {
         if (!cancelled) {
-          setConfiguredIds(
-            new Set(
-              config.providers.filter((p) => p.enabled).map((p) => p.id),
+          setConfiguredRows(
+            new Map(
+              config.providers
+                .filter((p) => p.enabled)
+                .map((p) => [p.id, p]),
             ),
           );
         }
@@ -152,10 +157,14 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
   }, [client]);
 
   const choose = (candidate: ProviderCandidate) => {
+    // Prefer scan-provided launch data; fall back to what the user already
+    // had configured, so choosing a configured row without a scan row never
+    // blanks the stored command/args.
+    const configured = configuredRows.get(candidate.id);
     setId(candidate.id);
     setProtocol(candidate.protocol);
-    setCommand(candidate.command ?? '');
-    setArgs(candidate.args);
+    setCommand(candidate.command ?? configured?.command ?? '');
+    setArgs(candidate.args.length > 0 ? candidate.args : (configured?.args ?? []));
   };
 
   const save = async () => {
@@ -209,8 +218,7 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
   // Sort: installed first, then configured (the repair target), then curated
   // priority (unranked last, display name as the final tie-break); the
   // catalog's registry order falls out as the stable default.
-  const configured = (c: ProviderCandidate) =>
-    configuredIds.has(c.id) || scanFailed ? 1 : 0;
+  const configured = (c: ProviderCandidate) => (configuredRows.has(c.id) ? 1 : 0);
   const orderedCandidates = [...candidates].sort((left, right) => {
     return (
       Number(right.installed) - Number(left.installed) ||
@@ -237,7 +245,7 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
               // A configured provider is the repair target itself: it stays
               // selectable regardless of scan state (the scan skips enabled
               // configured providers, so its row is missing by design).
-              const configured = configuredIds.has(candidate.id);
+              const configured = configuredRows.has(candidate.id);
               const installState = scanFailed
                 ? 'unknown'
                 : candidate.installed
