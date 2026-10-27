@@ -36,6 +36,7 @@ import { PRESET_ROUTES } from './presets.js';
 import { EXECUTION_ROUTES } from './execution.js';
 import { COMPUTE_ROUTES } from './compute.js';
 import { WORKFLOW_OBSERVATION_ROUTES } from './workflow-observation.js';
+import { CAPABILITY_ROUTES } from './capabilities.js';
 
 /** Read the `version` field of `apps/nexus-service/package.json`. */
 function readServiceVersion(): string {
@@ -541,6 +542,7 @@ export const DOMAIN_ROUTES: readonly DomainRoute[] = [
   ...EXECUTION_ROUTES,
   ...COMPUTE_ROUTES,
   ...WORKFLOW_OBSERVATION_ROUTES,
+  ...CAPABILITY_ROUTES,
   ...RUNTIME_ROUTES,
   ...HOST_ROUTES,
   ...WORLD_KB_ROUTES,

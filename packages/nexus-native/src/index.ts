@@ -290,6 +290,8 @@ export interface NativeCore {
    * `startExecutionOwner`.
    */
   restartExecutionOwner(): Promise<unknown>;
+  /** The live orchestration capability registry rows (`{ items }`). */
+  listCapabilities(): Promise<unknown>;
   changes(principal: PrincipalHandle, request: CoreChangesRequest): Promise<CoreChangesResponse>;
   providerCall(request: ProviderCall): Promise<ProviderReply>;
   nextProviderEvents(
@@ -904,6 +906,9 @@ function wrapCore(inner: NativeCoreBinding): NativeCore {
     },
     async restartExecutionOwner() {
       return parseJsonBuffer<unknown>(await inner.restartExecutionOwner());
+    },
+    async listCapabilities() {
+      return parseJsonBuffer<unknown>(await inner.listCapabilities());
     },
     async changes(principal, request) {
       return parseJsonBuffer(

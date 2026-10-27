@@ -285,6 +285,40 @@ impl NativeCore {
 
     // ── Durable schedule mutations (P3 ExecutionHandle authority) ───────────
 
+    /// `GET /v1/daemon/orchestration/capabilities` — the live capability
+    /// registry rows the established owner's engine reads.
+    ///
+    /// Rows use the hand-coded local wire shape (`camelCase` schemas,
+    /// `capability-info.ts`), not the schema-facing generated DTO; the service
+    /// owns pagination/sort so this lane stays a passthrough.
+    #[napi]
+    pub async fn list_capabilities(&self) -> Result<Buffer> {
+        let handle = self.execution_handle()?;
+        let registry = handle
+            .capability_holder()
+            .get()
+            .ok_or_else(|| Error::from_reason("capability registry unavailable"))?;
+        let items: Vec<serde_json::Value> = registry
+            .iter()
+            .map(|capability| {
+                let origin = match capability.origin() {
+                    nexus_orchestration::capability::CapabilityOrigin::Builtin => "builtin",
+                    nexus_orchestration::capability::CapabilityOrigin::User => "user",
+                };
+                serde_json::json!({
+                    "name": capability.name(),
+                    "inputSchema": capability.input_schema(),
+                    "outputSchema": capability.output_schema(),
+                    "origin": origin,
+                })
+            })
+            .collect();
+        Ok(Buffer::from(serde_json::to_vec(
+            &serde_json::json!({ "items": items }),
+        )?))
+    }
+
+
     /// The established execution owner, or a truthful rejection naming the
     /// missing establishment (never a silently degraded write).
     fn execution_handle(&self) -> Result<std::sync::Arc<nexus_core::ExecutionHandle>> {

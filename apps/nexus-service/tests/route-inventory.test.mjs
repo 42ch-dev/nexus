@@ -123,6 +123,7 @@ describe('route-inventory (P5-T5)', () => {
   ['GET', '/v1/daemon/memory/pending-review/count', 'tier2', 'memory'],
   ['GET', '/v1/daemon/narrative/worlds', 'tier2', 'worlds'],
   ['GET', '/v1/daemon/narrative/worlds/([^/]+)', 'tier2', 'worlds'],
+  ['GET', '/v1/daemon/orchestration/capabilities', 'tier2', 'execution'],
   ['GET', '/v1/daemon/orchestration/presets', 'tier2', 'presets'],
   ['GET', '/v1/daemon/orchestration/presets/([^/]+)/profile', 'tier2', 'presets'],
   ['GET', '/v1/daemon/orchestration/schedules', 'tier2', 'execution'],
