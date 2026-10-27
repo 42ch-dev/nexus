@@ -549,6 +549,12 @@ async function tryHostQuery(service: ServiceCore, request: Parameters<typeof hos
     if (isAbsentHostError(mapped)) {
       return null;
     }
+    // The service-only shell has no Host authority to publish, so tier1
+    // readiness degrades exactly like an absent host until promotion. After
+    // promotion the core exists and an `uninitialized` rejection still surfaces.
+    if (mapped.code === 'uninitialized' && !service.workspaceInitialized) {
+      return null;
+    }
     throw mapped;
   }
 }
