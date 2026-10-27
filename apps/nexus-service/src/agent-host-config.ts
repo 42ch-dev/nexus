@@ -12,37 +12,141 @@ import type { AgentHostConfig } from '@42ch/nexus-contracts';
 import type { ServiceCore } from './lifecycle.js';
 import { HttpError, mapNativeError } from './errors.js';
 import type { DomainRoute } from './routes.js';
+import { withSelectionLock } from './workspaces.js';
 
 const PROTOCOL_ACP = 'acp';
 const PROTOCOL_NATIVE_CLI = 'native_cli';
 
+const CONFIG_KEYS = [
+  'max_sessions',
+  'max_ops_per_session',
+  'timeouts',
+  'policy',
+  'providers',
+] as const;
+const TIMEOUT_KEYS = [
+  'launch_ms',
+  'initialize_ms',
+  'session_ms',
+  'prompt_ms',
+  'shutdown_ms',
+] as const;
+const POLICY_KEYS = [
+  'unknown_provider',
+  'unknown_tool_risk',
+  'allow_model_fallback',
+] as const;
+const PROVIDER_KEYS = ['id', 'protocol', 'command', 'args', 'env', 'enabled'] as const;
+
+function invalidInput(message: string): HttpError {
+  return new HttpError(400, 'invalid_input', message);
+}
+
+function requireRecord(value: unknown, path: string): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw invalidInput(`${path} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+/** Schema `additionalProperties: false` semantics at every object level. */
+function rejectUnknownKeys(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+  path: string,
+): void {
+  for (const key of Object.keys(value)) {
+    if (!allowed.includes(key)) throw invalidInput(`unknown field '${key}' at ${path}`);
+  }
+}
+
+function requirePositiveInteger(value: unknown, path: string): void {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+    throw invalidInput(`${path} must be an integer >= 1`);
+  }
+}
+
 /**
- * Client-facing shape check before the native save path re-validates the same
- * document. Without it a malformed entry would surface as the sanitized
- * `internal` 500 instead of a 400 that names the offending field.
+ * Enforce the generated `AgentHostConfig` wire schema before the native save
+ * path re-validates the same document. Without it a malformed entry would
+ * surface as the sanitized `internal` 500 instead of a 400 that names the
+ * offending field.
  */
 function parseAgentHostConfig(body: unknown): AgentHostConfig {
-  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
-    throw new HttpError(400, 'invalid_input', 'config must be an object with a providers array');
+  const config = requireRecord(body, 'config');
+  rejectUnknownKeys(config, CONFIG_KEYS, 'config');
+
+  if (config.max_sessions !== undefined) {
+    requirePositiveInteger(config.max_sessions, 'max_sessions');
   }
-  const { providers } = body as { providers?: unknown };
+  if (config.max_ops_per_session !== undefined) {
+    requirePositiveInteger(config.max_ops_per_session, 'max_ops_per_session');
+  }
+
+  if (config.timeouts !== undefined) {
+    const timeouts = requireRecord(config.timeouts, 'timeouts');
+    rejectUnknownKeys(timeouts, TIMEOUT_KEYS, 'timeouts');
+    for (const key of Object.keys(timeouts)) {
+      requirePositiveInteger(timeouts[key], `timeouts.${key}`);
+    }
+  }
+
+  if (config.policy !== undefined) {
+    const policy = requireRecord(config.policy, 'policy');
+    rejectUnknownKeys(policy, POLICY_KEYS, 'policy');
+    if (
+      policy.unknown_provider !== undefined &&
+      policy.unknown_provider !== 'deny' &&
+      policy.unknown_provider !== 'allow'
+    ) {
+      throw invalidInput('policy.unknown_provider must be "deny" or "allow"');
+    }
+    if (
+      policy.unknown_tool_risk !== undefined &&
+      policy.unknown_tool_risk !== 'deny' &&
+      policy.unknown_tool_risk !== 'ask' &&
+      policy.unknown_tool_risk !== 'allow'
+    ) {
+      throw invalidInput('policy.unknown_tool_risk must be "deny", "ask" or "allow"');
+    }
+    if (policy.allow_model_fallback !== undefined && typeof policy.allow_model_fallback !== 'boolean') {
+      throw invalidInput('policy.allow_model_fallback must be a boolean');
+    }
+  }
+
+  const { providers } = config;
   if (!Array.isArray(providers)) {
-    throw new HttpError(400, 'invalid_input', 'config must be an object with a providers array');
+    throw invalidInput('config must be an object with a providers array');
   }
   for (const [index, provider] of providers.entries()) {
-    if (typeof provider !== 'object' || provider === null || Array.isArray(provider)) {
-      throw new HttpError(400, 'invalid_input', `providers[${index}] must be an object`);
-    }
-    const { id, protocol } = provider as { id?: unknown; protocol?: unknown };
+    const path = `providers[${index}]`;
+    const record = requireRecord(provider, path);
+    rejectUnknownKeys(record, PROVIDER_KEYS, path);
+    const { id, protocol, command, args, env, enabled } = record;
     if (typeof id !== 'string' || id.trim() === '') {
-      throw new HttpError(400, 'invalid_input', `providers[${index}].id is required`);
+      throw invalidInput(`${path}.id is required`);
     }
     if (protocol !== PROTOCOL_ACP && protocol !== PROTOCOL_NATIVE_CLI) {
-      throw new HttpError(
-        400,
-        'invalid_input',
-        `providers[${index}].protocol must be "acp" or "native_cli"`,
-      );
+      throw invalidInput(`${path}.protocol must be "acp" or "native_cli"`);
+    }
+    if (command !== undefined && command !== null && typeof command !== 'string') {
+      throw invalidInput(`${path}.command must be a string or null`);
+    }
+    if (args !== undefined) {
+      if (!Array.isArray(args) || args.some((arg) => typeof arg !== 'string')) {
+        throw invalidInput(`${path}.args must be an array of strings`);
+      }
+    }
+    if (env !== undefined) {
+      const envRecord = requireRecord(env, `${path}.env`);
+      for (const [key, value] of Object.entries(envRecord)) {
+        if (typeof value !== 'string') {
+          throw invalidInput(`${path}.env.${key} must be a string`);
+        }
+      }
+    }
+    if (enabled !== undefined && typeof enabled !== 'boolean') {
+      throw invalidInput(`${path}.enabled must be a boolean`);
     }
   }
   return body as AgentHostConfig;
@@ -62,32 +166,14 @@ interface EngineOwnerFacts {
   provider_ready: boolean;
 }
 
-/**
- * Serializes the whole save → restart → publish sequence per service. Two
- * concurrent PUTs must apply strictly in order: the second restart reads the
- * document the first one wrote, so the final engine owner reflects both.
- */
-const saveQueues = new WeakMap<ServiceCore, Promise<unknown>>();
-
-function withSaveLock<T>(service: ServiceCore, work: () => Promise<T>): Promise<T> {
-  const previous = saveQueues.get(service) ?? Promise.resolve();
-  const run = previous.then(work, work);
-  saveQueues.set(
-    service,
-    run.then(
-      () => undefined,
-      () => undefined,
-    ),
-  );
-  return run;
-}
-
 export function putAgentHostConfig(
   service: ServiceCore,
   body: unknown,
 ): Promise<AgentHostConfig> {
   const config = parseAgentHostConfig(body);
-  return withSaveLock(service, async () => {
+  // The ONE owner-lifecycle lock (shared with selectWorkspace): a provider
+  // save+restart must never interleave with a first-run selection.
+  return withSelectionLock(service, async () => {
     try {
       await service.core.saveAgentHostConfig(config);
     } catch (error) {
