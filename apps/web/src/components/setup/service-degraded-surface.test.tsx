@@ -176,6 +176,127 @@ describe('ServiceDegradedGate', () => {
     expect(screen.getByRole('button', { name: '重新检测' })).toBeInTheDocument();
   });
 
+  it('dedupes scan rows by provider id and keeps the curated launch recipe', async () => {
+    const user = userEvent.setup();
+    const agents: AgentScanEntry[] = [
+      {
+        name: 'omp (ACP)',
+        registry_agent_id: 'omp',
+        launch_command: '/opt/homebrew/bin/omp',
+        launch_args: ['acp'],
+        installed: true,
+        protocol_kind: 'acp',
+      },
+      {
+        name: 'omp',
+        registry_agent_id: 'omp',
+        launch_command: 'omp',
+        launch_args: [],
+        installed: true,
+        protocol_kind: 'acp',
+      },
+    ];
+    const saved: AgentHostConfig[] = [];
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        {
+          scan: () => Promise.resolve({ agents }),
+          getConfig: () => Promise.resolve(EMPTY_CONFIG),
+          saveConfig: (config: AgentHostConfig) => {
+            saved.push(config);
+            return Promise.resolve(config);
+          },
+        },
+      ),
+    });
+
+    const roster = await screen.findAllByRole('listitem');
+    expect(roster).toHaveLength(1);
+    expect(roster[0]).toHaveTextContent('omp (ACP)');
+
+    await user.click(within(roster[0]!).getByRole('button', { name: '启用' }));
+    expect(screen.getByLabelText('启动命令')).toHaveValue('/opt/homebrew/bin/omp');
+    await user.click(screen.getByRole('button', { name: '保存并重启检测' }));
+    await waitFor(() => expect(saved.length).toBe(1));
+    // The curated row's recipe (not the bare registry duplicate) is saved.
+    expect(saved[0]!.providers).toEqual([
+      {
+        id: 'omp',
+        protocol: 'acp',
+        command: '/opt/homebrew/bin/omp',
+        args: ['acp'],
+        enabled: true,
+      },
+    ]);
+  });
+
+  it('renders detection-only rows disabled while a supported row stays selectable', async () => {
+    const user = userEvent.setup();
+    const agents: AgentScanEntry[] = [
+      {
+        name: 'kimi (native CLI)',
+        registry_agent_id: 'kimi',
+        launch_command: '/usr/local/bin/kimi',
+        launch_args: [],
+        installed: true,
+        protocol_kind: 'native_cli',
+      },
+      {
+        name: 'claude (native CLI)',
+        registry_agent_id: 'claude-native',
+        launch_command: '/usr/local/bin/claude',
+        launch_args: [],
+        installed: true,
+        protocol_kind: 'native_cli',
+      },
+    ];
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        {
+          scan: () => Promise.resolve({ agents }),
+          listProviders: () =>
+            Promise.resolve({
+              providers: [
+                { provider_id: 'kimi', display_name: 'Kimi CLI', protocol_kind: 'native_cli' },
+                {
+                  provider_id: 'claude-native',
+                  display_name: 'Claude Code',
+                  protocol_kind: 'native_cli',
+                },
+              ],
+            }),
+        },
+      ),
+    });
+
+    const roster = await screen.findAllByRole('listitem');
+    const kimiRow = roster.find((row) => row.textContent?.includes('Kimi CLI'))!;
+    const claudeRow = roster.find((row) => row.textContent?.includes('Claude Code'))!;
+
+    // Detection-only: rendered, badged, and impossible to choose.
+    expect(within(kimiRow).getByTestId('detection-only-badge')).toHaveTextContent(
+      '已检测，暂不支持从此处启用',
+    );
+    const kimiUse = within(kimiRow).getByRole('button', { name: '启用' });
+    expect(kimiUse).toBeDisabled();
+    await user.click(kimiUse);
+    expect(screen.getByLabelText('提供方 ID')).toHaveValue('');
+
+    // A supported native row in the same render stays selectable.
+    const claudeUse = within(claudeRow).getByRole('button', { name: '启用' });
+    expect(claudeUse).toBeEnabled();
+    await user.click(claudeUse);
+    expect(screen.getByLabelText('提供方 ID')).toHaveValue('claude-native');
+  });
+
   it('persists the scan-provided launch args when saving a chosen candidate', async () => {
     const user = userEvent.setup();
     const agents: AgentScanEntry[] = [

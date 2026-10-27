@@ -169,9 +169,9 @@ pub fn scan_path_in(
             continue;
         }
 
-        // Wire contract: the scan handler in `nexus-core` maps the
-        // "path candidate" health-message prefix to `installed: true`.
-        // Both markers below MUST keep that prefix.
+        // Health messages are diagnostics only: the scan handler in
+        // `nexus-core` derives `installed` from the resolved executable, never
+        // from this message text.
         let acp = !acp_args.is_empty();
         let capabilities = if acp {
             CapabilityDescriptor::acp_full()
@@ -261,9 +261,8 @@ pub fn scan_path_in(
         } else {
             // Full-roster contract: a detection target that is not installed
             // still gets a row so the UI renders it disabled. The launch
-            // command stays the bare name and is never spawned in this
-            // state; the message MUST NOT carry the "path candidate" prefix
-            // (it maps to `installed: true` in the daemon scan handler).
+            // command stays the bare name; the daemon's executable check
+            // resolves it as not installed, so it is never spawned.
             push_row(
                 cmd.to_string(),
                 unavailable(format!("{cmd} not found on PATH")),

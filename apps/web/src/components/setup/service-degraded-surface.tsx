@@ -203,11 +203,20 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
   // unconfigured home, with install state + launch recipe) and the provider
   // catalog (authoritative display name/protocol + curated priority for rows
   // the scan does not emit, e.g. a configured target without a detection row).
-  const scanById = new Map(
-    scanEntries.flatMap((entry) =>
-      entry.registry_agent_id ? [[entry.registry_agent_id, entry] as const] : [],
-    ),
-  );
+  // One row per provider id: a curated native row carries the launch recipe
+  // (e.g. ["acp"]) and must win over a bare registry row for the same id —
+  // keeping the bare one would save a binary that never speaks ACP.
+  const scanById = new Map<string, AgentScanEntry>();
+  for (const entry of scanEntries) {
+    const providerId = entry.registry_agent_id;
+    if (!providerId) continue;
+    const existing = scanById.get(providerId);
+    const existingHasRecipe = (existing?.launch_args ?? []).length > 0;
+    const entryHasRecipe = (entry.launch_args ?? []).length > 0;
+    if (!existing || (!existingHasRecipe && entryHasRecipe)) {
+      scanById.set(providerId, entry);
+    }
+  }
   const catalogById = new Map(
     (catalog ?? []).map((entry) => [entry.provider_id, entry] as const),
   );
@@ -276,7 +285,14 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
                 >
                   <span className="min-w-0 truncate text-copy-13 text-gray-1000">
                     {candidate.displayName}
-                    {installState !== 'missing' || configured ? (
+                    {!launchable && !configured ? (
+                      <span
+                        data-testid="detection-only-badge"
+                        className="ml-2 text-label-12 text-gray-500"
+                      >
+                        {t('degraded.repair.form.detectionOnly')}
+                      </span>
+                    ) : installState !== 'missing' || configured ? (
                       <span className="ml-2 text-label-12 text-gray-700">
                         {installState === 'installed'
                           ? t('degraded.repair.form.installed')
