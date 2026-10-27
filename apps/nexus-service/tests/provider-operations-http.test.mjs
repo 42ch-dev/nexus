@@ -163,4 +163,27 @@ describe('agent-host session operations (CAP-007 / I-000131)', () => {
     );
     assert.equal(called, false);
   });
+
+  test('domain_only profiles answer a typed 501, not route_not_migrated', async () => {
+    const route = routes.DOMAIN_ROUTES.find(
+      (candidate) =>
+        candidate.method === 'POST' && candidate.pattern.test('/v1/daemon/agent-host/sessions'),
+    );
+    assert.ok(route, 'POST sessions route is not mounted');
+    const service = {
+      domainOnly: true,
+      providerRegistry: new ProviderRegistry(),
+      core: {},
+    };
+
+    await assert.rejects(
+      () => route.handle(service, [], new URLSearchParams(), { provider_id: 'mock-acp' }),
+      (error) => {
+        assert.equal(error.status, 501);
+        assert.equal(error.code, 'not_supported');
+        assert.match(error.message, /provider-enabled profile/);
+        return true;
+      },
+    );
+  });
 });
