@@ -4,6 +4,7 @@
  * Generator: json-schema-to-typescript (tooling/codegen/src/ts-gen.ts)
  */
 
+export type { AgentHostConfig } from './agent-host-config';
 export type { AgentHostListSessionsQuery } from './agent-host-list-sessions-query';
 export type { AgentProfile } from './agent-profile';
 export type { AgentProfileResponse } from './agent-profile-response';

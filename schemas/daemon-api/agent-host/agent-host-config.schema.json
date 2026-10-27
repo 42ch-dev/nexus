@@ -1,0 +1,96 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/agent-host/agent-host-config.schema.json",
+  "schema_version": 1,
+  "title": "Nexus AgentHostConfig",
+  "description": "The agent-host provider document at `<home>/.nexus42/agent-host/config.toml`. GET /v1/daemon/agent-host/config returns it (native defaults when the file is absent); PUT replaces it with the same document. Provider entries are kept when disabled so a known-good provider can be re-enabled.",
+  "type": "object",
+  "required": ["providers"],
+  "properties": {
+    "max_sessions": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 4,
+      "description": "Maximum concurrent provider sessions."
+    },
+    "max_ops_per_session": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "Maximum concurrent operations per session."
+    },
+    "timeouts": {
+      "type": "object",
+      "description": "Provider lifecycle timeouts in milliseconds.",
+      "properties": {
+        "launch_ms": { "type": "integer", "minimum": 1, "default": 15000 },
+        "initialize_ms": { "type": "integer", "minimum": 1, "default": 15000 },
+        "session_ms": { "type": "integer", "minimum": 1, "default": 30000 },
+        "prompt_ms": { "type": "integer", "minimum": 1, "default": 180000 },
+        "shutdown_ms": { "type": "integer", "minimum": 1, "default": 5000 }
+      },
+      "additionalProperties": false
+    },
+    "policy": {
+      "type": "object",
+      "description": "Admission policy for providers, tools and model fallback.",
+      "properties": {
+        "unknown_provider": {
+          "type": "string",
+          "enum": ["deny", "allow"],
+          "default": "deny"
+        },
+        "unknown_tool_risk": {
+          "type": "string",
+          "enum": ["deny", "ask", "allow"],
+          "default": "deny"
+        },
+        "allow_model_fallback": { "type": "boolean", "default": true }
+      },
+      "additionalProperties": false
+    },
+    "providers": {
+      "type": "array",
+      "description": "Configured providers. An enabled entry requires a supported protocol and a non-empty command (the launcher's own admission rule).",
+      "items": {
+        "type": "object",
+        "required": ["id", "protocol"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provider id (the catalog's `provider_id`)."
+          },
+          "protocol": {
+            "type": "string",
+            "enum": ["acp", "native_cli"],
+            "description": "Provider protocol kind."
+          },
+          "command": {
+            "oneOf": [
+              { "type": "string" },
+              { "type": "null" }
+            ],
+            "description": "Launch command for an enabled provider."
+          },
+          "args": {
+            "type": "array",
+            "items": { "type": "string" },
+            "default": []
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": { "type": "string" },
+            "default": {}
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -8,28 +8,10 @@
  * document to the native save path and returns the persisted document, so the
  * readiness probe at the next owner start reads exactly what the client wrote.
  */
+import type { AgentHostConfig } from '@42ch/nexus-contracts';
 import type { ServiceCore } from './lifecycle.js';
 import { HttpError, mapNativeError } from './errors.js';
 import type { DomainRoute } from './routes.js';
-
-/** One provider entry, matching `nexus_agent_host::config::ProviderConfig`. */
-export interface AgentHostProviderConfig {
-  id: string;
-  protocol: 'acp' | 'native_cli';
-  command?: string | null;
-  args?: string[];
-  env?: Record<string, string>;
-  enabled?: boolean;
-}
-
-/** The persisted document, matching `AgentHostConfig`'s serde shape. */
-export interface AgentHostConfig {
-  max_sessions?: number;
-  max_ops_per_session?: number;
-  timeouts?: Record<string, number>;
-  policy?: { unknown_provider?: string; unknown_tool_risk?: string; allow_model_fallback?: boolean };
-  providers: AgentHostProviderConfig[];
-}
 
 const PROTOCOL_ACP = 'acp';
 const PROTOCOL_NATIVE_CLI = 'native_cli';
