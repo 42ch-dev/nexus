@@ -11,8 +11,11 @@ import type { IncomingMessage } from 'node:http';
  * Everything here is per-boot, in-memory state: revocation is a service
  * restart, and no token or session ever reaches disk.
  */
-export const TOKEN_TTL_MS = 300_000;
 export const SESSION_TTL_MS = 28_800_000;
+// Product decision (owner, 2026-10-27): the token is single-use, so the TTL
+// only bounds how long an UNCONSUMED link stays valid — matching the session
+// lifetime means a printed URL never expires while the service runs.
+export const TOKEN_TTL_MS = SESSION_TTL_MS;
 export const SESSION_COOKIE = 'nexus_session';
 
 /** 256-bit base64url identifier (tokens and session ids alike). */
