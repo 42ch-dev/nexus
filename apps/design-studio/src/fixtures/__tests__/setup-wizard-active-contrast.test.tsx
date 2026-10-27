@@ -117,7 +117,9 @@ describe('Setup engine repair page variants — Studio fixture (I-000124)', () =
 
     const light = screen.getByTestId('wizard-chrome-service-engine-failed');
     expect(light).toHaveTextContent('readiness check failed');
-    expect(light).not.toHaveTextContent('Provider ID');
+    // The failed state offers the same configuration form above the recheck.
+    expect(light).toHaveTextContent('Provider ID');
+    expect(within(light).getByRole('button', { name: 'Save and recheck' })).toBeInTheDocument();
     expect(within(light).getByRole('button', { name: 'Recheck' })).toBeInTheDocument();
 
     act(() => {

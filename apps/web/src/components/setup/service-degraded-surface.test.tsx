@@ -234,8 +234,10 @@ describe('ServiceDegradedGate', () => {
     expect(screen.getByTestId('engine-repair-failure')).toHaveTextContent(
       '已选择编排提供方，但就绪检测未通过：编排引擎未就绪。',
     );
-    // The form is for the unconfigured state only.
-    expect(screen.queryByLabelText('提供方 ID')).not.toBeInTheDocument();
+    // The failure note sits above the same configuration form: the saved
+    // profile alone cannot make the recheck succeed.
+    expect(screen.getByLabelText('提供方 ID')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '保存并重启检测' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '重新检测' })).toBeInTheDocument();
   });
 

@@ -240,7 +240,9 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
  *
  * No provider selected: step 1 is the in-page configuration form (scan
  * candidates + manual fields), step 2 is the readiness recheck. A selected
- * provider that failed readiness keeps the failure line and the recheck.
+ * provider that failed readiness keeps the failure line ABOVE the same form —
+ * the saved profile alone cannot satisfy readiness, so hiding the form would
+ * leave a recheck that can never succeed.
  */
 function EngineRepair({ reason }: { reason: EngineFailure }) {
   const { t } = useTranslation('setup');
@@ -259,13 +261,12 @@ function EngineRepair({ reason }: { reason: EngineFailure }) {
           {t('degraded.repair.title')}
         </h1>
         <p className="text-copy-14 text-gray-900">{t('degraded.repair.description')}</p>
-        {reason.kind === 'provider_unselected' ? (
-          <ProviderSetupForm onSaved={retry} />
-        ) : (
+        {reason.kind !== 'provider_unselected' && (
           <p data-testid="engine-repair-failure" className="text-copy-13 text-red-1000">
             {t('degraded.repair.failure', { reason: reasonText(reason, t) })}
           </p>
         )}
+        <ProviderSetupForm onSaved={retry} />
         <section className="flex flex-col items-start gap-2">
           <h2 className="text-copy-16 text-gray-1000">{t('degraded.repair.stepRecheck.title')}</h2>
           <p className="text-copy-14 text-gray-900">{t('degraded.repair.stepRecheck.body')}</p>
