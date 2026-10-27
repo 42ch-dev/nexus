@@ -38,11 +38,15 @@ import { useSetupCompleted } from '@/lib/setup-completed-context';
  *   actionable reason and is shown as-is.
  * - `subsystems` — the service answers but reports degraded subsystems; the
  *   surface localizes each name.
+ * - `provider_unselected` — the workspace is ready and only the orchestration
+ *   engine is degraded because no provider is selected yet. That is a setup
+ *   step, not an unavailable service: the surface guides instead of retrying.
  */
 export type ServiceDegradedReason =
   | { kind: 'unreachable' }
   | { kind: 'server'; message: string }
-  | { kind: 'subsystems'; subsystems: string[] };
+  | { kind: 'subsystems'; subsystems: string[] }
+  | { kind: 'provider_unselected' };
 
 interface ServiceStatusValue {
   /** Set while the service is unreachable or degraded; `null` when healthy. */
@@ -75,6 +79,16 @@ export function ServiceStatusProvider({ children }: { children: ReactNode }) {
       const status = await client.daemonStatus();
       if (!isLatest()) return false;
       const subsystems = completed ? status.degraded.subsystems : [];
+      if (subsystems.length === 1 && subsystems[0] === 'engine') {
+        // A ready workspace whose only degraded subsystem is the engine has no
+        // provider selected yet (the owner itself is established at startup).
+        const runtime = await client.runtimeStatus().catch(() => null);
+        if (!isLatest()) return false;
+        if (runtime?.workspace_initialized) {
+          setReason({ kind: 'provider_unselected' });
+          return true;
+        }
+      }
       setReason(subsystems.length > 0 ? { kind: 'subsystems', subsystems } : null);
       return true;
     } catch (error) {

@@ -1,10 +1,11 @@
 /**
  * Service-unavailable surface (plan v1219-onboarding T4).
  *
- * The probe is `GET /v1/daemon/daemon/status`; one instance drives two
- * placements — full-screen over the wizard, a top banner inside the shell.
- * Copy is localized (`setup:degraded.*`); these cases pin the zh-CN product
- * copy and the EN fallback.
+ * The probe is `GET /v1/daemon/daemon/status` (plus `runtime/status` when only
+ * the engine is degraded, to tell "no provider selected" from a failure); one
+ * instance drives two placements — full-screen over the wizard, a top banner
+ * inside the shell. Copy is localized (`setup:degraded.*`); these cases pin the
+ * zh-CN product copy and the EN fallback.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, screen, waitFor } from '@testing-library/react';
@@ -14,7 +15,7 @@ import { ServiceDegradedBanner, ServiceDegradedGate } from './service-degraded-s
 import { ServiceStatusProvider } from '@/lib/service-status-context';
 import { renderInApp } from '@/test/test-providers';
 import { NexusClientError } from '@/lib/nexus';
-import type { DaemonRuntimeStatus, NexusClient } from '@/lib/nexus';
+import type { DaemonRuntimeStatus, NexusClient, RuntimeStatus } from '@/lib/nexus';
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -31,8 +32,14 @@ function withResolvers<T>(): Deferred<T> {
   return { promise, resolve };
 }
 
-function clientWith(read: () => Promise<DaemonRuntimeStatus>): NexusClient {
-  return { daemonStatus: read } as unknown as NexusClient;
+function clientWith(
+  read: () => Promise<DaemonRuntimeStatus>,
+  runtime: RuntimeStatus = { workspace_initialized: false },
+): NexusClient {
+  return {
+    daemonStatus: read,
+    runtimeStatus: () => Promise.resolve(runtime),
+  } as unknown as NexusClient;
 }
 
 function renderSurface({
@@ -82,6 +89,23 @@ describe('ServiceDegradedGate', () => {
     // The shell stays usable behind the single surface — no toasts.
     expect(screen.getByTestId('app-content')).toBeInTheDocument();
     expect(screen.getAllByRole('alert')).toHaveLength(1);
+  });
+
+  it('guides provider selection when the workspace is ready but no provider is selected', async () => {
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(() => Promise.resolve(ENGINE_DEGRADED), {
+        workspace_initialized: true,
+      }),
+    });
+
+    const surface = await screen.findByTestId('service-degraded-surface');
+    expect(surface).toHaveTextContent(
+      '尚未选择编排引擎提供方 —— 在 Agent 设置中选择后即可启用运行能力。',
+    );
+    // A setup step, not a transport failure: no retry affordance.
+    expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('app-content')).toBeInTheDocument();
   });
 
   it('ignores an uninitialized service so onboarding stays reachable', async () => {
