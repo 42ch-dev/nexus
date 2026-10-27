@@ -517,6 +517,60 @@ pub fn load_config(home: &Path) -> HostResult<AgentHostConfig> {
     Ok(config)
 }
 
+/// Persist agent host config to the Nexus home layout.
+///
+/// Serializes to `{NEXUS_HOME}/agent-host/config.toml` through a temp file in
+/// the same directory and renames it over the target, so a concurrent reader
+/// sees either the previous document or the complete new one.
+///
+/// # Errors
+///
+/// Returns `HostError::InternalHostError` if the directory cannot be created,
+/// the config cannot be serialized, or the write/rename fails.
+pub fn save_config(home: &Path, config: &AgentHostConfig) -> HostResult<()> {
+    let config_dir = agent_host_config_dir(home);
+    let config_path = agent_host_config_path(home);
+
+    std::fs::create_dir_all(&config_dir).map_err(|e| {
+        HostError::internal(format!(
+            "failed to create config directory {}: {e}",
+            config_dir.display()
+        ))
+    })?;
+
+    let content = toml::to_string_pretty(config)
+        .map_err(|e| HostError::internal(format!("failed to serialize agent host config: {e}")))?;
+
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    let tmp_path = config_dir.join(format!(".config.toml.{}.{unique}.tmp", std::process::id()));
+
+    std::fs::write(&tmp_path, content).map_err(|e| {
+        HostError::internal(format!(
+            "failed to write config to {}: {e}",
+            tmp_path.display()
+        ))
+    })?;
+
+    std::fs::rename(&tmp_path, &config_path).map_err(|e| {
+        // A failed rename must not leave the temp document behind.
+        let _ = std::fs::remove_file(&tmp_path);
+        HostError::internal(format!(
+            "failed to replace config at {}: {e}",
+            config_path.display()
+        ))
+    })?;
+
+    tracing::info!(
+        path = %config_path.display(),
+        providers = config.providers.len(),
+        "Saved agent host config"
+    );
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -933,5 +987,64 @@ enabled = true
         let result = load_config_from_path(&config_path);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().category(), "internal_host_error");
+    }
+
+    // ── save_config tests ──────────────────────────────────────────────
+
+    #[test]
+    fn save_config_round_trips_through_load() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let mut config = AgentHostConfig {
+            max_sessions: 2,
+            ..AgentHostConfig::default()
+        };
+        config.providers.push(ProviderConfig {
+            id: "claude".to_string(),
+            protocol: "acp".to_string(),
+            command: Some("claude-agent-acp".to_string()),
+            args: vec!["--stdio".to_string()],
+            env: std::collections::HashMap::from([("MODE".to_string(), "test".to_string())]),
+            enabled: true,
+        });
+
+        save_config(temp_dir.path(), &config).expect("save config");
+        let loaded = load_config(temp_dir.path()).expect("load config");
+
+        assert_eq!(loaded.max_sessions, 2);
+        assert_eq!(loaded.providers.len(), 1);
+        assert_eq!(loaded.providers[0].id, "claude");
+        assert_eq!(loaded.providers[0].protocol, "acp");
+        assert_eq!(loaded.providers[0].command.as_deref(), Some("claude-agent-acp"));
+        assert_eq!(loaded.providers[0].args, vec!["--stdio".to_string()]);
+        assert_eq!(loaded.providers[0].env.get("MODE").map(String::as_str), Some("test"));
+        assert!(loaded.providers[0].enabled);
+        assert_eq!(loaded.policy.unknown_provider, "deny");
+    }
+
+    #[test]
+    fn save_config_creates_missing_agent_host_dir() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let config = AgentHostConfig::default();
+
+        save_config(temp_dir.path(), &config).expect("save config");
+
+        assert!(agent_host_config_dir(temp_dir.path()).is_dir());
+        assert!(agent_host_config_path(temp_dir.path()).is_file());
+    }
+
+    #[test]
+    fn save_config_leaves_no_temp_file() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        save_config(temp_dir.path(), &AgentHostConfig::default()).expect("save config");
+
+        let leftovers: Vec<_> = std::fs::read_dir(agent_host_config_dir(temp_dir.path()))
+            .expect("read config dir")
+            .filter_map(std::result::Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| {
+                std::path::Path::new(name).extension().is_some_and(|extension| extension == "tmp")
+            })
+            .collect();
+        assert!(leftovers.is_empty(), "temp files left behind: {leftovers:?}");
     }
 }

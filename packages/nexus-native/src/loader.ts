@@ -28,6 +28,8 @@ export interface NativeCoreBinding {
     cursor?: string | null,
   ): Promise<Uint8Array>;
   hostQuery(requestJson: Uint8Array): Promise<Uint8Array>;
+  getAgentHostConfig(): Promise<Uint8Array>;
+  saveAgentHostConfig(configJson: Uint8Array): Promise<void>;
   changes(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
   providerCall(requestJson: Uint8Array): Promise<Uint8Array>;
   nextProviderEvents(operationId: string, maxEvents: number, maxBytes: number): Promise<Uint8Array>;
