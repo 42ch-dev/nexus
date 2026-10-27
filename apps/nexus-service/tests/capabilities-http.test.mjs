@@ -94,6 +94,18 @@ describe('capabilities route (CAP-001 / I-000125)', () => {
     );
   });
 
+  test('domain_only profiles answer a typed 501, not route_not_migrated', async () => {
+    await assert.rejects(
+      () => routeFor().handle({ domainOnly: true }, [], new URLSearchParams()),
+      (error) => {
+        assert.equal(error.status, 501);
+        assert.equal(error.code, 'not_supported');
+        assert.match(error.message, /provider-enabled profile/);
+        return true;
+      },
+    );
+  });
+
   test('rejects an unsupported sort key', async () => {
     await assert.rejects(
       () => handle(new URLSearchParams({ sort: 'origin' })),
