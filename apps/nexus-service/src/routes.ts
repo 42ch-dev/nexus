@@ -28,6 +28,7 @@ import {
 } from './world-kb.js';
 import { ACTOR_ROUTES } from './actors.js';
 import { AGENT_PROFILE_ROUTES } from './agent-profile.js';
+import { AGENT_HOST_CONFIG_ROUTES } from './agent-host-config.js';
 import { WORKSPACE_ROUTES } from './workspaces.js';
 import { MEMORY_ROUTES } from './memory.js';
 import { CONTEXT_ROUTES } from './context.js';
@@ -467,6 +468,8 @@ export const HOST_ROUTES: readonly DomainRoute[] = [
   },
   // I-000064 — daemon-global agent profile (GET/PUT); see agent-profile.ts.
   ...AGENT_PROFILE_ROUTES,
+  // I-000124 follow-up — provider config document (GET/PUT); see agent-host-config.ts.
+  ...AGENT_HOST_CONFIG_ROUTES,
 ];
 
 /** World-KB and core changes family (tier2; handler bodies unchanged). */

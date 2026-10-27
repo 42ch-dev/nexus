@@ -88,6 +88,7 @@ describe('route-inventory (P5-T5)', () => {
   ['DELETE', '/v1/daemon/works/([^/]+)/findings/([^/]+)', 'tier2', 'knowledge'],
   ['DELETE', '/v1/daemon/worlds/([^/]+)', 'tier2', 'worlds'],
   ['GET', '/v1/daemon/agent-host/health', 'tier1', 'host'],
+  ['GET', '/v1/daemon/agent-host/config', 'tier1', 'host'],
   ['GET', '/v1/daemon/agent-host/operations/([^/]+)', 'tier2', 'host'],
   ['GET', '/v1/daemon/agent-host/profile', 'tier1', 'host'],
   ['GET', '/v1/daemon/agent-host/providers', 'tier1', 'host'],
@@ -232,6 +233,7 @@ describe('route-inventory (P5-T5)', () => {
   ['POST', '/v1/daemon/worlds/([^/]+)/kb/promote-candidate', 'tier2', 'worlds'],
   ['POST', '/v1/daemon/worlds/([^/]+)/rules', 'tier2', 'worlds'],
   ['PUT', '/v1/daemon/agent-host/profile', 'tier1', 'host'],
+  ['PUT', '/v1/daemon/agent-host/config', 'tier1', 'host'],
   ['PUT', '/v1/daemon/creators/active', 'tier1', 'actors'],
   ['PUT', '/v1/daemon/reading/progress', 'tier2', 'knowledge'],
     ];
