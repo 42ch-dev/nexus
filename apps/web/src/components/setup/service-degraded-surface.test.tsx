@@ -8,7 +8,7 @@
  * zh-CN product copy and the EN fallback.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { ServiceDegradedBanner, ServiceDegradedGate } from './service-degraded-surface';
@@ -16,6 +16,8 @@ import { ServiceStatusProvider } from '@/lib/service-status-context';
 import { renderInApp } from '@/test/test-providers';
 import { NexusClientError } from '@/lib/nexus';
 import type { DaemonRuntimeStatus, NexusClient, RuntimeStatus } from '@/lib/nexus';
+import type { AgentHostConfig } from '@/lib/nexus/types';
+import type { AgentScanEntry, ScanResponse } from '@42ch/nexus-contracts';
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -38,15 +40,28 @@ type ProfileRead = () => Promise<{ profile: { name: string } | null }>;
 const SELECTED_PROFILE: ProfileRead = () => Promise.resolve({ profile: { name: 'Claude Code' } });
 const UNSELECTED_PROFILE: ProfileRead = () => Promise.resolve({ profile: null });
 
+interface ConfigStubs {
+  scan?: () => Promise<ScanResponse>;
+  getConfig?: () => Promise<AgentHostConfig>;
+  saveConfig?: (config: AgentHostConfig) => Promise<AgentHostConfig>;
+}
+
+const EMPTY_CONFIG: AgentHostConfig = { providers: [] };
+
 function clientWith(
   read: () => Promise<DaemonRuntimeStatus>,
   runtime: RuntimeStatus = { workspace_initialized: false },
   profile: ProfileRead = SELECTED_PROFILE,
+  config: ConfigStubs = {},
 ): NexusClient {
   return {
     daemonStatus: read,
     runtimeStatus: () => Promise.resolve(runtime),
     getAgentProfile: profile,
+    scanAgents: config.scan ?? (() => Promise.resolve({ agents: [] })),
+    getAgentHostConfig: config.getConfig ?? (() => Promise.resolve(EMPTY_CONFIG)),
+    saveAgentHostConfig:
+      config.saveConfig ?? ((saved: AgentHostConfig) => Promise.resolve(saved)),
   } as unknown as NexusClient;
 }
 
@@ -104,19 +119,19 @@ describe('ServiceDegradedGate', () => {
     expect(screen.getAllByRole('alert')).toHaveLength(1);
   });
 
-  it('takes over every route with the repair page when no provider is selected', async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
+  it('lists installed candidates first and pre-fills the manual fields', async () => {
     const user = userEvent.setup();
-    Object.defineProperty(navigator, 'clipboard', {
-      value: { writeText },
-      configurable: true,
-    });
+    const agents: AgentScanEntry[] = [
+      { name: 'Beta Agent', registry_agent_id: 'beta-acp', launch_command: 'beta-acp', installed: false },
+      { name: 'Alpha Agent', registry_agent_id: 'alpha-acp', launch_command: 'alpha-acp', installed: true },
+    ];
     renderSurface({
       setupCompleted: true,
       client: clientWith(
         () => Promise.resolve(ENGINE_DEGRADED),
         { workspace_initialized: true },
         UNSELECTED_PROFILE,
+        { scan: () => Promise.resolve({ agents }) },
       ),
     });
 
@@ -125,15 +140,82 @@ describe('ServiceDegradedGate', () => {
     expect(surface).toHaveAttribute('data-state', 'unconfigured');
     expect(surface).toHaveTextContent('编排引擎未就绪');
     expect(surface).toHaveTextContent('配置编排提供方');
-    expect(surface).toHaveTextContent('nexus42 connect');
+    // The CLI escape hatch is gone: configuration is in-page only.
+    expect(surface).not.toHaveTextContent('nexus42 connect');
     expect(screen.queryByTestId('engine-repair-failure')).not.toBeInTheDocument();
     // The app is not usable until the engine is configured.
     expect(screen.queryByTestId('app-content')).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: '复制' }));
-    expect(writeText).toHaveBeenCalledWith('nexus42 connect');
-    expect(screen.getByRole('button', { name: '已复制' })).toBeInTheDocument();
+    const candidates = await screen.findAllByRole('listitem');
+    expect(candidates[0]).toHaveTextContent('Alpha Agent');
+    expect(candidates[1]).toHaveTextContent('Beta Agent');
+
+    await user.click(within(candidates[0]!).getByRole('button', { name: '启用' }));
+    expect(screen.getByLabelText('提供方 ID')).toHaveValue('alpha-acp');
+    expect(screen.getByLabelText('启动命令')).toHaveValue('alpha-acp');
+    expect(screen.getByRole('button', { name: '保存并重启检测' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '重新检测' })).toBeInTheDocument();
+  });
+
+  it('saves the upserted provider and re-runs the readiness probe', async () => {
+    const user = userEvent.setup();
+    const daemonStatus = vi.fn(() => Promise.resolve(ENGINE_DEGRADED));
+    const saved = { providers: [], max_sessions: 2 } as AgentHostConfig;
+    const saveConfig = vi.fn((config: AgentHostConfig) => {
+      Object.assign(saved, config);
+      return Promise.resolve(config);
+    });
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        daemonStatus,
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        { getConfig: () => Promise.resolve(saved), saveConfig },
+      ),
+    });
+
+    await screen.findByLabelText('提供方 ID');
+    await user.type(screen.getByLabelText('提供方 ID'), 'manual-agent');
+    await user.selectOptions(screen.getByLabelText('协议'), 'native_cli');
+    await user.type(screen.getByLabelText('启动命令'), '/usr/local/bin/manual-agent');
+    await user.click(screen.getByRole('button', { name: '保存并重启检测' }));
+
+    await waitFor(() => expect(saveConfig).toHaveBeenCalledTimes(1));
+    const written = saveConfig.mock.calls[0]![0];
+    expect(written.max_sessions).toBe(2);
+    expect(written.providers).toEqual([
+      { id: 'manual-agent', protocol: 'native_cli', command: '/usr/local/bin/manual-agent', enabled: true },
+    ]);
+    // A successful save re-runs the same probe the recheck button uses.
+    await waitFor(() =>
+      expect(daemonStatus.mock.calls.length).toBeGreaterThanOrEqual(2),
+    );
+  });
+
+  it('keeps the manual path usable when the agent scan fails', async () => {
+    const user = userEvent.setup();
+    const saveConfig = vi.fn((config: AgentHostConfig) => Promise.resolve(config));
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        {
+          scan: () => Promise.reject(new Error('scan offline')),
+          saveConfig,
+        },
+      ),
+    });
+
+    expect(await screen.findByTestId('provider-scan-failed')).toHaveTextContent(
+      '无法读取本机的智能体列表',
+    );
+    await user.type(screen.getByLabelText('提供方 ID'), 'manual-agent');
+    await user.type(screen.getByLabelText('启动命令'), 'manual-agent');
+    await user.click(screen.getByRole('button', { name: '保存并重启检测' }));
+    await waitFor(() => expect(saveConfig).toHaveBeenCalledTimes(1));
   });
 
   it('adds the failure note when a selected provider is not ready', async () => {
@@ -152,6 +234,8 @@ describe('ServiceDegradedGate', () => {
     expect(screen.getByTestId('engine-repair-failure')).toHaveTextContent(
       '已选择编排提供方，但就绪检测未通过：编排引擎未就绪。',
     );
+    // The form is for the unconfigured state only.
+    expect(screen.queryByLabelText('提供方 ID')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '重新检测' })).toBeInTheDocument();
   });
 
@@ -301,13 +385,19 @@ describe('ServiceDegradedGate', () => {
     window.localStorage.setItem('nexus-web-locale', 'en');
     renderSurface({
       setupCompleted: true,
-      client: clientWith(() => Promise.resolve(ENGINE_DEGRADED)),
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+      ),
     });
 
     const surface = await screen.findByTestId('service-degraded-surface');
     expect(surface).toHaveTextContent('Orchestration engine is not ready');
-    expect(surface).toHaveTextContent('nexus42 connect');
+    expect(surface).toHaveTextContent('Configure an orchestration provider');
+    expect(surface).not.toHaveTextContent('nexus42 connect');
+    expect(await screen.findByLabelText('Provider ID')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save and recheck' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Recheck' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
   });
 });

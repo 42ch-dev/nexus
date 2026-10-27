@@ -97,16 +97,18 @@ describe('Setup wizard active contrast — Studio fixture (P0G-4)', () => {
 });
 
 describe('Setup engine repair page variants — Studio fixture (I-000124)', () => {
-  it('provider-unconfigured shows the repair steps without a failure note', () => {
+  it('provider-unconfigured renders the in-page configuration form', () => {
     mockMatchMediaFull({ dark: false });
     renderWizardFixtures();
 
     const frame = screen.getByTestId('wizard-chrome-service-provider-unconfigured');
     expect(frame).toHaveTextContent('Orchestration engine is not ready');
-    expect(frame).toHaveTextContent('nexus42 connect');
+    expect(frame).toHaveTextContent('Configure an orchestration provider');
+    expect(frame).toHaveTextContent('Agents on this machine');
+    expect(frame).not.toHaveTextContent('nexus42 connect');
     expect(frame).not.toHaveTextContent('readiness check failed');
+    expect(within(frame).getByRole('button', { name: 'Save and recheck' })).toBeInTheDocument();
     expect(within(frame).getByRole('button', { name: 'Recheck' })).toBeInTheDocument();
-    expect(within(frame).getByRole('button', { name: 'Copy' })).toBeInTheDocument();
   });
 
   it('engine-failed keeps the failure note and recheck action in light and dark', () => {
@@ -115,6 +117,7 @@ describe('Setup engine repair page variants — Studio fixture (I-000124)', () =
 
     const light = screen.getByTestId('wizard-chrome-service-engine-failed');
     expect(light).toHaveTextContent('readiness check failed');
+    expect(light).not.toHaveTextContent('Provider ID');
     expect(within(light).getByRole('button', { name: 'Recheck' })).toBeInTheDocument();
 
     act(() => {

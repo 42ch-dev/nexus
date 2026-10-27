@@ -14,11 +14,16 @@
  * product-owned string verbatim, and the EN namespace is the fallback.
  */
 import type { TFunction } from 'i18next';
-import { useState, type ReactNode } from 'react';
+import type { AgentScanEntry } from '@42ch/nexus-contracts';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation } from 'react-router';
 
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { useNexusClient } from '@/lib/client-context';
+import type { AgentHostProviderConfig } from '@/lib/nexus/types';
 import type { ServiceDegradedReason } from '@/lib/service-status-context';
 import { useOptionalServiceStatus, useServiceStatus } from '@/lib/service-status-context';
 import { useSetupCompleted } from '@/lib/setup-completed-context';
@@ -55,29 +60,191 @@ function isEngineFailure(reason: ServiceDegradedReason): reason is EngineFailure
   );
 }
 
-const CONNECT_COMMAND = 'nexus42 connect';
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+/**
+ * Step 1 of the repair page: configure a provider through the service, never
+ * the CLI. Scan candidates are a convenience over the manual fields; both
+ * paths submit the same upsert (load the document, replace or append this
+ * provider id, save), and a successful save re-runs the readiness probe.
+ */
+function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
+  const { t } = useTranslation('setup');
+  const client = useNexusClient();
+  const [agents, setAgents] = useState<AgentScanEntry[] | null>(null);
+  const [scanFailed, setScanFailed] = useState(false);
+  const [id, setId] = useState('');
+  const [protocol, setProtocol] = useState<AgentHostProviderConfig['protocol']>('acp');
+  const [command, setCommand] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    client.scanAgents().then(
+      (response) => {
+        if (!cancelled) setAgents(response.agents);
+      },
+      () => {
+        if (!cancelled) {
+          setScanFailed(true);
+          setAgents([]);
+        }
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
+
+  const choose = (entry: AgentScanEntry) => {
+    setId(entry.registry_agent_id ?? slugify(entry.name));
+    setProtocol('acp');
+    setCommand(entry.launch_command ?? '');
+  };
+
+  const save = async () => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const current = await client.getAgentHostConfig();
+      const provider: AgentHostProviderConfig = {
+        id: id.trim(),
+        protocol,
+        command: command.trim(),
+        enabled: true,
+      };
+      const exists = current.providers.some((entry) => entry.id === provider.id);
+      const providers = exists
+        ? current.providers.map((entry) =>
+            entry.id === provider.id ? { ...entry, ...provider } : entry,
+          )
+        : [...current.providers, provider];
+      await client.saveAgentHostConfig({ ...current, providers });
+      await onSaved();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Installed candidates first; the rest keep the scan order.
+  const orderedAgents = agents
+    ? [...agents].sort((left, right) => Number(right.installed) - Number(left.installed))
+    : [];
+
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="text-copy-16 text-gray-1000">{t('degraded.repair.form.title')}</h2>
+      <div className="flex flex-col gap-2">
+        <h3 className="text-copy-14 text-gray-1000">{t('degraded.repair.form.candidatesTitle')}</h3>
+        {scanFailed && (
+          <p data-testid="provider-scan-failed" className="text-copy-13 text-red-1000">
+            {t('degraded.repair.form.candidatesError')}
+          </p>
+        )}
+        {orderedAgents.length > 0 && (
+          <ul className="flex max-h-56 list-none flex-col gap-1 overflow-y-auto p-0">
+            {orderedAgents.map((entry) => (
+              <li
+                key={`${entry.registry_agent_id ?? entry.name}:${entry.launch_command ?? ''}`}
+                className="flex items-center justify-between gap-3 rounded-md bg-background-200 px-3 py-2"
+              >
+                <span className="min-w-0 truncate text-copy-13 text-gray-1000">
+                  {entry.name}
+                  {entry.installed && (
+                    <span className="ml-2 text-label-12 text-gray-700">
+                      {t('degraded.repair.form.installed')}
+                    </span>
+                  )}
+                </span>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="small"
+                  onClick={() => choose(entry)}
+                >
+                  {t('degraded.repair.form.enable')}
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-3">
+        <h3 className="text-copy-14 text-gray-1000">{t('degraded.repair.form.manualTitle')}</h3>
+        <div className="flex flex-col gap-1">
+          <label htmlFor="repair-provider-id" className="text-copy-13 text-gray-900">
+            {t('degraded.repair.form.idLabel')}
+          </label>
+          <Input
+            id="repair-provider-id"
+            value={id}
+            placeholder={t('degraded.repair.form.idPlaceholder')}
+            onChange={(event) => setId(event.target.value)}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label htmlFor="repair-provider-protocol" className="text-copy-13 text-gray-900">
+            {t('degraded.repair.form.protocolLabel')}
+          </label>
+          <Select
+            id="repair-provider-protocol"
+            value={protocol}
+            onChange={(event) =>
+              setProtocol(event.target.value as AgentHostProviderConfig['protocol'])
+            }
+          >
+            <option value="acp">{t('degraded.repair.form.protocolAcp')}</option>
+            <option value="native_cli">{t('degraded.repair.form.protocolNativeCli')}</option>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <label htmlFor="repair-provider-command" className="text-copy-13 text-gray-900">
+            {t('degraded.repair.form.commandLabel')}
+          </label>
+          <Input
+            id="repair-provider-command"
+            value={command}
+            placeholder={t('degraded.repair.form.commandPlaceholder')}
+            onChange={(event) => setCommand(event.target.value)}
+          />
+        </div>
+        {saveError && (
+          <p data-testid="provider-save-failed" className="text-copy-13 text-red-1000">
+            {t('degraded.repair.form.saveFailed', { message: saveError })}
+          </p>
+        )}
+        <Button
+          type="button"
+          variant="primary"
+          disabled={saving || id.trim() === '' || command.trim() === ''}
+          onClick={() => void save()}
+        >
+          {saving ? t('degraded.repair.form.saving') : t('degraded.repair.form.save')}
+        </Button>
+      </div>
+    </section>
+  );
+}
 
 /**
  * Full-screen repair page for an engine that cannot serve the workspace.
  *
- * Two states, one page: no provider selected (`provider_unselected`) is steps
- * only; a selected provider whose readiness probe failed adds the failure line
- * under step 1. The retry button is the existing probe, so a fixed engine
- * releases the gate and the app renders.
+ * No provider selected: step 1 is the in-page configuration form (scan
+ * candidates + manual fields), step 2 is the readiness recheck. A selected
+ * provider that failed readiness keeps the failure line and the recheck.
  */
 function EngineRepair({ reason }: { reason: EngineFailure }) {
   const { t } = useTranslation('setup');
   const { checking, retry } = useServiceStatus();
-  const [copied, setCopied] = useState(false);
-
-  const copyCommand = async () => {
-    try {
-      await navigator.clipboard.writeText(CONNECT_COMMAND);
-      setCopied(true);
-    } catch {
-      // Clipboard access denied: the command is still visible to copy by hand.
-    }
-  };
 
   return (
     <div
@@ -92,37 +259,25 @@ function EngineRepair({ reason }: { reason: EngineFailure }) {
           {t('degraded.repair.title')}
         </h1>
         <p className="text-copy-14 text-gray-900">{t('degraded.repair.description')}</p>
-        <ol className="flex list-none flex-col gap-5 p-0">
-          <li className="flex flex-col gap-2">
-            <h2 className="text-copy-16 text-gray-1000">{t('degraded.repair.stepConnect.title')}</h2>
-            <p className="text-copy-14 text-gray-900">{t('degraded.repair.stepConnect.body')}</p>
-            <div className="flex items-center gap-2">
-              <code className="min-w-0 flex-1 rounded-md bg-background-200 px-3 py-2 font-mono text-copy-13 text-gray-1000">
-                {CONNECT_COMMAND}
-              </code>
-              <Button type="button" variant="secondary" size="small" onClick={() => void copyCommand()}>
-                {copied ? t('degraded.repair.copied') : t('degraded.repair.copy')}
-              </Button>
-            </div>
-            {reason.kind !== 'provider_unselected' && (
-              <p data-testid="engine-repair-failure" className="text-copy-13 text-red-1000">
-                {t('degraded.repair.failure', { reason: reasonText(reason, t) })}
-              </p>
-            )}
-          </li>
-          <li className="flex flex-col items-start gap-2">
-            <h2 className="text-copy-16 text-gray-1000">{t('degraded.repair.stepRecheck.title')}</h2>
-            <p className="text-copy-14 text-gray-900">{t('degraded.repair.stepRecheck.body')}</p>
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={checking}
-              onClick={() => void retry()}
-            >
-              {t('degraded.repair.recheck')}
-            </Button>
-          </li>
-        </ol>
+        {reason.kind === 'provider_unselected' ? (
+          <ProviderSetupForm onSaved={retry} />
+        ) : (
+          <p data-testid="engine-repair-failure" className="text-copy-13 text-red-1000">
+            {t('degraded.repair.failure', { reason: reasonText(reason, t) })}
+          </p>
+        )}
+        <section className="flex flex-col items-start gap-2">
+          <h2 className="text-copy-16 text-gray-1000">{t('degraded.repair.stepRecheck.title')}</h2>
+          <p className="text-copy-14 text-gray-900">{t('degraded.repair.stepRecheck.body')}</p>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={checking}
+            onClick={() => void retry()}
+          >
+            {t('degraded.repair.recheck')}
+          </Button>
+        </section>
       </div>
     </div>
   );

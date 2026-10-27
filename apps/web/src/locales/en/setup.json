@@ -127,13 +127,25 @@
     "repair": {
       "title": "Orchestration engine is not ready",
       "description": "Nexus needs an orchestration provider to run tasks. Complete the two steps below, then recheck.",
-      "stepConnect": {
-        "title": "Configure an orchestration provider",
-        "body": "Run this command in your terminal:"
-      },
-      "copy": "Copy",
-      "copied": "Copied",
       "failure": "A provider is selected, but its readiness check failed: {{reason}}.",
+      "form": {
+        "title": "Configure an orchestration provider",
+        "candidatesTitle": "Agents on this machine",
+        "candidatesError": "Could not read the local agent list. You can still fill in the configuration below.",
+        "enable": "Use",
+        "installed": "Installed",
+        "manualTitle": "Manual configuration",
+        "idLabel": "Provider ID",
+        "idPlaceholder": "e.g. claude-acp",
+        "protocolLabel": "Protocol",
+        "protocolAcp": "ACP",
+        "protocolNativeCli": "Native CLI",
+        "commandLabel": "Launch command",
+        "commandPlaceholder": "e.g. claude-agent-acp",
+        "save": "Save and recheck",
+        "saving": "Saving…",
+        "saveFailed": "Could not save the configuration: {{message}}"
+      },
       "stepRecheck": {
         "title": "Recheck",
         "body": "After configuring, click the button below to recheck the engine status."

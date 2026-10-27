@@ -272,6 +272,33 @@ export type WorkflowObservationFrame =
   | { kind: 'history_unavailable' };
 
 /**
+ * One provider entry in the agent-host config document
+ * (`{home}/agent-host/config.toml`, `nexus_agent_host::config::ProviderConfig`).
+ */
+export interface AgentHostProviderConfig {
+  id: string;
+  protocol: 'acp' | 'native_cli';
+  command?: string | null;
+  args?: string[];
+  env?: Record<string, string>;
+  enabled?: boolean;
+}
+
+/** The agent-host config document; unknown fields are preserved on save. */
+export interface AgentHostConfig {
+  max_sessions?: number;
+  max_ops_per_session?: number;
+  timeouts?: Record<string, number>;
+  policy?: {
+    unknown_provider?: string;
+    unknown_tool_risk?: string;
+    allow_model_fallback?: boolean;
+  };
+  providers: AgentHostProviderConfig[];
+  [key: string]: unknown;
+}
+
+/**
  * Transport-agnostic client for the Nexus Daemon API.
  *
  * Two implementations ship with this scaffold:
@@ -360,6 +387,16 @@ export interface NexusClient extends CoreSliceClient {
    * profile on the service (browser path; the desktop IPC path is unchanged).
    */
   saveAgentProfile(profile: AgentProfile): Promise<AgentProfileResponse>;
+  /**
+   * `GET /v1/daemon/agent-host/config` — the provider configuration document
+   * (native defaults when the file does not exist yet).
+   */
+  getAgentHostConfig(): Promise<AgentHostConfig>;
+  /**
+   * `PUT /v1/daemon/agent-host/config` — replace the provider configuration
+   * document; the daemon validates it and returns the persisted document.
+   */
+  saveAgentHostConfig(config: AgentHostConfig): Promise<AgentHostConfig>;
 
   /** `GET /v1/daemon/works` — cursor list (F-P1/F-P3/F-F1; canonical `items` key). */
   listWorks(query?: ListWorksQuery): Promise<ListWorksResponse>;

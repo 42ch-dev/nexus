@@ -8,7 +8,7 @@
 import { useState, type ReactNode } from 'react';
 import { CheckCircle, ChevronLeft } from 'lucide-react';
 
-import { Button, Card } from '@42ch/nexus-ui';
+import { Button, Card, Input, Select } from '@42ch/nexus-ui';
 import {
   AgentPicker,
   type AgentPickerItem,
@@ -201,7 +201,8 @@ function WorkspaceBody() {
 /**
  * Studio-local replica of the engine repair page (apps/web
  * service-degraded-surface `EngineRepair`): `provider-unconfigured` is the
- * steps-only state, `failed` adds the readiness failure note under step 1.
+ * in-page configuration form, `failed` keeps the readiness failure note and
+ * the recheck action.
  */
 function ServiceRepair({ variant }: { variant: 'provider-unconfigured' | 'failed' }) {
   const failed = variant === 'failed';
@@ -219,35 +220,66 @@ function ServiceRepair({ variant }: { variant: 'provider-unconfigured' | 'failed
         Nexus needs an orchestration provider to run tasks. Complete the two steps below, then
         recheck.
       </p>
-      <ol className="flex list-none flex-col gap-5 p-0">
-        <li className="flex flex-col gap-2">
+      {failed ? (
+        <p className="text-copy-13 text-red-1000">
+          A provider is selected, but its readiness check failed: the orchestration engine is not
+          ready.
+        </p>
+      ) : (
+        <section className="flex flex-col gap-3">
           <h2 className="text-copy-16 text-gray-1000">Configure an orchestration provider</h2>
-          <p className="text-copy-14 text-gray-900">Run this command in your terminal:</p>
-          <div className="flex items-center gap-2">
-            <code className="min-w-0 flex-1 rounded-md bg-background-200 px-3 py-2 font-mono text-copy-13 text-gray-1000">
-              nexus42 connect
-            </code>
-            <Button variant="secondary" size="small" type="button">
-              Copy
+          <div className="flex flex-col gap-2">
+            <h3 className="text-copy-14 text-gray-1000">Agents on this machine</h3>
+            <ul className="flex list-none flex-col gap-1 p-0">
+              <li className="flex items-center justify-between gap-3 rounded-md bg-background-200 px-3 py-2">
+                <span className="min-w-0 truncate text-copy-13 text-gray-1000">
+                  Claude Code
+                  <span className="ml-2 text-label-12 text-gray-700">Installed</span>
+                </span>
+                <Button variant="secondary" size="small" type="button">
+                  Use
+                </Button>
+              </li>
+              <li className="flex items-center justify-between gap-3 rounded-md bg-background-200 px-3 py-2">
+                <span className="min-w-0 truncate text-copy-13 text-gray-1000">Codex CLI</span>
+                <Button variant="secondary" size="small" type="button">
+                  Use
+                </Button>
+              </li>
+            </ul>
+          </div>
+          <div className="flex flex-col gap-3">
+            <h3 className="text-copy-14 text-gray-1000">Manual configuration</h3>
+            <div className="flex flex-col gap-1">
+              <p className="text-copy-13 text-gray-900">Provider ID</p>
+              <Input defaultValue="claude-acp" aria-label="Provider ID" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <p className="text-copy-13 text-gray-900">Protocol</p>
+              <Select defaultValue="acp" aria-label="Protocol">
+                <option value="acp">ACP</option>
+                <option value="native_cli">Native CLI</option>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <p className="text-copy-13 text-gray-900">Launch command</p>
+              <Input defaultValue="claude-agent-acp" aria-label="Launch command" />
+            </div>
+            <Button variant="primary" type="button">
+              Save and recheck
             </Button>
           </div>
-          {failed && (
-            <p className="text-copy-13 text-red-1000">
-              A provider is selected, but its readiness check failed: the orchestration engine is
-              not ready.
-            </p>
-          )}
-        </li>
-        <li className="flex flex-col items-start gap-2">
-          <h2 className="text-copy-16 text-gray-1000">Recheck</h2>
-          <p className="text-copy-14 text-gray-900">
-            After configuring, click the button below to recheck the engine status.
-          </p>
-          <Button variant="secondary" type="button">
-            Recheck
-          </Button>
-        </li>
-      </ol>
+        </section>
+      )}
+      <section className="flex flex-col items-start gap-2">
+        <h2 className="text-copy-16 text-gray-1000">Recheck</h2>
+        <p className="text-copy-14 text-gray-900">
+          After configuring, click the button below to recheck the engine status.
+        </p>
+        <Button variant="secondary" type="button">
+          Recheck
+        </Button>
+      </section>
     </div>
   );
 }
@@ -409,7 +441,7 @@ export function SetupWizardChromeFixtures() {
 
       <FixtureFrame
         title="Engine repair — no provider selected"
-        description="Full-screen repair steps: run `nexus42 connect`, then recheck."
+        description="In-page configuration form: scan candidates and manual fields, then recheck."
         testId="wizard-chrome-service-provider-unconfigured"
       >
         <ServiceRepair variant="provider-unconfigured" />

@@ -127,13 +127,25 @@
     "repair": {
       "title": "编排引擎未就绪",
       "description": "Nexus 需要编排提供方才能运行任务。完成以下两步后重新检测。",
-      "stepConnect": {
-        "title": "配置编排提供方",
-        "body": "在终端运行以下命令："
-      },
-      "copy": "复制",
-      "copied": "已复制",
       "failure": "已选择编排提供方，但就绪检测未通过：{{reason}}。",
+      "form": {
+        "title": "配置编排提供方",
+        "candidatesTitle": "本机可选智能体",
+        "candidatesError": "无法读取本机的智能体列表。你仍可手动填写下方配置。",
+        "enable": "启用",
+        "installed": "已安装",
+        "manualTitle": "手动配置",
+        "idLabel": "提供方 ID",
+        "idPlaceholder": "例如 claude-acp",
+        "protocolLabel": "协议",
+        "protocolAcp": "ACP",
+        "protocolNativeCli": "原生 CLI",
+        "commandLabel": "启动命令",
+        "commandPlaceholder": "例如 claude-agent-acp",
+        "save": "保存并重启检测",
+        "saving": "正在保存…",
+        "saveFailed": "保存配置失败：{{message}}"
+      },
       "stepRecheck": {
         "title": "重新检测",
         "body": "配置完成后，点击下方按钮重新检测引擎状态。"
