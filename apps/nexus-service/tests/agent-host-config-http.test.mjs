@@ -216,19 +216,20 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
       ),
     );
     const module = await import(join(serviceRoot, 'dist', 'agent-host-config.js'));
-    const sorted = (values) => [...values].sort();
-    assert.deepEqual(sorted(module.CONFIG_KEYS), Object.keys(schema.properties).sort());
+    const byName = (left, right) => left.localeCompare(right);
+    const sorted = (values) => [...values].sort(byName);
+    assert.deepEqual(sorted(module.CONFIG_KEYS), Object.keys(schema.properties).sort(byName));
     assert.deepEqual(
       sorted(module.TIMEOUT_KEYS),
-      Object.keys(schema.properties.timeouts.properties).sort(),
+      Object.keys(schema.properties.timeouts.properties).sort(byName),
     );
     assert.deepEqual(
       sorted(module.POLICY_KEYS),
-      Object.keys(schema.properties.policy.properties).sort(),
+      Object.keys(schema.properties.policy.properties).sort(byName),
     );
     assert.deepEqual(
       sorted(module.PROVIDER_KEYS),
-      Object.keys(schema.properties.providers.items.properties).sort(),
+      Object.keys(schema.properties.providers.items.properties).sort(byName),
     );
   });
 
