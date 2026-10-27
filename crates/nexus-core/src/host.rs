@@ -1333,11 +1333,10 @@ impl HostHandle {
                                 // provider catalog; `installed` mirrors the PATH
                                 // roster (the "path candidate" discovery marker),
                                 // NOT provider readiness.
-                                let installed = entry
-                                    .health
-                                    .message
-                                    .as_deref()
-                                    .is_some_and(|message| message.starts_with("path candidate"));
+                                let installed =
+                                    entry.health.message.as_deref().is_some_and(|message| {
+                                        message.starts_with("path candidate")
+                                    });
                                 NexusAgentScanEntry {
                                     name: entry.display_name,
                                     installed,
