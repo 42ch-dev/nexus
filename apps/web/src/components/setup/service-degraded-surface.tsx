@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { useNexusClient } from '@/lib/client-context';
+import { catalogPriority } from '@/lib/agent-catalog';
 import type { AgentHostCatalogEntry, AgentHostProviderConfig } from '@/lib/nexus/types';
 import type { ServiceDegradedReason } from '@/lib/service-status-context';
 import { useOptionalServiceStatus, useServiceStatus } from '@/lib/service-status-context';
@@ -68,12 +69,25 @@ function isEngineFailure(reason: ServiceDegradedReason): reason is EngineFailure
  * upsert (load the document, replace or append this provider id, save), and a
  * successful save re-runs the readiness probe.
  */
+/**
+ * Native provider ids that have a real launch adapter in this build. Every
+ * other native_cli detection row is detection-only: rendered for visibility,
+ * never offered for launch (the daemon would honestly refuse at admission).
+ */
+const SUPPORTED_NATIVE_LAUNCH: Record<string, true> = {
+  'dsh-native': true,
+  'codex-native': true,
+  'claude-native': true,
+};
+
 /** One actionable candidate: catalog id/protocol, scan install state/command. */
 interface ProviderCandidate {
   id: string;
   displayName: string;
   protocol: AgentHostProviderConfig['protocol'];
   command: string | null;
+  /** Scan-provided launch arguments (e.g. ["acp"] for `omp acp`). */
+  args: string[];
   installed: boolean;
 }
 
@@ -82,10 +96,26 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
   const client = useNexusClient();
   const [catalog, setCatalog] = useState<AgentHostCatalogEntry[] | null>(null);
   const [scanEntries, setScanEntries] = useState<AgentScanEntry[]>([]);
+  // A failed scan means install state is UNKNOWN, not "not installed":
+  // candidates stay selectable so a transient scan outage never locks the
+  // user out of the catalog.
+  const [scanFailed, setScanFailed] = useState(false);
   const [catalogFailed, setCatalogFailed] = useState(false);
+  // Enabled provider rows from the on-disk config, by id. A configured
+  // provider is the thing being repaired: it stays selectable even when the
+  // scan has no row for it (the scan skips enabled configured providers, and
+  // catalog-only targets like gemini have no detection row at all), and its
+  // stored command/args back the form when the scan cannot supply them.
+  const [configuredRows, setConfiguredRows] = useState<
+    Map<string, AgentHostProviderConfig>
+  >(new Map());
   const [id, setId] = useState('');
   const [protocol, setProtocol] = useState<AgentHostProviderConfig['protocol']>('acp');
   const [command, setCommand] = useState('');
+  // Scan-provided launch args for the chosen candidate (e.g. ["acp"]); the
+  // manual path keeps them empty. Without them an ACP subcommand agent
+  // (omp/hermes) would be spawned bare and never speak ACP.
+  const [args, setArgs] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -105,12 +135,31 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
         }
       },
     );
+    void client.getAgentHostConfig().then(
+      (config) => {
+        if (!cancelled) {
+          setConfiguredRows(
+            new Map(
+              config.providers
+                .filter((p) => p.enabled)
+                .map((p) => [p.id, p]),
+            ),
+          );
+        }
+      },
+      () => {
+        // A failed config read only costs the configured-row affordance.
+      },
+    );
     void client.scanAgents().then(
       (response) => {
         if (!cancelled) setScanEntries(response.agents);
       },
       () => {
-        if (!cancelled) setScanEntries([]);
+        if (!cancelled) {
+          setScanEntries([]);
+          setScanFailed(true);
+        }
       },
     );
     return () => {
@@ -119,9 +168,14 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
   }, [client]);
 
   const choose = (candidate: ProviderCandidate) => {
+    // Prefer scan-provided launch data; fall back to what the user already
+    // had configured, so choosing a configured row without a scan row never
+    // blanks the stored command/args.
+    const configured = configuredRows.get(candidate.id);
     setId(candidate.id);
     setProtocol(candidate.protocol);
-    setCommand(candidate.command ?? '');
+    setCommand(candidate.command ?? configured?.command ?? '');
+    setArgs(candidate.args.length > 0 ? candidate.args : (configured?.args ?? []));
   };
 
   const save = async () => {
@@ -133,14 +187,17 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
         id: id.trim(),
         protocol,
         command: command.trim(),
+        args,
         enabled: true,
       };
+      // Replacement semantics: the saved provider is the ONE enabled entry.
+      // Known-good entries stay in the document (disabled) so settings can
+      // re-enable them later; they are never deleted here.
       const exists = current.providers.some((entry) => entry.id === provider.id);
-      const providers = exists
-        ? current.providers.map((entry) =>
-            entry.id === provider.id ? { ...entry, ...provider } : entry,
-          )
-        : [...current.providers, provider];
+      const providers = current.providers.map((entry) =>
+        entry.id === provider.id ? { ...entry, ...provider } : { ...entry, enabled: false },
+      );
+      if (!exists) providers.push(provider);
       await client.saveAgentHostConfig({ ...current, providers });
       await onSaved();
     } catch (error) {
@@ -164,14 +221,24 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
         displayName: entry.display_name,
         protocol: entry.protocol_kind,
         command: scanned?.launch_command ?? null,
+        args: scanned?.launch_args ?? [],
         installed: scanned?.installed ?? false,
       },
     ];
   });
-  // Installed candidates first; the rest keep the catalog's registry order.
-  const orderedCandidates = [...candidates].sort(
-    (left, right) => Number(right.installed) - Number(left.installed),
-  );
+  // Sort: installed first, then configured (the repair target), then curated
+  // priority (unranked last, display name as the final tie-break); the
+  // catalog's registry order falls out as the stable default.
+  const configured = (c: ProviderCandidate) => (configuredRows.has(c.id) ? 1 : 0);
+  const orderedCandidates = [...candidates].sort((left, right) => {
+    return (
+      Number(right.installed) - Number(left.installed) ||
+      configured(right) - configured(left) ||
+      (catalogPriority(left.id) ?? Number.POSITIVE_INFINITY) -
+        (catalogPriority(right.id) ?? Number.POSITIVE_INFINITY) ||
+      left.displayName.localeCompare(right.displayName)
+    );
+  });
 
   return (
     <section className="flex flex-col gap-3">
@@ -185,29 +252,63 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
         )}
         {orderedCandidates.length > 0 && (
           <ul className="flex max-h-56 list-none flex-col gap-1 overflow-y-auto p-0">
-            {orderedCandidates.map((candidate) => (
-              <li
-                key={candidate.id}
-                className="flex items-center justify-between gap-3 rounded-md bg-background-200 px-3 py-2"
-              >
-                <span className="min-w-0 truncate text-copy-13 text-gray-1000">
-                  {candidate.displayName}
-                  {candidate.installed && (
-                    <span className="ml-2 text-label-12 text-gray-700">
-                      {t('degraded.repair.form.installed')}
-                    </span>
-                  )}
-                </span>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="small"
-                  onClick={() => choose(candidate)}
+            {orderedCandidates.map((candidate) => {
+              // A configured provider is the repair target itself: it stays
+              // selectable regardless of scan state (the scan skips enabled
+              // configured providers, so its row is missing by design).
+              const configured = configuredRows.has(candidate.id);
+              // Generic ACP recipes launch through the shared ACP adapter;
+              // only the built-in trio has native launch adapters. Other
+              // native ids are detection-only: shown, never offered.
+              const launchable =
+                candidate.protocol === 'acp' || SUPPORTED_NATIVE_LAUNCH[candidate.id] === true;
+              const installState = scanFailed
+                ? 'unknown'
+                : candidate.installed
+                  ? 'installed'
+                  : 'missing';
+              return (
+                <li
+                  key={candidate.id}
+                  className="flex items-center justify-between gap-3 rounded-md bg-background-200 px-3 py-2"
                 >
-                  {t('degraded.repair.form.enable')}
-                </Button>
-              </li>
-            ))}
+                  <span className="min-w-0 truncate text-copy-13 text-gray-1000">
+                    {candidate.displayName}
+                    {installState !== 'missing' || configured ? (
+                      <span className="ml-2 text-label-12 text-gray-700">
+                        {installState === 'installed'
+                          ? t('degraded.repair.form.installed')
+                          : installState === 'unknown'
+                            ? t('degraded.repair.form.installUnknown')
+                            : t('degraded.repair.form.configured')}
+                      </span>
+                    ) : (
+                      <span className="ml-2 text-label-12 text-gray-500">
+                        {t('degraded.repair.form.notInstalled')}
+                      </span>
+                    )}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="small"
+                    // Disabled for a scan-confirmed absent target and for
+                    // detection-only native rows without a launch adapter
+                    // (unless the user configured them — the repair target
+                    // itself must stay editable).
+                    disabled={!configured && (installState === 'missing' || !launchable)}
+                    title={
+                      !configured && !launchable
+                        ? t('degraded.repair.form.detectionOnly')
+                        : undefined
+                    }
+                    onClick={() => choose(candidate)}
+                  >
+                    {t('degraded.repair.form.enable')}
+                  </Button>
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
@@ -222,7 +323,13 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
             id="repair-provider-id"
             value={id}
             placeholder={t('degraded.repair.form.idPlaceholder')}
-            onChange={(event) => setId(event.target.value)}
+            // Manual edits leave the chosen scan row's recipe: the hidden
+            // launch args belong to that row and must not leak into a
+            // different manual provider.
+            onChange={(event) => {
+              setId(event.target.value);
+              setArgs([]);
+            }}
           />
         </div>
         <div className="flex flex-col gap-1">
@@ -232,9 +339,10 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
           <Select
             id="repair-provider-protocol"
             value={protocol}
-            onChange={(event) =>
-              setProtocol(event.target.value as AgentHostProviderConfig['protocol'])
-            }
+            onChange={(event) => {
+              setProtocol(event.target.value as AgentHostProviderConfig['protocol']);
+              setArgs([]);
+            }}
           >
             <option value="acp">{t('degraded.repair.form.protocolAcp')}</option>
             <option value="native_cli">{t('degraded.repair.form.protocolNativeCli')}</option>
@@ -248,6 +356,9 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
             id="repair-provider-command"
             value={command}
             placeholder={t('degraded.repair.form.commandPlaceholder')}
+            // Correcting the executable path of the SAME recipe keeps the
+            // scan-provided args (omp → /opt/homebrew/bin/omp still needs
+            // "acp"); only switching id or protocol invalidates them.
             onChange={(event) => setCommand(event.target.value)}
           />
         </div>

@@ -80,9 +80,16 @@ export function isExcludedFromPicker(key: string): boolean {
   return loaded.agents[key]?.excludeFromPicker === true;
 }
 
+/** Curated sort priority for a catalog key (undefined = unranked). */
+export function catalogPriority(key: string): number | undefined {
+  return loaded.agents[key]?.priority;
+}
+
 const NATIVE_LAUNCH_MAP: Record<string, string> = {
   claude: 'claude-native',
   codex: 'codex-native',
+  omp: 'omp',
+  hermes: 'hermes',
 };
 
 /**
@@ -128,7 +135,7 @@ export function resolveCatalogItem(entry: AgentScanEntry): AgentCatalogItem {
     name: entry.name,
     displayName: agentOverride?.displayName ?? entry.name,
     version: entry.version,
-    description: entry.description ?? agentOverride?.description ?? null,
+    description: agentOverride?.description ?? entry.description ?? null,
     iconUrl: entry.icon_url ?? agentOverride?.iconUrl ?? null,
     installed: entry.installed,
     installUrl:

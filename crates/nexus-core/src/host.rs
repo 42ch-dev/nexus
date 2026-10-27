@@ -1321,19 +1321,38 @@ impl HostHandle {
                         let entries: Vec<NexusAgentScanEntry> = native_entries
                             .into_iter()
                             .map(|entry| {
-                                let launch_command = match &entry.launch {
-                                    LaunchStrategy::Acp { command, .. }
-                                    | LaunchStrategy::NativeCli { command, .. } => {
-                                        Some(command.clone())
+                                let launch = match &entry.launch {
+                                    LaunchStrategy::Acp { command, args, .. }
+                                    | LaunchStrategy::NativeCli { command, args, .. } => {
+                                        Some((command.clone(), args.clone()))
                                     }
                                 };
+                                let (launch_command, launch_args) = match launch {
+                                    Some((command, args)) => (Some(command), args),
+                                    None => (None, Vec::new()),
+                                };
+                                // Wire contracts (see `path_scan::scan_path_in`):
+                                // `registry_agent_id` is the provider id so the
+                                // web repair surface can join scan rows to the
+                                // provider catalog; `installed` mirrors the PATH
+                                // roster (the "path candidate" discovery marker),
+                                // NOT provider readiness.
+                                let installed =
+                                    entry.health.message.as_deref().is_some_and(|message| {
+                                        message.starts_with("path candidate")
+                                    });
                                 NexusAgentScanEntry {
                                     name: entry.display_name,
-                                    installed: entry.health.available,
+                                    installed,
                                     launch_command,
-                                    description: entry.health.message,
+                                    launch_args,
+                                    // The wire field is reserved for registry
+                                    // copy; discovery health messages are
+                                    // internal diagnostics, never user-facing
+                                    // descriptions.
+                                    description: None,
                                     icon_url: None,
-                                    registry_agent_id: None,
+                                    registry_agent_id: Some(entry.provider_id.to_string()),
                                     version: None,
                                 }
                             })

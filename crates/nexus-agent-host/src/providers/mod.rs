@@ -71,9 +71,16 @@ pub fn validate_provider_config(pc: &ProviderConfig) -> HostResult<()> {
             pc.id
         )));
     }
-    if protocol == "native_cli" && !NATIVE_PROVIDER_IDS.contains(&pc.id.as_str()) {
+    // The built-in trio plus every plain native-CLI row the detection
+    // roster can emit (`opencode`, `kimi`, …): a configured provider that
+    // came from a scan row must pass the same validation at boot.
+    if protocol == "native_cli"
+        && !NATIVE_PROVIDER_IDS.contains(&pc.id.as_str())
+        && !crate::discovery::path_scan::known_native_cli_provider_ids().any(|id| id == pc.id)
+    {
         return Err(HostError::internal(format!(
-            "unsupported native_cli provider id '{}'; expected one of {}",
+            "unsupported native_cli provider id '{}'; expected one of {} or any \
+             detection-roster native id",
             pc.id,
             NATIVE_PROVIDER_IDS.join(", ")
         )));
@@ -217,8 +224,61 @@ pub fn adapter_from_catalog_entry(
                 Ok(Arc::new(provider))
             }
             other => Err(HostError::internal(format!(
-                "unsupported native provider id '{other}'"
+                "provider '{other}' is detection-only in this build: it has no native \
+                 launch adapter yet (native adapters: dsh-native, codex-native, \
+                 claude-native). If the agent ships an ACP server, configure it with \
+                 protocol \"acp\" instead"
             ))),
         },
+    }
+}
+
+#[cfg(test)]
+mod detection_only_tests {
+    use super::*;
+    use crate::capability::model::{CapabilityDescriptor, ProtocolKind, ProviderHealth};
+    use crate::{DiscoverySource, LaunchStrategy, ProviderId, TrustLevel};
+
+    /// A detection-roster native id (no launch adapter in this build) must be
+    /// rejected with an actionable, ACP-suggesting error — saveable config,
+    /// honest launch failure (review r2 F-2).
+    #[test]
+    fn detection_only_native_id_names_the_acp_route() {
+        let entry = crate::ProviderCatalogEntry {
+            provider_id: ProviderId::new("opencode"),
+            display_name: "opencode (native CLI)".to_string(),
+            protocol_kind: ProtocolKind::NativeCli,
+            launch: LaunchStrategy::NativeCli {
+                command: "/usr/local/bin/opencode".to_string(),
+                args: vec![],
+                env: std::collections::HashMap::new(),
+            },
+            source: DiscoverySource::PathScan,
+            trust: TrustLevel::LocalPath,
+            capabilities: CapabilityDescriptor::native_cli_limited(),
+            health: ProviderHealth {
+                provider_id: ProviderId::new("opencode"),
+                available: false,
+                latency_ms: None,
+                message: Some("path candidate; bounded probe required".to_string()),
+            },
+        };
+        let err = adapter_from_catalog_entry(
+            &entry,
+            TimeoutConfig::default(),
+            HostPermissionResolver::new_native_only(&crate::config::PolicyConfig::default()),
+            nexus_acp_host::LocalSetBridge::new(),
+        )
+        .err()
+        .expect("detection-only native id must not build an adapter");
+        let message = err.to_string();
+        assert!(
+            message.contains("detection-only"),
+            "error must name the limitation: {message}"
+        );
+        assert!(
+            message.contains("acp"),
+            "error must point at the ACP route: {message}"
+        );
     }
 }
