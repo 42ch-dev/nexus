@@ -184,6 +184,26 @@ pub fn command_on_path(path_dirs: &[PathBuf], command: &str) -> bool {
     find_command(path_dirs, command).is_some()
 }
 
+/// Whether `path` is an existing executable file (unix mode bits; other
+/// targets keep the existence check). A file that merely exists is not a
+/// command a provider can launch.
+#[must_use]
+pub fn is_executable_file(path: &std::path::Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        path.metadata()
+            .is_ok_and(|metadata| metadata.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
 /// Resolve a command name to its full path using cross-platform resolution.
 ///
 /// Uses the `which` crate for proper PATH lookup across all platforms.
@@ -217,7 +237,9 @@ fn find_command(path_dirs: &[PathBuf], command: &str) -> Option<PathBuf> {
 
     for dir in search_dirs {
         let candidate = dir.join(command);
-        if candidate.is_file() {
+        // A non-executable file is not a command: `which` already enforces
+        // this, so the manual fallback must too.
+        if is_executable_file(&candidate) {
             return Some(candidate);
         }
 

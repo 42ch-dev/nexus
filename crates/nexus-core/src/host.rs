@@ -325,14 +325,15 @@ fn native_scan_entries(
         .into_iter()
         .map(|entry| {
             let launch_command = match &entry.launch {
-                LaunchStrategy::Acp { command, .. }
-                | LaunchStrategy::NativeCli { command, .. } => command.clone(),
+                LaunchStrategy::Acp { command, .. } | LaunchStrategy::NativeCli { command, .. } => {
+                    command.clone()
+                }
             };
             // The scan only emits a PATH row when it resolved the binary (or a
             // validated DSH_RUNTIME_BIN), so presence is the install signal —
             // not the probe-pending health the catalog carries.
             let installed = path_scan::command_on_path(probe_dirs, &launch_command)
-                || std::path::Path::new(&launch_command).is_file();
+                || path_scan::is_executable_file(std::path::Path::new(&launch_command));
             NexusAgentScanEntry {
                 name: entry.display_name,
                 installed,
@@ -1409,7 +1410,8 @@ impl HostHandle {
                         // Repair discovery deliberately ignores the configured
                         // ids: an enabled-but-stale entry (its command removed)
                         // must not hide the working PATH binary of the same id.
-                        let mut entries = native_scan_entries(&config, &probe_dirs).map_err(host_err)?;
+                        let mut entries =
+                            native_scan_entries(&config, &probe_dirs).map_err(host_err)?;
                         // Registry agents that are actually launchable on this
                         // machine join the list, so an unconfigured home still
                         // offers a working candidate.
@@ -2331,14 +2333,16 @@ mod scan_tests {
         std::fs::copy("/bin/sh", &binary).expect("copy executable");
 
         let mut config = AgentHostConfig::default();
-        config.providers.push(nexus_agent_host::config::ProviderConfig {
-            id: "claude-native".to_string(),
-            protocol: "native_cli".to_string(),
-            command: Some("/definitely/removed/claude".to_string()),
-            args: Vec::new(),
-            env: std::collections::HashMap::new(),
-            enabled: true,
-        });
+        config
+            .providers
+            .push(nexus_agent_host::config::ProviderConfig {
+                id: "claude-native".to_string(),
+                protocol: "native_cli".to_string(),
+                command: Some("/definitely/removed/claude".to_string()),
+                args: Vec::new(),
+                env: std::collections::HashMap::new(),
+                enabled: true,
+            });
 
         let entries =
             native_scan_entries(&config, &[dir.path().to_path_buf()]).expect("scan entries");
@@ -2355,5 +2359,48 @@ mod scan_tests {
             entry.protocol_kind,
             Some(NexusAgentScanEntryProtocolKind::NativeCli)
         );
+    }
+
+    /// A resolved override only counts as installed when it is executable: a
+    /// bare existing file would save a provider the launcher cannot start.
+    #[cfg(unix)]
+    #[test]
+    fn dsh_env_override_is_installed_only_when_executable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let empty_path = dir.path().join("empty-path");
+        std::fs::create_dir(&empty_path).expect("empty path dir");
+        let plain = dir.path().join("plain-dsh");
+        std::fs::write(&plain, "not executable").expect("plain file");
+        let executable = dir.path().join("exec-dsh");
+        std::fs::copy("/bin/sh", &executable).expect("executable file");
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod");
+
+        let previous_path = std::env::var_os("PATH");
+        std::env::set_var("PATH", &empty_path);
+        let scan = |value: &std::path::Path| {
+            std::env::set_var("DSH_RUNTIME_BIN", value);
+            native_scan_entries(&AgentHostConfig::default(), &[])
+                .expect("scan entries")
+                .into_iter()
+                .find(|entry| entry.registry_agent_id.as_deref() == Some("dsh-native"))
+                .expect("dsh row")
+        };
+
+        assert!(!scan(&plain).installed, "non-executable override");
+        assert!(scan(&executable).installed, "executable override");
+
+        std::env::remove_var("DSH_RUNTIME_BIN");
+        match previous_path {
+            Some(path) => std::env::set_var("PATH", path),
+            None => std::env::remove_var("PATH"),
+        }
     }
 }
