@@ -795,6 +795,96 @@ describe('ServiceDegradedGate', () => {
     expect(screen.getByLabelText('启动命令')).toHaveValue('/opt/stored/acp');
   });
 
+  it('keeps the saved recipe when the disabled saved provider scan row is not installed', async () => {
+    const user = userEvent.setup();
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        {
+          scan: () =>
+            Promise.resolve({
+              agents: [
+                {
+                  name: 'claude (native CLI)',
+                  registry_agent_id: 'claude-native',
+                  launch_command: 'claude',
+                  launch_args: [],
+                  installed: false,
+                  protocol_kind: 'native_cli',
+                },
+              ],
+            }),
+          getConfig: () =>
+            Promise.resolve({
+              providers: [
+                {
+                  id: 'claude-native',
+                  protocol: 'native_cli',
+                  command: '/opt/private/claude',
+                  enabled: false,
+                },
+              ],
+              max_sessions: 2,
+            } as AgentHostConfig),
+        },
+      ),
+    });
+
+    const roster = await screen.findAllByRole('listitem');
+    expect(roster).toHaveLength(1);
+    await user.click(within(roster[0]!).getByRole('button', { name: '启用' }));
+    // The not-installed scan row's bare "claude" must not replace the working
+    // saved command.
+    expect(screen.getByLabelText('启动命令')).toHaveValue('/opt/private/claude');
+  });
+
+  it('uses the scan recipe when the disabled saved provider scan row is installed', async () => {
+    const user = userEvent.setup();
+    renderSurface({
+      setupCompleted: true,
+      client: clientWith(
+        () => Promise.resolve(ENGINE_DEGRADED),
+        { workspace_initialized: true },
+        UNSELECTED_PROFILE,
+        {
+          scan: () =>
+            Promise.resolve({
+              agents: [
+                {
+                  name: 'claude (native CLI)',
+                  registry_agent_id: 'claude-native',
+                  launch_command: '/usr/local/bin/claude',
+                  launch_args: [],
+                  installed: true,
+                  protocol_kind: 'native_cli',
+                },
+              ],
+            }),
+          getConfig: () =>
+            Promise.resolve({
+              providers: [
+                {
+                  id: 'claude-native',
+                  protocol: 'native_cli',
+                  command: '/opt/private/claude',
+                  enabled: false,
+                },
+              ],
+              max_sessions: 2,
+            } as AgentHostConfig),
+        },
+      ),
+    });
+
+    const roster = await screen.findAllByRole('listitem');
+    expect(roster).toHaveLength(1);
+    await user.click(within(roster[0]!).getByRole('button', { name: '启用' }));
+    expect(screen.getByLabelText('启动命令')).toHaveValue('/usr/local/bin/claude');
+  });
+
   it('disables every other provider when saving a replacement provider', async () => {
     const user = userEvent.setup();
     const saveConfig = vi.fn((config: AgentHostConfig) => Promise.resolve(config));

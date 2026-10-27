@@ -249,6 +249,9 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
       if (catalogById.has(providerId)) continue;
       const keyProtocol = key.slice(key.indexOf('\u0000') + 1);
       if (keyProtocol !== authoritativeProtocol) continue;
+      // Only an INSTALLED scan row may replace the saved recipe: a not-found
+      // row's bare command would overwrite a working saved command.
+      if (scanByKey.get(key)?.installed !== true) continue;
       addCandidateKey(key);
       continue;
     }
