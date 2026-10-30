@@ -174,7 +174,7 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 # imports (`nexus-provider-ports`, `nexus-local-db`, `async-trait`) come from
 # `[dependencies]` — that target is `#![cfg(feature = "execution")]`, and the
 # feature enables those optional edges.
-parking_lot = "0.12"
+parking_lot = "0.13"
 # The capability/compute target builds a real WASM module and a real user
 # capability scan, so it needs the engine, the WAT compiler and the capability
 # scanner's dependencies.
