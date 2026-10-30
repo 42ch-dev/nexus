@@ -186,7 +186,7 @@ nexus-wasm-host = { path = "../../crates/nexus-wasm-host" }
 # dev-only, tests-only (graph pins use --edges normal, dev-deps excluded).
 # None enabled: Nexus owns child-process lifecycle with Tokio + ByteStreams
 # and its wire schemas in `schemas/` (rationale: crates/nexus-acp-host/Cargo.toml).
-agent-client-protocol = "=3.4.0"
+agent-client-protocol = "=3.5.0"
 # v1.210 P3 T2 (D6): the `connect_event_consumer` example opens the WS event
 # lane directly (it is the consumer-side transport seam — `nexus_core`
 # exposes `WsTransport`, not a dialer), so it needs the same
