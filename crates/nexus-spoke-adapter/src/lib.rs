@@ -131,6 +131,11 @@ pub use adapter::mca_read::{ScopedKbRead, SpokeBackedKbStore};
 // operand types. These mirror `spoke_operations`' own `pub use spoke_schemas`.
 
 pub use spoke_operations::{ExtensionMap, SpokeReject, SpokeRejectCode, SpokeResult};
+// The generated extension-key newtype is module-local at 0.15.1 and every
+// module names it `ExtensionKey`, so the types cannot be re-exported side by
+// side. Re-export the crate instead: consumers spell
+// `spoke_schemas::<module>::ExtensionKey` for the map they hold.
+pub use spoke_schemas;
 // Spoke 0.5.0 timeline beat-assist pure helpers (Surface A) — pass-through,
 // no nexus logic (call-boundary invariant §7 preserved).
 pub use spoke_operations::{
@@ -146,21 +151,6 @@ pub use spoke_schemas::{
     KnowledgeEntry, ProjectRequest, ProjectResponse, PromoteRequest, PromoteResponse,
     RelateRequest, RelateResponse, Relation, Rule, Scope, SourceAnchor, TimelineEvent,
     UpsertRequest, UpsertResponse,
-};
-
-// ── Spoke extension-key newtypes (re-export) ─────────────────────────
-//
-// The typify-generated `*ExtensionsKey` newtypes are the only way to
-// look up the `"nexus"` namespace inside a spoke wire type's
-// `extensions` map — the newtypes do not implement `Borrow<str>`, so
-// `HashMap::get("nexus")` does not compile (see `extensions.rs`'s
-// `nexus_key()` helper for the long-form rationale). Re-exporting the
-// key types here lets downstream crates (the production adapter home in
-// `nexus-local-db`) build the same lookup without a direct
-// `spoke-schemas` dependency for relation / finding ports.
-pub use spoke_schemas::{
-    finding::FindingExtensionsKey, knowledge_entry::KnowledgeEntryExtensionsKey,
-    relation::RelationExtensionsKey, ScopeExtensionsKey,
 };
 
 // ── Spoke adapter port + orchestration surface (spoke ≥ 0.3.0) ─────────

@@ -11,7 +11,7 @@
 //! spoke 0.6.0's `Scope` gained an `extensions` map. The `KbQuery` filters
 //! MCA needs that spoke `Scope` has no native field for (`text_search` /
 //! `canonical_name` / `computable` / `limit` / `offset`) ride
-//! `scope.extensions["nexus"]` (looked up via the typify `ScopeExtensionsKey`
+//! `scope.extensions["nexus"]` (looked up via the typify `ExtensionKey`
 //! newtype), alongside the `Scope`'s native `entry_types` (mapped from
 //! [`KbQuery::block_type`]). This is the architect's original §7.5
 //! scope-pushdown design — feasible since 0.6.0 (the prior typed
@@ -34,7 +34,8 @@
 use super::NexusAdapter;
 use crate::conversion::{knowledge_record_to_spoke, spoke_to_knowledge_record};
 use crate::extensions::set_nexus_body;
-use crate::{KnowledgeEntry, Scope, ScopeExtensionsKey};
+use crate::{KnowledgeEntry, Scope};
+use spoke_schemas::ExtensionKey;
 use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryRecord, KnowledgeOwnerRef};
 use nexus_knowledge::world_kb::query::{KbQuery, KbQueryResult};
 use nexus_knowledge::world_kb::source_anchor::SourceAnchor;
@@ -344,14 +345,14 @@ fn read_only_error(method: &str) -> KbStoreError {
 
 // ── Scope ↔ KbQuery bridge (spoke-native scope.extensions, ≥ 0.6.0) ──────
 
-/// Build the typed `ScopeExtensionsKey` for the `"nexus"` namespace.
+/// Build the typed `ExtensionKey` for the `"nexus"` namespace.
 ///
 /// The literal `"nexus"` always satisfies the typify `^[a-z][a-z0-9_-]*$`
 /// namespace regex, so construction is infallible at runtime. The newtype does
 /// not implement `Borrow<str>`, so `HashMap::get("nexus")` does not compile —
 /// this bridges that gap (mirrors `extensions::nexus_key` for the entry key).
-fn nexus_scope_key() -> ScopeExtensionsKey {
-    ScopeExtensionsKey::try_from("nexus")
+fn nexus_scope_key() -> ExtensionKey {
+    ExtensionKey::try_from("nexus")
         .expect("\"nexus\" matches the ^[a-z][a-z0-9_-]*$ namespace regex")
 }
 
@@ -442,7 +443,8 @@ fn kb_query_from_scope(scope: &Scope) -> KbQuery {
     // trip from scope_from_kb_query).
     let (text_search, canonical_name, computable, limit, offset) = scope
         .extensions
-        .get(&nexus_scope_key())
+        .as_ref()
+        .and_then(|ext| ext.get(&nexus_scope_key()))
         .map_or((None, None, None, None, None), |ns| {
             let text_search = ns
                 .get("text_search")

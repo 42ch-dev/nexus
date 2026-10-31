@@ -57,7 +57,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use nexus_local_db::spoke_rules::{get_spoke_rules_by_ids, list_rules_by_world, SpokeRuleRow};
 use serde_json::{json, Map, Value};
-use spoke_schemas::data::rule::{RuleCanonicalName, RuleExtensionsKey};
+use spoke_schemas::data::rule::{RuleCanonicalName, ExtensionKey};
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU64;
 
@@ -96,7 +96,7 @@ fn row_to_rule(row: &SpokeRuleRow) -> Option<Rule> {
     let canonical_name = RuleCanonicalName::try_from(row.canonical_name.clone()).ok()?;
     let target_entry_types: Vec<String> =
         serde_json::from_str(&row.target_entry_types_json).ok()?;
-    let extensions: HashMap<RuleExtensionsKey, Map<String, Value>> =
+    let extensions: HashMap<ExtensionKey, Map<String, Value>> =
         serde_json::from_str(&row.extensions_json).ok()?;
     let source_anchor = row
         .source_anchor_json
@@ -121,7 +121,8 @@ fn row_to_rule(row: &SpokeRuleRow) -> Option<Rule> {
         target_entry_types,
         updated_at: row
             .updated_at
-            .and_then(|ts| DateTime::<Utc>::from_timestamp(ts, 0)),
+            .and_then(|ts| DateTime::<Utc>::from_timestamp(ts, 0))
+            .map(Into::into),
     })
 }
 
@@ -398,7 +399,7 @@ mod tests {
             "epoch-second INTEGER → DateTime<Utc>"
         );
         assert_eq!(
-            rule.updated_at,
+            rule.updated_at.as_deref().copied(),
             DateTime::<Utc>::from_timestamp(1_700_000_100, 0)
         );
     }

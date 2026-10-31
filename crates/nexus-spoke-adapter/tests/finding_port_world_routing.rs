@@ -466,7 +466,7 @@ async fn v1191_holder_ports_world_findings_stay_inside_the_bound_selection() {
     // (a) A world outside the bound selection is refused outright.
     let mut foreign = world_finding("fnd_foreign_world");
     if let Some(ext) = foreign.extensions.get_mut(
-        &spoke_schemas::finding::FindingExtensionsKey::try_from("nexus")
+        &spoke_schemas::finding::ExtensionKey::try_from("nexus")
             .expect("nexus namespace key"),
     ) {
         ext.insert(

@@ -372,7 +372,7 @@ mod tests {
         };
         assert!(!events.is_empty());
 
-        let key = spoke_schemas::timeline_event::TimelineEventExtensionsKey::try_from("nexus")
+        let key = spoke_schemas::timeline_event::ExtensionKey::try_from("nexus")
             .expect("valid namespace key");
 
         for e in &events {

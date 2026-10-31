@@ -255,7 +255,7 @@ fn v1191_holder_ports_governance_conversion_is_exact_and_legacy_key_refused() {
     // A legacy-flag entry is refused before any field is read.
     let legacy = nexus_spoke_adapter::extensions::refuse_legacy_creator_only;
     let mut wire = knowledge_record_to_spoke(&entry_in("confirmed"));
-    let key = spoke_schemas::knowledge_entry::KnowledgeEntryExtensionsKey::try_from("nexus")
+    let key = spoke_schemas::knowledge_entry::ExtensionKey::try_from("nexus")
         .expect("nexus namespace key");
     wire.extensions
         .entry(key)

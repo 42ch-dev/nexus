@@ -131,7 +131,10 @@ pub fn knowledge_record_to_spoke(entry: &KnowledgeEntryRecord) -> SpokeKnowledge
         .unwrap_or_default();
     let spoke_body = SpokeKnowledgeEntryBody {
         attributes,
-        computable: computable_map,
+        // 0.15.1 wire parity: upstream omits `computable` only when it is
+        // `None`, while 0.14.1 omitted an *empty* map — so the empty case
+        // must map to `None` rather than emitting `"computable": {}`.
+        computable: (!computable_map.is_empty()).then(|| computable_map.into()),
         state: state_map,
         summary,
         tags,
@@ -170,11 +173,15 @@ pub fn knowledge_record_to_spoke(entry: &KnowledgeEntryRecord) -> SpokeKnowledge
             .expect("schema_version >= 1"),
         source_anchor: entry.source_anchor.as_ref().map(nexus_anchor_to_spoke),
         status: entry.status.clone(),
-        updated_at: entry.updated_at.as_ref().and_then(|s| {
-            chrono::DateTime::parse_from_rfc3339(s)
-                .ok()
-                .map(|dt| dt.with_timezone(&chrono::Utc))
-        }),
+        updated_at: entry
+            .updated_at
+            .as_ref()
+            .and_then(|s| {
+                chrono::DateTime::parse_from_rfc3339(s)
+                    .ok()
+                    .map(|dt| dt.with_timezone(&chrono::Utc))
+            })
+            .map(Into::into),
     };
 
     // Canonical container owner → extensions.nexus (v1.184 P1). World owners
@@ -272,7 +279,7 @@ pub fn spoke_to_knowledge_record(
         summary,
         tags,
     } = s.body;
-    let has_computable = !computable.is_empty();
+    let has_computable = computable.as_ref().is_some_and(|m| !m.is_empty());
     let has_state = !state.is_empty();
     let has_tags = !tags.is_empty();
     let attributes_opt = spoke_attrs_to_nexus(&attributes);
@@ -364,9 +371,9 @@ fn nexus_attr_to_spoke(
     value: &Value,
 ) -> Option<KnowledgeEntryBodyAttributesItem> {
     let spoke_value = match value {
-        Value::String(s) => KnowledgeEntryBodyAttributesItemValue::Variant0(s.clone()),
-        Value::Number(n) => KnowledgeEntryBodyAttributesItemValue::Variant1(n.as_f64()?),
-        Value::Bool(b) => KnowledgeEntryBodyAttributesItemValue::Variant2(*b),
+        Value::String(s) => KnowledgeEntryBodyAttributesItemValue::String(s.clone()),
+        Value::Number(n) => KnowledgeEntryBodyAttributesItemValue::Number(n.as_f64()?),
+        Value::Bool(b) => KnowledgeEntryBodyAttributesItemValue::Boolean(*b),
         // Null / array / object — no spoke BodyAttributeValue slot.
         _ => return None,
     };
@@ -393,11 +400,11 @@ fn spoke_attrs_to_nexus(attrs: &[KnowledgeEntryBodyAttributesItem]) -> Option<Va
     for attr in attrs {
         let key = attr.trait_type.to_string();
         let val = match &attr.value {
-            KnowledgeEntryBodyAttributesItemValue::Variant0(s) => Value::String(s.clone()),
-            KnowledgeEntryBodyAttributesItemValue::Variant1(f) => {
+            KnowledgeEntryBodyAttributesItemValue::String(s) => Value::String(s.clone()),
+            KnowledgeEntryBodyAttributesItemValue::Number(f) => {
                 serde_json::Number::from_f64(*f).map_or(Value::Null, Value::Number)
             }
-            KnowledgeEntryBodyAttributesItemValue::Variant2(b) => Value::Bool(*b),
+            KnowledgeEntryBodyAttributesItemValue::Boolean(b) => Value::Bool(*b),
         };
         map.insert(key, val);
     }
@@ -409,9 +416,9 @@ fn spoke_attrs_to_nexus(attrs: &[KnowledgeEntryBodyAttributesItem]) -> Option<Va
 /// anchor model aligns with nexus provenance (T3).
 fn nexus_anchor_to_spoke(a: &SourceAnchor) -> SpokeSourceAnchor {
     SpokeSourceAnchor {
-        schema_version: NonZeroU64::new(1).expect("1 is non-zero"),
+        schema_version: NonZeroU64::new(1).expect("1 is non-zero").into(),
         source_id: serde_json::to_string(a).unwrap_or_else(|_| "{}".to_string()),
-        extensions: HashMap::new(),
+        extensions: HashMap::new().into(),
         label: None,
         mime_type: None,
         span: None,
@@ -453,8 +460,8 @@ fn nexus_modules_to_spoke(
             continue;
         };
         let ns_val = match val {
-            Value::Object(obj) => KnowledgeEntryModulesValue::Variant0(obj.clone()),
-            Value::Array(arr) => KnowledgeEntryModulesValue::Variant1(arr.clone()),
+            Value::Object(obj) => KnowledgeEntryModulesValue::Object(obj.clone()),
+            Value::Array(arr) => KnowledgeEntryModulesValue::Array(arr.clone()),
             // Scalar values / null — no spoke slot.
             _ => continue,
         };
@@ -476,8 +483,8 @@ fn spoke_modules_to_nexus(
     let mut map = Map::new();
     for (key, val) in spoke {
         let json_val = match val {
-            KnowledgeEntryModulesValue::Variant0(obj) => Value::Object(obj.clone()),
-            KnowledgeEntryModulesValue::Variant1(arr) => Value::Array(arr.clone()),
+            KnowledgeEntryModulesValue::Object(obj) => Value::Object(obj.clone()),
+            KnowledgeEntryModulesValue::Array(arr) => Value::Array(arr.clone()),
         };
         map.insert(key.to_string(), json_val);
     }
@@ -936,6 +943,41 @@ mod tests {
         let spoke = knowledge_record_to_spoke(&kb);
         let roundtripped = spoke_to_knowledge_record(spoke).unwrap();
         assert!(roundtripped.body.is_none(), "no body fields → body is None");
+    }
+
+    /// 0.15.1 wire parity for the one body field whose generated shape moved
+    /// from `Map` (`skip_serializing_if = Map::is_empty`) to `Option<Map>`
+    /// (`skip_serializing_if = Option::is_none`): a falsy nexus `computable`
+    /// must stay absent from the JSON, exactly as 0.14.1 emitted it, and only
+    /// `Some(true)` may render the marker map.
+    #[test]
+    fn spoke_seam_computable_is_omitted_when_empty() {
+        for computable in [None, Some(false)] {
+            let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Hero");
+            kb.body = Some(KnowledgeEntryBody {
+                computable,
+                ..Default::default()
+            });
+            let wire = serde_json::to_value(knowledge_record_to_spoke(&kb))
+                .expect("spoke entry serializes");
+            assert!(
+                wire["body"].get("computable").is_none(),
+                "empty computable map must stay off the wire (computable={computable:?})"
+            );
+        }
+
+        let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Hero");
+        kb.body = Some(KnowledgeEntryBody {
+            computable: Some(true),
+            ..Default::default()
+        });
+        let wire =
+            serde_json::to_value(knowledge_record_to_spoke(&kb)).expect("spoke entry serializes");
+        assert_eq!(
+            wire["body"]["computable"],
+            serde_json::json!({ "_computable": true }),
+            "a truthy computable renders the marker map"
+        );
     }
 
     #[test]

@@ -3744,7 +3744,7 @@ name = "nexus-contracts"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "regress 0.12.0",
+ "regress",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -5198,16 +5198,6 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "regress"
-version = "0.10.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2057b2325e68a893284d1538021ab90279adac1139957ca2a74426c6f118fb48"
-dependencies = [
- "hashbrown 0.16.1",
- "memchr",
-]
-
-[[package]]
-name = "regress"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32eef8b209c3c1c15dbad02c1f30f9539f00dc7253e0cbcdaae442a50a09d7c1"
@@ -5821,16 +5811,16 @@ dependencies = [
 
 [[package]]
 name = "spoke-connect"
-version = "0.14.1"
+version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "806e18c2f37ee325da225c1cfd0716a2be0ea8d16873df41b59bea99edd9c802"
+checksum = "19d579657aab2e08543334b815e53943d125ed60cf71dabe294e65baaad6a385"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
  "chrono",
  "ed25519-dalek 2.2.0",
  "futures",
- "getrandom 0.2.17",
+ "getrandom 0.4.3",
  "libp2p",
  "serde",
  "serde_jcs",
@@ -5844,26 +5834,28 @@ dependencies = [
 
 [[package]]
 name = "spoke-operations"
-version = "0.14.1"
+version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0cdb4a69b7f4f91866ce4980fc45daa90385591960486b218a88f49696ac1113"
+checksum = "6fc0884485abb0736aad5d6d9b1569a740a0a20e621906ba601d9f23dba7e31c"
 dependencies = [
  "async-trait",
  "chrono",
- "regress 0.10.5",
+ "regress",
  "serde",
+ "serde_jcs",
  "serde_json",
+ "sha2 0.10.9",
  "spoke-schemas",
 ]
 
 [[package]]
 name = "spoke-schemas"
-version = "0.14.1"
+version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "370be4946c09718191e28f04818e503f0bde4548321e2d7d0508c6de5b622cea"
+checksum = "2a25ecf69eb824273fa60353dc9759bb0541ccda2bf040dda3540a0ee7c8834a"
 dependencies = [
  "chrono",
- "regress 0.10.5",
+ "regress",
  "serde",
  "serde_json",
 ]

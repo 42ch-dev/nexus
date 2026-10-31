@@ -50,7 +50,7 @@ use nexus_knowledge::world_kb::knowledge_entry::{
 use serde_json::{Map, Value};
 use spoke_operations::ExtensionMap;
 use spoke_schemas::knowledge_entry::{
-    KnowledgeEntryExtensionsKey, KnowledgeEntryOwner as SpokeKnowledgeOwner,
+    ExtensionKey, KnowledgeEntryOwner as SpokeKnowledgeOwner,
 };
 use spoke_schemas::KnowledgeEntry;
 
@@ -61,13 +61,13 @@ const NAMESPACE: &str = "nexus";
 /// Construct the typed namespace lookup key for the `"nexus"` namespace.
 ///
 /// `KnowledgeEntry.extensions` is keyed by the newtype
-/// `KnowledgeEntryExtensionsKey` (typify-generated, regex-validated). The
+/// `ExtensionKey` (typify-generated, regex-validated). The
 /// literal `"nexus"` always satisfies the regex, so construction is
 /// infallible at runtime. The type does not implement `Borrow<str>`, so a
 /// `HashMap::get("nexus")` lookup does not compile — this helper bridges
 /// that gap.
-fn nexus_key() -> KnowledgeEntryExtensionsKey {
-    KnowledgeEntryExtensionsKey::try_from(NAMESPACE)
+fn nexus_key() -> ExtensionKey {
+    ExtensionKey::try_from(NAMESPACE)
         .expect("\"nexus\" matches the ^[a-z][a-z0-9_-]*$ namespace regex")
 }
 
@@ -371,7 +371,7 @@ pub fn set_provenance(
 ///
 /// Operates on the wire-neutral [`ExtensionMap`] shape (plain `String`
 /// namespace keys). The caller is responsible for any
-/// `KnowledgeEntryExtensionsKey` ↔ `String` conversion at the storage
+/// `ExtensionKey` ↔ `String` conversion at the storage
 /// boundary.
 #[must_use]
 pub fn build_extensions_nexus(

@@ -30,7 +30,7 @@
 
 use crate::Rule;
 use serde_json::{Map, Value};
-use spoke_schemas::data::rule::RuleExtensionsKey;
+use spoke_schemas::data::rule::ExtensionKey;
 
 /// The `extensions.nexus` namespace key (lowercase, matches the
 /// `^[a-z][a-z0-9_-]*$` namespace convention — same literal as
@@ -268,7 +268,7 @@ pub fn parse_carrier_json(value: &Value) -> Result<Constraint, String> {
 /// create).
 #[must_use]
 pub fn constraint_from_rule(rule: &Rule) -> Option<Constraint> {
-    let nexus_key = RuleExtensionsKey::try_from(NAMESPACE).ok()?;
+    let nexus_key = ExtensionKey::try_from(NAMESPACE).ok()?;
     let constraint = rule.extensions.get(&nexus_key)?.get(CONSTRAINT_KEY)?;
     parse_carrier_json(constraint).ok()
 }
@@ -605,7 +605,7 @@ mod tests {
     // ── constraint_from_rule: evaluator read path ────────────────────
 
     fn rule_with_extensions(extensions_json: &str) -> Rule {
-        let extensions: HashMap<RuleExtensionsKey, Map<String, Value>> =
+        let extensions: HashMap<ExtensionKey, Map<String, Value>> =
             serde_json::from_str(extensions_json).unwrap();
         Rule {
             canonical_name: RuleCanonicalName::try_from("characters need summaries".to_string())

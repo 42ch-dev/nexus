@@ -84,9 +84,8 @@
 
 use super::activation::HopEdge;
 use super::NexusAdapter;
-use crate::{
-    Relation, RelationExtensionsKey, RelationPort, SpokeReject, SpokeRejectCode, SpokeResult,
-};
+use crate::{Relation, RelationPort, SpokeReject, SpokeRejectCode, SpokeResult};
+use spoke_schemas::relation::ExtensionKey;
 use async_trait::async_trait;
 use nexus_local_db::kb_relationships::{
     get_relationship, list_confirmed_relationships_paginated, update_relationship_in_tx,
@@ -908,9 +907,11 @@ fn prepare_create_fields(
     let now = chrono::Utc::now().to_rfc3339();
     let created_at = relation
         .created_at
+        .as_ref()
         .map_or_else(|| now.clone(), |dt| dt.to_rfc3339());
     let updated_at = relation
         .updated_at
+        .as_ref()
         .map_or_else(|| now.clone(), |dt| dt.to_rfc3339());
     let source_anchor_ids = locals.source_anchor_ids.clone().unwrap_or_default();
 
@@ -953,7 +954,7 @@ struct NexusLocals {
 /// Borrow the nexus-locals from a spoke `Relation`'s `extensions.nexus`
 /// namespace, or [`NexusLocals::default`] when the namespace is absent.
 fn extract_nexus_locals(relation: &Relation) -> NexusLocals {
-    let Ok(key) = RelationExtensionsKey::try_from("nexus") else {
+    let Ok(key) = ExtensionKey::try_from("nexus") else {
         return NexusLocals::default();
     };
     let Some(ns) = relation.extensions.get(&key) else {
@@ -1011,7 +1012,7 @@ fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) 
 /// [`crate::conversion::kb_relationship_row_to_spoke`] merges the JSON back,
 /// with the 6 typed columns as authoritative.
 fn serialize_extensions_nexus_json(relation: &Relation) -> Option<String> {
-    let Ok(key) = RelationExtensionsKey::try_from("nexus") else {
+    let Ok(key) = ExtensionKey::try_from("nexus") else {
         return None;
     };
     let ns = relation.extensions.get(&key)?;
@@ -1188,7 +1189,7 @@ mod tests {
                 assert_eq!(r.label.as_deref(), Some("Alice ↔ Bob"));
                 assert_eq!(r.revision, Some(1), "get must reflect the seeded revision");
                 // nexus-locals round-trip through extensions.nexus.
-                let key = RelationExtensionsKey::try_from("nexus").unwrap();
+                let key = ExtensionKey::try_from("nexus").unwrap();
                 let ns = r.extensions.get(&key).expect("nexus namespace present");
                 assert_eq!(ns.get("world_id"), Some(&json!("wld_rel")));
                 assert_eq!(ns.get("symmetric"), Some(&json!(false)));
@@ -1253,7 +1254,7 @@ mod tests {
                     Some(&json!("fixture")),
                     "open metadata bag round-trips"
                 );
-                let key = RelationExtensionsKey::try_from("nexus").unwrap();
+                let key = ExtensionKey::try_from("nexus").unwrap();
                 let ns = r.extensions.get(&key).expect("nexus namespace present");
                 assert_eq!(ns.get("world_id"), Some(&json!("wld_rel")));
                 assert_eq!(
@@ -1458,7 +1459,7 @@ mod tests {
         assert_eq!(rev2.relation_type, "opposes");
         assert_eq!(rev2.label.as_deref(), Some("Alice ↔ Bob (revised)"));
         // nexus-locals preserved (world_id still present after update).
-        let key = RelationExtensionsKey::try_from("nexus").unwrap();
+        let key = ExtensionKey::try_from("nexus").unwrap();
         assert_eq!(
             rev2.extensions.get(&key).and_then(|ns| ns.get("world_id")),
             Some(&json!("wld_rel")),
@@ -1613,7 +1614,7 @@ mod tests {
 
         // Re-read through the port and confirm every omitted local is cleared.
         let r = unwrap_ok(adapter.get_relation("rel_clr").await, "re-read");
-        let key = RelationExtensionsKey::try_from("nexus").unwrap();
+        let key = ExtensionKey::try_from("nexus").unwrap();
         let ns = r.extensions.get(&key).expect("nexus namespace present");
         assert_eq!(
             ns.get("symmetric"),
@@ -1819,7 +1820,7 @@ mod tests {
         // did NOT fire because get populated them all).
         let r = unwrap_ok(adapter.get_relation("rel_rt2").await, "final get");
         assert_eq!(r.label.as_deref(), Some("round-tripped"));
-        let key = RelationExtensionsKey::try_from("nexus").unwrap();
+        let key = ExtensionKey::try_from("nexus").unwrap();
         let ns = r.extensions.get(&key).expect("nexus namespace present");
         assert_eq!(ns.get("world_id"), Some(&json!("wld_rel")));
         assert_eq!(ns.get("symmetric"), Some(&json!(true)));
@@ -1875,7 +1876,7 @@ mod tests {
 
         // Re-read and confirm the unknown keys survived alongside the known ones.
         let r = unwrap_ok(adapter.get_relation("rel_unknown_key").await, "get");
-        let key = RelationExtensionsKey::try_from("nexus").unwrap();
+        let key = ExtensionKey::try_from("nexus").unwrap();
         let ns = r.extensions.get(&key).expect("nexus namespace present");
 
         // Known key: always present from the typed column.
@@ -1938,7 +1939,7 @@ mod tests {
             adapter.get_relation("rel_upd_unk").await,
             "get after update",
         );
-        let key = RelationExtensionsKey::try_from("nexus").unwrap();
+        let key = ExtensionKey::try_from("nexus").unwrap();
         let ns = r.extensions.get(&key).expect("nexus namespace present");
 
         assert_eq!(r.label.as_deref(), Some("updated label"));

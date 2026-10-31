@@ -22,7 +22,7 @@ nexus depends on spoke's published packages directly:
 - **TypeScript:** `@42ch/spoke-schemas` + `@42ch/spoke-operations` (npm, lockstep exact pin on the same release — the two root `package.json` pins)
 - **Rust (opt-in Connect Host only):** `spoke-connect` (crates.io, lockstep exact pin on the same release) — workspace dep consumed **only** behind cargo feature `connect-host` on `apps/nexus42`. The ordinary `nexus42` (`cli`) build MUST NOT link `spoke-connect`. See §10.
 
-**Lockstep cutover:** all three Rust and both root npm pins, `tooling/check-wire-drift.sh::SPOKE_PIN`, and the strategy sample pin references move together in one custodian checkpoint. The `libp2p` companion pin sits at `=0.57.0`, moving with the `spoke-connect` 0.14.1 lockstep and verified against the integrated lock graph. Both `connect-host` and `connect-client` feature consumers are covered; no default-build linkage expansion is introduced.
+**Lockstep cutover:** all three Rust and both root npm pins, `tooling/check-wire-drift.sh::SPOKE_PIN`, and the strategy sample pin references move together in one custodian checkpoint. The `libp2p` companion pin sits at `=0.57.0`, moving with the `spoke-connect` 0.15.1 lockstep and verified against the integrated lock graph. Both `connect-host` and `connect-client` feature consumers are covered; no default-build linkage expansion is introduced.
 
 `schemas/domain/key-block.schema.json` does not exist, and no nexus-local copy of spoke schemas exists. The atomic KB wire type is `KnowledgeEntry` from spoke.
 
@@ -685,8 +685,8 @@ On create, the adapter seeds `revision = 1` (spoke convention), not `0` (nexus V
 #### Scope-pushdown contract — Nexus query filters alongside `Scope`
 
 > **Scope-native extensions (spoke ≥ 0.6.0):** the nexus-specific filters
-> ride `scope.extensions["nexus"]` (looked up via the typify
-> `ScopeExtensionsKey` newtype). See
+> ride `scope.extensions["nexus"]` (looked up via the typify `ExtensionKey`
+> newtype; `Scope.extensions` is optional since spoke 0.15.1). See
 > `nexus-spoke-adapter/src/adapter/mca_read.rs` (`scope_from_kb_query` /
 > `kb_query_from_scope`). The round-trip is proven by the
 > `scope_extensions_round_trip` smoke test.

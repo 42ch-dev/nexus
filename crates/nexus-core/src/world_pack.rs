@@ -703,8 +703,9 @@ use nexus_local_db::LocalDbError;
 use nexus_spoke_adapter::pack::ParsedPack;
 use nexus_spoke_adapter::{
     extensions, orchestrate_relate, orchestrate_upsert, KnowledgeEntry, NexusAdapter,
-    RelateRequest, Relation, RelationExtensionsKey, UpsertRequest,
+    RelateRequest, Relation, UpsertRequest,
 };
+use nexus_spoke_adapter::spoke_schemas::relation::ExtensionKey;
 use sqlx::SqlitePool;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
@@ -2192,7 +2193,7 @@ fn parse_entry_type(s: &str) -> Option<BlockType> {
 }
 
 fn update_relation_world_id(relation: &mut Relation, world_id: &str) {
-    let key = RelationExtensionsKey::try_from("nexus")
+    let key = ExtensionKey::try_from("nexus")
         .expect("\"nexus\" matches the extensions-key regex");
     let ns = relation.extensions.entry(key).or_default();
     ns.insert(

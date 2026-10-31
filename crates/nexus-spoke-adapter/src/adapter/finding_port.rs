@@ -64,10 +64,8 @@
 //! (`check/mental.rs`); findings carrying `work_id` keep the legacy table.
 
 use super::NexusAdapter;
-use crate::{
-    Finding as SpokeFinding, FindingExtensionsKey, FindingPort, SpokeReject, SpokeRejectCode,
-    SpokeResult,
-};
+use crate::{Finding as SpokeFinding, FindingPort, SpokeReject, SpokeRejectCode, SpokeResult};
+use spoke_schemas::finding::ExtensionKey;
 use async_trait::async_trait;
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef;
 use nexus_local_db::findings::{validate_finding_enums, Finding as NexusFinding};
@@ -325,8 +323,8 @@ async fn insert_world_finding_tx(
     world_id: &str,
 ) -> Result<(), LocalDbError> {
     let now_epoch = chrono::Utc::now().timestamp();
-    let created_at = f.created_at.map_or(now_epoch, |dt| dt.timestamp());
-    let updated_at = f.updated_at.map_or(now_epoch, |dt| dt.timestamp());
+    let created_at = f.created_at.as_ref().map_or(now_epoch, |dt| dt.timestamp());
+    let updated_at = f.updated_at.as_ref().map_or(now_epoch, |dt| dt.timestamp());
     let source_anchor_json = f
         .source_anchor
         .as_ref()
@@ -449,8 +447,8 @@ fn map_spoke_to_nexus(finding: &SpokeFinding) -> Result<NexusFinding, SpokeRejec
     };
 
     let now_epoch = chrono::Utc::now().timestamp();
-    let created_at = finding.created_at.map_or(now_epoch, |dt| dt.timestamp());
-    let updated_at = finding.updated_at.map_or(now_epoch, |dt| dt.timestamp());
+    let created_at = finding.created_at.as_ref().map_or(now_epoch, |dt| dt.timestamp());
+    let updated_at = finding.updated_at.as_ref().map_or(now_epoch, |dt| dt.timestamp());
 
     Ok(NexusFinding {
         finding_id: finding.finding_id.clone(),
@@ -506,8 +504,8 @@ struct NexusExtension {
 fn extract_nexus_extension(finding: &SpokeFinding) -> NexusExtension {
     // The `"nexus"` literal always satisfies the namespace regex —
     // construction is infallible at runtime (mirrors the V1.139
-    // `KnowledgeEntryExtensionsKey` pattern).
-    let Ok(key) = FindingExtensionsKey::try_from("nexus") else {
+    // `ExtensionKey` pattern).
+    let Ok(key) = ExtensionKey::try_from("nexus") else {
         return NexusExtension {
             work_id: None,
             world_id: None,

@@ -1496,7 +1496,7 @@ mod tests {
         ] {
             let mut entry = spoke_entry("kb_legacy", "Legacy", None);
             let key =
-                spoke_schemas::knowledge_entry::KnowledgeEntryExtensionsKey::try_from("nexus")
+                spoke_schemas::knowledge_entry::ExtensionKey::try_from("nexus")
                     .expect("nexus key is a valid extension key");
             entry
                 .extensions
@@ -1599,7 +1599,7 @@ mod tests {
         let adapter = scoped(pool);
         let mut entry = spoke_entry("kb_ambig", "Ambig", None);
         // Inject two typed owner keys — the conversion seam must fail closed.
-        let key = spoke_schemas::knowledge_entry::KnowledgeEntryExtensionsKey::try_from("nexus")
+        let key = spoke_schemas::knowledge_entry::ExtensionKey::try_from("nexus")
             .expect("nexus key is a valid extension key");
         if let Some(ns) = entry.extensions.get_mut(&key) {
             ns.insert(
@@ -1705,7 +1705,7 @@ mod tests {
 
         // Same visible id, and the request itself carries the legacy key.
         let mut attempt = spoke_entry("kb_prio", "Prio", None);
-        let key = spoke_schemas::knowledge_entry::KnowledgeEntryExtensionsKey::try_from("nexus")
+        let key = spoke_schemas::knowledge_entry::ExtensionKey::try_from("nexus")
             .expect("nexus key is a valid extension key");
         attempt
             .extensions

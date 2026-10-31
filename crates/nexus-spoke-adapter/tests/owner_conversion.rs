@@ -19,10 +19,10 @@ use nexus_knowledge::world_kb::knowledge_entry::{
     KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeOwnerRef,
 };
 use nexus_spoke_adapter::conversion::{knowledge_record_to_spoke, spoke_to_knowledge_record};
-use spoke_schemas::knowledge_entry::KnowledgeEntryExtensionsKey;
+use spoke_schemas::knowledge_entry::ExtensionKey;
 
 fn nexus_ns(entry: &spoke_schemas::KnowledgeEntry) -> serde_json::Map<String, serde_json::Value> {
-    let key = KnowledgeEntryExtensionsKey::try_from("nexus").unwrap();
+    let key = ExtensionKey::try_from("nexus").unwrap();
     entry.extensions.get(&key).cloned().unwrap_or_default()
 }
 
@@ -125,7 +125,7 @@ fn reverse_conversion_without_owner_fails_closed() {
     let rec = record_for(&KnowledgeOwnerRef::world("wld_x"), "Orphan");
     let mut spoke = knowledge_record_to_spoke(&rec);
     // Strip every owner key, simulating a malformed/foreign spoke entry.
-    let key = KnowledgeEntryExtensionsKey::try_from("nexus").unwrap();
+    let key = ExtensionKey::try_from("nexus").unwrap();
     if let Some(ns) = spoke.extensions.get_mut(&key) {
         ns.remove("world_id");
         ns.remove("character_id");
@@ -202,7 +202,7 @@ fn holder_without_disclosure_round_trips_as_shared() {
 fn spoke_with_nexus(json_map: &serde_json::Value) -> spoke_schemas::KnowledgeEntry {
     let rec = record_for(&KnowledgeOwnerRef::world("wld_x"), "Wire");
     let mut spoke = knowledge_record_to_spoke(&rec);
-    let key = KnowledgeEntryExtensionsKey::try_from("nexus").unwrap();
+    let key = ExtensionKey::try_from("nexus").unwrap();
     // The `extensions` map holds the namespace as a JSON object (the same
     // shape `nexus_namespace` reads back), not a wrapped `Value`.
     let obj = json_map

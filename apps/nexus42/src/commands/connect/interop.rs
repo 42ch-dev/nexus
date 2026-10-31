@@ -690,7 +690,14 @@ async fn every_core_op_and_garbage_op_is_refused_without_side_effects() {
         .expect("allowlisted handshake");
 
     // All core ops + an unknown/garbage op → op_unsupported (product draft
-    // §3.2 coverage).
+    // §3.2 coverage). The last three are the 0.15.1 `spoke-memory` family:
+    // one representative op per capability flag (`spoke-memory`,
+    // `-reflection`, `-transfer`). Upstream knows their requirement rows, but
+    // the node gate (no invoke handler configured here, and the capability
+    // gate below it) answers every deny with `op_unsupported` — the
+    // `capability_missing` code belongs to the optional remote responder
+    // face, which nexus does not wire. Pinning the family as refused without
+    // side effects is the contract that keeps memory UNCONSUMED.
     let ops = [
         "upsert",
         "promote",
@@ -700,6 +707,9 @@ async fn every_core_op_and_garbage_op_is_refused_without_side_effects() {
         "project",
         "compute",
         "garbage-op",
+        "memory.describe",
+        "memory.reflections.generate",
+        "memory.exports.create",
     ];
     for (index, op) in ops.iter().enumerate() {
         assert_eq!(
@@ -2942,7 +2952,12 @@ async fn n_c2_refusal_matrix_project_and_unknown_ops() {
     // negotiates only the user-locked set `S` — an id outside `S` is not
     // in any hello `capabilities[]`, so the gate answers the
     // op_unsupported wire envelope before the nexus handler runs.
-    for op in ["project", "garbage-op", "tools.math.add"] {
+    // 0.15.1 lockstep: the additive `spoke-memory` family is UNCONSUMED — a
+    // representative op is refused by the same gate below the nexus handler
+    // (requirement row known upstream, capability not negotiated), so op_scope
+    // and payload shape are irrelevant and no memory semantics are emulated
+    // locally (MEM-R019 posture, upstream C-002).
+    for op in ["project", "garbage-op", "tools.math.add", "memory.describe"] {
         assert_op_unsupported(&session, op).await;
     }
 
