@@ -15,7 +15,7 @@ workspace = true
 # disables upstream's new `postgres` default (production storage is the
 # custom SQLite SessionStorage, not upstream PostgreSQL); `rig` stays off
 # (per best-practices §1.2 pin policy).
-graph-flow = { version = "=0.8.0", default-features = false }
+graph-flow = { version = "=0.8.1", default-features = false }
 async-trait = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "process", "io-util", "time", "net"] }
 # sqlx: workspace dep is declared + feature-gated by WS8 T1 (runtime-tokio, sqlite, macros, migrate, chrono, uuid).
