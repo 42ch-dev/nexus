@@ -40,12 +40,12 @@ use crate::extensions::has_nexus_body;
 use crate::{
     KnowledgeEntry, Scope, ScopeQueryPort, SpokeReject, SpokeRejectCode, SpokeResult, TimelineEvent,
 };
-use spoke_schemas::ExtensionKey;
 use async_trait::async_trait;
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef;
 use nexus_local_db::kb_store::{SqliteKbStore, LIST_BY_WORLD_LIMIT};
 use nexus_local_db::narrative_gateway::list_timeline_events_scoped;
 use serde_json::{json, Map, Value};
+use spoke_schemas::ExtensionKey;
 #[async_trait]
 impl ScopeQueryPort for NexusAdapter<'_> {
     /// List the active knowledge entries for the scope's world.

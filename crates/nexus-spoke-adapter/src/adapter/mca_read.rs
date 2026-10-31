@@ -35,7 +35,6 @@ use super::NexusAdapter;
 use crate::conversion::{knowledge_record_to_spoke, spoke_to_knowledge_record};
 use crate::extensions::set_nexus_body;
 use crate::{KnowledgeEntry, Scope};
-use spoke_schemas::ExtensionKey;
 use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryRecord, KnowledgeOwnerRef};
 use nexus_knowledge::world_kb::query::{KbQuery, KbQueryResult};
 use nexus_knowledge::world_kb::source_anchor::SourceAnchor;
@@ -43,6 +42,7 @@ use nexus_knowledge::world_kb::store::{KbStore, KbStoreError};
 use nexus_knowledge::world_kb::KnowledgeReadScope;
 use nexus_local_db::kb_store::SqliteKbStore;
 use serde_json::Value;
+use spoke_schemas::ExtensionKey;
 use sqlx::SqlitePool;
 
 // ── Adapter scoped-read method ──────────────────────────────────────────

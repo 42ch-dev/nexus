@@ -48,13 +48,20 @@ against **two real provider implementations**:
 
 - **Local**: the Nexus default local provider — `LocalMemoryProvider:
   MemoryPort` with provider-private storage over real SQLite tables and
-  bearer markdown files in an isolated temporary nexus home, reusing
-  `MemoryEngine` pure functions for algorithm policy.
+  bearer markdown files in an isolated temporary nexus home, with
+  **Nexus-owned** algorithm policy (classification, recall scoring/budget,
+  staleness, transfer transformation).
 - **Remote**: an independent, real, **durable** service provider — a second
-  provider with its own persistent store (restart-surviving) and the same
-  `MemoryEngine` policy functions, served through `RemoteMemoryService` over
-  a loopback SPOKE Connect channel. An engine-internal mock is NOT accepted
+  provider with its own persistent store (restart-surviving) and its **own**
+  policy implementation, served through `RemoteMemoryService` over a
+  loopback SPOKE Connect channel. An engine-internal mock is NOT accepted
   as the second provider.
+
+Policy is provider-owned in both cases and the class-`FREE` rows below
+expect it to differ. The reference engine (`spoke-fixture-memory-engine`,
+`fixtures/memory-engine/rust`) is path-dependency-only and unpublished, so it
+is at most an **offline conformance reference** for the algorithm-variable
+rows — never a linked dependency of either participant.
 
 No mocked echo endpoint is acceptable evidence: the remote fixture is a real
 provider enforcing the full `MemoryPort` contract over its own real storage
@@ -191,7 +198,8 @@ Applies | Owner | Stage.
 | C-054 | HARD | MEM-R004 | recall in all three modes | unconsumed candidates exist | Candidates never appear | — | both | qa-engineer | NXM-11 |
 | C-055 | HARD | MEM-R015 (hard budget) | recall with `max_bytes` below corpus; force oversized first item | large corpus | Hard UTF-8 byte budget over serialized content respected; a single oversized first item is returned WHOLE with `overflow_record_id` flagged; truncation reported | Budget MUST NOT be silently exceeded; oversized item MUST NOT be silently dropped/skipped | both | qa-engineer | NXM-11 |
 | C-056 | HARD | MEM-R026 | continue a list cursor after a grant/state change | open cursor | `CURSOR_INVALID` (terminal); re-issue with fresh snapshot | No hidden-row leak across the invalidation boundary | both | qa-engineer | NXM-11 |
-| C-057 | HARD | MEM-R006 (grant scoping) | context-limited grant (no `shared_access`) calls recall with NO `context_ids`; then `subject_all`; then `shared_only` | scoped grant | All three refused (`NOT_AUTHORIZED`): omitted `context_ids` never widens to shared/subject-all | No scope amplification by omission | both | qa-engineer | NXM-11 |
+| C-057 | HARD | 01 §7.22 (request shape) | recall with `selection` omitted, then with `selection: null` | any authorized grant | `INVALID_INPUT` in both cases — `selection` is a required `ReadSelection`, so its absence is a format error | MUST NOT be answered `NOT_AUTHORIZED`: format validation is not an authorization outcome | both | qa-engineer | NXM-11 |
+| C-057A | HARD | MEM-R006 (grant scoping) | context-limited grant (no `shared_access`) calls recall with well-formed selections outside its coverage: `subject_all`, then `shared_only` | scoped grant | Both refused (`NOT_AUTHORIZED`) — a well-formed selection never widens to shared/subject-all | No scope amplification by selection choice | both | qa-engineer | NXM-11 |
 | C-058 | FREE | algorithmic freedom envelope | same recall inputs twice per provider; compare across providers | seeded corpus | Per provider: identical inputs → identical selection; across providers: ranking/order MAY differ, invariants (authorization, budget, exclusion rules) hold | No cross-provider identical-ranking requirement | both | qa-engineer | NXM-11 |
 | C-059 | HARD | 01 §Operations (`ProvenanceFilter`) | recall with `selection` + `filter{source_context_ids:[w1]}` | records with mixed provenance | Provenance filter ANDed with placement selection: only records whose provenance includes w1 within the selected placement | Filter MUST NOT act as placement (no visibility widening) | both | qa-engineer | NXM-7/NXM-11 |
 
@@ -209,8 +217,8 @@ Applies | Owner | Stage.
 
 | ID | Class | Invariant (01) | Action | Preconditions | Expected result | Forbidden side effects | Applies | Owner | Stage |
 |---|---|---|---|---|---|---|---|---|---|
-| C-070 | HARD | MEM-R012 | `reflections.generate` without/with reflect grant, with explicit `selection`+`filter` | `spoke-memory-reflection` on | Without grant ⇒ `NOT_AUTHORIZED`; with grant ⇒ receipt `pending` | No implicit generation from read ops | both | qa-engineer | NXM-11 |
-| C-071 | HARD | MEM-R012 + MEM-R010 | poll `receipts.get` to terminal; `reflections.list` | C-070 granted call | Receipt `committed`; reflection listed with pinned basis (selection+filter+source-set digest+revisions+`engine_policy_version`) | No webhook/stream dependence | both | qa-engineer | NXM-11 |
+| C-070 | HARD | MEM-R012 | `reflections.generate` without/with reflect grant, with explicit `selection`+`filter` | `spoke-memory-reflection` on | Without grant ⇒ `NOT_AUTHORIZED`; with grant ⇒ receipt `committed` OR `pending` — §7.0.3 lets the four long-running ops commit synchronously or complete asynchronously | No implicit generation from read ops | both | qa-engineer | NXM-11 |
+| C-071 | HARD | MEM-R012 + MEM-R010 | poll `receipts.get` to terminal; `reflections.list` | C-070 granted call | Receipt terminal `committed` (immediately when the provider committed synchronously, else after `pending`); reflection listed with pinned basis (selection+filter+source-set digest+revisions+`engine_policy_version`) | No webhook/stream dependence | both | qa-engineer | NXM-11 |
 | C-072 | FREE | 01 §Reflections (envelope) | inspect generated reflection | C-071 done | Envelope valid (ids, pinned basis, timestamps); content MAY differ across providers | No identical-text requirement | both | qa-engineer | NXM-11 |
 | C-073 | HARD | MEM-R011 | `reflections.state`, `reflections.list` | any state | Succeed; `state` reports `data_sufficiency`; no mutation, no receipts | MUST NOT trigger generation | both | qa-engineer | NXM-11 |
 | C-075 | HARD | MEM-R006 + MEM-R012 | context-restricted reflect grant calls state/list/generate on subject-wide selection | grant limited to c1 | Refused (`NOT_AUTHORIZED`) — a context-limited grant cannot read/generate all-subject derived text | No derived-text scope leak | both | qa-engineer | NXM-11 |
@@ -285,7 +293,7 @@ Applies | Owner | Stage.
 | Transfer completeness + rollback without data loss or split authority | NXM-12 | C-080..C-089, C-094, C-119 |
 | Profile trust, content kinds, and admission triage | NXM-4 | C-060..C-064 |
 | Reflections: scoped, pinned, invalidated, failure-honest | NXM-11 | C-042, C-070..C-079 |
-| Grant model self-contained, non-amplifying, operator-bootstrapped | NXM-9, NXM-11 | C-057, C-075, C-090, C-095, C-096 |
+| Grant model self-contained, non-amplifying, operator-bootstrapped | NXM-9, NXM-11 | C-057A, C-075, C-090, C-095, C-096 |
 | Honest capability surface | NXM-8 | C-002..C-005, C-035, C-101 |
 | Bounded reads, hard budgets, cursor integrity | NXM-11 | C-030, C-043, C-045, C-055, C-056 |
 | Auto run capture stays refused (separate product decision) | D-4 boundary | C-115 |

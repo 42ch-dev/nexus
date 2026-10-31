@@ -14,8 +14,8 @@
 //!    (`scope_id` only, like `scope_query_port::scope_for`) still deserialize.
 
 use nexus_spoke_adapter::Scope;
-use spoke_schemas::ExtensionKey;
 use serde_json::{json, Value};
+use spoke_schemas::ExtensionKey;
 
 #[test]
 fn scope_extensions_nexus_namespace_round_trips() {
@@ -66,7 +66,10 @@ fn scope_extensions_nexus_namespace_round_trips() {
             .extensions
             .as_ref()
             .and_then(|ext| ext.get(&nexus_key)),
-        scope.extensions.as_ref().and_then(|ext| ext.get(&nexus_key)),
+        scope
+            .extensions
+            .as_ref()
+            .and_then(|ext| ext.get(&nexus_key)),
         "extensions.nexus survives serialize -> deserialize"
     );
     // The wire still names the nexus namespace.

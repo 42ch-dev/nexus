@@ -49,9 +49,7 @@ use nexus_knowledge::world_kb::knowledge_entry::{
 };
 use serde_json::{Map, Value};
 use spoke_operations::ExtensionMap;
-use spoke_schemas::knowledge_entry::{
-    ExtensionKey, KnowledgeEntryOwner as SpokeKnowledgeOwner,
-};
+use spoke_schemas::knowledge_entry::{ExtensionKey, KnowledgeEntryOwner as SpokeKnowledgeOwner};
 use spoke_schemas::KnowledgeEntry;
 
 /// The `extensions.nexus` namespace key (lowercase, matches the

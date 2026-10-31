@@ -18,7 +18,7 @@ use nexus_spoke_adapter::extensions::{
 use nexus_spoke_adapter::ExtensionMap;
 use serde_json::{json, Map, Value};
 use spoke_schemas::knowledge_entry::{
-    KnowledgeEntryBody, KnowledgeEntryCanonicalName, ExtensionKey,
+    ExtensionKey, KnowledgeEntryBody, KnowledgeEntryCanonicalName,
 };
 use spoke_schemas::KnowledgeEntry;
 
@@ -122,8 +122,7 @@ fn preserves_unknown_keys_inside_extensions_nexus() {
 
     // Inject an unknown key directly into the nexus namespace — simulates a
     // future/forward-compatible field that nexus does not yet know about.
-    let nexus_key =
-        ExtensionKey::try_from("nexus").expect("nexus matches namespace regex");
+    let nexus_key = ExtensionKey::try_from("nexus").expect("nexus matches namespace regex");
     let ns = entry.extensions.entry(nexus_key).or_default();
     ns.insert("future_field".into(), json!("keep-me"));
 
@@ -149,8 +148,8 @@ fn preserves_unknown_namespaces_alongside_nexus() {
     set_world_id(&mut entry, "wld_abc".into());
 
     // Inject a sibling namespace that nexus must never touch.
-    let other_key = ExtensionKey::try_from("other_product")
-        .expect("other_product matches namespace regex");
+    let other_key =
+        ExtensionKey::try_from("other_product").expect("other_product matches namespace regex");
     let mut other_ns = Map::new();
     other_ns.insert("book_id".into(), json!("bk_1"));
     entry.extensions.insert(other_key, other_ns);

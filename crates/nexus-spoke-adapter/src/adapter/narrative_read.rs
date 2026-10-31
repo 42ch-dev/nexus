@@ -45,10 +45,10 @@
 
 use super::NexusAdapter;
 use crate::{Scope, SpokeReject, SpokeRejectCode, SpokeResult, TimelineEvent};
-use spoke_schemas::ExtensionKey;
 use nexus_local_db::narrative_gateway::list_timeline_events_scoped;
 use serde_json::{json, Map, Value};
 use spoke_operations::order_timeline_events_by_ids;
+use spoke_schemas::ExtensionKey;
 
 impl NexusAdapter<'_> {
     /// List timeline events ordered by an explicit `ordered_ids` list, with

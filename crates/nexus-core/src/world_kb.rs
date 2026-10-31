@@ -2360,11 +2360,11 @@ pub mod relationship {
         delete_relationship_in_tx, generate_relationship_id, get_relationship, SOURCE_MANUAL,
     };
     use nexus_local_db::LocalDbError;
+    use nexus_spoke_adapter::spoke_schemas::relation::ExtensionKey;
     use nexus_spoke_adapter::{
         orchestrate_relate, NexusAdapter, RelateRequest, RelateResponse, Relation as SpokeRelation,
         SpokeResult,
     };
-    use nexus_spoke_adapter::spoke_schemas::relation::ExtensionKey;
     use std::collections::HashMap;
     use std::num::NonZeroU64;
 
@@ -2831,8 +2831,8 @@ pub mod relationship {
             );
         }
 
-        let key = ExtensionKey::try_from("nexus")
-            .expect("\"nexus\" matches the extensions-key regex");
+        let key =
+            ExtensionKey::try_from("nexus").expect("\"nexus\" matches the extensions-key regex");
         let mut extensions = HashMap::new();
         extensions.insert(key, nexus_ns);
 

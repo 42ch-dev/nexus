@@ -57,7 +57,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use nexus_local_db::spoke_rules::{get_spoke_rules_by_ids, list_rules_by_world, SpokeRuleRow};
 use serde_json::{json, Map, Value};
-use spoke_schemas::data::rule::{RuleCanonicalName, ExtensionKey};
+use spoke_schemas::data::rule::{ExtensionKey, RuleCanonicalName};
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU64;
 

@@ -386,7 +386,7 @@ impl From<TimelineEvent> for nexus_contracts::TimelineEvent {
 //     metadata; modules.observation carried verbatim, unknown keys round-trip).
 
 use serde_json::Value;
-use spoke_schemas::timeline_event::{TimelineEventCanonicalName, ExtensionKey};
+use spoke_schemas::timeline_event::{ExtensionKey, TimelineEventCanonicalName};
 
 /// Re-export the spoke standard `TimelineEvent` under a clarifying alias.
 ///

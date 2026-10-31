@@ -65,13 +65,13 @@
 
 use super::NexusAdapter;
 use crate::{Finding as SpokeFinding, FindingPort, SpokeReject, SpokeRejectCode, SpokeResult};
-use spoke_schemas::finding::ExtensionKey;
 use async_trait::async_trait;
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef;
 use nexus_local_db::findings::{validate_finding_enums, Finding as NexusFinding};
 use nexus_local_db::world_findings::insert_world_finding_in_tx;
 use nexus_local_db::LocalDbError;
 use serde_json::{json, Map, Value};
+use spoke_schemas::finding::ExtensionKey;
 
 #[async_trait]
 impl FindingPort for NexusAdapter<'_> {
@@ -323,8 +323,14 @@ async fn insert_world_finding_tx(
     world_id: &str,
 ) -> Result<(), LocalDbError> {
     let now_epoch = chrono::Utc::now().timestamp();
-    let created_at = f.created_at.as_ref().map_or(now_epoch, |dt| dt.timestamp());
-    let updated_at = f.updated_at.as_ref().map_or(now_epoch, |dt| dt.timestamp());
+    let created_at = f
+        .created_at
+        .as_ref()
+        .map_or(now_epoch, chrono::DateTime::timestamp);
+    let updated_at = f
+        .updated_at
+        .as_deref()
+        .map_or(now_epoch, chrono::DateTime::timestamp);
     let source_anchor_json = f
         .source_anchor
         .as_ref()
@@ -447,8 +453,14 @@ fn map_spoke_to_nexus(finding: &SpokeFinding) -> Result<NexusFinding, SpokeRejec
     };
 
     let now_epoch = chrono::Utc::now().timestamp();
-    let created_at = finding.created_at.as_ref().map_or(now_epoch, |dt| dt.timestamp());
-    let updated_at = finding.updated_at.as_ref().map_or(now_epoch, |dt| dt.timestamp());
+    let created_at = finding
+        .created_at
+        .as_ref()
+        .map_or(now_epoch, chrono::DateTime::timestamp);
+    let updated_at = finding
+        .updated_at
+        .as_deref()
+        .map_or(now_epoch, chrono::DateTime::timestamp);
 
     Ok(NexusFinding {
         finding_id: finding.finding_id.clone(),

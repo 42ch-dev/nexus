@@ -121,8 +121,7 @@ pub fn kb_relationship_row_to_spoke(row: &KbRelationshipRow) -> Relation {
     // `"nexus"` always satisfies the `ExtensionKey` regex — the
     // conversion is infallible at runtime (mirrors the V1.139
     // `ExtensionKey` pattern).
-    let key = ExtensionKey::try_from("nexus")
-        .expect("\"nexus\" matches the extensions-key regex");
+    let key = ExtensionKey::try_from("nexus").expect("\"nexus\" matches the extensions-key regex");
     extensions.insert(key, nexus_ns);
 
     Relation {

@@ -654,12 +654,16 @@ impl ComputablePort for NexusAdapter<'_> {
         // early — needed for the cross-entry world-scope check (F-003).
         let primary_world_id = entry
             .extensions
-            .get(&spoke_schemas::knowledge_entry::ExtensionKey::try_from("nexus").expect("valid nexus key"))
+            .get(
+                &spoke_schemas::knowledge_entry::ExtensionKey::try_from("nexus")
+                    .expect("valid nexus key"),
+            )
             .and_then(|ns| ns.get("world_id"))
             .and_then(Value::as_str)
             .unwrap_or("unknown")
             .to_string();
-        let nexus_key = spoke_schemas::knowledge_entry::ExtensionKey::try_from("nexus").expect("valid");
+        let nexus_key =
+            spoke_schemas::knowledge_entry::ExtensionKey::try_from("nexus").expect("valid");
 
         let mut key_blocks: Vec<Map<String, Value>> = Vec::new();
         let primary_kb = spoke_entry_to_key_block(&entry);

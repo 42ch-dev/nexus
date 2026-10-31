@@ -85,7 +85,6 @@
 use super::activation::HopEdge;
 use super::NexusAdapter;
 use crate::{Relation, RelationPort, SpokeReject, SpokeRejectCode, SpokeResult};
-use spoke_schemas::relation::ExtensionKey;
 use async_trait::async_trait;
 use nexus_local_db::kb_relationships::{
     get_relationship, list_confirmed_relationships_paginated, update_relationship_in_tx,
@@ -93,6 +92,7 @@ use nexus_local_db::kb_relationships::{
 };
 use nexus_local_db::LocalDbError;
 use serde_json::{json, Map, Value};
+use spoke_schemas::relation::ExtensionKey;
 
 #[async_trait]
 impl RelationPort for NexusAdapter<'_> {
@@ -908,11 +908,11 @@ fn prepare_create_fields(
     let created_at = relation
         .created_at
         .as_ref()
-        .map_or_else(|| now.clone(), |dt| dt.to_rfc3339());
+        .map_or_else(|| now.clone(), chrono::DateTime::to_rfc3339);
     let updated_at = relation
         .updated_at
-        .as_ref()
-        .map_or_else(|| now.clone(), |dt| dt.to_rfc3339());
+        .as_deref()
+        .map_or_else(|| now.clone(), chrono::DateTime::to_rfc3339);
     let source_anchor_ids = locals.source_anchor_ids.clone().unwrap_or_default();
 
     CreateFields {

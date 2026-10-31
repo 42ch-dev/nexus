@@ -1495,9 +1495,8 @@ mod tests {
             serde_json::Value::Bool(true),
         ] {
             let mut entry = spoke_entry("kb_legacy", "Legacy", None);
-            let key =
-                spoke_schemas::knowledge_entry::ExtensionKey::try_from("nexus")
-                    .expect("nexus key is a valid extension key");
+            let key = spoke_schemas::knowledge_entry::ExtensionKey::try_from("nexus")
+                .expect("nexus key is a valid extension key");
             entry
                 .extensions
                 .entry(key)
