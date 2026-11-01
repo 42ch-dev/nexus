@@ -1169,16 +1169,17 @@ impl MemoryStore {
     /// and the invalidation marker come from ONE read transaction on the store's
     /// clock (S-4), so a revoke committing between the verdict and the page can
     /// neither widen a self-view to the space-wide one nor authorize the
-    /// `principal_id` filter. Returns the page, its marker, and the principal
+    /// `principal_id` filter. Returns the page, its marker, the principal
     /// filter actually applied — admin sees the requested filter, everyone else
-    /// sees their own grants.
+    /// sees their own grants — and whether more rows follow it.
     pub(super) async fn grants_page_for(
         &self,
         principal_id: &str,
         space_id: &str,
         subject_id: Option<&str>,
         principal_filter: Option<&str>,
-    ) -> StoreResult<(Vec<GrantRow>, String, Option<String>)> {
+        page: Option<(u64, u64)>,
+    ) -> StoreResult<(Vec<GrantRow>, String, Option<String>, bool)> {
         let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let grant_rows = grants_in_tx(&mut tx, space_id).await?;
@@ -1211,13 +1212,25 @@ impl MemoryStore {
             where_sql.push_str(" AND principal_id = ?");
             binds.push(filter);
         }
-        let rows_sql =
-            format!("SELECT {GRANT_COLUMNS} FROM memory_grants{where_sql} ORDER BY grant_id");
+        let page_clause = if page.is_some() {
+            " LIMIT ? OFFSET ?"
+        } else {
+            ""
+        };
+        let rows_sql = format!(
+            "SELECT {GRANT_COLUMNS} FROM memory_grants{where_sql} ORDER BY grant_id{page_clause}"
+        );
         let mut query = sqlx::query_as::<_, GrantRow>(sqlx::AssertSqlSafe(rows_sql));
         for bind in binds {
             query = query.bind(bind);
         }
-        let rows = query.fetch_all(&mut *tx).await?;
+        if let Some((limit, offset)) = page {
+            query = query
+                .bind(page_limit_with_probe(limit))
+                .bind(i64::try_from(offset).unwrap_or(i64::MAX));
+        }
+        let mut rows = query.fetch_all(&mut *tx).await?;
+        let more = page.is_some_and(|(limit, _)| page_had_more(&mut rows, limit));
         let (marker,): (i64,) = sqlx::query_as(
             "SELECT COALESCE(SUM(revision), 0) FROM memory_grants WHERE space_id = ?",
         )
@@ -1225,7 +1238,7 @@ impl MemoryStore {
         .fetch_one(&mut *tx)
         .await?;
         tx.commit().await?;
-        Ok((rows, marker.to_string(), filter.map(str::to_string)))
+        Ok((rows, marker.to_string(), filter.map(str::to_string), more))
     }
 
     /// §7.9 issuance. Current-coverage authorization, the dedup probe, the
@@ -2813,6 +2826,19 @@ fn snapshot_marker<'a>(
     }
 }
 
+/// `LIMIT` for one page: the page's own rows plus one probe row that says
+/// whether the set continues past it, so `next_cursor` never needs a count.
+fn page_limit_with_probe(limit: u64) -> i64 {
+    i64::try_from(limit).unwrap_or(i64::MAX).saturating_add(1)
+}
+
+/// Drop the probe row and report whether it was there.
+fn page_had_more<T>(rows: &mut Vec<T>, limit: u64) -> bool {
+    let more = u64::try_from(rows.len()).unwrap_or(u64::MAX) > limit;
+    rows.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
+    more
+}
+
 /// A pending/consumed review candidate as stored (§6.7).
 #[derive(Debug, sqlx::FromRow)]
 pub(super) struct CandidateRow {
@@ -2847,14 +2873,30 @@ impl CandidateRow {
     /// enforces this predicate itself (S-9), so no read-path helper re-decides
     /// it here.
     fn requirement<'a>(&'a self, capability: &'a str) -> GrantRequirement<'a> {
-        let scope = self.scope();
-        GrantRequirement {
+        candidate_requirement(
             capability,
-            subject_id: Some(self.subject_id.as_str()),
-            context_ids: scope.context_id.map(str::to_string).into_iter().collect(),
-            reads_shared: scope.visibility == Placement::SHARED,
-            subject_all: false,
-        }
+            self.subject_id.as_str(),
+            self.capture_visibility.as_str(),
+            self.capture_context_id.as_deref(),
+        )
+    }
+}
+
+/// The §6.7 coverage one candidate names: its own subject and immutable capture
+/// placement. Shared by the page rows and the identity set the invalidation
+/// marker digests, so the two never drift.
+fn candidate_requirement<'a>(
+    capability: &'a str,
+    subject_id: &'a str,
+    visibility: &str,
+    context_id: Option<&str>,
+) -> GrantRequirement<'a> {
+    GrantRequirement {
+        capability,
+        subject_id: Some(subject_id),
+        context_ids: context_id.map(str::to_string).into_iter().collect(),
+        reads_shared: visibility == Placement::SHARED,
+        subject_all: false,
     }
 }
 
@@ -3239,13 +3281,21 @@ impl MemoryStore {
     }
 
     /// §7.12: the authorized page and its invalidation marker from one read.
+    ///
+    /// The page is cut in SQL and the marker digests the whole authorized
+    /// identity set, so the bodies of rows past the page never cross the read
+    /// (S-10). Per-row `review` coverage still depends on each row's placement,
+    /// so the page is also filtered by it — the cursor walks the predicate set,
+    /// never the filtered result, and a short page never ends the listing.
+    #[allow(clippy::too_many_lines)]
     pub(super) async fn candidates(
         &self,
         space_id: &str,
         subject_id: &str,
         status: Option<&str>,
         principal_id: &str,
-    ) -> StoreResult<(Vec<CandidateRow>, String)> {
+        page: Option<(u64, u64)>,
+    ) -> StoreResult<(Vec<CandidateRow>, String, bool)> {
         let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let grant_rows = grants_in_tx(&mut tx, space_id).await?;
@@ -3262,61 +3312,110 @@ impl MemoryStore {
                 "principal {principal_id} holds no review grant on subject {subject_id}"
             )));
         }
-        // Constant predicates, as separate statements rather than
-        // `(? IS NULL OR status = ?)`: that shape defeats the status index, and
-        // §6.7 expiry belongs to the read, not to a post-filter over every row
-        // (S-10/S-9).
-        let mut sql = format!(
-            "SELECT {CANDIDATE_COLUMNS} FROM memory_candidates \
-             WHERE space_id = ? AND subject_id = ?"
-        );
-        if status.is_some() {
-            sql.push_str(" AND status = ?");
-        }
-        sql.push_str(
-            " AND NOT (status = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?) \
-             ORDER BY created_at, candidate_id",
-        );
-        let mut query = sqlx::query_as::<_, CandidateRow>(sqlx::AssertSqlSafe(sql))
-            .bind(space_id)
-            .bind(subject_id);
-        if let Some(status) = status {
-            query = query.bind(status);
-        }
-        let rows = query.bind(timestamp(now)).fetch_all(&mut *tx).await?;
         let subject_status = subject_in_tx(&mut tx, space_id, subject_id)
             .await?
             .map(|subject| subject.status);
         let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
-        tx.commit().await?;
         // §7.7: `archived` hides the subject from the *default* listing; a
         // status-filtered listing is an explicit audit query and stays readable.
         // §5.2/D-10: an unsettled intent withholds the subject either way.
         let archived = status.is_none() && subject_status.as_deref() == Some("archived");
         let hidden = withheld(unsettled.as_deref(), subject_id)?;
-        let visible: Vec<CandidateRow> = if archived || hidden {
-            Vec::new()
+        if archived || hidden {
+            tx.commit().await?;
+            let marker =
+                snapshot_marker(std::iter::empty(), &grant_rows, subject_status.as_deref())?;
+            return Ok((Vec::new(), marker, false));
+        }
+        // Constant predicates, as separate statements rather than
+        // `(? IS NULL OR status = ?)`: that shape defeats the status index, and
+        // §6.7 expiry belongs to the read, not to a post-filter over every row
+        // (S-10/S-9).
+        let mut where_sql = String::from(" WHERE space_id = ? AND subject_id = ?");
+        if status.is_some() {
+            where_sql.push_str(" AND status = ?");
+        }
+        where_sql.push_str(
+            " AND NOT (status = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?)",
+        );
+        let page_clause = if page.is_some() {
+            " LIMIT ? OFFSET ?"
         } else {
-            rows.into_iter()
+            ""
+        };
+        let page_sql = format!(
+            "SELECT {CANDIDATE_COLUMNS} FROM memory_candidates{where_sql} \
+             ORDER BY created_at, candidate_id{page_clause}"
+        );
+        let mut rows_query = sqlx::query_as::<_, CandidateRow>(sqlx::AssertSqlSafe(page_sql))
+            .bind(space_id)
+            .bind(subject_id);
+        if let Some(status) = status {
+            rows_query = rows_query.bind(status);
+        }
+        rows_query = rows_query.bind(timestamp(now));
+        if let Some((limit, offset)) = page {
+            rows_query = rows_query
+                .bind(page_limit_with_probe(limit))
+                .bind(i64::try_from(offset).unwrap_or(i64::MAX));
+        }
+        let mut rows = rows_query.fetch_all(&mut *tx).await?;
+        let more = page.is_some_and(|(limit, _)| page_had_more(&mut rows, limit));
+        // The authorized identity set: the marker digests identity + revision
+        // for every row that can be on this listing, never their bodies.
+        let mut identity_sql = String::from(
+            "SELECT candidate_id, subject_id, capture_visibility, capture_context_id, revision \
+             FROM memory_candidates",
+        );
+        identity_sql.push_str(&where_sql);
+        let mut identity_query =
+            sqlx::query_as::<_, (String, String, String, Option<String>, i64)>(
+                sqlx::AssertSqlSafe(identity_sql),
+            )
+            .bind(space_id)
+            .bind(subject_id);
+        if let Some(status) = status {
+            identity_query = identity_query.bind(status);
+        }
+        let identity = identity_query
+            .bind(timestamp(now))
+            .fetch_all(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        let visible: Vec<CandidateRow> = rows
+            .into_iter()
+            .filter(|row| {
+                covered(
+                    &grants,
+                    principal_id,
+                    space_id,
+                    now,
+                    &row.requirement("review"),
+                )
+            })
+            .collect();
+        let marker = snapshot_marker(
+            identity
+                .iter()
                 .filter(|row| {
                     covered(
                         &grants,
                         principal_id,
                         space_id,
                         now,
-                        &row.requirement("review"),
+                        &candidate_requirement(
+                            "review",
+                            row.1.as_str(),
+                            row.2.as_str(),
+                            row.3.as_deref(),
+                        ),
                     )
                 })
-                .collect()
-        };
-        let marker = snapshot_marker(
-            visible
-                .iter()
-                .map(|row| (row.candidate_id.as_str(), row.revision)),
+                .map(|row| (row.0.as_str(), row.4)),
             &grant_rows,
             subject_status.as_deref(),
         )?;
-        Ok((visible, marker))
+        Ok((visible, marker, more))
     }
 
     /// §7.13: by-id read under current authorization (§7.17-style; an

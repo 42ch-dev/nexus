@@ -69,6 +69,14 @@ CREATE TABLE IF NOT EXISTS memory_candidates (
 CREATE INDEX IF NOT EXISTS idx_memory_candidates_subject_status
     ON memory_candidates (space_id, subject_id, status);
 
+-- §6.7 expiry: the retention sweep deletes expired pending candidates and the
+-- list predicate tests `expires_at` for the same status. The subject index above
+-- leads on `space_id`, so it cannot serve either: this one is partial on the
+-- only status that carries expiry.
+CREATE INDEX IF NOT EXISTS idx_memory_candidates_pending_expires
+    ON memory_candidates (expires_at)
+    WHERE status = 'pending';
+
 CREATE TABLE IF NOT EXISTS memory_records (
     record_id TEXT PRIMARY KEY,
     space_id TEXT NOT NULL,
