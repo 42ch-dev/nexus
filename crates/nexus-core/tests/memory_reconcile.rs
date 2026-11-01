@@ -1262,6 +1262,60 @@ async fn settle_write_failure_after_commit_is_uncertain() {
     assert_settle_failure_is_uncertain(false).await;
 }
 
+/// §5.2 step 2/S-2: a same-key replay re-drives the still-unsettled intent and
+/// settles it too, so its settlement failure is the same uncertainty as the
+/// original commit — the effect and receipt are already durable — never a
+/// retryable `INTERNAL_ERROR`; the next open finishes the settlement.
+#[tokio::test]
+async fn settle_failure_on_the_replay_branch_is_uncertain() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    ensure(&provider).await;
+
+    // The first call commits its effect, then its settlement fails.
+    provider.inject_settle_fault(true);
+    let lost = wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-replay-settle", TEXT))
+            .await,
+    );
+    assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
+
+    // The replay finds the pending receipt and re-drives it; this settlement
+    // fails the same way.
+    provider.inject_settle_fault(true);
+    let replayed = wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-replay-settle", TEXT))
+            .await,
+    );
+    assert_eq!(error_code(&replayed), "OUTCOME_UNCERTAIN");
+    assert_eq!(retry_class(&replayed), "uncertain");
+    assert_eq!(
+        journal_states(&env).await,
+        vec!["pending"],
+        "the failed replay settlement left the intent recoverable, not applied"
+    );
+
+    // Nothing was rolled back: the next open settles the intent and the replay
+    // serves the committed receipt.
+    drop(provider);
+    let provider = open_provider(&env).await;
+    assert_eq!(journal_states(&env).await, vec!["applied"]);
+    let served = wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-replay-settle", TEXT))
+            .await,
+    );
+    let record_id = record_id_of(receipt(&served));
+    let record = wire(
+        &provider
+            .get_record(&admin(), record_get_request(&record_id))
+            .await,
+    );
+    assert_eq!(record["record"]["content"]["text"], TEXT);
+}
+
 // ── C5: quarantine is not a disclosure channel ──────────────────────────
 
 /// A quarantined candidate answers the terminal refusal to a reader that may

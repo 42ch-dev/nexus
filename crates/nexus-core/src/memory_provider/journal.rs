@@ -495,11 +495,30 @@ fn write_staged(root: &Path, receipt_id: &str, effect: &FileEffect) -> std::io::
 /// that installed it survives a power loss (A-13; the repo's durable-write
 /// precedents fsync the file and then its parent directory).
 fn sync_path(path: &Path) -> std::io::Result<()> {
-    std::fs::File::open(path)?.sync_all()?;
+    open_for_sync(path)?.sync_all()?;
     if let Some(parent) = path.parent() {
-        std::fs::File::open(parent)?.sync_all()?;
+        open_for_sync(parent)?.sync_all()?;
     }
     Ok(())
+}
+
+/// A read-only handle to flush that may name a directory: Windows refuses a
+/// directory handle unless it carries `FILE_FLAG_BACKUP_SEMANTICS`.
+#[cfg(not(windows))]
+fn open_for_sync(path: &Path) -> std::io::Result<std::fs::File> {
+    std::fs::File::open(path)
+}
+
+#[cfg(windows)]
+fn open_for_sync(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    /// `FILE_FLAG_BACKUP_SEMANTICS` (`windows-sys` value; `std` exposes none).
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)
 }
 
 fn matches_digest(bytes: &[u8], digest: &str) -> bool {

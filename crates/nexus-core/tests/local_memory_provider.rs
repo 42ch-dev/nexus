@@ -2710,6 +2710,94 @@ async fn candidate_reads_and_reviews_are_limited_to_covered_scopes() {
     assert_eq!(error_code(&unprivileged), "NOT_AUTHORIZED");
 }
 
+/// MEM-R006: candidate pages carry authorized candidates only, so a reviewer
+/// restricted to one context gets dense pages — hidden rows neither consume a
+/// page nor skip a visible one across a boundary.
+#[tokio::test]
+async fn restricted_candidate_pages_are_dense_and_skip_no_visible_row() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    let scoped = principal(OTHER);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    // Hidden rows lead the listing order, which is what used to empty the first
+    // page; `created_at` is pinned so the order is the same on every run.
+    let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
+    let mut covered = Vec::new();
+    for (index, context_id) in ["bnd_2", "bnd_1", "bnd_2", "bnd_1", "bnd_2", "bnd_1"]
+        .into_iter()
+        .enumerate()
+    {
+        let captured = wire(
+            &provider
+                .capture(
+                    &admin,
+                    capture_request(&format!("k-page-{index}"), Some(context_id), TEXT),
+                )
+                .await,
+        );
+        let candidate_id = receipt(&captured)["result"]["candidate_ids"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        sqlx::query("UPDATE memory_candidates SET created_at = ? WHERE candidate_id = ?")
+            .bind(format!("2026-01-01T00:00:{index:02}Z"))
+            .bind(&candidate_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        if context_id == "bnd_1" {
+            covered.push(candidate_id);
+        }
+    }
+    drop(pool);
+    wire(
+        &provider
+            .grant(
+                &admin,
+                restricted_grant("k-page-review", "review", OTHER, SUBJECT, &["bnd_1"]),
+            )
+            .await,
+    );
+
+    let mut seen = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let request: schemas::MemoryCandidatesListRequest = dto(json!({
+            "space_id": SPACE,
+            "subject_id": SUBJECT,
+            "limit": 1,
+            "cursor": cursor,
+        }));
+        let listed = wire(&provider.list_candidates(&scoped, request).await);
+        let page: Vec<String> = listed["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|candidate| candidate["candidate_id"].as_str().unwrap().to_string())
+            .collect();
+        if listed["next_cursor"].is_string() {
+            assert!(
+                !page.is_empty(),
+                "a page before the end is never emptied by hidden candidates: {listed}"
+            );
+        }
+        seen.extend(page);
+        cursor = listed["next_cursor"].as_str().map(str::to_string);
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(
+        seen, covered,
+        "pages carry every authorized candidate, in order and once each"
+    );
+}
+
 /// §9: recall ranks deterministically, applies the byte budget as a hard limit,
 /// and surfaces an oversized first item instead of dropping it.
 #[tokio::test]
