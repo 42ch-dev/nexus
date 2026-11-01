@@ -655,6 +655,21 @@ fn decode_cursor(
     Ok(cursor.offset)
 }
 
+/// The offset a cursor claims, decoded **before** the page is cut, for reads
+/// whose scope is only known after the read resolves it (the grants page names
+/// the principal filter that read decides). The claim is verified afterwards by
+/// [`decode_cursor`] — an offset from a foreign or stale cursor only ever
+/// selects rows the caller could already read, and the mismatched response is
+/// refused.
+fn claimed_offset(raw: Option<&str>) -> Result<u64, ProviderError> {
+    let Some(raw) = raw else {
+        return Ok(0);
+    };
+    Ok(serde_json::from_str::<PageCursor>(raw)
+        .map_err(|_| ProviderError::CursorInvalid)?
+        .offset)
+}
+
 /// The cursor's offset and the snapshot marker it was issued against, decoded
 /// **before** the store reads the page: the offset is what selects the SQL page,
 /// while the marker is verified afterwards against that same snapshot, so a
@@ -1450,16 +1465,25 @@ impl MemoryPort for LocalMemoryProvider {
         }
         let principal_filter = request.principal_id.as_ref().map(|value| value.as_str());
         let subject_filter = request.subject_id.as_ref().map(|value| value.as_str());
+        let limit = page_limit(request.limit);
+        // §7.0.7/MEM-R026: the cursor's offset selects the SQL page; its claim is
+        // verified after the read, because the scope names the principal filter
+        // that read resolves.
+        let page_offset = match claimed_offset(cursor_text(request.cursor.as_ref())) {
+            Ok(offset) => offset,
+            Err(error) => return deny(&error),
+        };
         // §7.0.7/§7.8/S-4: the `admin` verdict, the page and its invalidation
         // marker are ONE read transaction on the store's clock, and the returned
         // filter is the one that read actually applied.
-        let (rows, marker, filter) = match self
+        let (rows, marker, filter, more) = match self
             .store
             .grants_page_for(
                 principal_id,
                 request.space_id.as_str(),
                 subject_filter,
                 principal_filter,
+                Some((limit, page_offset)),
             )
             .await
         {
@@ -1481,9 +1505,9 @@ impl MemoryPort for LocalMemoryProvider {
             Ok(offset) => offset,
             Err(error) => return deny(&error),
         };
-        let (page, next) = page(rows, page_limit(request.limit), offset);
-        let mut bodies = Vec::with_capacity(page.len());
-        for row in &page {
+        let next = more.then(|| offset.saturating_add(limit));
+        let mut bodies = Vec::with_capacity(rows.len());
+        for row in &rows {
             match grant_body(row) {
                 Ok(body) => bodies.push(body),
                 Err(error) => return deny(&error),
@@ -1735,19 +1759,6 @@ impl MemoryPort for LocalMemoryProvider {
             });
         }
         let status = request.status.map(|status| status.to_string());
-        let (rows, marker) = match self
-            .store
-            .candidates(
-                request.space_id.as_str(),
-                request.subject_id.as_str(),
-                status.as_deref(),
-                principal_id,
-            )
-            .await
-        {
-            Ok(page) => page,
-            Err(error) => return deny(&store_error(error)),
-        };
         let scope = format!(
             "{}|status={}",
             cursor_scope(
@@ -1758,18 +1769,34 @@ impl MemoryPort for LocalMemoryProvider {
             ),
             status.as_deref().unwrap_or("*")
         );
-        let offset = match decode_cursor(
-            cursor_text(request.cursor.as_ref()),
-            principal_id,
-            &scope,
-            &marker,
-        ) {
-            Ok(offset) => offset,
-            Err(error) => return deny(&error),
+        // §7.0.7/MEM-R026: the cursor's offset selects the SQL page; its marker
+        // is verified against the snapshot the page was read in.
+        let (offset, claimed) =
+            match cursor_page(cursor_text(request.cursor.as_ref()), principal_id, &scope) {
+                Ok(page) => page,
+                Err(error) => return deny(&error),
+            };
+        let limit = page_limit(request.limit);
+        let (rows, marker, more) = match self
+            .store
+            .candidates(
+                request.space_id.as_str(),
+                request.subject_id.as_str(),
+                status.as_deref(),
+                principal_id,
+                Some((limit, offset)),
+            )
+            .await
+        {
+            Ok(page) => page,
+            Err(error) => return deny(&store_error(error)),
         };
-        let (page, next) = page(rows, page_limit(request.limit), offset);
-        let mut bodies = Vec::with_capacity(page.len());
-        for row in &page {
+        if let Err(error) = verify_cursor(claimed.as_deref(), &marker) {
+            return deny(&error);
+        }
+        let next = more.then(|| offset.saturating_add(limit));
+        let mut bodies = Vec::with_capacity(rows.len());
+        for row in &rows {
             match candidate_body(row) {
                 Ok(body) => bodies.push(body),
                 Err(error) => return deny(&error),

@@ -73,6 +73,16 @@ CREATE INDEX IF NOT EXISTS idx_memory_journal_recovery
     ON memory_journal (space_id, seq)
     WHERE state <> 'applied';
 
+-- The retention sweep deletes applied shells older than the journal window on
+-- every mutating entry. Both indexes above are partial on the unsettled side of
+-- `state`, so they cannot serve that delete: without this one it scans the whole
+-- table — which now retains `JOURNAL_RETENTION_SECONDS` worth of rows — on every
+-- write. The predicate is literal here and in the sweep for the same reason as
+-- above (`state = 'applied'`).
+CREATE INDEX IF NOT EXISTS idx_memory_journal_applied_created
+    ON memory_journal (created_at)
+    WHERE state = 'applied';
+
 -- ── Writer-protocol guards (cooperative core-table shape) ──
 
 CREATE TRIGGER IF NOT EXISTS guard_memory_journal_insert

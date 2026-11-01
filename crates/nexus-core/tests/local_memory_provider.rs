@@ -936,6 +936,85 @@ async fn fenced_and_archived_subjects_reject_writes() {
     assert_eq!(receipt(&space_wide)["result"]["revision"], 1);
 }
 
+/// §7.24/S-3: a content or profile write over a never-ensured subject is a
+/// `NOT_FOUND`, never an implicit creation — even for a principal whose
+/// space-wide grant would cover the placement. `subjects.ensure` is the op that
+/// creates the subject and keeps working for the same principal and grant.
+#[tokio::test]
+async fn writes_over_an_un_ensured_subject_refuse_not_found() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    let writer = principal(OTHER);
+
+    for (key, capability) in [
+        ("k-space-capture", "capture"),
+        ("k-space-records", "records_write"),
+        ("k-space-profile", "profile_write"),
+    ] {
+        wire(
+            &provider
+                .grant(&admin, grant_request(key, capability, OTHER))
+                .await,
+        );
+    }
+
+    let captured = wire(
+        &provider
+            .capture(&writer, capture_request("k-capture-absent", None, TEXT))
+            .await,
+    );
+    assert_eq!(error_code(&captured), "NOT_FOUND");
+    assert_eq!(retry_class(&captured), "terminal");
+
+    let created = wire(
+        &provider
+            .create_record(
+                &writer,
+                record_create_request(
+                    "k-record-absent",
+                    "note",
+                    &json!({ "visibility": "shared" }),
+                    TEXT,
+                ),
+            )
+            .await,
+    );
+    assert_eq!(error_code(&created), "NOT_FOUND");
+
+    let profile = wire(
+        &provider
+            .update_profile(
+                &writer,
+                dto(json!({
+                    "space_id": SPACE,
+                    "subject_id": SUBJECT,
+                    "profile_kind": "personality",
+                    "expected_revision": null,
+                    "document": { "format": "markdown", "body": "# Ghost" },
+                    "idempotency_key": "k-profile-absent",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(error_code(&profile), "NOT_FOUND");
+
+    let ensured = wire(
+        &provider
+            .ensure_subject(&writer, ensure_request(SUBJECT))
+            .await,
+    );
+    assert_eq!(receipt(&ensured)["result"]["created"], true);
+
+    // Same principal, same grant, subject now exists: the refusal was absence.
+    let after = wire(
+        &provider
+            .capture(&writer, capture_request("k-capture-present", None, TEXT))
+            .await,
+    );
+    assert_eq!(receipt(&after)["status"], "committed");
+}
+
 /// §7.9 non-amplification with the ISSUED scope: a subject-scoped admin delegates
 /// within its own subject only.
 #[tokio::test]
@@ -2131,6 +2210,53 @@ async fn expired_pending_candidates_leave_the_list_and_are_reclaimed() {
     assert_eq!(
         expired, 0,
         "the sweep reclaims the expired pending candidate"
+    );
+}
+
+/// §6.7/MEM-R021: the retention sweep runs inside every mutating transaction, so
+/// its two deletes must seek an index — the applied-age journal partial index and
+/// the pending-expiry candidate partial index — never scan tables that keep a
+/// whole retention window of rows.
+#[tokio::test]
+async fn retention_sweeps_seek_their_partial_indexes() {
+    let env = seed_env();
+    let _provider = open_provider(&env).await;
+    let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
+
+    let journal: Vec<(i64, i64, i64, String)> = sqlx::query_as(
+        "EXPLAIN QUERY PLAN \
+         DELETE FROM memory_journal WHERE state = 'applied' AND created_at < ?",
+    )
+    .bind("2020-01-01T00:00:00Z")
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let journal_plan = journal
+        .iter()
+        .map(|(_, _, _, detail)| detail.as_str())
+        .collect::<Vec<_>>()
+        .join("; ");
+    assert!(
+        journal_plan.contains("idx_memory_journal_applied_created"),
+        "the applied-age delete must seek its partial index: {journal_plan}"
+    );
+
+    let candidates: Vec<(i64, i64, i64, String)> = sqlx::query_as(
+        "EXPLAIN QUERY PLAN DELETE FROM memory_candidates \
+         WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?",
+    )
+    .bind("2020-01-01T00:00:00Z")
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let candidate_plan = candidates
+        .iter()
+        .map(|(_, _, _, detail)| detail.as_str())
+        .collect::<Vec<_>>()
+        .join("; ");
+    assert!(
+        candidate_plan.contains("idx_memory_candidates_pending_expires"),
+        "the expiry delete must seek its partial index: {candidate_plan}"
     );
 }
 
