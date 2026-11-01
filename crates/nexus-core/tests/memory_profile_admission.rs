@@ -108,6 +108,19 @@ async fn ensure(provider: &LocalMemoryProvider) {
 
 /// Author one profile kind; the document is the authored content, never policy.
 async fn author(provider: &LocalMemoryProvider, kind: &str, body: &str, key: &str) -> Value {
+    author_document(provider, kind, "markdown", body, None, key).await
+}
+
+/// Author one profile document in an explicit representation; a
+/// `expected_revision` re-authors an existing kind (create-only when `None`).
+async fn author_document(
+    provider: &LocalMemoryProvider,
+    kind: &str,
+    format: &str,
+    body: &str,
+    expected_revision: Option<u64>,
+    key: &str,
+) -> Value {
     wire(
         &provider
             .update_profile(
@@ -116,8 +129,8 @@ async fn author(provider: &LocalMemoryProvider, kind: &str, body: &str, key: &st
                     "space_id": SPACE,
                     "subject_id": SUBJECT,
                     "profile_kind": kind,
-                    "expected_revision": null,
-                    "document": { "format": "markdown", "body": body },
+                    "expected_revision": expected_revision,
+                    "document": { "format": format, "body": body },
                     "idempotency_key": key,
                 })),
             )
@@ -186,6 +199,99 @@ async fn required_profile_missing_fails_closed_with_profile_incomplete() {
         reject.details.as_ref().unwrap()["missing"],
         json!([SOUL_PROFILE_KIND]),
         "an optional kind never substitutes for the required one"
+    );
+}
+
+/// Outcome 1b: an empty authored document is as incomplete as an absent one
+/// (§4.2 — "absent or empty"), in either declared representation. Optional
+/// emptiness stays honest-empty and real content is still admitted.
+#[tokio::test]
+async fn empty_required_profile_fails_closed_with_profile_incomplete() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    ensure(&provider).await;
+
+    // markdown: a whitespace-only body authors nothing.
+    let authored = author_document(
+        &provider,
+        SOUL_PROFILE_KIND,
+        "markdown",
+        "  \n\t ",
+        None,
+        "k-empty-markdown",
+    )
+    .await;
+    assert_eq!(authored["status"], "committed");
+    let reject = admission_rejection(&provider).await;
+    assert_eq!(reject.code, SpokeRejectCode::ProfileIncomplete);
+    assert_eq!(
+        reject.details.as_ref().expect("details are carried")["missing"],
+        json!([SOUL_PROFILE_KIND]),
+        "the empty required kind is named in details.missing"
+    );
+
+    // json: a structurally empty body authors nothing either.
+    let authored = author_document(
+        &provider,
+        SOUL_PROFILE_KIND,
+        "json",
+        " { } ",
+        Some(1),
+        "k-empty-json-object",
+    )
+    .await;
+    assert_eq!(authored["status"], "committed");
+    let authored = author_document(
+        &provider,
+        SOUL_PROFILE_KIND,
+        "json",
+        "null",
+        Some(2),
+        "k-empty-json-null",
+    )
+    .await;
+    assert_eq!(authored["status"], "committed");
+    assert_eq!(
+        admission_rejection(&provider).await.code,
+        SpokeRejectCode::ProfileIncomplete
+    );
+
+    // An empty *optional* kind neither substitutes for the required one nor
+    // becomes a failure of its own.
+    let authored = author_document(
+        &provider,
+        "preferences",
+        "markdown",
+        "\n",
+        None,
+        "k-empty-preferences",
+    )
+    .await;
+    assert_eq!(authored["status"], "committed");
+    assert_eq!(
+        admission_rejection(&provider).await.code,
+        SpokeRejectCode::ProfileIncomplete
+    );
+
+    // Control: real content is admitted, and the empty optional kind stays
+    // honest-empty rather than being listed as authored content.
+    let authored = author_document(
+        &provider,
+        SOUL_PROFILE_KIND,
+        "markdown",
+        "# Mira\n\nPatient, watchful.",
+        Some(3),
+        "k-empty-control",
+    )
+    .await;
+    assert_eq!(authored["status"], "committed");
+    let admitted = ok(provider.profile_admission(&admin(), SPACE, SUBJECT).await);
+    assert_eq!(admitted.present, vec![SOUL_PROFILE_KIND.to_string()]);
+
+    let read = read_profiles(&provider, Some(&["preferences"])).await;
+    assert_eq!(
+        read["profiles"][0]["document"]["body"], "\n",
+        "the stored document is read back honestly, never dropped: {read}"
     );
 }
 

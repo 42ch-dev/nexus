@@ -15,10 +15,13 @@
 //!   the same content kind.
 //!
 //! The admission seam keeps the three MEM-R005 outcomes apart instead of
-//! collapsing them: a required authored kind that is absent is an `Err` the
-//! consumer turns into `PROFILE_INCOMPLETE` (never an empty success), an absent
-//! *optional* kind is honest-empty and simply not listed, and a missing provider
-//! capability is decided at provider selection — it never reaches this module.
+//! collapsing them: a required authored kind that is absent **or empty** is an
+//! `Err` the consumer turns into `PROFILE_INCOMPLETE` (never an empty success),
+//! an absent or empty *optional* kind is honest-empty and simply not listed, and
+//! a missing provider capability is decided at provider selection — it never
+//! reaches this module.
+
+use serde_json::Value;
 
 use crate::memory_provider::storage::ProfileRow;
 
@@ -28,21 +31,61 @@ pub const SOUL_PROFILE_KIND: &str = "personality";
 /// MEM-R005 admission view: what the subject has authored.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProfileAdmission {
-    /// Present authored content kinds, sorted.
+    /// Authored content kinds carrying content, sorted.
     pub present: Vec<String>,
+}
+
+/// §4.2: does this stored profile document carry authored content?
+///
+/// Emptiness is judged in the representation the document declares:
+///
+/// * `markdown` — empty or whitespace-only body;
+/// * `json` — whitespace-only body, or a body that parses to a structurally
+///   empty value (`null`, `""`, `[]`, `{}`). A body that does not parse is
+///   authored content, merely malformed: this is emptiness detection, not
+///   schema validation.
+///
+/// A stored body outside the `{ body, format }` shape authors nothing.
+///
+/// shortcut: only the top level is inspected, so `{"a":{}}` counts as content;
+/// upgrade when nested-empty JSON bodies must also fail admission closed.
+fn has_content(row: &ProfileRow) -> bool {
+    let Ok(document) = serde_json::from_str::<Value>(&row.document_json) else {
+        return false;
+    };
+    let Some(body) = document.get("body").and_then(Value::as_str) else {
+        return false;
+    };
+    let body = body.trim();
+    if body.is_empty() {
+        return false;
+    }
+    if document.get("format").and_then(Value::as_str) != Some("json") {
+        return true;
+    }
+    match serde_json::from_str::<Value>(body) {
+        Ok(Value::Null) => false,
+        Ok(Value::String(text)) => !text.trim().is_empty(),
+        Ok(Value::Array(items)) => !items.is_empty(),
+        Ok(Value::Object(members)) => !members.is_empty(),
+        Ok(_) | Err(_) => true,
+    }
 }
 
 /// §4.2/MEM-R005: the admission view over a subject's authored profiles.
 ///
-/// `Err` carries the §4.2 required kinds that are absent — the fail-closed
-/// state a consumer reports as `PROFILE_INCOMPLETE`. It is never a success
-/// value, so a missing required kind cannot be read as an empty success.
+/// A kind is present only when its stored document carries content, so `Err`
+/// carries the §4.2 required kinds that are absent **or empty** — the
+/// fail-closed state a consumer reports as `PROFILE_INCOMPLETE`. It is never a
+/// success value, so a missing or empty required kind cannot be read as an empty
+/// success.
 pub(super) fn admission(
     rows: &[ProfileRow],
     required: &[&str],
 ) -> Result<ProfileAdmission, Vec<String>> {
     let present: Vec<String> = rows
         .iter()
+        .filter(|row| has_content(row))
         .map(|row| row.profile_kind.clone())
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
