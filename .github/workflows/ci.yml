@@ -860,6 +860,8 @@ jobs:
           --test work_services --test home_services --test preset_services
           --test reading_knowledge_services --test context_services
           --test content_services --test timeline_services --test memory_services
+          --test local_memory_provider --test memory_receipts --test memory_reconcile
+          --test memory_profile_admission
           -- --test-threads=2
 
   rust-core-host-execution:
