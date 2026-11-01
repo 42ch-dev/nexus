@@ -212,7 +212,8 @@ const SETTLE_FAULT_OPEN: u8 = 1;
 const SETTLE_FAULT_WRITE: u8 = 2;
 
 /// §5.2 step 2 proof seam: the rendezvous a parked publication waits at — one
-/// signal that it holds the workspace gate, one that frees it. Test only.
+/// signal that it holds the workspace publication section (flock and gate), one
+/// that frees it. Test only.
 #[cfg(feature = "test-hooks")]
 struct PublishRendezvous {
     entered: Arc<tokio::sync::Notify>,
@@ -414,9 +415,9 @@ pub(super) struct Fence<'a> {
 /// Keyed on the provider's projection root — the workspace directory holding
 /// `state.db` and `memory-store/` — so every provider instance opened on that
 /// workspace shares one lock and their settle-to-publish windows cannot
-/// interleave. A second *process* is outside it: there the writer protocol's
-/// admission and the journal's ownership-checked swap are the safety, which is
-/// why the in-transaction predecessor check exists as well.
+/// interleave. A second *process* is excluded by the workspace
+/// [`journal::PublishFlock`] instead; this gate is the in-process half of the
+/// same section.
 fn workspace_publish_gate(files_root: &Path) -> Arc<tokio::sync::Mutex<()>> {
     static GATES: LazyLock<Mutex<HashMap<PathBuf, Arc<tokio::sync::Mutex<()>>>>> =
         LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -428,6 +429,21 @@ fn workspace_publish_gate(files_root: &Path) -> Arc<tokio::sync::Mutex<()>> {
     Arc::clone(gates.entry(key).or_default())
 }
 
+/// The held publication section of one operation on this workspace (§5.2 step 2):
+/// the cross-process [`journal::PublishFlock`] and this process's gate, in that
+/// order.
+///
+/// **One lock order for every file-effect path: flock → gate → transaction.** The
+/// flock is taken first because it is the wider exclusion — no in-process gate can
+/// exclude another process — and because no path takes a write transaction before
+/// this section, the pair can never deadlock. Held from before the predecessor
+/// settlement until after the last publish, which is what keeps another provider
+/// process out of the displacement's link→unlink window.
+pub(super) struct PublicationGuard {
+    _flock: journal::PublishFlock,
+    _gate: tokio::sync::OwnedMutexGuard<()>,
+}
+
 pub(super) struct MemoryStore {
     pool: SqlitePool,
     /// Holds this provider's writer admission for the provider's lifetime.
@@ -435,19 +451,17 @@ pub(super) struct MemoryStore {
     /// Root of the provider's own markdown projection, next to `state.db`.
     files_root: PathBuf,
     /// §5.2 step 2: serializes the settle-to-publish window of every operation
-    /// with a file effect (and the recovery pass). SQLite serializes the row
-    /// writes, but the publish happens after that transaction commits, so
-    /// without one order per target two committed updates of it could publish
-    /// out of order and leave the file older than the row.
+    /// with a file effect (and the recovery pass) **within this process**. SQLite
+    /// serializes the row writes, but the publish happens after that transaction
+    /// commits, so without one order per target two committed updates of it could
+    /// publish out of order and leave the file older than the row.
     ///
     /// Scoped to the **workspace**, not to this provider: two provider instances
     /// opened on one workspace in this process share it, so a predecessor they
-    /// both owe cannot interleave. Another *process* is not serialized by this
-    /// lock — the writer protocol fences its admission and the journal row plus
-    /// the ownership-checked swap are what keep two processes consistent; do not
-    /// read this gate as a cross-process guarantee (see
-    /// `MemoryStore::settle_predecessors` for the one check that also holds
-    /// there).
+    /// both owe cannot interleave. Another *process* is excluded by the workspace
+    /// [`journal::PublishFlock`], which every file-effect path takes before this
+    /// gate ([`PublicationGuard`] states the order) — neither lock alone is the
+    /// publication guarantee.
     publish_gate: Arc<tokio::sync::Mutex<()>>,
     /// Latest provider-clock reading in microseconds since the epoch. A floor,
     /// so retention verdicts cannot be re-derived downwards (§6.10); seeded from
@@ -642,9 +656,9 @@ impl MemoryStore {
     }
 
     /// §5.2 step 2 proof seam: park the next publication once it holds the
-    /// workspace gate and before it settles or stages anything, so a test can
-    /// observe another provider instance on the same workspace waiting for it.
-    /// Compiled out of a production build.
+    /// workspace publication section and before it settles or stages anything, so
+    /// a test can observe another provider instance on the same workspace waiting
+    /// for it. Compiled out of a production build.
     #[cfg(feature = "test-hooks")]
     pub(super) fn park_next_publish(
         &self,
@@ -1386,6 +1400,10 @@ impl MemoryStore {
     /// intent's ownership rule. A failure here keeps the entry `pending` and the
     /// receipt pending, so the next open — or the next operation on the same
     /// target — settles it before anything else publishes there.
+    ///
+    /// The caller holds the workspace publication section (see
+    /// [`PublicationGuard`]), so no other provider process can be inside its own
+    /// displacement while these bytes land.
     async fn publish_effects(&self, receipt_id: &str, effects: &[FileEffect]) -> StoreResult<()> {
         let publish_error = |step: &str, error: std::io::Error| {
             StoreError::CommitUnknown(format!("file effect {step} after journal COMMIT: {error}"))
@@ -1537,15 +1555,16 @@ impl MemoryStore {
     /// operation's in-transaction probe — instead of being gated on a later
     /// intent it did not create. A replay settles nothing: it produces no effect.
     ///
-    /// The lock is taken before any transaction (gate → transaction is the one
-    /// lock order this store uses) and held across the operation's effect.
+    /// The lock is taken before any transaction (flock → gate → transaction is
+    /// the one lock order this store uses) and held across the operation's
+    /// effect by the returned guard.
     async fn begin_publication(
         &self,
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
         targets: &[String],
-    ) -> StoreResult<tokio::sync::OwnedMutexGuard<()>> {
-        let gate = Arc::clone(&self.publish_gate).lock_owned().await;
+    ) -> StoreResult<PublicationGuard> {
+        let publication = self.begin_publication_section().await?;
         #[cfg(feature = "test-hooks")]
         {
             let parked = self.publish_barrier.lock().expect("publish barrier").take();
@@ -1555,7 +1574,7 @@ impl MemoryStore {
             }
         }
         if self.admitted(ctx, admission).await?.is_some() {
-            return Ok(gate);
+            return Ok(publication);
         }
         let entries: Vec<JournalEntry> = sqlx::query_as(UNSETTLED_TARGETS_SQL)
             .bind(ctx.space_id)
@@ -1566,7 +1585,27 @@ impl MemoryStore {
         for entry in entries {
             self.settle_intent(&entry).await;
         }
-        Ok(gate)
+        Ok(publication)
+    }
+
+    /// §5.2 step 2's section, in the store's one lock order: the workspace
+    /// [`journal::PublishFlock`] first — it is what keeps another provider
+    /// process's file effects out of this one's displacement — then this
+    /// process's workspace gate. Both are held until the returned guard drops.
+    async fn begin_publication_section(&self) -> StoreResult<PublicationGuard> {
+        let flock = journal::PublishFlock::acquire(&self.files_root)
+            .await
+            .map_err(|error| {
+                StoreError::Database(nexus_local_db::LocalDbError::Io(format!(
+                    "memory publication lock {}: {error}",
+                    self.files_root.join(journal::PUBLISH_LOCK_FILE).display()
+                )))
+            })?;
+        let gate = Arc::clone(&self.publish_gate).lock_owned().await;
+        Ok(PublicationGuard {
+            _flock: flock,
+            _gate: gate,
+        })
     }
 
     /// §6.5 + §7.0.5 ahead of §5.2 settlement: the caller's authorization and the
@@ -1588,9 +1627,20 @@ impl MemoryStore {
     }
 
     /// §5.2 step 3: settle — and re-drive — the unsettled intents of this space.
-    /// A pass that cannot run is logged and never fails the open.
+    /// A pass that cannot run is logged and never fails the open. The pass holds
+    /// the workspace publication section, so it never publishes inside another
+    /// process's displacement.
     async fn recover_journal(&self, space_id: &str) {
-        let _gate = self.publish_gate.lock().await;
+        let _publication = match self.begin_publication_section().await {
+            Ok(publication) => publication,
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    "memory journal recovery skipped: no publication lock"
+                );
+                return;
+            }
+        };
         if let Err(error) = self.settle_unsettled(space_id).await {
             tracing::warn!(?error, "memory journal recovery pass skipped");
         }
@@ -1678,7 +1728,8 @@ impl MemoryStore {
     }
 
     /// Settle one journal row from the crash-consistent disk state and record the
-    /// outcome. The caller holds the publication gate.
+    /// outcome. The caller holds the publication section (workspace flock and
+    /// in-process gate).
     async fn settle_intent(&self, entry: &JournalEntry) {
         let settled = settle_entry(&self.files_root, &entry.receipt_id, &entry.targets_json).await;
         let outcome = entry.outcome();
@@ -1796,8 +1847,9 @@ where
 /// intent for its target is unsettled.
 ///
 /// The pre-transaction pass normally clears them; this one runs inside the write
-/// transaction, so a writer in another process — which the in-process gate does
-/// not serialize — still cannot slip an unpublished intent underneath this one.
+/// transaction, so it re-reads the journal instead of trusting that pass. The
+/// workspace flock normally keeps another provider process out of this section
+/// entirely; this check is the durable invariant behind it, not a second lock.
 async fn require_settled_targets(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     space_id: &str,

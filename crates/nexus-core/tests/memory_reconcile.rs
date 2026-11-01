@@ -39,6 +39,16 @@ const UPDATED: &str = "Mira promised to return before the western gate opens at 
 const THIRD: &str = "Mira promised nothing; the northern route stayed closed all winter.";
 const OTHER: &str = "ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
+/// The workspace publication lock file at the projection root. Spelled here
+/// because the provider keeps it private; a rename surfaces as a broken
+/// [`files_under`] expectation, not as a silently skipped file.
+const PUBLISH_LOCK_FILE: &str = ".memory-publish.lock";
+/// Marks the re-executed child of the cross-process flock regression.
+const FLOCK_CHILD_ENV: &str = "NEXUS_MEMORY_PUBLISH_FLOCK_CHILD";
+/// The cross-process test's name, for the child's exact filter and the parent's
+/// wait on the child's handshake.
+const FLOCK_CHILD_TEST: &str = "another_process_holding_the_workspace_flock_blocks_publication";
+
 struct Env {
     _tmp: TempDir,
     user_home: PathBuf,
@@ -253,7 +263,8 @@ fn receipts_get_request(receipt_id: &str) -> schemas::MemoryReceiptsGetRequest {
 }
 
 /// Every regular file under the provider's projection root, as sorted paths
-/// relative to it. A missing root is the honest-empty case.
+/// relative to it. A missing root is the honest-empty case. The workspace
+/// publication lock is infrastructure, not a projection, so it is not listed.
 fn files_under(root: &Path) -> Vec<String> {
     let mut files = Vec::new();
     collect(root, root, &mut files);
@@ -269,7 +280,7 @@ fn collect(root: &Path, dir: &Path, files: &mut Vec<String>) {
         let path = entry.path();
         if path.is_dir() {
             collect(root, &path, files);
-        } else {
+        } else if path.file_name().and_then(|name| name.to_str()) != Some(PUBLISH_LOCK_FILE) {
             files.push(
                 path.strip_prefix(root)
                     .unwrap_or(&path)
@@ -2163,6 +2174,133 @@ async fn two_provider_instances_on_one_workspace_serialize_publication() {
         );
     }
     assert_eq!(journal_states(&env).await, vec!["applied", "applied"]);
+}
+
+/// The same §5.2 step 2 guarantee across **processes**, not just instances:
+/// while another OS process holds the workspace flock, this process's publication
+/// cannot run — so it cannot be inside the displacement's link→unlink window and
+/// delete a target that process replaced.
+///
+/// The second process is this test binary re-executed in child mode
+/// ([`FLOCK_CHILD_ENV`]): it takes the same `<file root>/.memory-publish.lock`
+/// lease and holds it until the release marker appears. The parent proves three
+/// things: the lease excludes this process too (`try_lock` fails), a real record
+/// publication stays unfinished while the child holds it, and that publication
+/// completes, with its projection on disk, once the child lets go. Only the
+/// OS-level lease is exercised here; the protocol's swap windows themselves are
+/// covered by the in-process interleaving regressions.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn another_process_holding_the_workspace_flock_blocks_publication() {
+    if let Ok(files_root) = std::env::var(FLOCK_CHILD_ENV) {
+        hold_workspace_flock(Path::new(&files_root));
+        return;
+    }
+    let env = seed_env();
+    let provider = Arc::new(open_provider(&env).await);
+    ensure(&provider).await;
+    let files_root = provider.file_root();
+    let markers = files_root
+        .parent()
+        .expect("workspace directory")
+        .to_path_buf();
+    let held = markers.join("flock-child.held");
+    let release = markers.join("flock-child.release");
+
+    let mut child = ChildHolder(
+        std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", FLOCK_CHILD_TEST])
+            .env(FLOCK_CHILD_ENV, &files_root)
+            .spawn()
+            .expect("the child test process starts"),
+    );
+    wait_for(|| held.exists(), "the child takes the workspace flock");
+
+    // The lease is the OS's, not this process's: a second descriptor cannot take
+    // it either. Dropped before the publication asks for it.
+    let probe = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(files_root.join(PUBLISH_LOCK_FILE))
+        .unwrap();
+    assert!(
+        probe.try_lock().is_err(),
+        "the child's flock excludes this process"
+    );
+    drop(probe);
+
+    let mut publish = tokio::spawn({
+        let provider = Arc::clone(&provider);
+        async move {
+            wire(
+                &provider
+                    .create_record(&admin(), record_create_request("k-flock-child", TEXT))
+                    .await,
+            )
+        }
+    });
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(500), &mut publish)
+            .await
+            .is_err(),
+        "a publication waits for another process's workspace flock"
+    );
+    std::fs::write(&release, b"").unwrap();
+    let published = tokio::time::timeout(std::time::Duration::from_secs(30), publish)
+        .await
+        .expect("the publication completes once the flock is released")
+        .unwrap();
+    let record_id = record_id_of(receipt(&published));
+    assert!(
+        files_root.join(format!("records/{record_id}.md")).exists(),
+        "the waiting publication's projection is on disk"
+    );
+    assert!(
+        child.0.wait().unwrap().success(),
+        "the child holder exits cleanly after the release"
+    );
+}
+
+/// Kills the child holder on every exit path, so a failed assertion never leaves
+/// a stray process holding the workspace flock through the rest of the run.
+struct ChildHolder(std::process::Child);
+
+impl Drop for ChildHolder {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// Child mode: take the workspace flock, tell the parent, and hold the lease
+/// until the parent's release marker. [`wait_for`]'s deadline keeps a failed
+/// parent from leaving the child behind.
+fn hold_workspace_flock(files_root: &Path) {
+    let markers = files_root.parent().expect("workspace directory");
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(files_root.join(PUBLISH_LOCK_FILE))
+        .unwrap();
+    file.lock().unwrap();
+    std::fs::write(markers.join("flock-child.held"), b"").unwrap();
+    wait_for(
+        || markers.join("flock-child.release").exists(),
+        "the parent releases the workspace flock",
+    );
+    drop(file);
+}
+
+/// Poll `ready` until it holds, or fail once the deadline expires.
+fn wait_for(ready: impl Fn() -> bool, what: &str) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !ready() {
+        assert!(std::time::Instant::now() < deadline, "timed out: {what}");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
 }
 
 // ── C-117: the journal migration ────────────────────────────────────────

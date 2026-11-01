@@ -851,8 +851,8 @@ impl LocalMemoryProvider {
     }
 
     /// §5.2 step 2 proof seam: park the next publication while it holds the
-    /// workspace publication gate (`entered` signals it, `release` frees it).
-    /// Test only.
+    /// workspace publication section — cross-process flock and in-process gate —
+    /// (`entered` signals it, `release` frees it). Test only.
     #[cfg(feature = "test-hooks")]
     pub fn park_next_publish(
         &self,

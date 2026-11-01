@@ -50,6 +50,23 @@
 //!    the terminal `INTERNAL_ERROR` on that subject instead of serving
 //!    half-committed content.
 //!
+//! # Who serializes the file effects
+//!
+//! Every step above is serialized across **processes** by [`PublishFlock`]: one
+//! exclusive `flock` on `<file root>/.memory-publish.lock`, held by the whole
+//! predecessor-settlement → stage → publish → settle section (in-process
+//! publication additionally holds the store's own gate). Without it the
+//! displacement is only ordered within one process: a second provider process
+//! could replace the target between the no-clobber link and the unlink that
+//! follows it, and the unlink would then delete bytes this intent never
+//! produced — the predecessor it displaced still sitting in the scratch.
+//!
+//! That lock is the entire cross-process contract. Files under the file root are
+//! the provider's own projections, and an external process that writes them
+//! while bypassing the provider API is outside it: such a writer cannot be made
+//! to take the lock or to honour the ownership rule, so the rule above only
+//! keeps the bytes it can see, it does not coordinate with them.
+//!
 //! A quarantined intent keeps its journaled payload: the projection it owes is
 //! still recoverable, so an operator who resolves the target lets a later pass
 //! re-drive the same intent (`quarantined` → `applied`). Its receipt records
@@ -94,6 +111,57 @@ pub(super) const STATE_QUARANTINED: &str = "quarantined";
 /// Left over by a bounded pass: still recoverable, but no longer silently
 /// withheld — the subject's reads answer the terminal refusal (§5.2 step 5).
 pub(super) const STATE_DEFERRED: &str = "deferred";
+
+/// The workspace publication lock file, at the root of the provider's own file
+/// tree. Hidden, never removed: unlinking it would let the next holder lock a
+/// different inode while an earlier one still holds the old.
+pub(super) const PUBLISH_LOCK_FILE: &str = ".memory-publish.lock";
+
+/// The cross-process half of the publish lock (§5.2 step 2): an exclusive
+/// `flock` on [`PUBLISH_LOCK_FILE`], held for the whole settle → publish section
+/// of one operation (or recovery pass).
+///
+/// Two provider **processes** on one workspace serialize their file effects
+/// through it, which is what closes the displacement window the ownership rule
+/// cannot: `hard_link(target, scratch)` followed by `remove_file(target)` leaves
+/// a moment where a second process could atomically replace the target with its
+/// own content, and the unlink would delete that content while the scratch still
+/// held the predecessor. The lock removes the second process from that section
+/// entirely. The ownership rule stays as the defence against **non-provider**
+/// writers, whose bytes it preserves but cannot coordinate with — see the module
+/// documentation for that boundary.
+///
+/// Released by closing the file (the guard's drop); never by unlinking it.
+pub(super) struct PublishFlock {
+    _file: std::fs::File,
+}
+
+impl PublishFlock {
+    /// Take the exclusive lease, creating the lock file if it is absent.
+    ///
+    /// `flock` has no async form, so the wait runs on the blocking pool: a
+    /// publication waiting for another process must not stall the executor's
+    /// worker threads.
+    ///
+    /// # Errors
+    /// The I/O error that prevented opening the lock file or taking the lease.
+    pub(super) async fn acquire(root: &Path) -> std::io::Result<Self> {
+        let root = root.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            std::fs::create_dir_all(&root)?;
+            let file = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(root.join(PUBLISH_LOCK_FILE))?;
+            file.lock()?;
+            Ok(Self { _file: file })
+        })
+        .await
+        .map_err(|error| std::io::Error::other(format!("publish lock task: {error}")))?
+    }
+}
 
 /// One planned file write: the target relative to the file root, the exact
 /// bytes, their digest, and the digest of the projection this intent replaces.
