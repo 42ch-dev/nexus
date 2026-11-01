@@ -439,6 +439,11 @@ fn workspace_publish_gate(files_root: &Path) -> Arc<tokio::sync::Mutex<()>> {
 /// makes one blocked waiter per workspace the permanent ceiling — the holder's
 /// own file work cannot starve behind a crowd of its same-process peers. No path
 /// takes a write transaction before this section, so the pair cannot deadlock.
+/// The ceiling survives cancellation: the waiting task owns the gate guard
+/// ([`journal::PublishFlock::acquire`] takes it by value and returns it with the
+/// lease), so a cancelled publication drops only its future and cannot release
+/// the gate while its flock wait is still running — the next caller parks on the
+/// gate instead of starting a second waiter.
 ///
 /// Held from before the predecessor settlement until after the last publish,
 /// which is what keeps another provider process out of the displacement's
@@ -516,6 +521,11 @@ pub(super) struct MemoryStore {
     /// can be shown waiting.
     #[cfg(feature = "test-hooks")]
     publish_barrier: std::sync::Mutex<Option<PublishRendezvous>>,
+    /// Test-only report a workspace flock **wait** sends from its blocking task
+    /// just before it blocks, so a regression can cancel callers that have
+    /// really reached the wait. Every wait reports while it is installed.
+    #[cfg(feature = "test-hooks")]
+    flock_wait_report: std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>>,
 }
 
 const SPACE_COLUMNS: &str = "s.space_id, s.display_name, s.authority_host_id, \
@@ -664,6 +674,8 @@ impl MemoryStore {
             receipt_read_barrier: std::sync::Mutex::new(None),
             #[cfg(feature = "test-hooks")]
             publish_barrier: std::sync::Mutex::new(None),
+            #[cfg(feature = "test-hooks")]
+            flock_wait_report: std::sync::Mutex::new(None),
         })
     }
 
@@ -694,6 +706,14 @@ impl MemoryStore {
     ) {
         *self.publish_barrier.lock().expect("publish barrier") =
             Some(PublishRendezvous { entered, release });
+    }
+
+    /// §5.2 step 2 proof seam: have every workspace flock **wait** report from
+    /// its blocking task just before it blocks, so a test can cancel callers that
+    /// have really reached the wait. Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    pub(super) fn report_flock_waits(&self, report: std::sync::mpsc::Sender<()>) {
+        *self.flock_wait_report.lock().expect("flock wait report") = Some(report);
     }
 
     #[cfg(feature = "test-hooks")]
@@ -1657,17 +1677,32 @@ impl MemoryStore {
     ///
     /// The gate comes first because the flock wait is a blocking syscall on the
     /// blocking pool: waiting behind the gate keeps one waiter per workspace at
-    /// most ([`PublicationGuard`] documents the property).
+    /// most ([`PublicationGuard`] documents the property). The gate is handed to
+    /// the task that runs the wait, so a cancelled caller cannot release it while
+    /// that wait is still in flight — the task holds it until the lease is taken
+    /// and hands both back.
     async fn begin_publication_section(&self) -> StoreResult<PublicationGuard> {
         let gate = Arc::clone(&self.publish_gate).lock_owned().await;
-        let lease = journal::PublishFlock::acquire(&self.files_root)
-            .await
-            .map_err(|error| {
-                StoreError::Database(nexus_local_db::LocalDbError::Io(format!(
-                    "memory publication lock {}: {error}",
-                    self.files_root.join(journal::PUBLISH_LOCK_FILE).display()
-                )))
-            })?;
+        #[cfg(feature = "test-hooks")]
+        let report = self
+            .flock_wait_report
+            .lock()
+            .expect("flock wait report")
+            .clone();
+        #[cfg(not(feature = "test-hooks"))]
+        let report: Option<std::sync::mpsc::Sender<()>> = None;
+        let (lease, gate) = journal::PublishFlock::acquire(&self.files_root, gate, move || {
+            if let Some(report) = report {
+                let _ = report.send(());
+            }
+        })
+        .await
+        .map_err(|error| {
+            StoreError::Database(nexus_local_db::LocalDbError::Io(format!(
+                "memory publication lock {}: {error}",
+                self.files_root.join(journal::PUBLISH_LOCK_FILE).display()
+            )))
+        })?;
         Ok(PublicationGuard {
             lease: Some(lease),
             _gate: gate,

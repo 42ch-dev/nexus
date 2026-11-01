@@ -862,6 +862,15 @@ impl LocalMemoryProvider {
         self.store.park_next_publish(entered, release);
     }
 
+    /// §5.2 step 2 proof seam: have every workspace flock **wait** report from
+    /// its blocking task just before it blocks, so a test can cancel callers that
+    /// have really reached the wait. Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn report_flock_waits(&self, report: std::sync::mpsc::Sender<()>) {
+        self.store.report_flock_waits(report);
+    }
+
     async fn space(&self, space_id: &str) -> Result<SpaceRow, ProviderError> {
         self.store
             .find_space(space_id)

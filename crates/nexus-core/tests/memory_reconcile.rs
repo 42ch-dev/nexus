@@ -2257,6 +2257,133 @@ fn queued_publications_never_exhaust_the_blocking_pool_the_holder_needs() {
     });
 }
 
+/// F-new-2 under **cancellation**: a caller cancelled while its workspace flock
+/// acquisition is still waiting must not release the workspace gate. The blocking
+/// task that runs the wait owns the gate, so however many callers are cancelled
+/// mid-wait, at most one wait task per workspace exists — and with a two-worker
+/// blocking pool that one waiter leaves a worker for the unrelated blocking work
+/// the lock holder itself needs.
+///
+/// Three callers park behind a flock the test itself holds and are cancelled one
+/// after another. Under the previous shape each cancellation dropped the gate
+/// while its wait kept running, so the second caller started a second waiter —
+/// the wait report fires again and two waiters fill the pool, starving the probe
+/// below.
+#[test]
+fn cancelled_flock_waiters_never_stack_and_leave_the_pool_free() {
+    let env = seed_env();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .max_blocking_threads(2)
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    runtime.block_on(async {
+        let provider = Arc::new(open_provider(&env).await);
+        ensure(&provider).await;
+        let files_root = provider.file_root();
+
+        // An exclusive flock this process's own descriptors cannot take either,
+        // so every publication below really waits for it.
+        let holder = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(files_root.join(PUBLISH_LOCK_FILE))
+            .expect("the workspace lock file opens");
+        holder
+            .lock()
+            .expect("the regression holds the workspace flock");
+
+        let (report_tx, report_rx) = std::sync::mpsc::channel();
+        provider.report_flock_waits(report_tx);
+
+        // The reports are read on this thread, never from the blocking pool the
+        // test measures.
+        for index in 0..3 {
+            let caller = tokio::spawn({
+                let provider = Arc::clone(&provider);
+                async move {
+                    wire(
+                        &provider
+                            .create_record(
+                                &admin(),
+                                record_create_request(&format!("k-cancel-{index}"), TEXT),
+                            )
+                            .await,
+                    )
+                }
+            });
+            if index == 0 {
+                report_rx
+                    .recv_timeout(std::time::Duration::from_secs(10))
+                    .expect("the first caller reaches the workspace flock wait");
+            } else {
+                assert!(
+                    report_rx
+                        .recv_timeout(std::time::Duration::from_millis(300))
+                        .is_err(),
+                    "a cancelled waiter released the gate and started a second waiter"
+                );
+            }
+            caller.abort();
+            assert!(
+                matches!(caller.await, Err(error) if error.is_cancelled()),
+                "the caller's future is dropped"
+            );
+        }
+
+        // One waiter holds one of the two workers; unrelated blocking work still
+        // gets the other.
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let probe = tokio::task::spawn_blocking(move || {
+            let _ = started_tx.send(());
+            let _ = release_rx.recv();
+        });
+        started_rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("unrelated blocking work still gets a worker beside the one waiter");
+        release_tx.send(()).expect("the probe is released");
+        probe.await.expect("the probe completes");
+
+        // A later publication parks on the gate the waiter still owns — not on a
+        // second waiter — and proceeds once the external holder lets go.
+        let mut next = tokio::spawn({
+            let provider = Arc::clone(&provider);
+            async move {
+                wire(
+                    &provider
+                        .create_record(&admin(), record_create_request("k-after-cancel", TEXT))
+                        .await,
+                )
+            }
+        });
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(300), &mut next)
+                .await
+                .is_err(),
+            "a publication still waits while another process holds the flock"
+        );
+        drop(holder);
+        let published = tokio::time::timeout(std::time::Duration::from_secs(30), next)
+            .await
+            .expect("the abandoned wait releases the gate once the flock is free")
+            .expect("the publication completes");
+        let record_id = record_id_of(receipt(&published));
+        assert!(
+            files_root.join(format!("records/{record_id}.md")).exists(),
+            "the publication that followed the cancelled waiters landed its projection"
+        );
+        assert_eq!(
+            journal_states(&env).await,
+            vec!["applied"],
+            "only the publication that was not cancelled reached its effect"
+        );
+    });
+}
+
 /// The same §5.2 step 2 guarantee across **processes**, not just instances:
 /// while another OS process holds the workspace flock, this process's publication
 /// cannot run — so it cannot be inside the displacement's link→unlink window and

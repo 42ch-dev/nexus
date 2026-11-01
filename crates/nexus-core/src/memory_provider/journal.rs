@@ -72,6 +72,12 @@
 //! flock — a crowd of same-process waiters queues on the async gate instead of
 //! filling the pool the lock holder needs for its own file work.
 //!
+//! The gate belongs to the blocking task that runs the wait, not to the awaiting
+//! future ([`PublishFlock::acquire`] takes the locked gate by value): a cancelled
+//! caller drops only its handle, that task keeps the gate until `flock` has
+//! actually returned, and only then releases both. Cancelling a waiter therefore
+//! never starts a second one, however often it happens.
+//!
 //! The file operations of the section run on a blocking thread that **owns the
 //! lease** for its whole duration ([`PublishFlock::section`], synchronous
 //! `std::fs`): the caller awaits the task's handle and holds nothing. That is
@@ -168,13 +174,30 @@ impl PublishFlock {
     ///
     /// `flock` has no async form, so the wait runs on the blocking pool: a
     /// publication waiting for another process must not stall the executor's
-    /// worker threads. The caller takes its in-process gate **before** this, so
-    /// one workspace has at most one of these waits in flight (module doc, §
-    /// *Who serializes the file effects*).
+    /// worker threads. The caller takes its in-process gate **before** this and
+    /// passes it in as `held`; the task that waits owns it, and returns it with
+    /// the lease. While the task waits, no other caller can take the gate, so one
+    /// workspace has at most one of these waits in flight (module doc, § *Who
+    /// serializes the file effects*).
+    ///
+    /// Cancelling the caller drops only its handle: the task keeps the gate until
+    /// `file.lock()` has actually returned (successfully or not) and only then
+    /// releases it, so repeated cancellation cannot stack waiters. `report_wait`
+    /// runs on that blocking task just before it blocks — a test seam that shows
+    /// a wait has really started; production passes a no-op.
     ///
     /// # Errors
     /// The I/O error that prevented opening the lock file or taking the lease.
-    pub(super) async fn acquire(root: &Path) -> std::io::Result<Self> {
+    /// The gate is released on that path too: the wait is over.
+    pub(super) async fn acquire<H, W>(
+        root: &Path,
+        held: H,
+        report_wait: W,
+    ) -> std::io::Result<(Self, H)>
+    where
+        H: Send + 'static,
+        W: FnOnce() + Send + 'static,
+    {
         let root = root.to_path_buf();
         tokio::task::spawn_blocking(move || {
             std::fs::create_dir_all(&root)?;
@@ -184,8 +207,9 @@ impl PublishFlock {
                 .create(true)
                 .truncate(false)
                 .open(root.join(PUBLISH_LOCK_FILE))?;
+            report_wait();
             file.lock()?;
-            Ok(Self { _file: file })
+            Ok((Self { _file: file }, held))
         })
         .await
         .map_err(|error| std::io::Error::other(format!("publish lock task: {error}")))?
@@ -1230,8 +1254,8 @@ mod tests {
             .enable_all()
             .build()
             .expect("test runtime");
-        let lease = runtime
-            .block_on(PublishFlock::acquire(&root))
+        let (lease, ()) = runtime
+            .block_on(PublishFlock::acquire(&root, (), || {}))
             .expect("the workspace lease");
 
         let (entered_tx, entered_rx) = std::sync::mpsc::channel();
