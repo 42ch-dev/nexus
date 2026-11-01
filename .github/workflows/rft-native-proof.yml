@@ -19,6 +19,10 @@ name: RFT Native Package Proof
 #     (plan: "Missing row blocks P3; missing input = blocked").
 on:
   workflow_dispatch:
+  schedule:
+    # Nightly full four-platform proof on main: the PR lane runs only the
+    # fastest row, so this is the drift check that covers the other rows.
+    - cron: '30 2 * * *'
   push:
     branches: [main, iteration/v1.189]
     paths: &proof-paths
@@ -76,6 +80,11 @@ jobs:
     name: ${{ matrix.slug }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
+    # PR lane: only the fastest row (darwin-arm64). The packaging/ABI hazards
+    # this workflow guards are per-row identical for generic cross-platform
+    # code, and the full matrix runs on main pushes, nightly, and
+    # workflow_dispatch. Rows kept for those events carry `pr: false`.
+    if: github.event_name != 'pull_request' || matrix.pr == true
     strategy:
       fail-fast: false
       matrix:
@@ -84,10 +93,12 @@ jobs:
             os: windows-2022
             short: win
             target: x86_64-pc-windows-msvc
+            pr: false
           - slug: darwin-arm64
             os: macos-15
             short: macarm
             target: aarch64-apple-darwin
+            pr: true
           # The x64 macOS row needs an Intel runner: the artifact must be
           # executed by the architecture it ships, and Rosetta would be a
           # translated run, not a native one.
@@ -95,6 +106,7 @@ jobs:
             os: macos-15-intel
             short: macx64
             target: x86_64-apple-darwin
+            pr: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -239,6 +251,9 @@ jobs:
     name: linux-x64-gnu
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    # PR lane runs darwin-arm64 only (see native-package-proof above); the
+    # glibc-2.28 container proof belongs to the main/nightly/dispatch lane.
+    if: github.event_name != 'pull_request'
     container:
       # Pinned by immutable digest (see MANYLINUX_IMAGE_DIGEST). A tag, even a
       # version-looking one, can be repointed; a digest cannot.
