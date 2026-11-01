@@ -46,6 +46,16 @@
 //!   read-only (MEM-R011) and only reports what the sweep left; the provider
 //!   clock never runs backwards ([`MemoryStore::now`]), so a body seen past its
 //!   retention window is never served again whatever the wall clock does next.
+//!   That floor is durable: every sweep commits the reading it decided at into
+//!   `memory_provider_meta`, in the same transaction as the eviction, and
+//!   [`MemoryStore::open`] seeds its clock from that row before any evaluation —
+//!   a restart after the wall clock moved backwards resumes from the last
+//!   committed reading instead of from zero. One limit stays open and is not
+//!   claimed as closed: a read cannot persist the expiry it observes (MEM-R011),
+//!   so an observation made after the last committed sweep and lost to an abrupt
+//!   kill is not carried across that restart. The durable floor bounds the
+//!   re-exposure window to that segment. Closing it needs a read-path persistence
+//!   contract change — an owner decision, not a provider choice.
 //! * **Error class** (§14.2/§14.3). A failure raised before `COMMIT` is a clean
 //!   no-effect [`StoreError::Database`]/[`StoreError::Corrupt`]; a failure at or
 //!   after `COMMIT` is [`StoreError::CommitUnknown`], which the facade reports as
@@ -86,6 +96,10 @@ use nexus_local_db::{begin_immediate, LocalDbError};
 fn mint_receipt_id() -> String {
     format!("rcp_{}", Uuid::new_v4().simple())
 }
+
+/// The `memory_provider_meta` row holding the durable retention clock floor
+/// (microseconds since the epoch, decimal text).
+const CLOCK_FLOOR_KEY: &str = "clock_floor_micros";
 
 /// The one canonical timestamp rendering.
 ///
@@ -340,7 +354,8 @@ pub(super) struct MemoryStore {
     /// Holds this provider's writer admission for the provider's lifetime.
     _guarded: GuardedPool,
     /// Latest provider-clock reading in microseconds since the epoch. A floor,
-    /// so retention verdicts cannot be re-derived downwards (§6.10).
+    /// so retention verdicts cannot be re-derived downwards (§6.10); seeded from
+    /// the persisted floor at [`Self::open`] and persisted again by every sweep.
     clock_floor: AtomicI64,
     #[cfg(feature = "test-hooks")]
     commit_fault: AtomicU8,
@@ -405,6 +420,10 @@ impl MemoryStore {
     /// best-effort in the opposite direction too: a sweep that cannot run is
     /// logged and never fails or rolls back the operation it precedes — retention
     /// is not part of that operation's contract.
+    ///
+    /// The same transaction records the reading it decided at
+    /// ([`record_clock_floor`]), so the clock this sweep judged retention by is
+    /// what the next process resumes from.
     async fn reclaim_expired_receipts(&self) {
         let mut tx = match begin_immediate(&self.pool).await {
             Ok(tx) => tx,
@@ -429,6 +448,8 @@ impl MemoryStore {
     /// one, so a wall-clock correction (or a test clock move) cannot re-open a
     /// window that already closed. A receipt body reported past its window stays
     /// reported — retention is one-way, not a projection of the current clock.
+    /// A restart resumes the floor from the last committed sweep rather than
+    /// from zero, so the same holds across a process boundary.
     fn now(&self) -> DateTime<Utc> {
         #[cfg(feature = "test-hooks")]
         let observed =
@@ -440,13 +461,33 @@ impl MemoryStore {
         DateTime::from_timestamp_micros(floor.max(micros)).unwrap_or(observed)
     }
 
+    /// Open the provider's pool and seed the retention clock with its durable
+    /// floor (§6.10).
+    ///
+    /// The floor is read here, before any evaluation, so the first sweep of this
+    /// process — [`Self::provision`]'s — already judges retention at a reading
+    /// the previous process committed to, not at a wall clock that may have moved
+    /// backwards across the restart.
     pub(super) async fn open(db_path: &Path, creator_id: &str) -> StoreResult<Self> {
         let guarded = init_guarded_pool(db_path, creator_id).await?;
         let pool = guarded.clone_pool();
+        let persisted: Option<String> =
+            sqlx::query_scalar("SELECT value FROM memory_provider_meta WHERE key = ?")
+                .bind(CLOCK_FLOOR_KEY)
+                .fetch_optional(&pool)
+                .await?;
+        let clock_floor = persisted
+            .map(|value| {
+                value.parse::<i64>().map_err(|error| {
+                    StoreError::Corrupt(format!("memory_provider_meta.{CLOCK_FLOOR_KEY}: {error}"))
+                })
+            })
+            .transpose()?
+            .unwrap_or(0);
         Ok(Self {
             pool,
             _guarded: guarded,
-            clock_floor: AtomicI64::new(0),
+            clock_floor: AtomicI64::new(clock_floor),
             #[cfg(feature = "test-hooks")]
             commit_fault: AtomicU8::new(COMMIT_FAULT_NONE),
             #[cfg(feature = "test-hooks")]
@@ -1343,6 +1384,29 @@ fn retention_cutoff(now: DateTime<Utc>, window: u64) -> String {
     timestamp(now - chrono::Duration::seconds(seconds))
 }
 
+/// Persist the retention clock floor (§6.10) in the sweep's transaction.
+///
+/// The upsert only ever moves the floor forward: two providers on one workspace,
+/// or a sweep that runs behind another writer, can never lower the reading a
+/// previous one committed. [`MemoryStore::open`] reads it back before evaluating
+/// anything.
+async fn record_clock_floor(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    now: DateTime<Utc>,
+) -> StoreResult<()> {
+    sqlx::query(
+        "INSERT INTO memory_provider_meta (key, value, updated_at) VALUES (?, ?, ?) \
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at \
+         WHERE CAST(excluded.value AS INTEGER) > CAST(memory_provider_meta.value AS INTEGER)",
+    )
+    .bind(CLOCK_FLOOR_KEY)
+    .bind(now.timestamp_micros().to_string())
+    .bind(timestamp(now))
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 /// §6.10/MEM-R021 reclamation in one transaction.
 ///
 /// Evicts every body older than `receipt_retention_seconds` across all dedup
@@ -1350,11 +1414,13 @@ fn retention_cutoff(now: DateTime<Utc>, window: u64) -> String {
 /// every tombstone older than `dedup_retention_seconds`. Eviction is a one-way
 /// rewrite — the payload is discarded, so a later clock move cannot resurrect
 /// it. [`MemoryStore::reclaim_expired_receipts`] owns the transaction and its
-/// commit; this function only writes the reclamation into it.
+/// commit; this function only writes the reclamation and the clock reading it
+/// was decided at into it.
 async fn receipt_retention_sweep(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     now: DateTime<Utc>,
 ) -> StoreResult<()> {
+    record_clock_floor(tx, now).await?;
     sqlx::query(
         "UPDATE memory_receipts SET result_json = NULL, error_json = NULL \
          WHERE created_at < ? AND (result_json IS NOT NULL OR error_json IS NOT NULL)",

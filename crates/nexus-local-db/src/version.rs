@@ -25,7 +25,8 @@
 // V1.227 NXM-1: 25 → 26 — memory control metadata: memory_spaces / memory_subjects / memory_grants / memory_receipts (spoke-memory §6.2/§6.3/§6.5/§6.10) + their writer-protocol guard/outbox families (migration 20261101000001_memory_control_metadata.sql).
 // V1.227 NXM-1: 26 → 27 — memory content metadata: memory_candidates / memory_records / memory_profiles (spoke-memory §6.6/§6.7/§6.8) carrying revision + stable record/candidate identity + their writer-protocol guard/outbox families (migration 20261101000002_memory_content_metadata.sql).
 // V1.227 NXM-2: 27 → 28 — memory_receipts rebuilt so a settled receipt may carry no payload at all, the content-free §6.10 dedup tombstone left after body eviction, plus the `created_at` retention-sweep index (migration 20261101000003_memory_receipt_tombstones.sql).
-pub const DB_SCHEMA_VERSION: u32 = 28;
+// V1.227 NXM-2: 28 → 29 — memory_provider_meta key/value table, the provider-owned home of the durable §6.10 retention clock floor, plus its writer-protocol guard/outbox family (migration 20261101000004_memory_provider_meta.sql).
+pub const DB_SCHEMA_VERSION: u32 = 29;
 
 /// Contract schema version from generated wire types
 ///

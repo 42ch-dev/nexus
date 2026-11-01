@@ -1584,12 +1584,14 @@ async fn admitted_write_completes_after_a_competing_writer_releases() {
     );
 }
 
-// C-117: both memory migrations advanced the schema version line (25 → 26 → 27).
-const _: () = assert!(nexus_local_db::DB_SCHEMA_VERSION >= 27);
+// C-117: every memory migration advanced the schema version line (25 → 26 → 27
+// → 28 → 29).
+const _: () = assert!(nexus_local_db::DB_SCHEMA_VERSION >= 29);
 
-/// C-117: the control- and content-metadata migrations land once, re-run as
-/// no-ops, are writer-guard registered (guards + outbox on every control and
-/// content table), and the `DB_SCHEMA_VERSION` line advanced with them.
+/// C-117: the control-, content- and provider-metadata migrations land once,
+/// re-run as no-ops, are writer-guard registered (guards + outbox on every
+/// control, content and provider-owned table), and the `DB_SCHEMA_VERSION` line
+/// advanced with them.
 #[tokio::test]
 async fn control_metadata_migration_is_idempotent_and_writer_registered() {
     let env = seed_env();
@@ -1597,7 +1599,11 @@ async fn control_metadata_migration_is_idempotent_and_writer_registered() {
     let provider = open_provider(&env).await;
     let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
 
-    for migration in ["memory_control_metadata", "memory_content_metadata"] {
+    for migration in [
+        "memory_control_metadata",
+        "memory_content_metadata",
+        "memory_provider_meta",
+    ] {
         let (applied,): (i64,) =
             sqlx::query_as("SELECT COUNT(*) FROM _sqlx_migrations WHERE description LIKE ?")
                 .bind(format!("%{migration}%"))
@@ -1615,6 +1621,7 @@ async fn control_metadata_migration_is_idempotent_and_writer_registered() {
         "memory_candidates",
         "memory_records",
         "memory_profiles",
+        "memory_provider_meta",
     ];
     for table in tables {
         let (found,): (i64,) =

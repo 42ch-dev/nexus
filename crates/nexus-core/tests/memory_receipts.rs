@@ -224,6 +224,26 @@ async fn receipt_payloads(
     .expect("memory_receipts row")
 }
 
+/// How many rows the namespace still holds for that id: `1` while only the read
+/// path has looked at it, `0` once a sweep purged an expired tombstone.
+async fn receipt_rows(pool: &SqlitePool, receipt_id: &str) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM memory_receipts WHERE receipt_id = ?")
+        .bind(receipt_id)
+        .fetch_one(pool)
+        .await
+        .expect("memory_receipts row count")
+}
+
+/// The durable §6.10 retention clock floor, as the provider persisted it.
+async fn persisted_clock_floor(pool: &SqlitePool) -> i64 {
+    let stored: String =
+        sqlx::query_scalar("SELECT value FROM memory_provider_meta WHERE key = 'clock_floor_micros'")
+            .fetch_one(pool)
+            .await
+            .expect("memory_provider_meta clock floor");
+    stored.parse().expect("decimal clock floor")
+}
+
 /// §7.0.5/MEM-R008: a same-key same-payload capture replays the stored receipt
 /// verbatim — no `IDEMPOTENCY_CONFLICT`, no second candidate.
 #[tokio::test]
@@ -1057,5 +1077,187 @@ async fn receipt_tombstone_past_the_dedup_window_is_not_found() {
         error_code(&gone),
         "NOT_FOUND",
         "the dedup window, not the tombstone's presence, decides: {gone}"
+    );
+    // Both sides of the final read: the row it declined to answer for is still
+    // there, so the `NOT_FOUND` came from the window, not from a read-path purge.
+    assert_eq!(
+        receipt_rows(&pool, &receipt_id).await,
+        1,
+        "the read that answered NOT_FOUND left the tombstone row untouched"
+    );
+}
+
+/// §6.10/MEM-R021: an expiry the provider committed is durable. A body observed
+/// past its window is evicted by the next mutating entry point, and a restart
+/// into a wall clock that moved backwards neither restores the body nor
+/// re-executes the namespace: the reopened provider answers `RECEIPT_EXPIRED` to
+/// the read and to a replay alike, and the key stays bound.
+#[tokio::test]
+async fn receipt_expiry_survives_a_restart_under_a_backward_clock() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    let (receipt_retention, _) = retention_limits(&provider, &admin).await;
+
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    let captured = wire(
+        &provider
+            .capture(&admin, capture_request("k-restart-floor", TEXT))
+            .await,
+    );
+    let receipt_id = receipt(&captured)["receipt_id"]
+        .as_str()
+        .expect("receipt id")
+        .to_owned();
+    let pool = nexus_local_db::open_pool_read_only(&env.db_path)
+        .await
+        .unwrap();
+    let (result, error, _) = receipt_payloads(&pool, &receipt_id).await;
+    assert!(
+        result.is_some() && error.is_none(),
+        "the body starts on disk"
+    );
+
+    // Age the body and observe the expiry on the read path only: reads stay
+    // read-only (MEM-R011), so nothing has been recorded yet and the aged body
+    // is still physically there.
+    provider.advance_receipt_clock(receipt_retention + 1);
+    let read = wire(
+        &provider
+            .get_receipt(&admin, receipts_get_request(&receipt_id))
+            .await,
+    );
+    assert_eq!(
+        error_code(&read),
+        "RECEIPT_EXPIRED",
+        "an aged body is not served: {read}"
+    );
+    let (result, _, _) = receipt_payloads(&pool, &receipt_id).await;
+    assert!(
+        result.is_some(),
+        "the read path persisted nothing, so no sweep has evicted the body yet"
+    );
+
+    // The next mutating entry point commits the eviction in a transaction of its
+    // own, so it outlives the operation and the process.
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request("sbj_after_expiry"))
+            .await,
+    );
+    let (result, error, _) = receipt_payloads(&pool, &receipt_id).await;
+    assert!(
+        result.is_none() && error.is_none(),
+        "the sweep evicted the aged body"
+    );
+
+    // Restart, with the wall clock back where this process started — i.e. before
+    // the observation above.
+    drop(provider);
+    let reopened = open_provider(&env).await;
+
+    let refused = wire(
+        &reopened
+            .get_receipt(&admin, receipts_get_request(&receipt_id))
+            .await,
+    );
+    assert_eq!(
+        error_code(&refused),
+        "RECEIPT_EXPIRED",
+        "the reopened provider never re-serves the expiry it committed: {refused}"
+    );
+    assert_eq!(error_details(&refused)["last_known_status"], "committed");
+    let (result, error, _) = receipt_payloads(&pool, &receipt_id).await;
+    assert!(
+        result.is_none() && error.is_none(),
+        "the restart restored neither the body nor an error payload"
+    );
+    let replay = wire(
+        &reopened
+            .capture(&admin, capture_request("k-restart-floor", TEXT))
+            .await,
+    );
+    assert_eq!(
+        error_code(&replay),
+        "RECEIPT_EXPIRED",
+        "a replay across the restart does not re-execute: {replay}"
+    );
+    assert_eq!(
+        receipt_rows(&pool, &receipt_id).await,
+        1,
+        "the namespace still binds the key; only the body is gone"
+    );
+}
+
+/// §6.10/MEM-R021: the retention clock is durable. Every sweep commits the
+/// reading it judged retention by, and a reopened provider seeds its clock from
+/// that row before it evaluates anything — so a wall clock that moved backwards
+/// across the restart can neither lower the floor nor re-stamp a write earlier
+/// than the reading the previous process already reached.
+#[tokio::test]
+async fn restart_resumes_the_durable_retention_floor() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    let (receipt_retention, _) = retention_limits(&provider, &admin).await;
+    let pool = nexus_local_db::open_pool_read_only(&env.db_path)
+        .await
+        .unwrap();
+
+    // A sweep just past the receipt window commits the reading it decided at.
+    let aged_floor = chrono::Utc::now().timestamp_micros() + (receipt_retention + 1) * 1_000_000;
+    provider.advance_receipt_clock(receipt_retention + 1);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request("sbj_aged"))
+            .await,
+    );
+    let committed = persisted_clock_floor(&pool).await;
+    assert!(
+        committed >= aged_floor,
+        "the sweep commits the reading it judged retention by: {committed} < {aged_floor}"
+    );
+    let (committed_at,): (String,) =
+        sqlx::query_as("SELECT updated_at FROM memory_provider_meta WHERE key = ?")
+            .bind("clock_floor_micros")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    // Restart with the wall clock back where this process started.
+    drop(provider);
+    let reopened = open_provider(&env).await;
+
+    // The reopen sweep runs seeded: it neither lowers the floor nor rewrites it.
+    assert!(
+        persisted_clock_floor(&pool).await >= committed,
+        "reopening never lowers the durable floor"
+    );
+
+    // The reopened store evaluates at that floor instead of the wall clock that
+    // moved backwards, so its write is stamped no earlier than it.
+    let written = wire(
+        &reopened
+            .ensure_subject(&admin, ensure_request("sbj_after_restart"))
+            .await,
+    );
+    let written_id = receipt(&written)["receipt_id"]
+        .as_str()
+        .expect("receipt id")
+        .to_owned();
+    let (created_at,): (String,) =
+        sqlx::query_as("SELECT created_at FROM memory_receipts WHERE receipt_id = ?")
+            .bind(&written_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(
+        created_at.as_str() >= committed_at.as_str(),
+        "a write after the restart is stamped at least at the durable floor: \
+         created_at {created_at} < floor {committed_at}"
     );
 }
