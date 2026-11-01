@@ -16,15 +16,17 @@
 //!   evaluates authorization, the dedup probe and the freeze/fence lifecycle
 //!   gates *inside* that transaction. A freeze therefore either commits before
 //!   the op begins (which then sees it and refuses) or after the op commits —
-//!   never in between.
+//!   never in between. The authorization clock is read *after* the lock is held
+//!   ([`begin_admission`]), so a grant that expires while the op waits behind
+//!   another writer cannot authorize it.
 //! * **Dedup + receipt** (§7.0.5, MEM-R008/R021). The `memory_receipts` primary
 //!   key IS the namespace `(space_id, requester_principal_id, op,
 //!   idempotency_key)`; a same-namespace replay returns the stored receipt
 //!   without re-executing, and a same-namespace different-`payload_digest`
 //!   attempt is `IDEMPOTENCY_CONFLICT`. The probe runs after current
-//!   authorization but before any fresh-effect lifecycle gate, so a replay never
-//!   re-evaluates the superseded CAS/fence/freeze preconditions of the receipt it
-//!   returns.
+//!   authorization but before every fresh-effect rule — issuance
+//!   non-amplification (§7.9), the CAS, freeze and fence preconditions — so a
+//!   replay never re-evaluates the constraints of the receipt it returns.
 //! * **Revision CAS** (MEM-R007). `expected_revision` is compared and `revision`
 //!   incremented in the same `UPDATE ... WHERE revision = ?` statement.
 //! * **Error class** (§14.2/§14.3). A failure raised before `COMMIT` is a clean
@@ -302,6 +304,20 @@ const VISIBLE_SPACE_PREDICATE: &str = "EXISTS ( \
            AND (g.expires_at IS NULL OR g.expires_at > ?) \
      )";
 
+/// Open an effect transaction and read the authorization clock **after** the
+/// write lock is held.
+///
+/// `BEGIN IMMEDIATE` can park behind another writer for as long as its
+/// `busy_timeout` allows, so a clock read by the caller beforehand would let a
+/// grant that expires during that wait still authorize the write (§6.5). Every
+/// mutating entry point therefore takes its `now` from here.
+async fn begin_admission(
+    pool: &SqlitePool,
+) -> StoreResult<(sqlx::Transaction<'_, sqlx::Sqlite>, DateTime<Utc>)> {
+    let tx = begin_immediate(pool).await?;
+    Ok((tx, Utc::now()))
+}
+
 impl MemoryStore {
     pub(super) async fn open(db_path: &Path, creator_id: &str) -> StoreResult<Self> {
         let guarded = init_guarded_pool(db_path, creator_id).await?;
@@ -438,10 +454,9 @@ impl MemoryStore {
         admission: &Admission<'_>,
         expected_revision: i64,
         status: &str,
-        now: DateTime<Utc>,
     ) -> StoreResult<ReceiptRow> {
-        let mut tx = begin_immediate(&self.pool).await?;
-        authorize(&mut tx, admission, now).await?;
+        let (mut tx, now) = begin_admission(&self.pool).await?;
+        let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx).await? {
             return Ok(row);
         }
@@ -484,10 +499,9 @@ impl MemoryStore {
         admission: &Admission<'_>,
         subject_id: &str,
         kind: Option<(&str, &str)>,
-        now: DateTime<Utc>,
     ) -> StoreResult<ReceiptRow> {
-        let mut tx = begin_immediate(&self.pool).await?;
-        authorize(&mut tx, admission, now).await?;
+        let (mut tx, now) = begin_admission(&self.pool).await?;
+        let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx).await? {
             return Ok(row);
         }
@@ -528,7 +542,6 @@ impl MemoryStore {
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
         fence: Fence<'_>,
-        now: DateTime<Utc>,
     ) -> StoreResult<ReceiptRow> {
         let Fence {
             subject_id,
@@ -536,8 +549,8 @@ impl MemoryStore {
             action,
             expected_revision,
         } = fence;
-        let mut tx = begin_immediate(&self.pool).await?;
-        authorize(&mut tx, admission, now).await?;
+        let (mut tx, now) = begin_admission(&self.pool).await?;
+        let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx).await? {
             return Ok(row);
         }
@@ -646,20 +659,26 @@ impl MemoryStore {
         Ok((rows, marker))
     }
 
-    /// §7.9 issuance. Authorization, non-amplification, the subject lifecycle
-    /// gate and the insert are one transaction (§7.3/§11).
+    /// §7.9 issuance. Current-coverage authorization, the dedup probe, the
+    /// non-amplification check, the subject lifecycle gate and the insert are one
+    /// transaction (§7.3/§11), in that order.
     pub(super) async fn insert_grant(
         &self,
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
         new_grant: &NewGrant<'_>,
-        now: DateTime<Utc>,
     ) -> StoreResult<ReceiptRow> {
-        let mut tx = begin_immediate(&self.pool).await?;
-        authorize(&mut tx, admission, now).await?;
+        let (mut tx, now) = begin_admission(&self.pool).await?;
+        // §7.0.5/MEM-R021: handing back a committed receipt is a disclosure, so
+        // it needs current coverage — but it never re-runs the issuance rules.
+        // An applicable admin grant acquired after the original issuance can
+        // tighten the §7.9 expiry bound, and the retry must still return its
+        // receipt rather than `NOT_AUTHORIZED`.
+        let grants = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx).await? {
             return Ok(row);
         }
+        authorize_issuance(&grants, admission, now)?;
         gate(&mut tx, admission).await?;
         let capabilities = serde_json::to_string(new_grant.capabilities)
             .map_err(|e| StoreError::Corrupt(format!("grant capabilities: {e}")))?;
@@ -697,10 +716,9 @@ impl MemoryStore {
         admission: &Admission<'_>,
         grant_id: &str,
         expected_revision: i64,
-        now: DateTime<Utc>,
     ) -> StoreResult<ReceiptRow> {
-        let mut tx = begin_immediate(&self.pool).await?;
-        authorize(&mut tx, admission, now).await?;
+        let (mut tx, now) = begin_admission(&self.pool).await?;
+        let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx).await? {
             return Ok(row);
         }
@@ -806,53 +824,68 @@ impl MemoryStore {
     }
 }
 
-/// §6.5/§7.9 authorization, evaluated inside the effect transaction: the grant
-/// set cannot change between this check and the write.
+/// §6.5 coverage, evaluated inside the effect transaction: the grant set cannot
+/// change between this check and the write.
+///
+/// Runs *before* the dedup probe, because handing back an already committed
+/// receipt is itself a disclosure that current coverage must still admit
+/// (§7.0.5). §7.9 non-amplification is a fresh-effect rule and lives in
+/// [`authorize_issuance`], behind the probe.
 async fn authorize(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     admission: &Admission<'_>,
     now: DateTime<Utc>,
-) -> StoreResult<()> {
+) -> StoreResult<Vec<GrantRow>> {
     space_in_tx(tx, admission.space_id).await?;
-    if admission.requirement.is_none() && admission.issuance.is_none() {
-        return Ok(());
-    }
+    let Some(requirement) = &admission.requirement else {
+        return Ok(Vec::new());
+    };
     let rows = grants_in_tx(tx, admission.space_id).await?;
-    if let Some(requirement) = &admission.requirement {
-        let mut covered = false;
-        for row in &rows {
-            if grant_covers(
-                &row.wire()?,
-                admission.principal_id,
-                admission.space_id,
-                now,
-                requirement,
-            ) {
-                covered = true;
-                break;
-            }
-        }
-        if !covered {
-            return Err(StoreError::NotAuthorized(format!(
-                "principal {} holds no grant covering {} in space {}",
-                admission.principal_id, requirement.capability, admission.space_id
-            )));
-        }
-    }
-    if let Some(issued) = admission.issuance {
-        let mut grants = Vec::with_capacity(rows.len());
-        for row in &rows {
-            grants.push(row.wire()?);
-        }
-        if let SpokeResult::Reject(reject) = validate_grant_issuance(
-            &grants,
+    let mut covered = false;
+    for row in &rows {
+        if grant_covers(
+            &row.wire()?,
             admission.principal_id,
             admission.space_id,
             now,
-            issued,
+            requirement,
         ) {
-            return Err(StoreError::NotAuthorized(reject.message));
+            covered = true;
+            break;
         }
+    }
+    if !covered {
+        return Err(StoreError::NotAuthorized(format!(
+            "principal {} holds no grant covering {} in space {}",
+            admission.principal_id, requirement.capability, admission.space_id
+        )));
+    }
+    Ok(rows)
+}
+
+/// §7.9 non-amplification over the same grant set the coverage check read. Only
+/// a fresh issuance can amplify granter coverage, so this runs on the fresh
+/// effect path and never on a replay (§7.0.5/MEM-R021).
+fn authorize_issuance(
+    rows: &[GrantRow],
+    admission: &Admission<'_>,
+    now: DateTime<Utc>,
+) -> StoreResult<()> {
+    let Some(issued) = admission.issuance else {
+        return Ok(());
+    };
+    let mut grants = Vec::with_capacity(rows.len());
+    for row in rows {
+        grants.push(row.wire()?);
+    }
+    if let SpokeResult::Reject(reject) = validate_grant_issuance(
+        &grants,
+        admission.principal_id,
+        admission.space_id,
+        now,
+        issued,
+    ) {
+        return Err(StoreError::NotAuthorized(reject.message));
     }
     Ok(())
 }

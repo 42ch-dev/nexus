@@ -4,9 +4,9 @@
 //! migration, and the `memory.describe` / `memory.spaces.*` /
 //! `memory.subjects.*` / `memory.grants.*` families. Round B
 //! (capture/candidates/records/recall/profile) and the sub-capability gated
-//! families (reflection, transfer) must answer the dispatch-level denial
-//! (`CAPABILITY_PORT_MISSING` + `details.wire_code`), never a success value and
-//! never an empty success.
+//! families (reflection, transfer) must answer the dispatch-level denial —
+//! `CAPABILITY_PORT_MISSING`, the code upstream's responder serializes for an
+//! unimplemented op — never a success value and never an empty success.
 //!
 //! Every scenario runs on a temp nexus home. Import-boundary note: the shared
 //! `MemoryPort` vocabulary comes from `spoke_operations`, whose generated wire
@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use chrono::SubsecRound;
 use nexus_core::memory_provider::LocalMemoryProvider;
 use nexus_creator_memory::bearer::MemoryBearerRef;
 use serde::de::DeserializeOwned;
@@ -618,8 +619,8 @@ async fn grants_grant_list_revoke_and_non_amplification() {
 }
 
 /// §14.1/§14.2: refusals travel `SpokeResult::Reject` — a domain refusal keeps
-/// its memory code, and an unserved op is the upstream dispatch-deny shape
-/// (`CAPABILITY_PORT_MISSING` + `details.wire_code`), never a success payload.
+/// its memory code, and an unserved op is the dispatch-deny code upstream's
+/// responder serializes (`CAPABILITY_PORT_MISSING`), never a success payload.
 #[tokio::test]
 async fn refusals_travel_the_reject_channel() {
     let env = seed_env();
@@ -655,8 +656,7 @@ async fn refusals_travel_the_reject_channel() {
     match &unsupported {
         SpokeResult::Reject(reject) => {
             assert_eq!(reject.code, SpokeRejectCode::CapabilityPortMissing);
-            let details = reject.details.as_ref().expect("wire code is carried");
-            assert_eq!(details["wire_code"], "op_unsupported");
+            let details = reject.details.as_ref().expect("retry class is carried");
             assert_eq!(details["retry_class"], "terminal");
         }
         SpokeResult::Ok(_) => panic!("an unserved op must be rejected: {unsupported:?}"),
@@ -666,7 +666,7 @@ async fn refusals_travel_the_reject_channel() {
 /// Round B's families and the sub-capability gated families answer the
 /// dispatch-level denial instead of any success.
 #[tokio::test]
-async fn gated_families_refuse_with_op_unsupported() {
+async fn gated_families_refuse_with_the_unsupported_code() {
     let env = seed_env();
     let provider = open_provider(&env).await;
     let p = principal(CREATOR);
@@ -685,8 +685,15 @@ async fn gated_families_refuse_with_op_unsupported() {
             )
             .await,
     );
-    assert_eq!(error_code(&capture), "CAPABILITY_PORT_MISSING");
-    assert_eq!(error_details(&capture)["wire_code"], "op_unsupported");
+    assert_eq!(
+        error_code(&capture),
+        SpokeRejectCode::CapabilityPortMissing.as_str(),
+        "the emitted code is the one upstream's responder serializes"
+    );
+    assert!(
+        error_details(&capture).get("wire_code").is_none(),
+        "the inbound dispatch-deny marker must not be minted on the emitting side: {capture}"
+    );
     assert_eq!(retry_class(&capture), "terminal");
 
     let recall = wire(
@@ -731,6 +738,57 @@ async fn gated_families_refuse_with_op_unsupported() {
             .await,
     );
     assert_eq!(error_code(&export), "CAPABILITY_PORT_MISSING");
+}
+
+/// R1: an unserved op emits exactly the code string a responder puts on the
+/// wire. `send_reverse_error_envelope(doc, reject.code.as_str(), ..)` copies the
+/// reject code verbatim (`responder.rs:1506-1522`), and the port vocabulary has
+/// no `op_unsupported` variant (`result.rs:8-70, 76-129`) — upstream's own
+/// responder answers an unimplemented port op with `CapabilityPortMissing`
+/// (`responder.rs:367-371`). `op_unsupported` is only ever an *inbound* marker
+/// that `map_error_envelope` folds into `CapabilityPortMissing`
+/// (`remote_adapter.rs:296-299`).
+#[tokio::test]
+async fn unserved_ops_serialize_the_upstream_dispatch_code() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+
+    let result = provider
+        .capture(
+            &principal(CREATOR),
+            dto(json!({
+                "space_id": SPACE,
+                "subject_id": SUBJECT,
+                "content": { "text": "Mira promised to return before dawn." },
+                "capture_scope": { "visibility": "shared" },
+                "idempotency_key": "k-wire-code",
+            })),
+        )
+        .await;
+    let SpokeResult::Reject(reject) = &result else {
+        panic!("an unserved op must be rejected: {result:?}");
+    };
+
+    let serialized = reject.code.as_str();
+    assert_eq!(serialized, SpokeRejectCode::CapabilityPortMissing.as_str());
+    assert_eq!(
+        SpokeRejectCode::try_from_str(serialized),
+        Some(SpokeRejectCode::CapabilityPortMissing),
+        "the emitted code must be a protocol code a peer can parse"
+    );
+    assert_eq!(
+        SpokeRejectCode::try_from_str("op_unsupported"),
+        None,
+        "`op_unsupported` is a transport dispatch-deny string, never a reject code"
+    );
+
+    // The envelope a responder builds from this reject carries the code as-is.
+    let envelope = wire(&result);
+    assert_eq!(error_code(&envelope), serialized);
+    assert!(
+        error_details(&envelope).get("wire_code").is_none(),
+        "details must not restate a mapping that belongs to the receiving side: {envelope}"
+    );
 }
 
 /// §6.5/§7.7: fence authorization is bound to the target — a context fence needs
@@ -1058,6 +1116,134 @@ async fn replay_is_checked_before_fresh_effect_lifecycle_gates() {
         error_code(&changed_payload),
         "IDEMPOTENCY_CONFLICT",
         "the same key with a different payload is never replayed"
+    );
+}
+
+/// R3 (§7.0.5/MEM-R021): a replay is admitted by *current* coverage and then
+/// answered from its receipt — it never re-runs the §7.9 non-amplification the
+/// original issuance was checked against. An applicable admin grant acquired
+/// later tightens the expiry bound over that same set, which must not turn a
+/// committed issuance into a refusal.
+#[tokio::test]
+async fn a_committed_grant_replay_survives_a_tightened_issuance_bound() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+
+    // The provisioned admin grant never expires, so this non-expiring issuance
+    // is admitted and committed.
+    let issued = wire(
+        &provider
+            .grant(&admin, grant_request("k-bound-replay", "capture", OTHER))
+            .await,
+    );
+    let receipt_id = receipt(&issued)["receipt_id"].as_str().unwrap().to_owned();
+
+    // An additional, expiring admin grant for the same principal: the §7.9
+    // applicable set now carries a finite earliest expiry.
+    let expiring_admin = dto::<schemas::MemoryGrantsGrantRequest>(json!({
+        "space_id": SPACE,
+        "principal_id": CREATOR,
+        "capabilities": ["admin"],
+        "expires_at": (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339(),
+        "idempotency_key": "k-bound-admin",
+    }));
+    let tightened = wire(&provider.grant(&admin, expiring_admin).await);
+    assert_eq!(receipt(&tightened)["result"]["revision"], 1);
+
+    // A *fresh* non-expiring issuance is now refused under that bound ...
+    let fresh = wire(
+        &provider
+            .grant(&admin, grant_request("k-bound-fresh", "capture", OTHER))
+            .await,
+    );
+    assert_eq!(
+        error_code(&fresh),
+        "NOT_AUTHORIZED",
+        "the bound really did tighten: {fresh}"
+    );
+
+    // ... while the identical retry still returns its committed receipt.
+    let replay = wire(
+        &provider
+            .grant(&admin, grant_request("k-bound-replay", "capture", OTHER))
+            .await,
+    );
+    assert_eq!(
+        receipt(&replay)["receipt_id"],
+        receipt_id,
+        "a replay is authorized by current coverage, never re-validated as a fresh issuance"
+    );
+}
+
+/// R2 (§6.5): the authorization clock is read *after* the write lock. A grant
+/// that expires while the write waits for `BEGIN IMMEDIATE` cannot authorize it,
+/// even though it was valid when the request arrived.
+#[tokio::test]
+async fn a_grant_expiring_during_the_lock_wait_does_not_authorize_the_write() {
+    let env = seed_env();
+    let provider = Arc::new(open_provider(&env).await);
+    let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
+
+    // `expires_at` is stored second-truncated (`storage::timestamp`), so a
+    // sub-second TTL would land in the past and prove nothing. Place it on a
+    // whole second 400–1400ms ahead: the request clock the op captures when it
+    // starts is then still valid, while the post-lock clock is not.
+    let mut expires_at = chrono::Utc::now().trunc_subsecs(0) + chrono::Duration::seconds(1);
+    if expires_at - chrono::Utc::now() < chrono::Duration::milliseconds(400) {
+        expires_at += chrono::Duration::seconds(1);
+    }
+    let expiring = dto::<schemas::MemoryGrantsGrantRequest>(json!({
+        "space_id": SPACE,
+        "subject_id": OTHER_SUBJECT,
+        "principal_id": OTHER,
+        "capabilities": ["capture"],
+        "expires_at": expires_at.to_rfc3339(),
+        "idempotency_key": "k-expiring-capture",
+    }));
+    let issued = wire(&provider.grant(&principal(CREATOR), expiring).await);
+    assert_eq!(receipt(&issued)["result"]["revision"], 1);
+
+    // A competing writer parks the op on the write lock across that expiry.
+    let held = nexus_local_db::begin_immediate(&pool).await.unwrap();
+    let writer = Arc::clone(&provider);
+    let pending = tokio::spawn(async move {
+        writer
+            .ensure_subject(&principal(OTHER), ensure_request(OTHER_SUBJECT))
+            .await
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(
+        !pending.is_finished(),
+        "the write is parked on the competing writer's lock"
+    );
+    // Release only after the grant has expired, and still inside the 2s
+    // busy_timeout the connection sets.
+    let until_expired = (expires_at + chrono::Duration::milliseconds(100) - chrono::Utc::now())
+        .to_std()
+        .unwrap_or_default();
+    tokio::time::sleep(until_expired).await;
+
+    held.rollback().await.unwrap();
+    let refused = wire(&pending.await.unwrap());
+    assert_eq!(
+        error_code(&refused),
+        "NOT_AUTHORIZED",
+        "coverage is evaluated at the post-lock clock, not the request clock"
+    );
+
+    let absent = wire(
+        &provider
+            .get_subject(
+                &principal(CREATOR),
+                dto(json!({ "space_id": SPACE, "subject_id": OTHER_SUBJECT })),
+            )
+            .await,
+    );
+    assert_eq!(
+        error_code(&absent),
+        "NOT_FOUND",
+        "the expired grant authorizes no effect: {absent}"
     );
 }
 

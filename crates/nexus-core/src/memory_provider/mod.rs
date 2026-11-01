@@ -14,11 +14,15 @@
 //!
 //! **Error shape.** Refusals travel the port's own `SpokeResult::Reject` channel,
 //! never the success channel: the memory error codes are ops-layer reject codes
-//! (§14.1, `spoke_operations::SpokeRejectCode`), and a dispatch-level denial
-//! (`op_unsupported`, `capability_missing`) is the upstream
-//! `CAPABILITY_PORT_MISSING` reject carrying `details.wire_code` — the same
-//! mapping `spoke-connect`'s `map_error_envelope` applies to an inbound error
-//! envelope. Every reject carries `details.retry_class` (§14.2);
+//! (§14.1, `spoke_operations::SpokeRejectCode`), and an unserved op is
+//! `CAPABILITY_PORT_MISSING` — the code upstream's own responder answers an
+//! unimplemented port op with, and serializes as-is
+//! (`responder.rs:367-371`, `responder.rs:1506-1522`). The lowercase
+//! `op_unsupported` string exists only on the *inbound* side, where
+//! `map_error_envelope` folds a peer's dispatch-deny into
+//! `CAPABILITY_PORT_MISSING` + `details.wire_code` (`remote_adapter.rs:296-299`),
+//! so minting it here would name a code no reject can serialize.
+//! Every reject carries `details.retry_class` (§14.2);
 //! `OUTCOME_UNCERTAIN` is the only `uncertain` class, and `INTERNAL_ERROR` is
 //! `retryable` only because it is raised strictly before the effect commits.
 //!
@@ -219,11 +223,16 @@ fn deny<T>(error: &ProviderError) -> SpokeResult<T> {
 }
 
 /// Round B's families and the sub-capability gated families: the dispatch-level
-/// denial shape — `CAPABILITY_PORT_MISSING` with `details.wire_code` naming the
-/// host's `op_unsupported` answer (upstream `map_error_envelope`).
+/// denial shape. A reject can only carry a [`SpokeRejectCode`], and the port
+/// vocabulary has no `op_unsupported` variant — upstream's responder answers an
+/// unimplemented port op with `CapabilityPortMissing` (`responder.rs:367-371`)
+/// and serializes `reject.code.as_str()` verbatim (`responder.rs:1506-1522`), so
+/// `CAPABILITY_PORT_MISSING` is the code the wire carries. The lowercase
+/// `op_unsupported` marker belongs to the receiving side of a dispatch deny
+/// (`remote_adapter.rs:296-299`); a provider that minted it would describe a
+/// code no reject can serialize.
 fn unsupported<T>(op: &str) -> SpokeResult<T> {
     let mut details = Map::new();
-    details.insert("wire_code".to_string(), json!("op_unsupported"));
     details.insert(
         "retry_class".to_string(),
         Value::String("terminal".to_string()),
@@ -638,13 +647,7 @@ impl LocalMemoryProvider {
         };
         match self
             .store
-            .set_space_status(
-                &ctx,
-                &admission,
-                expected_revision,
-                transition.status(),
-                Utc::now(),
-            )
+            .set_space_status(&ctx, &admission, expected_revision, transition.status())
             .await
         {
             Ok(receipt) => settle_receipt(&receipt),
@@ -865,13 +868,7 @@ impl MemoryPort for LocalMemoryProvider {
         };
         match self
             .store
-            .ensure_subject(
-                &ctx,
-                &admission,
-                request.subject_id.as_str(),
-                kind,
-                Utc::now(),
-            )
+            .ensure_subject(&ctx, &admission, request.subject_id.as_str(), kind)
             .await
         {
             Ok(receipt) => settle_receipt(&receipt),
@@ -977,11 +974,7 @@ impl MemoryPort for LocalMemoryProvider {
             action,
             expected_revision: expected_revision(request.expected_revision),
         };
-        match self
-            .store
-            .fence_subject(&ctx, &admission, fence, Utc::now())
-            .await
-        {
+        match self.store.fence_subject(&ctx, &admission, fence).await {
             Ok(receipt) => settle_receipt(&receipt),
             Err(error) => deny(&store_error(error)),
         }
@@ -1126,11 +1119,7 @@ impl MemoryPort for LocalMemoryProvider {
             subject_gate: subject_id,
             freeze_gated: true,
         };
-        match self
-            .store
-            .insert_grant(&ctx, &admission, &new_grant, Utc::now())
-            .await
-        {
+        match self.store.insert_grant(&ctx, &admission, &new_grant).await {
             Ok(receipt) => settle_receipt(&receipt),
             Err(error) => deny(&store_error(error)),
         }
@@ -1172,7 +1161,6 @@ impl MemoryPort for LocalMemoryProvider {
                 &admission,
                 request.grant_id.as_str(),
                 expected_revision(request.expected_revision),
-                Utc::now(),
             )
             .await
         {
