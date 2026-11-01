@@ -1,0 +1,100 @@
+#!/bin/sh
+# Pre-push: lint + typecheck the committed changes actually being pushed.
+# Checks read working-tree contents (including uncommitted edits).
+set -e
+
+zero=0000000000000000000000000000000000000000
+
+# Base for a brand-new branch: upstream, then merge-base, then origin/main.
+base_for_new_branch() {
+  git rev-parse --verify --quiet '@{upstream}' 2>/dev/null ||
+    git merge-base HEAD origin/main 2>/dev/null ||
+    git rev-parse --verify --quiet origin/main 2>/dev/null
+}
+
+ranges=$(mktemp)
+diff_raw=$(mktemp)
+files=$(mktemp)
+lint_files=$(mktemp)
+trap 'rm -f "$ranges" "$diff_raw" "$files" "$lint_files"' EXIT HUP INT TERM
+
+# Collect one "<from> <to>" range per pushed branch from Git's stdin refspec.
+# Deletions and non-branch refs (tags) have nothing committable to check.
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue
+  case "$remote_ref" in refs/heads/*) ;; *) continue ;; esac
+  if [ "$remote_sha" = "$zero" ]; then
+    from=$(base_for_new_branch) || {
+      echo "Skipping pre-push checks: no upstream or origin/main found."
+      exit 0
+    }
+  else
+    from=$remote_sha
+  fi
+  printf '%s %s\n' "$from" "$local_sha" >> "$ranges"
+done
+
+[ -s "$ranges" ] || exit 0
+
+# Full changed-file set (configs drive package attribution);
+# --no-renames so a cross-package move attributes both packages.
+# Check each diff directly: a force-push may replace a remote commit we
+# never fetched, and a failed diff must not degrade into an empty list.
+while read -r from to; do
+  git diff --no-renames --name-only -z "$from" "$to" >> "$diff_raw" || {
+    echo "pre-push: cannot diff against pushed base $from (not fetched locally?)." >&2
+    echo "pre-push: fetch and retry, or run the checks manually." >&2
+    exit 1
+  }
+done < "$ranges"
+sort -zu "$diff_raw" > "$files"
+[ -s "$files" ] || exit 0
+echo "Changed source files:"
+xargs -0 printf '%s\n' < "$files"
+xargs -0 sh -c '
+  for file do
+    case "$file" in
+      *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs|*.mts|*.cts)
+        [ ! -f "$file" ] || printf "%s\0" "$file" ;;
+    esac
+  done
+' sh < "$files" > "$lint_files"
+if [ -s "$lint_files" ]; then
+  echo "Running oxlint:"
+  xargs -0 pnpm exec oxlint < "$lint_files"
+fi
+# Attribution includes package configs (tsconfig/package.json). Root
+# dependency files (lockfile, root package.json/tsconfig) check everything.
+packages=$(xargs -0 sh -c '
+  for file do
+    case "$file" in
+      pnpm-lock.yaml|package.json|tsconfig.json) echo ALL ;;
+      */tsconfig.json|*/tsconfig.*.json|*/package.json|apps/*/*|packages/*/*|tooling/*/*)
+        root=${file%%/*}
+        rest=${file#*/}
+        printf "%s/%s\n" "$root" "${rest%%/*}"
+        ;;
+    esac
+  done
+' sh < "$files" | sort -u)
+
+case "$packages" in
+  *ALL*)
+    # Same declaration chain the CI TypeScript leg builds before typecheck.
+    pnpm --filter @42ch/nexus-contracts --filter @42ch/nexus-native \
+      --filter @42ch/nexus-provider-acp --filter @42ch/nexus-service \
+      run --if-present build
+    pnpm run typecheck
+    exit 0
+    ;;
+esac
+
+while IFS= read -r package; do
+  [ -n "$package" ] && [ -f "$package/package.json" ] || continue
+  # Build the package's workspace dependency graph first so tsc resolves
+  # their dist declarations (same order contract as the CI TypeScript leg).
+  pnpm --filter "./$package..." run --if-present build
+  pnpm --filter "./$package" run --if-present typecheck
+done <<EOF
+$packages
+EOF
