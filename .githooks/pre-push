@@ -13,9 +13,10 @@ base_for_new_branch() {
 }
 
 ranges=$(mktemp)
+diff_raw=$(mktemp)
 files=$(mktemp)
 lint_files=$(mktemp)
-trap 'rm -f "$ranges" "$files" "$lint_files"' EXIT HUP INT TERM
+trap 'rm -f "$ranges" "$diff_raw" "$files" "$lint_files"' EXIT HUP INT TERM
 
 # Collect one "<from> <to>" range per pushed branch from Git's stdin refspec.
 # Deletions and non-branch refs (tags) have nothing committable to check.
@@ -37,9 +38,16 @@ done
 
 # Full changed-file set (configs drive package attribution);
 # --no-renames so a cross-package move attributes both packages.
+# Check each diff directly: a force-push may replace a remote commit we
+# never fetched, and a failed diff must not degrade into an empty list.
 while read -r from to; do
-  git diff --no-renames --name-only -z "$from" "$to"
-done < "$ranges" | sort -zu > "$files"
+  git diff --no-renames --name-only -z "$from" "$to" >> "$diff_raw" || {
+    echo "pre-push: cannot diff against pushed base $from (not fetched locally?)." >&2
+    echo "pre-push: fetch and retry, or run the checks manually." >&2
+    exit 1
+  }
+done < "$ranges"
+sort -zu "$diff_raw" > "$files"
 [ -s "$files" ] || exit 0
 echo "Changed source files:"
 xargs -0 printf '%s\n' < "$files"
@@ -68,10 +76,10 @@ packages=$(xargs -0 sh -c '
         ;;
     esac
   done
-' sh < "$files" | sort -u | tr '\n' ' ')
+' sh < "$files" | sort -u)
 
-case " $packages " in
-  *" ALL "*)
+case "$packages" in
+  *ALL*)
     # Same declaration chain the CI TypeScript leg builds before typecheck.
     pnpm --filter @42ch/nexus-contracts --filter @42ch/nexus-native \
       --filter @42ch/nexus-provider-acp --filter @42ch/nexus-service \
