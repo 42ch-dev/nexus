@@ -220,7 +220,7 @@ impl ProviderError {
                 "this idempotency key was already used with a different payload".to_string()
             }
             Self::ReceiptExpired { last_known_status } => format!(
-                "this receipt's body was evicted after its retention window and is no longer                  served; the recorded outcome was {last_known_status}, and the operation is not                  re-executed — use the same idempotency_key to start a new operation"
+                "this receipt's body was evicted after its retention window and is no longer served; the recorded outcome was {last_known_status}, and the operation is not re-executed — the idempotency_key stays bound to that outcome until its dedup retention window ends, so repeating that key cannot reach a new effect; use a new idempotency_key to perform a new operation"
             ),
             Self::InvalidInput { field, reason } => format!("{field}: {reason}"),
             Self::CursorInvalid => {
@@ -687,6 +687,15 @@ impl LocalMemoryProvider {
     #[doc(hidden)]
     pub fn advance_receipt_clock(&self, seconds: i64) {
         self.store.advance_receipt_clock(seconds);
+    }
+
+    /// §7.28 proof seam: park the next `memory.receipts.get` after it holds its
+    /// connection, so a test can move the clock while the read is queued.
+    /// Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn park_next_receipt_read(&self, barrier: std::sync::Arc<tokio::sync::Barrier>) {
+        self.store.park_next_receipt_read(barrier);
     }
 
     async fn space(&self, space_id: &str) -> Result<SpaceRow, ProviderError> {
