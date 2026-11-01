@@ -1528,9 +1528,21 @@ impl MemoryStore {
     /// would install a tombstone as though no projection had ever been owed and
     /// strand the earlier body. Whatever cannot be settled inline refuses this
     /// operation before its own effect commits.
+    ///
+    /// Settlement is not admission. It runs only after the caller's §6.5
+    /// coverage and §7.0.5 dedup probe have been evaluated in
+    /// [`Self::admitted`], so a caller without `records_write` gets the standard
+    /// `NOT_AUTHORIZED` instead of another intent's receipt id and state, and a
+    /// same-key replay reaches its own recorded receipt — answered by the
+    /// operation's in-transaction probe — instead of being gated on a later
+    /// intent it did not create. A replay settles nothing: it produces no effect.
+    ///
+    /// The lock is taken before any transaction (gate → transaction is the one
+    /// lock order this store uses) and held across the operation's effect.
     async fn begin_publication(
         &self,
-        space_id: &str,
+        ctx: &OpContext<'_>,
+        admission: &Admission<'_>,
         targets: &[String],
     ) -> StoreResult<tokio::sync::OwnedMutexGuard<()>> {
         let gate = Arc::clone(&self.publish_gate).lock_owned().await;
@@ -1542,8 +1554,11 @@ impl MemoryStore {
                 rendezvous.release.wait().await;
             }
         }
+        if self.admitted(ctx, admission).await?.is_some() {
+            return Ok(gate);
+        }
         let entries: Vec<JournalEntry> = sqlx::query_as(UNSETTLED_TARGETS_SQL)
-            .bind(space_id)
+            .bind(ctx.space_id)
             .bind(journal::STATE_APPLIED)
             .bind(targets_array(targets)?)
             .fetch_all(&self.pool)
@@ -1551,11 +1566,25 @@ impl MemoryStore {
         for entry in entries {
             self.settle_intent(&entry).await;
         }
-        let unsettled = unsettled_target(&self.pool, space_id, targets).await?;
-        if let Some((receipt_id, state)) = unsettled {
-            return Err(StoreError::UnsettledPredecessor { receipt_id, state });
-        }
         Ok(gate)
+    }
+
+    /// §6.5 + §7.0.5 ahead of §5.2 settlement: the caller's authorization and the
+    /// dedup probe, evaluated in a transaction of their own and kept by neither.
+    /// The operation's admission transaction re-evaluates both as the authority
+    /// for its effect; this only decides what a caller may learn — and whether
+    /// there is anything to settle — before predecessor state is touched.
+    async fn admitted(
+        &self,
+        ctx: &OpContext<'_>,
+        admission: &Admission<'_>,
+    ) -> StoreResult<Option<ReceiptRow>> {
+        let mut tx = begin_immediate(&self.pool).await?;
+        let now = self.now();
+        let _ = authorize(&mut tx, admission, now).await?;
+        let row = probe(&mut tx, ctx, now).await?;
+        tx.rollback().await?;
+        Ok(row)
     }
 
     /// §5.2 step 3: settle — and re-drive — the unsettled intents of this space.
@@ -1567,23 +1596,35 @@ impl MemoryStore {
         }
     }
 
-    /// §5.2 step 3, bounded. Recoverable work (`pending`, `deferred`) settles
-    /// first so a still-conflicting quarantine cannot starve it; quarantined
-    /// intents are re-driven with whatever bound capacity is left, which is how
-    /// an operator-resolved target gets its owed projection published.
+    /// §5.2 step 3, bounded and fair. Recoverable work (`pending`, `deferred`)
+    /// settles first so a still-conflicting quarantine cannot starve it;
+    /// quarantined intents are re-driven with whatever bound capacity is left,
+    /// which is how an operator-resolved target gets its owed projection
+    /// published.
+    ///
+    /// The pass resumes after the `seq` the previous pass stopped at and wraps,
+    /// so a head that keeps conflicting is skipped in favour of the tail: with
+    /// more unsettled intents than the bound, the 65th behind 64 persistently
+    /// conflicting ones is reached on the next pass rather than never. The bound
+    /// itself is unchanged — one pass never settles more than
+    /// [`journal::RECOVERY_BOUND`] entries.
     async fn settle_unsettled(&self, space_id: &str) -> StoreResult<()> {
+        let cursor = self.recovery_cursor(space_id).await?;
         let entries: Vec<JournalEntry> = sqlx::query_as(
-            "SELECT receipt_id, subject_id, targets_json, result_json FROM memory_journal \
-             WHERE space_id = ? AND state <> ? ORDER BY state = ?, seq LIMIT ?",
+            "SELECT seq, receipt_id, subject_id, targets_json, result_json FROM memory_journal \
+             WHERE space_id = ? AND state <> ? \
+             ORDER BY state = ?, CASE WHEN seq > ? THEN 0 ELSE 1 END, seq LIMIT ?",
         )
         .bind(space_id)
         .bind(journal::STATE_APPLIED)
         .bind(journal::STATE_QUARANTINED)
+        .bind(cursor)
         .bind(journal::RECOVERY_BOUND)
         .fetch_all(&self.pool)
         .await?;
-        for entry in entries {
-            self.settle_intent(&entry).await;
+        let advance = entries.last().map(|entry| entry.seq);
+        for entry in &entries {
+            self.settle_intent(entry).await;
         }
         // §5.2 step 5: what the bound did not reach is terminal until a later
         // pass settles it, never silently withheld.
@@ -1594,6 +1635,43 @@ impl MemoryStore {
         .bind(timestamp(self.now()))
         .bind(space_id)
         .bind(journal::STATE_PENDING)
+        .execute(&self.pool)
+        .await?;
+        if let Some(seq) = advance {
+            if let Err(error) = self.record_recovery_cursor(space_id, seq).await {
+                // The pass did its work; only the rotation position is lost, and
+                // the next pass simply starts over from the oldest intent.
+                tracing::warn!(%space_id, ?error, "memory journal recovery cursor not recorded");
+            }
+        }
+        Ok(())
+    }
+
+    /// Where the last bounded pass of this space stopped. Durable: a pass that
+    /// restarted at the oldest unsettled intent every reopen would retry the
+    /// same conflicting head forever.
+    async fn recovery_cursor(&self, space_id: &str) -> StoreResult<i64> {
+        let value: Option<String> =
+            sqlx::query_scalar("SELECT value FROM memory_provider_meta WHERE key = ?")
+                .bind(recovery_cursor_key(space_id))
+                .fetch_optional(&self.pool)
+                .await?;
+        value.map_or(Ok(0), |value| {
+            value.parse::<i64>().map_err(|error| {
+                StoreError::Corrupt(format!("memory_provider_meta recovery cursor: {error}"))
+            })
+        })
+    }
+
+    async fn record_recovery_cursor(&self, space_id: &str, seq: i64) -> StoreResult<()> {
+        sqlx::query(
+            "INSERT INTO memory_provider_meta (key, value, updated_at) VALUES (?, ?, ?) \
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value, \
+             updated_at = excluded.updated_at",
+        )
+        .bind(recovery_cursor_key(space_id))
+        .bind(seq.to_string())
+        .bind(timestamp(self.now()))
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -1643,7 +1721,7 @@ enum Settlement<'a> {
 /// The unsettled intents that own one of the bound file targets. `json_each`
 /// expands the target list, so this is exact equality on each intent's own
 /// `path` field — never a pattern match over the serialized JSON.
-const UNSETTLED_TARGETS_SQL: &str = "SELECT j.receipt_id, j.subject_id, j.targets_json, \
+const UNSETTLED_TARGETS_SQL: &str = "SELECT j.seq, j.receipt_id, j.subject_id, j.targets_json, \
      j.result_json FROM memory_journal AS j \
      WHERE j.space_id = ? AND j.state <> ? AND EXISTS ( \
          SELECT 1 FROM json_each(j.targets_json) AS e \
@@ -1660,10 +1738,19 @@ const UNSETTLED_TARGET_SQL: &str = "SELECT j.receipt_id, j.state FROM memory_jou
 /// One unsettled journal row, in the shape both settlement passes read.
 #[derive(sqlx::FromRow)]
 struct JournalEntry {
+    /// Settlement order: predecessors publish in commit order, and the bounded
+    /// recovery pass rotates on it.
+    seq: i64,
     receipt_id: String,
     subject_id: String,
     targets_json: String,
     result_json: Option<String>,
+}
+
+/// The `memory_provider_meta` row holding where a space's last bounded recovery
+/// pass stopped (§5.2 step 3 fairness).
+fn recovery_cursor_key(space_id: &str) -> String {
+    format!("recovery_cursor:{space_id}")
 }
 
 impl JournalEntry {
@@ -2951,7 +3038,7 @@ impl MemoryStore {
         expected_revision: i64,
     ) -> StoreResult<ReceiptRow> {
         let targets = [journal::candidate_target(candidate_id)];
-        let _gate = self.begin_publication(ctx.space_id, &targets).await?;
+        let _gate = self.begin_publication(ctx, admission, &targets).await?;
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
@@ -3003,7 +3090,7 @@ impl MemoryStore {
         decision: &ReviewDecision<'_>,
     ) -> StoreResult<ReceiptRow> {
         let targets = [journal::candidate_target(candidate_id)];
-        let _gate = self.begin_publication(ctx.space_id, &targets).await?;
+        let _gate = self.begin_publication(ctx, admission, &targets).await?;
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
@@ -3274,7 +3361,7 @@ impl MemoryStore {
         // A create owns a target nothing has ever written, so its predecessor
         // check is trivially clear — it still runs like every other publication.
         let targets = [journal::record_target(&record_id)];
-        let _gate = self.begin_publication(ctx.space_id, &targets).await?;
+        let _gate = self.begin_publication(ctx, admission, &targets).await?;
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
@@ -3319,7 +3406,7 @@ impl MemoryStore {
         kind: Option<&str>,
     ) -> StoreResult<ReceiptRow> {
         let targets = [journal::record_target(record_id)];
-        let _gate = self.begin_publication(ctx.space_id, &targets).await?;
+        let _gate = self.begin_publication(ctx, admission, &targets).await?;
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
@@ -3401,7 +3488,7 @@ impl MemoryStore {
         deleted_by: &str,
     ) -> StoreResult<ReceiptRow> {
         let targets = [journal::record_target(record_id)];
-        let _gate = self.begin_publication(ctx.space_id, &targets).await?;
+        let _gate = self.begin_publication(ctx, admission, &targets).await?;
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
@@ -3483,7 +3570,7 @@ impl MemoryStore {
         target: Placement<'_>,
     ) -> StoreResult<ReceiptRow> {
         let targets = [journal::record_target(record_id)];
-        let _gate = self.begin_publication(ctx.space_id, &targets).await?;
+        let _gate = self.begin_publication(ctx, admission, &targets).await?;
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
@@ -3617,7 +3704,7 @@ impl MemoryStore {
         updated_by: &str,
     ) -> StoreResult<ReceiptRow> {
         let targets = [journal::profile_target(subject_id, profile_kind)?];
-        let _gate = self.begin_publication(ctx.space_id, &targets).await?;
+        let _gate = self.begin_publication(ctx, admission, &targets).await?;
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {

@@ -353,11 +353,23 @@ async fn journal_states(env: &Env) -> Vec<String> {
 /// The persisted journal payloads of the space, in settlement order.
 async fn journal_targets(env: &Env) -> Vec<String> {
     let pool = store_pool(env).await;
-    let rows: Vec<(String,)> = sqlx::query_as("SELECT targets_json FROM memory_journal")
-        .fetch_all(&pool)
-        .await
-        .unwrap();
+    let rows: Vec<(String,)> =
+        sqlx::query_as("SELECT targets_json FROM memory_journal ORDER BY seq")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
     rows.into_iter().map(|(targets,)| targets).collect()
+}
+
+/// The last file target an intent journalled — the path whose projection the
+/// intent owes.
+fn journalled_target(targets_json: &str) -> String {
+    let effects: Vec<Value> = serde_json::from_str(targets_json).unwrap();
+    effects
+        .last()
+        .and_then(|effect| effect["path"].as_str())
+        .unwrap_or_else(|| panic!("an intent journals at least one target: {targets_json}"))
+        .to_string()
 }
 
 // ── Window (a): a crash before the journal commit ───────────────────────
@@ -1372,6 +1384,106 @@ async fn overflow_beyond_the_bounded_pass_reads_terminal_then_recovers() {
     assert_eq!(listed["total_authorized"], count);
 }
 
+// ── NF4: a bounded pass advances past a head that keeps conflicting ─────
+
+/// 65 quarantined intents, the first 64 conflicting forever: a pass that always
+/// restarts at the oldest unsettled intent retries the same 64 by `seq` and the
+/// 65th is never selected — resolving only its target never gets it recovered.
+/// The pass now resumes after the `seq` the previous pass stopped at (and wraps),
+/// so the bound stays intact and the tail is reached.
+#[tokio::test]
+async fn a_bounded_pass_advances_past_persistently_conflicting_heads() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    ensure(&provider).await;
+    let root = provider.file_root();
+
+    let count = 65;
+    for index in 0..count {
+        provider.inject_commit_fault(true);
+        wire(
+            &provider
+                .create_record(
+                    &admin(),
+                    record_create_request(&format!("k-starve-{index}"), TEXT),
+                )
+                .await,
+        );
+    }
+    let targets: Vec<String> = journal_targets(&env)
+        .await
+        .iter()
+        .map(|journaled| journalled_target(journaled))
+        .collect();
+    assert_eq!(targets.len(), count);
+    // Every target conflicts: no intent can settle yet.
+    std::fs::create_dir_all(root.join("records")).unwrap();
+    for path in &targets {
+        std::fs::write(root.join(path), "a writer this provider does not own").unwrap();
+    }
+
+    // Pass 1 settles the first 64 and defers the one the bound did not reach.
+    drop(provider);
+    let provider = open_provider(&env).await;
+    let states = journal_states(&env).await;
+    assert_eq!(
+        states
+            .iter()
+            .filter(|state| *state == "quarantined")
+            .count(),
+        count - 1,
+        "one pass still settles at most the work bound: {states:?}"
+    );
+    assert_eq!(
+        states.iter().filter(|state| *state == "deferred").count(),
+        1,
+        "the intent the bound did not reach is deferred, not silently dropped: {states:?}"
+    );
+
+    // Pass 2 reaches the deferred one; it conflicts too, so all 65 are now
+    // quarantined behind each other.
+    drop(provider);
+    let provider = open_provider(&env).await;
+    assert_eq!(
+        journal_states(&env)
+            .await
+            .iter()
+            .filter(|state| *state == "quarantined")
+            .count(),
+        count,
+        "the whole quarantine is settled-as-failed before the head is resolved"
+    );
+
+    // Only the 65th's conflict is resolved; the head still conflicts.
+    std::fs::remove_file(root.join(&targets[count - 1])).unwrap();
+    drop(provider);
+    let provider = open_provider(&env).await;
+    let last = root.join(&targets[count - 1]);
+    let Ok(published) = std::fs::read_to_string(&last) else {
+        panic!(
+            "the next pass reaches the intent behind the conflicting head: {:?}",
+            journal_states(&env).await
+        );
+    };
+    assert!(published.contains(TEXT), "{published}");
+    assert_eq!(
+        journal_states(&env)
+            .await
+            .iter()
+            .filter(|state| *state == "quarantined")
+            .count(),
+        count - 1,
+        "the conflicting head stays quarantined instead of being published over"
+    );
+    let listed = wire(
+        &provider
+            .list_records(&admin(), records_list_request())
+            .await,
+    );
+    assert_eq!(error_code(&listed), "INTERNAL_ERROR");
+    assert_eq!(retry_class(&listed), "terminal");
+}
+
 // ── F2: a later publication never overtakes an unsettled predecessor ────
 
 /// A create that stops after staging owns a target nothing has written yet
@@ -1506,6 +1618,190 @@ async fn an_unsettleable_predecessor_refuses_the_later_write() {
         .await
         .unwrap();
     assert_eq!(deletes, 0, "a refused write leaves no receipt");
+}
+
+// ── NF2: the swap's own crash window is recoverable ─────────────────────
+
+/// The window the rename-first protocol opened: the deleted body was displaced
+/// into the receipt's scratch sibling and the tombstone never linked. Recovery
+/// must finish the intent — and the superseded body must not survive as a
+/// hidden file next to its own tombstone, which is the scrub clause of §7.19.
+#[tokio::test]
+async fn a_deletion_crash_inside_the_swap_leaves_no_body_behind() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    ensure(&provider).await;
+    let root = provider.file_root();
+
+    let created = wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-swap-create", TEXT))
+            .await,
+    );
+    let record_id = record_id_of(receipt(&created));
+    let target = root.join(format!("records/{record_id}.md"));
+    assert!(std::fs::read_to_string(&target).unwrap().contains(TEXT));
+
+    provider.inject_file_fault(false);
+    let lost = wire(
+        &provider
+            .delete_record(&admin(), delete_request("k-swap-delete", &record_id, 1))
+            .await,
+    );
+    assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
+    let receipt_id = receipt_id_of_key(&env, "k-swap-delete").await;
+
+    // The crash instant: the body was displaced to its scratch sibling, the
+    // tombstone stayed in the staged file, and the target is gone.
+    let scratch = root.join(format!("records/.{record_id}.md.{receipt_id}.prior"));
+    std::fs::rename(&target, &scratch).unwrap();
+    assert!(!target.exists());
+
+    drop(provider);
+    let provider = open_provider(&env).await;
+
+    let published = std::fs::read_to_string(&target).unwrap();
+    assert!(published.contains("tombstoned: true"), "{published}");
+    assert!(!published.contains(TEXT), "{published}");
+    assert_eq!(
+        files_under(&root),
+        vec![format!("records/{record_id}.md")],
+        "neither the staged file nor the deleted body survives the settlement"
+    );
+    assert_eq!(journal_states(&env).await, vec!["applied", "applied"]);
+    let served = wire(
+        &provider
+            .get_record(&admin(), record_get_request(&record_id))
+            .await,
+    );
+    assert!(served["record"]["tombstone"].is_object(), "{served}");
+}
+
+// ── NF3: settlement never precedes authorization or the dedup probe ──────
+
+/// Predecessor settlement is not admission. A caller without `records_write`
+/// gets the same refusal it gets for a clear target — never another intent's
+/// receipt id and state, and never a settlement write it did not authorize.
+#[tokio::test]
+async fn an_unauthorized_update_never_learns_of_the_unsettled_predecessor() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    ensure(&provider).await;
+    let root = provider.file_root();
+
+    let blocked = wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-authz-a", TEXT))
+            .await,
+    );
+    let blocked_id = record_id_of(receipt(&blocked));
+    let clear = wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-authz-b", TEXT))
+            .await,
+    );
+    let clear_id = record_id_of(receipt(&clear));
+
+    // An intent on A's own target that can never settle: the target holds bytes
+    // no intent produced.
+    provider.inject_commit_fault(true);
+    let blocked_commit = wire(
+        &provider
+            .update_record(
+                &admin(),
+                update_request("k-authz-blocker", &blocked_id, 1, UPDATED),
+            )
+            .await,
+    );
+    assert_eq!(error_code(&blocked_commit), "OUTCOME_UNCERTAIN");
+    let predecessor = receipt_id_of_key(&env, "k-authz-blocker").await;
+    let target = root.join(format!("records/{blocked_id}.md"));
+    let foreign = "a writer this provider does not own";
+    std::fs::write(&target, foreign).unwrap();
+
+    let refused_blocked = wire(
+        &provider
+            .update_record(
+                &stranger(),
+                update_request("k-authz-stranger-a", &blocked_id, 1, UPDATED),
+            )
+            .await,
+    );
+    let refused_clear = wire(
+        &provider
+            .update_record(
+                &stranger(),
+                update_request("k-authz-stranger-b", &clear_id, 1, UPDATED),
+            )
+            .await,
+    );
+    assert_eq!(
+        refused_blocked, refused_clear,
+        "the refusal cannot depend on another operation's unsettled intent"
+    );
+    assert_eq!(error_code(&refused_blocked), "NOT_AUTHORIZED");
+    assert!(
+        !refused_blocked.to_string().contains(&predecessor),
+        "the refusal leaks no predecessor receipt: {refused_blocked}"
+    );
+    assert_eq!(
+        journal_states(&env).await,
+        vec!["applied", "applied", "pending"],
+        "an unauthorized caller settled nothing"
+    );
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), foreign);
+}
+
+/// An authorized same-key replay answers its own recorded receipt, even when a
+/// later intent owns the same target and cannot be settled.
+#[tokio::test]
+async fn a_replay_reaches_its_own_receipt_past_a_later_unsettled_intent() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    ensure(&provider).await;
+    let root = provider.file_root();
+
+    let created = wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-replay-create", TEXT))
+            .await,
+    );
+    let record_id = record_id_of(receipt(&created));
+    let committed = wire(
+        &provider
+            .update_record(&admin(), update_request("k-replay", &record_id, 1, UPDATED))
+            .await,
+    );
+    let committed = receipt(&committed).clone();
+    let receipt_id = committed["receipt_id"]
+        .as_str()
+        .expect("a receipt id")
+        .to_string();
+    assert_eq!(committed["result"]["revision"], 2);
+
+    // A later intent owns the same target and cannot settle there.
+    provider.inject_commit_fault(true);
+    let blocker = wire(
+        &provider
+            .update_record(&admin(), update_request("k-later", &record_id, 2, THIRD))
+            .await,
+    );
+    assert_eq!(error_code(&blocker), "OUTCOME_UNCERTAIN");
+    let target = root.join(format!("records/{record_id}.md"));
+    std::fs::write(&target, "a writer this provider does not own").unwrap();
+
+    let replayed = wire(
+        &provider
+            .update_record(&admin(), update_request("k-replay", &record_id, 1, UPDATED))
+            .await,
+    );
+    let replayed = receipt(&replayed).clone();
+    assert_eq!(
+        replayed["receipt_id"].as_str(),
+        Some(receipt_id.as_str()),
+        "the replay returns the receipt it recorded: {replayed}"
+    );
+    assert_eq!(replayed["result"]["revision"], 2);
 }
 
 // ── F3: quarantine preserves recovery evidence and terminates ────────────
