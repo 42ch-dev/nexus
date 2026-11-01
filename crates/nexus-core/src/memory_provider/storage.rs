@@ -43,19 +43,23 @@
 //!   does: a replay refusal, an authorization failure or any other early return
 //!   drops only the effect transaction. A sweep failure is logged and never
 //!   fails or rolls back the operation it precedes. `memory.receipts.get` stays
-//!   read-only (MEM-R011) and only reports what the sweep left; the provider
-//!   clock never runs backwards ([`MemoryStore::now`]), so a body seen past its
-//!   retention window is never served again whatever the wall clock does next.
-//!   That floor is durable: every sweep commits the reading it decided at into
-//!   `memory_provider_meta`, in the same transaction as the eviction, and
+//!   read-only (MEM-R011) and only reports what the sweep left. Within one
+//!   `MemoryStore` the clock never runs backwards ([`MemoryStore::now`]), so a
+//!   body seen past its retention window is not served again for as long as that
+//!   provider lives, whatever the wall clock does next. Across a restart the
+//!   guarantee is the committed floor: every sweep commits the reading it decided
+//!   at into `memory_provider_meta`, in the same transaction as the eviction, and
 //!   [`MemoryStore::open`] seeds its clock from that row before any evaluation —
-//!   a restart after the wall clock moved backwards resumes from the last
-//!   committed reading instead of from zero. One limit stays open and is not
-//!   claimed as closed: a read cannot persist the expiry it observes (MEM-R011),
-//!   so an observation made after the last committed sweep and lost to an abrupt
-//!   kill is not carried across that restart. The durable floor bounds the
-//!   re-exposure window to that segment. Closing it needs a read-path persistence
-//!   contract change — an owner decision, not a provider choice.
+//!   so a reopened provider resumes from the last committed reading instead of
+//!   from zero, and a wall clock that moved backwards cannot re-open what a
+//!   committed sweep closed. One limit stays open and is not claimed as closed: a
+//!   read cannot persist the expiry it observes (MEM-R011), so an expiry first
+//!   observed after the last committed sweep is not carried across a restart —
+//!   dropping the provider and reopening it, with nothing abrupt involved, serves
+//!   that body again. The committed floor bounds the re-exposure window to that
+//!   segment. Closing it needs a read-path persistence contract change — an owner
+//!   decision, not a provider choice (compass D13 residual, open pending owner
+//!   adjudication).
 //! * **Error class** (§14.2/§14.3). A failure raised before `COMMIT` is a clean
 //!   no-effect [`StoreError::Database`]/[`StoreError::Corrupt`]; a failure at or
 //!   after `COMMIT` is [`StoreError::CommitUnknown`], which the facade reports as

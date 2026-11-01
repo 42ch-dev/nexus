@@ -1,16 +1,11 @@
 -- v1.227 NXM-2: provider-owned metadata (spoke-memory §6.10/MEM-R021).
 --
 -- The provider owns exactly one durable scalar it must not lose across a
--- restart: the high-water mark of its clock. Retention is one-way once a sweep
--- commits — the reading that decided an eviction is written here in the same
--- transaction — so a reopened provider seeds its clock from the last committed
--- reading instead of from a wall clock that may have moved backwards. That
--- bounds re-exposure to the segment after the last committed sweep or write; it
--- does not close the restart case. An expiry observed only on the read path is
--- not persisted (MEM-R011 keeps reads read-only), so such a body can be served
--- again after a restart plus a backward clock. Closing that needs a read-path
--- persistence contract change — compass D13 residual, open pending owner
--- adjudication.
+-- restart: the high-water mark of its clock. Retention is one-way — a receipt
+-- body past `receipt_retention_seconds` is never served again — and the reading
+-- that decided it must outlive the process, or a reopened provider would seed
+-- its clock from the wall clock alone and a wall clock that moved backwards
+-- could re-open a window the previous process already closed.
 --
 -- The row is written by the retention sweep itself, in the same transaction as
 -- the eviction it decided, so the clock reading and its effects commit together.

@@ -236,11 +236,12 @@ async fn receipt_rows(pool: &SqlitePool, receipt_id: &str) -> i64 {
 
 /// The durable §6.10 retention clock floor, as the provider persisted it.
 async fn persisted_clock_floor(pool: &SqlitePool) -> i64 {
-    let stored: String =
-        sqlx::query_scalar("SELECT value FROM memory_provider_meta WHERE key = 'clock_floor_micros'")
-            .fetch_one(pool)
-            .await
-            .expect("memory_provider_meta clock floor");
+    let stored: String = sqlx::query_scalar(
+        "SELECT value FROM memory_provider_meta WHERE key = 'clock_floor_micros'",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("memory_provider_meta clock floor");
     stored.parse().expect("decimal clock floor")
 }
 
@@ -1201,10 +1202,11 @@ async fn committed_expiry_eviction_survives_a_restart_under_a_backward_clock() {
 /// §6.10/MEM-R021 / compass D13 residual — **this test documents un-closed
 /// behavior, not a guarantee**. The sequence is read → drop → backward clock →
 /// reopen: the read path observes the expiry without persisting it (MEM-R011
-/// keeps it read-only) and no mutating entry point runs before the drop, so the
-/// durable floor still holds the sweep from the provider's own open, taken
-/// before the body was aged. The reopened provider therefore evaluates at that
-/// earlier reading and serves the aged body again.
+/// keeps it read-only) and no mutating entry point runs between that observation
+/// and the drop, so the floor the reopened provider seeds from is still the one
+/// committed by the last sweep before the body aged — the sweep `capture`'s own
+/// admission ran, not the provider-open sweep. The reopened provider therefore
+/// evaluates at that earlier reading and serves the aged body again.
 ///
 /// Ignored so the suite never presents this as desired behavior. Closing it
 /// needs a read-path persistence contract change, which is the owner's decision
