@@ -2176,6 +2176,87 @@ async fn two_provider_instances_on_one_workspace_serialize_publication() {
     assert_eq!(journal_states(&env).await, vec!["applied", "applied"]);
 }
 
+/// F-new-2: same-process contention must not occupy the blocking pool the
+/// publication section itself needs. With a **one-thread** blocking pool, a
+/// publication that holds the workspace section and three queued behind it all
+/// complete: the waiters park on the async gate, only the gate holder ever waits
+/// for the flock, and the holder's own file work therefore always reaches the
+/// pool.
+///
+/// Under the previous flock-first order each waiter sat in a blocking worker
+/// waiting for the lease, so the holder's staging and publishing jobs queued
+/// behind them and the section could never finish — this test would hang until
+/// its timeout instead of passing.
+#[test]
+fn queued_publications_never_exhaust_the_blocking_pool_the_holder_needs() {
+    let env = seed_env();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .max_blocking_threads(1)
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    runtime.block_on(async {
+        let holder = Arc::new(open_provider(&env).await);
+        ensure(&holder).await;
+        let mut queued_on = Vec::new();
+        for _ in 1..4 {
+            queued_on.push(Arc::new(open_provider(&env).await));
+        }
+
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Barrier::new(2));
+        holder.park_next_publish(Arc::clone(&entered), Arc::clone(&release));
+        let mut publications = vec![tokio::spawn({
+            let provider = Arc::clone(&holder);
+            async move {
+                wire(
+                    &provider
+                        .create_record(&admin(), record_create_request("k-pool-holder", TEXT))
+                        .await,
+                )
+            }
+        })];
+        tokio::time::timeout(std::time::Duration::from_secs(10), entered.notified())
+            .await
+            .expect("the holder is inside the workspace publication section");
+        for (index, provider) in queued_on.into_iter().enumerate() {
+            publications.push(tokio::spawn(async move {
+                wire(
+                    &provider
+                        .create_record(
+                            &admin(),
+                            record_create_request(&format!("k-pool-{index}"), TEXT),
+                        )
+                        .await,
+                )
+            }));
+        }
+        // Let the queued publications reach their wait before the holder moves on.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        tokio::time::timeout(std::time::Duration::from_secs(10), release.wait())
+            .await
+            .expect("the parked publication is released");
+
+        let root = holder.file_root();
+        for publication in publications {
+            let publication = tokio::time::timeout(std::time::Duration::from_secs(30), publication)
+                .await
+                .expect("no publication starves behind the blocking pool")
+                .unwrap();
+            let record_id = record_id_of(receipt(&publication));
+            assert!(
+                root.join(format!("records/{record_id}.md")).exists(),
+                "every publication's file section completed: {record_id}"
+            );
+        }
+        assert_eq!(
+            journal_states(&env).await,
+            vec!["applied", "applied", "applied", "applied"]
+        );
+    });
+}
+
 /// The same §5.2 step 2 guarantee across **processes**, not just instances:
 /// while another OS process holds the workspace flock, this process's publication
 /// cannot run — so it cannot be inside the displacement's link→unlink window and

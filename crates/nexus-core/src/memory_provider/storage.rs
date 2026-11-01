@@ -212,7 +212,7 @@ const SETTLE_FAULT_OPEN: u8 = 1;
 const SETTLE_FAULT_WRITE: u8 = 2;
 
 /// §5.2 step 2 proof seam: the rendezvous a parked publication waits at — one
-/// signal that it holds the workspace publication section (flock and gate), one
+/// signal that it holds the workspace publication section (gate and flock), one
 /// that frees it. Test only.
 #[cfg(feature = "test-hooks")]
 struct PublishRendezvous {
@@ -417,7 +417,7 @@ pub(super) struct Fence<'a> {
 /// workspace shares one lock and their settle-to-publish windows cannot
 /// interleave. A second *process* is excluded by the workspace
 /// [`journal::PublishFlock`] instead; this gate is the in-process half of the
-/// same section.
+/// same section, and it is taken **before** that flock.
 fn workspace_publish_gate(files_root: &Path) -> Arc<tokio::sync::Mutex<()>> {
     static GATES: LazyLock<Mutex<HashMap<PathBuf, Arc<tokio::sync::Mutex<()>>>>> =
         LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -430,18 +430,45 @@ fn workspace_publish_gate(files_root: &Path) -> Arc<tokio::sync::Mutex<()>> {
 }
 
 /// The held publication section of one operation on this workspace (§5.2 step 2):
-/// the cross-process [`journal::PublishFlock`] and this process's gate, in that
-/// order.
+/// this process's workspace gate and the cross-process [`journal::PublishFlock`],
+/// in that order.
 ///
-/// **One lock order for every file-effect path: flock → gate → transaction.** The
-/// flock is taken first because it is the wider exclusion — no in-process gate can
-/// exclude another process — and because no path takes a write transaction before
-/// this section, the pair can never deadlock. Held from before the predecessor
-/// settlement until after the last publish, which is what keeps another provider
-/// process out of the displacement's link→unlink window.
+/// **One lock order for every file-effect path: gate → flock → transaction.** The
+/// gate is taken first so same-process waiters queue on an async mutex and never
+/// occupy a blocking worker: only the gate holder ever waits for the flock, which
+/// makes one blocked waiter per workspace the permanent ceiling — the holder's
+/// own file work cannot starve behind a crowd of its same-process peers. No path
+/// takes a write transaction before this section, so the pair cannot deadlock.
+///
+/// Held from before the predecessor settlement until after the last publish,
+/// which is what keeps another provider process out of the displacement's
+/// link→unlink window. The lease itself is only *parked* here: every file
+/// operation runs inside [`PublicationGuard::files`], whose blocking task owns it
+/// ([`journal::PublishFlock::section`]).
 pub(super) struct PublicationGuard {
-    _flock: journal::PublishFlock,
+    lease: Option<journal::PublishFlock>,
     _gate: tokio::sync::OwnedMutexGuard<()>,
+}
+
+impl PublicationGuard {
+    /// Run one file-effect section (`stage`, `publish` or `settle`) on a blocking
+    /// task that owns the lease for its whole duration, then take the lease back.
+    ///
+    /// The lease is always held by this guard or by that task — never by the
+    /// caller's future — so a cancelled request drops the handle while the
+    /// ordered filesystem operations still finish and release the lock
+    /// themselves. The work must be `'static` and synchronous for the same
+    /// reason: nothing may stay queued on the blocking pool past the section.
+    async fn files<T, F>(&mut self, work: F) -> T
+    where
+        F: FnOnce() -> T + Send + 'static,
+        T: Send + 'static,
+    {
+        let lease = self.lease.take().expect("publication lease");
+        let (lease, out) = lease.section(work).await;
+        self.lease = Some(lease);
+        out
+    }
 }
 
 pub(super) struct MemoryStore {
@@ -459,9 +486,9 @@ pub(super) struct MemoryStore {
     /// Scoped to the **workspace**, not to this provider: two provider instances
     /// opened on one workspace in this process share it, so a predecessor they
     /// both owe cannot interleave. Another *process* is excluded by the workspace
-    /// [`journal::PublishFlock`], which every file-effect path takes before this
-    /// gate ([`PublicationGuard`] states the order) — neither lock alone is the
-    /// publication guarantee.
+    /// [`journal::PublishFlock`], which every file-effect path takes **after**
+    /// this gate ([`PublicationGuard`] states the order) — neither lock alone is
+    /// the publication guarantee.
     publish_gate: Arc<tokio::sync::Mutex<()>>,
     /// Latest provider-clock reading in microseconds since the epoch. A floor,
     /// so retention verdicts cannot be re-derived downwards (§6.10); seeded from
@@ -1289,10 +1316,15 @@ impl MemoryStore {
     /// scrub its content and terminalize the receipt. Every failure past the
     /// commit — publish, settlement, applied mark — is `OUTCOME_UNCERTAIN`:
     /// the effect committed and the journal keeps the intent recoverable.
+    ///
+    /// The caller's [`PublicationGuard`] is passed through, not re-taken: its
+    /// file sections own the lease while they run, so the publication and the
+    /// recovery that follows a cancelled caller stay ordered.
     #[allow(clippy::too_many_arguments)]
     async fn commit_journalled(
         &self,
         mut tx: sqlx::Transaction<'_, sqlx::Sqlite>,
+        publication: &mut PublicationGuard,
         ctx: &OpContext<'_>,
         receipt_id: String,
         subject_id: &str,
@@ -1304,7 +1336,8 @@ impl MemoryStore {
         self.write_receipt(&mut tx, ctx, &receipt_id, None, now)
             .await?;
         self.commit_effect(tx).await?;
-        self.publish_effects(&receipt_id, effects).await?;
+        self.publish_effects(publication, &receipt_id, effects)
+            .await?;
         self.settle_journal(&receipt_id, Settlement::Applied(result), now)
             .await
             .map_err(|error| match error {
@@ -1401,18 +1434,37 @@ impl MemoryStore {
     /// receipt pending, so the next open — or the next operation on the same
     /// target — settles it before anything else publishes there.
     ///
-    /// The caller holds the workspace publication section (see
-    /// [`PublicationGuard`]), so no other provider process can be inside its own
-    /// displacement while these bytes land.
-    async fn publish_effects(&self, receipt_id: &str, effects: &[FileEffect]) -> StoreResult<()> {
+    /// Both halves run as [`PublicationGuard::files`] sections: the blocking task
+    /// that stages or publishes owns the workspace lease until its last
+    /// filesystem call is done, so a cancelled request cannot release it under a
+    /// queued unlink. Staging and publishing are two sections only because the
+    /// §5.2 crash seam between them is a real protocol point — the staged file
+    /// surviving without the target is exactly what recovery resolves.
+    async fn publish_effects(
+        &self,
+        publication: &mut PublicationGuard,
+        receipt_id: &str,
+        effects: &[FileEffect],
+    ) -> StoreResult<()> {
         let publish_error = |step: &str, error: std::io::Error| {
             StoreError::CommitUnknown(format!("file effect {step} after journal COMMIT: {error}"))
         };
-        for effect in effects {
-            journal::stage(&self.files_root, receipt_id, effect)
+        let planned: Arc<[FileEffect]> = effects.to_vec().into();
+        let staged = {
+            let (root, receipt, planned) = (
+                self.files_root.clone(),
+                receipt_id.to_string(),
+                Arc::clone(&planned),
+            );
+            publication
+                .files(move || {
+                    planned
+                        .iter()
+                        .try_for_each(|effect| journal::stage(&root, &receipt, effect))
+                })
                 .await
-                .map_err(|error| publish_error("staging failed", error))?;
-        }
+        };
+        staged.map_err(|error| publish_error("staging failed", error))?;
         #[cfg(feature = "test-hooks")]
         let fault = self.file_fault.load(Ordering::SeqCst);
         #[cfg(feature = "test-hooks")]
@@ -1422,11 +1474,21 @@ impl MemoryStore {
                 "injected failure after staging the file effect".to_string(),
             ));
         }
-        for effect in effects {
-            journal::publish(&self.files_root, receipt_id, effect)
+        let published = {
+            let (root, receipt, planned) = (
+                self.files_root.clone(),
+                receipt_id.to_string(),
+                Arc::clone(&planned),
+            );
+            publication
+                .files(move || {
+                    planned
+                        .iter()
+                        .try_for_each(|effect| journal::publish(&root, &receipt, effect))
+                })
                 .await
-                .map_err(|error| publish_error("publish failed", error))?;
-        }
+        };
+        published.map_err(|error| publish_error("publish failed", error))?;
         #[cfg(feature = "test-hooks")]
         if fault == FILE_FAULT_AFTER_PUBLISH {
             self.file_fault.store(FILE_FAULT_NONE, Ordering::SeqCst);
@@ -1555,16 +1617,16 @@ impl MemoryStore {
     /// operation's in-transaction probe — instead of being gated on a later
     /// intent it did not create. A replay settles nothing: it produces no effect.
     ///
-    /// The lock is taken before any transaction (flock → gate → transaction is
-    /// the one lock order this store uses) and held across the operation's
-    /// effect by the returned guard.
+    /// The section is taken before any transaction (**gate → flock →
+    /// transaction** is the one lock order this store uses) and held across the
+    /// operation's effect by the returned guard.
     async fn begin_publication(
         &self,
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
         targets: &[String],
     ) -> StoreResult<PublicationGuard> {
-        let publication = self.begin_publication_section().await?;
+        let mut publication = self.begin_publication_section().await?;
         #[cfg(feature = "test-hooks")]
         {
             let parked = self.publish_barrier.lock().expect("publish barrier").take();
@@ -1583,17 +1645,22 @@ impl MemoryStore {
             .fetch_all(&self.pool)
             .await?;
         for entry in entries {
-            self.settle_intent(&entry).await;
+            self.settle_intent(&mut publication, &entry).await;
         }
         Ok(publication)
     }
 
-    /// §5.2 step 2's section, in the store's one lock order: the workspace
-    /// [`journal::PublishFlock`] first — it is what keeps another provider
-    /// process's file effects out of this one's displacement — then this
-    /// process's workspace gate. Both are held until the returned guard drops.
+    /// §5.2 step 2's section, in the store's one lock order: this process's
+    /// workspace gate first, then the workspace [`journal::PublishFlock`] that
+    /// keeps another provider process's file effects out of this one's
+    /// displacement. Both are held until the returned guard drops.
+    ///
+    /// The gate comes first because the flock wait is a blocking syscall on the
+    /// blocking pool: waiting behind the gate keeps one waiter per workspace at
+    /// most ([`PublicationGuard`] documents the property).
     async fn begin_publication_section(&self) -> StoreResult<PublicationGuard> {
-        let flock = journal::PublishFlock::acquire(&self.files_root)
+        let gate = Arc::clone(&self.publish_gate).lock_owned().await;
+        let lease = journal::PublishFlock::acquire(&self.files_root)
             .await
             .map_err(|error| {
                 StoreError::Database(nexus_local_db::LocalDbError::Io(format!(
@@ -1601,9 +1668,8 @@ impl MemoryStore {
                     self.files_root.join(journal::PUBLISH_LOCK_FILE).display()
                 )))
             })?;
-        let gate = Arc::clone(&self.publish_gate).lock_owned().await;
         Ok(PublicationGuard {
-            _flock: flock,
+            lease: Some(lease),
             _gate: gate,
         })
     }
@@ -1631,7 +1697,7 @@ impl MemoryStore {
     /// the workspace publication section, so it never publishes inside another
     /// process's displacement.
     async fn recover_journal(&self, space_id: &str) {
-        let _publication = match self.begin_publication_section().await {
+        let mut publication = match self.begin_publication_section().await {
             Ok(publication) => publication,
             Err(error) => {
                 tracing::warn!(
@@ -1641,7 +1707,7 @@ impl MemoryStore {
                 return;
             }
         };
-        if let Err(error) = self.settle_unsettled(space_id).await {
+        if let Err(error) = self.settle_unsettled(&mut publication, space_id).await {
             tracing::warn!(?error, "memory journal recovery pass skipped");
         }
     }
@@ -1658,7 +1724,11 @@ impl MemoryStore {
     /// conflicting ones is reached on the next pass rather than never. The bound
     /// itself is unchanged — one pass never settles more than
     /// [`journal::RECOVERY_BOUND`] entries.
-    async fn settle_unsettled(&self, space_id: &str) -> StoreResult<()> {
+    async fn settle_unsettled(
+        &self,
+        publication: &mut PublicationGuard,
+        space_id: &str,
+    ) -> StoreResult<()> {
         let cursor = self.recovery_cursor(space_id).await?;
         let entries: Vec<JournalEntry> = sqlx::query_as(
             "SELECT seq, receipt_id, subject_id, targets_json, result_json FROM memory_journal \
@@ -1674,7 +1744,7 @@ impl MemoryStore {
         .await?;
         let advance = entries.last().map(|entry| entry.seq);
         for entry in &entries {
-            self.settle_intent(entry).await;
+            self.settle_intent(publication, entry).await;
         }
         // §5.2 step 5: what the bound did not reach is terminal until a later
         // pass settles it, never silently withheld.
@@ -1728,10 +1798,18 @@ impl MemoryStore {
     }
 
     /// Settle one journal row from the crash-consistent disk state and record the
-    /// outcome. The caller holds the publication section (workspace flock and
-    /// in-process gate).
-    async fn settle_intent(&self, entry: &JournalEntry) {
-        let settled = settle_entry(&self.files_root, &entry.receipt_id, &entry.targets_json).await;
+    /// outcome. The caller holds the publication section (workspace gate and
+    /// flock); the filesystem half runs inside [`PublicationGuard::files`],
+    /// whose blocking task owns the lease until its last file operation returns.
+    async fn settle_intent(&self, publication: &mut PublicationGuard, entry: &JournalEntry) {
+        let (root, receipt_id, targets_json) = (
+            self.files_root.clone(),
+            entry.receipt_id.clone(),
+            entry.targets_json.clone(),
+        );
+        let settled = publication
+            .files(move || settle_entry(&root, &receipt_id, &targets_json))
+            .await;
         let outcome = entry.outcome();
         let settlement = match &settled {
             Ok(()) => Settlement::Applied(&outcome),
@@ -1885,11 +1963,14 @@ fn quarantine_failure(receipt_id: &str, subject_id: &str, reason: &str) -> Value
 /// §5.2 step 3: settle one journaled intent from the crash-consistent disk
 /// state. Every target must be published or regenerated; the first target that
 /// cannot be is the entry's quarantine reason.
-async fn settle_entry(root: &Path, receipt_id: &str, targets_json: &str) -> Result<(), String> {
+///
+/// Synchronous by design: [`MemoryStore::settle_intent`] runs it inside a
+/// [`PublicationGuard::files`] section, which owns the lease for the whole call.
+fn settle_entry(root: &Path, receipt_id: &str, targets_json: &str) -> Result<(), String> {
     let effects: Vec<FileEffect> =
         serde_json::from_str(targets_json).map_err(|error| format!("targets: {error}"))?;
     for effect in &effects {
-        match journal::settle(root, receipt_id, effect).await {
+        match journal::settle(root, receipt_id, effect) {
             journal::Settled::Published => {}
             journal::Settled::Quarantined(reason) => return Err(reason),
         }
@@ -3090,7 +3171,7 @@ impl MemoryStore {
         expected_revision: i64,
     ) -> StoreResult<ReceiptRow> {
         let targets = [journal::candidate_target(candidate_id)];
-        let _gate = self.begin_publication(ctx, admission, &targets).await?;
+        let mut publication = self.begin_publication(ctx, admission, &targets).await?;
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
@@ -3119,6 +3200,7 @@ impl MemoryStore {
         let result = json!({ "candidate_id": candidate_id, "outcome": "dismissed" });
         self.commit_journalled(
             tx,
+            &mut publication,
             ctx,
             receipt_id,
             candidate.subject_id.as_str(),
@@ -3142,7 +3224,7 @@ impl MemoryStore {
         decision: &ReviewDecision<'_>,
     ) -> StoreResult<ReceiptRow> {
         let targets = [journal::candidate_target(candidate_id)];
-        let _gate = self.begin_publication(ctx, admission, &targets).await?;
+        let mut publication = self.begin_publication(ctx, admission, &targets).await?;
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
@@ -3233,6 +3315,7 @@ impl MemoryStore {
         let result = json!({ "outcome": decision.outcome(), "record_ids": record_ids });
         self.commit_journalled(
             tx,
+            &mut publication,
             ctx,
             receipt_id,
             candidate.subject_id.as_str(),
@@ -3413,7 +3496,7 @@ impl MemoryStore {
         // A create owns a target nothing has ever written, so its predecessor
         // check is trivially clear — it still runs like every other publication.
         let targets = [journal::record_target(&record_id)];
-        let _gate = self.begin_publication(ctx, admission, &targets).await?;
+        let mut publication = self.begin_publication(ctx, admission, &targets).await?;
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
@@ -3437,6 +3520,7 @@ impl MemoryStore {
         let result = json!({ "record_id": record_id, "revision": 1 });
         self.commit_journalled(
             tx,
+            &mut publication,
             ctx,
             mint_receipt_id(),
             subject_id,
@@ -3458,7 +3542,7 @@ impl MemoryStore {
         kind: Option<&str>,
     ) -> StoreResult<ReceiptRow> {
         let targets = [journal::record_target(record_id)];
-        let _gate = self.begin_publication(ctx, admission, &targets).await?;
+        let mut publication = self.begin_publication(ctx, admission, &targets).await?;
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
@@ -3519,6 +3603,7 @@ impl MemoryStore {
         let result = json!({ "record_id": record_id, "revision": record.revision + 1 });
         self.commit_journalled(
             tx,
+            &mut publication,
             ctx,
             mint_receipt_id(),
             record.subject_id.as_str(),
@@ -3540,7 +3625,7 @@ impl MemoryStore {
         deleted_by: &str,
     ) -> StoreResult<ReceiptRow> {
         let targets = [journal::record_target(record_id)];
-        let _gate = self.begin_publication(ctx, admission, &targets).await?;
+        let mut publication = self.begin_publication(ctx, admission, &targets).await?;
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
@@ -3602,6 +3687,7 @@ impl MemoryStore {
         let result = json!({ "record_id": record_id, "tombstoned": true });
         self.commit_journalled(
             tx,
+            &mut publication,
             ctx,
             mint_receipt_id(),
             record.subject_id.as_str(),
@@ -3622,7 +3708,7 @@ impl MemoryStore {
         target: Placement<'_>,
     ) -> StoreResult<ReceiptRow> {
         let targets = [journal::record_target(record_id)];
-        let _gate = self.begin_publication(ctx, admission, &targets).await?;
+        let mut publication = self.begin_publication(ctx, admission, &targets).await?;
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
@@ -3692,6 +3778,7 @@ impl MemoryStore {
             .over(Some(prior));
         self.commit_journalled(
             tx,
+            &mut publication,
             ctx,
             mint_receipt_id(),
             record.subject_id.as_str(),
@@ -3756,7 +3843,7 @@ impl MemoryStore {
         updated_by: &str,
     ) -> StoreResult<ReceiptRow> {
         let targets = [journal::profile_target(subject_id, profile_kind)?];
-        let _gate = self.begin_publication(ctx, admission, &targets).await?;
+        let mut publication = self.begin_publication(ctx, admission, &targets).await?;
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
@@ -3836,6 +3923,7 @@ impl MemoryStore {
         let result = json!({ "profile_kind": profile_kind, "revision": revision });
         self.commit_journalled(
             tx,
+            &mut publication,
             ctx,
             mint_receipt_id(),
             subject_id,

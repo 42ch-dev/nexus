@@ -26,13 +26,17 @@
 //!    is dropped only after the new bytes are linked in no-clobber. A cleanup
 //!    that fails leaves the intent unsettled instead of marking it applied with
 //!    a superseded or deleted body still on disk. Bytes this intent did not
-//!    produce are put back where they were, never deleted, so a writer landing
-//!    between any two steps keeps its file. Bytes that already *are* the
-//!    intent's content are linked back at the target, never dropped: the intent
-//!    may only report success with its projection on disk. A scratch an earlier
-//!    attempt left behind is checked before the name is reused — this intent's
-//!    own or its recorded predecessor is obsolete and dropped, anything else is
-//!    preserved and the attempt refuses rather than replacing it.
+//!    produce are put back where they were, never deleted — for every pathname
+//!    state the protocol actually reads. A write landing after such a read and
+//!    before the unlink that follows the same name (inside the displacement, or
+//!    on a scratch about to be dropped) can still go with it; see § *Who
+//!    serializes the file effects* for what that bound covers. Bytes that
+//!    already *are* the intent's content are linked back at the target, never
+//!    dropped: the intent may only report success with its projection on disk.
+//!    A scratch an earlier attempt left behind is checked before the name is
+//!    reused — this intent's own or its recorded predecessor is obsolete and
+//!    dropped, anything else is preserved and the attempt refuses rather than
+//!    replacing it.
 //! 4. **Bounded recovery.** A reopen settles every unsettled entry of its
 //!    space ([`RECOVERY_BOUND`] entries per pass, rotating across passes so a
 //!    persistently conflicting head cannot starve the tail): a staged file
@@ -50,22 +54,43 @@
 //!    the terminal `INTERNAL_ERROR` on that subject instead of serving
 //!    half-committed content.
 //!
-//! # Who serializes the file effects
+//! # Who serializes the file effects, and in what order
 //!
 //! Every step above is serialized across **processes** by [`PublishFlock`]: one
 //! exclusive `flock` on `<file root>/.memory-publish.lock`, held by the whole
-//! predecessor-settlement → stage → publish → settle section (in-process
-//! publication additionally holds the store's own gate). Without it the
+//! predecessor-settlement → stage → publish → settle section. Without it the
 //! displacement is only ordered within one process: a second provider process
 //! could replace the target between the no-clobber link and the unlink that
 //! follows it, and the unlink would then delete bytes this intent never
 //! produced — the predecessor it displaced still sitting in the scratch.
 //!
+//! Publications of one workspace **in this process** additionally serialize on
+//! the store's workspace gate, and that gate is taken **first**. The one lock
+//! order is **gate → flock → transaction**: no path takes a write transaction
+//! before the pair, and the flock wait happens inside the gate, so at most one
+//! publication per workspace ever occupies a blocking worker waiting for the
+//! flock — a crowd of same-process waiters queues on the async gate instead of
+//! filling the pool the lock holder needs for its own file work.
+//!
+//! The file operations of the section run on a blocking thread that **owns the
+//! lease** for its whole duration ([`PublishFlock::section`], synchronous
+//! `std::fs`): the caller awaits the task's handle and holds nothing. That is
+//! the cancellation contract. A dropped request future releases no lock — it
+//! drops the handle, the blocking task still runs its ordered operations
+//! (link → verify → unlink) to completion and releases the flock itself, which
+//! is what the point of no return requires: the effect is already committed, so
+//! it finishes even when its caller is gone. A lease owned by the caller future
+//! instead could be closed while a queued unlink was still running, and that
+//! unlink could then delete a target the next provider had published.
+//!
 //! That lock is the entire cross-process contract. Files under the file root are
 //! the provider's own projections, and an external process that writes them
 //! while bypassing the provider API is outside it: such a writer cannot be made
-//! to take the lock or to honour the ownership rule, so the rule above only
-//! keeps the bytes it can see, it does not coordinate with them.
+//! to take the lock or to honour the ownership rule, so the rule above preserves
+//! the bytes it actually reads and does not coordinate with them. A write that
+//! lands after an ownership read and before the unlink that consumes the same
+//! name — inside the displacement, or on a scratch about to be dropped — can
+//! still be deleted with that name.
 //!
 //! A quarantined intent keeps its journaled payload: the projection it owes is
 //! still recoverable, so an operator who resolves the target lets a later pass
@@ -127,11 +152,13 @@ pub(super) const PUBLISH_LOCK_FILE: &str = ".memory-publish.lock";
 /// a moment where a second process could atomically replace the target with its
 /// own content, and the unlink would delete that content while the scratch still
 /// held the predecessor. The lock removes the second process from that section
-/// entirely. The ownership rule stays as the defence against **non-provider**
-/// writers, whose bytes it preserves but cannot coordinate with — see the module
-/// documentation for that boundary.
+/// entirely. Against **non-provider** writers the ownership rule is all there
+/// is: it preserves the bytes it reads, and cannot coordinate with a write that
+/// lands between one of those reads and the unlink of the same name — see the
+/// module documentation for that boundary.
 ///
-/// Released by closing the file (the guard's drop); never by unlinking it.
+/// Held for the section by whichever blocking task is running it
+/// ([`Self::section`]), released by closing the file, never by unlinking it.
 pub(super) struct PublishFlock {
     _file: std::fs::File,
 }
@@ -141,7 +168,9 @@ impl PublishFlock {
     ///
     /// `flock` has no async form, so the wait runs on the blocking pool: a
     /// publication waiting for another process must not stall the executor's
-    /// worker threads.
+    /// worker threads. The caller takes its in-process gate **before** this, so
+    /// one workspace has at most one of these waits in flight (module doc, §
+    /// *Who serializes the file effects*).
     ///
     /// # Errors
     /// The I/O error that prevented opening the lock file or taking the lease.
@@ -160,6 +189,26 @@ impl PublishFlock {
         })
         .await
         .map_err(|error| std::io::Error::other(format!("publish lock task: {error}")))?
+    }
+
+    /// Run one file-effect section on a blocking thread that owns this lease for
+    /// its whole duration, then hand the lease back for the next section.
+    ///
+    /// The closure runs synchronous `std::fs` operations only. Cancelling the
+    /// caller drops the task handle, never the lease: the section still runs its
+    /// ordered operations to completion and releases the lock itself, which is
+    /// what keeps a committed effect from outliving its own lock.
+    pub(super) async fn section<T, F>(self, work: F) -> (Self, T)
+    where
+        F: FnOnce() -> T + Send + 'static,
+        T: Send + 'static,
+    {
+        // A join error is a panic inside the section, not an I/O outcome: the
+        // unwinding task has already released the lease.
+        tokio::task::spawn_blocking(move || (work(), self))
+            .await
+            .map(|(out, lease)| (lease, out))
+            .expect("file-effect section task")
     }
 }
 
@@ -402,19 +451,15 @@ fn hidden(target: &Path, suffix: &str) -> PathBuf {
     target.with_file_name(format!(".{name}.{suffix}"))
 }
 
-async fn write_staged(
-    root: &Path,
-    receipt_id: &str,
-    effect: &FileEffect,
-) -> std::io::Result<PathBuf> {
+fn write_staged(root: &Path, receipt_id: &str, effect: &FileEffect) -> std::io::Result<PathBuf> {
     let Some(target) = resolve(root, effect) else {
         return Err(std::io::Error::other("unsafe journal target"));
     };
     if let Some(parent) = target.parent() {
-        tokio::fs::create_dir_all(parent).await?;
+        std::fs::create_dir_all(parent)?;
     }
     let staged_path = staged(&target, receipt_id);
-    tokio::fs::write(&staged_path, effect.content.as_bytes()).await?;
+    std::fs::write(&staged_path, effect.content.as_bytes())?;
     Ok(staged_path)
 }
 
@@ -436,32 +481,30 @@ fn obsolete(bytes: &[u8], effect: &FileEffect) -> bool {
 }
 
 /// Write the staged file for one intent (step 2's first half).
-pub(super) async fn stage(
-    root: &Path,
-    receipt_id: &str,
-    effect: &FileEffect,
-) -> std::io::Result<()> {
-    write_staged(root, receipt_id, effect).await.map(|_| ())
+///
+/// Synchronous by design: the caller runs it as part of a
+/// [`PublishFlock::section`], which owns the lease for the whole call.
+pub(super) fn stage(root: &Path, receipt_id: &str, effect: &FileEffect) -> std::io::Result<()> {
+    write_staged(root, receipt_id, effect).map(|_| ())
 }
 
 /// Verify the staged bytes against the intent digest and install them at the
 /// target without replacing bytes this intent did not produce.
-pub(super) async fn publish(
-    root: &Path,
-    receipt_id: &str,
-    effect: &FileEffect,
-) -> std::io::Result<()> {
+///
+/// Synchronous by design: the caller runs it as part of a
+/// [`PublishFlock::section`], which owns the lease for the whole call.
+pub(super) fn publish(root: &Path, receipt_id: &str, effect: &FileEffect) -> std::io::Result<()> {
     let Some(target) = resolve(root, effect) else {
         return Err(std::io::Error::other("unsafe journal target"));
     };
     let staged_path = staged(&target, receipt_id);
-    let bytes = tokio::fs::read(&staged_path).await?;
+    let bytes = std::fs::read(&staged_path)?;
     if !matches_digest(&bytes, &effect.digest) {
         return Err(std::io::Error::other(
             "staged file does not match the intent digest",
         ));
     }
-    install(&staged_path, &target, receipt_id, effect).await
+    install(&staged_path, &target, receipt_id, effect)
 }
 
 /// Move the staged bytes into place under the intent's ownership rule.
@@ -471,21 +514,24 @@ pub(super) async fn publish(
 /// predecessor. Nothing here removes a pathname it did not first give a second
 /// name: the target is displaced to a receipt-scoped scratch sibling by a
 /// no-clobber link followed by an unlink, and only the bytes that link carried
-/// away are verified. Bytes this intent did not produce are put back untouched,
-/// so a writer landing at any point keeps its file — including between the
-/// ownership check and the removal that a check-then-remove protocol would have
-/// performed, and between the read of the scratch name and the displacement.
+/// away are verified. Bytes this intent did not produce are put back untouched
+/// for every state this protocol reads, so a writer landing at any of those
+/// checks keeps its file — including between the ownership check and the
+/// removal that a check-then-remove protocol would have performed, and between
+/// the read of the scratch name and the displacement. The two windows the rule
+/// cannot see are the unlinks of a name it has just read (the displacement's
+/// link→unlink, the scratch-name retry); the module doc bounds them.
 ///
 /// A scratch already at that name is an earlier attempt's leftover, never a
 /// free slot: obsolete content is dropped, anything else is somebody's bytes an
 /// attempt could not put back, and this one refuses instead of replacing them.
-async fn install(
+fn install(
     staged_path: &Path,
     target: &Path,
     receipt_id: &str,
     effect: &FileEffect,
 ) -> std::io::Result<()> {
-    install_verifying(staged_path, target, receipt_id, effect, &noop).await
+    install_verifying(staged_path, target, receipt_id, effect, &noop)
 }
 
 /// The seam production passes: every protocol point is a no-op.
@@ -498,7 +544,7 @@ const fn noop(_: Point) -> std::io::Result<()> {
 /// [`install`] with the deterministic seam the regressions use to land a foreign
 /// write or an I/O failure at the exact point the swap depends on. Plainly a
 /// no-op in production paths.
-async fn install_verifying<F>(
+fn install_verifying<F>(
     staged_path: &Path,
     target: &Path,
     receipt_id: &str,
@@ -509,23 +555,23 @@ where
     F: Fn(Point) -> std::io::Result<()> + Send + Sync,
 {
     let scratch = displaced(target, receipt_id);
-    match tokio::fs::read(&scratch).await {
+    match std::fs::read(&scratch) {
         Ok(bytes) if obsolete(&bytes, effect) => {
             seam(Point::BeforeScratchRemoval)?;
-            tokio::fs::remove_file(&scratch).await?;
+            std::fs::remove_file(&scratch)?;
         }
         Ok(_) => return Err(preserved(effect, &scratch)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error),
     }
-    let taken = displace(target, &scratch, effect, seam).await?;
+    let taken = displace(target, &scratch, effect, seam)?;
     if taken {
-        let bytes = tokio::fs::read(&scratch).await?;
+        let bytes = std::fs::read(&scratch)?;
         if matches_digest(&bytes, &effect.digest) {
             // Crash between the install and the applied mark: the displaced
             // bytes ARE this intent's content, so they go back to the target —
             // dropping them would report success with the projection absent.
-            match restore(&scratch, target).await {
+            match restore(&scratch, target) {
                 Ok(()) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                     return Err(std::io::Error::other(format!(
@@ -535,15 +581,15 @@ where
                 }
                 Err(error) => return Err(error),
             }
-            let _ = tokio::fs::remove_file(staged_path).await;
-            drop_obsolete_scratch(&scratch, effect, seam).await?;
+            let _ = std::fs::remove_file(staged_path);
+            drop_obsolete_scratch(&scratch, effect, seam)?;
             return Ok(());
         }
         if !obsolete(&bytes, effect) {
             // Not ours: restore it where it was, without replacing anything that
             // landed meanwhile. If even that is impossible the bytes stay at the
             // scratch path — preserved, never deleted.
-            let _ = restore(&scratch, target).await;
+            let _ = restore(&scratch, target);
             return Err(std::io::Error::other(format!(
                 "{} holds content this intent did not produce",
                 effect.path
@@ -551,7 +597,7 @@ where
         }
     }
     seam(Point::AfterDisplacement)?;
-    match tokio::fs::hard_link(staged_path, target).await {
+    match std::fs::hard_link(staged_path, target) {
         Ok(()) => {}
         // A writer created the target after it was displaced: its bytes stay.
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -562,13 +608,13 @@ where
         }
         Err(error) => return Err(error),
     }
-    let _ = tokio::fs::remove_file(staged_path).await;
+    let _ = std::fs::remove_file(staged_path);
     // The verified predecessor must not outlive the link, and a scratch a
     // concurrent attempt of this same receipt left inside its own swap is
     // obsolete too. A failure here leaves obsolete bytes on disk, so it is
     // reported and the intent stays unsettled for a later pass to re-attempt
     // instead of being marked applied.
-    drop_obsolete_scratch(&scratch, effect, seam).await?;
+    drop_obsolete_scratch(&scratch, effect, seam)?;
     Ok(())
 }
 
@@ -580,7 +626,7 @@ where
 /// against the CURRENT bytes — this intent's own obsolete leftover is dropped
 /// and the link retried once; anything else is preserved and the attempt
 /// refuses with the target still in place.
-async fn displace<F>(
+fn displace<F>(
     target: &Path,
     scratch: &Path,
     effect: &FileEffect,
@@ -590,11 +636,11 @@ where
     F: Fn(Point) -> std::io::Result<()> + Send + Sync,
 {
     seam(Point::BeforeDisplacement)?;
-    match tokio::fs::hard_link(target, scratch).await {
+    match std::fs::hard_link(target, scratch) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            let bytes = tokio::fs::read(scratch).await?;
+            let bytes = std::fs::read(scratch)?;
             if !obsolete(&bytes, effect) {
                 return Err(preserved(effect, scratch));
             }
@@ -603,8 +649,8 @@ where
             // read and this unlink would be deleted with it.
             // shortcut: unlink-by-name cannot prove the inode it read; upgrade
             // to an fd-relative unlink if the platform layer ever exposes one.
-            tokio::fs::remove_file(scratch).await?;
-            match tokio::fs::hard_link(target, scratch).await {
+            std::fs::remove_file(scratch)?;
+            match std::fs::hard_link(target, scratch) {
                 Ok(()) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                     return Err(preserved(effect, scratch));
@@ -615,7 +661,7 @@ where
         }
         Err(error) => return Err(error),
     }
-    tokio::fs::remove_file(target).await?;
+    std::fs::remove_file(target)?;
     Ok(true)
 }
 
@@ -630,9 +676,9 @@ fn preserved(effect: &FileEffect, scratch: &Path) -> std::io::Error {
 
 /// Put preserved bytes back where they were, never over anything that appeared
 /// meanwhile, and drop the scratch only once they are back.
-async fn restore(scratch: &Path, target: &Path) -> std::io::Result<()> {
-    tokio::fs::hard_link(scratch, target).await?;
-    let _ = tokio::fs::remove_file(scratch).await;
+fn restore(scratch: &Path, target: &Path) -> std::io::Result<()> {
+    std::fs::hard_link(scratch, target)?;
+    let _ = std::fs::remove_file(scratch);
     Ok(())
 }
 
@@ -642,19 +688,17 @@ async fn restore(scratch: &Path, target: &Path) -> std::io::Result<()> {
 /// journaled bytes. Anything that would overwrite content the intent did not
 /// produce is quarantined instead, and obsolete scratch — this intent's own
 /// bytes or the predecessor it replaces — never survives the settlement.
-pub(super) async fn settle(root: &Path, receipt_id: &str, effect: &FileEffect) -> Settled {
-    settle_verifying(root, receipt_id, effect, &noop).await
+///
+/// Synchronous by design: the caller runs it as part of a
+/// [`PublishFlock::section`], which owns the lease for the whole call.
+pub(super) fn settle(root: &Path, receipt_id: &str, effect: &FileEffect) -> Settled {
+    settle_verifying(root, receipt_id, effect, &noop)
 }
 
 /// [`settle`] with the deterministic seam the cleanup-failure regression uses
 /// to fail the obsolete-scratch removal at the exact call. Plainly a no-op in
 /// production paths.
-async fn settle_verifying<F>(
-    root: &Path,
-    receipt_id: &str,
-    effect: &FileEffect,
-    seam: &F,
-) -> Settled
+fn settle_verifying<F>(root: &Path, receipt_id: &str, effect: &FileEffect, seam: &F) -> Settled
 where
     F: Fn(Point) -> std::io::Result<()> + Send + Sync,
 {
@@ -663,7 +707,7 @@ where
     };
     let staged_path = staged(&target, receipt_id);
     let scratch = displaced(&target, receipt_id);
-    match tokio::fs::read(&target).await {
+    match std::fs::read(&target) {
         Ok(bytes) if matches_digest(&bytes, &effect.digest) => {
             // Crash after publish, before the applied mark: the content is
             // already consistent, so the stale staged copy and the scratch an
@@ -671,8 +715,8 @@ where
             // duplicate of this content) are dropped. A cleanup that fails is
             // reported: the deleted body is still on disk, so the intent may
             // not be marked applied — the next pass retries the removal.
-            let _ = tokio::fs::remove_file(&staged_path).await;
-            return match drop_obsolete_scratch(&scratch, effect, seam).await {
+            let _ = std::fs::remove_file(&staged_path);
+            return match drop_obsolete_scratch(&scratch, effect, seam) {
                 Ok(()) => Settled::Published,
                 Err(error) => Settled::Quarantined(format!("scratch cleanup failed: {error}")),
             };
@@ -698,13 +742,10 @@ where
     // superseded — or the intent's own bytes, when the crash landed after the
     // link. Verified against the intent's own digests, it completes the intent
     // without rewriting the journaled content.
-    if tokio::fs::read(&scratch)
-        .await
-        .is_ok_and(|bytes| matches_digest(&bytes, &effect.digest))
-    {
-        match restore(&scratch, &target).await {
+    if std::fs::read(&scratch).is_ok_and(|bytes| matches_digest(&bytes, &effect.digest)) {
+        match restore(&scratch, &target) {
             Ok(()) => {
-                let _ = tokio::fs::remove_file(&staged_path).await;
+                let _ = std::fs::remove_file(&staged_path);
                 return Settled::Published;
             }
             // The target was re-created meanwhile: its bytes stay, and the
@@ -715,24 +756,24 @@ where
             }
         }
     }
-    let staged_bytes = tokio::fs::read(&staged_path).await.ok();
+    let staged_bytes = std::fs::read(&staged_path).ok();
     let staged_path = match staged_bytes {
         Some(bytes) if matches_digest(&bytes, &effect.digest) => staged_path,
         // Missing or mismatched staged content: regenerate it from the
         // journaled bytes, verify what was written, and publish that.
-        _ => match write_staged(root, receipt_id, effect).await {
+        _ => match write_staged(root, receipt_id, effect) {
             Ok(path) => path,
             Err(error) => return Settled::Quarantined(format!("regeneration failed: {error}")),
         },
     };
-    let written = match tokio::fs::read(&staged_path).await {
+    let written = match std::fs::read(&staged_path) {
         Ok(bytes) => bytes,
         Err(error) => return Settled::Quarantined(format!("staged read failed: {error}")),
     };
     if !matches_digest(&written, &effect.digest) {
         return Settled::Quarantined("journaled content does not match its digest".to_string());
     }
-    match install_verifying(&staged_path, &target, receipt_id, effect, seam).await {
+    match install_verifying(&staged_path, &target, receipt_id, effect, seam) {
         // The install removes every obsolete scratch before it reports success.
         Ok(()) => Settled::Published,
         Err(error) => Settled::Quarantined(format!("publish failed: {error}")),
@@ -743,18 +784,14 @@ where
 /// predecessor it replaces — and leave anything else exactly where it is. A read
 /// or unlink failure is returned: the obsolete bytes are still on disk, so the
 /// caller must keep the intent unsettled instead of settling it as published.
-async fn drop_obsolete_scratch<F>(
-    scratch: &Path,
-    effect: &FileEffect,
-    seam: &F,
-) -> std::io::Result<()>
+fn drop_obsolete_scratch<F>(scratch: &Path, effect: &FileEffect, seam: &F) -> std::io::Result<()>
 where
     F: Fn(Point) -> std::io::Result<()> + Send + Sync,
 {
-    match tokio::fs::read(scratch).await {
+    match std::fs::read(scratch) {
         Ok(bytes) if obsolete(&bytes, effect) => {
             seam(Point::BeforeScratchRemoval)?;
-            tokio::fs::remove_file(scratch).await
+            std::fs::remove_file(scratch)
         }
         Ok(_) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -800,30 +837,30 @@ mod tests {
     /// §5.2 step 2's ownership rule: a version is installed only where there is
     /// nothing, where its own content already is, or where the intent's recorded
     /// predecessor is — never over bytes the intent did not produce.
-    #[tokio::test]
-    async fn install_replaces_its_predecessor_and_never_foreign_bytes() {
+    #[test]
+    fn install_replaces_its_predecessor_and_never_foreign_bytes() {
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
         let target = root.join("records/rec_x.md");
 
         let first = effect("records/rec_x.md".to_string(), "one\n".to_string()).unwrap();
-        stage(root, "rcp_a", &first).await.unwrap();
-        publish(root, "rcp_a", &first).await.unwrap();
+        stage(root, "rcp_a", &first).unwrap();
+        publish(root, "rcp_a", &first).unwrap();
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "one\n");
 
         let second = effect("records/rec_x.md".to_string(), "two\n".to_string())
             .unwrap()
-            .over(Some(first.digest.clone()));
-        stage(root, "rcp_b", &second).await.unwrap();
-        publish(root, "rcp_b", &second).await.unwrap();
+            .over(Some(first.digest));
+        stage(root, "rcp_b", &second).unwrap();
+        publish(root, "rcp_b", &second).unwrap();
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "two\n");
 
         std::fs::write(&target, "foreign\n").unwrap();
         let third = effect("records/rec_x.md".to_string(), "three\n".to_string())
             .unwrap()
-            .over(Some(second.digest.clone()));
-        stage(root, "rcp_c", &third).await.unwrap();
-        let error = publish(root, "rcp_c", &third).await.unwrap_err();
+            .over(Some(second.digest));
+        stage(root, "rcp_c", &third).unwrap();
+        let error = publish(root, "rcp_c", &third).unwrap_err();
         assert!(
             error.to_string().contains("did not produce"),
             "an unowned target is refused: {error}"
@@ -836,20 +873,20 @@ mod tests {
     /// provider's `remove_file`, which the no-clobber link could not undo. The
     /// target is now displaced before anything is verified, so a write landing in
     /// that exact window keeps its bytes and the intent refuses.
-    #[tokio::test]
-    async fn a_foreign_replacement_during_the_swap_is_never_deleted() {
+    #[test]
+    fn a_foreign_replacement_during_the_swap_is_never_deleted() {
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
         let target = root.join("records/rec_x.md");
 
         let first = effect("records/rec_x.md".to_string(), "one\n".to_string()).unwrap();
-        stage(root, "rcp_a", &first).await.unwrap();
-        publish(root, "rcp_a", &first).await.unwrap();
+        stage(root, "rcp_a", &first).unwrap();
+        publish(root, "rcp_a", &first).unwrap();
 
         let second = effect("records/rec_x.md".to_string(), "two\n".to_string())
             .unwrap()
-            .over(Some(first.digest.clone()));
-        stage(root, "rcp_b", &second).await.unwrap();
+            .over(Some(first.digest));
+        stage(root, "rcp_b", &second).unwrap();
         let staged_path = staged(&target, "rcp_b");
 
         // The foreign writer lands after the predecessor was displaced and
@@ -860,7 +897,6 @@ mod tests {
             }
             Ok(())
         })
-        .await
         .unwrap_err();
         assert!(
             error
@@ -887,20 +923,20 @@ mod tests {
     /// NF1: a target that already holds the intent's content is displaced by the
     /// swap and must be linked back. Dropping the displaced copy reported success
     /// with no projection on disk at all.
-    #[tokio::test]
-    async fn a_consistent_target_survives_the_install_that_displaces_it() {
+    #[test]
+    fn a_consistent_target_survives_the_install_that_displaces_it() {
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
         let target = root.join("records/rec_x.md");
 
         let first = effect("records/rec_x.md".to_string(), "one\n".to_string()).unwrap();
-        stage(root, "rcp_a", &first).await.unwrap();
-        publish(root, "rcp_a", &first).await.unwrap();
+        stage(root, "rcp_a", &first).unwrap();
+        publish(root, "rcp_a", &first).unwrap();
 
         // A re-drive of the same intent: the target is already consistent, so the
         // swap that displaces it has to put those bytes back.
-        stage(root, "rcp_a", &first).await.unwrap();
-        publish(root, "rcp_a", &first).await.unwrap();
+        stage(root, "rcp_a", &first).unwrap();
+        publish(root, "rcp_a", &first).unwrap();
 
         assert_eq!(
             std::fs::read_to_string(&target).unwrap(),
@@ -915,27 +951,24 @@ mod tests {
     /// bytes leaves the target absent and the predecessor in scratch. Recovery
     /// must finish the intent and drop the superseded bytes — leaving them is a
     /// deleted body surviving its own tombstone.
-    #[tokio::test]
-    async fn settle_supersedes_the_scratch_a_displacement_crash_left() {
+    #[test]
+    fn settle_supersedes_the_scratch_a_displacement_crash_left() {
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
         let target = root.join("records/rec_x.md");
 
         let first = effect("records/rec_x.md".to_string(), "one\n".to_string()).unwrap();
-        stage(root, "rcp_a", &first).await.unwrap();
-        publish(root, "rcp_a", &first).await.unwrap();
+        stage(root, "rcp_a", &first).unwrap();
+        publish(root, "rcp_a", &first).unwrap();
 
         let second = effect("records/rec_x.md".to_string(), "two\n".to_string())
             .unwrap()
-            .over(Some(first.digest.clone()));
-        stage(root, "rcp_b", &second).await.unwrap();
+            .over(Some(first.digest));
+        stage(root, "rcp_b", &second).unwrap();
         std::fs::rename(&target, displaced(&target, "rcp_b")).unwrap();
         assert!(!target.exists(), "the crash window leaves no target");
 
-        assert!(matches!(
-            settle(root, "rcp_b", &second).await,
-            Settled::Published
-        ));
+        assert!(matches!(settle(root, "rcp_b", &second), Settled::Published));
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "two\n");
         assert!(
             !displaced(&target, "rcp_b").exists(),
@@ -947,28 +980,25 @@ mod tests {
     /// NF2(a): a scratch can also hold the intent's own content — the swap linked
     /// it, then the process died before the applied mark. Recovery completes from
     /// that evidence instead of rewriting the journaled bytes.
-    #[tokio::test]
-    async fn settle_completes_from_a_scratch_that_holds_its_content() {
+    #[test]
+    fn settle_completes_from_a_scratch_that_holds_its_content() {
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
         let target = root.join("records/rec_x.md");
 
         let first = effect("records/rec_x.md".to_string(), "one\n".to_string()).unwrap();
-        stage(root, "rcp_a", &first).await.unwrap();
-        publish(root, "rcp_a", &first).await.unwrap();
+        stage(root, "rcp_a", &first).unwrap();
+        publish(root, "rcp_a", &first).unwrap();
 
         let second = effect("records/rec_x.md".to_string(), "two\n".to_string())
             .unwrap()
-            .over(Some(first.digest.clone()));
-        stage(root, "rcp_b", &second).await.unwrap();
+            .over(Some(first.digest));
+        stage(root, "rcp_b", &second).unwrap();
         std::fs::rename(&target, displaced(&target, "rcp_b")).unwrap();
         // The staged copy went with the process; only the scratch has the bytes.
         std::fs::remove_file(staged(&target, "rcp_b")).unwrap();
 
-        assert!(matches!(
-            settle(root, "rcp_b", &second).await,
-            Settled::Published
-        ));
+        assert!(matches!(settle(root, "rcp_b", &second), Settled::Published));
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "two\n");
         assert!(!displaced(&target, "rcp_b").exists());
     }
@@ -976,24 +1006,24 @@ mod tests {
     /// NF2(b): bytes an earlier attempt could not put back stay at the scratch
     /// name. Reusing that name on the retry replaced them on any platform with
     /// ordinary rename replacement semantics.
-    #[tokio::test]
-    async fn a_preserved_scratch_is_never_replaced_by_a_retry() {
+    #[test]
+    fn a_preserved_scratch_is_never_replaced_by_a_retry() {
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
         let target = root.join("records/rec_x.md");
 
         let first = effect("records/rec_x.md".to_string(), "one\n".to_string()).unwrap();
-        stage(root, "rcp_a", &first).await.unwrap();
-        publish(root, "rcp_a", &first).await.unwrap();
+        stage(root, "rcp_a", &first).unwrap();
+        publish(root, "rcp_a", &first).unwrap();
 
         let second = effect("records/rec_x.md".to_string(), "two\n".to_string())
             .unwrap()
-            .over(Some(first.digest.clone()));
-        stage(root, "rcp_b", &second).await.unwrap();
+            .over(Some(first.digest));
+        stage(root, "rcp_b", &second).unwrap();
         let preserved = displaced(&target, "rcp_b");
         std::fs::write(&preserved, "foreign\n").unwrap();
 
-        let error = publish(root, "rcp_b", &second).await.unwrap_err();
+        let error = publish(root, "rcp_b", &second).unwrap_err();
         assert!(
             error.to_string().contains("preserves bytes"),
             "a scratched name holding someone else's bytes is refused: {error}"
@@ -1015,20 +1045,20 @@ mod tests {
     /// the deleted body was still on disk in a hidden file no later pass would
     /// select again. The failure is propagated now, so the intent stays
     /// unsettled and the next pass re-attempts the removal.
-    #[tokio::test]
-    async fn a_predecessor_scratch_that_cannot_be_removed_keeps_the_intent_unsettled() {
+    #[test]
+    fn a_predecessor_scratch_that_cannot_be_removed_keeps_the_intent_unsettled() {
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
         let target = root.join("records/rec_x.md");
 
         let first = effect("records/rec_x.md".to_string(), "one\n".to_string()).unwrap();
-        stage(root, "rcp_a", &first).await.unwrap();
-        publish(root, "rcp_a", &first).await.unwrap();
+        stage(root, "rcp_a", &first).unwrap();
+        publish(root, "rcp_a", &first).unwrap();
 
         let second = effect("records/rec_x.md".to_string(), "two\n".to_string())
             .unwrap()
-            .over(Some(first.digest.clone()));
-        stage(root, "rcp_b", &second).await.unwrap();
+            .over(Some(first.digest));
+        stage(root, "rcp_b", &second).unwrap();
         let staged_path = staged(&target, "rcp_b");
 
         let error = install_verifying(&staged_path, &target, "rcp_b", &second, &|point| {
@@ -1037,7 +1067,6 @@ mod tests {
             }
             Ok(())
         })
-        .await
         .unwrap_err();
         assert!(error.to_string().contains("injected"), "{error}");
         assert_eq!(
@@ -1053,10 +1082,7 @@ mod tests {
 
         // The retry the unsettled intent gets: recovery's consistent branch
         // removes the body and only then settles the intent.
-        assert!(matches!(
-            settle(root, "rcp_b", &second).await,
-            Settled::Published
-        ));
+        assert!(matches!(settle(root, "rcp_b", &second), Settled::Published));
         assert!(
             !displaced(&target, "rcp_b").exists(),
             "the retried cleanup removes the deleted body"
@@ -1067,19 +1093,19 @@ mod tests {
     /// scratch with its errors ignored and answered `Published`. The deleted body
     /// then stayed on disk under an applied intent. The failure keeps the entry
     /// unsettled, and the next pass that can remove it settles the intent.
-    #[tokio::test]
-    async fn settle_keeps_the_intent_recoverable_when_the_cleanup_fails() {
+    #[test]
+    fn settle_keeps_the_intent_recoverable_when_the_cleanup_fails() {
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
         let target = root.join("records/rec_x.md");
 
         let first = effect("records/rec_x.md".to_string(), "one\n".to_string()).unwrap();
-        stage(root, "rcp_a", &first).await.unwrap();
-        publish(root, "rcp_a", &first).await.unwrap();
+        stage(root, "rcp_a", &first).unwrap();
+        publish(root, "rcp_a", &first).unwrap();
 
         let second = effect("records/rec_x.md".to_string(), "two\n".to_string())
             .unwrap()
-            .over(Some(first.digest.clone()));
+            .over(Some(first.digest));
         // The state the failed install above leaves: the new content at the
         // target, the deleted body at the receipt's scratch name.
         std::fs::write(&target, "two\n").unwrap();
@@ -1091,9 +1117,7 @@ mod tests {
                 return Err(std::io::Error::other("injected scratch unlink failure"));
             }
             Ok(())
-        })
-        .await
-        {
+        }) {
             Settled::Quarantined(reason) => assert!(reason.contains("injected"), "{reason}"),
             Settled::Published => panic!("a failed cleanup may not settle as published"),
         }
@@ -1103,10 +1127,7 @@ mod tests {
             "the deleted body stays until it is actually removed"
         );
 
-        assert!(matches!(
-            settle(root, "rcp_b", &second).await,
-            Settled::Published
-        ));
+        assert!(matches!(settle(root, "rcp_b", &second), Settled::Published));
         assert!(!scratch.exists());
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "two\n");
     }
@@ -1117,20 +1138,20 @@ mod tests {
     /// displacement now hard-links — it replaces nothing — and a collision
     /// re-runs the ownership predicate against the CURRENT bytes: foreign bytes
     /// survive and the intent refuses with the target still in place.
-    #[tokio::test]
-    async fn a_scratch_retaken_after_the_ownership_read_is_never_clobbered() {
+    #[test]
+    fn a_scratch_retaken_after_the_ownership_read_is_never_clobbered() {
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
         let target = root.join("records/rec_x.md");
 
         let first = effect("records/rec_x.md".to_string(), "one\n".to_string()).unwrap();
-        stage(root, "rcp_a", &first).await.unwrap();
-        publish(root, "rcp_a", &first).await.unwrap();
+        stage(root, "rcp_a", &first).unwrap();
+        publish(root, "rcp_a", &first).unwrap();
 
         let second = effect("records/rec_x.md".to_string(), "two\n".to_string())
             .unwrap()
-            .over(Some(first.digest.clone()));
-        stage(root, "rcp_b", &second).await.unwrap();
+            .over(Some(first.digest));
+        stage(root, "rcp_b", &second).unwrap();
         let staged_path = staged(&target, "rcp_b");
         let scratch = displaced(&target, "rcp_b");
 
@@ -1140,7 +1161,6 @@ mod tests {
             }
             Ok(())
         })
-        .await
         .unwrap_err();
         assert!(
             error.to_string().contains("preserves bytes"),
@@ -1162,20 +1182,20 @@ mod tests {
     /// F2: the same collision with this intent's own obsolete leftover is
     /// dropped and the displacement retried once, so a superseded name does not
     /// block its own publication.
-    #[tokio::test]
-    async fn an_obsolete_scratch_retaken_after_the_read_is_dropped_and_retried() {
+    #[test]
+    fn an_obsolete_scratch_retaken_after_the_read_is_dropped_and_retried() {
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
         let target = root.join("records/rec_x.md");
 
         let first = effect("records/rec_x.md".to_string(), "one\n".to_string()).unwrap();
-        stage(root, "rcp_a", &first).await.unwrap();
-        publish(root, "rcp_a", &first).await.unwrap();
+        stage(root, "rcp_a", &first).unwrap();
+        publish(root, "rcp_a", &first).unwrap();
 
         let second = effect("records/rec_x.md".to_string(), "two\n".to_string())
             .unwrap()
-            .over(Some(first.digest.clone()));
-        stage(root, "rcp_b", &second).await.unwrap();
+            .over(Some(first.digest));
+        stage(root, "rcp_b", &second).unwrap();
         let staged_path = staged(&target, "rcp_b");
         let scratch = displaced(&target, "rcp_b");
 
@@ -1185,7 +1205,6 @@ mod tests {
             }
             Ok(())
         })
-        .await
         .unwrap();
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "two\n");
         assert!(
@@ -1193,5 +1212,75 @@ mod tests {
             "the retried displacement leaves no scratch"
         );
         assert!(!staged_path.exists());
+    }
+
+    /// F-new-1: the lease belongs to the blocking task that runs the file
+    /// operations, never to the caller's future. When the caller is cancelled
+    /// while the section is in flight, only its handle goes away — the task
+    /// finishes its ordered operations and releases the flock itself. A lease
+    /// owned by the cancelled future would be closed under a queued unlink, and
+    /// that unlink could then delete the file the next provider had published.
+    #[test]
+    fn a_cancelled_section_keeps_the_lease_until_its_file_work_finishes() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().join(FILES_DIR);
+        let target = root.join("records/rec_x.md");
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        let lease = runtime
+            .block_on(PublishFlock::acquire(&root))
+            .expect("the workspace lease");
+
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (finish_tx, finish_rx) = std::sync::mpsc::channel::<()>();
+        let written = target.clone();
+        let section = runtime.spawn(async move {
+            lease
+                .section(move || {
+                    std::fs::create_dir_all(written.parent().unwrap()).unwrap();
+                    std::fs::write(&written, "one\n").unwrap();
+                    entered_tx.send(()).unwrap();
+                    // The operation the cancelled caller can no longer wait for.
+                    finish_rx.recv().unwrap();
+                    std::fs::write(&written, "two\n").unwrap();
+                })
+                .await
+        });
+        entered_rx.recv().expect("the section runs with the lease");
+
+        section.abort();
+        assert!(
+            matches!(runtime.block_on(section), Err(error) if error.is_cancelled()),
+            "the caller's future is dropped"
+        );
+        let probe = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(root.join(PUBLISH_LOCK_FILE))
+            .unwrap();
+        assert!(
+            probe.try_lock().is_err(),
+            "the lease stays held while the section's file work is in flight"
+        );
+
+        finish_tx.send(()).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while probe.try_lock().is_err() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the finished section releases the lease itself"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            "two\n",
+            "the committed section ran its last file operation past the cancellation"
+        );
     }
 }
