@@ -76,37 +76,34 @@ env:
   RUSTUP_INIT_SHA256: "20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c"
 
 jobs:
+  rft-matrix:
+    # GitHub job-level `if` cannot read the matrix context, so the PR lane is
+    # expressed as a dynamic matrix instead of per-row skips.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.rows.outputs.matrix }}
+    steps:
+      - id: rows
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # PR lane: only the fastest row. The packaging/ABI hazards this
+            # workflow guards are per-row identical for generic cross-platform
+            # code; the full matrix covers the other rows on main/nightly.
+            echo 'matrix={"include":[{"slug":"darwin-arm64","os":"macos-15","short":"macarm","target":"aarch64-apple-darwin"}]}' >> "$GITHUB_OUTPUT"
+          else
+            echo 'matrix={"include":[{"slug":"win32-x64-msvc","os":"windows-2022","short":"win","target":"x86_64-pc-windows-msvc"},{"slug":"darwin-arm64","os":"macos-15","short":"macarm","target":"aarch64-apple-darwin"},{"slug":"darwin-x64","os":"macos-15-intel","short":"macx64","target":"x86_64-apple-darwin"}]}' >> "$GITHUB_OUTPUT"
+          fi
+
   native-package-proof:
+    needs: rft-matrix
     name: ${{ matrix.slug }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
-    # PR lane: only the fastest row (darwin-arm64). The packaging/ABI hazards
-    # this workflow guards are per-row identical for generic cross-platform
-    # code, and the full matrix runs on main pushes, nightly, and
-    # workflow_dispatch. Rows kept for those events carry `pr: false`.
-    if: github.event_name != 'pull_request' || matrix.pr == true
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - slug: win32-x64-msvc
-            os: windows-2022
-            short: win
-            target: x86_64-pc-windows-msvc
-            pr: false
-          - slug: darwin-arm64
-            os: macos-15
-            short: macarm
-            target: aarch64-apple-darwin
-            pr: true
-          # The x64 macOS row needs an Intel runner: the artifact must be
-          # executed by the architecture it ships, and Rosetta would be a
-          # translated run, not a native one.
-          - slug: darwin-x64
-            os: macos-15-intel
-            short: macx64
-            target: x86_64-apple-darwin
-            pr: false
+      matrix: ${{ fromJSON(needs.rft-matrix.outputs.matrix) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
