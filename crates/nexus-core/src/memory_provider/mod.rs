@@ -33,6 +33,7 @@
 //! sub-capability gated families (reflection, transfer) are rejected as not
 //! served.
 
+mod journal;
 pub mod policy;
 pub mod profile;
 mod storage;
@@ -154,6 +155,12 @@ enum ProviderError {
     /// The effect may have committed (§14.2/§14.3): never reported as a clean
     /// no-effect failure.
     OutcomeUncertain(String),
+    /// §5.2/D-10: the subject's journaled file intent is quarantined, so its
+    /// objects are withheld until an operator resolves it. Terminal: retrying
+    /// cannot help.
+    Unreconciled {
+        subject_id: String,
+    },
     Internal(String),
 }
 
@@ -173,12 +180,14 @@ impl ProviderError {
             Self::StatusTransition(_) => SpokeRejectCode::InvalidStatusTransition,
             Self::CursorInvalid => SpokeRejectCode::CursorInvalid,
             Self::OutcomeUncertain(_) => SpokeRejectCode::OutcomeUncertain,
-            Self::Internal(_) => SpokeRejectCode::InternalError,
+            Self::Unreconciled { .. } | Self::Internal(_) => SpokeRejectCode::InternalError,
         }
     }
 
-    /// §14.2: `INTERNAL_ERROR` is retryable only because this provider raises it
-    /// strictly before the effect commits; an uncertain outcome is its own class.
+    /// §14.2 retry class. `INTERNAL_ERROR` is retryable only because this
+    /// provider raises it strictly before the effect commits; an uncertain
+    /// outcome is its own class, and a quarantined journal intent is terminal
+    /// (retrying cannot settle it).
     const fn retry_class(&self) -> &'static str {
         match self {
             Self::Internal(_) => "retryable",
@@ -203,6 +212,9 @@ impl ProviderError {
             | Self::CandidateConsumed(reason)
             | Self::OutcomeUncertain(reason)
             | Self::Internal(reason) => reason.clone(),
+            Self::Unreconciled { subject_id } => format!(
+                "subject {subject_id} has an unresolved memory journal intent (quarantined); its objects are withheld from reads until that journal entry is settled"
+            ),
             Self::SubjectFenced {
                 subject_id,
                 status,
@@ -268,6 +280,9 @@ impl ProviderError {
                     details.insert("context_id".to_string(), json!(context_id));
                 }
             }
+            Self::Unreconciled { subject_id } => {
+                details.insert("subject_id".to_string(), json!(subject_id));
+            }
             _ => {}
         }
         details
@@ -296,6 +311,7 @@ fn store_error(error: StoreError) -> ProviderError {
         StoreError::CandidateConsumed(reason) => ProviderError::CandidateConsumed(reason),
         StoreError::StatusTransition(reason) => ProviderError::StatusTransition(reason),
         StoreError::CommitUnknown(reason) => ProviderError::OutcomeUncertain(reason),
+        StoreError::Unreconciled { subject_id } => ProviderError::Unreconciled { subject_id },
         StoreError::Corrupt(reason) => ProviderError::Internal(reason),
         StoreError::Database(error) => ProviderError::Internal(error.to_string()),
     }
@@ -679,6 +695,25 @@ impl LocalMemoryProvider {
     #[doc(hidden)]
     pub fn inject_commit_fault(&self, after_commit: bool) {
         self.store.inject_commit_fault(after_commit);
+    }
+
+    /// §5.2/C-113 proof seam: force the next journal publish to stop at a crash
+    /// window (`after_publish: false` → after the hidden staged write, before
+    /// the rename; `true` → after the publish rename, before the applied mark).
+    /// Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn inject_file_fault(&self, after_publish: bool) {
+        self.store.inject_file_fault(after_publish);
+    }
+
+    /// §5.2 proof seam: the provider's markdown projection root. Compiled out of
+    /// a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn file_root(&self) -> std::path::PathBuf {
+        self.store.file_root().to_path_buf()
     }
 
     /// §6.10/MEM-R021 proof seam: move the provider clock forward so the receipt

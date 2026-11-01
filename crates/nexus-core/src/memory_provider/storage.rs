@@ -76,7 +76,7 @@
 //! placement, so [`Coverage`] resolves those requirements inside the effect
 //! transaction instead of trusting a value read before it.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 #[cfg(feature = "test-hooks")]
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -95,6 +95,8 @@ use uuid::Uuid;
 
 use nexus_local_db::writer_protocol::{init_guarded_pool, GuardedPool};
 use nexus_local_db::{begin_immediate, LocalDbError};
+
+use super::journal::{self, FileEffect};
 
 /// §6.10 receipt ids are provider-assigned opaque strings.
 fn mint_receipt_id() -> String {
@@ -144,6 +146,12 @@ pub(super) enum StoreError {
     /// The transaction may have committed (§14.3). Never reported as a clean
     /// no-effect failure.
     CommitUnknown(String),
+    /// §5.2/D-10: a journaled file intent for this subject could not be settled
+    /// and is quarantined. Reads of the subject answer the terminal
+    /// `INTERNAL_ERROR` rather than serve half-committed content.
+    Unreconciled {
+        subject_id: String,
+    },
     /// A stored row this provider's own writer could not have produced.
     Corrupt(String),
     Database(LocalDbError),
@@ -161,7 +169,7 @@ impl From<sqlx::Error> for StoreError {
     }
 }
 
-type StoreResult<T> = Result<T, StoreError>;
+pub(super) type StoreResult<T> = Result<T, StoreError>;
 
 /// Test-only commit fault, injected by the §14.2/§14.3 proof; compiled out of a
 /// production build (`test-hooks`).
@@ -171,6 +179,18 @@ const COMMIT_FAULT_NONE: u8 = 0;
 const COMMIT_FAULT_BEFORE: u8 = 1;
 #[cfg(feature = "test-hooks")]
 const COMMIT_FAULT_AFTER: u8 = 2;
+
+/// Test-only file-effect fault, injected by the §5.2/C-113 crash-window
+/// proofs; compiled out of a production build (`test-hooks`). `AFTER_STAGE`
+/// leaves the hidden staged file on disk and stops before the publish rename;
+/// `AFTER_PUBLISH` leaves the target published and stops before the journal is
+/// marked applied.
+#[cfg(feature = "test-hooks")]
+const FILE_FAULT_NONE: u8 = 0;
+#[cfg(feature = "test-hooks")]
+const FILE_FAULT_AFTER_STAGE: u8 = 1;
+#[cfg(feature = "test-hooks")]
+const FILE_FAULT_AFTER_PUBLISH: u8 = 2;
 
 /// What admits a mutating op (§6.5): one requirement per capability the op
 /// needs, and every one of them must be covered by the grant set.
@@ -357,12 +377,17 @@ pub(super) struct MemoryStore {
     pool: SqlitePool,
     /// Holds this provider's writer admission for the provider's lifetime.
     _guarded: GuardedPool,
+    /// Root of the provider's own markdown projection, next to `state.db`.
+    files_root: PathBuf,
     /// Latest provider-clock reading in microseconds since the epoch. A floor,
     /// so retention verdicts cannot be re-derived downwards (§6.10); seeded from
     /// the persisted floor at [`Self::open`] and persisted again by every sweep.
     clock_floor: AtomicI64,
     #[cfg(feature = "test-hooks")]
     commit_fault: AtomicU8,
+    /// Test-only file-effect fault (§5.2/C-113 crash windows).
+    #[cfg(feature = "test-hooks")]
+    file_fault: AtomicU8,
     /// Test-only offset applied to the provider clock (§6.10 retention).
     #[cfg(feature = "test-hooks")]
     receipt_clock_skew: AtomicI64,
@@ -482,6 +507,10 @@ impl MemoryStore {
     pub(super) async fn open(db_path: &Path, creator_id: &str) -> StoreResult<Self> {
         let guarded = init_guarded_pool(db_path, creator_id).await?;
         let pool = guarded.clone_pool();
+        let files_root = db_path.parent().map_or_else(
+            || PathBuf::from(journal::FILES_DIR),
+            |dir| dir.join(journal::FILES_DIR),
+        );
         let persisted: Option<String> =
             sqlx::query_scalar("SELECT value FROM memory_provider_meta WHERE key = ?")
                 .bind(CLOCK_FLOOR_KEY)
@@ -498,9 +527,12 @@ impl MemoryStore {
         Ok(Self {
             pool,
             _guarded: guarded,
+            files_root,
             clock_floor: AtomicI64::new(clock_floor),
             #[cfg(feature = "test-hooks")]
             commit_fault: AtomicU8::new(COMMIT_FAULT_NONE),
+            #[cfg(feature = "test-hooks")]
+            file_fault: AtomicU8::new(FILE_FAULT_NONE),
             #[cfg(feature = "test-hooks")]
             receipt_clock_skew: AtomicI64::new(0),
             #[cfg(feature = "test-hooks")]
@@ -549,6 +581,28 @@ impl MemoryStore {
         );
     }
 
+    /// Force the next journal publish to stop at a crash window: a `false`
+    /// fault stops after the hidden staged write (target not yet renamed), a
+    /// `true` fault stops after the publish rename (content already in place,
+    /// journal not yet marked applied). §5.2/C-113 proof seam only.
+    #[cfg(feature = "test-hooks")]
+    pub(super) fn inject_file_fault(&self, after_publish: bool) {
+        self.file_fault.store(
+            if after_publish {
+                FILE_FAULT_AFTER_PUBLISH
+            } else {
+                FILE_FAULT_AFTER_STAGE
+            },
+            Ordering::SeqCst,
+        );
+    }
+
+    /// The provider's markdown projection root (§5.2). Test seam only.
+    #[cfg(feature = "test-hooks")]
+    pub(super) fn file_root(&self) -> &Path {
+        &self.files_root
+    }
+
     /// Operator provisioning (§7.0.6): the local space and the first `admin`
     /// grant exist before any protocol op can be called.
     ///
@@ -564,6 +618,11 @@ impl MemoryStore {
         now: DateTime<Utc>,
     ) -> StoreResult<()> {
         let at = timestamp(now);
+        // §5.2/D-10: a reopen settles whatever the previous process journaled
+        // but did not publish, before provisioning makes anything else visible.
+        // The pass is bounded and best-effort: an intent it cannot settle stays
+        // quarantined and the subject's reads report that explicitly.
+        self.recover_journal(space_id).await;
         // §6.10 retention is durable even for a deployment that only reads:
         // opening the provider reclaims what has aged out, and does so in its
         // own committed transaction so a provisioning failure cannot put an
@@ -1085,6 +1144,49 @@ impl MemoryStore {
         result: &Value,
         now: DateTime<Utc>,
     ) -> StoreResult<ReceiptRow> {
+        let row = self
+            .write_receipt(&mut tx, ctx, &receipt_id, result, now)
+            .await?;
+        self.commit_effect(tx).await?;
+        Ok(row)
+    }
+
+    /// §5.2/D-10 journal-first commit for an op with file effects.
+    ///
+    /// The intent rows join the effect rows and the receipt in the SAME guarded
+    /// transaction; its commit is the operation's point of no return. Only
+    /// after it does the file publish run (hidden stage, verified atomic
+    /// rename, journal applied mark). A publish failure is `OUTCOME_UNCERTAIN`:
+    /// the effect committed and the journal keeps the intent recoverable.
+    #[allow(clippy::too_many_arguments)]
+    async fn commit_journalled(
+        &self,
+        mut tx: sqlx::Transaction<'_, sqlx::Sqlite>,
+        ctx: &OpContext<'_>,
+        receipt_id: String,
+        subject_id: &str,
+        effects: &[FileEffect],
+        result: &Value,
+        now: DateTime<Utc>,
+    ) -> StoreResult<ReceiptRow> {
+        write_journal_entry(&mut tx, ctx, &receipt_id, subject_id, effects, now).await?;
+        let row = self
+            .write_receipt(&mut tx, ctx, &receipt_id, result, now)
+            .await?;
+        self.commit_effect(tx).await?;
+        self.publish_effects(&receipt_id, effects).await?;
+        Ok(row)
+    }
+
+    /// Append the receipt row to the still-open effect transaction.
+    async fn write_receipt(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        ctx: &OpContext<'_>,
+        receipt_id: &str,
+        result: &Value,
+        now: DateTime<Utc>,
+    ) -> StoreResult<ReceiptRow> {
         let at = timestamp(now);
         let result_json = serde_json::to_string(result)
             .map_err(|e| StoreError::Corrupt(format!("receipt result: {e}")))?;
@@ -1098,13 +1200,30 @@ impl MemoryStore {
         .bind(ctx.requester_principal_id)
         .bind(ctx.op)
         .bind(ctx.idempotency_key)
-        .bind(&receipt_id)
+        .bind(receipt_id)
         .bind(ctx.payload_digest)
         .bind(&result_json)
         .bind(&at)
         .bind(&at)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
+        Ok(ReceiptRow {
+            space_id: ctx.space_id.to_string(),
+            requester_principal_id: ctx.requester_principal_id.to_string(),
+            op: ctx.op.to_string(),
+            idempotency_key: ctx.idempotency_key.map(str::to_string),
+            receipt_id: receipt_id.to_string(),
+            payload_digest: ctx.payload_digest.to_string(),
+            status: "committed".to_string(),
+            result_json: Some(result_json),
+            error_json: None,
+            created_at: at.clone(),
+            completed_at: Some(at),
+        })
+    }
+
+    /// `COMMIT` with the §14.2/§14.3 proof seam applied at its boundary.
+    async fn commit_effect(&self, tx: sqlx::Transaction<'_, sqlx::Sqlite>) -> StoreResult<()> {
         #[cfg(feature = "test-hooks")]
         let fault = self.commit_fault.swap(COMMIT_FAULT_NONE, Ordering::SeqCst);
         #[cfg(feature = "test-hooks")]
@@ -1122,19 +1241,187 @@ impl MemoryStore {
                 "injected failure after COMMIT".to_string(),
             ));
         }
-        Ok(ReceiptRow {
-            space_id: ctx.space_id.to_string(),
-            requester_principal_id: ctx.requester_principal_id.to_string(),
-            op: ctx.op.to_string(),
-            idempotency_key: ctx.idempotency_key.map(str::to_string),
-            receipt_id,
-            payload_digest: ctx.payload_digest.to_string(),
-            status: "committed".to_string(),
-            result_json: Some(result_json),
-            error_json: None,
-            created_at: at.clone(),
-            completed_at: Some(at),
-        })
+        Ok(())
+    }
+
+    /// §5.2 step 2: stage every planned file, verify and atomically publish it,
+    /// then mark the journal entry applied. Each failure keeps the entry
+    /// `pending`, so the next open's recovery settles it.
+    async fn publish_effects(&self, receipt_id: &str, effects: &[FileEffect]) -> StoreResult<()> {
+        let publish_error = |step: &str, error: std::io::Error| {
+            StoreError::CommitUnknown(format!("file effect {step} after journal COMMIT: {error}"))
+        };
+        for effect in effects {
+            journal::stage(&self.files_root, receipt_id, effect)
+                .await
+                .map_err(|error| publish_error("staging failed", error))?;
+        }
+        #[cfg(feature = "test-hooks")]
+        let fault = self.file_fault.load(Ordering::SeqCst);
+        #[cfg(feature = "test-hooks")]
+        if fault == FILE_FAULT_AFTER_STAGE {
+            self.file_fault.store(FILE_FAULT_NONE, Ordering::SeqCst);
+            return Err(StoreError::CommitUnknown(
+                "injected failure after staging the file effect".to_string(),
+            ));
+        }
+        for effect in effects {
+            journal::publish(&self.files_root, receipt_id, effect)
+                .await
+                .map_err(|error| publish_error("publish failed", error))?;
+        }
+        #[cfg(feature = "test-hooks")]
+        if fault == FILE_FAULT_AFTER_PUBLISH {
+            self.file_fault.store(FILE_FAULT_NONE, Ordering::SeqCst);
+            return Err(StoreError::CommitUnknown(
+                "injected failure after publishing the file effect".to_string(),
+            ));
+        }
+        self.mark_journal_applied(receipt_id).await
+    }
+
+    /// Mark a pending journal intent applied in a transaction of its own.
+    async fn mark_journal_applied(&self, receipt_id: &str) -> StoreResult<()> {
+        let mut tx = begin_immediate(&self.pool).await?;
+        sqlx::query(
+            "UPDATE memory_journal SET state = ?, updated_at = ? \
+             WHERE receipt_id = ? AND state = ?",
+        )
+        .bind(journal::STATE_APPLIED)
+        .bind(timestamp(self.now()))
+        .bind(receipt_id)
+        .bind(journal::STATE_PENDING)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit()
+            .await
+            .map_err(|e| StoreError::CommitUnknown(format!("journal applied mark: {e}")))?;
+        Ok(())
+    }
+
+    /// §5.2 step 3, bounded: settle the pending intents of this space. A pass
+    /// that cannot run is logged and never fails the open — the entries stay
+    /// pending and the affected subjects stay excluded.
+    async fn recover_journal(&self, space_id: &str) {
+        if let Err(error) = self.settle_pending(space_id).await {
+            tracing::warn!(?error, "memory journal recovery pass skipped");
+        }
+    }
+
+    async fn settle_pending(&self, space_id: &str) -> StoreResult<()> {
+        let entries: Vec<(String, String)> = sqlx::query_as(
+            "SELECT receipt_id, targets_json FROM memory_journal \
+             WHERE space_id = ? AND state = ? ORDER BY created_at, receipt_id LIMIT ?",
+        )
+        .bind(space_id)
+        .bind(journal::STATE_PENDING)
+        .bind(journal::RECOVERY_BOUND)
+        .fetch_all(&self.pool)
+        .await?;
+        for (receipt_id, targets_json) in entries {
+            let state = match settle_entry(&self.files_root, &receipt_id, &targets_json).await {
+                Ok(()) => journal::STATE_APPLIED,
+                Err(reason) => {
+                    tracing::warn!(%receipt_id, %reason, "memory journal intent quarantined");
+                    journal::STATE_QUARANTINED
+                }
+            };
+            let mut tx = begin_immediate(&self.pool).await?;
+            sqlx::query(
+                "UPDATE memory_journal SET state = ?, updated_at = ? \
+                 WHERE receipt_id = ? AND state = ?",
+            )
+            .bind(state)
+            .bind(timestamp(self.now()))
+            .bind(&receipt_id)
+            .bind(journal::STATE_PENDING)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+        }
+        Ok(())
+    }
+}
+
+/// §5.2 step 3: settle one journaled intent from the crash-consistent disk
+/// state. Every target must be published or regenerated; the first target that
+/// cannot be is the entry's quarantine reason.
+async fn settle_entry(root: &Path, receipt_id: &str, targets_json: &str) -> Result<(), String> {
+    let effects: Vec<FileEffect> =
+        serde_json::from_str(targets_json).map_err(|error| format!("targets: {error}"))?;
+    for effect in &effects {
+        match journal::settle(root, receipt_id, effect).await {
+            journal::Settled::Published => {}
+            journal::Settled::Quarantined(reason) => return Err(reason),
+        }
+    }
+    Ok(())
+}
+
+/// §5.2 step 1: append the planned file effects to the still-open effect
+/// transaction, so the intent commits with — never after — the rows it
+/// describes.
+async fn write_journal_entry(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    ctx: &OpContext<'_>,
+    receipt_id: &str,
+    subject_id: &str,
+    effects: &[FileEffect],
+    now: DateTime<Utc>,
+) -> StoreResult<()> {
+    let targets = serde_json::to_string(effects)
+        .map_err(|error| StoreError::Corrupt(format!("journal targets: {error}")))?;
+    let at = timestamp(now);
+    sqlx::query(
+        "INSERT INTO memory_journal \
+         (receipt_id, space_id, subject_id, requester_principal_id, op, idempotency_key, state, \
+          targets_json, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(receipt_id)
+    .bind(ctx.space_id)
+    .bind(subject_id)
+    .bind(ctx.requester_principal_id)
+    .bind(ctx.op)
+    .bind(ctx.idempotency_key)
+    .bind(journal::STATE_PENDING)
+    .bind(targets)
+    .bind(&at)
+    .bind(&at)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+/// The unsettled journal state of one subject (D-10 read isolation).
+async fn unsettled_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    space_id: &str,
+    subject_id: &str,
+) -> StoreResult<Option<String>> {
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT state FROM memory_journal \
+         WHERE space_id = ? AND subject_id = ? AND state <> ? \
+         ORDER BY CASE state WHEN ? THEN 0 ELSE 1 END, created_at LIMIT 1",
+    )
+    .bind(space_id)
+    .bind(subject_id)
+    .bind(journal::STATE_APPLIED)
+    .bind(journal::STATE_QUARANTINED)
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(row.map(|(state,)| state))
+}
+
+/// §5.2 step 4: `Ok(true)` withholds the subject's objects while its intent is
+/// recovering, `Err` is the terminal refusal once it is quarantined.
+fn withheld(state: Option<&str>, subject_id: &str) -> StoreResult<bool> {
+    match state {
+        Some(journal::STATE_QUARANTINED) => Err(StoreError::Unreconciled {
+            subject_id: subject_id.to_string(),
+        }),
+        Some(_) => Ok(true),
+        None => Ok(false),
     }
 }
 
@@ -1927,6 +2214,24 @@ async fn record_in_tx(
         .await?)
 }
 
+async fn profile_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    space_id: &str,
+    subject_id: &str,
+    profile_kind: &str,
+) -> StoreResult<Option<ProfileRow>> {
+    let sql = format!(
+        "SELECT {PROFILE_COLUMNS} FROM memory_profiles \
+         WHERE space_id = ? AND subject_id = ? AND profile_kind = ?"
+    );
+    Ok(sqlx::query_as::<_, ProfileRow>(sqlx::AssertSqlSafe(sql))
+        .bind(space_id)
+        .bind(subject_id)
+        .bind(profile_kind)
+        .fetch_optional(&mut **tx)
+        .await?)
+}
+
 /// §7.14/§7.15 shared consumption prelude: load the shell, gate its subject and
 /// its immutable capture placement, then check that it is still pending and at
 /// the expected revision.
@@ -1960,16 +2265,15 @@ async fn consumable_candidate(
 }
 
 /// §6.7/§8.1 consumption: scrub the body, stamp `content_digest`, record the
-/// outcome and bump the revision in one statement guarded by the CAS.
-#[allow(clippy::too_many_arguments)]
+/// outcome and bump the revision in one statement guarded by the CAS, then
+/// project the consumed shell as the operation's file effect (§5.2 seam 2).
 async fn consume_candidate(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     candidate: &CandidateRow,
     expected_revision: i64,
     consumed_by: &Value,
     content_digest: &str,
-    now: DateTime<Utc>,
-) -> StoreResult<()> {
+) -> StoreResult<FileEffect> {
     let updated = sqlx::query(
         "UPDATE memory_candidates \
          SET status = 'consumed', content_json = NULL, content_digest = ?, consumed_by_json = ?, \
@@ -1988,10 +2292,23 @@ async fn consume_candidate(
             current: candidate.revision,
         });
     }
-    let _ = now;
-    Ok(())
+    let shell = candidate_in_tx(
+        tx,
+        candidate.space_id.as_str(),
+        candidate.candidate_id.as_str(),
+    )
+    .await?
+    .ok_or_else(|| {
+        StoreError::Corrupt(format!(
+            "candidate {} vanished after consumption",
+            candidate.candidate_id
+        ))
+    })?;
+    journal::candidate_effect(&shell)
 }
 
+/// §5.2 seam 1: insert the record, then project the stored row as the
+/// operation's file effect.
 #[allow(clippy::too_many_arguments)]
 async fn insert_record(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
@@ -2004,7 +2321,7 @@ async fn insert_record(
     occurred_at: Option<&str>,
     record_id: &str,
     now: DateTime<Utc>,
-) -> StoreResult<()> {
+) -> StoreResult<FileEffect> {
     let at = timestamp(now);
     sqlx::query(
         "INSERT INTO memory_records \
@@ -2025,7 +2342,19 @@ async fn insert_record(
     .bind(&at)
     .execute(&mut **tx)
     .await?;
-    Ok(())
+    record_effect_in_tx(tx, space_id, record_id).await
+}
+
+/// Re-read one stored record and project it (§5.2 seams 1 and 3).
+async fn record_effect_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    space_id: &str,
+    record_id: &str,
+) -> StoreResult<FileEffect> {
+    let row = record_in_tx(tx, space_id, record_id)
+        .await?
+        .ok_or_else(|| StoreError::Corrupt(format!("record {record_id} is missing")))?;
+    journal::record_effect(&row)
 }
 
 fn mint_record_id() -> String {
@@ -2122,11 +2451,14 @@ impl MemoryStore {
         let subject_status = subject_in_tx(&mut tx, space_id, subject_id)
             .await?
             .map(|subject| subject.status);
+        let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
         tx.commit().await?;
         // §7.7: `archived` hides the subject from the *default* listing; a
         // status-filtered listing is an explicit audit query and stays readable.
+        // §5.2/D-10: an unsettled intent withholds the subject either way.
         let archived = status.is_none() && subject_status.as_deref() == Some("archived");
-        let visible: Vec<CandidateRow> = if archived {
+        let hidden = withheld(unsettled.as_deref(), subject_id)?;
+        let visible: Vec<CandidateRow> = if archived || hidden {
             Vec::new()
         } else {
             rows.into_iter()
@@ -2165,7 +2497,17 @@ impl MemoryStore {
         space_in_tx(&mut tx, space_id).await?;
         let grants = wire_grants(&grants_in_tx(&mut tx, space_id).await?)?;
         let row = candidate_in_tx(&mut tx, space_id, candidate_id).await?;
+        let unsettled = match &row {
+            Some(row) => unsettled_in(&mut tx, space_id, row.subject_id.as_str()).await?,
+            None => None,
+        };
         tx.commit().await?;
+        if let Some(row) = &row {
+            // §5.2/D-10: withheld while recovering, terminal once quarantined.
+            if withheld(unsettled.as_deref(), row.subject_id.as_str())? {
+                return Ok(None);
+            }
+        }
         Ok(row.filter(|row| {
             covered(
                 &grants,
@@ -2201,18 +2543,25 @@ impl MemoryStore {
             "record_ids": [],
         });
         let digest = content_digest(&candidate)?;
-        consume_candidate(
+        let effect = consume_candidate(
             &mut tx,
             &candidate,
             expected_revision,
             &consumed_by,
             &digest,
-            now,
         )
         .await?;
         let result = json!({ "candidate_id": candidate_id, "outcome": "dismissed" });
-        self.commit_receipt_with(tx, ctx, receipt_id, &result, now)
-            .await
+        self.commit_journalled(
+            tx,
+            ctx,
+            receipt_id,
+            candidate.subject_id.as_str(),
+            std::slice::from_ref(&effect),
+            &result,
+            now,
+        )
+        .await
     }
 
     /// §7.15: consumption + scrub + every record insert + receipt, one
@@ -2247,43 +2596,48 @@ impl MemoryStore {
         };
         let placement = candidate.scope();
         let mut record_ids = Vec::new();
+        let mut effects = Vec::new();
         match decision {
             ReviewDecision::Promote {
                 kind,
                 content: override_content,
             } => {
                 let record_id = mint_record_id();
-                insert_record(
-                    &mut tx,
-                    ctx.space_id,
-                    candidate.subject_id.as_str(),
-                    placement,
-                    kind.unwrap_or(candidate.kind.as_str()),
-                    override_content.unwrap_or(&content),
-                    &provenance,
-                    candidate.occurred_at.as_deref(),
-                    &record_id,
-                    now,
-                )
-                .await?;
-                record_ids.push(record_id);
-            }
-            ReviewDecision::Fragment { items } => {
-                for (kind, fragment) in *items {
-                    let record_id = mint_record_id();
+                effects.push(
                     insert_record(
                         &mut tx,
                         ctx.space_id,
                         candidate.subject_id.as_str(),
                         placement,
-                        kind.as_str(),
-                        fragment,
+                        kind.unwrap_or(candidate.kind.as_str()),
+                        override_content.unwrap_or(&content),
                         &provenance,
                         candidate.occurred_at.as_deref(),
                         &record_id,
                         now,
                     )
-                    .await?;
+                    .await?,
+                );
+                record_ids.push(record_id);
+            }
+            ReviewDecision::Fragment { items } => {
+                for (kind, fragment) in *items {
+                    let record_id = mint_record_id();
+                    effects.push(
+                        insert_record(
+                            &mut tx,
+                            ctx.space_id,
+                            candidate.subject_id.as_str(),
+                            placement,
+                            kind.as_str(),
+                            fragment,
+                            &provenance,
+                            candidate.occurred_at.as_deref(),
+                            &record_id,
+                            now,
+                        )
+                        .await?,
+                    );
                     record_ids.push(record_id);
                 }
             }
@@ -2297,18 +2651,27 @@ impl MemoryStore {
             "record_ids": record_ids,
         });
         let digest = content_digest(&candidate)?;
-        consume_candidate(
-            &mut tx,
-            &candidate,
-            expected_revision,
-            &consumed_by,
-            &digest,
+        effects.push(
+            consume_candidate(
+                &mut tx,
+                &candidate,
+                expected_revision,
+                &consumed_by,
+                &digest,
+            )
+            .await?,
+        );
+        let result = json!({ "outcome": decision.outcome(), "record_ids": record_ids });
+        self.commit_journalled(
+            tx,
+            ctx,
+            receipt_id,
+            candidate.subject_id.as_str(),
+            &effects,
+            &result,
             now,
         )
-        .await?;
-        let result = json!({ "outcome": decision.outcome(), "record_ids": record_ids });
-        self.commit_receipt_with(tx, ctx, receipt_id, &result, now)
-            .await
+        .await
     }
 
     /// §7.20/§7.22 read path: authorization and tombstone/selection filters
@@ -2370,12 +2733,15 @@ impl MemoryStore {
         let subject_status = subject_in_tx(&mut tx, space_id, subject_id)
             .await?
             .map(|subject| subject.status);
+        let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
         tx.commit().await?;
         // §7.7: an archived subject's records leave recall; the listing and
         // by-id audit routes still serve them.
+        // §5.2/D-10: an unsettled file intent withholds the subject from both.
         let archived = read.excludes_archived() && subject_status.as_deref() == Some("archived");
+        let hidden = withheld(unsettled.as_deref(), subject_id)?;
         let subject_all = matches!(selection, Selection::SubjectAll);
-        let rows = if archived { Vec::new() } else { rows };
+        let rows = if archived || hidden { Vec::new() } else { rows };
         let visible: Vec<RecordRow> = rows
             .into_iter()
             .filter(|row| !row.tombstoned() || include_tombstoned)
@@ -2420,7 +2786,17 @@ impl MemoryStore {
         space_in_tx(&mut tx, space_id).await?;
         let grants = wire_grants(&grants_in_tx(&mut tx, space_id).await?)?;
         let row = record_in_tx(&mut tx, space_id, record_id).await?;
+        let unsettled = match &row {
+            Some(row) => unsettled_in(&mut tx, space_id, row.subject_id.as_str()).await?,
+            None => None,
+        };
         tx.commit().await?;
+        if let Some(row) = &row {
+            // §5.2/D-10: withheld while recovering, terminal once quarantined.
+            if withheld(unsettled.as_deref(), row.subject_id.as_str())? {
+                return Ok(None);
+            }
+        }
         let subject_id = row.as_ref().map(|row| row.subject_id.clone());
         let admin = GrantRequirement {
             capability: "admin",
@@ -2468,7 +2844,7 @@ impl MemoryStore {
         }
         gate(&mut tx, admission).await?;
         let record_id = mint_record_id();
-        insert_record(
+        let effect = insert_record(
             &mut tx,
             ctx.space_id,
             subject_id,
@@ -2482,7 +2858,16 @@ impl MemoryStore {
         )
         .await?;
         let result = json!({ "record_id": record_id, "revision": 1 });
-        self.commit_receipt(tx, ctx, &result, now).await
+        self.commit_journalled(
+            tx,
+            ctx,
+            mint_receipt_id(),
+            subject_id,
+            std::slice::from_ref(&effect),
+            &result,
+            now,
+        )
+        .await
     }
 
     /// §7.18: kind/content edit under CAS. Placement is not editable here.
@@ -2545,8 +2930,18 @@ impl MemoryStore {
                 current: record.revision,
             });
         }
+        let effect = record_effect_in_tx(&mut tx, ctx.space_id, record_id).await?;
         let result = json!({ "record_id": record_id, "revision": record.revision + 1 });
-        self.commit_receipt(tx, ctx, &result, now).await
+        self.commit_journalled(
+            tx,
+            ctx,
+            mint_receipt_id(),
+            record.subject_id.as_str(),
+            std::slice::from_ref(&effect),
+            &result,
+            now,
+        )
+        .await
     }
 
     /// §7.19/MEM-R014: content removed, tombstone retained, receipts untouched.
@@ -2610,8 +3005,18 @@ impl MemoryStore {
                 current: record.revision,
             });
         }
+        let effect = record_effect_in_tx(&mut tx, ctx.space_id, record_id).await?;
         let result = json!({ "record_id": record_id, "tombstoned": true });
-        self.commit_receipt(tx, ctx, &result, now).await
+        self.commit_journalled(
+            tx,
+            ctx,
+            mint_receipt_id(),
+            record.subject_id.as_str(),
+            std::slice::from_ref(&effect),
+            &result,
+            now,
+        )
+        .await
     }
 
     /// §7.21 explicit placement change; provenance is untouched.
@@ -2680,7 +3085,21 @@ impl MemoryStore {
             "context_id": target.context_id,
         });
         let result = json!({ "record_id": record_id, "revision": revision, "scope": scope });
-        self.commit_receipt(tx, ctx, &result, now).await
+        if revision == record.revision {
+            // §7.0.4 no-op: the stored row is unchanged, so the projection is too.
+            return self.commit_receipt(tx, ctx, &result, now).await;
+        }
+        let effect = record_effect_in_tx(&mut tx, ctx.space_id, record_id).await?;
+        self.commit_journalled(
+            tx,
+            ctx,
+            mint_receipt_id(),
+            record.subject_id.as_str(),
+            std::slice::from_ref(&effect),
+            &result,
+            now,
+        )
+        .await
     }
 
     /// §7.23 profile read: every present profile, or the requested kinds that
@@ -2705,6 +3124,7 @@ impl MemoryStore {
             tx.commit().await?;
             return Ok(None);
         }
+        let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
         let sql = format!(
             "SELECT {PROFILE_COLUMNS} FROM memory_profiles \
              WHERE space_id = ? AND subject_id = ? ORDER BY profile_kind"
@@ -2715,6 +3135,11 @@ impl MemoryStore {
             .fetch_all(&mut *tx)
             .await?;
         tx.commit().await?;
+        // §5.2/D-10: a subject whose file intent is unsettled has no readable
+        // profile surface yet.
+        if withheld(unsettled.as_deref(), subject_id)? {
+            return Ok(None);
+        }
         Ok(Some(rows))
     }
 
@@ -2798,8 +3223,25 @@ impl MemoryStore {
                 current + 1
             }
         };
+        let profile = profile_in_tx(&mut tx, ctx.space_id, subject_id, profile_kind)
+            .await?
+            .ok_or_else(|| {
+                StoreError::Corrupt(format!(
+                    "profile {profile_kind} of subject {subject_id} is missing after the write"
+                ))
+            })?;
+        let effect = journal::profile_effect(&profile)?;
         let result = json!({ "profile_kind": profile_kind, "revision": revision });
-        self.commit_receipt(tx, ctx, &result, now).await
+        self.commit_journalled(
+            tx,
+            ctx,
+            mint_receipt_id(),
+            subject_id,
+            std::slice::from_ref(&effect),
+            &result,
+            now,
+        )
+        .await
     }
 }
 
