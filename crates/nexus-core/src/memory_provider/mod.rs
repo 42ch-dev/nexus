@@ -12,19 +12,20 @@
 //! * `spoke_operations` — the protocol's own validators, digest helpers and grant
 //!   evaluation, so no protocol rule is re-implemented here.
 //!
-//! **Error shape.** The memory family carries its errors *inside* the op response
-//! (§14: every generated `memory.*` response is a oneOf of the success payload
-//! and a `MemoryErrorEnvelope` carrying `details.retry_class`). The ops-layer
-//! `SpokeRejectCode` vocabulary has no `op_unsupported`/`capability_missing` at
-//! all (§14.1 assigns those to the dispatch layer), so this provider expresses
-//! every memory outcome — success and refusal — through the response envelope it
-//! is defined to speak. A refusal is therefore never "silent success": it is the
-//! protocol's typed `{ error: { code, details.retry_class, message } }`.
+//! **Error shape.** Refusals travel the port's own `SpokeResult::Reject` channel,
+//! never the success channel: the memory error codes are ops-layer reject codes
+//! (§14.1, `spoke_operations::SpokeRejectCode`), and a dispatch-level denial
+//! (`op_unsupported`, `capability_missing`) is the upstream
+//! `CAPABILITY_PORT_MISSING` reject carrying `details.wire_code` — the same
+//! mapping `spoke-connect`'s `map_error_envelope` applies to an inbound error
+//! envelope. Every reject carries `details.retry_class` (§14.2);
+//! `OUTCOME_UNCERTAIN` is the only `uncertain` class, and `INTERNAL_ERROR` is
+//! `retryable` only because it is raised strictly before the effect commits.
 //!
 //! **Round split.** Round A serves `memory.describe`, `memory.spaces.*`,
 //! `memory.subjects.*` and `memory.grants.*`. The round-B families
 //! (capture/candidates/records/recall/profile) and the sub-capability gated
-//! families (reflection, transfer) refuse `op_unsupported`.
+//! families (reflection, transfer) are rejected as not served.
 
 pub mod policy;
 mod storage;
@@ -39,16 +40,15 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 use spoke_operations::spoke_schemas as schemas;
 use spoke_operations::{
-    grant_covers, is_freeze_allowlisted, jcs_sha256_hex, validate_grant_issuance,
-    validate_memory_grants_grant, validate_memory_grants_list, validate_memory_spaces_list,
-    validate_memory_subjects_fence, GrantRequirement, IssuedGrant, MemoryPort, SpokeRejectCode,
-    SpokeResult,
+    grant_covers, jcs_sha256_hex, validate_memory_grants_grant, validate_memory_grants_list,
+    validate_memory_spaces_list, validate_memory_subjects_fence, GrantRequirement, IssuedGrant,
+    MemoryPort, SpokeRejectCode, SpokeResult,
 };
 
 use crate::error::{CoreError, CoreResult};
 use storage::{
-    FenceAction, FenceTarget, GrantRow, MemoryStore, NewGrant, OpContext, ReceiptRow, SpaceRow,
-    StoreError, SubjectRow,
+    Admission, Fence, FenceAction, FenceTarget, GrantRow, MemoryStore, NewGrant, OpContext,
+    ReceiptRow, SpaceRow, StoreError, SubjectRow,
 };
 
 /// The single space this provider provisions (§7.0.6). Clients discover it via
@@ -68,6 +68,30 @@ const OP_FENCE_SUBJECT: &str = "memory.subjects.fence";
 const OP_GRANT: &str = "memory.grants.grant";
 const OP_REVOKE_GRANT: &str = "memory.grants.revoke";
 
+/// §7.3/§7.4: the two space lifecycle transitions, each naming its op string and
+/// the state it writes.
+#[derive(Clone, Copy)]
+enum SpaceTransition {
+    Freeze,
+    Unfreeze,
+}
+
+impl SpaceTransition {
+    const fn op(self) -> &'static str {
+        match self {
+            Self::Freeze => OP_FREEZE_SPACE,
+            Self::Unfreeze => OP_UNFREEZE_SPACE,
+        }
+    }
+
+    const fn status(self) -> &'static str {
+        match self {
+            Self::Freeze => "frozen",
+            Self::Unfreeze => "active",
+        }
+    }
+}
+
 /// Why an op was refused, in protocol vocabulary (§14.1).
 ///
 /// Every variant maps onto a wire `code` plus its §14.2 retry class, so the
@@ -77,45 +101,64 @@ enum ProviderError {
     NotFound(String),
     NotAuthorized(String),
     SpaceFrozen(String),
-    RevisionConflict { current: i64 },
+    SubjectFenced {
+        subject_id: String,
+        status: String,
+    },
+    RevisionConflict {
+        current: i64,
+    },
     IdempotencyConflict,
-    InvalidInput { field: String, reason: String },
+    InvalidInput {
+        field: String,
+        reason: String,
+    },
     StatusTransition(String),
     CursorInvalid,
+    /// The effect may have committed (§14.2/§14.3): never reported as a clean
+    /// no-effect failure.
+    OutcomeUncertain(String),
     Internal(String),
 }
 
 impl ProviderError {
-    const fn code(&self) -> &'static str {
+    const fn reject_code(&self) -> SpokeRejectCode {
         match self {
-            Self::NotFound(_) => "NOT_FOUND",
-            Self::NotAuthorized(_) => "NOT_AUTHORIZED",
-            Self::SpaceFrozen(_) => "SPACE_FROZEN",
-            Self::RevisionConflict { .. } => "REVISION_CONFLICT",
-            Self::IdempotencyConflict => "IDEMPOTENCY_CONFLICT",
-            Self::InvalidInput { .. } => "INVALID_INPUT",
-            Self::StatusTransition(_) => "INVALID_STATUS_TRANSITION",
-            Self::CursorInvalid => "CURSOR_INVALID",
-            Self::Internal(_) => "INTERNAL_ERROR",
+            Self::NotFound(_) => SpokeRejectCode::NotFound,
+            Self::NotAuthorized(_) => SpokeRejectCode::NotAuthorized,
+            Self::SpaceFrozen(_) => SpokeRejectCode::SpaceFrozen,
+            Self::SubjectFenced { .. } => SpokeRejectCode::SubjectFenced,
+            Self::RevisionConflict { .. } => SpokeRejectCode::RevisionConflict,
+            Self::IdempotencyConflict => SpokeRejectCode::IdempotencyConflict,
+            Self::InvalidInput { .. } => SpokeRejectCode::InvalidInput,
+            Self::StatusTransition(_) => SpokeRejectCode::InvalidStatusTransition,
+            Self::CursorInvalid => SpokeRejectCode::CursorInvalid,
+            Self::OutcomeUncertain(_) => SpokeRejectCode::OutcomeUncertain,
+            Self::Internal(_) => SpokeRejectCode::InternalError,
         }
     }
 
-    /// §14.2: `INTERNAL_ERROR` is retryable only because this provider asserts no
-    /// effect committed when it raises one; everything else is terminal.
+    /// §14.2: `INTERNAL_ERROR` is retryable only because this provider raises it
+    /// strictly before the effect commits; an uncertain outcome is its own class.
     const fn retry_class(&self) -> &'static str {
         match self {
             Self::Internal(_) => "retryable",
+            Self::OutcomeUncertain(_) => "uncertain",
             _ => "terminal",
         }
     }
 
     fn message(&self) -> String {
         match self {
-            Self::NotFound(subject) => format!("{subject} not found"),
+            Self::NotFound(target) => format!("{target} not found"),
             Self::NotAuthorized(reason)
             | Self::SpaceFrozen(reason)
             | Self::StatusTransition(reason)
+            | Self::OutcomeUncertain(reason)
             | Self::Internal(reason) => reason.clone(),
+            Self::SubjectFenced { subject_id, status } => {
+                format!("subject {subject_id} is {status}; its writes are rejected")
+            }
             Self::RevisionConflict { current } => format!(
                 "expected_revision does not match the stored revision ({current}); re-read and retry"
             ),
@@ -130,79 +173,66 @@ impl ProviderError {
         }
     }
 
-    fn details(&self) -> Value {
+    fn details(&self) -> Map<String, Value> {
+        let mut details = Map::new();
+        details.insert(
+            "retry_class".to_string(),
+            Value::String(self.retry_class().to_string()),
+        );
         match self {
-            Self::InvalidInput { field, .. } => json!({ "field": field }),
-            Self::RevisionConflict { current } => json!({ "current_revision": current }),
-            _ => json!({}),
+            Self::InvalidInput { field, .. } => {
+                details.insert("field".to_string(), json!(field));
+            }
+            Self::RevisionConflict { current } => {
+                details.insert("current_revision".to_string(), json!(current));
+            }
+            Self::SubjectFenced { subject_id, status } => {
+                details.insert("subject_id".to_string(), json!(subject_id));
+                details.insert("status".to_string(), json!(status));
+            }
+            _ => {}
         }
+        details
     }
 }
 
 fn store_error(error: StoreError) -> ProviderError {
     match error {
-        StoreError::NotFound(subject) => ProviderError::NotFound(subject),
+        StoreError::NotFound(target) => ProviderError::NotFound(target),
+        StoreError::NotAuthorized(reason) => ProviderError::NotAuthorized(reason),
+        StoreError::SpaceFrozen(reason) => ProviderError::SpaceFrozen(reason),
+        StoreError::SubjectFenced { subject_id, status } => {
+            ProviderError::SubjectFenced { subject_id, status }
+        }
         StoreError::RevisionConflict { current } => ProviderError::RevisionConflict { current },
         StoreError::IdempotencyConflict => ProviderError::IdempotencyConflict,
         StoreError::StatusTransition(reason) => ProviderError::StatusTransition(reason),
+        StoreError::CommitUnknown(reason) => ProviderError::OutcomeUncertain(reason),
         StoreError::Corrupt(reason) => ProviderError::Internal(reason),
         StoreError::Database(error) => ProviderError::Internal(error.to_string()),
     }
 }
 
-/// The protocol's error envelope, built from a code (§14.1) and retry class.
-fn refusal<T: DeserializeOwned>(
-    code: &str,
-    retry_class: &str,
-    message: String,
-    details: Value,
-) -> SpokeResult<T> {
-    let mut envelope_details = match details {
-        Value::Object(map) => map,
-        _ => Map::new(),
-    };
-    envelope_details.insert(
+/// A refusal is a reject, never a success value (§14.1).
+fn deny<T>(error: &ProviderError) -> SpokeResult<T> {
+    spoke_operations::spoke_reject(error.reject_code(), error.message(), Some(error.details()))
+}
+
+/// Round B's families and the sub-capability gated families: the dispatch-level
+/// denial shape — `CAPABILITY_PORT_MISSING` with `details.wire_code` naming the
+/// host's `op_unsupported` answer (upstream `map_error_envelope`).
+fn unsupported<T>(op: &str) -> SpokeResult<T> {
+    let mut details = Map::new();
+    details.insert("wire_code".to_string(), json!("op_unsupported"));
+    details.insert(
         "retry_class".to_string(),
-        Value::String(retry_class.to_string()),
+        Value::String("terminal".to_string()),
     );
-    let body = json!({
-        "error": {
-            "code": code,
-            "details": envelope_details,
-            "extensions": {},
-            "message": message,
-        }
-    });
-    match serde_json::from_value(body) {
-        Ok(response) => spoke_operations::spoke_ok(response),
-        // The envelope shape is schema-generated; a failure here means the
-        // generated surface changed under this build, which must surface as a
-        // host-level reject rather than a fabricated answer.
-        Err(error) => spoke_operations::spoke_reject(
-            SpokeRejectCode::InternalError,
-            format!("memory error envelope projection: {error}"),
-            None,
-        ),
-    }
-}
-
-fn deny<T: DeserializeOwned>(error: &ProviderError) -> SpokeResult<T> {
-    refusal(
-        error.code(),
-        error.retry_class(),
-        error.message(),
-        error.details(),
-    )
-}
-
-/// Round B's families and the sub-capability gated families: a typed refusal,
-/// never an empty success.
-fn unsupported<T: DeserializeOwned>(op: &str) -> SpokeResult<T> {
-    refusal(
-        "op_unsupported",
-        "terminal",
+    details.insert("op".to_string(), json!(op));
+    spoke_operations::spoke_reject(
+        SpokeRejectCode::CapabilityPortMissing,
         format!("{op} is not served by this provider build"),
-        json!({ "op": op }),
+        Some(details),
     )
 }
 
@@ -215,13 +245,27 @@ fn respond<T: DeserializeOwned>(body: Value) -> SpokeResult<T> {
     }
 }
 
-/// §6.1 `payload_digest`: SHA-256 over the JCS canonicalization of the request
-/// payload object. The op name is already part of the dedup namespace, so the
-/// digest binds the payload only.
-fn payload_digest<T: Serialize>(request: &T) -> Result<String, ProviderError> {
+/// Project a receipt that is already committed. A failure here is *after* the
+/// effect, so it is `OUTCOME_UNCERTAIN`, never a retryable `INTERNAL_ERROR`
+/// (§14.2/§14.3).
+fn settle_receipt<T: DeserializeOwned>(receipt: &ReceiptRow) -> SpokeResult<T> {
+    match receipt_body(receipt) {
+        Ok(body) => match serde_json::from_value(body) {
+            Ok(response) => spoke_operations::spoke_ok(response),
+            Err(error) => deny(&ProviderError::OutcomeUncertain(format!(
+                "memory response projection after commit: {error}"
+            ))),
+        },
+        Err(error) => deny(&ProviderError::OutcomeUncertain(error.message())),
+    }
+}
+
+/// §6.1 `payload_digest`, bound to the operation as the plan's memory identity
+/// requires: SHA-256 over the JCS canonicalization of `{"op", "payload"}`.
+fn payload_digest<T: Serialize>(op: &str, request: &T) -> Result<String, ProviderError> {
     let payload = serde_json::to_value(request)
         .map_err(|e| ProviderError::Internal(format!("payload encode: {e}")))?;
-    match jcs_sha256_hex(&payload) {
+    match jcs_sha256_hex(&json!({ "op": op, "payload": payload })) {
         SpokeResult::Ok(digest) => Ok(digest),
         SpokeResult::Reject(reject) => Err(ProviderError::InvalidInput {
             field: "payload".to_string(),
@@ -331,38 +375,62 @@ fn receipt_body(receipt: &ReceiptRow) -> Result<Value, ProviderError> {
     }))
 }
 
-/// Opaque page cursor bound to principal + listing scope + state window
-/// (§7.0.7, MEM-R026). It is plain JSON: cursors are opaque strings to clients,
-/// and JSON keeps the binding inspectable in tests.
+/// Opaque page cursor bound to principal + space + subject/filter + policy
+/// version + snapshot marker (§7.0.7, MEM-R026). It is plain JSON: cursors are
+/// opaque strings to clients, and JSON keeps the binding inspectable in tests.
 #[derive(serde::Serialize, serde::Deserialize)]
 struct PageCursor {
     principal: String,
     scope: String,
     offset: u64,
-    snapshot: i64,
+    marker: i64,
 }
 
-fn encode_cursor(principal: &str, scope: &str, offset: u64, snapshot: i64) -> String {
+/// The bound query a cursor belongs to: op, space, the subject and principal
+/// filters actually applied, and the engine policy version. Any other request
+/// under the same cursor is `CURSOR_INVALID` (MEM-R026).
+fn cursor_scope(
+    op: &str,
+    space_id: Option<&str>,
+    subject_id: Option<&str>,
+    principal_filter: Option<&str>,
+) -> String {
+    format!(
+        "{op}|space={}|subject={}|principal={}|policy={}",
+        space_id.unwrap_or("*"),
+        subject_id.unwrap_or("*"),
+        principal_filter.unwrap_or("*"),
+        policy::ENGINE_POLICY_VERSION,
+    )
+}
+
+fn encode_cursor(principal: &str, scope: &str, offset: u64, marker: i64) -> String {
     let cursor = PageCursor {
         principal: principal.to_string(),
         scope: scope.to_string(),
         offset,
-        snapshot,
+        marker,
     };
     serde_json::to_string(&cursor).expect("a page cursor always serializes")
+}
+
+/// The wire `cursor` newtypes are transparent over `String`; the decoder binds
+/// the text they carry.
+fn cursor_text<C: std::ops::Deref<Target = String>>(cursor: Option<&C>) -> Option<&str> {
+    cursor.map(|value| value.as_str())
 }
 
 fn decode_cursor(
     raw: Option<&str>,
     principal: &str,
     scope: &str,
-    snapshot: i64,
+    marker: i64,
 ) -> Result<u64, ProviderError> {
     let Some(raw) = raw else {
         return Ok(0);
     };
     let cursor: PageCursor = serde_json::from_str(raw).map_err(|_| ProviderError::CursorInvalid)?;
-    if cursor.principal != principal || cursor.scope != scope || cursor.snapshot != snapshot {
+    if cursor.principal != principal || cursor.scope != scope || cursor.marker != marker {
         return Err(ProviderError::CursorInvalid);
     }
     Ok(cursor.offset)
@@ -465,24 +533,22 @@ impl LocalMemoryProvider {
         &self.space_id
     }
 
+    /// §14.2/§14.3 proof seam: force the next committing transaction to fail at
+    /// the commit boundary (`after_commit: false` → before `COMMIT`, no effect;
+    /// `true` → after `COMMIT`, effect committed). Compiled out of a production
+    /// build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn inject_commit_fault(&self, after_commit: bool) {
+        self.store.inject_commit_fault(after_commit);
+    }
+
     async fn space(&self, space_id: &str) -> Result<SpaceRow, ProviderError> {
         self.store
             .find_space(space_id)
             .await
             .map_err(store_error)?
             .ok_or_else(|| ProviderError::NotFound(format!("space {space_id}")))
-    }
-
-    /// §8.2: a frozen space admits only the read-only ops and the maintenance
-    /// allowlist; everything else fails `SPACE_FROZEN` before any effect.
-    fn admit_op(op: &str, space: &SpaceRow) -> Result<(), ProviderError> {
-        if space.status == "frozen" && !is_freeze_allowlisted(op) {
-            return Err(ProviderError::SpaceFrozen(format!(
-                "space {} is frozen; {op} is outside the maintenance allowlist",
-                space.space_id
-            )));
-        }
-        Ok(())
     }
 
     async fn grants_in_space(&self, space_id: &str) -> Result<Vec<GrantRow>, ProviderError> {
@@ -492,7 +558,8 @@ impl LocalMemoryProvider {
             .map_err(store_error)
     }
 
-    /// §6.5 coverage: at least one live grant of the principal admits the op.
+    /// §6.5 coverage for a read: at least one live grant of the principal admits
+    /// the op. Writes evaluate the same rule inside their effect transaction.
     async fn require_grant(
         &self,
         principal_id: &str,
@@ -519,18 +586,8 @@ impl LocalMemoryProvider {
         space: &SpaceRow,
         subject_id: Option<&str>,
     ) -> Result<(), ProviderError> {
-        self.require_grant(
-            principal_id,
-            space,
-            &GrantRequirement {
-                capability: "admin",
-                subject_id,
-                context_ids: Vec::new(),
-                reads_shared: false,
-                subject_all: false,
-            },
-        )
-        .await
+        self.require_grant(principal_id, space, &admin_requirement(subject_id))
+            .await
     }
 
     async fn require_subject(
@@ -545,50 +602,121 @@ impl LocalMemoryProvider {
             .ok_or_else(|| ProviderError::NotFound(format!("subject {subject_id}")))
     }
 
-    /// §7.3/§7.4. The space lifecycle ops are not gated by their own freeze: §7.3
-    /// names re-freezing an already-frozen space as a no-op success, and §8.2
-    /// admits `unfreeze` explicitly. Every other mutating op goes through
-    /// [`Self::admit_op`].
+    /// §7.3/§7.4. The space lifecycle ops define their own freeze admission
+    /// (§7.3 names re-freezing a frozen space a no-op success, and §8.2 admits
+    /// `unfreeze`), so `freeze_gated` is false for them.
     async fn change_space_status<T: DeserializeOwned>(
         &self,
         principal: &schemas::Principal,
-        op: &str,
+        transition: SpaceTransition,
         space_id: &str,
         expected_revision: i64,
         idempotency_key: Option<&str>,
-        status: &str,
-        request: &impl Serialize,
+        request: &(impl Serialize + Sync),
     ) -> SpokeResult<T> {
         let principal_id = principal_id(principal);
-        let space = match self.space(space_id).await {
-            Ok(space) => space,
-            Err(error) => return deny(&error),
-        };
-        if let Err(error) = self.require_admin(principal_id, &space, None).await {
-            return deny(&error);
-        }
-        let digest = match payload_digest(request) {
+        let op = transition.op();
+        let digest = match payload_digest(op, request) {
             Ok(digest) => digest,
             Err(error) => return deny(&error),
         };
         let ctx = OpContext {
-            space_id: &space.space_id,
+            space_id,
             requester_principal_id: principal_id,
             op,
             idempotency_key,
             payload_digest: &digest,
         };
+        let admission = Admission {
+            op,
+            space_id,
+            principal_id,
+            requirement: Some(admin_requirement(None)),
+            issuance: None,
+            subject_gate: None,
+            freeze_gated: false,
+        };
         match self
             .store
-            .set_space_status(&ctx, expected_revision, status, Utc::now())
+            .set_space_status(
+                &ctx,
+                &admission,
+                expected_revision,
+                transition.status(),
+                Utc::now(),
+            )
             .await
         {
-            Ok(receipt) => match receipt_body(&receipt) {
-                Ok(body) => respond(body),
-                Err(error) => deny(&error),
-            },
+            Ok(receipt) => settle_receipt(&receipt),
             Err(error) => deny(&store_error(error)),
         }
+    }
+}
+
+/// The facts both `memory.grants.grant` request shapes name (§7.9); the restricted
+/// shape adds the placement-context restriction (§6.5).
+struct GrantFacts<'a> {
+    space_id: &'a str,
+    grantee: &'a str,
+    capabilities: Vec<String>,
+    context_ids: Vec<String>,
+    shared_access: bool,
+    subject_id: Option<&'a str>,
+    expires_at: Option<DateTime<Utc>>,
+    idempotency_key: &'a str,
+}
+
+fn grant_facts(request: &schemas::MemoryGrantsGrantRequest) -> GrantFacts<'_> {
+    match request {
+        schemas::MemoryGrantsGrantRequest::Variant0 {
+            capabilities,
+            context_ids,
+            expires_at,
+            idempotency_key,
+            principal_id: grantee,
+            shared_access,
+            space_id,
+            subject_id,
+            ..
+        } => GrantFacts {
+            space_id: space_id.as_str(),
+            grantee: grantee.as_str(),
+            capabilities: capabilities.clone(),
+            context_ids: context_ids.clone(),
+            shared_access: shared_access.unwrap_or(false),
+            subject_id: subject_id.as_ref().map(|value| value.as_str()),
+            expires_at: *expires_at,
+            idempotency_key: idempotency_key.as_str(),
+        },
+        schemas::MemoryGrantsGrantRequest::Variant1 {
+            capabilities,
+            expires_at,
+            idempotency_key,
+            principal_id: grantee,
+            space_id,
+            subject_id,
+            ..
+        } => GrantFacts {
+            space_id: space_id.as_str(),
+            grantee: grantee.as_str(),
+            capabilities: capabilities.clone(),
+            context_ids: Vec::new(),
+            shared_access: false,
+            subject_id: subject_id.as_ref().map(|value| value.as_str()),
+            expires_at: expires_at.as_ref().map(|value| **value),
+            idempotency_key: idempotency_key.as_str(),
+        },
+    }
+}
+
+/// The §7 `admin` requirement for a space- or subject-scoped admin op.
+const fn admin_requirement(subject_id: Option<&str>) -> GrantRequirement<'_> {
+    GrantRequirement {
+        capability: "admin",
+        subject_id,
+        context_ids: Vec::new(),
+        reads_shared: false,
+        subject_all: false,
     }
 }
 
@@ -597,8 +725,8 @@ fn bootstrap_grant_id(creator_id: &str) -> String {
 }
 
 /// Round A's error taxonomy is deliberately narrower than `CoreError`: opening
-/// maps it onto the core taxonomy, while op refusals travel in the protocol
-/// envelope, so only the open path needs this bridge.
+/// maps it onto the core taxonomy, while op refusals travel the `SpokeResult`
+/// reject channel, so only the open path needs this bridge.
 fn to_core_error(error: ProviderError) -> CoreError {
     match error {
         ProviderError::Internal(reason) => CoreError::Internal { category: reason },
@@ -642,24 +770,23 @@ impl MemoryPort for LocalMemoryProvider {
                 reason: reject.message,
             });
         }
-        let spaces = match self.store.visible_spaces(principal_id, Utc::now()).await {
-            Ok(spaces) => spaces,
+        let (spaces, marker) = match self.store.visible_spaces(principal_id, Utc::now()).await {
+            Ok(page) => page,
             Err(error) => return deny(&store_error(error)),
         };
-        let snapshot = i64::try_from(spaces.len()).unwrap_or(i64::MAX);
+        let scope = cursor_scope("memory.spaces.list", None, None, None);
         let offset = match decode_cursor(
-            request.cursor.as_deref().map(|cursor| cursor.as_str()),
+            cursor_text(request.cursor.as_ref()),
             principal_id,
-            "memory.spaces.list",
-            snapshot,
+            &scope,
+            marker,
         ) {
             Ok(offset) => offset,
             Err(error) => return deny(&error),
         };
         let (page, next) = page(spaces, page_limit(request.limit), offset);
         let bodies: Vec<Value> = page.iter().map(space_body).collect();
-        let next_cursor =
-            next.map(|offset| encode_cursor(principal_id, "memory.spaces.list", offset, snapshot));
+        let next_cursor = next.map(|offset| encode_cursor(principal_id, &scope, offset, marker));
         respond(json!({ "spaces": bodies, "next_cursor": next_cursor }))
     }
 
@@ -670,11 +797,10 @@ impl MemoryPort for LocalMemoryProvider {
     ) -> SpokeResult<schemas::MemorySpacesFreezeResponse> {
         self.change_space_status(
             principal,
-            OP_FREEZE_SPACE,
+            SpaceTransition::Freeze,
             request.space_id.as_str(),
             expected_revision(request.expected_revision),
             Some(request.idempotency_key.as_str()),
-            "frozen",
             &request,
         )
         .await
@@ -687,11 +813,10 @@ impl MemoryPort for LocalMemoryProvider {
     ) -> SpokeResult<schemas::MemorySpacesUnfreezeResponse> {
         self.change_space_status(
             principal,
-            OP_UNFREEZE_SPACE,
+            SpaceTransition::Unfreeze,
             request.space_id.as_str(),
             expected_revision(request.expected_revision),
             Some(request.idempotency_key.as_str()),
-            "active",
             &request,
         )
         .await
@@ -703,32 +828,8 @@ impl MemoryPort for LocalMemoryProvider {
         request: schemas::MemorySubjectsEnsureRequest,
     ) -> SpokeResult<schemas::MemorySubjectsEnsureResponse> {
         let principal_id = principal_id(principal);
-        let space = match self.space(request.space_id.as_str()).await {
-            Ok(space) => space,
-            Err(error) => return deny(&error),
-        };
-        // Authorization first: an uncovered principal must not learn the space's
-        // freeze state (§14.1 — NOT_AUTHORIZED also declines to reveal existence).
-        if let Err(error) = self
-            .require_grant(
-                principal_id,
-                &space,
-                &GrantRequirement {
-                    capability: "capture",
-                    subject_id: Some(request.subject_id.as_str()),
-                    context_ids: Vec::new(),
-                    reads_shared: false,
-                    subject_all: false,
-                },
-            )
-            .await
-        {
-            return deny(&error);
-        }
-        if let Err(error) = Self::admit_op(OP_ENSURE_SUBJECT, &space) {
-            return deny(&error);
-        }
-        let digest = match payload_digest(&request) {
+        let op = OP_ENSURE_SUBJECT;
+        let digest = match payload_digest(op, &request) {
             Ok(digest) => digest,
             Err(error) => return deny(&error),
         };
@@ -739,21 +840,41 @@ impl MemoryPort for LocalMemoryProvider {
         // The sole `idempotency_key` exemption (§7.0.5): a keyless receipt sits
         // outside the dedup namespace, so every ensure records its own outcome.
         let ctx = OpContext {
-            space_id: &space.space_id,
+            space_id: request.space_id.as_str(),
             requester_principal_id: principal_id,
-            op: OP_ENSURE_SUBJECT,
+            op,
             idempotency_key: None,
             payload_digest: &digest,
         };
+        let admission = Admission {
+            op,
+            space_id: request.space_id.as_str(),
+            principal_id,
+            requirement: Some(GrantRequirement {
+                capability: "capture",
+                subject_id: Some(request.subject_id.as_str()),
+                context_ids: Vec::new(),
+                reads_shared: false,
+                subject_all: false,
+            }),
+            issuance: None,
+            // §7.5: a fenced or archived subject rejects its writes, checked in
+            // the same transaction as the get-or-create.
+            subject_gate: Some(request.subject_id.as_str()),
+            freeze_gated: true,
+        };
         match self
             .store
-            .ensure_subject(&ctx, request.subject_id.as_str(), kind, Utc::now())
+            .ensure_subject(
+                &ctx,
+                &admission,
+                request.subject_id.as_str(),
+                kind,
+                Utc::now(),
+            )
             .await
         {
-            Ok(receipt) => match receipt_body(&receipt) {
-                Ok(body) => respond(body),
-                Err(error) => deny(&error),
-            },
+            Ok(receipt) => settle_receipt(&receipt),
             Err(error) => deny(&store_error(error)),
         }
     }
@@ -808,19 +929,7 @@ impl MemoryPort for LocalMemoryProvider {
                 reason: reject.message,
             });
         }
-        let space = match self.space(request.space_id.as_str()).await {
-            Ok(space) => space,
-            Err(error) => return deny(&error),
-        };
-        if let Err(error) = self
-            .require_admin(principal_id, &space, Some(request.subject_id.as_str()))
-            .await
-        {
-            return deny(&error);
-        }
-        if let Err(error) = Self::admit_op(OP_FENCE_SUBJECT, &space) {
-            return deny(&error);
-        }
+        let op = OP_FENCE_SUBJECT;
         let target = match &request.target {
             schemas::memory_subjects_fence_request::Target::Subject => FenceTarget::Subject,
             schemas::memory_subjects_fence_request::Target::Context(context_id) => {
@@ -832,33 +941,48 @@ impl MemoryPort for LocalMemoryProvider {
             schemas::memory_subjects_fence_request::Action::Unfence => FenceAction::Unfence,
             schemas::memory_subjects_fence_request::Action::Archive => FenceAction::Archive,
         };
-        let digest = match payload_digest(&request) {
+        // §6.5/§7.7: authorization is bound to what the op actually touches — a
+        // context fence needs coverage of THAT context, and a whole-subject
+        // fence/archive needs unrestricted coverage of the subject.
+        let mut requirement = admin_requirement(Some(request.subject_id.as_str()));
+        match &target {
+            FenceTarget::Subject => requirement.subject_all = true,
+            FenceTarget::Context(context_id) => {
+                requirement.context_ids = vec![(*context_id).to_string()];
+            }
+        }
+        let digest = match payload_digest(op, &request) {
             Ok(digest) => digest,
             Err(error) => return deny(&error),
         };
         let ctx = OpContext {
-            space_id: &space.space_id,
+            space_id: request.space_id.as_str(),
             requester_principal_id: principal_id,
-            op: OP_FENCE_SUBJECT,
+            op,
             idempotency_key: Some(request.idempotency_key.as_str()),
             payload_digest: &digest,
         };
+        let admission = Admission {
+            op,
+            space_id: request.space_id.as_str(),
+            principal_id,
+            requirement: Some(requirement),
+            issuance: None,
+            subject_gate: None,
+            freeze_gated: true,
+        };
+        let fence = Fence {
+            subject_id: request.subject_id.as_str(),
+            target,
+            action,
+            expected_revision: expected_revision(request.expected_revision),
+        };
         match self
             .store
-            .fence_subject(
-                &ctx,
-                request.subject_id.as_str(),
-                &target,
-                action,
-                expected_revision(request.expected_revision),
-                Utc::now(),
-            )
+            .fence_subject(&ctx, &admission, fence, Utc::now())
             .await
         {
-            Ok(receipt) => match receipt_body(&receipt) {
-                Ok(body) => respond(body),
-                Err(error) => deny(&error),
-            },
+            Ok(receipt) => settle_receipt(&receipt),
             Err(error) => deny(&store_error(error)),
         }
     }
@@ -901,23 +1025,27 @@ impl MemoryPort for LocalMemoryProvider {
         } else {
             Some(principal_id)
         };
-        let rows = match self
+        // §7.0.7: the page and its invalidation marker are one read, and the
+        // cursor binds every filter that selected them.
+        let (rows, marker) = match self
             .store
-            .grants(&space.space_id, subject_filter, filter_principal)
+            .grants_page(&space.space_id, subject_filter, filter_principal)
             .await
         {
-            Ok(rows) => rows,
+            Ok(page) => page,
             Err(error) => return deny(&store_error(error)),
         };
-        let snapshot = match self.store.grant_snapshot(&space.space_id).await {
-            Ok(snapshot) => snapshot,
-            Err(error) => return deny(&store_error(error)),
-        };
-        let offset = match decode_cursor(
-            request.cursor.as_deref().map(|cursor| cursor.as_str()),
-            principal_id,
+        let scope = cursor_scope(
             "memory.grants.list",
-            snapshot,
+            Some(space.space_id.as_str()),
+            subject_filter,
+            filter_principal,
+        );
+        let offset = match decode_cursor(
+            cursor_text(request.cursor.as_ref()),
+            principal_id,
+            &scope,
+            marker,
         ) {
             Ok(offset) => offset,
             Err(error) => return deny(&error),
@@ -930,8 +1058,7 @@ impl MemoryPort for LocalMemoryProvider {
                 Err(error) => return deny(&error),
             }
         }
-        let next_cursor =
-            next.map(|offset| encode_cursor(principal_id, "memory.grants.list", offset, snapshot));
+        let next_cursor = next.map(|offset| encode_cursor(principal_id, &scope, offset, marker));
         respond(json!({ "grants": bodies, "next_cursor": next_cursor }))
     }
 
@@ -947,9 +1074,7 @@ impl MemoryPort for LocalMemoryProvider {
                 reason: reject.message,
             });
         }
-        // Both request shapes name the same facts; the restricted shape adds the
-        // placement-context restriction (§6.5).
-        let (
+        let GrantFacts {
             space_id,
             grantee,
             capabilities,
@@ -958,67 +1083,7 @@ impl MemoryPort for LocalMemoryProvider {
             subject_id,
             expires_at,
             idempotency_key,
-        ) = match &request {
-            schemas::MemoryGrantsGrantRequest::Variant0 {
-                capabilities,
-                context_ids,
-                expires_at,
-                idempotency_key,
-                principal_id: grantee,
-                shared_access,
-                space_id,
-                subject_id,
-                ..
-            } => (
-                space_id.as_str(),
-                grantee.as_str(),
-                capabilities.clone(),
-                context_ids.clone(),
-                shared_access.unwrap_or(false),
-                subject_id.as_ref().map(|value| value.as_str()),
-                *expires_at,
-                idempotency_key.as_str(),
-            ),
-            schemas::MemoryGrantsGrantRequest::Variant1 {
-                capabilities,
-                expires_at,
-                idempotency_key,
-                principal_id: grantee,
-                space_id,
-                subject_id,
-                ..
-            } => (
-                space_id.as_str(),
-                grantee.as_str(),
-                capabilities.clone(),
-                Vec::new(),
-                false,
-                subject_id.as_ref().map(|value| value.as_str()),
-                expires_at.as_ref().map(|value| **value),
-                idempotency_key.as_str(),
-            ),
-        };
-        let space = match self.space(space_id).await {
-            Ok(space) => space,
-            Err(error) => return deny(&error),
-        };
-        if let Err(error) = self.require_admin(principal_id, &space, None).await {
-            return deny(&error);
-        }
-        if let Err(error) = Self::admit_op(OP_GRANT, &space) {
-            return deny(&error);
-        }
-        let rows = match self.grants_in_space(&space.space_id).await {
-            Ok(rows) => rows,
-            Err(error) => return deny(&error),
-        };
-        let mut granter_grants = Vec::with_capacity(rows.len());
-        for row in &rows {
-            match grant_wire(row) {
-                Ok(grant) => granter_grants.push(grant),
-                Err(error) => return deny(&error),
-            }
-        }
+        } = grant_facts(&request);
         let capability_refs: Vec<&str> = capabilities.iter().map(String::as_str).collect();
         let issued = IssuedGrant {
             capabilities: &capability_refs,
@@ -1027,22 +1092,13 @@ impl MemoryPort for LocalMemoryProvider {
             shared_access,
             expires_at,
         };
-        if let SpokeResult::Reject(reject) = validate_grant_issuance(
-            &granter_grants,
-            principal_id,
-            &space.space_id,
-            Utc::now(),
-            &issued,
-        ) {
-            return deny(&ProviderError::NotAuthorized(reject.message));
-        }
-        let digest = match payload_digest(&request) {
+        let digest = match payload_digest(OP_GRANT, &request) {
             Ok(digest) => digest,
             Err(error) => return deny(&error),
         };
         let grant_id = format!("grt_{}", uuid::Uuid::new_v4().simple());
         let ctx = OpContext {
-            space_id: &space.space_id,
+            space_id,
             requester_principal_id: principal_id,
             op: OP_GRANT,
             idempotency_key: Some(idempotency_key),
@@ -1050,7 +1106,7 @@ impl MemoryPort for LocalMemoryProvider {
         };
         let new_grant = NewGrant {
             grant_id: &grant_id,
-            space_id: &space.space_id,
+            space_id,
             subject_id,
             principal_id: grantee,
             capabilities: &capabilities,
@@ -1058,11 +1114,24 @@ impl MemoryPort for LocalMemoryProvider {
             shared_access,
             expires_at,
         };
-        match self.store.insert_grant(&ctx, &new_grant, Utc::now()).await {
-            Ok(receipt) => match receipt_body(&receipt) {
-                Ok(body) => respond(body),
-                Err(error) => deny(&error),
-            },
+        // §7.9: admission uses the ISSUED grant's scope — a subject-scoped admin
+        // delegates within its own subject — and non-amplification is evaluated
+        // on the same grant set, inside the transaction that inserts the grant.
+        let admission = Admission {
+            op: OP_GRANT,
+            space_id,
+            principal_id,
+            requirement: Some(admin_requirement(subject_id)),
+            issuance: Some(&issued),
+            subject_gate: subject_id,
+            freeze_gated: true,
+        };
+        match self
+            .store
+            .insert_grant(&ctx, &admission, &new_grant, Utc::now())
+            .await
+        {
+            Ok(receipt) => settle_receipt(&receipt),
             Err(error) => deny(&store_error(error)),
         }
     }
@@ -1073,40 +1142,41 @@ impl MemoryPort for LocalMemoryProvider {
         request: schemas::MemoryGrantsRevokeRequest,
     ) -> SpokeResult<schemas::MemoryGrantsRevokeResponse> {
         let principal_id = principal_id(principal);
-        let space = match self.space(request.space_id.as_str()).await {
-            Ok(space) => space,
-            Err(error) => return deny(&error),
-        };
-        // `memory.grants.revoke` is on the §8.2 allowlist, so an incident can be
-        // contained while the space is frozen.
-        if let Err(error) = self.require_admin(principal_id, &space, None).await {
-            return deny(&error);
-        }
-        let digest = match payload_digest(&request) {
+        let op = OP_REVOKE_GRANT;
+        let digest = match payload_digest(op, &request) {
             Ok(digest) => digest,
             Err(error) => return deny(&error),
         };
         let ctx = OpContext {
-            space_id: &space.space_id,
+            space_id: request.space_id.as_str(),
             requester_principal_id: principal_id,
-            op: OP_REVOKE_GRANT,
+            op,
             idempotency_key: Some(request.idempotency_key.as_str()),
             payload_digest: &digest,
+        };
+        // `memory.grants.revoke` is on the §8.2 allowlist, so an incident can be
+        // contained while the space is frozen.
+        let admission = Admission {
+            op,
+            space_id: request.space_id.as_str(),
+            principal_id,
+            requirement: Some(admin_requirement(None)),
+            issuance: None,
+            subject_gate: None,
+            freeze_gated: true,
         };
         match self
             .store
             .revoke_grant(
                 &ctx,
+                &admission,
                 request.grant_id.as_str(),
                 expected_revision(request.expected_revision),
                 Utc::now(),
             )
             .await
         {
-            Ok(receipt) => match receipt_body(&receipt) {
-                Ok(body) => respond(body),
-                Err(error) => deny(&error),
-            },
+            Ok(receipt) => settle_receipt(&receipt),
             Err(error) => deny(&store_error(error)),
         }
     }

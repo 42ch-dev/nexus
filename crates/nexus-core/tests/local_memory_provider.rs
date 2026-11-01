@@ -4,8 +4,9 @@
 //! migration, and the `memory.describe` / `memory.spaces.*` /
 //! `memory.subjects.*` / `memory.grants.*` families. Round B
 //! (capture/candidates/records/recall/profile) and the sub-capability gated
-//! families (reflection, transfer) must answer a typed `op_unsupported`
-//! refusal — never a silent success.
+//! families (reflection, transfer) must answer the dispatch-level denial
+//! (`CAPABILITY_PORT_MISSING` + `details.wire_code`), never a success value and
+//! never an empty success.
 //!
 //! Every scenario runs on a temp nexus home. Import-boundary note: the shared
 //! `MemoryPort` vocabulary comes from `spoke_operations`, whose generated wire
@@ -13,20 +14,24 @@
 //! keeps exactly one spoke dependency edge.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
 
 use nexus_core::memory_provider::LocalMemoryProvider;
 use nexus_creator_memory::bearer::MemoryBearerRef;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use spoke_operations::spoke_schemas as schemas;
-use spoke_operations::{MemoryPort, SpokeResult};
+use spoke_operations::{MemoryPort, SpokeRejectCode, SpokeResult};
 use sqlx::Connection as _;
 use tempfile::TempDir;
 
 const CREATOR: &str = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const OTHER: &str = "ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const THIRD: &str = "ctr_cccccccccccccccccccccccccccccccc";
 const SPACE: &str = "spc_local_default";
 const SUBJECT: &str = "sbj_mira";
+const OTHER_SUBJECT: &str = "sbj_other";
 
 struct Env {
     _tmp: TempDir,
@@ -61,24 +66,38 @@ fn dto<T: DeserializeOwned>(value: Value) -> T {
     serde_json::from_value(value).expect("wire-valid payload")
 }
 
-/// Project any response onto its wire JSON: assertions then read the
-/// protocol shape (the memory family carries its errors inside the response
-/// envelope), not Rust variant names.
+/// Project a port result onto ONE assertion shape: the success payload, or the
+/// refusal as the wire carries it. Refusals must arrive as `SpokeResult::Reject`
+/// (§14.1), so both channels are readable here without encoding either as a
+/// success.
 fn wire<T: serde::Serialize>(result: &SpokeResult<T>) -> Value {
     match result {
         SpokeResult::Ok(value) => serde_json::to_value(value).expect("serializable response"),
-        SpokeResult::Reject(reject) => panic!("expected a response envelope, got {reject:?}"),
+        SpokeResult::Reject(reject) => json!({
+            "error": {
+                "code": reject.code.as_str(),
+                "details": reject
+                    .details
+                    .clone()
+                    .map_or(Value::Null, Value::Object),
+                "message": reject.message,
+            }
+        }),
     }
 }
 
 fn error_code(body: &Value) -> &str {
     body["error"]["code"]
         .as_str()
-        .unwrap_or_else(|| panic!("expected a memory error envelope, got {body}"))
+        .unwrap_or_else(|| panic!("expected a memory error, got {body}"))
+}
+
+fn error_details(body: &Value) -> &Value {
+    &body["error"]["details"]
 }
 
 fn retry_class(body: &Value) -> &str {
-    body["error"]["details"]["retry_class"]
+    error_details(body)["retry_class"]
         .as_str()
         .unwrap_or_else(|| panic!("expected details.retry_class, got {body}"))
 }
@@ -101,20 +120,102 @@ fn grant_request(key: &str, capability: &str, grantee: &str) -> schemas::MemoryG
     }))
 }
 
-fn fence_request(
+/// §6.5 unrestricted grant scoped to one subject.
+fn subject_grant(
+    key: &str,
+    capability: &str,
+    grantee: &str,
+    subject: &str,
+) -> schemas::MemoryGrantsGrantRequest {
+    dto(json!({
+        "space_id": SPACE,
+        "subject_id": subject,
+        "principal_id": grantee,
+        "capabilities": [capability],
+        "idempotency_key": key,
+    }))
+}
+
+/// §6.5 context-restricted grant (the shape `context_ids` selects).
+fn restricted_grant(
+    key: &str,
+    capability: &str,
+    grantee: &str,
+    subject: &str,
+    contexts: &[&str],
+) -> schemas::MemoryGrantsGrantRequest {
+    dto(json!({
+        "space_id": SPACE,
+        "subject_id": subject,
+        "principal_id": grantee,
+        "capabilities": [capability],
+        "context_ids": contexts,
+        "shared_access": false,
+        "idempotency_key": key,
+    }))
+}
+
+fn fence_at_subject(
+    subject: &str,
     action: &str,
-    target: Value,
     revision: u64,
     key: &str,
 ) -> schemas::MemorySubjectsFenceRequest {
     dto(json!({
         "space_id": SPACE,
-        "subject_id": SUBJECT,
-        "target": target,
+        "subject_id": subject,
+        "target": { "type": "subject" },
         "action": action,
         "expected_revision": revision,
         "idempotency_key": key,
     }))
+}
+
+fn fence_at_context(
+    subject: &str,
+    context_id: &str,
+    action: &str,
+    revision: u64,
+    key: &str,
+) -> schemas::MemorySubjectsFenceRequest {
+    dto(json!({
+        "space_id": SPACE,
+        "subject_id": subject,
+        "target": { "type": "context", "context_id": context_id },
+        "action": action,
+        "expected_revision": revision,
+        "idempotency_key": key,
+    }))
+}
+
+fn ensure_request(subject: &str) -> schemas::MemorySubjectsEnsureRequest {
+    dto(json!({ "space_id": SPACE, "subject_id": subject }))
+}
+
+fn freeze_request(key: &str, revision: u64) -> schemas::MemorySpacesFreezeRequest {
+    dto(json!({ "space_id": SPACE, "expected_revision": revision, "idempotency_key": key }))
+}
+
+fn list_grants(
+    subject: Option<&str>,
+    principal_filter: Option<&str>,
+    limit: Option<u64>,
+    cursor: Option<&str>,
+) -> schemas::MemoryGrantsListRequest {
+    let mut request = json!({ "space_id": SPACE });
+    if let Some(subject) = subject {
+        request["subject_id"] = json!(subject);
+    }
+    if let Some(principal_id) = principal_filter {
+        request["principal_id"] = json!(principal_id);
+    }
+    if let Some(limit) = limit {
+        request["limit"] = json!(limit);
+    }
+    if let Some(cursor) = cursor {
+        request["cursor"] = json!(cursor);
+    }
+    dto(request)
 }
 
 /// §7.1: the provider describes exactly what it serves, carries no space
@@ -211,11 +312,22 @@ async fn space_freeze_is_revision_checked_and_key_idempotent() {
     let env = seed_env();
     let provider = open_provider(&env).await;
     let admin = principal(CREATOR);
-    let freeze = |key: &str, revision: u64| -> schemas::MemorySpacesFreezeRequest {
-        dto(json!({ "space_id": SPACE, "expected_revision": revision, "idempotency_key": key }))
-    };
 
-    let first = wire(&provider.freeze_space(&admin, freeze("k-freeze", 1)).await);
+    let issued = wire(
+        &provider
+            .grant(&admin, grant_request("k-pre-freeze", "capture", OTHER))
+            .await,
+    );
+    let grant_id = receipt(&issued)["result"]["grant_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let first = wire(
+        &provider
+            .freeze_space(&admin, freeze_request("k-freeze", 1))
+            .await,
+    );
     let first = receipt(&first);
     assert_eq!(first["op"], "memory.spaces.freeze");
     assert_eq!(first["result"]["status"], "frozen");
@@ -224,18 +336,30 @@ async fn space_freeze_is_revision_checked_and_key_idempotent() {
     assert_eq!(first["requester_principal_id"], CREATOR);
     let receipt_id = first["receipt_id"].as_str().unwrap().to_owned();
 
-    let replay = wire(&provider.freeze_space(&admin, freeze("k-freeze", 1)).await);
+    let replay = wire(
+        &provider
+            .freeze_space(&admin, freeze_request("k-freeze", 1))
+            .await,
+    );
     assert_eq!(
         receipt(&replay)["receipt_id"],
         receipt_id,
         "the same key + payload replays the stored receipt (§7.0.5)"
     );
 
-    let conflicting = wire(&provider.freeze_space(&admin, freeze("k-freeze", 2)).await);
+    let conflicting = wire(
+        &provider
+            .freeze_space(&admin, freeze_request("k-freeze", 2))
+            .await,
+    );
     assert_eq!(error_code(&conflicting), "IDEMPOTENCY_CONFLICT");
     assert_eq!(retry_class(&conflicting), "terminal");
 
-    let stale = wire(&provider.freeze_space(&admin, freeze("k-stale", 1)).await);
+    let stale = wire(
+        &provider
+            .freeze_space(&admin, freeze_request("k-stale", 1))
+            .await,
+    );
     assert_eq!(error_code(&stale), "REVISION_CONFLICT");
     assert_eq!(retry_class(&stale), "terminal");
 
@@ -249,6 +373,22 @@ async fn space_freeze_is_revision_checked_and_key_idempotent() {
         "SPACE_FROZEN",
         "grants.grant is outside the §8.2 allowlist"
     );
+
+    // §8.2: revoke stays admissible while frozen, so an incident can be contained.
+    let revoked = wire(
+        &provider
+            .revoke_grant(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "grant_id": grant_id,
+                    "expected_revision": 1,
+                    "idempotency_key": "k-revoke-frozen",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(receipt(&revoked)["result"]["revoked"], true);
 
     let unfrozen = wire(
         &provider
@@ -318,12 +458,7 @@ async fn subjects_ensure_get_and_fence_state_machine() {
         &provider
             .fence_subject(
                 &admin,
-                fence_request(
-                    "archive",
-                    json!({ "type": "context", "context_id": "bnd_1" }),
-                    1,
-                    "k-arch-ctx",
-                ),
+                fence_at_context(SUBJECT, "bnd_1", "archive", 1, "k-arch-ctx"),
             )
             .await,
     );
@@ -331,10 +466,7 @@ async fn subjects_ensure_get_and_fence_state_machine() {
 
     let fenced = wire(
         &provider
-            .fence_subject(
-                &admin,
-                fence_request("fence", json!({ "type": "subject" }), 1, "k-fence"),
-            )
+            .fence_subject(&admin, fence_at_subject(SUBJECT, "fence", 1, "k-fence"))
             .await,
     );
     assert_eq!(receipt(&fenced)["result"]["status"], "fenced");
@@ -342,10 +474,7 @@ async fn subjects_ensure_get_and_fence_state_machine() {
 
     let unfenced = wire(
         &provider
-            .fence_subject(
-                &admin,
-                fence_request("unfence", json!({ "type": "subject" }), 2, "k-unfence"),
-            )
+            .fence_subject(&admin, fence_at_subject(SUBJECT, "unfence", 2, "k-unfence"))
             .await,
     );
     assert_eq!(receipt(&unfenced)["result"]["status"], "active");
@@ -355,12 +484,7 @@ async fn subjects_ensure_get_and_fence_state_machine() {
         &provider
             .fence_subject(
                 &admin,
-                fence_request(
-                    "fence",
-                    json!({ "type": "context", "context_id": "bnd_1" }),
-                    3,
-                    "k-fence-ctx",
-                ),
+                fence_at_context(SUBJECT, "bnd_1", "fence", 3, "k-fence-ctx"),
             )
             .await,
     );
@@ -372,10 +496,7 @@ async fn subjects_ensure_get_and_fence_state_machine() {
 
     let archived = wire(
         &provider
-            .fence_subject(
-                &admin,
-                fence_request("archive", json!({ "type": "subject" }), 4, "k-archive"),
-            )
+            .fence_subject(&admin, fence_at_subject(SUBJECT, "archive", 4, "k-archive"))
             .await,
     );
     assert_eq!(receipt(&archived)["result"]["status"], "archived");
@@ -384,7 +505,7 @@ async fn subjects_ensure_get_and_fence_state_machine() {
         &provider
             .fence_subject(
                 &admin,
-                fence_request("unfence", json!({ "type": "subject" }), 5, "k-unarchive"),
+                fence_at_subject(SUBJECT, "unfence", 5, "k-unarchive"),
             )
             .await,
     );
@@ -401,14 +522,14 @@ async fn grants_grant_list_revoke_and_non_amplification() {
     let admin = principal(CREATOR);
     let grantee = principal(OTHER);
 
-    let granted = wire(
+    let issued = wire(
         &provider
             .grant(&admin, grant_request("k-grant-1", "capture", OTHER))
             .await,
     );
-    let granted = receipt(&granted);
-    let grant_id = granted["result"]["grant_id"].as_str().unwrap().to_owned();
-    assert_eq!(granted["result"]["revision"], 1);
+    let issued = receipt(&issued);
+    let grant_id = issued["result"]["grant_id"].as_str().unwrap().to_owned();
+    assert_eq!(issued["result"]["revision"], 1);
 
     let self_view = wire(
         &provider
@@ -490,17 +611,60 @@ async fn grants_grant_list_revoke_and_non_amplification() {
     // no longer run a `capture`-gated op.
     let denied = wire(
         &provider
-            .ensure_subject(
-                &grantee,
-                dto(json!({ "space_id": SPACE, "subject_id": "sbj_after_revoke" })),
-            )
+            .ensure_subject(&grantee, ensure_request("sbj_after_revoke"))
             .await,
     );
     assert_eq!(error_code(&denied), "NOT_AUTHORIZED");
 }
 
-/// Round B's families and the sub-capability gated families answer a typed
-/// `op_unsupported` refusal (`retry_class: terminal`) instead of any success.
+/// §14.1/§14.2: refusals travel `SpokeResult::Reject` — a domain refusal keeps
+/// its memory code, and an unserved op is the upstream dispatch-deny shape
+/// (`CAPABILITY_PORT_MISSING` + `details.wire_code`), never a success payload.
+#[tokio::test]
+async fn refusals_travel_the_reject_channel() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+
+    let denied = provider
+        .grant(
+            &principal(OTHER),
+            grant_request("k-deny", "capture", CREATOR),
+        )
+        .await;
+    match &denied {
+        SpokeResult::Reject(reject) => {
+            assert_eq!(reject.code, SpokeRejectCode::NotAuthorized);
+            let details = reject.details.as_ref().expect("retry class is carried");
+            assert_eq!(details["retry_class"], "terminal");
+        }
+        SpokeResult::Ok(_) => panic!("a refusal must never be a success value: {denied:?}"),
+    }
+
+    let unsupported = provider
+        .capture(
+            &principal(CREATOR),
+            dto(json!({
+                "space_id": SPACE,
+                "subject_id": SUBJECT,
+                "content": { "text": "Mira promised to return before dawn." },
+                "capture_scope": { "visibility": "shared" },
+                "idempotency_key": "k-capture-reject",
+            })),
+        )
+        .await;
+    match &unsupported {
+        SpokeResult::Reject(reject) => {
+            assert_eq!(reject.code, SpokeRejectCode::CapabilityPortMissing);
+            let details = reject.details.as_ref().expect("wire code is carried");
+            assert_eq!(details["wire_code"], "op_unsupported");
+            assert_eq!(details["retry_class"], "terminal");
+        }
+        SpokeResult::Ok(_) => panic!("an unserved op must be rejected: {unsupported:?}"),
+    }
+}
+
+/// Round B's families and the sub-capability gated families answer the
+/// dispatch-level denial instead of any success.
 #[tokio::test]
 async fn gated_families_refuse_with_op_unsupported() {
     let env = seed_env();
@@ -521,11 +685,8 @@ async fn gated_families_refuse_with_op_unsupported() {
             )
             .await,
     );
-    assert_eq!(
-        error_code(&capture),
-        "op_unsupported",
-        "round B owns capture"
-    );
+    assert_eq!(error_code(&capture), "CAPABILITY_PORT_MISSING");
+    assert_eq!(error_details(&capture)["wire_code"], "op_unsupported");
     assert_eq!(retry_class(&capture), "terminal");
 
     let recall = wire(
@@ -541,7 +702,7 @@ async fn gated_families_refuse_with_op_unsupported() {
             )
             .await,
     );
-    assert_eq!(error_code(&recall), "op_unsupported", "round B owns recall");
+    assert_eq!(error_code(&recall), "CAPABILITY_PORT_MISSING");
 
     let reflections = wire(
         &provider
@@ -555,11 +716,7 @@ async fn gated_families_refuse_with_op_unsupported() {
             )
             .await,
     );
-    assert_eq!(
-        error_code(&reflections),
-        "op_unsupported",
-        "reflection is a gated sub-capability"
-    );
+    assert_eq!(error_code(&reflections), "CAPABILITY_PORT_MISSING");
 
     let export = wire(
         &provider
@@ -573,12 +730,701 @@ async fn gated_families_refuse_with_op_unsupported() {
             )
             .await,
     );
+    assert_eq!(error_code(&export), "CAPABILITY_PORT_MISSING");
+}
+
+/// §6.5/§7.7: fence authorization is bound to the target — a context fence needs
+/// coverage of THAT context, and a whole-subject fence/archive needs unrestricted
+/// coverage of the subject.
+#[tokio::test]
+async fn fence_authorization_is_bound_to_the_fenced_target() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    let scoped = principal(OTHER);
+
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(OTHER_SUBJECT))
+            .await,
+    );
+    let granted = wire(
+        &provider
+            .grant(
+                &admin,
+                restricted_grant("k-scoped-admin", "admin", OTHER, SUBJECT, &["bnd_1"]),
+            )
+            .await,
+    );
+    assert_eq!(receipt(&granted)["result"]["revision"], 1);
+
+    let outside_context = wire(
+        &provider
+            .fence_subject(
+                &scoped,
+                fence_at_context(SUBJECT, "bnd_2", "fence", 1, "k-fence-outside"),
+            )
+            .await,
+    );
     assert_eq!(
-        error_code(&export),
-        "op_unsupported",
-        "transfer is a gated sub-capability"
+        error_code(&outside_context),
+        "NOT_AUTHORIZED",
+        "an admin restricted to bnd_1 cannot fence bnd_2"
+    );
+
+    let other_subject = wire(
+        &provider
+            .fence_subject(
+                &scoped,
+                fence_at_context(OTHER_SUBJECT, "bnd_1", "fence", 1, "k-fence-other-subject"),
+            )
+            .await,
+    );
+    assert_eq!(
+        error_code(&other_subject),
+        "NOT_AUTHORIZED",
+        "subject-scoped coverage never reaches another subject"
+    );
+
+    let whole_subject = wire(
+        &provider
+            .fence_subject(
+                &scoped,
+                fence_at_subject(SUBJECT, "fence", 1, "k-fence-whole"),
+            )
+            .await,
+    );
+    assert_eq!(
+        error_code(&whole_subject),
+        "NOT_AUTHORIZED",
+        "a whole-subject fence needs unrestricted grant coverage"
+    );
+
+    let archive = wire(
+        &provider
+            .fence_subject(
+                &scoped,
+                fence_at_subject(SUBJECT, "archive", 1, "k-archive-whole"),
+            )
+            .await,
+    );
+    assert_eq!(error_code(&archive), "NOT_AUTHORIZED");
+
+    let own_context = wire(
+        &provider
+            .fence_subject(
+                &scoped,
+                fence_at_context(SUBJECT, "bnd_1", "fence", 1, "k-fence-inside"),
+            )
+            .await,
+    );
+    assert_eq!(
+        receipt(&own_context)["result"]["fenced_contexts"],
+        json!(["bnd_1"])
+    );
+
+    let admin_archive = wire(
+        &provider
+            .fence_subject(
+                &admin,
+                fence_at_subject(SUBJECT, "archive", 2, "k-archive-admin"),
+            )
+            .await,
+    );
+    assert_eq!(receipt(&admin_archive)["result"]["status"], "archived");
+}
+
+/// §7.5/§7.7/§7.9: a fenced or archived subject rejects its writes — get-or-create
+/// and subject-scoped grants — while space-wide writes stay unaffected.
+#[tokio::test]
+async fn fenced_and_archived_subjects_reject_writes() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    let fenced = wire(
+        &provider
+            .fence_subject(&admin, fence_at_subject(SUBJECT, "fence", 1, "k-fence"))
+            .await,
+    );
+    assert_eq!(receipt(&fenced)["result"]["status"], "fenced");
+
+    let ensure_while_fenced = wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    assert_eq!(error_code(&ensure_while_fenced), "SUBJECT_FENCED");
+    assert_eq!(error_details(&ensure_while_fenced)["status"], "fenced");
+    assert_eq!(retry_class(&ensure_while_fenced), "terminal");
+
+    let grant_while_fenced = wire(
+        &provider
+            .grant(
+                &admin,
+                subject_grant("k-grant-fenced", "capture", OTHER, SUBJECT),
+            )
+            .await,
+    );
+    assert_eq!(error_code(&grant_while_fenced), "SUBJECT_FENCED");
+
+    let unfenced = wire(
+        &provider
+            .fence_subject(&admin, fence_at_subject(SUBJECT, "unfence", 2, "k-unfence"))
+            .await,
+    );
+    assert_eq!(receipt(&unfenced)["result"]["status"], "active");
+
+    let ensure_after_unfence = wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    assert_eq!(
+        receipt(&ensure_after_unfence)["result"]["created"],
+        false,
+        "unfencing restores the subject's writes"
+    );
+
+    let archived = wire(
+        &provider
+            .fence_subject(&admin, fence_at_subject(SUBJECT, "archive", 3, "k-archive"))
+            .await,
+    );
+    assert_eq!(receipt(&archived)["result"]["status"], "archived");
+
+    let ensure_while_archived = wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    assert_eq!(error_code(&ensure_while_archived), "SUBJECT_FENCED");
+    assert_eq!(error_details(&ensure_while_archived)["status"], "archived");
+
+    let grant_while_archived = wire(
+        &provider
+            .grant(
+                &admin,
+                subject_grant("k-grant-archived", "capture", OTHER, SUBJECT),
+            )
+            .await,
+    );
+    assert_eq!(error_code(&grant_while_archived), "SUBJECT_FENCED");
+
+    // Space-wide issuance names no gated subject, so it still commits.
+    let space_wide = wire(
+        &provider
+            .grant(&admin, grant_request("k-space-wide", "capture", OTHER))
+            .await,
+    );
+    assert_eq!(receipt(&space_wide)["result"]["revision"], 1);
+}
+
+/// §7.9 non-amplification with the ISSUED scope: a subject-scoped admin delegates
+/// within its own subject only.
+#[tokio::test]
+async fn subject_scoped_admin_delegates_within_its_subject_only() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    let scoped = principal(OTHER);
+
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(OTHER_SUBJECT))
+            .await,
+    );
+    let scoped_admin = wire(
+        &provider
+            .grant(&admin, subject_grant("k-scoped", "admin", OTHER, SUBJECT))
+            .await,
+    );
+    assert_eq!(receipt(&scoped_admin)["result"]["revision"], 1);
+
+    let delegated = wire(
+        &provider
+            .grant(
+                &scoped,
+                subject_grant("k-delegate", "capture", THIRD, SUBJECT),
+            )
+            .await,
+    );
+    assert_eq!(
+        receipt(&delegated)["result"]["revision"],
+        1,
+        "a same-subject admin may delegate within its own subject"
+    );
+
+    let other_subject = wire(
+        &provider
+            .grant(
+                &scoped,
+                subject_grant("k-delegate-other", "capture", THIRD, OTHER_SUBJECT),
+            )
+            .await,
+    );
+    assert_eq!(error_code(&other_subject), "NOT_AUTHORIZED");
+
+    let space_wide = wire(
+        &provider
+            .grant(&scoped, grant_request("k-delegate-wide", "capture", THIRD))
+            .await,
+    );
+    assert_eq!(
+        error_code(&space_wide),
+        "NOT_AUTHORIZED",
+        "subject-scoped coverage cannot issue a space-wide grant"
     );
 }
+
+/// §7.0.5/MEM-R021: a same-key replay returns the stored receipt without
+/// re-evaluating the freeze the original op preceded; a different payload under
+/// the same key is still `IDEMPOTENCY_CONFLICT`.
+#[tokio::test]
+async fn replay_is_checked_before_fresh_effect_lifecycle_gates() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+
+    let granted = wire(
+        &provider
+            .grant(&admin, grant_request("k-replay", "capture", OTHER))
+            .await,
+    );
+    let granted_receipt = receipt(&granted)["receipt_id"].as_str().unwrap().to_owned();
+
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    let fenced = wire(
+        &provider
+            .fence_subject(&admin, fence_at_subject(SUBJECT, "fence", 1, "k-fence"))
+            .await,
+    );
+    let fence_receipt = receipt(&fenced)["receipt_id"].as_str().unwrap().to_owned();
+
+    let frozen = wire(
+        &provider
+            .freeze_space(&admin, freeze_request("k-freeze", 1))
+            .await,
+    );
+    assert_eq!(receipt(&frozen)["result"]["status"], "frozen");
+
+    let replay = wire(
+        &provider
+            .grant(&admin, grant_request("k-replay", "capture", OTHER))
+            .await,
+    );
+    assert_eq!(
+        receipt(&replay)["receipt_id"],
+        granted_receipt,
+        "the retry after freeze replays the original grant receipt, not SPACE_FROZEN"
+    );
+
+    let fence_replay = wire(
+        &provider
+            .fence_subject(&admin, fence_at_subject(SUBJECT, "fence", 1, "k-fence"))
+            .await,
+    );
+    assert_eq!(
+        receipt(&fence_replay)["receipt_id"],
+        fence_receipt,
+        "the retry after freeze replays the original fence receipt"
+    );
+
+    let changed_payload = wire(
+        &provider
+            .grant(&admin, grant_request("k-replay", "recall", OTHER))
+            .await,
+    );
+    assert_eq!(
+        error_code(&changed_payload),
+        "IDEMPOTENCY_CONFLICT",
+        "the same key with a different payload is never replayed"
+    );
+}
+
+/// §7.0.7/MEM-R026: a cursor is bound to principal + space + subject +
+/// principal filter + policy version + snapshot marker, and a grant write
+/// between pages invalidates it instead of silently re-filtering.
+#[tokio::test]
+async fn cursors_bind_the_query_and_invalidate_on_change() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(OTHER_SUBJECT))
+            .await,
+    );
+    wire(
+        &provider
+            .grant(&admin, subject_grant("k-a", "capture", OTHER, SUBJECT))
+            .await,
+    );
+    wire(
+        &provider
+            .grant(&admin, subject_grant("k-b", "recall", OTHER, SUBJECT))
+            .await,
+    );
+    wire(
+        &provider
+            .grant(
+                &admin,
+                subject_grant("k-c", "capture", OTHER, OTHER_SUBJECT),
+            )
+            .await,
+    );
+
+    let first = wire(
+        &provider
+            .list_grants(&admin, list_grants(Some(SUBJECT), None, Some(1), None))
+            .await,
+    );
+    assert_eq!(first["grants"].as_array().unwrap().len(), 1);
+    let cursor = first["next_cursor"]
+        .as_str()
+        .expect("a filtered page of two grants issues a cursor")
+        .to_owned();
+
+    let second = wire(
+        &provider
+            .list_grants(
+                &admin,
+                list_grants(Some(SUBJECT), None, Some(1), Some(&cursor)),
+            )
+            .await,
+    );
+    assert_eq!(second["grants"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        second.get("next_cursor"),
+        None,
+        "the second page ends the bound listing"
+    );
+
+    let cross_filter = wire(
+        &provider
+            .list_grants(
+                &admin,
+                list_grants(Some(OTHER_SUBJECT), None, Some(1), Some(&cursor)),
+            )
+            .await,
+    );
+    assert_eq!(
+        error_code(&cross_filter),
+        "CURSOR_INVALID",
+        "a cursor never carries over to another filter"
+    );
+
+    let cross_principal = wire(
+        &provider
+            .list_grants(
+                &principal(OTHER),
+                list_grants(Some(SUBJECT), None, Some(1), Some(&cursor)),
+            )
+            .await,
+    );
+    assert_eq!(
+        error_code(&cross_principal),
+        "CURSOR_INVALID",
+        "a cursor is bound to the principal that minted it"
+    );
+
+    // A grant write moves the marker, so the page-one cursor dies (§7.0.7).
+    wire(
+        &provider
+            .grant(&admin, subject_grant("k-d", "capture", THIRD, SUBJECT))
+            .await,
+    );
+    let invalidated = wire(
+        &provider
+            .list_grants(
+                &admin,
+                list_grants(Some(SUBJECT), None, Some(1), Some(&cursor)),
+            )
+            .await,
+    );
+    assert_eq!(
+        error_code(&invalidated),
+        "CURSOR_INVALID",
+        "a grant change between pages invalidates the cursor"
+    );
+}
+
+/// §6.1 + plan Global Constraints: `payload_digest` is the SHA-256 of the JCS
+/// canonicalization of `{op, payload}`. The vector below was computed
+/// independently (Python `json.dumps(..., sort_keys=True, separators=(",", ":"))`
+/// over `{"op": "memory.spaces.freeze", "payload": {...}}`) rather than read back
+/// from the provider.
+#[tokio::test]
+async fn payload_digest_binds_the_operation_and_the_canonical_payload() {
+    const FREEZE_DIGEST_VECTOR: &str =
+        "0fb2daf7b8909d3a73c5d9961a8deb8549aee99387b86d894b39eeccdd08619d";
+
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let body = wire(
+        &provider
+            .freeze_space(&principal(CREATOR), freeze_request("k-digest", 1))
+            .await,
+    );
+    let receipt = receipt(&body);
+    let digest = receipt["payload_digest"].as_str().expect("digest present");
+    assert_eq!(digest.len(), 64, "64 lowercase hex chars (§6.1)");
+    assert!(
+        digest
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
+        "lowercase hex only: {digest}"
+    );
+    assert_eq!(
+        digest, FREEZE_DIGEST_VECTOR,
+        "the op-bound JCS digest matches the pinned cross-component vector"
+    );
+}
+
+/// §14.2/§14.3: a failure at or after `COMMIT` is `OUTCOME_UNCERTAIN`, never a
+/// clean retryable failure, and same-key replay/settlement resolves it.
+#[tokio::test]
+async fn commit_boundary_failures_are_outcome_uncertain() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+
+    // The COMMIT succeeded but the response was lost: the effect is committed.
+    provider.inject_commit_fault(true);
+    let lost = wire(
+        &provider
+            .grant(&admin, grant_request("k-uncertain", "capture", OTHER))
+            .await,
+    );
+    assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
+    assert_eq!(retry_class(&lost), "uncertain");
+
+    let resolved = wire(
+        &provider
+            .grant(&admin, grant_request("k-uncertain", "capture", OTHER))
+            .await,
+    );
+    let resolved = receipt(&resolved);
+    assert_eq!(resolved["op"], "memory.grants.grant");
+    assert_eq!(
+        resolved["status"], "committed",
+        "the lost response is recovered by same-key replay (§14.3)"
+    );
+    let view = wire(
+        &provider
+            .list_grants(&principal(OTHER), dto(json!({ "space_id": SPACE })))
+            .await,
+    );
+    assert_eq!(
+        view["grants"].as_array().unwrap().len(),
+        1,
+        "the committed effect exists exactly once"
+    );
+
+    // The COMMIT itself failed: the outcome is unknown, so it is not reported as
+    // a clean no-effect retryable either.
+    provider.inject_commit_fault(false);
+    let unknown = wire(
+        &provider
+            .grant(&admin, grant_request("k-unknown", "capture", THIRD))
+            .await,
+    );
+    assert_eq!(error_code(&unknown), "OUTCOME_UNCERTAIN");
+    assert_eq!(retry_class(&unknown), "uncertain");
+
+    let retried = wire(
+        &provider
+            .grant(&admin, grant_request("k-unknown", "capture", THIRD))
+            .await,
+    );
+    assert_eq!(receipt(&retried)["result"]["revision"], 1);
+}
+
+/// §14.2: a storage failure raised strictly BEFORE `COMMIT` asserts no effect and
+/// stays a retryable `INTERNAL_ERROR`.
+#[tokio::test]
+async fn pre_commit_storage_failures_are_retryable_and_leave_no_effect() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
+
+    // A real storage error before COMMIT: the receipt insert always aborts.
+    sqlx::query(
+        "CREATE TRIGGER test_fail_receipt BEFORE INSERT ON memory_receipts \
+         BEGIN SELECT RAISE(ABORT, 'injected receipt failure'); END",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let failed = wire(
+        &provider
+            .grant(&admin, grant_request("k-precommit", "capture", OTHER))
+            .await,
+    );
+    assert_eq!(error_code(&failed), "INTERNAL_ERROR");
+    assert_eq!(retry_class(&failed), "retryable");
+
+    let view = wire(
+        &provider
+            .list_grants(
+                &admin,
+                dto(json!({ "space_id": SPACE, "principal_id": OTHER })),
+            )
+            .await,
+    );
+    assert!(
+        view["grants"].as_array().unwrap().is_empty(),
+        "a pre-commit failure leaves no effect: {view}"
+    );
+
+    sqlx::query("DROP TRIGGER test_fail_receipt")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let retried = wire(
+        &provider
+            .grant(&admin, grant_request("k-precommit", "capture", OTHER))
+            .await,
+    );
+    assert_eq!(
+        receipt(&retried)["result"]["revision"],
+        1,
+        "the retry with the same key re-executes and commits"
+    );
+}
+
+/// §7.3/§11: admission and effect are serialized with the freeze transition. A
+/// freeze transaction holding the write lock blocks the op's admission, so after
+/// it commits the op sees the frozen space and is refused — never admitted on the
+/// pre-freeze state and committed after the barrier.
+#[tokio::test]
+async fn freeze_serializes_with_admitted_writes() {
+    let env = seed_env();
+    let provider = Arc::new(open_provider(&env).await);
+    let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
+
+    // The uncommitted freeze holds the write lock for this whole block.
+    let mut freeze = nexus_local_db::begin_immediate(&pool).await.unwrap();
+    sqlx::query(
+        "UPDATE memory_spaces SET status = 'frozen', revision = revision + 1 WHERE space_id = ?",
+    )
+    .bind(SPACE)
+    .execute(&mut *freeze)
+    .await
+    .unwrap();
+
+    let writer = Arc::clone(&provider);
+    let pending = tokio::spawn(async move {
+        writer
+            .grant(
+                &principal(CREATOR),
+                grant_request("k-race", "capture", OTHER),
+            )
+            .await
+    });
+
+    // Deterministic: the op cannot begin its transaction (hence cannot admit)
+    // while the freeze transaction is open; 100ms is far inside busy_timeout.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(
+        !pending.is_finished(),
+        "the op must wait for the freeze transaction (§7.3/§11)"
+    );
+
+    freeze.commit().await.unwrap();
+    let refused = wire(&pending.await.unwrap());
+    assert_eq!(
+        error_code(&refused),
+        "SPACE_FROZEN",
+        "an op that begins after the freeze commit is refused"
+    );
+
+    let view = wire(
+        &provider
+            .list_grants(
+                &principal(CREATOR),
+                dto(json!({ "space_id": SPACE, "principal_id": OTHER })),
+            )
+            .await,
+    );
+    assert!(
+        view["grants"].as_array().unwrap().is_empty(),
+        "no write is committed after the freeze barrier: {view}"
+    );
+}
+
+/// §11: an op that is admitted before a competing writer performs its work is not
+/// lost — it completes and keeps its receipt once the writer releases the lock.
+#[tokio::test]
+async fn admitted_write_completes_after_a_competing_writer_releases() {
+    let env = seed_env();
+    let provider = Arc::new(open_provider(&env).await);
+    let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
+
+    let competing = nexus_local_db::begin_immediate(&pool).await.unwrap();
+
+    let writer = Arc::clone(&provider);
+    let pending = tokio::spawn(async move {
+        writer
+            .grant(
+                &principal(CREATOR),
+                grant_request("k-admitted", "capture", OTHER),
+            )
+            .await
+    });
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(
+        !pending.is_finished(),
+        "the op waits for the competing writer's transaction"
+    );
+
+    // The competing writer never takes effect; the op then commits in full.
+    competing.rollback().await.unwrap();
+    let committed = wire(&pending.await.unwrap());
+    assert_eq!(receipt(&committed)["result"]["revision"], 1);
+
+    let view = wire(
+        &provider
+            .list_grants(&principal(OTHER), dto(json!({ "space_id": SPACE })))
+            .await,
+    );
+    assert_eq!(
+        view["grants"].as_array().unwrap().len(),
+        1,
+        "the admitted write is neither lost nor half-applied"
+    );
+}
+
+// C-117: the control-metadata migration bumps the schema version line.
+const _: () = assert!(nexus_local_db::DB_SCHEMA_VERSION >= 26);
 
 /// C-117: the control-metadata migration lands once, re-runs as a no-op, is
 /// writer-guard registered (guards + outbox on every control table), and the
@@ -657,10 +1503,6 @@ async fn control_metadata_migration_is_idempotent_and_writer_registered() {
         versions.db_schema_version,
         nexus_local_db::DB_SCHEMA_VERSION,
         "the seeded version line is current"
-    );
-    assert!(
-        nexus_local_db::DB_SCHEMA_VERSION >= 26,
-        "the control-metadata migration bumps DB_SCHEMA_VERSION (C-117)"
     );
 
     drop(provider);
