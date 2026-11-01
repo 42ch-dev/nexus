@@ -29,7 +29,7 @@ use std::num::NonZeroU64;
 
 use nexus_local_db::kb_relationships::KbRelationshipRow;
 use serde_json::{Map, Value};
-use spoke_schemas::relation::RelationExtensionsKey;
+use spoke_schemas::relation::ExtensionKey;
 use spoke_schemas::Relation;
 
 /// Build the merged `extensions.nexus` namespace for a `kb_relationships` row.
@@ -93,7 +93,7 @@ fn build_relation_nexus_ns(row: &KbRelationshipRow) -> Map<String, Value> {
 /// # Panics
 ///
 /// Panics if the literal string `"nexus"` ever fails the
-/// `RelationExtensionsKey` regex — impossible in practice (the regex
+/// `ExtensionKey` regex — impossible in practice (the regex
 /// accepts any `^[a-z][a-z0-9_-]*$` string).
 #[must_use]
 pub fn kb_relationship_row_to_spoke(row: &KbRelationshipRow) -> Relation {
@@ -112,16 +112,16 @@ pub fn kb_relationship_row_to_spoke(row: &KbRelationshipRow) -> Relation {
         .updated_at
         .parse::<chrono::DateTime<chrono::FixedOffset>>()
         .ok()
-        .map(|dt| dt.with_timezone(&chrono::Utc));
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+        .map(Into::into);
 
     let nexus_ns = build_relation_nexus_ns(row);
 
     let mut extensions = HashMap::new();
-    // `"nexus"` always satisfies the `RelationExtensionsKey` regex — the
+    // `"nexus"` always satisfies the `ExtensionKey` regex — the
     // conversion is infallible at runtime (mirrors the V1.139
-    // `KnowledgeEntryExtensionsKey` pattern).
-    let key = RelationExtensionsKey::try_from("nexus")
-        .expect("\"nexus\" matches the extensions-key regex");
+    // `ExtensionKey` pattern).
+    let key = ExtensionKey::try_from("nexus").expect("\"nexus\" matches the extensions-key regex");
     extensions.insert(key, nexus_ns);
 
     Relation {

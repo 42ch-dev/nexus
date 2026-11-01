@@ -202,13 +202,13 @@ use nexus_spoke_adapter::{
     orchestrate_assemble, orchestrate_check_world_scoped, orchestrate_compute, orchestrate_promote,
     orchestrate_relate, orchestrate_upsert, AssembleRequest, AssembleResponse, CheckRequest,
     CheckResponse, ComputeRequest, ComputeResponse, KnowledgeEntryPort, NexusAdapter,
-    PromoteRequest, PromoteResponse, RelateRequest, RelateResponse, Relation,
-    RelationExtensionsKey, RelationPort, SpokeReject, SpokeRejectCode, SpokeResult, UpsertRequest,
-    UpsertResponse,
+    PromoteRequest, PromoteResponse, RelateRequest, RelateResponse, Relation, RelationPort,
+    SpokeReject, SpokeRejectCode, SpokeResult, UpsertRequest, UpsertResponse,
 };
 use serde_json::{Map, Value};
 use spoke_connect::InvokeHandlerV2;
 use spoke_schemas::connect::connect_invoke_response::ErrorEnvelope;
+use spoke_schemas::relation::ExtensionKey;
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -2509,11 +2509,10 @@ async fn assert_relate_endpoint_world_matches(
 }
 
 /// Read `extensions.nexus.world_id` from a stored spoke `Relation` (the
-/// typed map lookup — `RelationExtensionsKey` does not implement
+/// typed map lookup — `ExtensionKey` does not implement
 /// `Borrow<str>`, mirroring the adapter's own extension-key pattern).
 fn relation_world_id_of(relation: &Relation) -> Option<&str> {
-    let key = RelationExtensionsKey::try_from("nexus")
-        .expect("\"nexus\" matches the extensions-key regex");
+    let key = ExtensionKey::try_from("nexus").expect("\"nexus\" matches the extensions-key regex");
     relation
         .extensions
         .get(&key)

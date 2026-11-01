@@ -38,14 +38,14 @@ use crate::conversion::knowledge_entry::block_type_to_entry_type;
 use crate::conversion::knowledge_record_to_spoke;
 use crate::extensions::has_nexus_body;
 use crate::{
-    KnowledgeEntry, Scope, ScopeExtensionsKey, ScopeQueryPort, SpokeReject, SpokeRejectCode,
-    SpokeResult, TimelineEvent,
+    KnowledgeEntry, Scope, ScopeQueryPort, SpokeReject, SpokeRejectCode, SpokeResult, TimelineEvent,
 };
 use async_trait::async_trait;
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef;
 use nexus_local_db::kb_store::{SqliteKbStore, LIST_BY_WORLD_LIMIT};
 use nexus_local_db::narrative_gateway::list_timeline_events_scoped;
 use serde_json::{json, Map, Value};
+use spoke_schemas::ExtensionKey;
 #[async_trait]
 impl ScopeQueryPort for NexusAdapter<'_> {
     /// List the active knowledge entries for the scope's world.
@@ -179,11 +179,12 @@ impl ScopeQueryPort for NexusAdapter<'_> {
         let pool = self.pool.clone();
         let world_id = scope.scope_id.clone();
         // branch_id rides scope.extensions["nexus"] (spoke-native since 0.6.0),
-        // looked up via the typify ScopeExtensionsKey newtype — mirrors the
+        // looked up via the typify ExtensionKey newtype — mirrors the
         // MCA `kb_query_from_scope` extraction (spec §7.5 scope-pushdown).
         let branch_id = scope
             .extensions
-            .get(&nexus_scope_key())
+            .as_ref()
+            .and_then(|ext| ext.get(&nexus_scope_key()))
             .and_then(|ns| ns.get("branch_id"))
             .and_then(Value::as_str)
             .map(str::to_owned);
@@ -223,15 +224,15 @@ impl ScopeQueryPort for NexusAdapter<'_> {
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
-/// Construct the typed `ScopeExtensionsKey` for the `"nexus"` namespace.
+/// Construct the typed `ExtensionKey` for the `"nexus"` namespace.
 ///
 /// The literal `"nexus"` always satisfies the typify `^[a-z][a-z0-9_-]*$`
 /// namespace regex, so construction is infallible at runtime. The newtype does
 /// not implement `Borrow<str>`, so `HashMap::get("nexus")` does not compile —
 /// this bridges that gap (mirrors `mca_read::nexus_scope_key` /
 /// `extensions::nexus_key`).
-fn nexus_scope_key() -> ScopeExtensionsKey {
-    ScopeExtensionsKey::try_from("nexus")
+fn nexus_scope_key() -> ExtensionKey {
+    ExtensionKey::try_from("nexus")
         .expect("\"nexus\" matches the ^[a-z][a-z0-9_-]*$ namespace regex")
 }
 
@@ -266,7 +267,7 @@ mod tests {
     use nexus_local_db::kb_store::LIST_BY_WORLD_LIMIT;
     use nexus_local_db::narrative_gateway::seed;
     use nexus_local_db::{open_pool, run_migrations};
-    use spoke_schemas::timeline_event::TimelineEventExtensionsKey;
+    use spoke_schemas::timeline_event::ExtensionKey;
 
     /// Register the fixture creator's holder so a governed row can be stored
     /// (the native `holder_entry_id` column is FK-bound to the registry, and
@@ -818,11 +819,11 @@ mod tests {
             .expect("timeline scope wire shape is schema-valid")
     }
 
-    /// Typed `TimelineEventExtensionsKey` for the `"nexus"` namespace — the only
+    /// Typed `ExtensionKey` for the `"nexus"` namespace — the only
     /// way to read `extensions.nexus` on a spoke `TimelineEvent` (the typify
     /// newtype does not impl `Borrow<str>`).
-    fn nexus_te_key() -> TimelineEventExtensionsKey {
-        TimelineEventExtensionsKey::try_from("nexus")
+    fn nexus_te_key() -> ExtensionKey {
+        ExtensionKey::try_from("nexus")
             .expect("\"nexus\" matches the ^[a-z][a-z0-9_-]*$ namespace regex")
     }
 

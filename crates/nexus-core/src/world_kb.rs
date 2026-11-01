@@ -2360,9 +2360,10 @@ pub mod relationship {
         delete_relationship_in_tx, generate_relationship_id, get_relationship, SOURCE_MANUAL,
     };
     use nexus_local_db::LocalDbError;
+    use nexus_spoke_adapter::spoke_schemas::relation::ExtensionKey;
     use nexus_spoke_adapter::{
         orchestrate_relate, NexusAdapter, RelateRequest, RelateResponse, Relation as SpokeRelation,
-        RelationExtensionsKey, SpokeResult,
+        SpokeResult,
     };
     use std::collections::HashMap;
     use std::num::NonZeroU64;
@@ -2553,7 +2554,7 @@ pub mod relationship {
             if let Ok(stored_ns) =
                 serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(json)
             {
-                let key = RelationExtensionsKey::try_from("nexus")
+                let key = ExtensionKey::try_from("nexus")
                     .expect("\"nexus\" matches the extensions-key regex");
                 if let Some(nexus_ns) = relation.extensions.get_mut(&key) {
                     for (k, v) in stored_ns {
@@ -2830,8 +2831,8 @@ pub mod relationship {
             );
         }
 
-        let key = RelationExtensionsKey::try_from("nexus")
-            .expect("\"nexus\" matches the extensions-key regex");
+        let key =
+            ExtensionKey::try_from("nexus").expect("\"nexus\" matches the extensions-key regex");
         let mut extensions = HashMap::new();
         extensions.insert(key, nexus_ns);
 

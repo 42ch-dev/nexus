@@ -637,6 +637,19 @@ mod tests {
             "capabilities must be exactly the advertised locked list \
              (baseline ++ ke-ownership ++ LOCAL_TOOL_OPS, compute names only with the feature)"
         );
+        // 0.15.1 lockstep: the upstream `spoke-memory` capability family is
+        // additive and UNCONSUMED — the manifest must never fabricate it
+        // (no capability without a production port behind it).
+        for capability in [
+            "spoke-memory",
+            "spoke-memory-reflection",
+            "spoke-memory-transfer",
+        ] {
+            assert!(
+                !manifest.capabilities.iter().any(|c| c == capability),
+                "capability {capability:?} must stay absent until memory adoption is authorized"
+            );
+        }
         assert!(
             matches!(
                 spoke_operations::validate_manifest_tools(&manifest),

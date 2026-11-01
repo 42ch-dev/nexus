@@ -386,7 +386,7 @@ impl From<TimelineEvent> for nexus_contracts::TimelineEvent {
 //     metadata; modules.observation carried verbatim, unknown keys round-trip).
 
 use serde_json::Value;
-use spoke_schemas::timeline_event::{TimelineEventCanonicalName, TimelineEventExtensionsKey};
+use spoke_schemas::timeline_event::{ExtensionKey, TimelineEventCanonicalName};
 
 /// Re-export the spoke standard `TimelineEvent` under a clarifying alias.
 ///
@@ -403,12 +403,12 @@ const NEXUS_NAMESPACE: &str = "nexus";
 /// Construct the typed namespace lookup key for the `"nexus"` namespace.
 ///
 /// `spoke_schemas::TimelineEvent.extensions` is keyed by the typify-generated
-/// newtype `TimelineEventExtensionsKey` (regex-validated). The literal
+/// newtype `ExtensionKey` (regex-validated). The literal
 /// `"nexus"` always satisfies the regex, so construction is infallible at
 /// runtime. The type does not implement `Borrow<str>`, so a `HashMap::get`
 /// lookup must construct the key explicitly.
-fn nexus_ext_key() -> TimelineEventExtensionsKey {
-    TimelineEventExtensionsKey::try_from(NEXUS_NAMESPACE)
+fn nexus_ext_key() -> ExtensionKey {
+    ExtensionKey::try_from(NEXUS_NAMESPACE)
         .expect("\"nexus\" matches the ^[a-z][a-z0-9_-]*$ namespace regex")
 }
 
@@ -435,7 +435,7 @@ impl From<TimelineEvent> for SpokeTimelineEvent {
 
         // Build extensions.nexus carrying the 7 typed nexus fields.
         let mut extensions: std::collections::HashMap<
-            TimelineEventExtensionsKey,
+            ExtensionKey,
             serde_json::Map<String, Value>,
         > = std::collections::HashMap::new();
         {

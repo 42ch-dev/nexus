@@ -18,7 +18,7 @@ use nexus_spoke_adapter::extensions::{
 use nexus_spoke_adapter::ExtensionMap;
 use serde_json::{json, Map, Value};
 use spoke_schemas::knowledge_entry::{
-    KnowledgeEntryBody, KnowledgeEntryCanonicalName, KnowledgeEntryExtensionsKey,
+    ExtensionKey, KnowledgeEntryBody, KnowledgeEntryCanonicalName,
 };
 use spoke_schemas::KnowledgeEntry;
 
@@ -122,8 +122,7 @@ fn preserves_unknown_keys_inside_extensions_nexus() {
 
     // Inject an unknown key directly into the nexus namespace — simulates a
     // future/forward-compatible field that nexus does not yet know about.
-    let nexus_key =
-        KnowledgeEntryExtensionsKey::try_from("nexus").expect("nexus matches namespace regex");
+    let nexus_key = ExtensionKey::try_from("nexus").expect("nexus matches namespace regex");
     let ns = entry.extensions.entry(nexus_key).or_default();
     ns.insert("future_field".into(), json!("keep-me"));
 
@@ -133,7 +132,7 @@ fn preserves_unknown_keys_inside_extensions_nexus() {
     // Unknown key is preserved verbatim; typed fields are updated.
     let ns = entry
         .extensions
-        .get(&KnowledgeEntryExtensionsKey::try_from("nexus").unwrap())
+        .get(&ExtensionKey::try_from("nexus").unwrap())
         .expect("nexus namespace present");
     assert_eq!(ns.get("future_field"), Some(&json!("keep-me")));
     assert_eq!(ns.get("world_id"), Some(&json!("wld_updated")));
@@ -149,8 +148,8 @@ fn preserves_unknown_namespaces_alongside_nexus() {
     set_world_id(&mut entry, "wld_abc".into());
 
     // Inject a sibling namespace that nexus must never touch.
-    let other_key = KnowledgeEntryExtensionsKey::try_from("other_product")
-        .expect("other_product matches namespace regex");
+    let other_key =
+        ExtensionKey::try_from("other_product").expect("other_product matches namespace regex");
     let mut other_ns = Map::new();
     other_ns.insert("book_id".into(), json!("bk_1"));
     entry.extensions.insert(other_key, other_ns);
@@ -161,7 +160,7 @@ fn preserves_unknown_namespaces_alongside_nexus() {
     // Sibling namespace survives untouched.
     let other = entry
         .extensions
-        .get(&KnowledgeEntryExtensionsKey::try_from("other_product").unwrap())
+        .get(&ExtensionKey::try_from("other_product").unwrap())
         .expect("other_product namespace preserved");
     assert_eq!(other.get("book_id"), Some(&json!("bk_1")));
     assert_eq!(get_world_id(&entry), Some("wld_updated"));
@@ -178,7 +177,7 @@ fn empty_extensions_nexus_is_valid_after_set_then_clear() {
     set_provenance(&mut entry, None, None, None);
 
     // The nexus namespace is still present and non-null (world_id remains).
-    let nexus_key = KnowledgeEntryExtensionsKey::try_from("nexus").unwrap();
+    let nexus_key = ExtensionKey::try_from("nexus").unwrap();
     let ns = entry.extensions.get(&nexus_key);
     assert!(
         ns.is_some(),

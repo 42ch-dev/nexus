@@ -23,11 +23,11 @@ importers:
   .:
     dependencies:
       '@42ch/spoke-operations':
-        specifier: 0.14.1
-        version: 0.14.1
+        specifier: 0.15.1
+        version: 0.15.1
       '@42ch/spoke-schemas':
-        specifier: 0.14.1
-        version: 0.14.1
+        specifier: 0.15.1
+        version: 0.15.1
     devDependencies:
       oxlint:
         specifier: ^1.89.0
@@ -104,7 +104,7 @@ importers:
         version: 6.1.2(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
       jsdom:
         specifier: ^30.1.3
-        version: 30.1.3
+        version: 30.1.3(@noble/hashes@2.4.0)
       postcss:
         specifier: ^8.5.32
         version: 8.5.32
@@ -119,7 +119,7 @@ importers:
         version: 8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)
       vitest:
         specifier: ^5.0.5
-        version: 5.0.5(@types/node@26.6.5)(@vitest/coverage-v8@5.0.5)(jsdom@30.1.3)(msw@3.0.3(@types/node@26.6.5)(graphql@16.14.2)(supports-color@7.2.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+        version: 5.0.5(@types/node@26.6.5)(@vitest/coverage-v8@5.0.5)(jsdom@30.1.3(@noble/hashes@2.4.0))(msw@3.0.3(@types/node@26.6.5)(graphql@16.14.2)(supports-color@7.2.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   apps/desktop-electron:
     dependencies:
@@ -281,7 +281,7 @@ importers:
         version: 10.6.2(postcss@8.5.32)
       jsdom:
         specifier: ^30.1.3
-        version: 30.1.3
+        version: 30.1.3(@noble/hashes@2.4.0)
       msw:
         specifier: ^3.0.3
         version: 3.0.3(@types/node@26.6.5)(graphql@16.14.2)(supports-color@7.2.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
@@ -299,7 +299,7 @@ importers:
         version: 8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)
       vitest:
         specifier: ^5.0.5
-        version: 5.0.5(@types/node@26.6.5)(@vitest/coverage-v8@5.0.5)(jsdom@30.1.3)(msw@3.0.3(@types/node@26.6.5)(graphql@16.14.2)(supports-color@7.2.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+        version: 5.0.5(@types/node@26.6.5)(@vitest/coverage-v8@5.0.5)(jsdom@30.1.3(@noble/hashes@2.4.0))(msw@3.0.3(@types/node@26.6.5)(graphql@16.14.2)(supports-color@7.2.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   packages/nexus-contracts:
     devDependencies:
@@ -395,7 +395,7 @@ importers:
         version: 19.3.0(@types/react@19.3.0)
       jsdom:
         specifier: ^30.1.3
-        version: 30.1.3
+        version: 30.1.3(@noble/hashes@2.4.0)
       react:
         specifier: ^19.3.1
         version: 19.3.1
@@ -410,7 +410,7 @@ importers:
         version: 7.0.2
       vitest:
         specifier: ^5.0.5
-        version: 5.0.5(@types/node@26.6.5)(@vitest/coverage-v8@5.0.5)(jsdom@30.1.3)(msw@3.0.3(@types/node@26.6.5)(graphql@16.14.2)(supports-color@7.2.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+        version: 5.0.5(@types/node@26.6.5)(@vitest/coverage-v8@5.0.5)(jsdom@30.1.3(@noble/hashes@2.4.0))(msw@3.0.3(@types/node@26.6.5)(graphql@16.14.2)(supports-color@7.2.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   tooling/codegen:
     dependencies:
@@ -435,7 +435,7 @@ importers:
         version: 7.0.2
       vitest:
         specifier: ^5.0.5
-        version: 5.0.5(@types/node@26.6.5)(@vitest/coverage-v8@5.0.5)(jsdom@30.1.3)(msw@3.0.3(@types/node@26.6.5)(graphql@16.14.2)(supports-color@7.2.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+        version: 5.0.5(@types/node@26.6.5)(@vitest/coverage-v8@5.0.5)(jsdom@30.1.3(@noble/hashes@2.4.0))(msw@3.0.3(@types/node@26.6.5)(graphql@16.14.2)(supports-color@7.2.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   tooling/design-tokens:
     dependencies:
@@ -464,11 +464,11 @@ importers:
 
 packages:
 
-  '@42ch/spoke-operations@0.14.1':
-    resolution: {integrity: sha512-TXw71gW1B74bDz2tp2cvGMSpVAxfOUtzQhyuZS3Z4qBJS40XBNN6d1l4S2PDObpPL8R6AiOALi5zVW5/uOnuSg==}
+  '@42ch/spoke-operations@0.15.1':
+    resolution: {integrity: sha512-uVV6/T+kjnbFTvDfC0nR6QRZ0xNOogIzg6HC9PoxMTaupRBVyccY2CrSZNWYUREtdIMdXmgKVXBIxusslPLDcg==}
 
-  '@42ch/spoke-schemas@0.14.1':
-    resolution: {integrity: sha512-Va/LCYJaHtYbTwrvooSNY+GJIDQpqKPrH3qDPZ61GOIvEZkAg2ltMXf5sHNliZH+vTY0PaLra/JE5rjRCH4kbA==}
+  '@42ch/spoke-schemas@0.15.1':
+    resolution: {integrity: sha512-n9c7twS9tYZ1EktJnFMy37SJUj9YSRF2zL9VEFuiX4usu5csJfYWmNW4QSDLMqgvrPhPhhJJLOGVKZJVtbudYg==}
 
   '@adobe/css-tools@4.5.0':
     resolution: {integrity: sha512-6OzddxPio9UiWTCemp4N8cYLV2ZN1ncRnV1cVGtve7dhPOtRkleRyx32GQCYSwDYgaHU3USMm84tNsvKzRCa1Q==}
@@ -1024,6 +1024,10 @@ packages:
     cpu: [x64]
     os: [linux]
     libc: [glibc]
+
+  '@noble/hashes@2.4.0':
+    resolution: {integrity: sha512-X5XaVWZIBCT7HHZGm5I7ZQXDwLG+bGXuSrMQAW+7Zvl87h1kmc1ZB1VSRJcpUfoUrGQp4Fkoxm5kZ+Ms+aW+eA==}
+    engines: {node: '>= 20.19.0'}
 
   '@nodelib/fs.scandir@2.1.5':
     resolution: {integrity: sha512-vq24Bq3ym5HEQm2NKCr3yXDwjc7vTsEThRDnkp2DK9p1uqLR+DHurm/NOTo0KG7HYHU7eppKZj3MyqYuMBf62g==}
@@ -2292,6 +2296,11 @@ packages:
 
   caniuse-lite@1.0.30001810:
     resolution: {integrity: sha512-TITQPUkaz+aVk5GL6NhOdwk1aEaNTSDPsGFWrTuhKGtjTF70jL/Oht2W4c6rXUe5fu7Ie19VIahAXHIIiWWNeg==}
+
+  canonicalize@3.0.0:
+    resolution: {integrity: sha512-yYLfHyDMIXRyRqsKBRLX023riFLpXY2YOfdtqKXZRZy9qsfOJ9U+4F9YZL7MEzL5+ziN2x2nlBvY/Voi3EBljA==}
+    engines: {node: '>=18'}
+    hasBin: true
 
   ccount@2.0.1:
     resolution: {integrity: sha512-eyrF0jiFpY+3drT6383f1qhkbGsLSifNAjA61IUjZjmLCWjItY6LB9ft9YhoDgwfmclB2zhu51Lc7+95b8NRAg==}
@@ -3999,11 +4008,13 @@ packages:
 
 snapshots:
 
-  '@42ch/spoke-operations@0.14.1':
+  '@42ch/spoke-operations@0.15.1':
     dependencies:
-      '@42ch/spoke-schemas': 0.14.1
+      '@42ch/spoke-schemas': 0.15.1
+      '@noble/hashes': 2.4.0
+      canonicalize: 3.0.0
 
-  '@42ch/spoke-schemas@0.14.1': {}
+  '@42ch/spoke-schemas@0.15.1': {}
 
   '@adobe/css-tools@4.5.0': {}
 
@@ -4253,7 +4264,9 @@ snapshots:
   '@esbuild/win32-x64@0.28.1':
     optional: true
 
-  '@exodus/bytes@1.16.0': {}
+  '@exodus/bytes@1.16.0(@noble/hashes@2.4.0)':
+    optionalDependencies:
+      '@noble/hashes': 2.4.0
 
   '@floating-ui/core@1.8.0':
     dependencies:
@@ -4444,6 +4457,8 @@ snapshots:
 
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     optional: true
+
+  '@noble/hashes@2.4.0': {}
 
   '@nodelib/fs.scandir@2.1.5':
     dependencies:
@@ -4897,7 +4912,7 @@ snapshots:
       picocolors: 1.1.1
       redent: 3.0.0
     optionalDependencies:
-      vitest: 5.0.5(@types/node@26.6.5)(@vitest/coverage-v8@5.0.5)(jsdom@30.1.3)(msw@3.0.3(@types/node@26.6.5)(graphql@16.14.2)(supports-color@7.2.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+      vitest: 5.0.5(@types/node@26.6.5)(@vitest/coverage-v8@5.0.5)(jsdom@30.1.3(@noble/hashes@2.4.0))(msw@3.0.3(@types/node@26.6.5)(graphql@16.14.2)(supports-color@7.2.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   '@testing-library/react@16.3.3(@testing-library/dom@10.4.1)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
@@ -5261,7 +5276,7 @@ snapshots:
       obug: 3.0.0
       std-env: 4.3.0
       tinyrainbow: 3.2.0
-      vitest: 5.0.5(@types/node@26.6.5)(@vitest/coverage-v8@5.0.5)(jsdom@30.1.3)(msw@3.0.3(@types/node@26.6.5)(graphql@16.14.2)(supports-color@7.2.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+      vitest: 5.0.5(@types/node@26.6.5)(@vitest/coverage-v8@5.0.5)(jsdom@30.1.3(@noble/hashes@2.4.0))(msw@3.0.3(@types/node@26.6.5)(graphql@16.14.2)(supports-color@7.2.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   '@vitest/istanbul-lib-coverage@1.0.2': {}
 
@@ -5408,6 +5423,8 @@ snapshots:
 
   caniuse-lite@1.0.30001810: {}
 
+  canonicalize@3.0.0: {}
+
   ccount@2.0.1: {}
 
   chai@6.3.0: {}
@@ -5519,10 +5536,10 @@ snapshots:
       d3-selection: 3.0.0
       d3-transition: 3.0.1(d3-selection@3.0.0)
 
-  data-urls@8.0.0:
+  data-urls@8.0.0(@noble/hashes@2.4.0):
     dependencies:
       whatwg-mimetype: 5.0.0
-      whatwg-url: 17.2.0
+      whatwg-url: 17.2.0(@noble/hashes@2.4.0)
     transitivePeerDependencies:
       - '@noble/hashes'
 
@@ -5757,9 +5774,9 @@ snapshots:
       '@types/set-cookie-parser': 2.4.10
       set-cookie-parser: 3.1.1
 
-  html-encoding-sniffer@7.0.0:
+  html-encoding-sniffer@7.0.0(@noble/hashes@2.4.0):
     dependencies:
-      '@exodus/bytes': 1.16.0
+      '@exodus/bytes': 1.16.0(@noble/hashes@2.4.0)
     transitivePeerDependencies:
       - '@noble/hashes'
 
@@ -5830,17 +5847,17 @@ snapshots:
     dependencies:
       argparse: 2.0.1
 
-  jsdom@30.1.3:
+  jsdom@30.1.3(@noble/hashes@2.4.0):
     dependencies:
       '@asamuzakjp/css-color': 7.1.3
       '@asamuzakjp/dom-selector': 10.0.4
       '@bramus/specificity': 2.4.2
       '@csstools/css-syntax-patches-for-csstree': 1.1.15(css-tree@3.2.1)
-      '@exodus/bytes': 1.16.0
+      '@exodus/bytes': 1.16.0(@noble/hashes@2.4.0)
       css-tree: 3.2.1
-      data-urls: 8.0.0
+      data-urls: 8.0.0(@noble/hashes@2.4.0)
       decimal.js: 10.6.0
-      html-encoding-sniffer: 7.0.0
+      html-encoding-sniffer: 7.0.0(@noble/hashes@2.4.0)
       is-potential-custom-element-name: 1.0.1
       lru-cache: 11.5.3
       parse5: 8.0.1
@@ -5850,7 +5867,7 @@ snapshots:
       w3c-xmlserializer: 6.0.0
       webidl-conversions: 8.0.1
       whatwg-mimetype: 5.0.0
-      whatwg-url: 17.2.0
+      whatwg-url: 17.2.0(@noble/hashes@2.4.0)
       xml-name-validator: 5.0.0
     transitivePeerDependencies:
       - '@noble/hashes'
@@ -7255,7 +7272,7 @@ snapshots:
       tsx: 4.23.15
       yaml: 2.9.1
 
-  vitest@5.0.5(@types/node@26.6.5)(@vitest/coverage-v8@5.0.5)(jsdom@30.1.3)(msw@3.0.3(@types/node@26.6.5)(graphql@16.14.2)(supports-color@7.2.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)):
+  vitest@5.0.5(@types/node@26.6.5)(@vitest/coverage-v8@5.0.5)(jsdom@30.1.3(@noble/hashes@2.4.0))(msw@3.0.3(@types/node@26.6.5)(graphql@16.14.2)(supports-color@7.2.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)):
     dependencies:
       '@types/chai': 5.2.3
       '@vitest/mocker': 5.0.5(msw@3.0.3(@types/node@26.6.5)(graphql@16.14.2)(supports-color@7.2.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
@@ -7274,7 +7291,7 @@ snapshots:
     optionalDependencies:
       '@types/node': 26.6.5
       '@vitest/coverage-v8': 5.0.5(vitest@5.0.5)
-      jsdom: 30.1.3
+      jsdom: 30.1.3(@noble/hashes@2.4.0)
     transitivePeerDependencies:
       - msw
 
@@ -7288,9 +7305,9 @@ snapshots:
 
   whatwg-mimetype@5.0.0: {}
 
-  whatwg-url@17.2.0:
+  whatwg-url@17.2.0(@noble/hashes@2.4.0):
     dependencies:
-      '@exodus/bytes': 1.16.0
+      '@exodus/bytes': 1.16.0(@noble/hashes@2.4.0)
       tr46: 7.0.0
       webidl-conversions: 8.0.1
     transitivePeerDependencies:

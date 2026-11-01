@@ -90,7 +90,8 @@ fn resolve_module_id(
     if let Some(module_id) = entry
         .body
         .computable
-        .get("module_id")
+        .as_ref()
+        .and_then(|m| m.get("module_id"))
         .and_then(Value::as_str)
     {
         return SpokeResult::Ok(module_id.to_string());
@@ -521,7 +522,7 @@ impl ComputablePort for NexusAdapter<'_> {
                 computable: state,
                 entry_id,
                 session_id,
-                extensions: HashMap::default(),
+                extensions: None,
             }),
             Err(e) => {
                 // sqlx::Error::Database with UNIQUE constraint → session
@@ -653,12 +654,16 @@ impl ComputablePort for NexusAdapter<'_> {
         // early — needed for the cross-entry world-scope check (F-003).
         let primary_world_id = entry
             .extensions
-            .get(&crate::KnowledgeEntryExtensionsKey::try_from("nexus").expect("valid nexus key"))
+            .get(
+                &spoke_schemas::knowledge_entry::ExtensionKey::try_from("nexus")
+                    .expect("valid nexus key"),
+            )
             .and_then(|ns| ns.get("world_id"))
             .and_then(Value::as_str)
             .unwrap_or("unknown")
             .to_string();
-        let nexus_key = crate::KnowledgeEntryExtensionsKey::try_from("nexus").expect("valid");
+        let nexus_key =
+            spoke_schemas::knowledge_entry::ExtensionKey::try_from("nexus").expect("valid");
 
         let mut key_blocks: Vec<Map<String, Value>> = Vec::new();
         let primary_kb = spoke_entry_to_key_block(&entry);
@@ -959,10 +964,10 @@ impl ComputablePort for NexusAdapter<'_> {
 
         // ── 10. Return ComputeResponse ────────────────────────────────────
         SpokeResult::Ok(ComputeResponse::Variant0 {
-            computable: merged_state,
+            computable: merged_state.into(),
             entry_id,
             session_id,
-            extensions: HashMap::default(),
+            extensions: None,
             state: if settle {
                 post_settle_state
             } else {

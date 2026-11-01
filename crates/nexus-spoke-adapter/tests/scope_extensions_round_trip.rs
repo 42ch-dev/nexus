@@ -8,13 +8,14 @@
 //! `scope.extensions["nexus"]` instead of a nexus-local carrier struct.
 //!
 //! It also locks in two 0.6.0 properties the rest of the crate relies on:
-//!  - the typify `ScopeExtensionsKey` newtype exists and constructs the
-//!    `"nexus"` key via `try_from` (mirrors `KnowledgeEntryExtensionsKey`);
+//!  - the typify `ExtensionKey` newtype exists and constructs the
+//!    `"nexus"` key via `try_from` (mirrors `ExtensionKey`);
 //!  - `extensions` is `#[serde(default)]`, so pre-0.6.0 minimal scopes
 //!    (`scope_id` only, like `scope_query_port::scope_for`) still deserialize.
 
-use nexus_spoke_adapter::{Scope, ScopeExtensionsKey};
+use nexus_spoke_adapter::Scope;
 use serde_json::{json, Value};
+use spoke_schemas::ExtensionKey;
 
 #[test]
 fn scope_extensions_nexus_namespace_round_trips() {
@@ -37,14 +38,15 @@ fn scope_extensions_nexus_namespace_round_trips() {
     let scope: Scope =
         serde_json::from_value(wire).expect("Scope with extensions.nexus deserializes");
 
-    // The typed-key path: the typify `ScopeExtensionsKey` newtype is the only
+    // The typed-key path: the typify `ExtensionKey` newtype is the only
     // way to look up the namespace (it does not impl `Borrow<str>`, mirroring
-    // `KnowledgeEntryExtensionsKey`). Constructing it via `try_from` proves the
+    // `ExtensionKey`). Constructing it via `try_from` proves the
     // 0.6.0 newtype name + the "nexus" key the P2 redo depends on.
-    let nexus_key = ScopeExtensionsKey::try_from("nexus").expect("valid namespace key");
+    let nexus_key = ExtensionKey::try_from("nexus").expect("valid namespace key");
     let nexus_ns = scope
         .extensions
-        .get(&nexus_key)
+        .as_ref()
+        .and_then(|ext| ext.get(&nexus_key))
         .expect("nexus namespace carried on Scope");
 
     assert_eq!(nexus_ns.get("text_search"), Some(&Value::from("harbor")));
@@ -60,8 +62,14 @@ fn scope_extensions_nexus_namespace_round_trips() {
     let back = serde_json::to_value(&scope).expect("Scope serializes");
     let round_tripped: Scope = serde_json::from_value(back.clone()).expect("Scope re-deserializes");
     assert_eq!(
-        round_tripped.extensions.get(&nexus_key),
-        scope.extensions.get(&nexus_key),
+        round_tripped
+            .extensions
+            .as_ref()
+            .and_then(|ext| ext.get(&nexus_key)),
+        scope
+            .extensions
+            .as_ref()
+            .and_then(|ext| ext.get(&nexus_key)),
         "extensions.nexus survives serialize -> deserialize"
     );
     // The wire still names the nexus namespace.
@@ -73,11 +81,12 @@ fn scope_extensions_nexus_namespace_round_trips() {
 
 #[test]
 fn minimal_scope_without_extensions_still_deserializes() {
-    // `extensions` is `#[serde(default)]` — pre-0.6.0 minimal scopes (`scope_id`
-    // only, like `scope_query_port::scope_for`) stay valid. This guards the
-    // backward-compat property the existing serde-based construction relies on.
+    // `extensions` is optional at 0.15.1 — pre-0.6.0 minimal scopes
+    // (`scope_id` only, like `scope_query_port::scope_for`) stay valid and
+    // deserialize to `None`. This guards the property the existing
+    // serde-based construction relies on.
     let scope: Scope = serde_json::from_value(json!({ "scope_id": "wld_any" }))
         .expect("minimal scope without extensions deserializes");
-    assert!(scope.extensions.is_empty());
+    assert!(scope.extensions.is_none());
     assert_eq!(scope.scope_id, "wld_any");
 }
