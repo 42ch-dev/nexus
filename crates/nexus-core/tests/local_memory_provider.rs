@@ -1868,6 +1868,27 @@ fn recall_request(max_items: u64) -> schemas::MemoryRecallRequest {
     }))
 }
 
+/// §7.22 recall with the ranking and paging inputs the cursor binds.
+fn recall_page(
+    max_items: u64,
+    query: Option<&str>,
+    cursor: Option<&str>,
+) -> schemas::MemoryRecallRequest {
+    let mut request = json!({
+        "space_id": SPACE,
+        "subject_id": SUBJECT,
+        "selection": { "mode": "subject_all" },
+        "budget": { "max_items": max_items },
+    });
+    if let Some(query) = query {
+        request["query"] = json!(query);
+    }
+    if let Some(cursor) = cursor {
+        request["cursor"] = json!(cursor);
+    }
+    dto(request)
+}
+
 /// §7.11→§7.15→§7.22 end to end: capture produces a pending candidate, recall
 /// never returns it (MEM-R004), review consumes it into a record with the
 /// candidate's placement while scrubbing the body and keeping its digest
@@ -2764,4 +2785,729 @@ async fn nexus_kinds_round_trip_through_the_namespaced_mapping() {
 
     assert_eq!(policy::memory_kind_of("event"), None);
     assert_eq!(policy::memory_kind_of("nexus.unknown_kind"), None);
+}
+
+// ── Round B conformance regressions (C1–C5) ────────────────────────────
+
+/// §7.22 (C1): execution-time recall demands the `recall` capability itself. A
+/// principal holding only `records_read` may list the very same records and is
+/// still refused at recall.
+#[tokio::test]
+async fn recall_demands_the_recall_capability() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    let reader = principal(OTHER);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    wire(
+        &provider
+            .grant(
+                &admin,
+                subject_grant("k-reader", "records_read", OTHER, SUBJECT),
+            )
+            .await,
+    );
+    let created = wire(
+        &provider
+            .create_record(
+                &admin,
+                record_create_request(
+                    "k-rec",
+                    "nexus.world_building",
+                    &json!({ "visibility": "shared" }),
+                    TEXT,
+                ),
+            )
+            .await,
+    );
+    let record_id = receipt(&created)["result"]["record_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let listed = wire(
+        &provider
+            .list_records(
+                &reader,
+                dto(json!({
+                    "space_id": SPACE,
+                    "subject_id": SUBJECT,
+                    "selection": { "mode": "subject_all" },
+                })),
+            )
+            .await,
+    );
+    assert_eq!(
+        listed["total_authorized"], 1,
+        "records_read authorizes the listing: {listed}"
+    );
+
+    let refused = wire(&provider.recall(&reader, recall_request(10)).await);
+    assert_eq!(
+        error_code(&refused),
+        "NOT_AUTHORIZED",
+        "records_read is not recall (§7.22): {refused}"
+    );
+
+    wire(
+        &provider
+            .grant(
+                &admin,
+                subject_grant("k-recalled", "recall", OTHER, SUBJECT),
+            )
+            .await,
+    );
+    let recalled = wire(&provider.recall(&reader, recall_request(10)).await);
+    assert_eq!(recalled["total_authorized"], 1);
+    assert_eq!(recalled["records"][0]["record_id"], record_id);
+}
+
+/// §7.7/MEM-R024 (C2): a fenced context refuses the capture and authored-create
+/// placements into it, names the context on the wire, leaves sibling contexts
+/// and shared placement usable, and unfencing restores the write.
+#[tokio::test]
+async fn context_fences_refuse_capture_and_create() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    let fenced = wire(
+        &provider
+            .fence_subject(
+                &admin,
+                fence_at_context(SUBJECT, "bnd_1", "fence", 1, "k-fence-context"),
+            )
+            .await,
+    );
+    assert_eq!(
+        receipt(&fenced)["result"]["fenced_contexts"],
+        json!(["bnd_1"])
+    );
+    assert_eq!(receipt(&fenced)["result"]["status"], "active");
+
+    let captured = wire(
+        &provider
+            .capture(&admin, capture_request("k-cap-fenced", Some("bnd_1"), TEXT))
+            .await,
+    );
+    assert_eq!(error_code(&captured), "SUBJECT_FENCED");
+    assert_eq!(error_details(&captured)["scope"], "context");
+    assert_eq!(error_details(&captured)["context_id"], "bnd_1");
+    assert_eq!(retry_class(&captured), "terminal");
+
+    let listed = wire(
+        &provider
+            .list_candidates(&admin, candidates_list_request(None))
+            .await,
+    );
+    assert!(
+        listed["candidates"].as_array().unwrap().is_empty(),
+        "a refused capture leaves no candidate: {listed}"
+    );
+
+    let created = wire(
+        &provider
+            .create_record(
+                &admin,
+                record_create_request(
+                    "k-create-fenced",
+                    "nexus.world_building",
+                    &json!({ "visibility": "context", "context_id": "bnd_1" }),
+                    TEXT,
+                ),
+            )
+            .await,
+    );
+    assert_eq!(error_code(&created), "SUBJECT_FENCED");
+    assert_eq!(error_details(&created)["scope"], "context");
+
+    // MEM-R024: no collateral fencing — the sibling context and shared
+    // placement stay writable.
+    let sibling = wire(
+        &provider
+            .create_record(
+                &admin,
+                record_create_request(
+                    "k-create-sibling",
+                    "nexus.world_building",
+                    &json!({ "visibility": "context", "context_id": "bnd_2" }),
+                    TEXT,
+                ),
+            )
+            .await,
+    );
+    assert_eq!(receipt(&sibling)["result"]["revision"], 1);
+    let shared = wire(
+        &provider
+            .capture(&admin, capture_request("k-cap-shared", None, TEXT))
+            .await,
+    );
+    assert_eq!(receipt(&shared)["result"]["classified"], 1);
+
+    wire(
+        &provider
+            .fence_subject(
+                &admin,
+                fence_at_context(SUBJECT, "bnd_1", "unfence", 2, "k-unfence-context"),
+            )
+            .await,
+    );
+    let restored = wire(
+        &provider
+            .capture(
+                &admin,
+                capture_request("k-cap-restored", Some("bnd_1"), TEXT),
+            )
+            .await,
+    );
+    assert_eq!(
+        receipt(&restored)["result"]["classified"],
+        1,
+        "unfencing the context restores the write"
+    );
+}
+
+/// §7.7/MEM-R024 (C2): row-scoped content writes resolve their placement from
+/// the row, so review, update and promotion are refused when that placement —
+/// or, for promotion, either side of the move — is fenced.
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn context_fences_refuse_review_update_and_promotion() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    let captured = wire(
+        &provider
+            .capture(&admin, capture_request("k-cap-review", Some("bnd_1"), TEXT))
+            .await,
+    );
+    let candidate_id = receipt(&captured)["result"]["candidate_ids"][0]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let mut records = Vec::new();
+    for (key, context_id) in [("k-rec-1", "bnd_1"), ("k-rec-2", "bnd_2")] {
+        let created = wire(
+            &provider
+                .create_record(
+                    &admin,
+                    record_create_request(
+                        key,
+                        "nexus.world_building",
+                        &json!({ "visibility": "context", "context_id": context_id }),
+                        TEXT,
+                    ),
+                )
+                .await,
+        );
+        records.push(
+            receipt(&created)["result"]["record_id"]
+                .as_str()
+                .unwrap()
+                .to_owned(),
+        );
+    }
+
+    wire(
+        &provider
+            .fence_subject(
+                &admin,
+                fence_at_context(SUBJECT, "bnd_1", "fence", 1, "k-fence-context"),
+            )
+            .await,
+    );
+
+    let reviewed = wire(
+        &provider
+            .review_candidate(&admin, review_request("k-review-fenced", &candidate_id, 1))
+            .await,
+    );
+    assert_eq!(
+        error_code(&reviewed),
+        "SUBJECT_FENCED",
+        "review creates a record in the candidate's fenced capture scope: {reviewed}"
+    );
+    assert_eq!(error_details(&reviewed)["scope"], "context");
+
+    let updated = wire(
+        &provider
+            .update_record(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "record_id": records[0],
+                    "expected_revision": 1,
+                    "content": { "text": "rewritten inside a fenced context" },
+                    "idempotency_key": "k-update-fenced",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(error_code(&updated), "SUBJECT_FENCED");
+
+    // A placement move writes both sides: out of the fenced context…
+    let moved_out = wire(
+        &provider
+            .promote_record(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "record_id": records[0],
+                    "expected_revision": 1,
+                    "target_scope": { "visibility": "shared" },
+                    "idempotency_key": "k-promote-out",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(error_code(&moved_out), "SUBJECT_FENCED");
+
+    // …and into it.
+    let moved_in = wire(
+        &provider
+            .promote_record(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "record_id": records[1],
+                    "expected_revision": 1,
+                    "target_scope": { "visibility": "context", "context_id": "bnd_1" },
+                    "idempotency_key": "k-promote-in",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(error_code(&moved_in), "SUBJECT_FENCED");
+    assert_eq!(error_details(&moved_in)["context_id"], "bnd_1");
+
+    // The sibling context keeps moving freely.
+    let sibling_move = wire(
+        &provider
+            .promote_record(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "record_id": records[1],
+                    "expected_revision": 1,
+                    "target_scope": { "visibility": "shared" },
+                    "idempotency_key": "k-promote-sibling",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(receipt(&sibling_move)["result"]["revision"], 2);
+}
+
+/// §7.7 (C3): an archived subject leaves recall and the default candidate list,
+/// while its records, candidates and receipts stay readable through the audit
+/// routes the protocol still permits.
+#[tokio::test]
+async fn archived_subjects_leave_recall_and_default_candidate_lists() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    let created = wire(
+        &provider
+            .create_record(
+                &admin,
+                record_create_request(
+                    "k-rec",
+                    "nexus.world_building",
+                    &json!({ "visibility": "shared" }),
+                    TEXT,
+                ),
+            )
+            .await,
+    );
+    let record_id = receipt(&created)["result"]["record_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    wire(
+        &provider
+            .capture(&admin, capture_request("k-cap", None, TEXT))
+            .await,
+    );
+
+    let recalled = wire(&provider.recall(&admin, recall_request(10)).await);
+    assert_eq!(recalled["total_authorized"], 1);
+    let listed = wire(
+        &provider
+            .list_candidates(&admin, candidates_list_request(None))
+            .await,
+    );
+    assert_eq!(listed["candidates"].as_array().unwrap().len(), 1);
+
+    let archived = wire(
+        &provider
+            .fence_subject(&admin, fence_at_subject(SUBJECT, "archive", 1, "k-archive"))
+            .await,
+    );
+    assert_eq!(receipt(&archived)["result"]["status"], "archived");
+
+    let recalled_after = wire(&provider.recall(&admin, recall_request(10)).await);
+    assert_eq!(
+        recalled_after["total_authorized"], 0,
+        "an archived subject's records leave recall (§7.7): {recalled_after}"
+    );
+    assert!(recalled_after["records"].as_array().unwrap().is_empty());
+
+    let default_listing = wire(
+        &provider
+            .list_candidates(&admin, candidates_list_request(None))
+            .await,
+    );
+    assert!(
+        default_listing["candidates"].as_array().unwrap().is_empty(),
+        "archive hides the subject from the default candidate listing (§7.7): {default_listing}"
+    );
+
+    // §7.7 keeps the retained state readable: an explicit status filter is an
+    // audit read, and by-id/listing reads are unchanged.
+    let audit_listing = wire(
+        &provider
+            .list_candidates(&admin, candidates_list_request(Some("pending")))
+            .await,
+    );
+    assert_eq!(audit_listing["candidates"].as_array().unwrap().len(), 1);
+
+    let by_id = wire(
+        &provider
+            .get_record(&admin, record_get_request(&record_id))
+            .await,
+    );
+    assert_eq!(by_id["record"]["record_id"], record_id);
+    assert_eq!(by_id["record"]["content"]["text"], TEXT);
+
+    let listing = wire(
+        &provider
+            .list_records(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "subject_id": SUBJECT,
+                    "selection": { "mode": "subject_all" },
+                })),
+            )
+            .await,
+    );
+    assert_eq!(listing["total_authorized"], 1);
+}
+
+/// §7.0.7/MEM-R026 (C4): the recall cursor binds the snapshot *and* the ranking
+/// input. Losing a redundant grant, swapping the visible rows for different
+/// rows at the same revision sum, and changing the query all make it
+/// `CURSOR_INVALID` instead of silently re-paging a different set.
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn recall_cursors_bind_snapshot_and_query() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    let reader = principal(OTHER);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    let mut record_ids = Vec::new();
+    for (key, text) in [
+        (
+            "k-rec-1",
+            "The northern gate opens at dawn for the caravan.",
+        ),
+        ("k-rec-2", "The southern harbour closes on the first storm."),
+    ] {
+        let created = wire(
+            &provider
+                .create_record(
+                    &admin,
+                    record_create_request(
+                        key,
+                        "nexus.world_building",
+                        &json!({ "visibility": "shared" }),
+                        text,
+                    ),
+                )
+                .await,
+        );
+        record_ids.push(
+            receipt(&created)["result"]["record_id"]
+                .as_str()
+                .unwrap()
+                .to_owned(),
+        );
+    }
+    wire(
+        &provider
+            .grant(
+                &admin,
+                subject_grant("k-recall-1", "recall", OTHER, SUBJECT),
+            )
+            .await,
+    );
+    let duplicate = wire(
+        &provider
+            .grant(
+                &admin,
+                subject_grant("k-recall-2", "recall", OTHER, SUBJECT),
+            )
+            .await,
+    );
+    let duplicate_grant = receipt(&duplicate)["result"]["grant_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // (a) A grant change that leaves every visible row untouched still changes
+    //     the authorization the page was cut under.
+    let page_one = wire(&provider.recall(&reader, recall_page(1, None, None)).await);
+    assert_eq!(page_one["records"].as_array().unwrap().len(), 1);
+    let cursor = page_one["next_cursor"]
+        .as_str()
+        .expect("a second record remains")
+        .to_owned();
+    let page_two = wire(
+        &provider
+            .recall(&reader, recall_page(1, None, Some(&cursor)))
+            .await,
+    );
+    assert_eq!(
+        page_two["records"].as_array().unwrap().len(),
+        1,
+        "the cursor continues its own snapshot"
+    );
+    wire(
+        &provider
+            .revoke_grant(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "grant_id": duplicate_grant,
+                    "expected_revision": 1,
+                    "idempotency_key": "k-revoke-duplicate",
+                })),
+            )
+            .await,
+    );
+    let redundant_change = wire(
+        &provider
+            .recall(&reader, recall_page(1, None, Some(&cursor)))
+            .await,
+    );
+    assert_eq!(
+        error_code(&redundant_change),
+        "CURSOR_INVALID",
+        "a redundant grant revoke invalidates the cursor even though the rows are unchanged"
+    );
+
+    // (b) Two revision-1 rows out, two revision-1 rows in: the visible revision
+    //     sum stays 2 while the page would silently change identity.
+    let page_one = wire(&provider.recall(&reader, recall_page(1, None, None)).await);
+    let stale = page_one["next_cursor"]
+        .as_str()
+        .expect("a second record remains")
+        .to_owned();
+    for (index, record_id) in record_ids.iter().enumerate() {
+        wire(
+            &provider
+                .delete_record(
+                    &admin,
+                    dto(json!({
+                        "space_id": SPACE,
+                        "record_id": record_id,
+                        "expected_revision": 1,
+                        "idempotency_key": format!("k-delete-{index}"),
+                    })),
+                )
+                .await,
+        );
+    }
+    for (key, text) in [
+        ("k-rec-3", "The eastern road floods after the thaw."),
+        ("k-rec-4", "The western mill grinds until the frost."),
+    ] {
+        wire(
+            &provider
+                .create_record(
+                    &admin,
+                    record_create_request(
+                        key,
+                        "nexus.world_building",
+                        &json!({ "visibility": "shared" }),
+                        text,
+                    ),
+                )
+                .await,
+        );
+    }
+    let swapped = wire(
+        &provider
+            .recall(&reader, recall_page(1, None, Some(&stale)))
+            .await,
+    );
+    assert_eq!(
+        error_code(&swapped),
+        "CURSOR_INVALID",
+        "equal visible revision sums do not identify the same page"
+    );
+
+    // (c) The query orders the page, so it is part of the bound request.
+    let ranked = wire(
+        &provider
+            .recall(&reader, recall_page(1, Some("eastern road"), None))
+            .await,
+    );
+    let ranked_cursor = ranked["next_cursor"]
+        .as_str()
+        .expect("a second record remains")
+        .to_owned();
+    let same_query = wire(
+        &provider
+            .recall(
+                &reader,
+                recall_page(1, Some("eastern road"), Some(&ranked_cursor)),
+            )
+            .await,
+    );
+    assert_eq!(same_query["records"].as_array().unwrap().len(), 1);
+    let changed_query = wire(
+        &provider
+            .recall(
+                &reader,
+                recall_page(1, Some("western mill"), Some(&ranked_cursor)),
+            )
+            .await,
+    );
+    assert_eq!(
+        error_code(&changed_query),
+        "CURSOR_INVALID",
+        "a cursor never carries over to another ordering (§9.2/MEM-R026)"
+    );
+}
+
+/// §7.19/§7.7 (C5): deletion runs the same subject and placement gates as update
+/// and promote, so a fenced or archived subject cannot have its content
+/// irreversibly scrubbed.
+#[tokio::test]
+async fn delete_is_gated_by_the_subject_lifecycle() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    let created = wire(
+        &provider
+            .create_record(
+                &admin,
+                record_create_request(
+                    "k-rec",
+                    "nexus.world_building",
+                    &json!({ "visibility": "context", "context_id": "bnd_1" }),
+                    TEXT,
+                ),
+            )
+            .await,
+    );
+    let record_id = receipt(&created)["result"]["record_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let delete = |key: &str| {
+        dto::<schemas::MemoryRecordsDeleteRequest>(json!({
+            "space_id": SPACE,
+            "record_id": record_id,
+            "expected_revision": 1,
+            "idempotency_key": key,
+        }))
+    };
+
+    wire(
+        &provider
+            .fence_subject(
+                &admin,
+                fence_at_context(SUBJECT, "bnd_1", "fence", 1, "k-fence-context"),
+            )
+            .await,
+    );
+    let context_fenced = wire(
+        &provider
+            .delete_record(&admin, delete("k-delete-context"))
+            .await,
+    );
+    assert_eq!(error_code(&context_fenced), "SUBJECT_FENCED");
+    assert_eq!(error_details(&context_fenced)["scope"], "context");
+
+    wire(
+        &provider
+            .fence_subject(
+                &admin,
+                fence_at_context(SUBJECT, "bnd_1", "unfence", 2, "k-unfence-context"),
+            )
+            .await,
+    );
+    wire(
+        &provider
+            .fence_subject(&admin, fence_at_subject(SUBJECT, "fence", 3, "k-fence"))
+            .await,
+    );
+    let subject_fenced = wire(
+        &provider
+            .delete_record(&admin, delete("k-delete-fenced"))
+            .await,
+    );
+    assert_eq!(error_code(&subject_fenced), "SUBJECT_FENCED");
+    assert_eq!(error_details(&subject_fenced)["status"], "fenced");
+
+    wire(
+        &provider
+            .fence_subject(&admin, fence_at_subject(SUBJECT, "unfence", 4, "k-unfence"))
+            .await,
+    );
+    wire(
+        &provider
+            .fence_subject(&admin, fence_at_subject(SUBJECT, "archive", 5, "k-archive"))
+            .await,
+    );
+    let archived = wire(
+        &provider
+            .delete_record(&admin, delete("k-delete-archived"))
+            .await,
+    );
+    assert_eq!(error_code(&archived), "SUBJECT_FENCED");
+    assert_eq!(error_details(&archived)["status"], "archived");
+
+    // Every refusal left the content untouched: no scrub, no tombstone.
+    let record = wire(
+        &provider
+            .get_record(&admin, record_get_request(&record_id))
+            .await,
+    );
+    assert_eq!(record["record"]["content"]["text"], TEXT);
+    assert_eq!(record["record"]["revision"], 1);
+    assert!(
+        record["record"].get("tombstone").is_none(),
+        "a refused delete never tombstones: {record}"
+    );
 }

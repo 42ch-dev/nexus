@@ -57,7 +57,7 @@ use spoke_operations::{
 use crate::error::{CoreError, CoreResult};
 use storage::{
     Admission, CandidateRow, Coverage, Fence, FenceAction, FenceTarget, GrantRow, MemoryStore,
-    NewCandidate, NewGrant, OpContext, Placement, ProfileRow, ReceiptRow, RecordRow,
+    NewCandidate, NewGrant, OpContext, Placement, ProfileRow, ReceiptRow, RecordRead, RecordRow,
     ReviewDecision, Selection, SpaceRow, StoreError, SubjectRow,
 };
 
@@ -125,6 +125,7 @@ enum ProviderError {
     SubjectFenced {
         subject_id: String,
         status: String,
+        context_id: Option<String>,
     },
     RevisionConflict {
         current: i64,
@@ -180,9 +181,16 @@ impl ProviderError {
             | Self::CandidateConsumed(reason)
             | Self::OutcomeUncertain(reason)
             | Self::Internal(reason) => reason.clone(),
-            Self::SubjectFenced { subject_id, status } => {
-                format!("subject {subject_id} is {status}; its writes are rejected")
-            }
+            Self::SubjectFenced {
+                subject_id,
+                status,
+                context_id,
+            } => context_id.as_deref().map_or_else(
+                || format!("subject {subject_id} is {status}; its writes are rejected"),
+                |context_id| format!(
+                    "subject {subject_id} has context {context_id} fenced; writes placing content there are rejected"
+                ),
+            ),
             Self::RevisionConflict { current } => format!(
                 "expected_revision does not match the stored revision ({current}); re-read and retry"
             ),
@@ -210,9 +218,24 @@ impl ProviderError {
             Self::RevisionConflict { current } => {
                 details.insert("current_revision".to_string(), json!(current));
             }
-            Self::SubjectFenced { subject_id, status } => {
+            Self::SubjectFenced {
+                subject_id,
+                status,
+                context_id,
+            } => {
                 details.insert("subject_id".to_string(), json!(subject_id));
                 details.insert("status".to_string(), json!(status));
+                details.insert(
+                    "scope".to_string(),
+                    json!(if context_id.is_some() {
+                        "context"
+                    } else {
+                        "subject"
+                    }),
+                );
+                if let Some(context_id) = context_id {
+                    details.insert("context_id".to_string(), json!(context_id));
+                }
             }
             _ => {}
         }
@@ -225,9 +248,15 @@ fn store_error(error: StoreError) -> ProviderError {
         StoreError::NotFound(target) => ProviderError::NotFound(target),
         StoreError::NotAuthorized(reason) => ProviderError::NotAuthorized(reason),
         StoreError::SpaceFrozen(reason) => ProviderError::SpaceFrozen(reason),
-        StoreError::SubjectFenced { subject_id, status } => {
-            ProviderError::SubjectFenced { subject_id, status }
-        }
+        StoreError::SubjectFenced {
+            subject_id,
+            status,
+            context_id,
+        } => ProviderError::SubjectFenced {
+            subject_id,
+            status,
+            context_id,
+        },
         StoreError::RevisionConflict { current } => ProviderError::RevisionConflict { current },
         StoreError::IdempotencyConflict => ProviderError::IdempotencyConflict,
         StoreError::CandidateConsumed(reason) => ProviderError::CandidateConsumed(reason),
@@ -414,7 +443,7 @@ struct PageCursor {
     principal: String,
     scope: String,
     offset: u64,
-    marker: i64,
+    marker: String,
 }
 
 /// The bound query a cursor belongs to: op, space, the subject and principal
@@ -435,12 +464,12 @@ fn cursor_scope(
     )
 }
 
-fn encode_cursor(principal: &str, scope: &str, offset: u64, marker: i64) -> String {
+fn encode_cursor(principal: &str, scope: &str, offset: u64, marker: &str) -> String {
     let cursor = PageCursor {
         principal: principal.to_string(),
         scope: scope.to_string(),
         offset,
-        marker,
+        marker: marker.to_string(),
     };
     serde_json::to_string(&cursor).expect("a page cursor always serializes")
 }
@@ -455,7 +484,7 @@ fn decode_cursor(
     raw: Option<&str>,
     principal: &str,
     scope: &str,
-    marker: i64,
+    marker: &str,
 ) -> Result<u64, ProviderError> {
     let Some(raw) = raw else {
         return Ok(0);
@@ -702,6 +731,7 @@ impl LocalMemoryProvider {
             coverage: Coverage::Requirements(&requirements),
             issuance: None,
             subject_gate: None,
+            placement_gate: None,
             freeze_gated: false,
         };
         match self
@@ -1033,14 +1063,14 @@ impl MemoryPort for LocalMemoryProvider {
             cursor_text(request.cursor.as_ref()),
             principal_id,
             &scope,
-            marker,
+            &marker,
         ) {
             Ok(offset) => offset,
             Err(error) => return deny(&error),
         };
         let (page, next) = page(spaces, page_limit(request.limit), offset);
         let bodies: Vec<Value> = page.iter().map(space_body).collect();
-        let next_cursor = next.map(|offset| encode_cursor(principal_id, &scope, offset, marker));
+        let next_cursor = next.map(|offset| encode_cursor(principal_id, &scope, offset, &marker));
         respond(json!({ "spaces": bodies, "next_cursor": next_cursor }))
     }
 
@@ -1116,6 +1146,7 @@ impl MemoryPort for LocalMemoryProvider {
             // §7.5: a fenced or archived subject rejects its writes, checked in
             // the same transaction as the get-or-create.
             subject_gate: Some(request.subject_id.as_str()),
+            placement_gate: None,
             freeze_gated: true,
         };
         match self
@@ -1219,6 +1250,7 @@ impl MemoryPort for LocalMemoryProvider {
             coverage: Coverage::Requirements(&requirements),
             issuance: None,
             subject_gate: None,
+            placement_gate: None,
             freeze_gated: true,
         };
         let fence = Fence {
@@ -1291,7 +1323,7 @@ impl MemoryPort for LocalMemoryProvider {
             cursor_text(request.cursor.as_ref()),
             principal_id,
             &scope,
-            marker,
+            &marker,
         ) {
             Ok(offset) => offset,
             Err(error) => return deny(&error),
@@ -1304,7 +1336,7 @@ impl MemoryPort for LocalMemoryProvider {
                 Err(error) => return deny(&error),
             }
         }
-        let next_cursor = next.map(|offset| encode_cursor(principal_id, &scope, offset, marker));
+        let next_cursor = next.map(|offset| encode_cursor(principal_id, &scope, offset, &marker));
         respond(json!({ "grants": bodies, "next_cursor": next_cursor }))
     }
 
@@ -1371,6 +1403,7 @@ impl MemoryPort for LocalMemoryProvider {
             coverage: Coverage::Requirements(&requirements),
             issuance: Some(&issued),
             subject_gate: subject_id,
+            placement_gate: None,
             freeze_gated: true,
         };
         match self.store.insert_grant(&ctx, &admission, &new_grant).await {
@@ -1407,6 +1440,7 @@ impl MemoryPort for LocalMemoryProvider {
             coverage: Coverage::Requirements(&requirements),
             issuance: None,
             subject_gate: None,
+            placement_gate: None,
             freeze_gated: true,
         };
         match self
@@ -1481,6 +1515,7 @@ impl MemoryPort for LocalMemoryProvider {
             coverage: Coverage::Requirements(&requirements),
             issuance: None,
             subject_gate: Some(subject_id),
+            placement_gate: Some(placement),
             freeze_gated: true,
         };
         let now = Utc::now();
@@ -1575,7 +1610,7 @@ impl MemoryPort for LocalMemoryProvider {
             cursor_text(request.cursor.as_ref()),
             principal_id,
             &scope,
-            marker,
+            &marker,
         ) {
             Ok(offset) => offset,
             Err(error) => return deny(&error),
@@ -1588,7 +1623,7 @@ impl MemoryPort for LocalMemoryProvider {
                 Err(error) => return deny(&error),
             }
         }
-        let next_cursor = next.map(|offset| encode_cursor(principal_id, &scope, offset, marker));
+        let next_cursor = next.map(|offset| encode_cursor(principal_id, &scope, offset, &marker));
         respond(json!({ "candidates": bodies, "next_cursor": next_cursor }))
     }
 
@@ -1651,6 +1686,7 @@ impl MemoryPort for LocalMemoryProvider {
             },
             issuance: None,
             subject_gate: None,
+            placement_gate: None,
             freeze_gated: true,
         };
         match self
@@ -1706,6 +1742,7 @@ impl MemoryPort for LocalMemoryProvider {
             },
             issuance: None,
             subject_gate: None,
+            placement_gate: None,
             freeze_gated: true,
         };
         let override_content = match &request.decision {
@@ -1806,6 +1843,7 @@ impl MemoryPort for LocalMemoryProvider {
             coverage: Coverage::Requirements(&requirements),
             issuance: None,
             subject_gate: Some(subject_id),
+            placement_gate: Some(placement),
             freeze_gated: true,
         };
         let content = match to_json(&request.content, "record content") {
@@ -1960,6 +1998,7 @@ impl MemoryPort for LocalMemoryProvider {
             },
             issuance: None,
             subject_gate: None,
+            placement_gate: None,
             freeze_gated: true,
         };
         match self
@@ -2008,6 +2047,7 @@ impl MemoryPort for LocalMemoryProvider {
             },
             issuance: None,
             subject_gate: None,
+            placement_gate: None,
             freeze_gated: true,
         };
         match self
@@ -2067,6 +2107,7 @@ impl MemoryPort for LocalMemoryProvider {
                 filter.as_deref(),
                 &request.kinds,
                 request.include_tombstoned,
+                RecordRead::List,
                 principal_id,
                 Utc::now(),
             )
@@ -2093,7 +2134,7 @@ impl MemoryPort for LocalMemoryProvider {
             cursor_text(request.cursor.as_ref()),
             principal_id,
             &scope,
-            marker,
+            &marker,
         ) {
             Ok(offset) => offset,
             Err(error) => return deny(&error),
@@ -2106,7 +2147,7 @@ impl MemoryPort for LocalMemoryProvider {
                 Err(error) => return deny(&error),
             }
         }
-        let next_cursor = next.map(|offset| encode_cursor(principal_id, &scope, offset, marker));
+        let next_cursor = next.map(|offset| encode_cursor(principal_id, &scope, offset, &marker));
         respond(json!({
             "records": bodies,
             "total_authorized": total,
@@ -2156,6 +2197,7 @@ impl MemoryPort for LocalMemoryProvider {
             },
             issuance: None,
             subject_gate: None,
+            placement_gate: None,
             freeze_gated: true,
         };
         match self
@@ -2217,6 +2259,7 @@ impl MemoryPort for LocalMemoryProvider {
                 filter.as_deref(),
                 &[],
                 false,
+                RecordRead::Recall,
                 principal_id,
                 Utc::now(),
             )
@@ -2226,8 +2269,11 @@ impl MemoryPort for LocalMemoryProvider {
             Err(error) => return deny(&store_error(error)),
         };
         let total = rows.len();
+        // §9.2: the query decides the ordering, so a cursor continues only the
+        // ranking it was minted under (MEM-R026).
+        let terms = policy::query_terms(request.query.as_deref().unwrap_or_default());
         let scope = format!(
-            "{}|sel={}|filter={}",
+            "{}|sel={}|filter={}|query={}",
             cursor_scope(
                 OP_RECALL,
                 Some(request.space_id.as_str()),
@@ -2235,19 +2281,19 @@ impl MemoryPort for LocalMemoryProvider {
                 None,
             ),
             selection_key(&selection),
-            filter_key(filter.as_deref())
+            filter_key(filter.as_deref()),
+            terms.join(",")
         );
         let offset = match decode_cursor(
             cursor_text(request.cursor.as_ref()),
             principal_id,
             &scope,
-            marker,
+            &marker,
         ) {
             Ok(offset) => offset,
             Err(error) => return deny(&error),
         };
         // §9.2 ranking: deterministic for identical state, request and policy.
-        let terms = policy::query_terms(request.query.as_deref().unwrap_or_default());
         let mut ranked: Vec<(usize, &RecordRow)> = rows
             .iter()
             .map(|row| (policy::recall_score(&record_text(row), &terms), row))
@@ -2284,7 +2330,7 @@ impl MemoryPort for LocalMemoryProvider {
         }
         let consumed = start + bodies.len();
         let next_cursor = (consumed < total)
-            .then(|| encode_cursor(principal_id, &scope, consumed as u64, marker));
+            .then(|| encode_cursor(principal_id, &scope, consumed as u64, &marker));
         respond(json!({
             "records": bodies,
             "total_authorized": total,
@@ -2364,6 +2410,8 @@ impl MemoryPort for LocalMemoryProvider {
             coverage: Coverage::Requirements(&requirements),
             issuance: None,
             subject_gate: Some(subject_id),
+            // Profiles are subject-level documents with no placement (§6.8).
+            placement_gate: None,
             freeze_gated: true,
         };
         let document = match to_json(&request.document, "profile document") {

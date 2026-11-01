@@ -83,10 +83,12 @@ pub(super) enum StoreError {
     NotAuthorized(String),
     /// A frozen space refuses an op outside the §8.2 allowlist (§7.3/§8.2).
     SpaceFrozen(String),
-    /// A fenced or archived subject refuses writes (§7.5/§7.7/§7.9).
+    /// A fenced or archived subject refuses writes (§7.5/§7.7/§7.9), and so does
+    /// a placement into one of its fenced contexts (§7.7/MEM-R024).
     SubjectFenced {
         subject_id: String,
         status: String,
+        context_id: Option<String>,
     },
     RevisionConflict {
         current: i64,
@@ -162,6 +164,10 @@ pub(super) struct Admission<'a> {
     pub issuance: Option<&'a IssuedGrant<'a>>,
     /// Subject whose `fenced`/`archived` status rejects the write (§7.5/§7.9).
     pub subject_gate: Option<&'a str>,
+    /// Placement the op writes content into, checked against that subject's
+    /// `fenced_contexts` in the same transaction (§7.7/MEM-R024). Row-scoped ops
+    /// resolve the same check from the row they are about to write.
+    pub placement_gate: Option<Placement<'a>>,
     /// Whether the §8.2 freeze gate applies. The space lifecycle ops define
     /// their own admission (§7.3/§7.4) and set this to false.
     pub freeze_gated: bool,
@@ -451,7 +457,7 @@ impl MemoryStore {
         &self,
         principal_id: &str,
         now: DateTime<Utc>,
-    ) -> StoreResult<(Vec<SpaceRow>, i64)> {
+    ) -> StoreResult<(Vec<SpaceRow>, String)> {
         let mut tx = self.pool.begin().await?;
         let rows_sql = format!(
             "SELECT {SPACE_COLUMNS} FROM memory_spaces s \
@@ -473,7 +479,7 @@ impl MemoryStore {
             .fetch_one(&mut *tx)
             .await?;
         tx.commit().await?;
-        Ok((rows, marker))
+        Ok((rows, marker.to_string()))
     }
 
     /// §7.3/§7.4 freeze-state change. `frozen`/`active` no-ops succeed without
@@ -663,7 +669,7 @@ impl MemoryStore {
         space_id: &str,
         subject_id: Option<&str>,
         principal_id: Option<&str>,
-    ) -> StoreResult<(Vec<GrantRow>, i64)> {
+    ) -> StoreResult<(Vec<GrantRow>, String)> {
         let mut tx = self.pool.begin().await?;
         let rows_sql = format!(
             "SELECT {GRANT_COLUMNS} FROM memory_grants \
@@ -686,7 +692,7 @@ impl MemoryStore {
         .fetch_one(&mut *tx)
         .await?;
         tx.commit().await?;
-        Ok((rows, marker))
+        Ok((rows, marker.to_string()))
     }
 
     /// §7.9 issuance. Current-coverage authorization, the dedup probe, the
@@ -970,7 +976,8 @@ fn authorize_issuance(
 
 /// Lifecycle gates that apply only to a fresh effect — never to a replay
 /// (§7.0.5/MEM-R021): the space freeze allowlist (§8.2) and the subject
-/// `fenced`/`archived` write gate (§7.5/§7.7/§7.9).
+/// `fenced`/`archived` write gate, including its fenced-context set
+/// (§7.5/§7.7/§7.9/MEM-R024).
 async fn gate(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     admission: &Admission<'_>,
@@ -986,12 +993,35 @@ async fn gate(
     }
     if let Some(subject_id) = admission.subject_gate {
         if let Some(subject) = subject_in_tx(tx, admission.space_id, subject_id).await? {
-            if subject.status != "active" {
-                return Err(StoreError::SubjectFenced {
-                    subject_id: subject_id.to_string(),
-                    status: subject.status,
-                });
-            }
+            require_write_allowed(&subject, admission.placement_gate.as_slice())?;
+        }
+    }
+    Ok(())
+}
+
+/// §7.7/MEM-R024: a `fenced`/`archived` subject rejects the write, and so does a
+/// placement into any context it has fenced. Sibling contexts and shared
+/// placement stay usable — a context fence never collaterally fences the
+/// subject.
+fn require_write_allowed(subject: &SubjectRow, placements: &[Placement<'_>]) -> StoreResult<()> {
+    if subject.status != "active" {
+        return Err(StoreError::SubjectFenced {
+            subject_id: subject.subject_id.clone(),
+            status: subject.status.clone(),
+            context_id: None,
+        });
+    }
+    let fenced_contexts = subject.fenced_contexts()?;
+    for placement in placements {
+        let Some(context_id) = placement.context_id else {
+            continue;
+        };
+        if fenced_contexts.iter().any(|known| known == context_id) {
+            return Err(StoreError::SubjectFenced {
+                subject_id: subject.subject_id.clone(),
+                status: subject.status.clone(),
+                context_id: Some(context_id.to_string()),
+            });
         }
     }
     Ok(())
@@ -1243,6 +1273,59 @@ impl Selection {
     }
 }
 
+/// Which read op is asking for records (§7.20 vs §7.22): the two differ in the
+/// capability they demand and in whether §7.7's archive exclusion applies.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum RecordRead {
+    List,
+    Recall,
+}
+
+impl RecordRead {
+    /// §7.20 accepts either read capability; §7.22 requires `recall` itself.
+    const fn capabilities(self) -> &'static [&'static str] {
+        match self {
+            Self::List => &["records_read", "recall"],
+            Self::Recall => &["recall"],
+        }
+    }
+
+    /// §7.7: `archived` excludes the subject's records from recall only.
+    const fn excludes_archived(self) -> bool {
+        matches!(self, Self::Recall)
+    }
+}
+
+/// MEM-R026 invalidation marker for a content page: a digest over everything
+/// that determines what the page holds — each visible row's identity and
+/// revision, every grant revision in the space, and the subject's lifecycle
+/// status. A bare revision sum can stay equal while one visible row is swapped
+/// for another, and cannot see a grant change that leaves the rows unchanged.
+fn snapshot_marker<'a>(
+    rows: impl Iterator<Item = (&'a str, i64)>,
+    grants: &[GrantRow],
+    subject_status: Option<&str>,
+) -> StoreResult<String> {
+    let mut visible: Vec<(String, i64)> = rows
+        .map(|(record_id, revision)| (record_id.to_string(), revision))
+        .collect();
+    visible.sort();
+    let mut grant_revisions: Vec<(String, i64)> = grants
+        .iter()
+        .map(|grant| (grant.grant_id.clone(), grant.revision))
+        .collect();
+    grant_revisions.sort();
+    let parts = json!({
+        "rows": visible,
+        "grants": grant_revisions,
+        "subject": subject_status,
+    });
+    match spoke_operations::jcs_sha256_hex(&parts) {
+        SpokeResult::Ok(digest) => Ok(digest),
+        SpokeResult::Reject(reject) => Err(StoreError::Corrupt(reject.message)),
+    }
+}
+
 /// A pending/consumed review candidate as stored (§6.7).
 #[derive(Debug, sqlx::FromRow)]
 pub(super) struct CandidateRow {
@@ -1407,19 +1490,15 @@ fn wire_grants(rows: &[GrantRow]) -> StoreResult<Vec<MemoryGrant>> {
 }
 
 /// §7.5/§7.7/§7.9 write gate for a subject named by a *stored row* rather than
-/// the request.
-async fn require_subject_active(
+/// the request, including the placement(s) that write touches (MEM-R024).
+async fn require_subject_writable(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     space_id: &str,
     subject_id: &str,
+    placements: &[Placement<'_>],
 ) -> StoreResult<()> {
     if let Some(subject) = subject_in_tx(tx, space_id, subject_id).await? {
-        if subject.status != "active" {
-            return Err(StoreError::SubjectFenced {
-                subject_id: subject_id.to_string(),
-                status: subject.status,
-            });
-        }
+        require_write_allowed(&subject, placements)?;
     }
     Ok(())
 }
@@ -1452,6 +1531,38 @@ async fn record_in_tx(
         .bind(record_id)
         .fetch_optional(&mut **tx)
         .await?)
+}
+
+/// §7.14/§7.15 shared consumption prelude: load the shell, gate its subject and
+/// its immutable capture placement, then check that it is still pending and at
+/// the expected revision.
+async fn consumable_candidate(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    space_id: &str,
+    candidate_id: &str,
+    expected_revision: i64,
+) -> StoreResult<CandidateRow> {
+    let candidate = candidate_in_tx(tx, space_id, candidate_id)
+        .await?
+        .ok_or_else(|| StoreError::NotFound(format!("candidate {candidate_id}")))?;
+    require_subject_writable(
+        tx,
+        space_id,
+        candidate.subject_id.as_str(),
+        &[candidate.scope()],
+    )
+    .await?;
+    if candidate.status == "consumed" {
+        return Err(StoreError::CandidateConsumed(format!(
+            "candidate {candidate_id} was already consumed"
+        )));
+    }
+    if candidate.revision != expected_revision {
+        return Err(StoreError::RevisionConflict {
+            current: candidate.revision,
+        });
+    }
+    Ok(candidate)
 }
 
 /// §6.7/§8.1 consumption: scrub the body, stamp `content_digest`, record the
@@ -1585,10 +1696,11 @@ impl MemoryStore {
         status: Option<&str>,
         principal_id: &str,
         now: DateTime<Utc>,
-    ) -> StoreResult<(Vec<CandidateRow>, i64)> {
+    ) -> StoreResult<(Vec<CandidateRow>, String)> {
         let mut tx = self.pool.begin().await?;
         space_in_tx(&mut tx, space_id).await?;
-        let grants = wire_grants(&grants_in_tx(&mut tx, space_id).await?)?;
+        let grant_rows = grants_in_tx(&mut tx, space_id).await?;
+        let grants = wire_grants(&grant_rows)?;
         let base = GrantRequirement {
             capability: "review",
             subject_id: Some(subject_id),
@@ -1613,21 +1725,36 @@ impl MemoryStore {
             .bind(status)
             .fetch_all(&mut *tx)
             .await?;
+        let subject_status = subject_in_tx(&mut tx, space_id, subject_id)
+            .await?
+            .map(|subject| subject.status);
         tx.commit().await?;
-        let visible: Vec<CandidateRow> = rows
-            .into_iter()
-            .filter(|row| !row.expired(now))
-            .filter(|row| {
-                covered(
-                    &grants,
-                    principal_id,
-                    space_id,
-                    now,
-                    &row.requirement("review"),
-                )
-            })
-            .collect();
-        let marker = visible.iter().map(|row| row.revision).sum();
+        // §7.7: `archived` hides the subject from the *default* listing; a
+        // status-filtered listing is an explicit audit query and stays readable.
+        let archived = status.is_none() && subject_status.as_deref() == Some("archived");
+        let visible: Vec<CandidateRow> = if archived {
+            Vec::new()
+        } else {
+            rows.into_iter()
+                .filter(|row| !row.expired(now))
+                .filter(|row| {
+                    covered(
+                        &grants,
+                        principal_id,
+                        space_id,
+                        now,
+                        &row.requirement("review"),
+                    )
+                })
+                .collect()
+        };
+        let marker = snapshot_marker(
+            visible
+                .iter()
+                .map(|row| (row.candidate_id.as_str(), row.revision)),
+            &grant_rows,
+            subject_status.as_deref(),
+        )?;
         Ok((visible, marker))
     }
 
@@ -1670,20 +1797,8 @@ impl MemoryStore {
             return Ok(row);
         }
         gate(&mut tx, admission).await?;
-        let candidate = candidate_in_tx(&mut tx, ctx.space_id, candidate_id)
-            .await?
-            .ok_or_else(|| StoreError::NotFound(format!("candidate {candidate_id}")))?;
-        require_subject_active(&mut tx, ctx.space_id, candidate.subject_id.as_str()).await?;
-        if candidate.status == "consumed" {
-            return Err(StoreError::CandidateConsumed(format!(
-                "candidate {candidate_id} was already consumed"
-            )));
-        }
-        if candidate.revision != expected_revision {
-            return Err(StoreError::RevisionConflict {
-                current: candidate.revision,
-            });
-        }
+        let candidate =
+            consumable_candidate(&mut tx, ctx.space_id, candidate_id, expected_revision).await?;
         let receipt_id = mint_receipt_id();
         let consumed_by = json!({
             "op": "memory.candidates.dismiss",
@@ -1723,20 +1838,8 @@ impl MemoryStore {
             return Ok(row);
         }
         gate(&mut tx, admission).await?;
-        let candidate = candidate_in_tx(&mut tx, ctx.space_id, candidate_id)
-            .await?
-            .ok_or_else(|| StoreError::NotFound(format!("candidate {candidate_id}")))?;
-        require_subject_active(&mut tx, ctx.space_id, candidate.subject_id.as_str()).await?;
-        if candidate.status == "consumed" {
-            return Err(StoreError::CandidateConsumed(format!(
-                "candidate {candidate_id} was already consumed"
-            )));
-        }
-        if candidate.revision != expected_revision {
-            return Err(StoreError::RevisionConflict {
-                current: candidate.revision,
-            });
-        }
+        let candidate =
+            consumable_candidate(&mut tx, ctx.space_id, candidate_id, expected_revision).await?;
         let provenance: Value = serde_json::from_str(&candidate.provenance_json)
             .map_err(|e| StoreError::Corrupt(format!("candidate provenance: {e}")))?;
         let content: Value = match candidate.content_json.as_deref() {
@@ -1826,20 +1929,27 @@ impl MemoryStore {
         filter: Option<&[String]>,
         kinds: &[String],
         include_tombstoned: bool,
+        read: RecordRead,
         principal_id: &str,
         now: DateTime<Utc>,
-    ) -> StoreResult<(Vec<RecordRow>, i64)> {
+    ) -> StoreResult<(Vec<RecordRow>, String)> {
         let mut tx = self.pool.begin().await?;
         space_in_tx(&mut tx, space_id).await?;
-        let grants = wire_grants(&grants_in_tx(&mut tx, space_id).await?)?;
-        let readable = ["records_read", "recall"]
-            .map(|capability| selection.base_requirement(capability, subject_id));
-        if !readable
-            .iter()
-            .any(|requirement| covered(&grants, principal_id, space_id, now, requirement))
-        {
+        let grant_rows = grants_in_tx(&mut tx, space_id).await?;
+        let grants = wire_grants(&grant_rows)?;
+        let required = read.capabilities();
+        if !required.iter().any(|capability| {
+            covered(
+                &grants,
+                principal_id,
+                space_id,
+                now,
+                &selection.base_requirement(capability, subject_id),
+            )
+        }) {
             return Err(StoreError::NotAuthorized(format!(
-                "principal {principal_id} holds no records_read/recall grant covering the selection"
+                "principal {principal_id} holds no {} grant covering the selection",
+                required.join("/")
             )));
         }
         let admin = GrantRequirement {
@@ -1863,8 +1973,15 @@ impl MemoryStore {
             .bind(subject_id)
             .fetch_all(&mut *tx)
             .await?;
+        let subject_status = subject_in_tx(&mut tx, space_id, subject_id)
+            .await?
+            .map(|subject| subject.status);
         tx.commit().await?;
+        // §7.7: an archived subject's records leave recall; the listing and
+        // by-id audit routes still serve them.
+        let archived = read.excludes_archived() && subject_status.as_deref() == Some("archived");
         let subject_all = matches!(selection, Selection::SubjectAll);
+        let rows = if archived { Vec::new() } else { rows };
         let visible: Vec<RecordRow> = rows
             .into_iter()
             .filter(|row| !row.tombstoned() || include_tombstoned)
@@ -1875,7 +1992,7 @@ impl MemoryStore {
                     .is_none_or(|context_ids| provenance_matches(&row.provenance_json, context_ids))
             })
             .filter(|row| {
-                ["records_read", "recall"].iter().any(|capability| {
+                required.iter().any(|capability| {
                     covered(
                         &grants,
                         principal_id,
@@ -1886,7 +2003,13 @@ impl MemoryStore {
                 })
             })
             .collect();
-        let marker = visible.iter().map(|row| row.revision).sum();
+        let marker = snapshot_marker(
+            visible
+                .iter()
+                .map(|row| (row.record_id.as_str(), row.revision)),
+            &grant_rows,
+            subject_status.as_deref(),
+        )?;
         Ok((visible, marker))
     }
 
@@ -1987,7 +2110,13 @@ impl MemoryStore {
         let record = record_in_tx(&mut tx, ctx.space_id, record_id)
             .await?
             .ok_or_else(|| StoreError::NotFound(format!("record {record_id}")))?;
-        require_subject_active(&mut tx, ctx.space_id, record.subject_id.as_str()).await?;
+        require_subject_writable(
+            &mut tx,
+            ctx.space_id,
+            record.subject_id.as_str(),
+            &[record.scope()],
+        )
+        .await?;
         // MEM-R014: deletion is terminal, so a tombstoned record is never edited
         // back to life.
         if record.tombstoned() {
@@ -2045,6 +2174,15 @@ impl MemoryStore {
         let record = record_in_tx(&mut tx, ctx.space_id, record_id)
             .await?
             .ok_or_else(|| StoreError::NotFound(format!("record {record_id}")))?;
+        // §7.7/MEM-R014: deletion scrubs content irreversibly, so the subject
+        // and placement gates apply exactly as they do to update and promote.
+        require_subject_writable(
+            &mut tx,
+            ctx.space_id,
+            record.subject_id.as_str(),
+            &[record.scope()],
+        )
+        .await?;
         if record.tombstoned() {
             return Err(StoreError::StatusTransition(format!(
                 "record {record_id} is already tombstoned"
@@ -2100,7 +2238,13 @@ impl MemoryStore {
         let record = record_in_tx(&mut tx, ctx.space_id, record_id)
             .await?
             .ok_or_else(|| StoreError::NotFound(format!("record {record_id}")))?;
-        require_subject_active(&mut tx, ctx.space_id, record.subject_id.as_str()).await?;
+        require_subject_writable(
+            &mut tx,
+            ctx.space_id,
+            record.subject_id.as_str(),
+            &[record.scope(), target],
+        )
+        .await?;
         if record.tombstoned() {
             return Err(StoreError::StatusTransition(format!(
                 "record {record_id} is tombstoned"
