@@ -484,7 +484,22 @@ fn write_staged(root: &Path, receipt_id: &str, effect: &FileEffect) -> std::io::
     }
     let staged_path = staged(&target, receipt_id);
     std::fs::write(&staged_path, effect.content.as_bytes())?;
+    // A-13: the staged bytes — and the directory entry that names them — must be
+    // on disk before the journal's recovery bytes are cleared, or a power loss
+    // loses the file while recovery still sees the intent as applied.
+    sync_path(&staged_path)?;
     Ok(staged_path)
+}
+
+/// fsync one file and the directory holding its name, so the write/link/rename
+/// that installed it survives a power loss (A-13; the repo's durable-write
+/// precedents fsync the file and then its parent directory).
+fn sync_path(path: &Path) -> std::io::Result<()> {
+    std::fs::File::open(path)?.sync_all()?;
+    if let Some(parent) = path.parent() {
+        std::fs::File::open(parent)?.sync_all()?;
+    }
+    Ok(())
 }
 
 fn matches_digest(bytes: &[u8], digest: &str) -> bool {
@@ -528,7 +543,10 @@ pub(super) fn publish(root: &Path, receipt_id: &str, effect: &FileEffect) -> std
             "staged file does not match the intent digest",
         ));
     }
-    install(&staged_path, &target, receipt_id, effect)
+    install(&staged_path, &target, receipt_id, effect)?;
+    // A-13: the settlement that clears the journal's recovery bytes runs only
+    // after the installed file and its directory entry are durable.
+    sync_path(&target)
 }
 
 /// Move the staged bytes into place under the intent's ownership rule.
@@ -741,7 +759,7 @@ where
             // not be marked applied — the next pass retries the removal.
             let _ = std::fs::remove_file(&staged_path);
             return match drop_obsolete_scratch(&scratch, effect, seam) {
-                Ok(()) => Settled::Published,
+                Ok(()) => durable_published(&target),
                 Err(error) => Settled::Quarantined(format!("scratch cleanup failed: {error}")),
             };
         }
@@ -770,7 +788,7 @@ where
         match restore(&scratch, &target) {
             Ok(()) => {
                 let _ = std::fs::remove_file(&staged_path);
-                return Settled::Published;
+                return durable_published(&target);
             }
             // The target was re-created meanwhile: its bytes stay, and the
             // ownership rule below decides.
@@ -799,8 +817,19 @@ where
     }
     match install_verifying(&staged_path, &target, receipt_id, effect, seam) {
         // The install removes every obsolete scratch before it reports success.
-        Ok(()) => Settled::Published,
+        Ok(()) => durable_published(&target),
         Err(error) => Settled::Quarantined(format!("publish failed: {error}")),
+    }
+}
+
+/// Report the intent as published, after making the target and its directory
+/// entry durable (A-13): the journal's recovery bytes are cleared in the same
+/// settlement, so a file a power loss could still revert must keep the intent
+/// unsettled. The payload survives, so a later pass retries the sync.
+fn durable_published(target: &Path) -> Settled {
+    match sync_path(target) {
+        Ok(()) => Settled::Published,
+        Err(error) => Settled::Quarantined(format!("target sync failed: {error}")),
     }
 }
 

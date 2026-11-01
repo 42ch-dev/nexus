@@ -38,7 +38,7 @@
 //!   namespace is free again, on read and replay alike — a tombstone is not an
 //!   eternal answer. Every mutating entry point and every provider open first
 //!   reclaims expired rows in a transaction of its own
-//!   ([`MemoryStore::reclaim_expired_receipts`]) — all namespaces, keyless
+//!   ([`MemoryStore::reclaim_expired`]) — all namespaces, keyless
 //!   receipts included — so eviction is committed whatever the operation then
 //!   does: a replay refusal, an authorization failure or any other early return
 //!   drops only the effect transaction. A sweep failure is logged and never
@@ -577,7 +577,7 @@ impl MemoryStore {
     async fn begin_admission(
         &self,
     ) -> StoreResult<(sqlx::Transaction<'_, sqlx::Sqlite>, DateTime<Utc>)> {
-        self.reclaim_expired_receipts().await;
+        self.reclaim_expired().await;
         let tx = begin_immediate(&self.pool).await?;
         Ok((tx, self.now()))
     }
@@ -608,21 +608,23 @@ impl MemoryStore {
     ///
     /// The same transaction records the reading it decided at
     /// ([`record_clock_floor`]), so the clock this sweep judged retention by is
-    /// what the next process resumes from.
-    async fn reclaim_expired_receipts(&self) {
+    /// what the next process resumes from. It also reclaims the two families
+    /// that age out on the same clock: applied journal shells (§5.2/MEM-R014,
+    /// `JOURNAL_RETENTION_SECONDS`) and expired pending candidates (§6.7).
+    async fn reclaim_expired(&self) {
         let mut tx = match begin_immediate(&self.pool).await {
             Ok(tx) => tx,
             Err(error) => {
-                tracing::warn!(?error, "memory receipt retention sweep skipped");
+                tracing::warn!(?error, "memory retention sweep skipped");
                 return;
             }
         };
-        if let Err(error) = receipt_retention_sweep(&mut tx, self.now()).await {
-            tracing::warn!(?error, "memory receipt retention sweep failed");
+        if let Err(error) = retention_sweep(&mut tx, self.now()).await {
+            tracing::warn!(?error, "memory retention sweep failed");
             return;
         }
         if let Err(error) = tx.commit().await {
-            tracing::warn!(?error, "memory receipt retention sweep did not commit");
+            tracing::warn!(?error, "memory retention sweep did not commit");
         }
     }
 
@@ -837,7 +839,7 @@ impl MemoryStore {
         // opening the provider reclaims what has aged out, and does so in its
         // own committed transaction so a provisioning failure cannot put an
         // already-evicted body back either.
-        self.reclaim_expired_receipts().await;
+        self.reclaim_expired().await;
         let mut tx = begin_immediate(&self.pool).await?;
         sqlx::query(
             "INSERT OR IGNORE INTO memory_spaces \
@@ -866,14 +868,6 @@ impl MemoryStore {
             .await
             .map_err(|e| StoreError::CommitUnknown(e.to_string()))?;
         Ok(())
-    }
-
-    pub(super) async fn find_space(&self, space_id: &str) -> StoreResult<Option<SpaceRow>> {
-        let sql = format!("SELECT {SPACE_COLUMNS} FROM memory_spaces s WHERE s.space_id = ?");
-        Ok(sqlx::query_as::<_, SpaceRow>(sqlx::AssertSqlSafe(sql))
-            .bind(space_id)
-            .fetch_optional(&self.pool)
-            .await?)
     }
 
     /// §7.28 `memory.receipts.get`: one stored receipt under **current**
@@ -959,19 +953,28 @@ impl MemoryStore {
         }
     }
 
-    pub(super) async fn find_subject(
+    /// §7.6 subject read: the "any live grant reaches this subject" check and
+    /// the subject row come from ONE read transaction on the store's clock
+    /// (S-4), so a revoke committing between them cannot disclose the subject.
+    pub(super) async fn subject_for_read(
         &self,
+        principal_id: &str,
         space_id: &str,
         subject_id: &str,
-    ) -> StoreResult<Option<SubjectRow>> {
-        let sql = format!(
-            "SELECT {SUBJECT_COLUMNS} FROM memory_subjects WHERE space_id = ? AND subject_id = ?"
-        );
-        Ok(sqlx::query_as::<_, SubjectRow>(sqlx::AssertSqlSafe(sql))
-            .bind(space_id)
-            .bind(subject_id)
-            .fetch_optional(&self.pool)
-            .await?)
+    ) -> StoreResult<SubjectRow> {
+        let (mut tx, now) = self.begin_read().await?;
+        space_in_tx(&mut tx, space_id).await?;
+        let rows = grants_in_tx(&mut tx, space_id).await?;
+        if !any_grant_for_subject(&rows, principal_id, space_id, subject_id, now) {
+            return Err(StoreError::NotAuthorized(format!(
+                "principal {principal_id} holds no grant on subject {subject_id}"
+            )));
+        }
+        let subject = subject_in_tx(&mut tx, space_id, subject_id)
+            .await?
+            .ok_or_else(|| StoreError::NotFound(format!("subject {subject_id}")))?;
+        tx.commit().await?;
+        Ok(subject)
     }
 
     /// The visible spaces AND their invalidation marker from one consistent read
@@ -1162,53 +1165,59 @@ impl MemoryStore {
         self.commit_receipt(tx, ctx, &result, now).await
     }
 
-    pub(super) async fn grants(
+    /// §7.6/§7.8/§7.0.7 self-view read: the `admin` verdict, the page it selects
+    /// and the invalidation marker come from ONE read transaction on the store's
+    /// clock (S-4), so a revoke committing between the verdict and the page can
+    /// neither widen a self-view to the space-wide one nor authorize the
+    /// `principal_id` filter. Returns the page, its marker, and the principal
+    /// filter actually applied — admin sees the requested filter, everyone else
+    /// sees their own grants.
+    pub(super) async fn grants_page_for(
         &self,
+        principal_id: &str,
         space_id: &str,
         subject_id: Option<&str>,
-        principal_id: Option<&str>,
-    ) -> StoreResult<Vec<GrantRow>> {
-        let sql = format!(
-            "SELECT {GRANT_COLUMNS} FROM memory_grants \
-             WHERE space_id = ? AND (? IS NULL OR subject_id = ?) \
-             AND (? IS NULL OR principal_id = ?) \
-             ORDER BY grant_id"
+        principal_filter: Option<&str>,
+    ) -> StoreResult<(Vec<GrantRow>, String, Option<String>)> {
+        let (mut tx, now) = self.begin_read().await?;
+        space_in_tx(&mut tx, space_id).await?;
+        let grant_rows = grants_in_tx(&mut tx, space_id).await?;
+        let admin = covered(
+            &wire_grants(&grant_rows)?,
+            principal_id,
+            space_id,
+            now,
+            &super::admin_requirement(subject_id),
         );
-        Ok(sqlx::query_as::<_, GrantRow>(sqlx::AssertSqlSafe(sql))
-            .bind(space_id)
-            .bind(subject_id)
-            .bind(subject_id)
-            .bind(principal_id)
-            .bind(principal_id)
-            .fetch_all(&self.pool)
-            .await?)
-    }
-
-    /// One filtered grant page AND its invalidation marker from the same read
-    /// (§7.0.7, MEM-R026): a grant write that changes the marker between pages
-    /// invalidates the cursor. Revisions only grow, so the sum over the space
-    /// moves on every insert or revoke.
-    pub(super) async fn grants_page(
-        &self,
-        space_id: &str,
-        subject_id: Option<&str>,
-        principal_id: Option<&str>,
-    ) -> StoreResult<(Vec<GrantRow>, String)> {
-        let mut tx = self.pool.begin().await?;
-        let rows_sql = format!(
-            "SELECT {GRANT_COLUMNS} FROM memory_grants \
-             WHERE space_id = ? AND (? IS NULL OR subject_id = ?) \
-             AND (? IS NULL OR principal_id = ?) \
-             ORDER BY grant_id"
-        );
-        let rows = sqlx::query_as::<_, GrantRow>(sqlx::AssertSqlSafe(rows_sql))
-            .bind(space_id)
-            .bind(subject_id)
-            .bind(subject_id)
-            .bind(principal_id)
-            .bind(principal_id)
-            .fetch_all(&mut *tx)
-            .await?;
+        if !admin && principal_filter.is_some() {
+            return Err(StoreError::NotAuthorized(
+                "the principal_id filter is admin-only (§7.8)".to_string(),
+            ));
+        }
+        let filter = if admin {
+            principal_filter
+        } else {
+            Some(principal_id)
+        };
+        // Constant predicates only: the absent-filter variants are separate
+        // statements so the (space_id, …) indexes stay usable.
+        let mut where_sql = String::from(" WHERE space_id = ?");
+        let mut binds: Vec<&str> = vec![space_id];
+        if let Some(subject_id) = subject_id {
+            where_sql.push_str(" AND subject_id = ?");
+            binds.push(subject_id);
+        }
+        if let Some(filter) = filter {
+            where_sql.push_str(" AND principal_id = ?");
+            binds.push(filter);
+        }
+        let rows_sql =
+            format!("SELECT {GRANT_COLUMNS} FROM memory_grants{where_sql} ORDER BY grant_id");
+        let mut query = sqlx::query_as::<_, GrantRow>(sqlx::AssertSqlSafe(rows_sql));
+        for bind in binds {
+            query = query.bind(bind);
+        }
+        let rows = query.fetch_all(&mut *tx).await?;
         let (marker,): (i64,) = sqlx::query_as(
             "SELECT COALESCE(SUM(revision), 0) FROM memory_grants WHERE space_id = ?",
         )
@@ -1216,7 +1225,7 @@ impl MemoryStore {
         .fetch_one(&mut *tx)
         .await?;
         tx.commit().await?;
-        Ok((rows, marker.to_string()))
+        Ok((rows, marker.to_string(), filter.map(str::to_string)))
     }
 
     /// §7.9 issuance. Current-coverage authorization, the dedup probe, the
@@ -1383,8 +1392,32 @@ impl MemoryStore {
         self.write_receipt(&mut tx, ctx, &receipt_id, None, now)
             .await?;
         self.commit_effect(tx).await?;
-        self.publish_effects(publication, &receipt_id, effects)
-            .await?;
+        if let Err(error) = self
+            .publish_effects(publication, &receipt_id, effects)
+            .await
+        {
+            // §5.2 step 3/S-1: terminalize the intent now. Leaving it `pending`
+            // silently withheld the subject from every read until the next open,
+            // and a deterministic refusal was reported by no channel at all. The
+            // payload is kept, which is the evidence a recovery pass re-drives;
+            // the response stays `OUTCOME_UNCERTAIN` because the file write may
+            // have landed before it failed (§14.3).
+            let failure = quarantine_failure(&receipt_id, subject_id, &describe(&error));
+            if let Err(settle) = self
+                .settle_journal(&receipt_id, Settlement::Quarantined(failure), now)
+                .await
+            {
+                // The publish failure is the caller's outcome; a settle failure
+                // only means the intent is still `pending` and the next open
+                // (or the next same-key replay) recovers it.
+                tracing::warn!(
+                    receipt_id = %receipt_id,
+                    ?settle,
+                    "memory journal quarantine skipped"
+                );
+            }
+            return Err(error);
+        }
         self.settle_journal(&receipt_id, Settlement::Applied(result), now)
             .await
             .map_err(|error| match error {
@@ -1638,12 +1671,17 @@ impl MemoryStore {
         let sql = format!("SELECT {RECEIPT_COLUMNS} FROM memory_receipts WHERE receipt_id = ?");
         let row = sqlx::query_as::<_, ReceiptRow>(sqlx::AssertSqlSafe(sql))
             .bind(receipt_id)
-            .fetch_one(&mut *tx)
+            .fetch_optional(&mut *tx)
             .await?;
         tx.commit()
             .await
             .map_err(|e| StoreError::CommitUnknown(format!("journal settle COMMIT: {e}")))?;
-        Ok(row)
+        // The retention sweep may have reclaimed the receipt of an intent that
+        // was still unsettled (the receipt's dedup window can end before the
+        // target is resolved). The journal row is the recovery authority, so its
+        // settlement still commits — only a caller that needs this receipt row
+        // is told it is gone.
+        row.ok_or_else(|| StoreError::NotFound(format!("receipt {receipt_id}")))
     }
 
     /// §5.2 step 2: take the workspace publication lock and settle every earlier
@@ -1687,7 +1725,6 @@ impl MemoryStore {
         }
         let entries: Vec<JournalEntry> = sqlx::query_as(UNSETTLED_TARGETS_SQL)
             .bind(ctx.space_id)
-            .bind(journal::STATE_APPLIED)
             .bind(targets_array(targets)?)
             .fetch_all(&self.pool)
             .await?;
@@ -1794,11 +1831,10 @@ impl MemoryStore {
         let cursor = self.recovery_cursor(space_id).await?;
         let entries: Vec<JournalEntry> = sqlx::query_as(
             "SELECT seq, receipt_id, subject_id, targets_json, result_json FROM memory_journal \
-             WHERE space_id = ? AND state <> ? \
+             WHERE space_id = ? AND state <> 'applied' \
              ORDER BY state = ?, CASE WHEN seq > ? THEN 0 ELSE 1 END, seq LIMIT ?",
         )
         .bind(space_id)
-        .bind(journal::STATE_APPLIED)
         .bind(journal::STATE_QUARANTINED)
         .bind(cursor)
         .bind(journal::RECOVERY_BOUND)
@@ -1864,6 +1900,19 @@ impl MemoryStore {
     /// flock); the filesystem half runs inside [`PublicationGuard::files`],
     /// whose blocking task owns the lease until its last file operation returns.
     async fn settle_intent(&self, publication: &mut PublicationGuard, entry: &JournalEntry) {
+        if let Err(error) = self.settle_entry(publication, entry).await {
+            tracing::warn!(receipt_id = %entry.receipt_id, ?error, "memory journal settle skipped");
+        }
+    }
+
+    /// [`Self::settle_intent`] returning the settled receipt: a re-drive
+    /// publishes what the journal owes and then records the outcome in one
+    /// transaction.
+    async fn settle_entry(
+        &self,
+        publication: &mut PublicationGuard,
+        entry: &JournalEntry,
+    ) -> StoreResult<ReceiptRow> {
         let (root, receipt_id, targets_json) = (
             self.files_root.clone(),
             entry.receipt_id.clone(),
@@ -1888,12 +1937,40 @@ impl MemoryStore {
                 ))
             }
         };
-        if let Err(error) = self
-            .settle_journal(&entry.receipt_id, settlement, self.now())
+        self.settle_journal(&entry.receipt_id, settlement, self.now())
             .await
-        {
-            tracing::warn!(receipt_id = %entry.receipt_id, ?error, "memory journal settle skipped");
+    }
+
+    /// §5.2 step 2 on the replay path (S-2): when a same-key replay reaches a
+    /// receipt whose journaled intent is still unsettled, re-drive and settle it
+    /// before answering. The replay then serves the published outcome — or the
+    /// recorded terminal failure when the target still conflicts — so the
+    /// duplicate-key channel can never answer `OUTCOME_UNCERTAIN` forever for an
+    /// intent a later pass could have settled.
+    async fn settle_replayed(
+        &self,
+        publication: &mut PublicationGuard,
+        row: ReceiptRow,
+    ) -> StoreResult<ReceiptRow> {
+        if row.status != RECEIPT_PENDING {
+            return Ok(row);
         }
+        let entry: Option<JournalEntry> = sqlx::query_as(
+            "SELECT seq, receipt_id, subject_id, targets_json, result_json FROM memory_journal \
+             WHERE receipt_id = ?",
+        )
+        .bind(&row.receipt_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        // Both rows commit in one transaction, so a pending receipt without its
+        // intent is a store state this provider cannot produce.
+        let entry = entry.ok_or_else(|| {
+            StoreError::Corrupt(format!(
+                "pending receipt {} has no journal intent",
+                row.receipt_id
+            ))
+        })?;
+        self.settle_entry(publication, &entry).await
     }
 }
 
@@ -1914,14 +1991,14 @@ enum Settlement<'a> {
 /// `path` field — never a pattern match over the serialized JSON.
 const UNSETTLED_TARGETS_SQL: &str = "SELECT j.seq, j.receipt_id, j.subject_id, j.targets_json, \
      j.result_json FROM memory_journal AS j \
-     WHERE j.space_id = ? AND j.state <> ? AND EXISTS ( \
+     WHERE j.space_id = ? AND j.state <> 'applied' AND EXISTS ( \
          SELECT 1 FROM json_each(j.targets_json) AS e \
          WHERE json_extract(e.value, '$.path') IN (SELECT value FROM json_each(?))) \
      ORDER BY j.seq";
 
 /// Whether any intent that owns one of the bound targets is still unsettled.
 const UNSETTLED_TARGET_SQL: &str = "SELECT j.receipt_id, j.state FROM memory_journal AS j \
-     WHERE j.space_id = ? AND j.state <> ? AND EXISTS ( \
+     WHERE j.space_id = ? AND j.state <> 'applied' AND EXISTS ( \
          SELECT 1 FROM json_each(j.targets_json) AS e \
          WHERE json_extract(e.value, '$.path') IN (SELECT value FROM json_each(?))) \
      ORDER BY j.seq LIMIT 1";
@@ -1976,7 +2053,6 @@ where
 {
     let row: Option<(String, String)> = sqlx::query_as(UNSETTLED_TARGET_SQL)
         .bind(space_id)
-        .bind(journal::STATE_APPLIED)
         .bind(targets_array(targets)?)
         .fetch_optional(executor)
         .await?;
@@ -2060,9 +2136,10 @@ async fn write_journal_entry(
     let at = timestamp(now);
     sqlx::query(
         "INSERT INTO memory_journal \
-         (receipt_id, space_id, subject_id, requester_principal_id, op, idempotency_key, state, \
-          targets_json, result_json, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         (seq, receipt_id, space_id, subject_id, requester_principal_id, op, idempotency_key, \
+          state, targets_json, result_json, created_at, updated_at) \
+         VALUES ((SELECT COALESCE(MAX(seq), 0) + 1 FROM memory_journal), ?, ?, ?, ?, ?, ?, ?, ?, \
+                 ?, ?, ?)",
     )
     .bind(receipt_id)
     .bind(ctx.space_id)
@@ -2093,12 +2170,11 @@ async fn unsettled_in(
 ) -> StoreResult<Option<String>> {
     let row: Option<(String,)> = sqlx::query_as(
         "SELECT state FROM memory_journal \
-         WHERE space_id = ? AND subject_id = ? AND state <> ? \
+         WHERE space_id = ? AND subject_id = ? AND state <> 'applied' \
          ORDER BY CASE state WHEN ? THEN 0 WHEN ? THEN 1 ELSE 2 END, created_at LIMIT 1",
     )
     .bind(space_id)
     .bind(subject_id)
-    .bind(journal::STATE_APPLIED)
     .bind(journal::STATE_QUARANTINED)
     .bind(journal::STATE_DEFERRED)
     .fetch_optional(&mut **tx)
@@ -2226,6 +2302,17 @@ fn authorize_issuance(
     Ok(())
 }
 
+/// §7.24/S-3: the ops that write a subject's own content, and therefore need the
+/// subject row to exist. `memory.subjects.ensure` is their creator; the
+/// control-plane ops (grant issuance, fence) name a subject without writing its
+/// content and keep their own admission rules.
+fn writes_subject_content(op: &str) -> bool {
+    matches!(
+        op,
+        super::OP_CAPTURE | super::OP_RECORDS_CREATE | super::OP_PROFILE_UPDATE
+    )
+}
+
 /// Lifecycle gates that apply only to a fresh effect — never to a replay
 /// (§7.0.5/MEM-R021): the space freeze allowlist (§8.2) and the subject
 /// `fenced`/`archived` write gate, including its fenced-context set
@@ -2244,8 +2331,20 @@ async fn gate(
         }
     }
     if let Some(subject_id) = admission.subject_gate {
-        if let Some(subject) = subject_in_tx(tx, admission.space_id, subject_id).await? {
-            require_write_allowed(&subject, admission.placement_gate.as_slice())?;
+        match subject_in_tx(tx, admission.space_id, subject_id).await? {
+            Some(subject) => {
+                require_write_allowed(&subject, admission.placement_gate.as_slice())?;
+            }
+            // §7.24/S-3: a content/profile write over a never-ensured subject is
+            // a `NOT_FOUND`, never an implicit creation — a space-wide grantee
+            // must not mint records or a trusted `personality` profile for a
+            // subject `subjects.get` cannot read. `memory.subjects.ensure` is
+            // the op that creates it, and control-plane ops (grant issuance)
+            // name a subject without writing its content.
+            None if writes_subject_content(admission.op) => {
+                return Err(StoreError::NotFound(format!("subject {subject_id}")));
+            }
+            None => {}
         }
     }
     Ok(())
@@ -2407,16 +2506,22 @@ async fn record_clock_floor(
     Ok(())
 }
 
-/// §6.10/MEM-R021 reclamation in one transaction.
+/// §6.10/MEM-R021 + §5.2/MEM-R014 + §6.7 reclamation in one transaction.
 ///
-/// Evicts every body older than `receipt_retention_seconds` across all dedup
-/// namespaces and the keyless `memory.subjects.ensure` receipts too, then drops
-/// every tombstone older than `dedup_retention_seconds`. Eviction is a one-way
-/// rewrite — the payload is discarded, so a later clock move cannot resurrect
-/// it. [`MemoryStore::reclaim_expired_receipts`] owns the transaction and its
+/// Evicts every receipt body older than `receipt_retention_seconds` across all
+/// dedup namespaces and the keyless `memory.subjects.ensure` receipts too, then
+/// drops every tombstone older than `dedup_retention_seconds`. Eviction is a
+/// one-way rewrite — the payload is discarded, so a later clock move cannot
+/// resurrect it. [`MemoryStore::reclaim_expired`] owns the transaction and its
 /// commit; this function only writes the reclamation and the clock reading it
 /// was decided at into it.
-async fn receipt_retention_sweep(
+///
+/// The same window bounds the two content families that would otherwise retain
+/// rows forever: an applied journal shell (its file content was scrubbed at
+/// settlement, so only the diagnostic trail ages out — an *unsettled* intent is
+/// never reclaimed, it is the recovery authority) and an expired pending
+/// candidate (never consumed, and excluded from every list).
+async fn retention_sweep(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     now: DateTime<Utc>,
 ) -> StoreResult<()> {
@@ -2438,6 +2543,20 @@ async fn receipt_retention_sweep(
         ))
         .execute(&mut **tx)
         .await?;
+    sqlx::query("DELETE FROM memory_journal WHERE state = 'applied' AND created_at < ?")
+        .bind(retention_cutoff(
+            now,
+            super::policy::JOURNAL_RETENTION_SECONDS,
+        ))
+        .execute(&mut **tx)
+        .await?;
+    sqlx::query(
+        "DELETE FROM memory_candidates \
+         WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?",
+    )
+    .bind(timestamp(now))
+    .execute(&mut **tx)
+    .await?;
     Ok(())
 }
 
@@ -2639,21 +2758,6 @@ impl Selection {
             },
         }
     }
-
-    /// Does the selection include a row with this placement (§6.12)?
-    fn admits(&self, placement: &Placement<'_>) -> bool {
-        match self {
-            Self::SubjectAll => true,
-            Self::SharedOnly => placement.visibility == Placement::SHARED,
-            Self::SelectedContexts {
-                context_ids,
-                include_shared,
-            } => placement.context_id.map_or_else(
-                || placement.visibility == Placement::SHARED && *include_shared,
-                |context_id| context_ids.iter().any(|known| known == context_id),
-            ),
-        }
-    }
 }
 
 /// Which read op is asking for records (§7.20 vs §7.22): the two differ in the
@@ -2739,15 +2843,9 @@ impl CandidateRow {
     }
 
     /// §6.7: an expired *pending* candidate leaves the lists without being
-    /// consumed; a consumed shell keeps its audit visibility.
-    fn expired(&self, now: DateTime<Utc>) -> bool {
-        self.status == "pending"
-            && self
-                .expires_at
-                .as_deref()
-                .is_some_and(|expires_at| expires_at <= timestamp(now).as_str())
-    }
-
+    /// consumed; a consumed shell keeps its audit visibility. The list SQL
+    /// enforces this predicate itself (S-9), so no read-path helper re-decides
+    /// it here.
     fn requirement<'a>(&'a self, capability: &'a str) -> GrantRequirement<'a> {
         let scope = self.scope();
         GrantRequirement {
@@ -2870,6 +2968,33 @@ fn covered(
 
 fn wire_grants(rows: &[GrantRow]) -> StoreResult<Vec<MemoryGrant>> {
     rows.iter().map(GrantRow::wire).collect()
+}
+
+/// Does any live grant reach this subject at all? §7.6 asks for "any capability
+/// on the subject", which `grant_covers` cannot express (it always names one
+/// required capability), so the §6.5 applicability filters are applied directly.
+/// Evaluated inside the caller's read transaction on the store's clock (S-4).
+fn any_grant_for_subject(
+    grants: &[GrantRow],
+    principal_id: &str,
+    space_id: &str,
+    subject_id: &str,
+    now: DateTime<Utc>,
+) -> bool {
+    let now_text = timestamp(now);
+    grants.iter().any(|grant| {
+        grant.principal_id == principal_id
+            && grant.space_id == space_id
+            && grant.revoked_at.is_none()
+            && grant
+                .expires_at
+                .as_deref()
+                .is_none_or(|expires_at| expires_at > now_text.as_str())
+            && grant
+                .subject_id
+                .as_deref()
+                .is_none_or(|scoped| scoped == subject_id)
+    })
 }
 
 /// §7.5/§7.7/§7.9 write gate for a subject named by a *stored row* rather than
@@ -3137,18 +3262,28 @@ impl MemoryStore {
                 "principal {principal_id} holds no review grant on subject {subject_id}"
             )));
         }
-        let sql = format!(
+        // Constant predicates, as separate statements rather than
+        // `(? IS NULL OR status = ?)`: that shape defeats the status index, and
+        // §6.7 expiry belongs to the read, not to a post-filter over every row
+        // (S-10/S-9).
+        let mut sql = format!(
             "SELECT {CANDIDATE_COLUMNS} FROM memory_candidates \
-             WHERE space_id = ? AND subject_id = ? AND (? IS NULL OR status = ?) \
-             ORDER BY created_at, candidate_id"
+             WHERE space_id = ? AND subject_id = ?"
         );
-        let rows = sqlx::query_as::<_, CandidateRow>(sqlx::AssertSqlSafe(sql))
+        if status.is_some() {
+            sql.push_str(" AND status = ?");
+        }
+        sql.push_str(
+            " AND NOT (status = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?) \
+             ORDER BY created_at, candidate_id",
+        );
+        let mut query = sqlx::query_as::<_, CandidateRow>(sqlx::AssertSqlSafe(sql))
             .bind(space_id)
-            .bind(subject_id)
-            .bind(status)
-            .bind(status)
-            .fetch_all(&mut *tx)
-            .await?;
+            .bind(subject_id);
+        if let Some(status) = status {
+            query = query.bind(status);
+        }
+        let rows = query.bind(timestamp(now)).fetch_all(&mut *tx).await?;
         let subject_status = subject_in_tx(&mut tx, space_id, subject_id)
             .await?
             .map(|subject| subject.status);
@@ -3163,7 +3298,6 @@ impl MemoryStore {
             Vec::new()
         } else {
             rows.into_iter()
-                .filter(|row| !row.expired(now))
                 .filter(|row| {
                     covered(
                         &grants,
@@ -3235,7 +3369,11 @@ impl MemoryStore {
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
-            return Ok(row);
+            // §5.2 step 2/S-2: settle the replayed intent before serving it, so
+            // a duplicate key reaches the published outcome (or the recorded
+            // terminal failure) instead of `OUTCOME_UNCERTAIN`.
+            tx.rollback().await?;
+            return self.settle_replayed(&mut publication, row).await;
         }
         require_settled_targets(&mut tx, ctx.space_id, &targets).await?;
         gate(&mut tx, admission).await?;
@@ -3288,7 +3426,11 @@ impl MemoryStore {
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
-            return Ok(row);
+            // §5.2 step 2/S-2: settle the replayed intent before serving it, so
+            // a duplicate key reaches the published outcome (or the recorded
+            // terminal failure) instead of `OUTCOME_UNCERTAIN`.
+            tx.rollback().await?;
+            return self.settle_replayed(&mut publication, row).await;
         }
         require_settled_targets(&mut tx, ctx.space_id, &targets).await?;
         gate(&mut tx, admission).await?;
@@ -3386,10 +3528,15 @@ impl MemoryStore {
         .await
     }
 
-    /// §7.20/§7.22 read path: authorization and tombstone/selection filters
-    /// apply before the page is cut, so counts and cursors cover only what the
-    /// principal may see (MEM-R006).
+    /// §7.20/§7.22 read path: authorization, and every constant filter
+    /// (tombstone, kind, selection, provenance) are applied by the SQL that cuts
+    /// the page, so a page fetches only its own rows (S-10). The invalidation
+    /// marker is a digest over the full authorized identity set, and
+    /// `total_authorized` is that set's size — both read in the same snapshot as
+    /// the page, so the cursor still covers only what the principal may see
+    /// (MEM-R006).
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_lines)]
     pub(super) async fn records(
         &self,
         space_id: &str,
@@ -3400,7 +3547,8 @@ impl MemoryStore {
         include_tombstoned: bool,
         read: RecordRead,
         principal_id: &str,
-    ) -> StoreResult<(Vec<RecordRow>, String)> {
+        page: Option<(u64, u64)>,
+    ) -> StoreResult<(Vec<RecordRow>, String, u64)> {
         let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let grant_rows = grants_in_tx(&mut tx, space_id).await?;
@@ -3432,56 +3580,99 @@ impl MemoryStore {
                 "include_tombstoned requires admin coverage (§7.20)".to_string(),
             ));
         }
-        let sql = format!(
-            "SELECT {RECORD_COLUMNS} FROM memory_records \
-             WHERE space_id = ? AND subject_id = ? ORDER BY created_at DESC, record_id"
-        );
-        let rows = sqlx::query_as::<_, RecordRow>(sqlx::AssertSqlSafe(sql))
-            .bind(space_id)
-            .bind(subject_id)
-            .fetch_all(&mut *tx)
-            .await?;
         let subject_status = subject_in_tx(&mut tx, space_id, subject_id)
             .await?
             .map(|subject| subject.status);
         let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
-        tx.commit().await?;
         // §7.7: an archived subject's records leave recall; the listing and
         // by-id audit routes still serve them.
         // §5.2/D-10: an unsettled file intent withholds the subject from both.
         let archived = read.excludes_archived() && subject_status.as_deref() == Some("archived");
         let hidden = withheld(unsettled.as_deref(), subject_id)?;
         let subject_all = matches!(selection, Selection::SubjectAll);
-        let rows = if archived || hidden { Vec::new() } else { rows };
-        let visible: Vec<RecordRow> = rows
-            .into_iter()
-            .filter(|row| !row.tombstoned() || include_tombstoned)
-            .filter(|row| kinds.is_empty() || kinds.contains(&row.kind))
-            .filter(|row| selection.admits(&row.scope()))
-            .filter(|row| {
-                filter
-                    .is_none_or(|context_ids| provenance_matches(&row.provenance_json, context_ids))
-            })
-            .filter(|row| {
-                required.iter().any(|capability| {
-                    covered(
-                        &grants,
-                        principal_id,
-                        space_id,
-                        now,
-                        &row.requirement(capability, subject_all),
-                    )
-                })
-            })
-            .collect();
+        if archived || hidden {
+            tx.commit().await?;
+            let marker =
+                snapshot_marker(std::iter::empty(), &grant_rows, subject_status.as_deref())?;
+            return Ok((Vec::new(), marker, 0));
+        }
+        let (where_sql, binds) = record_predicate(
+            selection,
+            filter,
+            kinds,
+            include_tombstoned,
+            space_id,
+            subject_id,
+        );
+        // `Some((limit, offset))` cuts the page in SQL; `None` is recall, which
+        // ranks the whole authorized set (§9.2) and so cannot page before it.
+        let page_clause = if page.is_some() {
+            " LIMIT ? OFFSET ?"
+        } else {
+            ""
+        };
+        let page_sql = format!(
+            "SELECT {RECORD_COLUMNS} FROM memory_records{where_sql} \
+             ORDER BY created_at DESC, record_id{page_clause}"
+        );
+        let mut rows_query = sqlx::query_as::<_, RecordRow>(sqlx::AssertSqlSafe(page_sql));
+        for bind in &binds {
+            rows_query = rows_query.bind(bind);
+        }
+        if let Some((limit, offset)) = page {
+            rows_query = rows_query
+                .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+                .bind(i64::try_from(offset).unwrap_or(i64::MAX));
+        }
+        let rows = rows_query.fetch_all(&mut *tx).await?;
+        // The authorized identity set: the marker and the count, never the
+        // bodies of rows the page will not serve. A whole-set read already has
+        // them.
+        let visible: Vec<(String, i64)> = if page.is_some() {
+            let identity_sql = format!(
+                "SELECT record_id, revision FROM memory_records{where_sql} \
+                 ORDER BY created_at DESC, record_id"
+            );
+            let mut identity =
+                sqlx::query_as::<_, (String, i64)>(sqlx::AssertSqlSafe(identity_sql));
+            for bind in &binds {
+                identity = identity.bind(bind);
+            }
+            identity.fetch_all(&mut *tx).await?
+        } else {
+            rows.iter()
+                .map(|row| (row.record_id.clone(), row.revision))
+                .collect()
+        };
+        tx.commit().await?;
+        // §6.5: the selection check above covers every row the selection admits
+        // (a grant covering all of its named contexts covers each of them), so
+        // the page is a slice of the authorized set and never needs a second
+        // row-level refusal. This asserts that invariant in tests.
+        debug_assert!(
+            rows.iter().all(|row| required.iter().any(|capability| {
+                covered(
+                    &grants,
+                    principal_id,
+                    space_id,
+                    now,
+                    &row.requirement(capability, subject_all),
+                )
+            })),
+            "the SQL page must be a slice of the authorized record set"
+        );
         let marker = snapshot_marker(
             visible
                 .iter()
-                .map(|row| (row.record_id.as_str(), row.revision)),
+                .map(|(record_id, revision)| (record_id.as_str(), *revision)),
             &grant_rows,
             subject_status.as_deref(),
         )?;
-        Ok((visible, marker))
+        Ok((
+            rows,
+            marker,
+            u64::try_from(visible.len()).unwrap_or(u64::MAX),
+        ))
     }
 
     /// §7.17: by-id read; a tombstoned record is admin-only and an unauthorized
@@ -3558,7 +3749,11 @@ impl MemoryStore {
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
-            return Ok(row);
+            // §5.2 step 2/S-2: settle the replayed intent before serving it, so
+            // a duplicate key reaches the published outcome (or the recorded
+            // terminal failure) instead of `OUTCOME_UNCERTAIN`.
+            tx.rollback().await?;
+            return self.settle_replayed(&mut publication, row).await;
         }
         require_settled_targets(&mut tx, ctx.space_id, &targets).await?;
         gate(&mut tx, admission).await?;
@@ -3604,7 +3799,11 @@ impl MemoryStore {
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
-            return Ok(row);
+            // §5.2 step 2/S-2: settle the replayed intent before serving it, so
+            // a duplicate key reaches the published outcome (or the recorded
+            // terminal failure) instead of `OUTCOME_UNCERTAIN`.
+            tx.rollback().await?;
+            return self.settle_replayed(&mut publication, row).await;
         }
         require_settled_targets(&mut tx, ctx.space_id, &targets).await?;
         gate(&mut tx, admission).await?;
@@ -3687,7 +3886,11 @@ impl MemoryStore {
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
-            return Ok(row);
+            // §5.2 step 2/S-2: settle the replayed intent before serving it, so
+            // a duplicate key reaches the published outcome (or the recorded
+            // terminal failure) instead of `OUTCOME_UNCERTAIN`.
+            tx.rollback().await?;
+            return self.settle_replayed(&mut publication, row).await;
         }
         require_settled_targets(&mut tx, ctx.space_id, &targets).await?;
         gate(&mut tx, admission).await?;
@@ -3770,7 +3973,11 @@ impl MemoryStore {
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
-            return Ok(row);
+            // §5.2 step 2/S-2: settle the replayed intent before serving it, so
+            // a duplicate key reaches the published outcome (or the recorded
+            // terminal failure) instead of `OUTCOME_UNCERTAIN`.
+            tx.rollback().await?;
+            return self.settle_replayed(&mut publication, row).await;
         }
         require_settled_targets(&mut tx, ctx.space_id, &targets).await?;
         gate(&mut tx, admission).await?;
@@ -3904,7 +4111,11 @@ impl MemoryStore {
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
-            return Ok(row);
+            // §5.2 step 2/S-2: settle the replayed intent before serving it, so
+            // a duplicate key reaches the published outcome (or the recorded
+            // terminal failure) instead of `OUTCOME_UNCERTAIN`.
+            tx.rollback().await?;
+            return self.settle_replayed(&mut publication, row).await;
         }
         require_settled_targets(&mut tx, ctx.space_id, &targets).await?;
         gate(&mut tx, admission).await?;
@@ -3992,21 +4203,75 @@ impl MemoryStore {
     }
 }
 
-/// §6.13: at least one provenance source context is in the filter list.
-fn provenance_matches(provenance_json: &str, context_ids: &[String]) -> bool {
-    let Ok(provenance) = serde_json::from_str::<Value>(provenance_json) else {
-        return false;
-    };
-    provenance
-        .get("source_context_ids")
-        .and_then(Value::as_array)
-        .is_some_and(|sources| {
-            sources.iter().any(|source| {
-                source
-                    .as_str()
-                    .is_some_and(|source| context_ids.iter().any(|known| known == source))
-            })
-        })
+/// §6.13/§7.20/§7.22: the SQL predicate of a record page, with its binds in
+/// placeholder order. Every term is constant for the request — none depends on
+/// the row's authorization (that is decided once, for the whole selection) — so
+/// pushing it into the read is what lets the page be cut in SQL.
+fn record_predicate(
+    selection: &Selection,
+    filter: Option<&[String]>,
+    kinds: &[String],
+    include_tombstoned: bool,
+    space_id: &str,
+    subject_id: &str,
+) -> (String, Vec<String>) {
+    let mut sql = String::from(" WHERE space_id = ? AND subject_id = ?");
+    let mut binds = vec![space_id.to_string(), subject_id.to_string()];
+    if !include_tombstoned {
+        sql.push_str(" AND tombstone_json IS NULL");
+    }
+    if !kinds.is_empty() {
+        sql.push_str(" AND kind IN (");
+        push_placeholders(&mut sql, kinds, &mut binds);
+        sql.push(')');
+    }
+    match selection {
+        Selection::SubjectAll => {}
+        Selection::SharedOnly => sql.push_str(" AND scope_visibility = 'shared'"),
+        Selection::SelectedContexts {
+            context_ids,
+            include_shared,
+        } => {
+            if context_ids.is_empty() && !include_shared {
+                // Neither a named context nor shared placement is admitted.
+                sql.push_str(" AND 0");
+            } else if context_ids.is_empty() {
+                sql.push_str(" AND scope_visibility = 'shared'");
+            } else {
+                sql.push_str(" AND (");
+                if *include_shared {
+                    sql.push_str("scope_visibility = 'shared' OR ");
+                }
+                sql.push_str("scope_context_id IN (");
+                push_placeholders(&mut sql, context_ids, &mut binds);
+                sql.push_str("))");
+            }
+        }
+    }
+    if let Some(context_ids) = filter {
+        if context_ids.is_empty() {
+            sql.push_str(" AND 0");
+        } else {
+            sql.push_str(
+                " AND EXISTS (SELECT 1 FROM json_each(json_extract(provenance_json, \
+                 '$.source_context_ids')) AS source WHERE source.value IN (",
+            );
+            push_placeholders(&mut sql, context_ids, &mut binds);
+            sql.push_str("))");
+        }
+    }
+    (sql, binds)
+}
+
+/// Append one `?` per value and collect the values in bind order.
+fn push_placeholders(sql: &mut String, values: &[String], binds: &mut Vec<String>) {
+    for (index, value) in values.iter().enumerate() {
+        if index > 0 {
+            sql.push(',');
+        }
+        sql.push('?');
+        binds.push(value.clone());
+    }
 }
 
 /// §7.23 coverage: any capability on the subject, with shared access or

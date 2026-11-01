@@ -14,7 +14,9 @@
 -- deleted or superseded body is not retained (MEM-R014). `result_json` is the
 -- content-free receipt outcome recovery needs to terminalize the receipt.
 -- `seq` is the settlement order: file effects for one target must publish in
--- commit order, never in wall-clock (whole-second) or uuid order.
+-- commit order, never in wall-clock (whole-second) or uuid order. The store
+-- assigns it (`COALESCE(MAX(seq), 0) + 1`, the same shape as
+-- `operation_receipts.sequence`), never SQLite.
 --
 -- `state` is the recovery surface:
 --
@@ -48,12 +50,27 @@ CREATE TABLE IF NOT EXISTS memory_journal (
     result_json TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
-);
+) WITHOUT ROWID;
+-- WITHOUT ROWID: on a rowid table `seq INTEGER PRIMARY KEY` is an ALIAS for the
+-- row's storage id, and neither an `INSERT OR REPLACE` carrying an explicit
+-- rowid nor an `UPDATE OR REPLACE … SET rowid = …` fires the victim's DELETE
+-- trigger while `recursive_triggers` is OFF — so an admitted writer could
+-- silently destroy a committed cross-store intent and its outbox event. The
+-- table's identity is `seq` assigned by the store (nothing reads a rowid), so
+-- removing the alias removes the bypass class outright, exactly as
+-- `operation_receipts` does.
 
 -- The isolation lookup: read paths ask whether any intent for a subject is
--- still unsettled, and the bounded recovery pass pages by creation order.
+-- still unsettled. The predicate is repeated as a literal in the queries
+-- (`state <> 'applied'`) so the planner can prove it and use this index; a bind
+-- parameter cannot be matched against a partial-index predicate at prepare time.
 CREATE INDEX IF NOT EXISTS idx_memory_journal_unsettled
     ON memory_journal (space_id, subject_id, created_at)
+    WHERE state <> 'applied';
+
+-- The bounded recovery pass pages a whole space by settlement order.
+CREATE INDEX IF NOT EXISTS idx_memory_journal_recovery
+    ON memory_journal (space_id, seq)
     WHERE state <> 'applied';
 
 -- ── Writer-protocol guards (cooperative core-table shape) ──

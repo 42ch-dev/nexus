@@ -387,13 +387,18 @@ BEGIN
 END;
 
 -- ── Outbox: memory_profiles ──
+--
+-- The row identity is the composite primary key, rendered the way every other
+-- composite-key outbox in this schema renders it (`a || ':' || b`), so a change
+-- consumer can address exactly the profile row that changed instead of every
+-- profile of that kind.
 
 CREATE TRIGGER IF NOT EXISTS outbox_memory_profiles_insert
 AFTER INSERT ON memory_profiles
 FOR EACH ROW
 BEGIN
   INSERT INTO core_changes (world_id, resource_kind, resource_id, resource_revision, change_kind, writer_id)
-  VALUES ('', 'memory_profiles', NEW.profile_kind, CAST(NEW.revision AS TEXT), 'insert', nexus_writer_id());
+  VALUES ('', 'memory_profiles', NEW.space_id || ':' || NEW.subject_id || ':' || NEW.profile_kind, CAST(NEW.revision AS TEXT), 'insert', nexus_writer_id());
 END;
 
 CREATE TRIGGER IF NOT EXISTS outbox_memory_profiles_update
@@ -401,7 +406,7 @@ AFTER UPDATE ON memory_profiles
 FOR EACH ROW
 BEGIN
   INSERT INTO core_changes (world_id, resource_kind, resource_id, resource_revision, change_kind, writer_id)
-  VALUES ('', 'memory_profiles', NEW.profile_kind, CAST(NEW.revision AS TEXT), 'update', nexus_writer_id());
+  VALUES ('', 'memory_profiles', NEW.space_id || ':' || NEW.subject_id || ':' || NEW.profile_kind, CAST(NEW.revision AS TEXT), 'update', nexus_writer_id());
 END;
 
 CREATE TRIGGER IF NOT EXISTS outbox_memory_profiles_delete
@@ -409,5 +414,5 @@ AFTER DELETE ON memory_profiles
 FOR EACH ROW
 BEGIN
   INSERT INTO core_changes (world_id, resource_kind, resource_id, resource_revision, change_kind, writer_id)
-  VALUES ('', 'memory_profiles', OLD.profile_kind, CAST(OLD.revision AS TEXT), 'delete', nexus_writer_id());
+  VALUES ('', 'memory_profiles', OLD.space_id || ':' || OLD.subject_id || ':' || OLD.profile_kind, CAST(OLD.revision AS TEXT), 'delete', nexus_writer_id());
 END;

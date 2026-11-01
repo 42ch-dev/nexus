@@ -169,3 +169,52 @@ BEGIN
   INSERT INTO core_changes (world_id, resource_kind, resource_id, resource_revision, change_kind, writer_id)
   VALUES ('', 'memory_receipts', OLD.receipt_id, NULL, 'delete', nexus_writer_id());
 END;
+
+-- ── Terminal immutability (§6.10/MEM-R021) ──
+--
+-- A settled receipt is the durable answer a replay and `memory.receipts.get`
+-- are served from, so a later writer must not be able to rewrite it: no
+-- `committed` → `failed` downgrade, no replacement payload under the same
+-- status, no `payload_digest` relabel and no key change. The only admitted
+-- transitions of a settled row are the ones the store performs — the journal's
+-- quarantined → `committed` re-drive, and the retention sweep's one-way body
+-- eviction (payload to NULL) — which is what these triggers allow.
+CREATE TRIGGER IF NOT EXISTS immutable_settled_memory_receipts_update
+BEFORE UPDATE ON memory_receipts
+FOR EACH ROW
+WHEN OLD.status IN ('committed', 'failed')
+BEGIN
+  SELECT RAISE(ABORT, 'MEMORY_RECEIPT_SETTLED_IMMUTABLE')
+  WHERE NEW.receipt_id IS NOT OLD.receipt_id
+     OR NEW.space_id IS NOT OLD.space_id
+     OR NEW.requester_principal_id IS NOT OLD.requester_principal_id
+     OR NEW.op IS NOT OLD.op
+     OR NEW.idempotency_key IS NOT OLD.idempotency_key
+     OR NEW.payload_digest IS NOT OLD.payload_digest
+     OR NEW.created_at IS NOT OLD.created_at
+     OR (NEW.status <> OLD.status AND NOT (OLD.status = 'failed' AND NEW.status = 'committed'))
+     OR (
+          NEW.status = OLD.status
+          AND (
+               (NEW.result_json IS NOT NULL AND NEW.result_json IS NOT OLD.result_json)
+            OR (NEW.error_json IS NOT NULL AND NEW.error_json IS NOT OLD.error_json)
+          )
+        );
+END;
+
+-- `INSERT OR REPLACE` over a settled key resolves the conflict by deleting the
+-- victim, and that victim's DELETE trigger does not fire while
+-- `recursive_triggers` is OFF. This BEFORE INSERT guard refuses the replacement
+-- attempt itself; the store never inserts over an existing receipt (it probes
+-- first), so a legitimate write never trips it.
+CREATE TRIGGER IF NOT EXISTS immutable_settled_memory_receipts_insert
+BEFORE INSERT ON memory_receipts
+FOR EACH ROW
+WHEN EXISTS (
+    SELECT 1 FROM memory_receipts existing
+    WHERE existing.receipt_id = NEW.receipt_id
+      AND existing.status IN ('committed', 'failed')
+)
+BEGIN
+  SELECT RAISE(ABORT, 'MEMORY_RECEIPT_SETTLED_IMMUTABLE');
+END;

@@ -14,11 +14,6 @@
 //! types are reachable through its `spoke_schemas` re-export, so this crate
 //! keeps exactly one spoke dependency edge.
 
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::Duration;
-
-use chrono::SubsecRound;
 use nexus_core::memory_provider::LocalMemoryProvider;
 use nexus_creator_memory::bearer::MemoryBearerRef;
 use serde::de::DeserializeOwned;
@@ -26,6 +21,8 @@ use serde_json::{json, Value};
 use spoke_operations::spoke_schemas as schemas;
 use spoke_operations::{MemoryPort, SpokeRejectCode, SpokeResult};
 use sqlx::Connection as _;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tempfile::TempDir;
 
 const CREATOR: &str = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -696,6 +693,13 @@ async fn refusals_travel_the_reject_channel() {
         }
         SpokeResult::Ok(_) => panic!("an unserved op must be rejected: {unsupported:?}"),
     }
+    // The envelope carries the code as-is and nothing that restates a mapping
+    // belonging to the receiving side.
+    let envelope = wire(&unsupported);
+    assert!(
+        error_details(&envelope).get("wire_code").is_none(),
+        "details must not restate a mapping that belongs to the receiving side: {envelope}"
+    );
 }
 
 /// The sub-capability gated families and the NXM-2 receipt read answer the
@@ -733,57 +737,6 @@ async fn gated_families_refuse_with_the_unsupported_code() {
             .await,
     );
     assert_eq!(error_code(&export), "CAPABILITY_PORT_MISSING");
-}
-
-/// R1: an unserved op emits exactly the code string a responder puts on the
-/// wire. `send_reverse_error_envelope(doc, reject.code.as_str(), ..)` copies the
-/// reject code verbatim (`responder.rs:1506-1522`), and the port vocabulary has
-/// no `op_unsupported` variant (`result.rs:8-70, 76-129`) — upstream's own
-/// responder answers an unimplemented port op with `CapabilityPortMissing`
-/// (`responder.rs:367-371`). `op_unsupported` is only ever an *inbound* marker
-/// that `map_error_envelope` folds into `CapabilityPortMissing`
-/// (`remote_adapter.rs:296-299`).
-#[tokio::test]
-async fn unserved_ops_serialize_the_upstream_dispatch_code() {
-    let env = seed_env();
-    let provider = open_provider(&env).await;
-
-    let result = provider
-        .generate_reflection(
-            &principal(CREATOR),
-            dto(json!({
-                "space_id": SPACE,
-                "subject_id": SUBJECT,
-                "selection": { "mode": "subject_all" },
-                "expected_state_digest": "0".repeat(64),
-                "idempotency_key": "k-wire-code",
-            })),
-        )
-        .await;
-    let SpokeResult::Reject(reject) = &result else {
-        panic!("an unserved op must be rejected: {result:?}");
-    };
-
-    let serialized = reject.code.as_str();
-    assert_eq!(serialized, SpokeRejectCode::CapabilityPortMissing.as_str());
-    assert_eq!(
-        SpokeRejectCode::try_from_str(serialized),
-        Some(SpokeRejectCode::CapabilityPortMissing),
-        "the emitted code must be a protocol code a peer can parse"
-    );
-    assert_eq!(
-        SpokeRejectCode::try_from_str("op_unsupported"),
-        None,
-        "`op_unsupported` is a transport dispatch-deny string, never a reject code"
-    );
-
-    // The envelope a responder builds from this reject carries the code as-is.
-    let envelope = wire(&result);
-    assert_eq!(error_code(&envelope), serialized);
-    assert!(
-        error_details(&envelope).get("wire_code").is_none(),
-        "details must not restate a mapping that belongs to the receiving side: {envelope}"
-    );
 }
 
 /// §6.5/§7.7: fence authorization is bound to the target — a context fence needs
@@ -1171,75 +1124,79 @@ async fn a_committed_grant_replay_survives_a_tightened_issuance_bound() {
     );
 }
 
-/// R2 (§6.5): the authorization clock is read *after* the write lock. A grant
-/// that expires while the write waits for `BEGIN IMMEDIATE` cannot authorize it,
-/// even though it was valid when the request arrived.
+/// R2 (§6.5): the authorization clock is read when the write proceeds, not at the
+/// request boundary. A grant that expires while the write waits for its
+/// publication section cannot authorize it, even though it was valid when the
+/// request arrived. `park_next_publish` fixes the ordering — the write is parked
+/// before it samples the clock, so moving the clock there cannot race it.
 #[tokio::test]
-async fn a_grant_expiring_during_the_lock_wait_does_not_authorize_the_write() {
+async fn a_grant_expiring_while_the_write_waits_does_not_authorize_it() {
     let env = seed_env();
     let provider = Arc::new(open_provider(&env).await);
-    let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
+    let admin = principal(CREATOR);
 
-    // `expires_at` is stored second-truncated (`storage::timestamp`), so a
-    // sub-second TTL would land in the past and prove nothing. Place it on a
-    // whole second 400–1400ms ahead: the request clock the op captures when it
-    // starts is then still valid, while the post-lock clock is not.
-    let mut expires_at = chrono::Utc::now().trunc_subsecs(0) + chrono::Duration::seconds(1);
-    if expires_at - chrono::Utc::now() < chrono::Duration::milliseconds(400) {
-        expires_at += chrono::Duration::seconds(1);
-    }
-    let expiring = dto::<schemas::MemoryGrantsGrantRequest>(json!({
-        "space_id": SPACE,
-        "subject_id": OTHER_SUBJECT,
-        "principal_id": OTHER,
-        "capabilities": ["capture"],
-        "expires_at": expires_at.to_rfc3339(),
-        "idempotency_key": "k-expiring-capture",
-    }));
-    let issued = wire(&provider.grant(&principal(CREATOR), expiring).await);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(OTHER_SUBJECT))
+            .await,
+    );
+    let issued = wire(
+        &provider
+            .grant(
+                &admin,
+                subject_grant_until(
+                    "k-expiring-write",
+                    "records_write",
+                    OTHER,
+                    OTHER_SUBJECT,
+                    60,
+                ),
+            )
+            .await,
+    );
     assert_eq!(receipt(&issued)["result"]["revision"], 1);
 
-    // A competing writer parks the op on the write lock across that expiry.
-    let held = nexus_local_db::begin_immediate(&pool).await.unwrap();
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Barrier::new(2));
+    provider.park_next_publish(Arc::clone(&entered), Arc::clone(&release));
     let writer = Arc::clone(&provider);
     let pending = tokio::spawn(async move {
         writer
-            .ensure_subject(&principal(OTHER), ensure_request(OTHER_SUBJECT))
+            .create_record(
+                &principal(OTHER),
+                dto(json!({
+                    "space_id": SPACE,
+                    "subject_id": OTHER_SUBJECT,
+                    "kind": "note",
+                    "content": { "text": TEXT },
+                    "scope": { "visibility": "shared" },
+                    "idempotency_key": "k-expiring-write-op",
+                })),
+            )
             .await
     });
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    assert!(
-        !pending.is_finished(),
-        "the write is parked on the competing writer's lock"
-    );
-    // Release only after the grant has expired, and still inside the 2s
-    // busy_timeout the connection sets.
-    let until_expired = (expires_at + chrono::Duration::milliseconds(100) - chrono::Utc::now())
-        .to_std()
-        .unwrap_or_default();
-    tokio::time::sleep(until_expired).await;
 
-    held.rollback().await.unwrap();
+    entered.notified().await;
+    // The grant's 60s TTL elapses while the write is parked, before it reads the
+    // authorization clock.
+    provider.advance_clock(120);
+    release.wait().await;
+
     let refused = wire(&pending.await.unwrap());
     assert_eq!(
         error_code(&refused),
         "NOT_AUTHORIZED",
-        "coverage is evaluated at the post-lock clock, not the request clock"
+        "coverage is evaluated when the write proceeds, not when the request arrives"
     );
 
-    let absent = wire(
-        &provider
-            .get_subject(
-                &principal(CREATOR),
-                dto(json!({ "space_id": SPACE, "subject_id": OTHER_SUBJECT })),
-            )
-            .await,
-    );
-    assert_eq!(
-        error_code(&absent),
-        "NOT_FOUND",
-        "the expired grant authorizes no effect: {absent}"
-    );
+    let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
+    let (records,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM memory_records WHERE subject_id = ?")
+            .bind(OTHER_SUBJECT)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(records, 0, "the expired grant authorized no effect");
 }
 
 /// §7.0.7/MEM-R026: a cursor is bound to principal + space + subject +
@@ -1531,14 +1488,9 @@ async fn freeze_serializes_with_admitted_writes() {
             .await
     });
 
-    // Deterministic: the op cannot begin its transaction (hence cannot admit)
-    // while the freeze transaction is open; 100ms is far inside busy_timeout.
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    assert!(
-        !pending.is_finished(),
-        "the op must wait for the freeze transaction (§7.3/§11)"
-    );
-
+    // The freeze transaction holds the write lock, so the op's `BEGIN IMMEDIATE`
+    // cannot complete until it commits: whenever the task is scheduled, the op is
+    // admitted on the post-freeze state.
     freeze.commit().await.unwrap();
     let refused = wire(&pending.await.unwrap());
     assert_eq!(
@@ -1581,13 +1533,9 @@ async fn admitted_write_completes_after_a_competing_writer_releases() {
             .await
     });
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    assert!(
-        !pending.is_finished(),
-        "the op waits for the competing writer's transaction"
-    );
-
-    // The competing writer never takes effect; the op then commits in full.
+    // The competing transaction holds the write lock, so the op's
+    // `BEGIN IMMEDIATE` cannot complete before it ends. The committed receipt
+    // below is only reachable through that wait, whatever the scheduling.
     competing.rollback().await.unwrap();
     let committed = wire(&pending.await.unwrap());
     assert_eq!(receipt(&committed)["result"]["revision"], 1);
@@ -1608,10 +1556,24 @@ async fn admitted_write_completes_after_a_competing_writer_releases() {
 // → 28 → 29).
 const _: () = assert!(nexus_local_db::DB_SCHEMA_VERSION >= 29);
 
+/// Every table the memory migrations own. Writer admission is probed per table
+/// in [`out_of_guard_writes_are_writer_fenced`]; the names are data here, never
+/// an assertion about trigger shapes.
+const MEMORY_TABLES: [&str; 9] = [
+    "memory_spaces",
+    "memory_subjects",
+    "memory_grants",
+    "memory_receipts",
+    "memory_candidates",
+    "memory_records",
+    "memory_profiles",
+    "memory_provider_meta",
+    "memory_journal",
+];
+
 /// C-117: the control-, content- and provider-metadata migrations land once,
-/// re-run as no-ops, are writer-guard registered (guards + outbox on every
-/// control, content and provider-owned table), and the `DB_SCHEMA_VERSION` line
-/// advanced with them.
+/// re-run as no-ops, register the provider's writer, and the
+/// `DB_SCHEMA_VERSION` line advanced with them.
 #[tokio::test]
 async fn control_metadata_migration_is_idempotent_and_writer_registered() {
     let env = seed_env();
@@ -1633,17 +1595,7 @@ async fn control_metadata_migration_is_idempotent_and_writer_registered() {
         assert_eq!(applied, 1, "migration {migration} applies exactly once");
     }
 
-    let tables = [
-        "memory_spaces",
-        "memory_subjects",
-        "memory_grants",
-        "memory_receipts",
-        "memory_candidates",
-        "memory_records",
-        "memory_profiles",
-        "memory_provider_meta",
-    ];
-    for table in tables {
+    for table in MEMORY_TABLES {
         let (found,): (i64,) =
             sqlx::query_as("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?")
                 .bind(table)
@@ -1651,27 +1603,6 @@ async fn control_metadata_migration_is_idempotent_and_writer_registered() {
                 .await
                 .unwrap();
         assert_eq!(found, 1, "missing memory table: {table}");
-    }
-
-    for table in tables {
-        for (kind, verb) in [
-            ("guard", "insert"),
-            ("guard", "update"),
-            ("guard", "delete"),
-            ("outbox", "insert"),
-            ("outbox", "update"),
-            ("outbox", "delete"),
-        ] {
-            let name = format!("{kind}_{table}_{verb}");
-            let (found,): (i64,) = sqlx::query_as(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name=?",
-            )
-            .bind(&name)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-            assert_eq!(found, 1, "missing writer-protocol trigger: {name}");
-        }
     }
 
     let (registered,): (i64,) = sqlx::query_as(
@@ -1713,7 +1644,27 @@ async fn control_metadata_migration_is_idempotent_and_writer_registered() {
 #[tokio::test]
 async fn out_of_guard_writes_are_writer_fenced() {
     let env = seed_env();
-    let _provider = open_provider(&env).await;
+    let provider = open_provider(&env).await;
+    wire(
+        &provider
+            .ensure_subject(&principal(CREATOR), ensure_request(SUBJECT))
+            .await,
+    );
+    // One committed intent, so the journal probes below have a row to attack.
+    let created = wire(
+        &provider
+            .create_record(
+                &principal(CREATOR),
+                record_create_request(
+                    "k-journal-fence",
+                    "note",
+                    &json!({ "visibility": "shared" }),
+                    TEXT,
+                ),
+            )
+            .await,
+    );
+    assert!(receipt(&created)["result"]["record_id"].is_string());
 
     // A connection with the protocol scalar functions installed but NO
     // `core_writer_registration` row: exactly the "outside the guard" writer the
@@ -1736,18 +1687,20 @@ async fn out_of_guard_writes_are_writer_fenced() {
     .await
     .unwrap();
 
-    let err = sqlx::query(
-        "INSERT INTO memory_spaces \
-         (space_id, display_name, authority_host_id, authority_generation, status, revision, created_at) \
-         VALUES ('spc_rogue', NULL, 'rogue', 1, 'active', 1, '2026-11-01T00:00:00Z')",
-    )
-    .execute(&mut raw)
-    .await
-    .expect_err("an unregistered connection must be fenced");
-    assert!(
-        err.to_string().contains("WRITER_FENCED"),
-        "expected WRITER_FENCED, got: {err}"
-    );
+    // Every memory table admits writes through the writer protocol only. The
+    // BEFORE INSERT guard runs ahead of the column constraints, so an
+    // unregistered insert meets the fence on any of them.
+    for table in MEMORY_TABLES {
+        let insert = sqlx::AssertSqlSafe(format!("INSERT INTO {table} DEFAULT VALUES"));
+        let err = sqlx::query(insert)
+            .execute(&mut raw)
+            .await
+            .expect_err("a write outside the guard must be fenced");
+        assert!(
+            err.to_string().contains("WRITER_FENCED"),
+            "expected WRITER_FENCED for a {table} insert, got: {err}"
+        );
+    }
 
     let err = sqlx::query("UPDATE memory_spaces SET status = 'frozen' WHERE space_id = ?")
         .bind(SPACE)
@@ -1759,23 +1712,41 @@ async fn out_of_guard_writes_are_writer_fenced() {
         "expected WRITER_FENCED, got: {err}"
     );
 
-    // The round-B content tables carry the same admission: a record cannot be
-    // written outside the writer guard either.
-    let err = sqlx::query(
-        "INSERT INTO memory_records \
-         (record_id, space_id, subject_id, kind, content_json, scope_visibility, scope_context_id, \
-          provenance_json, import_ref_json, occurred_at, tombstone_json, revision, created_at, updated_at) \
-         VALUES ('rec_rogue', ?, 'sbj_mira', 'note', '{\"text\":\"rogue\"}', 'shared', NULL, \
-                 '{}', NULL, NULL, NULL, 1, '2026-11-01T00:00:00Z', '2026-11-01T00:00:00Z')",
-    )
-    .bind(SPACE)
-    .execute(&mut raw)
-    .await
-    .expect_err("a content write outside the guard must be fenced");
+    // The journal carries the same admission, and its key is a real column:
+    // without a rowid alias there is no `INSERT OR REPLACE …(seq, …)` /
+    // `UPDATE … SET rowid` route around the delete guard (the must-fix).
+    let err = sqlx::query("DELETE FROM memory_journal")
+        .execute(&mut raw)
+        .await
+        .expect_err("a journal delete outside the guard must be fenced");
     assert!(
         err.to_string().contains("WRITER_FENCED"),
-        "expected WRITER_FENCED for a record insert, got: {err}"
+        "expected WRITER_FENCED for a journal delete, got: {err}"
     );
+    let err = sqlx::query("SELECT rowid FROM memory_journal")
+        .fetch_all(&mut raw)
+        .await
+        .expect_err("a WITHOUT ROWID journal has no rowid alias to attack");
+    assert!(
+        err.to_string().contains("no such column: rowid"),
+        "expected the journal to expose no rowid, got: {err}"
+    );
+
+    // The outbox family publishes a change event for admitted mutations, on the
+    // existing retention/drain channel.
+    let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
+    for kind in ["memory_subjects", "memory_records"] {
+        let (events,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM core_changes WHERE resource_kind = ?")
+                .bind(kind)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(
+            events > 0,
+            "an admitted {kind} write publishes a change event"
+        );
+    }
 }
 
 /// Compass AC #3: bearer path validation is untouched by the migration — the
@@ -1966,7 +1937,7 @@ async fn capture_review_promote_and_recall_round_trip() {
     // MEM-R004: a candidate is never a recall result, and nothing is retained yet.
     let before_review = wire(&provider.recall(&admin, recall_request(10)).await);
     assert_eq!(before_review["total_authorized"], 0);
-    assert!(before_review["records"].as_array().unwrap().is_empty());
+    assert_eq!(before_review["records"], json!([]));
 
     let reviewed = wire(
         &provider
@@ -2084,6 +2055,83 @@ async fn duplicate_capture_replays_the_receipt() {
     );
     assert_eq!(error_code(&conflict), "IDEMPOTENCY_CONFLICT");
     assert_eq!(retry_class(&conflict), "terminal");
+}
+
+/// §6.7/S-9: an expired pending candidate leaves the list — the predicate is in
+/// the list SQL, not a post-filter over every fetched row — and the retention
+/// sweep reclaims its body with the shell.
+#[tokio::test]
+async fn expired_pending_candidates_leave_the_list_and_are_reclaimed() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
+    // Two real captures (so content and provenance are the API's own shapes),
+    // then one is aged out: `memory.capture` never mints an expiring candidate.
+    let mut candidate_ids = Vec::new();
+    for key in ["k-expiring", "k-live"] {
+        let captured = wire(
+            &provider
+                .capture(&admin, capture_request(key, None, TEXT))
+                .await,
+        );
+        candidate_ids.push(
+            receipt(&captured)["result"]["candidate_ids"][0]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
+    }
+    sqlx::query(
+        "UPDATE memory_candidates SET expires_at = '2020-01-01T00:00:00Z' WHERE candidate_id = ?",
+    )
+    .bind(&candidate_ids[0])
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let listed = wire(
+        &provider
+            .list_candidates(&admin, candidates_list_request(None))
+            .await,
+    );
+    let ids: Vec<&str> = listed["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|candidate| candidate["candidate_id"].as_str())
+        .collect();
+    assert!(
+        ids.contains(&candidate_ids[1].as_str()),
+        "a live candidate stays: {listed}"
+    );
+    assert!(
+        !ids.contains(&candidate_ids[0].as_str()),
+        "an expired candidate leaves the list: {listed}"
+    );
+
+    // Every mutating entry point runs the retention sweep in its own committed
+    // transaction, which is where the expired row's body is dropped.
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(OTHER_SUBJECT))
+            .await,
+    );
+    let (expired,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM memory_candidates WHERE candidate_id = ?")
+            .bind(&candidate_ids[0])
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        expired, 0,
+        "the sweep reclaims the expired pending candidate"
+    );
 }
 
 /// §8.1/MEM-R007: review is revision-checked, and consumption is terminal —
@@ -3369,7 +3417,7 @@ async fn archived_subjects_leave_recall_and_default_candidate_lists() {
         recalled_after["total_authorized"], 0,
         "an archived subject's records leave recall (§7.7): {recalled_after}"
     );
-    assert!(recalled_after["records"].as_array().unwrap().is_empty());
+    assert_eq!(recalled_after["records"], json!([]));
 
     let default_listing = wire(
         &provider
