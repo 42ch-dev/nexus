@@ -19,6 +19,10 @@ name: RFT Native Package Proof
 #     (plan: "Missing row blocks P3; missing input = blocked").
 on:
   workflow_dispatch:
+  schedule:
+    # Nightly full four-platform proof on main: the PR lane runs only the
+    # fastest row, so this is the drift check that covers the other rows.
+    - cron: '30 2 * * *'
   push:
     branches: [main, iteration/v1.189]
     paths: &proof-paths
@@ -72,29 +76,34 @@ env:
   RUSTUP_INIT_SHA256: "20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c"
 
 jobs:
+  rft-matrix:
+    # GitHub job-level `if` cannot read the matrix context, so the PR lane is
+    # expressed as a dynamic matrix instead of per-row skips.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.rows.outputs.matrix }}
+    steps:
+      - id: rows
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # PR lane: only the fastest row. The packaging/ABI hazards this
+            # workflow guards are per-row identical for generic cross-platform
+            # code; the full matrix covers the other rows on main/nightly.
+            echo 'matrix={"include":[{"slug":"darwin-arm64","os":"macos-15","short":"macarm","target":"aarch64-apple-darwin"}]}' >> "$GITHUB_OUTPUT"
+          else
+            echo 'matrix={"include":[{"slug":"win32-x64-msvc","os":"windows-2022","short":"win","target":"x86_64-pc-windows-msvc"},{"slug":"darwin-arm64","os":"macos-15","short":"macarm","target":"aarch64-apple-darwin"},{"slug":"darwin-x64","os":"macos-15-intel","short":"macx64","target":"x86_64-apple-darwin"}]}' >> "$GITHUB_OUTPUT"
+          fi
+
   native-package-proof:
+    needs: rft-matrix
     name: ${{ matrix.slug }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - slug: win32-x64-msvc
-            os: windows-2022
-            short: win
-            target: x86_64-pc-windows-msvc
-          - slug: darwin-arm64
-            os: macos-15
-            short: macarm
-            target: aarch64-apple-darwin
-          # The x64 macOS row needs an Intel runner: the artifact must be
-          # executed by the architecture it ships, and Rosetta would be a
-          # translated run, not a native one.
-          - slug: darwin-x64
-            os: macos-15-intel
-            short: macx64
-            target: x86_64-apple-darwin
+      matrix: ${{ fromJSON(needs.rft-matrix.outputs.matrix) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -239,6 +248,9 @@ jobs:
     name: linux-x64-gnu
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    # PR lane runs darwin-arm64 only (see native-package-proof above); the
+    # glibc-2.28 container proof belongs to the main/nightly/dispatch lane.
+    if: github.event_name != 'pull_request'
     container:
       # Pinned by immutable digest (see MANYLINUX_IMAGE_DIGEST). A tag, even a
       # version-looking one, can be repointed; a digest cannot.
@@ -384,7 +396,7 @@ jobs:
           if-no-files-found: warn
 
   native-package-matrix-summary:
-    name: Matrix summary (all four rows)
+    name: Matrix summary
     runs-on: ubuntu-latest
     needs: [native-package-proof, linux-gnu-proof]
     if: always()
@@ -404,6 +416,7 @@ jobs:
         env:
           MATRIX_JOB_RESULT: ${{ needs.native-package-proof.result }}
           LINUX_JOB_RESULT: ${{ needs.linux-gnu-proof.result }}
+          PR_LANE: ${{ github.event_name == 'pull_request' }}
         run: |
           set -euo pipefail
           mkdir -p "${EVIDENCE}"
@@ -411,11 +424,20 @@ jobs:
           import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
           import { join } from 'node:path';
           const root = 'rft-native-evidence';
-          const rows = [
-            { suffix: 'linux-x64-gnu', short: 'linux', job_result: process.env.LINUX_JOB_RESULT },
-            { suffix: 'win32-x64-msvc', short: 'win', job_result: process.env.MATRIX_JOB_RESULT },
-            { suffix: 'darwin-arm64', short: 'macarm', job_result: process.env.MATRIX_JOB_RESULT },
-            { suffix: 'darwin-x64', short: 'macx64', job_result: process.env.MATRIX_JOB_RESULT },
+          const prLane = process.env.PR_LANE === 'true';
+          const rows = prLane
+            ? [
+                // PR lane runs darwin-arm64 only (see rft-matrix above): the
+                // summary evaluates exactly the rows this run should have
+                // produced. A missing should-run row stays fail-closed
+                // ('unavailable' is never a pass).
+                { suffix: 'darwin-arm64', short: 'macarm', job_result: process.env.MATRIX_JOB_RESULT },
+              ]
+            : [
+                { suffix: 'linux-x64-gnu', short: 'linux', job_result: process.env.LINUX_JOB_RESULT },
+                { suffix: 'win32-x64-msvc', short: 'win', job_result: process.env.MATRIX_JOB_RESULT },
+                { suffix: 'darwin-arm64', short: 'macarm', job_result: process.env.MATRIX_JOB_RESULT },
+                { suffix: 'darwin-x64', short: 'macx64', job_result: process.env.MATRIX_JOB_RESULT },
           ];
           const out = [];
           const buildInputs = [];
@@ -464,9 +486,13 @@ jobs:
               status,
             });
           }
-          const jobFailure = [process.env.MATRIX_JOB_RESULT, process.env.LINUX_JOB_RESULT].some(
-            (result) => result !== 'success',
-          );
+          // PR lane: linux-gnu-proof is skipped by design, so only the host
+          // matrix job result gates the decision.
+          const jobFailure = prLane
+            ? process.env.MATRIX_JOB_RESULT !== 'success'
+            : [process.env.MATRIX_JOB_RESULT, process.env.LINUX_JOB_RESULT].some(
+                (result) => result !== 'success',
+              );
           const decision = jobFailure
             ? 'fail'
             : out.every((row) => row.status === 'pass')
