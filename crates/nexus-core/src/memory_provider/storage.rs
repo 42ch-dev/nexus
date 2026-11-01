@@ -37,6 +37,13 @@
 //! `memory.subjects.ensure` is the sole idempotency-key exemption (§7.0.5): its
 //! receipt carries a NULL key, which the partial unique index excludes from the
 //! dedup namespace, so two ensures never collide and never replay each other.
+//!
+//! The content tables are provider-owned (`memory_candidates`, `memory_records`,
+//! `memory_profiles`) and carry the same control metadata from their first row:
+//! a `revision` CAS surface, a provider-minted identity that is never reused,
+//! and the writer admission above. Authorization over content hangs off a row's
+//! placement, so [`Coverage`] resolves those requirements inside the effect
+//! transaction instead of trusting a value read before it.
 
 use std::path::Path;
 #[cfg(feature = "test-hooks")]
@@ -85,6 +92,8 @@ pub(super) enum StoreError {
         current: i64,
     },
     IdempotencyConflict,
+    /// The candidate left the §8.1 `pending` state: consumption is terminal.
+    CandidateConsumed(String),
     /// A forbidden lifecycle transition (§7.7/§7.10).
     StatusTransition(String),
     /// The transaction may have committed (§14.3). Never reported as a clean
@@ -118,16 +127,37 @@ const COMMIT_FAULT_BEFORE: u8 = 1;
 #[cfg(feature = "test-hooks")]
 const COMMIT_FAULT_AFTER: u8 = 2;
 
-/// What a mutating op needs before its effect may run (§6.5/§7.3/§7.9/§11).
+/// What admits a mutating op (§6.5): one requirement per capability the op
+/// needs, and every one of them must be covered by the grant set.
 ///
-/// Evaluated inside the effect transaction: authorization, then the dedup probe,
-/// then the lifecycle gates that apply only to a fresh effect.
+/// Two ops derive their requirements from state the request does not name —
+/// candidate consumption and record writes name only an id, while the coverage
+/// they need hangs off that row's immutable placement. Those resolve the
+/// requirement *inside* the effect transaction, so authorization still sees
+/// exactly the row the write will touch.
+pub(super) enum Coverage<'a> {
+    /// Requirements known from the request; empty = admitted by another rule.
+    Requirements(&'a [GrantRequirement<'a>]),
+    /// Candidate-scoped: coverage of the candidate's `capture_scope` (§6.7).
+    Candidate {
+        candidate_id: &'a str,
+        capabilities: &'a [&'a str],
+    },
+    /// Record-scoped: coverage of the record's current placement, plus — for
+    /// `memory.records.promote` — of the requested target placement (§7.21).
+    Record {
+        record_id: &'a str,
+        capabilities: &'a [&'a str],
+        target: Option<Placement<'a>>,
+    },
+}
+
 pub(super) struct Admission<'a> {
     pub op: &'a str,
     pub space_id: &'a str,
     pub principal_id: &'a str,
-    /// §6.5 coverage requirement; `None` for ops admitted by another rule.
-    pub requirement: Option<GrantRequirement<'a>>,
+    /// §6.5 coverage, evaluated inside the effect transaction.
+    pub coverage: Coverage<'a>,
     /// §7.9 non-amplification input, evaluated over the same grant set.
     pub issuance: Option<&'a IssuedGrant<'a>>,
     /// Subject whose `fenced`/`archived` status rejects the write (§7.5/§7.9).
@@ -766,13 +796,28 @@ impl MemoryStore {
     /// commit. A `COMMIT` failure leaves the outcome unknown (§14.3).
     async fn commit_receipt(
         &self,
-        mut tx: sqlx::Transaction<'_, sqlx::Sqlite>,
+        tx: sqlx::Transaction<'_, sqlx::Sqlite>,
         ctx: &OpContext<'_>,
         result: &Value,
         now: DateTime<Utc>,
     ) -> StoreResult<ReceiptRow> {
+        // Candidate consumption writes the receipt id into the audit shell
+        // before this runs (§6.7 `consumed_by`), so those ops pass their own.
+        self.commit_receipt_with(tx, ctx, mint_receipt_id(), result, now)
+            .await
+    }
+
+    /// [`Self::commit_receipt`] for ops that must know the receipt id before the
+    /// effect rows that reference it are written.
+    async fn commit_receipt_with(
+        &self,
+        mut tx: sqlx::Transaction<'_, sqlx::Sqlite>,
+        ctx: &OpContext<'_>,
+        receipt_id: String,
+        result: &Value,
+        now: DateTime<Utc>,
+    ) -> StoreResult<ReceiptRow> {
         let at = timestamp(now);
-        let receipt_id = mint_receipt_id();
         let result_json = serde_json::to_string(result)
             .map_err(|e| StoreError::Corrupt(format!("receipt result: {e}")))?;
         sqlx::query(
@@ -837,28 +882,61 @@ async fn authorize(
     now: DateTime<Utc>,
 ) -> StoreResult<Vec<GrantRow>> {
     space_in_tx(tx, admission.space_id).await?;
-    let Some(requirement) = &admission.requirement else {
-        return Ok(Vec::new());
-    };
     let rows = grants_in_tx(tx, admission.space_id).await?;
-    let mut covered = false;
-    for row in &rows {
-        if grant_covers(
-            &row.wire()?,
+    let grants = wire_grants(&rows)?;
+    let check = |requirement: &GrantRequirement<'_>| -> StoreResult<()> {
+        if covered(
+            &grants,
             admission.principal_id,
             admission.space_id,
             now,
             requirement,
         ) {
-            covered = true;
-            break;
+            return Ok(());
         }
-    }
-    if !covered {
-        return Err(StoreError::NotAuthorized(format!(
+        Err(StoreError::NotAuthorized(format!(
             "principal {} holds no grant covering {} in space {}",
             admission.principal_id, requirement.capability, admission.space_id
-        )));
+        )))
+    };
+    match &admission.coverage {
+        Coverage::Requirements(requirements) => {
+            for requirement in *requirements {
+                check(requirement)?;
+            }
+        }
+        Coverage::Candidate {
+            candidate_id,
+            capabilities,
+        } => {
+            let candidate = candidate_in_tx(tx, admission.space_id, candidate_id)
+                .await?
+                .ok_or_else(|| StoreError::NotFound(format!("candidate {candidate_id}")))?;
+            for capability in *capabilities {
+                check(&candidate.requirement(capability))?;
+            }
+        }
+        Coverage::Record {
+            record_id,
+            capabilities,
+            target,
+        } => {
+            let record = record_in_tx(tx, admission.space_id, record_id)
+                .await?
+                .ok_or_else(|| StoreError::NotFound(format!("record {record_id}")))?;
+            for capability in *capabilities {
+                check(&record.requirement(capability, false))?;
+                if let Some(target) = target {
+                    check(&GrantRequirement {
+                        capability,
+                        subject_id: Some(record.subject_id.as_str()),
+                        context_ids: target.context_id.map(str::to_string).into_iter().collect(),
+                        reads_shared: target.visibility == Placement::SHARED,
+                        subject_all: false,
+                    })?;
+                }
+            }
+        }
     }
     Ok(rows)
 }
@@ -1069,4 +1147,1195 @@ async fn pending_receipts(
     .fetch_one(&mut **tx)
     .await?;
     Ok(u64::try_from(pending).unwrap_or(0))
+}
+
+// ── The content families (§6.6/§6.7/§6.8, §7.11–§7.24) ──────────────────
+//
+// The content tables carry the same control metadata as the round-A control
+// tables: `revision` as the CAS surface (MEM-R007), a stable provider-minted
+// identity that is never reused, and the provider's writer admission on every
+// mutation. Reads are one transaction so the page and its invalidation marker
+// observe the same snapshot, and authorization filters rows *before* the page
+// is cut (MEM-R006).
+
+const CANDIDATE_COLUMNS: &str = "candidate_id, space_id, subject_id, capture_visibility, \
+     capture_context_id, kind, content_json, provenance_json, classification_json, status, \
+     consumed_by_json, content_digest, occurred_at, expires_at, revision, created_at";
+
+const RECORD_COLUMNS: &str = "record_id, space_id, subject_id, kind, content_json, \
+     scope_visibility, scope_context_id, provenance_json, import_ref_json, occurred_at, \
+     tombstone_json, revision, created_at, updated_at";
+
+const PROFILE_COLUMNS: &str = "space_id, subject_id, profile_kind, document_json, updated_by, \
+     revision, created_at, updated_at";
+
+/// One placement (§6.6/§6.7 `scope` / `capture_scope`) as the tables store it.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Placement<'a> {
+    pub visibility: &'a str,
+    pub context_id: Option<&'a str>,
+}
+
+impl Placement<'_> {
+    pub(super) const SHARED: &'static str = "shared";
+    pub(super) const CONTEXT: &'static str = "context";
+}
+
+/// The §6.12 read selection, as the read path needs it.
+pub(super) enum Selection {
+    SubjectAll,
+    SharedOnly,
+    SelectedContexts {
+        context_ids: Vec<String>,
+        include_shared: bool,
+    },
+}
+
+impl Selection {
+    /// Coverage the *whole* read needs (§6.5): every named context, shared access
+    /// when shared rows are in scope, and unrestricted coverage for `subject_all`.
+    fn base_requirement<'a>(
+        &'a self,
+        capability: &'a str,
+        subject_id: &'a str,
+    ) -> GrantRequirement<'a> {
+        match self {
+            Self::SubjectAll => GrantRequirement {
+                capability,
+                subject_id: Some(subject_id),
+                context_ids: Vec::new(),
+                reads_shared: false,
+                subject_all: true,
+            },
+            Self::SharedOnly => GrantRequirement {
+                capability,
+                subject_id: Some(subject_id),
+                context_ids: Vec::new(),
+                reads_shared: true,
+                subject_all: false,
+            },
+            Self::SelectedContexts {
+                context_ids,
+                include_shared,
+            } => GrantRequirement {
+                capability,
+                subject_id: Some(subject_id),
+                context_ids: context_ids.clone(),
+                reads_shared: *include_shared,
+                subject_all: false,
+            },
+        }
+    }
+
+    /// Does the selection include a row with this placement (§6.12)?
+    fn admits(&self, placement: &Placement<'_>) -> bool {
+        match self {
+            Self::SubjectAll => true,
+            Self::SharedOnly => placement.visibility == Placement::SHARED,
+            Self::SelectedContexts {
+                context_ids,
+                include_shared,
+            } => placement.context_id.map_or_else(
+                || placement.visibility == Placement::SHARED && *include_shared,
+                |context_id| context_ids.iter().any(|known| known == context_id),
+            ),
+        }
+    }
+}
+
+/// A pending/consumed review candidate as stored (§6.7).
+#[derive(Debug, sqlx::FromRow)]
+pub(super) struct CandidateRow {
+    pub candidate_id: String,
+    pub space_id: String,
+    pub subject_id: String,
+    pub capture_visibility: String,
+    pub capture_context_id: Option<String>,
+    pub kind: String,
+    pub content_json: Option<String>,
+    pub provenance_json: String,
+    pub classification_json: String,
+    pub status: String,
+    pub consumed_by_json: Option<String>,
+    pub content_digest: Option<String>,
+    pub occurred_at: Option<String>,
+    pub expires_at: Option<String>,
+    pub revision: i64,
+    pub created_at: String,
+}
+
+impl CandidateRow {
+    pub(super) fn scope(&self) -> Placement<'_> {
+        Placement {
+            visibility: self.capture_visibility.as_str(),
+            context_id: self.capture_context_id.as_deref(),
+        }
+    }
+
+    /// §6.7: an expired *pending* candidate leaves the lists without being
+    /// consumed; a consumed shell keeps its audit visibility.
+    fn expired(&self, now: DateTime<Utc>) -> bool {
+        self.status == "pending"
+            && self
+                .expires_at
+                .as_deref()
+                .is_some_and(|expires_at| expires_at <= timestamp(now).as_str())
+    }
+
+    fn requirement<'a>(&'a self, capability: &'a str) -> GrantRequirement<'a> {
+        let scope = self.scope();
+        GrantRequirement {
+            capability,
+            subject_id: Some(self.subject_id.as_str()),
+            context_ids: scope.context_id.map(str::to_string).into_iter().collect(),
+            reads_shared: scope.visibility == Placement::SHARED,
+            subject_all: false,
+        }
+    }
+}
+
+/// A retained record as stored (§6.6).
+#[derive(Debug, sqlx::FromRow)]
+pub(super) struct RecordRow {
+    pub record_id: String,
+    pub space_id: String,
+    pub subject_id: String,
+    pub kind: String,
+    pub content_json: String,
+    pub scope_visibility: String,
+    pub scope_context_id: Option<String>,
+    pub provenance_json: String,
+    pub import_ref_json: Option<String>,
+    pub occurred_at: Option<String>,
+    pub tombstone_json: Option<String>,
+    pub revision: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl RecordRow {
+    pub(super) fn scope(&self) -> Placement<'_> {
+        Placement {
+            visibility: self.scope_visibility.as_str(),
+            context_id: self.scope_context_id.as_deref(),
+        }
+    }
+
+    pub(super) const fn tombstoned(&self) -> bool {
+        self.tombstone_json.is_some()
+    }
+
+    fn requirement<'a>(&'a self, capability: &'a str, subject_all: bool) -> GrantRequirement<'a> {
+        let scope = self.scope();
+        GrantRequirement {
+            capability,
+            subject_id: Some(self.subject_id.as_str()),
+            context_ids: scope.context_id.map(str::to_string).into_iter().collect(),
+            reads_shared: scope.visibility == Placement::SHARED,
+            subject_all,
+        }
+    }
+}
+
+/// A trusted authored subject document as stored (§6.8).
+#[derive(Debug, sqlx::FromRow)]
+pub(super) struct ProfileRow {
+    pub space_id: String,
+    pub subject_id: String,
+    pub profile_kind: String,
+    pub document_json: String,
+    pub updated_by: String,
+    pub revision: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// One candidate as `memory.capture` materializes it (§7.11).
+pub(super) struct NewCandidate<'a> {
+    pub candidate_id: &'a str,
+    pub subject_id: &'a str,
+    pub placement: Placement<'a>,
+    pub kind: &'a str,
+    pub content: &'a Value,
+    pub provenance: &'a Value,
+    pub classification: &'a Value,
+    pub occurred_at: Option<&'a str>,
+    pub expires_at: Option<&'a str>,
+}
+
+/// The §7.15 review decision, reduced to what the write path needs.
+pub(super) enum ReviewDecision<'a> {
+    Promote {
+        kind: Option<&'a str>,
+        content: Option<&'a Value>,
+    },
+    Fragment {
+        items: &'a [(String, Value)],
+    },
+    Drop,
+}
+
+impl ReviewDecision<'_> {
+    const fn outcome(&self) -> &'static str {
+        match self {
+            Self::Promote { .. } => "promoted",
+            Self::Fragment { .. } => "fragmented",
+            Self::Drop => "dropped",
+        }
+    }
+}
+
+fn serialize(value: &Value, what: &str) -> StoreResult<String> {
+    serde_json::to_string(value).map_err(|e| StoreError::Corrupt(format!("{what}: {e}")))
+}
+
+/// §6.5 coverage over an already-read and already-wired grant set.
+fn covered(
+    grants: &[MemoryGrant],
+    principal_id: &str,
+    space_id: &str,
+    now: DateTime<Utc>,
+    requirement: &GrantRequirement<'_>,
+) -> bool {
+    grants
+        .iter()
+        .any(|grant| grant_covers(grant, principal_id, space_id, now, requirement))
+}
+
+fn wire_grants(rows: &[GrantRow]) -> StoreResult<Vec<MemoryGrant>> {
+    rows.iter().map(GrantRow::wire).collect()
+}
+
+/// §7.5/§7.7/§7.9 write gate for a subject named by a *stored row* rather than
+/// the request.
+async fn require_subject_active(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    space_id: &str,
+    subject_id: &str,
+) -> StoreResult<()> {
+    if let Some(subject) = subject_in_tx(tx, space_id, subject_id).await? {
+        if subject.status != "active" {
+            return Err(StoreError::SubjectFenced {
+                subject_id: subject_id.to_string(),
+                status: subject.status,
+            });
+        }
+    }
+    Ok(())
+}
+
+async fn candidate_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    space_id: &str,
+    candidate_id: &str,
+) -> StoreResult<Option<CandidateRow>> {
+    let sql = format!(
+        "SELECT {CANDIDATE_COLUMNS} FROM memory_candidates \
+         WHERE space_id = ? AND candidate_id = ?"
+    );
+    Ok(sqlx::query_as::<_, CandidateRow>(sqlx::AssertSqlSafe(sql))
+        .bind(space_id)
+        .bind(candidate_id)
+        .fetch_optional(&mut **tx)
+        .await?)
+}
+
+async fn record_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    space_id: &str,
+    record_id: &str,
+) -> StoreResult<Option<RecordRow>> {
+    let sql =
+        format!("SELECT {RECORD_COLUMNS} FROM memory_records WHERE space_id = ? AND record_id = ?");
+    Ok(sqlx::query_as::<_, RecordRow>(sqlx::AssertSqlSafe(sql))
+        .bind(space_id)
+        .bind(record_id)
+        .fetch_optional(&mut **tx)
+        .await?)
+}
+
+/// §6.7/§8.1 consumption: scrub the body, stamp `content_digest`, record the
+/// outcome and bump the revision in one statement guarded by the CAS.
+#[allow(clippy::too_many_arguments)]
+async fn consume_candidate(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    candidate: &CandidateRow,
+    expected_revision: i64,
+    consumed_by: &Value,
+    content_digest: &str,
+    now: DateTime<Utc>,
+) -> StoreResult<()> {
+    let updated = sqlx::query(
+        "UPDATE memory_candidates \
+         SET status = 'consumed', content_json = NULL, content_digest = ?, consumed_by_json = ?, \
+             revision = revision + 1 \
+         WHERE space_id = ? AND candidate_id = ? AND revision = ? AND status = 'pending'",
+    )
+    .bind(content_digest)
+    .bind(serialize(consumed_by, "candidate consumption")?)
+    .bind(candidate.space_id.as_str())
+    .bind(candidate.candidate_id.as_str())
+    .bind(expected_revision)
+    .execute(&mut **tx)
+    .await?;
+    if updated.rows_affected() != 1 {
+        return Err(StoreError::RevisionConflict {
+            current: candidate.revision,
+        });
+    }
+    let _ = now;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn insert_record(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    space_id: &str,
+    subject_id: &str,
+    placement: Placement<'_>,
+    kind: &str,
+    content: &Value,
+    provenance: &Value,
+    occurred_at: Option<&str>,
+    record_id: &str,
+    now: DateTime<Utc>,
+) -> StoreResult<()> {
+    let at = timestamp(now);
+    sqlx::query(
+        "INSERT INTO memory_records \
+         (record_id, space_id, subject_id, kind, content_json, scope_visibility, scope_context_id, \
+          provenance_json, import_ref_json, occurred_at, tombstone_json, revision, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, 1, ?, ?)",
+    )
+    .bind(record_id)
+    .bind(space_id)
+    .bind(subject_id)
+    .bind(kind)
+    .bind(serialize(content, "record content")?)
+    .bind(placement.visibility)
+    .bind(placement.context_id)
+    .bind(serialize(provenance, "record provenance")?)
+    .bind(occurred_at)
+    .bind(&at)
+    .bind(&at)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+fn mint_record_id() -> String {
+    format!("rec_{}", Uuid::new_v4().simple())
+}
+
+/// Stable candidate identity (§6.7): minted once, never reused.
+pub(super) fn mint_candidate_id() -> String {
+    format!("cnd_{}", Uuid::new_v4().simple())
+}
+
+impl MemoryStore {
+    /// §7.11: admission + candidate inserts + receipt, one transaction.
+    pub(super) async fn capture(
+        &self,
+        ctx: &OpContext<'_>,
+        admission: &Admission<'_>,
+        candidates: &[NewCandidate<'_>],
+    ) -> StoreResult<ReceiptRow> {
+        let (mut tx, now) = begin_admission(&self.pool).await?;
+        let _ = authorize(&mut tx, admission, now).await?;
+        if let Some(row) = probe(&mut tx, ctx).await? {
+            return Ok(row);
+        }
+        gate(&mut tx, admission).await?;
+        let at = timestamp(now);
+        let mut ids = Vec::with_capacity(candidates.len());
+        for candidate in candidates {
+            sqlx::query(
+                "INSERT INTO memory_candidates \
+                 (candidate_id, space_id, subject_id, capture_visibility, capture_context_id, kind, \
+                  content_json, provenance_json, classification_json, status, consumed_by_json, \
+                  content_digest, occurred_at, expires_at, revision, created_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, ?, ?, 1, ?)",
+            )
+            .bind(candidate.candidate_id)
+            .bind(ctx.space_id)
+            .bind(candidate.subject_id)
+            .bind(candidate.placement.visibility)
+            .bind(candidate.placement.context_id)
+            .bind(candidate.kind)
+            .bind(serialize(candidate.content, "candidate content")?)
+            .bind(serialize(candidate.provenance, "candidate provenance")?)
+            .bind(serialize(candidate.classification, "candidate classification")?)
+            .bind(candidate.occurred_at)
+            .bind(candidate.expires_at)
+            .bind(&at)
+            .execute(&mut *tx)
+            .await?;
+            ids.push(candidate.candidate_id.to_string());
+        }
+        let classified = ids.len();
+        let result = json!({ "candidate_ids": ids, "classified": classified });
+        self.commit_receipt(tx, ctx, &result, now).await
+    }
+
+    /// §7.12: the authorized page and its invalidation marker from one read.
+    pub(super) async fn candidates(
+        &self,
+        space_id: &str,
+        subject_id: &str,
+        status: Option<&str>,
+        principal_id: &str,
+        now: DateTime<Utc>,
+    ) -> StoreResult<(Vec<CandidateRow>, i64)> {
+        let mut tx = self.pool.begin().await?;
+        space_in_tx(&mut tx, space_id).await?;
+        let grants = wire_grants(&grants_in_tx(&mut tx, space_id).await?)?;
+        let base = GrantRequirement {
+            capability: "review",
+            subject_id: Some(subject_id),
+            context_ids: Vec::new(),
+            reads_shared: false,
+            subject_all: false,
+        };
+        if !covered(&grants, principal_id, space_id, now, &base) {
+            return Err(StoreError::NotAuthorized(format!(
+                "principal {principal_id} holds no review grant on subject {subject_id}"
+            )));
+        }
+        let sql = format!(
+            "SELECT {CANDIDATE_COLUMNS} FROM memory_candidates \
+             WHERE space_id = ? AND subject_id = ? AND (? IS NULL OR status = ?) \
+             ORDER BY created_at, candidate_id"
+        );
+        let rows = sqlx::query_as::<_, CandidateRow>(sqlx::AssertSqlSafe(sql))
+            .bind(space_id)
+            .bind(subject_id)
+            .bind(status)
+            .bind(status)
+            .fetch_all(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        let visible: Vec<CandidateRow> = rows
+            .into_iter()
+            .filter(|row| !row.expired(now))
+            .filter(|row| {
+                covered(
+                    &grants,
+                    principal_id,
+                    space_id,
+                    now,
+                    &row.requirement("review"),
+                )
+            })
+            .collect();
+        let marker = visible.iter().map(|row| row.revision).sum();
+        Ok((visible, marker))
+    }
+
+    /// §7.13: by-id read under current authorization (§7.17-style; an
+    /// unauthorized candidate is reported as absent).
+    pub(super) async fn candidate_for_read(
+        &self,
+        space_id: &str,
+        candidate_id: &str,
+        principal_id: &str,
+        now: DateTime<Utc>,
+    ) -> StoreResult<Option<CandidateRow>> {
+        let mut tx = self.pool.begin().await?;
+        space_in_tx(&mut tx, space_id).await?;
+        let grants = wire_grants(&grants_in_tx(&mut tx, space_id).await?)?;
+        let row = candidate_in_tx(&mut tx, space_id, candidate_id).await?;
+        tx.commit().await?;
+        Ok(row.filter(|row| {
+            covered(
+                &grants,
+                principal_id,
+                space_id,
+                now,
+                &row.requirement("review"),
+            )
+        }))
+    }
+
+    /// §7.14: dismissal consumes the candidate without producing records.
+    pub(super) async fn dismiss_candidate(
+        &self,
+        ctx: &OpContext<'_>,
+        admission: &Admission<'_>,
+        candidate_id: &str,
+        expected_revision: i64,
+    ) -> StoreResult<ReceiptRow> {
+        let (mut tx, now) = begin_admission(&self.pool).await?;
+        let _ = authorize(&mut tx, admission, now).await?;
+        if let Some(row) = probe(&mut tx, ctx).await? {
+            return Ok(row);
+        }
+        gate(&mut tx, admission).await?;
+        let candidate = candidate_in_tx(&mut tx, ctx.space_id, candidate_id)
+            .await?
+            .ok_or_else(|| StoreError::NotFound(format!("candidate {candidate_id}")))?;
+        require_subject_active(&mut tx, ctx.space_id, candidate.subject_id.as_str()).await?;
+        if candidate.status == "consumed" {
+            return Err(StoreError::CandidateConsumed(format!(
+                "candidate {candidate_id} was already consumed"
+            )));
+        }
+        if candidate.revision != expected_revision {
+            return Err(StoreError::RevisionConflict {
+                current: candidate.revision,
+            });
+        }
+        let receipt_id = mint_receipt_id();
+        let consumed_by = json!({
+            "op": "memory.candidates.dismiss",
+            "receipt_id": receipt_id,
+            "outcome": "dismissed",
+            "record_ids": [],
+        });
+        let digest = content_digest(&candidate)?;
+        consume_candidate(
+            &mut tx,
+            &candidate,
+            expected_revision,
+            &consumed_by,
+            &digest,
+            now,
+        )
+        .await?;
+        let result = json!({ "candidate_id": candidate_id, "outcome": "dismissed" });
+        self.commit_receipt_with(tx, ctx, receipt_id, &result, now)
+            .await
+    }
+
+    /// §7.15: consumption + scrub + every record insert + receipt, one
+    /// transaction (MEM-R009). Placement is inherited from the candidate and can
+    /// never be chosen by the decision.
+    pub(super) async fn review_candidate(
+        &self,
+        ctx: &OpContext<'_>,
+        admission: &Admission<'_>,
+        candidate_id: &str,
+        expected_revision: i64,
+        decision: &ReviewDecision<'_>,
+    ) -> StoreResult<ReceiptRow> {
+        let (mut tx, now) = begin_admission(&self.pool).await?;
+        let _ = authorize(&mut tx, admission, now).await?;
+        if let Some(row) = probe(&mut tx, ctx).await? {
+            return Ok(row);
+        }
+        gate(&mut tx, admission).await?;
+        let candidate = candidate_in_tx(&mut tx, ctx.space_id, candidate_id)
+            .await?
+            .ok_or_else(|| StoreError::NotFound(format!("candidate {candidate_id}")))?;
+        require_subject_active(&mut tx, ctx.space_id, candidate.subject_id.as_str()).await?;
+        if candidate.status == "consumed" {
+            return Err(StoreError::CandidateConsumed(format!(
+                "candidate {candidate_id} was already consumed"
+            )));
+        }
+        if candidate.revision != expected_revision {
+            return Err(StoreError::RevisionConflict {
+                current: candidate.revision,
+            });
+        }
+        let provenance: Value = serde_json::from_str(&candidate.provenance_json)
+            .map_err(|e| StoreError::Corrupt(format!("candidate provenance: {e}")))?;
+        let content: Value = match candidate.content_json.as_deref() {
+            Some(raw) => serde_json::from_str(raw)
+                .map_err(|e| StoreError::Corrupt(format!("candidate content: {e}")))?,
+            None => {
+                return Err(StoreError::Corrupt(format!(
+                    "pending candidate {candidate_id} carries no content"
+                )))
+            }
+        };
+        let placement = candidate.scope();
+        let mut record_ids = Vec::new();
+        match decision {
+            ReviewDecision::Promote {
+                kind,
+                content: override_content,
+            } => {
+                let record_id = mint_record_id();
+                insert_record(
+                    &mut tx,
+                    ctx.space_id,
+                    candidate.subject_id.as_str(),
+                    placement,
+                    kind.unwrap_or(candidate.kind.as_str()),
+                    override_content.unwrap_or(&content),
+                    &provenance,
+                    candidate.occurred_at.as_deref(),
+                    &record_id,
+                    now,
+                )
+                .await?;
+                record_ids.push(record_id);
+            }
+            ReviewDecision::Fragment { items } => {
+                for (kind, fragment) in *items {
+                    let record_id = mint_record_id();
+                    insert_record(
+                        &mut tx,
+                        ctx.space_id,
+                        candidate.subject_id.as_str(),
+                        placement,
+                        kind.as_str(),
+                        fragment,
+                        &provenance,
+                        candidate.occurred_at.as_deref(),
+                        &record_id,
+                        now,
+                    )
+                    .await?;
+                    record_ids.push(record_id);
+                }
+            }
+            ReviewDecision::Drop => {}
+        }
+        let receipt_id = mint_receipt_id();
+        let consumed_by = json!({
+            "op": "memory.candidates.review",
+            "receipt_id": receipt_id,
+            "outcome": decision.outcome(),
+            "record_ids": record_ids,
+        });
+        let digest = content_digest(&candidate)?;
+        consume_candidate(
+            &mut tx,
+            &candidate,
+            expected_revision,
+            &consumed_by,
+            &digest,
+            now,
+        )
+        .await?;
+        let result = json!({ "outcome": decision.outcome(), "record_ids": record_ids });
+        self.commit_receipt_with(tx, ctx, receipt_id, &result, now)
+            .await
+    }
+
+    /// §7.20/§7.22 read path: authorization and tombstone/selection filters
+    /// apply before the page is cut, so counts and cursors cover only what the
+    /// principal may see (MEM-R006).
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn records(
+        &self,
+        space_id: &str,
+        subject_id: &str,
+        selection: &Selection,
+        filter: Option<&[String]>,
+        kinds: &[String],
+        include_tombstoned: bool,
+        principal_id: &str,
+        now: DateTime<Utc>,
+    ) -> StoreResult<(Vec<RecordRow>, i64)> {
+        let mut tx = self.pool.begin().await?;
+        space_in_tx(&mut tx, space_id).await?;
+        let grants = wire_grants(&grants_in_tx(&mut tx, space_id).await?)?;
+        let readable = ["records_read", "recall"]
+            .map(|capability| selection.base_requirement(capability, subject_id));
+        if !readable
+            .iter()
+            .any(|requirement| covered(&grants, principal_id, space_id, now, requirement))
+        {
+            return Err(StoreError::NotAuthorized(format!(
+                "principal {principal_id} holds no records_read/recall grant covering the selection"
+            )));
+        }
+        let admin = GrantRequirement {
+            capability: "admin",
+            subject_id: Some(subject_id),
+            context_ids: Vec::new(),
+            reads_shared: false,
+            subject_all: false,
+        };
+        if include_tombstoned && !covered(&grants, principal_id, space_id, now, &admin) {
+            return Err(StoreError::NotAuthorized(
+                "include_tombstoned requires admin coverage (§7.20)".to_string(),
+            ));
+        }
+        let sql = format!(
+            "SELECT {RECORD_COLUMNS} FROM memory_records \
+             WHERE space_id = ? AND subject_id = ? ORDER BY created_at DESC, record_id"
+        );
+        let rows = sqlx::query_as::<_, RecordRow>(sqlx::AssertSqlSafe(sql))
+            .bind(space_id)
+            .bind(subject_id)
+            .fetch_all(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        let subject_all = matches!(selection, Selection::SubjectAll);
+        let visible: Vec<RecordRow> = rows
+            .into_iter()
+            .filter(|row| !row.tombstoned() || include_tombstoned)
+            .filter(|row| kinds.is_empty() || kinds.contains(&row.kind))
+            .filter(|row| selection.admits(&row.scope()))
+            .filter(|row| {
+                filter
+                    .is_none_or(|context_ids| provenance_matches(&row.provenance_json, context_ids))
+            })
+            .filter(|row| {
+                ["records_read", "recall"].iter().any(|capability| {
+                    covered(
+                        &grants,
+                        principal_id,
+                        space_id,
+                        now,
+                        &row.requirement(capability, subject_all),
+                    )
+                })
+            })
+            .collect();
+        let marker = visible.iter().map(|row| row.revision).sum();
+        Ok((visible, marker))
+    }
+
+    /// §7.17: by-id read; a tombstoned record is admin-only and an unauthorized
+    /// record reads as absent.
+    pub(super) async fn record_for_read(
+        &self,
+        space_id: &str,
+        record_id: &str,
+        principal_id: &str,
+        now: DateTime<Utc>,
+    ) -> StoreResult<Option<RecordRow>> {
+        let mut tx = self.pool.begin().await?;
+        space_in_tx(&mut tx, space_id).await?;
+        let grants = wire_grants(&grants_in_tx(&mut tx, space_id).await?)?;
+        let row = record_in_tx(&mut tx, space_id, record_id).await?;
+        tx.commit().await?;
+        let subject_id = row.as_ref().map(|row| row.subject_id.clone());
+        let admin = GrantRequirement {
+            capability: "admin",
+            subject_id: subject_id.as_deref(),
+            context_ids: Vec::new(),
+            reads_shared: false,
+            subject_all: false,
+        };
+        Ok(row.filter(|row| {
+            if !covered(
+                &grants,
+                principal_id,
+                space_id,
+                now,
+                &row.requirement("records_read", false),
+            ) && !covered(
+                &grants,
+                principal_id,
+                space_id,
+                now,
+                &row.requirement("recall", false),
+            ) {
+                return false;
+            }
+            !row.tombstoned() || covered(&grants, principal_id, space_id, now, &admin)
+        }))
+    }
+
+    /// §7.16 direct authored write.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn create_record(
+        &self,
+        ctx: &OpContext<'_>,
+        admission: &Admission<'_>,
+        subject_id: &str,
+        placement: Placement<'_>,
+        kind: &str,
+        content: &Value,
+        provenance: &Value,
+    ) -> StoreResult<ReceiptRow> {
+        let (mut tx, now) = begin_admission(&self.pool).await?;
+        let _ = authorize(&mut tx, admission, now).await?;
+        if let Some(row) = probe(&mut tx, ctx).await? {
+            return Ok(row);
+        }
+        gate(&mut tx, admission).await?;
+        let record_id = mint_record_id();
+        insert_record(
+            &mut tx,
+            ctx.space_id,
+            subject_id,
+            placement,
+            kind,
+            content,
+            provenance,
+            None,
+            &record_id,
+            now,
+        )
+        .await?;
+        let result = json!({ "record_id": record_id, "revision": 1 });
+        self.commit_receipt(tx, ctx, &result, now).await
+    }
+
+    /// §7.18: kind/content edit under CAS. Placement is not editable here.
+    pub(super) async fn update_record(
+        &self,
+        ctx: &OpContext<'_>,
+        admission: &Admission<'_>,
+        record_id: &str,
+        expected_revision: i64,
+        content: Option<&Value>,
+        kind: Option<&str>,
+    ) -> StoreResult<ReceiptRow> {
+        let (mut tx, now) = begin_admission(&self.pool).await?;
+        let _ = authorize(&mut tx, admission, now).await?;
+        if let Some(row) = probe(&mut tx, ctx).await? {
+            return Ok(row);
+        }
+        gate(&mut tx, admission).await?;
+        let record = record_in_tx(&mut tx, ctx.space_id, record_id)
+            .await?
+            .ok_or_else(|| StoreError::NotFound(format!("record {record_id}")))?;
+        require_subject_active(&mut tx, ctx.space_id, record.subject_id.as_str()).await?;
+        // MEM-R014: deletion is terminal, so a tombstoned record is never edited
+        // back to life.
+        if record.tombstoned() {
+            return Err(StoreError::StatusTransition(format!(
+                "record {record_id} is tombstoned"
+            )));
+        }
+        if record.revision != expected_revision {
+            return Err(StoreError::RevisionConflict {
+                current: record.revision,
+            });
+        }
+        let content_json = match content {
+            Some(content) => Some(serialize(content, "record content")?),
+            None => None,
+        };
+        let updated = sqlx::query(
+            "UPDATE memory_records SET content_json = COALESCE(?, content_json), \
+             kind = COALESCE(?, kind), updated_at = ?, revision = revision + 1 \
+             WHERE space_id = ? AND record_id = ? AND revision = ?",
+        )
+        .bind(content_json)
+        .bind(kind)
+        .bind(timestamp(now))
+        .bind(ctx.space_id)
+        .bind(record_id)
+        .bind(record.revision)
+        .execute(&mut *tx)
+        .await?;
+        if updated.rows_affected() != 1 {
+            return Err(StoreError::RevisionConflict {
+                current: record.revision,
+            });
+        }
+        let result = json!({ "record_id": record_id, "revision": record.revision + 1 });
+        self.commit_receipt(tx, ctx, &result, now).await
+    }
+
+    /// §7.19/MEM-R014: content removed, tombstone retained, receipts untouched.
+    pub(super) async fn delete_record(
+        &self,
+        ctx: &OpContext<'_>,
+        admission: &Admission<'_>,
+        record_id: &str,
+        expected_revision: i64,
+        reason: Option<&str>,
+        deleted_by: &str,
+    ) -> StoreResult<ReceiptRow> {
+        let (mut tx, now) = begin_admission(&self.pool).await?;
+        let _ = authorize(&mut tx, admission, now).await?;
+        if let Some(row) = probe(&mut tx, ctx).await? {
+            return Ok(row);
+        }
+        gate(&mut tx, admission).await?;
+        let record = record_in_tx(&mut tx, ctx.space_id, record_id)
+            .await?
+            .ok_or_else(|| StoreError::NotFound(format!("record {record_id}")))?;
+        if record.tombstoned() {
+            return Err(StoreError::StatusTransition(format!(
+                "record {record_id} is already tombstoned"
+            )));
+        }
+        if record.revision != expected_revision {
+            return Err(StoreError::RevisionConflict {
+                current: record.revision,
+            });
+        }
+        let tombstone = json!({
+            "deleted_at": timestamp(now),
+            "deleted_by": deleted_by,
+            "reason": reason,
+        });
+        let updated = sqlx::query(
+            "UPDATE memory_records SET content_json = ?, tombstone_json = ?, updated_at = ?, \
+             revision = revision + 1 \
+             WHERE space_id = ? AND record_id = ? AND revision = ?",
+        )
+        .bind(serialize(&json!({ "text": "" }), "scrubbed content")?)
+        .bind(serialize(&tombstone, "tombstone")?)
+        .bind(timestamp(now))
+        .bind(ctx.space_id)
+        .bind(record_id)
+        .bind(record.revision)
+        .execute(&mut *tx)
+        .await?;
+        if updated.rows_affected() != 1 {
+            return Err(StoreError::RevisionConflict {
+                current: record.revision,
+            });
+        }
+        let result = json!({ "record_id": record_id, "tombstoned": true });
+        self.commit_receipt(tx, ctx, &result, now).await
+    }
+
+    /// §7.21 explicit placement change; provenance is untouched.
+    pub(super) async fn promote_record(
+        &self,
+        ctx: &OpContext<'_>,
+        admission: &Admission<'_>,
+        record_id: &str,
+        expected_revision: i64,
+        target: Placement<'_>,
+    ) -> StoreResult<ReceiptRow> {
+        let (mut tx, now) = begin_admission(&self.pool).await?;
+        let _ = authorize(&mut tx, admission, now).await?;
+        if let Some(row) = probe(&mut tx, ctx).await? {
+            return Ok(row);
+        }
+        gate(&mut tx, admission).await?;
+        let record = record_in_tx(&mut tx, ctx.space_id, record_id)
+            .await?
+            .ok_or_else(|| StoreError::NotFound(format!("record {record_id}")))?;
+        require_subject_active(&mut tx, ctx.space_id, record.subject_id.as_str()).await?;
+        if record.tombstoned() {
+            return Err(StoreError::StatusTransition(format!(
+                "record {record_id} is tombstoned"
+            )));
+        }
+        if record.revision != expected_revision {
+            return Err(StoreError::RevisionConflict {
+                current: record.revision,
+            });
+        }
+        let revision = if record.scope_visibility == target.visibility
+            && record.scope_context_id.as_deref() == target.context_id
+        {
+            // §7.0.4: a genuine no-op keeps the revision.
+            record.revision
+        } else {
+            let updated = sqlx::query(
+                "UPDATE memory_records SET scope_visibility = ?, scope_context_id = ?, \
+                 updated_at = ?, revision = revision + 1 \
+                 WHERE space_id = ? AND record_id = ? AND revision = ?",
+            )
+            .bind(target.visibility)
+            .bind(target.context_id)
+            .bind(timestamp(now))
+            .bind(ctx.space_id)
+            .bind(record_id)
+            .bind(record.revision)
+            .execute(&mut *tx)
+            .await?;
+            if updated.rows_affected() != 1 {
+                return Err(StoreError::RevisionConflict {
+                    current: record.revision,
+                });
+            }
+            record.revision + 1
+        };
+        let scope = json!({
+            "visibility": target.visibility,
+            "context_id": target.context_id,
+        });
+        let result = json!({ "record_id": record_id, "revision": revision, "scope": scope });
+        self.commit_receipt(tx, ctx, &result, now).await
+    }
+
+    /// §7.23 profile read: every present profile, or the requested kinds that
+    /// are present. Absence is honest-empty, never an error.
+    pub(super) async fn profiles(
+        &self,
+        space_id: &str,
+        subject_id: &str,
+        principal_id: &str,
+        now: DateTime<Utc>,
+    ) -> StoreResult<Option<Vec<ProfileRow>>> {
+        let mut tx = self.pool.begin().await?;
+        space_in_tx(&mut tx, space_id).await?;
+        let rows = grants_in_tx(&mut tx, space_id).await?;
+        let visible = rows.iter().any(|grant| {
+            let Ok(wire) = grant.wire() else {
+                return false;
+            };
+            profiles_grant_covers(&wire, principal_id, space_id, now, subject_id)
+        });
+        if !visible {
+            tx.commit().await?;
+            return Ok(None);
+        }
+        let sql = format!(
+            "SELECT {PROFILE_COLUMNS} FROM memory_profiles \
+             WHERE space_id = ? AND subject_id = ? ORDER BY profile_kind"
+        );
+        let rows = sqlx::query_as::<_, ProfileRow>(sqlx::AssertSqlSafe(sql))
+            .bind(space_id)
+            .bind(subject_id)
+            .fetch_all(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(Some(rows))
+    }
+
+    /// §7.24 create-or-update under CAS; `expected == None` is create-only.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn upsert_profile(
+        &self,
+        ctx: &OpContext<'_>,
+        admission: &Admission<'_>,
+        subject_id: &str,
+        profile_kind: &str,
+        expected_revision: Option<i64>,
+        document: &Value,
+        updated_by: &str,
+    ) -> StoreResult<ReceiptRow> {
+        let (mut tx, now) = begin_admission(&self.pool).await?;
+        let _ = authorize(&mut tx, admission, now).await?;
+        if let Some(row) = probe(&mut tx, ctx).await? {
+            return Ok(row);
+        }
+        gate(&mut tx, admission).await?;
+        let existing: Option<(i64,)> = sqlx::query_as(
+            "SELECT revision FROM memory_profiles \
+             WHERE space_id = ? AND subject_id = ? AND profile_kind = ?",
+        )
+        .bind(ctx.space_id)
+        .bind(subject_id)
+        .bind(profile_kind)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let at = timestamp(now);
+        let revision = match (existing, expected_revision) {
+            (None, None) => {
+                sqlx::query(
+                    "INSERT INTO memory_profiles \
+                     (space_id, subject_id, profile_kind, document_json, updated_by, revision, \
+                      created_at, updated_at) \
+                     VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+                )
+                .bind(ctx.space_id)
+                .bind(subject_id)
+                .bind(profile_kind)
+                .bind(serialize(document, "profile document")?)
+                .bind(updated_by)
+                .bind(&at)
+                .bind(&at)
+                .execute(&mut *tx)
+                .await?;
+                1
+            }
+            (None, Some(_)) => {
+                // Create-only was not requested but the row does not exist: the
+                // expectation cannot be met.
+                return Err(StoreError::RevisionConflict { current: 0 });
+            }
+            (Some((current,)), None) => {
+                // `expected_revision: null` means create-only (§7.24).
+                return Err(StoreError::RevisionConflict { current });
+            }
+            (Some((current,)), Some(expected)) => {
+                if current != expected {
+                    return Err(StoreError::RevisionConflict { current });
+                }
+                let updated = sqlx::query(
+                    "UPDATE memory_profiles SET document_json = ?, updated_by = ?, \
+                     updated_at = ?, revision = revision + 1 \
+                     WHERE space_id = ? AND subject_id = ? AND profile_kind = ? AND revision = ?",
+                )
+                .bind(serialize(document, "profile document")?)
+                .bind(updated_by)
+                .bind(&at)
+                .bind(ctx.space_id)
+                .bind(subject_id)
+                .bind(profile_kind)
+                .bind(current)
+                .execute(&mut *tx)
+                .await?;
+                if updated.rows_affected() != 1 {
+                    return Err(StoreError::RevisionConflict { current });
+                }
+                current + 1
+            }
+        };
+        let result = json!({ "profile_kind": profile_kind, "revision": revision });
+        self.commit_receipt(tx, ctx, &result, now).await
+    }
+}
+
+/// §6.13: at least one provenance source context is in the filter list.
+fn provenance_matches(provenance_json: &str, context_ids: &[String]) -> bool {
+    let Ok(provenance) = serde_json::from_str::<Value>(provenance_json) else {
+        return false;
+    };
+    provenance
+        .get("source_context_ids")
+        .and_then(Value::as_array)
+        .is_some_and(|sources| {
+            sources.iter().any(|source| {
+                source
+                    .as_str()
+                    .is_some_and(|source| context_ids.iter().any(|known| known == source))
+            })
+        })
+}
+
+/// §7.23 coverage: any capability on the subject, with shared access or
+/// unrestricted coverage (profiles are subject-level trusted documents).
+fn profiles_grant_covers(
+    grant: &MemoryGrant,
+    principal_id: &str,
+    space_id: &str,
+    now: DateTime<Utc>,
+    subject_id: &str,
+) -> bool {
+    // Every capability the grant lists is admitted by the same subject/space
+    // filter, so probing the grant's own first capability keeps the §6.5
+    // evaluator (expiry, revoke, subject scope) as the single source of truth.
+    let Some(capability) = grant_capabilities(grant).first() else {
+        return false;
+    };
+    let unrestricted = match grant {
+        MemoryGrant::RestrictedGrant(grant) => grant.context_ids.is_empty(),
+        MemoryGrant::UnrestrictedGrant(_) => true,
+    };
+    let shared = match grant {
+        MemoryGrant::RestrictedGrant(grant) => grant.shared_access.unwrap_or(false),
+        MemoryGrant::UnrestrictedGrant(_) => true,
+    };
+    if !unrestricted && !shared {
+        return false;
+    }
+    let requirement = GrantRequirement {
+        capability,
+        subject_id: Some(subject_id),
+        context_ids: Vec::new(),
+        reads_shared: true,
+        subject_all: false,
+    };
+    grant_covers(grant, principal_id, space_id, now, &requirement)
+}
+
+fn grant_capabilities(grant: &MemoryGrant) -> &[String] {
+    match grant {
+        MemoryGrant::RestrictedGrant(grant) => &grant.capabilities,
+        MemoryGrant::UnrestrictedGrant(grant) => &grant.capabilities,
+    }
+}
+
+/// §6.7: 64-hex SHA-256 over the JCS-canonical candidate content, computed
+/// before the body is scrubbed.
+fn content_digest(candidate: &CandidateRow) -> StoreResult<String> {
+    let raw = candidate
+        .content_json
+        .as_deref()
+        .ok_or_else(|| StoreError::Corrupt("candidate has no content to digest".to_string()))?;
+    let content: Value = serde_json::from_str(raw)
+        .map_err(|e| StoreError::Corrupt(format!("candidate content: {e}")))?;
+    match spoke_operations::jcs_sha256_hex(&content) {
+        SpokeResult::Ok(digest) => Ok(digest),
+        SpokeResult::Reject(reject) => Err(StoreError::Corrupt(reject.message)),
+    }
 }

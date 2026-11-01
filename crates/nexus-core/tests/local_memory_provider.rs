@@ -1,12 +1,13 @@
-//! `LocalMemoryProvider` (NXM-1 round A) protocol contract tests.
+//! `LocalMemoryProvider` (NXM-1) protocol contract tests.
 //!
-//! Round A lands the provider skeleton, the additive control-metadata
-//! migration, and the `memory.describe` / `memory.spaces.*` /
-//! `memory.subjects.*` / `memory.grants.*` families. Round B
-//! (capture/candidates/records/recall/profile) and the sub-capability gated
-//! families (reflection, transfer) must answer the dispatch-level denial —
-//! `CAPABILITY_PORT_MISSING`, the code upstream's responder serializes for an
-//! unimplemented op — never a success value and never an empty success.
+//! Covers the whole served surface: `memory.describe`, `memory.spaces.*`,
+//! `memory.subjects.*`, `memory.grants.*`, and the round-B content families
+//! (`memory.capture`, `memory.candidates.*`, `memory.records.*`,
+//! `memory.recall`, `memory.profile.*`) end to end on a temp nexus home. The
+//! sub-capability gated families (reflection, transfer) and the NXM-2 receipt
+//! read must answer the dispatch-level denial — `CAPABILITY_PORT_MISSING`, the
+//! code upstream's responder serializes for an unimplemented op — never a
+//! success value and never an empty success.
 //!
 //! Every scenario runs on a temp nexus home. Import-boundary note: the shared
 //! `MemoryPort` vocabulary comes from `spoke_operations`, whose generated wire
@@ -84,6 +85,20 @@ fn wire<T: serde::Serialize>(result: &SpokeResult<T>) -> Value {
                 "message": reject.message,
             }
         }),
+    }
+}
+
+/// The success payload of a typed port result; a refusal panics with its code.
+fn ok<T>(result: SpokeResult<T>) -> T {
+    match result {
+        SpokeResult::Ok(value) => value,
+        SpokeResult::Reject(reject) => {
+            panic!(
+                "expected success, got {}: {}",
+                reject.code.as_str(),
+                reject.message
+            )
+        }
     }
 }
 
@@ -642,14 +657,14 @@ async fn refusals_travel_the_reject_channel() {
     }
 
     let unsupported = provider
-        .capture(
+        .generate_reflection(
             &principal(CREATOR),
             dto(json!({
                 "space_id": SPACE,
                 "subject_id": SUBJECT,
-                "content": { "text": "Mira promised to return before dawn." },
-                "capture_scope": { "visibility": "shared" },
-                "idempotency_key": "k-capture-reject",
+                "selection": { "mode": "subject_all" },
+                "expected_state_digest": "0".repeat(64),
+                "idempotency_key": "k-reflection-reject",
             })),
         )
         .await;
@@ -663,53 +678,13 @@ async fn refusals_travel_the_reject_channel() {
     }
 }
 
-/// Round B's families and the sub-capability gated families answer the
+/// The sub-capability gated families and the NXM-2 receipt read answer the
 /// dispatch-level denial instead of any success.
 #[tokio::test]
 async fn gated_families_refuse_with_the_unsupported_code() {
     let env = seed_env();
     let provider = open_provider(&env).await;
     let p = principal(CREATOR);
-
-    let capture = wire(
-        &provider
-            .capture(
-                &p,
-                dto(json!({
-                    "space_id": SPACE,
-                    "subject_id": SUBJECT,
-                    "content": { "text": "Mira promised to return before dawn." },
-                    "capture_scope": { "visibility": "shared" },
-                    "idempotency_key": "k-capture",
-                })),
-            )
-            .await,
-    );
-    assert_eq!(
-        error_code(&capture),
-        SpokeRejectCode::CapabilityPortMissing.as_str(),
-        "the emitted code is the one upstream's responder serializes"
-    );
-    assert!(
-        error_details(&capture).get("wire_code").is_none(),
-        "the inbound dispatch-deny marker must not be minted on the emitting side: {capture}"
-    );
-    assert_eq!(retry_class(&capture), "terminal");
-
-    let recall = wire(
-        &provider
-            .recall(
-                &p,
-                dto(json!({
-                    "space_id": SPACE,
-                    "subject_id": SUBJECT,
-                    "selection": { "mode": "subject_all" },
-                    "budget": { "max_items": 10 },
-                })),
-            )
-            .await,
-    );
-    assert_eq!(error_code(&recall), "CAPABILITY_PORT_MISSING");
 
     let reflections = wire(
         &provider
@@ -754,13 +729,13 @@ async fn unserved_ops_serialize_the_upstream_dispatch_code() {
     let provider = open_provider(&env).await;
 
     let result = provider
-        .capture(
+        .generate_reflection(
             &principal(CREATOR),
             dto(json!({
                 "space_id": SPACE,
                 "subject_id": SUBJECT,
-                "content": { "text": "Mira promised to return before dawn." },
-                "capture_scope": { "visibility": "shared" },
+                "selection": { "mode": "subject_all" },
+                "expected_state_digest": "0".repeat(64),
                 "idempotency_key": "k-wire-code",
             })),
         )
@@ -1609,12 +1584,12 @@ async fn admitted_write_completes_after_a_competing_writer_releases() {
     );
 }
 
-// C-117: the control-metadata migration bumps the schema version line.
-const _: () = assert!(nexus_local_db::DB_SCHEMA_VERSION >= 26);
+// C-117: both memory migrations advanced the schema version line (25 → 26 → 27).
+const _: () = assert!(nexus_local_db::DB_SCHEMA_VERSION >= 27);
 
-/// C-117: the control-metadata migration lands once, re-runs as a no-op, is
-/// writer-guard registered (guards + outbox on every control table), and the
-/// `DB_SCHEMA_VERSION` line advanced with it.
+/// C-117: the control- and content-metadata migrations land once, re-run as
+/// no-ops, are writer-guard registered (guards + outbox on every control and
+/// content table), and the `DB_SCHEMA_VERSION` line advanced with them.
 #[tokio::test]
 async fn control_metadata_migration_is_idempotent_and_writer_registered() {
     let env = seed_env();
@@ -1622,35 +1597,36 @@ async fn control_metadata_migration_is_idempotent_and_writer_registered() {
     let provider = open_provider(&env).await;
     let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
 
-    let (applied,): (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM _sqlx_migrations WHERE description LIKE '%memory_control_metadata%'",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert_eq!(applied, 1, "the migration applies exactly once");
+    for migration in ["memory_control_metadata", "memory_content_metadata"] {
+        let (applied,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM _sqlx_migrations WHERE description LIKE ?")
+                .bind(format!("%{migration}%"))
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(applied, 1, "migration {migration} applies exactly once");
+    }
 
-    for table in [
+    let tables = [
         "memory_spaces",
         "memory_subjects",
         "memory_grants",
         "memory_receipts",
-    ] {
+        "memory_candidates",
+        "memory_records",
+        "memory_profiles",
+    ];
+    for table in tables {
         let (found,): (i64,) =
             sqlx::query_as("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?")
                 .bind(table)
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert_eq!(found, 1, "missing control-metadata table: {table}");
+        assert_eq!(found, 1, "missing memory table: {table}");
     }
 
-    for table in [
-        "memory_spaces",
-        "memory_subjects",
-        "memory_grants",
-        "memory_receipts",
-    ] {
+    for table in tables {
         for (kind, verb) in [
             ("guard", "insert"),
             ("guard", "update"),
@@ -1755,6 +1731,24 @@ async fn out_of_guard_writes_are_writer_fenced() {
         err.to_string().contains("WRITER_FENCED"),
         "expected WRITER_FENCED, got: {err}"
     );
+
+    // The round-B content tables carry the same admission: a record cannot be
+    // written outside the writer guard either.
+    let err = sqlx::query(
+        "INSERT INTO memory_records \
+         (record_id, space_id, subject_id, kind, content_json, scope_visibility, scope_context_id, \
+          provenance_json, import_ref_json, occurred_at, tombstone_json, revision, created_at, updated_at) \
+         VALUES ('rec_rogue', ?, 'sbj_mira', 'note', '{\"text\":\"rogue\"}', 'shared', NULL, \
+                 '{}', NULL, NULL, NULL, 1, '2026-11-01T00:00:00Z', '2026-11-01T00:00:00Z')",
+    )
+    .bind(SPACE)
+    .execute(&mut raw)
+    .await
+    .expect_err("a content write outside the guard must be fenced");
+    assert!(
+        err.to_string().contains("WRITER_FENCED"),
+        "expected WRITER_FENCED for a record insert, got: {err}"
+    );
 }
 
 /// Compass AC #3: bearer path validation is untouched by the migration — the
@@ -1795,4 +1789,979 @@ fn creator_memory_dir(user_home: &Path) -> PathBuf {
         .join(CREATOR)
         .join("memory")
         .join("long-term")
+}
+
+// ── The content families ───────────────────────────────────────────────
+
+const TEXT: &str = "Mira promised to return before the northern gate opens at dawn.";
+
+fn capture_request(
+    key: &str,
+    context_id: Option<&str>,
+    text: &str,
+) -> schemas::MemoryCaptureRequest {
+    let capture_scope = context_id.map_or_else(
+        || json!({ "visibility": "shared" }),
+        |context_id| json!({ "visibility": "context", "context_id": context_id }),
+    );
+    dto(json!({
+        "space_id": SPACE,
+        "subject_id": SUBJECT,
+        "content": { "text": text },
+        "capture_scope": capture_scope,
+        "source_context_ids": if context_id.is_some() { json!([context_id]) } else { json!([]) },
+        "idempotency_key": key,
+    }))
+}
+
+fn candidates_list_request(status: Option<&str>) -> schemas::MemoryCandidatesListRequest {
+    status.map_or_else(
+        || dto(json!({ "space_id": SPACE, "subject_id": SUBJECT })),
+        |status| dto(json!({ "space_id": SPACE, "subject_id": SUBJECT, "status": status })),
+    )
+}
+
+fn candidate_get_request(candidate_id: &str) -> schemas::MemoryCandidatesGetRequest {
+    dto(json!({ "space_id": SPACE, "candidate_id": candidate_id }))
+}
+
+fn review_request(
+    key: &str,
+    candidate_id: &str,
+    revision: u64,
+) -> schemas::MemoryCandidatesReviewRequest {
+    dto(json!({
+        "space_id": SPACE,
+        "candidate_id": candidate_id,
+        "expected_revision": revision,
+        "decision": { "action": "promote" },
+        "idempotency_key": key,
+    }))
+}
+
+fn record_create_request(
+    key: &str,
+    kind: &str,
+    scope: &Value,
+    text: &str,
+) -> schemas::MemoryRecordsCreateRequest {
+    dto(json!({
+        "space_id": SPACE,
+        "subject_id": SUBJECT,
+        "kind": kind,
+        "content": { "text": text },
+        "scope": scope,
+        "idempotency_key": key,
+    }))
+}
+
+fn record_get_request(record_id: &str) -> schemas::MemoryRecordsGetRequest {
+    dto(json!({ "space_id": SPACE, "record_id": record_id }))
+}
+
+fn recall_request(max_items: u64) -> schemas::MemoryRecallRequest {
+    dto(json!({
+        "space_id": SPACE,
+        "subject_id": SUBJECT,
+        "selection": { "mode": "subject_all" },
+        "budget": { "max_items": max_items },
+    }))
+}
+
+/// §7.11→§7.15→§7.22 end to end: capture produces a pending candidate, recall
+/// never returns it (MEM-R004), review consumes it into a record with the
+/// candidate's placement while scrubbing the body and keeping its digest
+/// (MEM-R009/§6.7), and recall then serves the record under current
+/// authorization.
+#[tokio::test]
+async fn capture_review_promote_and_recall_round_trip() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+
+    let captured = wire(
+        &provider
+            .capture(&admin, capture_request("k-capture", None, TEXT))
+            .await,
+    );
+    let captured = receipt(&captured);
+    assert_eq!(captured["op"], "memory.capture");
+    assert_eq!(captured["result"]["classified"], 1);
+    let candidate_id = captured["result"]["candidate_ids"][0]
+        .as_str()
+        .expect("a committed capture names its candidate")
+        .to_owned();
+    assert!(
+        !captured["result"].to_string().contains("Mira"),
+        "receipts are content-free (MEM-R022): {captured}"
+    );
+
+    // §7.12: the pending candidate is listed with its body and advisory verdict.
+    let listed = wire(
+        &provider
+            .list_candidates(&admin, candidates_list_request(Some("pending")))
+            .await,
+    );
+    let prompt = &listed["candidates"][0];
+    assert_eq!(prompt["candidate_id"], candidate_id);
+    assert_eq!(prompt["status"], "pending");
+    assert_eq!(prompt["proposed"]["content"]["text"], TEXT);
+    assert_eq!(prompt["proposed"]["kind"], "nexus.custom");
+    assert_eq!(prompt["classification"]["disposition"], "promote");
+    assert_eq!(prompt["capture_scope"]["visibility"], "shared");
+
+    // MEM-R004: a candidate is never a recall result, and nothing is retained yet.
+    let before_review = wire(&provider.recall(&admin, recall_request(10)).await);
+    assert_eq!(before_review["total_authorized"], 0);
+    assert!(before_review["records"].as_array().unwrap().is_empty());
+
+    let reviewed = wire(
+        &provider
+            .review_candidate(&admin, review_request("k-review", &candidate_id, 1))
+            .await,
+    );
+    let reviewed = receipt(&reviewed);
+    assert_eq!(reviewed["result"]["outcome"], "promoted");
+    let record_id = reviewed["result"]["record_ids"][0]
+        .as_str()
+        .expect("a promoted candidate names its record")
+        .to_owned();
+
+    // §6.7 scrub: the shell keeps the digest and the outcome, never the body.
+    let shell = wire(
+        &provider
+            .get_candidate(&admin, candidate_get_request(&candidate_id))
+            .await,
+    );
+    let shell = &shell["candidate"];
+    assert_eq!(shell["status"], "consumed");
+    assert!(
+        shell["proposed"].get("content").is_none(),
+        "consumption removes the proposed body: {shell}"
+    );
+    let digest = shell["content_digest"].as_str().expect("digest is set");
+    assert_eq!(digest.len(), 64, "§6.1 64 lowercase hex chars");
+    assert_eq!(shell["consumed_by"]["outcome"], "promoted");
+    assert_eq!(shell["consumed_by"]["receipt_id"], reviewed["receipt_id"]);
+    assert_eq!(shell["consumed_by"]["record_ids"][0], record_id);
+
+    // §7.17: the record exists with the placement the candidate was captured under.
+    let record = wire(
+        &provider
+            .get_record(&admin, record_get_request(&record_id))
+            .await,
+    );
+    assert_eq!(record["record"]["scope"]["visibility"], "shared");
+    assert_eq!(record["record"]["content"]["text"], TEXT);
+    assert_eq!(record["record"]["kind"], "nexus.custom");
+    assert_eq!(record["record"]["provenance"]["captured_by"], CREATOR);
+
+    let recalled = wire(&provider.recall(&admin, recall_request(10)).await);
+    assert_eq!(recalled["total_authorized"], 1);
+    assert_eq!(recalled["records"][0]["record_id"], record_id);
+    assert_eq!(recalled["truncated"], false);
+    assert!(
+        !recalled["engine_policy_version"]
+            .as_str()
+            .unwrap()
+            .is_empty(),
+        "recall stamps the policy version its ordering came from: {recalled}"
+    );
+}
+
+/// §7.0.5/MEM-R008: a same-key same-payload capture replays its committed
+/// receipt without inserting a second candidate; a different payload under the
+/// same key is `IDEMPOTENCY_CONFLICT`.
+#[tokio::test]
+async fn duplicate_capture_replays_the_receipt() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+
+    let first = wire(
+        &provider
+            .capture(&admin, capture_request("k-replay-capture", None, TEXT))
+            .await,
+    );
+    let first = receipt(&first);
+    let candidate_id = first["result"]["candidate_ids"][0]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let replay = wire(
+        &provider
+            .capture(&admin, capture_request("k-replay-capture", None, TEXT))
+            .await,
+    );
+    assert_eq!(
+        receipt(&replay)["receipt_id"],
+        first["receipt_id"],
+        "the retry returns the stored receipt without re-executing"
+    );
+    assert_eq!(receipt(&replay)["result"]["candidate_ids"][0], candidate_id);
+
+    let listed = wire(
+        &provider
+            .list_candidates(&admin, candidates_list_request(None))
+            .await,
+    );
+    assert_eq!(
+        listed["candidates"].as_array().unwrap().len(),
+        1,
+        "a replay never inserts a second candidate: {listed}"
+    );
+
+    let conflict = wire(
+        &provider
+            .capture(
+                &admin,
+                capture_request(
+                    "k-replay-capture",
+                    None,
+                    "A different promise under the same idempotency key.",
+                ),
+            )
+            .await,
+    );
+    assert_eq!(error_code(&conflict), "IDEMPOTENCY_CONFLICT");
+    assert_eq!(retry_class(&conflict), "terminal");
+}
+
+/// §8.1/MEM-R007: review is revision-checked, and consumption is terminal —
+/// a second decision on the shell is `CANDIDATE_CONSUMED`, not a second record.
+#[tokio::test]
+async fn review_is_revision_checked_and_consumption_is_terminal() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    let captured = wire(
+        &provider
+            .capture(&admin, capture_request("k-capture-cas", None, TEXT))
+            .await,
+    );
+    let candidate_id = receipt(&captured)["result"]["candidate_ids"][0]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let stale = wire(
+        &provider
+            .review_candidate(&admin, review_request("k-review-stale", &candidate_id, 2))
+            .await,
+    );
+    assert_eq!(error_code(&stale), "REVISION_CONFLICT");
+    assert_eq!(error_details(&stale)["current_revision"], 1);
+
+    let promoted = wire(
+        &provider
+            .review_candidate(&admin, review_request("k-review-once", &candidate_id, 1))
+            .await,
+    );
+    assert_eq!(receipt(&promoted)["result"]["outcome"], "promoted");
+
+    let again = wire(
+        &provider
+            .review_candidate(&admin, review_request("k-review-twice", &candidate_id, 2))
+            .await,
+    );
+    assert_eq!(error_code(&again), "CANDIDATE_CONSUMED");
+    assert_eq!(retry_class(&again), "terminal");
+
+    let recalled = wire(&provider.recall(&admin, recall_request(10)).await);
+    assert_eq!(
+        recalled["total_authorized"], 1,
+        "the consumed candidate produced exactly one record: {recalled}"
+    );
+}
+
+/// §7.14: dismissal consumes the candidate without producing a record, and the
+/// outcome is atomic with the scrub (MEM-R009).
+#[tokio::test]
+async fn dismissing_a_candidate_consumes_it_without_a_record() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    let captured = wire(
+        &provider
+            .capture(&admin, capture_request("k-capture-dismiss", None, TEXT))
+            .await,
+    );
+    let candidate_id = receipt(&captured)["result"]["candidate_ids"][0]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let dismissed = wire(
+        &provider
+            .dismiss_candidate(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "candidate_id": candidate_id,
+                    "expected_revision": 1,
+                    "reason": "duplicate of an existing note",
+                    "idempotency_key": "k-dismiss",
+                })),
+            )
+            .await,
+    );
+    let dismissed = receipt(&dismissed);
+    assert_eq!(dismissed["result"]["outcome"], "dismissed");
+    assert_eq!(dismissed["result"]["candidate_id"], candidate_id);
+
+    let shell = wire(
+        &provider
+            .get_candidate(&admin, candidate_get_request(&candidate_id))
+            .await,
+    );
+    assert_eq!(shell["candidate"]["status"], "consumed");
+    assert_eq!(shell["candidate"]["consumed_by"]["outcome"], "dismissed");
+    assert_eq!(shell["candidate"]["consumed_by"]["record_ids"], json!([]));
+
+    let recalled = wire(&provider.recall(&admin, recall_request(10)).await);
+    assert_eq!(recalled["total_authorized"], 0);
+}
+
+/// §7.18/§7.19/§7.20 + MEM-R007/R014: update is CAS-checked, delete keeps a
+/// tombstone with no content, the tombstone is admin-only, and a tombstoned
+/// record leaves recall.
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn record_update_and_delete_tombstone_the_content() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    let reader = principal(OTHER);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    wire(
+        &provider
+            .grant(
+                &admin,
+                subject_grant("k-reader", "records_read", OTHER, SUBJECT),
+            )
+            .await,
+    );
+    let created = wire(
+        &provider
+            .create_record(
+                &admin,
+                record_create_request(
+                    "k-record",
+                    "nexus.story_summary",
+                    &json!({ "visibility": "shared" }),
+                    TEXT,
+                ),
+            )
+            .await,
+    );
+    let record_id = receipt(&created)["result"]["record_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(receipt(&created)["result"]["revision"], 1);
+
+    let visible = wire(
+        &provider
+            .get_record(&reader, record_get_request(&record_id))
+            .await,
+    );
+    assert_eq!(visible["record"]["record_id"], record_id);
+
+    let stale = wire(
+        &provider
+            .update_record(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "record_id": record_id,
+                    "expected_revision": 5,
+                    "content": { "text": "rewritten" },
+                    "idempotency_key": "k-update-stale",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(error_code(&stale), "REVISION_CONFLICT");
+    assert_eq!(error_details(&stale)["current_revision"], 1);
+
+    let updated = wire(
+        &provider
+            .update_record(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "record_id": record_id,
+                    "expected_revision": 1,
+                    "kind": "nexus.character_note",
+                    "idempotency_key": "k-update",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(receipt(&updated)["result"]["revision"], 2);
+
+    let deleted = wire(
+        &provider
+            .delete_record(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "record_id": record_id,
+                    "expected_revision": 2,
+                    "reason": "superseded",
+                    "idempotency_key": "k-delete",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(receipt(&deleted)["result"]["tombstoned"], true);
+
+    let admin_view = wire(
+        &provider
+            .get_record(&admin, record_get_request(&record_id))
+            .await,
+    );
+    let tombstone = &admin_view["record"];
+    assert_eq!(
+        tombstone["content"]["text"], "",
+        "deletion removes the content (MEM-R014): {admin_view}"
+    );
+    assert_eq!(tombstone["kind"], "nexus.character_note");
+    assert_eq!(tombstone["tombstone"]["deleted_by"], CREATOR);
+    assert_eq!(tombstone["tombstone"]["reason"], "superseded");
+
+    let reader_view = wire(
+        &provider
+            .get_record(&reader, record_get_request(&record_id))
+            .await,
+    );
+    assert_eq!(
+        error_code(&reader_view),
+        "NOT_FOUND",
+        "a tombstone is admin-only (§7.17)"
+    );
+
+    let recalled = wire(&provider.recall(&admin, recall_request(10)).await);
+    assert_eq!(recalled["total_authorized"], 0);
+
+    let with_tombstones = wire(
+        &provider
+            .list_records(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "subject_id": SUBJECT,
+                    "selection": { "mode": "subject_all" },
+                    "include_tombstoned": true,
+                })),
+            )
+            .await,
+    );
+    assert_eq!(with_tombstones["total_authorized"], 1);
+
+    let reader_tombstones = wire(
+        &provider
+            .list_records(
+                &reader,
+                dto(json!({
+                    "space_id": SPACE,
+                    "subject_id": SUBJECT,
+                    "selection": { "mode": "subject_all" },
+                    "include_tombstoned": true,
+                })),
+            )
+            .await,
+    );
+    assert_eq!(
+        error_code(&reader_tombstones),
+        "NOT_AUTHORIZED",
+        "include_tombstoned is admin-only (§7.20)"
+    );
+}
+
+/// §7.21: promotion moves placement explicitly, and the new placement is what
+/// authorization applies — a context-limited reader loses the record once it
+/// becomes shared, and regains it when it is promoted back.
+#[tokio::test]
+async fn promote_moves_placement_and_authorization_follows_it() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    let scoped = principal(OTHER);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    wire(
+        &provider
+            .grant(
+                &admin,
+                restricted_grant("k-scoped-read", "records_read", OTHER, SUBJECT, &["bnd_1"]),
+            )
+            .await,
+    );
+    let created = wire(
+        &provider
+            .create_record(
+                &admin,
+                record_create_request(
+                    "k-context-record",
+                    "nexus.character_note",
+                    &json!({ "visibility": "context", "context_id": "bnd_1" }),
+                    TEXT,
+                ),
+            )
+            .await,
+    );
+    let record_id = receipt(&created)["result"]["record_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let scoped_view = wire(
+        &provider
+            .get_record(&scoped, record_get_request(&record_id))
+            .await,
+    );
+    assert_eq!(scoped_view["record"]["scope"]["context_id"], "bnd_1");
+
+    let promoted = wire(
+        &provider
+            .promote_record(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "record_id": record_id,
+                    "expected_revision": 1,
+                    "target_scope": { "visibility": "shared" },
+                    "idempotency_key": "k-promote-shared",
+                })),
+            )
+            .await,
+    );
+    let promoted = receipt(&promoted);
+    assert_eq!(promoted["result"]["revision"], 2);
+    assert_eq!(
+        promoted["result"]["scope"],
+        json!({ "visibility": "shared" })
+    );
+
+    let lost = wire(
+        &provider
+            .get_record(&scoped, record_get_request(&record_id))
+            .await,
+    );
+    assert_eq!(
+        error_code(&lost),
+        "NOT_FOUND",
+        "a context-limited grant never covers a shared placement"
+    );
+
+    let demoted = wire(
+        &provider
+            .promote_record(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "record_id": record_id,
+                    "expected_revision": 2,
+                    "target_scope": { "visibility": "context", "context_id": "bnd_1" },
+                    "idempotency_key": "k-promote-context",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(receipt(&demoted)["result"]["revision"], 3);
+    let regained = wire(
+        &provider
+            .get_record(&scoped, record_get_request(&record_id))
+            .await,
+    );
+    assert_eq!(regained["record"]["record_id"], record_id);
+}
+
+/// MEM-R006: candidate listing filters by coverage *before* it pages, and review
+/// needs both `review` and `records_write` over the candidate's capture scope.
+#[tokio::test]
+async fn candidate_reads_and_reviews_are_limited_to_covered_scopes() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    let scoped = principal(OTHER);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    let covered = wire(
+        &provider
+            .capture(&admin, capture_request("k-ctx-1", Some("bnd_1"), TEXT))
+            .await,
+    );
+    let covered_id = receipt(&covered)["result"]["candidate_ids"][0]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let outside = wire(
+        &provider
+            .capture(&admin, capture_request("k-ctx-2", Some("bnd_2"), TEXT))
+            .await,
+    );
+    let outside_id = receipt(&outside)["result"]["candidate_ids"][0]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // Only `review`, restricted to bnd_1.
+    wire(
+        &provider
+            .grant(
+                &admin,
+                restricted_grant("k-scoped-review", "review", OTHER, SUBJECT, &["bnd_1"]),
+            )
+            .await,
+    );
+
+    let listed = wire(
+        &provider
+            .list_candidates(&scoped, candidates_list_request(None))
+            .await,
+    );
+    let visible = listed["candidates"].as_array().unwrap();
+    assert_eq!(
+        visible.len(),
+        1,
+        "only the covered candidate is listed: {listed}"
+    );
+    assert_eq!(visible[0]["candidate_id"], covered_id);
+
+    let hidden = wire(
+        &provider
+            .get_candidate(&scoped, candidate_get_request(&outside_id))
+            .await,
+    );
+    assert_eq!(
+        error_code(&hidden),
+        "NOT_FOUND",
+        "an uncovered candidate reads as absent"
+    );
+
+    // §7.15 needs `records_write` over the same scope; this principal lacks it.
+    let refused = wire(
+        &provider
+            .review_candidate(&scoped, review_request("k-review-scoped", &covered_id, 1))
+            .await,
+    );
+    assert_eq!(error_code(&refused), "NOT_AUTHORIZED");
+
+    // A reader with no review grant sees nothing at all rather than an empty page.
+    let unprivileged = wire(
+        &provider
+            .list_candidates(&principal(THIRD), candidates_list_request(None))
+            .await,
+    );
+    assert_eq!(error_code(&unprivileged), "NOT_AUTHORIZED");
+}
+
+/// §9: recall ranks deterministically, applies the byte budget as a hard limit,
+/// and surfaces an oversized first item instead of dropping it.
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn recall_ranks_by_query_and_surfaces_budget_overflow() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    for (key, text) in [
+        (
+            "k-rec-1",
+            "The northern gate opens at dawn for the caravan.",
+        ),
+        ("k-rec-2", "The southern harbour closes on the first storm."),
+        ("k-rec-3", "Mira keeps the ledger of every debt she owes."),
+    ] {
+        wire(
+            &provider
+                .create_record(
+                    &admin,
+                    record_create_request(
+                        key,
+                        "nexus.world_building",
+                        &json!({ "visibility": "shared" }),
+                        text,
+                    ),
+                )
+                .await,
+        );
+    }
+
+    let ranked = wire(
+        &provider
+            .recall(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "subject_id": SUBJECT,
+                    "selection": { "mode": "subject_all" },
+                    "query": "northern gate",
+                    "budget": { "max_items": 10 },
+                })),
+            )
+            .await,
+    );
+    assert_eq!(ranked["total_authorized"], 3);
+    assert!(
+        ranked["records"][0]["content"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("northern"),
+        "the query moves the matching record to the front: {ranked}"
+    );
+
+    let stable = wire(
+        &provider
+            .recall(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "subject_id": SUBJECT,
+                    "selection": { "mode": "subject_all" },
+                    "query": "northern gate",
+                    "budget": { "max_items": 10 },
+                })),
+            )
+            .await,
+    );
+    assert_eq!(
+        ranked["records"], stable["records"],
+        "identical state + request + policy yields identical ordering (§9.2)"
+    );
+
+    // One byte below the first item: the page is empty, so it is returned whole
+    // and named as the overflow (§9.3).
+    let oversized = wire(
+        &provider
+            .recall(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "subject_id": SUBJECT,
+                    "selection": { "mode": "subject_all" },
+                    "budget": { "max_items": 10, "max_bytes": 1 },
+                })),
+            )
+            .await,
+    );
+    assert_eq!(oversized["records"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        oversized["overflow_record_id"],
+        oversized["records"][0]["record_id"]
+    );
+    assert_eq!(oversized["truncated"], true);
+
+    let capped = wire(&provider.recall(&admin, recall_request(2)).await);
+    assert_eq!(capped["records"].as_array().unwrap().len(), 2);
+    assert_eq!(capped["truncated"], true);
+    let cursor = capped["next_cursor"]
+        .as_str()
+        .expect("a third record remains");
+    let page_two = wire(
+        &provider
+            .recall(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "subject_id": SUBJECT,
+                    "selection": { "mode": "subject_all" },
+                    "budget": { "max_items": 2 },
+                    "cursor": cursor,
+                })),
+            )
+            .await,
+    );
+    assert_eq!(page_two["records"].as_array().unwrap().len(), 1);
+    assert_eq!(page_two["truncated"], false);
+    assert_eq!(page_two.get("next_cursor"), None);
+}
+
+/// §7.23/§7.24 + MEM-R005/D-12: profile reads are honest-empty, writes are
+/// CAS-checked with `null` meaning create-only, and the admission seam reports
+/// a missing *required* authored kind without inventing a document.
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn profile_admission_and_honest_empty_reads() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(OTHER_SUBJECT))
+            .await,
+    );
+
+    let empty = wire(
+        &provider
+            .get_profile(
+                &admin,
+                dto(json!({ "space_id": SPACE, "subject_id": SUBJECT })),
+            )
+            .await,
+    );
+    assert_eq!(
+        empty["profiles"],
+        json!([]),
+        "an absent profile is honest-empty, never fabricated (§7.23)"
+    );
+
+    let before = ok(provider.profile_admission(&admin, SPACE, SUBJECT).await);
+    assert!(!before.is_admitted(), "no authored profile yet");
+    assert_eq!(before.missing_required, vec!["personality".to_string()]);
+    assert!(before.present.is_empty());
+
+    let created = wire(
+        &provider
+            .update_profile(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "subject_id": SUBJECT,
+                    "profile_kind": "personality",
+                    "expected_revision": null,
+                    "document": { "format": "markdown", "body": "# Mira\n\nPatient, watchful." },
+                    "idempotency_key": "k-profile-create",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(receipt(&created)["result"]["revision"], 1);
+
+    let create_only = wire(
+        &provider
+            .update_profile(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "subject_id": SUBJECT,
+                    "profile_kind": "personality",
+                    "expected_revision": null,
+                    "document": { "format": "markdown", "body": "replaced" },
+                    "idempotency_key": "k-profile-create-again",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(
+        error_code(&create_only),
+        "REVISION_CONFLICT",
+        "null expected_revision is create-only (§7.24)"
+    );
+
+    let updated = wire(
+        &provider
+            .update_profile(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "subject_id": SUBJECT,
+                    "profile_kind": "personality",
+                    "expected_revision": 1,
+                    "document": { "format": "markdown", "body": "# Mira\n\nPatient, watchful, kind." },
+                    "idempotency_key": "k-profile-update",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(receipt(&updated)["result"]["revision"], 2);
+
+    let read = wire(
+        &provider
+            .get_profile(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "subject_id": SUBJECT,
+                    "profile_kinds": ["personality", "preferences"],
+                })),
+            )
+            .await,
+    );
+    let profiles = read["profiles"].as_array().unwrap();
+    assert_eq!(
+        profiles.len(),
+        1,
+        "the absent optional kind is honest-empty, not fabricated: {read}"
+    );
+    assert_eq!(profiles[0]["profile_kind"], "personality");
+    assert_eq!(profiles[0]["updated_by"], CREATOR);
+    assert_eq!(profiles[0]["revision"], 2);
+
+    let admitted = ok(provider.profile_admission(&admin, SPACE, SUBJECT).await);
+    assert!(admitted.is_admitted());
+    assert_eq!(admitted.present, vec!["personality".to_string()]);
+    assert!(admitted.missing_required.is_empty());
+
+    // The other subject still lacks the required kind, and nothing was copied.
+    let missing = ok(provider
+        .profile_admission(&admin, SPACE, OTHER_SUBJECT)
+        .await);
+    assert!(!missing.is_admitted());
+    assert_eq!(missing.missing_required, vec!["personality".to_string()]);
+}
+
+/// D-7: the nine-value Nexus taxonomy survives the protocol's open kind
+/// vocabulary losslessly — both directions, and nothing else is claimed.
+#[tokio::test]
+async fn nexus_kinds_round_trip_through_the_namespaced_mapping() {
+    use nexus_core::memory_provider::policy;
+
+    let mut seen = Vec::new();
+    for kind in policy::NEXUS_MEMORY_KINDS {
+        let record_kind = policy::namespaced_record_kind(kind);
+        assert_eq!(record_kind, format!("nexus.{kind}"));
+        assert_eq!(
+            policy::memory_kind_of(&record_kind),
+            Some(kind),
+            "the mapping is a bijection (D-7)"
+        );
+        seen.push(record_kind);
+    }
+    assert_eq!(seen.len(), 9, "nine authored kinds, never collapsed");
+    assert_eq!(policy::NEXUS_MEMORY_KINDS.len(), 9);
+
+    assert_eq!(policy::memory_kind_of("event"), None);
+    assert_eq!(policy::memory_kind_of("nexus.unknown_kind"), None);
 }
