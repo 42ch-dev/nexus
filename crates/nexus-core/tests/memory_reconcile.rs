@@ -2200,6 +2200,13 @@ fn queued_publications_never_exhaust_the_blocking_pool_the_holder_needs() {
             queued_on.push(Arc::new(open_provider(&env).await));
         }
 
+        // Every publication reports when it reaches its flock acquisition, and
+        // all four providers feed one channel. The holder's own report lands
+        // before it parks in the section, so consuming it first leaves the
+        // channel empty for the queued callers.
+        let (report_tx, report_rx) = std::sync::mpsc::channel();
+        holder.report_flock_waits(report_tx.clone());
+
         let entered = Arc::new(tokio::sync::Notify::new());
         let release = Arc::new(tokio::sync::Barrier::new(2));
         holder.park_next_publish(Arc::clone(&entered), Arc::clone(&release));
@@ -2216,7 +2223,11 @@ fn queued_publications_never_exhaust_the_blocking_pool_the_holder_needs() {
         tokio::time::timeout(std::time::Duration::from_secs(10), entered.notified())
             .await
             .expect("the holder is inside the workspace publication section");
+        report_rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the holder took the workspace flock");
         for (index, provider) in queued_on.into_iter().enumerate() {
+            provider.report_flock_waits(report_tx.clone());
             publications.push(tokio::spawn(async move {
                 wire(
                     &provider
@@ -2228,8 +2239,15 @@ fn queued_publications_never_exhaust_the_blocking_pool_the_holder_needs() {
                 )
             }));
         }
-        // Let the queued publications reach their wait before the holder moves on.
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        // Gate first: a queued publication waits on the async gate and never
+        // reaches the flock wait while the holder is parked. Under the previous
+        // flock-first order each waiter reports here instead.
+        assert!(
+            report_rx
+                .recv_timeout(std::time::Duration::from_millis(300))
+                .is_err(),
+            "queued publications wait on the gate, never the flock"
+        );
         tokio::time::timeout(std::time::Duration::from_secs(10), release.wait())
             .await
             .expect("the parked publication is released");
@@ -2509,10 +2527,12 @@ fn wait_for(ready: impl Fn() -> bool, what: &str) {
 
 // ── C-117: the journal migration ────────────────────────────────────────
 
-/// The journal migration is registered with the writer protocol, applies once,
-/// and the `DB_SCHEMA_VERSION` line advanced with it.
+/// The journal migration applies once and the `DB_SCHEMA_VERSION` line advanced
+/// with it. Its writer admission and outbox behaviour are asserted where the
+/// behaviour happens: the per-table fence probe in `local_memory_provider.rs`
+/// and [`settled_intents_do_not_retain_projection_content`].
 #[tokio::test]
-async fn journal_migration_is_registered_and_idempotent() {
+async fn journal_migration_applies_once_and_advances_the_version_line() {
     let env = seed_env();
     let provider = open_provider(&env).await;
     let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
@@ -2532,24 +2552,6 @@ async fn journal_migration_is_registered_and_idempotent() {
             .await
             .unwrap();
     assert_eq!(found, 1, "memory_journal exists");
-
-    for (kind, verb) in [
-        ("guard", "insert"),
-        ("guard", "update"),
-        ("guard", "delete"),
-        ("outbox", "insert"),
-        ("outbox", "update"),
-        ("outbox", "delete"),
-    ] {
-        let name = format!("{kind}_memory_journal_{verb}");
-        let (found,): (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name=?")
-                .bind(&name)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(found, 1, "missing writer-protocol trigger: {name}");
-    }
 
     let versions = nexus_local_db::read_versions(&pool).await.unwrap();
     assert_eq!(
