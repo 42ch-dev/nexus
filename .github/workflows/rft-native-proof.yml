@@ -396,7 +396,7 @@ jobs:
           if-no-files-found: warn
 
   native-package-matrix-summary:
-    name: Matrix summary (all four rows)
+    name: Matrix summary
     runs-on: ubuntu-latest
     needs: [native-package-proof, linux-gnu-proof]
     if: always()
@@ -416,6 +416,7 @@ jobs:
         env:
           MATRIX_JOB_RESULT: ${{ needs.native-package-proof.result }}
           LINUX_JOB_RESULT: ${{ needs.linux-gnu-proof.result }}
+          PR_LANE: ${{ github.event_name == 'pull_request' }}
         run: |
           set -euo pipefail
           mkdir -p "${EVIDENCE}"
@@ -423,11 +424,20 @@ jobs:
           import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
           import { join } from 'node:path';
           const root = 'rft-native-evidence';
-          const rows = [
-            { suffix: 'linux-x64-gnu', short: 'linux', job_result: process.env.LINUX_JOB_RESULT },
-            { suffix: 'win32-x64-msvc', short: 'win', job_result: process.env.MATRIX_JOB_RESULT },
-            { suffix: 'darwin-arm64', short: 'macarm', job_result: process.env.MATRIX_JOB_RESULT },
-            { suffix: 'darwin-x64', short: 'macx64', job_result: process.env.MATRIX_JOB_RESULT },
+          const prLane = process.env.PR_LANE === 'true';
+          const rows = prLane
+            ? [
+                // PR lane runs darwin-arm64 only (see rft-matrix above): the
+                // summary evaluates exactly the rows this run should have
+                // produced. A missing should-run row stays fail-closed
+                // ('unavailable' is never a pass).
+                { suffix: 'darwin-arm64', short: 'macarm', job_result: process.env.MATRIX_JOB_RESULT },
+              ]
+            : [
+                { suffix: 'linux-x64-gnu', short: 'linux', job_result: process.env.LINUX_JOB_RESULT },
+                { suffix: 'win32-x64-msvc', short: 'win', job_result: process.env.MATRIX_JOB_RESULT },
+                { suffix: 'darwin-arm64', short: 'macarm', job_result: process.env.MATRIX_JOB_RESULT },
+                { suffix: 'darwin-x64', short: 'macx64', job_result: process.env.MATRIX_JOB_RESULT },
           ];
           const out = [];
           const buildInputs = [];
@@ -476,9 +486,13 @@ jobs:
               status,
             });
           }
-          const jobFailure = [process.env.MATRIX_JOB_RESULT, process.env.LINUX_JOB_RESULT].some(
-            (result) => result !== 'success',
-          );
+          // PR lane: linux-gnu-proof is skipped by design, so only the host
+          // matrix job result gates the decision.
+          const jobFailure = prLane
+            ? process.env.MATRIX_JOB_RESULT !== 'success'
+            : [process.env.MATRIX_JOB_RESULT, process.env.LINUX_JOB_RESULT].some(
+                (result) => result !== 'success',
+              );
           const decision = jobFailure
             ? 'fail'
             : out.every((row) => row.status === 'pass')
