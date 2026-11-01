@@ -1087,13 +1087,18 @@ async fn receipt_tombstone_past_the_dedup_window_is_not_found() {
     );
 }
 
-/// §6.10/MEM-R021: an expiry the provider committed is durable. A body observed
-/// past its window is evicted by the next mutating entry point, and a restart
+/// §6.10/MEM-R021: an expiry the provider **committed** is durable. A body
+/// observed past its window is evicted by the next mutating entry point; the
+/// eviction and the clock reading that decided it commit together, so a restart
 /// into a wall clock that moved backwards neither restores the body nor
 /// re-executes the namespace: the reopened provider answers `RECEIPT_EXPIRED` to
 /// the read and to a replay alike, and the key stays bound.
+///
+/// Only the committed-eviction case is claimed here. The read-only expiry that
+/// no sweep committed is the open D13 residual, documented by
+/// `read_only_expiry_is_served_again_after_a_restart_under_a_backward_clock`.
 #[tokio::test]
-async fn receipt_expiry_survives_a_restart_under_a_backward_clock() {
+async fn committed_expiry_eviction_survives_a_restart_under_a_backward_clock() {
     let env = seed_env();
     let provider = open_provider(&env).await;
     let admin = principal(CREATOR);
@@ -1190,6 +1195,85 @@ async fn receipt_expiry_survives_a_restart_under_a_backward_clock() {
         receipt_rows(&pool, &receipt_id).await,
         1,
         "the namespace still binds the key; only the body is gone"
+    );
+}
+
+/// §6.10/MEM-R021 / compass D13 residual — **this test documents un-closed
+/// behavior, not a guarantee**. The sequence is read → drop → backward clock →
+/// reopen: the read path observes the expiry without persisting it (MEM-R011
+/// keeps it read-only) and no mutating entry point runs before the drop, so the
+/// durable floor still holds the sweep from the provider's own open, taken
+/// before the body was aged. The reopened provider therefore evaluates at that
+/// earlier reading and serves the aged body again.
+///
+/// Ignored so the suite never presents this as desired behavior. Closing it
+/// needs a read-path persistence contract change, which is the owner's decision
+/// (compass D13, open); once that lands this test flips to expecting
+/// `RECEIPT_EXPIRED`.
+#[ignore = "documents the D13 residual — owner adjudication pending"]
+#[tokio::test]
+async fn read_only_expiry_is_served_again_after_a_restart_under_a_backward_clock() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    let (receipt_retention, _) = retention_limits(&provider, &admin).await;
+
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    let captured = wire(
+        &provider
+            .capture(&admin, capture_request("k-read-only-expiry", TEXT))
+            .await,
+    );
+    let captured = receipt(&captured).clone();
+    let receipt_id = captured["receipt_id"]
+        .as_str()
+        .expect("receipt id")
+        .to_owned();
+    let pool = nexus_local_db::open_pool_read_only(&env.db_path)
+        .await
+        .unwrap();
+
+    // Whatever the last committed sweep wrote is all a reopen can seed from.
+    let floor_before = persisted_clock_floor(&pool).await;
+
+    provider.advance_receipt_clock(receipt_retention + 1);
+    let observed = wire(
+        &provider
+            .get_receipt(&admin, receipts_get_request(&receipt_id))
+            .await,
+    );
+    assert_eq!(
+        error_code(&observed),
+        "RECEIPT_EXPIRED",
+        "the read reports the aged body as expired: {observed}"
+    );
+    assert_eq!(
+        persisted_clock_floor(&pool).await,
+        floor_before,
+        "the read persisted no clock reading and no eviction (MEM-R011)"
+    );
+    let (result, _, _) = receipt_payloads(&pool, &receipt_id).await;
+    assert!(result.is_some(), "the aged body is still on disk");
+
+    // Restart straight from the read: nothing committed the expiry, and the wall
+    // clock is back where this process started — i.e. before the observation.
+    drop(provider);
+    let reopened = open_provider(&env).await;
+
+    let served = wire(
+        &reopened
+            .get_receipt(&admin, receipts_get_request(&receipt_id))
+            .await,
+    );
+    assert_eq!(
+        read_receipt(&served),
+        &captured,
+        "D13 residual: the un-persisted expiry is not durable, so the reopened \
+         provider serves the aged body again: {served}"
     );
 }
 

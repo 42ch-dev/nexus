@@ -444,12 +444,19 @@ impl MemoryStore {
     /// The provider clock: retention windows (§6.10) are evaluated against it,
     /// and it is the one place a test may move time.
     ///
-    /// It never runs backwards: the latest reading is a floor for every later
-    /// one, so a wall-clock correction (or a test clock move) cannot re-open a
-    /// window that already closed. A receipt body reported past its window stays
-    /// reported — retention is one-way, not a projection of the current clock.
+    /// It never runs backwards within a process: the latest reading is a floor
+    /// for every later one, so a wall-clock correction (or a test clock move)
+    /// cannot re-open a window that already closed. A receipt body the sweep
+    /// reported past its window stays reported — retention is one-way, not a
+    /// projection of the current clock.
+    ///
     /// A restart resumes the floor from the last committed sweep rather than
-    /// from zero, so the same holds across a process boundary.
+    /// from zero, which bounds re-exposure to the segment since that sweep; it
+    /// does not close the restart case. An expiry observed only on the read path
+    /// is not persisted (MEM-R011 keeps reads read-only), so the body can be
+    /// served again after a restart plus a backward clock until the owner
+    /// adjudicates a read-path persistence contract change — compass D13
+    /// residual, open, not closed.
     fn now(&self) -> DateTime<Utc> {
         #[cfg(feature = "test-hooks")]
         let observed =
