@@ -1677,6 +1677,68 @@ async fn a_deletion_crash_inside_the_swap_leaves_no_body_behind() {
     assert!(served["record"]["tombstone"].is_object(), "{served}");
 }
 
+// ── F1: a failed cleanup leaves the intent unsettled, never applied ──────
+
+/// The state an install that linked the tombstone but could not unlink its
+/// verified predecessor leaves: the new projection at the target, the deleted
+/// body at the receipt's scratch name, and the intent still pending. Ignoring
+/// that failure marked the intent applied, and no later pass looked at the
+/// hidden file again. The next pass must finish the cleanup and settle the
+/// intent without leaving the body behind.
+#[tokio::test]
+async fn a_failed_scratch_cleanup_is_settled_by_the_next_pass() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    ensure(&provider).await;
+    let root = provider.file_root();
+
+    let created = wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-cleanup-create", TEXT))
+            .await,
+    );
+    let record_id = record_id_of(receipt(&created));
+    let target = root.join(format!("records/{record_id}.md"));
+
+    provider.inject_file_fault(false);
+    let lost = wire(
+        &provider
+            .delete_record(&admin(), delete_request("k-cleanup-delete", &record_id, 1))
+            .await,
+    );
+    assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
+    let receipt_id = receipt_id_of_key(&env, "k-cleanup-delete").await;
+
+    // The crash instant: the body is still at the target, the tombstone in the
+    // staged file. The failed install linked the tombstone at the target and
+    // kept the body at its scratch name; the intent is still pending.
+    let staged_path = root.join(format!("records/.{record_id}.md.{receipt_id}.staged"));
+    let scratch = root.join(format!("records/.{record_id}.md.{receipt_id}.prior"));
+    std::fs::hard_link(&target, &scratch).unwrap();
+    std::fs::remove_file(&target).unwrap();
+    std::fs::hard_link(&staged_path, &target).unwrap();
+    std::fs::remove_file(&staged_path).unwrap();
+
+    drop(provider);
+    let provider = open_provider(&env).await;
+
+    let published = std::fs::read_to_string(&target).unwrap();
+    assert!(published.contains("tombstoned: true"), "{published}");
+    assert!(!published.contains(TEXT), "{published}");
+    assert_eq!(
+        files_under(&root),
+        vec![format!("records/{record_id}.md")],
+        "the retried cleanup removes the deleted body and the stale staged copy"
+    );
+    assert_eq!(journal_states(&env).await, vec!["applied", "applied"]);
+    let served = wire(
+        &provider
+            .get_record(&admin(), record_get_request(&record_id))
+            .await,
+    );
+    assert!(served["record"]["tombstone"].is_object(), "{served}");
+}
+
 // ── NF3: settlement never precedes authorization or the dedup probe ──────
 
 /// Predecessor settlement is not admission. A caller without `records_write`
