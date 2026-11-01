@@ -845,13 +845,18 @@ impl LocalMemoryProvider {
         self.store.advance_clock(seconds);
     }
 
-    /// §6.5/§7.28 proof seam: park the next read after it holds its connection,
-    /// so a test can move the clock while the read is queued. Compiled out of a
-    /// production build.
+    /// §6.5/§7.28 proof seam: park the next read once it holds its connection
+    /// (`entered` signals it is parked, `release` frees it), so a test can move
+    /// the clock while the read is queued and only after it has parked. Compiled
+    /// out of a production build.
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
-    pub fn park_next_read(&self, barrier: std::sync::Arc<tokio::sync::Barrier>) {
-        self.store.park_next_read(barrier);
+    pub fn park_next_read(
+        &self,
+        entered: std::sync::Arc<tokio::sync::Notify>,
+        release: std::sync::Arc<tokio::sync::Barrier>,
+    ) {
+        self.store.park_next_read(entered, release);
     }
 
     /// §5.2 step 2 proof seam: park the next publication while it holds the

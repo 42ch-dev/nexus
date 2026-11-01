@@ -2911,7 +2911,9 @@ async fn recall_demands_the_recall_capability() {
 /// One test, three phases. The provider clock never runs backwards, so each
 /// phase issues its grant 60s ahead of the clock its predecessor already moved,
 /// parks the read on its connection, expires that grant during the wait and
-/// expects the refusal.
+/// expects the refusal. The clock moves only after the seam reports the read has
+/// parked, so the expiry provably happens while the read waits rather than
+/// before it has reached the gate.
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
 async fn content_read_authorization_is_evaluated_after_the_connection_wait() {
@@ -2972,14 +2974,16 @@ async fn content_read_authorization_is_evaluated_after_the_connection_wait() {
         "the grant is live before the wait: {live}"
     );
 
-    let barrier = Arc::new(tokio::sync::Barrier::new(2));
-    provider.park_next_read(Arc::clone(&barrier));
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Barrier::new(2));
+    provider.park_next_read(Arc::clone(&entered), Arc::clone(&release));
     let read = provider.recall(&reader, recall_request(10));
-    let expire_while_queued = async {
+    let expire_while_parked = async {
+        entered.notified().await;
         provider.advance_clock(120);
-        barrier.wait().await;
+        release.wait().await;
     };
-    let (read, ()) = tokio::join!(read, expire_while_queued);
+    let (read, ()) = tokio::join!(read, expire_while_parked);
     let refused = wire(&read);
     assert_eq!(
         error_code(&refused),
@@ -3003,14 +3007,16 @@ async fn content_read_authorization_is_evaluated_after_the_connection_wait() {
     );
     assert_eq!(live["record"]["record_id"], record_id, "{live}");
 
-    let barrier = Arc::new(tokio::sync::Barrier::new(2));
-    provider.park_next_read(Arc::clone(&barrier));
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Barrier::new(2));
+    provider.park_next_read(Arc::clone(&entered), Arc::clone(&release));
     let read = provider.get_record(&reader, record_get_request(&record_id));
-    let expire_while_queued = async {
+    let expire_while_parked = async {
+        entered.notified().await;
         provider.advance_clock(120);
-        barrier.wait().await;
+        release.wait().await;
     };
-    let (read, ()) = tokio::join!(read, expire_while_queued);
+    let (read, ()) = tokio::join!(read, expire_while_parked);
     let refused = wire(&read);
     assert_eq!(
         error_code(&refused),
@@ -3040,17 +3046,19 @@ async fn content_read_authorization_is_evaluated_after_the_connection_wait() {
         "the grant is live before the wait: {live}"
     );
 
-    let barrier = Arc::new(tokio::sync::Barrier::new(2));
-    provider.park_next_read(Arc::clone(&barrier));
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Barrier::new(2));
+    provider.park_next_read(Arc::clone(&entered), Arc::clone(&release));
     let read = provider.get_profile(
         &reader,
         dto(json!({ "space_id": SPACE, "subject_id": SUBJECT })),
     );
-    let expire_while_queued = async {
+    let expire_while_parked = async {
+        entered.notified().await;
         provider.advance_clock(120);
-        barrier.wait().await;
+        release.wait().await;
     };
-    let (read, ()) = tokio::join!(read, expire_while_queued);
+    let (read, ()) = tokio::join!(read, expire_while_parked);
     let refused = wire(&read);
     assert_eq!(
         error_code(&refused),

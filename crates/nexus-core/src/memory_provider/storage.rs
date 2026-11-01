@@ -220,6 +220,15 @@ struct PublishRendezvous {
     release: Arc<tokio::sync::Barrier>,
 }
 
+/// §6.5/§7.28 proof seam: the rendezvous a parked read waits at — `entered`
+/// reports that it holds its connection and will sample the clock only after
+/// the wait, `release` frees it. Test only.
+#[cfg(feature = "test-hooks")]
+struct ReadRendezvous {
+    entered: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Barrier>,
+}
+
 /// §6.10 receipt status while its journaled file effect is not yet published
 /// (§5.2 step 2): durable, but not terminal.
 pub(super) const RECEIPT_PENDING: &str = "pending";
@@ -511,10 +520,11 @@ pub(super) struct MemoryStore {
     /// Test-only offset applied to the provider clock (§6.5/§6.10).
     #[cfg(feature = "test-hooks")]
     clock_skew: AtomicI64,
-    /// Test-only rendezvous a read waits at once it holds its connection, so a
+    /// Test-only rendezvous a read waits at once it holds its connection —
+    /// `entered` tells the test the read is parked, `release` frees it — so a
     /// test can move the clock while the read is queued.
     #[cfg(feature = "test-hooks")]
-    read_barrier: std::sync::Mutex<Option<Arc<tokio::sync::Barrier>>>,
+    read_barrier: std::sync::Mutex<Option<ReadRendezvous>>,
     /// Test-only rendezvous a publication waits at **while it holds the
     /// workspace publication gate** — `entered` tells the test the gate is held,
     /// `release` frees it — so a second provider instance on the same workspace
@@ -704,12 +714,17 @@ impl MemoryStore {
         self.clock_skew.fetch_add(seconds, Ordering::SeqCst);
     }
 
-    /// §6.5/§7.28 proof seam: park the next read after it holds its connection,
-    /// so a test can move the clock while the read is queued. Compiled out of a
-    /// production build.
+    /// §6.5/§7.28 proof seam: park the next read after it holds its connection —
+    /// `entered` signals it is parked, `release` frees it — so a test can move the
+    /// clock while the read is queued and know it has not been sampled yet.
+    /// Compiled out of a production build.
     #[cfg(feature = "test-hooks")]
-    pub(super) fn park_next_read(&self, barrier: Arc<tokio::sync::Barrier>) {
-        *self.read_barrier.lock().expect("read gate") = Some(barrier);
+    pub(super) fn park_next_read(
+        &self,
+        entered: Arc<tokio::sync::Notify>,
+        release: Arc<tokio::sync::Barrier>,
+    ) {
+        *self.read_barrier.lock().expect("read gate") = Some(ReadRendezvous { entered, release });
     }
 
     /// §5.2 step 2 proof seam: park the next publication once it holds the
@@ -740,8 +755,9 @@ impl MemoryStore {
             let mut gate = self.read_barrier.lock().expect("read gate");
             gate.take()
         };
-        if let Some(barrier) = parked {
-            barrier.wait().await;
+        if let Some(rendezvous) = parked {
+            rendezvous.entered.notify_one();
+            rendezvous.release.wait().await;
         }
     }
 
