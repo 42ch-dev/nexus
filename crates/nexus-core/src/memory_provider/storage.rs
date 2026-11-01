@@ -76,12 +76,12 @@
 //! placement, so [`Coverage`] resolves those requirements inside the effect
 //! transaction instead of trusting a value read before it.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 #[cfg(feature = "test-hooks")]
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::{AtomicI64, Ordering};
-#[cfg(feature = "test-hooks")]
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex};
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::{json, Value};
@@ -152,6 +152,13 @@ pub(super) enum StoreError {
     Unreconciled {
         subject_id: String,
     },
+    /// §5.2 step 2: an earlier intent for this operation's file target is still
+    /// unsettled, so publishing now would strand its owed projection. Raised
+    /// before this operation commits, so it is a retryable no-effect refusal.
+    UnsettledPredecessor {
+        receipt_id: String,
+        state: String,
+    },
     /// A stored row this provider's own writer could not have produced.
     Corrupt(String),
     Database(LocalDbError),
@@ -204,9 +211,22 @@ const SETTLE_FAULT_OPEN: u8 = 1;
 #[cfg(feature = "test-hooks")]
 const SETTLE_FAULT_WRITE: u8 = 2;
 
+/// §5.2 step 2 proof seam: the rendezvous a parked publication waits at — one
+/// signal that it holds the workspace gate, one that frees it. Test only.
+#[cfg(feature = "test-hooks")]
+struct PublishRendezvous {
+    entered: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Barrier>,
+}
+
 /// §6.10 receipt status while its journaled file effect is not yet published
 /// (§5.2 step 2): durable, but not terminal.
 pub(super) const RECEIPT_PENDING: &str = "pending";
+
+/// §5.2 step 3: the receipt of an intent that could not be published. Terminal:
+/// `error_json` carries the failure envelope, and a later re-drive publishes the
+/// intent and replaces this status with `committed`.
+pub(super) const RECEIPT_FAILED: &str = "failed";
 
 /// What admits a mutating op (§6.5): one requirement per capability the op
 /// needs, and every one of them must be covered by the grant set.
@@ -389,18 +409,46 @@ pub(super) struct Fence<'a> {
     pub expected_revision: i64,
 }
 
+/// The publication gate of one workspace in this process (§5.2 step 2).
+///
+/// Keyed on the provider's projection root — the workspace directory holding
+/// `state.db` and `memory-store/` — so every provider instance opened on that
+/// workspace shares one lock and their settle-to-publish windows cannot
+/// interleave. A second *process* is outside it: there the writer protocol's
+/// admission and the journal's ownership-checked swap are the safety, which is
+/// why the in-transaction predecessor check exists as well.
+fn workspace_publish_gate(files_root: &Path) -> Arc<tokio::sync::Mutex<()>> {
+    static GATES: LazyLock<Mutex<HashMap<PathBuf, Arc<tokio::sync::Mutex<()>>>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
+    let key = files_root.parent().map_or_else(
+        || files_root.to_path_buf(),
+        |workspace| std::fs::canonicalize(workspace).unwrap_or_else(|_| workspace.to_path_buf()),
+    );
+    let mut gates = GATES.lock().expect("publish gate registry");
+    Arc::clone(gates.entry(key).or_default())
+}
+
 pub(super) struct MemoryStore {
     pool: SqlitePool,
     /// Holds this provider's writer admission for the provider's lifetime.
     _guarded: GuardedPool,
     /// Root of the provider's own markdown projection, next to `state.db`.
     files_root: PathBuf,
-    /// §5.2 step 2: serializes the commit-to-publish window of every operation
+    /// §5.2 step 2: serializes the settle-to-publish window of every operation
     /// with a file effect (and the recovery pass). SQLite serializes the row
     /// writes, but the publish happens after that transaction commits, so
-    /// without this gate two committed updates of one target could publish out
-    /// of order and leave the file older than the row.
-    publish_gate: tokio::sync::Mutex<()>,
+    /// without one order per target two committed updates of it could publish
+    /// out of order and leave the file older than the row.
+    ///
+    /// Scoped to the **workspace**, not to this provider: two provider instances
+    /// opened on one workspace in this process share it, so a predecessor they
+    /// both owe cannot interleave. Another *process* is not serialized by this
+    /// lock — the writer protocol fences its admission and the journal row plus
+    /// the ownership-checked swap are what keep two processes consistent; do not
+    /// read this gate as a cross-process guarantee (see
+    /// `MemoryStore::settle_predecessors` for the one check that also holds
+    /// there).
+    publish_gate: Arc<tokio::sync::Mutex<()>>,
     /// Latest provider-clock reading in microseconds since the epoch. A floor,
     /// so retention verdicts cannot be re-derived downwards (§6.10); seeded from
     /// the persisted floor at [`Self::open`] and persisted again by every sweep.
@@ -421,6 +469,12 @@ pub(super) struct MemoryStore {
     /// connection, so a test can move the clock while the read is queued.
     #[cfg(feature = "test-hooks")]
     receipt_read_barrier: std::sync::Mutex<Option<Arc<tokio::sync::Barrier>>>,
+    /// Test-only rendezvous a publication waits at **while it holds the
+    /// workspace publication gate** — `entered` tells the test the gate is held,
+    /// `release` frees it — so a second provider instance on the same workspace
+    /// can be shown waiting.
+    #[cfg(feature = "test-hooks")]
+    publish_barrier: std::sync::Mutex<Option<PublishRendezvous>>,
 }
 
 const SPACE_COLUMNS: &str = "s.space_id, s.display_name, s.authority_host_id, \
@@ -550,11 +604,12 @@ impl MemoryStore {
             })
             .transpose()?
             .unwrap_or(0);
+        let publish_gate = workspace_publish_gate(&files_root);
         Ok(Self {
             pool,
             _guarded: guarded,
             files_root,
-            publish_gate: tokio::sync::Mutex::new(()),
+            publish_gate,
             clock_floor: AtomicI64::new(clock_floor),
             #[cfg(feature = "test-hooks")]
             commit_fault: AtomicU8::new(COMMIT_FAULT_NONE),
@@ -566,6 +621,8 @@ impl MemoryStore {
             receipt_clock_skew: AtomicI64::new(0),
             #[cfg(feature = "test-hooks")]
             receipt_read_barrier: std::sync::Mutex::new(None),
+            #[cfg(feature = "test-hooks")]
+            publish_barrier: std::sync::Mutex::new(None),
         })
     }
 
@@ -582,6 +639,20 @@ impl MemoryStore {
     #[cfg(feature = "test-hooks")]
     pub(super) fn park_next_receipt_read(&self, barrier: Arc<tokio::sync::Barrier>) {
         *self.receipt_read_barrier.lock().expect("receipt read gate") = Some(barrier);
+    }
+
+    /// §5.2 step 2 proof seam: park the next publication once it holds the
+    /// workspace gate and before it settles or stages anything, so a test can
+    /// observe another provider instance on the same workspace waiting for it.
+    /// Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    pub(super) fn park_next_publish(
+        &self,
+        entered: Arc<tokio::sync::Notify>,
+        release: Arc<tokio::sync::Barrier>,
+    ) {
+        *self.publish_barrier.lock().expect("publish barrier") =
+            Some(PublishRendezvous { entered, release });
     }
 
     #[cfg(feature = "test-hooks")]
@@ -1220,7 +1291,7 @@ impl MemoryStore {
             .await?;
         self.commit_effect(tx).await?;
         self.publish_effects(&receipt_id, effects).await?;
-        self.settle_journal(&receipt_id, journal::STATE_APPLIED, Some(result), now)
+        self.settle_journal(&receipt_id, Settlement::Applied(result), now)
             .await
             .map_err(|error| match error {
                 StoreError::CommitUnknown(_) => error,
@@ -1313,7 +1384,8 @@ impl MemoryStore {
 
     /// §5.2 step 2: stage every planned file, verify and publish it under the
     /// intent's ownership rule. A failure here keeps the entry `pending` and the
-    /// receipt pending, so the next open's recovery settles it.
+    /// receipt pending, so the next open — or the next operation on the same
+    /// target — settles it before anything else publishes there.
     async fn publish_effects(&self, receipt_id: &str, effects: &[FileEffect]) -> StoreResult<()> {
         let publish_error = |step: &str, error: std::io::Error| {
             StoreError::CommitUnknown(format!("file effect {step} after journal COMMIT: {error}"))
@@ -1347,19 +1419,15 @@ impl MemoryStore {
         Ok(())
     }
 
-    /// §5.2 step 2's finality, one transaction: mark the intent settled, drop
-    /// the journaled projection content (MEM-R014 — a settled intent must not
-    /// retain a deleted or superseded body), and — when the file effect is
-    /// consistent — terminalize the receipt with its stored outcome.
-    ///
-    /// Doing all three together is what makes the scrub crash-safe: the intent
-    /// is never applied without its content gone, and recovery of a still
-    /// pending entry re-publishes idempotently before settling it again.
+    /// §5.2 steps 2–3: record how one intent settled in one transaction — the
+    /// journal state, the payload it keeps or loses, and the receipt's terminal
+    /// outcome. Doing all of it together makes the scrub crash-safe: the intent
+    /// is never applied without its content gone, and re-driving a still
+    /// unsettled entry re-publishes idempotently before settling it again.
     async fn settle_journal(
         &self,
         receipt_id: &str,
-        state: &str,
-        result: Option<&Value>,
+        settlement: Settlement<'_>,
         now: DateTime<Utc>,
     ) -> StoreResult<ReceiptRow> {
         #[cfg(feature = "test-hooks")]
@@ -1372,37 +1440,73 @@ impl MemoryStore {
         }
         let mut tx = begin_immediate(&self.pool).await?;
         let at = timestamp(now);
-        sqlx::query(
-            "UPDATE memory_journal SET state = ?, targets_json = '[]', updated_at = ? \
-             WHERE receipt_id = ? AND state <> ?",
-        )
-        .bind(state)
-        .bind(&at)
-        .bind(receipt_id)
-        .bind(journal::STATE_APPLIED)
-        .execute(&mut *tx)
-        .await?;
+        match &settlement {
+            Settlement::Applied(_) => {
+                sqlx::query(
+                    "UPDATE memory_journal SET state = ?, targets_json = '[]', updated_at = ? \
+                     WHERE receipt_id = ? AND state <> ?",
+                )
+                .bind(journal::STATE_APPLIED)
+                .bind(&at)
+                .bind(receipt_id)
+                .bind(journal::STATE_APPLIED)
+                .execute(&mut *tx)
+                .await?;
+            }
+            // The payload stays put: it is the recovery evidence a re-drive
+            // republishes, and deleting it here is what stranded the intent.
+            Settlement::Quarantined(_) => {
+                sqlx::query(
+                    "UPDATE memory_journal SET state = ?, updated_at = ? \
+                     WHERE receipt_id = ? AND state <> ?",
+                )
+                .bind(journal::STATE_QUARANTINED)
+                .bind(&at)
+                .bind(receipt_id)
+                .bind(journal::STATE_APPLIED)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
         #[cfg(feature = "test-hooks")]
         if fault == SETTLE_FAULT_WRITE {
             // The way a real settle write fails: the transaction opened and its
-            // first write landed, then the terminalize write did not.
+            // first write landed, then the receipt write did not.
             return Err(StoreError::Database(nexus_local_db::LocalDbError::Io(
                 "injected journal settle failure: write".to_string(),
             )));
         }
-        if let Some(result) = result {
-            let result_json = serde_json::to_string(result)
-                .map_err(|e| StoreError::Corrupt(format!("receipt result: {e}")))?;
-            sqlx::query(
-                "UPDATE memory_receipts SET status = 'committed', result_json = ?, completed_at = ? \
-                 WHERE receipt_id = ? AND status = ?",
-            )
-            .bind(&result_json)
-            .bind(&at)
-            .bind(receipt_id)
-            .bind(RECEIPT_PENDING)
-            .execute(&mut *tx)
-            .await?;
+        match &settlement {
+            Settlement::Applied(result) => {
+                let result_json = serde_json::to_string(result)
+                    .map_err(|e| StoreError::Corrupt(format!("receipt result: {e}")))?;
+                // A re-drive publishes an intent whose receipt already recorded
+                // the failure, so both unsettled shapes are replaceable.
+                sqlx::query(
+                    "UPDATE memory_receipts SET status = 'committed', result_json = ?, \
+                     error_json = NULL, completed_at = ? \
+                     WHERE receipt_id = ? AND status <> 'committed'",
+                )
+                .bind(&result_json)
+                .bind(&at)
+                .bind(receipt_id)
+                .execute(&mut *tx)
+                .await?;
+            }
+            Settlement::Quarantined(failure) => {
+                let error_json = serde_json::to_string(failure)
+                    .map_err(|e| StoreError::Corrupt(format!("quarantine failure: {e}")))?;
+                sqlx::query(
+                    "UPDATE memory_receipts SET status = 'failed', error_json = ?, completed_at = ? \
+                     WHERE receipt_id = ? AND status = ?",
+                )
+                .bind(&error_json)
+                .bind(&at)
+                .bind(receipt_id)
+                .bind(RECEIPT_PENDING)
+                .execute(&mut *tx)
+                .await?;
+            }
         }
         let sql = format!("SELECT {RECEIPT_COLUMNS} FROM memory_receipts WHERE receipt_id = ?");
         let row = sqlx::query_as::<_, ReceiptRow>(sqlx::AssertSqlSafe(sql))
@@ -1415,49 +1519,71 @@ impl MemoryStore {
         Ok(row)
     }
 
-    /// §5.2 step 3, bounded: settle the pending intents of this space. A pass
-    /// that cannot run is logged and never fails the open — the entries stay
-    /// pending and the affected subjects stay excluded.
+    /// §5.2 step 2: take the workspace publication lock and settle every earlier
+    /// intent that owns one of this operation's file targets.
+    ///
+    /// A predecessor must not be published over while it is unsettled: the
+    /// classic window is a create that stopped after staging — row, journal and
+    /// hidden staged file, no target — followed by a delete of that record, which
+    /// would install a tombstone as though no projection had ever been owed and
+    /// strand the earlier body. Whatever cannot be settled inline refuses this
+    /// operation before its own effect commits.
+    async fn begin_publication(
+        &self,
+        space_id: &str,
+        targets: &[String],
+    ) -> StoreResult<tokio::sync::OwnedMutexGuard<()>> {
+        let gate = Arc::clone(&self.publish_gate).lock_owned().await;
+        #[cfg(feature = "test-hooks")]
+        {
+            let parked = self.publish_barrier.lock().expect("publish barrier").take();
+            if let Some(rendezvous) = parked {
+                rendezvous.entered.notify_one();
+                rendezvous.release.wait().await;
+            }
+        }
+        let entries: Vec<JournalEntry> = sqlx::query_as(UNSETTLED_TARGETS_SQL)
+            .bind(space_id)
+            .bind(journal::STATE_APPLIED)
+            .bind(targets_array(targets)?)
+            .fetch_all(&self.pool)
+            .await?;
+        for entry in entries {
+            self.settle_intent(&entry).await;
+        }
+        let unsettled = unsettled_target(&self.pool, space_id, targets).await?;
+        if let Some((receipt_id, state)) = unsettled {
+            return Err(StoreError::UnsettledPredecessor { receipt_id, state });
+        }
+        Ok(gate)
+    }
+
+    /// §5.2 step 3: settle — and re-drive — the unsettled intents of this space.
+    /// A pass that cannot run is logged and never fails the open.
     async fn recover_journal(&self, space_id: &str) {
-        if let Err(error) = self.settle_pending(space_id).await {
+        let _gate = self.publish_gate.lock().await;
+        if let Err(error) = self.settle_unsettled(space_id).await {
             tracing::warn!(?error, "memory journal recovery pass skipped");
         }
     }
 
-    async fn settle_pending(&self, space_id: &str) -> StoreResult<()> {
-        let _gate = self.publish_gate.lock().await;
-        let entries: Vec<(String, String, Option<String>)> = sqlx::query_as(
-            "SELECT receipt_id, targets_json, result_json FROM memory_journal \
-             WHERE space_id = ? AND state IN (?, ?) ORDER BY seq LIMIT ?",
+    /// §5.2 step 3, bounded. Recoverable work (`pending`, `deferred`) settles
+    /// first so a still-conflicting quarantine cannot starve it; quarantined
+    /// intents are re-driven with whatever bound capacity is left, which is how
+    /// an operator-resolved target gets its owed projection published.
+    async fn settle_unsettled(&self, space_id: &str) -> StoreResult<()> {
+        let entries: Vec<JournalEntry> = sqlx::query_as(
+            "SELECT receipt_id, subject_id, targets_json, result_json FROM memory_journal \
+             WHERE space_id = ? AND state <> ? ORDER BY state = ?, seq LIMIT ?",
         )
         .bind(space_id)
-        .bind(journal::STATE_PENDING)
-        .bind(journal::STATE_DEFERRED)
+        .bind(journal::STATE_APPLIED)
+        .bind(journal::STATE_QUARANTINED)
         .bind(journal::RECOVERY_BOUND)
         .fetch_all(&self.pool)
         .await?;
-        for (receipt_id, targets_json, result_json) in entries {
-            let settled = settle_entry(&self.files_root, &receipt_id, &targets_json).await;
-            let state = match &settled {
-                Ok(()) => journal::STATE_APPLIED,
-                Err(reason) => {
-                    tracing::warn!(%receipt_id, %reason, "memory journal intent quarantined");
-                    journal::STATE_QUARANTINED
-                }
-            };
-            // Only a published file effect terminalizes the receipt: a
-            // quarantined intent's outcome is not settled, so it stays pending
-            // while the subject's reads answer the terminal refusal.
-            let result = match (&settled, result_json) {
-                (Ok(()), Some(raw)) => serde_json::from_str::<Value>(&raw).ok(),
-                _ => None,
-            };
-            if let Err(error) = self
-                .settle_journal(&receipt_id, state, result.as_ref(), self.now())
-                .await
-            {
-                tracing::warn!(%receipt_id, ?error, "memory journal settle skipped");
-            }
+        for entry in entries {
+            self.settle_intent(&entry).await;
         }
         // §5.2 step 5: what the bound did not reach is terminal until a later
         // pass settles it, never silently withheld.
@@ -1472,6 +1598,149 @@ impl MemoryStore {
         .await?;
         Ok(())
     }
+
+    /// Settle one journal row from the crash-consistent disk state and record the
+    /// outcome. The caller holds the publication gate.
+    async fn settle_intent(&self, entry: &JournalEntry) {
+        let settled = settle_entry(&self.files_root, &entry.receipt_id, &entry.targets_json).await;
+        let outcome = entry.outcome();
+        let settlement = match &settled {
+            Ok(()) => Settlement::Applied(&outcome),
+            Err(reason) => {
+                tracing::warn!(
+                    receipt_id = %entry.receipt_id,
+                    %reason,
+                    "memory journal intent quarantined"
+                );
+                Settlement::Quarantined(quarantine_failure(
+                    &entry.receipt_id,
+                    &entry.subject_id,
+                    reason,
+                ))
+            }
+        };
+        if let Err(error) = self
+            .settle_journal(&entry.receipt_id, settlement, self.now())
+            .await
+        {
+            tracing::warn!(receipt_id = %entry.receipt_id, ?error, "memory journal settle skipped");
+        }
+    }
+}
+
+/// How one intent settled, as [`MemoryStore::settle_journal`] records it.
+enum Settlement<'a> {
+    /// The file effect is consistent: scrub the journaled payload — MEM-R014,
+    /// a published intent keeps no deleted or superseded body — and commit the
+    /// receipt with this content-free outcome.
+    Applied(&'a Value),
+    /// The intent could not be published: keep its payload, which is the
+    /// recovery evidence a later pass republishes once the target is resolved,
+    /// and record the failure on the receipt.
+    Quarantined(Value),
+}
+
+/// The unsettled intents that own one of the bound file targets. `json_each`
+/// expands the target list, so this is exact equality on each intent's own
+/// `path` field — never a pattern match over the serialized JSON.
+const UNSETTLED_TARGETS_SQL: &str = "SELECT j.receipt_id, j.subject_id, j.targets_json, \
+     j.result_json FROM memory_journal AS j \
+     WHERE j.space_id = ? AND j.state <> ? AND EXISTS ( \
+         SELECT 1 FROM json_each(j.targets_json) AS e \
+         WHERE json_extract(e.value, '$.path') IN (SELECT value FROM json_each(?))) \
+     ORDER BY j.seq";
+
+/// Whether any intent that owns one of the bound targets is still unsettled.
+const UNSETTLED_TARGET_SQL: &str = "SELECT j.receipt_id, j.state FROM memory_journal AS j \
+     WHERE j.space_id = ? AND j.state <> ? AND EXISTS ( \
+         SELECT 1 FROM json_each(j.targets_json) AS e \
+         WHERE json_extract(e.value, '$.path') IN (SELECT value FROM json_each(?))) \
+     ORDER BY j.seq LIMIT 1";
+
+/// One unsettled journal row, in the shape both settlement passes read.
+#[derive(sqlx::FromRow)]
+struct JournalEntry {
+    receipt_id: String,
+    subject_id: String,
+    targets_json: String,
+    result_json: Option<String>,
+}
+
+impl JournalEntry {
+    /// The content-free outcome the receipt is terminalized with. A row whose
+    /// recorded outcome cannot be read still terminalizes — as a committed
+    /// receipt with a null result — so no channel reports an already-published
+    /// intent as perpetually pending.
+    fn outcome(&self) -> Value {
+        self.result_json
+            .as_deref()
+            .and_then(|raw| serde_json::from_str(raw).ok())
+            .unwrap_or(Value::Null)
+    }
+}
+
+/// The bound target list in the JSON-array form `json_each` expands.
+fn targets_array(targets: &[String]) -> StoreResult<String> {
+    serde_json::to_string(targets)
+        .map_err(|e| StoreError::Corrupt(format!("journal target list: {e}")))
+}
+
+/// The first unsettled intent owning one of `targets`, if any. Read through the
+/// caller's executor so the same check runs against the pool (before an
+/// operation) and inside its write transaction (cross-process backstop).
+async fn unsettled_target<'e, E>(
+    executor: E,
+    space_id: &str,
+    targets: &[String],
+) -> StoreResult<Option<(String, String)>>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
+    let row: Option<(String, String)> = sqlx::query_as(UNSETTLED_TARGET_SQL)
+        .bind(space_id)
+        .bind(journal::STATE_APPLIED)
+        .bind(targets_array(targets)?)
+        .fetch_optional(executor)
+        .await?;
+    Ok(row)
+}
+
+/// §5.2 step 2's last check: the operation may not commit while an earlier
+/// intent for its target is unsettled.
+///
+/// The pre-transaction pass normally clears them; this one runs inside the write
+/// transaction, so a writer in another process — which the in-process gate does
+/// not serialize — still cannot slip an unpublished intent underneath this one.
+async fn require_settled_targets(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    space_id: &str,
+    targets: &[String],
+) -> StoreResult<()> {
+    let unsettled = unsettled_target(&mut **tx, space_id, targets).await?;
+    match unsettled {
+        Some((receipt_id, state)) => Err(StoreError::UnsettledPredecessor { receipt_id, state }),
+        None => Ok(()),
+    }
+}
+
+/// The terminal failure a quarantined intent records on its receipt (§5.2 step
+/// 3), shaped as the §14.1 memory error envelope so `memory.receipts.get` serves
+/// it verbatim and names the supported recovery path.
+fn quarantine_failure(receipt_id: &str, subject_id: &str, reason: &str) -> Value {
+    json!({
+        "code": "INTERNAL_ERROR",
+        "message": format!(
+            "receipt {receipt_id} is failed: its committed file effect for subject {subject_id} \
+             is quarantined ({reason}). The target was left untouched, memory.receipts.get serves \
+             this failure, and the intent is re-driven once that target is resolved"
+        ),
+        "details": {
+            "retry_class": "terminal",
+            "subject_id": subject_id,
+            "receipt_id": receipt_id,
+        },
+        "extensions": {},
+    })
 }
 
 /// §5.2 step 3: settle one journaled intent from the crash-consistent disk
@@ -1530,6 +1799,11 @@ async fn write_journal_entry(
 }
 
 /// The unsettled journal state of one subject (D-10 read isolation).
+///
+/// Terminal unresolved states outrank a merely pending one: a quarantined
+/// subject — and one a bounded pass left `deferred` — has an outcome no later
+/// write can repair on its own, so a newer pending intent for the same subject
+/// must not mask it and turn the terminal diagnosis into silent absence.
 async fn unsettled_in(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     space_id: &str,
@@ -1538,12 +1812,13 @@ async fn unsettled_in(
     let row: Option<(String,)> = sqlx::query_as(
         "SELECT state FROM memory_journal \
          WHERE space_id = ? AND subject_id = ? AND state <> ? \
-         ORDER BY CASE state WHEN ? THEN 0 ELSE 1 END, created_at LIMIT 1",
+         ORDER BY CASE state WHEN ? THEN 0 WHEN ? THEN 1 ELSE 2 END, created_at LIMIT 1",
     )
     .bind(space_id)
     .bind(subject_id)
     .bind(journal::STATE_APPLIED)
-    .bind(journal::STATE_PENDING)
+    .bind(journal::STATE_QUARANTINED)
+    .bind(journal::STATE_DEFERRED)
     .fetch_optional(&mut **tx)
     .await?;
     Ok(row.map(|(state,)| state))
@@ -2675,12 +2950,14 @@ impl MemoryStore {
         candidate_id: &str,
         expected_revision: i64,
     ) -> StoreResult<ReceiptRow> {
-        let _gate = self.publish_gate.lock().await;
+        let targets = [journal::candidate_target(candidate_id)];
+        let _gate = self.begin_publication(ctx.space_id, &targets).await?;
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
             return Ok(row);
         }
+        require_settled_targets(&mut tx, ctx.space_id, &targets).await?;
         gate(&mut tx, admission).await?;
         let candidate =
             consumable_candidate(&mut tx, ctx.space_id, candidate_id, expected_revision).await?;
@@ -2716,6 +2993,7 @@ impl MemoryStore {
     /// §7.15: consumption + scrub + every record insert + receipt, one
     /// transaction (MEM-R009). Placement is inherited from the candidate and can
     /// never be chosen by the decision.
+    #[allow(clippy::too_many_lines)]
     pub(super) async fn review_candidate(
         &self,
         ctx: &OpContext<'_>,
@@ -2724,12 +3002,14 @@ impl MemoryStore {
         expected_revision: i64,
         decision: &ReviewDecision<'_>,
     ) -> StoreResult<ReceiptRow> {
-        let _gate = self.publish_gate.lock().await;
+        let targets = [journal::candidate_target(candidate_id)];
+        let _gate = self.begin_publication(ctx.space_id, &targets).await?;
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
             return Ok(row);
         }
+        require_settled_targets(&mut tx, ctx.space_id, &targets).await?;
         gate(&mut tx, admission).await?;
         let candidate =
             consumable_candidate(&mut tx, ctx.space_id, candidate_id, expected_revision).await?;
@@ -2990,14 +3270,18 @@ impl MemoryStore {
         content: &Value,
         provenance: &Value,
     ) -> StoreResult<ReceiptRow> {
-        let _gate = self.publish_gate.lock().await;
+        let record_id = mint_record_id();
+        // A create owns a target nothing has ever written, so its predecessor
+        // check is trivially clear — it still runs like every other publication.
+        let targets = [journal::record_target(&record_id)];
+        let _gate = self.begin_publication(ctx.space_id, &targets).await?;
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
             return Ok(row);
         }
+        require_settled_targets(&mut tx, ctx.space_id, &targets).await?;
         gate(&mut tx, admission).await?;
-        let record_id = mint_record_id();
         let effect = insert_record(
             &mut tx,
             ctx.space_id,
@@ -3034,12 +3318,14 @@ impl MemoryStore {
         content: Option<&Value>,
         kind: Option<&str>,
     ) -> StoreResult<ReceiptRow> {
-        let _gate = self.publish_gate.lock().await;
+        let targets = [journal::record_target(record_id)];
+        let _gate = self.begin_publication(ctx.space_id, &targets).await?;
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
             return Ok(row);
         }
+        require_settled_targets(&mut tx, ctx.space_id, &targets).await?;
         gate(&mut tx, admission).await?;
         let record = record_in_tx(&mut tx, ctx.space_id, record_id)
             .await?
@@ -3114,12 +3400,14 @@ impl MemoryStore {
         reason: Option<&str>,
         deleted_by: &str,
     ) -> StoreResult<ReceiptRow> {
-        let _gate = self.publish_gate.lock().await;
+        let targets = [journal::record_target(record_id)];
+        let _gate = self.begin_publication(ctx.space_id, &targets).await?;
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
             return Ok(row);
         }
+        require_settled_targets(&mut tx, ctx.space_id, &targets).await?;
         gate(&mut tx, admission).await?;
         let record = record_in_tx(&mut tx, ctx.space_id, record_id)
             .await?
@@ -3194,12 +3482,14 @@ impl MemoryStore {
         expected_revision: i64,
         target: Placement<'_>,
     ) -> StoreResult<ReceiptRow> {
-        let _gate = self.publish_gate.lock().await;
+        let targets = [journal::record_target(record_id)];
+        let _gate = self.begin_publication(ctx.space_id, &targets).await?;
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
             return Ok(row);
         }
+        require_settled_targets(&mut tx, ctx.space_id, &targets).await?;
         gate(&mut tx, admission).await?;
         let record = record_in_tx(&mut tx, ctx.space_id, record_id)
             .await?
@@ -3326,12 +3616,14 @@ impl MemoryStore {
         document: &Value,
         updated_by: &str,
     ) -> StoreResult<ReceiptRow> {
-        let _gate = self.publish_gate.lock().await;
+        let targets = [journal::profile_target(subject_id, profile_kind)?];
+        let _gate = self.begin_publication(ctx.space_id, &targets).await?;
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
             return Ok(row);
         }
+        require_settled_targets(&mut tx, ctx.space_id, &targets).await?;
         gate(&mut tx, admission).await?;
         let existing = profile_in_tx(&mut tx, ctx.space_id, subject_id, profile_kind).await?;
         // The projection this upsert replaces: the provider's own previous

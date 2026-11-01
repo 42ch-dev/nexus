@@ -21,6 +21,7 @@
 //! same-key replay and `memory.receipts.get` report the pending state.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use nexus_core::memory_provider::LocalMemoryProvider;
 use serde::de::DeserializeOwned;
@@ -1043,9 +1044,9 @@ async fn recovery_never_overwrites_foreign_bytes_for_an_update() {
 }
 
 /// Two commits of one target publish in commit order. Update A stops after
-/// staging (its version is not on disk yet), so B's publish cannot be applied
-/// first; recovery settles A and then B, leaving the row's newest version at
-/// the target.
+/// staging (its version is not on disk yet), so B may not publish over the
+/// target before A's owed projection is there: B settles A inline, then
+/// publishes its own version — the file never trails the row.
 #[tokio::test]
 async fn committed_updates_publish_in_commit_order() {
     let env = seed_env();
@@ -1076,7 +1077,22 @@ async fn committed_updates_publish_in_commit_order() {
             .update_record(&admin(), update_request("k-order-b", &record_id, 2, THIRD))
             .await,
     );
-    assert_eq!(error_code(&second), "OUTCOME_UNCERTAIN");
+    let second = receipt(&second);
+    assert_eq!(second["result"]["revision"], 3);
+
+    // B settled A's unsettled predecessor inline, so A is terminal too.
+    let pool = store_pool(&env).await;
+    let (first_status,): (String,) =
+        sqlx::query_as("SELECT status FROM memory_receipts WHERE idempotency_key = ?")
+            .bind("k-order-a")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        first_status, "committed",
+        "the settled predecessor's receipt is terminal, never pending"
+    );
+    drop(pool);
 
     drop(provider);
     let provider = open_provider(&env).await;
@@ -1354,6 +1370,441 @@ async fn overflow_beyond_the_bounded_pass_reads_terminal_then_recovers() {
             .await,
     );
     assert_eq!(listed["total_authorized"], count);
+}
+
+// ── F2: a later publication never overtakes an unsettled predecessor ────
+
+/// A create that stops after staging owns a target nothing has written yet
+/// (`row + journal + hidden staged file`, no target). A later delete of that
+/// record must not install a tombstone as though no projection had ever been
+/// owed: the delete settles the earlier intent inline first, so the record is
+/// published before its tombstone replaces it — the file is never newer than
+/// what recovery owes, and the earlier body leaves the journal with it.
+#[tokio::test]
+async fn staged_create_predecessor_is_settled_before_a_tombstone_is_published() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    ensure(&provider).await;
+    let root = provider.file_root();
+
+    provider.inject_file_fault(false);
+    let staged = wire(
+        &provider
+            .create_record(
+                &admin(),
+                record_create_request("k-predecessor-create", TEXT),
+            )
+            .await,
+    );
+    assert_eq!(error_code(&staged), "OUTCOME_UNCERTAIN");
+    let record_id = only_record_id(&env).await;
+    let target = root.join(format!("records/{record_id}.md"));
+    assert!(
+        !target.exists(),
+        "the after-staging window leaves no target to publish over"
+    );
+
+    let deleted = wire(
+        &provider
+            .delete_record(
+                &admin(),
+                delete_request("k-predecessor-delete", &record_id, 1),
+            )
+            .await,
+    );
+    let deleted = receipt(&deleted);
+    assert_eq!(deleted["result"]["record_id"], record_id);
+    assert_eq!(deleted["result"]["tombstoned"], true);
+
+    let published = std::fs::read_to_string(&target).unwrap();
+    assert!(published.contains("tombstoned: true"), "{published}");
+    assert!(
+        !published.contains(TEXT),
+        "the deleted body is gone: {published}"
+    );
+    assert_eq!(journal_states(&env).await, vec!["applied", "applied"]);
+    assert!(
+        journal_targets(&env)
+            .await
+            .iter()
+            .all(|targets| targets == "[]"),
+        "a settled predecessor drops the body it no longer owes"
+    );
+    let pool = store_pool(&env).await;
+    let (status,): (String,) =
+        sqlx::query_as("SELECT status FROM memory_receipts WHERE idempotency_key = ?")
+            .bind("k-predecessor-create")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        status, "committed",
+        "the inline-settled predecessor's receipt is terminal"
+    );
+    drop(pool);
+
+    drop(provider);
+    let provider = open_provider(&env).await;
+    let served = wire(
+        &provider
+            .get_record(&admin(), record_get_request(&record_id))
+            .await,
+    );
+    assert!(served["record"]["tombstone"].is_object(), "{served}");
+}
+
+/// The other half of the same rule: when the predecessor cannot be settled (its
+/// target holds bytes the intent never produced), the later write is refused
+/// before its own effect commits — typed retryable, naming the unsettled
+/// predecessor — instead of publishing over it.
+#[tokio::test]
+async fn an_unsettleable_predecessor_refuses_the_later_write() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    ensure(&provider).await;
+    let root = provider.file_root();
+
+    provider.inject_commit_fault(true);
+    wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-refuse-create", TEXT))
+            .await,
+    );
+    let record_id = only_record_id(&env).await;
+    let target = root.join(format!("records/{record_id}.md"));
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    let foreign = "content this intent never produced";
+    std::fs::write(&target, foreign).unwrap();
+    let predecessor = receipt_id_of_key(&env, "k-refuse-create").await;
+
+    let refused = wire(
+        &provider
+            .delete_record(&admin(), delete_request("k-refuse-delete", &record_id, 1))
+            .await,
+    );
+    assert_eq!(error_code(&refused), "INTERNAL_ERROR");
+    assert_eq!(retry_class(&refused), "retryable");
+    assert_eq!(
+        error_details(&refused)["receipt_id"].as_str(),
+        Some(predecessor.as_str()),
+        "the refusal names the unsettled predecessor: {refused}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&target).unwrap(),
+        foreign,
+        "the refused deletion publishes nothing"
+    );
+    assert_eq!(
+        journal_states(&env).await,
+        vec!["quarantined"],
+        "only the predecessor changed state; the deletion never committed"
+    );
+    let pool = store_pool(&env).await;
+    let (deletes,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM memory_receipts WHERE op = ?")
+        .bind("memory.records.delete")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(deletes, 0, "a refused write leaves no receipt");
+}
+
+// ── F3: quarantine preserves recovery evidence and terminates ────────────
+
+/// Quarantine is not a dead end. The intent keeps the payload a re-drive
+/// republishes, its receipt records the failure terminally instead of answering
+/// pending forever, and once the conflict is resolved the next pass publishes the
+/// same intent and terminalizes the receipt as committed.
+#[tokio::test]
+async fn quarantined_intent_keeps_its_payload_and_redrives_once_resolved() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    ensure(&provider).await;
+    let root = provider.file_root();
+
+    provider.inject_commit_fault(true);
+    wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-redrive", TEXT))
+            .await,
+    );
+    let record_id = only_record_id(&env).await;
+    let target = root.join(format!("records/{record_id}.md"));
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::fs::write(&target, "a writer this provider does not own").unwrap();
+    let receipt_id = receipt_id_of_key(&env, "k-redrive").await;
+
+    drop(provider);
+    let provider = open_provider(&env).await;
+    assert_eq!(journal_states(&env).await, vec!["quarantined"]);
+    assert!(
+        journal_targets(&env).await[0].contains(&format!("records/{record_id}.md")),
+        "a quarantined intent keeps the projection it still owes"
+    );
+
+    // No channel reports a quarantined intent as pending forever.
+    let pool = store_pool(&env).await;
+    let (status,): (String,) =
+        sqlx::query_as("SELECT status FROM memory_receipts WHERE receipt_id = ?")
+            .bind(&receipt_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        status, "failed",
+        "the receipt records the failure terminally"
+    );
+    let (pending,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM memory_receipts WHERE status = 'pending'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(pending, 0, "no receipt is left pending on a quarantine");
+    drop(pool);
+
+    let polled = wire(
+        &provider
+            .get_receipt(&admin(), receipts_get_request(&receipt_id))
+            .await,
+    );
+    let polled = read_receipt(&polled);
+    assert_eq!(polled["status"], "failed", "{polled}");
+    assert_eq!(polled["error"]["code"], "INTERNAL_ERROR");
+    assert_eq!(polled["error"]["details"]["retry_class"], "terminal");
+    let message = polled["error"]["message"].as_str().unwrap();
+    assert!(
+        message.contains(&receipt_id)
+            && message.contains(SUBJECT)
+            && message.contains("quarantined"),
+        "the recorded failure names the receipt, the subject and the quarantine: {message}"
+    );
+    assert!(
+        polled.get("result").is_none(),
+        "the failed shape carries the failure, not a result: {polled}"
+    );
+
+    let view = wire(
+        &provider
+            .get_record(&admin(), record_get_request(&record_id))
+            .await,
+    );
+    assert_eq!(error_code(&view), "INTERNAL_ERROR");
+    assert_eq!(retry_class(&view), "terminal");
+    // Repeating the key cannot settle it; the journal re-drives without us.
+    let replay = wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-redrive", TEXT))
+            .await,
+    );
+    assert_eq!(error_code(&replay), "INTERNAL_ERROR");
+    assert_eq!(retry_class(&replay), "terminal");
+
+    // The operator resolves the conflict; the next pass republishes the intent.
+    std::fs::remove_file(&target).unwrap();
+    drop(provider);
+    let provider = open_provider(&env).await;
+    assert_eq!(journal_states(&env).await, vec!["applied"]);
+    assert!(
+        journal_targets(&env)
+            .await
+            .iter()
+            .all(|targets| targets == "[]"),
+        "the re-driven intent scrubs its payload once published"
+    );
+    assert!(std::fs::read_to_string(&target).unwrap().contains(TEXT));
+    let committed = wire(
+        &provider
+            .get_receipt(&admin(), receipts_get_request(&receipt_id))
+            .await,
+    );
+    let committed = read_receipt(&committed);
+    assert_eq!(committed["status"], "committed", "{committed}");
+    assert_eq!(committed["result"]["record_id"], record_id);
+    let served = wire(
+        &provider
+            .get_record(&admin(), record_get_request(&record_id))
+            .await,
+    );
+    assert_eq!(served["record"]["content"]["text"], TEXT);
+}
+
+// ── F4: terminal states outrank a pending one for the same subject ───────
+
+/// A quarantined subject that later acquires another pending intent still reads
+/// terminally: the terminal diagnosis is never masked into silent absence.
+#[tokio::test]
+async fn terminal_state_outranks_pending_for_the_same_subject() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    ensure(&provider).await;
+    let root = provider.file_root();
+
+    provider.inject_commit_fault(true);
+    wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-mixed-a", TEXT))
+            .await,
+    );
+    let quarantined_record = only_record_id(&env).await;
+    let target = root.join(format!("records/{quarantined_record}.md"));
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::fs::write(&target, "someone else's file").unwrap();
+    drop(provider);
+    let provider = open_provider(&env).await;
+    assert_eq!(journal_states(&env).await, vec!["quarantined"]);
+
+    // Same subject, a second intent that stays pending (its file never lands).
+    provider.inject_commit_fault(true);
+    wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-mixed-b", TEXT))
+            .await,
+    );
+    assert_eq!(journal_states(&env).await, vec!["quarantined", "pending"]);
+
+    for body in [
+        wire(
+            &provider
+                .get_record(&admin(), record_get_request(&quarantined_record))
+                .await,
+        ),
+        wire(
+            &provider
+                .list_records(&admin(), records_list_request())
+                .await,
+        ),
+        wire(&provider.recall(&admin(), recall_request(10)).await),
+    ] {
+        assert_eq!(error_code(&body), "INTERNAL_ERROR", "{body}");
+        assert_eq!(retry_class(&body), "terminal");
+    }
+}
+
+// ── §7.21: the promotion crash window ───────────────────────────────────
+
+/// A committed placement change is projected on recovery: the target still holds
+/// the pre-promotion frame until then, and after it the file and the served row
+/// agree on the new placement.
+#[tokio::test]
+async fn promote_crash_publishes_the_new_placement() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    ensure(&provider).await;
+    let root = provider.file_root();
+
+    let created = wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-promote-create", TEXT))
+            .await,
+    );
+    let record_id = record_id_of(receipt(&created));
+    let target = root.join(format!("records/{record_id}.md"));
+    let before = std::fs::read_to_string(&target).unwrap();
+    assert!(before.contains("visibility: shared"), "{before}");
+
+    provider.inject_file_fault(false);
+    let lost = wire(
+        &provider
+            .promote_record(
+                &admin(),
+                dto(json!({
+                    "space_id": SPACE,
+                    "record_id": record_id,
+                    "expected_revision": 1,
+                    "target_scope": { "visibility": "context", "context_id": "bnd_north" },
+                    "idempotency_key": "k-promote-crash",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
+    assert_eq!(
+        std::fs::read_to_string(&target).unwrap(),
+        before,
+        "the placement is only in the row until recovery publishes it"
+    );
+
+    drop(provider);
+    let provider = open_provider(&env).await;
+
+    let published = std::fs::read_to_string(&target).unwrap();
+    assert!(published.contains("visibility: context"), "{published}");
+    assert!(published.contains("context_id: bnd_north"), "{published}");
+    assert!(published.contains(TEXT), "{published}");
+    assert_eq!(journal_states(&env).await, vec!["applied", "applied"]);
+    let served = wire(
+        &provider
+            .get_record(&admin(), record_get_request(&record_id))
+            .await,
+    );
+    assert_eq!(served["record"]["scope"]["visibility"], "context");
+    assert_eq!(served["record"]["scope"]["context_id"], "bnd_north");
+    assert_eq!(served["record"]["revision"], 2);
+}
+
+// ── §5.2 step 2: one publication gate per workspace ─────────────────────
+
+/// The publication gate is keyed by workspace, not by provider instance: a second
+/// provider opened on the same workspace waits for the first one's
+/// settle-to-publish window instead of publishing concurrently.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn two_provider_instances_on_one_workspace_serialize_publication() {
+    let env = seed_env();
+    let first = Arc::new(open_provider(&env).await);
+    ensure(&first).await;
+    let second = Arc::new(open_provider(&env).await);
+
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Barrier::new(2));
+    first.park_next_publish(Arc::clone(&entered), Arc::clone(&release));
+    let parked = tokio::spawn({
+        let provider = Arc::clone(&first);
+        async move {
+            wire(
+                &provider
+                    .create_record(&admin(), record_create_request("k-gate-a", TEXT))
+                    .await,
+            )
+        }
+    });
+    // Wait until that publication actually holds the workspace gate before the
+    // second instance asks for it.
+    tokio::time::timeout(std::time::Duration::from_secs(10), entered.notified())
+        .await
+        .expect("the first instance's publication holds the workspace gate");
+    let mut queued = tokio::spawn({
+        let provider = Arc::clone(&second);
+        async move {
+            wire(
+                &provider
+                    .create_record(&admin(), record_create_request("k-gate-b", TEXT))
+                    .await,
+            )
+        }
+    });
+
+    // The other instance cannot even reach its own publication while the first
+    // holds the workspace gate.
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(200), &mut queued)
+            .await
+            .is_err(),
+        "a second provider instance must wait for the workspace publication gate"
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(10), release.wait())
+        .await
+        .expect("the parked publication is released");
+
+    let parked = receipt(&parked.await.unwrap()).clone();
+    let queued = receipt(&queued.await.unwrap()).clone();
+    let root = first.file_root();
+    for body in [&parked, &queued] {
+        let record_id = record_id_of(body);
+        assert!(
+            root.join(format!("records/{record_id}.md")).exists(),
+            "both publications landed: {record_id}"
+        );
+    }
+    assert_eq!(journal_states(&env).await, vec!["applied", "applied"]);
 }
 
 // ── C-117: the journal migration ────────────────────────────────────────

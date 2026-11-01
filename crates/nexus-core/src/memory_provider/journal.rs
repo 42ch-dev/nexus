@@ -14,16 +14,28 @@
 //!    are verified against the intent digest, and are installed with a
 //!    no-clobber link. Only then is the entry marked `applied`, its content
 //!    scrubbed and its receipt terminalized.
-//! 3. **Bounded recovery.** A reopen settles every `pending`/`deferred` entry
-//!    of its space ([`RECOVERY_BOUND`] entries per pass, no retries): a staged
-//!    file matching the intent digest is published, a missing/mismatched one
-//!    is regenerated from the journaled bytes, and an unsafe path, an I/O
-//!    failure or a target holding content this intent never produced
-//!    quarantines it. Objects of a subject with an unsettled entry stay out of
-//!    recall/list/get until it is resolved; a quarantined entry — and one a
-//!    bounded pass left behind, which is marked `deferred` — answers the
-//!    terminal `INTERNAL_ERROR` on that subject instead of serving
-//!    half-committed content.
+//! 3. **Ownership-safe replacement.** The target is never checked and then
+//!    removed: it is first *renamed* to a hidden scratch sibling
+//!    (`.<name>.<receipt_id>.prior`), and only the bytes that rename carried
+//!    away are verified — absent, already the intent's own content, or exactly
+//!    the recorded predecessor. The predecessor is dropped only after the new
+//!    bytes are linked in no-clobber. Bytes this intent did not produce are
+//!    put back where they were, never deleted, so a writer landing between any
+//!    two steps keeps its file.
+//! 4. **Bounded recovery.** A reopen settles every unsettled entry of its
+//!    space ([`RECOVERY_BOUND`] entries per pass): a staged file matching the
+//!    intent digest is published, a missing/mismatched one is regenerated from
+//!    the journaled bytes, and an unsafe path, an I/O failure or a target
+//!    holding content this intent never produced quarantines it. Objects of a
+//!    subject with an unsettled entry stay out of recall/list/get until it is
+//!    resolved; a quarantined entry — and one a bounded pass left behind, which
+//!    is marked `deferred` — answers the terminal `INTERNAL_ERROR` on that
+//!    subject instead of serving half-committed content.
+//!
+//! A quarantined intent keeps its journaled payload: the projection it owes is
+//! still recoverable, so an operator who resolves the target lets a later pass
+//! re-drive the same intent (`quarantined` → `applied`). Its receipt records
+//! the failure terminally rather than reporting an outcome that never settles.
 //!
 //! The target is never overwritten blindly. [`FileEffect::prior`] carries the
 //! digest of the provider's own previous projection of the same row, so
@@ -143,6 +155,24 @@ fn optional(label: &str, value: Option<&str>) -> String {
     value.map_or_else(String::new, |value| format!("{label}: {}\n", line(value)))
 }
 
+/// §6.6 record projection target. The one source of "which file this row owns":
+/// the journal writes it and an operation's predecessor check asks for it.
+pub(super) fn record_target(record_id: &str) -> String {
+    format!("records/{record_id}.md")
+}
+
+/// §6.7 consumed-candidate shell target.
+pub(super) fn candidate_target(candidate_id: &str) -> String {
+    format!("candidates/{candidate_id}.md")
+}
+
+/// §6.8 profile target. The file name is the digest of the subject/kind pair, so
+/// open-vocabulary ids never become path components.
+pub(super) fn profile_target(subject_id: &str, profile_kind: &str) -> StoreResult<String> {
+    let name = digest_of(&format!("{subject_id}\u{1f}{profile_kind}"))?;
+    Ok(format!("profiles/{name}.md"))
+}
+
 /// §6.6 record projection: the stored row as markdown.
 pub(super) fn record_effect(row: &RecordRow) -> StoreResult<FileEffect> {
     let out = format!(
@@ -177,7 +207,7 @@ pub(super) fn record_effect(row: &RecordRow) -> StoreResult<FileEffect> {
         },
         body_text(&row.content_json),
     );
-    effect(format!("records/{}.md", row.record_id), out)
+    effect(record_target(&row.record_id), out)
 }
 
 /// §6.7 consumed-candidate shell projection: the content-free audit shell.
@@ -204,13 +234,13 @@ pub(super) fn candidate_effect(row: &CandidateRow) -> StoreResult<FileEffect> {
         optional("content_digest", row.content_digest.as_deref()),
         row.consumed_by_json.as_deref().unwrap_or(""),
     );
-    effect(format!("candidates/{}.md", row.candidate_id), out)
+    effect(candidate_target(&row.candidate_id), out)
 }
 
 /// §6.8 profile projection. The file name is the digest of the subject/kind
 /// pair, so open-vocabulary ids never become path components.
 pub(super) fn profile_effect(row: &ProfileRow) -> StoreResult<FileEffect> {
-    let name = digest_of(&format!("{}\u{1f}{}", row.subject_id, row.profile_kind))?;
+    let target = profile_target(&row.subject_id, &row.profile_kind)?;
     let out = format!(
         "---\n\
          space_id: {}\n\
@@ -231,7 +261,7 @@ pub(super) fn profile_effect(row: &ProfileRow) -> StoreResult<FileEffect> {
         line(&row.updated_at),
         document_text(&row.document_json),
     );
-    effect(format!("profiles/{name}.md"), out)
+    effect(target, out)
 }
 
 /// Resolve an intent target below the file root, refusing anything that would
@@ -255,11 +285,22 @@ fn resolve(root: &Path, effect: &FileEffect) -> Option<PathBuf> {
 /// The hidden staged sibling of a target: dot-prefixed and receipt-scoped, so
 /// no provider reader lists it and two operations never share a staged file.
 fn staged(target: &Path, receipt_id: &str) -> PathBuf {
+    hidden(target, &format!("{receipt_id}.staged"))
+}
+
+/// The hidden sibling a target is displaced to while it is replaced: dot-prefixed
+/// and receipt-scoped, so it is invisible to readers and two intents never share
+/// one scratch path.
+fn displaced(target: &Path, receipt_id: &str) -> PathBuf {
+    hidden(target, &format!("{receipt_id}.prior"))
+}
+
+fn hidden(target: &Path, suffix: &str) -> PathBuf {
     let name = target
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("target");
-    target.with_file_name(format!(".{name}.{receipt_id}.staged"))
+    target.with_file_name(format!(".{name}.{suffix}"))
 }
 
 async fn write_staged(
@@ -311,40 +352,92 @@ pub(super) async fn publish(
             "staged file does not match the intent digest",
         ));
     }
-    install(&staged_path, &target, effect).await
+    install(&staged_path, &target, receipt_id, effect).await
 }
 
 /// Move the staged bytes into place under the intent's ownership rule.
 ///
 /// The target must be absent, already hold the intent's content (a crash
 /// between the install and the applied mark), or hold exactly the recorded
-/// predecessor. The predecessor is cleared and the new bytes are linked in
-/// *without* replacement, so a writer landing in between makes the link fail
-/// instead of losing its bytes; anything else is refused untouched.
-async fn install(staged_path: &Path, target: &Path, effect: &FileEffect) -> std::io::Result<()> {
-    match tokio::fs::read(target).await {
-        Ok(bytes) => {
-            if matches_digest(&bytes, &effect.digest) {
-                let _ = tokio::fs::remove_file(staged_path).await;
-                return Ok(());
-            }
-            if !effect
-                .prior
-                .as_deref()
-                .is_some_and(|prior| matches_digest(&bytes, prior))
-            {
-                return Err(std::io::Error::other(format!(
-                    "{} holds content this intent did not produce",
-                    effect.path
-                )));
-            }
-            tokio::fs::remove_file(target).await?;
+/// predecessor. Nothing here removes a pathname it did not first rename: the
+/// target is displaced to a receipt-scoped scratch sibling atomically, and only
+/// the bytes that rename carried away are verified. Bytes this intent did not
+/// produce are put back untouched, so a writer landing at any point keeps its
+/// file — including between the ownership check and the removal that a
+/// check-then-remove protocol would have performed.
+async fn install(
+    staged_path: &Path,
+    target: &Path,
+    receipt_id: &str,
+    effect: &FileEffect,
+) -> std::io::Result<()> {
+    install_verifying(staged_path, target, receipt_id, effect, &noop).await
+}
+
+/// The no-op seam [`install`] passes.
+const fn noop() {}
+
+/// [`install`] with the deterministic seam the regression uses to land a foreign
+/// write at the exact point the swap depends on (after the target is displaced,
+/// before the new bytes are linked). Plainly a no-op in production paths.
+async fn install_verifying<F>(
+    staged_path: &Path,
+    target: &Path,
+    receipt_id: &str,
+    effect: &FileEffect,
+    between: &F,
+) -> std::io::Result<()>
+where
+    F: Fn() + Send + Sync,
+{
+    let scratch = displaced(target, receipt_id);
+    let taken = match tokio::fs::rename(target, &scratch).await {
+        Ok(()) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => return Err(error),
+    };
+    if taken {
+        let bytes = tokio::fs::read(&scratch).await?;
+        if matches_digest(&bytes, &effect.digest) {
+            // Crash between the install and the applied mark: the content is
+            // already consistent, so the displaced copy is a duplicate of it.
+            let _ = tokio::fs::remove_file(&scratch).await;
+            let _ = tokio::fs::remove_file(staged_path).await;
+            return Ok(());
         }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        if !effect
+            .prior
+            .as_deref()
+            .is_some_and(|prior| matches_digest(&bytes, prior))
+        {
+            // Not ours: restore it where it was, without replacing anything that
+            // landed meanwhile. If even that is impossible the bytes stay at the
+            // scratch path — preserved, never deleted.
+            if tokio::fs::hard_link(&scratch, target).await.is_ok() {
+                let _ = tokio::fs::remove_file(&scratch).await;
+            }
+            return Err(std::io::Error::other(format!(
+                "{} holds content this intent did not produce",
+                effect.path
+            )));
+        }
+    }
+    between();
+    match tokio::fs::hard_link(staged_path, target).await {
+        Ok(()) => {}
+        // A writer created the target after it was displaced: its bytes stay.
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Err(std::io::Error::other(format!(
+                "{} was replaced while this intent published",
+                effect.path
+            )));
+        }
         Err(error) => return Err(error),
     }
-    tokio::fs::hard_link(staged_path, target).await?;
     let _ = tokio::fs::remove_file(staged_path).await;
+    if taken {
+        let _ = tokio::fs::remove_file(&scratch).await;
+    }
     Ok(())
 }
 
@@ -398,7 +491,7 @@ pub(super) async fn settle(root: &Path, receipt_id: &str, effect: &FileEffect) -
     if !matches_digest(&written, &effect.digest) {
         return Settled::Quarantined("journaled content does not match its digest".to_string());
     }
-    match install(&staged_path, &target, effect).await {
+    match install(&staged_path, &target, receipt_id, effect).await {
         Ok(()) => Settled::Published,
         Err(error) => Settled::Quarantined(format!("publish failed: {error}")),
     }
@@ -471,5 +564,55 @@ mod tests {
             "an unowned target is refused: {error}"
         );
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "foreign\n");
+    }
+
+    /// F1: the ownership check and the predecessor's removal were two steps, so
+    /// a writer replacing the target between them had its file deleted by the
+    /// provider's `remove_file`, which the no-clobber link could not undo. The
+    /// target is now displaced before anything is verified, so a write landing in
+    /// that exact window keeps its bytes and the intent refuses.
+    #[tokio::test]
+    async fn a_foreign_replacement_during_the_swap_is_never_deleted() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        let target = root.join("records/rec_x.md");
+
+        let first = effect("records/rec_x.md".to_string(), "one\n".to_string()).unwrap();
+        stage(root, "rcp_a", &first).await.unwrap();
+        publish(root, "rcp_a", &first).await.unwrap();
+
+        let second = effect("records/rec_x.md".to_string(), "two\n".to_string())
+            .unwrap()
+            .over(Some(first.digest.clone()));
+        stage(root, "rcp_b", &second).await.unwrap();
+        let staged_path = staged(&target, "rcp_b");
+
+        // The foreign writer lands after the predecessor was displaced and
+        // verified, at the point the old protocol removed the target.
+        let error = install_verifying(&staged_path, &target, "rcp_b", &second, &|| {
+            std::fs::write(&target, "foreign\n").unwrap();
+        })
+        .await
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("replaced while this intent published"),
+            "a target re-created during the swap is refused: {error}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            "foreign\n",
+            "the foreign file survives the refused publication"
+        );
+        assert_eq!(
+            std::fs::read_to_string(displaced(&target, "rcp_b")).unwrap(),
+            "one\n",
+            "the verified predecessor is preserved, not deleted"
+        );
+        assert!(
+            staged_path.exists(),
+            "the staged bytes stay published-from until the intent settles"
+        );
     }
 }

@@ -60,7 +60,7 @@ use crate::error::{CoreError, CoreResult};
 use storage::{
     Admission, CandidateRow, Coverage, Fence, FenceAction, FenceTarget, GrantRow, MemoryStore,
     NewCandidate, NewGrant, OpContext, Placement, ProfileRow, ReceiptRow, RecordRead, RecordRow,
-    ReviewDecision, Selection, SpaceRow, StoreError, SubjectRow, RECEIPT_PENDING,
+    ReviewDecision, Selection, SpaceRow, StoreError, SubjectRow, RECEIPT_FAILED, RECEIPT_PENDING,
 };
 
 /// The single space this provider provisions (§7.0.6). Clients discover it via
@@ -161,6 +161,22 @@ enum ProviderError {
     Unreconciled {
         subject_id: String,
     },
+    /// §5.2 step 3/MEM-R010: this receipt records a quarantine — the intent
+    /// committed but its file effect could not be published. Terminal on the
+    /// replay channel; the recorded envelope is served by
+    /// `memory.receipts.get`, and recovery re-drives the intent once the target
+    /// is resolved.
+    ReceiptFailed {
+        receipt_id: String,
+        message: String,
+    },
+    /// §5.2 step 2: an earlier intent for this operation's file target is still
+    /// unsettled. Raised before the operation commits, so retrying after the
+    /// journal recovery settles that predecessor is the supported path.
+    UnsettledPredecessor {
+        receipt_id: String,
+        state: String,
+    },
     Internal(String),
 }
 
@@ -180,17 +196,21 @@ impl ProviderError {
             Self::StatusTransition(_) => SpokeRejectCode::InvalidStatusTransition,
             Self::CursorInvalid => SpokeRejectCode::CursorInvalid,
             Self::OutcomeUncertain(_) => SpokeRejectCode::OutcomeUncertain,
-            Self::Unreconciled { .. } | Self::Internal(_) => SpokeRejectCode::InternalError,
+            Self::Unreconciled { .. }
+            | Self::ReceiptFailed { .. }
+            | Self::UnsettledPredecessor { .. }
+            | Self::Internal(_) => SpokeRejectCode::InternalError,
         }
     }
 
     /// §14.2 retry class. `INTERNAL_ERROR` is retryable only because this
-    /// provider raises it strictly before the effect commits; an uncertain
-    /// outcome is its own class, and a quarantined journal intent is terminal
-    /// (retrying cannot settle it).
+    /// provider raises it strictly before the effect commits — which is exactly
+    /// the shape of an unsettled predecessor; an uncertain outcome is its own
+    /// class, and a quarantined intent stops being retryable once its receipt
+    /// recorded the failure (the journal re-drives it without the caller).
     const fn retry_class(&self) -> &'static str {
         match self {
-            Self::Internal(_) => "retryable",
+            Self::Internal(_) | Self::UnsettledPredecessor { .. } => "retryable",
             Self::OutcomeUncertain(_) => "uncertain",
             _ => "terminal",
         }
@@ -211,7 +231,15 @@ impl ProviderError {
             | Self::StatusTransition(reason)
             | Self::CandidateConsumed(reason)
             | Self::OutcomeUncertain(reason)
+            | Self::ReceiptFailed {
+                message: reason, ..
+            }
             | Self::Internal(reason) => reason.clone(),
+            Self::UnsettledPredecessor { receipt_id, state } => format!(
+                "an earlier memory journal intent for this operation's file target is unsettled \
+                 (receipt {receipt_id}, state {state}); the journal recovery settles it, so repeat \
+                 this operation once that intent is resolved"
+            ),
             Self::Unreconciled { subject_id } => format!(
                 "subject {subject_id} has an unresolved memory journal intent (quarantined); its objects are withheld from reads until that journal entry is settled"
             ),
@@ -283,6 +311,13 @@ impl ProviderError {
             Self::Unreconciled { subject_id } => {
                 details.insert("subject_id".to_string(), json!(subject_id));
             }
+            Self::ReceiptFailed { receipt_id, .. } => {
+                details.insert("receipt_id".to_string(), json!(receipt_id));
+            }
+            Self::UnsettledPredecessor { receipt_id, state } => {
+                details.insert("receipt_id".to_string(), json!(receipt_id));
+                details.insert("state".to_string(), json!(state));
+            }
             _ => {}
         }
         details
@@ -312,6 +347,9 @@ fn store_error(error: StoreError) -> ProviderError {
         StoreError::StatusTransition(reason) => ProviderError::StatusTransition(reason),
         StoreError::CommitUnknown(reason) => ProviderError::OutcomeUncertain(reason),
         StoreError::Unreconciled { subject_id } => ProviderError::Unreconciled { subject_id },
+        StoreError::UnsettledPredecessor { receipt_id, state } => {
+            ProviderError::UnsettledPredecessor { receipt_id, state }
+        }
         StoreError::Corrupt(reason) => ProviderError::Internal(reason),
         StoreError::Database(error) => ProviderError::Internal(error.to_string()),
     }
@@ -362,6 +400,9 @@ fn settle_receipt<T: DeserializeOwned>(receipt: &ReceiptRow) -> SpokeResult<T> {
     if let Some(error) = pending_receipt(receipt) {
         return deny(&error);
     }
+    if let Some(error) = failed_receipt(receipt) {
+        return deny(&error);
+    }
     match receipt_body(receipt) {
         Ok(body) => match serde_json::from_value(body) {
             Ok(response) => spoke_operations::spoke_ok(response),
@@ -371,6 +412,43 @@ fn settle_receipt<T: DeserializeOwned>(receipt: &ReceiptRow) -> SpokeResult<T> {
         },
         Err(error) => deny(&ProviderError::OutcomeUncertain(error.message())),
     }
+}
+
+/// §5.2 step 3: a receipt the journal settled as `failed` records a committed
+/// intent whose file effect could not be published. Repeating the key cannot
+/// settle it, so the replay channel answers terminally with the recorded
+/// failure; `memory.receipts.get` serves that envelope, and the journal re-drives
+/// the intent without the caller once its target is resolved.
+fn failed_receipt(receipt: &ReceiptRow) -> Option<ProviderError> {
+    (receipt.status == RECEIPT_FAILED).then(|| {
+        let recorded = receipt_failure(receipt).ok().and_then(|envelope| {
+            envelope
+                .get("message")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        });
+        ProviderError::ReceiptFailed {
+            receipt_id: receipt.receipt_id.clone(),
+            message: recorded.unwrap_or_else(|| {
+                format!(
+                    "receipt {} is failed: its committed file effect is quarantined",
+                    receipt.receipt_id
+                )
+            }),
+        }
+    })
+}
+
+/// The failure envelope a `failed` receipt recorded at quarantine time.
+fn receipt_failure(receipt: &ReceiptRow) -> Result<Value, ProviderError> {
+    let raw = receipt.error_json.as_deref().ok_or_else(|| {
+        ProviderError::Internal(format!(
+            "failed receipt {} carries no failure envelope",
+            receipt.receipt_id
+        ))
+    })?;
+    serde_json::from_str(raw)
+        .map_err(|e| ProviderError::Internal(format!("receipt failure envelope: {e}")))
 }
 
 /// §5.2 step 2: a journaled op's receipt is durable at the point of no return
@@ -480,14 +558,12 @@ fn grant_wire(grant: &GrantRow) -> Result<schemas::MemoryGrant, ProviderError> {
         .map_err(|e| ProviderError::Internal(format!("grant projection: {e}")))
 }
 
-/// §6.10 receipt projection, as every mutating op returns it.
+/// §6.10 receipt projection, as every mutating op returns it. A `failed` receipt
+/// carries the recorded failure envelope and no result — the wire schema's own
+/// failed branch (§5.2 step 3), which is the channel that reports a quarantined
+/// intent terminally.
 fn receipt_body(receipt: &ReceiptRow) -> Result<Value, ProviderError> {
-    let result = match receipt.result_json.as_deref() {
-        Some(raw) => serde_json::from_str::<Value>(raw)
-            .map_err(|e| ProviderError::Internal(format!("receipt result: {e}")))?,
-        None => Value::Null,
-    };
-    Ok(json!({
+    let mut body = json!({
         "schema_version": 1,
         "receipt_id": receipt.receipt_id,
         "op": receipt.op,
@@ -496,11 +572,24 @@ fn receipt_body(receipt: &ReceiptRow) -> Result<Value, ProviderError> {
         "idempotency_key": receipt.idempotency_key,
         "payload_digest": receipt.payload_digest,
         "status": receipt.status,
-        "result": result,
         "created_at": receipt.created_at,
         "completed_at": receipt.completed_at,
         "extensions": {},
-    }))
+    });
+    let object = body
+        .as_object_mut()
+        .expect("a receipt projection is always a JSON object");
+    if receipt.status == RECEIPT_FAILED {
+        object.insert("error".to_string(), receipt_failure(receipt)?);
+    } else {
+        let result = match receipt.result_json.as_deref() {
+            Some(raw) => serde_json::from_str::<Value>(raw)
+                .map_err(|e| ProviderError::Internal(format!("receipt result: {e}")))?,
+            None => Value::Null,
+        };
+        object.insert("result".to_string(), result);
+    }
+    Ok(body)
 }
 
 /// Opaque page cursor bound to principal + space + subject/filter + policy
@@ -759,6 +848,18 @@ impl LocalMemoryProvider {
     #[doc(hidden)]
     pub fn park_next_receipt_read(&self, barrier: std::sync::Arc<tokio::sync::Barrier>) {
         self.store.park_next_receipt_read(barrier);
+    }
+
+    /// §5.2 step 2 proof seam: park the next publication while it holds the
+    /// workspace publication gate (`entered` signals it, `release` frees it).
+    /// Test only.
+    #[cfg(feature = "test-hooks")]
+    pub fn park_next_publish(
+        &self,
+        entered: std::sync::Arc<tokio::sync::Notify>,
+        release: std::sync::Arc<tokio::sync::Barrier>,
+    ) {
+        self.store.park_next_publish(entered, release);
     }
 
     async fn space(&self, space_id: &str) -> Result<SpaceRow, ProviderError> {
