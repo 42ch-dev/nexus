@@ -35,11 +35,17 @@
 //!   answers, so a replay and `memory.receipts.get` fail `RECEIPT_EXPIRED`
 //!   (terminal, `details.last_known_status`) instead of silently re-executing.
 //!   Past `dedup_retention_seconds` the tombstone row itself is dropped and the
-//!   namespace is free again. Every mutating transaction reclaims expired rows
-//!   ([`receipt_retention_sweep`]) — all namespaces, keyless receipts included —
-//!   so eviction never waits for a probe of the same key; `memory.receipts.get`
-//!   stays read-only (MEM-R011) and only reports what the sweep left. A scrubbed
-//!   body is never restored, even if the provider clock moves backwards.
+//!   namespace is free again, on read and replay alike — a tombstone is not an
+//!   eternal answer. Every mutating entry point and every provider open first
+//!   reclaims expired rows in a transaction of its own
+//!   ([`MemoryStore::reclaim_expired_receipts`]) — all namespaces, keyless
+//!   receipts included — so eviction is committed whatever the operation then
+//!   does: a replay refusal, an authorization failure or any other early return
+//!   drops only the effect transaction. A sweep failure is logged and never
+//!   fails or rolls back the operation it precedes. `memory.receipts.get` stays
+//!   read-only (MEM-R011) and only reports what the sweep left; the provider
+//!   clock never runs backwards ([`MemoryStore::now`]), so a body seen past its
+//!   retention window is never served again whatever the wall clock does next.
 //! * **Error class** (§14.2/§14.3). A failure raised before `COMMIT` is a clean
 //!   no-effect [`StoreError::Database`]/[`StoreError::Corrupt`]; a failure at or
 //!   after `COMMIT` is [`StoreError::CommitUnknown`], which the facade reports as
@@ -58,7 +64,8 @@
 
 use std::path::Path;
 #[cfg(feature = "test-hooks")]
-use std::sync::atomic::{AtomicI64, AtomicU8, Ordering};
+use std::sync::atomic::AtomicU8;
+use std::sync::atomic::{AtomicI64, Ordering};
 #[cfg(feature = "test-hooks")]
 use std::sync::Arc;
 
@@ -332,6 +339,9 @@ pub(super) struct MemoryStore {
     pool: SqlitePool,
     /// Holds this provider's writer admission for the provider's lifetime.
     _guarded: GuardedPool,
+    /// Latest provider-clock reading in microseconds since the epoch. A floor,
+    /// so retention verdicts cannot be re-derived downwards (§6.10).
+    clock_floor: AtomicI64,
     #[cfg(feature = "test-hooks")]
     commit_fault: AtomicU8,
     /// Test-only offset applied to the provider clock (§6.10 retention).
@@ -376,26 +386,58 @@ impl MemoryStore {
     /// grant that expires during that wait still authorize the write (§6.5). Every
     /// mutating entry point therefore takes its `now` from here.
     ///
-    /// The same transaction also reclaims receipts whose §6.10 retention windows
-    /// have elapsed, so eviction and tombstone cleanup run for every namespace
-    /// without depending on a later probe of the same key.
+    /// Receipt reclamation runs *before* this transaction, in one of its own:
+    /// the caller may still refuse the operation or return early, and dropping
+    /// its transaction must not resurrect the bodies the sweep just removed.
     async fn begin_admission(
         &self,
     ) -> StoreResult<(sqlx::Transaction<'_, sqlx::Sqlite>, DateTime<Utc>)> {
-        let mut tx = begin_immediate(&self.pool).await?;
-        let now = self.now();
-        receipt_retention_sweep(&mut tx, now).await?;
-        Ok((tx, now))
+        self.reclaim_expired_receipts().await;
+        let tx = begin_immediate(&self.pool).await?;
+        Ok((tx, self.now()))
+    }
+
+    /// §6.10/MEM-R021 reclamation in a transaction of its own, committed before
+    /// the operation begins — autonomous of how that operation ends.
+    ///
+    /// Eviction therefore outlives a replay refusal, an authorization failure,
+    /// any other early return, and a caller whose own `COMMIT` fails. It is
+    /// best-effort in the opposite direction too: a sweep that cannot run is
+    /// logged and never fails or rolls back the operation it precedes — retention
+    /// is not part of that operation's contract.
+    async fn reclaim_expired_receipts(&self) {
+        let mut tx = match begin_immediate(&self.pool).await {
+            Ok(tx) => tx,
+            Err(error) => {
+                tracing::warn!(?error, "memory receipt retention sweep skipped");
+                return;
+            }
+        };
+        if let Err(error) = receipt_retention_sweep(&mut tx, self.now()).await {
+            tracing::warn!(?error, "memory receipt retention sweep failed");
+            return;
+        }
+        if let Err(error) = tx.commit().await {
+            tracing::warn!(?error, "memory receipt retention sweep did not commit");
+        }
     }
 
     /// The provider clock: retention windows (§6.10) are evaluated against it,
-    /// and it is the one place a test may move time forward.
+    /// and it is the one place a test may move time.
+    ///
+    /// It never runs backwards: the latest reading is a floor for every later
+    /// one, so a wall-clock correction (or a test clock move) cannot re-open a
+    /// window that already closed. A receipt body reported past its window stays
+    /// reported — retention is one-way, not a projection of the current clock.
     fn now(&self) -> DateTime<Utc> {
         #[cfg(feature = "test-hooks")]
-        return Utc::now()
-            + chrono::Duration::seconds(self.receipt_clock_skew.load(Ordering::SeqCst));
+        let observed =
+            Utc::now() + chrono::Duration::seconds(self.receipt_clock_skew.load(Ordering::SeqCst));
         #[cfg(not(feature = "test-hooks"))]
-        Utc::now()
+        let observed = Utc::now();
+        let micros = observed.timestamp_micros();
+        let floor = self.clock_floor.fetch_max(micros, Ordering::SeqCst);
+        DateTime::from_timestamp_micros(floor.max(micros)).unwrap_or(observed)
     }
 
     pub(super) async fn open(db_path: &Path, creator_id: &str) -> StoreResult<Self> {
@@ -404,6 +446,7 @@ impl MemoryStore {
         Ok(Self {
             pool,
             _guarded: guarded,
+            clock_floor: AtomicI64::new(0),
             #[cfg(feature = "test-hooks")]
             commit_fault: AtomicU8::new(COMMIT_FAULT_NONE),
             #[cfg(feature = "test-hooks")]
@@ -469,10 +512,12 @@ impl MemoryStore {
         now: DateTime<Utc>,
     ) -> StoreResult<()> {
         let at = timestamp(now);
-        let mut tx = begin_immediate(&self.pool).await?;
         // §6.10 retention is durable even for a deployment that only reads:
-        // opening the provider reclaims what has aged out.
-        receipt_retention_sweep(&mut tx, now).await?;
+        // opening the provider reclaims what has aged out, and does so in its
+        // own committed transaction so a provisioning failure cannot put an
+        // already-evicted body back either.
+        self.reclaim_expired_receipts().await;
+        let mut tx = begin_immediate(&self.pool).await?;
         sqlx::query(
             "INSERT OR IGNORE INTO memory_spaces \
              (space_id, display_name, authority_host_id, authority_generation, status, revision, created_at) \
@@ -518,8 +563,12 @@ impl MemoryStore {
     /// principal reads nothing, not even their own receipt. Current participation
     /// is required *before* the id is looked up, so a non-participant gets one
     /// refusal whether or not the receipt exists. Read-only (MEM-R011): this
-    /// writes nothing — retained rows are reclaimed by mutating transactions —
-    /// so an evicted body is reported, never repaired here.
+    /// writes nothing — retained rows are reclaimed by mutating entry points —
+    /// so an evicted body is reported, never repaired here. Its verdict is
+    /// one-way all the same: [`Self::now`] never runs backwards, so a body this
+    /// read reports past its retention window is not served again by a later
+    /// read after a clock correction, and a tombstone past the dedup window
+    /// answers `NOT_FOUND` without needing a sweep to remove it first.
     pub(super) async fn receipt(
         &self,
         principal_id: &str,
@@ -1260,12 +1309,14 @@ enum Retention {
 
 /// Which retention window the receipt is in at `now` (§6.10/MEM-R021).
 ///
-/// A settled row with no payload left is a tombstone: the body was evicted from
-/// the row, so it is never served again whatever the clock now says.
+/// The dedup window is decided first: past it the namespace is free again even
+/// when the row is still there, so a tombstone left by an earlier sweep (or by a
+/// body-less settled row) never answers `RECEIPT_EXPIRED` forever. Inside that
+/// window a settled row with no payload left is a tombstone — the body was
+/// evicted from the row, so it is never served again whatever the clock now
+/// says — and a row that still carries its body is `Retained` until
+/// `receipt_retention_seconds` and `Evicted` after.
 fn retention(row: &ReceiptRow, now: DateTime<Utc>) -> StoreResult<Retention> {
-    if row.status != "pending" && row.result_json.is_none() && row.error_json.is_none() {
-        return Ok(Retention::Evicted);
-    }
     let created = chrono::DateTime::parse_from_rfc3339(&row.created_at)
         .map_err(|e| StoreError::Corrupt(format!("memory_receipts.created_at: {e}")))?
         .with_timezone(&Utc);
@@ -1273,12 +1324,14 @@ fn retention(row: &ReceiptRow, now: DateTime<Utc>) -> StoreResult<Retention> {
     let receipt_window =
         i64::try_from(super::policy::RECEIPT_RETENTION_SECONDS).unwrap_or(i64::MAX);
     let dedup_window = i64::try_from(super::policy::DEDUP_RETENTION_SECONDS).unwrap_or(i64::MAX);
-    Ok(if age <= receipt_window {
-        Retention::Retained
-    } else if age <= dedup_window {
-        Retention::Evicted
-    } else {
+    Ok(if age > dedup_window {
         Retention::Expired
+    } else if row.status != "pending" && row.result_json.is_none() && row.error_json.is_none() {
+        Retention::Evicted
+    } else if age <= receipt_window {
+        Retention::Retained
+    } else {
+        Retention::Evicted
     })
 }
 
@@ -1290,13 +1343,14 @@ fn retention_cutoff(now: DateTime<Utc>, window: u64) -> String {
     timestamp(now - chrono::Duration::seconds(seconds))
 }
 
-/// §6.10/MEM-R021 reclamation, inside the caller's effect transaction.
+/// §6.10/MEM-R021 reclamation in one transaction.
 ///
 /// Evicts every body older than `receipt_retention_seconds` across all dedup
 /// namespaces and the keyless `memory.subjects.ensure` receipts too, then drops
 /// every tombstone older than `dedup_retention_seconds`. Eviction is a one-way
 /// rewrite — the payload is discarded, so a later clock move cannot resurrect
-/// it.
+/// it. [`MemoryStore::reclaim_expired_receipts`] owns the transaction and its
+/// commit; this function only writes the reclamation into it.
 async fn receipt_retention_sweep(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     now: DateTime<Utc>,

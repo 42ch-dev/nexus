@@ -632,7 +632,10 @@ async fn receipt_retention_evicts_bodies_and_purges_tombstones() {
     );
 
     // The namespace still binds the key, and the evicted body stays evicted when
-    // the clock is moved back to the receipt's own creation time.
+    // the clock is moved back to the receipt's own creation time. (The provider
+    // clock is monotone, so this move cannot lower the verdict; the read-only
+    // path that has no swept tombstone to rely on is
+    // `receipt_read_expiry_is_one_way_under_a_backward_clock`.)
     provider.advance_receipt_clock(-(receipt_retention + 1));
     let read = wire(
         &provider
@@ -817,4 +820,242 @@ async fn receipt_existence_is_not_enumerable_without_current_participation() {
         );
         assert_eq!(retry_class(&refused), "terminal");
     }
+}
+
+/// §6.10/MEM-R021: reclamation is autonomous. The sweep commits in a transaction
+/// of its own *before* the operation runs, so a replay refusal or an
+/// authorization failure — both of which drop the effect transaction — cannot
+/// roll the eviction back and leave an aged body on disk.
+#[tokio::test]
+async fn receipt_reclamation_survives_a_refused_operation() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    let (receipt_retention, _) = retention_limits(&provider, &admin).await;
+
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    let captured = wire(
+        &provider
+            .capture(&admin, capture_request("k-reclaim-refused", TEXT))
+            .await,
+    );
+    let receipt_id = receipt(&captured)["receipt_id"]
+        .as_str()
+        .expect("receipt id")
+        .to_owned();
+    let pool = nexus_local_db::open_pool_read_only(&env.db_path)
+        .await
+        .unwrap();
+    let (result, error, _) = receipt_payloads(&pool, &receipt_id).await;
+    assert!(
+        result.is_some() && error.is_none(),
+        "the body starts on disk"
+    );
+
+    // Age the body, then refuse the operation that reaches the sweep: the
+    // same-key replay is terminal (`RECEIPT_EXPIRED`), so the effect transaction
+    // that produced it never commits.
+    provider.advance_receipt_clock(receipt_retention + 1);
+    let replay = wire(
+        &provider
+            .capture(&admin, capture_request("k-reclaim-refused", TEXT))
+            .await,
+    );
+    assert_eq!(error_code(&replay), "RECEIPT_EXPIRED");
+    let (result, error, status) = receipt_payloads(&pool, &receipt_id).await;
+    assert!(
+        result.is_none() && error.is_none(),
+        "a replay refusal still leaves the sweep committed"
+    );
+    assert_eq!(
+        status, "committed",
+        "the tombstone keeps the terminal status"
+    );
+
+    // The same holds when the refusal is authorization: age a fresh body past
+    // its window, then have a principal with no grant in the space attempt a
+    // mutation.
+    let second = wire(
+        &provider
+            .capture(&admin, capture_request("k-reclaim-refused-2", TEXT))
+            .await,
+    );
+    let second_id = receipt(&second)["receipt_id"]
+        .as_str()
+        .expect("receipt id")
+        .to_owned();
+    provider.advance_receipt_clock(receipt_retention + 1);
+    let refused = wire(
+        &provider
+            .capture(
+                &principal(STRANGER),
+                capture_request("k-reclaim-stranger", TEXT),
+            )
+            .await,
+    );
+    assert_eq!(error_code(&refused), "NOT_AUTHORIZED");
+    let (result, error, _) = receipt_payloads(&pool, &second_id).await;
+    assert!(
+        result.is_none() && error.is_none(),
+        "an authorization failure still leaves the sweep committed"
+    );
+}
+
+/// §6.10/MEM-R021: the read path stays read-only (MEM-R011) and its verdict is
+/// still one-way. A body past its retention window is reported
+/// `RECEIPT_EXPIRED` even when no sweep has run yet, moving the provider clock
+/// backwards cannot make a later read serve it, and the next mutating entry
+/// point turns the observed eviction into a physical one.
+#[tokio::test]
+async fn receipt_read_expiry_is_one_way_under_a_backward_clock() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    let (receipt_retention, _) = retention_limits(&provider, &admin).await;
+
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    let captured = wire(
+        &provider
+            .capture(&admin, capture_request("k-read-one-way", TEXT))
+            .await,
+    );
+    let receipt_id = receipt(&captured)["receipt_id"]
+        .as_str()
+        .expect("receipt id")
+        .to_owned();
+    let pool = nexus_local_db::open_pool_read_only(&env.db_path)
+        .await
+        .unwrap();
+
+    // Age the body with reads only: nothing sweeps, so the body is still stored
+    // and the verdict below is the read path's own.
+    provider.advance_receipt_clock(receipt_retention + 1);
+    let (result, _, _) = receipt_payloads(&pool, &receipt_id).await;
+    assert!(
+        result.is_some(),
+        "no sweep has run yet, so the aged body is still on disk"
+    );
+    let read = wire(
+        &provider
+            .get_receipt(&admin, receipts_get_request(&receipt_id))
+            .await,
+    );
+    assert_eq!(
+        error_code(&read),
+        "RECEIPT_EXPIRED",
+        "an aged body is not served: {read}"
+    );
+    assert_eq!(error_details(&read)["last_known_status"], "committed");
+
+    // Back to the receipt's creation instant: the expiry already reported stands.
+    provider.advance_receipt_clock(-(receipt_retention + 1));
+    let again = wire(
+        &provider
+            .get_receipt(&admin, receipts_get_request(&receipt_id))
+            .await,
+    );
+    assert_eq!(
+        error_code(&again),
+        "RECEIPT_EXPIRED",
+        "a reported expiry is not re-derived from the clock: {again}"
+    );
+    assert_eq!(error_details(&again)["last_known_status"], "committed");
+
+    // The next mutating entry point makes the eviction physical.
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request("sbj_after_expiry"))
+            .await,
+    );
+    let (result, error, _) = receipt_payloads(&pool, &receipt_id).await;
+    assert!(
+        result.is_none() && error.is_none(),
+        "the observed eviction becomes durable at the next mutation"
+    );
+}
+
+/// §6.10/MEM-R021: the dedup window, not the persisted tombstone, decides the
+/// answer. A tombstone left by an earlier sweep answers `RECEIPT_EXPIRED` only
+/// inside `dedup_retention_seconds`; past it the key is new again, so a
+/// read-only deployment — no sweep since — gets `NOT_FOUND` (the `RECEIPT_EXPIRED`
+/// cause is the evicted body, and there is no surviving dedup namespace left).
+#[tokio::test]
+async fn receipt_tombstone_past_the_dedup_window_is_not_found() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    let (receipt_retention, dedup_retention) = retention_limits(&provider, &admin).await;
+
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    let captured = wire(
+        &provider
+            .capture(&admin, capture_request("k-dedup-read-only", TEXT))
+            .await,
+    );
+    let receipt_id = receipt(&captured)["receipt_id"]
+        .as_str()
+        .expect("receipt id")
+        .to_owned();
+    let pool = nexus_local_db::open_pool_read_only(&env.db_path)
+        .await
+        .unwrap();
+
+    // A mutation just past the receipt window evicts the body and leaves the
+    // content-free tombstone behind.
+    provider.advance_receipt_clock(receipt_retention + 1);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request("sbj_other"))
+            .await,
+    );
+    let (result, error, status) = receipt_payloads(&pool, &receipt_id).await;
+    assert!(
+        result.is_none() && error.is_none(),
+        "the body is evicted, the tombstone stays"
+    );
+    assert_eq!(status, "committed");
+
+    // Inside the dedup window the tombstone still answers for the evicted body.
+    let read = wire(
+        &provider
+            .get_receipt(&admin, receipts_get_request(&receipt_id))
+            .await,
+    );
+    assert_eq!(error_code(&read), "RECEIPT_EXPIRED");
+    assert_eq!(error_details(&read)["last_known_status"], "committed");
+
+    // Past the dedup window, reads only: the row is still there (no sweep ran)
+    // and the key is new again.
+    provider.advance_receipt_clock(dedup_retention + 1);
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM memory_receipts WHERE receipt_id = ?")
+        .bind(&receipt_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        rows, 1,
+        "no sweep has run since the tombstone was written; the read path must not purge it"
+    );
+    let gone = wire(
+        &provider
+            .get_receipt(&admin, receipts_get_request(&receipt_id))
+            .await,
+    );
+    assert_eq!(
+        error_code(&gone),
+        "NOT_FOUND",
+        "the dedup window, not the tombstone's presence, decides: {gone}"
+    );
 }
