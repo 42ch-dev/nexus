@@ -41,8 +41,12 @@ const MAX_CANDIDATES_PER_CAPTURE: u64 = 32;
 const MAX_PAGE_SIZE: u64 = 100;
 const EXPORT_CHUNK_BYTES: u64 = 262_144;
 const IDEMPOTENCY_RETENTION_SECONDS: u64 = 2_592_000;
-const RECEIPT_RETENTION_SECONDS: u64 = 2_592_000;
-const DEDUP_RETENTION_SECONDS: u64 = 5_184_000;
+/// §6.10/MEM-R021: how long a receipt *body* is served; afterwards only its
+/// content-free dedup tombstone answers (§7.28 `RECEIPT_EXPIRED`).
+pub(super) const RECEIPT_RETENTION_SECONDS: u64 = 2_592_000;
+/// How long the tombstone (namespace, digest, receipt id, terminal status)
+/// outlives the body; past it the key is new again.
+pub(super) const DEDUP_RETENTION_SECONDS: u64 = 5_184_000;
 const STAGED_IMPORT_TTL_SECONDS: u64 = 86_400;
 const EXPORT_RETENTION_SECONDS: u64 = 86_400;
 

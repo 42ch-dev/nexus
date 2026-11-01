@@ -28,9 +28,10 @@
 //!
 //! **Served surface.** `memory.describe`, `memory.spaces.*`,
 //! `memory.subjects.*`, `memory.grants.*`, `memory.capture`,
-//! `memory.candidates.*`, `memory.records.*`, `memory.recall` and
-//! `memory.profile.*` are served. The sub-capability gated families
-//! (reflection, transfer) and `memory.receipts.get` are rejected as not served.
+//! `memory.candidates.*`, `memory.records.*`, `memory.recall`,
+//! `memory.profile.*` and `memory.receipts.get` (§7.28) are served. The
+//! sub-capability gated families (reflection, transfer) are rejected as not
+//! served.
 
 pub mod policy;
 pub mod profile;
@@ -131,6 +132,12 @@ enum ProviderError {
         current: i64,
     },
     IdempotencyConflict,
+    /// §6.10/MEM-R021: the receipt body is past `receipt_retention_seconds`; the
+    /// op is never re-executed and only the tombstone's last known status is
+    /// disclosed (§7.28).
+    ReceiptExpired {
+        last_known_status: String,
+    },
     CandidateConsumed(String),
     /// §4.2/MEM-R005: an admission-relevant consumer is missing a required
     /// authored content kind — fail closed, never an empty success.
@@ -159,6 +166,7 @@ impl ProviderError {
             Self::SubjectFenced { .. } => SpokeRejectCode::SubjectFenced,
             Self::RevisionConflict { .. } => SpokeRejectCode::RevisionConflict,
             Self::IdempotencyConflict => SpokeRejectCode::IdempotencyConflict,
+            Self::ReceiptExpired { .. } => SpokeRejectCode::ReceiptExpired,
             Self::CandidateConsumed(_) => SpokeRejectCode::CandidateConsumed,
             Self::ProfileIncomplete { .. } => SpokeRejectCode::ProfileIncomplete,
             Self::InvalidInput { .. } => SpokeRejectCode::InvalidInput,
@@ -211,6 +219,9 @@ impl ProviderError {
             Self::IdempotencyConflict => {
                 "this idempotency key was already used with a different payload".to_string()
             }
+            Self::ReceiptExpired { last_known_status } => format!(
+                "this receipt's body was evicted after its retention window and is no longer                  served; the recorded outcome was {last_known_status}, and the operation is not                  re-executed — use the same idempotency_key to start a new operation"
+            ),
             Self::InvalidInput { field, reason } => format!("{field}: {reason}"),
             Self::CursorInvalid => {
                 "the pagination cursor is no longer valid (state or grant change); restart the listing"
@@ -231,6 +242,9 @@ impl ProviderError {
             }
             Self::RevisionConflict { current } => {
                 details.insert("current_revision".to_string(), json!(current));
+            }
+            Self::ReceiptExpired { last_known_status } => {
+                details.insert("last_known_status".to_string(), json!(last_known_status));
             }
             Self::ProfileIncomplete { missing, .. } => {
                 details.insert("missing".to_string(), json!(missing));
@@ -276,6 +290,9 @@ fn store_error(error: StoreError) -> ProviderError {
         },
         StoreError::RevisionConflict { current } => ProviderError::RevisionConflict { current },
         StoreError::IdempotencyConflict => ProviderError::IdempotencyConflict,
+        StoreError::ReceiptExpired { last_known_status } => {
+            ProviderError::ReceiptExpired { last_known_status }
+        }
         StoreError::CandidateConsumed(reason) => ProviderError::CandidateConsumed(reason),
         StoreError::StatusTransition(reason) => ProviderError::StatusTransition(reason),
         StoreError::CommitUnknown(reason) => ProviderError::OutcomeUncertain(reason),
@@ -289,8 +306,8 @@ fn deny<T>(error: &ProviderError) -> SpokeResult<T> {
     spoke_operations::spoke_reject(error.reject_code(), error.message(), Some(error.details()))
 }
 
-/// The sub-capability gated families (reflection, transfer) and the NXM-2
-/// receipt read: the dispatch-level denial shape. A reject can only carry a
+/// The sub-capability gated families (reflection, transfer): the
+/// dispatch-level denial shape. A reject can only carry a
 /// [`SpokeRejectCode`], and the port
 /// vocabulary has no `op_unsupported` variant — upstream's responder answers an
 /// unimplemented port op with `CapabilityPortMissing` (`responder.rs:367-371`)
@@ -662,6 +679,14 @@ impl LocalMemoryProvider {
     #[doc(hidden)]
     pub fn inject_commit_fault(&self, after_commit: bool) {
         self.store.inject_commit_fault(after_commit);
+    }
+
+    /// §6.10/MEM-R021 proof seam: move the provider clock forward so the receipt
+    /// retention windows elapse. Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn advance_receipt_clock(&self, seconds: i64) {
+        self.store.advance_receipt_clock(seconds);
     }
 
     async fn space(&self, space_id: &str) -> Result<SpaceRow, ProviderError> {
@@ -2463,11 +2488,28 @@ impl MemoryPort for LocalMemoryProvider {
 
     async fn get_receipt(
         &self,
-        _principal: &schemas::Principal,
-        _request: schemas::MemoryReceiptsGetRequest,
+        principal: &schemas::Principal,
+        request: schemas::MemoryReceiptsGetRequest,
     ) -> SpokeResult<schemas::MemoryReceiptsGetResponse> {
-        // NXM-2 owns the receipt read channel.
-        unsupported("memory.receipts.get")
+        // §7.28: the sole uncertainty-resolution channel (MEM-R010). Read-only
+        // (MEM-R011), content-free (§6.10/MEM-R022), and admissible only under the
+        // caller's *current* authorization (MEM-R018/R021).
+        let stored = match self
+            .store
+            .receipt(
+                principal_id(principal),
+                request.space_id.as_str(),
+                request.receipt_id.as_str(),
+            )
+            .await
+        {
+            Ok(stored) => stored,
+            Err(error) => return deny(&store_error(error)),
+        };
+        match receipt_body(&stored) {
+            Ok(body) => respond(json!({ "receipt": body })),
+            Err(error) => deny(&error),
+        }
     }
 
     // ── Sub-capability gated (never served in N1) ──────────────────────

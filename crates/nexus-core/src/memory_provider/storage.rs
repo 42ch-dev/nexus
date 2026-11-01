@@ -29,6 +29,14 @@
 //!   replay never re-evaluates the constraints of the receipt it returns.
 //! * **Revision CAS** (MEM-R007). `expected_revision` is compared and `revision`
 //!   incremented in the same `UPDATE ... WHERE revision = ?` statement.
+//! * **Receipt retention** (§6.10/MEM-R021). A receipt body is served for
+//!   `receipt_retention_seconds`; after that only its content-free tombstone —
+//!   the stored namespace, digest, id and terminal status — answers, so a replay
+//!   and `memory.receipts.get` fail `RECEIPT_EXPIRED` (terminal,
+//!   `details.last_known_status`) instead of silently re-executing. Past
+//!   `dedup_retention_seconds` the namespace is free again and the expired row is
+//!   dropped on the next probe of that key. Retention is evaluated against the
+//!   provider clock, never rewritten into the immutable receipt row.
 //! * **Error class** (§14.2/§14.3). A failure raised before `COMMIT` is a clean
 //!   no-effect [`StoreError::Database`]/[`StoreError::Corrupt`]; a failure at or
 //!   after `COMMIT` is [`StoreError::CommitUnknown`], which the facade reports as
@@ -47,7 +55,7 @@
 
 use std::path::Path;
 #[cfg(feature = "test-hooks")]
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU8, Ordering};
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::{json, Value};
@@ -94,6 +102,11 @@ pub(super) enum StoreError {
         current: i64,
     },
     IdempotencyConflict,
+    /// The receipt body is past `receipt_retention_seconds`; the dedup tombstone
+    /// still knows how the op ended (§6.10/MEM-R021, §7.28).
+    ReceiptExpired {
+        last_known_status: String,
+    },
     /// The candidate left the §8.1 `pending` state: consumption is terminal.
     CandidateConsumed(String),
     /// A forbidden lifecycle transition (§7.7/§7.10).
@@ -314,6 +327,9 @@ pub(super) struct MemoryStore {
     _guarded: GuardedPool,
     #[cfg(feature = "test-hooks")]
     commit_fault: AtomicU8,
+    /// Test-only offset applied to the provider clock (§6.10 retention).
+    #[cfg(feature = "test-hooks")]
+    receipt_clock_skew: AtomicI64,
 }
 
 const SPACE_COLUMNS: &str = "s.space_id, s.display_name, s.authority_host_id, \
@@ -340,21 +356,31 @@ const VISIBLE_SPACE_PREDICATE: &str = "EXISTS ( \
            AND (g.expires_at IS NULL OR g.expires_at > ?) \
      )";
 
-/// Open an effect transaction and read the authorization clock **after** the
-/// write lock is held.
-///
-/// `BEGIN IMMEDIATE` can park behind another writer for as long as its
-/// `busy_timeout` allows, so a clock read by the caller beforehand would let a
-/// grant that expires during that wait still authorize the write (§6.5). Every
-/// mutating entry point therefore takes its `now` from here.
-async fn begin_admission(
-    pool: &SqlitePool,
-) -> StoreResult<(sqlx::Transaction<'_, sqlx::Sqlite>, DateTime<Utc>)> {
-    let tx = begin_immediate(pool).await?;
-    Ok((tx, Utc::now()))
-}
-
 impl MemoryStore {
+    /// Open an effect transaction and read the authorization clock **after** the
+    /// write lock is held.
+    ///
+    /// `BEGIN IMMEDIATE` can park behind another writer for as long as its
+    /// `busy_timeout` allows, so a clock read by the caller beforehand would let a
+    /// grant that expires during that wait still authorize the write (§6.5). Every
+    /// mutating entry point therefore takes its `now` from here.
+    async fn begin_admission(
+        &self,
+    ) -> StoreResult<(sqlx::Transaction<'_, sqlx::Sqlite>, DateTime<Utc>)> {
+        let tx = begin_immediate(&self.pool).await?;
+        Ok((tx, self.now()))
+    }
+
+    /// The provider clock: retention windows (§6.10) are evaluated against it,
+    /// and it is the one place a test may move time forward.
+    fn now(&self) -> DateTime<Utc> {
+        #[cfg(feature = "test-hooks")]
+        return Utc::now()
+            + chrono::Duration::seconds(self.receipt_clock_skew.load(Ordering::SeqCst));
+        #[cfg(not(feature = "test-hooks"))]
+        Utc::now()
+    }
+
     pub(super) async fn open(db_path: &Path, creator_id: &str) -> StoreResult<Self> {
         let guarded = init_guarded_pool(db_path, creator_id).await?;
         let pool = guarded.clone_pool();
@@ -363,7 +389,16 @@ impl MemoryStore {
             _guarded: guarded,
             #[cfg(feature = "test-hooks")]
             commit_fault: AtomicU8::new(COMMIT_FAULT_NONE),
+            #[cfg(feature = "test-hooks")]
+            receipt_clock_skew: AtomicI64::new(0),
         })
+    }
+
+    /// §6.10/MEM-R021 proof seam: move the provider clock forward so the receipt
+    /// retention windows elapse. Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    pub(super) fn advance_receipt_clock(&self, seconds: i64) {
+        self.receipt_clock_skew.fetch_add(seconds, Ordering::SeqCst);
     }
 
     /// Force the next committing transaction to fail at the commit boundary: a
@@ -434,6 +469,74 @@ impl MemoryStore {
             .await?)
     }
 
+    /// §7.28 `memory.receipts.get`: one stored receipt under **current**
+    /// authorization (MEM-R018/R021).
+    ///
+    /// Disclosure admits the receipt's own requester while they are still a live
+    /// participant of the space, or a space-wide `admin` grant — a revoked
+    /// principal reads nothing, not even their own receipt. Read-only (MEM-R011):
+    /// this writes nothing, so an evicted body is reported, never repaired here.
+    pub(super) async fn receipt(
+        &self,
+        principal_id: &str,
+        space_id: &str,
+        receipt_id: &str,
+    ) -> StoreResult<ReceiptRow> {
+        let now = self.now();
+        let mut tx = self.pool.begin().await?;
+        space_in_tx(&mut tx, space_id).await?;
+        let sql = format!(
+            "SELECT {RECEIPT_COLUMNS} FROM memory_receipts WHERE receipt_id = ? AND space_id = ?"
+        );
+        let row = sqlx::query_as::<_, ReceiptRow>(sqlx::AssertSqlSafe(sql))
+            .bind(receipt_id)
+            .bind(space_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| StoreError::NotFound(format!("receipt {receipt_id}")))?;
+        let grant_rows = grants_in_tx(&mut tx, space_id).await?;
+        let at = timestamp(now);
+        let participant = grant_rows.iter().any(|grant| {
+            grant.principal_id == principal_id
+                && grant.revoked_at.is_none()
+                && grant
+                    .expires_at
+                    .as_deref()
+                    .is_none_or(|expires_at| expires_at > at.as_str())
+        });
+        let admin = GrantRequirement {
+            capability: "admin",
+            subject_id: None,
+            context_ids: Vec::new(),
+            reads_shared: false,
+            subject_all: false,
+        };
+        let requester = row.requester_principal_id == principal_id && participant;
+        let was_admin = covered(
+            &wire_grants(&grant_rows)?,
+            principal_id,
+            space_id,
+            now,
+            &admin,
+        );
+        if !requester && !was_admin {
+            return Err(StoreError::NotAuthorized(format!(
+                "principal {principal_id} holds no current authorization for receipt {receipt_id}"
+            )));
+        }
+        match retention(&row.created_at, now)? {
+            Retention::Retained => {
+                tx.commit().await?;
+                Ok(row)
+            }
+            Retention::Evicted => Err(StoreError::ReceiptExpired {
+                last_known_status: row.status,
+            }),
+            // Past the dedup window even the tombstone is gone.
+            Retention::Expired => Err(StoreError::NotFound(format!("receipt {receipt_id}"))),
+        }
+    }
+
     pub(super) async fn find_subject(
         &self,
         space_id: &str,
@@ -491,9 +594,9 @@ impl MemoryStore {
         expected_revision: i64,
         status: &str,
     ) -> StoreResult<ReceiptRow> {
-        let (mut tx, now) = begin_admission(&self.pool).await?;
+        let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
-        if let Some(row) = probe(&mut tx, ctx).await? {
+        if let Some(row) = probe(&mut tx, ctx, now).await? {
             return Ok(row);
         }
         gate(&mut tx, admission).await?;
@@ -536,9 +639,9 @@ impl MemoryStore {
         subject_id: &str,
         kind: Option<(&str, &str)>,
     ) -> StoreResult<ReceiptRow> {
-        let (mut tx, now) = begin_admission(&self.pool).await?;
+        let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
-        if let Some(row) = probe(&mut tx, ctx).await? {
+        if let Some(row) = probe(&mut tx, ctx, now).await? {
             return Ok(row);
         }
         gate(&mut tx, admission).await?;
@@ -585,9 +688,9 @@ impl MemoryStore {
             action,
             expected_revision,
         } = fence;
-        let (mut tx, now) = begin_admission(&self.pool).await?;
+        let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
-        if let Some(row) = probe(&mut tx, ctx).await? {
+        if let Some(row) = probe(&mut tx, ctx, now).await? {
             return Ok(row);
         }
         gate(&mut tx, admission).await?;
@@ -704,14 +807,14 @@ impl MemoryStore {
         admission: &Admission<'_>,
         new_grant: &NewGrant<'_>,
     ) -> StoreResult<ReceiptRow> {
-        let (mut tx, now) = begin_admission(&self.pool).await?;
+        let (mut tx, now) = self.begin_admission().await?;
         // §7.0.5/MEM-R021: handing back a committed receipt is a disclosure, so
         // it needs current coverage — but it never re-runs the issuance rules.
         // An applicable admin grant acquired after the original issuance can
         // tighten the §7.9 expiry bound, and the retry must still return its
         // receipt rather than `NOT_AUTHORIZED`.
         let grants = authorize(&mut tx, admission, now).await?;
-        if let Some(row) = probe(&mut tx, ctx).await? {
+        if let Some(row) = probe(&mut tx, ctx, now).await? {
             return Ok(row);
         }
         authorize_issuance(&grants, admission, now)?;
@@ -753,9 +856,9 @@ impl MemoryStore {
         grant_id: &str,
         expected_revision: i64,
     ) -> StoreResult<ReceiptRow> {
-        let (mut tx, now) = begin_admission(&self.pool).await?;
+        let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
-        if let Some(row) = probe(&mut tx, ctx).await? {
+        if let Some(row) = probe(&mut tx, ctx, now).await? {
             return Ok(row);
         }
         gate(&mut tx, admission).await?;
@@ -1086,14 +1189,51 @@ fn next_fence_state(
     Ok((status, fenced_contexts, changed))
 }
 
+/// §6.10/MEM-R021 retention state of one stored receipt at the provider clock.
+enum Retention {
+    /// Inside `receipt_retention_seconds`: the body is served as stored.
+    Retained,
+    /// Body evicted, dedup tombstone alive: never re-execute, never serve.
+    Evicted,
+    /// Past `dedup_retention_seconds`: the namespace is free again.
+    Expired,
+}
+
+/// Which retention window the receipt created at `created_at` is in at `now`.
+///
+/// The row itself is never rewritten — a committed receipt is the durable answer
+/// it was written as — so retention is a read-time comparison against the
+/// provider clock.
+fn retention(created_at: &str, now: DateTime<Utc>) -> StoreResult<Retention> {
+    let created = chrono::DateTime::parse_from_rfc3339(created_at)
+        .map_err(|e| StoreError::Corrupt(format!("memory_receipts.created_at: {e}")))?
+        .with_timezone(&Utc);
+    let age = now.signed_duration_since(created).num_seconds();
+    let receipt_window =
+        i64::try_from(super::policy::RECEIPT_RETENTION_SECONDS).unwrap_or(i64::MAX);
+    let dedup_window = i64::try_from(super::policy::DEDUP_RETENTION_SECONDS).unwrap_or(i64::MAX);
+    Ok(if age <= receipt_window {
+        Retention::Retained
+    } else if age <= dedup_window {
+        Retention::Evicted
+    } else {
+        Retention::Expired
+    })
+}
+
 /// Probe the dedup namespace inside the caller's transaction.
 ///
 /// A keyless op (the `memory.subjects.ensure` exemption) binds NULL, which
 /// SQLite never matches, so it never replays and always records a fresh
 /// receipt.
+///
+/// A hit is judged by its retention window first: an evicted body is
+/// `RECEIPT_EXPIRED` (terminal, never re-executed) and a namespace past the dedup
+/// window is cleared here so the key starts over (§6.10/MEM-R021).
 async fn probe(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     ctx: &OpContext<'_>,
+    now: DateTime<Utc>,
 ) -> StoreResult<Option<ReceiptRow>> {
     let sql = format!(
         "SELECT {RECEIPT_COLUMNS} FROM memory_receipts \
@@ -1106,10 +1246,28 @@ async fn probe(
         .bind(ctx.idempotency_key)
         .fetch_optional(&mut **tx)
         .await?;
-    match existing {
-        None => Ok(None),
-        Some(row) if row.payload_digest == ctx.payload_digest => Ok(Some(row)),
-        Some(_) => Err(StoreError::IdempotencyConflict),
+    let Some(row) = existing else {
+        return Ok(None);
+    };
+    match retention(&row.created_at, now)? {
+        Retention::Retained => {
+            if row.payload_digest == ctx.payload_digest {
+                Ok(Some(row))
+            } else {
+                Err(StoreError::IdempotencyConflict)
+            }
+        }
+        Retention::Evicted => Err(StoreError::ReceiptExpired {
+            last_known_status: row.status,
+        }),
+        Retention::Expired => {
+            // The partial unique index would otherwise hold the key forever.
+            sqlx::query("DELETE FROM memory_receipts WHERE receipt_id = ?")
+                .bind(&row.receipt_id)
+                .execute(&mut **tx)
+                .await?;
+            Ok(None)
+        }
     }
 }
 
@@ -1651,9 +1809,9 @@ impl MemoryStore {
         admission: &Admission<'_>,
         candidates: &[NewCandidate<'_>],
     ) -> StoreResult<ReceiptRow> {
-        let (mut tx, now) = begin_admission(&self.pool).await?;
+        let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
-        if let Some(row) = probe(&mut tx, ctx).await? {
+        if let Some(row) = probe(&mut tx, ctx, now).await? {
             return Ok(row);
         }
         gate(&mut tx, admission).await?;
@@ -1791,9 +1949,9 @@ impl MemoryStore {
         candidate_id: &str,
         expected_revision: i64,
     ) -> StoreResult<ReceiptRow> {
-        let (mut tx, now) = begin_admission(&self.pool).await?;
+        let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
-        if let Some(row) = probe(&mut tx, ctx).await? {
+        if let Some(row) = probe(&mut tx, ctx, now).await? {
             return Ok(row);
         }
         gate(&mut tx, admission).await?;
@@ -1832,9 +1990,9 @@ impl MemoryStore {
         expected_revision: i64,
         decision: &ReviewDecision<'_>,
     ) -> StoreResult<ReceiptRow> {
-        let (mut tx, now) = begin_admission(&self.pool).await?;
+        let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
-        if let Some(row) = probe(&mut tx, ctx).await? {
+        if let Some(row) = probe(&mut tx, ctx, now).await? {
             return Ok(row);
         }
         gate(&mut tx, admission).await?;
@@ -2067,9 +2225,9 @@ impl MemoryStore {
         content: &Value,
         provenance: &Value,
     ) -> StoreResult<ReceiptRow> {
-        let (mut tx, now) = begin_admission(&self.pool).await?;
+        let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
-        if let Some(row) = probe(&mut tx, ctx).await? {
+        if let Some(row) = probe(&mut tx, ctx, now).await? {
             return Ok(row);
         }
         gate(&mut tx, admission).await?;
@@ -2101,9 +2259,9 @@ impl MemoryStore {
         content: Option<&Value>,
         kind: Option<&str>,
     ) -> StoreResult<ReceiptRow> {
-        let (mut tx, now) = begin_admission(&self.pool).await?;
+        let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
-        if let Some(row) = probe(&mut tx, ctx).await? {
+        if let Some(row) = probe(&mut tx, ctx, now).await? {
             return Ok(row);
         }
         gate(&mut tx, admission).await?;
@@ -2165,9 +2323,9 @@ impl MemoryStore {
         reason: Option<&str>,
         deleted_by: &str,
     ) -> StoreResult<ReceiptRow> {
-        let (mut tx, now) = begin_admission(&self.pool).await?;
+        let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
-        if let Some(row) = probe(&mut tx, ctx).await? {
+        if let Some(row) = probe(&mut tx, ctx, now).await? {
             return Ok(row);
         }
         gate(&mut tx, admission).await?;
@@ -2229,9 +2387,9 @@ impl MemoryStore {
         expected_revision: i64,
         target: Placement<'_>,
     ) -> StoreResult<ReceiptRow> {
-        let (mut tx, now) = begin_admission(&self.pool).await?;
+        let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
-        if let Some(row) = probe(&mut tx, ctx).await? {
+        if let Some(row) = probe(&mut tx, ctx, now).await? {
             return Ok(row);
         }
         gate(&mut tx, admission).await?;
@@ -2336,9 +2494,9 @@ impl MemoryStore {
         document: &Value,
         updated_by: &str,
     ) -> StoreResult<ReceiptRow> {
-        let (mut tx, now) = begin_admission(&self.pool).await?;
+        let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
-        if let Some(row) = probe(&mut tx, ctx).await? {
+        if let Some(row) = probe(&mut tx, ctx, now).await? {
             return Ok(row);
         }
         gate(&mut tx, admission).await?;
