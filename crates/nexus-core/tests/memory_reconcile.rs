@@ -438,13 +438,13 @@ async fn crash_before_journal_commit_leaves_no_effect_and_frees_the_key() {
 // ── Window (b): a crash after the journal commit ────────────────────────
 
 /// After the journal commit the SQL effect is durable and recoverable. Until
-/// recovery settles the intent, the subject's objects are withheld from
-/// recall/list/get and the receipt is *pending* — the file effect was never
-/// published, so neither the replay nor `memory.receipts.get` may report a
-/// terminal outcome. A reopen publishes the planned file from the journaled
-/// bytes and only then terminalizes the receipt.
+/// the intent is settled, the subject's objects are withheld from recall/list/get
+/// and the receipt stays *pending* — `memory.receipts.get` may not report a
+/// terminal outcome for a file effect that was never published. A same-key
+/// replay settles the intent (S-2) and answers the terminal outcome without
+/// waiting for a reopen.
 #[tokio::test]
-async fn crash_after_journal_commit_is_withheld_then_published_on_reopen() {
+async fn crash_after_journal_commit_is_withheld_then_settled_by_a_replay() {
     let env = seed_env();
     let provider = open_provider(&env).await;
     ensure(&provider).await;
@@ -459,14 +459,8 @@ async fn crash_after_journal_commit_is_withheld_then_published_on_reopen() {
     assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
 
     // §5.2 step 2: the receipt is durable at the point of no return, but the
-    // pending window reports the pending state on both channels.
-    let replayed = wire(
-        &provider
-            .create_record(&admin(), record_create_request("k-post-commit", TEXT))
-            .await,
-    );
-    assert_eq!(error_code(&replayed), "OUTCOME_UNCERTAIN");
-    assert_eq!(retry_class(&replayed), "uncertain");
+    // pending window reports the pending state — and the read-only receipt
+    // channel never settles the intent itself (MEM-R011).
     let receipt_id = receipt_id_of_key(&env, "k-post-commit").await;
     let read = wire(
         &provider
@@ -494,10 +488,15 @@ async fn crash_after_journal_commit_is_withheld_then_published_on_reopen() {
     assert_eq!(recalled["total_authorized"], 0);
     assert_eq!(files_under(&root), Vec::<String>::new());
 
-    drop(provider);
-    let provider = open_provider(&env).await;
-
-    // Recovery published exactly the planned target and settled the journal.
+    // §5.2 step 2/S-2: the replay settles the journaled intent — it publishes
+    // the planned target and only then terminalizes the receipt.
+    let replayed = wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-post-commit", TEXT))
+            .await,
+    );
+    let replayed = receipt(&replayed);
+    assert_eq!(record_id_of(replayed), record_id);
     assert_eq!(files_under(&root), vec![format!("records/{record_id}.md")]);
     let published = std::fs::read_to_string(root.join(format!("records/{record_id}.md"))).unwrap();
     assert!(
@@ -511,28 +510,31 @@ async fn crash_after_journal_commit_is_withheld_then_published_on_reopen() {
             .await,
     );
     assert_eq!(served["record"]["content"]["text"], TEXT);
-    let recalled = wire(&provider.recall(&admin(), recall_request(10)).await);
-    assert_eq!(recalled["total_authorized"], 1);
-
-    // Only now is the receipt terminal, on both channels and with the same
-    // outcome the crashed caller never saw.
-    let replayed = wire(
-        &provider
-            .create_record(&admin(), record_create_request("k-post-commit", TEXT))
-            .await,
-    );
-    let replayed = receipt(&replayed);
-    assert_eq!(record_id_of(replayed), record_id);
     let read = wire(
         &provider
             .get_receipt(&admin(), receipts_get_request(&receipt_id))
             .await,
     );
     assert_eq!(read_receipt(&read), replayed);
+
+    // A reopen finds the settled intent and leaves the published file alone.
+    drop(provider);
+    let provider = open_provider(&env).await;
+    assert_eq!(files_under(&root), vec![format!("records/{record_id}.md")]);
+    assert_eq!(journal_states(&env).await, vec!["applied"]);
+    let again = wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-post-commit", TEXT))
+            .await,
+    );
+    assert_eq!(record_id_of(receipt(&again)), record_id);
 }
 
 /// C-113's "post-commit pre-publish" window: the staged file exists and
 /// matches the intent digest, so recovery publishes it instead of regenerating.
+/// S-1: the publish failure terminalizes the intent at once (the subject reads
+/// the terminal refusal, never a silent withholding), and the next open re-drives
+/// the quarantined intent from the staged file.
 #[tokio::test]
 async fn crash_after_staging_is_published_from_the_staged_file() {
     let env = seed_env();
@@ -554,19 +556,16 @@ async fn crash_after_staging_is_published_from_the_staged_file() {
         staged[0].contains(".staged"),
         "the staged file stays hidden until publish: {staged:?}"
     );
-    let replayed = wire(
-        &provider
-            .create_record(&admin(), record_create_request("k-staged", TEXT))
-            .await,
-    );
-    assert_eq!(error_code(&replayed), "OUTCOME_UNCERTAIN");
+    // S-1: quarantined immediately, with the payload kept for the re-drive.
+    assert_eq!(journal_states(&env).await, vec!["quarantined"]);
     let record_id = only_record_id(&env).await;
     let withheld = wire(
         &provider
             .get_record(&admin(), record_get_request(&record_id))
             .await,
     );
-    assert_eq!(error_code(&withheld), "NOT_FOUND");
+    assert_eq!(error_code(&withheld), "INTERNAL_ERROR");
+    assert_eq!(retry_class(&withheld), "terminal");
 
     drop(provider);
     let provider = open_provider(&env).await;
@@ -584,7 +583,9 @@ async fn crash_after_staging_is_published_from_the_staged_file() {
 }
 
 /// A crash after the publish rename: the target is already consistent, so
-/// recovery marks the intent applied without rewriting or re-staging it.
+/// recovery marks the intent applied without rewriting or re-staging it. S-1:
+/// the injected failure terminalizes the intent first, so the subject is not
+/// silently withheld while it waits for the next open.
 #[tokio::test]
 async fn crash_after_publish_marks_the_intent_applied() {
     let env = seed_env();
@@ -599,14 +600,9 @@ async fn crash_after_publish_marks_the_intent_applied() {
             .await,
     );
     assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
-    let replayed = wire(
-        &provider
-            .create_record(&admin(), record_create_request("k-published", TEXT))
-            .await,
-    );
-    // The file is published but the intent is not settled, so the receipt is
-    // still pending and the replay says so.
-    assert_eq!(error_code(&replayed), "OUTCOME_UNCERTAIN");
+    // The file is published but the intent is not settled — and it is recorded
+    // as quarantined until a pass re-drives it.
+    assert_eq!(journal_states(&env).await, vec!["quarantined"]);
     let record_id = only_record_id(&env).await;
     assert_eq!(files_under(&root), vec![format!("records/{record_id}.md")]);
     let before = std::fs::read_to_string(root.join(format!("records/{record_id}.md"))).unwrap();

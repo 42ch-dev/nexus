@@ -44,6 +44,11 @@ const IDEMPOTENCY_RETENTION_SECONDS: u64 = 2_592_000;
 /// §6.10/MEM-R021: how long a receipt *body* is served; afterwards only its
 /// content-free dedup tombstone answers (§7.28 `RECEIPT_EXPIRED`).
 pub(super) const RECEIPT_RETENTION_SECONDS: u64 = 2_592_000;
+/// §5.2/MEM-R014: how long an applied journal shell is retained. Its file
+/// content is scrubbed at settlement (`targets_json` becomes `'[]'`), so the
+/// window only bounds the diagnostic trail and the outbox history; an unsettled
+/// intent is never reclaimed, it is the recovery authority.
+pub(super) const JOURNAL_RETENTION_SECONDS: u64 = 2_592_000;
 /// How long the tombstone (namespace, digest, receipt id, terminal status)
 /// outlives the body; past it the key is new again.
 pub(super) const DEDUP_RETENTION_SECONDS: u64 = 5_184_000;

@@ -1713,7 +1713,27 @@ async fn control_metadata_migration_is_idempotent_and_writer_registered() {
 #[tokio::test]
 async fn out_of_guard_writes_are_writer_fenced() {
     let env = seed_env();
-    let _provider = open_provider(&env).await;
+    let provider = open_provider(&env).await;
+    wire(
+        &provider
+            .ensure_subject(&principal(CREATOR), ensure_request(SUBJECT))
+            .await,
+    );
+    // One committed intent, so the journal probes below have a row to attack.
+    let created = wire(
+        &provider
+            .create_record(
+                &principal(CREATOR),
+                record_create_request(
+                    "k-journal-fence",
+                    "note",
+                    &json!({ "visibility": "shared" }),
+                    TEXT,
+                ),
+            )
+            .await,
+    );
+    assert!(receipt(&created)["result"]["record_id"].is_string());
 
     // A connection with the protocol scalar functions installed but NO
     // `core_writer_registration` row: exactly the "outside the guard" writer the
@@ -1775,6 +1795,26 @@ async fn out_of_guard_writes_are_writer_fenced() {
     assert!(
         err.to_string().contains("WRITER_FENCED"),
         "expected WRITER_FENCED for a record insert, got: {err}"
+    );
+
+    // The journal carries the same admission, and its key is a real column:
+    // without a rowid alias there is no `INSERT OR REPLACE …(seq, …)` /
+    // `UPDATE … SET rowid` route around the delete guard (the must-fix).
+    let err = sqlx::query("DELETE FROM memory_journal")
+        .execute(&mut raw)
+        .await
+        .expect_err("a journal delete outside the guard must be fenced");
+    assert!(
+        err.to_string().contains("WRITER_FENCED"),
+        "expected WRITER_FENCED for a journal delete, got: {err}"
+    );
+    let err = sqlx::query("SELECT rowid FROM memory_journal")
+        .fetch_all(&mut raw)
+        .await
+        .expect_err("a WITHOUT ROWID journal has no rowid alias to attack");
+    assert!(
+        err.to_string().contains("no such column: rowid"),
+        "expected the journal to expose no rowid, got: {err}"
     );
 }
 
@@ -1966,7 +2006,7 @@ async fn capture_review_promote_and_recall_round_trip() {
     // MEM-R004: a candidate is never a recall result, and nothing is retained yet.
     let before_review = wire(&provider.recall(&admin, recall_request(10)).await);
     assert_eq!(before_review["total_authorized"], 0);
-    assert!(before_review["records"].as_array().unwrap().is_empty());
+    assert_eq!(before_review["records"], json!([]));
 
     let reviewed = wire(
         &provider
@@ -2084,6 +2124,83 @@ async fn duplicate_capture_replays_the_receipt() {
     );
     assert_eq!(error_code(&conflict), "IDEMPOTENCY_CONFLICT");
     assert_eq!(retry_class(&conflict), "terminal");
+}
+
+/// §6.7/S-9: an expired pending candidate leaves the list — the predicate is in
+/// the list SQL, not a post-filter over every fetched row — and the retention
+/// sweep reclaims its body with the shell.
+#[tokio::test]
+async fn expired_pending_candidates_leave_the_list_and_are_reclaimed() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
+    // Two real captures (so content and provenance are the API's own shapes),
+    // then one is aged out: `memory.capture` never mints an expiring candidate.
+    let mut candidate_ids = Vec::new();
+    for key in ["k-expiring", "k-live"] {
+        let captured = wire(
+            &provider
+                .capture(&admin, capture_request(key, None, TEXT))
+                .await,
+        );
+        candidate_ids.push(
+            receipt(&captured)["result"]["candidate_ids"][0]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
+    }
+    sqlx::query(
+        "UPDATE memory_candidates SET expires_at = '2020-01-01T00:00:00Z' WHERE candidate_id = ?",
+    )
+    .bind(&candidate_ids[0])
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let listed = wire(
+        &provider
+            .list_candidates(&admin, candidates_list_request(None))
+            .await,
+    );
+    let ids: Vec<&str> = listed["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|candidate| candidate["candidate_id"].as_str())
+        .collect();
+    assert!(
+        ids.contains(&candidate_ids[1].as_str()),
+        "a live candidate stays: {listed}"
+    );
+    assert!(
+        !ids.contains(&candidate_ids[0].as_str()),
+        "an expired candidate leaves the list: {listed}"
+    );
+
+    // Every mutating entry point runs the retention sweep in its own committed
+    // transaction, which is where the expired row's body is dropped.
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(OTHER_SUBJECT))
+            .await,
+    );
+    let (expired,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM memory_candidates WHERE candidate_id = ?")
+            .bind(&candidate_ids[0])
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        expired, 0,
+        "the sweep reclaims the expired pending candidate"
+    );
 }
 
 /// §8.1/MEM-R007: review is revision-checked, and consumption is terminal —
@@ -3369,7 +3486,7 @@ async fn archived_subjects_leave_recall_and_default_candidate_lists() {
         recalled_after["total_authorized"], 0,
         "an archived subject's records leave recall (§7.7): {recalled_after}"
     );
-    assert!(recalled_after["records"].as_array().unwrap().is_empty());
+    assert_eq!(recalled_after["records"], json!([]));
 
     let default_listing = wire(
         &provider

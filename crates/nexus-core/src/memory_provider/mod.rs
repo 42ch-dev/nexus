@@ -48,12 +48,11 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 use spoke_operations::spoke_schemas as schemas;
 use spoke_operations::{
-    grant_covers, jcs_sha256_hex, validate_memory_candidates_list,
-    validate_memory_candidates_review, validate_memory_capture, validate_memory_grants_grant,
-    validate_memory_grants_list, validate_memory_recall, validate_memory_records_create,
-    validate_memory_records_list, validate_memory_records_update, validate_memory_spaces_list,
-    validate_memory_subjects_fence, GrantRequirement, IssuedGrant, MemoryPort, SpokeRejectCode,
-    SpokeResult,
+    jcs_sha256_hex, validate_memory_candidates_list, validate_memory_candidates_review,
+    validate_memory_capture, validate_memory_grants_grant, validate_memory_grants_list,
+    validate_memory_recall, validate_memory_records_create, validate_memory_records_list,
+    validate_memory_records_update, validate_memory_spaces_list, validate_memory_subjects_fence,
+    GrantRequirement, IssuedGrant, MemoryPort, SpokeRejectCode, SpokeResult,
 };
 
 use crate::error::{CoreError, CoreResult};
@@ -656,6 +655,34 @@ fn decode_cursor(
     Ok(cursor.offset)
 }
 
+/// The cursor's offset and the snapshot marker it was issued against, decoded
+/// **before** the store reads the page: the offset is what selects the SQL page,
+/// while the marker is verified afterwards against that same snapshot, so a
+/// stale cursor still answers `CURSOR_INVALID` (§7.0.7/MEM-R026).
+fn cursor_page(
+    raw: Option<&str>,
+    principal: &str,
+    scope: &str,
+) -> Result<(u64, Option<String>), ProviderError> {
+    let Some(raw) = raw else {
+        return Ok((0, None));
+    };
+    let cursor: PageCursor = serde_json::from_str(raw).map_err(|_| ProviderError::CursorInvalid)?;
+    if cursor.principal != principal || cursor.scope != scope {
+        return Err(ProviderError::CursorInvalid);
+    }
+    Ok((cursor.offset, Some(cursor.marker)))
+}
+
+/// Refuse a page read against a different snapshot than the cursor was minted
+/// on — the visible set or its grants changed between pages.
+fn verify_cursor(claimed: Option<&str>, marker: &str) -> Result<(), ProviderError> {
+    if claimed.is_some_and(|claimed| claimed != marker) {
+        return Err(ProviderError::CursorInvalid);
+    }
+    Ok(())
+}
+
 fn page<T>(items: Vec<T>, limit: u64, offset: u64) -> (Vec<T>, Option<u64>) {
     let total = items.len();
     let start = usize::try_from(offset).unwrap_or(total).min(total);
@@ -668,33 +695,6 @@ fn page<T>(items: Vec<T>, limit: u64, offset: u64) -> (Vec<T>, Option<u64>) {
 
 fn page_limit(limit: Option<NonZeroU64>) -> u64 {
     limit.unwrap_or(policy::MAX_PAGE_SIZE_BOUND).get()
-}
-
-/// Does any live grant reach this subject at all? §7.6/§7.2 ask for "any
-/// capability on the subject", which `grant_covers` cannot express (it always
-/// names one required capability), so the §6.5 applicability filters are
-/// applied directly.
-fn any_grant_for_subject(
-    grants: &[GrantRow],
-    principal_id: &str,
-    space_id: &str,
-    subject_id: &str,
-    now: DateTime<Utc>,
-) -> bool {
-    let now_text = storage::timestamp(now);
-    grants.iter().any(|grant| {
-        grant.principal_id == principal_id
-            && grant.space_id == space_id
-            && grant.revoked_at.is_none()
-            && grant
-                .expires_at
-                .as_deref()
-                .is_none_or(|expires_at| expires_at > now_text.as_str())
-            && grant
-                .subject_id
-                .as_deref()
-                .is_none_or(|scoped| scoped == subject_id)
-    })
 }
 
 pub struct LocalMemoryProvider {
@@ -880,65 +880,6 @@ impl LocalMemoryProvider {
         self.store.report_flock_waits(report);
     }
 
-    async fn space(&self, space_id: &str) -> Result<SpaceRow, ProviderError> {
-        self.store
-            .find_space(space_id)
-            .await
-            .map_err(store_error)?
-            .ok_or_else(|| ProviderError::NotFound(format!("space {space_id}")))
-    }
-
-    async fn grants_in_space(&self, space_id: &str) -> Result<Vec<GrantRow>, ProviderError> {
-        self.store
-            .grants(space_id, None, None)
-            .await
-            .map_err(store_error)
-    }
-
-    /// §6.5 coverage for a read: at least one live grant of the principal admits
-    /// the op. Writes evaluate the same rule inside their effect transaction.
-    async fn require_grant(
-        &self,
-        principal_id: &str,
-        space: &SpaceRow,
-        requirement: &GrantRequirement<'_>,
-    ) -> Result<(), ProviderError> {
-        let rows = self.grants_in_space(&space.space_id).await?;
-        let now = Utc::now();
-        for row in &rows {
-            let grant = grant_wire(row)?;
-            if grant_covers(&grant, principal_id, &space.space_id, now, requirement) {
-                return Ok(());
-            }
-        }
-        Err(ProviderError::NotAuthorized(format!(
-            "principal {principal_id} holds no grant covering {} in space {}",
-            requirement.capability, space.space_id
-        )))
-    }
-
-    async fn require_admin(
-        &self,
-        principal_id: &str,
-        space: &SpaceRow,
-        subject_id: Option<&str>,
-    ) -> Result<(), ProviderError> {
-        self.require_grant(principal_id, space, &admin_requirement(subject_id))
-            .await
-    }
-
-    async fn require_subject(
-        &self,
-        space_id: &str,
-        subject_id: &str,
-    ) -> Result<SubjectRow, ProviderError> {
-        self.store
-            .find_subject(space_id, subject_id)
-            .await
-            .map_err(store_error)?
-            .ok_or_else(|| ProviderError::NotFound(format!("subject {subject_id}")))
-    }
-
     /// §7.3/§7.4. The space lifecycle ops define their own freeze admission
     /// (§7.3 names re-freezing a frozen space a no-op success, and §8.2 admits
     /// `unfreeze`), so `freeze_gated` is false for them.
@@ -1043,7 +984,7 @@ fn grant_facts(request: &schemas::MemoryGrantsGrantRequest) -> GrantFacts<'_> {
 }
 
 /// The §7 `admin` requirement for a space- or subject-scoped admin op.
-const fn admin_requirement(subject_id: Option<&str>) -> GrantRequirement<'_> {
+pub(super) const fn admin_requirement(subject_id: Option<&str>) -> GrantRequirement<'_> {
     GrantRequirement {
         capability: "admin",
         subject_id,
@@ -1406,35 +1347,22 @@ impl MemoryPort for LocalMemoryProvider {
         request: schemas::MemorySubjectsGetRequest,
     ) -> SpokeResult<schemas::MemorySubjectsGetResponse> {
         let principal_id = principal_id(principal);
-        let space = match self.space(request.space_id.as_str()).await {
-            Ok(space) => space,
-            Err(error) => return deny(&error),
-        };
-        let rows = match self.grants_in_space(&space.space_id).await {
-            Ok(rows) => rows,
-            Err(error) => return deny(&error),
-        };
-        if !any_grant_for_subject(
-            &rows,
-            principal_id,
-            &space.space_id,
-            request.subject_id.as_str(),
-            Utc::now(),
-        ) {
-            return deny(&ProviderError::NotAuthorized(format!(
-                "principal {principal_id} holds no grant on subject {}",
-                request.subject_id.as_str()
-            )));
-        }
+        // §7.6/S-4: the "any live grant" test and the subject row are one read
+        // transaction on the store's clock.
         match self
-            .require_subject(&space.space_id, request.subject_id.as_str())
+            .store
+            .subject_for_read(
+                principal_id,
+                request.space_id.as_str(),
+                request.subject_id.as_str(),
+            )
             .await
         {
             Ok(subject) => match subject_body(&subject) {
                 Ok(body) => respond(json!({ "subject": body })),
                 Err(error) => deny(&error),
             },
-            Err(error) => deny(&error),
+            Err(error) => deny(&store_error(error)),
         }
     }
 
@@ -1520,35 +1448,19 @@ impl MemoryPort for LocalMemoryProvider {
                 reason: reject.message,
             });
         }
-        let space = match self.space(request.space_id.as_str()).await {
-            Ok(space) => space,
-            Err(error) => return deny(&error),
-        };
-        let admin = self
-            .require_admin(
-                principal_id,
-                &space,
-                request.subject_id.as_ref().map(|value| value.as_str()),
-            )
-            .await
-            .is_ok();
-        if !admin && request.principal_id.is_some() {
-            return deny(&ProviderError::NotAuthorized(
-                "the principal_id filter is admin-only (§7.8)".to_string(),
-            ));
-        }
         let principal_filter = request.principal_id.as_ref().map(|value| value.as_str());
         let subject_filter = request.subject_id.as_ref().map(|value| value.as_str());
-        let filter_principal = if admin {
-            principal_filter
-        } else {
-            Some(principal_id)
-        };
-        // §7.0.7: the page and its invalidation marker are one read, and the
-        // cursor binds every filter that selected them.
-        let (rows, marker) = match self
+        // §7.0.7/§7.8/S-4: the `admin` verdict, the page and its invalidation
+        // marker are ONE read transaction on the store's clock, and the returned
+        // filter is the one that read actually applied.
+        let (rows, marker, filter) = match self
             .store
-            .grants_page(&space.space_id, subject_filter, filter_principal)
+            .grants_page_for(
+                principal_id,
+                request.space_id.as_str(),
+                subject_filter,
+                principal_filter,
+            )
             .await
         {
             Ok(page) => page,
@@ -1556,9 +1468,9 @@ impl MemoryPort for LocalMemoryProvider {
         };
         let scope = cursor_scope(
             "memory.grants.list",
-            Some(space.space_id.as_str()),
+            Some(request.space_id.as_str()),
             subject_filter,
-            filter_principal,
+            filter.as_deref(),
         );
         let offset = match decode_cursor(
             cursor_text(request.cursor.as_ref()),
@@ -2336,24 +2248,6 @@ impl MemoryPort for LocalMemoryProvider {
             .filter
             .as_ref()
             .map(|filter| filter.source_context_ids.clone());
-        let (rows, marker) = match self
-            .store
-            .records(
-                request.space_id.as_str(),
-                request.subject_id.as_str(),
-                &selection,
-                filter.as_deref(),
-                &request.kinds,
-                request.include_tombstoned,
-                RecordRead::List,
-                principal_id,
-            )
-            .await
-        {
-            Ok(page) => page,
-            Err(error) => return deny(&store_error(error)),
-        };
-        let total = rows.len();
         let scope = format!(
             "{}|sel={}|filter={}|kinds={}|tombstoned={}",
             cursor_scope(
@@ -2367,18 +2261,38 @@ impl MemoryPort for LocalMemoryProvider {
             request.kinds.join(","),
             request.include_tombstoned
         );
-        let offset = match decode_cursor(
-            cursor_text(request.cursor.as_ref()),
-            principal_id,
-            &scope,
-            &marker,
-        ) {
-            Ok(offset) => offset,
-            Err(error) => return deny(&error),
+        // §7.0.7/MEM-R026: the cursor's offset selects the SQL page; its marker
+        // is verified against the snapshot the page was read in.
+        let (offset, claimed) =
+            match cursor_page(cursor_text(request.cursor.as_ref()), principal_id, &scope) {
+                Ok(page) => page,
+                Err(error) => return deny(&error),
+            };
+        let (rows, marker, total) = match self
+            .store
+            .records(
+                request.space_id.as_str(),
+                request.subject_id.as_str(),
+                &selection,
+                filter.as_deref(),
+                &request.kinds,
+                request.include_tombstoned,
+                RecordRead::List,
+                principal_id,
+                Some((page_limit(request.limit), offset)),
+            )
+            .await
+        {
+            Ok(page) => page,
+            Err(error) => return deny(&store_error(error)),
         };
-        let (page, next) = page(rows, page_limit(request.limit), offset);
-        let mut bodies = Vec::with_capacity(page.len());
-        for row in &page {
+        if let Err(error) = verify_cursor(claimed.as_deref(), &marker) {
+            return deny(&error);
+        }
+        let consumed = offset.saturating_add(u64::try_from(rows.len()).unwrap_or(u64::MAX));
+        let next = (consumed < total).then_some(consumed);
+        let mut bodies = Vec::with_capacity(rows.len());
+        for row in &rows {
             match record_body(row) {
                 Ok(body) => bodies.push(body),
                 Err(error) => return deny(&error),
@@ -2487,7 +2401,7 @@ impl MemoryPort for LocalMemoryProvider {
             .map(|filter| filter.source_context_ids.clone());
         // §9.1: authorization + selection + filter are applied by the read path,
         // so the authorized set — never the raw table — is what gets ranked.
-        let (rows, marker) = match self
+        let (rows, marker, total) = match self
             .store
             .records(
                 request.space_id.as_str(),
@@ -2498,13 +2412,15 @@ impl MemoryPort for LocalMemoryProvider {
                 false,
                 RecordRead::Recall,
                 principal_id,
+                None,
             )
             .await
         {
             Ok(page) => page,
             Err(error) => return deny(&store_error(error)),
         };
-        let total = rows.len();
+        // The recall budget is a byte/item bound over a Rust-ranked list.
+        let total = usize::try_from(total).unwrap_or(usize::MAX);
         // §9.2: the query decides the ordering, so a cursor continues only the
         // ranking it was minted under (MEM-R026).
         let terms = policy::query_terms(request.query.as_deref().unwrap_or_default());
