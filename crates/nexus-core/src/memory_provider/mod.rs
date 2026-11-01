@@ -1769,8 +1769,8 @@ impl MemoryPort for LocalMemoryProvider {
             ),
             status.as_deref().unwrap_or("*")
         );
-        // §7.0.7/MEM-R026: the cursor's offset selects the SQL page; its marker
-        // is verified against the snapshot the page was read in.
+        // §7.0.7/MEM-R026: the cursor's offset selects the authorized page; its
+        // marker is verified against the snapshot the page was read in.
         let (offset, claimed) =
             match cursor_page(cursor_text(request.cursor.as_ref()), principal_id, &scope) {
                 Ok(page) => page,
