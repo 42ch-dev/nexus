@@ -10,14 +10,25 @@
 --
 -- The row carries no content the receipt does not already allow (D-9): the
 -- journaled file bodies are the provider's own projected content, never
--- receipt payload. `state` is the recovery surface:
+-- receipt payload, and they are scrubbed the moment the intent settles so a
+-- deleted or superseded body is not retained (MEM-R014). `result_json` is the
+-- content-free receipt outcome recovery needs to terminalize the receipt.
+-- `seq` is the settlement order: file effects for one target must publish in
+-- commit order, never in wall-clock (whole-second) or uuid order.
+--
+-- `state` is the recovery surface:
 --
 --   pending      committed intent not yet published; a reopen settles it and
 --                objects of the subject stay out of recall/list/get meanwhile
---   applied      the file effect is published and consistent with the row
---   quarantined  the intent could not be settled (conflicting target, unsafe
---                path, I/O failure); the subject's reads answer the terminal
---                INTERNAL_ERROR instead of serving half-committed content
+--   applied      the file effect is published and consistent with the row; the
+--                intent content is scrubbed
+--   quarantined  the intent could not be settled (foreign target content,
+--                unsafe path, I/O failure); the subject's reads answer the
+--                terminal INTERNAL_ERROR instead of serving half-committed
+--                content
+--   deferred     a bounded recovery pass did not reach it (§5.2 step 5); still
+--                recoverable, but the subject reads terminally until a later
+--                pass settles it
 --
 -- Writer admission: the table is a cooperative core table with the same guard
 -- and outbox trigger family as the control/content tables, so a raw pool is
@@ -25,17 +36,19 @@
 -- `core_changes` event.
 
 CREATE TABLE IF NOT EXISTS memory_journal (
-    receipt_id TEXT PRIMARY KEY,
+    seq INTEGER PRIMARY KEY,
+    receipt_id TEXT NOT NULL UNIQUE,
     space_id TEXT NOT NULL,
     subject_id TEXT NOT NULL,
     requester_principal_id TEXT NOT NULL,
     op TEXT NOT NULL,
     idempotency_key TEXT,
-    state TEXT NOT NULL CHECK (state IN ('pending', 'applied', 'quarantined')),
+    state TEXT NOT NULL CHECK (state IN ('pending', 'applied', 'quarantined', 'deferred')),
     targets_json TEXT NOT NULL,
+    result_json TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
-) WITHOUT ROWID;
+);
 
 -- The isolation lookup: read paths ask whether any intent for a subject is
 -- still unsettled, and the bounded recovery pass pages by creation order.

@@ -60,7 +60,7 @@ use crate::error::{CoreError, CoreResult};
 use storage::{
     Admission, CandidateRow, Coverage, Fence, FenceAction, FenceTarget, GrantRow, MemoryStore,
     NewCandidate, NewGrant, OpContext, Placement, ProfileRow, ReceiptRow, RecordRead, RecordRow,
-    ReviewDecision, Selection, SpaceRow, StoreError, SubjectRow,
+    ReviewDecision, Selection, SpaceRow, StoreError, SubjectRow, RECEIPT_PENDING,
 };
 
 /// The single space this provider provisions (§7.0.6). Clients discover it via
@@ -359,6 +359,9 @@ fn respond<T: DeserializeOwned>(body: Value) -> SpokeResult<T> {
 /// effect, so it is `OUTCOME_UNCERTAIN`, never a retryable `INTERNAL_ERROR`
 /// (§14.2/§14.3).
 fn settle_receipt<T: DeserializeOwned>(receipt: &ReceiptRow) -> SpokeResult<T> {
+    if let Some(error) = pending_receipt(receipt) {
+        return deny(&error);
+    }
     match receipt_body(receipt) {
         Ok(body) => match serde_json::from_value(body) {
             Ok(response) => spoke_operations::spoke_ok(response),
@@ -368,6 +371,21 @@ fn settle_receipt<T: DeserializeOwned>(receipt: &ReceiptRow) -> SpokeResult<T> {
         },
         Err(error) => deny(&ProviderError::OutcomeUncertain(error.message())),
     }
+}
+
+/// §5.2 step 2: a journaled op's receipt is durable at the point of no return
+/// but terminal only once its file effect is consistent. Until then both the
+/// replay and `memory.receipts.get` answer the pending state as `uncertain`, so
+/// no caller is told an unsettled outcome is final.
+fn pending_receipt(receipt: &ReceiptRow) -> Option<ProviderError> {
+    (receipt.status == RECEIPT_PENDING).then(|| {
+        ProviderError::OutcomeUncertain(format!(
+            "receipt {} is committed but its journaled file effect is not published yet, so the \
+             outcome is not settled: repeat the same idempotency_key or read \
+             memory.receipts.get once the journal has been recovered",
+            receipt.receipt_id
+        ))
+    })
 }
 
 /// §6.1 `payload_digest`, bound to the operation as the plan's memory identity
@@ -714,6 +732,16 @@ impl LocalMemoryProvider {
     #[must_use]
     pub fn file_root(&self) -> std::path::PathBuf {
         self.store.file_root().to_path_buf()
+    }
+
+    /// §14.3 proof seam: force the next post-commit journal settlement to fail
+    /// (`before_write: true` → its transaction never opens; `false` → its write
+    /// fails). Both are failures after the journal COMMIT. Compiled out of a
+    /// production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn inject_settle_fault(&self, before_write: bool) {
+        self.store.inject_settle_fault(before_write);
     }
 
     /// §6.10/MEM-R021 proof seam: move the provider clock forward so the receipt
@@ -2550,10 +2578,15 @@ impl MemoryPort for LocalMemoryProvider {
             Ok(stored) => stored,
             Err(error) => return deny(&store_error(error)),
         };
-        match receipt_body(&stored) {
-            Ok(body) => respond(json!({ "receipt": body })),
-            Err(error) => deny(&error),
-        }
+        pending_receipt(&stored).map_or_else(
+            || match receipt_body(&stored) {
+                Ok(body) => respond(json!({ "receipt": body })),
+                Err(error) => deny(&error),
+            },
+            // §5.2 step 2: durable but not consistent yet — the channel answers
+            // the pending state instead of a terminal receipt.
+            |error| deny(&error),
+        )
     }
 
     // ── Sub-capability gated (never served in N1) ──────────────────────
