@@ -27,6 +27,8 @@ pub mod host;
 mod knowledge;
 mod memory;
 mod memory_pipeline;
+// v1.227 NXM-1: the in-process `spoke_operations::MemoryPort` provider.
+pub mod memory_provider;
 mod operation_receipts;
 pub mod slug;
 // v1.207 P3-T1 (spec §B.1): the stable durable operation id every receipt

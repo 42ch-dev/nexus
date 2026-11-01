@@ -29,7 +29,6 @@ execution = [
     "dep:nexus-provider-ports",
     "dep:graph-flow",
     "dep:tokio-util",
-    "dep:async-trait",
     "operation-id",
     # The durable workspace commit authority moved out of the daemon: the
     # intent/digest/recovery protocol hashes content (via `operation-id`'s
@@ -113,11 +112,18 @@ nexus-wasm-host = { path = "../nexus-wasm-host", optional = true }
 # `server` is the smallest role covering mcp_bridge's ServerHandler
 # surface (RoleServer/RequestContext); the client role is not needed.
 rmcp = { version = "=3.8.0", default-features = false, features = ["server", "client"], optional = true }
-# async-trait is used ONLY by the execution cohort's port traits and the
-# module's test doubles. Nothing outside `execution` uses the macro (the
-# `#![allow(clippy::unused_async_trait_impl)]` in knowledge.rs is a lint name,
-# not a crate use), so the edge is optional and enabled by `execution`.
-async-trait = { workspace = true, optional = true }
+# async-trait implements the execution cohort's port traits and the module's
+# test doubles, and — since v1.227 NXM-1 — `spoke_operations::MemoryPort`,
+# whose `#[async_trait]` declaration must be re-expanded on the impl side.
+# The memory provider is part of the default cohort, so this edge is no
+# longer optional.
+async-trait = { workspace = true }
+# v1.227 NXM-1 (spoke-memory §7): the provider implements the upstream
+# `MemoryPort` boundary and reuses its generated wire types (reachable through
+# `spoke_operations::spoke_schemas`) plus the pure validators/digest helpers,
+# so the adapter stays the only spoke edge a *consumer* needs while the
+# boundary itself is named once here.
+spoke-operations.workspace = true
 # The durable workspace commit authority (v1.190 P3-T2) moved out of the
 # daemon with its module set. These edges are `execution`-only:
 #   sha2   — content-addressed OCC hashes for the snapshot/intent digest
@@ -170,10 +176,9 @@ tempfile = "3"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 # Only `parking_lot` needs a dev-dep: the relocated execution regression module
 # builds one scripted engine fixture with interior mutability, and parking_lot
-# is not otherwise a `nexus-core` dependency. The integration target's other
+# is not otherwise a `nexus-core` dependency. The integration targets' other
 # imports (`nexus-provider-ports`, `nexus-local-db`, `async-trait`) come from
-# `[dependencies]` — that target is `#![cfg(feature = "execution")]`, and the
-# feature enables those optional edges.
+# `[dependencies]`.
 parking_lot = "0.13"
 # The capability/compute target builds a real WASM module and a real user
 # capability scan, so it needs the engine, the WAT compiler and the capability
@@ -194,10 +199,13 @@ wat = "1"
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 chrono.workspace = true
 serde_json.workspace = true
-async-trait.workspace = true
 # p4 t3 fix wave 1: the World KB authored-module allocation regression check
 # counts the current thread's allocations. The workspace lints forbid
 # `unsafe_code`, so a counting `GlobalAlloc` cannot be hand-rolled in this
 # crate; this dev-dep ships one (MIT/Apache-2.0, no transitive dependencies)
 # and is test-only — the shipped graph is untouched.
 allocation-counter = "0.8"
+# The C-110 writer-fence anchor drives one connection with the protocol scalar
+# functions installed but no registration row — the exact "outside the guard"
+# writer shape — so it needs the audited FFI boundary directly.
+nexus-storage-guard = { path = "../nexus-storage-guard" }
