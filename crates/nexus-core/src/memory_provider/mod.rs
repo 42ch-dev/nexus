@@ -132,6 +132,12 @@ enum ProviderError {
     },
     IdempotencyConflict,
     CandidateConsumed(String),
+    /// §4.2/MEM-R005: an admission-relevant consumer is missing a required
+    /// authored content kind — fail closed, never an empty success.
+    ProfileIncomplete {
+        subject_id: String,
+        missing: Vec<String>,
+    },
     InvalidInput {
         field: String,
         reason: String,
@@ -154,6 +160,7 @@ impl ProviderError {
             Self::RevisionConflict { .. } => SpokeRejectCode::RevisionConflict,
             Self::IdempotencyConflict => SpokeRejectCode::IdempotencyConflict,
             Self::CandidateConsumed(_) => SpokeRejectCode::CandidateConsumed,
+            Self::ProfileIncomplete { .. } => SpokeRejectCode::ProfileIncomplete,
             Self::InvalidInput { .. } => SpokeRejectCode::InvalidInput,
             Self::StatusTransition(_) => SpokeRejectCode::InvalidStatusTransition,
             Self::CursorInvalid => SpokeRejectCode::CursorInvalid,
@@ -175,6 +182,13 @@ impl ProviderError {
     fn message(&self) -> String {
         match self {
             Self::NotFound(target) => format!("{target} not found"),
+            Self::ProfileIncomplete {
+                subject_id,
+                missing,
+            } => format!(
+                "subject {subject_id} has not authored the required profile kinds ({}); author them with memory.profile.update",
+                missing.join(", ")
+            ),
             Self::NotAuthorized(reason)
             | Self::SpaceFrozen(reason)
             | Self::StatusTransition(reason)
@@ -217,6 +231,9 @@ impl ProviderError {
             }
             Self::RevisionConflict { current } => {
                 details.insert("current_revision".to_string(), json!(current));
+            }
+            Self::ProfileIncomplete { missing, .. } => {
+                details.insert("missing".to_string(), json!(missing));
             }
             Self::SubjectFenced {
                 subject_id,
@@ -593,17 +610,19 @@ impl LocalMemoryProvider {
         &self.space_id
     }
 
-    /// MEM-R005 profile admission seam: the authored content kinds a subject
-    /// has and the §4.2 required kinds it is missing.
+    /// MEM-R005 profile admission gate: the authored content kinds a subject
+    /// has, or the typed `PROFILE_INCOMPLETE` refusal.
     ///
     /// An absent *optional* kind is honest-empty (§7.23) and simply not listed.
-    /// A missing entry in `missing_required` is the state a consumer that needs
-    /// an authored profile before acting turns into `PROFILE_INCOMPLETE`; this
-    /// seam reports it rather than raising it, because no N1 operation requires
-    /// an authored profile before acting.
+    /// A missing §4.2 required kind is the fail-closed state an
+    /// admission-relevant consumer acts on, so it leaves on the reject channel
+    /// with `details.missing`, never as a success value that could be read as an
+    /// empty success. Capability absence is decided at provider selection
+    /// (`CAPABILITY_PORT_MISSING`) and never reaches this gate.
     ///
     /// # Errors
     ///
+    /// `PROFILE_INCOMPLETE` when a required authored kind is absent.
     /// `NOT_AUTHORIZED` when the principal holds no profile-visible grant on the
     /// subject (§7.23).
     pub async fn profile_admission(
@@ -626,7 +645,13 @@ impl LocalMemoryProvider {
                 principal_id(principal)
             )));
         };
-        spoke_operations::spoke_ok(profile::admission(&rows, &policy::REQUIRED_PROFILE_KINDS))
+        match profile::admission(&rows, &policy::REQUIRED_PROFILE_KINDS) {
+            Ok(admission) => spoke_operations::spoke_ok(admission),
+            Err(missing) => deny(&ProviderError::ProfileIncomplete {
+                subject_id: subject_id.to_string(),
+                missing,
+            }),
+        }
     }
 
     /// §14.2/§14.3 proof seam: force the next committing transaction to fail at

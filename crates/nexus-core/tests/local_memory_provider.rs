@@ -2635,8 +2635,8 @@ async fn recall_ranks_by_query_and_surfaces_budget_overflow() {
 }
 
 /// §7.23/§7.24 + MEM-R005/D-12: profile reads are honest-empty, writes are
-/// CAS-checked with `null` meaning create-only, and the admission seam reports
-/// a missing *required* authored kind without inventing a document.
+/// CAS-checked with `null` meaning create-only, and the admission gate fails
+/// closed with `PROFILE_INCOMPLETE` when the required authored kind is missing.
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
 async fn profile_admission_and_honest_empty_reads() {
@@ -2668,10 +2668,16 @@ async fn profile_admission_and_honest_empty_reads() {
         "an absent profile is honest-empty, never fabricated (§7.23)"
     );
 
-    let before = ok(provider.profile_admission(&admin, SPACE, SUBJECT).await);
-    assert!(!before.is_admitted(), "no authored profile yet");
-    assert_eq!(before.missing_required, vec!["personality".to_string()]);
-    assert!(before.present.is_empty());
+    let before = provider.profile_admission(&admin, SPACE, SUBJECT).await;
+    let SpokeResult::Reject(before) = &before else {
+        panic!("a missing required profile must never be a success value: {before:?}");
+    };
+    assert_eq!(before.code, SpokeRejectCode::ProfileIncomplete);
+    assert_eq!(
+        before.details.as_ref().expect("details are carried")["missing"],
+        json!(["personality"]),
+        "the required authored kind is reported missing (MEM-R005)"
+    );
 
     let created = wire(
         &provider
@@ -2751,16 +2757,20 @@ async fn profile_admission_and_honest_empty_reads() {
     assert_eq!(profiles[0]["revision"], 2);
 
     let admitted = ok(provider.profile_admission(&admin, SPACE, SUBJECT).await);
-    assert!(admitted.is_admitted());
     assert_eq!(admitted.present, vec!["personality".to_string()]);
-    assert!(admitted.missing_required.is_empty());
 
     // The other subject still lacks the required kind, and nothing was copied.
-    let missing = ok(provider
+    let missing = provider
         .profile_admission(&admin, SPACE, OTHER_SUBJECT)
-        .await);
-    assert!(!missing.is_admitted());
-    assert_eq!(missing.missing_required, vec!["personality".to_string()]);
+        .await;
+    let SpokeResult::Reject(missing) = &missing else {
+        panic!("admission must not be copied to another subject: {missing:?}");
+    };
+    assert_eq!(missing.code, SpokeRejectCode::ProfileIncomplete);
+    assert_eq!(
+        missing.details.as_ref().expect("details are carried")["missing"],
+        json!(["personality"])
+    );
 }
 
 /// D-7: the nine-value Nexus taxonomy survives the protocol's open kind

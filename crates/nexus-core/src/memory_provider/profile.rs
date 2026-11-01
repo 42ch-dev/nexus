@@ -14,56 +14,48 @@
 //!   the authored personality profile, so a consumer reading either surface sees
 //!   the same content kind.
 //!
-//! The admission seam distinguishes the three outcomes MEM-R005 keeps apart:
-//! a present kind is served, an absent optional kind is honest-empty, and a
-//! *required* authored kind that is missing is reported as such so the consumer
-//! that needs it can fail closed with `PROFILE_INCOMPLETE`. N1 has no operation
-//! that requires an authored profile before acting (profile reads are
-//! honest-empty by §7.23 and generation is a sub-capability it never serves), so
-//! this module reports the missing set and the refusal is raised by the consumer
-//! that needs it — Task 5 wires and tests that refusal.
+//! The admission seam keeps the three MEM-R005 outcomes apart instead of
+//! collapsing them: a required authored kind that is absent is an `Err` the
+//! consumer turns into `PROFILE_INCOMPLETE` (never an empty success), an absent
+//! *optional* kind is honest-empty and simply not listed, and a missing provider
+//! capability is decided at provider selection — it never reaches this module.
 
 use crate::memory_provider::storage::ProfileRow;
 
 /// D-12: SOUL.md ↔ the authored `personality` content kind.
 pub const SOUL_PROFILE_KIND: &str = "personality";
 
-/// MEM-R005 seam result: what the subject has authored and what a consumer that
-/// requires authored profiles is missing.
+/// MEM-R005 admission view: what the subject has authored.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProfileAdmission {
     /// Present authored content kinds, sorted.
     pub present: Vec<String>,
-    /// §4.2 required authored kinds that are absent; empty = admitted.
-    pub missing_required: Vec<String>,
-}
-
-impl ProfileAdmission {
-    /// `false` iff a required authored kind is missing — the state a consumer
-    /// maps to `PROFILE_INCOMPLETE` rather than an empty success.
-    #[must_use]
-    pub const fn is_admitted(&self) -> bool {
-        self.missing_required.is_empty()
-    }
 }
 
 /// §4.2/MEM-R005: the admission view over a subject's authored profiles.
-pub(super) fn admission(rows: &[ProfileRow], required: &[&str]) -> ProfileAdmission {
-    let mut present: Vec<String> = rows
+///
+/// `Err` carries the §4.2 required kinds that are absent — the fail-closed
+/// state a consumer reports as `PROFILE_INCOMPLETE`. It is never a success
+/// value, so a missing required kind cannot be read as an empty success.
+pub(super) fn admission(
+    rows: &[ProfileRow],
+    required: &[&str],
+) -> Result<ProfileAdmission, Vec<String>> {
+    let present: Vec<String> = rows
         .iter()
         .map(|row| row.profile_kind.clone())
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
         .collect();
-    present.dedup();
-    let missing_required = required
+    let missing: Vec<String> = required
         .iter()
         .filter(|kind| !present.iter().any(|present| present == *kind))
         .map(|kind| (*kind).to_string())
         .collect();
-    ProfileAdmission {
-        present,
-        missing_required,
+    if missing.is_empty() {
+        Ok(ProfileAdmission { present })
+    } else {
+        Err(missing)
     }
 }
 
