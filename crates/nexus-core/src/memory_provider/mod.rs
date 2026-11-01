@@ -416,9 +416,12 @@ fn settle_receipt<T: DeserializeOwned>(receipt: &ReceiptRow) -> SpokeResult<T> {
 
 /// §5.2 step 3: a receipt the journal settled as `failed` records a committed
 /// intent whose file effect could not be published. Repeating the key cannot
-/// settle it, so the replay channel answers terminally with the recorded
-/// failure; `memory.receipts.get` serves that envelope, and the journal re-drives
-/// the intent without the caller once its target is resolved.
+/// settle it, so until the intent is re-driven both the replay channel and
+/// `memory.receipts.get` answer with the recorded failure. That answer is not
+/// permanent: once its target is resolved, the journal re-drives the intent
+/// without the caller and a successful re-drive replaces the `failed` receipt
+/// with a `committed` one carrying the published outcome, so the same key and
+/// the same receipt id then settle normally.
 fn failed_receipt(receipt: &ReceiptRow) -> Option<ProviderError> {
     (receipt.status == RECEIPT_FAILED).then(|| {
         let recorded = receipt_failure(receipt).ok().and_then(|envelope| {
@@ -773,7 +776,7 @@ impl LocalMemoryProvider {
     ) -> SpokeResult<profile::ProfileAdmission> {
         let rows = match self
             .store
-            .profiles(space_id, subject_id, principal_id(principal), Utc::now())
+            .profiles(space_id, subject_id, principal_id(principal))
             .await
         {
             Ok(rows) => rows,
@@ -833,21 +836,22 @@ impl LocalMemoryProvider {
         self.store.inject_settle_fault(before_write);
     }
 
-    /// §6.10/MEM-R021 proof seam: move the provider clock forward so the receipt
-    /// retention windows elapse. Compiled out of a production build.
+    /// §6.5/§6.10 proof seam: move the provider clock forward so grant expiries
+    /// and the receipt retention windows elapse. Compiled out of a production
+    /// build.
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
-    pub fn advance_receipt_clock(&self, seconds: i64) {
-        self.store.advance_receipt_clock(seconds);
+    pub fn advance_clock(&self, seconds: i64) {
+        self.store.advance_clock(seconds);
     }
 
-    /// §7.28 proof seam: park the next `memory.receipts.get` after it holds its
-    /// connection, so a test can move the clock while the read is queued.
-    /// Compiled out of a production build.
+    /// §6.5/§7.28 proof seam: park the next read after it holds its connection,
+    /// so a test can move the clock while the read is queued. Compiled out of a
+    /// production build.
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
-    pub fn park_next_receipt_read(&self, barrier: std::sync::Arc<tokio::sync::Barrier>) {
-        self.store.park_next_receipt_read(barrier);
+    pub fn park_next_read(&self, barrier: std::sync::Arc<tokio::sync::Barrier>) {
+        self.store.park_next_read(barrier);
     }
 
     /// §5.2 step 2 proof seam: park the next publication while it holds the
@@ -1286,7 +1290,7 @@ impl MemoryPort for LocalMemoryProvider {
                 reason: reject.message,
             });
         }
-        let (spaces, marker) = match self.store.visible_spaces(principal_id, Utc::now()).await {
+        let (spaces, marker) = match self.store.visible_spaces(principal_id).await {
             Ok(page) => page,
             Err(error) => return deny(&store_error(error)),
         };
@@ -1821,7 +1825,6 @@ impl MemoryPort for LocalMemoryProvider {
                 request.subject_id.as_str(),
                 status.as_deref(),
                 principal_id,
-                Utc::now(),
             )
             .await
         {
@@ -1870,7 +1873,6 @@ impl MemoryPort for LocalMemoryProvider {
                 request.space_id.as_str(),
                 request.candidate_id.as_str(),
                 principal_id(principal),
-                Utc::now(),
             )
             .await
         {
@@ -2123,7 +2125,6 @@ impl MemoryPort for LocalMemoryProvider {
                 request.space_id.as_str(),
                 request.record_id.as_str(),
                 principal_id(principal),
-                Utc::now(),
             )
             .await
         {
@@ -2341,7 +2342,6 @@ impl MemoryPort for LocalMemoryProvider {
                 request.include_tombstoned,
                 RecordRead::List,
                 principal_id,
-                Utc::now(),
             )
             .await
         {
@@ -2493,7 +2493,6 @@ impl MemoryPort for LocalMemoryProvider {
                 false,
                 RecordRead::Recall,
                 principal_id,
-                Utc::now(),
             )
             .await
         {
@@ -2584,7 +2583,6 @@ impl MemoryPort for LocalMemoryProvider {
                 request.space_id.as_str(),
                 request.subject_id.as_str(),
                 principal_id(principal),
-                Utc::now(),
             )
             .await
         {

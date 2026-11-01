@@ -152,6 +152,26 @@ fn subject_grant(
     }))
 }
 
+/// §6.5 unrestricted subject grant that expires `expires_in_seconds` from now,
+/// for the read-admission clock regressions.
+fn subject_grant_until(
+    key: &str,
+    capability: &str,
+    grantee: &str,
+    subject: &str,
+    expires_in_seconds: i64,
+) -> schemas::MemoryGrantsGrantRequest {
+    dto(json!({
+        "space_id": SPACE,
+        "subject_id": subject,
+        "principal_id": grantee,
+        "capabilities": [capability],
+        "expires_at": (chrono::Utc::now() + chrono::Duration::seconds(expires_in_seconds))
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        "idempotency_key": key,
+    }))
+}
+
 /// §6.5 context-restricted grant (the shape `context_ids` selects).
 fn restricted_grant(
     key: &str,
@@ -2881,6 +2901,162 @@ async fn recall_demands_the_recall_capability() {
     let recalled = wire(&provider.recall(&reader, recall_request(10)).await);
     assert_eq!(recalled["total_authorized"], 1);
     assert_eq!(recalled["records"][0]["record_id"], record_id);
+}
+
+/// §6.5/MEM-R006: every content read samples its authorization clock only after
+/// it holds its connection, so a grant that expires while the read queues in the
+/// pool cannot authorize disclosure. Covered here: recall, a by-id record read
+/// and a profile read.
+///
+/// One test, three phases. The provider clock never runs backwards, so each
+/// phase issues its grant 60s ahead of the clock its predecessor already moved,
+/// parks the read on its connection, expires that grant during the wait and
+/// expects the refusal.
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn content_read_authorization_is_evaluated_after_the_connection_wait() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    let reader = principal(OTHER);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    let created = wire(
+        &provider
+            .create_record(
+                &admin,
+                record_create_request(
+                    "k-read-wait-rec",
+                    "nexus.world_building",
+                    &json!({ "visibility": "shared" }),
+                    TEXT,
+                ),
+            )
+            .await,
+    );
+    let record_id = receipt(&created)["result"]["record_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    wire(
+        &provider
+            .update_profile(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "subject_id": SUBJECT,
+                    "profile_kind": "personality",
+                    "expected_revision": null,
+                    "document": { "format": "markdown", "body": "# Mira\n\nPatient, watchful." },
+                    "idempotency_key": "k-read-wait-profile",
+                })),
+            )
+            .await,
+    );
+
+    // ── recall ──────────────────────────────────────────────────────────
+    wire(
+        &provider
+            .grant(
+                &admin,
+                subject_grant_until("k-read-wait-recall", "recall", OTHER, SUBJECT, 60),
+            )
+            .await,
+    );
+    let live = wire(&provider.recall(&reader, recall_request(10)).await);
+    assert_eq!(
+        live["total_authorized"], 1,
+        "the grant is live before the wait: {live}"
+    );
+
+    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+    provider.park_next_read(Arc::clone(&barrier));
+    let read = provider.recall(&reader, recall_request(10));
+    let expire_while_queued = async {
+        provider.advance_clock(120);
+        barrier.wait().await;
+    };
+    let (read, ()) = tokio::join!(read, expire_while_queued);
+    let refused = wire(&read);
+    assert_eq!(
+        error_code(&refused),
+        "NOT_AUTHORIZED",
+        "a recall grant that expired during the wait cannot authorize: {refused}"
+    );
+
+    // ── by-id record ────────────────────────────────────────────────────
+    wire(
+        &provider
+            .grant(
+                &admin,
+                subject_grant_until("k-read-wait-record", "records_read", OTHER, SUBJECT, 180),
+            )
+            .await,
+    );
+    let live = wire(
+        &provider
+            .get_record(&reader, record_get_request(&record_id))
+            .await,
+    );
+    assert_eq!(live["record"]["record_id"], record_id, "{live}");
+
+    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+    provider.park_next_read(Arc::clone(&barrier));
+    let read = provider.get_record(&reader, record_get_request(&record_id));
+    let expire_while_queued = async {
+        provider.advance_clock(120);
+        barrier.wait().await;
+    };
+    let (read, ()) = tokio::join!(read, expire_while_queued);
+    let refused = wire(&read);
+    assert_eq!(
+        error_code(&refused),
+        "NOT_FOUND",
+        "an expired grant reads as an absent record: {refused}"
+    );
+
+    // ── profile ─────────────────────────────────────────────────────────
+    wire(
+        &provider
+            .grant(
+                &admin,
+                subject_grant_until("k-read-wait-profile", "records_read", OTHER, SUBJECT, 300),
+            )
+            .await,
+    );
+    let live = wire(
+        &provider
+            .get_profile(
+                &reader,
+                dto(json!({ "space_id": SPACE, "subject_id": SUBJECT })),
+            )
+            .await,
+    );
+    assert_eq!(
+        live["profiles"][0]["profile_kind"], "personality",
+        "the grant is live before the wait: {live}"
+    );
+
+    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+    provider.park_next_read(Arc::clone(&barrier));
+    let read = provider.get_profile(
+        &reader,
+        dto(json!({ "space_id": SPACE, "subject_id": SUBJECT })),
+    );
+    let expire_while_queued = async {
+        provider.advance_clock(120);
+        barrier.wait().await;
+    };
+    let (read, ()) = tokio::join!(read, expire_while_queued);
+    let refused = wire(&read);
+    assert_eq!(
+        error_code(&refused),
+        "NOT_AUTHORIZED",
+        "an expired grant cannot authorize a profile read: {refused}"
+    );
 }
 
 /// §7.7/MEM-R024 (C2): a fenced context refuses the capture and authored-create

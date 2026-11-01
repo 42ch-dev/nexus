@@ -508,13 +508,13 @@ pub(super) struct MemoryStore {
     /// settlement, injected in the two modes the real path can hit (§14.3).
     #[cfg(feature = "test-hooks")]
     settle_fault: AtomicU8,
-    /// Test-only offset applied to the provider clock (§6.10 retention).
+    /// Test-only offset applied to the provider clock (§6.5/§6.10).
     #[cfg(feature = "test-hooks")]
-    receipt_clock_skew: AtomicI64,
-    /// Test-only rendezvous a `memory.receipts.get` waits at once it holds its
-    /// connection, so a test can move the clock while the read is queued.
+    clock_skew: AtomicI64,
+    /// Test-only rendezvous a read waits at once it holds its connection, so a
+    /// test can move the clock while the read is queued.
     #[cfg(feature = "test-hooks")]
-    receipt_read_barrier: std::sync::Mutex<Option<Arc<tokio::sync::Barrier>>>,
+    read_barrier: std::sync::Mutex<Option<Arc<tokio::sync::Barrier>>>,
     /// Test-only rendezvous a publication waits at **while it holds the
     /// workspace publication gate** — `entered` tells the test the gate is held,
     /// `release` frees it — so a second provider instance on the same workspace
@@ -572,6 +572,21 @@ impl MemoryStore {
         Ok((tx, self.now()))
     }
 
+    /// Open a read transaction and read the authorization clock **after** the
+    /// connection is held (§6.5). Acquiring a pooled connection can queue for as
+    /// long as another read holds it or the pool refills, so a clock read by the
+    /// caller beforehand would let a grant that expires during that wait still
+    /// authorize disclosure. Every content/authorization read takes its `now`
+    /// from here.
+    async fn begin_read(
+        &self,
+    ) -> StoreResult<(sqlx::Transaction<'_, sqlx::Sqlite>, DateTime<Utc>)> {
+        let tx = self.pool.begin().await?;
+        #[cfg(feature = "test-hooks")]
+        self.read_gate().await;
+        Ok((tx, self.now()))
+    }
+
     /// §6.10/MEM-R021 reclamation in a transaction of its own, committed before
     /// the operation begins — autonomous of how that operation ends.
     ///
@@ -601,8 +616,10 @@ impl MemoryStore {
         }
     }
 
-    /// The provider clock: retention windows (§6.10) are evaluated against it,
-    /// and it is the one place a test may move time.
+    /// The provider clock: every authorization decision and every §6.10
+    /// retention window is evaluated against it, and it is the one place a test
+    /// may move time. Writes sample it after the write lock, reads after their
+    /// connection ([`Self::begin_read`]).
     ///
     /// It never runs backwards within a process: the latest reading is a floor
     /// for every later one, so a wall-clock correction (or a test clock move)
@@ -620,7 +637,7 @@ impl MemoryStore {
     fn now(&self) -> DateTime<Utc> {
         #[cfg(feature = "test-hooks")]
         let observed =
-            Utc::now() + chrono::Duration::seconds(self.receipt_clock_skew.load(Ordering::SeqCst));
+            Utc::now() + chrono::Duration::seconds(self.clock_skew.load(Ordering::SeqCst));
         #[cfg(not(feature = "test-hooks"))]
         let observed = Utc::now();
         let micros = observed.timestamp_micros();
@@ -669,9 +686,9 @@ impl MemoryStore {
             #[cfg(feature = "test-hooks")]
             settle_fault: AtomicU8::new(SETTLE_FAULT_NONE),
             #[cfg(feature = "test-hooks")]
-            receipt_clock_skew: AtomicI64::new(0),
+            clock_skew: AtomicI64::new(0),
             #[cfg(feature = "test-hooks")]
-            receipt_read_barrier: std::sync::Mutex::new(None),
+            read_barrier: std::sync::Mutex::new(None),
             #[cfg(feature = "test-hooks")]
             publish_barrier: std::sync::Mutex::new(None),
             #[cfg(feature = "test-hooks")]
@@ -679,19 +696,20 @@ impl MemoryStore {
         })
     }
 
-    /// §6.10/MEM-R021 proof seam: move the provider clock forward so the receipt
-    /// retention windows elapse. Compiled out of a production build.
+    /// §6.5/§6.10 proof seam: move the provider clock forward so the grant
+    /// expiries and receipt retention windows elapse. Compiled out of a
+    /// production build.
     #[cfg(feature = "test-hooks")]
-    pub(super) fn advance_receipt_clock(&self, seconds: i64) {
-        self.receipt_clock_skew.fetch_add(seconds, Ordering::SeqCst);
+    pub(super) fn advance_clock(&self, seconds: i64) {
+        self.clock_skew.fetch_add(seconds, Ordering::SeqCst);
     }
 
-    /// §7.28 proof seam: park the next `memory.receipts.get` after it holds its
-    /// connection, so a test can move the clock while the read is queued.
-    /// Compiled out of a production build.
+    /// §6.5/§7.28 proof seam: park the next read after it holds its connection,
+    /// so a test can move the clock while the read is queued. Compiled out of a
+    /// production build.
     #[cfg(feature = "test-hooks")]
-    pub(super) fn park_next_receipt_read(&self, barrier: Arc<tokio::sync::Barrier>) {
-        *self.receipt_read_barrier.lock().expect("receipt read gate") = Some(barrier);
+    pub(super) fn park_next_read(&self, barrier: Arc<tokio::sync::Barrier>) {
+        *self.read_barrier.lock().expect("read gate") = Some(barrier);
     }
 
     /// §5.2 step 2 proof seam: park the next publication once it holds the
@@ -717,9 +735,9 @@ impl MemoryStore {
     }
 
     #[cfg(feature = "test-hooks")]
-    async fn receipt_read_gate(&self) {
+    async fn read_gate(&self) {
         let parked = {
-            let mut gate = self.receipt_read_barrier.lock().expect("receipt read gate");
+            let mut gate = self.read_barrier.lock().expect("read gate");
             gate.take()
         };
         if let Some(barrier) = parked {
@@ -862,13 +880,7 @@ impl MemoryStore {
         space_id: &str,
         receipt_id: &str,
     ) -> StoreResult<ReceiptRow> {
-        let mut tx = self.pool.begin().await?;
-        #[cfg(feature = "test-hooks")]
-        self.receipt_read_gate().await;
-        // §6.5: the authorization clock is read once the connection is held, so a
-        // grant that expires while this read waits in the pool queue cannot
-        // authorize it.
-        let now = self.now();
+        let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let grant_rows = grants_in_tx(&mut tx, space_id).await?;
         let at = timestamp(now);
@@ -953,9 +965,8 @@ impl MemoryStore {
     pub(super) async fn visible_spaces(
         &self,
         principal_id: &str,
-        now: DateTime<Utc>,
     ) -> StoreResult<(Vec<SpaceRow>, String)> {
-        let mut tx = self.pool.begin().await?;
+        let (mut tx, now) = self.begin_read().await?;
         let rows_sql = format!(
             "SELECT {SPACE_COLUMNS} FROM memory_spaces s \
              WHERE {VISIBLE_SPACE_PREDICATE} \
@@ -3093,9 +3104,8 @@ impl MemoryStore {
         subject_id: &str,
         status: Option<&str>,
         principal_id: &str,
-        now: DateTime<Utc>,
     ) -> StoreResult<(Vec<CandidateRow>, String)> {
-        let mut tx = self.pool.begin().await?;
+        let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let grant_rows = grants_in_tx(&mut tx, space_id).await?;
         let grants = wire_grants(&grant_rows)?;
@@ -3166,9 +3176,8 @@ impl MemoryStore {
         space_id: &str,
         candidate_id: &str,
         principal_id: &str,
-        now: DateTime<Utc>,
     ) -> StoreResult<Option<CandidateRow>> {
-        let mut tx = self.pool.begin().await?;
+        let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let grants = wire_grants(&grants_in_tx(&mut tx, space_id).await?)?;
         let row = candidate_in_tx(&mut tx, space_id, candidate_id).await?;
@@ -3375,9 +3384,8 @@ impl MemoryStore {
         include_tombstoned: bool,
         read: RecordRead,
         principal_id: &str,
-        now: DateTime<Utc>,
     ) -> StoreResult<(Vec<RecordRow>, String)> {
-        let mut tx = self.pool.begin().await?;
+        let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let grant_rows = grants_in_tx(&mut tx, space_id).await?;
         let grants = wire_grants(&grant_rows)?;
@@ -3467,9 +3475,8 @@ impl MemoryStore {
         space_id: &str,
         record_id: &str,
         principal_id: &str,
-        now: DateTime<Utc>,
     ) -> StoreResult<Option<RecordRow>> {
-        let mut tx = self.pool.begin().await?;
+        let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let grants = wire_grants(&grants_in_tx(&mut tx, space_id).await?)?;
         let row = record_in_tx(&mut tx, space_id, record_id).await?;
@@ -3831,9 +3838,8 @@ impl MemoryStore {
         space_id: &str,
         subject_id: &str,
         principal_id: &str,
-        now: DateTime<Utc>,
     ) -> StoreResult<Option<Vec<ProfileRow>>> {
-        let mut tx = self.pool.begin().await?;
+        let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let rows = grants_in_tx(&mut tx, space_id).await?;
         let visible = rows.iter().any(|grant| {
