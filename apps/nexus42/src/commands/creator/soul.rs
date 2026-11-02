@@ -1,29 +1,36 @@
 //! SOUL management commands.
+//!
+//! Since NXM-6 the SOUL document is the provider's authored `personality`
+//! profile (`memory.profile.get` / `memory.profile.update`) instead of a bearer
+//! file: every leaf reads that document through the direct core, edits it with
+//! the pure `SoulDocument` type, and writes it back on the revision it read.
+//! The provider bridge projects an unmigrated `SOUL.md` as that same profile,
+//! and the first write replaces the projection (the bridge keeps a stored kind
+//! over it), so no leaf ever touches the bearer file.
 
-use crate::config;
+use crate::commands::creator::memory::memory_identity;
 use crate::config::CliConfig;
-use crate::errors::Result;
+use crate::core::{map_core_error, with_direct_core, with_read_only_core};
+use crate::errors::{CliError, Result};
 use clap::Subcommand;
-use nexus_creator_memory::soul_io;
-use nexus_creator_memory::MemoryBearerRef;
-use nexus_local_db::{
-    get_soul_meta as db_get_soul_meta, upsert_soul_meta as db_upsert_soul_meta, SoulMeta,
-};
+use nexus_core::ProfileDocument;
+use nexus_creator_memory::errors::MemoryError;
+use nexus_creator_memory::soul::SoulDocument;
 
 #[derive(Debug, Subcommand)]
 pub enum SoulCommand {
-    /// Initialize a new SOUL.md for the active creator
+    /// Initialize a new SOUL document for the active creator
     Init,
-    /// Show current SOUL.md content
+    /// Show the current SOUL document
     Show,
-    /// Edit the personality section of SOUL.md
+    /// Edit the personality section of the SOUL document
     EditPersonality {
         /// New personality content (markdown). Use "-" to read from stdin.
         content: Option<String>,
     },
-    /// Validate SOUL.md structure and sections
+    /// Validate the SOUL document structure and sections
     Validate,
-    /// Push personality section to long-term memory
+    /// Push the personality section to long-term memory
     PushPersonality,
     /// Refresh the ## Experience section from long-term memories (deterministic, no LLM)
     RefreshExperience,
@@ -35,9 +42,8 @@ pub enum SoulCommand {
 ///
 /// Returns an error if:
 /// - No active creator is set
-/// - Database operations fail
-/// - File I/O operations fail
-/// - Daemon API calls fail
+/// - No SOUL document is authored yet
+/// - The mapped core refusal reaches the leaf
 pub async fn run(command: SoulCommand, config: &CliConfig) -> Result<()> {
     let creator_id = config.active_creator_id.as_deref().ok_or_else(|| {
         crate::errors::CliError::Other(
@@ -47,66 +53,85 @@ pub async fn run(command: SoulCommand, config: &CliConfig) -> Result<()> {
 
     match command {
         SoulCommand::Init => init(config, creator_id).await,
-        SoulCommand::Show => show(config, creator_id),
+        SoulCommand::Show => show(config, creator_id).await,
         SoulCommand::EditPersonality { content } => {
             edit_personality(config, creator_id, content).await
         }
-        SoulCommand::Validate => validate(config, creator_id),
-        SoulCommand::PushPersonality => push_personality(config, creator_id),
+        SoulCommand::Validate => validate(config, creator_id).await,
+        SoulCommand::PushPersonality => push_personality(config, creator_id).await,
         SoulCommand::RefreshExperience => refresh_experience(config, creator_id).await,
     }
 }
 
-async fn init(_config: &CliConfig, creator_id: &str) -> Result<()> {
-    let home = config::user_home_dir()?;
-    if soul_io::exists(&home, MemoryBearerRef::Creator(creator_id)) {
-        return Err(crate::errors::CliError::Other(format!(
-            "SOUL.md already exists for creator '{creator_id}'. Use `soul show` to view it."
-        )));
-    }
-    let doc = soul_io::create(&home, MemoryBearerRef::Creator(creator_id))?;
-    doc.validate()?;
+/// The retained "no SOUL document" refusal. The document has no file path after
+/// the cutover, so the wording drops the old `at <path>` suffix.
+fn soul_not_found(creator_id: &str) -> CliError {
+    CliError::Other(format!("SOUL.md not found for creator '{creator_id}'."))
+}
 
-    // Persist metadata to DB (best-effort; file I/O is the primary action).
-    if let Some(pool) = open_global_db().await? {
-        let path = soul_io::soul_path(&home, MemoryBearerRef::Creator(creator_id));
-        let now = chrono::Utc::now().to_rfc3339();
-        let meta = SoulMeta {
-            creator_id: creator_id.to_string(),
-            file_path: path.display().to_string(),
-            schema_version: 1,
-            personality_hash: doc.personality.as_ref().map(|p| simple_hash(p)),
-            experience_hash: doc.experience.as_ref().map(|e| simple_hash(e)),
-            created_at: now.clone(),
-            updated_at: now,
-        };
-        if let Err(e) = db_upsert_soul_meta(&pool, &meta).await {
-            eprintln!("warning: failed to persist soul metadata: {e}");
+/// Map a SOUL document failure onto the retained `Memory error:` envelope the
+/// file-backed leaf rendered.
+fn soul_error(error: MemoryError) -> CliError {
+    CliError::Other(format!("Memory error: {error}"))
+}
+
+/// Read the authored SOUL document body and its provider revision.
+async fn read_soul(config: &CliConfig, creator_id: &str) -> Result<(String, u64)> {
+    with_read_only_core(config, async |core, principal| {
+        let profile: ProfileDocument = core
+            .get_creator_soul(principal)
+            .await
+            .map_err(map_core_error)?
+            .ok_or_else(|| soul_not_found(creator_id))?;
+        Ok((profile.document.body, profile.revision.get()))
+    })
+    .await
+}
+
+async fn init(config: &CliConfig, creator_id: &str) -> Result<()> {
+    let document = SoulDocument::for_creator(creator_id).render();
+    let text = with_direct_core(config, async |core, principal| {
+        if core
+            .get_creator_soul(principal)
+            .await
+            .map_err(map_core_error)?
+            .is_some()
+        {
+            return Err(CliError::Other(format!(
+                "SOUL.md already exists for creator '{creator_id}'. Use `soul show` to view it."
+            )));
         }
-    }
-
-    println!("SOUL.md initialized for creator '{creator_id}'.");
-    println!(
-        "Path: {}",
-        soul_io::soul_path(&home, MemoryBearerRef::Creator(creator_id)).display()
-    );
+        core.set_creator_soul(principal, &document, None)
+            .await
+            .map_err(map_core_error)?;
+        Ok(format!("SOUL.md initialized for creator '{creator_id}'."))
+    })
+    .await?;
+    println!("{text}");
     Ok(())
 }
 
-fn show(_config: &CliConfig, creator_id: &str) -> Result<()> {
-    let home = config::user_home_dir()?;
-    let doc = soul_io::load(&home, MemoryBearerRef::Creator(creator_id))?;
-    println!("{}", doc.render());
+async fn show(config: &CliConfig, creator_id: &str) -> Result<()> {
+    let body = with_read_only_core(config, async |core, principal| {
+        let profile = core
+            .get_creator_soul(principal)
+            .await
+            .map_err(map_core_error)?
+            .ok_or_else(|| soul_not_found(creator_id))?;
+        Ok(profile.document.body)
+    })
+    .await?;
+    println!("{body}");
     Ok(())
 }
 
 async fn edit_personality(
-    _config: &CliConfig,
+    config: &CliConfig,
     creator_id: &str,
     content: Option<String>,
 ) -> Result<()> {
-    let home = config::user_home_dir()?;
-    let mut doc = soul_io::load(&home, MemoryBearerRef::Creator(creator_id))?;
+    let (body, revision) = read_soul(config, creator_id).await?;
+    let mut soul = SoulDocument::parse(&body).map_err(soul_error)?;
     let new_content = match content.as_deref() {
         Some("-") => {
             use std::io::Read;
@@ -116,50 +141,34 @@ async fn edit_personality(
         }
         Some(text) => text.to_string(),
         None => {
-            return Err(crate::errors::CliError::Other(
+            return Err(CliError::Other(
                 "Provide personality content or use '-' to read from stdin.".to_string(),
             ))
         }
     };
-    doc.set_personality(new_content);
-    soul_io::save(&home, MemoryBearerRef::Creator(creator_id), &doc)?;
+    soul.set_personality(new_content);
+    let rendered = soul.render();
 
-    // Update metadata in DB (best-effort).
-    if let Some(pool) = open_global_db().await? {
-        let path = soul_io::soul_path(&home, MemoryBearerRef::Creator(creator_id));
-        let now = chrono::Utc::now().to_rfc3339();
-        let existing_created_at = db_get_soul_meta(&pool, creator_id)
+    with_direct_core(config, async |core, principal| {
+        core.set_creator_soul(principal, &rendered, Some(revision))
             .await
-            .ok()
-            .flatten()
-            .map(|m| m.created_at);
-        let meta = SoulMeta {
-            creator_id: creator_id.to_string(),
-            file_path: path.display().to_string(),
-            schema_version: 1,
-            personality_hash: doc.personality.as_ref().map(|p| simple_hash(p)),
-            experience_hash: doc.experience.as_ref().map(|e| simple_hash(e)),
-            created_at: existing_created_at.unwrap_or_else(|| now.clone()),
-            updated_at: now,
-        };
-        if let Err(e) = db_upsert_soul_meta(&pool, &meta).await {
-            eprintln!("warning: failed to update soul metadata: {e}");
-        }
-    }
-
+            .map_err(map_core_error)
+    })
+    .await?;
     println!("Personality section updated for creator '{creator_id}'.");
     Ok(())
 }
 
-fn validate(_config: &CliConfig, creator_id: &str) -> Result<()> {
-    let home = config::user_home_dir()?;
-    let doc = soul_io::validate(&home, MemoryBearerRef::Creator(creator_id))?;
+async fn validate(config: &CliConfig, creator_id: &str) -> Result<()> {
+    let (body, _) = read_soul(config, creator_id).await?;
+    let soul = SoulDocument::parse(&body).map_err(soul_error)?;
+    soul.validate().map_err(soul_error)?;
     println!("SOUL.md for creator '{creator_id}' is valid.");
     println!("  Sections: Personality ✓, Experience ✓");
-    if !doc.extra_sections.is_empty() {
+    if !soul.extra_sections.is_empty() {
         println!(
             "  Extra sections: {}",
-            doc.extra_sections
+            soul.extra_sections
                 .keys()
                 .cloned()
                 .collect::<Vec<_>>()
@@ -169,106 +178,43 @@ fn validate(_config: &CliConfig, creator_id: &str) -> Result<()> {
     Ok(())
 }
 
-fn push_personality(_config: &CliConfig, creator_id: &str) -> Result<()> {
-    let home = config::user_home_dir()?;
-    let soul = soul_io::load(&home, MemoryBearerRef::Creator(creator_id))?;
+async fn push_personality(config: &CliConfig, creator_id: &str) -> Result<()> {
+    let (body, _) = read_soul(config, creator_id).await?;
+    let soul = SoulDocument::parse(&body).map_err(soul_error)?;
+    let personality = soul.personality.unwrap_or_default();
 
-    let memory = nexus_creator_memory::personality_sync::push_personality_to_memory(
-        &home,
-        MemoryBearerRef::Creator(creator_id),
-        &soul,
-    )?;
+    let record = with_direct_core(config, async |core, principal| {
+        core.push_creator_personality(principal, &personality)
+            .await
+            .map_err(map_core_error)
+    })
+    .await?;
+    let (memory_id, kind) = memory_identity(&record)
+        .unwrap_or_else(|| (String::new(), "personality_core".to_string()));
 
     println!("Personality pushed to long-term memory for creator '{creator_id}'.");
-    println!("  Memory ID: {}", memory.frontmatter.memory_id);
-    println!("  Kind: {}", memory.frontmatter.memory_kind);
-    if let Some(path) = &memory.source_path {
-        println!("  Path: {}", path.display());
-    }
+    println!("  Memory ID: {memory_id}");
+    println!("  Kind: {kind}");
     Ok(())
 }
 
-/// Deterministic experience refresh — no LLM call.
-///
-/// Reads long-term memory files, filters to experience-kind entries, sorts by
-/// recency, and overwrites the `## Experience` section in SOUL.md.
-///
-/// **Warning:** hand-edits under `## Experience` are overwritten on each run.
-async fn refresh_experience(_config: &CliConfig, creator_id: &str) -> Result<()> {
-    let home = config::user_home_dir()?;
-
-    let result = nexus_creator_memory::experience_aggregation::aggregate_experience(
-        &home,
-        MemoryBearerRef::Creator(creator_id),
-        None, // No synthesizer — deterministic path only
-    )
+async fn refresh_experience(config: &CliConfig, creator_id: &str) -> Result<()> {
+    let (markdown, processed) = with_direct_core(config, async |core, principal| {
+        core.refresh_creator_experience(principal)
+            .await
+            .map_err(map_core_error)
+    })
     .await?;
 
-    // Update metadata in DB (best-effort).
-    if let Some(pool) = open_global_db().await? {
-        let path = soul_io::soul_path(&home, MemoryBearerRef::Creator(creator_id));
-        let now = chrono::Utc::now().to_rfc3339();
-        let existing_created_at = db_get_soul_meta(&pool, creator_id)
-            .await
-            .ok()
-            .flatten()
-            .map(|m| m.created_at);
-        let soul = soul_io::load(&home, MemoryBearerRef::Creator(creator_id))?;
-        let meta = SoulMeta {
-            creator_id: creator_id.to_string(),
-            file_path: path.display().to_string(),
-            schema_version: 1,
-            personality_hash: soul.personality.as_ref().map(|p| simple_hash(p)),
-            experience_hash: soul.experience.as_ref().map(|e| simple_hash(e)),
-            created_at: existing_created_at.unwrap_or_else(|| now.clone()),
-            updated_at: now,
-        };
-        if let Err(e) = db_upsert_soul_meta(&pool, &meta).await {
-            eprintln!("warning: failed to update soul metadata: {e}");
-        }
-    }
-
     println!("Experience refreshed for creator '{creator_id}'.");
-    println!("  Memories processed: {}", result.memories_processed);
+    println!("  Memories processed: {processed}");
     println!("  Method: deterministic (no LLM)");
-    if result.experience_markdown.is_empty() {
+    if markdown.is_empty() {
         println!("  Note: no experience-kind memories found; Experience section cleared.");
     } else {
         println!("  Warning: hand-edits under ## Experience are overwritten on refresh.");
     }
     Ok(())
-}
-
-/// Open or create the global database, returning `Some(pool)` on success
-/// or `None` if the DB is not available (e.g., first run before `nexus42 creator workspace init`).
-///
-/// This mirrors `identity.rs::open_global_db()` but returns `None` instead of
-/// erroring so SOUL operations degrade gracefully when no DB exists yet.
-async fn open_global_db() -> Result<Option<nexus_local_db::SqlitePool>> {
-    let home = config::user_home_dir()?;
-    let nexus_dir = home.join(".nexus42");
-
-    // If the nexus dir doesn't exist, no DB to open — that's OK for SOUL ops.
-    if !nexus_dir.exists() {
-        return Ok(None);
-    }
-
-    let db_path = nexus_dir.join("state.db");
-    if !db_path.exists() {
-        return Ok(None);
-    }
-
-    let pool = crate::db::Schema::init(&db_path).await?;
-    Ok(Some(pool))
-}
-
-/// Cheap deterministic hash for SOUL section content (not cryptographic).
-fn simple_hash(s: &str) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    let mut hasher = DefaultHasher::new();
-    s.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
 }
 
 #[cfg(test)]

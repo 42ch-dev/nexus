@@ -109,6 +109,10 @@ pub use references::{RegisterReferenceParams, REFERENCE_SOURCE_TYPES};
 pub use nexus_contracts::core::references::{
     ReferenceGetResponse, ReferenceListResponse, ReferenceSourceInfo,
 };
+// Provider-owned memory contract objects (spoke §6): the E1/E2 direct-core
+// callers name the Creator record and SOUL profile documents through
+// `nexus_core` instead of a second DTO set.
+pub use spoke_operations::spoke_schemas::{ProfileDocument, RetainedRecord};
 pub use service::{CoreAccess, CoreOpenOptions, CoreService};
 pub use soul::CoreCharacterMind;
 pub use storage_status::{CoreStorageStatus, CoreStorageVersions};

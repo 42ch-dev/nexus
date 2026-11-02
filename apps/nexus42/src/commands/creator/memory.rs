@@ -1,18 +1,21 @@
 //! Memory management commands.
 //!
-//! CRUD operations for long-term memories, review pipeline,
-//! and fragment management.
+//! Long-term memory CRUD, the SOUL-independent review pipeline, and fragment
+//! management. Every leaf is a typed `CoreService` client since NXM-6: no
+//! command opens a legacy memory file.
 
-use crate::config;
 use crate::config::CliConfig;
-use crate::core::{finish_direct, map_core_error, open_direct_core};
-use crate::errors::Result;
+use crate::core::{
+    finish_direct, map_core_error, open_direct_core, with_direct_core, with_read_only_core,
+};
+use crate::errors::{CliError, Result};
 use clap::Subcommand;
+use nexus_contracts::daemon_api::memory::create_pending_review_request::CreatePendingReviewRequest;
+use nexus_contracts::daemon_api::memory::create_pending_review_response::CreatePendingReviewResponse;
 use nexus_contracts::daemon_api::memory::{ReviewRequest, ReviewResponse};
-use nexus_core::{CoreService, Principal};
-use nexus_creator_memory::long_term_memory::LongTermMemory;
-use nexus_creator_memory::memory_io;
-use nexus_creator_memory::MemoryBearerRef;
+use nexus_core::{CoreService, Principal, RetainedRecord};
+use nexus_creator_memory::long_term_memory::slug_is_safe;
+use nexus_creator_memory::memory_item::MemoryKind;
 use std::io::Write;
 use std::str::FromStr;
 
@@ -99,6 +102,39 @@ pub enum MemoryCommand {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
+
+    /// Capture a session digest into the pending-review queue
+    Capture {
+        /// Pending review ID for the captured digest
+        #[arg(long)]
+        pending_id: String,
+
+        /// Session that produced the digest
+        #[arg(long)]
+        session_id: String,
+
+        /// World the session ran in (provenance context)
+        #[arg(long)]
+        world_id: Option<String>,
+
+        /// Task kind heuristic (`brainstorm`, `outline`, `chapter`, `research`,
+        /// `unknown`)
+        #[arg(long)]
+        task_kind: Option<String>,
+
+        /// Raw digest extracted from the session
+        #[arg(long)]
+        digest: String,
+
+        /// Capture timestamp (RFC 3339; defaults to the current time)
+        #[arg(long)]
+        created_at: Option<String>,
+
+        /// Emit machine-readable JSON (the `CreatePendingReviewResponse`
+        /// DTO verbatim) instead of human text.
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
 }
 
 /// `creator memory pending` subcommands (AR-86).
@@ -115,16 +151,16 @@ pub enum PendingCommand {
 
 /// Run memory command.
 ///
-/// The local CRUD leaves author through the guarded local memory library and
-/// never open the core; the review family runs on the shared direct-core seam
-/// in [`run_direct`].
+/// The local CRUD and SOUL leaves are provider clients: each opens the shared
+/// direct-core seam, calls one typed `CoreService` operation and prints its
+/// rendered outcome only after the writer was released.
 ///
 /// # Errors
 ///
 /// Returns an error if:
 /// - No active creator is set
-/// - Database operations fail
-/// - File I/O operations fail
+/// - The mapped core refusal (admission, `[not_found]` / `[forbidden]`,
+///   storage) reaches the leaf
 pub async fn run(command: MemoryCommand, config: &CliConfig) -> Result<()> {
     let creator_id = config.active_creator_id.as_deref().ok_or_else(|| {
         crate::errors::CliError::Other(
@@ -133,21 +169,21 @@ pub async fn run(command: MemoryCommand, config: &CliConfig) -> Result<()> {
     })?;
 
     match command {
-        MemoryCommand::List => list(config, creator_id),
+        MemoryCommand::List => list(config, creator_id).await,
         MemoryCommand::Create {
             slug,
             kind,
             content,
-        } => create(config, creator_id, &slug, &kind, content),
-        MemoryCommand::Show { slug } => show(config, creator_id, &slug),
-        MemoryCommand::Edit { slug } => edit(config, creator_id, &slug),
-        MemoryCommand::Delete { slug, force } => delete(config, creator_id, &slug, force),
-        // The review family is admitted on the direct core, not this local leaf.
+        } => create(config, creator_id, &slug, &kind, content).await,
+        MemoryCommand::Show { slug } => show(config, creator_id, &slug).await,
+        MemoryCommand::Edit { slug } => edit(config, creator_id, &slug).await,
+        MemoryCommand::Delete { slug, force } => delete(config, creator_id, &slug, force).await,
+        // The review and capture family runs on the same direct-core seam.
         direct => run_direct(direct, config, creator_id).await,
     }
 }
 
-/// Run one review-family leaf on the shared direct-core seam.
+/// Run one leaf on the shared direct-core seam and print its rendered outcome.
 ///
 /// One `CoreService` call per leaf over the raw user home; the writer is
 /// released by [`finish_direct`] before a line is printed, so no command
@@ -179,165 +215,328 @@ async fn run_direct(command: MemoryCommand, config: &CliConfig, creator_id: &str
             MemoryCommand::PendingDismiss { pending_id, json } => {
                 pending_dismiss(&core, &principal, &pending_id, json).await
             }
-            // `run` routes the local CRUD leaves before this seam is opened.
+            MemoryCommand::Capture {
+                pending_id,
+                session_id,
+                world_id,
+                task_kind,
+                digest,
+                created_at,
+                json,
+            } => {
+                capture(
+                    &core,
+                    &principal,
+                    creator_id,
+                    CreatePendingReviewRequest {
+                        pending_id,
+                        session_id,
+                        creator_id: creator_id.to_string(),
+                        world_id,
+                        task_kind,
+                        raw_digest: digest,
+                        created_at,
+                    },
+                    json,
+                )
+                .await
+            }
+            // `run` routes the E1/E2 leaves before this seam is opened.
             MemoryCommand::List
             | MemoryCommand::Create { .. }
             | MemoryCommand::Show { .. }
             | MemoryCommand::Edit { .. }
             | MemoryCommand::Delete { .. } => {
-                unreachable!("local memory leaves are routed before the direct core opens")
+                unreachable!("the crud leaves are routed before the direct core opens")
             }
         }
     }
     .await;
-    println!("{}", finish_direct(&core, outcome).await?);
+    let text = finish_direct(&core, outcome).await?;
+    if !text.is_empty() {
+        println!("{text}");
+    }
     Ok(())
 }
 
-fn list(_config: &CliConfig, creator_id: &str) -> Result<()> {
-    let home = config::user_home_dir()?;
-    let slugs = memory_io::list_memories(&home, MemoryBearerRef::Creator(creator_id))?;
+/// One authored long-term memory as the CLI renders it.
+///
+/// The display identity rides in the record's `nexus_legacy` block — the shape
+/// the provider bridge projects and every write in this family stores — so a
+/// rendered row reads the same before and after P5's migration.
+struct MemoryLine {
+    slug: String,
+    kind: String,
+    memory_id: String,
+    updated_at: String,
+    source_session_ids: Vec<String>,
+    body: String,
+}
 
-    if slugs.is_empty() {
-        println!("No long-term memories for creator '{creator_id}'.");
-        return Ok(());
+impl MemoryLine {
+    fn from_record(record: &RetainedRecord) -> Option<Self> {
+        let RetainedRecord::LiveRecord(live) = record else {
+            return None;
+        };
+        let legacy = live
+            .content
+            .structured
+            .as_ref()
+            .and_then(|structured| structured.get("nexus_legacy"));
+        Some(Self {
+            slug: legacy
+                .and_then(|legacy| legacy["slug"].as_str())
+                .unwrap_or_default()
+                .to_string(),
+            kind: legacy
+                .and_then(|legacy| legacy["memory_kind"].as_str())
+                .map_or_else(|| live.kind.as_str().to_string(), ToString::to_string),
+            memory_id: legacy
+                .and_then(|legacy| legacy["memory_id"].as_str())
+                .map_or_else(|| live.record_id.as_str().to_string(), ToString::to_string),
+            updated_at: legacy
+                .and_then(|legacy| legacy["updated_at"].as_str())
+                .map_or_else(|| live.updated_at.to_rfc3339(), ToString::to_string),
+            source_session_ids: legacy
+                .and_then(|legacy| legacy["source_session_ids"].as_array())
+                .map(|ids| {
+                    ids.iter()
+                        .filter_map(|id| id.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            body: live.content.text.clone(),
+        })
     }
+}
 
-    println!("Long-term memories for creator '{creator_id}':\n");
+/// The retained "no such memory" refusal for one authored slug.
+fn memory_not_found(creator_id: &str, slug: &str) -> CliError {
+    CliError::Other(format!(
+        "Memory '{slug}' not found for creator '{creator_id}'."
+    ))
+}
 
-    // Header
-    println!("{:<30} {:<20} UPDATED_AT", "SLUG", "KIND");
-    println!("{}", "-".repeat(80));
+/// The authored `(memory_id, kind)` of one Creator record, for the leaves that
+/// report the identity they just wrote.
+pub(crate) fn memory_identity(record: &RetainedRecord) -> Option<(String, String)> {
+    MemoryLine::from_record(record).map(|row| (row.memory_id, row.kind))
+}
 
-    for slug in &slugs {
-        match memory_io::load_memory(&home, MemoryBearerRef::Creator(creator_id), slug) {
-            Ok(mem) => {
-                let kind = &mem.frontmatter.memory_kind;
-                let updated = &mem.frontmatter.updated_at;
-                println!("{slug:<30} {kind:<20} {updated}");
-            }
-            Err(_) => {
-                println!("{:<30} {:<20} ", slug, "(unreadable)");
-            }
-        }
+fn render_memory_list(creator_id: &str, records: &[RetainedRecord]) -> String {
+    let rows: Vec<MemoryLine> = records.iter().filter_map(MemoryLine::from_record).collect();
+    if rows.is_empty() {
+        return format!("No long-term memories for creator '{creator_id}'.");
     }
+    let mut lines = vec![
+        format!("Long-term memories for creator '{creator_id}':\n"),
+        format!("{:<30} {:<20} UPDATED_AT", "SLUG", "KIND"),
+        "-".repeat(80),
+    ];
+    for row in &rows {
+        lines.push(format!(
+            "{:<30} {:<20} {}",
+            row.slug, row.kind, row.updated_at
+        ));
+    }
+    lines.push(format!("\n{} memories", rows.len()));
+    lines.join("\n")
+}
 
-    println!("\n{} memories", slugs.len());
+async fn list(config: &CliConfig, creator_id: &str) -> Result<()> {
+    let text = with_read_only_core(config, async |core, principal| {
+        let records = core
+            .list_creator_memories(principal)
+            .await
+            .map_err(map_core_error)?;
+        Ok(render_memory_list(creator_id, &records))
+    })
+    .await?;
+    println!("{text}");
     Ok(())
 }
 
-fn create(
-    _config: &CliConfig,
+async fn create(
+    config: &CliConfig,
     creator_id: &str,
     slug: &str,
     kind: &str,
     content: Option<String>,
 ) -> Result<()> {
-    let home = config::user_home_dir()?;
-
-    // Validate slug
-    if !nexus_creator_memory::long_term_memory::slug_is_safe(slug) {
-        return Err(crate::errors::CliError::Other(format!(
+    // The authored identity is validated before anything is opened.
+    if !slug_is_safe(slug) {
+        return Err(CliError::Other(format!(
             "Invalid slug '{slug}': must not contain '..', '/', '\\\\', or control characters."
         )));
     }
-
-    // Check if memory already exists
-    if memory_io::load_memory(&home, MemoryBearerRef::Creator(creator_id), slug).is_ok() {
-        return Err(crate::errors::CliError::Other(format!(
-            "Memory '{slug}' already exists for creator '{creator_id}'. Use `memory edit {slug}` to modify it."
+    if MemoryKind::from_str(kind).is_err() {
+        return Err(CliError::Other(format!(
+            "Invalid memory kind '{kind}'. Valid kinds: {}",
+            MemoryKind::all_as_strings().join(", ")
         )));
     }
-
-    // Validate kind
-    if nexus_creator_memory::memory_item::MemoryKind::from_str(kind).is_err() {
-        return Err(crate::errors::CliError::Other(format!(
-            "Invalid memory kind '{}'. Valid kinds: {}",
-            kind,
-            nexus_creator_memory::memory_item::MemoryKind::all_as_strings().join(", ")
-        )));
-    }
-
-    // Get content
+    // The editor runs before the direct core admits the workspace writer, so an
+    // open editor never holds the cross-process writer admission.
     let body = match content {
-        Some(c) => c,
+        Some(body) => body,
         None => open_editor_temp("Memory content", "")?,
     };
 
-    let mut memory = LongTermMemory::new(kind);
-    memory.set_body(&body);
-    memory_io::save_memory(&home, MemoryBearerRef::Creator(creator_id), slug, &memory)?;
-
-    println!("Memory '{slug}' created for creator '{creator_id}'.");
-    println!("  Kind: {kind}");
-    println!(
-        "  Path: {}",
-        memory_io::memory_path(&home, MemoryBearerRef::Creator(creator_id), slug).display()
-    );
+    let text = with_direct_core(config, async |core, principal| {
+        if !core
+            .create_creator_memory(principal, slug, kind, &body)
+            .await
+            .map_err(map_core_error)?
+        {
+            return Err(CliError::Other(format!(
+                "Memory '{slug}' already exists for creator '{creator_id}'. Use `memory edit {slug}` to modify it."
+            )));
+        }
+        Ok(format!(
+            "Memory '{slug}' created for creator '{creator_id}'.\n  Kind: {kind}"
+        ))
+    })
+    .await?;
+    println!("{text}");
     Ok(())
 }
 
-fn show(_config: &CliConfig, creator_id: &str, slug: &str) -> Result<()> {
-    let home = config::user_home_dir()?;
-    let memory = memory_io::load_memory(&home, MemoryBearerRef::Creator(creator_id), slug)?;
+async fn show(config: &CliConfig, creator_id: &str, slug: &str) -> Result<()> {
+    let text = with_read_only_core(config, async |core, principal| {
+        let record = core
+            .get_creator_memory(principal, slug)
+            .await
+            .map_err(map_core_error)?
+            .ok_or_else(|| memory_not_found(creator_id, slug))?;
+        Ok(render_memory(&record))
+    })
+    .await?;
+    println!("{text}");
+    Ok(())
+}
 
-    // Display frontmatter
-    println!("slug: {slug}");
-    println!("memory_id: {}", memory.frontmatter.memory_id);
-    println!("memory_kind: {}", memory.frontmatter.memory_kind);
-    println!("updated_at: {}", memory.frontmatter.updated_at);
-    if !memory.frontmatter.source_session_ids.is_empty() {
-        println!(
+/// Render the `creator memory show` output for one record.
+fn render_memory(record: &RetainedRecord) -> String {
+    let Some(row) = MemoryLine::from_record(record) else {
+        return String::new();
+    };
+    let mut lines = vec![
+        format!("slug: {}", row.slug),
+        format!("memory_id: {}", row.memory_id),
+        format!("memory_kind: {}", row.kind),
+        format!("updated_at: {}", row.updated_at),
+    ];
+    if !row.source_session_ids.is_empty() {
+        lines.push(format!(
             "source_sessions: {}",
-            memory.frontmatter.source_session_ids.join(", ")
-        );
+            row.source_session_ids.join(", ")
+        ));
     }
-    println!();
+    lines.push(String::new());
+    lines.push(row.body);
+    lines.join("\n")
+}
 
-    // Display body
-    println!("{}", memory.body);
+async fn edit(config: &CliConfig, creator_id: &str, slug: &str) -> Result<()> {
+    // Read, edit with nothing admitted, then write: an editor session never
+    // holds the workspace writer.
+    let current = with_read_only_core(config, async |core, principal| {
+        let record = core
+            .get_creator_memory(principal, slug)
+            .await
+            .map_err(map_core_error)?
+            .ok_or_else(|| memory_not_found(creator_id, slug))?;
+        Ok(MemoryLine::from_record(&record).map_or_else(String::new, |row| row.body))
+    })
+    .await?;
+    let body = open_editor_temp("Memory content", &current)?;
+
+    let text = with_direct_core(config, async |core, principal| {
+        if !core
+            .update_creator_memory(principal, slug, &body)
+            .await
+            .map_err(map_core_error)?
+        {
+            return Err(memory_not_found(creator_id, slug));
+        }
+        Ok(format!("Memory '{slug}' updated."))
+    })
+    .await?;
+    println!("{text}");
     Ok(())
 }
 
-fn edit(_config: &CliConfig, creator_id: &str, slug: &str) -> Result<()> {
-    let home = config::user_home_dir()?;
-    let mut memory = memory_io::load_memory(&home, MemoryBearerRef::Creator(creator_id), slug)?;
-
-    let new_body = open_editor_temp("Memory content", &memory.body)?;
-    memory.set_body(&new_body);
-    memory_io::save_memory(&home, MemoryBearerRef::Creator(creator_id), slug, &memory)?;
-
-    println!("Memory '{slug}' updated.");
-    Ok(())
-}
-
-fn delete(_config: &CliConfig, creator_id: &str, slug: &str, force: bool) -> Result<()> {
-    let home = config::user_home_dir()?;
-
-    // Verify memory exists
-    memory_io::load_memory(&home, MemoryBearerRef::Creator(creator_id), slug)?;
-
-    if !force {
-        // S-005: Confirm deletion. Empty input (just pressing Enter) = cancel.
-        println!("Delete memory '{slug}' for creator '{creator_id}'? [y/N]");
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input)?;
-        let trimmed = input.trim();
-        if trimmed.is_empty() {
-            // User pressed Enter without typing anything — treat as cancel
-            println!("Aborted (empty input).");
-            return Ok(());
+async fn delete(config: &CliConfig, creator_id: &str, slug: &str, force: bool) -> Result<()> {
+    let text = with_direct_core(config, async |core, principal| {
+        if core
+            .get_creator_memory(principal, slug)
+            .await
+            .map_err(map_core_error)?
+            .is_none()
+        {
+            return Err(memory_not_found(creator_id, slug));
         }
-        if !trimmed.eq_ignore_ascii_case("y") && !trimmed.eq_ignore_ascii_case("yes") {
-            println!("Aborted.");
-            return Ok(());
+        if !force && !confirm_delete(creator_id, slug)? {
+            return Ok(String::new());
         }
+        if !core
+            .delete_creator_memory(principal, slug)
+            .await
+            .map_err(map_core_error)?
+        {
+            return Err(memory_not_found(creator_id, slug));
+        }
+        Ok(format!("Memory '{slug}' deleted."))
+    })
+    .await?;
+    if !text.is_empty() {
+        println!("{text}");
     }
-
-    memory_io::delete_memory(&home, MemoryBearerRef::Creator(creator_id), slug)?;
-    println!("Memory '{slug}' deleted.");
     Ok(())
 }
+
+/// `[y/N]` confirmation for one deletion: an empty answer cancels (S-005).
+fn confirm_delete(creator_id: &str, slug: &str) -> Result<bool> {
+    println!("Delete memory '{slug}' for creator '{creator_id}'? [y/N]");
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        println!("Aborted (empty input).");
+        return Ok(false);
+    }
+    if !trimmed.eq_ignore_ascii_case("y") && !trimmed.eq_ignore_ascii_case("yes") {
+        println!("Aborted.");
+        return Ok(false);
+    }
+    Ok(true)
+}
+
+/// `creator memory capture` — record one session digest in the Creator's
+/// pending-review queue through the typed capture capability (NXM-16).
+///
+/// Explicit capture only: the Host's automatic `remember` stays refused (D-4),
+/// and the captured row is the provider candidate the review family consumes.
+async fn capture(
+    core: &CoreService,
+    principal: &Principal,
+    creator_id: &str,
+    request: CreatePendingReviewRequest,
+    json: bool,
+) -> Result<String> {
+    let response: CreatePendingReviewResponse = core
+        .create_pending_review(principal, request)
+        .await
+        .map_err(map_core_error)?;
+    if json {
+        return Ok(serde_json::to_string_pretty(&response)?);
+    }
+    Ok(format!(
+        "Captured pending review:\n  pending_id: {}\n  creator_id: {creator_id}",
+        response.pending_id
+    ))
+}
+
 
 /// Page size for the memory list/pending reads.
 ///

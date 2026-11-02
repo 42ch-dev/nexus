@@ -29,6 +29,8 @@ use nexus_contracts::generated::daemon_api::characters::tom::list_character_tom_
 use nexus_contracts::generated::daemon_api::characters::tom::record_character_tom_request::RecordCharacterTomRequest;
 use nexus_contracts::generated::daemon_api::characters::tom::record_character_tom_response::RecordCharacterTomResponse;
 use nexus_contracts::generated::daemon_api::memory::count_pending_reviews_response::CountPendingReviewsResponse;
+use nexus_contracts::generated::daemon_api::memory::create_pending_review_request::CreatePendingReviewRequest;
+use nexus_contracts::generated::daemon_api::memory::create_pending_review_response::CreatePendingReviewResponse;
 use nexus_contracts::generated::daemon_api::memory::delete_pending_review_response::DeletePendingReviewResponse;
 use nexus_contracts::generated::daemon_api::memory::list_memory_fragments_response::ListMemoryFragmentsResponse;
 use nexus_contracts::generated::daemon_api::memory::list_pending_reviews_response::ListPendingReviewsResponse;
@@ -36,6 +38,9 @@ use nexus_contracts::generated::daemon_api::memory::memory_fragment_info::Memory
 use nexus_contracts::generated::daemon_api::memory::pending_review_info::PendingReviewInfo;
 use nexus_contracts::generated::daemon_api::memory::review_request::ReviewRequest;
 use nexus_contracts::generated::daemon_api::memory::review_response::ReviewResponse;
+use nexus_creator_memory::experience_aggregation::ExperienceEntry;
+use nexus_creator_memory::personality_sync::PERSONALITY_MEMORY_SLUG;
+use nexus_creator_memory::soul::SoulDocument;
 use nexus_knowledge::world_kb::knowledge_entry::{
     validate_character_tom_belief_row, BeliefPropositionRaw, KnowledgeEntryRecord,
     KnowledgeOwnerRef,
@@ -58,6 +63,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::memory_provider::legacy;
+use crate::memory_provider::policy;
+use crate::memory_provider::profile;
 use crate::memory_provider::{created_at_cmp, LocalMemoryProvider, MemoryDisposition};
 use crate::principal::Principal;
 use crate::service::CoreService;
@@ -140,6 +147,13 @@ fn memory_reject(reject: &SpokeReject) -> CoreError {
             field: "memory".to_string(),
             reason: reject.message.clone(),
         },
+        // A CAS miss keeps the retained `version_mismatch` conflict code the
+        // legacy promotion path already renders (409 at the HTTP adapters), so
+        // the same stale-revision answer reads the same on either path.
+        SpokeRejectCode::RevisionConflict => CoreError::ActorConflict {
+            code: "version_mismatch".to_string(),
+            message: reject.message.clone(),
+        },
         _ => internal_err("memory_provider", reject.message.clone()),
     }
 }
@@ -154,6 +168,11 @@ fn memory_ok<T: serde::Serialize>(result: SpokeResult<T>) -> CoreResult<Value> {
 
 /// One pending-review row as the retained DTOs render it.
 struct PendingMemoryRow {
+    /// The provider's own candidate id: the identity a dismissal or a review
+    /// consumes.
+    candidate_id: String,
+    /// The candidate's current revision (the review/dismiss CAS token).
+    revision: u64,
     pending_id: String,
     session_id: String,
     task_kind: String,
@@ -172,6 +191,8 @@ impl PendingMemoryRow {
         let origin = candidate.pointer("/proposed/content/structured/nexus_legacy")?;
         let scope = &candidate["capture_scope"];
         Some(Self {
+            candidate_id: candidate["candidate_id"].as_str()?.to_string(),
+            revision: candidate["revision"].as_u64().unwrap_or(1),
             pending_id: origin["pending_id"].as_str()?.to_string(),
             session_id: origin["session_id"]
                 .as_str()
@@ -398,6 +419,174 @@ impl MemoryAdapter {
             SpokeResult::Reject(reject) => Err(memory_reject(&reject)),
         }
     }
+
+    /// Dismiss one provider-native pending candidate (a row captured through
+    /// [`CoreService::create_pending_review`]): its candidate id is minted, so
+    /// the retained `pending_id` can only address it through the row itself.
+    ///
+    /// `Ok(false)` folds the same outcomes as [`Self::dismiss_legacy`]: absent,
+    /// already consumed, or lost the revision race.
+    async fn dismiss_native(&self, candidate_id: &str, revision: u64) -> CoreResult<bool> {
+        let request: spoke_schemas::MemoryCandidatesDismissRequest = map_wire(json!({
+            "space_id": MEMORY_SPACE_ID,
+            "candidate_id": candidate_id,
+            "expected_revision": revision,
+            "idempotency_key": format!("e4dismiss-native:{candidate_id}"),
+        }))?;
+        match self
+            .provider
+            .dismiss_candidate(&self.principal, request)
+            .await
+        {
+            SpokeResult::Ok(_) => Ok(true),
+            SpokeResult::Reject(reject)
+                if matches!(
+                    reject.code,
+                    SpokeRejectCode::NotFound
+                        | SpokeRejectCode::CandidateConsumed
+                        | SpokeRejectCode::RevisionConflict
+                ) =>
+            {
+                Ok(false)
+            }
+            SpokeResult::Reject(reject) => Err(memory_reject(&reject)),
+        }
+    }
+
+    /// Every Creator long-term memory record (the nine authored kinds only), in
+    /// the provider's `created_at DESC` order.
+    async fn memory_records(&self) -> CoreResult<Vec<Value>> {
+        let kinds = creator_record_kinds();
+        let kinds: Vec<&str> = kinds.iter().map(String::as_str).collect();
+        self.records(json!({ "mode": "shared_only" }), &kinds, None, None)
+            .await
+    }
+
+    /// One long-term memory record by its authored slug.
+    ///
+    /// The slug is authored content (`nexus_legacy.slug`) and the provider has
+    /// no slug index, so the match happens after the read — exactly the
+    /// directory scan the CLI used to perform.
+    async fn memory_by_slug(&self, slug: &str) -> CoreResult<Option<Value>> {
+        Ok(self
+            .memory_records()
+            .await?
+            .into_iter()
+            .find(|record| creator_slug(record) == Some(slug)))
+    }
+
+    /// The Creator's `personality` profile (`SOUL.md`), if authored.
+    async fn personality_profile(&self) -> CoreResult<Option<Value>> {
+        let request: spoke_schemas::MemoryProfileGetRequest = map_wire(json!({
+            "space_id": MEMORY_SPACE_ID,
+            "subject_id": self.subject_id,
+            "profile_kinds": [profile::SOUL_PROFILE_KIND],
+        }))?;
+        let body = memory_ok(self.provider.get_profile(&self.principal, request).await)?;
+        Ok(body["profiles"]
+            .as_array()
+            .and_then(|profiles| profiles.first())
+            .cloned())
+    }
+
+    /// Create one Creator long-term memory record (shared placement).
+    async fn create_memory_record(
+        &self,
+        kind: &str,
+        content: Value,
+        idempotency_key: &str,
+    ) -> CoreResult<()> {
+        let request: spoke_schemas::MemoryRecordsCreateRequest = map_wire(json!({
+            "space_id": MEMORY_SPACE_ID,
+            "subject_id": self.subject_id,
+            "kind": kind,
+            "content": content,
+            "scope": { "visibility": "shared" },
+            "source_context_ids": [],
+            "idempotency_key": idempotency_key,
+        }))?;
+        memory_ok(self.provider.create_record(&self.principal, request).await).map(|_| ())
+    }
+
+    /// Replace one Creator record's content on the expected revision.
+    async fn update_memory_record(
+        &self,
+        record_id: &str,
+        expected_revision: u64,
+        content: Value,
+        idempotency_key: &str,
+    ) -> CoreResult<()> {
+        let request: spoke_schemas::MemoryRecordsUpdateRequest = map_wire(json!({
+            "space_id": MEMORY_SPACE_ID,
+            "record_id": record_id,
+            "expected_revision": expected_revision,
+            "content": content,
+            "idempotency_key": idempotency_key,
+        }))?;
+        memory_ok(self.provider.update_record(&self.principal, request).await).map(|_| ())
+    }
+
+    /// Tombstone one Creator record on the expected revision.
+    async fn delete_memory_record(
+        &self,
+        record_id: &str,
+        expected_revision: u64,
+        idempotency_key: &str,
+    ) -> CoreResult<()> {
+        let request: spoke_schemas::MemoryRecordsDeleteRequest = map_wire(json!({
+            "space_id": MEMORY_SPACE_ID,
+            "record_id": record_id,
+            "expected_revision": expected_revision,
+            "reason": "deleted through the creator memory CLI",
+            "idempotency_key": idempotency_key,
+        }))?;
+        memory_ok(self.provider.delete_record(&self.principal, request).await).map(|_| ())
+    }
+
+    /// Write the `personality` profile document.
+    ///
+    /// A *projected* `SOUL.md` (unmigrated) has no provider row, so its
+    /// projected revision is not a stored one: the revision-checked write cannot
+    /// meet it, while the create-only write can — and that write can only
+    /// succeed when no stored row exists, so a genuine stale-revision conflict
+    /// still surfaces instead of being papered over. The bridge keeps a stored
+    /// kind over the projection, so the adoption replaces the projected document
+    /// rather than duplicating it.
+    async fn write_personality_profile(
+        &self,
+        body: &str,
+        expected_revision: Option<u64>,
+        idempotency_key: &str,
+    ) -> CoreResult<()> {
+        match self
+            .upsert_personality_profile(body, expected_revision, idempotency_key)
+            .await
+        {
+            Err(error) if expected_revision.is_some() && memory_conflict(&error) => {
+                self.upsert_personality_profile(body, None, &format!("{idempotency_key}:adopt"))
+                    .await
+            }
+            other => other,
+        }
+    }
+
+    /// One `memory.profile.update` at the exact expected revision.
+    async fn upsert_personality_profile(
+        &self,
+        body: &str,
+        expected_revision: Option<u64>,
+        idempotency_key: &str,
+    ) -> CoreResult<()> {
+        let request: spoke_schemas::MemoryProfileUpdateRequest = map_wire(json!({
+            "space_id": MEMORY_SPACE_ID,
+            "subject_id": self.subject_id,
+            "profile_kind": profile::SOUL_PROFILE_KIND,
+            "expected_revision": expected_revision,
+            "document": { "format": "markdown", "body": body },
+            "idempotency_key": idempotency_key,
+        }))?;
+        memory_ok(self.provider.update_profile(&self.principal, request).await).map(|_| ())
+    }
 }
 
 // ── Review disposition authority (NXM-5 Task 2 fix round 2) ──────────────
@@ -602,6 +791,588 @@ fn creator_world_id(record: &Value) -> Option<String> {
                 .and_then(Value::as_str)
                 .map(str::to_string)
         })
+}
+
+// ── Creator long-term memory + SOUL profile family (NXM-6/NXM-16) ────────
+//
+// The CLI's E1 (`creator memory list|create|show|edit|delete`) and E2
+// (`creator soul …`) leaves used to reach the bearer files directly. They are
+// provider clients now: a Creator's long-term memories are the `nexus.*`
+// records the nine-kind bijection names (D-7), and `SOUL.md` is the one
+// authored `personality` profile (§6.8, D-12). The bridge projects both from
+// the unmigrated files, so one read path serves migrated and not-yet-migrated
+// content alike (D6); every write lands on the provider, never on the legacy
+// surface.
+//
+// The authored identity the CLI renders — the memory slug, its `memory_id` and
+// the authored kind — rides in `content.structured.nexus_legacy`, the same
+// block the bridge projects, so one rendered row reads the same before and
+// after P5's migration.
+
+/// The `nexus_legacy` slug of a Creator record.
+fn creator_slug(record: &Value) -> Option<&str> {
+    nexus_legacy(record)["slug"].as_str()
+}
+
+/// The nine authored record kinds, namespaced (D-7's lossless bijection).
+fn creator_record_kinds() -> Vec<String> {
+    policy::NEXUS_MEMORY_KINDS
+        .iter()
+        .map(|kind| policy::namespaced_record_kind(kind))
+        .collect()
+}
+
+/// `task_kind` → authored memory kind: the promotion mapping the review
+/// pipeline documents (`nexus_creator_memory::review::promote_to_long_term`).
+fn task_kind_to_memory_kind(task_kind: &str) -> &'static str {
+    match task_kind.to_lowercase().as_str() {
+        "brainstorm" | "chapter" => "story_summary",
+        "outline" => "plot_outline",
+        "research" => "research_material",
+        _ => "custom",
+    }
+}
+
+/// A stable memory idempotency key: the operation, its subject and its payload
+/// decide the key, so a retried write replays instead of duplicating.
+fn creator_memory_key(op: &str, subject: &str, body: &str) -> String {
+    match spoke_operations::jcs_sha256_hex(&json!({ "op": op, "subject": subject, "body": body })) {
+        SpokeResult::Ok(digest) => format!("e4memory:{digest}"),
+        // The three-string payload always canonicalizes; keep the spelling
+        // total rather than reporting an unreachable interior failure.
+        SpokeResult::Reject(_) => format!("e4memory:{op}:{subject}"),
+    }
+}
+
+/// A provider CAS refusal (`expected_revision` did not match the stored one).
+fn memory_conflict(error: &CoreError) -> bool {
+    matches!(error, CoreError::ActorConflict { code, .. } if code == "version_mismatch")
+}
+
+/// The authored memory id of a freshly created record: `mem_<uuid>`, the
+/// frontmatter identity `LongTermMemory` mints and P5's migration preserves.
+fn mint_creator_memory_id() -> String {
+    format!("mem_{}", uuid::Uuid::new_v4().to_string().replace('-', ""))
+}
+
+/// The provider identity and CAS revision of one record body.
+fn creator_record_identity(record: &Value) -> CoreResult<(String, u64)> {
+    let record_id = record["record_id"]
+        .as_str()
+        .ok_or_else(|| internal_err("memory_record", "a provider record carries no record_id"))?;
+    Ok((record_id.to_string(), record["revision"].as_u64().unwrap_or(1)))
+}
+
+/// The authored identity of one Creator memory record: `(memory_id, kind,
+/// source_session_ids)`, from the `nexus_legacy` block the bridge projects.
+fn creator_memory_identity(record: &Value) -> (String, String, Vec<String>) {
+    let legacy = nexus_legacy(record);
+    let memory_id = legacy["memory_id"].as_str().map_or_else(
+        || {
+            record["record_id"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string()
+        },
+        str::to_string,
+    );
+    let kind = legacy["memory_kind"]
+        .as_str()
+        .map(str::to_string)
+        .or_else(|| {
+            record["kind"]
+                .as_str()
+                .and_then(policy::memory_kind_of)
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "custom".to_string());
+    let source_session_ids = legacy["source_session_ids"]
+        .as_array()
+        .map(|ids| {
+            ids.iter()
+                .filter_map(|id| id.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    (memory_id, kind, source_session_ids)
+}
+
+/// The record content of one authored long-term memory.
+fn creator_memory_content(
+    slug: &str,
+    kind: &str,
+    memory_id: &str,
+    body: &str,
+    source_session_ids: &[String],
+) -> Value {
+    json!({
+        "text": body,
+        "structured": { "nexus_legacy": {
+            "slug": slug,
+            "memory_id": memory_id,
+            "memory_kind": kind,
+            "nexus_memory_version": 1,
+            "updated_at": chrono::Utc::now().to_rfc3339(),
+            "source_session_ids": source_session_ids,
+        }},
+    })
+}
+
+/// Memory kinds that feed the SOUL `## Experience` section (the aggregation's
+/// authored set).
+const EXPERIENCE_MEMORY_KINDS: [&str; 6] = [
+    "story_summary",
+    "review_note",
+    "character_note",
+    "world_building",
+    "plot_outline",
+    "theme_analysis",
+];
+
+/// Longest body excerpt one experience entry carries.
+const EXPERIENCE_EXCERPT_CHARS: usize = 200;
+
+/// The deterministic `## Experience` body for a set of Creator records, and how
+/// many memories contributed.
+///
+/// shortcut: the rendering mirrors
+/// `nexus_creator_memory::experience_aggregation` (whose collector reads the
+/// legacy files); NXM-14 deletes that reader, leaving this as the only copy.
+fn experience_markdown(records: &[Value]) -> (String, usize) {
+    let mut entries: Vec<ExperienceEntry> = records
+        .iter()
+        .filter_map(|record| {
+            let (_, kind, _) = creator_memory_identity(record);
+            if !EXPERIENCE_MEMORY_KINDS.contains(&kind.as_str()) {
+                return None;
+            }
+            let legacy = nexus_legacy(record);
+            Some(ExperienceEntry {
+                memory_kind: kind,
+                slug: legacy["slug"].as_str().unwrap_or_default().to_string(),
+                body: record
+                    .pointer("/content/text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                updated_at: legacy["updated_at"].as_str().map_or_else(
+                    || {
+                        record["updated_at"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .to_string()
+                    },
+                    str::to_string,
+                ),
+            })
+        })
+        .collect();
+    entries.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+    let processed = entries.len();
+    if entries.is_empty() {
+        return (String::new(), 0);
+    }
+    let mut parts = Vec::new();
+    for entry in &entries {
+        parts.push(format!(
+            "### {}: {}",
+            experience_kind_label(&entry.memory_kind),
+            entry.slug
+        ));
+        parts.push(experience_excerpt(&entry.body));
+    }
+    (parts.join("\n\n"), processed)
+}
+
+/// `story_summary` → `Story Summary`: the heading the aggregation renders.
+fn experience_kind_label(kind: &str) -> String {
+    kind.split('_')
+        .map(|word| {
+            let mut chars = word.chars();
+            chars.next().map_or_else(String::new, |first| {
+                first.to_uppercase().collect::<String>() + chars.as_str()
+            })
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Truncate an entry body the way the aggregation does: the first
+/// [`EXPERIENCE_EXCERPT_CHARS`] characters, broken at the last space, `...`.
+fn experience_excerpt(body: &str) -> String {
+    if body.chars().count() <= EXPERIENCE_EXCERPT_CHARS {
+        return body.to_string();
+    }
+    let end: String = body.chars().take(EXPERIENCE_EXCERPT_CHARS).collect();
+    end.rfind(' ')
+        .map_or_else(|| format!("{end}..."), |pos| format!("{}...", &end[..pos]))
+}
+
+impl CoreService {
+    /// Capture one session digest into the principal's pending-review queue.
+    ///
+    /// This is the Creator arm of the Character capture family and the explicit
+    /// capture parity NXM-16 adds: Host auto-`remember` stays refused (D-4), and
+    /// the write lands on the pinned `MemoryPort` like every other memory
+    /// mutation, so the candidate the review family consumes is the provider's
+    /// own row.
+    ///
+    /// The capture is mapped as the plan pins it: shared placement, `world_id`
+    /// as the provenance context, `session_id` as a source anchor, `task_kind`
+    /// through the promotion mapping as the kind hint, and the retained capture
+    /// fields in `content.structured.nexus_legacy` so the pending-review DTOs
+    /// keep rendering them.
+    ///
+    /// # Errors
+    /// [`CoreError::ForbiddenReason`] when `request.creator_id` is not the
+    /// admitted principal, `ActorInput` for a malformed capture field, and the
+    /// mapped storage error otherwise.
+    pub async fn create_pending_review(
+        &self,
+        principal: &Principal,
+        request: CreatePendingReviewRequest,
+    ) -> CoreResult<CreatePendingReviewResponse> {
+        self.verify_principal(principal)?;
+        if request.creator_id.as_str() != principal.creator_id() {
+            return Err(CoreError::ForbiddenReason {
+                resource: "pending_review".to_string(),
+                reason: format!(
+                    "creator_id '{}' does not match active creator '{}'",
+                    request.creator_id,
+                    principal.creator_id()
+                ),
+            });
+        }
+        let pending_id = request.pending_id.as_str().to_string();
+        let session_id = request.session_id.as_str().to_string();
+        let world_id = request.world_id.as_deref().map(str::to_string);
+        let task_kind = request
+            .task_kind
+            .as_deref()
+            .unwrap_or("unknown")
+            .to_string();
+        let raw_digest = request.raw_digest.as_str().to_string();
+        let created_at = request
+            .created_at
+            .as_deref()
+            .map(str::to_string)
+            .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+        validate_capture_fields(
+            &pending_id,
+            &session_id,
+            &raw_digest,
+            Some(&task_kind),
+            world_id.as_deref(),
+        )?;
+
+        let memory = self.creator_memory_writer(principal).await?;
+        let digest = match spoke_operations::jcs_sha256_hex(&json!(pending_id)) {
+            SpokeResult::Ok(digest) => digest,
+            SpokeResult::Reject(reject) => return Err(memory_reject(&reject)),
+        };
+        let capture: spoke_schemas::MemoryCaptureRequest = map_wire(json!({
+            "space_id": MEMORY_SPACE_ID,
+            "subject_id": memory.subject_id.as_str(),
+            "content": {
+                "text": raw_digest.as_str(),
+                "structured": { "nexus_legacy": {
+                    "pending_id": pending_id.as_str(),
+                    "session_id": session_id.as_str(),
+                    "creator_id": principal.creator_id(),
+                    "world_id": world_id.as_deref(),
+                    "task_kind": task_kind.as_str(),
+                    "raw_digest": raw_digest.as_str(),
+                    "created_at": created_at.as_str(),
+                }},
+            },
+            "capture_scope": { "visibility": "shared" },
+            "source_context_ids": world_id.iter().collect::<Vec<_>>(),
+            "anchors": [{ "source_id": session_id.as_str(), "schema_version": 1 }],
+            "kind_hint": task_kind_to_memory_kind(&task_kind),
+            "idempotency_key": format!("e4capture:{digest}"),
+        }))?;
+        memory_ok(memory.provider.capture(&memory.principal, capture).await)?;
+        map_wire(json!({ "success": true, "pending_id": pending_id }))
+    }
+
+    /// Every Creator long-term memory record, newest first.
+    ///
+    /// # Errors
+    /// [`CoreError::AuthRequired`] when the principal fails verification and
+    /// the mapped storage error otherwise.
+    pub async fn list_creator_memories(
+        &self,
+        principal: &Principal,
+    ) -> CoreResult<Vec<spoke_schemas::RetainedRecord>> {
+        self.verify_principal(principal)?;
+        let memory = self.creator_memory(principal).await?;
+        memory
+            .memory_records()
+            .await?
+            .iter()
+            .map(map_wire)
+            .collect()
+    }
+
+    /// One Creator long-term memory record by its authored slug.
+    ///
+    /// # Errors
+    /// As [`Self::list_creator_memories`].
+    pub async fn get_creator_memory(
+        &self,
+        principal: &Principal,
+        slug: &str,
+    ) -> CoreResult<Option<spoke_schemas::RetainedRecord>> {
+        self.verify_principal(principal)?;
+        let memory = self.creator_memory(principal).await?;
+        memory
+            .memory_by_slug(slug)
+            .await?
+            .as_ref()
+            .map(map_wire)
+            .transpose()
+    }
+
+    /// Create one Creator long-term memory from its authored slug, kind and
+    /// body. `Ok(false)` reports that the slug is already taken — the retained
+    /// CLI refusal — and writes nothing.
+    ///
+    /// # Errors
+    /// As [`Self::list_creator_memories`].
+    pub async fn create_creator_memory(
+        &self,
+        principal: &Principal,
+        slug: &str,
+        kind: &str,
+        body: &str,
+    ) -> CoreResult<bool> {
+        self.verify_principal(principal)?;
+        let memory = self.creator_memory_writer(principal).await?;
+        if memory.memory_by_slug(slug).await?.is_some() {
+            return Ok(false);
+        }
+        let content =
+            creator_memory_content(slug, kind, &mint_creator_memory_id(), body, &[]);
+        memory
+            .create_memory_record(
+                &policy::namespaced_record_kind(kind),
+                content,
+                &creator_memory_key("create", slug, body),
+            )
+            .await?;
+        Ok(true)
+    }
+
+    /// Replace one Creator memory's body, addressed by its authored slug, on the
+    /// revision read with it.
+    ///
+    /// `Ok(false)` reports that no mutable record carries the slug: absent, or
+    /// still the bridge's projection of an unmigrated file — a projection is
+    /// read-only by design (`legacy.rs`), and P5's migration is what turns it
+    /// into a mutable provider row with the same identity.
+    ///
+    /// # Errors
+    /// As [`Self::list_creator_memories`].
+    pub async fn update_creator_memory(
+        &self,
+        principal: &Principal,
+        slug: &str,
+        body: &str,
+    ) -> CoreResult<bool> {
+        self.verify_principal(principal)?;
+        let memory = self.creator_memory_writer(principal).await?;
+        let Some(record) = memory.memory_by_slug(slug).await? else {
+            return Ok(false);
+        };
+        let (record_id, revision) = creator_record_identity(&record)?;
+        let (memory_id, kind, source_session_ids) = creator_memory_identity(&record);
+        let content = creator_memory_content(slug, &kind, &memory_id, body, &source_session_ids);
+        match memory
+            .update_memory_record(
+                &record_id,
+                revision,
+                content,
+                &creator_memory_key("update", slug, body),
+            )
+            .await
+        {
+            Ok(()) => Ok(true),
+            Err(CoreError::NotFound { .. }) => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Delete one Creator memory, addressed by its authored slug.
+    ///
+    /// `Ok(false)` carries the same answer as [`Self::update_creator_memory`]:
+    /// no mutable record carries the slug.
+    ///
+    /// # Errors
+    /// As [`Self::list_creator_memories`].
+    pub async fn delete_creator_memory(
+        &self,
+        principal: &Principal,
+        slug: &str,
+    ) -> CoreResult<bool> {
+        self.verify_principal(principal)?;
+        let memory = self.creator_memory_writer(principal).await?;
+        let Some(record) = memory.memory_by_slug(slug).await? else {
+            return Ok(false);
+        };
+        let (record_id, revision) = creator_record_identity(&record)?;
+        match memory
+            .delete_memory_record(
+                &record_id,
+                revision,
+                &creator_memory_key("delete", slug, ""),
+            )
+            .await
+        {
+            Ok(()) => Ok(true),
+            Err(CoreError::NotFound { .. }) => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// The Creator's authored SOUL document (the `personality` profile).
+    ///
+    /// # Errors
+    /// As [`Self::list_creator_memories`].
+    pub async fn get_creator_soul(
+        &self,
+        principal: &Principal,
+    ) -> CoreResult<Option<spoke_schemas::ProfileDocument>> {
+        self.verify_principal(principal)?;
+        let memory = self.creator_memory(principal).await?;
+        memory
+            .personality_profile()
+            .await?
+            .as_ref()
+            .map(map_wire)
+            .transpose()
+    }
+
+    /// Write the Creator's SOUL document body: create-only when
+    /// `expected_revision` is `None`, revision-checked otherwise.
+    ///
+    /// # Errors
+    /// As [`Self::list_creator_memories`], plus the provider's CAS conflict.
+    pub async fn set_creator_soul(
+        &self,
+        principal: &Principal,
+        body: &str,
+        expected_revision: Option<u64>,
+    ) -> CoreResult<()> {
+        self.verify_principal(principal)?;
+        let memory = self.creator_memory_writer(principal).await?;
+        memory
+            .write_personality_profile(
+                body,
+                expected_revision,
+                &creator_memory_key("soul", &expected_revision.map_or_else(String::new, |r| r.to_string()), body),
+            )
+            .await
+    }
+
+    /// Refresh the SOUL `## Experience` section from the Creator's memory
+    /// records (deterministic, no LLM). Returns the rendered section and how
+    /// many memories contributed.
+    ///
+    /// # Errors
+    /// [`CoreError::NotFound`] when no SOUL document is authored, plus the
+    /// mapped storage error.
+    pub async fn refresh_creator_experience(
+        &self,
+        principal: &Principal,
+    ) -> CoreResult<(String, usize)> {
+        self.verify_principal(principal)?;
+        let memory = self.creator_memory_writer(principal).await?;
+        let Some(profile) = memory.personality_profile().await? else {
+            return Err(CoreError::NotFound {
+                resource: format!("SOUL.md for creator '{}'", principal.creator_id()),
+            });
+        };
+        let body = profile.pointer("/document/body").and_then(Value::as_str);
+        let mut soul = SoulDocument::parse(body.unwrap_or_default())
+            .map_err(|error| internal_err("soul_parse", error))?;
+        let (markdown, processed) = experience_markdown(&memory.memory_records().await?);
+        soul.set_experience(markdown.clone());
+        memory
+            .write_personality_profile(
+                &soul.render(),
+                profile["revision"].as_u64(),
+                &creator_memory_key("experience", "", &markdown),
+            )
+            .await?;
+        Ok((markdown, processed))
+    }
+
+    /// Push the SOUL personality section down into the `personality-core`
+    /// long-term memory. The SOUL document is the anchor, so its next push
+    /// overwrites the memory (the authored `memory_id` and the empty
+    /// `source_session_ids` are preserved).
+    ///
+    /// # Errors
+    /// [`CoreError::ActorInput`] for an empty section, plus the mapped storage
+    /// error.
+    pub async fn push_creator_personality(
+        &self,
+        principal: &Principal,
+        personality: &str,
+    ) -> CoreResult<spoke_schemas::RetainedRecord> {
+        self.verify_principal(principal)?;
+        let personality = personality.trim();
+        if personality.is_empty() {
+            return Err(invalid_input(
+                "cannot push an empty personality section to memory",
+            ));
+        }
+        let memory = self.creator_memory_writer(principal).await?;
+        let existing = memory.memory_by_slug(PERSONALITY_MEMORY_SLUG).await?;
+        let key = creator_memory_key("personality", PERSONALITY_MEMORY_SLUG, personality);
+        let memory_id = match &existing {
+            Some(record) => {
+                let (record_id, revision) = creator_record_identity(record)?;
+                let (memory_id, _, _) = creator_memory_identity(record);
+                let content = creator_memory_content(
+                    PERSONALITY_MEMORY_SLUG,
+                    "personality_core",
+                    &memory_id,
+                    personality,
+                    &[],
+                );
+                memory
+                    .update_memory_record(&record_id, revision, content, &key)
+                    .await?;
+                memory_id
+            }
+            None => {
+                let memory_id = mint_creator_memory_id();
+                let content = creator_memory_content(
+                    PERSONALITY_MEMORY_SLUG,
+                    "personality_core",
+                    &memory_id,
+                    personality,
+                    &[],
+                );
+                memory
+                    .create_memory_record(
+                        &policy::namespaced_record_kind("personality_core"),
+                        content,
+                        &key,
+                    )
+                    .await?;
+                memory_id
+            }
+        };
+        let record = memory
+            .memory_by_slug(PERSONALITY_MEMORY_SLUG)
+            .await?
+            .ok_or_else(|| CoreError::NotFound {
+                resource: format!("memory '{PERSONALITY_MEMORY_SLUG}' ({memory_id})"),
+            })?;
+        map_wire(record)
+    }
 }
 
 // ── Character memory family ──────────────────────────────────────────────
@@ -1054,7 +1825,24 @@ fn validate_capture_input(
     request: &CaptureCharacterPendingReviewRequest,
     raw_digest: &str,
 ) -> CoreResult<()> {
-    let pending_id = request.pending_id.as_str();
+    validate_capture_fields(
+        request.pending_id.as_str(),
+        request.session_id.as_str(),
+        raw_digest,
+        optional_str(request.task_kind.as_ref()),
+        None,
+    )
+}
+
+/// The capture-field validation both memory bearers share (a Character capture
+/// has no world, so `world_id` is `None` there).
+fn validate_capture_fields(
+    pending_id: &str,
+    session_id: &str,
+    raw_digest: &str,
+    task_kind: Option<&str>,
+    world_id: Option<&str>,
+) -> CoreResult<()> {
     if pending_id.is_empty() || pending_id.len() > 128 {
         return Err(invalid_input(
             "pending_id must be between 1 and 128 characters",
@@ -1065,7 +1853,6 @@ fn validate_capture_input(
             "pending_id cannot use the reserved {RUN_PENDING_ID_PREFIX} prefix"
         )));
     }
-    let session_id = request.session_id.as_str();
     if session_id.is_empty() || session_id.len() > 128 {
         return Err(invalid_input(
             "session_id must be between 1 and 128 characters",
@@ -1076,10 +1863,13 @@ fn validate_capture_input(
             "raw_digest must be between 1 and {MAX_DIGEST_BYTES} bytes"
         )));
     }
-    if let Some(kind) = optional_str(request.task_kind.as_ref()) {
+    if let Some(kind) = task_kind {
         if kind.len() > 64 {
             return Err(invalid_input("task_kind must be at most 64 characters"));
         }
+    }
+    if world_id.is_some_and(|world| world.len() > 128) {
+        return Err(invalid_input("world_id must be at most 128 characters"));
     }
     Ok(())
 }
@@ -1273,16 +2063,30 @@ impl CoreService {
         // (before the reroute the row was deleted, so a repeat dismissal found
         // nothing). The authoritative decision is still the guarded dismissal
         // below; this read only keeps that answer.
-        if !pending_now(&memory, &candidate_id).await? {
-            return Err(self.pending_review_refusal(principal, &pending_id).await?);
+        if pending_now(&memory, &candidate_id).await? && memory.dismiss_legacy(&candidate_id).await? {
+            return Ok(DeletePendingReviewResponse {
+                success: true,
+                pending_id,
+            });
         }
-        if !memory.dismiss_legacy(&candidate_id).await? {
-            return Err(self.pending_review_refusal(principal, &pending_id).await?);
+        // A row captured through the typed Creator path (NXM-16) is
+        // provider-native: its candidate id is minted, so the retained
+        // `pending_id` addresses it through the row itself instead of the
+        // bridge's deterministic id.
+        if let Some(row) = memory
+            .pending_rows()
+            .await?
+            .into_iter()
+            .find(|row| row.pending_id == pending_id)
+        {
+            if memory.dismiss_native(&row.candidate_id, row.revision).await? {
+                return Ok(DeletePendingReviewResponse {
+                    success: true,
+                    pending_id,
+                });
+            }
         }
-        Ok(DeletePendingReviewResponse {
-            success: true,
-            pending_id,
-        })
+        Err(self.pending_review_refusal(principal, &pending_id).await?)
     }
 
     /// The retained refusal for a dismissal that found nothing to consume: a

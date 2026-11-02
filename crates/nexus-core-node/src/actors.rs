@@ -68,6 +68,7 @@ use nexus_contracts::daemon_api::inspector::{
 use nexus_contracts::daemon_api::memory::{
     count_pending_reviews_query::CountPendingReviewsQuery,
     count_pending_reviews_response::CountPendingReviewsResponse,
+    create_pending_review_request::CreatePendingReviewRequest,
     delete_pending_review_query::DeletePendingReviewQuery,
     delete_pending_review_response::DeletePendingReviewResponse,
     list_memory_fragments_query::ListMemoryFragmentsQuery,
@@ -1227,6 +1228,27 @@ impl NativeCore {
     }
 
     // ── Creator-scope memory family (active-creator equality kept here) ─────
+
+    /// `POST /v1/daemon/memory/pending-review` — 201. The wire `creator_id`
+    /// must be the natively minted active creator; a mismatch is the retained
+    /// 403 (the same equality guard the Creator list/count routes keep).
+    #[napi]
+    pub async fn create_pending_review(
+        &self,
+        principal_handle: String,
+        request_json: Buffer,
+    ) -> Result<Buffer> {
+        let request: CreatePendingReviewRequest = decode(request_json, "request")?;
+        self.json_call(principal_handle, async move |core, principal| {
+            if request.creator_id.as_str() != principal.creator_id() {
+                return Err(CoreError::Forbidden {
+                    resource: "pending_review".to_string(),
+                });
+            }
+            core.create_pending_review(&principal, request).await
+        })
+        .await
+    }
 
     /// `GET /v1/daemon/memory/pending-review` — the wire `creator_id` must be
     /// the natively minted active creator; a mismatch is the retained 403.

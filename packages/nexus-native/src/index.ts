@@ -166,6 +166,8 @@ import type {
   ListCharacterTomResponse,
   ListPendingReviewsQuery,
   ListPendingReviewsResponse,
+  CreatePendingReviewRequest,
+  CreatePendingReviewResponse,
   CountPendingReviewsResponse,
   CountPendingReviewsQuery,
   DeletePendingReviewResponse,
@@ -708,6 +710,10 @@ export interface NativeCore {
     characterId: string,
     query: ListCharacterTomQuery,
   ): Promise<ListCharacterTomResponse>;
+  createPendingReview(
+    principal: PrincipalHandle,
+    request: CreatePendingReviewRequest,
+  ): Promise<CreatePendingReviewResponse>;
   listPendingReviews(principal: PrincipalHandle, query: ListPendingReviewsQuery): Promise<ListPendingReviewsResponse>;
   countPendingReviews(
     principal: PrincipalHandle,
@@ -1088,6 +1094,7 @@ type DomainSurface = Pick<
   | 'reflectCharacterSoul'
   | 'recordCharacterTom'
   | 'listCharacterTom'
+  | 'createPendingReview'
   | 'listPendingReviews'
   | 'countPendingReviews'
   | 'deletePendingReview'
@@ -1527,6 +1534,9 @@ function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
     },
     async listCharacterTom(principal, characterId, query) {
       return json(await inner.listCharacterTom(principal, characterId, wire(query, 'query')));
+    },
+    async createPendingReview(principal, request) {
+      return json(await inner.createPendingReview(principal, wire(request, 'request')));
     },
     async listPendingReviews(principal, query) {
       return json(await inner.listPendingReviews(principal, wire(query, 'query')));
