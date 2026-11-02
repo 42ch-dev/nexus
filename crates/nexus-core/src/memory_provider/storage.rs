@@ -76,7 +76,7 @@
 //! placement, so [`Coverage`] resolves those requirements inside the effect
 //! transaction instead of trusting a value read before it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 #[cfg(feature = "test-hooks")]
 use std::sync::atomic::AtomicU8;
@@ -90,13 +90,14 @@ use spoke_operations::{
     grant_covers, is_freeze_allowlisted, validate_grant_issuance, GrantRequirement, IssuedGrant,
     SpokeResult,
 };
-use sqlx::SqlitePool;
+use sqlx::{Sqlite, SqlitePool};
 use uuid::Uuid;
 
 use nexus_local_db::writer_protocol::{init_guarded_pool, GuardedPool};
 use nexus_local_db::{begin_immediate, LocalDbError};
 
 use super::journal::{self, FileEffect};
+use super::legacy::{self, LegacyRoots};
 
 /// §6.10 receipt ids are provider-assigned opaque strings.
 fn mint_receipt_id() -> String {
@@ -491,6 +492,9 @@ pub(super) struct MemoryStore {
     _guarded: GuardedPool,
     /// Root of the provider's own markdown projection, next to `state.db`.
     files_root: PathBuf,
+    /// Legacy bearer roots read by the projection bridge ([`super::legacy`]).
+    /// Held here so every composed read path projects the same sources.
+    legacy: LegacyRoots,
     /// §5.2 step 2: serializes the settle-to-publish window of every operation
     /// with a file effect (and the recovery pass) **within this process**. SQLite
     /// serializes the row writes, but the publish happens after that transaction
@@ -543,7 +547,7 @@ const SPACE_COLUMNS: &str = "s.space_id, s.display_name, s.authority_host_id, \
      (SELECT COUNT(*) FROM memory_receipts r WHERE r.space_id = s.space_id \
       AND r.status = 'pending') AS pending_receipts";
 
-const SUBJECT_COLUMNS: &str = "space_id, subject_id, kind_ns, kind_id, status, \
+pub(super) const SUBJECT_COLUMNS: &str = "space_id, subject_id, kind_ns, kind_id, status, \
      fenced_contexts_json, revision, created_at";
 
 const GRANT_COLUMNS: &str = "grant_id, space_id, subject_id, principal_id, \
@@ -664,7 +668,11 @@ impl MemoryStore {
     /// process — [`Self::provision`]'s — already judges retention at a reading
     /// the previous process committed to, not at a wall clock that may have moved
     /// backwards across the restart.
-    pub(super) async fn open(db_path: &Path, creator_id: &str) -> StoreResult<Self> {
+    pub(super) async fn open(
+        db_path: &Path,
+        creator_id: &str,
+        user_home: &Path,
+    ) -> StoreResult<Self> {
         let guarded = init_guarded_pool(db_path, creator_id).await?;
         let pool = guarded.clone_pool();
         let files_root = db_path.parent().map_or_else(
@@ -689,6 +697,7 @@ impl MemoryStore {
             pool,
             _guarded: guarded,
             files_root,
+            legacy: LegacyRoots::new(user_home.to_path_buf(), creator_id),
             publish_gate,
             clock_floor: AtomicI64::new(clock_floor),
             #[cfg(feature = "test-hooks")]
@@ -2850,6 +2859,50 @@ fn page_had_more<T>(rows: &mut Vec<T>, limit: u64) -> bool {
     more
 }
 
+/// Cut one page out of a merged list that is already ordered the page's way.
+fn page_rows<T>(rows: Vec<T>, limit: u64, offset: u64) -> Vec<T> {
+    rows.into_iter()
+        .skip(usize::try_from(offset).unwrap_or(usize::MAX))
+        .take(usize::try_from(limit).unwrap_or(usize::MAX))
+        .collect()
+}
+
+/// Every provider record id of the subject, independent of the request
+/// predicate: a migrated legacy object carries the bridge's own external id, so
+/// the provider row must win even when the predicate would hide it (see the
+/// merge in [`MemoryStore::records`]).
+async fn provider_record_ids(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    space_id: &str,
+    subject_id: &str,
+) -> StoreResult<HashSet<String>> {
+    let ids = sqlx::query_scalar::<_, String>(
+        "SELECT record_id FROM memory_records WHERE space_id = ? AND subject_id = ?",
+    )
+    .bind(space_id)
+    .bind(subject_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    Ok(ids.into_iter().collect())
+}
+
+/// Every provider candidate id of the subject, independent of the request
+/// status filter (see the merge in [`MemoryStore::candidates`]).
+async fn provider_candidate_ids(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    space_id: &str,
+    subject_id: &str,
+) -> StoreResult<HashSet<String>> {
+    let ids = sqlx::query_scalar::<_, String>(
+        "SELECT candidate_id FROM memory_candidates WHERE space_id = ? AND subject_id = ?",
+    )
+    .bind(space_id)
+    .bind(subject_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    Ok(ids.into_iter().collect())
+}
+
 /// A pending/consumed review candidate as stored (§6.7).
 #[derive(Debug, sqlx::FromRow)]
 pub(super) struct CandidateRow {
@@ -3326,9 +3379,8 @@ impl MemoryStore {
                 "principal {principal_id} holds no review grant on subject {subject_id}"
             )));
         }
-        let subject_status = subject_in_tx(&mut tx, space_id, subject_id)
-            .await?
-            .map(|subject| subject.status);
+        let subject_row = subject_in_tx(&mut tx, space_id, subject_id).await?;
+        let subject_status = subject_row.as_ref().map(|subject| subject.status.clone());
         let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
         // §7.7: `archived` hides the subject from the *default* listing; a
         // status-filtered listing is an explicit audit query and stays readable.
@@ -3357,15 +3409,15 @@ impl MemoryStore {
         // authorization authority and coverage needs each row's placement;
         // only the page's own ids then fetch their bodies.
         let identity_sql = format!(
-            "SELECT candidate_id, subject_id, capture_visibility, capture_context_id, revision \
-             FROM memory_candidates{where_sql} ORDER BY created_at, candidate_id"
+            "SELECT candidate_id, subject_id, capture_visibility, capture_context_id, revision, \
+             created_at FROM memory_candidates{where_sql} ORDER BY created_at, candidate_id"
         );
-        let mut identity_query =
-            sqlx::query_as::<_, (String, String, String, Option<String>, i64)>(
-                sqlx::AssertSqlSafe(identity_sql),
-            )
-            .bind(space_id)
-            .bind(subject_id);
+        let mut identity_query = sqlx::query_as::<
+            _,
+            (String, String, String, Option<String>, i64, String),
+        >(sqlx::AssertSqlSafe(identity_sql))
+        .bind(space_id)
+        .bind(subject_id);
         if let Some(status) = status {
             identity_query = identity_query.bind(status);
         }
@@ -3373,7 +3425,7 @@ impl MemoryStore {
             .bind(timestamp(now))
             .fetch_all(&mut *tx)
             .await?;
-        let authorized: Vec<(&str, i64)> = identity
+        let mut authorized: Vec<(String, i64, String)> = identity
             .iter()
             .filter(|row| {
                 covered(
@@ -3384,8 +3436,50 @@ impl MemoryStore {
                     &candidate_requirement("review", &row.1, &row.2, row.3.as_deref()),
                 )
             })
-            .map(|row| (row.0.as_str(), row.4))
+            .map(|row| (row.0.clone(), row.4, row.5.clone()))
             .collect();
+        // Legacy read bridge (NXM-5 Task 1): projected queue entries join the
+        // same authorized identity set under the same coverage rule. A migrated
+        // candidate carries the bridge's own external id, so the provider row
+        // wins and the projection is dropped.
+        let mut projected: HashMap<String, CandidateRow> = HashMap::new();
+        let legacy_rows = legacy::candidates_in_tx(
+            &mut tx,
+            &self.legacy,
+            space_id,
+            subject_row.as_ref(),
+            status,
+        )
+        .await?;
+        if !legacy_rows.is_empty() {
+            let owned = provider_candidate_ids(&mut tx, space_id, subject_id).await?;
+            for row in legacy_rows {
+                if owned.contains(&row.candidate_id)
+                    || !covered(
+                        &grants,
+                        principal_id,
+                        space_id,
+                        now,
+                        &candidate_requirement(
+                            "review",
+                            &row.subject_id,
+                            &row.capture_visibility,
+                            row.capture_context_id.as_deref(),
+                        ),
+                    )
+                {
+                    continue;
+                }
+                authorized.push((
+                    row.candidate_id.clone(),
+                    row.revision,
+                    row.created_at.clone(),
+                ));
+                projected.insert(row.candidate_id.clone(), row);
+            }
+            authorized
+                .sort_by(|left, right| left.2.cmp(&right.2).then_with(|| left.0.cmp(&right.0)));
+        }
         // Cursor offsets index the authorized set, never the predicate set: a
         // hidden candidate can neither consume a page nor skip a visible row
         // across a boundary (MEM-R006).
@@ -3399,14 +3493,19 @@ impl MemoryStore {
         });
         let end = start.saturating_add(take).min(authorized.len());
         let more = end < authorized.len();
-        let page_ids: Vec<&str> = authorized[start..end]
+        let page_ids: Vec<String> = authorized[start..end]
             .iter()
-            .map(|(candidate_id, _)| *candidate_id)
+            .map(|(candidate_id, _, _)| candidate_id.clone())
             .collect();
-        let rows = if page_ids.is_empty() {
+        let stored_ids: Vec<&str> = page_ids
+            .iter()
+            .filter(|candidate_id| !projected.contains_key(*candidate_id))
+            .map(String::as_str)
+            .collect();
+        let mut rows = if stored_ids.is_empty() {
             Vec::new()
         } else {
-            let placeholders = std::iter::repeat_n("?", page_ids.len())
+            let placeholders = std::iter::repeat_n("?", stored_ids.len())
                 .collect::<Vec<_>>()
                 .join(",");
             let page_sql = format!(
@@ -3414,16 +3513,26 @@ impl MemoryStore {
                  WHERE candidate_id IN ({placeholders}) ORDER BY created_at, candidate_id"
             );
             let mut rows_query = sqlx::query_as::<_, CandidateRow>(sqlx::AssertSqlSafe(page_sql));
-            for candidate_id in &page_ids {
+            for candidate_id in &stored_ids {
                 rows_query = rows_query.bind(*candidate_id);
             }
             rows_query.fetch_all(&mut *tx).await?
         };
+        rows.extend(
+            page_ids
+                .iter()
+                .filter_map(|candidate_id| projected.remove(candidate_id)),
+        );
+        rows.sort_by(|left, right| {
+            left.created_at
+                .cmp(&right.created_at)
+                .then_with(|| left.candidate_id.cmp(&right.candidate_id))
+        });
         tx.commit().await?;
         let marker = snapshot_marker(
             authorized
                 .iter()
-                .map(|(candidate_id, revision)| (*candidate_id, *revision)),
+                .map(|(candidate_id, revision, _)| (candidate_id.as_str(), *revision)),
             &grant_rows,
             subject_status.as_deref(),
         )?;
@@ -3442,6 +3551,14 @@ impl MemoryStore {
         space_in_tx(&mut tx, space_id).await?;
         let grants = wire_grants(&grants_in_tx(&mut tx, space_id).await?)?;
         let row = candidate_in_tx(&mut tx, space_id, candidate_id).await?;
+        // Legacy read bridge (NXM-5 Task 1): a projected id resolves to its
+        // unmigrated queue entry; coverage below applies to the projection.
+        let row = match row {
+            Some(row) => Some(row),
+            None => {
+                legacy::candidate_by_id_in_tx(&mut tx, &self.legacy, space_id, candidate_id).await?
+            }
+        };
         let unsettled = match &row {
             Some(row) => unsettled_in(&mut tx, space_id, row.subject_id.as_str()).await?,
             None => None,
@@ -3691,9 +3808,8 @@ impl MemoryStore {
                 "include_tombstoned requires admin coverage (§7.20)".to_string(),
             ));
         }
-        let subject_status = subject_in_tx(&mut tx, space_id, subject_id)
-            .await?
-            .map(|subject| subject.status);
+        let subject_row = subject_in_tx(&mut tx, space_id, subject_id).await?;
+        let subject_status = subject_row.as_ref().map(|subject| subject.status.clone());
         let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
         // §7.7: an archived subject's records leave recall; the listing and
         // by-id audit routes still serve them.
@@ -3715,9 +3831,32 @@ impl MemoryStore {
             space_id,
             subject_id,
         );
+        // Legacy read bridge (NXM-5 Task 1): the subject's unmigrated content is
+        // projected through the same predicate, so the page below is a slice of
+        // one authorized set spanning both sources.
+        let legacy_rows = legacy::records_in_tx(
+            &mut tx,
+            &self.legacy,
+            space_id,
+            subject_row.as_ref(),
+            selection,
+            filter,
+            kinds,
+        )
+        .await?;
+        let projected = !legacy_rows.is_empty();
+        // A projected row inserts itself into the order, so the SQL half returns
+        // a prefix that cannot omit a provider row of the merged page: a provider
+        // row inside the merged prefix `[0, offset + limit)` ranks below
+        // `offset + limit` in the table as well.
+        let fetch = if projected {
+            page.map(|(limit, offset)| (limit.saturating_add(offset), 0))
+        } else {
+            page
+        };
         // `Some((limit, offset))` cuts the page in SQL; `None` is recall, which
         // ranks the whole authorized set (§9.2) and so cannot page before it.
-        let page_clause = if page.is_some() {
+        let page_clause = if fetch.is_some() {
             " LIMIT ? OFFSET ?"
         } else {
             ""
@@ -3730,16 +3869,16 @@ impl MemoryStore {
         for bind in &binds {
             rows_query = rows_query.bind(bind);
         }
-        if let Some((limit, offset)) = page {
+        if let Some((limit, offset)) = fetch {
             rows_query = rows_query
                 .bind(i64::try_from(limit).unwrap_or(i64::MAX))
                 .bind(i64::try_from(offset).unwrap_or(i64::MAX));
         }
-        let rows = rows_query.fetch_all(&mut *tx).await?;
+        let mut rows = rows_query.fetch_all(&mut *tx).await?;
         // The authorized identity set: the marker and the count, never the
         // bodies of rows the page will not serve. A whole-set read already has
         // them.
-        let visible: Vec<(String, i64)> = if page.is_some() {
+        let mut visible: Vec<(String, i64)> = if page.is_some() {
             let identity_sql = format!(
                 "SELECT record_id, revision FROM memory_records{where_sql} \
                  ORDER BY created_at DESC, record_id"
@@ -3755,6 +3894,32 @@ impl MemoryStore {
                 .map(|row| (row.record_id.clone(), row.revision))
                 .collect()
         };
+        if projected {
+            // A migrated object carries this projection's own external id, so
+            // the provider row wins whatever the request predicate says about it
+            // — a tombstoned migrated record must stay deleted, not reappear
+            // through the bridge.
+            let owned = provider_record_ids(&mut tx, space_id, subject_id).await?;
+            let legacy_rows: Vec<RecordRow> = legacy_rows
+                .into_iter()
+                .filter(|row| !owned.contains(&row.record_id))
+                .collect();
+            visible.extend(
+                legacy_rows
+                    .iter()
+                    .map(|row| (row.record_id.clone(), row.revision)),
+            );
+            rows.extend(legacy_rows);
+            rows.sort_by(|left, right| {
+                right
+                    .created_at
+                    .cmp(&left.created_at)
+                    .then_with(|| left.record_id.cmp(&right.record_id))
+            });
+            if let Some((limit, offset)) = page {
+                rows = page_rows(rows, limit, offset);
+            }
+        }
         tx.commit().await?;
         // §6.5: the selection check above covers every row the selection admits
         // (a grant covering all of its named contexts covers each of them), so
@@ -3798,6 +3963,13 @@ impl MemoryStore {
         space_in_tx(&mut tx, space_id).await?;
         let grants = wire_grants(&grants_in_tx(&mut tx, space_id).await?)?;
         let row = record_in_tx(&mut tx, space_id, record_id).await?;
+        // Legacy read bridge (NXM-5 Task 1): a projected id resolves to its
+        // unmigrated source; the coverage/tombstone/unsettled gates below apply
+        // to the projected row exactly as they do to a provider row.
+        let row = match row {
+            Some(row) => Some(row),
+            None => legacy::record_by_id_in_tx(&mut tx, &self.legacy, space_id, record_id).await?,
+        };
         let unsettled = match &row {
             Some(row) => unsettled_in(&mut tx, space_id, row.subject_id.as_str()).await?,
             None => None,
@@ -4186,16 +4358,32 @@ impl MemoryStore {
             tx.commit().await?;
             return Ok(None);
         }
+        let subject_row = subject_in_tx(&mut tx, space_id, subject_id).await?;
         let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
         let sql = format!(
             "SELECT {PROFILE_COLUMNS} FROM memory_profiles \
              WHERE space_id = ? AND subject_id = ? ORDER BY profile_kind"
         );
-        let rows = sqlx::query_as::<_, ProfileRow>(sqlx::AssertSqlSafe(sql))
+        let mut rows = sqlx::query_as::<_, ProfileRow>(sqlx::AssertSqlSafe(sql))
             .bind(space_id)
             .bind(subject_id)
             .fetch_all(&mut *tx)
             .await?;
+        // Legacy read bridge (NXM-5 Task 1): `SOUL.md` is the subject's authored
+        // personality document until it is migrated. A stored profile of the
+        // same kind always wins, so a migrated document never appears twice.
+        let projected =
+            legacy::profiles_in_tx(&mut tx, &self.legacy, space_id, subject_row.as_ref()).await?;
+        for row in projected {
+            if rows
+                .iter()
+                .any(|stored| stored.profile_kind == row.profile_kind)
+            {
+                continue;
+            }
+            rows.push(row);
+        }
+        rows.sort_by(|left, right| left.profile_kind.cmp(&right.profile_kind));
         tx.commit().await?;
         // §5.2/D-10: a subject whose file intent is unsettled has no readable
         // profile surface yet.

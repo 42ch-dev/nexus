@@ -1697,3 +1697,633 @@ fn transition_request(
         .try_into()
         .expect("transition request is wire-valid")
 }
+
+// ═══ NXM-5 Task 1: provider-seam legacy read bridge ═══════════════════════
+//
+// The bridge projects the legacy bearer surfaces (tables and files) as
+// provider-native rows, so one `MemoryPort` read path serves both the
+// provider's own content and unmigrated legacy content. These tests pin the
+// merged view: provider-native and projected rows appear through the same
+// read, the projected ids are deterministic, and nothing is written to the
+// legacy surfaces by a read.
+
+use nexus_core::memory_provider::legacy;
+use nexus_core::memory_provider::LocalMemoryProvider;
+use spoke_operations::spoke_schemas as bridge_schemas;
+use spoke_operations::{MemoryPort, SpokeResult};
+
+const BRIDGE_SPACE: &str = "spc_local_default";
+const BRIDGE_CREATOR_SUBJECT: &str = "sbj_bridge_creator";
+const BRIDGE_CHARACTER_SUBJECT: &str = "sbj_bridge_character";
+const BRIDGE_TEXT: &str = "Provider-native record written by the current provider.";
+const BRIDGE_SOUL: &str = "# Soul\n\nA bridge-authored soul document.\n";
+
+fn bridge_principal() -> bridge_schemas::Principal {
+    dto(serde_json::json!({ "principal_id": CREATOR, "extensions": {} }))
+}
+
+/// The success payload of a typed port result; a refusal panics with its code.
+fn bridge_ok<T: serde::Serialize>(result: &SpokeResult<T>) -> serde_json::Value {
+    match result {
+        SpokeResult::Ok(value) => serde_json::to_value(value).expect("serializable response"),
+        SpokeResult::Reject(reject) => panic!(
+            "expected success, got {}: {}",
+            reject.code.as_str(),
+            reject.message
+        ),
+    }
+}
+
+async fn open_bridge_provider(env: &Env) -> LocalMemoryProvider {
+    LocalMemoryProvider::open(env.user_home.clone(), CREATOR, "default")
+        .await
+        .expect("provider open")
+}
+
+/// Opt a provider subject into the legacy projection of one bearer.
+fn bridge_ensure_request(
+    subject: &str,
+    namespace: &str,
+    kind_id: &str,
+) -> bridge_schemas::MemorySubjectsEnsureRequest {
+    dto(serde_json::json!({
+        "space_id": BRIDGE_SPACE,
+        "subject_id": subject,
+        "kind": { "ns": namespace, "id": kind_id },
+    }))
+}
+
+#[allow(clippy::needless_pass_by_value)] // one request builder per test read
+fn bridge_records_request(
+    subject: &str,
+    selection: serde_json::Value,
+    kinds: serde_json::Value,
+) -> bridge_schemas::MemoryRecordsListRequest {
+    dto(serde_json::json!({
+        "space_id": BRIDGE_SPACE,
+        "subject_id": subject,
+        "selection": selection,
+        "kinds": kinds,
+    }))
+}
+
+fn bridge_recall_request(subject: &str) -> bridge_schemas::MemoryRecallRequest {
+    dto(serde_json::json!({
+        "space_id": BRIDGE_SPACE,
+        "subject_id": subject,
+        "selection": { "mode": "subject_all" },
+        "budget": { "max_items": 50 },
+    }))
+}
+
+fn bridge_record_get_request(record_id: &str) -> bridge_schemas::MemoryRecordsGetRequest {
+    dto(serde_json::json!({ "space_id": BRIDGE_SPACE, "record_id": record_id }))
+}
+
+fn bridge_report_ids(body: &serde_json::Value, field: &str) -> Vec<String> {
+    body[field]
+        .as_array()
+        .unwrap_or_else(|| panic!("expected `{field}` to be an array: {body}"))
+        .iter()
+        .map(|row| {
+            row["record_id"]
+                .as_str()
+                .unwrap_or_else(|| panic!("expected a record id in {row}"))
+                .to_string()
+        })
+        .collect()
+}
+
+/// Seed every Creator legacy surface the bridge projects: one fragment, one
+/// soul narrative, one long-term memory file, `SOUL.md` and one pending-review
+/// row.
+async fn seed_legacy_creator_content(env: &Env) {
+    let pool = plain_pool(env).await;
+    nexus_local_db::memory_fragment::create_fragment(
+        &pool,
+        &nexus_local_db::memory_fragment::MemoryFragmentRecord {
+            fragment_id: "frag_bridge".to_string(),
+            session_id: "sess_bridge".to_string(),
+            creator_id: CREATOR.to_string(),
+            keywords: serde_json::json!(["kw_bridge"]).to_string(),
+            summary: "Legacy creator fragment text.".to_string(),
+            created_at: "2026-03-01T00:00:00Z".to_string(),
+            ttl: None,
+            world_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    nexus_local_db::upsert_soul_narrative(
+        &pool,
+        &nexus_local_db::SoulNarrativeRecord {
+            creator_id: CREATOR.to_string(),
+            world_id: None,
+            narrative: Some("Legacy soul narrative.".to_string()),
+            generated_at: Some("2026-03-01T00:00:01Z".to_string()),
+            fragment_count_at_generation: 1,
+            max_fragment_created_at_at_generation: None,
+            distinct_keyword_count_cache: 1,
+            stats_fingerprint: None,
+            created_at: "2026-03-01T00:00:01Z".to_string(),
+            updated_at: "2026-03-01T00:00:01Z".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    nexus_local_db::create_pending_review(
+        &pool,
+        &nexus_local_db::PendingReviewRecord {
+            pending_id: "pend_bridge".to_string(),
+            session_id: "sess_pend_bridge".to_string(),
+            creator_id: CREATOR.to_string(),
+            world_id: Some(WORLD.to_string()),
+            task_kind: "research".to_string(),
+            raw_digest: FRAGMENT_DIGEST.to_string(),
+            created_at: "2026-03-01T00:00:02Z".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let home = env.user_home.as_path();
+    let bearer = MemoryBearerRef::Creator(CREATOR);
+    let mut memory = nexus_creator_memory::LongTermMemory::new("story_summary");
+    memory.set_body("Legacy long-term body.");
+    nexus_creator_memory::memory_io::save_memory(home, bearer, "bridge-memory", &memory)
+        .expect("long-term memory fixture");
+    std::fs::write(
+        nexus_home_layout::creator_soul_md_path(home, CREATOR),
+        BRIDGE_SOUL,
+    )
+    .expect("SOUL.md fixture");
+}
+
+/// Seed the Character legacy surfaces: one binding-local fragment and one run
+/// capture receipt (which also enqueues its own pending row).
+async fn seed_legacy_character_content(env: &Env) {
+    // `character_run_captures` is engine-owned (§5.2 capture lane): its writer
+    // guard admits only an engine-mode writer, unlike the direct-mode surfaces
+    // the other seeds use.
+    let guarded = init_engine_pool(&env.db_path, CREATOR, GuardedPoolOptions::default())
+        .await
+        .unwrap();
+    let pool = guarded.clone_pool();
+    let lifecycle_epoch: i64 =
+        sqlx::query_scalar("SELECT lifecycle_epoch FROM characters WHERE character_id = ?")
+            .bind(&env.character_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    nexus_local_db::create_character_fragment(
+        &pool,
+        CREATOR,
+        &nexus_local_db::NewCharacterMemoryFragment {
+            fragment_id: "hfrag_bridge".to_string(),
+            session_id: "hsess_bridge".to_string(),
+            character_id: env.character_id.clone(),
+            actor_world_binding_id: Some(env.binding_id.clone()),
+            keywords: serde_json::json!(["kw_binding"]).to_string(),
+            summary: "Binding-local character fragment.".to_string(),
+            created_at: "2026-03-02T00:00:00Z".to_string(),
+            ttl: None,
+        },
+    )
+    .await
+    .unwrap();
+    nexus_local_db::capture_character_run(
+        &pool,
+        CREATOR,
+        nexus_local_db::RunCaptureInput {
+            operation_id: "op_bridge",
+            session_id: "sess_run_bridge",
+            character_id: &env.character_id,
+            binding_id: &env.binding_id,
+            pending_id: "pend_char_bridge",
+            raw_digest: FRAGMENT_DIGEST,
+            captured_at: "2026-03-02T00:00:01Z",
+            lifecycle_epoch,
+        },
+    )
+    .await
+    .unwrap();
+    pool.close().await;
+    drop(guarded);
+}
+
+#[tokio::test]
+async fn merged_reads_serve_provider_native_and_projected_legacy_records() {
+    let env = seed_env().await;
+    seed_legacy_creator_content(&env).await;
+    // The read bridge is read-only: the bearer files are the input, never an
+    // output, so their bytes must survive every merged read below.
+    let long_term_path =
+        MemoryBearerRef::Creator(CREATOR).long_term_memory_path(&env.user_home, "bridge-memory");
+    let soul_path = nexus_home_layout::creator_soul_md_path(&env.user_home, CREATOR);
+    let long_term_before = std::fs::read(&long_term_path).expect("long-term file bytes");
+    let soul_before = std::fs::read(&soul_path).expect("SOUL.md bytes");
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    bridge_ok(
+        &provider
+            .ensure_subject(
+                &admin,
+                bridge_ensure_request(BRIDGE_CREATOR_SUBJECT, legacy::CREATOR_KIND_NS, CREATOR),
+            )
+            .await,
+    );
+    let created = bridge_ok(
+        &provider
+            .create_record(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": BRIDGE_CREATOR_SUBJECT,
+                    "kind": "note",
+                    "content": { "text": BRIDGE_TEXT },
+                    "scope": { "visibility": "shared" },
+                    "idempotency_key": "k-bridge-native",
+                })),
+            )
+            .await,
+    );
+    let native_id = created["result"]["record_id"]
+        .as_str()
+        .expect("a created record id")
+        .to_string();
+
+    let listed = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    BRIDGE_CREATOR_SUBJECT,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    let ids = bridge_report_ids(&listed, "records");
+    assert_eq!(
+        listed["total_authorized"], 4,
+        "the provider's own record and the three projected legacy records share one authorized set: {listed}"
+    );
+    assert!(
+        ids.contains(&native_id),
+        "provider-native row missing: {ids:?}"
+    );
+    assert!(
+        ids.contains(&"lgc:memory_fragments:frag_bridge".to_string()),
+        "projected fragment missing: {ids:?}"
+    );
+    assert!(
+        ids.contains(&format!("lgc:memory_long_term:{CREATOR}:bridge-memory")),
+        "projected long-term memory file missing: {ids:?}"
+    );
+    assert!(
+        ids.contains(&"lgc:memory_soul_narratives:%00".to_string()),
+        "projected Creator-level soul narrative missing: {ids:?}"
+    );
+
+    let kinds: Vec<&str> = listed["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["kind"].as_str().unwrap())
+        .collect();
+    assert!(
+        kinds.contains(&"fact"),
+        "legacy fragment projects as a fact: {kinds:?}"
+    );
+    assert!(
+        kinds.contains(&"nexus.story_summary"),
+        "a long-term memory keeps its authored kind: {kinds:?}"
+    );
+    assert!(
+        kinds.contains(&"nexus.soul_narrative"),
+        "a cached soul narrative keeps its own kind: {kinds:?}"
+    );
+
+    // The projected rows are readable by their external id through the same
+    // by-id route, and carry the legacy content they project.
+    let fragment = bridge_ok(
+        &provider
+            .get_record(
+                &admin,
+                bridge_record_get_request("lgc:memory_fragments:frag_bridge"),
+            )
+            .await,
+    );
+    assert_eq!(
+        fragment["record"]["content"]["text"],
+        "Legacy creator fragment text."
+    );
+    assert_eq!(fragment["record"]["revision"], 1);
+    assert_eq!(fragment["record"]["subject_id"], BRIDGE_CREATOR_SUBJECT);
+
+    // Deterministic external ids: the same read twice returns the same ids in
+    // the same order.
+    let again = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    BRIDGE_CREATOR_SUBJECT,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(
+        bridge_report_ids(&again, "records"),
+        ids,
+        "projected ids are stable across repeated reads"
+    );
+
+    // Recall ranks the merged set: every authorized record is a candidate.
+    let recalled = bridge_ok(
+        &provider
+            .recall(&admin, bridge_recall_request(BRIDGE_CREATOR_SUBJECT))
+            .await,
+    );
+    assert_eq!(recalled["total_authorized"], 4, "{recalled}");
+    assert_eq!(
+        bridge_report_ids(&recalled, "records").len(),
+        4,
+        "recall serves the merged set: {recalled}"
+    );
+
+    // A kind filter is applied to the projected rows by the same predicate.
+    let only_narrative = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    BRIDGE_CREATOR_SUBJECT,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!(["nexus.soul_narrative"]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(
+        bridge_report_ids(&only_narrative, "records"),
+        vec!["lgc:memory_soul_narratives:%00".to_string()],
+        "{only_narrative}"
+    );
+
+    // A subject that does not name a legacy bearer projects nothing.
+    bridge_ok(
+        &provider
+            .ensure_subject(
+                &admin,
+                bridge_ensure_request("sbj_bridge_plain", "nexus", "plain"),
+            )
+            .await,
+    );
+    let plain = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    "sbj_bridge_plain",
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(plain["total_authorized"], 0, "{plain}");
+
+    assert_eq!(
+        std::fs::read(&long_term_path).expect("long-term file bytes"),
+        long_term_before,
+        "a merged read never rewrites a legacy bearer file"
+    );
+    assert_eq!(
+        std::fs::read(&soul_path).expect("SOUL.md bytes"),
+        soul_before,
+        "a merged read never rewrites SOUL.md"
+    );
+}
+
+#[tokio::test]
+async fn merged_profile_read_serves_the_legacy_soul_document() {
+    let env = seed_env().await;
+    seed_legacy_creator_content(&env).await;
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    bridge_ok(
+        &provider
+            .ensure_subject(
+                &admin,
+                bridge_ensure_request(BRIDGE_CREATOR_SUBJECT, legacy::CREATOR_KIND_NS, CREATOR),
+            )
+            .await,
+    );
+
+    let profile = bridge_ok(
+        &provider
+            .get_profile(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": BRIDGE_CREATOR_SUBJECT,
+                })),
+            )
+            .await,
+    );
+    let personality = profile["profiles"]
+        .as_array()
+        .expect("profiles array")
+        .iter()
+        .find(|row| row["profile_kind"] == "personality")
+        .unwrap_or_else(|| panic!("SOUL.md projects as the personality profile: {profile}"));
+    assert_eq!(personality["document"]["format"], "markdown");
+    assert_eq!(personality["document"]["body"], BRIDGE_SOUL);
+    assert_eq!(personality["revision"], 1);
+}
+
+#[tokio::test]
+async fn merged_candidate_reads_serve_the_legacy_pending_queue() {
+    let env = seed_env().await;
+    seed_legacy_creator_content(&env).await;
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    bridge_ok(
+        &provider
+            .ensure_subject(
+                &admin,
+                bridge_ensure_request(BRIDGE_CREATOR_SUBJECT, legacy::CREATOR_KIND_NS, CREATOR),
+            )
+            .await,
+    );
+
+    let listed = bridge_ok(
+        &provider
+            .list_candidates(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": BRIDGE_CREATOR_SUBJECT,
+                })),
+            )
+            .await,
+    );
+    let candidate_ids: Vec<&str> = listed["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["candidate_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        candidate_ids,
+        vec!["lgc:memory_pending_review:pend_bridge"],
+        "the legacy queue entry is projected as a pending candidate: {listed}"
+    );
+    let projected = &listed["candidates"][0];
+    assert_eq!(projected["status"], "pending");
+    assert_eq!(projected["capture_scope"]["visibility"], "shared");
+    assert_eq!(
+        projected["proposed"]["content"]["structured"]["nexus_legacy"]["raw_digest"],
+        FRAGMENT_DIGEST
+    );
+
+    let fetched = bridge_ok(
+        &provider
+            .get_candidate(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "candidate_id": "lgc:memory_pending_review:pend_bridge",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(fetched["candidate"]["candidate_id"], candidate_ids[0]);
+
+    // A status-filtered audit query never admits a projected pending entry.
+    let consumed = bridge_ok(
+        &provider
+            .list_candidates(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": BRIDGE_CREATOR_SUBJECT,
+                    "status": "consumed",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(consumed["candidates"], serde_json::json!([]), "{consumed}");
+}
+
+#[tokio::test]
+async fn merged_character_reads_respect_binding_placement_and_ownership() {
+    let env = seed_env().await;
+    seed_legacy_character_content(&env).await;
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    bridge_ok(
+        &provider
+            .ensure_subject(
+                &admin,
+                bridge_ensure_request(
+                    BRIDGE_CHARACTER_SUBJECT,
+                    legacy::CHARACTER_KIND_NS,
+                    &env.character_id,
+                ),
+            )
+            .await,
+    );
+
+    let all = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    BRIDGE_CHARACTER_SUBJECT,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    let ids = bridge_report_ids(&all, "records");
+    assert!(
+        ids.contains(&"lgc:character_memory_fragments:hfrag_bridge".to_string()),
+        "binding-local fragment missing: {ids:?}"
+    );
+    assert!(
+        ids.contains(&"lgc:character_run_captures:op_bridge".to_string()),
+        "run-capture provenance record missing: {ids:?}"
+    );
+    for row in all["records"].as_array().unwrap() {
+        assert_eq!(
+            row["scope"]["visibility"], "context",
+            "a binding-local legacy row keeps its binding placement: {row}"
+        );
+        assert_eq!(row["scope"]["context_id"], env.binding_id.as_str());
+    }
+
+    // A shared-only selection excludes both binding-local projections.
+    let shared = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    BRIDGE_CHARACTER_SUBJECT,
+                    serde_json::json!({ "mode": "shared_only" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(shared["total_authorized"], 0, "{shared}");
+
+    // Naming the binding context selects them back in.
+    let context = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    BRIDGE_CHARACTER_SUBJECT,
+                    serde_json::json!({
+                        "mode": "selected_contexts",
+                        "context_ids": [env.binding_id.clone()],
+                    }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(context["total_authorized"], 2, "{context}");
+
+    // Ownership guard: a Character subject naming a character this workspace
+    // does not own projects nothing.
+    let foreign = "chr_00000000000000000000000000000000";
+    bridge_ok(
+        &provider
+            .ensure_subject(
+                &admin,
+                bridge_ensure_request("sbj_bridge_foreign", legacy::CHARACTER_KIND_NS, foreign),
+            )
+            .await,
+    );
+    let foreign_records = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    "sbj_bridge_foreign",
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(foreign_records["total_authorized"], 0, "{foreign_records}");
+}

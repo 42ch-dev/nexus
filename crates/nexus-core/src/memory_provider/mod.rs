@@ -34,6 +34,8 @@
 //! served.
 
 mod journal;
+/// The single provider-seam legacy projection/read bridge (NXM-5 Task 1).
+pub mod legacy;
 pub mod policy;
 pub mod profile;
 mod storage;
@@ -740,7 +742,7 @@ impl LocalMemoryProvider {
                     category: format!("memory provider workspace dir: {error}"),
                 })?;
         }
-        let store = MemoryStore::open(&db_path, creator_id)
+        let store = MemoryStore::open(&db_path, creator_id, &user_home)
             .await
             .map_err(store_error)
             .map_err(to_core_error)?;
