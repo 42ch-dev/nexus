@@ -3240,6 +3240,32 @@ async fn cross_creator_dismissal_keeps_the_pending_review_forbidden_reason() {
     pool.close().await;
 }
 
+/// QC1-F3: a failed ownership re-read is the retained `database_error`
+/// internal, never the 404 an absence answers.
+#[tokio::test]
+async fn dismissal_ownership_lookup_failure_is_a_database_error() {
+    let env = seed_env().await;
+    // Another Creator's row: the provider cannot see it, so the dismissal falls
+    // through to the legacy ownership re-read that distinguishes 403 from 404.
+    seed_foreign_creator_pending_row(&env, "pending_foreign").await;
+    let (core, principal) = open_core(&env).await;
+    // Closing the core pool fails exactly that re-read; the provider keeps its
+    // own pool, so the reads ahead of it still answer.
+    core.pool().close().await;
+
+    let err = core
+        .delete_pending_review(&principal, "pending_foreign".to_string())
+        .await
+        .expect_err("a failed ownership lookup is not an absence");
+    match err {
+        CoreError::Internal { category } => assert!(
+            category.starts_with("database_error"),
+            "the pre-reroute database-error class, got {category}"
+        ),
+        other => panic!("expected the database_error internal, got {other:?}"),
+    }
+}
+
 #[tokio::test]
 async fn legacy_dismissal_and_adoption_commit_together() {
     let env = seed_env().await;
@@ -3327,6 +3353,47 @@ async fn pending_listing_serves_rows_past_the_former_scan_cap() {
         "a first page of a large queue must not report completion"
     );
     assert!(first.pagination.next_cursor.is_some());
+}
+
+/// QC1-F1: two rows inside one second whose ids order opposite to their
+/// fractional timestamps keep the retained `created_at DESC` order and serve
+/// their original timestamp values, across a keyset page boundary.
+#[tokio::test]
+async fn pending_pages_keep_sub_second_order_opposite_to_ids() {
+    let env = seed_env().await;
+    // `pending_a` sorts before `pending_z` by id but is the newer row.
+    seed_creator_pending_row(&env, "pending_a", None, "2026-01-01T00:00:00.900000Z").await;
+    seed_creator_pending_row(&env, "pending_z", None, "2026-01-01T00:00:00.100000Z").await;
+    let (core, principal) = open_core(&env).await;
+
+    let first = core
+        .list_pending_reviews(&principal, None, 1)
+        .await
+        .unwrap();
+    assert_eq!(first.items.len(), 1);
+    assert_eq!(
+        first.items[0].pending_id, "pending_a",
+        "the newer fractional timestamp orders first, not the larger id"
+    );
+    assert_eq!(
+        first.items[0].created_at, "2026-01-01T00:00:00.900000Z",
+        "the legacy timestamp is served verbatim, sub-second precision included"
+    );
+    assert!(first.pagination.has_more, "the older row is still queued");
+    let cursor = first
+        .pagination
+        .next_cursor
+        .clone()
+        .expect("a partial page carries a cursor");
+
+    let second = core
+        .list_pending_reviews(&principal, Some(cursor), 1)
+        .await
+        .unwrap();
+    assert_eq!(second.items.len(), 1);
+    assert_eq!(second.items[0].pending_id, "pending_z");
+    assert_eq!(second.items[0].created_at, "2026-01-01T00:00:00.100000Z");
+    assert!(!second.pagination.has_more);
 }
 
 #[tokio::test]

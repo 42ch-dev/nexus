@@ -98,6 +98,7 @@ use uuid::Uuid;
 use nexus_local_db::writer_protocol::{init_guarded_pool, GuardedPool};
 use nexus_local_db::{begin_immediate, LocalDbError};
 
+use super::created_at_cmp;
 use super::journal::{self, FileEffect};
 use super::legacy::{self, LegacyRoots};
 
@@ -3575,7 +3576,7 @@ async fn adopt_in_tx(
         .bind(row.occurred_at.as_deref())
         .bind(row.expires_at.as_deref())
         .bind(row.revision)
-        .bind(row.created_at.as_str())
+        .bind(legacy::provider_timestamp(&row.created_at))
         .execute(&mut **tx)
         .await?;
         adopted += i64::try_from(inserted.rows_affected()).unwrap_or(0);
@@ -3852,8 +3853,9 @@ impl MemoryStore {
                 ));
                 projected.insert(row.candidate_id.clone(), row);
             }
-            authorized
-                .sort_by(|left, right| left.2.cmp(&right.2).then_with(|| left.0.cmp(&right.0)));
+            authorized.sort_by(|left, right| {
+                created_at_cmp(&left.2, &right.2).then_with(|| left.0.cmp(&right.0))
+            });
         }
         // Cursor offsets index the authorized set, never the predicate set: a
         // hidden candidate can neither consume a page nor skip a visible row
@@ -3899,8 +3901,7 @@ impl MemoryStore {
                 .filter_map(|candidate_id| projected.remove(candidate_id)),
         );
         rows.sort_by(|left, right| {
-            left.created_at
-                .cmp(&right.created_at)
+            created_at_cmp(&left.created_at, &right.created_at)
                 .then_with(|| left.candidate_id.cmp(&right.candidate_id))
         });
         tx.commit().await?;
@@ -4417,9 +4418,7 @@ impl MemoryStore {
             }
             rows.extend(legacy_rows);
             rows.sort_by(|left, right| {
-                right
-                    .created_at
-                    .cmp(&left.created_at)
+                created_at_cmp(&right.created_at, &left.created_at)
                     .then_with(|| left.record_id.cmp(&right.record_id))
             });
             if let Some((limit, offset)) = page {

@@ -50,7 +50,7 @@
 
 use std::path::PathBuf;
 
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, SecondsFormat, Utc};
 use serde_json::{json, Value};
 use sqlx::Sqlite;
 
@@ -684,11 +684,11 @@ async fn creator_fragments(
                 session_id,
                 keywords,
                 summary,
-                created_at,
+                created_at: raw_created_at,
                 ttl,
                 world_id,
             } = row;
-            let created_at = normalize_timestamp(&created_at);
+            let created_at = normalize_timestamp(&raw_created_at);
             let record_id = external_id(FAMILY_MEMORY_FRAGMENTS, &[fragment_id.as_str()]);
             let content = json!({
                 "text": summary,
@@ -699,6 +699,9 @@ async fn creator_fragments(
                     "keywords": keywords_json(&keywords),
                     "ttl": ttl,
                     "world_id": world_id,
+                    // The E4 DTO serves the legacy column verbatim (D5); the
+                    // row's `created_at` above only carries its time for order.
+                    "created_at": raw_created_at,
                 }},
             });
             record_row(
@@ -755,11 +758,11 @@ async fn character_fragments(
                 actor_world_binding_id,
                 keywords,
                 summary,
-                created_at,
+                created_at: raw_created_at,
                 ttl,
                 revision,
             } = row;
-            let created_at = normalize_timestamp(&created_at);
+            let created_at = normalize_timestamp(&raw_created_at);
             let record_id = external_id(FAMILY_CHARACTER_FRAGMENTS, &[fragment_id.as_str()]);
             let visibility = binding_visibility(actor_world_binding_id.as_deref());
             let context_id = actor_world_binding_id.clone();
@@ -772,6 +775,8 @@ async fn character_fragments(
                     "actor_world_binding_id": actor_world_binding_id,
                     "keywords": keywords_json(&keywords),
                     "ttl": ttl,
+                    // The E4 DTO serves the legacy column verbatim (D5).
+                    "created_at": raw_created_at,
                 }},
             });
             record_row(
@@ -1133,6 +1138,9 @@ async fn creator_pending_reviews(
                     "world_id": world_id,
                     "task_kind": task_kind,
                     "raw_digest": raw_digest,
+                    // The E4 DTO serves the legacy column verbatim (D5); the
+                    // row's `created_at` only carries its time for order.
+                    "created_at": created_at,
                 }},
             });
             candidate_row(
@@ -1198,6 +1206,8 @@ async fn character_pending_reviews(
                     "task_kind": task_kind,
                     "raw_digest": raw_digest,
                     "source_operation_id": source_operation_id,
+                    // The E4 DTO serves the legacy column verbatim (D5).
+                    "created_at": created_at,
                 }},
             });
             candidate_row(
@@ -1356,18 +1366,39 @@ fn keywords_json(raw: &str) -> Vec<String> {
     serde_json::from_str(raw).unwrap_or_default()
 }
 
-/// The provider's single timestamp rendering, so a merged page orders provider
-/// and legacy rows on one comparable format. Legacy SQLite columns carry
-/// `YYYY-MM-DD HH:MM:SS` and bearer frontmatter carries RFC 3339; a value in
-/// neither form is kept verbatim rather than replaced by an invented time.
+/// One UTC rendering of a legacy timestamp that keeps the precision the legacy
+/// column carried. Legacy SQLite columns carry `YYYY-MM-DD HH:MM:SS[.fff]` and
+/// bearer frontmatter carries RFC 3339; a value in neither form is kept verbatim
+/// rather than replaced by an invented time.
+///
+/// The provider's own [`timestamp`] renders whole seconds, and truncating a
+/// legacy value to that loses both the value an E4 DTO serves and the order two
+/// rows in one second must keep (NXM-5 QC1-F1). Ordering compares parsed times
+/// ([`super::created_at_cmp`]); only a written column uses the provider
+/// rendering ([`provider_timestamp`]).
 fn normalize_timestamp(raw: &str) -> String {
+    parse_timestamp(raw).map_or_else(
+        || raw.to_string(),
+        |parsed| parsed.to_rfc3339_opts(SecondsFormat::AutoSi, true),
+    )
+}
+
+/// The provider's own whole-second rendering, for the one place a projected
+/// timestamp is written into a provider table (adoption): every stored
+/// timestamp column is compared as text, so a written value keeps the one
+/// format the provider mints.
+pub(super) fn provider_timestamp(raw: &str) -> String {
+    parse_timestamp(raw).map_or_else(|| raw.to_string(), timestamp)
+}
+
+fn parse_timestamp(raw: &str) -> Option<DateTime<Utc>> {
     if let Ok(parsed) = DateTime::parse_from_rfc3339(raw) {
-        return timestamp(parsed.with_timezone(&Utc));
+        return Some(parsed.with_timezone(&Utc));
     }
-    ["%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"]
+    ["%Y-%m-%d %H:%M:%S%.f", "%Y-%m-%dT%H:%M:%S%.f"]
         .into_iter()
         .find_map(|format| NaiveDateTime::parse_from_str(raw, format).ok())
-        .map_or_else(|| raw.to_string(), |naive| timestamp(naive.and_utc()))
+        .map(|naive| naive.and_utc())
 }
 
 fn serialize(value: &Value, what: &str) -> StoreResult<String> {
@@ -1483,10 +1514,21 @@ mod tests {
             normalize_timestamp("2026-11-02 08:05:00"),
             "2026-11-02T08:05:00Z"
         );
+        // Sub-second precision survives: two rows in one second stay ordered by
+        // their real times (NXM-5 QC1-F1).
         assert_eq!(
             normalize_timestamp("2026-11-02T08:05:00.123+02:00"),
-            "2026-11-02T06:05:00Z"
+            "2026-11-02T06:05:00.123Z"
+        );
+        assert_eq!(
+            normalize_timestamp("2026-11-02 08:05:00.900"),
+            "2026-11-02T08:05:00.900Z"
         );
         assert_eq!(normalize_timestamp("not a time"), "not a time");
+        // A written provider column keeps the one provider rendering.
+        assert_eq!(
+            provider_timestamp("2026-11-02T08:05:00.900Z"),
+            "2026-11-02T08:05:00Z"
+        );
     }
 }

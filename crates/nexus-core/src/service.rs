@@ -96,9 +96,11 @@ pub struct CoreInner {
     /// handle up with [`Self::guarded`] — otherwise a closed-but-referenced
     /// service would still hold the writer admission it reported released.
     ///
-    /// `None` for a read-only open: the provider is a writer (it provisions the
-    /// space and the bootstrap grant), so a read-only core pins no provider and
-    /// the memory family refuses instead of writing under a read-only open.
+    /// `None` only after a confirmed close gives the handle up (and until an
+    /// open stores it); every open pins one. A read-only open pins the
+    /// read-only provider, so a read-only core serves memory reads through it
+    /// while its write handlers refuse via [`Self::memory_writer`] (NXM-5 Task 2
+    /// fix round 1, finding F6).
     memory: Mutex<Option<Arc<LocalMemoryProvider>>>,
     /// Active creator this service was opened against (open-scoped).
     pub(crate) nexus_home: PathBuf,

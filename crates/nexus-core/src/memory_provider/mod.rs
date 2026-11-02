@@ -98,6 +98,20 @@ const OP_PROFILE_UPDATE: &str = "memory.profile.update";
 /// dismissal replays instead of duplicating and no adopted row is left pending.
 const OP_LEGACY_ADOPT: &str = "memory.legacy.adopt";
 
+/// Time order for a merged read: a provider row renders whole seconds, while a
+/// projected legacy row keeps the precision its legacy column carried, so the
+/// two renderings are not comparable as text (NXM-5 QC1-F1). Parse both sides
+/// when both parse; otherwise keep the deterministic text order.
+pub(crate) fn created_at_cmp(left: &str, right: &str) -> std::cmp::Ordering {
+    match (
+        DateTime::parse_from_rfc3339(left),
+        DateTime::parse_from_rfc3339(right),
+    ) {
+        (Ok(left), Ok(right)) => left.cmp(&right),
+        _ => left.cmp(right),
+    }
+}
+
 /// §7.3/§7.4: the two space lifecycle transitions, each naming its op string and
 /// the state it writes.
 #[derive(Clone, Copy)]
@@ -2859,7 +2873,7 @@ impl MemoryPort for LocalMemoryProvider {
         ranked.sort_by(|(left_score, left), (right_score, right)| {
             right_score
                 .cmp(left_score)
-                .then_with(|| right.created_at.cmp(&left.created_at))
+                .then_with(|| created_at_cmp(&right.created_at, &left.created_at))
                 .then_with(|| left.record_id.cmp(&right.record_id))
         });
         // §9.3 budget over what remains after the cursor.

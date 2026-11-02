@@ -58,7 +58,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::memory_provider::legacy;
-use crate::memory_provider::{LocalMemoryProvider, MemoryDisposition};
+use crate::memory_provider::{created_at_cmp, LocalMemoryProvider, MemoryDisposition};
 use crate::principal::Principal;
 use crate::service::CoreService;
 use spoke_operations::{spoke_schemas, MemoryPort, SpokeReject, SpokeRejectCode, SpokeResult};
@@ -186,8 +186,9 @@ impl PendingMemoryRow {
             source_operation_id: origin["source_operation_id"].as_str().map(str::to_string),
             binding_id: scope["context_id"].as_str().map(str::to_string),
             shared: scope["visibility"].as_str() == Some("shared"),
-            created_at: candidate["created_at"]
+            created_at: origin["created_at"]
                 .as_str()
+                .or_else(|| candidate["created_at"].as_str())
                 .unwrap_or_default()
                 .to_string(),
         })
@@ -294,8 +295,8 @@ impl MemoryAdapter {
             }
         }
         rows.sort_by(|left, right| {
-            (right.created_at.as_str(), right.pending_id.as_str())
-                .cmp(&(left.created_at.as_str(), left.pending_id.as_str()))
+            created_at_cmp(&right.created_at, &left.created_at)
+                .then_with(|| right.pending_id.cmp(&left.pending_id))
         });
         Ok(rows)
     }
@@ -1122,7 +1123,10 @@ fn character_fragment_from_provider(
         "binding_id": record.pointer("/scope/context_id"),
         "summary": record.pointer("/content/text").and_then(Value::as_str).unwrap_or_default(),
         "keywords": record_keywords(record),
-        "created_at": record["created_at"].as_str().unwrap_or_default(),
+        "created_at": origin["created_at"]
+            .as_str()
+            .or_else(|| record["created_at"].as_str())
+            .unwrap_or_default(),
         "ttl": origin["ttl"],
         "revision": revision,
     }))
@@ -1145,7 +1149,9 @@ fn creator_fragment_from_provider(record: &Value) -> CoreResult<MemoryFragmentIn
         "summary": record.pointer("/content/text").and_then(Value::as_str).unwrap_or_default(),
         "world_id": creator_world_id(record),
         "keywords": record_keywords(record),
-        "created_at": record["created_at"].as_str(),
+        "created_at": origin["created_at"]
+            .as_str()
+            .or_else(|| record["created_at"].as_str()),
     }))
 }
 
@@ -1251,8 +1257,10 @@ impl CoreService {
     ///
     /// # Errors
     /// [`CoreError::NotFound`] when the row is absent,
-    /// [`CoreError::ForbiddenReason`] when it belongs to another Creator, and
-    /// [`CoreError::Forbidden`] under read-only core access.
+    /// [`CoreError::ForbiddenReason`] when it belongs to another Creator,
+    /// [`CoreError::Forbidden`] under read-only core access, and the retained
+    /// `database_error` internal when the ownership re-read fails
+    /// (NXM-5 QC1-F3).
     pub async fn delete_pending_review(
         &self,
         principal: &Principal,
@@ -1266,10 +1274,10 @@ impl CoreService {
         // nothing). The authoritative decision is still the guarded dismissal
         // below; this read only keeps that answer.
         if !pending_now(&memory, &candidate_id).await? {
-            return Err(self.pending_review_refusal(principal, &pending_id).await);
+            return Err(self.pending_review_refusal(principal, &pending_id).await?);
         }
         if !memory.dismiss_legacy(&candidate_id).await? {
-            return Err(self.pending_review_refusal(principal, &pending_id).await);
+            return Err(self.pending_review_refusal(principal, &pending_id).await?);
         }
         Ok(DeletePendingReviewResponse {
             success: true,
@@ -1281,16 +1289,26 @@ impl CoreService {
     /// row another Creator owns is the `pending_review` `ForbiddenReason`, an
     /// absent or already-consumed row the `NotFound` it always was. The
     /// ownership re-read is the same read-only legacy lookup the pre-reroute
-    /// handler performed, and a failed re-read answers the retained `NotFound`
-    /// rather than inventing a third outcome.
-    async fn pending_review_refusal(&self, principal: &Principal, pending_id: &str) -> CoreError {
+    /// handler performed, so its failure keeps the pre-reroute
+    /// `database_error` mapping instead of masquerading as an absence
+    /// (NXM-5 QC1-F3).
+    async fn pending_review_refusal(
+        &self,
+        principal: &Principal,
+        pending_id: &str,
+    ) -> CoreResult<CoreError> {
         let owner: Option<String> =
             sqlx::query_scalar("SELECT creator_id FROM memory_pending_review WHERE pending_id = ?")
                 .bind(pending_id)
                 .fetch_optional(&self.inner.pool)
                 .await
-                .unwrap_or(None);
-        match owner {
+                .map_err(|e| {
+                    internal_err(
+                        "database_error",
+                        format!("failed to lookup pending review: {e}"),
+                    )
+                })?;
+        Ok(match owner {
             Some(owner) if owner != principal.creator_id() => CoreError::ForbiddenReason {
                 resource: "pending_review".to_string(),
                 reason: format!(
@@ -1301,7 +1319,7 @@ impl CoreService {
             _ => CoreError::NotFound {
                 resource: format!("pending review '{pending_id}' not found"),
             },
-        }
+        })
     }
 
     /// List the principal's memory fragments with optional keyword/world
