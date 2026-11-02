@@ -237,6 +237,28 @@ impl CoreService {
         Self::open_impl(options, Some(expected)).await
     }
 
+    /// Build the `MemoryPort` this open pins for the memory family.
+    ///
+    /// A read-only open pins the read-only provider: it must keep serving memory
+    /// reads, and it takes no writer admission, provisions nothing and runs no
+    /// recovery (NXM-5 Task 2 fix round 1, finding F6). Its write handlers refuse
+    /// before they reach it.
+    async fn pin_memory_provider(
+        options: &CoreOpenOptions,
+        creator_id: &str,
+        workspace_slug: &str,
+    ) -> CoreResult<Arc<LocalMemoryProvider>> {
+        let user_home = options.user_home.clone();
+        Ok(Arc::new(match options.access {
+            CoreAccess::ReadOnly => {
+                LocalMemoryProvider::open_read_only(user_home, creator_id, workspace_slug).await?
+            }
+            CoreAccess::DirectWriter | CoreAccess::EngineOwner => {
+                LocalMemoryProvider::open(user_home, creator_id, workspace_slug).await?
+            }
+        }))
+    }
+
     async fn open_impl(options: CoreOpenOptions, expected: Option<&Path>) -> CoreResult<Self> {
         let nexus_home = nexus_home_layout::nexus_root_from_home(&options.user_home);
         let cfg = CliConfigSnapshot::load(&nexus_home).map_err(|e| CoreError::Internal {
@@ -307,17 +329,9 @@ impl CoreService {
         };
 
         // Pin the one `MemoryPort` this open serves the memory family from
-        // (NXM-5 Task 2). It is built HERE, beside the pool admission, so an
-        // E4 handler can never mint a second provider instance behind the
-        // service. A read-only open pins none: the provider provisions a space
-        // and a bootstrap grant, and a read-only admission must not write.
-        let memory = match options.access {
-            CoreAccess::ReadOnly => None,
-            CoreAccess::DirectWriter | CoreAccess::EngineOwner => Some(Arc::new(
-                LocalMemoryProvider::open(options.user_home.clone(), &creator_id, &workspace_slug)
-                    .await?,
-            )),
-        };
+        // (NXM-5 Task 2), built HERE beside the pool admission so an E4 handler
+        // can never mint a second provider instance behind the service.
+        let memory = Some(Self::pin_memory_provider(&options, &creator_id, &workspace_slug).await?);
 
         Ok(Self {
             inner: Arc::new(CoreInner {
@@ -367,13 +381,13 @@ impl CoreService {
     /// The `MemoryPort` this open pinned for the memory family (NXM-5 Task 2).
     ///
     /// The handle is shared, not copied: every E4 handler runs against the one
-    /// provider (and therefore the one guarded writer pool) this open admitted,
-    /// and a close that already gave it up refuses here instead of serving a
-    /// released service.
+    /// provider (and therefore the one guarded pool) this open admitted, and a
+    /// close that already gave it up refuses here instead of serving a released
+    /// service. A read-only open pins a read-only provider, so its reads are
+    /// served too (fix round 1, finding F6).
     ///
     /// # Errors
-    /// [`CoreError::Closing`] after a close began, and [`CoreError::Forbidden`]
-    /// for a read-only open, which pins no provider (it would have to write).
+    /// [`CoreError::Closing`] after a close began.
     pub(crate) fn memory_provider(&self) -> CoreResult<Arc<LocalMemoryProvider>> {
         self.ensure_open()?;
         self.inner
@@ -381,9 +395,26 @@ impl CoreService {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
-            .ok_or_else(|| CoreError::Forbidden {
+            .ok_or(CoreError::Closing)
+    }
+
+    /// The `MemoryPort` a memory **write** handler must use (NXM-5 Task 2 fix
+    /// round 1, finding F6).
+    ///
+    /// A read-only core serves reads, not writes: a dismissal attempted through
+    /// it keeps its typed refusal instead of reaching a write on a read-only
+    /// connection.
+    ///
+    /// # Errors
+    /// [`CoreError::Closing`] after a close began, and [`CoreError::Forbidden`]
+    /// under read-only core access.
+    pub(crate) fn memory_writer(&self) -> CoreResult<Arc<LocalMemoryProvider>> {
+        if self.inner.access == CoreAccess::ReadOnly {
+            return Err(CoreError::Forbidden {
                 resource: "memory: read-only core access".to_string(),
-            })
+            });
+        }
+        self.memory_provider()
     }
 
     #[must_use]

@@ -775,6 +775,43 @@ impl LocalMemoryProvider {
         &self.space_id
     }
 
+    /// Open the provider over a **read-only** connection (NXM-5 Task 2 fix round
+    /// 1, finding F6).
+    ///
+    /// A read-only core access must keep serving memory reads, so this open
+    /// serves the same `MemoryPort` reads over `mode=ro` storage. It takes no
+    /// writer admission and performs no provisioning, journal recovery or
+    /// retention sweep: an open-pinned provider on that access mode must not
+    /// write. A write op reached through this handle is refused by the writer
+    /// protocol (the read-only connection rejects it), and `CoreService` refuses
+    /// the E4 write handlers before they get here.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError`] when the workspace database cannot be read.
+    pub async fn open_read_only(
+        user_home: PathBuf,
+        creator_id: &str,
+        workspace_slug: &str,
+    ) -> CoreResult<Self> {
+        let db_path =
+            nexus_home_layout::workspace_state_db_path(&user_home, creator_id, workspace_slug);
+        let store = MemoryStore::open_read_only(&db_path, creator_id, &user_home)
+            .await
+            .map_err(store_error)
+            .map_err(to_core_error)?;
+        Ok(Self {
+            store,
+            space_id: DEFAULT_SPACE_ID.to_string(),
+        })
+    }
+
+    /// Whether this provider may write (`false` for a read-only open).
+    #[must_use]
+    pub const fn is_writable(&self) -> bool {
+        self.store.writable()
+    }
+
     /// MEM-R005 profile admission gate: the authored content kinds a subject
     /// has, or the typed `PROFILE_INCOMPLETE` refusal.
     ///
@@ -870,6 +907,78 @@ impl LocalMemoryProvider {
             .await
             .map_err(store_error)
             .map_err(to_core_error)
+    }
+
+    /// Dismiss a legacy-derived candidate: adopt the projection under the
+    /// bridge's deterministic id and consume it **in one guarded transaction**
+    /// (NXM-5 Task 2 fix round 1, finding F4).
+    ///
+    /// The adoption is not a separate step a caller can interleave with: a
+    /// failure of either half leaves neither effect, so an adopted pending row
+    /// can never be left behind by a dismissal that did not commit. The
+    /// departure from the wire request shape is deliberate — the E4 dismissal
+    /// has no caller-supplied revision (`expected_revision: None` consumes the
+    /// revision the transaction reads) and it names the bearer's subject, which
+    /// only this seam knows.
+    ///
+    /// # Refusals
+    /// The same reject codes `memory.candidates.dismiss` answers: `NOT_FOUND`
+    /// when nothing resolves to the id, `CANDIDATE_CONSUMED`/
+    /// `REVISION_CONFLICT` when the CAS cannot land, and the admission codes.
+    pub async fn dismiss_legacy_candidate(
+        &self,
+        principal: &schemas::Principal,
+        subject_id: &str,
+        candidate_id: &str,
+        expected_revision: Option<i64>,
+        idempotency_key: &str,
+    ) -> SpokeResult<schemas::MemoryCandidatesDismissResponse> {
+        let principal_id = principal_id(principal);
+        let op = OP_CANDIDATES_DISMISS;
+        let digest = match jcs_sha256_hex(&json!({
+            "candidate_id": candidate_id,
+            "expected_revision": expected_revision,
+            "idempotency_key": idempotency_key,
+        })) {
+            SpokeResult::Ok(digest) => digest,
+            SpokeResult::Reject(reject) => {
+                return deny(&ProviderError::Internal(reject.message));
+            }
+        };
+        let ctx = OpContext {
+            space_id: &self.space_id,
+            requester_principal_id: principal_id,
+            op,
+            idempotency_key: Some(idempotency_key),
+            payload_digest: &digest,
+        };
+        let admission = Admission {
+            op,
+            space_id: &self.space_id,
+            principal_id,
+            coverage: Coverage::Candidate {
+                candidate_id,
+                capabilities: &["review"],
+            },
+            issuance: None,
+            subject_gate: None,
+            placement_gate: None,
+            freeze_gated: true,
+        };
+        match self
+            .store
+            .dismiss_legacy_candidate(
+                &ctx,
+                &admission,
+                candidate_id,
+                subject_id,
+                expected_revision,
+            )
+            .await
+        {
+            Ok(receipt) => settle_receipt(&receipt),
+            Err(error) => deny(&store_error(error)),
+        }
     }
 
     /// §14.2/§14.3 proof seam: force the next committing transaction to fail at

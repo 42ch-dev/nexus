@@ -2806,3 +2806,485 @@ async fn just_in_time_adoption_is_inert_after_the_completion_marker() {
         "no adoption path runs after the marker"
     );
 }
+
+// ═══ NXM-5 Task 2 fix round 1 ═════════════════════════════════════════════
+//
+// F1: a row a provider dismissal consumed keeps its legacy row (a provider
+// write never touches the legacy surface), so the legacy review drain has to
+// check the provider's state before it classifies a digest the caller rejected.
+// F2: the retained cross-Creator `pending_review` 403. F4: adoption and
+// dismissal are one guarded transaction. F5: no blanket scan cap in the retained
+// list/count/search semantics. F6: a read-only core keeps serving memory reads
+// and still refuses writes.
+
+const REJECTED_DIGEST: &str =
+    "Rejected research summary, long enough to classify as a fragment if a drain ever saw it.";
+
+async fn seed_creator_pending_digest(env: &Env, pending_id: &str, digest: &str, created_at: &str) {
+    let pool = plain_pool(env).await;
+    nexus_local_db::create_pending_review(
+        &pool,
+        &nexus_local_db::PendingReviewRecord {
+            pending_id: pending_id.to_string(),
+            session_id: format!("sess_{pending_id}"),
+            creator_id: CREATOR.to_string(),
+            world_id: None,
+            task_kind: "research".to_string(),
+            raw_digest: digest.to_string(),
+            created_at: created_at.to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    pool.close().await;
+}
+
+async fn seed_foreign_creator_pending_row(env: &Env, pending_id: &str) {
+    let pool = plain_pool(env).await;
+    nexus_local_db::create_pending_review(
+        &pool,
+        &nexus_local_db::PendingReviewRecord {
+            pending_id: pending_id.to_string(),
+            session_id: format!("sess_{pending_id}"),
+            creator_id: OTHER.to_string(),
+            world_id: None,
+            task_kind: "research".to_string(),
+            raw_digest: FRAGMENT_DIGEST.to_string(),
+            created_at: "2026-01-01T00:00:01Z".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    pool.close().await;
+}
+
+/// Seed `count` Creator pending rows whose `created_at` sorts by row index, in
+/// one statement (a fixture past the former 10_000-row scan cap).
+async fn seed_creator_pending_past_former_cap(env: &Env, count: i64) {
+    let pool = plain_pool(env).await;
+    sqlx::query(
+        "WITH RECURSIVE seq(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM seq WHERE i + 1 < ?)
+         INSERT INTO memory_pending_review
+             (pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at)
+         SELECT printf('pending_cap_%06d', i), printf('sess_cap_%06d', i), ?, NULL, 'research', ?,
+                printf('2026-01-01T00:00:00.%06dZ', i)
+         FROM seq",
+    )
+    .bind(count)
+    .bind(CREATOR)
+    .bind(FRAGMENT_DIGEST)
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+}
+
+/// Seed `count` Character-shared pending rows in one statement.
+async fn seed_character_pending_past_former_cap(env: &Env, count: i64) {
+    let pool = plain_pool(env).await;
+    sqlx::query(
+        "WITH RECURSIVE seq(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM seq WHERE i + 1 < ?)
+         INSERT INTO character_memory_pending_review
+             (pending_id, session_id, character_id, actor_world_binding_id, task_kind, raw_digest,
+              created_at)
+         SELECT printf('pending_chr_%06d', i), printf('sess_chr_%06d', i), ?, NULL, 'research', ?,
+                printf('2026-01-01T00:00:00.%06dZ', i)
+         FROM seq",
+    )
+    .bind(count)
+    .bind(&env.character_id)
+    .bind(FRAGMENT_DIGEST)
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+}
+
+/// Seed `count` Creator fragments; only the last one carries `kw_past_cap`.
+async fn seed_creator_fragments_past_former_cap(env: &Env, count: i64) {
+    let pool = plain_pool(env).await;
+    sqlx::query(
+        "WITH RECURSIVE seq(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM seq WHERE i + 1 < ?)
+         INSERT INTO memory_fragments
+             (fragment_id, session_id, creator_id, keywords, summary, created_at, ttl, world_id)
+         SELECT printf('frag_cap_%06d', i), printf('sess_fcap_%06d', i), ?,
+                CASE WHEN i + 1 = ? THEN '[\"kw_past_cap\"]' ELSE '[\"kw_other\"]' END,
+                printf('Seeded fragment %06d.', i),
+                printf('2026-01-01T00:00:00.%06dZ', i), NULL, NULL
+         FROM seq",
+    )
+    .bind(count)
+    .bind(CREATOR)
+    .bind(count)
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+}
+
+/// The provider's merged view of one candidate's status.
+async fn provider_candidate_status(
+    provider: &LocalMemoryProvider,
+    admin: &bridge_schemas::Principal,
+    candidate_id: &str,
+) -> String {
+    let fetched = bridge_ok(
+        &provider
+            .get_candidate(
+                admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "candidate_id": candidate_id,
+                })),
+            )
+            .await,
+    );
+    fetched["candidate"]["status"]
+        .as_str()
+        .expect("candidate status")
+        .to_string()
+}
+
+#[tokio::test]
+async fn dismissed_creator_digest_is_never_classified_by_the_review_drain() {
+    let env = seed_env().await;
+    seed_creator_pending_digest(
+        &env,
+        "pending_keep",
+        FRAGMENT_DIGEST,
+        "2026-01-01T00:00:01Z",
+    )
+    .await;
+    seed_creator_pending_digest(
+        &env,
+        "pending_rejected",
+        REJECTED_DIGEST,
+        "2026-01-01T00:00:02Z",
+    )
+    .await;
+    let (core, principal) = open_core(&env).await;
+
+    core.delete_pending_review(&principal, "pending_rejected".to_string())
+        .await
+        .expect("the rejected row is dismissed");
+
+    let reviewed = core
+        .review_memory(&principal, creator_review_request())
+        .await
+        .expect("review drains what is still queued");
+    assert_eq!(
+        reviewed.processed,
+        Some(1),
+        "the consumed row is not a classification input"
+    );
+    assert_eq!(reviewed.fragmented, 1, "only the kept digest is classified");
+    assert_eq!(
+        reviewed.has_more,
+        Some(false),
+        "a consumed row must not keep the drain reporting work"
+    );
+
+    let pool = plain_pool(&env).await;
+    let summaries: Vec<String> = sqlx::query_as("SELECT summary FROM memory_fragments")
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row: (String,)| row.0)
+        .collect();
+    assert_eq!(summaries, vec![FRAGMENT_DIGEST.to_string()]);
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
+        1,
+        "only the dismissed legacy row is left, untouched"
+    );
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn dismissed_character_digest_is_never_classified_by_the_review_drain() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let chr = env.character_id.clone();
+    let bind1 = env.binding_id.clone();
+
+    core.capture_character_pending_review(
+        &principal,
+        chr.clone(),
+        dto(json_capture(
+            "pend_char_keep",
+            Some(&bind1),
+            "2026-01-01T00:00:01Z",
+        )),
+    )
+    .await
+    .expect("kept capture");
+    let mut rejected = json_capture("pend_char_rejected", Some(&bind1), "2026-01-01T00:00:02Z");
+    rejected["raw_digest"] = serde_json::json!(REJECTED_DIGEST);
+    core.capture_character_pending_review(&principal, chr.clone(), dto(rejected))
+        .await
+        .expect("rejected capture");
+
+    core.delete_character_pending_review(&principal, chr.clone(), "pend_char_rejected".to_string())
+        .await
+        .expect("dismissal");
+
+    let reviewed = core
+        .review_character_memory(
+            &principal,
+            chr.clone(),
+            dto::<ReviewCharacterMemoryRequest>(serde_json::json!({ "binding_id": bind1 })),
+        )
+        .await
+        .expect("review drains what is still queued");
+    assert_eq!(reviewed.processed, Some(1), "the consumed row is skipped");
+    assert_eq!(reviewed.fragmented, 1);
+    assert_eq!(reviewed.has_more, Some(false));
+
+    let pool = plain_pool(&env).await;
+    let summaries: Vec<String> = sqlx::query_as("SELECT summary FROM character_memory_fragments")
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row: (String,)| row.0)
+        .collect();
+    assert_eq!(summaries, vec![FRAGMENT_DIGEST.to_string()]);
+    assert_eq!(
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM character_memory_pending_review"
+        )
+        .await,
+        1,
+        "the dismissed legacy row survives untouched; the reviewed one is consumed"
+    );
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn cross_creator_dismissal_keeps_the_pending_review_forbidden_reason() {
+    let env = seed_env().await;
+    seed_foreign_creator_pending_row(&env, "pending_foreign").await;
+    let (core, principal) = open_core(&env).await;
+
+    match core
+        .delete_pending_review(&principal, "pending_foreign".to_string())
+        .await
+        .expect_err("another Creator's row must be refused")
+    {
+        CoreError::ForbiddenReason { resource, reason } => {
+            assert_eq!(resource, "pending_review");
+            assert!(
+                reason.contains("does not belong to creator"),
+                "retained reason text, got {reason}"
+            );
+        }
+        other => panic!("expected ForbiddenReason, got {other:?}"),
+    }
+
+    // An id no row carries is still the retained 404.
+    let err = core
+        .delete_pending_review(&principal, "pending_absent".to_string())
+        .await
+        .expect_err("an absent row is not found");
+    assert!(matches!(err, CoreError::NotFound { .. }), "got {err:?}");
+
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM memory_pending_review WHERE pending_id = 'pending_foreign'"
+        )
+        .await,
+        1,
+        "the refused dismissal mutates nothing"
+    );
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn legacy_dismissal_and_adoption_commit_together() {
+    let env = seed_env().await;
+    seed_creator_pending_row(&env, "pend_atomic", None, "2026-01-01T00:00:01Z").await;
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    let subject = legacy::creator_subject_id(CREATOR);
+    bridge_ok(
+        &provider
+            .ensure_subject(
+                &admin,
+                bridge_ensure_request(&subject, legacy::CREATOR_KIND_NS, CREATOR),
+            )
+            .await,
+    );
+    let candidate_id = legacy::pending_review_candidate_id("pend_atomic");
+
+    // A commit that never lands leaves neither half: no adopted row, and the
+    // projected row is still pending for the next reader.
+    provider.inject_commit_fault(false);
+    let failed = provider
+        .dismiss_legacy_candidate(&admin, &subject, &candidate_id, None, "atomic-1")
+        .await;
+    assert!(
+        matches!(failed, SpokeResult::Reject(_)),
+        "a failed commit refuses"
+    );
+    assert_eq!(
+        adopted_candidate(&env, &candidate_id).await,
+        None,
+        "the adoption rolled back with the dismissal"
+    );
+    assert_eq!(
+        provider_candidate_status(&provider, &admin, &candidate_id).await,
+        "pending"
+    );
+
+    // A CAS that cannot land rolls the adoption back too: the two effects are
+    // one transaction, so a rejected dismissal leaves no adopted pending row.
+    let stale = provider
+        .dismiss_legacy_candidate(&admin, &subject, &candidate_id, Some(99), "atomic-2")
+        .await;
+    assert_eq!(bridge_reject_code(&stale), "REVISION_CONFLICT");
+    assert_eq!(
+        adopted_candidate(&env, &candidate_id).await,
+        None,
+        "a rejected dismissal leaves no adopted row behind"
+    );
+    assert_eq!(
+        provider_candidate_status(&provider, &admin, &candidate_id).await,
+        "pending"
+    );
+
+    // The same call without a caller CAS adopts and consumes atomically.
+    bridge_ok(
+        &provider
+            .dismiss_legacy_candidate(&admin, &subject, &candidate_id, None, "atomic-3")
+            .await,
+    );
+    assert_eq!(
+        adopted_candidate(&env, &candidate_id).await,
+        Some(("consumed".to_string(), None))
+    );
+}
+
+#[tokio::test]
+async fn pending_listing_serves_rows_past_the_former_scan_cap() {
+    const TOTAL: i64 = 10_001;
+    let env = seed_env().await;
+    seed_creator_pending_past_former_cap(&env, TOTAL).await;
+    let (core, principal) = open_core(&env).await;
+
+    assert_eq!(
+        core.count_pending_reviews(&principal).await.unwrap().count,
+        TOTAL,
+        "a queue past the former 10_000-row cap is counted, not refused"
+    );
+    let first = core
+        .list_pending_reviews(&principal, None, 2)
+        .await
+        .unwrap();
+    assert_eq!(first.items.len(), 2);
+    assert!(
+        first.pagination.has_more,
+        "a first page of a large queue must not report completion"
+    );
+    assert!(first.pagination.next_cursor.is_some());
+}
+
+#[tokio::test]
+async fn character_offset_window_serves_rows_past_the_former_scan_cap() {
+    const TOTAL: i64 = 10_001;
+    let env = seed_env().await;
+    seed_character_pending_past_former_cap(&env, TOTAL).await;
+    let (core, principal) = open_core(&env).await;
+
+    // The window starts inside what the former clamp hid: it used to answer an
+    // empty page with `has_more = false` although the row existed.
+    let page = core
+        .list_character_pending_reviews(&principal, env.character_id.clone(), None, 5, 10_000)
+        .await
+        .unwrap();
+    assert_eq!(page.items.len(), 1, "the row past the old window is served");
+    assert!(!page.pagination.has_more);
+}
+
+#[tokio::test]
+async fn keyword_search_finds_a_fragment_past_the_former_scan_cap() {
+    const TOTAL: i64 = 10_001;
+    let env = seed_env().await;
+    seed_creator_fragments_past_former_cap(&env, TOTAL).await;
+    let (core, principal) = open_core(&env).await;
+
+    let found = core
+        .list_memory_fragments(&principal, Some("kw_past_cap".to_string()), None, 10)
+        .await
+        .unwrap();
+    assert_eq!(
+        found.fragments.len(),
+        1,
+        "a keyword match past the former scan bound is not silently dropped"
+    );
+    assert_eq!(
+        found.fragments[0]
+            .keywords
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        vec!["kw_past_cap"]
+    );
+}
+
+#[tokio::test]
+async fn read_only_core_serves_memory_reads_and_refuses_the_write() {
+    let env = seed_env().await;
+    seed_creator_pending_row(&env, "pend_read_only", None, "2026-01-01T00:00:01Z").await;
+    // A writer open ensures the provider subject the legacy projection needs;
+    // the read-only core below serves the same read without writing anything.
+    {
+        let (core, principal) = open_core(&env).await;
+        assert_eq!(
+            core.count_pending_reviews(&principal).await.unwrap().count,
+            1
+        );
+    }
+
+    let read_only = CoreService::open(CoreOpenOptions {
+        user_home: env.user_home.clone(),
+        access: CoreAccess::ReadOnly,
+    })
+    .await
+    .expect("read-only open");
+    let principal = read_only.active_principal().await.unwrap();
+    assert_eq!(
+        read_only
+            .count_pending_reviews(&principal)
+            .await
+            .unwrap()
+            .count,
+        1,
+        "a read-only core still serves the pending count"
+    );
+    let listed = read_only
+        .list_pending_reviews(&principal, None, PAGE_SIZE)
+        .await
+        .unwrap();
+    assert_eq!(listed.items.len(), 1);
+    assert_eq!(listed.items[0].pending_id, "pend_read_only");
+
+    let err = read_only
+        .delete_pending_review(&principal, "pend_read_only".to_string())
+        .await
+        .expect_err("a read-only core must refuse the dismissal");
+    assert!(
+        matches!(err, CoreError::Forbidden { ref resource } if resource == "memory: read-only core access"),
+        "got {err:?}"
+    );
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
+        1,
+        "the refused dismissal mutates nothing"
+    );
+    pool.close().await;
+}
