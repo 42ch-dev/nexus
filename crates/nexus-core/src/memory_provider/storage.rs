@@ -236,16 +236,6 @@ struct ReadRendezvous {
     release: Arc<tokio::sync::Barrier>,
 }
 
-/// NXM-5 Task 2 fix round 3 (finding F5) proof seam: the rendezvous a
-/// disposition acquisition waits at after the lock file is open and before the
-/// lock is attempted — `entered` reports that the caller really reached the
-/// attempt, `release` lets it proceed. Test only.
-#[cfg(feature = "test-hooks")]
-struct DispositionRendezvous {
-    entered: Arc<tokio::sync::Notify>,
-    release: Arc<tokio::sync::Barrier>,
-}
-
 /// §6.10 receipt status while its journaled file effect is not yet published
 /// (§5.2 step 2): durable, but not terminal.
 pub(super) const RECEIPT_PENDING: &str = "pending";
@@ -567,10 +557,12 @@ pub(super) struct MemoryStore {
     /// read-only write leaves it at zero (fix round 3, finding F5).
     #[cfg(feature = "test-hooks")]
     lock_attempts: AtomicUsize,
-    /// Test-only rendezvous a disposition acquisition waits at between opening
-    /// its lock file and attempting the lock (fix round 3, finding F5).
+    /// Test-only report a disposition acquisition sends **from inside the lock
+    /// attempt** when its non-blocking probe finds the section held, i.e. the
+    /// caller is really about to block on the OS lock (fix round 4, finding
+    /// R4-F3).
     #[cfg(feature = "test-hooks")]
-    disposition_attempt: std::sync::Mutex<Option<DispositionRendezvous>>,
+    disposition_wait_report: std::sync::Mutex<Option<Arc<tokio::sync::Notify>>>,
 }
 
 const SPACE_COLUMNS: &str = "s.space_id, s.display_name, s.authority_host_id, \
@@ -790,7 +782,7 @@ impl MemoryStore {
             #[cfg(feature = "test-hooks")]
             lock_attempts: AtomicUsize::new(0),
             #[cfg(feature = "test-hooks")]
-            disposition_attempt: std::sync::Mutex::new(None),
+            disposition_wait_report: std::sync::Mutex::new(None),
         })
     }
 
@@ -918,37 +910,27 @@ impl MemoryStore {
         *self.flock_wait_report.lock().expect("flock wait report") = Some(report);
     }
 
-    /// NXM-5 Task 2 fix round 3 (finding F5) proof seam: park the next
-    /// disposition acquisition after its lock file is open and before the lock
-    /// is attempted, so a regression can prove the dismissal really reached the
-    /// attempt while the drain holds the section. Compiled out of a production
-    /// build.
+    /// NXM-5 Task 2 fix round 4 (finding R4-F3) proof seam: report, from inside
+    /// the lock attempt, that the section is held and the caller is about to
+    /// block on the OS lock. The report fires only after the non-blocking probe
+    /// has failed, so a regression that observes it knows the dismissal really
+    /// reached the contended lock, not merely that its task has been scheduled.
+    /// Compiled out of a production build.
     #[cfg(feature = "test-hooks")]
-    pub(super) fn park_disposition_attempt(
-        &self,
-        entered: Arc<tokio::sync::Notify>,
-        release: Arc<tokio::sync::Barrier>,
-    ) {
+    pub(super) fn report_disposition_waits(&self, report: Arc<tokio::sync::Notify>) {
         *self
-            .disposition_attempt
+            .disposition_wait_report
             .lock()
-            .expect("disposition attempt") = Some(DispositionRendezvous { entered, release });
+            .expect("disposition wait report") = Some(report);
     }
 
-    /// The single step-point of [`Self::park_disposition_attempt`].
+    /// The armed report of [`Self::report_disposition_waits`], if any.
     #[cfg(feature = "test-hooks")]
-    pub(super) async fn disposition_attempt_gate(&self) {
-        let parked = {
-            let mut gate = self
-                .disposition_attempt
-                .lock()
-                .expect("disposition attempt");
-            gate.take()
-        };
-        if let Some(rendezvous) = parked {
-            rendezvous.entered.notify_one();
-            rendezvous.release.wait().await;
-        }
+    pub(super) fn take_disposition_wait_report(&self) -> Option<Arc<tokio::sync::Notify>> {
+        self.disposition_wait_report
+            .lock()
+            .expect("disposition wait report")
+            .take()
     }
 
     /// NXM-5 Task 2 fix round 3 (finding F5) proof seam: how many write entries
@@ -4050,6 +4032,18 @@ impl MemoryStore {
         gate(&mut tx, effective).await?;
         let candidate =
             consumable_candidate(&mut tx, ctx.space_id, candidate_id, expected_revision).await?;
+        // A dismissal that names a bearer consumes only that bearer's row (fix
+        // round 4, finding R4-F1): the entry point already resolved the owner
+        // before taking its section, and this guard keeps the match where the
+        // consumption happens, so no future caller can bypass it.
+        if let Some(subject_id) = adopt_subject {
+            if candidate.subject_id != subject_id {
+                return Err(StoreError::NotAuthorized(format!(
+                    "candidate {candidate_id} belongs to subject {}, not {subject_id}",
+                    candidate.subject_id
+                )));
+            }
+        }
         let receipt_id = mint_receipt_id();
         let consumed_by = json!({
             "op": "memory.candidates.dismiss",

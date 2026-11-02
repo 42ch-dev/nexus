@@ -3395,14 +3395,13 @@ async fn creator_dismissal_cannot_commit_inside_the_review_decision() {
         "the review decision is not interleavable with a dismissal"
     );
 
-    // The dismissal-side attempt step-point (fix round 3, finding F5): the
-    // dismissal parks after opening the lock file and before attempting the
-    // lock, so the test observes that it really reached the attempt while the
-    // drain holds the section — not merely that some task had not finished.
+    // The dismissal-side wait signal (fix round 4, finding R4-F3): it fires
+    // from inside the lock attempt only after the non-blocking probe failed, so
+    // the test observes a real contended acquisition — not merely that the task
+    // had not finished yet. The drain stays held until that signal arrives.
     let pinned = core.memory_provider_for_test().expect("pinned provider");
-    let attempting = Arc::new(tokio::sync::Notify::new());
-    let proceed = Arc::new(tokio::sync::Barrier::new(2));
-    pinned.pause_disposition_attempt(Arc::clone(&attempting), Arc::clone(&proceed));
+    let waiting = Arc::new(tokio::sync::Notify::new());
+    pinned.report_disposition_waits(Arc::clone(&waiting));
 
     let dismissal = tokio::spawn({
         let core = core.clone();
@@ -3412,12 +3411,15 @@ async fn creator_dismissal_cannot_commit_inside_the_review_decision() {
                 .await
         }
     });
-    attempting.notified().await;
+    waiting.notified().await;
     assert!(
         !provider.disposition_available(&subject),
-        "the dismissal reached its lock attempt while the drain holds the section"
+        "the dismissal found the section held and is blocked on its lock"
     );
-    proceed.wait().await;
+    assert!(
+        !dismissal.is_finished(),
+        "the dismissal cannot complete while the drain holds the section"
+    );
 
     release.notify_one();
     let reviewed = drain_task.await.unwrap().expect("review drains the row");
@@ -3508,12 +3510,11 @@ async fn character_dismissal_cannot_commit_inside_the_review_decision() {
         "the review decision is not interleavable with a dismissal"
     );
 
-    // Same dismissal-side attempt step-point as the Creator arm (fix round 3,
-    // finding F5).
+    // Same dismissal-side wait signal as the Creator arm (fix round 4, finding
+    // R4-F3): it fires from inside the contending lock attempt.
     let pinned = core.memory_provider_for_test().expect("pinned provider");
-    let attempting = Arc::new(tokio::sync::Notify::new());
-    let proceed = Arc::new(tokio::sync::Barrier::new(2));
-    pinned.pause_disposition_attempt(Arc::clone(&attempting), Arc::clone(&proceed));
+    let waiting = Arc::new(tokio::sync::Notify::new());
+    pinned.report_disposition_waits(Arc::clone(&waiting));
 
     let dismissal = tokio::spawn({
         let core = core.clone();
@@ -3524,12 +3525,15 @@ async fn character_dismissal_cannot_commit_inside_the_review_decision() {
                 .await
         }
     });
-    attempting.notified().await;
+    waiting.notified().await;
     assert!(
         !provider.disposition_available(&subject),
-        "the dismissal reached its lock attempt while the drain holds the section"
+        "the dismissal found the section held and is blocked on its lock"
     );
-    proceed.wait().await;
+    assert!(
+        !dismissal.is_finished(),
+        "the dismissal cannot complete while the drain holds the section"
+    );
 
     release.notify_one();
     let reviewed = drain_task.await.unwrap().expect("review drains the row");

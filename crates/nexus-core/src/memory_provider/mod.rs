@@ -740,26 +740,22 @@ pub struct MemoryDisposition {
     _file: std::fs::File,
 }
 
-/// The lock file name for one bearer: every byte outside `[A-Za-z0-9_-]` is
-/// percent-encoded, so a subject id can neither escape
-/// `<state db dir>/memory_locks/` (no path separators, no `.`/`..`) nor alias
-/// another subject's lock — the encoding is injective over the unreserved set
-/// (NXM-5 Task 2 fix round 3, finding F4).
-fn disposition_lock_file(subject_id: &str) -> String {
-    const HEX: &[u8; 16] = b"0123456789ABCDEF";
-    let mut name = String::with_capacity(subject_id.len() + 16);
-    name.push_str("subject-");
-    for byte in subject_id.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_') {
-            name.push(char::from(byte));
-        } else {
-            name.push('%');
-            name.push(char::from(HEX[usize::from(byte >> 4)]));
-            name.push(char::from(HEX[usize::from(byte & 0x0F)]));
-        }
-    }
-    name.push_str(".lock");
-    name
+/// The lock file name for one bearer: a SHA-256 digest of the exact subject id
+/// under `<state db dir>/memory_locks/` (NXM-5 Task 2 fix round 4, finding
+/// R4-F2).
+///
+/// The digest is the identity: it distinguishes ids that differ only by ASCII
+/// case (unlike a readable encoding on a case-insensitive volume) and it is
+/// fixed-length, so any subject id maps to a name well inside the filesystem
+/// component limit. Confinement comes from the fixed prefix plus the digest's
+/// hex alphabet, so no id can name a path component, `..`, or another subject's
+/// lock.
+fn disposition_lock_file(subject_id: &str) -> Result<String, ProviderError> {
+    let digest = match jcs_sha256_hex(&Value::String(subject_id.to_owned())) {
+        SpokeResult::Ok(digest) => digest,
+        SpokeResult::Reject(reject) => return Err(ProviderError::Internal(reject.message)),
+    };
+    Ok(format!("subject-{digest}.lock"))
 }
 
 impl LocalMemoryProvider {
@@ -883,7 +879,7 @@ impl LocalMemoryProvider {
             ));
         }
         let dir = self.store.disposition_dir();
-        let name = disposition_lock_file(subject_id);
+        let name = disposition_lock_file(subject_id)?;
         let opened = tokio::task::spawn_blocking(move || -> std::io::Result<std::fs::File> {
             std::fs::create_dir_all(&dir)?;
             std::fs::OpenOptions::new()
@@ -907,13 +903,25 @@ impl LocalMemoryProvider {
                 )))
             }
         };
-        // The attempt step-point (fix round 3, finding F5): the file is open and
-        // the lock has not been attempted yet, so a test can prove the caller
-        // really reached the attempt.
+        // The attempt itself (fix round 4, finding R4-F3): the non-blocking
+        // probe decides whether this acquisition is contended, so a test can
+        // observe a real lock wait instead of a pre-lock rendezvous. The probe
+        // also takes the section when free, so the blocking `lock()` below runs
+        // only when another descriptor really holds it.
         #[cfg(feature = "test-hooks")]
-        self.store.disposition_attempt_gate().await;
+        let wait_report = self.store.take_disposition_wait_report();
         let locked = tokio::task::spawn_blocking(move || -> std::io::Result<std::fs::File> {
-            file.lock()?;
+            match file.try_lock() {
+                Ok(()) => {}
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    #[cfg(feature = "test-hooks")]
+                    if let Some(report) = wait_report.as_ref() {
+                        report.notify_one();
+                    }
+                    file.lock()?;
+                }
+                Err(std::fs::TryLockError::Error(error)) => return Err(error),
+            }
             Ok(file)
         })
         .await;
@@ -933,10 +941,10 @@ impl LocalMemoryProvider {
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn disposition_available(&self, subject_id: &str) -> bool {
-        let path = self
-            .store
-            .disposition_dir()
-            .join(disposition_lock_file(subject_id));
+        let Ok(name) = disposition_lock_file(subject_id) else {
+            return false;
+        };
+        let path = self.store.disposition_dir().join(name);
         let Ok(file) = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
@@ -953,17 +961,14 @@ impl LocalMemoryProvider {
         free
     }
 
-    /// NXM-5 Task 2 fix round 3 (finding F5) proof seam: park the next
-    /// disposition acquisition after it opens its lock file and before it
-    /// attempts the lock. Compiled out of a production build.
+    /// NXM-5 Task 2 fix round 4 (finding R4-F3) proof seam: notify `waiter`
+    /// from inside the lock attempt of the next disposition acquisition whose
+    /// non-blocking probe finds the section held, i.e. only after the caller has
+    /// really reached the contended lock. Compiled out of a production build.
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
-    pub fn pause_disposition_attempt(
-        &self,
-        entered: std::sync::Arc<tokio::sync::Notify>,
-        release: std::sync::Arc<tokio::sync::Barrier>,
-    ) {
-        self.store.park_disposition_attempt(entered, release);
+    pub fn report_disposition_waits(&self, waiter: std::sync::Arc<tokio::sync::Notify>) {
+        self.store.report_disposition_waits(waiter);
     }
 
     /// NXM-5 Task 2 fix round 3 (finding F5) proof seam: entries that passed the
@@ -1039,6 +1044,9 @@ impl LocalMemoryProvider {
     /// The same reject codes `memory.candidates.dismiss` answers: `NOT_FOUND`
     /// when nothing resolves to the id, `CANDIDATE_CONSUMED`/
     /// `REVISION_CONFLICT` when the CAS cannot land, and the admission codes.
+    /// A stored candidate owned by another subject is `INVALID_REQUEST`: the
+    /// dismissal names the bearer whose section it takes, and only the row's
+    /// owner is that bearer (fix round 4, finding R4-F1).
     pub async fn dismiss_legacy_candidate(
         &self,
         principal: &schemas::Principal,
@@ -1047,6 +1055,29 @@ impl LocalMemoryProvider {
         expected_revision: Option<i64>,
         idempotency_key: &str,
     ) -> SpokeResult<schemas::MemoryCandidatesDismissResponse> {
+        // The section must belong to the row's owner, not to whatever subject the
+        // caller named (fix round 4, finding R4-F1): resolving the stored owner
+        // before locking means a caller can never consume A while holding B's
+        // section, interleaving A's review drain. A projected-only id has no
+        // provider row, so the supplied subject is the only owner it can adopt
+        // under, and the store's own adoption refuses a legacy row of another
+        // subject.
+        let owner = match self.store.candidate_subject(&self.space_id, candidate_id).await {
+            Ok(owner) => owner,
+            Err(error) => return deny(&store_error(error)),
+        };
+        let subject_id = match owner.as_deref() {
+            Some(owner) if owner != subject_id => {
+                return deny(&ProviderError::InvalidInput {
+                    field: "subject_id".to_string(),
+                    reason: format!(
+                        "candidate {candidate_id} belongs to subject {owner}, not {subject_id}"
+                    ),
+                })
+            }
+            Some(owner) => owner,
+            None => subject_id,
+        };
         // The consumption decision holds the bearer's disposition section (fix
         // round 2, finding F1): a legacy review drain holds the same section
         // across its consumed-check, classification and persistence, so a

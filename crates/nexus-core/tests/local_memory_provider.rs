@@ -4140,9 +4140,8 @@ async fn a_wire_dismissal_takes_the_bearer_disposition_section() {
         .expect("the bearer's disposition section");
     assert!(!provider.disposition_available(SUBJECT));
 
-    let attempting = Arc::new(tokio::sync::Notify::new());
-    let proceed = Arc::new(tokio::sync::Barrier::new(2));
-    provider.pause_disposition_attempt(Arc::clone(&attempting), Arc::clone(&proceed));
+    let waiting = Arc::new(tokio::sync::Notify::new());
+    provider.report_disposition_waits(Arc::clone(&waiting));
     let dismissal = tokio::spawn({
         let provider = Arc::clone(&provider);
         let request = dto(json!({
@@ -4157,13 +4156,14 @@ async fn a_wire_dismissal_takes_the_bearer_disposition_section() {
             provider.dismiss_candidate(&admin, request).await
         }
     });
-    // The dismissal really reached the lock attempt, with the section held.
-    attempting.notified().await;
+    // The wait signal fires from inside the lock attempt, after the non-blocking
+    // probe found the section held (fix round 4, finding R4-F3): the dismissal
+    // is really blocked on the lock, not merely unscheduled.
+    waiting.notified().await;
     assert!(
         !provider.disposition_available(SUBJECT),
-        "the wire dismissal is parked at the lock the other decision holds"
+        "the wire dismissal is blocked on the lock the other decision holds"
     );
-    proceed.wait().await;
     assert!(
         !dismissal.is_finished(),
         "it cannot acquire the section while another decision holds it"
@@ -4317,6 +4317,167 @@ async fn subject_ids_map_to_confined_unique_disposition_locks() {
         assert!(
             !stem.contains('/') && !stem.contains('.'),
             "the encoded lock stem can hold no path component or dot: {name}"
+        );
+    }
+}
+
+/// NXM-5 Task 2 fix round 4 (R4-F1): a legacy dismissal holds the section of the
+/// stored candidate's owner — never a section the caller merely named — and a
+/// subject that does not own the row is refused before anything is consumed.
+#[tokio::test]
+async fn a_legacy_dismissal_locks_only_the_candidates_own_subject() {
+    let env = seed_env();
+    let provider = Arc::new(open_provider(&env).await);
+    let admin = principal(CREATOR);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    let captured = wire(
+        &provider
+            .capture(&admin, capture_request("k-capture-owner", None, TEXT))
+            .await,
+    );
+    let candidate_id = receipt(&captured)["result"]["candidate_ids"][0]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // Another bearer's section is held: a dismissal that named it would consume
+    // this row behind the owner's back. It is refused instead, and nothing moves.
+    let other = provider
+        .review_disposition(OTHER_SUBJECT)
+        .await
+        .expect("the other bearer's section");
+    let refused = wire(
+        &provider
+            .dismiss_legacy_candidate(
+                &admin,
+                OTHER_SUBJECT,
+                &candidate_id,
+                None,
+                "k-owner-mismatch",
+            )
+            .await,
+    );
+    assert_eq!(
+        error_code(&refused),
+        "INVALID_INPUT",
+        "a subject that does not own the candidate is refused: {refused}"
+    );
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("belongs to subject"),
+        "the refusal names the owner mismatch: {refused}"
+    );
+    let still_pending = wire(
+        &provider
+            .get_candidate(&admin, candidate_get_request(&candidate_id))
+            .await,
+    );
+    assert_eq!(
+        still_pending["candidate"]["status"], "pending",
+        "the refused dismissal consumes nothing: {still_pending}"
+    );
+    drop(other);
+
+    // The owner's section is the one the dismissal really blocks on.
+    let section = provider
+        .review_disposition(SUBJECT)
+        .await
+        .expect("the owner's section");
+    let waiting = Arc::new(tokio::sync::Notify::new());
+    provider.report_disposition_waits(Arc::clone(&waiting));
+    let dismissal = tokio::spawn({
+        let provider = Arc::clone(&provider);
+        let candidate_id = candidate_id.clone();
+        async move {
+            let admin = principal(CREATOR);
+            provider
+                .dismiss_legacy_candidate(&admin, SUBJECT, &candidate_id, None, "k-owner-dismiss")
+                .await
+        }
+    });
+    waiting.notified().await;
+    assert!(!provider.disposition_available(SUBJECT));
+    assert!(
+        !dismissal.is_finished(),
+        "the owner-exact dismissal cannot complete while its owner's section is held"
+    );
+    drop(section);
+
+    let dismissed = wire(&dismissal.await.unwrap());
+    let dismissed = receipt(&dismissed);
+    assert_eq!(dismissed["result"]["outcome"], "dismissed");
+    assert!(
+        provider.disposition_available(SUBJECT),
+        "the section is free once the dismissal commits"
+    );
+}
+
+/// NXM-5 Task 2 fix round 4 (R4-F2): the lock identity is a bounded digest, so
+/// ids differing only by ASCII case never alias on a case-insensitive volume and
+/// an arbitrarily long id still maps to a usable filename.
+#[tokio::test]
+async fn case_aliased_and_long_subject_ids_map_to_distinct_bounded_locks() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let lock_dir = provider.file_root().parent().unwrap().join("memory_locks");
+
+    // Two bears that differ only by case are two bearers: both sections can be
+    // held at once, which one shared file could not allow.
+    let upper = provider
+        .review_disposition("Bearer")
+        .await
+        .expect("upper-case section");
+    assert!(!provider.disposition_available("Bearer"));
+    assert!(
+        provider.disposition_available("bearer"),
+        "case aliases must not share a lock"
+    );
+    let lower = provider
+        .review_disposition("bearer")
+        .await
+        .expect("lower-case section");
+    assert!(!provider.disposition_available("bearer"));
+    drop((upper, lower));
+
+    // Far past the 255-byte component limit as a raw name, still one lock.
+    let long = "x".repeat(4096);
+    let held = provider
+        .review_disposition(&long)
+        .await
+        .expect("a long id still gets a section");
+    assert!(!provider.disposition_available(&long));
+    drop(held);
+    assert!(
+        provider.disposition_available(&long),
+        "the bounded lock is released with the section"
+    );
+
+    let mut names: Vec<String> = std::fs::read_dir(&lock_dir)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(names.len(), 3, "one lock file per bearer: {names:?}");
+    for name in &names {
+        let digest = name
+            .strip_prefix("subject-")
+            .and_then(|stem| stem.strip_suffix(".lock"))
+            .unwrap_or_else(|| panic!("a confined, prefixed lock filename: {name}"));
+        assert_eq!(
+            digest.len(),
+            64,
+            "the name is a fixed-length SHA-256 digest, bounded for any id: {name}"
+        );
+        assert!(
+            digest.chars().all(|c| c.is_ascii_hexdigit()),
+            "the digest uses only safe ASCII: {name}"
         );
     }
 }
