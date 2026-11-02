@@ -717,9 +717,11 @@ pub async fn load_character_mind_projection(
         None => Vec::new(),
     };
 
-    // Deterministic merge: fragments newest first (`created_at DESC`,
-    // `fragment_id DESC`) across both admitted scopes, rendered with the
-    // keywords the legacy column carried.
+    // Deterministic merge: the legacy per-scope selection key across both
+    // admitted scopes — the RAW `created_at` TEXT (`created_at DESC`) then
+    // `fragment_id DESC` — rendered with the keywords the legacy column carried.
+    // The text key, not the parsed instant, is what the legacy query ordered by
+    // (fix round 4, finding R4-F1).
     let mut fragments = shared_fragments;
     fragments.extend(binding_fragments);
     fragments.sort_by(|left, right| {
@@ -752,7 +754,7 @@ pub async fn load_character_mind_projection(
         .map(|kind| policy::namespaced_record_kind(kind))
         .collect();
     let authored_kind_refs: Vec<&str> = authored_kinds.iter().map(String::as_str).collect();
-    let mut long_term_memories = read.family(selection, &authored_kind_refs, None).await?;
+    let mut long_term_memories = read.family(selection, &authored_kind_refs).await?;
     long_term_memories.sort_by(|left, right| {
         memory_slug(left)
             .cmp(&memory_slug(right))
@@ -766,19 +768,20 @@ pub async fn load_character_mind_projection(
 }
 
 /// The newest fragments of one admitted scope, as the legacy per-scope read
-/// served them: the complete `created_at` tie group at the legacy `LIMIT`
-/// boundary arrives with the read, so the legacy order inside it
-/// (`fragment_id DESC`, which [`partition`] applies) decides the bound's last
-/// rows before this caps back to the legacy `LIMIT` (fix round 3, finding
-/// R3-F1). A prefix cut by the provider's own tie order (record id ascending)
-/// would keep the wrong rows of one instant.
+/// served them: the top `created_at` TEXT key rows (`fragment_id DESC` inside a
+/// key group) at the legacy `LIMIT`.
+///
+/// The whole kind-filtered family is read because the selection key is the RAW
+/// legacy `created_at` TEXT (`ORDER BY created_at DESC, fragment_id DESC` in the
+/// legacy query), while the provider pages by parsed instant: for mixed
+/// timestamp formats the two orders disagree, so no smaller window can prove it
+/// holds every row that ranks under that key (fix round 4, finding R4-F1).
+/// `partition` applies the text order and this caps back to the legacy `LIMIT`.
 async fn projection_fragments(
     read: &MemoryAdapter,
     selection: serde_json::Value,
 ) -> CoreResult<Vec<FragmentMemory>> {
-    let records = read
-        .family(selection, &[FACT_KIND], Some(MIND_PROJECTION_FETCH_LIMIT))
-        .await?;
+    let records = read.family(selection, &[FACT_KIND]).await?;
     let mut fragments = partition(records).fragments;
     fragments.truncate(MIND_PROJECTION_FETCH_LIMIT);
     Ok(fragments)

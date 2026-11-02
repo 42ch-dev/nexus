@@ -313,18 +313,13 @@ impl MemoryAdapter {
     /// A `None` bound is the honest one for a caller that filters after the read
     /// (the keyword scan): the provider has no keyword index, so stopping early
     /// would silently drop matches the retained SQL found (fix round 1, finding
-    /// F5). `keep_tie_group` carries the complete `created_at` tie group
-    /// straddling the `want`-th row, for a caller that selects *inside* that
-    /// group: the provider orders ties by record id while the legacy reads
-    /// ordered them by id descending, so a prefix that ends inside the group
-    /// keeps the wrong rows (fix round 3, finding R3-F1).
+    /// F5).
     async fn records(
         &self,
         selection: Value,
         kinds: &[&str],
         filter: Option<&[String]>,
         want: Option<usize>,
-        keep_tie_group: bool,
     ) -> CoreResult<Vec<Value>> {
         let mut rows: Vec<Value> = Vec::new();
         let mut cursor: Option<String> = None;
@@ -340,10 +335,8 @@ impl MemoryAdapter {
             }))?;
             let body = memory_ok(self.provider.list_records(&self.principal, request).await)?;
             rows.extend(body["records"].as_array().cloned().unwrap_or_default());
-            if let Some(want) = want {
-                if rows.len() >= want && (!keep_tie_group || tie_group_closed(&rows, want)) {
-                    break;
-                }
+            if want.is_some_and(|want| rows.len() >= want) {
+                break;
             }
             match body["next_cursor"].as_str() {
                 Some(next) => cursor = Some(next.to_string()),
@@ -362,9 +355,11 @@ impl MemoryAdapter {
     /// kinds — events, the derived narrative cache — and any page budget can
     /// then silently truncate the family. `memory.records.list` takes the kind
     /// filter (`kinds`), which is the same authorized read path the E4 bridge
-    /// uses; `want` bounds the walk at the caller's legacy bound (with the whole
-    /// boundary tie group, so the caller's own ordering decides that bound's
-    /// last rows), and `None` walks the family to exhaustion.
+    /// uses. The family is read to exhaustion: a caller that selects inside it
+    /// under the legacy `created_at` TEXT key cannot prove a bounded provider
+    /// prefix holds every row that ranks under that key (the provider pages by
+    /// parsed instant, which mixed formats can order differently — fix round 4,
+    /// finding R4-F1).
     ///
     /// **Recall's subject-state rule (§7.7) is re-applied here:** `recall`
     /// excludes an archived subject's records while `memory.records.list` is the
@@ -374,12 +369,11 @@ impl MemoryAdapter {
         &self,
         selection: Value,
         kinds: &[&str],
-        want: Option<usize>,
     ) -> CoreResult<Vec<spoke_schemas::RetainedRecord>> {
         if self.subject_archived().await? {
             return Ok(Vec::new());
         }
-        self.records(selection, kinds, None, want, want.is_some())
+        self.records(selection, kinds, None, None)
             .await?
             .into_iter()
             .map(|record| serde_json::from_value(record).map_err(wire_err))
@@ -480,22 +474,6 @@ impl MemoryAdapter {
             SpokeResult::Reject(reject) => Err(memory_reject(&reject)),
         }
     }
-}
-
-/// Whether the fetched `created_at DESC` prefix already carries the whole
-/// `created_at` tie group the `want`-th row sits in — its last row is strictly
-/// older than that row. A caller that selects inside the group cannot decide its
-/// last rows from a prefix that ends inside it (fix round 3, finding R3-F1).
-fn tie_group_closed(rows: &[Value], want: usize) -> bool {
-    let Some(boundary) = rows
-        .get(want.saturating_sub(1))
-        .and_then(|row| row["created_at"].as_str())
-    else {
-        return true;
-    };
-    rows.last()
-        .and_then(|row| row["created_at"].as_str())
-        .is_none_or(|last| created_at_cmp(last, boundary).is_lt())
 }
 
 // ── Review disposition authority (NXM-5 Task 2 fix round 2) ──────────────
@@ -949,7 +927,7 @@ impl CoreService {
         // finding F5).
         let want = start.saturating_add(page_size).saturating_add(1);
         let records = memory
-            .records(selection, &["fact"], None, Some(want), false)
+            .records(selection, &["fact"], None, Some(want))
             .await?;
         let page: Vec<&Value> = records.iter().skip(start).take(page_size).collect();
         let has_more = records.len() > start.saturating_add(page.len());
@@ -1454,7 +1432,6 @@ impl CoreService {
                 &["fact"],
                 filter.as_deref(),
                 want,
-                false,
             )
             .await?;
         let mut fragments = Vec::new();

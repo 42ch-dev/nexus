@@ -5161,6 +5161,85 @@ async fn character_mind_projection_keeps_the_legacy_tie_break_at_the_scope_cap()
     );
 }
 
+/// The legacy per-scope read ordered the RAW `created_at` column text
+/// (`ORDER BY created_at DESC, fragment_id DESC`), while the provider pages by
+/// parsed instant. With 101 fragments at `2026-02-01T00:00:00Z` and one at
+/// `2026-02-01T00:00:00.900Z`, SQLite ranks every `Z` row above the fractional
+/// one (`.` < `Z`), so the legacy `LIMIT 100` excludes the fractional-second
+/// fragment. Its instant is the newest of the fixture, so an instant-ordered
+/// selection would put it first in the mind's 20 lines and drop a
+/// legacy-selected fragment (fix round 4, finding R4-F1).
+#[tokio::test]
+async fn character_mind_projection_keeps_the_legacy_text_order_across_timestamp_formats() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let pool = plain_pool(&env).await;
+    for index in 0..101_u32 {
+        nexus_local_db::create_character_fragment(
+            &pool,
+            CREATOR,
+            &nexus_local_db::NewCharacterMemoryFragment {
+                fragment_id: format!("frag-{index:03}"),
+                session_id: format!("sess_frag_{index:03}"),
+                character_id: env.character_id.clone(),
+                actor_world_binding_id: None,
+                keywords: "[]".to_string(),
+                summary: format!("Fragment frag-{index:03}."),
+                created_at: "2026-02-01T00:00:00Z".to_string(),
+                ttl: None,
+            },
+        )
+        .await
+        .unwrap();
+    }
+    // The newest instant, but the lowest text key of the fixture: the legacy
+    // selection never reaches it.
+    nexus_local_db::create_character_fragment(
+        &pool,
+        CREATOR,
+        &nexus_local_db::NewCharacterMemoryFragment {
+            fragment_id: "frag-900".to_string(),
+            session_id: "sess_frag_900".to_string(),
+            character_id: env.character_id.clone(),
+            actor_world_binding_id: None,
+            keywords: "[]".to_string(),
+            summary: "Fractional-second fragment.".to_string(),
+            created_at: "2026-02-01T00:00:00.900Z".to_string(),
+            ttl: None,
+        },
+    )
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let mind = CoreCharacterMind::new(
+        plain_pool(&env).await,
+        core.memory_provider_for_test().expect("pinned provider"),
+    )
+    .projection(&principal, CREATOR, &env.character_id, None)
+    .await
+    .expect("the projection serves the mixed-format family");
+
+    let expected: Vec<String> = (81..=100)
+        .rev()
+        .map(|index| format!("- Fragment frag-{index:03}."))
+        .collect();
+    assert_eq!(
+        mind.memory, expected,
+        "the legacy `created_at DESC, fragment_id DESC` TEXT order picks the \
+         whole-second `Z` rows, so the fractional-second row changes neither \
+         the per-scope 100 selection nor the mind's head 20"
+    );
+    assert!(
+        !mind
+            .memory
+            .iter()
+            .any(|line| line.contains("Fractional-second fragment.")),
+        "the fractional-second row is the newest instant but the lowest legacy \
+         text key, so the legacy `LIMIT 100` excludes it"
+    );
+}
+
 /// §7.7: an archived subject's records leave recall. The E6 projection replaces
 /// recall on this read path, and the listing read behind it is the audit route
 /// that keeps serving them — so a read-only core (whose `MemoryAdapter::open`

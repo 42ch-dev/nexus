@@ -50,8 +50,11 @@ pub struct FragmentMemory {
     /// carries no keyword member at all (the distinction the projection's
     /// rendered line preserves).
     pub keywords: Option<Vec<String>>,
-    /// The record's `created_at`: E6's newest-first merge key.
-    pub created_at: chrono::DateTime<chrono::Utc>,
+    /// The record's legacy selection key: the original `created_at` TEXT a
+    /// migrated row carried, else the record's own rendering. The legacy
+    /// per-scope read ordered by this text (not by the parsed instant), so the
+    /// projection keeps the same key (fix round 4, finding R4-F1).
+    pub created_at: String,
     /// The admitted scope the fragment sits in. E6 bounds each scope's
     /// fragments separately, exactly as the legacy per-scope queries did.
     pub scope: FragmentScope,
@@ -92,8 +95,8 @@ pub struct MemoryDocument {
 pub struct RecallPartition {
     /// The authored `nexus.<MemoryKind>` records, in recall order.
     pub long_term_memories: Vec<RetainedRecord>,
-    /// `fact` records, newest first (`created_at` DESC, `fragment_id` DESC) —
-    /// E6's deterministic merge order.
+    /// `fact` records in the legacy order (`created_at` TEXT DESC,
+    /// `fragment_id` DESC) — E6's deterministic merge order.
     pub fragments: Vec<FragmentMemory>,
     /// The union of every fragment's keywords (de-duplicated, sorted).
     pub fragment_keywords: Vec<String>,
@@ -104,7 +107,7 @@ pub struct RecallPartition {
 #[must_use]
 pub fn partition(records: Vec<RetainedRecord>) -> RecallPartition {
     let mut partition = RecallPartition::default();
-    let mut keyed: Vec<(chrono::DateTime<chrono::Utc>, FragmentMemory)> = Vec::new();
+    let mut fragments: Vec<FragmentMemory> = Vec::new();
     let mut keywords = BTreeSet::new();
     for record in records {
         let kind = memory_kind(&record);
@@ -125,27 +128,24 @@ pub fn partition(records: Vec<RetainedRecord>) -> RecallPartition {
                         .collect()
                 });
             keywords.extend(fragment_keywords.iter().flatten().cloned());
-            let at = *created_at(&record);
-            keyed.push((
-                at,
-                FragmentMemory {
-                    fragment_id,
-                    summary: memory_body(&record).to_string(),
-                    keywords: fragment_keywords,
-                    created_at: at,
-                    scope: placement(&record),
-                },
-            ));
+            fragments.push(FragmentMemory {
+                fragment_id,
+                summary: memory_body(&record).to_string(),
+                keywords: fragment_keywords,
+                created_at: created_at_key(&record),
+                scope: placement(&record),
+            });
         } else if is_authored_kind(kind) {
             partition.long_term_memories.push(record);
         }
     }
-    keyed.sort_by(|(left_at, left), (right_at, right)| {
-        right_at
-            .cmp(left_at)
+    fragments.sort_by(|left, right| {
+        right
+            .created_at
+            .cmp(&left.created_at)
             .then_with(|| right.fragment_id.cmp(&left.fragment_id))
     });
-    partition.fragments = keyed.into_iter().map(|(_, fragment)| fragment).collect();
+    partition.fragments = fragments;
     partition.fragment_keywords = keywords.into_iter().collect();
     partition
 }
@@ -258,6 +258,21 @@ pub fn memory_updated_at(record: &RetainedRecord) -> &chrono::DateTime<chrono::U
         RetainedRecord::LiveRecord(live) => &live.updated_at,
         RetainedRecord::TombstonedRecord(tombstoned) => &tombstoned.updated_at,
     }
+}
+
+/// The record's legacy selection key: the original `created_at` TEXT a
+/// migrated row carries verbatim in `nexus_legacy`. The provider only keeps
+/// the normalized instant, whose order can differ from that text, so the
+/// bridge's raw column is what the legacy read ordered by. A provider-native
+/// record never had a legacy column and is keyed by its own rendering.
+fn created_at_key(record: &RetainedRecord) -> String {
+    legacy_metadata(record)
+        .and_then(|legacy| legacy.get("created_at"))
+        .and_then(Value::as_str)
+        .map_or_else(
+            || created_at(record).to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
+            str::to_string,
+        )
 }
 
 fn created_at(record: &RetainedRecord) -> &chrono::DateTime<chrono::Utc> {
