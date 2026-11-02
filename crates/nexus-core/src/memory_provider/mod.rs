@@ -183,6 +183,10 @@ enum ProviderError {
         receipt_id: String,
         state: String,
     },
+    /// The provider was opened read-only: a mutation is refused before
+    /// admission, retention, the publication lock or any connection write
+    /// (fix round 2, finding F3).
+    ReadOnly(String),
     Internal(String),
 }
 
@@ -190,7 +194,7 @@ impl ProviderError {
     const fn reject_code(&self) -> SpokeRejectCode {
         match self {
             Self::NotFound(_) => SpokeRejectCode::NotFound,
-            Self::NotAuthorized(_) => SpokeRejectCode::NotAuthorized,
+            Self::NotAuthorized(_) | Self::ReadOnly(_) => SpokeRejectCode::NotAuthorized,
             Self::SpaceFrozen(_) => SpokeRejectCode::SpaceFrozen,
             Self::SubjectFenced { .. } => SpokeRejectCode::SubjectFenced,
             Self::RevisionConflict { .. } => SpokeRejectCode::RevisionConflict,
@@ -233,6 +237,7 @@ impl ProviderError {
                 missing.join(", ")
             ),
             Self::NotAuthorized(reason)
+            | Self::ReadOnly(reason)
             | Self::SpaceFrozen(reason)
             | Self::StatusTransition(reason)
             | Self::CandidateConsumed(reason)
@@ -357,6 +362,7 @@ fn store_error(error: StoreError) -> ProviderError {
             ProviderError::UnsettledPredecessor { receipt_id, state }
         }
         StoreError::Corrupt(reason) => ProviderError::Internal(reason),
+        StoreError::ReadOnly(reason) => ProviderError::ReadOnly(reason),
         StoreError::Database(error) => ProviderError::Internal(error.to_string()),
     }
 }
@@ -724,6 +730,15 @@ pub struct LocalMemoryProvider {
     space_id: String,
 }
 
+/// Exclusive per-bearer memory-disposition section
+/// ([`LocalMemoryProvider::review_disposition`]).
+///
+/// Held for the critical section and released on drop. It is not a writer
+/// admission and grants nothing on its own.
+pub struct MemoryDisposition {
+    _file: std::fs::File,
+}
+
 impl LocalMemoryProvider {
     /// Open (or join) the workspace's admitted writer and provision the local
     /// space plus its first `admin` grant (§7.0.6). Re-opening is a no-op.
@@ -810,6 +825,88 @@ impl LocalMemoryProvider {
     #[must_use]
     pub const fn is_writable(&self) -> bool {
         self.store.writable()
+    }
+
+    /// The bearer's memory-disposition section (NXM-5 Task 2 fix round 2,
+    /// finding F1).
+    ///
+    /// A provider candidate consumption and the legacy review drain's
+    /// consumed-check plus classification are one decision in two halves, so
+    /// both take this exclusive OS lock for their whole critical section: a
+    /// dismissal can never commit between the check and the classify write.
+    /// One lock file per bearer under `<state db dir>/memory_locks/`, opened per
+    /// acquisition — descriptors in one process contend exactly like two
+    /// processes (the same primitive the Character activity fences use), so a
+    /// daemon drain and a CLI dismissal over one workspace serialize too.
+    ///
+    /// # Errors
+    /// [`CoreError::Forbidden`] under read-only access (a section that exists to
+    /// decide a write is not served) and [`CoreError::Internal`] when the lock
+    /// file cannot be opened or locked.
+    pub async fn review_disposition(&self, subject_id: &str) -> CoreResult<MemoryDisposition> {
+        self.disposition(subject_id)
+            .await
+            .map_err(|error| match error {
+                ProviderError::ReadOnly(reason) => CoreError::Forbidden { resource: reason },
+                other => to_core_error(other),
+            })
+    }
+
+    /// [`Self::review_disposition`] as the provider's own error taxonomy.
+    async fn disposition(&self, subject_id: &str) -> Result<MemoryDisposition, ProviderError> {
+        if !self.is_writable() {
+            return Err(ProviderError::ReadOnly(
+                "memory: read-only core access".to_string(),
+            ));
+        }
+        let dir = self.store.disposition_dir();
+        let name = format!("{subject_id}.lock");
+        let acquired = tokio::task::spawn_blocking(move || -> std::io::Result<std::fs::File> {
+            std::fs::create_dir_all(&dir)?;
+            let file = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(dir.join(name))?;
+            file.lock()?;
+            Ok(file)
+        })
+        .await;
+        match acquired {
+            Ok(Ok(file)) => Ok(MemoryDisposition { _file: file }),
+            Ok(Err(error)) => Err(ProviderError::Internal(format!(
+                "memory disposition lock: {error}"
+            ))),
+            Err(error) => Err(ProviderError::Internal(format!(
+                "memory disposition lock task: {error}"
+            ))),
+        }
+    }
+
+    /// §14.2 proof seam: whether the bearer's disposition section is free right
+    /// now. Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn disposition_available(&self, subject_id: &str) -> bool {
+        let path = self
+            .store
+            .disposition_dir()
+            .join(format!("{subject_id}.lock"));
+        let Ok(file) = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path)
+        else {
+            return false;
+        };
+        let free = file.try_lock().is_ok();
+        if free {
+            let _ = file.unlock();
+        }
+        free
     }
 
     /// MEM-R005 profile admission gate: the authored content kinds a subject
@@ -933,6 +1030,14 @@ impl LocalMemoryProvider {
         expected_revision: Option<i64>,
         idempotency_key: &str,
     ) -> SpokeResult<schemas::MemoryCandidatesDismissResponse> {
+        // The consumption decision holds the bearer's disposition section (fix
+        // round 2, finding F1): a legacy review drain holds the same section
+        // across its consumed-check, classification and persistence, so a
+        // dismissal can never commit in between.
+        let _disposition = match self.disposition(subject_id).await {
+            Ok(section) => section,
+            Err(error) => return deny(&error),
+        };
         let principal_id = principal_id(principal);
         let op = OP_CANDIDATES_DISMISS;
         let digest = match jcs_sha256_hex(&json!({

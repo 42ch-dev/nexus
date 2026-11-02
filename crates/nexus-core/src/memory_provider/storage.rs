@@ -80,7 +80,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 #[cfg(feature = "test-hooks")]
 use std::sync::atomic::AtomicU8;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
 use chrono::{DateTime, SecondsFormat, Utc};
@@ -162,6 +162,10 @@ pub(super) enum StoreError {
     },
     /// A stored row this provider's own writer could not have produced.
     Corrupt(String),
+    /// The store was opened read-only: a mutation is refused before admission,
+    /// retention, the publication lock or any connection write (fix round 2,
+    /// finding F3).
+    ReadOnly(String),
     Database(LocalDbError),
 }
 
@@ -513,6 +517,11 @@ pub(super) struct MemoryStore {
     /// so retention verdicts cannot be re-derived downwards (§6.10); seeded from
     /// the persisted floor at [`Self::open`] and persisted again by every sweep.
     clock_floor: AtomicI64,
+    /// Whether this database carries the provider schema. A read-only open can
+    /// be taken over a workspace no writer ever provisioned; its reads then
+    /// answer the space's absence instead of a driver error (fix round 2,
+    /// finding F2).
+    provisioned: AtomicBool,
     #[cfg(feature = "test-hooks")]
     commit_fault: AtomicU8,
     /// Test-only file-effect fault (§5.2/C-113 crash windows).
@@ -582,6 +591,9 @@ impl MemoryStore {
     async fn begin_admission(
         &self,
     ) -> StoreResult<(sqlx::Transaction<'_, sqlx::Sqlite>, DateTime<Utc>)> {
+        // A read-only store refuses before the retention sweep and before the
+        // connection is touched (fix round 2, finding F3).
+        self.require_writable()?;
         self.reclaim_expired().await;
         let tx = begin_immediate(&self.pool).await?;
         Ok((tx, self.now()))
@@ -706,6 +718,16 @@ impl MemoryStore {
         self.guarded.is_some()
     }
 
+    /// The directory of the workspace memory-disposition lock files (fix round
+    /// 2, finding F1): next to `state.db`, so two providers over one workspace —
+    /// in this process or in another — contend on the same files.
+    pub(super) fn disposition_dir(&self) -> PathBuf {
+        self.files_root
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("memory_locks")
+    }
+
     async fn compose(
         pool: SqlitePool,
         guarded: Option<GuardedPool>,
@@ -718,6 +740,7 @@ impl MemoryStore {
             |dir| dir.join(journal::FILES_DIR),
         );
         let clock_floor = Self::stored_clock_floor(&pool).await?;
+        let provisioned = Self::provider_tables_present(&pool).await?;
         let publish_gate = workspace_publish_gate(&files_root);
         Ok(Self {
             pool,
@@ -726,6 +749,7 @@ impl MemoryStore {
             legacy: LegacyRoots::new(user_home.to_path_buf(), creator_id),
             publish_gate,
             clock_floor: AtomicI64::new(clock_floor),
+            provisioned: AtomicBool::new(provisioned),
             #[cfg(feature = "test-hooks")]
             commit_fault: AtomicU8::new(COMMIT_FAULT_NONE),
             #[cfg(feature = "test-hooks")]
@@ -741,6 +765,42 @@ impl MemoryStore {
             #[cfg(feature = "test-hooks")]
             flock_wait_report: std::sync::Mutex::new(None),
         })
+    }
+
+    /// Whether the provider schema exists in this database. A read-only open
+    /// can precede any writer provisioning it.
+    async fn provider_tables_present(pool: &SqlitePool) -> StoreResult<bool> {
+        let present: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master \
+             WHERE type = 'table' AND name = 'memory_spaces')",
+        )
+        .fetch_one(pool)
+        .await?;
+        Ok(present)
+    }
+
+    /// Refuse a read against a database that carries no provider schema: the
+    /// space genuinely does not exist there (fix round 2, finding F2), so the
+    /// answer is the space's absence rather than a driver error.
+    fn require_provisioned(&self, space_id: &str) -> StoreResult<()> {
+        if self.provisioned.load(Ordering::Relaxed) {
+            Ok(())
+        } else {
+            Err(StoreError::NotFound(format!("space {space_id}")))
+        }
+    }
+
+    /// Refuse a mutation on a read-only store before it reaches retention, the
+    /// publication lock or the connection (fix round 2, finding F3).
+    fn require_writable(&self) -> StoreResult<()> {
+        if self.writable() {
+            Ok(())
+        } else {
+            Err(StoreError::ReadOnly(
+                "this memory provider was opened read-only; write operations are refused"
+                    .to_string(),
+            ))
+        }
     }
 
     /// The durable retention floor, or `0` when the provider has no meta table
@@ -929,6 +989,7 @@ impl MemoryStore {
         tx.commit()
             .await
             .map_err(|e| StoreError::CommitUnknown(e.to_string()))?;
+        self.provisioned.store(true, Ordering::Relaxed);
         Ok(())
     }
 
@@ -1047,6 +1108,11 @@ impl MemoryStore {
         &self,
         principal_id: &str,
     ) -> StoreResult<(Vec<SpaceRow>, String)> {
+        // A workspace no writer ever provisioned carries no provider space
+        // (fix round 2, finding F2): an empty listing, not a driver error.
+        if !self.provisioned.load(Ordering::Relaxed) {
+            return Ok((Vec::new(), "0".to_string()));
+        }
         let (mut tx, now) = self.begin_read().await?;
         let rows_sql = format!(
             "SELECT {SPACE_COLUMNS} FROM memory_spaces s \
@@ -1821,6 +1887,9 @@ impl MemoryStore {
     /// that wait is still in flight — the task holds it until the lease is taken
     /// and hands both back.
     async fn begin_publication_section(&self) -> StoreResult<PublicationGuard> {
+        // The publication path refuses a read-only store before it takes this
+        // process's gate or the workspace flock (fix round 2, finding F3).
+        self.require_writable()?;
         let gate = Arc::clone(&self.publish_gate).lock_owned().await;
         #[cfg(feature = "test-hooks")]
         let report = self
@@ -3537,6 +3606,7 @@ impl MemoryStore {
         principal_id: &str,
         page: Option<(u64, u64)>,
     ) -> StoreResult<(Vec<CandidateRow>, String, bool)> {
+        self.require_provisioned(space_id)?;
         let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let grant_rows = grants_in_tx(&mut tx, space_id).await?;
@@ -3626,6 +3696,7 @@ impl MemoryStore {
             &self.legacy,
             space_id,
             subject_row.as_ref(),
+            subject_id,
             status,
         )
         .await?;
@@ -3729,6 +3800,7 @@ impl MemoryStore {
         candidate_id: &str,
         principal_id: &str,
     ) -> StoreResult<Option<CandidateRow>> {
+        self.require_provisioned(space_id)?;
         let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let grants = wire_grants(&grants_in_tx(&mut tx, space_id).await?)?;
@@ -4063,6 +4135,7 @@ impl MemoryStore {
         principal_id: &str,
         page: Option<(u64, u64)>,
     ) -> StoreResult<(Vec<RecordRow>, String, u64)> {
+        self.require_provisioned(space_id)?;
         let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let grant_rows = grants_in_tx(&mut tx, space_id).await?;
@@ -4129,6 +4202,7 @@ impl MemoryStore {
             &self.legacy,
             space_id,
             subject_row.as_ref(),
+            subject_id,
             selection,
             filter,
             kinds,
@@ -4256,6 +4330,7 @@ impl MemoryStore {
         record_id: &str,
         principal_id: &str,
     ) -> StoreResult<Option<RecordRow>> {
+        self.require_provisioned(space_id)?;
         let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let grants = wire_grants(&grants_in_tx(&mut tx, space_id).await?)?;
@@ -4642,6 +4717,7 @@ impl MemoryStore {
         subject_id: &str,
         principal_id: &str,
     ) -> StoreResult<Option<Vec<ProfileRow>>> {
+        self.require_provisioned(space_id)?;
         let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let rows = grants_in_tx(&mut tx, space_id).await?;
@@ -4669,8 +4745,14 @@ impl MemoryStore {
         // Legacy read bridge (NXM-5 Task 1): `SOUL.md` is the subject's authored
         // personality document until it is migrated. A stored profile of the
         // same kind always wins, so a migrated document never appears twice.
-        let projected =
-            legacy::profiles_in_tx(&mut tx, &self.legacy, space_id, subject_row.as_ref()).await?;
+        let projected = legacy::profiles_in_tx(
+            &mut tx,
+            &self.legacy,
+            space_id,
+            subject_row.as_ref(),
+            subject_id,
+        )
+        .await?;
         for row in projected {
             if rows
                 .iter()

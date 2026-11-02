@@ -58,7 +58,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::memory_provider::legacy;
-use crate::memory_provider::LocalMemoryProvider;
+use crate::memory_provider::{LocalMemoryProvider, MemoryDisposition};
 use crate::principal::Principal;
 use crate::service::CoreService;
 use spoke_operations::{spoke_schemas, MemoryPort, SpokeReject, SpokeRejectCode, SpokeResult};
@@ -250,6 +250,13 @@ impl MemoryAdapter {
         })
     }
 
+    /// The bearer's memory-disposition section: a review drain holds it across
+    /// the consumed-check, the classification and the persistence of every row
+    /// it processes (NXM-5 Task 2 fix round 2, finding F1).
+    async fn review_claim(&self) -> CoreResult<MemoryDisposition> {
+        self.provider.review_disposition(&self.subject_id).await
+    }
+
     /// Every pending candidate of the subject, newest first in the retained
     /// `(created_at DESC, pending_id DESC)` order.
     ///
@@ -388,6 +395,76 @@ impl MemoryAdapter {
                 Ok(false)
             }
             SpokeResult::Reject(reject) => Err(memory_reject(&reject)),
+        }
+    }
+}
+
+// ── Review disposition authority (NXM-5 Task 2 fix round 2) ──────────────
+//
+// A provider dismissal and a legacy review drain decide the same digest, so
+// both hold the bearer's [`MemoryDisposition`] section: the drain across its
+// consumed-check and classification, the dismissal across its consume. The
+// step-point below lets a regression drive the exact interleaving a dismissal
+// would need and observe the section is not available to it.
+
+/// A step-point inside a review drain's disposition section (test builds only).
+#[cfg(feature = "test-hooks")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryReviewPause {
+    /// The fetch-time check selected the slice; the drain is about to take the
+    /// bearer's disposition section and re-check it there — the exact window a
+    /// dismissal could otherwise slip into.
+    AfterFetchCheck,
+    /// The slice was re-checked inside the section and is about to be
+    /// classified and persisted.
+    AfterRecheck,
+}
+
+/// The rendezvous a test arms for one [`MemoryReviewPause`].
+#[cfg(feature = "test-hooks")]
+#[derive(Debug, Clone)]
+pub struct MemoryReviewRendezvous {
+    /// The step-point this rendezvous arms.
+    pub at: MemoryReviewPause,
+    /// Fires once the drain is parked at `at`.
+    pub entered: Arc<tokio::sync::Notify>,
+    /// Fires to resume the parked drain.
+    pub release: Arc<tokio::sync::Notify>,
+}
+
+#[cfg(feature = "test-hooks")]
+impl CoreService {
+    /// Test-only: park the next Creator or Character review drain at
+    /// `rendezvous.at`. Compiled out of a production build.
+    #[doc(hidden)]
+    pub fn pause_memory_review(&self, rendezvous: MemoryReviewRendezvous) {
+        *self
+            .inner
+            .memory_review_pause
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(rendezvous);
+    }
+
+    /// Park at `at` when a test armed that step-point.
+    async fn park_memory_review(&self, at: MemoryReviewPause) {
+        // Only the armed step-point consumes the rendezvous: the drain walks
+        // every step-point, and taking a later one's rendezvous here would drop
+        // it before the drain reached it.
+        let armed = {
+            let mut slot = self
+                .inner
+                .memory_review_pause
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if slot.as_ref().is_some_and(|rendezvous| rendezvous.at == at) {
+                slot.take()
+            } else {
+                None
+            }
+        };
+        if let Some(rendezvous) = armed {
+            rendezvous.entered.notify_one();
+            rendezvous.release.notified().await;
         }
     }
 }
@@ -843,6 +920,7 @@ impl CoreService {
     /// # Errors
     /// As [`Self::acquire_actor_activity`], plus the mapped pipeline/storage
     /// errors otherwise.
+    #[allow(clippy::too_many_lines)] // the bounded fetch + disposition section are one flow
     pub async fn review_character_memory(
         &self,
         principal: &Principal,
@@ -917,7 +995,29 @@ impl CoreService {
         if more_in_db {
             rows.truncate(batch_limit);
         }
+        // The check/use boundary (fix round 2, finding F1): the fetch-time check
+        // above only selects the slice. This re-check runs inside the bearer's
+        // disposition section, so a dismissal can neither commit between it and
+        // the classification below nor be classified after it: one that already
+        // committed is observed here and its row is dropped.
+        #[cfg(feature = "test-hooks")]
+        self.park_memory_review(MemoryReviewPause::AfterFetchCheck)
+            .await;
+        let _disposition = memory.review_claim().await?;
+        let rechecked: Vec<String> = rows
+            .iter()
+            .map(|row| legacy::character_pending_review_candidate_id(&row.pending_id))
+            .collect();
+        let consumed = consumed_candidates(&memory, rechecked).await?;
+        rows.retain(|row| {
+            !consumed.contains(&legacy::character_pending_review_candidate_id(
+                &row.pending_id,
+            ))
+        });
         let processing_slice = rows.len();
+        #[cfg(feature = "test-hooks")]
+        self.park_memory_review(MemoryReviewPause::AfterRecheck)
+            .await;
         let inputs: Vec<nexus_creator_memory::review::PendingReviewInput> = rows
             .into_iter()
             .map(|r| nexus_creator_memory::review::PendingReviewInput {
@@ -1266,6 +1366,7 @@ impl CoreService {
     ///
     /// # Errors
     /// As [`Self::review_character_memory`] for the Creator arm.
+    #[allow(clippy::too_many_lines)] // the bounded fetch + disposition section are one flow
     pub async fn review_memory(
         &self,
         principal: &Principal,
@@ -1337,7 +1438,27 @@ impl CoreService {
         if more_in_db {
             rows.truncate(batch_limit);
         }
+        // The check/use boundary (fix round 2, finding F1): the fetch-time check
+        // above only selects the slice. This re-check runs inside the bearer's
+        // disposition section, so a dismissal can neither commit between it and
+        // the classification below nor be classified after it: one that already
+        // committed is observed here and its row is dropped.
+        #[cfg(feature = "test-hooks")]
+        self.park_memory_review(MemoryReviewPause::AfterFetchCheck)
+            .await;
+        let _disposition = memory.review_claim().await?;
+        let rechecked: Vec<String> = rows
+            .iter()
+            .map(|row| legacy::pending_review_candidate_id(&row.pending_id))
+            .collect();
+        let consumed = consumed_candidates(&memory, rechecked).await?;
+        rows.retain(|row| {
+            !consumed.contains(&legacy::pending_review_candidate_id(&row.pending_id))
+        });
         let processing_slice = rows.len();
+        #[cfg(feature = "test-hooks")]
+        self.park_memory_review(MemoryReviewPause::AfterRecheck)
+            .await;
 
         let deadline = tokio::time::Instant::now() + REVIEW_CALL_TIMEOUT;
         let inputs: Vec<nexus_creator_memory::review::PendingReviewInput> = rows

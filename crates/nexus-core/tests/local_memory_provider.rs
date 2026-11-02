@@ -57,6 +57,25 @@ async fn open_provider(env: &Env) -> LocalMemoryProvider {
         .expect("provider open")
 }
 
+/// Every file under `root`, recursively and sorted, so a test can assert a
+/// refused write changed nothing on disk.
+fn files_under(root: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return found;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            found.extend(files_under(&path));
+        } else {
+            found.push(path);
+        }
+    }
+    found.sort();
+    found
+}
+
 fn principal(id: &str) -> schemas::Principal {
     dto(json!({ "principal_id": id, "extensions": {} }))
 }
@@ -3972,5 +3991,86 @@ async fn delete_is_gated_by_the_subject_lifecycle() {
     assert!(
         record["record"].get("tombstone").is_none(),
         "a refused delete never tombstones: {record}"
+    );
+}
+
+/// NXM-5 Task 2 fix round 2 (R2-F3): the provider itself — not only the
+/// `CoreService` adapter — refuses a direct write on a read-only open, before the
+/// retention sweep, the admission transaction, or the publication section.
+#[tokio::test]
+async fn a_read_only_open_refuses_writes_before_their_machinery() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let files_root = provider.file_root();
+    drop(provider);
+    let before = files_under(&files_root);
+
+    let read_only = LocalMemoryProvider::open_read_only(env.user_home.clone(), CREATOR, "default")
+        .await
+        .expect("read-only open");
+    assert!(!read_only.is_writable());
+    let admin = principal(CREATOR);
+
+    // The normal transaction path (`begin_admission`).
+    let refused = wire(
+        &read_only
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    assert_eq!(error_code(&refused), "NOT_AUTHORIZED");
+    assert_eq!(retry_class(&refused), "terminal");
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("read-only"),
+        "the refusal names the read-only open: {refused}"
+    );
+
+    // The publication path (`begin_publication` → gate → workspace flock).
+    let refused = wire(
+        &read_only
+            .create_record(
+                &admin,
+                record_create_request(
+                    "k-read-only-record",
+                    "note",
+                    &json!({ "visibility": "shared" }),
+                    TEXT,
+                ),
+            )
+            .await,
+    );
+    assert_eq!(error_code(&refused), "NOT_AUTHORIZED");
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("read-only"),
+        "the refusal names the read-only open: {refused}"
+    );
+
+    // No side effect: no subject, candidate, record, journal intent or receipt,
+    // and no publication lock file or projection under the file root.
+    let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
+    for table in [
+        "memory_subjects",
+        "memory_candidates",
+        "memory_records",
+        "memory_journal",
+        "memory_receipts",
+    ] {
+        let sql = format!("SELECT COUNT(*) FROM {table}");
+        let (count,): (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 0, "{table} untouched by a refused read-only write");
+    }
+    pool.close().await;
+    assert_eq!(
+        files_under(&files_root),
+        before,
+        "no publication section was taken, no lock changed and nothing was projected"
     );
 }

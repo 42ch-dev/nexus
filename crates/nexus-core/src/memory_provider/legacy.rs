@@ -72,6 +72,13 @@ pub const CREATOR_KIND_NS: &str = "nexus_creator";
 /// Subject namespace of a Character bearer (its `kind_id` is the character id).
 pub const CHARACTER_KIND_NS: &str = "nexus_character";
 
+/// Prefix of the deterministic subject id of a workspace Creator bearer.
+const CREATOR_SUBJECT_PREFIX: &str = "sbj_legacy_creator_";
+
+/// Prefix of the deterministic subject id of a Character bearer, whose suffix
+/// is the character id.
+const CHARACTER_SUBJECT_PREFIX: &str = "sbj_legacy_character_";
+
 /// The provider subject id of the workspace Creator's bearer.
 ///
 /// One deterministic id per bearer keeps the bridge's canonical-subject rule
@@ -80,13 +87,13 @@ pub const CHARACTER_KIND_NS: &str = "nexus_character";
 /// never be listed under one subject and read under another.
 #[must_use]
 pub fn creator_subject_id(creator_id: &str) -> String {
-    format!("sbj_legacy_creator_{creator_id}")
+    format!("{CREATOR_SUBJECT_PREFIX}{creator_id}")
 }
 
 /// [`creator_subject_id`] for a Character bearer.
 #[must_use]
 pub fn character_subject_id(character_id: &str) -> String {
-    format!("sbj_legacy_character_{character_id}")
+    format!("{CHARACTER_SUBJECT_PREFIX}{character_id}")
 }
 
 /// `provenance.captured_by` of every projected row: no authenticated principal
@@ -209,6 +216,15 @@ impl Owner {
             Self::Character(character_id) => character_id,
         }
     }
+
+    /// The subject id a writer open ensures for this bearer, which is also the
+    /// identity a read-only projection serves when no writer ever ensured it.
+    fn canonical_subject_id(&self, roots: &LegacyRoots) -> String {
+        match self {
+            Self::Creator => creator_subject_id(&roots.creator_id),
+            Self::Character(character_id) => character_subject_id(character_id),
+        }
+    }
 }
 
 // ── Read-path entry points ───────────────────────────────────────────────
@@ -217,11 +233,13 @@ impl Owner {
 /// predicate the provider's own page uses ([`Selection`], provenance filter,
 /// kind filter). Tombstoned rows are not a legacy state: a legacy object is
 /// either present or absent.
+#[allow(clippy::too_many_arguments)] // the bridge entry mirrors the page predicate's inputs
 pub(super) async fn records_in_tx(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
     roots: &LegacyRoots,
     space_id: &str,
     subject: Option<&SubjectRow>,
+    subject_id: &str,
     selection: &Selection,
     filter: Option<&[String]>,
     kinds: &[String],
@@ -229,10 +247,9 @@ pub(super) async fn records_in_tx(
     if migration_complete(tx, space_id).await? {
         return Ok(Vec::new());
     }
-    let Some(owner) = owner_of(tx, roots, space_id, subject).await? else {
+    let Some(owner) = owner_of(tx, roots, space_id, subject, subject_id).await? else {
         return Ok(Vec::new());
     };
-    let subject_id = subject.map_or("", |subject| subject.subject_id.as_str());
     let mut rows = project_records(tx, roots, space_id, subject_id, &owner).await?;
     rows.retain(|row| {
         selection_admits(selection, row)
@@ -261,10 +278,15 @@ pub(super) async fn record_by_id_in_tx(
     let Some(owner) = id_owner(tx, roots, &family, &components).await? else {
         return Ok(None);
     };
-    let Some(subject) = subject_of(tx, roots, space_id, &owner).await? else {
-        return Ok(None);
+    // A bearer no writer ever ensured still projects under the deterministic
+    // identity a writer open would have created (fix round 2, finding F2):
+    // when a subject already names the bearer, that canonical subject wins and
+    // this absent one projects nothing.
+    let subject_id = match subject_of(tx, roots, space_id, &owner).await? {
+        Some(subject) => subject.subject_id,
+        None => owner.canonical_subject_id(roots),
     };
-    let rows = project_records(tx, roots, space_id, &subject.subject_id, &owner).await?;
+    let rows = project_records(tx, roots, space_id, &subject_id, &owner).await?;
     Ok(rows.into_iter().find(|row| row.record_id == record_id))
 }
 
@@ -276,6 +298,7 @@ pub(super) async fn candidates_in_tx(
     roots: &LegacyRoots,
     space_id: &str,
     subject: Option<&SubjectRow>,
+    subject_id: &str,
     status: Option<&str>,
 ) -> StoreResult<Vec<CandidateRow>> {
     if migration_complete(tx, space_id).await? {
@@ -284,10 +307,9 @@ pub(super) async fn candidates_in_tx(
     if status.is_some_and(|status| status != "pending") {
         return Ok(Vec::new());
     }
-    let Some(owner) = owner_of(tx, roots, space_id, subject).await? else {
+    let Some(owner) = owner_of(tx, roots, space_id, subject, subject_id).await? else {
         return Ok(Vec::new());
     };
-    let subject_id = subject.map_or("", |subject| subject.subject_id.as_str());
     candidates_for_owner(tx, roots, space_id, subject_id, &owner).await
 }
 
@@ -307,10 +329,11 @@ pub(super) async fn candidate_by_id_in_tx(
     let Some(owner) = id_owner(tx, roots, &family, &components).await? else {
         return Ok(None);
     };
-    let Some(subject) = subject_of(tx, roots, space_id, &owner).await? else {
-        return Ok(None);
+    let subject_id = match subject_of(tx, roots, space_id, &owner).await? {
+        Some(subject) => subject.subject_id,
+        None => owner.canonical_subject_id(roots),
     };
-    let rows = candidates_for_owner(tx, roots, space_id, &subject.subject_id, &owner).await?;
+    let rows = candidates_for_owner(tx, roots, space_id, &subject_id, &owner).await?;
     Ok(rows
         .into_iter()
         .find(|row| row.candidate_id == candidate_id))
@@ -324,14 +347,14 @@ pub(super) async fn profiles_in_tx(
     roots: &LegacyRoots,
     space_id: &str,
     subject: Option<&SubjectRow>,
+    subject_id: &str,
 ) -> StoreResult<Vec<ProfileRow>> {
     if migration_complete(tx, space_id).await? {
         return Ok(Vec::new());
     }
-    let Some(owner) = owner_of(tx, roots, space_id, subject).await? else {
+    let Some(owner) = owner_of(tx, roots, space_id, subject, subject_id).await? else {
         return Ok(Vec::new());
     };
-    let subject_id = subject.map_or("", |subject| subject.subject_id.as_str());
     let Some(body) = soul_document(roots, &owner)? else {
         return Ok(Vec::new());
     };
@@ -368,14 +391,28 @@ async fn migration_complete(
 /// bearer's canonical subject (see the module's bearer → subject mapping)
 /// projects, so a list read and a by-id read of the same external id always
 /// resolve the same subject — and therefore the same grants.
+///
+/// A subject no writer ever ensured (a read-only open skips the subject ensure,
+/// fix round 2, finding F2) still projects under the deterministic identity a
+/// writer would have created: the id names the bearer without registering
+/// anything durable. The canonical rule is unchanged — when a subject that is
+/// not the deterministic one already names the bearer, the projection stays
+/// under that smaller subject and this identity projects nothing.
 async fn owner_of(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
     roots: &LegacyRoots,
     space_id: &str,
     subject: Option<&SubjectRow>,
+    subject_id: &str,
 ) -> StoreResult<Option<Owner>> {
     let Some(subject) = subject else {
-        return Ok(None);
+        let Some(owner) = projection_owner(tx, roots, subject_id).await? else {
+            return Ok(None);
+        };
+        return Ok(subject_of(tx, roots, space_id, &owner)
+            .await?
+            .is_none()
+            .then_some(owner));
     };
     let (Some(namespace), Some(kind_id)) = (subject.kind_ns.as_deref(), subject.kind_id.as_deref())
     else {
@@ -392,6 +429,24 @@ async fn owner_of(
         Some(canonical) if canonical.subject_id == subject.subject_id => Ok(Some(owner)),
         _ => Ok(None),
     }
+}
+
+/// The bearer a deterministic projection subject id names, when this workspace
+/// owns it. Reads only: nothing is registered or written.
+async fn projection_owner(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    roots: &LegacyRoots,
+    subject_id: &str,
+) -> StoreResult<Option<Owner>> {
+    if let Some(creator_id) = subject_id.strip_prefix(CREATOR_SUBJECT_PREFIX) {
+        return Ok((creator_id == roots.creator_id).then_some(Owner::Creator));
+    }
+    let Some(character_id) = subject_id.strip_prefix(CHARACTER_SUBJECT_PREFIX) else {
+        return Ok(None);
+    };
+    Ok(character_owned(tx, roots, character_id)
+        .await?
+        .then(|| Owner::Character(character_id.to_string())))
 }
 
 /// The owner an external id names, or `None` when the id is foreign to this

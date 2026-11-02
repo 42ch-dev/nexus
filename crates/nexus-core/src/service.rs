@@ -127,6 +127,11 @@ pub struct CoreInner {
     /// Per-Character activity/transition fences (v1.190 P2-T1), Host-free
     /// and separate from any process session registry.
     pub(crate) character_fences: ActorFenceTable,
+    /// Test-only step-point a review drain parks at inside its memory
+    /// disposition section (NXM-5 Task 2 fix round 2, finding F1). Compiled out
+    /// of a production build.
+    #[cfg(feature = "test-hooks")]
+    pub(crate) memory_review_pause: Mutex<Option<crate::memory::MemoryReviewRendezvous>>,
     /// Established-owner slot for the Host authority (P4-T2): at most one
     /// `open_host` manager per open service — a second start is a typed busy
     /// rejection, never a second engine. Reset only by a confirmed close.
@@ -354,6 +359,8 @@ impl CoreService {
                 #[cfg(feature = "execution")]
                 admission_root,
                 character_fences: ActorFenceTable::new(&db_path),
+                #[cfg(feature = "test-hooks")]
+                memory_review_pause: Mutex::new(None),
                 #[cfg(feature = "execution")]
                 execution: std::sync::Mutex::new(None),
                 #[cfg(feature = "execution")]

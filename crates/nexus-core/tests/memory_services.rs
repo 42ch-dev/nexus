@@ -24,7 +24,10 @@ use nexus_contracts::daemon_api::memory::review_request::ReviewRequest;
 use nexus_contracts::generated::core::{
     CoreCharacterTransitionRequest, CoreCharacterTransitionRequestTargetStatus,
 };
-use nexus_core::{AdmittedActor, CoreAccess, CoreError, CoreOpenOptions, CoreService};
+use nexus_core::{
+    AdmittedActor, CoreAccess, CoreError, CoreOpenOptions, CoreService, MemoryReviewPause,
+    MemoryReviewRendezvous,
+};
 use nexus_creator_memory::bearer::MemoryBearerRef;
 use nexus_creator_memory::errors::MemoryError;
 use nexus_creator_memory::soul_narrative::{
@@ -36,6 +39,7 @@ use nexus_local_db::{
 };
 use sqlx::SqlitePool;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tempfile::TempDir;
 
 const CREATOR: &str = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -3287,4 +3291,509 @@ async fn read_only_core_serves_memory_reads_and_refuses_the_write() {
         "the refused dismissal mutates nothing"
     );
     pool.close().await;
+}
+
+// ═══ NXM-5 Task 2 fix round 2 ═════════════════════════════════════════════
+//
+// R2-F1: a provider dismissal and a legacy review drain decide the same digest,
+// so the drain holds the bearer's disposition section across its consumed-check,
+// classification and persistence, and a dismissal must hold the same section to
+// consume. Each regression parks the drain at a test-controlled step-point — no
+// sleeps, no timing — and asserts the dismissal cannot enter that window.
+// R2-F2: a read-only open projects the legacy rows of a bearer no writer ever
+// ensured, and answers the space's absence when nothing was ever provisioned.
+
+/// Seed one Character pending row bound to `binding_id`.
+async fn seed_character_pending_binding(env: &Env, pending_id: &str, binding_id: &str) {
+    let pool = plain_pool(env).await;
+    sqlx::query(
+        "INSERT INTO character_memory_pending_review
+             (pending_id, session_id, character_id, actor_world_binding_id, task_kind, raw_digest,
+              created_at)
+         VALUES (?, ?, ?, ?, 'research', ?, '2026-01-01T00:00:01Z')",
+    )
+    .bind(pending_id)
+    .bind(format!("sess_{pending_id}"))
+    .bind(&env.character_id)
+    .bind(binding_id)
+    .bind(FRAGMENT_DIGEST)
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+}
+
+/// Arm one of the drain's step-points.
+fn arm_review_pause(
+    core: &CoreService,
+    at: MemoryReviewPause,
+) -> (Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>) {
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    core.pause_memory_review(MemoryReviewRendezvous {
+        at,
+        entered: Arc::clone(&entered),
+        release: Arc::clone(&release),
+    });
+    (entered, release)
+}
+
+#[tokio::test]
+async fn creator_dismissal_cannot_commit_inside_the_review_decision() {
+    let env = seed_env().await;
+    seed_creator_pending_digest(
+        &env,
+        "pending_window",
+        FRAGMENT_DIGEST,
+        "2026-01-01T00:00:01Z",
+    )
+    .await;
+    let (core, principal) = open_core(&env).await;
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    let subject = legacy::creator_subject_id(CREATOR);
+    let candidate_id = legacy::pending_review_candidate_id("pending_window");
+
+    let (entered, release) = arm_review_pause(&core, MemoryReviewPause::AfterRecheck);
+    let drain_task = tokio::spawn({
+        let core = core.clone();
+        let principal = principal.clone();
+        async move {
+            core.review_memory(&principal, creator_review_request())
+                .await
+        }
+    });
+    entered.notified().await;
+
+    // The drain's check ran and saw the row pending, and the section it holds is
+    // the one a dismissal must take to consume that row: there is no window
+    // between the check and the classification for the dismissal to commit in.
+    assert_eq!(
+        provider_candidate_status(&provider, &admin, &candidate_id).await,
+        "pending",
+        "the checked row was still queued when the drain decided to classify it"
+    );
+    assert!(
+        !provider.disposition_available(&subject),
+        "the review decision is not interleavable with a dismissal"
+    );
+
+    let dismissal = tokio::spawn({
+        let core = core.clone();
+        let principal = principal.clone();
+        async move {
+            core.delete_pending_review(&principal, "pending_window".to_string())
+                .await
+        }
+    });
+    tokio::task::yield_now().await;
+    assert!(
+        !dismissal.is_finished(),
+        "a dismissal cannot slip into the check/classify window"
+    );
+
+    release.notify_one();
+    let reviewed = drain_task.await.unwrap().expect("review drains the row");
+    assert_eq!(
+        reviewed.processed,
+        Some(1),
+        "the row the drain checked is still classified"
+    );
+    assert_eq!(reviewed.fragmented, 1);
+    // The drain consumed the row first, so the dismissal that was excluded from
+    // its window is the retained `NotFound` — it never ran inside the decision.
+    let late = dismissal
+        .await
+        .unwrap()
+        .expect_err("the dismissal lost the serialization");
+    assert!(
+        matches!(late, CoreError::NotFound { .. }),
+        "the excluded dismissal finds the row already consumed: {late:?}"
+    );
+    assert!(
+        provider.disposition_available(&subject),
+        "the section is released once the row is persisted"
+    );
+
+    let pool = plain_pool(&env).await;
+    let summaries: Vec<String> = sqlx::query_as("SELECT summary FROM memory_fragments")
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row: (String,)| row.0)
+        .collect();
+    assert_eq!(summaries, vec![FRAGMENT_DIGEST.to_string()]);
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
+        0,
+        "the classified row is consumed by the drain"
+    );
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn character_dismissal_cannot_commit_inside_the_review_decision() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let chr = env.character_id.clone();
+    let bind1 = env.binding_id.clone();
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    let subject = legacy::character_subject_id(&chr);
+    let candidate_id = legacy::character_pending_review_candidate_id("pend_window");
+    core.capture_character_pending_review(
+        &principal,
+        chr.clone(),
+        dto(json_capture(
+            "pend_window",
+            Some(&bind1),
+            "2026-01-01T00:00:01Z",
+        )),
+    )
+    .await
+    .expect("capture");
+
+    let (entered, release) = arm_review_pause(&core, MemoryReviewPause::AfterRecheck);
+    let drain_task = tokio::spawn({
+        let core = core.clone();
+        let principal = principal.clone();
+        let chr = chr.clone();
+        let bind = bind1.clone();
+        async move {
+            core.review_character_memory(
+                &principal,
+                chr,
+                dto::<ReviewCharacterMemoryRequest>(serde_json::json!({ "binding_id": bind })),
+            )
+            .await
+        }
+    });
+    entered.notified().await;
+
+    assert_eq!(
+        provider_candidate_status(&provider, &admin, &candidate_id).await,
+        "pending",
+        "the checked row was still queued when the drain decided to classify it"
+    );
+    assert!(
+        !provider.disposition_available(&subject),
+        "the review decision is not interleavable with a dismissal"
+    );
+
+    let dismissal = tokio::spawn({
+        let core = core.clone();
+        let principal = principal.clone();
+        async move {
+            core.delete_character_pending_review(&principal, chr, "pend_window".to_string())
+                .await
+        }
+    });
+    tokio::task::yield_now().await;
+    assert!(
+        !dismissal.is_finished(),
+        "a dismissal cannot slip into the check/classify window"
+    );
+
+    release.notify_one();
+    let reviewed = drain_task.await.unwrap().expect("review drains the row");
+    assert_eq!(reviewed.processed, Some(1));
+    assert_eq!(reviewed.fragmented, 1);
+    // The drain consumed the row first: the excluded dismissal finds nothing.
+    let late = dismissal
+        .await
+        .unwrap()
+        .expect_err("the dismissal lost the serialization");
+    assert!(
+        matches!(late, CoreError::NotFound { .. }),
+        "the excluded dismissal finds the row already consumed: {late:?}"
+    );
+    assert!(provider.disposition_available(&subject));
+
+    let pool = plain_pool(&env).await;
+    let summaries: Vec<String> = sqlx::query_as("SELECT summary FROM character_memory_fragments")
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row: (String,)| row.0)
+        .collect();
+    assert_eq!(summaries, vec![FRAGMENT_DIGEST.to_string()]);
+    assert_eq!(
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM character_memory_pending_review"
+        )
+        .await,
+        0
+    );
+    pool.close().await;
+}
+
+/// R2-F1: a dismissal that commits between the fetch-time check and the
+/// disposition section is re-verified inside the section and its row is dropped
+/// — the digest is never classified and no fragment is created.
+#[tokio::test]
+async fn creator_dismissal_between_check_and_classification_is_reverified() {
+    let env = seed_env().await;
+    seed_creator_pending_digest(
+        &env,
+        "pending_window",
+        REJECTED_DIGEST,
+        "2026-01-01T00:00:01Z",
+    )
+    .await;
+    let (core, principal) = open_core(&env).await;
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    let candidate_id = legacy::pending_review_candidate_id("pending_window");
+
+    let (entered, release) = arm_review_pause(&core, MemoryReviewPause::AfterFetchCheck);
+    let drain_task = tokio::spawn({
+        let core = core.clone();
+        let principal = principal.clone();
+        async move {
+            core.review_memory(&principal, creator_review_request())
+                .await
+        }
+    });
+    entered.notified().await;
+
+    // The fetch-time check saw the row pending, and the dismissal commits in the
+    // window before the drain takes the disposition section.
+    assert_eq!(
+        provider_candidate_status(&provider, &admin, &candidate_id).await,
+        "pending"
+    );
+    core.delete_pending_review(&principal, "pending_window".to_string())
+        .await
+        .expect("the dismissal wins the window");
+    assert_eq!(
+        provider_candidate_status(&provider, &admin, &candidate_id).await,
+        "consumed"
+    );
+
+    release.notify_one();
+    let reviewed = drain_task.await.unwrap().expect("review");
+    assert_eq!(
+        reviewed.processed,
+        Some(0),
+        "the re-check drops the consumed row instead of classifying it"
+    );
+    assert_eq!(
+        reviewed.fragmented, 0,
+        "a dismissed digest is never classified"
+    );
+    assert_eq!(reviewed.has_more, Some(false));
+
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM memory_fragments").await,
+        0,
+        "no fragment is created from a dismissed digest"
+    );
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
+        1,
+        "the dismissal wrote no legacy row and the drain never classified it"
+    );
+    pool.close().await;
+}
+
+/// The Character arm of
+/// [`creator_dismissal_between_check_and_classification_is_reverified`].
+#[tokio::test]
+async fn character_dismissal_between_check_and_classification_is_reverified() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let chr = env.character_id.clone();
+    let bind1 = env.binding_id.clone();
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    let candidate_id = legacy::character_pending_review_candidate_id("pend_window");
+    let mut rejected = json_capture("pend_window", Some(&bind1), "2026-01-01T00:00:01Z");
+    rejected["raw_digest"] = serde_json::json!(REJECTED_DIGEST);
+    core.capture_character_pending_review(&principal, chr.clone(), dto(rejected))
+        .await
+        .expect("capture");
+
+    let (entered, release) = arm_review_pause(&core, MemoryReviewPause::AfterFetchCheck);
+    let drain_task = tokio::spawn({
+        let core = core.clone();
+        let principal = principal.clone();
+        let chr = chr.clone();
+        let bind = bind1.clone();
+        async move {
+            core.review_character_memory(
+                &principal,
+                chr,
+                dto::<ReviewCharacterMemoryRequest>(serde_json::json!({ "binding_id": bind })),
+            )
+            .await
+        }
+    });
+    entered.notified().await;
+    assert_eq!(
+        provider_candidate_status(&provider, &admin, &candidate_id).await,
+        "pending"
+    );
+    core.delete_character_pending_review(&principal, chr.clone(), "pend_window".to_string())
+        .await
+        .expect("the dismissal wins the window");
+
+    release.notify_one();
+    let reviewed = drain_task.await.unwrap().expect("review");
+    assert_eq!(reviewed.processed, Some(0));
+    assert_eq!(reviewed.fragmented, 0);
+    assert_eq!(reviewed.has_more, Some(false));
+
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM character_memory_fragments").await,
+        0
+    );
+    assert_eq!(
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM character_memory_pending_review"
+        )
+        .await,
+        1
+    );
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn read_only_core_projects_bearers_no_writer_ever_ensured() {
+    let env = seed_env().await;
+    seed_creator_pending_digest(
+        &env,
+        "pending_unensured",
+        FRAGMENT_DIGEST,
+        "2026-01-01T00:00:01Z",
+    )
+    .await;
+    seed_creator_fragments(&env, 1).await;
+    let binding = env.binding_id.clone();
+    seed_character_pending_binding(&env, "pending_chr_unensured", &binding).await;
+    // Provision the space only: a writer open registers the space and the
+    // bootstrap grant and ensures no subject at all.
+    let provider = open_bridge_provider(&env).await;
+    drop(provider);
+
+    let read_only = CoreService::open(CoreOpenOptions {
+        user_home: env.user_home.clone(),
+        access: CoreAccess::ReadOnly,
+    })
+    .await
+    .expect("read-only open");
+    let principal = read_only.active_principal().await.unwrap();
+
+    assert_eq!(
+        read_only
+            .count_pending_reviews(&principal)
+            .await
+            .unwrap()
+            .count,
+        1,
+        "an unensured Creator bearer still serves its legacy pending row"
+    );
+    let listed = read_only
+        .list_pending_reviews(&principal, None, PAGE_SIZE)
+        .await
+        .unwrap();
+    assert_eq!(listed.items.len(), 1);
+    assert_eq!(listed.items[0].pending_id, "pending_unensured");
+    let fragments = read_only
+        .list_memory_fragments(&principal, None, None, PAGE_SIZE)
+        .await
+        .unwrap();
+    assert_eq!(
+        fragments.fragments.len(),
+        1,
+        "an unensured Creator bearer still serves its legacy fragments"
+    );
+
+    let character = read_only
+        .list_character_pending_reviews(
+            &principal,
+            env.character_id.clone(),
+            Some(binding),
+            u32::try_from(PAGE_SIZE).unwrap(),
+            0,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        character.items.len(),
+        1,
+        "an unensured Character bearer still serves its legacy pending row"
+    );
+    assert_eq!(
+        character.items[0].pending_id.as_str(),
+        "pending_chr_unensured"
+    );
+
+    // The projection is a read: no subject, receipt or candidate was created.
+    let pool = plain_pool(&env).await;
+    for table in ["memory_subjects", "memory_receipts", "memory_candidates"] {
+        assert_eq!(
+            count_where(&pool, &format!("SELECT COUNT(*) FROM {table}")).await,
+            0,
+            "{table} stays write-idle on a read-only projection"
+        );
+    }
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn read_only_core_over_a_never_provisioned_workspace_answers_not_found() {
+    let env = seed_env().await;
+    seed_creator_pending_digest(
+        &env,
+        "pending_no_space",
+        FRAGMENT_DIGEST,
+        "2026-01-01T00:00:01Z",
+    )
+    .await;
+
+    let read_only = CoreService::open(CoreOpenOptions {
+        user_home: env.user_home.clone(),
+        access: CoreAccess::ReadOnly,
+    })
+    .await
+    .expect("read-only open");
+    let principal = read_only.active_principal().await.unwrap();
+
+    assert!(
+        matches!(
+            read_only.count_pending_reviews(&principal).await,
+            Err(CoreError::NotFound { .. })
+        ),
+        "a workspace with no provider space answers the space's absence"
+    );
+    assert!(matches!(
+        read_only
+            .list_pending_reviews(&principal, None, PAGE_SIZE)
+            .await,
+        Err(CoreError::NotFound { .. })
+    ));
+    assert!(matches!(
+        read_only
+            .list_memory_fragments(&principal, None, None, PAGE_SIZE)
+            .await,
+        Err(CoreError::NotFound { .. })
+    ));
+    assert!(matches!(
+        read_only
+            .list_character_pending_reviews(
+                &principal,
+                env.character_id.clone(),
+                None,
+                u32::try_from(PAGE_SIZE).unwrap(),
+                0,
+            )
+            .await,
+        Err(CoreError::NotFound { .. })
+    ));
 }
