@@ -1,12 +1,14 @@
-//! Bearer-parameterized memory pipeline (v1.190 P2-T2).
+//! Bearer-parameterized memory pipeline (v1.190 P2-T2; E11 rerouted in NXM-8).
 //!
 //! Moved from the daemon `api::handlers::memory_pipeline` module: the shared
 //! review/promotion orchestration dispatching to the Creator vs Character
-//! bearer storage through the closed [`nexus_creator_memory::MemoryBearerRef`]
-//! (spec §3). The Creator arm reproduces the pre-migration bytes, paths, table
-//! names, and cache semantics exactly; the Character arm routes to the
-//! dedicated `character_*` repositories which enforce actor/owner provenance
-//! before any persistence.
+//! bearer through the closed [`nexus_creator_memory::MemoryBearerRef`] (spec
+//! §3). The review drain classifies with the unchanged deterministic classifier
+//! and consumes each pending candidate through the provider
+//! (`memory.candidates.review`), so it writes provider candidates/records only
+//! and the legacy `*_pending_review` tables stay write-idle (compass D6). The
+//! one coherence write that survives is the retained SOUL-narrative cache
+//! invalidation on fragment promotion.
 //!
 //! The pipeline context is a **core-internal authorization capability**: its
 //! fields are private, the only constructors are [`MemoryPipelineCtx::creator`]
@@ -22,10 +24,13 @@
 
 use crate::actor_fence::ActorActivityLease;
 use crate::error::{CoreError, CoreResult};
+use crate::memory::MemoryAdapter;
+use crate::memory_provider::MemoryDisposition;
 use nexus_creator_memory::bearer::MemoryBearerRef;
 use nexus_creator_memory::errors::MemoryError;
-use nexus_creator_memory::review::{ReviewAction, ReviewDecision, SessionDigestSummarizer};
+use nexus_creator_memory::review::{ReviewAction, SessionDigestSummarizer};
 use nexus_local_db::LocalDbError;
+use serde_json::{json, Value};
 use sqlx::SqlitePool;
 
 /// Internal wire-code carrier: `"{CODE}: {message}"` core categories the
@@ -177,11 +182,6 @@ impl MemoryPipelineCtx {
         })
     }
 
-    /// The bearer id, for read-only diagnostics.
-    pub(crate) fn bearer_id(&self) -> String {
-        self.bearer_ref().id().to_string()
-    }
-
     /// Borrow the bearer for a read path. Readable contexts and writable
     /// contexts both allow reads.
     #[allow(clippy::option_if_let_else)] // the match names both wire bearers directly
@@ -256,72 +256,83 @@ struct RowActionCounts {
     dropped: i64,
 }
 
+/// One pending candidate the review drain may classify.
+///
+/// The provider candidate is the review input: its classifier fields come from
+/// the bridge's `nexus_legacy` block (E11's classifier is unchanged), and its
+/// immutable capture scope decides whether a promotion is binding-local.
+pub struct ReviewBatchRow {
+    /// The provider candidate the decision consumes.
+    pub candidate_id: String,
+    /// The revision the candidate read served, used as the CAS precondition.
+    pub expected_revision: u64,
+    /// The retained classifier input.
+    pub input: nexus_creator_memory::review::PendingReviewInput,
+    /// A Character candidate captured under `context(binding_id)`: a promotion
+    /// must stay binding-local (only the explicit fragment promotion shares it).
+    pub binding_local: bool,
+}
+
 /// Process a bounded slice of a bearer's review queue.
 ///
-/// Bearer-agnostic: classifies each pending row and dispatches the
-/// persistence (fragment insert, pending delete) to the Creator or Character
-/// storage. The deadline semantics (stop on expiry, partial progress,
-/// `any_row_remained_pending`) are identical to the pre-migration Creator
-/// logic.
+/// Bearer-agnostic: classifies each pending candidate and consumes it through
+/// the provider (`memory.candidates.review`), so a drain writes provider
+/// candidates/records only — the legacy `*_pending_review` tables stay
+/// write-idle (compass D6). The deadline semantics (stop on expiry, partial
+/// progress, `any_row_remained_pending`) are unchanged.
+///
+/// `section` is the bearer's memory-disposition section, already held by the
+/// caller across the whole batch: every consumption here runs under it.
 pub async fn process_bearer_review_batch(
-    inputs: &[nexus_creator_memory::review::PendingReviewInput],
-    nexus_home: &std::path::Path,
-    ctx: &MemoryPipelineCtx,
-    pool: &SqlitePool,
+    rows: &[ReviewBatchRow],
+    bearer: MemoryBearerRef<'_>,
+    memory: &MemoryAdapter,
+    section: &MemoryDisposition,
     deadline: tokio::time::Instant,
 ) -> CoreResult<ReviewBatchOutcome> {
-    // A read-only context cannot advance a queue, promote, or write files.
-    ctx.bearer_for_write()?;
     let mut outcome = ReviewBatchOutcome::new();
 
-    for input in inputs {
+    for row in rows {
         if tokio::time::Instant::now() >= deadline {
+            tracing::info!(
+                bearer_id = %bearer.id(),
+                pending_id = %row.input.pending_id,
+                processed = outcome.processed,
+                "Review deadline reached mid-batch; returning partial progress"
+            );
             break;
         }
 
-        let decision = nexus_creator_memory::review::classify_pending_review(input);
-
-        let row_result = tokio::time::timeout_at(
-            deadline,
-            process_single_review_row(&decision, input, nexus_home, ctx, pool),
-        )
-        .await;
+        let decision = nexus_creator_memory::review::classify_pending_review(&row.input);
+        // A row that has started runs to completion: the provider journals each
+        // decision, and cancelling one mid-transaction can leave its target
+        // unsettled, which would refuse the bearer's next read. The call budget
+        // is therefore checked between rows, never inside one.
+        let action_counts =
+            consume_review_decision(&decision.action, row, bearer, memory, section).await;
 
         outcome.processed += 1;
-
-        match row_result {
-            Ok(action_counts) => {
-                outcome.promoted += action_counts.promoted;
-                outcome.fragmented += action_counts.fragmented;
-                outcome.dropped += action_counts.dropped;
-                if action_counts.promoted + action_counts.fragmented + action_counts.dropped == 0 {
-                    outcome.any_row_remained_pending = true;
-                }
-            }
-            Err(_elapsed) => {
-                outcome.any_row_remained_pending = true;
-                tracing::info!(
-                    bearer_id = %ctx.bearer_id(),
-                    pending_id = %input.pending_id,
-                    processed = outcome.processed,
-                    "Review deadline reached mid-batch; returning partial progress"
-                );
-                break;
-            }
+        outcome.promoted += action_counts.promoted;
+        outcome.fragmented += action_counts.fragmented;
+        outcome.dropped += action_counts.dropped;
+        if action_counts.promoted + action_counts.fragmented + action_counts.dropped == 0 {
+            outcome.any_row_remained_pending = true;
         }
     }
 
     Ok(outcome)
 }
 
-/// Classify one pending row, perform the action (promote/fragment/drop), and
-/// delete the pending row on success for the bearer's storage.
-async fn process_single_review_row(
-    decision: &ReviewDecision,
-    input: &nexus_creator_memory::review::PendingReviewInput,
-    nexus_home: &std::path::Path,
-    ctx: &MemoryPipelineCtx,
-    pool: &SqlitePool,
+/// Classify one pending candidate and consume it through the provider.
+///
+/// A provider refusal leaves the candidate pending and the row counts stay
+/// zero, so the caller reports `has_more` instead of a false completion.
+async fn consume_review_decision(
+    action: &ReviewAction,
+    row: &ReviewBatchRow,
+    bearer: MemoryBearerRef<'_>,
+    memory: &MemoryAdapter,
+    section: &MemoryDisposition,
 ) -> RowActionCounts {
     let mut counts = RowActionCounts {
         promoted: 0,
@@ -329,87 +340,52 @@ async fn process_single_review_row(
         dropped: 0,
     };
 
-    match decision.action {
-        ReviewAction::PromoteToLongTerm => {
-            // Binding-local Character pending must stay binding-local: a
-            // Promote decision on a World-life (binding) scope is coerced to
-            // the fragment path so it retains binding provenance (blocking
-            // binding removal via `binding_has_local_memory`) and only becomes
-            // Character-shared after the explicit revision-checked fragment
-            // promotion. Shared Character scope and the whole Creator arm are
-            // unchanged.
-            let binding_local = matches!(ctx.bearer_ref(), MemoryBearerRef::Character { .. })
-                && input.scope_id.is_some();
-            if binding_local {
-                let fragment = nexus_creator_memory::review::create_fragment_from_review(input);
-                match insert_fragment_and_delete_pending(
-                    pool,
-                    ctx,
-                    &fragment,
-                    input.scope_id.as_deref(),
-                    &input.pending_id,
-                )
-                .await
-                {
-                    Ok(()) => counts.fragmented = 1,
-                    Err(e) => {
-                        tracing::warn!(
-                            pending_id = %input.pending_id,
-                            error = %e,
-                            "Failed to create binding-local fragment from Promote decision atomically; row stays pending"
-                        );
-                    }
-                }
-            } else {
-                match claim_pending_and_promote(nexus_home, pool, ctx, input).await {
-                    Ok(()) => counts.promoted = 1,
-                    Err(e) => {
-                        tracing::warn!(
-                            pending_id = %input.pending_id,
-                            error = %e,
-                            "Failed to promote pending review; row stays pending"
-                        );
-                    }
-                }
-            }
-        }
-        ReviewAction::FragmentOnly => {
-            let fragment = nexus_creator_memory::review::create_fragment_from_review(input);
-            match insert_fragment_and_delete_pending(
-                pool,
-                ctx,
-                &fragment,
-                input.scope_id.as_deref(),
-                &input.pending_id,
-            )
-            .await
-            {
-                Ok(()) => counts.fragmented = 1,
-                Err(e) => {
-                    tracing::warn!(
-                        pending_id = %input.pending_id,
-                        error = %e,
-                        "Failed to create fragment and advance queue atomically; row stays pending"
-                    );
-                }
-            }
-        }
-        ReviewAction::Drop => match delete_pending_row(pool, ctx, &input.pending_id).await {
-            Ok(()) => counts.dropped = 1,
-            Err(e) => {
+    let decision = match action {
+        // Binding-local Character pending must stay binding-local: a
+        // Promote decision on a World-life (binding) scope is coerced to
+        // the fragment path so it retains binding provenance (blocking
+        // binding removal via `binding_has_local_memory`) and only becomes
+        // Character-shared after the explicit revision-checked fragment
+        // promotion. Shared Character scope and the whole Creator arm promote.
+        ReviewAction::PromoteToLongTerm if row.binding_local => fragment_decision(&row.input),
+        ReviewAction::PromoteToLongTerm => match promote_decision(&row.input, bearer).await {
+            Ok(decision) => decision,
+            Err(error) => {
                 tracing::warn!(
-                    pending_id = %input.pending_id,
-                    error = %e,
-                    "Failed to drop pending review; row stays pending"
+                    pending_id = %row.input.pending_id,
+                    error = %error,
+                    "Failed to build the promote decision; row stays pending"
                 );
+                return counts;
             }
         },
+        ReviewAction::FragmentOnly => fragment_decision(&row.input),
+        ReviewAction::Drop => json!({ "action": "drop" }),
         // MergeIntoExisting and TriggerSoulExperienceOnly are later features.
         _ => {
             tracing::debug!(
-                pending_id = %input.pending_id,
-                action = ?decision.action,
+                pending_id = %row.input.pending_id,
+                action = ?action,
                 "Skipping unimplemented review action"
+            );
+            return counts;
+        }
+    };
+
+    match memory
+        .review(&row.candidate_id, row.expected_revision, decision, section)
+        .await
+    {
+        Ok(()) => match action {
+            ReviewAction::Drop => counts.dropped = 1,
+            ReviewAction::PromoteToLongTerm if !row.binding_local => counts.promoted = 1,
+            _ => counts.fragmented = 1,
+        },
+        Err(error) => {
+            tracing::warn!(
+                pending_id = %row.input.pending_id,
+                error = %error,
+                "Failed to persist the review decision; row stays pending"
             );
         }
     }
@@ -417,200 +393,53 @@ async fn process_single_review_row(
     counts
 }
 
-/// Delete a consumed pending row from the bearer's table.
-///
-/// PR #240 finding 2: queue advancement is part of the reported result — a
-/// failed delete returns an error so the caller leaves the success counter
-/// untouched and the row visible as still pending.
-///
-/// A delete that affects zero rows is treated as success: the queue has
-/// already advanced (another consumer removed the row first).
-async fn delete_pending_row(
-    pool: &SqlitePool,
-    ctx: &MemoryPipelineCtx,
-    pending_id: &str,
-) -> CoreResult<()> {
-    match ctx.bearer_ref() {
-        MemoryBearerRef::Creator(_) => {
-            let pid = pending_id.to_string();
-            sqlx::query!(
-                "DELETE FROM memory_pending_review WHERE pending_id = ?",
-                pid
-            )
-            .execute(pool)
-            .await
-            .map_err(sqlx_internal)?;
-            Ok(())
-        }
-        MemoryBearerRef::Character {
-            owner_creator_id,
-            character_id,
-        } => nexus_local_db::delete_character_pending_review(
-            pool,
-            owner_creator_id,
-            character_id,
-            pending_id,
-        )
-        .await
-        .map_err(map_local_db_error)
-        .map(|_| ()),
-    }
+/// The §7.15 fragment decision: one `fact` record carrying the retained
+/// summary, keywords, TTL, session and pending provenance. The record inherits
+/// the candidate's immutable capture scope.
+fn fragment_decision(input: &nexus_creator_memory::review::PendingReviewInput) -> Value {
+    let fragment = nexus_creator_memory::review::create_fragment_from_review(input);
+    json!({
+        "action": "fragment",
+        "fragments": [{
+            "kind": "fact",
+            "content": {
+                "text": fragment.summary,
+                "structured": { "nexus_legacy": {
+                    "pending_id": input.pending_id,
+                    "session_id": fragment.session_id,
+                    "keywords": fragment.keywords,
+                    "ttl": fragment.ttl,
+                    "created_at": fragment.created_at,
+                }},
+            },
+        }],
+    })
 }
 
-/// Claim exactly one pending row in a transaction, then promote to
-/// long-term memory while the claim is uncommitted (PR #240 review round 3).
-///
-/// Recovery semantics (filesystem cannot join the SQLite transaction):
-/// - Stale/ghost input (zero-row claim): the transaction rolls back and NO
-///   file is written — fresh stale input is safe.
-/// - Filesystem/promote failure: the transaction rolls back, restoring the
-///   pending row for a later retry.
-/// - Commit failure after a successful file write: the row stays pending and
-///   the durable file (keyed by `session_id` via
-///   `check_session_already_promoted`) makes the next attempt hit
-///   `AlreadyPromoted`, which commits the claim without rewriting.
-async fn claim_pending_and_promote(
-    nexus_home: &std::path::Path,
-    pool: &SqlitePool,
-    ctx: &MemoryPipelineCtx,
+/// The §7.15 promote decision for shared Character and whole-Creator scope: the
+/// retained long-term body (passthrough summarizer, UNTRUSTED header included)
+/// under the task-kind-derived `nexus.<MemoryKind>` record kind.
+async fn promote_decision(
     input: &nexus_creator_memory::review::PendingReviewInput,
-) -> CoreResult<()> {
-    let mut tx = pool.begin().await.map_err(sqlx_internal)?;
-    let deleted = match ctx.bearer_ref() {
-        MemoryBearerRef::Creator(_) => {
-            nexus_local_db::delete_pending_review_in_tx(&mut tx, &input.pending_id)
-                .await
-                .map_err(map_local_db_error)?
-        }
-        MemoryBearerRef::Character {
-            character_id,
-            owner_creator_id,
-            ..
-        } => nexus_local_db::delete_character_pending_review_in_tx(
-            &mut tx,
-            owner_creator_id,
-            character_id,
-            &input.pending_id,
+    bearer: MemoryBearerRef<'_>,
+) -> CoreResult<Value> {
+    let summarizer = PassthroughSummarizer::new(bearer);
+    let body = summarizer
+        .summarize(
+            &input.session_id,
+            &input.task_kind,
+            &input.raw_digest,
+            input.scope_id.as_deref(),
         )
         .await
-        .map_err(map_local_db_error)?,
-    };
-    require_exactly_one_pending_delete(deleted, &input.pending_id)?;
-
-    let summarizer = PassthroughSummarizer::new(ctx.bearer_ref());
-    match nexus_creator_memory::review::promote_to_long_term(
-        nexus_home,
-        ctx.bearer_ref(),
-        input,
-        &summarizer,
-    )
-    .await
-    {
-        Ok(_) => tx.commit().await.map_err(sqlx_internal),
-        Err(MemoryError::AlreadyPromoted { .. }) => {
-            tracing::info!(
-                pending_id = %input.pending_id,
-                session_id = %input.session_id,
-                "Session already promoted by an earlier attempt; committing claim without rewriting"
-            );
-            tx.commit().await.map_err(sqlx_internal)
-        }
-        Err(e) => {
-            let _ = tx.rollback().await;
-            Err(internal_err("promote_to_long_term_failed", e))
-        }
-    }
-}
-
-/// PR #240 review round 2: the fragment+delete transaction requires the
-/// queue advance to consume exactly one pending row. A zero-row delete means
-/// the row was already consumed by a concurrent/stale run; the fragment
-/// insert must roll back with it so replays can never duplicate fragments.
-fn require_exactly_one_pending_delete(deleted: bool, pending_id: &str) -> CoreResult<()> {
-    if deleted {
-        Ok(())
-    } else {
-        Err(internal_err(
-            "pending_review_queue_advance_stale",
-            format!(
-                "pending review {pending_id} deleted zero rows (already consumed); rolling back fragment insert"
-            ),
-        ))
-    }
-}
-
-/// Insert a review fragment and advance the queue in one transaction.
-///
-/// PR #240 finding 2: fragment creation and pending-row deletion commit
-/// atomically, so a failed queue advance can no longer leave a duplicated
-/// fragment behind while the row stays pending.
-async fn insert_fragment_and_delete_pending(
-    pool: &SqlitePool,
-    ctx: &MemoryPipelineCtx,
-    fragment: &nexus_creator_memory::review::MemoryFragment,
-    scope_id: Option<&str>,
-    pending_id: &str,
-) -> CoreResult<()> {
-    let mut tx = pool.begin().await.map_err(sqlx_internal)?;
-    let result = async {
-        match ctx.bearer_ref() {
-            MemoryBearerRef::Creator(_) => {
-                let record = nexus_local_db::memory_fragment::MemoryFragmentRecord {
-                    fragment_id: fragment.fragment_id.clone(),
-                    session_id: fragment.session_id.clone(),
-                    creator_id: fragment.bearer_id.clone(),
-                    keywords: serde_json::to_string(&fragment.keywords).unwrap_or_default(),
-                    summary: fragment.summary.clone(),
-                    created_at: fragment.created_at.clone(),
-                    ttl: fragment.ttl.clone(),
-                    world_id: scope_id.map(str::to_string),
-                };
-                nexus_local_db::memory_fragment::create_fragment_in_tx(&mut tx, &record)
-                    .await
-                    .map_err(map_local_db_error)?;
-                let deleted = nexus_local_db::delete_pending_review_in_tx(&mut tx, pending_id)
-                    .await
-                    .map_err(map_local_db_error)?;
-                require_exactly_one_pending_delete(deleted, pending_id)?;
-            }
-            MemoryBearerRef::Character {
-                owner_creator_id,
-                character_id,
-            } => {
-                let record = nexus_local_db::NewCharacterMemoryFragment {
-                    fragment_id: fragment.fragment_id.clone(),
-                    session_id: fragment.session_id.clone(),
-                    character_id: (*character_id).to_string(),
-                    actor_world_binding_id: scope_id.map(str::to_string),
-                    keywords: serde_json::to_string(&fragment.keywords).unwrap_or_default(),
-                    summary: fragment.summary.clone(),
-                    created_at: fragment.created_at.clone(),
-                    ttl: fragment.ttl.clone(),
-                };
-                nexus_local_db::create_character_fragment_in_tx(&mut tx, owner_creator_id, &record)
-                    .await
-                    .map_err(map_local_db_error)?;
-                let deleted = nexus_local_db::delete_character_pending_review_in_tx(
-                    &mut tx,
-                    owner_creator_id,
-                    character_id,
-                    pending_id,
-                )
-                .await
-                .map_err(map_local_db_error)?;
-                require_exactly_one_pending_delete(deleted, pending_id)?;
-            }
-        }
-        Ok::<(), CoreError>(())
-    }
-    .await;
-    match result {
-        Ok(()) => tx.commit().await.map_err(sqlx_internal),
-        Err(err) => {
-            let _ = tx.rollback().await;
-            Err(err)
-        }
-    }
+        .map_err(|error| internal_err("promote_to_long_term_failed", error))?;
+    Ok(json!({
+        "action": "promote",
+        "kind": crate::memory_provider::policy::namespaced_record_kind(
+            nexus_creator_memory::review::task_kind_to_memory_kind(&input.task_kind),
+        ),
+        "content_override": { "text": body },
+    }))
 }
 
 /// Passthrough summarizer that returns the raw digest with a provenance

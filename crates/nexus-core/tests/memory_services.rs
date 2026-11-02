@@ -195,6 +195,26 @@ async fn count_where(pool: &SqlitePool, sql: &str) -> i64 {
     n
 }
 
+/// The provider `fact` record bodies of one subject, in insertion order.
+async fn provider_fact_bodies(pool: &SqlitePool, subject_id: &str) -> Vec<String> {
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT content_json FROM memory_records WHERE kind = 'fact' AND subject_id = ? \
+         ORDER BY created_at, record_id",
+    )
+    .bind(subject_id)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    rows.into_iter()
+        .map(|(content,)| {
+            serde_json::from_str::<serde_json::Value>(&content).unwrap()["text"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string()
+        })
+        .collect()
+}
+
 fn dto<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> T {
     serde_json::from_value(value).expect("wire-valid request DTO")
 }
@@ -439,10 +459,15 @@ async fn review_both_arms_share_classification_and_isolate_storage() {
     assert_eq!(char_out.fragmented, 1);
     assert_eq!(char_out.dropped, 1);
 
+    // Both queues drain through the provider: every candidate is adopted under
+    // the bridge's deterministic id and consumed in place, and the review writes
+    // provider records only — the legacy pending and fragment tables stay
+    // write-idle (compass D6).
     let pool = plain_pool(&env).await;
     assert_eq!(
         count_where(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
-        0
+        3,
+        "the Creator legacy queue is write-idle"
     );
     assert_eq!(
         count_where(
@@ -450,57 +475,65 @@ async fn review_both_arms_share_classification_and_isolate_storage() {
             "SELECT COUNT(*) FROM character_memory_pending_review"
         )
         .await,
+        3,
+        "the Character legacy queue is write-idle"
+    );
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM memory_fragments").await,
+        0,
+        "a review writes provider records, not legacy fragments"
+    );
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM character_memory_fragments").await,
         0
     );
-    assert_eq!(
-        count_where(
-            &pool,
-            &format!("SELECT COUNT(*) FROM memory_fragments WHERE creator_id = '{CREATOR}'")
+    let creator_subject = legacy::creator_subject_id(CREATOR);
+    let character_subject = legacy::character_subject_id(&chr);
+    for subject in [creator_subject.as_str(), character_subject.as_str()] {
+        let facts: Vec<(String,)> = sqlx::query_as(
+            "SELECT content_json FROM memory_records WHERE kind = 'fact' AND subject_id = ?",
         )
-        .await,
-        1
-    );
-    assert_eq!(
-        count_where(
-            &pool,
-            &format!("SELECT COUNT(*) FROM memory_fragments WHERE creator_id = '{OTHER}'")
+        .bind(subject)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            facts.len(),
+            1,
+            "one fragment record per subject ({subject})"
+        );
+        let promoted: Vec<(String,)> = sqlx::query_as(
+            "SELECT content_json FROM memory_records WHERE kind = 'nexus.story_summary' \
+             AND subject_id = ?",
         )
-        .await,
-        0,
-        "no fragment may cross to another creator"
-    );
-    assert_eq!(
-        count_where(
-            &pool,
-            &format!(
-                "SELECT COUNT(*) FROM character_memory_fragments WHERE character_id = '{chr}'"
-            )
-        )
-        .await,
-        1
-    );
+        .bind(subject)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            promoted.len(),
+            1,
+            "one promoted record per subject ({subject})"
+        );
+    }
     pool.close().await;
 
-    // The pipeline composes bearer paths off the nexus root (the same
-    // `state.nexus_home()` the daemon passed), not the raw user home.
-    let nexus_root = nexus_home_layout::nexus_root_from_home(&env.user_home);
-    let cdir = MemoryBearerRef::Creator(CREATOR).long_term_memory_dir(&nexus_root);
-    let hdir = MemoryBearerRef::Character {
-        owner_creator_id: CREATOR,
-        character_id: &chr,
+    // Every queue entry — promoted, fragmented and dropped alike — was consumed
+    // under the bridge's deterministic id on both arms.
+    for pending_id in ["c_p", "c_f", "c_d"] {
+        for candidate_id in [
+            legacy::pending_review_candidate_id(pending_id),
+            legacy::character_pending_review_candidate_id(pending_id),
+        ] {
+            assert_eq!(
+                adopted_candidate(&env, &candidate_id)
+                    .await
+                    .map(|(status, _)| status),
+                Some("consumed".to_string()),
+                "{candidate_id} is consumed by the drain"
+            );
+        }
     }
-    .long_term_memory_dir(&nexus_root);
-    assert_ne!(cdir, hdir);
-    assert_eq!(
-        std::fs::read_dir(&cdir).unwrap().count(),
-        1,
-        "creator memory dir"
-    );
-    assert_eq!(
-        std::fs::read_dir(&hdir).unwrap().count(),
-        1,
-        "character memory dir"
-    );
 }
 
 fn json_req(binding_id: &str, pending_id: &str) -> serde_json::Value {
@@ -851,27 +884,6 @@ async fn seed_creator_fragments(env: &Env, count: usize) {
     pool.close().await;
 }
 
-/// Pre-insert the fragment id a later `FragmentOnly` action mints for
-/// `pending_id` (`frag_{pending_id}`), so that action collides on the primary
-/// key and fails, leaving the pending row in place.
-async fn block_fragment_creation(pool: &SqlitePool, pending_id: &str) {
-    nexus_local_db::memory_fragment::create_fragment(
-        pool,
-        &nexus_local_db::memory_fragment::MemoryFragmentRecord {
-            fragment_id: format!("frag_{pending_id}"),
-            session_id: "sess_block".to_string(),
-            creator_id: CREATOR.to_string(),
-            keywords: "[]".to_string(),
-            summary: "blocker".to_string(),
-            created_at: "2026-01-01T00:00:00Z".to_string(),
-            ttl: None,
-            world_id: None,
-        },
-    )
-    .await
-    .unwrap();
-}
-
 fn creator_review_request() -> ReviewRequest {
     dto::<ReviewRequest>(serde_json::json!({ "creator_id": CREATOR }))
 }
@@ -1056,33 +1068,58 @@ async fn retained_creator_review_drain_is_bounded_and_keeps_remaining_rows() {
     );
     pool.close().await;
 
-    // One bounded call: at most the batch limit, and more rows signalled.
+    // One bounded call: never more than the batch limit, and more rows
+    // signalled. The provider commits a durable record set per row, so a call
+    // can also stop at its own deadline; partial progress is the retained
+    // contract and repeated calls drain the queue.
     let first = core
         .review_memory(&principal, creator_review_request())
         .await
         .unwrap();
-    assert_eq!(
-        first.processed,
-        Some(50),
-        "one call processes the batch bound"
+    let first_processed = first.processed.expect("processed count");
+    assert!(
+        first_processed > 0 && first_processed <= 50,
+        "one call is bounded by the batch bound, got {first_processed}"
     );
     assert_eq!(
         first.has_more,
         Some(true),
         "remaining rows must be signalled"
     );
-    assert_eq!(first.fragmented, 50);
-    assert_eq!(first.promoted, 0);
-    assert_eq!(first.dropped, 0);
+    assert_eq!(first.promoted + first.dropped, 0);
+    assert!(
+        first.fragmented <= first_processed,
+        "an attempt the deadline stopped counts as processed but not completed"
+    );
 
-    // The remainder drains and the drain reports completion.
-    let second = core
-        .review_memory(&principal, creator_review_request())
-        .await
-        .unwrap();
-    assert_eq!(second.processed, Some(5), "the second call drains the tail");
-    assert_eq!(second.has_more, Some(false));
-    assert_eq!(second.fragmented, 5);
+    // Repeated calls drain the remainder; every call stays bounded and the
+    // drain reports completion once the queue is empty. `processed` counts
+    // attempts, so a deadline-stopped row is retried by the next call and
+    // completes exactly once.
+    let mut fragmented = first.fragmented;
+    let mut completed = false;
+    for _ in 0..=DRAIN_TOTAL {
+        let next = core
+            .review_memory(&principal, creator_review_request())
+            .await
+            .unwrap();
+        assert!(
+            next.processed.expect("processed count") <= 50,
+            "every call is bounded"
+        );
+        assert_eq!(next.promoted + next.dropped, 0);
+        fragmented += next.fragmented;
+        if next.has_more == Some(false) {
+            completed = true;
+            break;
+        }
+    }
+    assert!(completed, "the drain must report completion");
+    assert_eq!(
+        fragmented,
+        i64::try_from(DRAIN_TOTAL).unwrap(),
+        "every seeded row completes exactly once"
+    );
 
     // A call on the empty queue reports zero work and completion.
     let third = core
@@ -1093,16 +1130,30 @@ async fn retained_creator_review_drain_is_bounded_and_keeps_remaining_rows() {
     assert_eq!(third.has_more, Some(false));
     assert_eq!(third.promoted + third.fragmented + third.dropped, 0);
 
-    // No row was lost and none was processed twice: the queue is empty and
-    // exactly one fragment exists per seeded row.
+    // No row was lost and none was processed twice: the provider queue is empty,
+    // exactly one fragment record exists per seeded candidate, and the legacy
+    // table never changed (compass D6).
     let pool = plain_pool(&env).await;
     assert_eq!(
         count_where(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
-        0,
-        "the queue is fully drained"
+        i64::try_from(DRAIN_TOTAL).unwrap(),
+        "the legacy queue stays write-idle"
     );
     assert_eq!(
-        count_where(&pool, "SELECT COUNT(*) FROM memory_fragments").await,
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM memory_candidates WHERE status = 'pending'"
+        )
+        .await,
+        0,
+        "every provider candidate was consumed"
+    );
+    assert_eq!(
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM memory_records WHERE kind = 'fact'"
+        )
+        .await,
         i64::try_from(DRAIN_TOTAL).unwrap(),
         "one fragment per seeded row, no duplicate insert"
     );
@@ -1110,91 +1161,91 @@ async fn retained_creator_review_drain_is_bounded_and_keeps_remaining_rows() {
 }
 
 /// Ported from the daemon W-QC3-001 drain-completion regressions
-/// (`memory_review_fragments_api.rs`): `has_more` reflects whether pending rows
-/// REMAIN, not whether rows were attempted. A row whose action fails is not
-/// deleted, so `has_more` stays true (never a false "Review complete") and the
-/// fragment insert that could not consume exactly one pending row is rolled
-/// back rather than duplicated.
+/// (`memory_review_fragments_api.rs`): `has_more` reflects whether candidates
+/// REMAIN, not whether rows were attempted. A row whose decision fails at its
+/// commit boundary stays pending, so `has_more` stays true (never a false
+/// "Review complete"), the other rows still complete, and the retried row is
+/// consumed exactly once.
 #[tokio::test]
 async fn retained_creator_review_row_failure_keeps_has_more_true() {
-    // Only pending row fails: the serialized call re-inspects it, reports
-    // has_more, counts nothing, and never drops it.
     let env = seed_env().await;
     let (core, principal) = open_core(&env).await;
-    seed_creator_pending(&env, "pending_blocked", 1).await;
-    let pool = plain_pool(&env).await;
-    block_fragment_creation(&pool, "pending_blocked_000").await;
-    pool.close().await;
+    seed_creator_pending(&env, "pending_blocked", 2).await;
+    let pinned = core.memory_provider_for_test().expect("pinned provider");
 
-    for call in 1..=3 {
-        let out = core
-            .review_memory(&principal, creator_review_request())
-            .await
-            .unwrap();
-        assert_eq!(
-            out.processed,
-            Some(1),
-            "call {call}: the row is re-inspected"
-        );
-        assert_eq!(
-            out.has_more,
-            Some(true),
-            "call {call}: has_more must stay true while a row remains"
-        );
-        assert_eq!(out.promoted, 0, "call {call}");
-        assert_eq!(out.fragmented, 0, "call {call}: nothing completed");
-        assert_eq!(out.dropped, 0, "call {call}");
-        let pool = plain_pool(&env).await;
-        assert_eq!(
-            count_where(
-                &pool,
-                "SELECT COUNT(*) FROM memory_pending_review WHERE pending_id = 'pending_blocked_000'"
-            )
-            .await,
-            1,
-            "call {call}: the failed row must never be dropped"
-        );
-        assert_eq!(
-            count_where(&pool, "SELECT COUNT(*) FROM memory_fragments").await,
-            1,
-            "call {call}: the blocked fragment is never duplicated"
-        );
-        pool.close().await;
-    }
-
-    // Final-row failure inside a batch: every other row completes, the blocked
-    // row (oldest, therefore processed last) stays pending and has_more is true.
-    let env = seed_env().await;
-    let (core, principal) = open_core(&env).await;
-    seed_creator_pending(&env, "pending_blocked", 4).await;
-    let pool = plain_pool(&env).await;
-    block_fragment_creation(&pool, "pending_blocked_000").await;
-    pool.close().await;
-
-    let out = core
-        .review_memory(&principal, creator_review_request())
+    // Park the drain after its re-check (the adapter is open, the slice is
+    // selected) and arm the §14.3 commit-boundary fault: the next row's decision
+    // fails before its COMMIT and leaves no effect.
+    let (entered, release) = arm_review_pause(&core, MemoryReviewPause::AfterRecheck);
+    let drain = tokio::spawn({
+        let core = core.clone();
+        let principal = principal.clone();
+        async move {
+            core.review_memory(&principal, creator_review_request())
+                .await
+        }
+    });
+    entered.notified().await;
+    pinned.inject_commit_fault(false);
+    release.notify_one();
+    let out = drain
         .await
-        .unwrap();
-    assert_eq!(out.processed, Some(4), "all four rows were inspected");
-    assert_eq!(out.fragmented, 3, "only the blocked row failed");
+        .unwrap()
+        .expect("the batch survives one failed row");
+    assert_eq!(out.processed, Some(2), "both rows were inspected");
+    assert_eq!(out.fragmented, 1, "the other row completed");
     assert_eq!(
         out.has_more,
         Some(true),
-        "has_more must be true when the final row in the batch remains pending"
+        "has_more must stay true while a row remains"
+    );
+    assert_eq!(
+        core.count_pending_reviews(&principal).await.unwrap().count,
+        1,
+        "the failed row is still queued"
     );
     let pool = plain_pool(&env).await;
     assert_eq!(
-        count_where(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
+        count_where(&pool, "SELECT COUNT(*) FROM memory_candidates").await,
         1,
-        "only the failed row remains pending"
+        "only the completed row was adopted and consumed"
     );
     assert_eq!(
         count_where(
             &pool,
-            "SELECT COUNT(*) FROM memory_pending_review WHERE pending_id = 'pending_blocked_000'"
+            "SELECT COUNT(*) FROM memory_records WHERE kind = 'fact'"
         )
         .await,
-        1
+        1,
+        "only the completed row recorded a fragment"
+    );
+    pool.close().await;
+
+    // The retry classifies the remaining row and drains the queue.
+    let retried = core
+        .review_memory(&principal, creator_review_request())
+        .await
+        .expect("the retry drains the remaining row");
+    assert_eq!(retried.processed, Some(1));
+    assert_eq!(
+        retried.fragmented, 1,
+        "the retried row completes exactly once"
+    );
+    assert_eq!(retried.has_more, Some(false));
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM memory_records WHERE kind = 'fact'"
+        )
+        .await,
+        2,
+        "no fragment is duplicated and none is lost"
+    );
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
+        2,
+        "the legacy queue was never written"
     );
     pool.close().await;
 }
@@ -1560,28 +1611,52 @@ async fn retained_character_review_batch_is_bounded_and_reports_remaining() {
         )
         .await
         .unwrap();
-    assert_eq!(
-        first.processed,
-        Some(50),
-        "one call processes the batch bound"
+    let first_processed = first.processed.expect("processed count");
+    assert!(
+        first_processed > 0 && first_processed <= 50,
+        "one call is bounded by the batch bound, got {first_processed}"
     );
     assert_eq!(
         first.has_more,
         Some(true),
         "remaining rows must be signalled"
     );
-    assert_eq!(first.dropped, 50);
+    assert!(
+        first.dropped <= first_processed,
+        "an attempt the deadline stopped counts as processed but not completed"
+    );
 
-    let second = core
-        .review_character_memory(
-            &principal,
-            chr.clone(),
-            dto::<ReviewCharacterMemoryRequest>(serde_json::json!({})),
-        )
-        .await
-        .unwrap();
-    assert_eq!(second.processed, Some(3), "the second call drains the tail");
-    assert_eq!(second.has_more, Some(false));
+    // Repeated calls drain the remainder; every call stays bounded and the
+    // drain reports completion once the queue is empty. `processed` counts
+    // attempts, so a deadline-stopped row is retried by the next call and
+    // completes exactly once.
+    let mut dropped = first.dropped;
+    let mut completed = false;
+    for _ in 0..=TOTAL {
+        let next = core
+            .review_character_memory(
+                &principal,
+                chr.clone(),
+                dto::<ReviewCharacterMemoryRequest>(serde_json::json!({})),
+            )
+            .await
+            .unwrap();
+        assert!(
+            next.processed.expect("processed count") <= 50,
+            "every call is bounded"
+        );
+        dropped += next.dropped;
+        if next.has_more == Some(false) {
+            completed = true;
+            break;
+        }
+    }
+    assert!(completed, "the drain must report completion");
+    assert_eq!(
+        dropped,
+        i64::try_from(TOTAL).unwrap(),
+        "every seeded row completes exactly once"
+    );
 
     let third = core
         .review_character_memory(
@@ -1601,13 +1676,22 @@ async fn retained_character_review_batch_is_bounded_and_reports_remaining() {
             "SELECT COUNT(*) FROM character_memory_pending_review"
         )
         .await,
-        0,
-        "the queue is fully drained"
+        i64::try_from(TOTAL).unwrap(),
+        "the legacy queue stays write-idle"
     );
     assert_eq!(
         count_where(&pool, "SELECT COUNT(*) FROM character_memory_fragments").await,
         0,
         "dropped digests create no fragments"
+    );
+    assert_eq!(
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM memory_candidates WHERE status = 'pending'"
+        )
+        .await,
+        0,
+        "every provider candidate was consumed"
     );
     pool.close().await;
 }
@@ -3122,18 +3206,15 @@ async fn dismissed_creator_digest_is_never_classified_by_the_review_drain() {
     );
 
     let pool = plain_pool(&env).await;
-    let summaries: Vec<String> = sqlx::query_as("SELECT summary FROM memory_fragments")
-        .fetch_all(&pool)
-        .await
-        .unwrap()
-        .into_iter()
-        .map(|row: (String,)| row.0)
-        .collect();
-    assert_eq!(summaries, vec![FRAGMENT_DIGEST.to_string()]);
+    assert_eq!(
+        provider_fact_bodies(&pool, &legacy::creator_subject_id(CREATOR)).await,
+        vec![FRAGMENT_DIGEST.to_string()],
+        "only the kept digest is classified"
+    );
     assert_eq!(
         count_where(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
-        1,
-        "only the dismissed legacy row is left, untouched"
+        2,
+        "the drain writes no legacy row; both queued rows stay untouched"
     );
     pool.close().await;
 }
@@ -3179,22 +3260,19 @@ async fn dismissed_character_digest_is_never_classified_by_the_review_drain() {
     assert_eq!(reviewed.has_more, Some(false));
 
     let pool = plain_pool(&env).await;
-    let summaries: Vec<String> = sqlx::query_as("SELECT summary FROM character_memory_fragments")
-        .fetch_all(&pool)
-        .await
-        .unwrap()
-        .into_iter()
-        .map(|row: (String,)| row.0)
-        .collect();
-    assert_eq!(summaries, vec![FRAGMENT_DIGEST.to_string()]);
+    assert_eq!(
+        provider_fact_bodies(&pool, &legacy::character_subject_id(&chr)).await,
+        vec![FRAGMENT_DIGEST.to_string()],
+        "only the kept digest is classified"
+    );
     assert_eq!(
         count_where(
             &pool,
             "SELECT COUNT(*) FROM character_memory_pending_review"
         )
         .await,
-        1,
-        "the dismissed legacy row survives untouched; the reviewed one is consumed"
+        2,
+        "the drain writes no legacy row; both queued rows stay untouched"
     );
     pool.close().await;
 }
@@ -3685,18 +3763,14 @@ async fn creator_dismissal_cannot_commit_inside_the_review_decision() {
     );
 
     let pool = plain_pool(&env).await;
-    let summaries: Vec<String> = sqlx::query_as("SELECT summary FROM memory_fragments")
-        .fetch_all(&pool)
-        .await
-        .unwrap()
-        .into_iter()
-        .map(|row: (String,)| row.0)
-        .collect();
-    assert_eq!(summaries, vec![FRAGMENT_DIGEST.to_string()]);
+    assert_eq!(
+        provider_fact_bodies(&pool, &legacy::creator_subject_id(CREATOR)).await,
+        vec![FRAGMENT_DIGEST.to_string()]
+    );
     assert_eq!(
         count_where(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
-        0,
-        "the classified row is consumed by the drain"
+        1,
+        "the drain consumes the provider candidate, never the legacy row"
     );
     pool.close().await;
 }
@@ -3791,21 +3865,18 @@ async fn character_dismissal_cannot_commit_inside_the_review_decision() {
     assert!(provider.disposition_available(&subject));
 
     let pool = plain_pool(&env).await;
-    let summaries: Vec<String> = sqlx::query_as("SELECT summary FROM character_memory_fragments")
-        .fetch_all(&pool)
-        .await
-        .unwrap()
-        .into_iter()
-        .map(|row: (String,)| row.0)
-        .collect();
-    assert_eq!(summaries, vec![FRAGMENT_DIGEST.to_string()]);
+    assert_eq!(
+        provider_fact_bodies(&pool, &legacy::character_subject_id(&chr)).await,
+        vec![FRAGMENT_DIGEST.to_string()]
+    );
     assert_eq!(
         count_where(
             &pool,
             "SELECT COUNT(*) FROM character_memory_pending_review"
         )
         .await,
-        0
+        1,
+        "the drain consumes the provider candidate, never the legacy row"
     );
     pool.close().await;
 }

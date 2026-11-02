@@ -1169,6 +1169,135 @@ impl LocalMemoryProvider {
         }
     }
 
+    /// NXM-8: review one bearer's candidate while the caller already holds that
+    /// bearer's memory-disposition section.
+    ///
+    /// The review drain is the caller: it takes [`MemoryDisposition`] once for
+    /// the whole batch ([`Self::review_disposition`]) and keeps it across its
+    /// check, classification and persistence, so this seam must not re-take the
+    /// same section — a `flock` contends per open file description, so a second
+    /// acquisition in the same task would deadlock against itself. The section
+    /// parameter is the proof that it is held.
+    ///
+    /// A legacy-derived id has no provider row; the store adopts the projection
+    /// under the bridge's deterministic id inside the same guarded transaction
+    /// that consumes it (NXM-5 D13's mutation-time adoption), so no adopted
+    /// pending row can be left behind. A row the provider already owns is
+    /// consumed as it is. `subject_id` is the bearer whose section the caller
+    /// holds: a candidate owned by another subject is `NOT_AUTHORIZED`.
+    pub async fn review_legacy_candidate(
+        &self,
+        principal: &schemas::Principal,
+        subject_id: &str,
+        request: schemas::MemoryCandidatesReviewRequest,
+        _section: &MemoryDisposition,
+    ) -> SpokeResult<schemas::MemoryCandidatesReviewResponse> {
+        if let SpokeResult::Reject(reject) = validate_memory_candidates_review(&request) {
+            return deny(&ProviderError::InvalidInput {
+                field: "decision".to_string(),
+                reason: reject.message,
+            });
+        }
+        self.review_committed(principal_id(principal), &request, Some(subject_id))
+            .await
+    }
+
+    /// §7.15 admission and decision projection, shared by the wire review (which
+    /// took the candidate's section) and the bearer drain's review (which holds
+    /// the bearer's own section and names the subject it may adopt under).
+    async fn review_committed(
+        &self,
+        principal_id: &str,
+        request: &schemas::MemoryCandidatesReviewRequest,
+        adopt_subject: Option<&str>,
+    ) -> SpokeResult<schemas::MemoryCandidatesReviewResponse> {
+        use schemas::memory_candidates_review_request::Decision;
+
+        let op = OP_CANDIDATES_REVIEW;
+        let digest = match payload_digest(op, request) {
+            Ok(digest) => digest,
+            Err(error) => return deny(&error),
+        };
+        let ctx = OpContext {
+            space_id: request.space_id.as_str(),
+            requester_principal_id: principal_id,
+            op,
+            idempotency_key: Some(request.idempotency_key.as_str()),
+            payload_digest: &digest,
+        };
+        // §7.15: `review` *and* `records_write`, both covering the candidate's
+        // capture scope — created records inherit that placement verbatim.
+        let admission = Admission {
+            op,
+            space_id: request.space_id.as_str(),
+            principal_id,
+            coverage: Coverage::Candidate {
+                candidate_id: request.candidate_id.as_str(),
+                capabilities: &["review", "records_write"],
+            },
+            issuance: None,
+            subject_gate: None,
+            placement_gate: None,
+            freeze_gated: true,
+        };
+        let override_content = match &request.decision {
+            Decision::Promote {
+                content_override: Some(content),
+                ..
+            } => match to_json(content, "decision content_override") {
+                Ok(content) => Some(content),
+                Err(error) => return deny(&error),
+            },
+            _ => None,
+        };
+        let fragments: Vec<(String, Value)> = match &request.decision {
+            Decision::Fragment { fragments } => {
+                let mut built = Vec::with_capacity(fragments.len());
+                for fragment in fragments {
+                    match to_json(&fragment.content, "fragment content") {
+                        Ok(content) => built.push((fragment.kind.as_str().to_string(), content)),
+                        Err(error) => return deny(&error),
+                    }
+                }
+                built
+            }
+            _ => Vec::new(),
+        };
+        let decision = match &request.decision {
+            Decision::Promote { kind, .. } => ReviewDecision::Promote {
+                kind: kind.as_ref().map(|kind| kind.as_str()),
+                content: override_content.as_ref(),
+            },
+            Decision::Fragment { .. } => ReviewDecision::Fragment { items: &fragments },
+            Decision::Drop { .. } => ReviewDecision::Drop,
+        };
+        let revision = expected_revision(request.expected_revision);
+        let candidate_id = request.candidate_id.as_str();
+        let consumed = match adopt_subject {
+            Some(subject_id) => {
+                self.store
+                    .review_legacy_candidate(
+                        &ctx,
+                        &admission,
+                        candidate_id,
+                        subject_id,
+                        revision,
+                        &decision,
+                    )
+                    .await
+            }
+            None => {
+                self.store
+                    .review_candidate(&ctx, &admission, candidate_id, revision, &decision)
+                    .await
+            }
+        };
+        match consumed {
+            Ok(receipt) => settle_receipt(&receipt),
+            Err(error) => deny(&store_error(error)),
+        }
+    }
+
     /// The disposition section of the bearer that owns one provider-native
     /// candidate, or `None` when this store holds no such row (NXM-5 Task 2 fix
     /// round 3, finding F1).
@@ -1322,6 +1451,118 @@ impl LocalMemoryProvider {
             Ok(receipt) => settle_receipt(&receipt),
             Err(error) => deny(&store_error(error)),
         }
+    }
+
+    /// §7.21 explicit promotion of one Character fragment addressed by the id the
+    /// E4 DTO serves.
+    ///
+    /// A listed legacy fragment's id is the legacy column, not a provider record
+    /// id: the bridge indexes that row under its deterministic external id
+    /// (`lgc:character_memory_fragments:<id>`), so the promotion resolves the id
+    /// through the bridge and, when the row is still a projection, adopts it
+    /// inside the promotion's own guarded transaction (R4-F1; NXM-5 D13's
+    /// mutation-time adoption, reused for records). `subject_id` is the bearer
+    /// whose activity lease the caller holds: a record owned by another subject,
+    /// or one that is not a `fact` fragment, is refused before any write
+    /// (R4-F2).
+    ///
+    /// # Refusals
+    /// `NOT_FOUND` when nothing resolves to the id, `NOT_AUTHORIZED` when the
+    /// record belongs to another subject or is not a fragment, `REVISION_CONFLICT`
+    /// when the CAS cannot land, and the admission codes otherwise.
+    pub async fn promote_character_fragment(
+        &self,
+        principal: &schemas::Principal,
+        subject_id: &str,
+        record_id: &str,
+        expected_revision: u64,
+        idempotency_key: &str,
+    ) -> SpokeResult<schemas::MemoryRecordsPromoteResponse> {
+        let principal_id = principal_id(principal);
+        let op = OP_RECORDS_PROMOTE;
+        let digest = match jcs_sha256_hex(&json!({
+            "record_id": record_id,
+            "expected_revision": expected_revision,
+            "idempotency_key": idempotency_key,
+        })) {
+            SpokeResult::Ok(digest) => digest,
+            SpokeResult::Reject(reject) => {
+                return deny(&ProviderError::Internal(reject.message));
+            }
+        };
+        let ctx = OpContext {
+            space_id: &self.space_id,
+            requester_principal_id: principal_id,
+            op,
+            idempotency_key: Some(idempotency_key),
+            payload_digest: &digest,
+        };
+        let target = Placement {
+            visibility: Placement::SHARED,
+            context_id: None,
+        };
+        // §7.21: `promote` + `records_write` over BOTH placements.
+        let admission = Admission {
+            op,
+            space_id: &self.space_id,
+            principal_id,
+            coverage: Coverage::Record {
+                record_id,
+                capabilities: &["promote", "records_write"],
+                target: Some(target),
+            },
+            issuance: None,
+            subject_gate: None,
+            placement_gate: None,
+            freeze_gated: true,
+        };
+        match self
+            .store
+            .promote_record(
+                &ctx,
+                &admission,
+                record_id,
+                i64::try_from(expected_revision).unwrap_or(i64::MAX),
+                target,
+                Some(subject_id),
+            )
+            .await
+        {
+            Ok(receipt) => settle_receipt(&receipt),
+            Err(error) => deny(&store_error(error)),
+        }
+    }
+
+    /// R4-F3 round 2: the placement a committed Character-fragment promotion
+    /// left behind, while the caller's SOUL-narrative invalidation has not
+    /// succeeded yet.
+    ///
+    /// The promotion's own transaction wrote it ([`Self::promote_character_fragment`]),
+    /// so a retry reads the scope the record actually left instead of inferring
+    /// one from the record (its scope is the target now) or its provenance (a
+    /// client claim). Cleared by [`Self::finish_soul_invalidation`].
+    ///
+    /// # Errors
+    /// [`CoreError::Internal`] when the workspace database cannot be read.
+    pub async fn soul_invalidation_binding(&self, record_id: &str) -> CoreResult<Option<String>> {
+        self.store
+            .soul_invalidation_binding(&self.space_id, record_id)
+            .await
+            .map_err(store_error)
+            .map_err(to_core_error)
+    }
+
+    /// Clear the recovery row once the invalidation it names ran; a repeated
+    /// clear is a no-op.
+    ///
+    /// # Errors
+    /// [`CoreError::Internal`] when the workspace database cannot be written.
+    pub async fn finish_soul_invalidation(&self, record_id: &str) -> CoreResult<()> {
+        self.store
+            .clear_soul_invalidation(&self.space_id, record_id)
+            .await
+            .map_err(store_error)
+            .map_err(to_core_error)
     }
 }
 
@@ -2280,9 +2521,6 @@ impl MemoryPort for LocalMemoryProvider {
         principal: &schemas::Principal,
         request: schemas::MemoryCandidatesReviewRequest,
     ) -> SpokeResult<schemas::MemoryCandidatesReviewResponse> {
-        use schemas::memory_candidates_review_request::Decision;
-
-        let principal_id = principal_id(principal);
         if let SpokeResult::Reject(reject) = validate_memory_candidates_review(&request) {
             return deny(&ProviderError::InvalidInput {
                 field: "decision".to_string(),
@@ -2299,78 +2537,8 @@ impl MemoryPort for LocalMemoryProvider {
             Ok(section) => section,
             Err(error) => return deny(&error),
         };
-        let op = OP_CANDIDATES_REVIEW;
-        let digest = match payload_digest(op, &request) {
-            Ok(digest) => digest,
-            Err(error) => return deny(&error),
-        };
-        let ctx = OpContext {
-            space_id: request.space_id.as_str(),
-            requester_principal_id: principal_id,
-            op,
-            idempotency_key: Some(request.idempotency_key.as_str()),
-            payload_digest: &digest,
-        };
-        // §7.15: `review` *and* `records_write`, both covering the candidate's
-        // capture scope — created records inherit that placement verbatim.
-        let admission = Admission {
-            op,
-            space_id: request.space_id.as_str(),
-            principal_id,
-            coverage: Coverage::Candidate {
-                candidate_id: request.candidate_id.as_str(),
-                capabilities: &["review", "records_write"],
-            },
-            issuance: None,
-            subject_gate: None,
-            placement_gate: None,
-            freeze_gated: true,
-        };
-        let override_content = match &request.decision {
-            Decision::Promote {
-                content_override: Some(content),
-                ..
-            } => match to_json(content, "decision content_override") {
-                Ok(content) => Some(content),
-                Err(error) => return deny(&error),
-            },
-            _ => None,
-        };
-        let fragments: Vec<(String, Value)> = match &request.decision {
-            Decision::Fragment { fragments } => {
-                let mut built = Vec::with_capacity(fragments.len());
-                for fragment in fragments {
-                    match to_json(&fragment.content, "fragment content") {
-                        Ok(content) => built.push((fragment.kind.as_str().to_string(), content)),
-                        Err(error) => return deny(&error),
-                    }
-                }
-                built
-            }
-            _ => Vec::new(),
-        };
-        let decision = match &request.decision {
-            Decision::Promote { kind, .. } => ReviewDecision::Promote {
-                kind: kind.as_ref().map(|kind| kind.as_str()),
-                content: override_content.as_ref(),
-            },
-            Decision::Fragment { .. } => ReviewDecision::Fragment { items: &fragments },
-            Decision::Drop { .. } => ReviewDecision::Drop,
-        };
-        match self
-            .store
-            .review_candidate(
-                &ctx,
-                &admission,
-                request.candidate_id.as_str(),
-                expected_revision(request.expected_revision),
-                &decision,
-            )
+        self.review_committed(principal_id(principal), &request, None)
             .await
-        {
-            Ok(receipt) => settle_receipt(&receipt),
-            Err(error) => deny(&store_error(error)),
-        }
     }
 
     async fn create_record(
@@ -2789,6 +2957,7 @@ impl MemoryPort for LocalMemoryProvider {
                 request.record_id.as_str(),
                 expected_revision(request.expected_revision),
                 target,
+                None,
             )
             .await
         {
