@@ -457,7 +457,7 @@ fn stage0_memory(record: &RetainedRecord) -> Option<LongTermMemory> {
                 .collect()
         })
         .unwrap_or_default();
-    memory.body = live.content.text.clone();
+    memory.body.clone_from(&live.content.text);
     Some(memory)
 }
 

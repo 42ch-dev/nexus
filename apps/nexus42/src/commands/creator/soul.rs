@@ -71,6 +71,7 @@ fn soul_not_found(creator_id: &str) -> CliError {
 
 /// Map a SOUL document failure onto the retained `Memory error:` envelope the
 /// file-backed leaf rendered.
+#[allow(clippy::needless_pass_by_value)] // a `map_err` adapter takes the error by value
 fn soul_error(error: MemoryError) -> CliError {
     CliError::Other(format!("Memory error: {error}"))
 }

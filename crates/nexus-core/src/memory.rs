@@ -1052,11 +1052,10 @@ impl CoreService {
             .unwrap_or("unknown")
             .to_string();
         let raw_digest = request.raw_digest.as_str().to_string();
-        let created_at = request
-            .created_at
-            .as_deref()
-            .map(str::to_string)
-            .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+        let created_at = request.created_at.as_deref().map_or_else(
+            || chrono::Utc::now().to_rfc3339(),
+            str::to_string,
+        );
         validate_capture_fields(
             &pending_id,
             &session_id,
@@ -1334,40 +1333,37 @@ impl CoreService {
         let memory = self.creator_memory_writer(principal).await?;
         let existing = memory.memory_by_slug(PERSONALITY_MEMORY_SLUG).await?;
         let key = creator_memory_key("personality", PERSONALITY_MEMORY_SLUG, personality);
-        let memory_id = match &existing {
-            Some(record) => {
-                let (record_id, revision) = creator_record_identity(record)?;
-                let (memory_id, _, _) = creator_memory_identity(record);
-                let content = creator_memory_content(
-                    PERSONALITY_MEMORY_SLUG,
-                    "personality_core",
-                    &memory_id,
-                    personality,
-                    &[],
-                );
-                memory
-                    .update_memory_record(&record_id, revision, content, &key)
-                    .await?;
-                memory_id
-            }
-            None => {
-                let memory_id = mint_creator_memory_id();
-                let content = creator_memory_content(
-                    PERSONALITY_MEMORY_SLUG,
-                    "personality_core",
-                    &memory_id,
-                    personality,
-                    &[],
-                );
-                memory
-                    .create_memory_record(
-                        &policy::namespaced_record_kind("personality_core"),
-                        content,
-                        &key,
-                    )
-                    .await?;
-                memory_id
-            }
+        let memory_id = if let Some(record) = &existing {
+            let (record_id, revision) = creator_record_identity(record)?;
+            let (memory_id, _, _) = creator_memory_identity(record);
+            let content = creator_memory_content(
+                PERSONALITY_MEMORY_SLUG,
+                "personality_core",
+                &memory_id,
+                personality,
+                &[],
+            );
+            memory
+                .update_memory_record(&record_id, revision, content, &key)
+                .await?;
+            memory_id
+        } else {
+            let memory_id = mint_creator_memory_id();
+            let content = creator_memory_content(
+                PERSONALITY_MEMORY_SLUG,
+                "personality_core",
+                &memory_id,
+                personality,
+                &[],
+            );
+            memory
+                .create_memory_record(
+                    &policy::namespaced_record_kind("personality_core"),
+                    content,
+                    &key,
+                )
+                .await?;
+            memory_id
         };
         let record = memory
             .memory_by_slug(PERSONALITY_MEMORY_SLUG)
