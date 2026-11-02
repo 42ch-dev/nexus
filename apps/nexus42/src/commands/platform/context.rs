@@ -376,8 +376,9 @@ async fn build_stage0_from_local(
                         "SOUL.md not found for creator '{creator_id}'."
                     ))
                 })?;
-            let document = SoulDocument::parse(&soul.document.body)
-                .map_err(|error| crate::errors::CliError::Other(format!("Memory error: {error}")))?;
+            let document = SoulDocument::parse(&soul.document.body).map_err(|error| {
+                crate::errors::CliError::Other(format!("Memory error: {error}"))
+            })?;
             let records = core
                 .list_creator_memories(principal)
                 .await

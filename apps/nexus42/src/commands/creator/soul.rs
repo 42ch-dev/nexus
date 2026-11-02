@@ -189,8 +189,8 @@ async fn push_personality(config: &CliConfig, creator_id: &str) -> Result<()> {
             .map_err(map_core_error)
     })
     .await?;
-    let (memory_id, kind) = memory_identity(&record)
-        .unwrap_or_else(|| (String::new(), "personality_core".to_string()));
+    let (memory_id, kind) =
+        memory_identity(&record).unwrap_or_else(|| (String::new(), "personality_core".to_string()));
 
     println!("Personality pushed to long-term memory for creator '{creator_id}'.");
     println!("  Memory ID: {memory_id}");

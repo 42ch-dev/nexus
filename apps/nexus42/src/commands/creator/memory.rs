@@ -537,7 +537,6 @@ async fn capture(
     ))
 }
 
-
 /// Page size for the memory list/pending reads.
 ///
 /// The daemon adapter's `DEFAULT_QUERY_LIMIT` (`resolve_query_limit` on an
