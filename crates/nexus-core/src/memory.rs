@@ -126,6 +126,9 @@ const MEMORY_SPACE_ID: &str = crate::memory_provider::DEFAULT_SPACE_ID;
 /// advertised `max_page_size`, so a legacy DTO never names a bigger bound.
 const MEMORY_PAGE_SIZE: u64 = 100;
 
+/// The one authored profile kind (§4.2): the `SOUL.md` document.
+const SOUL_PROFILE_KIND: &str = "personality";
+
 /// Map one port refusal onto the retained core error taxonomy.
 fn memory_reject(reject: &SpokeReject) -> CoreError {
     match reject.code {
@@ -210,7 +213,10 @@ fn pending_row_in_scope(row: &PendingMemoryRow, binding_id: Option<&str>) -> boo
 /// its own kind (`legacy::CREATOR_KIND_NS` / `CHARACTER_KIND_NS`), so every E4
 /// handler ensures that subject before it reads or mutates; the id comes from
 /// the bridge's deterministic scheme, which P5's migration key shares.
-struct MemoryAdapter {
+///
+/// E6's Character mind projection (`crate::soul`) reads through the same
+/// adapter: one merged-read address for both entry points (NXM-7).
+pub struct MemoryAdapter {
     provider: Arc<LocalMemoryProvider>,
     principal: spoke_schemas::Principal,
     subject_id: String,
@@ -223,7 +229,7 @@ impl MemoryAdapter {
     /// legacy projection, so it runs only on a writable provider: a read-only
     /// core (NXM-5 Task 2 fix round 1, finding F6) serves the projection of the
     /// subject an earlier writer open already ensured, and writes nothing.
-    async fn open(
+    pub async fn open(
         provider: Arc<LocalMemoryProvider>,
         principal: &Principal,
         subject_id: String,
@@ -338,6 +344,51 @@ impl MemoryAdapter {
             }
         }
         Ok(rows)
+    }
+
+    /// One `memory.recall` page of the subject's merged read (NXM-7).
+    ///
+    /// `selection` is the §6.12 arm the caller needs — `shared_only`, or
+    /// `selected_contexts` with `include_shared` for a binding-local merge — so
+    /// the placement filter stays the provider's own. The page comes back as
+    /// the upstream contract DTO (the data-target `RetainedRecord`), which is
+    /// what E6's projection and E10's MCA inputs both consume; `next_cursor`
+    /// continues the ranking this page was minted under.
+    pub(crate) async fn recall(
+        &self,
+        selection: Value,
+        max_items: u64,
+        cursor: Option<&str>,
+    ) -> CoreResult<(Vec<spoke_schemas::RetainedRecord>, Option<String>)> {
+        let request: spoke_schemas::MemoryRecallRequest = map_wire(json!({
+            "space_id": MEMORY_SPACE_ID,
+            "subject_id": self.subject_id,
+            "selection": selection,
+            "budget": { "max_items": max_items },
+            "cursor": cursor,
+        }))?;
+        let body = memory_ok(self.provider.recall(&self.principal, request).await)?;
+        let records: Vec<spoke_schemas::RetainedRecord> =
+            serde_json::from_value(body["records"].clone()).map_err(wire_err)?;
+        Ok((records, body["next_cursor"].as_str().map(str::to_string)))
+    }
+
+    /// The subject's `personality` profile body — `SOUL.md` as the provider
+    /// renders it. `None` is the honest-empty answer for an absent document.
+    pub(crate) async fn personality(&self) -> CoreResult<Option<String>> {
+        let request: spoke_schemas::MemoryProfileGetRequest = map_wire(json!({
+            "space_id": MEMORY_SPACE_ID,
+            "subject_id": self.subject_id,
+            "profile_kinds": [SOUL_PROFILE_KIND],
+        }))?;
+        let body = memory_ok(self.provider.get_profile(&self.principal, request).await)?;
+        Ok(body["profiles"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|profile| profile["profile_kind"] == SOUL_PROFILE_KIND)
+            .and_then(|profile| profile["document"]["body"].as_str())
+            .map(str::to_string))
     }
 
     /// One candidate by its provider id (the bridge's projected row included);

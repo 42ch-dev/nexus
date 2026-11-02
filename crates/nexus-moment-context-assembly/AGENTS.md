@@ -27,7 +27,8 @@ Per-moment context assembly for ACP sessions. Three strategies:
 
 ## Dependencies
 
-- `nexus-creator-memory` (for `LongTermMemory`)
+- `nexus-spoke-adapter` (for the upstream `RetainedRecord` contract DTO that carries
+  long-term memories and fragments — E10 recall inputs, NXM-7)
 - `nexus-contracts` (for `RuntimeMode`, `BlockType`, local types)
 - `nexus-narrative` (for `NarrativeGateway` — world state, timeline, events)
 - `nexus-knowledge` (for `KbStore`, `KbQuery` — World-scoped knowledge entries with structured queries)

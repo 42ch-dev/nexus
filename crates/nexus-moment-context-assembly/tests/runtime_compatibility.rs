@@ -8,17 +8,16 @@
 
 #![cfg(feature = "cloud-stage")]
 use nexus_contracts::local::domain::RuntimeMode;
-use nexus_creator_memory::LongTermMemory;
 use nexus_moment_context_assembly::cloud_stage::{
     AssembleMetadata, AssembleResponse, KbEntry, MemoryItemRef, TwoStageAssembly,
 };
+use nexus_spoke_adapter::spoke_schemas::RetainedRecord;
 
-/// Helper to create a `LongTermMemory` for testing.
-fn make_memory(kind: &str, body: &str, updated_at: &str) -> LongTermMemory {
-    let mut mem = LongTermMemory::new(kind);
-    mem.set_body(body);
-    mem.frontmatter.updated_at = updated_at.to_string();
-    mem
+mod common;
+
+/// Helper to create a contract `RetainedRecord` for testing.
+fn make_memory(kind: &str, body: &str, updated_at: &str) -> RetainedRecord {
+    common::memory(&format!("mem_{kind}_{updated_at}"), kind, body, updated_at)
 }
 
 #[test]
@@ -91,8 +90,7 @@ fn two_stage_fallback_empty_response() {
 
 #[test]
 fn dedup_platform_memory_with_local_priority() {
-    let mut local_mem = make_memory("note", "Local content", "2026-04-15");
-    local_mem.frontmatter.memory_id = "mem-1".into();
+    let local_mem = common::memory("mem-1", "character_note", "Local content", "2026-04-15");
 
     let platform_item = MemoryItemRef {
         memory_id: "mem-1".into(),

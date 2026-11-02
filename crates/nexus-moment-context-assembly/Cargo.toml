@@ -12,10 +12,15 @@ workspace = true
 
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
-nexus-creator-memory = { path = "../nexus-creator-memory" }
 nexus-narrative = { path = "../nexus-narrative" }
 nexus-knowledge = { path = "../nexus-knowledge" }
+# NXM-7: the E10 memory inputs are the upstream contract DTO
+# (`spoke_schemas::RetainedRecord`) reached through this crate's single
+# spoke-adapter import boundary; the legacy memory-file parser is no longer a
+# dependency of this crate.
 nexus-spoke-adapter = { path = "../nexus-spoke-adapter", default-features = false }
+# The DTO's `updated_at` recency key is `DateTime<Utc>`.
+chrono = { workspace = true }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -27,6 +32,3 @@ nexus-cloud-sync = { path = "../nexus-cloud-sync", optional = true }
 [features]
 default = []
 cloud-stage = ["dep:nexus-cloud-sync"]
-
-[dev-dependencies]
-chrono = { workspace = true }

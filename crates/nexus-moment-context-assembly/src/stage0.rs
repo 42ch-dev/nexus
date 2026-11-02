@@ -15,7 +15,8 @@
 //! - Personality section is NEVER truncated
 //! - Truncatable sections are dropped from the end when budget exceeded
 
-use nexus_creator_memory::LongTermMemory;
+use crate::recall::{memory_body, memory_display_id, memory_kind, memory_updated_at};
+use nexus_spoke_adapter::spoke_schemas::RetainedRecord;
 use std::collections::BTreeSet;
 
 /// Section heading for fragment keywords.
@@ -48,7 +49,11 @@ pub struct Stage0Assembly {
     /// Experience section content (aggregated from SOUL.md `## Experience`).
     pub experience: String,
     /// Long-term memories to include, sorted by kind then recency.
-    pub long_term_memories: Vec<LongTermMemory>,
+    ///
+    /// These are the upstream contract records (`RetainedRecord`) — the
+    /// provider's `nexus.<MemoryKind>` recall rows, never the legacy
+    /// `LongTermMemory` file type (NXM-7 / compass D5).
+    pub long_term_memories: Vec<RetainedRecord>,
     /// Fragment keywords (deduped union from `memory_fragments`).
     pub fragment_keywords: Vec<String>,
     /// System/policy prefix (runtime injection).
@@ -83,8 +88,8 @@ impl Stage0Assembly {
         // 3. Long-term memories (sorted by kind, then recency)
         let sorted = self.sorted_memories();
         for mem in &sorted {
-            let title = format!("### Memory: {}", mem.frontmatter.memory_id);
-            parts.push(format!("{title}\n\n{}\n", mem.body));
+            let title = format!("### Memory: {}", memory_display_id(mem));
+            parts.push(format!("{title}\n\n{}\n", memory_body(mem)));
         }
 
         // 4. Fragment keywords (deduped, omit if empty)
@@ -143,8 +148,8 @@ impl Stage0Assembly {
 
         // 3. Long-term memories (truncatable)
         for mem in &sorted {
-            let heading = format!("### Memory: {}\n\n", mem.frontmatter.memory_id);
-            sections.push((heading, mem.body.clone(), false));
+            let heading = format!("### Memory: {}\n\n", memory_display_id(mem));
+            sections.push((heading, memory_body(mem).to_string(), false));
         }
 
         // 4. Fragment keywords (truncatable)
@@ -184,17 +189,17 @@ impl Stage0Assembly {
         parts.join("\n\n")
     }
 
-    /// Sort memories by `memory_kind` (alphabetical), then by `updated_at`
+    /// Sort memories by kind (alphabetical), then by `updated_at`
     /// descending (most recent first).
-    fn sorted_memories(&self) -> Vec<&LongTermMemory> {
-        let mut sorted: Vec<&LongTermMemory> = self.long_term_memories.iter().collect();
+    fn sorted_memories(&self) -> Vec<&RetainedRecord> {
+        let mut sorted: Vec<&RetainedRecord> = self.long_term_memories.iter().collect();
         sorted.sort_by(|a, b| {
-            let kind_cmp = a.frontmatter.memory_kind.cmp(&b.frontmatter.memory_kind);
+            let kind_cmp = memory_kind(a).cmp(memory_kind(b));
             if kind_cmp != std::cmp::Ordering::Equal {
                 return kind_cmp;
             }
             // Most recent first (reverse chronological)
-            b.frontmatter.updated_at.cmp(&a.frontmatter.updated_at)
+            memory_updated_at(b).cmp(memory_updated_at(a))
         });
         sorted
     }
@@ -296,13 +301,10 @@ fn truncate_to_char_count(text: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_creator_memory::LongTermMemory;
+    use nexus_spoke_adapter::spoke_schemas::RetainedRecord;
 
-    fn make_memory(kind: &str, body: &str, updated_at: &str) -> LongTermMemory {
-        let mut mem = LongTermMemory::new(kind);
-        mem.set_body(body);
-        mem.frontmatter.updated_at = updated_at.to_string();
-        mem
+    fn make_memory(kind: &str, body: &str, updated_at: &str) -> RetainedRecord {
+        crate::test_support::memory(&format!("mem_{kind}_{updated_at}"), kind, body, updated_at)
     }
 
     #[test]
