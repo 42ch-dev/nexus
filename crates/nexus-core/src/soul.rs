@@ -632,6 +632,11 @@ fn format_tom_belief_line(row: &crate::memory::CharacterTomBeliefRow) -> String 
 /// column carried, and a promoted memory is re-rendered as the memory file
 /// (frontmatter block plus body) it came from.
 ///
+/// **Subject state:** the two record families keep recall's §7.7 rule — an
+/// archived subject's records are not projected — because this path replaces
+/// recall while the listing read behind it (the audit route) keeps serving
+/// them. The SOUL slot is a profile, not a record, and keeps its own read.
+///
 /// **Honest-empty vs fail-closed:** only explicit *absent* optional data is an
 /// honest empty — an absent `personality` profile yields `None` and an empty
 /// family result yields no lines. Any other read/refusal error is propagated so
@@ -761,7 +766,12 @@ pub async fn load_character_mind_projection(
 }
 
 /// The newest fragments of one admitted scope, as the legacy per-scope read
-/// served them: a kind-filtered read bounded at the legacy `LIMIT`.
+/// served them: the complete `created_at` tie group at the legacy `LIMIT`
+/// boundary arrives with the read, so the legacy order inside it
+/// (`fragment_id DESC`, which [`partition`] applies) decides the bound's last
+/// rows before this caps back to the legacy `LIMIT` (fix round 3, finding
+/// R3-F1). A prefix cut by the provider's own tie order (record id ascending)
+/// would keep the wrong rows of one instant.
 async fn projection_fragments(
     read: &MemoryAdapter,
     selection: serde_json::Value,
@@ -769,7 +779,9 @@ async fn projection_fragments(
     let records = read
         .family(selection, &[FACT_KIND], Some(MIND_PROJECTION_FETCH_LIMIT))
         .await?;
-    Ok(partition(records).fragments)
+    let mut fragments = partition(records).fragments;
+    fragments.truncate(MIND_PROJECTION_FETCH_LIMIT);
+    Ok(fragments)
 }
 
 /// One promoted-memory line exactly as the legacy projection rendered it: the

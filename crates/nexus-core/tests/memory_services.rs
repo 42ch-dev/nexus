@@ -5105,6 +5105,169 @@ async fn character_mind_projection_ranks_the_complete_memory_set_by_slug_before_
     );
 }
 
+/// The legacy per-scope fragment read took one instant's rows by `fragment_id
+/// DESC` (`list_character_fragments`, `LIMIT 100`), while the provider pages an
+/// equal `created_at` by record id ascending. A read that stops at the 100th row
+/// therefore keeps the wrong rows of a tie group, and the fragment the legacy
+/// selection put first disappears. 101 shared fragments at one instant pin that
+/// selection: the projection's first line is `frag-100` (the member a
+/// provider-ordered prefix drops) and the row that prefix kept instead
+/// (`frag-080`) never renders.
+#[tokio::test]
+async fn character_mind_projection_keeps_the_legacy_tie_break_at_the_scope_cap() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let pool = plain_pool(&env).await;
+    for index in 0..101_u32 {
+        nexus_local_db::create_character_fragment(
+            &pool,
+            CREATOR,
+            &nexus_local_db::NewCharacterMemoryFragment {
+                fragment_id: format!("frag-{index:03}"),
+                session_id: format!("sess_frag_{index:03}"),
+                character_id: env.character_id.clone(),
+                actor_world_binding_id: None,
+                keywords: "[]".to_string(),
+                summary: format!("Fragment frag-{index:03}."),
+                created_at: "2026-02-01T00:00:00Z".to_string(),
+                ttl: None,
+            },
+        )
+        .await
+        .unwrap();
+    }
+    pool.close().await;
+
+    let mind = CoreCharacterMind::new(
+        plain_pool(&env).await,
+        core.memory_provider_for_test().expect("pinned provider"),
+    )
+    .projection(&principal, CREATOR, &env.character_id, None)
+    .await
+    .expect("the projection serves the tie group");
+
+    let expected: Vec<String> = (81..=100)
+        .rev()
+        .map(|index| format!("- Fragment frag-{index:03}."))
+        .collect();
+    assert_eq!(
+        mind.memory, expected,
+        "the legacy `created_at DESC, fragment_id DESC` order picks the rows one \
+         instant keeps at the per-scope bound, before the mind's own 20-line cap"
+    );
+    assert!(
+        !mind.memory.iter().any(|line| line.contains("frag-080")),
+        "the row a provider-ordered prefix kept instead of frag-100 never renders"
+    );
+}
+
+/// §7.7: an archived subject's records leave recall. The E6 projection replaces
+/// recall on this read path, and the listing read behind it is the audit route
+/// that keeps serving them — so a read-only core (whose `MemoryAdapter::open`
+/// skips `ensure_subject`) must project no record of an archived subject.
+/// The SOUL slot is a profile, not a record, and is not seeded here.
+#[tokio::test]
+async fn character_mind_projection_excludes_an_archived_subject_like_recall() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let provider = core.memory_provider_for_test().expect("pinned provider");
+
+    let pool = plain_pool(&env).await;
+    nexus_local_db::create_character_fragment(
+        &pool,
+        CREATOR,
+        &nexus_local_db::NewCharacterMemoryFragment {
+            fragment_id: "afrag_shared".to_string(),
+            session_id: "sess_afrag_shared".to_string(),
+            character_id: env.character_id.clone(),
+            actor_world_binding_id: None,
+            keywords: "[]".to_string(),
+            summary: "Archived-scope shared fragment.".to_string(),
+            created_at: "2026-02-01T00:00:00Z".to_string(),
+            ttl: None,
+        },
+    )
+    .await
+    .unwrap();
+    pool.close().await;
+    let bearer = MemoryBearerRef::Character {
+        owner_creator_id: CREATOR,
+        character_id: &env.character_id,
+    };
+    let mut memory = nexus_creator_memory::LongTermMemory::new("story_summary");
+    memory.set_body("Archived-scope memory body.");
+    memory.frontmatter.updated_at = "2026-01-05T00:00:00Z".to_string();
+    nexus_creator_memory::memory_io::save_memory(
+        &env.user_home,
+        bearer,
+        "archived-memory",
+        &memory,
+    )
+    .expect("promoted memory fixture");
+    let document =
+        std::fs::read_to_string(bearer.long_term_memory_path(&env.user_home, "archived-memory"))
+            .expect("memory file bytes");
+
+    // A live subject: the projection serves both record families.
+    let live = CoreCharacterMind::new(plain_pool(&env).await, provider.clone())
+        .projection(&principal, CREATOR, &env.character_id, None)
+        .await
+        .expect("live projection");
+    assert_eq!(
+        live.memory,
+        vec![
+            "- Archived-scope shared fragment.".to_string(),
+            format!("- {document}"),
+        ],
+        "a live subject projects its fragments and promoted memories"
+    );
+
+    // Archive the subject the projection addresses, through the provider's own
+    // terminal transition (§7.7), so the read sees a real archived subject.
+    let subject = legacy::character_subject_id(&env.character_id);
+    let archived = bridge_ok(
+        &provider
+            .fence_subject(
+                &bridge_principal(),
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": subject,
+                    "target": { "type": "subject" },
+                    "action": "archive",
+                    "expected_revision": 1,
+                    "idempotency_key": "k-mind-archive",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(archived["result"]["status"], "archived");
+
+    // A read-only core writes nothing, so the archived state is the one the
+    // provider already holds — and the projection is recall-equivalent.
+    let read_only = CoreService::open(CoreOpenOptions {
+        user_home: env.user_home.clone(),
+        access: CoreAccess::ReadOnly,
+    })
+    .await
+    .expect("read-only open");
+    let principal = read_only.active_principal().await.unwrap();
+    let excluded = CoreCharacterMind::new(
+        plain_pool(&env).await,
+        read_only
+            .memory_provider_for_test()
+            .expect("pinned provider"),
+    )
+    .projection(&principal, CREATOR, &env.character_id, None)
+    .await
+    .expect("an archived subject still projects");
+    assert!(
+        excluded.memory.is_empty(),
+        "recall excludes an archived subject's records, and so does the E6 \
+         projection: {:?}",
+        excluded.memory
+    );
+}
+
 #[tokio::test]
 async fn character_mind_projection_fails_closed_when_the_provider_refuses() {
     let env = seed_env().await;
