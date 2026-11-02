@@ -1046,7 +1046,11 @@ impl LocalMemoryProvider {
     /// `REVISION_CONFLICT` when the CAS cannot land, and the admission codes.
     /// A stored candidate owned by another subject is `INVALID_REQUEST`: the
     /// dismissal names the bearer whose section it takes, and only the row's
-    /// owner is that bearer (fix round 4, finding R4-F1).
+    /// owner is that bearer (fix round 4, finding R4-F1). Authorization runs
+    /// before that answer is chosen (fix round 5, finding R5-F1): a principal
+    /// the candidate's `review` coverage does not admit is `NOT_FOUND`, the same
+    /// refusal an id this store never held produces, so no caller without
+    /// coverage can learn the candidate exists or who owns it.
     pub async fn dismiss_legacy_candidate(
         &self,
         principal: &schemas::Principal,
@@ -1058,11 +1062,18 @@ impl LocalMemoryProvider {
         // The section must belong to the row's owner, not to whatever subject the
         // caller named (fix round 4, finding R4-F1): resolving the stored owner
         // before locking means a caller can never consume A while holding B's
-        // section, interleaving A's review drain. A projected-only id has no
-        // provider row, so the supplied subject is the only owner it can adopt
-        // under, and the store's own adoption refuses a legacy row of another
-        // subject.
-        let owner = match self.store.candidate_subject(&self.space_id, candidate_id).await {
+        // section, interleaving A's review drain. The probe authorizes the
+        // caller first (fix round 5, finding R5-F1): the owner is the only thing
+        // the mismatch refusal would disclose, so a principal the candidate's
+        // coverage does not admit never learns it exists. A projected-only id has
+        // no provider row (`None`), so the supplied subject is the only owner it
+        // can adopt under, and the store's own adoption refuses a legacy row of
+        // another subject.
+        let owner = match self
+            .store
+            .reviewable_candidate_subject(&self.space_id, candidate_id, principal_id(principal))
+            .await
+        {
             Ok(owner) => owner,
             Err(error) => return deny(&store_error(error)),
         };

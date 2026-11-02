@@ -4418,6 +4418,110 @@ async fn a_legacy_dismissal_locks_only_the_candidates_own_subject() {
     );
 }
 
+/// NXM-5 Task 2 fix round 5 (R5-F1): a dismissal never discloses the candidate's
+/// owner to a principal the candidate's coverage does not admit. The refusal is
+/// exactly the answer an id this store never held produces, so neither the
+/// wrong-subject nor the true-owner-subject call teaches the stranger anything.
+#[tokio::test]
+async fn an_unauthorized_legacy_dismissal_cannot_learn_the_candidates_owner() {
+    let env = seed_env();
+    let provider = Arc::new(open_provider(&env).await);
+    let admin = principal(CREATOR);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    let captured = wire(
+        &provider
+            .capture(&admin, capture_request("k-capture-leak", None, TEXT))
+            .await,
+    );
+    let candidate_id = receipt(&captured)["result"]["candidate_ids"][0]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // The control answer: an id no row carries, from the same principal.
+    let absent = wire(
+        &provider
+            .dismiss_legacy_candidate(
+                &principal(OTHER),
+                OTHER_SUBJECT,
+                "cand_absent_probe",
+                None,
+                "k-absent",
+            )
+            .await,
+    );
+    assert_eq!(error_code(&absent), "NOT_FOUND");
+    let absent_message = absent["error"]["message"].as_str().unwrap();
+
+    // No grant at all, and the caller names the candidate: wrong subject, the
+    // true owner's subject, and a principal that holds nothing anywhere. All
+    // three get the control answer, byte for byte after the id.
+    for (caller, subject, key) in [
+        (OTHER, OTHER_SUBJECT, "k-stranger-mismatch"),
+        (OTHER, SUBJECT, "k-stranger-owner"),
+        (
+            "ctr_dddddddddddddddddddddddddddddddd",
+            OTHER_SUBJECT,
+            "k-stranger-unknown",
+        ),
+    ] {
+        let refused = wire(
+            &provider
+                .dismiss_legacy_candidate(&principal(caller), subject, &candidate_id, None, key)
+                .await,
+        );
+        assert_eq!(
+            error_code(&refused),
+            "NOT_FOUND",
+            "an uncovered dismissal answers like an absent candidate: {refused}"
+        );
+        assert_eq!(error_code(&refused), error_code(&absent));
+        assert_eq!(error_details(&refused), error_details(&absent));
+        let message = refused["error"]["message"].as_str().unwrap();
+        assert_eq!(
+            message,
+            absent_message.replace("cand_absent_probe", &candidate_id),
+            "the refusal is the not-found answer, never an owner mismatch: {refused}"
+        );
+        for owner in [SUBJECT, OTHER_SUBJECT] {
+            assert!(
+                !message.contains(owner),
+                "no refusal names a subject: {refused}"
+            );
+        }
+    }
+
+    let still_pending = wire(
+        &provider
+            .get_candidate(&admin, candidate_get_request(&candidate_id))
+            .await,
+    );
+    assert_eq!(
+        still_pending["candidate"]["status"], "pending",
+        "the refused dismissals consume nothing: {still_pending}"
+    );
+
+    // The same wrong subject from a principal the coverage admits still gets the
+    // informative mismatch refusal (round 4, R4-F1, unchanged).
+    let informed = wire(
+        &provider
+            .dismiss_legacy_candidate(&admin, OTHER_SUBJECT, &candidate_id, None, "k-informed")
+            .await,
+    );
+    assert_eq!(error_code(&informed), "INVALID_INPUT");
+    assert!(
+        informed["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("belongs to subject"),
+        "an authorized mismatch stays informative: {informed}"
+    );
+}
+
 /// NXM-5 Task 2 fix round 4 (R4-F2): the lock identity is a bounded digest, so
 /// ids differing only by ASCII case never alias on a case-insensitive volume and
 /// an arbitrarily long id still maps to a usable filename.

@@ -3611,6 +3611,64 @@ impl MemoryStore {
         Ok(subject)
     }
 
+    /// The bearer subject that owns one provider-native candidate, if this
+    /// principal may review it (NXM-5 Task 2 fix round 5, finding R5-F1).
+    ///
+    /// Authorization is part of the probe, not a later step: the next thing the
+    /// caller does with the answer is name the owner in an error, so a principal
+    /// without `review` coverage must never reach it. An uncovered candidate
+    /// answers exactly like one this store never held — the same `NotFound` the
+    /// effect transaction raises — so the refusal discloses neither existence
+    /// nor ownership. This is the disclosure check, not the effect check: the
+    /// admission transaction still authorizes the write itself against the row
+    /// it consumes, so a grant withdrawn between the two is refused there.
+    ///
+    /// A projected legacy id is still `None`: the bridge authorizes those inside
+    /// the adoption, from the row it projects.
+    pub(super) async fn reviewable_candidate_subject(
+        &self,
+        space_id: &str,
+        candidate_id: &str,
+        principal_id: &str,
+    ) -> StoreResult<Option<String>> {
+        self.require_provisioned(space_id).await?;
+        let (mut tx, now) = self.begin_read().await?;
+        let subject: Option<String> = sqlx::query_scalar(
+            "SELECT subject_id FROM memory_candidates \
+             WHERE space_id = ? AND candidate_id = ?",
+        )
+        .bind(space_id)
+        .bind(candidate_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if subject.is_none() {
+            tx.rollback().await?;
+            return Ok(None);
+        }
+        let admission = Admission {
+            op: super::OP_CANDIDATES_DISMISS,
+            space_id,
+            principal_id,
+            coverage: Coverage::Candidate {
+                candidate_id,
+                capabilities: &["review"],
+            },
+            issuance: None,
+            subject_gate: None,
+            placement_gate: None,
+            freeze_gated: true,
+        };
+        let admitted = authorize(&mut tx, &admission, now).await;
+        tx.rollback().await?;
+        match admitted {
+            Ok(_) => Ok(subject),
+            Err(StoreError::NotAuthorized(_)) => {
+                Err(StoreError::NotFound(format!("candidate {candidate_id}")))
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     /// §7.11: admission + candidate inserts + receipt, one transaction.
     pub(super) async fn capture(
         &self,
