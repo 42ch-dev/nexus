@@ -1087,7 +1087,11 @@ impl CoreService {
             },
             "capture_scope": { "visibility": "shared" },
             "source_context_ids": world_id.iter().collect::<Vec<_>>(),
-            "anchors": [{ "source_id": session_id.as_str(), "schema_version": 1 }],
+            "anchors": [{
+                "source_id": session_id.as_str(),
+                "schema_version": 1,
+                "extensions": {},
+            }],
             "kind_hint": task_kind_to_memory_kind(&task_kind),
             "idempotency_key": format!("e4capture:{digest}"),
         }))?;
