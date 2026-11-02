@@ -1974,8 +1974,14 @@ impl HostHandle {
                         "Character host launch requires an active binding",
                     )
                 })?;
-                let mind = CoreCharacterMind::new(pool.clone(), self.core.inner.nexus_home.clone())
-                    .projection_with_tom(creator_id, character_id, &ctx.world_id, binding_id)
+                let mind = CoreCharacterMind::new(pool.clone(), self.core.memory_provider()?)
+                    .projection_with_tom(
+                        principal,
+                        creator_id,
+                        character_id,
+                        &ctx.world_id,
+                        binding_id,
+                    )
                     .await?;
                 MomentActorContext::character_with_mind(view, mind)
             }

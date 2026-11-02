@@ -19,6 +19,8 @@ use nexus_moment_context_assembly::stage0::Stage0Assembly;
 use nexus_moment_context_assembly::{assemble_moment, MomentContext, MomentRequest};
 use nexus_narrative::InMemoryNarrativeGateway;
 
+mod common;
+
 // ── Helpers ─────────────────────────────────────────────────────────
 
 struct FixtureStores {
@@ -38,8 +40,12 @@ impl FixtureStores {
 }
 
 fn stage0_with_soul_sections() -> Stage0Assembly {
-    let mut ltm = nexus_creator_memory::LongTermMemory::new("story_summary");
-    ltm.set_body("The hero's journey begins with a call to adventure.");
+    let ltm = common::memory(
+        "mem_hero",
+        "story_summary",
+        "The hero's journey begins with a call to adventure.",
+        "2026-04-14T00:00:00Z",
+    );
     Stage0Assembly {
         personality: "I am a speculative fiction writer who loves worldbuilding.".to_string(),
         experience: "Published 3 novels, 20 short stories.".to_string(),

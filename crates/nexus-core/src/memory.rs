@@ -122,6 +122,9 @@ const MEMORY_SPACE_ID: &str = crate::memory_provider::DEFAULT_SPACE_ID;
 /// advertised `max_page_size`, so a legacy DTO never names a bigger bound.
 const MEMORY_PAGE_SIZE: u64 = 100;
 
+/// The one authored profile kind (§4.2): the `SOUL.md` document.
+const SOUL_PROFILE_KIND: &str = "personality";
+
 /// Map one port refusal onto the retained core error taxonomy.
 fn memory_reject(reject: &SpokeReject) -> CoreError {
     match reject.code {
@@ -229,6 +232,9 @@ fn pending_row_in_scope(row: &PendingMemoryRow, binding_id: Option<&str>) -> boo
 /// its own kind (`legacy::CREATOR_KIND_NS` / `CHARACTER_KIND_NS`), so every E4
 /// handler ensures that subject before it reads or mutates; the id comes from
 /// the bridge's deterministic scheme, which P5's migration key shares.
+///
+/// E6's Character mind projection (`crate::soul`) reads through the same
+/// adapter: one merged-read address for both entry points (NXM-7).
 pub struct MemoryAdapter {
     provider: Arc<LocalMemoryProvider>,
     principal: spoke_schemas::Principal,
@@ -242,7 +248,7 @@ impl MemoryAdapter {
     /// legacy projection, so it runs only on a writable provider: a read-only
     /// core (NXM-5 Task 2 fix round 1, finding F6) serves the projection of the
     /// subject an earlier writer open already ensured, and writes nothing.
-    async fn open(
+    pub async fn open(
         provider: Arc<LocalMemoryProvider>,
         principal: &Principal,
         subject_id: String,
@@ -363,6 +369,76 @@ impl MemoryAdapter {
             }
         }
         Ok(rows)
+    }
+
+    /// One kind-filtered family read of the subject's retained records, as the
+    /// upstream contract DTO (the data-target `RetainedRecord`) E6 and E10
+    /// consume (NXM-7 fix round 2).
+    ///
+    /// `memory.recall` ranks every record kind together and offers no kind
+    /// filter, so a family read through it has to share pages with unrelated
+    /// kinds — events, the derived narrative cache — and any page budget can
+    /// then silently truncate the family. `memory.records.list` takes the kind
+    /// filter (`kinds`), which is the same authorized read path the E4 bridge
+    /// uses. The family is read to exhaustion: a caller that selects inside it
+    /// under the legacy `created_at` TEXT key cannot prove a bounded provider
+    /// prefix holds every row that ranks under that key (the provider pages by
+    /// parsed instant, which mixed formats can order differently — fix round 4,
+    /// finding R4-F1).
+    ///
+    /// **Recall's subject-state rule (§7.7) is re-applied here:** `recall`
+    /// excludes an archived subject's records while `memory.records.list` is the
+    /// audit listing that keeps serving them, so this replacement for recall on
+    /// the E6 path must exclude them itself (fix round 3, finding R3-F2).
+    pub(crate) async fn family(
+        &self,
+        selection: Value,
+        kinds: &[&str],
+    ) -> CoreResult<Vec<spoke_schemas::RetainedRecord>> {
+        if self.subject_archived().await? {
+            return Ok(Vec::new());
+        }
+        self.records(selection, kinds, None, None)
+            .await?
+            .into_iter()
+            .map(|record| serde_json::from_value(record).map_err(wire_err))
+            .collect()
+    }
+
+    /// Whether the subject is `archived` — the one subject state that removes
+    /// its records from recall (§7.7). A subject the provider has never seen
+    /// carries no records either way, so its absence is not an archive.
+    async fn subject_archived(&self) -> CoreResult<bool> {
+        let request: spoke_schemas::MemorySubjectsGetRequest = map_wire(json!({
+            "space_id": MEMORY_SPACE_ID,
+            "subject_id": self.subject_id,
+        }))?;
+        match self.provider.get_subject(&self.principal, request).await {
+            SpokeResult::Ok(body) => {
+                let body = serde_json::to_value(&body).map_err(wire_err)?;
+                Ok(body["subject"]["status"].as_str() == Some("archived"))
+            }
+            SpokeResult::Reject(reject) if reject.code == SpokeRejectCode::NotFound => Ok(false),
+            SpokeResult::Reject(reject) => Err(memory_reject(&reject)),
+        }
+    }
+
+    /// The subject's `personality` profile body — `SOUL.md` as the provider
+    /// renders it. `None` is the honest-empty answer for an absent document.
+    pub(crate) async fn personality(&self) -> CoreResult<Option<String>> {
+        let request: spoke_schemas::MemoryProfileGetRequest = map_wire(json!({
+            "space_id": MEMORY_SPACE_ID,
+            "subject_id": self.subject_id,
+            "profile_kinds": [SOUL_PROFILE_KIND],
+        }))?;
+        let body = memory_ok(self.provider.get_profile(&self.principal, request).await)?;
+        Ok(body["profiles"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|profile| profile["profile_kind"] == SOUL_PROFILE_KIND)
+            .and_then(|profile| profile["document"]["body"].as_str())
+            .map(str::to_string))
     }
 
     /// One candidate by its provider id (the bridge's projected row included);

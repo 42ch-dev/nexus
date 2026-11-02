@@ -25,8 +25,8 @@ use nexus_contracts::generated::core::{
     CoreCharacterTransitionRequest, CoreCharacterTransitionRequestTargetStatus,
 };
 use nexus_core::{
-    AdmittedActor, CoreAccess, CoreError, CoreOpenOptions, CoreService, MemoryReviewPause,
-    MemoryReviewRendezvous,
+    AdmittedActor, CoreAccess, CoreCharacterMind, CoreError, CoreOpenOptions, CoreService,
+    MemoryReviewPause, MemoryReviewRendezvous,
 };
 use nexus_creator_memory::bearer::MemoryBearerRef;
 use nexus_creator_memory::errors::MemoryError;
@@ -4907,5 +4907,549 @@ async fn dismissal_racing_the_completion_marker_adopts_nothing() {
         core.count_pending_reviews(&principal).await.unwrap().count,
         0,
         "post-marker the legacy-derived queue is empty"
+    );
+}
+
+// ═══ NXM-7 fix round 1 ═══════════════════════════════════════════════════
+//
+// P3-F1/P3-F2/P3-F4: the rerouted E6 projection is consumer-visible, so these
+// tests assert the final mind-slot content against provider-seeded fixtures —
+// the Character SOUL, its shared and binding-local fragments, and the promoted
+// memories rendered as the legacy memory files they came from. The fixtures
+// flood three recall pages with newer `event` rows, so the projection must
+// filter per family while it pages rather than let one global cap serve every
+// kind.
+
+const MIND_SOUL: &str = "# Soul\n\nA provider-seeded Character soul.\n";
+
+/// Seed the Character's legacy surfaces below 830 newer `event` records — more
+/// than eight recall pages, the scale at which the round-2 review showed a
+/// global page budget silently evicting memory — and return the exact bytes of
+/// its two promoted memory files.
+async fn seed_mind_projection_fixtures(env: &Env, other_binding: &str) -> (String, String) {
+    let guarded = init_engine_pool(&env.db_path, CREATOR, GuardedPoolOptions::default())
+        .await
+        .unwrap();
+    let pool = guarded.clone_pool();
+    let lifecycle_epoch: i64 =
+        sqlx::query_scalar("SELECT lifecycle_epoch FROM characters WHERE character_id = ?")
+            .bind(&env.character_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    for (fragment_id, summary, keywords, binding, created_at) in [
+        (
+            "mfrag_shared",
+            "Shared Character fragment.",
+            r#"["kw_shared"]"#,
+            None,
+            "2026-01-02T00:00:00Z",
+        ),
+        (
+            "mfrag_binding",
+            "Binding-local Character fragment.",
+            r#"["kw_binding"]"#,
+            Some(env.binding_id.as_str()),
+            "2026-01-03T00:00:00Z",
+        ),
+        (
+            "mfrag_other",
+            "Other-binding Character fragment.",
+            r#"["kw_other"]"#,
+            Some(other_binding),
+            "2026-01-04T00:00:00Z",
+        ),
+    ] {
+        nexus_local_db::create_character_fragment(
+            &pool,
+            CREATOR,
+            &nexus_local_db::NewCharacterMemoryFragment {
+                fragment_id: fragment_id.to_string(),
+                session_id: format!("sess_{fragment_id}"),
+                character_id: env.character_id.clone(),
+                actor_world_binding_id: binding.map(str::to_string),
+                keywords: keywords.to_string(),
+                summary: summary.to_string(),
+                created_at: created_at.to_string(),
+                ttl: None,
+            },
+        )
+        .await
+        .unwrap();
+    }
+    for index in 0..830_u32 {
+        let operation_id = format!("op_mind_{index:03}");
+        let session_id = format!("sess_mind_{index:03}");
+        let pending_id = format!("pend_mind_{index:03}");
+        let captured_at = format!("2026-04-01T{:02}:{:02}:00Z", index / 60, index % 60);
+        nexus_local_db::capture_character_run(
+            &pool,
+            CREATOR,
+            nexus_local_db::RunCaptureInput {
+                operation_id: &operation_id,
+                session_id: &session_id,
+                character_id: &env.character_id,
+                binding_id: &env.binding_id,
+                pending_id: &pending_id,
+                raw_digest: FRAGMENT_DIGEST,
+                captured_at: &captured_at,
+                lifecycle_epoch,
+            },
+        )
+        .await
+        .unwrap();
+    }
+    pool.close().await;
+    drop(guarded);
+
+    let soul_path =
+        nexus_home_layout::character_soul_md_path(&env.user_home, CREATOR, &env.character_id);
+    std::fs::create_dir_all(soul_path.parent().expect("character root")).unwrap();
+    std::fs::write(&soul_path, MIND_SOUL).unwrap();
+    let bearer = MemoryBearerRef::Character {
+        owner_creator_id: CREATOR,
+        character_id: &env.character_id,
+    };
+    for (slug, kind, body, updated_at) in [
+        (
+            "alpha-memory",
+            "story_summary",
+            "Alpha memory body.",
+            "2026-01-05T00:00:00Z",
+        ),
+        (
+            "zeta-memory",
+            "character_note",
+            "Zeta memory body.",
+            "2026-01-06T00:00:00Z",
+        ),
+    ] {
+        let mut memory = nexus_creator_memory::LongTermMemory::new(kind);
+        memory.set_body(body);
+        // Older than every seeded event row: a promoted memory must survive a
+        // flood of newer unrelated records regardless of how large it is.
+        memory.frontmatter.updated_at = updated_at.to_string();
+        nexus_creator_memory::memory_io::save_memory(&env.user_home, bearer, slug, &memory)
+            .expect("promoted memory fixture");
+    }
+    let read = |slug: &str| {
+        std::fs::read_to_string(bearer.long_term_memory_path(&env.user_home, slug))
+            .expect("memory file bytes")
+    };
+    (read("alpha-memory"), read("zeta-memory"))
+}
+
+#[tokio::test]
+async fn character_mind_projection_serves_provider_seeded_soul_fragments_and_memories() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let other_binding = core
+        .add_binding(
+            &principal,
+            env.character_id.clone(),
+            WORLD_B.to_string(),
+            None,
+        )
+        .await
+        .expect("second binding")
+        .binding
+        .binding_id
+        .as_str()
+        .to_string();
+    // Creator-side content of the same workspace: never part of the Character's
+    // mind (a bearer sees its own subject only).
+    seed_legacy_creator_content(&env).await;
+    let (alpha, zeta) = seed_mind_projection_fixtures(&env, &other_binding).await;
+
+    let mind = CoreCharacterMind::new(
+        plain_pool(&env).await,
+        core.memory_provider_for_test().expect("pinned provider"),
+    )
+    .projection(
+        &principal,
+        CREATOR,
+        &env.character_id,
+        Some(&env.binding_id),
+    )
+    .await
+    .expect("the projection serves the seeded Character mind");
+
+    assert_eq!(
+        mind.soul.as_deref(),
+        Some(MIND_SOUL),
+        "the SOUL slot carries the Character's own document"
+    );
+    assert_eq!(
+        mind.memory,
+        vec![
+            "- Binding-local Character fragment. — keywords: [\"kw_binding\"]".to_string(),
+            "- Shared Character fragment. — keywords: [\"kw_shared\"]".to_string(),
+            format!("- {alpha}"),
+            format!("- {zeta}"),
+        ],
+        "830 newer unrelated events never evict the fragments or the promoted \
+         memories, and each promoted memory renders as the legacy memory file \
+         it came from, in slug order"
+    );
+
+    let shared_only = CoreCharacterMind::new(
+        plain_pool(&env).await,
+        core.memory_provider_for_test().expect("pinned provider"),
+    )
+    .projection(&principal, CREATOR, &env.character_id, None)
+    .await
+    .expect("shared-scope projection");
+    assert_eq!(
+        shared_only.memory,
+        vec![
+            "- Shared Character fragment. — keywords: [\"kw_shared\"]".to_string(),
+            format!("- {alpha}"),
+            format!("- {zeta}"),
+        ],
+        "a shared-scope projection keeps shared records and never leaks a binding's"
+    );
+    assert!(
+        !shared_only
+            .memory
+            .iter()
+            .any(|line| line.contains("Legacy long-term body.")),
+        "the Creator's promoted memory is not the Character's"
+    );
+}
+
+/// The legacy projection listed the complete memory directory by slug and then
+/// took the head 20 (`memory_io::list_memories` + `take`). Ranking a recency
+/// window instead drops the slug-first memory whenever 20 newer memories exist,
+/// so this fixture makes recency and slug order disagree: `alpha-memory` is the
+/// oldest file and exactly the memory a recency window would drop.
+#[tokio::test]
+async fn character_mind_projection_ranks_the_complete_memory_set_by_slug_before_capping() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let bearer = MemoryBearerRef::Character {
+        owner_creator_id: CREATOR,
+        character_id: &env.character_id,
+    };
+    let mut slugs = vec!["alpha-memory".to_string()];
+    for index in 0..20_u32 {
+        slugs.push(format!("memory-{index:02}"));
+    }
+    let mut expected: Vec<String> = Vec::new();
+    for (index, slug) in slugs.iter().enumerate() {
+        let mut memory = nexus_creator_memory::LongTermMemory::new("story_summary");
+        memory.set_body(&format!("Memory {slug} body."));
+        // `alpha-memory` is older than every other file, so only the complete
+        // slug ranking keeps it inside the 20-entry selection.
+        memory.frontmatter.updated_at = if index == 0 {
+            "2025-12-01T00:00:00Z".to_string()
+        } else {
+            format!("2026-01-{index:02}T00:00:00Z")
+        };
+        nexus_creator_memory::memory_io::save_memory(&env.user_home, bearer, slug, &memory)
+            .expect("promoted memory fixture");
+        if index < 20 {
+            let bytes = std::fs::read_to_string(bearer.long_term_memory_path(&env.user_home, slug))
+                .expect("memory file bytes");
+            expected.push(format!("- {bytes}"));
+        }
+    }
+
+    let mind = CoreCharacterMind::new(
+        plain_pool(&env).await,
+        core.memory_provider_for_test().expect("pinned provider"),
+    )
+    .projection(&principal, CREATOR, &env.character_id, None)
+    .await
+    .expect("the projection serves the promoted set");
+
+    assert_eq!(
+        mind.memory, expected,
+        "the slug-first 20 of the complete promoted set survive; provider recency \
+         never evicts the legacy selection"
+    );
+    assert!(
+        !mind
+            .memory
+            .iter()
+            .any(|line| line.contains("memory-19 body.")),
+        "the slug-last memory falls outside the 20-entry selection"
+    );
+}
+
+/// The legacy per-scope fragment read took one instant's rows by `fragment_id
+/// DESC` (`list_character_fragments`, `LIMIT 100`), while the provider pages an
+/// equal `created_at` by record id ascending. A read that stops at the 100th row
+/// therefore keeps the wrong rows of a tie group, and the fragment the legacy
+/// selection put first disappears. 101 shared fragments at one instant pin that
+/// selection: the projection's first line is `frag-100` (the member a
+/// provider-ordered prefix drops) and the row that prefix kept instead
+/// (`frag-080`) never renders.
+#[tokio::test]
+async fn character_mind_projection_keeps_the_legacy_tie_break_at_the_scope_cap() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let pool = plain_pool(&env).await;
+    for index in 0..101_u32 {
+        nexus_local_db::create_character_fragment(
+            &pool,
+            CREATOR,
+            &nexus_local_db::NewCharacterMemoryFragment {
+                fragment_id: format!("frag-{index:03}"),
+                session_id: format!("sess_frag_{index:03}"),
+                character_id: env.character_id.clone(),
+                actor_world_binding_id: None,
+                keywords: "[]".to_string(),
+                summary: format!("Fragment frag-{index:03}."),
+                created_at: "2026-02-01T00:00:00Z".to_string(),
+                ttl: None,
+            },
+        )
+        .await
+        .unwrap();
+    }
+    pool.close().await;
+
+    let mind = CoreCharacterMind::new(
+        plain_pool(&env).await,
+        core.memory_provider_for_test().expect("pinned provider"),
+    )
+    .projection(&principal, CREATOR, &env.character_id, None)
+    .await
+    .expect("the projection serves the tie group");
+
+    let expected: Vec<String> = (81..=100)
+        .rev()
+        .map(|index| format!("- Fragment frag-{index:03}."))
+        .collect();
+    assert_eq!(
+        mind.memory, expected,
+        "the legacy `created_at DESC, fragment_id DESC` order picks the rows one \
+         instant keeps at the per-scope bound, before the mind's own 20-line cap"
+    );
+    assert!(
+        !mind.memory.iter().any(|line| line.contains("frag-080")),
+        "the row a provider-ordered prefix kept instead of frag-100 never renders"
+    );
+}
+
+/// The legacy per-scope read ordered the RAW `created_at` column text
+/// (`ORDER BY created_at DESC, fragment_id DESC`), while the provider pages by
+/// parsed instant. With 101 fragments at `2026-02-01T00:00:00Z` and one at
+/// `2026-02-01T00:00:00.900Z`, SQLite ranks every `Z` row above the fractional
+/// one (`.` < `Z`), so the legacy `LIMIT 100` excludes the fractional-second
+/// fragment. Its instant is the newest of the fixture, so an instant-ordered
+/// selection would put it first in the mind's 20 lines and drop a
+/// legacy-selected fragment (fix round 4, finding R4-F1).
+#[tokio::test]
+async fn character_mind_projection_keeps_the_legacy_text_order_across_timestamp_formats() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let pool = plain_pool(&env).await;
+    for index in 0..101_u32 {
+        nexus_local_db::create_character_fragment(
+            &pool,
+            CREATOR,
+            &nexus_local_db::NewCharacterMemoryFragment {
+                fragment_id: format!("frag-{index:03}"),
+                session_id: format!("sess_frag_{index:03}"),
+                character_id: env.character_id.clone(),
+                actor_world_binding_id: None,
+                keywords: "[]".to_string(),
+                summary: format!("Fragment frag-{index:03}."),
+                created_at: "2026-02-01T00:00:00Z".to_string(),
+                ttl: None,
+            },
+        )
+        .await
+        .unwrap();
+    }
+    // The newest instant, but the lowest text key of the fixture: the legacy
+    // selection never reaches it.
+    nexus_local_db::create_character_fragment(
+        &pool,
+        CREATOR,
+        &nexus_local_db::NewCharacterMemoryFragment {
+            fragment_id: "frag-900".to_string(),
+            session_id: "sess_frag_900".to_string(),
+            character_id: env.character_id.clone(),
+            actor_world_binding_id: None,
+            keywords: "[]".to_string(),
+            summary: "Fractional-second fragment.".to_string(),
+            created_at: "2026-02-01T00:00:00.900Z".to_string(),
+            ttl: None,
+        },
+    )
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let mind = CoreCharacterMind::new(
+        plain_pool(&env).await,
+        core.memory_provider_for_test().expect("pinned provider"),
+    )
+    .projection(&principal, CREATOR, &env.character_id, None)
+    .await
+    .expect("the projection serves the mixed-format family");
+
+    let expected: Vec<String> = (81..=100)
+        .rev()
+        .map(|index| format!("- Fragment frag-{index:03}."))
+        .collect();
+    assert_eq!(
+        mind.memory, expected,
+        "the legacy `created_at DESC, fragment_id DESC` TEXT order picks the \
+         whole-second `Z` rows, so the fractional-second row changes neither \
+         the per-scope 100 selection nor the mind's head 20"
+    );
+    assert!(
+        !mind
+            .memory
+            .iter()
+            .any(|line| line.contains("Fractional-second fragment.")),
+        "the fractional-second row is the newest instant but the lowest legacy \
+         text key, so the legacy `LIMIT 100` excludes it"
+    );
+}
+
+/// §7.7: an archived subject's records leave recall. The E6 projection replaces
+/// recall on this read path, and the listing read behind it is the audit route
+/// that keeps serving them — so a read-only core (whose `MemoryAdapter::open`
+/// skips `ensure_subject`) must project no record of an archived subject.
+/// The SOUL slot is a profile, not a record, and is not seeded here.
+#[tokio::test]
+async fn character_mind_projection_excludes_an_archived_subject_like_recall() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let provider = core.memory_provider_for_test().expect("pinned provider");
+
+    let pool = plain_pool(&env).await;
+    nexus_local_db::create_character_fragment(
+        &pool,
+        CREATOR,
+        &nexus_local_db::NewCharacterMemoryFragment {
+            fragment_id: "afrag_shared".to_string(),
+            session_id: "sess_afrag_shared".to_string(),
+            character_id: env.character_id.clone(),
+            actor_world_binding_id: None,
+            keywords: "[]".to_string(),
+            summary: "Archived-scope shared fragment.".to_string(),
+            created_at: "2026-02-01T00:00:00Z".to_string(),
+            ttl: None,
+        },
+    )
+    .await
+    .unwrap();
+    pool.close().await;
+    let bearer = MemoryBearerRef::Character {
+        owner_creator_id: CREATOR,
+        character_id: &env.character_id,
+    };
+    let mut memory = nexus_creator_memory::LongTermMemory::new("story_summary");
+    memory.set_body("Archived-scope memory body.");
+    memory.frontmatter.updated_at = "2026-01-05T00:00:00Z".to_string();
+    nexus_creator_memory::memory_io::save_memory(
+        &env.user_home,
+        bearer,
+        "archived-memory",
+        &memory,
+    )
+    .expect("promoted memory fixture");
+    let document =
+        std::fs::read_to_string(bearer.long_term_memory_path(&env.user_home, "archived-memory"))
+            .expect("memory file bytes");
+
+    // A live subject: the projection serves both record families.
+    let live = CoreCharacterMind::new(plain_pool(&env).await, provider.clone())
+        .projection(&principal, CREATOR, &env.character_id, None)
+        .await
+        .expect("live projection");
+    assert_eq!(
+        live.memory,
+        vec![
+            "- Archived-scope shared fragment.".to_string(),
+            format!("- {document}"),
+        ],
+        "a live subject projects its fragments and promoted memories"
+    );
+
+    // Archive the subject the projection addresses, through the provider's own
+    // terminal transition (§7.7), so the read sees a real archived subject.
+    let subject = legacy::character_subject_id(&env.character_id);
+    let archived = bridge_ok(
+        &provider
+            .fence_subject(
+                &bridge_principal(),
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": subject,
+                    "target": { "type": "subject" },
+                    "action": "archive",
+                    "expected_revision": 1,
+                    "idempotency_key": "k-mind-archive",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(archived["result"]["status"], "archived");
+
+    // A read-only core writes nothing, so the archived state is the one the
+    // provider already holds — and the projection is recall-equivalent.
+    let read_only = CoreService::open(CoreOpenOptions {
+        user_home: env.user_home.clone(),
+        access: CoreAccess::ReadOnly,
+    })
+    .await
+    .expect("read-only open");
+    let principal = read_only.active_principal().await.unwrap();
+    let excluded = CoreCharacterMind::new(
+        plain_pool(&env).await,
+        read_only
+            .memory_provider_for_test()
+            .expect("pinned provider"),
+    )
+    .projection(&principal, CREATOR, &env.character_id, None)
+    .await
+    .expect("an archived subject still projects");
+    assert!(
+        excluded.memory.is_empty(),
+        "recall excludes an archived subject's records, and so does the E6 \
+         projection: {:?}",
+        excluded.memory
+    );
+}
+
+#[tokio::test]
+async fn character_mind_projection_fails_closed_when_the_provider_refuses() {
+    let env = seed_env().await;
+    // A read-only open with no writer behind it: no space or subject exists, so
+    // the projection's first read is refused instead of yielding an empty mind.
+    let read_only = CoreService::open(CoreOpenOptions {
+        user_home: env.user_home.clone(),
+        access: CoreAccess::ReadOnly,
+    })
+    .await
+    .expect("read-only open");
+    let principal = read_only.active_principal().await.unwrap();
+    let provider = read_only
+        .memory_provider_for_test()
+        .expect("pinned provider");
+    let pool = plain_pool(&env).await;
+
+    let refused = CoreCharacterMind::new(pool.clone(), provider.clone())
+        .projection(&principal, CREATOR, &env.character_id, None)
+        .await
+        .expect_err("an absent provider space cannot serve the projection");
+    assert!(
+        matches!(refused, CoreError::NotFound { .. }),
+        "the refusal propagates instead of becoming an empty mind: {refused:?}"
+    );
+
+    let malformed = CoreCharacterMind::new(pool, provider)
+        .projection(&principal, CREATOR, "not-a-character", None)
+        .await
+        .expect_err("a malformed bearer id names no subject");
+    assert!(
+        matches!(malformed, CoreError::InvalidInput { ref field, .. } if field == "character_id"),
+        "got {malformed:?}"
     );
 }
