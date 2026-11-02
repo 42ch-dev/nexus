@@ -1391,7 +1391,10 @@ pub(super) fn provider_timestamp(raw: &str) -> String {
     parse_timestamp(raw).map_or_else(|| raw.to_string(), timestamp)
 }
 
-fn parse_timestamp(raw: &str) -> Option<DateTime<Utc>> {
+/// The one legacy timestamp parser: RFC 3339, then the SQLite
+/// (`YYYY-MM-DD HH:MM:SS[.fff]`) and bare-`T` forms. Shared with the merged-read
+/// ordering key so one queue of legacy formats sorts as instants.
+pub(super) fn parse_timestamp(raw: &str) -> Option<DateTime<Utc>> {
     if let Ok(parsed) = DateTime::parse_from_rfc3339(raw) {
         return Some(parsed.with_timezone(&Utc));
     }

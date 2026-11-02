@@ -100,15 +100,25 @@ const OP_LEGACY_ADOPT: &str = "memory.legacy.adopt";
 
 /// Time order for a merged read: a provider row renders whole seconds, while a
 /// projected legacy row keeps the precision its legacy column carried, so the
-/// two renderings are not comparable as text (NXM-5 QC1-F1). Parse both sides
-/// when both parse; otherwise keep the deterministic text order.
+/// two renderings are not comparable as text (NXM-5 QC1-F1).
+///
+/// Both sides order through [`legacy::parse_timestamp`] — the parser the legacy
+/// projection itself uses, which accepts RFC 3339 and the SQLite/bare-`T`
+/// forms — so a queue mixing those formats still shares one instant order. Any
+/// value it cannot parse is a separate class after every parsed instant,
+/// ordered by its raw text; the class assignment never depends on the pair
+/// being compared, which is what makes this comparator transitive and gives
+/// `sort_by` the total order it requires (NXM-5 QC1-F1 fix round 2).
 pub(crate) fn created_at_cmp(left: &str, right: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
     match (
-        DateTime::parse_from_rfc3339(left),
-        DateTime::parse_from_rfc3339(right),
+        legacy::parse_timestamp(left),
+        legacy::parse_timestamp(right),
     ) {
-        (Ok(left), Ok(right)) => left.cmp(&right),
-        _ => left.cmp(right),
+        (Some(left), Some(right)) => left.cmp(&right),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => left.cmp(right),
     }
 }
 
@@ -3102,5 +3112,86 @@ impl MemoryPort for LocalMemoryProvider {
         _request: schemas::MemoryImportsDiscardRequest,
     ) -> SpokeResult<schemas::MemoryImportsDiscardResponse> {
         unsupported("memory.imports.discard")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::created_at_cmp;
+    use std::cmp::Ordering;
+
+    /// NXM-5 QC1-F1 fix round 2: the merged-read comparator must be a total
+    /// order for every supported legacy timestamp format. The reported cycle —
+    /// RFC 3339 second `A < B` (fractional RFC 3339) by parse, `B < C` and
+    /// `C < A` by pairwise text fallback — must not be expressible.
+    #[test]
+    fn created_at_cmp_is_a_total_order_for_mixed_legacy_formats() {
+        let values = [
+            "2026-01-01T00:00:00Z",     // A: RFC 3339, whole second
+            "2026-01-01T00:00:00.900Z", // B: RFC 3339 with fraction
+            "2026-01-01T00:00:00.950",  // C: bare-T form (no offset)
+            "2026-01-01 00:00:00.950",  // the same instant in the SQLite form
+            "2026-01-01T00:00:01Z",     // D: one second later
+            "not a timestamp",          // unparseable class
+            "also not a timestamp",     // unparseable class
+        ];
+
+        for left in values {
+            assert_eq!(created_at_cmp(left, left), Ordering::Equal);
+            for right in values {
+                assert_eq!(
+                    created_at_cmp(left, right),
+                    created_at_cmp(right, left).reverse(),
+                    "antisymmetry: {left} vs {right}"
+                );
+            }
+        }
+        for a in values {
+            for b in values {
+                for c in values {
+                    if created_at_cmp(a, b) == Ordering::Less
+                        && created_at_cmp(b, c) == Ordering::Less
+                    {
+                        assert_eq!(
+                            created_at_cmp(a, c),
+                            Ordering::Less,
+                            "transitivity: {a} < {b} < {c}"
+                        );
+                    }
+                }
+            }
+        }
+
+        // The reported triple now ranks by instant: A < B < C and therefore
+        // A < C, with no cycle.
+        assert_eq!(
+            created_at_cmp("2026-01-01T00:00:00Z", "2026-01-01T00:00:00.900Z"),
+            Ordering::Less
+        );
+        assert_eq!(
+            created_at_cmp("2026-01-01T00:00:00.900Z", "2026-01-01T00:00:00.950"),
+            Ordering::Less
+        );
+        assert_eq!(
+            created_at_cmp("2026-01-01T00:00:00Z", "2026-01-01T00:00:00.950"),
+            Ordering::Less
+        );
+
+        // One sort yields exactly one ranking, parseable instants first and
+        // the unparseable class last in raw-text order.
+        let mut sorted = values;
+        sorted.sort_by(|left, right| created_at_cmp(left, right));
+        assert_eq!(
+            sorted,
+            [
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:00:00.900Z",
+                "2026-01-01T00:00:00.950",
+                "2026-01-01 00:00:00.950",
+                "2026-01-01T00:00:01Z",
+                "also not a timestamp",
+                "not a timestamp",
+            ]
+        );
     }
 }

@@ -3396,6 +3396,63 @@ async fn pending_pages_keep_sub_second_order_opposite_to_ids() {
     assert!(!second.pagination.has_more);
 }
 
+/// QC1-F1 fix round 2: one pending queue mixes an RFC 3339 whole second, a
+/// fractional RFC 3339 value and a timezone-less bare-`T` legacy value. Ordering
+/// by the shared legacy parser keeps the retained `created_at DESC` order and
+/// its keyset page boundaries consistent with one total order.
+#[tokio::test]
+async fn pending_mixed_timestamp_formats_order_as_instants_across_pages() {
+    let env = seed_env().await;
+    seed_creator_pending_row(&env, "pending_a", None, "2026-01-01T00:00:00Z").await;
+    seed_creator_pending_row(&env, "pending_b", None, "2026-01-01T00:00:00.900Z").await;
+    seed_creator_pending_row(&env, "pending_c", None, "2026-01-01T00:00:00.950").await;
+    let (core, principal) = open_core(&env).await;
+
+    let first = core
+        .list_pending_reviews(&principal, None, 1)
+        .await
+        .unwrap();
+    assert_eq!(first.items.len(), 1);
+    assert_eq!(
+        first.items[0].pending_id, "pending_c",
+        "the timezone-less bare-T value is the newest, not the textually largest"
+    );
+    assert_eq!(
+        first.items[0].created_at, "2026-01-01T00:00:00.950",
+        "the legacy value is served verbatim"
+    );
+    assert!(first.pagination.has_more);
+    let cursor = first
+        .pagination
+        .next_cursor
+        .clone()
+        .expect("a partial page carries a cursor");
+
+    let second = core
+        .list_pending_reviews(&principal, Some(cursor), 1)
+        .await
+        .unwrap();
+    assert_eq!(second.items.len(), 1);
+    assert_eq!(second.items[0].pending_id, "pending_b");
+    assert_eq!(second.items[0].created_at, "2026-01-01T00:00:00.900Z");
+    assert!(second.pagination.has_more);
+    let cursor = second
+        .pagination
+        .next_cursor
+        .clone()
+        .expect("a partial page carries a cursor");
+
+    let third = core
+        .list_pending_reviews(&principal, Some(cursor), 1)
+        .await
+        .unwrap();
+    assert_eq!(third.items.len(), 1);
+    assert_eq!(third.items[0].pending_id, "pending_a");
+    assert_eq!(third.items[0].created_at, "2026-01-01T00:00:00Z");
+    assert!(!third.pagination.has_more);
+    assert!(third.pagination.next_cursor.is_none());
+}
+
 #[tokio::test]
 async fn character_offset_window_serves_rows_past_the_former_scan_cap() {
     const TOTAL: i64 = 10_001;
