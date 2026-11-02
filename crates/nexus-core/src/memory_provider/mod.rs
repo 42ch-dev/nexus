@@ -91,6 +91,11 @@ const OP_RECORDS_LIST: &str = "memory.records.list";
 const OP_RECORDS_PROMOTE: &str = "memory.records.promote";
 const OP_RECALL: &str = "memory.recall";
 const OP_PROFILE_UPDATE: &str = "memory.profile.update";
+/// NXM-5 Task 2's internal op: adopting a legacy-derived object into provider
+/// storage. It is never a wire op — it is the receipt identity of the
+/// just-in-time adoption the E4 handlers perform before they mutate a projected
+/// row, so a retried adoption replays instead of duplicating.
+const OP_LEGACY_ADOPT: &str = "memory.legacy.adopt";
 
 /// §7.3/§7.4: the two space lifecycle transitions, each naming its op string and
 /// the state it writes.
@@ -812,6 +817,59 @@ impl LocalMemoryProvider {
                 missing,
             }),
         }
+    }
+
+    /// NXM-5 Task 2 just-in-time adoption: take provider ownership of the
+    /// legacy-derived candidates named by `candidate_ids`, under the ids the
+    /// read bridge already projected them with, before an E4 handler mutates
+    /// them.
+    ///
+    /// This is the mutation-side half of the legacy bridge. A projected row is a
+    /// read view the provider cannot write, so the handler adopts it here and
+    /// then dismisses/reviews the adopted row through the port. Adoption is
+    /// idempotent (the same set replays; an already-native id is a no-op) and
+    /// marker-gated (the bridge resolves nothing once P5 publishes the
+    /// completion marker, so a post-migration call adopts nothing).
+    ///
+    /// # Errors
+    /// The typed [`CoreError`] a store refusal maps onto; the caller treats a
+    /// failure as the mutation's own refusal, never as a silent skip.
+    pub async fn adopt_legacy_candidates(
+        &self,
+        principal: &schemas::Principal,
+        subject_id: &str,
+        candidate_ids: &[String],
+    ) -> CoreResult<()> {
+        if candidate_ids.is_empty() {
+            return Ok(());
+        }
+        let requester = principal_id(principal);
+        // The dedup key is the adopted set itself: the same adoption retried is
+        // a replay, a different one has its own namespace.
+        let digest = match jcs_sha256_hex(&json!({
+            "space_id": self.space_id,
+            "subject_id": subject_id,
+            "candidate_ids": candidate_ids,
+        })) {
+            SpokeResult::Ok(digest) => digest,
+            SpokeResult::Reject(reject) => {
+                return Err(CoreError::Internal {
+                    category: reject.message,
+                });
+            }
+        };
+        let ctx = OpContext {
+            space_id: &self.space_id,
+            requester_principal_id: requester,
+            op: OP_LEGACY_ADOPT,
+            idempotency_key: Some(digest.as_str()),
+            payload_digest: &digest,
+        };
+        self.store
+            .adopt_legacy_candidates(&ctx, &self.space_id, requester, subject_id, candidate_ids)
+            .await
+            .map_err(store_error)
+            .map_err(to_core_error)
     }
 
     /// §14.2/§14.3 proof seam: force the next committing transaction to fail at

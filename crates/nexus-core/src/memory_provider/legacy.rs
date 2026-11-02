@@ -72,6 +72,23 @@ pub const CREATOR_KIND_NS: &str = "nexus_creator";
 /// Subject namespace of a Character bearer (its `kind_id` is the character id).
 pub const CHARACTER_KIND_NS: &str = "nexus_character";
 
+/// The provider subject id of the workspace Creator's bearer.
+///
+/// One deterministic id per bearer keeps the bridge's canonical-subject rule
+/// (smallest `subject_id` naming the bearer) trivially satisfied: E4's handlers
+/// and P5's migration pass address the same subject, so a projected row can
+/// never be listed under one subject and read under another.
+#[must_use]
+pub fn creator_subject_id(creator_id: &str) -> String {
+    format!("sbj_legacy_creator_{creator_id}")
+}
+
+/// [`creator_subject_id`] for a Character bearer.
+#[must_use]
+pub fn character_subject_id(character_id: &str) -> String {
+    format!("sbj_legacy_character_{character_id}")
+}
+
 /// `provenance.captured_by` of every projected row: no authenticated principal
 /// wrote it, the bridge projected it from the legacy bearer.
 const LEGACY_CAPTURED_BY: &str = "nexus:legacy";
@@ -126,6 +143,22 @@ const EPOCH_TIMESTAMP: &str = "1970-01-01T00:00:00Z";
 #[must_use]
 pub fn legacy_migration_key(space_id: &str) -> String {
     format!("legacy_content_migration:{space_id}")
+}
+
+/// The deterministic external id of a Creator pending-review row.
+///
+/// The E4 pending-review DTOs name the legacy `pending_id`; the provider names
+/// the same object with this id, so an adoption (Task 2) and P5's migration
+/// key agree on the identity without a lookup table between them.
+#[must_use]
+pub fn pending_review_candidate_id(pending_id: &str) -> String {
+    external_id(FAMILY_MEMORY_PENDING_REVIEW, &[pending_id])
+}
+
+/// [`pending_review_candidate_id`] for a Character pending-review row.
+#[must_use]
+pub fn character_pending_review_candidate_id(pending_id: &str) -> String {
+    external_id(FAMILY_CHARACTER_PENDING_REVIEW, &[pending_id])
 }
 
 /// The legacy bearer roots of one opened workspace: the user home the bearer

@@ -3311,6 +3311,88 @@ pub(super) fn mint_candidate_id() -> String {
 }
 
 impl MemoryStore {
+    /// NXM-5 Task 2 just-in-time adoption: insert the legacy-derived candidates
+    /// named by `ids` as provider-native rows under their deterministic external
+    /// ids.
+    ///
+    /// Each row comes from [`super::legacy`], which is also what decides whether
+    /// a projection exists at all: once P5 publishes the completion marker the
+    /// bridge resolves nothing, so this adopts nothing — the marker read and the
+    /// insert share this one admission transaction. The insert is idempotent
+    /// (`ON CONFLICT DO NOTHING`), so a retried dismissal can neither duplicate
+    /// a row nor resurrect a consumed one, and the identifier the bridge would
+    /// have projected is the identifier the provider now owns: the merged read
+    /// dedupes on it, so the legacy source stops resurfacing.
+    pub(super) async fn adopt_legacy_candidates(
+        &self,
+        ctx: &OpContext<'_>,
+        space_id: &str,
+        principal_id: &str,
+        subject_id: &str,
+        ids: &[String],
+    ) -> StoreResult<()> {
+        let (mut tx, now) = self.begin_admission().await?;
+        if let Some(_earlier) = probe(&mut tx, ctx, now).await? {
+            // The same adoption set replayed: its rows are already native, and
+            // its receipt is already the dedup authority for this key.
+            tx.rollback().await?;
+            return Ok(());
+        }
+        let mut adopted = 0_i64;
+        for id in ids {
+            let Some(row) =
+                legacy::candidate_by_id_in_tx(&mut tx, &self.legacy, space_id, id).await?
+            else {
+                continue;
+            };
+            // The bridge resolves the bearer's canonical subject; an id that
+            // resolves under another subject is not this caller's to adopt.
+            if row.subject_id != subject_id {
+                continue;
+            }
+            let requirements = [row.requirement("capture")];
+            let admission = Admission {
+                op: super::OP_LEGACY_ADOPT,
+                space_id,
+                principal_id,
+                coverage: Coverage::Requirements(&requirements),
+                issuance: None,
+                subject_gate: Some(subject_id),
+                placement_gate: Some(row.scope()),
+                freeze_gated: true,
+            };
+            let _ = authorize(&mut tx, &admission, now).await?;
+            gate(&mut tx, &admission).await?;
+            let inserted = sqlx::query(
+                "INSERT INTO memory_candidates \
+                 (candidate_id, space_id, subject_id, capture_visibility, capture_context_id, kind, \
+                  content_json, provenance_json, classification_json, status, consumed_by_json, \
+                  content_digest, occurred_at, expires_at, revision, created_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, ?, ?, ?, ?) \
+                 ON CONFLICT(candidate_id) DO NOTHING",
+            )
+            .bind(row.candidate_id.as_str())
+            .bind(row.space_id.as_str())
+            .bind(row.subject_id.as_str())
+            .bind(row.capture_visibility.as_str())
+            .bind(row.capture_context_id.as_deref())
+            .bind(row.kind.as_str())
+            .bind(row.content_json.as_deref())
+            .bind(row.provenance_json.as_str())
+            .bind(row.classification_json.as_str())
+            .bind(row.occurred_at.as_deref())
+            .bind(row.expires_at.as_deref())
+            .bind(row.revision)
+            .bind(row.created_at.as_str())
+            .execute(&mut *tx)
+            .await?;
+            adopted += i64::try_from(inserted.rows_affected()).unwrap_or(0);
+        }
+        self.commit_receipt(tx, ctx, &json!({ "adopted": adopted }), now)
+            .await?;
+        Ok(())
+    }
+
     /// §7.11: admission + candidate inserts + receipt, one transaction.
     pub(super) async fn capture(
         &self,

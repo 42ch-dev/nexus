@@ -2618,3 +2618,191 @@ async fn legacy_file_change_between_pages_invalidates_the_cursor() {
         .await;
     assert_eq!(bridge_reject_code(&stale), "CURSOR_INVALID");
 }
+
+// ═══ NXM-5 Task 2: E4 reroute + just-in-time adoption ═════════════════════
+//
+// The E4 read and dismissal handlers serve the memory family through the
+// pinned `MemoryPort`. A dismissal of a legacy-derived row is the architect's
+// just-in-time adoption contract: the row exists only as a projected view, so
+// the handler adopts it under the bridge's deterministic id and then consumes
+// it through the provider — the legacy table stays byte-identical, adoption is
+// idempotent, and nothing is adopted once P5's completion marker is present.
+
+/// One provider candidate row as the store holds it: `(status, capture
+/// context)`.
+async fn adopted_candidate(env: &Env, candidate_id: &str) -> Option<(String, Option<String>)> {
+    let pool = plain_pool(env).await;
+    let row: Option<(String, Option<String>)> = sqlx::query_as(
+        "SELECT status, capture_context_id FROM memory_candidates WHERE candidate_id = ?",
+    )
+    .bind(candidate_id)
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+    row
+}
+
+#[tokio::test]
+async fn dismissal_adopts_the_projected_row_before_consuming_it() {
+    let env = seed_env().await;
+    seed_creator_pending_row(&env, "pend_adopt", Some(WORLD), "2026-01-01T00:00:01Z").await;
+    let (core, principal) = open_core(&env).await;
+    let candidate_id = legacy::pending_review_candidate_id("pend_adopt");
+
+    // The row is served from the bridge's projection, and a read adopts
+    // nothing: adoption belongs to the mutation it precedes.
+    assert_eq!(
+        core.count_pending_reviews(&principal).await.unwrap().count,
+        1
+    );
+    assert_eq!(
+        adopted_candidate(&env, &candidate_id).await,
+        None,
+        "a read must not adopt"
+    );
+
+    let deleted = core
+        .delete_pending_review(&principal, "pend_adopt".to_string())
+        .await
+        .expect("the projected row is adopted, then dismissed");
+    assert!(deleted.success);
+    assert_eq!(deleted.pending_id, "pend_adopt");
+
+    // The provider now owns the same deterministic id, consumed in place.
+    assert_eq!(
+        adopted_candidate(&env, &candidate_id).await,
+        Some(("consumed".to_string(), None)),
+        "the dismissal consumed the adopted row under the bridge's id"
+    );
+    // …and the legacy table was never written (compass D6: write-idle).
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
+        1
+    );
+    pool.close().await;
+
+    // The consumed row is gone from the retained DTO surface, and a repeat
+    // dismissal finds nothing to dismiss.
+    assert_eq!(
+        core.count_pending_reviews(&principal).await.unwrap().count,
+        0
+    );
+    assert!(core
+        .list_pending_reviews(&principal, None, PAGE_SIZE)
+        .await
+        .unwrap()
+        .items
+        .is_empty());
+    let err = core
+        .delete_pending_review(&principal, "pend_adopt".to_string())
+        .await
+        .expect_err("a consumed row is gone");
+    assert!(matches!(err, CoreError::NotFound { .. }), "got {err:?}");
+
+    // Idempotency: re-running the adoption for an already-adopted id is a
+    // no-op that neither duplicates nor resurrects the row.
+    let provider = LocalMemoryProvider::open(env.user_home.clone(), CREATOR, "default")
+        .await
+        .expect("provider reopen");
+    provider
+        .adopt_legacy_candidates(
+            &bridge_principal(),
+            &legacy::creator_subject_id(CREATOR),
+            std::slice::from_ref(&candidate_id),
+        )
+        .await
+        .expect("re-adoption is idempotent");
+    assert_eq!(
+        adopted_candidate(&env, &candidate_id).await,
+        Some(("consumed".to_string(), None)),
+        "re-adoption must not resurrect the consumed row"
+    );
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM memory_candidates WHERE candidate_id = 'lgc:memory_pending_review:pend_adopt'"
+        )
+        .await,
+        1,
+        "re-adoption must not duplicate the row"
+    );
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn character_dismissal_adopts_the_projected_row_before_consuming_it() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let chr = env.character_id.clone();
+    let bind1 = env.binding_id.clone();
+    core.capture_character_pending_review(
+        &principal,
+        chr.clone(),
+        dto(json_capture(
+            "pend_char_adopt",
+            Some(&bind1),
+            "2026-01-01T00:00:01Z",
+        )),
+    )
+    .await
+    .expect("binding-local capture");
+
+    core.delete_character_pending_review(&principal, chr.clone(), "pend_char_adopt".to_string())
+        .await
+        .expect("the projected row is adopted, then dismissed");
+
+    assert_eq!(
+        adopted_candidate(
+            &env,
+            &legacy::character_pending_review_candidate_id("pend_char_adopt")
+        )
+        .await,
+        Some(("consumed".to_string(), Some(bind1.clone()))),
+        "the adopted row keeps its binding placement"
+    );
+    assert_eq!(
+        core.count_character_pending_reviews(&principal, chr, Some(bind1))
+            .await
+            .unwrap()
+            .count,
+        0
+    );
+}
+
+#[tokio::test]
+async fn just_in_time_adoption_is_inert_after_the_completion_marker() {
+    let env = seed_env().await;
+    seed_creator_pending_row(&env, "pend_post_marker", None, "2026-01-01T00:00:01Z").await;
+    publish_migration_marker(&env).await;
+    let (core, principal) = open_core(&env).await;
+
+    // Post-migration reads serve provider-native rows only: the bridge closes.
+    assert_eq!(
+        core.count_pending_reviews(&principal).await.unwrap().count,
+        0
+    );
+    assert!(core
+        .list_pending_reviews(&principal, None, PAGE_SIZE)
+        .await
+        .unwrap()
+        .items
+        .is_empty());
+
+    let err = core
+        .delete_pending_review(&principal, "pend_post_marker".to_string())
+        .await
+        .expect_err("nothing is projected to dismiss");
+    assert!(matches!(err, CoreError::NotFound { .. }), "got {err:?}");
+    assert_eq!(
+        adopted_candidate(
+            &env,
+            &legacy::pending_review_candidate_id("pend_post_marker")
+        )
+        .await,
+        None,
+        "no adoption path runs after the marker"
+    );
+}
