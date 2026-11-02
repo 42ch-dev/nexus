@@ -385,6 +385,19 @@ impl CoreService {
         &self.inner.pool
     }
 
+    /// The `MemoryPort` this open pinned, for crate-external integration tests
+    /// only (NXM-5 Task 2 fix round 3, finding F5: a regression arms the
+    /// dismissal-side disposition step-point on the very instance the E4
+    /// handlers use). Compiled out of a production build.
+    ///
+    /// # Errors
+    /// [`CoreError::Closing`] after a close began.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn memory_provider_for_test(&self) -> CoreResult<Arc<LocalMemoryProvider>> {
+        self.memory_provider()
+    }
+
     /// The `MemoryPort` this open pinned for the memory family (NXM-5 Task 2).
     ///
     /// The handle is shared, not copied: every E4 handler runs against the one

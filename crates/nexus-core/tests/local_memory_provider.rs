@@ -4000,6 +4000,25 @@ async fn delete_is_gated_by_the_subject_lifecycle() {
 #[tokio::test]
 async fn a_read_only_open_refuses_writes_before_their_machinery() {
     let env = seed_env();
+
+    // The counter is live, not dead instrumentation: a writable instance counts
+    // its admission attempt (fix round 3, finding F5). Probed on a throwaway
+    // workspace so this test's rows stay untouched.
+    {
+        let probe_env = seed_env();
+        let probe = open_provider(&probe_env).await;
+        let before_attempts = probe.lock_attempts();
+        wire(
+            &probe
+                .ensure_subject(&principal(CREATOR), ensure_request(SUBJECT))
+                .await,
+        );
+        assert!(
+            probe.lock_attempts() > before_attempts,
+            "a writable instance counts its admission attempt"
+        );
+    }
+
     let provider = open_provider(&env).await;
     let files_root = provider.file_root();
     drop(provider);
@@ -4009,6 +4028,11 @@ async fn a_read_only_open_refuses_writes_before_their_machinery() {
         .await
         .expect("read-only open");
     assert!(!read_only.is_writable());
+    assert_eq!(
+        read_only.lock_attempts(),
+        0,
+        "a read-only instance has attempted no admission or publication"
+    );
     let admin = principal(CREATOR);
 
     // The normal transaction path (`begin_admission`).
@@ -4050,6 +4074,16 @@ async fn a_read_only_open_refuses_writes_before_their_machinery() {
         "the refusal names the read-only open: {refused}"
     );
 
+    // Zero lock attempts, observed directly (fix round 3, finding F5): neither
+    // refused write passed the read-only gate, so neither reached the admission
+    // transaction, the retention sweep, the publication gate or the workspace
+    // flock. The filename assertion below is corroboration, not the proof.
+    assert_eq!(
+        read_only.lock_attempts(),
+        0,
+        "a refused read-only write never reaches the admission/publication machinery"
+    );
+
     // No side effect: no subject, candidate, record, journal intent or receipt,
     // and no publication lock file or projection under the file root.
     let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
@@ -4073,4 +4107,216 @@ async fn a_read_only_open_refuses_writes_before_their_machinery() {
         before,
         "no publication section was taken, no lock changed and nothing was projected"
     );
+}
+
+/// NXM-5 Task 2 fix round 3 (R3-F1/R3-F5): the ordinary wire dismissal consumes
+/// a provider candidate only under the bearer's disposition section — the same
+/// section a legacy review drain holds — and the regression proves it with an
+/// observable lock attempt rather than a scheduling guess.
+#[tokio::test]
+async fn a_wire_dismissal_takes_the_bearer_disposition_section() {
+    let env = seed_env();
+    let provider = Arc::new(open_provider(&env).await);
+    let admin = principal(CREATOR);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    let captured = wire(
+        &provider
+            .capture(&admin, capture_request("k-capture-section", None, TEXT))
+            .await,
+    );
+    let candidate_id = receipt(&captured)["result"]["candidate_ids"][0]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // Another decision on this bearer holds the section.
+    let section = provider
+        .review_disposition(SUBJECT)
+        .await
+        .expect("the bearer's disposition section");
+    assert!(!provider.disposition_available(SUBJECT));
+
+    let attempting = Arc::new(tokio::sync::Notify::new());
+    let proceed = Arc::new(tokio::sync::Barrier::new(2));
+    provider.pause_disposition_attempt(Arc::clone(&attempting), Arc::clone(&proceed));
+    let dismissal = tokio::spawn({
+        let provider = Arc::clone(&provider);
+        let request = dto(json!({
+            "space_id": SPACE,
+            "candidate_id": candidate_id.clone(),
+            "expected_revision": 1,
+            "reason": "duplicate of an existing note",
+            "idempotency_key": "k-dismiss-section",
+        }));
+        async move {
+            let admin = principal(CREATOR);
+            provider.dismiss_candidate(&admin, request).await
+        }
+    });
+    // The dismissal really reached the lock attempt, with the section held.
+    attempting.notified().await;
+    assert!(
+        !provider.disposition_available(SUBJECT),
+        "the wire dismissal is parked at the lock the other decision holds"
+    );
+    proceed.wait().await;
+    assert!(
+        !dismissal.is_finished(),
+        "it cannot acquire the section while another decision holds it"
+    );
+
+    drop(section);
+    let dismissed = wire(&dismissal.await.unwrap());
+    let dismissed = receipt(&dismissed);
+    assert_eq!(dismissed["result"]["outcome"], "dismissed");
+    assert_eq!(dismissed["result"]["candidate_id"], candidate_id);
+    assert!(
+        provider.disposition_available(SUBJECT),
+        "the section is released once the dismissal commits"
+    );
+}
+
+/// NXM-5 Task 2 fix round 3 (R3-F3): every direct read entry point of a
+/// read-only provider opened over a workspace with no provider schema answers
+/// the space's absence (or an empty page), never a driver error.
+#[tokio::test]
+async fn a_read_only_open_over_a_pre_provider_workspace_answers_absent_reads() {
+    let env = seed_env();
+    std::fs::create_dir_all(env.db_path.parent().unwrap()).unwrap();
+    std::fs::write(&env.db_path, b"").unwrap();
+
+    let read_only = LocalMemoryProvider::open_read_only(env.user_home.clone(), CREATOR, "default")
+        .await
+        .expect("read-only open over the pre-provider database");
+    assert!(!read_only.is_writable());
+    let admin = principal(CREATOR);
+
+    let absent = [
+        wire(
+            &read_only
+                .get_subject(
+                    &admin,
+                    dto(json!({ "space_id": SPACE, "subject_id": SUBJECT })),
+                )
+                .await,
+        ),
+        wire(
+            &read_only
+                .list_grants(&admin, dto(json!({ "space_id": SPACE })))
+                .await,
+        ),
+        wire(
+            &read_only
+                .get_receipt(
+                    &admin,
+                    dto(json!({ "space_id": SPACE, "receipt_id": "rcp_missing" })),
+                )
+                .await,
+        ),
+        wire(
+            &read_only
+                .list_candidates(&admin, candidates_list_request(None))
+                .await,
+        ),
+        wire(
+            &read_only
+                .list_records(
+                    &admin,
+                    dto(json!({
+                        "space_id": SPACE,
+                        "subject_id": SUBJECT,
+                        "selection": { "mode": "subject_all" },
+                    })),
+                )
+                .await,
+        ),
+        wire(
+            &read_only
+                .get_record(&admin, record_get_request("rec_missing"))
+                .await,
+        ),
+        wire(
+            &read_only
+                .get_profile(
+                    &admin,
+                    dto(json!({ "space_id": SPACE, "subject_id": SUBJECT })),
+                )
+                .await,
+        ),
+    ];
+    for body in &absent {
+        assert_eq!(
+            error_code(body),
+            "NOT_FOUND",
+            "the space's absence, not an internal error: {body}"
+        );
+    }
+    let spaces = wire(&read_only.list_spaces(&admin, dto(json!({}))).await);
+    assert_eq!(spaces["spaces"], json!([]));
+}
+
+/// NXM-5 Task 2 fix round 3 (R3-F4): a subject id maps to exactly one safe
+/// filename inside the lock directory — no escape past it and no alias between
+/// distinct ids.
+#[tokio::test]
+async fn subject_ids_map_to_confined_unique_disposition_locks() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let lock_dir = provider.file_root().parent().unwrap().join("memory_locks");
+
+    // A traversing id is held under the encoded name, and it neither escapes
+    // the directory nor aliases the plain id.
+    let escaping = provider
+        .review_disposition("../escape")
+        .await
+        .expect("the escaping id still gets a section");
+    assert!(
+        !provider.disposition_available("../escape"),
+        "the held id is the one the section was taken under"
+    );
+    assert!(
+        provider.disposition_available("escape"),
+        "an escaping id must not alias a plain id"
+    );
+    drop(escaping);
+    assert!(
+        !lock_dir.join("../escape.lock").exists(),
+        "no lock file is created outside the disposition directory"
+    );
+
+    // Distinct raw ids never share a lock.
+    let dotted = provider
+        .review_disposition("bearer.a")
+        .await
+        .expect("section");
+    assert!(
+        provider.disposition_available("bearer/a"),
+        "distinct ids must map to distinct locks"
+    );
+    drop(dotted);
+
+    let names: Vec<String> = std::fs::read_dir(&lock_dir)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(
+        names.len(),
+        4,
+        "one lock file per distinct subject id (the probe itself creates the file): {names:?}"
+    );
+    for name in &names {
+        let stem = name
+            .strip_prefix("subject-")
+            .and_then(|stem| stem.strip_suffix(".lock"))
+            .unwrap_or_else(|| panic!("a confined, prefixed lock filename: {name}"));
+        assert!(
+            !stem.contains('/') && !stem.contains('.'),
+            "the encoded lock stem can hold no path component or dot: {name}"
+        );
+    }
 }

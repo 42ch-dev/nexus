@@ -93,8 +93,9 @@ const OP_RECALL: &str = "memory.recall";
 const OP_PROFILE_UPDATE: &str = "memory.profile.update";
 /// NXM-5 Task 2's internal op: adopting a legacy-derived object into provider
 /// storage. It is never a wire op — it is the receipt identity of the
-/// just-in-time adoption the E4 handlers perform before they mutate a projected
-/// row, so a retried adoption replays instead of duplicating.
+/// just-in-time adoption a dismissal performs **inside the transaction that
+/// consumes the row** (NXM-5 Task 2 fix round 3, finding F1), so a retried
+/// dismissal replays instead of duplicating and no adopted row is left pending.
 const OP_LEGACY_ADOPT: &str = "memory.legacy.adopt";
 
 /// §7.3/§7.4: the two space lifecycle transitions, each naming its op string and
@@ -739,6 +740,28 @@ pub struct MemoryDisposition {
     _file: std::fs::File,
 }
 
+/// The lock file name for one bearer: every byte outside `[A-Za-z0-9_-]` is
+/// percent-encoded, so a subject id can neither escape
+/// `<state db dir>/memory_locks/` (no path separators, no `.`/`..`) nor alias
+/// another subject's lock — the encoding is injective over the unreserved set
+/// (NXM-5 Task 2 fix round 3, finding F4).
+fn disposition_lock_file(subject_id: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut name = String::with_capacity(subject_id.len() + 16);
+    name.push_str("subject-");
+    for byte in subject_id.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_') {
+            name.push(char::from(byte));
+        } else {
+            name.push('%');
+            name.push(char::from(HEX[usize::from(byte >> 4)]));
+            name.push(char::from(HEX[usize::from(byte & 0x0F)]));
+        }
+    }
+    name.push_str(".lock");
+    name
+}
+
 impl LocalMemoryProvider {
     /// Open (or join) the workspace's admitted writer and provision the local
     /// space plus its first `admin` grant (§7.0.6). Re-opening is a no-op.
@@ -860,20 +883,41 @@ impl LocalMemoryProvider {
             ));
         }
         let dir = self.store.disposition_dir();
-        let name = format!("{subject_id}.lock");
-        let acquired = tokio::task::spawn_blocking(move || -> std::io::Result<std::fs::File> {
+        let name = disposition_lock_file(subject_id);
+        let opened = tokio::task::spawn_blocking(move || -> std::io::Result<std::fs::File> {
             std::fs::create_dir_all(&dir)?;
-            let file = std::fs::OpenOptions::new()
+            std::fs::OpenOptions::new()
                 .read(true)
                 .write(true)
                 .create(true)
                 .truncate(false)
-                .open(dir.join(name))?;
+                .open(dir.join(name))
+        })
+        .await;
+        let file = match opened {
+            Ok(Ok(file)) => file,
+            Ok(Err(error)) => {
+                return Err(ProviderError::Internal(format!(
+                    "memory disposition lock: {error}"
+                )))
+            }
+            Err(error) => {
+                return Err(ProviderError::Internal(format!(
+                    "memory disposition lock task: {error}"
+                )))
+            }
+        };
+        // The attempt step-point (fix round 3, finding F5): the file is open and
+        // the lock has not been attempted yet, so a test can prove the caller
+        // really reached the attempt.
+        #[cfg(feature = "test-hooks")]
+        self.store.disposition_attempt_gate().await;
+        let locked = tokio::task::spawn_blocking(move || -> std::io::Result<std::fs::File> {
             file.lock()?;
             Ok(file)
         })
         .await;
-        match acquired {
+        match locked {
             Ok(Ok(file)) => Ok(MemoryDisposition { _file: file }),
             Ok(Err(error)) => Err(ProviderError::Internal(format!(
                 "memory disposition lock: {error}"
@@ -892,7 +936,7 @@ impl LocalMemoryProvider {
         let path = self
             .store
             .disposition_dir()
-            .join(format!("{subject_id}.lock"));
+            .join(disposition_lock_file(subject_id));
         let Ok(file) = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
@@ -907,6 +951,29 @@ impl LocalMemoryProvider {
             let _ = file.unlock();
         }
         free
+    }
+
+    /// NXM-5 Task 2 fix round 3 (finding F5) proof seam: park the next
+    /// disposition acquisition after it opens its lock file and before it
+    /// attempts the lock. Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn pause_disposition_attempt(
+        &self,
+        entered: std::sync::Arc<tokio::sync::Notify>,
+        release: std::sync::Arc<tokio::sync::Barrier>,
+    ) {
+        self.store.park_disposition_attempt(entered, release);
+    }
+
+    /// NXM-5 Task 2 fix round 3 (finding F5) proof seam: entries that passed the
+    /// read-only gate and reached the admission or publication machinery.
+    /// Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn lock_attempts(&self) -> usize {
+        self.store.lock_attempts()
     }
 
     /// MEM-R005 profile admission gate: the authored content kinds a subject
@@ -953,70 +1020,20 @@ impl LocalMemoryProvider {
         }
     }
 
-    /// NXM-5 Task 2 just-in-time adoption: take provider ownership of the
-    /// legacy-derived candidates named by `candidate_ids`, under the ids the
-    /// read bridge already projected them with, before an E4 handler mutates
-    /// them.
-    ///
-    /// This is the mutation-side half of the legacy bridge. A projected row is a
-    /// read view the provider cannot write, so the handler adopts it here and
-    /// then dismisses/reviews the adopted row through the port. Adoption is
-    /// idempotent (the same set replays; an already-native id is a no-op) and
-    /// marker-gated (the bridge resolves nothing once P5 publishes the
-    /// completion marker, so a post-migration call adopts nothing).
-    ///
-    /// # Errors
-    /// The typed [`CoreError`] a store refusal maps onto; the caller treats a
-    /// failure as the mutation's own refusal, never as a silent skip.
-    pub async fn adopt_legacy_candidates(
-        &self,
-        principal: &schemas::Principal,
-        subject_id: &str,
-        candidate_ids: &[String],
-    ) -> CoreResult<()> {
-        if candidate_ids.is_empty() {
-            return Ok(());
-        }
-        let requester = principal_id(principal);
-        // The dedup key is the adopted set itself: the same adoption retried is
-        // a replay, a different one has its own namespace.
-        let digest = match jcs_sha256_hex(&json!({
-            "space_id": self.space_id,
-            "subject_id": subject_id,
-            "candidate_ids": candidate_ids,
-        })) {
-            SpokeResult::Ok(digest) => digest,
-            SpokeResult::Reject(reject) => {
-                return Err(CoreError::Internal {
-                    category: reject.message,
-                });
-            }
-        };
-        let ctx = OpContext {
-            space_id: &self.space_id,
-            requester_principal_id: requester,
-            op: OP_LEGACY_ADOPT,
-            idempotency_key: Some(digest.as_str()),
-            payload_digest: &digest,
-        };
-        self.store
-            .adopt_legacy_candidates(&ctx, &self.space_id, requester, subject_id, candidate_ids)
-            .await
-            .map_err(store_error)
-            .map_err(to_core_error)
-    }
-
     /// Dismiss a legacy-derived candidate: adopt the projection under the
     /// bridge's deterministic id and consume it **in one guarded transaction**
     /// (NXM-5 Task 2 fix round 1, finding F4).
     ///
     /// The adoption is not a separate step a caller can interleave with: a
     /// failure of either half leaves neither effect, so an adopted pending row
-    /// can never be left behind by a dismissal that did not commit. The
-    /// departure from the wire request shape is deliberate — the E4 dismissal
-    /// has no caller-supplied revision (`expected_revision: None` consumes the
-    /// revision the transaction reads) and it names the bearer's subject, which
-    /// only this seam knows.
+    /// can never be left behind by a dismissal that did not commit. There is no
+    /// standalone adoption entry point at all (fix round 3, finding F1): every
+    /// provider adoption happens inside the mutation that consumes the row, and
+    /// every candidate-consuming provider op holds the bearer's disposition
+    /// section. The departure from the wire request shape is deliberate — the E4
+    /// dismissal has no caller-supplied revision (`expected_revision: None`
+    /// consumes the revision the transaction reads) and it names the bearer's
+    /// subject, which only this seam knows.
     ///
     /// # Refusals
     /// The same reject codes `memory.candidates.dismiss` answers: `NOT_FOUND`
@@ -1084,6 +1101,32 @@ impl LocalMemoryProvider {
             Ok(receipt) => settle_receipt(&receipt),
             Err(error) => deny(&store_error(error)),
         }
+    }
+
+    /// The disposition section of the bearer that owns one provider-native
+    /// candidate, or `None` when this store holds no such row (NXM-5 Task 2 fix
+    /// round 3, finding F1).
+    ///
+    /// Every candidate consumption takes the owning bearer's section, so the
+    /// ordinary wire dismissal/review cannot consume a legacy-derived row behind
+    /// a review drain's back. A projected legacy id has no provider row: there
+    /// is nothing for the wire path to consume and its own read answers the
+    /// absence, so no section is taken. A failed probe fails the operation
+    /// rather than proceeding unsectioned.
+    async fn candidate_disposition(
+        &self,
+        space_id: &str,
+        candidate_id: &str,
+    ) -> Result<Option<MemoryDisposition>, ProviderError> {
+        let Some(subject) = self
+            .store
+            .candidate_subject(space_id, candidate_id)
+            .await
+            .map_err(store_error)?
+        else {
+            return Ok(None);
+        };
+        self.disposition(&subject).await.map(Some)
     }
 
     /// §14.2/§14.3 proof seam: force the next committing transaction to fail at
@@ -2114,6 +2157,16 @@ impl MemoryPort for LocalMemoryProvider {
         principal: &schemas::Principal,
         request: schemas::MemoryCandidatesDismissRequest,
     ) -> SpokeResult<schemas::MemoryCandidatesDismissResponse> {
+        // Whichever op consumes a candidate, it holds the owning bearer's
+        // disposition section (fix round 3, finding F1): the legacy review drain
+        // holds the same section across its consumed-check and classification.
+        let _disposition = match self
+            .candidate_disposition(request.space_id.as_str(), request.candidate_id.as_str())
+            .await
+        {
+            Ok(section) => section,
+            Err(error) => return deny(&error),
+        };
         let principal_id = principal_id(principal);
         let op = OP_CANDIDATES_DISMISS;
         let digest = match payload_digest(op, &request) {
@@ -2170,6 +2223,16 @@ impl MemoryPort for LocalMemoryProvider {
                 reason: reject.message,
             });
         }
+        // A review consumes the candidate exactly as a dismissal does, so it
+        // takes the owning bearer's disposition section too (fix round 3,
+        // finding F1).
+        let _disposition = match self
+            .candidate_disposition(request.space_id.as_str(), request.candidate_id.as_str())
+            .await
+        {
+            Ok(section) => section,
+            Err(error) => return deny(&error),
+        };
         let op = OP_CANDIDATES_REVIEW;
         let digest = match payload_digest(op, &request) {
             Ok(digest) => digest,

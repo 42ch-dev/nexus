@@ -139,6 +139,38 @@ async fn seed_env() -> Env {
     }
 }
 
+/// Materialize only the workspace shell and an **empty** state database: the
+/// pre-provider lifecycle a read-only core can open before any writer has
+/// migrated or provisioned it (fix round 3, finding F2).
+fn seed_unprovisioned_env() -> Env {
+    let tmp = TempDir::new().unwrap();
+    let user_home = tmp.path().to_path_buf();
+    let nexus_home = user_home.join(".nexus42");
+    std::fs::create_dir_all(&nexus_home).unwrap();
+    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+        &user_home, CREATOR, "default",
+    ))
+    .unwrap();
+    std::fs::write(
+        nexus_home.join("config.toml"),
+        format!(
+            "active_creator_id = \"{CREATOR}\"\n\
+             [active_workspace_slug_by_creator]\n\
+             \"{CREATOR}\" = \"default\""
+        ),
+    )
+    .unwrap();
+    let db_path = nexus_home_layout::workspace_state_db_path(&user_home, CREATOR, "default");
+    std::fs::write(&db_path, b"").unwrap();
+    Env {
+        _tmp: tmp,
+        user_home,
+        db_path,
+        character_id: String::new(),
+        binding_id: String::new(),
+    }
+}
+
 /// Open one engine-owner core against the seeded workspace.
 async fn open_core(env: &Env) -> (CoreService, nexus_core::Principal) {
     let core = CoreService::open(CoreOpenOptions {
@@ -2705,24 +2737,9 @@ async fn dismissal_adopts_the_projected_row_before_consuming_it() {
         .expect_err("a consumed row is gone");
     assert!(matches!(err, CoreError::NotFound { .. }), "got {err:?}");
 
-    // Idempotency: re-running the adoption for an already-adopted id is a
-    // no-op that neither duplicates nor resurrects the row.
-    let provider = LocalMemoryProvider::open(env.user_home.clone(), CREATOR, "default")
-        .await
-        .expect("provider reopen");
-    provider
-        .adopt_legacy_candidates(
-            &bridge_principal(),
-            &legacy::creator_subject_id(CREATOR),
-            std::slice::from_ref(&candidate_id),
-        )
-        .await
-        .expect("re-adoption is idempotent");
-    assert_eq!(
-        adopted_candidate(&env, &candidate_id).await,
-        Some(("consumed".to_string(), None)),
-        "re-adoption must not resurrect the consumed row"
-    );
+    // Idempotency and no standalone adoption (fix round 3, finding F1): the
+    // repeat dismissal above neither duplicated nor resurrected the row, and
+    // adoption exists only inside the dismissal that consumes it.
     let pool = plain_pool(&env).await;
     assert_eq!(
         count_where(
@@ -2731,7 +2748,7 @@ async fn dismissal_adopts_the_projected_row_before_consuming_it() {
         )
         .await,
         1,
-        "re-adoption must not duplicate the row"
+        "no adoption path can duplicate the row"
     );
     pool.close().await;
 }
@@ -3378,6 +3395,15 @@ async fn creator_dismissal_cannot_commit_inside_the_review_decision() {
         "the review decision is not interleavable with a dismissal"
     );
 
+    // The dismissal-side attempt step-point (fix round 3, finding F5): the
+    // dismissal parks after opening the lock file and before attempting the
+    // lock, so the test observes that it really reached the attempt while the
+    // drain holds the section — not merely that some task had not finished.
+    let pinned = core.memory_provider_for_test().expect("pinned provider");
+    let attempting = Arc::new(tokio::sync::Notify::new());
+    let proceed = Arc::new(tokio::sync::Barrier::new(2));
+    pinned.pause_disposition_attempt(Arc::clone(&attempting), Arc::clone(&proceed));
+
     let dismissal = tokio::spawn({
         let core = core.clone();
         let principal = principal.clone();
@@ -3386,11 +3412,12 @@ async fn creator_dismissal_cannot_commit_inside_the_review_decision() {
                 .await
         }
     });
-    tokio::task::yield_now().await;
+    attempting.notified().await;
     assert!(
-        !dismissal.is_finished(),
-        "a dismissal cannot slip into the check/classify window"
+        !provider.disposition_available(&subject),
+        "the dismissal reached its lock attempt while the drain holds the section"
     );
+    proceed.wait().await;
 
     release.notify_one();
     let reviewed = drain_task.await.unwrap().expect("review drains the row");
@@ -3481,19 +3508,28 @@ async fn character_dismissal_cannot_commit_inside_the_review_decision() {
         "the review decision is not interleavable with a dismissal"
     );
 
+    // Same dismissal-side attempt step-point as the Creator arm (fix round 3,
+    // finding F5).
+    let pinned = core.memory_provider_for_test().expect("pinned provider");
+    let attempting = Arc::new(tokio::sync::Notify::new());
+    let proceed = Arc::new(tokio::sync::Barrier::new(2));
+    pinned.pause_disposition_attempt(Arc::clone(&attempting), Arc::clone(&proceed));
+
     let dismissal = tokio::spawn({
         let core = core.clone();
         let principal = principal.clone();
+        let chr = chr.clone();
         async move {
             core.delete_character_pending_review(&principal, chr, "pend_window".to_string())
                 .await
         }
     });
-    tokio::task::yield_now().await;
+    attempting.notified().await;
     assert!(
-        !dismissal.is_finished(),
-        "a dismissal cannot slip into the check/classify window"
+        !provider.disposition_available(&subject),
+        "the dismissal reached its lock attempt while the drain holds the section"
     );
+    proceed.wait().await;
 
     release.notify_one();
     let reviewed = drain_task.await.unwrap().expect("review drains the row");
@@ -3746,9 +3782,45 @@ async fn read_only_core_projects_bearers_no_writer_ever_ensured() {
     pool.close().await;
 }
 
+/// NXM-5 Task 2 fix round 3 (R3-F2/R3-F3): a read-only core opened before any
+/// writer provisioned the workspace answers the space's absence; once a writer
+/// provisions that same workspace, the SAME read-only instance serves its reads
+/// — no reopen and no persistent write from the read path.
 #[tokio::test]
 async fn read_only_core_over_a_never_provisioned_workspace_answers_not_found() {
-    let env = seed_env().await;
+    let env = seed_unprovisioned_env();
+
+    let read_only = CoreService::open(CoreOpenOptions {
+        user_home: env.user_home.clone(),
+        access: CoreAccess::ReadOnly,
+    })
+    .await
+    .expect("read-only open over the pre-provider workspace");
+    let principal = read_only.active_principal().await.unwrap();
+
+    assert!(
+        matches!(
+            read_only.count_pending_reviews(&principal).await,
+            Err(CoreError::NotFound { .. })
+        ),
+        "a workspace with no provider schema answers the space's absence"
+    );
+    assert!(matches!(
+        read_only
+            .list_pending_reviews(&principal, None, PAGE_SIZE)
+            .await,
+        Err(CoreError::NotFound { .. })
+    ));
+    assert!(matches!(
+        read_only
+            .list_memory_fragments(&principal, None, None, PAGE_SIZE)
+            .await,
+        Err(CoreError::NotFound { .. })
+    ));
+
+    // A writer opens the same workspace afterwards: migrations and provisioning
+    // commit while this read-only service stays open.
+    let writer = open_bridge_provider(&env).await;
     seed_creator_pending_digest(
         &env,
         "pending_no_space",
@@ -3756,6 +3828,54 @@ async fn read_only_core_over_a_never_provisioned_workspace_answers_not_found() {
         "2026-01-01T00:00:01Z",
     )
     .await;
+
+    assert_eq!(
+        read_only
+            .count_pending_reviews(&principal)
+            .await
+            .unwrap()
+            .count,
+        1,
+        "the pinned read-only provider observes the later provisioning"
+    );
+    let listed = read_only
+        .list_pending_reviews(&principal, None, PAGE_SIZE)
+        .await
+        .unwrap();
+    assert_eq!(listed.items.len(), 1);
+    assert_eq!(listed.items[0].pending_id, "pending_no_space");
+    assert_eq!(
+        read_only
+            .list_memory_fragments(&principal, None, None, PAGE_SIZE)
+            .await
+            .unwrap()
+            .fragments
+            .len(),
+        0,
+        "the read serves the provider/bridge state, not a stale snapshot"
+    );
+
+    // The read path wrote nothing: no subject was ensured and no projection was
+    // persisted by the read-only instance.
+    let pool = plain_pool(&env).await;
+    for table in ["memory_subjects", "memory_receipts", "memory_candidates"] {
+        assert_eq!(
+            count_where(&pool, &format!("SELECT COUNT(*) FROM {table}")).await,
+            0,
+            "{table} stays write-idle across the read-only open and its reads"
+        );
+    }
+    pool.close().await;
+    drop(writer);
+}
+
+/// NXM-5 Task 2 fix round 2/3: a provider schema with no space row still
+/// answers the space's absence on every read entry point (the static case the
+/// open-before-provision regression no longer covers, since it starts from a
+/// database with no schema at all).
+#[tokio::test]
+async fn read_only_core_answers_a_missing_space_row_as_not_found() {
+    let env = seed_env().await;
 
     let read_only = CoreService::open(CoreOpenOptions {
         user_home: env.user_home.clone(),
@@ -3770,7 +3890,7 @@ async fn read_only_core_over_a_never_provisioned_workspace_answers_not_found() {
             read_only.count_pending_reviews(&principal).await,
             Err(CoreError::NotFound { .. })
         ),
-        "a workspace with no provider space answers the space's absence"
+        "an unprovisioned space answers the space's absence"
     );
     assert!(matches!(
         read_only

@@ -80,6 +80,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 #[cfg(feature = "test-hooks")]
 use std::sync::atomic::AtomicU8;
+#[cfg(feature = "test-hooks")]
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
@@ -230,6 +232,16 @@ struct PublishRendezvous {
 /// the wait, `release` frees it. Test only.
 #[cfg(feature = "test-hooks")]
 struct ReadRendezvous {
+    entered: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Barrier>,
+}
+
+/// NXM-5 Task 2 fix round 3 (finding F5) proof seam: the rendezvous a
+/// disposition acquisition waits at after the lock file is open and before the
+/// lock is attempted — `entered` reports that the caller really reached the
+/// attempt, `release` lets it proceed. Test only.
+#[cfg(feature = "test-hooks")]
+struct DispositionRendezvous {
     entered: Arc<tokio::sync::Notify>,
     release: Arc<tokio::sync::Barrier>,
 }
@@ -550,6 +562,15 @@ pub(super) struct MemoryStore {
     /// really reached the wait. Every wait reports while it is installed.
     #[cfg(feature = "test-hooks")]
     flock_wait_report: std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>>,
+    /// Test-only count of write entries that reached the admission or
+    /// publication machinery, i.e. passed the read-only gate. A refused
+    /// read-only write leaves it at zero (fix round 3, finding F5).
+    #[cfg(feature = "test-hooks")]
+    lock_attempts: AtomicUsize,
+    /// Test-only rendezvous a disposition acquisition waits at between opening
+    /// its lock file and attempting the lock (fix round 3, finding F5).
+    #[cfg(feature = "test-hooks")]
+    disposition_attempt: std::sync::Mutex<Option<DispositionRendezvous>>,
 }
 
 const SPACE_COLUMNS: &str = "s.space_id, s.display_name, s.authority_host_id, \
@@ -594,6 +615,8 @@ impl MemoryStore {
         // A read-only store refuses before the retention sweep and before the
         // connection is touched (fix round 2, finding F3).
         self.require_writable()?;
+        #[cfg(feature = "test-hooks")]
+        self.lock_attempts.fetch_add(1, Ordering::SeqCst);
         self.reclaim_expired().await;
         let tx = begin_immediate(&self.pool).await?;
         Ok((tx, self.now()))
@@ -764,6 +787,10 @@ impl MemoryStore {
             publish_barrier: std::sync::Mutex::new(None),
             #[cfg(feature = "test-hooks")]
             flock_wait_report: std::sync::Mutex::new(None),
+            #[cfg(feature = "test-hooks")]
+            lock_attempts: AtomicUsize::new(0),
+            #[cfg(feature = "test-hooks")]
+            disposition_attempt: std::sync::Mutex::new(None),
         })
     }
 
@@ -779,11 +806,29 @@ impl MemoryStore {
         Ok(present)
     }
 
+    /// Whether the provider schema exists **now**: the open-time snapshot once
+    /// it is true, otherwise a fresh probe of the database (fix round 3,
+    /// finding F2).
+    ///
+    /// The snapshot alone went stale for a read-only instance that opened before
+    /// any writer provisioned the workspace: the only other update is the writer
+    /// instance's own `provision`. The probe is a read — no durable write — and
+    /// runs only while the cache says absent, so a provisioned store never
+    /// re-checks on the read path.
+    async fn provider_schema_present(&self) -> StoreResult<bool> {
+        if self.provisioned.load(Ordering::Relaxed) {
+            return Ok(true);
+        }
+        let present = Self::provider_tables_present(&self.pool).await?;
+        self.provisioned.store(present, Ordering::Relaxed);
+        Ok(present)
+    }
+
     /// Refuse a read against a database that carries no provider schema: the
     /// space genuinely does not exist there (fix round 2, finding F2), so the
     /// answer is the space's absence rather than a driver error.
-    fn require_provisioned(&self, space_id: &str) -> StoreResult<()> {
-        if self.provisioned.load(Ordering::Relaxed) {
+    async fn require_provisioned(&self, space_id: &str) -> StoreResult<()> {
+        if self.provider_schema_present().await? {
             Ok(())
         } else {
             Err(StoreError::NotFound(format!("space {space_id}")))
@@ -871,6 +916,48 @@ impl MemoryStore {
     #[cfg(feature = "test-hooks")]
     pub(super) fn report_flock_waits(&self, report: std::sync::mpsc::Sender<()>) {
         *self.flock_wait_report.lock().expect("flock wait report") = Some(report);
+    }
+
+    /// NXM-5 Task 2 fix round 3 (finding F5) proof seam: park the next
+    /// disposition acquisition after its lock file is open and before the lock
+    /// is attempted, so a regression can prove the dismissal really reached the
+    /// attempt while the drain holds the section. Compiled out of a production
+    /// build.
+    #[cfg(feature = "test-hooks")]
+    pub(super) fn park_disposition_attempt(
+        &self,
+        entered: Arc<tokio::sync::Notify>,
+        release: Arc<tokio::sync::Barrier>,
+    ) {
+        *self
+            .disposition_attempt
+            .lock()
+            .expect("disposition attempt") = Some(DispositionRendezvous { entered, release });
+    }
+
+    /// The single step-point of [`Self::park_disposition_attempt`].
+    #[cfg(feature = "test-hooks")]
+    pub(super) async fn disposition_attempt_gate(&self) {
+        let parked = {
+            let mut gate = self
+                .disposition_attempt
+                .lock()
+                .expect("disposition attempt");
+            gate.take()
+        };
+        if let Some(rendezvous) = parked {
+            rendezvous.entered.notify_one();
+            rendezvous.release.wait().await;
+        }
+    }
+
+    /// NXM-5 Task 2 fix round 3 (finding F5) proof seam: how many write entries
+    /// passed the read-only gate and reached the admission or publication
+    /// machinery. Zero after refused writes proves no lock was attempted.
+    /// Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    pub(super) fn lock_attempts(&self) -> usize {
+        self.lock_attempts.load(Ordering::SeqCst)
     }
 
     #[cfg(feature = "test-hooks")]
@@ -1013,6 +1100,9 @@ impl MemoryStore {
         space_id: &str,
         receipt_id: &str,
     ) -> StoreResult<ReceiptRow> {
+        // A workspace with no provider schema has no receipt and no space
+        // (fix round 3, finding F3): the declared absence, not a driver error.
+        self.require_provisioned(space_id).await?;
         let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let grant_rows = grants_in_tx(&mut tx, space_id).await?;
@@ -1085,6 +1175,9 @@ impl MemoryStore {
         space_id: &str,
         subject_id: &str,
     ) -> StoreResult<SubjectRow> {
+        // Same absence policy as the other space-scoped reads (fix round 3,
+        // finding F3): authorization is unchanged where the space exists.
+        self.require_provisioned(space_id).await?;
         let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let rows = grants_in_tx(&mut tx, space_id).await?;
@@ -1109,8 +1202,10 @@ impl MemoryStore {
         principal_id: &str,
     ) -> StoreResult<(Vec<SpaceRow>, String)> {
         // A workspace no writer ever provisioned carries no provider space
-        // (fix round 2, finding F2): an empty listing, not a driver error.
-        if !self.provisioned.load(Ordering::Relaxed) {
+        // (fix round 2, finding F2): an empty listing, not a driver error. The
+        // check re-probes while the cache says absent, so a later writer
+        // provisioning is observed here (fix round 3, finding F2).
+        if !self.provider_schema_present().await? {
             return Ok((Vec::new(), "0".to_string()));
         }
         let (mut tx, now) = self.begin_read().await?;
@@ -1308,6 +1403,9 @@ impl MemoryStore {
         principal_filter: Option<&str>,
         page: Option<(u64, u64)>,
     ) -> StoreResult<(Vec<GrantRow>, String, Option<String>, bool)> {
+        // The grants page is space-scoped too: a workspace with no provider
+        // schema answers the space's absence (fix round 3, finding F3).
+        self.require_provisioned(space_id).await?;
         let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let grant_rows = grants_in_tx(&mut tx, space_id).await?;
@@ -1890,6 +1988,8 @@ impl MemoryStore {
         // The publication path refuses a read-only store before it takes this
         // process's gate or the workspace flock (fix round 2, finding F3).
         self.require_writable()?;
+        #[cfg(feature = "test-hooks")]
+        self.lock_attempts.fetch_add(1, Ordering::SeqCst);
         let gate = Arc::clone(&self.publish_gate).lock_owned().await;
         #[cfg(feature = "test-hooks")]
         let report = self
@@ -3436,9 +3536,10 @@ pub(super) fn mint_candidate_id() -> String {
 /// The adoption insert itself: every projected row `ids` names, under the id
 /// the bridge projects it with, inside the caller's transaction.
 ///
-/// Shared by the adoption op and by the dismissal that adopts what it consumes,
-/// so "adopt then mutate" is one guarded write whichever entry point asked for
-/// it. Returns the number of rows actually inserted.
+/// Only the dismissal that adopts what it consumes calls this, so "adopt then
+/// mutate" is one guarded write and no adopted pending row can be left behind
+/// (NXM-5 Task 2 fix round 3, finding F1: there is no standalone adoption).
+/// Returns the number of rows actually inserted.
 #[allow(clippy::too_many_arguments)]
 async fn adopt_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
@@ -3501,46 +3602,31 @@ async fn adopt_in_tx(
 }
 
 impl MemoryStore {
-    /// NXM-5 Task 2 just-in-time adoption: insert the legacy-derived candidates
-    /// named by `ids` as provider-native rows under their deterministic external
-    /// ids.
+    /// The bearer subject that owns one provider-native candidate row, if this
+    /// store holds it.
     ///
-    /// Each row comes from [`super::legacy`], which is also what decides whether
-    /// a projection exists at all: once P5 publishes the completion marker the
-    /// bridge resolves nothing, so this adopts nothing — the marker read and the
-    /// insert share this one admission transaction. The insert is idempotent
-    /// (`ON CONFLICT DO NOTHING`), so a retried dismissal can neither duplicate
-    /// a row nor resurrect a consumed one, and the identifier the bridge would
-    /// have projected is the identifier the provider now owns: the merged read
-    /// dedupes on it, so the legacy source stops resurfacing.
-    pub(super) async fn adopt_legacy_candidates(
+    /// A projected legacy id is not a row here (`None`), and neither is an id
+    /// this space never held: the caller's own path answers that absence. The
+    /// probe decides which per-bearer authority section a candidate mutation
+    /// must take (NXM-5 Task 2 fix round 3, finding F1), so it runs before the
+    /// mutation and reads only.
+    pub(super) async fn candidate_subject(
         &self,
-        ctx: &OpContext<'_>,
         space_id: &str,
-        principal_id: &str,
-        subject_id: &str,
-        ids: &[String],
-    ) -> StoreResult<()> {
-        let (mut tx, now) = self.begin_admission().await?;
-        if let Some(_earlier) = probe(&mut tx, ctx, now).await? {
-            // The same adoption set replayed: its rows are already native, and
-            // its receipt is already the dedup authority for this key.
-            tx.rollback().await?;
-            return Ok(());
-        }
-        let adopted = adopt_in_tx(
-            &mut tx,
-            &self.legacy,
-            space_id,
-            principal_id,
-            subject_id,
-            ids,
-            now,
+        candidate_id: &str,
+    ) -> StoreResult<Option<String>> {
+        self.require_provisioned(space_id).await?;
+        let (mut tx, _now) = self.begin_read().await?;
+        let subject: Option<String> = sqlx::query_scalar(
+            "SELECT subject_id FROM memory_candidates \
+             WHERE space_id = ? AND candidate_id = ?",
         )
+        .bind(space_id)
+        .bind(candidate_id)
+        .fetch_optional(&mut *tx)
         .await?;
-        self.commit_receipt(tx, ctx, &json!({ "adopted": adopted }), now)
-            .await?;
-        Ok(())
+        tx.rollback().await?;
+        Ok(subject)
     }
 
     /// §7.11: admission + candidate inserts + receipt, one transaction.
@@ -3606,7 +3692,7 @@ impl MemoryStore {
         principal_id: &str,
         page: Option<(u64, u64)>,
     ) -> StoreResult<(Vec<CandidateRow>, String, bool)> {
-        self.require_provisioned(space_id)?;
+        self.require_provisioned(space_id).await?;
         let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let grant_rows = grants_in_tx(&mut tx, space_id).await?;
@@ -3800,7 +3886,7 @@ impl MemoryStore {
         candidate_id: &str,
         principal_id: &str,
     ) -> StoreResult<Option<CandidateRow>> {
-        self.require_provisioned(space_id)?;
+        self.require_provisioned(space_id).await?;
         let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let grants = wire_grants(&grants_in_tx(&mut tx, space_id).await?)?;
@@ -4135,7 +4221,7 @@ impl MemoryStore {
         principal_id: &str,
         page: Option<(u64, u64)>,
     ) -> StoreResult<(Vec<RecordRow>, String, u64)> {
-        self.require_provisioned(space_id)?;
+        self.require_provisioned(space_id).await?;
         let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let grant_rows = grants_in_tx(&mut tx, space_id).await?;
@@ -4330,7 +4416,7 @@ impl MemoryStore {
         record_id: &str,
         principal_id: &str,
     ) -> StoreResult<Option<RecordRow>> {
-        self.require_provisioned(space_id)?;
+        self.require_provisioned(space_id).await?;
         let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let grants = wire_grants(&grants_in_tx(&mut tx, space_id).await?)?;
@@ -4717,7 +4803,7 @@ impl MemoryStore {
         subject_id: &str,
         principal_id: &str,
     ) -> StoreResult<Option<Vec<ProfileRow>>> {
-        self.require_provisioned(space_id)?;
+        self.require_provisioned(space_id).await?;
         let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let rows = grants_in_tx(&mut tx, space_id).await?;
