@@ -1782,8 +1782,17 @@ fn bridge_ensure_request(
     namespace: &str,
     kind_id: &str,
 ) -> bridge_schemas::MemorySubjectsEnsureRequest {
+    bridge_ensure_request_in(BRIDGE_SPACE, subject, namespace, kind_id)
+}
+
+fn bridge_ensure_request_in(
+    space_id: &str,
+    subject: &str,
+    namespace: &str,
+    kind_id: &str,
+) -> bridge_schemas::MemorySubjectsEnsureRequest {
     dto(serde_json::json!({
-        "space_id": BRIDGE_SPACE,
+        "space_id": space_id,
         "subject_id": subject,
         "kind": { "ns": namespace, "id": kind_id },
     }))
@@ -1795,8 +1804,18 @@ fn bridge_records_request(
     selection: serde_json::Value,
     kinds: serde_json::Value,
 ) -> bridge_schemas::MemoryRecordsListRequest {
+    bridge_records_request_in(BRIDGE_SPACE, subject, selection, kinds)
+}
+
+#[allow(clippy::needless_pass_by_value)] // one request builder per test read
+fn bridge_records_request_in(
+    space_id: &str,
+    subject: &str,
+    selection: serde_json::Value,
+    kinds: serde_json::Value,
+) -> bridge_schemas::MemoryRecordsListRequest {
     dto(serde_json::json!({
-        "space_id": BRIDGE_SPACE,
+        "space_id": space_id,
         "subject_id": subject,
         "selection": selection,
         "kinds": kinds,
@@ -1854,13 +1873,13 @@ fn bridge_records_page_request(
     }))
 }
 
-/// Publish P5's completion marker the way the migration pass does: a
-/// `memory_provider_meta` row written by a registered core writer.
-async fn publish_migration_marker(env: &Env) {
+/// Publish P5's completion marker for one space the way the migration pass
+/// does: a `memory_provider_meta` row written by a registered core writer.
+async fn publish_migration_marker(env: &Env, space_id: &str) {
     let guarded = init_guarded_pool(&env.db_path, CREATOR).await.unwrap();
     let pool = guarded.clone_pool();
     sqlx::query("INSERT INTO memory_provider_meta (key, value, updated_at) VALUES (?, ?, ?)")
-        .bind(legacy::legacy_migration_key(BRIDGE_SPACE))
+        .bind(legacy::legacy_migration_key(space_id))
         .bind("2026-11-02T00:00:00Z")
         .bind("2026-11-02T00:00:00Z")
         .execute(&pool)
@@ -2438,7 +2457,7 @@ async fn completion_marker_closes_the_legacy_projection() {
         "pre-migration the bridge projects the fragment, narrative and file: {before}"
     );
 
-    publish_migration_marker(&env).await;
+    publish_migration_marker(&env, BRIDGE_SPACE).await;
 
     let after = bridge_ok(
         &provider
@@ -2797,7 +2816,7 @@ async fn character_dismissal_adopts_the_projected_row_before_consuming_it() {
 async fn just_in_time_adoption_is_inert_after_the_completion_marker() {
     let env = seed_env().await;
     seed_creator_pending_row(&env, "pend_post_marker", None, "2026-01-01T00:00:01Z").await;
-    publish_migration_marker(&env).await;
+    publish_migration_marker(&env, BRIDGE_SPACE).await;
     let (core, principal) = open_core(&env).await;
 
     // Post-migration reads serve provider-native rows only: the bridge closes.
@@ -3920,4 +3939,586 @@ async fn read_only_core_answers_a_missing_space_row_as_not_found() {
             .await,
         Err(CoreError::NotFound { .. })
     ));
+}
+
+// ═══ NXM-5 Task 3: provider-path regression gaps ═══════════════════════════
+//
+// The four families the reroute must keep — pre-migration merged reads,
+// just-in-time adoption, stable external ids, and provider-only reads after
+// P5's completion marker — are pinned by the Task 1/2 suites above. These
+// regressions close what they leave open: the marker is per space, the wire
+// candidate entries are not adoption paths, a record cursor survives an
+// adoption that writes only the candidate family, and a marker published while
+// a dismissal is in flight withdraws the projection that dismissal would adopt.
+
+/// A second space as P5 leaves it after migrating it: a space row plus its
+/// bootstrap admin grant, and no completion marker yet.
+async fn seed_space_with_admin_grant(env: &Env, space_id: &str) {
+    let guarded = init_guarded_pool(&env.db_path, CREATOR).await.unwrap();
+    let pool = guarded.clone_pool();
+    sqlx::query(
+        "INSERT INTO memory_spaces \
+         (space_id, display_name, authority_host_id, authority_generation, status, revision, \
+          created_at) \
+         VALUES (?, ?, 'nexus-local', 1, 'active', 1, '2026-03-01T00:00:00Z')",
+    )
+    .bind(space_id)
+    .bind(space_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO memory_grants \
+         (grant_id, space_id, subject_id, principal_id, capabilities_json, context_ids_json, \
+          shared_access, expires_at, revoked_at, revision, created_at) \
+         VALUES (?, ?, NULL, ?, '[\"admin\"]', '[]', 0, NULL, NULL, 1, '2026-03-01T00:00:00Z')",
+    )
+    .bind(format!("grant_bootstrap_{space_id}"))
+    .bind(space_id)
+    .bind(CREATOR)
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+}
+
+/// P5's completion marker is per space (`legacy_content_migration:<space>`): a
+/// marker published for one space closes every legacy projection of that space
+/// — both bearers — and leaves another space's unmigrated projection serving
+/// the same external ids.
+#[tokio::test]
+async fn completion_marker_closes_only_the_space_it_names() {
+    const SHADOW_SPACE: &str = "spc_bridge_shadow";
+    const SHADOW_SUBJECT: &str = "sbj_bridge_shadow";
+
+    let env = seed_env().await;
+    seed_legacy_creator_content(&env).await;
+    seed_legacy_character_content(&env).await;
+    seed_space_with_admin_grant(&env, SHADOW_SPACE).await;
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    for (space, subject, namespace, kind_id) in [
+        (
+            BRIDGE_SPACE,
+            BRIDGE_CREATOR_SUBJECT,
+            legacy::CREATOR_KIND_NS,
+            CREATOR,
+        ),
+        (
+            BRIDGE_SPACE,
+            BRIDGE_CHARACTER_SUBJECT,
+            legacy::CHARACTER_KIND_NS,
+            env.character_id.as_str(),
+        ),
+        (
+            SHADOW_SPACE,
+            SHADOW_SUBJECT,
+            legacy::CREATOR_KIND_NS,
+            CREATOR,
+        ),
+    ] {
+        bridge_ok(
+            &provider
+                .ensure_subject(
+                    &admin,
+                    bridge_ensure_request_in(space, subject, namespace, kind_id),
+                )
+                .await,
+        );
+    }
+
+    let creator_before = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    BRIDGE_CREATOR_SUBJECT,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(creator_before["total_authorized"], 3, "{creator_before}");
+    let character_before = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    BRIDGE_CHARACTER_SUBJECT,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(
+        character_before["total_authorized"], 2,
+        "{character_before}"
+    );
+    let shadow_before = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request_in(
+                    SHADOW_SPACE,
+                    SHADOW_SUBJECT,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(
+        bridge_report_ids(&shadow_before, "records"),
+        bridge_report_ids(&creator_before, "records"),
+        "the unmigrated space projects the same deterministic external ids: {shadow_before}"
+    );
+    let shadow_candidates_before = bridge_ok(
+        &provider
+            .list_candidates(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": SHADOW_SPACE,
+                    "subject_id": SHADOW_SUBJECT,
+                    "status": "pending",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(
+        shadow_candidates_before["candidates"][0]["candidate_id"],
+        "lgc:memory_pending_review:pend_bridge",
+        "{shadow_candidates_before}"
+    );
+
+    // P5 completes the marked space only.
+    publish_migration_marker(&env, BRIDGE_SPACE).await;
+
+    // Every projection entry point of that space closes, for both bearers.
+    for subject in [BRIDGE_CREATOR_SUBJECT, BRIDGE_CHARACTER_SUBJECT] {
+        let closed = bridge_ok(
+            &provider
+                .list_records(
+                    &admin,
+                    bridge_records_request(
+                        subject,
+                        serde_json::json!({ "mode": "subject_all" }),
+                        serde_json::json!([]),
+                    ),
+                )
+                .await,
+        );
+        assert_eq!(
+            closed["total_authorized"], 0,
+            "the marker is not subject-scoped: {subject} projects nothing after it: {closed}"
+        );
+    }
+    let closed_candidates = bridge_ok(
+        &provider
+            .list_candidates(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": BRIDGE_CREATOR_SUBJECT,
+                    "status": "pending",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(
+        closed_candidates["candidates"],
+        serde_json::json!([]),
+        "{closed_candidates}"
+    );
+    let closed_profile = bridge_ok(
+        &provider
+            .get_profile(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": BRIDGE_CREATOR_SUBJECT,
+                })),
+            )
+            .await,
+    );
+    assert_eq!(
+        closed_profile["profiles"],
+        serde_json::json!([]),
+        "{closed_profile}"
+    );
+    let closed_by_id = provider
+        .get_record(
+            &admin,
+            dto(serde_json::json!({
+                "space_id": BRIDGE_SPACE,
+                "record_id": "lgc:memory_fragments:frag_bridge",
+            })),
+        )
+        .await;
+    assert_eq!(bridge_reject_code(&closed_by_id), "NOT_FOUND");
+
+    // The other space is untouched: same external ids, same queue, same SOUL.
+    let shadow_after = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request_in(
+                    SHADOW_SPACE,
+                    SHADOW_SUBJECT,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(
+        bridge_report_ids(&shadow_after, "records"),
+        bridge_report_ids(&creator_before, "records"),
+        "a marker for another space withdraws nothing here: {shadow_after}"
+    );
+    let shadow_candidates = bridge_ok(
+        &provider
+            .list_candidates(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": SHADOW_SPACE,
+                    "subject_id": SHADOW_SUBJECT,
+                    "status": "pending",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(
+        shadow_candidates["candidates"][0]["candidate_id"], "lgc:memory_pending_review:pend_bridge",
+        "{shadow_candidates}"
+    );
+    let shadow_by_id = bridge_ok(
+        &provider
+            .get_record(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": SHADOW_SPACE,
+                    "record_id": "lgc:memory_fragments:frag_bridge",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(
+        shadow_by_id["record"]["content"]["text"], "Legacy creator fragment text.",
+        "{shadow_by_id}"
+    );
+    let shadow_profile = bridge_ok(
+        &provider
+            .get_profile(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": SHADOW_SPACE,
+                    "subject_id": SHADOW_SUBJECT,
+                })),
+            )
+            .await,
+    );
+    assert_eq!(
+        shadow_profile["profiles"][0]["document"]["body"], BRIDGE_SOUL,
+        "{shadow_profile}"
+    );
+
+    // Once that space completes too, its own marker closes it.
+    publish_migration_marker(&env, SHADOW_SPACE).await;
+    let shadow_closed = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request_in(
+                    SHADOW_SPACE,
+                    SHADOW_SUBJECT,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(
+        shadow_closed["total_authorized"], 0,
+        "each space has its own completion marker: {shadow_closed}"
+    );
+}
+
+/// Adoption is the E4 dismissal's contract, not the wire's: `dismiss_candidate`
+/// and `review_candidate` reach provider-native rows only. A projected legacy
+/// row is absent to them and stays unadopted; once the dismissal has adopted and
+/// consumed it, the same id is a provider-native consumed row, so the wire
+/// entries refuse it as consumed instead of re-adopting or resurrecting it.
+#[tokio::test]
+async fn wire_candidate_mutations_never_adopt_a_projected_legacy_row() {
+    let env = seed_env().await;
+    seed_creator_pending_row(&env, "pend_wire", None, "2026-01-01T00:00:01Z").await;
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    let projected = legacy::pending_review_candidate_id("pend_wire");
+
+    // A projected id is not a provider row: both mutation entries refuse the
+    // op and, crucially, adopt nothing on the way.
+    let dismissed = provider
+        .dismiss_candidate(
+            &admin,
+            dto(serde_json::json!({
+                "space_id": BRIDGE_SPACE,
+                "candidate_id": projected,
+                "expected_revision": 1,
+                "reason": "not this entry's to adopt",
+                "idempotency_key": "k-wire-dismiss",
+            })),
+        )
+        .await;
+    assert_eq!(bridge_reject_code(&dismissed), "NOT_FOUND");
+    let reviewed = provider
+        .review_candidate(
+            &admin,
+            dto(serde_json::json!({
+                "space_id": BRIDGE_SPACE,
+                "candidate_id": projected,
+                "expected_revision": 1,
+                "decision": { "action": "drop" },
+                "idempotency_key": "k-wire-review",
+            })),
+        )
+        .await;
+    assert_eq!(bridge_reject_code(&reviewed), "NOT_FOUND");
+    assert_eq!(
+        adopted_candidate(&env, &projected).await,
+        None,
+        "neither wire entry has an adoption path"
+    );
+
+    // The E4 dismissal adopts under the projected id and consumes in place; it
+    // is also the path that ensures the bearer's deterministic subject.
+    let (core, principal) = open_core(&env).await;
+    core.delete_pending_review(&principal, "pend_wire".to_string())
+        .await
+        .expect("the E4 dismissal adopts the projected row");
+    assert_eq!(
+        adopted_candidate(&env, &projected).await,
+        Some(("consumed".to_string(), None)),
+        "adoption under the bridge's deterministic id"
+    );
+
+    // The wire now sees that provider-native row and refuses a second decision.
+    assert_eq!(
+        provider_candidate_status(&provider, &admin, &projected).await,
+        "consumed"
+    );
+    let dismissed_again = provider
+        .dismiss_candidate(
+            &admin,
+            dto(serde_json::json!({
+                "space_id": BRIDGE_SPACE,
+                "candidate_id": projected,
+                "expected_revision": 2,
+                "reason": "already decided",
+                "idempotency_key": "k-wire-dismiss-consumed",
+            })),
+        )
+        .await;
+    assert_eq!(bridge_reject_code(&dismissed_again), "CANDIDATE_CONSUMED");
+    let reviewed_again = provider
+        .review_candidate(
+            &admin,
+            dto(serde_json::json!({
+                "space_id": BRIDGE_SPACE,
+                "candidate_id": projected,
+                "expected_revision": 2,
+                "decision": { "action": "drop" },
+                "idempotency_key": "k-wire-review-consumed",
+            })),
+        )
+        .await;
+    assert_eq!(bridge_reject_code(&reviewed_again), "CANDIDATE_CONSUMED");
+
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM memory_candidates WHERE candidate_id = 'lgc:memory_pending_review:pend_wire'"
+        )
+        .await,
+        1,
+        "no wire entry duplicated the adopted row"
+    );
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
+        1,
+        "the legacy queue row is never written by any of these paths"
+    );
+    pool.close().await;
+}
+
+/// A cursor minted over the merged record set stays valid across an adoption:
+/// the dismissal writes candidates, receipts and the journal only, so the
+/// snapshot marker of the record family is unchanged and the walk continues to
+/// every projected row. A candidate cursor is different — the dismissal really
+/// removed a row from that authorized set, so the old snapshot is refused
+/// instead of silently re-filtering (MEM-R026).
+#[tokio::test]
+async fn record_cursor_survives_a_dismissal_that_adopts_a_projected_row() {
+    let env = seed_env().await;
+    seed_legacy_creator_content(&env).await;
+    seed_creator_pending_row(&env, "pend_cursor", None, "2026-03-02T00:00:00Z").await;
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    // The bearer's deterministic subject is the one E4 addresses, so the pages
+    // below are minted against the same subject (and lifecycle status) the
+    // dismissal leaves behind.
+    let subject = legacy::creator_subject_id(CREATOR);
+    bridge_ok(
+        &provider
+            .ensure_subject(
+                &admin,
+                bridge_ensure_request(&subject, legacy::CREATOR_KIND_NS, CREATOR),
+            )
+            .await,
+    );
+
+    let first = bridge_ok(
+        &provider
+            .list_records(&admin, bridge_records_page_request(&subject, 1, None))
+            .await,
+    );
+    assert_eq!(first["total_authorized"], 3, "{first}");
+    let cursor = first["next_cursor"]
+        .as_str()
+        .expect("three projected records have a second page")
+        .to_string();
+    let candidates_first = bridge_ok(
+        &provider
+            .list_candidates(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": subject,
+                    "status": "pending",
+                    "limit": 1,
+                })),
+            )
+            .await,
+    );
+    let candidate_cursor = candidates_first["next_cursor"]
+        .as_str()
+        .expect("two pending rows have a second page")
+        .to_string();
+
+    // Adoption through the E4 dismissal, while this same provider stays open.
+    let (core, principal) = open_core(&env).await;
+    core.delete_pending_review(&principal, "pend_bridge".to_string())
+        .await
+        .expect("the projected row is adopted and consumed");
+
+    let second = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_page_request(&subject, 1, Some(&cursor)),
+            )
+            .await,
+    );
+    let second_cursor = second["next_cursor"]
+        .as_str()
+        .expect("the third projected record follows")
+        .to_string();
+    let third = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_page_request(&subject, 1, Some(&second_cursor)),
+            )
+            .await,
+    );
+    assert!(
+        third["next_cursor"].is_null(),
+        "the walk ends with the third record: {third}"
+    );
+    let mut walked = bridge_report_ids(&first, "records");
+    walked.extend(bridge_report_ids(&second, "records"));
+    walked.extend(bridge_report_ids(&third, "records"));
+    walked.sort();
+    walked.dedup();
+    assert_eq!(
+        walked.len(),
+        3,
+        "the cursor path across the adoption serves every projected record once"
+    );
+
+    // The candidate snapshot really changed: the adopted row left the queue.
+    let stale = provider
+        .list_candidates(
+            &admin,
+            dto(serde_json::json!({
+                "space_id": BRIDGE_SPACE,
+                "subject_id": subject,
+                "status": "pending",
+                "limit": 1,
+                "cursor": candidate_cursor,
+            })),
+        )
+        .await;
+    assert_eq!(bridge_reject_code(&stale), "CURSOR_INVALID");
+}
+
+/// The completion marker is re-read inside the dismissal's admission
+/// transaction, not cached from the projection read that preceded it: when P5
+/// publishes the marker while a dismissal is parked in its publication section,
+/// the dismissal adopts nothing, consumes nothing, returns the retained
+/// `NotFound` and leaves the legacy row untouched.
+#[tokio::test]
+async fn dismissal_racing_the_completion_marker_adopts_nothing() {
+    let env = seed_env().await;
+    seed_creator_pending_row(&env, "pend_race", None, "2026-01-01T00:00:01Z").await;
+    let (core, principal) = open_core(&env).await;
+    let pinned = core.memory_provider_for_test().expect("pinned provider");
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Barrier::new(2));
+    pinned.park_next_publish(Arc::clone(&entered), Arc::clone(&release));
+
+    let dismissal = tokio::spawn({
+        let core = core.clone();
+        let principal = principal.clone();
+        async move {
+            core.delete_pending_review(&principal, "pend_race".to_string())
+                .await
+        }
+    });
+    // The dismissal has resolved the projection and now holds its publication
+    // section; P5 completes the space before the admission transaction opens.
+    entered.notified().await;
+    publish_migration_marker(&env, BRIDGE_SPACE).await;
+    release.wait().await;
+
+    let late = dismissal
+        .await
+        .unwrap()
+        .expect_err("the marker withdrew the row before the dismissal consumed it");
+    assert!(matches!(late, CoreError::NotFound { .. }), "got {late:?}");
+    assert_eq!(
+        adopted_candidate(&env, &legacy::pending_review_candidate_id("pend_race")).await,
+        None,
+        "the withdrawal is re-read inside the admission transaction"
+    );
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
+        1,
+        "the legacy row is still there and was never written"
+    );
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM memory_candidates").await,
+        0,
+        "no adoption was committed"
+    );
+    pool.close().await;
+    assert_eq!(
+        core.count_pending_reviews(&principal).await.unwrap().count,
+        0,
+        "post-marker reads serve provider-native rows only"
+    );
 }
