@@ -3271,6 +3271,40 @@ impl ReviewDecision<'_> {
     }
 }
 
+/// What consumes one candidate. A dismissal (§7.14) and a review (§7.15) share
+/// the one mutation-time adoption path and the one consumption write (NXM-5
+/// D13); they differ only in the records they stage and the outcome they
+/// journal.
+#[derive(Clone, Copy)]
+enum ConsumeStep<'a> {
+    Dismiss,
+    Review(&'a ReviewDecision<'a>),
+}
+
+impl ConsumeStep<'_> {
+    /// The candidate-capture capabilities this consumption's coverage admits.
+    const fn capabilities(self) -> &'static [&'static str] {
+        match self {
+            Self::Dismiss => &["review"],
+            Self::Review(_) => &["review", "records_write"],
+        }
+    }
+
+    const fn op(self) -> &'static str {
+        match self {
+            Self::Dismiss => "memory.candidates.dismiss",
+            Self::Review(_) => "memory.candidates.review",
+        }
+    }
+
+    const fn outcome(self) -> &'static str {
+        match self {
+            Self::Dismiss => "dismissed",
+            Self::Review(decision) => decision.outcome(),
+        }
+    }
+}
+
 fn serialize(value: &Value, what: &str) -> StoreResult<String> {
     serde_json::to_string(value).map_err(|e| StoreError::Corrupt(format!("{what}: {e}")))
 }
@@ -3493,6 +3527,80 @@ async fn insert_record(
     .execute(&mut **tx)
     .await?;
     record_effect_in_tx(tx, space_id, record_id).await
+}
+
+/// §7.15 record inserts for one review decision: the records the decision
+/// yields (in insertion order) and their ids. Content and provenance are parsed
+/// before the decision is matched, so a corrupt candidate payload refuses the
+/// whole decision exactly as it did before the adoption path was shared.
+async fn stage_review_records(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    candidate: &CandidateRow,
+    decision: &ReviewDecision<'_>,
+    now: DateTime<Utc>,
+) -> StoreResult<(Vec<FileEffect>, Vec<String>)> {
+    let provenance: Value = serde_json::from_str(&candidate.provenance_json)
+        .map_err(|e| StoreError::Corrupt(format!("candidate provenance: {e}")))?;
+    let content: Value = match candidate.content_json.as_deref() {
+        Some(raw) => serde_json::from_str(raw)
+            .map_err(|e| StoreError::Corrupt(format!("candidate content: {e}")))?,
+        None => {
+            return Err(StoreError::Corrupt(format!(
+                "pending candidate {} carries no content",
+                candidate.candidate_id
+            )))
+        }
+    };
+    let placement = candidate.scope();
+    let mut effects = Vec::new();
+    let mut record_ids = Vec::new();
+    match decision {
+        ReviewDecision::Promote {
+            kind,
+            content: override_content,
+        } => {
+            let record_id = mint_record_id();
+            effects.push(
+                insert_record(
+                    tx,
+                    candidate.space_id.as_str(),
+                    candidate.subject_id.as_str(),
+                    placement,
+                    kind.unwrap_or(candidate.kind.as_str()),
+                    override_content.unwrap_or(&content),
+                    &provenance,
+                    candidate.occurred_at.as_deref(),
+                    &record_id,
+                    now,
+                )
+                .await?,
+            );
+            record_ids.push(record_id);
+        }
+        ReviewDecision::Fragment { items } => {
+            for (kind, fragment) in *items {
+                let record_id = mint_record_id();
+                effects.push(
+                    insert_record(
+                        tx,
+                        candidate.space_id.as_str(),
+                        candidate.subject_id.as_str(),
+                        placement,
+                        kind.as_str(),
+                        fragment,
+                        &provenance,
+                        candidate.occurred_at.as_deref(),
+                        &record_id,
+                        now,
+                    )
+                    .await?,
+                );
+                record_ids.push(record_id);
+            }
+        }
+        ReviewDecision::Drop => {}
+    }
+    Ok((effects, record_ids))
 }
 
 /// Re-read one stored record and project it (§5.2 seams 1 and 3).
@@ -3973,8 +4081,15 @@ impl MemoryStore {
         candidate_id: &str,
         expected_revision: i64,
     ) -> StoreResult<ReceiptRow> {
-        self.dismiss_adopting(ctx, admission, candidate_id, None, Some(expected_revision))
-            .await
+        self.consume_adopting(
+            ctx,
+            admission,
+            candidate_id,
+            None,
+            Some(expected_revision),
+            ConsumeStep::Dismiss,
+        )
+        .await
     }
 
     /// NXM-5 Task 2: dismiss a legacy-derived candidate, adopting the projection
@@ -3996,26 +4111,28 @@ impl MemoryStore {
         subject_id: &str,
         expected_revision: Option<i64>,
     ) -> StoreResult<ReceiptRow> {
-        self.dismiss_adopting(
+        self.consume_adopting(
             ctx,
             admission,
             candidate_id,
             Some(subject_id),
             expected_revision,
+            ConsumeStep::Dismiss,
         )
         .await
     }
 
     #[allow(clippy::too_many_lines)]
-    async fn dismiss_adopting(
+    async fn consume_adopting(
         &self,
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
         candidate_id: &str,
         adopt_subject: Option<&str>,
         expected_revision: Option<i64>,
+        step: ConsumeStep<'_>,
     ) -> StoreResult<ReceiptRow> {
-        // Resolve what this dismissal has to be authorized as BEFORE the
+        // Resolve what this consumption has to be authorized as BEFORE the
         // publication section (which evaluates the caller's admission): a row the
         // provider does not own yet is authorized exactly as the bridge projects
         // it, because the adopted row carries the same subject and immutable
@@ -4043,7 +4160,11 @@ impl MemoryStore {
         };
         let requirements: Vec<GrantRequirement<'_>> = projected
             .iter()
-            .map(|row| row.requirement("review"))
+            .flat_map(|row| {
+                step.capabilities()
+                    .iter()
+                    .map(move |capability| row.requirement(capability))
+            })
             .collect();
         let projected_admission = Admission {
             op: super::OP_LEGACY_ADOPT,
@@ -4104,142 +4225,40 @@ impl MemoryStore {
             }
         }
         let receipt_id = mint_receipt_id();
+        let mut effects = Vec::new();
+        let record_ids = match step {
+            ConsumeStep::Dismiss => Vec::new(),
+            ConsumeStep::Review(decision) => {
+                let (records, record_ids) =
+                    stage_review_records(&mut tx, &candidate, decision, now).await?;
+                effects.extend(records);
+                record_ids
+            }
+        };
         let consumed_by = json!({
-            "op": "memory.candidates.dismiss",
+            "op": step.op(),
             "receipt_id": receipt_id,
-            "outcome": "dismissed",
-            "record_ids": [],
+            "outcome": step.outcome(),
+            "record_ids": record_ids,
         });
         let digest = content_digest(&candidate)?;
         let effect = consume_candidate(
             &mut tx,
             &candidate,
-            candidate.revision,
+            expected_revision.unwrap_or(candidate.revision),
             &consumed_by,
             &digest,
         )
         .await?;
-        let result = json!({ "candidate_id": candidate_id, "outcome": "dismissed" });
-        self.commit_journalled(
-            tx,
-            &mut publication,
-            ctx,
-            receipt_id,
-            candidate.subject_id.as_str(),
-            std::slice::from_ref(&effect),
-            &result,
-            now,
-        )
-        .await
-    }
-
-    /// §7.15: consumption + scrub + every record insert + receipt, one
-    /// transaction (MEM-R009). Placement is inherited from the candidate and can
-    /// never be chosen by the decision.
-    #[allow(clippy::too_many_lines)]
-    pub(super) async fn review_candidate(
-        &self,
-        ctx: &OpContext<'_>,
-        admission: &Admission<'_>,
-        candidate_id: &str,
-        expected_revision: i64,
-        decision: &ReviewDecision<'_>,
-    ) -> StoreResult<ReceiptRow> {
-        let targets = [journal::candidate_target(candidate_id)];
-        let mut publication = self.begin_publication(ctx, admission, &targets).await?;
-        let (mut tx, now) = self.begin_admission().await?;
-        let _ = authorize(&mut tx, admission, now).await?;
-        if let Some(row) = probe(&mut tx, ctx, now).await? {
-            // §5.2 step 2/S-2: settle the replayed intent before serving it, so
-            // a duplicate key reaches the published outcome (or the recorded
-            // terminal failure) instead of `OUTCOME_UNCERTAIN`.
-            tx.rollback().await?;
-            return self.settle_replayed(&mut publication, row).await;
-        }
-        require_settled_targets(&mut tx, ctx.space_id, &targets).await?;
-        gate(&mut tx, admission).await?;
-        let candidate =
-            consumable_candidate(&mut tx, ctx.space_id, candidate_id, Some(expected_revision))
-                .await?;
-        let provenance: Value = serde_json::from_str(&candidate.provenance_json)
-            .map_err(|e| StoreError::Corrupt(format!("candidate provenance: {e}")))?;
-        let content: Value = match candidate.content_json.as_deref() {
-            Some(raw) => serde_json::from_str(raw)
-                .map_err(|e| StoreError::Corrupt(format!("candidate content: {e}")))?,
-            None => {
-                return Err(StoreError::Corrupt(format!(
-                    "pending candidate {candidate_id} carries no content"
-                )))
+        effects.push(effect);
+        let result = match step {
+            ConsumeStep::Dismiss => {
+                json!({ "candidate_id": candidate_id, "outcome": "dismissed" })
+            }
+            ConsumeStep::Review(_) => {
+                json!({ "outcome": step.outcome(), "record_ids": record_ids })
             }
         };
-        let placement = candidate.scope();
-        let mut record_ids = Vec::new();
-        let mut effects = Vec::new();
-        match decision {
-            ReviewDecision::Promote {
-                kind,
-                content: override_content,
-            } => {
-                let record_id = mint_record_id();
-                effects.push(
-                    insert_record(
-                        &mut tx,
-                        ctx.space_id,
-                        candidate.subject_id.as_str(),
-                        placement,
-                        kind.unwrap_or(candidate.kind.as_str()),
-                        override_content.unwrap_or(&content),
-                        &provenance,
-                        candidate.occurred_at.as_deref(),
-                        &record_id,
-                        now,
-                    )
-                    .await?,
-                );
-                record_ids.push(record_id);
-            }
-            ReviewDecision::Fragment { items } => {
-                for (kind, fragment) in *items {
-                    let record_id = mint_record_id();
-                    effects.push(
-                        insert_record(
-                            &mut tx,
-                            ctx.space_id,
-                            candidate.subject_id.as_str(),
-                            placement,
-                            kind.as_str(),
-                            fragment,
-                            &provenance,
-                            candidate.occurred_at.as_deref(),
-                            &record_id,
-                            now,
-                        )
-                        .await?,
-                    );
-                    record_ids.push(record_id);
-                }
-            }
-            ReviewDecision::Drop => {}
-        }
-        let receipt_id = mint_receipt_id();
-        let consumed_by = json!({
-            "op": "memory.candidates.review",
-            "receipt_id": receipt_id,
-            "outcome": decision.outcome(),
-            "record_ids": record_ids,
-        });
-        let digest = content_digest(&candidate)?;
-        effects.push(
-            consume_candidate(
-                &mut tx,
-                &candidate,
-                expected_revision,
-                &consumed_by,
-                &digest,
-            )
-            .await?,
-        );
-        let result = json!({ "outcome": decision.outcome(), "record_ids": record_ids });
         self.commit_journalled(
             tx,
             &mut publication,
@@ -4249,6 +4268,52 @@ impl MemoryStore {
             &effects,
             &result,
             now,
+        )
+        .await
+    }
+
+    /// §7.15: consumption + scrub + every record insert + receipt, one
+    /// transaction (MEM-R009). Placement is inherited from the candidate and can
+    /// never be chosen by the decision.
+    pub(super) async fn review_candidate(
+        &self,
+        ctx: &OpContext<'_>,
+        admission: &Admission<'_>,
+        candidate_id: &str,
+        expected_revision: i64,
+        decision: &ReviewDecision<'_>,
+    ) -> StoreResult<ReceiptRow> {
+        self.consume_adopting(
+            ctx,
+            admission,
+            candidate_id,
+            None,
+            Some(expected_revision),
+            ConsumeStep::Review(decision),
+        )
+        .await
+    }
+
+    /// NXM-8: review a legacy-derived candidate, adopting the projection under
+    /// its deterministic external id **inside this review's guarded
+    /// transaction** — the review half of the one mutation-time adoption path
+    /// (NXM-5 D13). A row the provider already owns is consumed as it is.
+    pub(super) async fn review_legacy_candidate(
+        &self,
+        ctx: &OpContext<'_>,
+        admission: &Admission<'_>,
+        candidate_id: &str,
+        subject_id: &str,
+        expected_revision: i64,
+        decision: &ReviewDecision<'_>,
+    ) -> StoreResult<ReceiptRow> {
+        self.consume_adopting(
+            ctx,
+            admission,
+            candidate_id,
+            Some(subject_id),
+            Some(expected_revision),
+            ConsumeStep::Review(decision),
         )
         .await
     }

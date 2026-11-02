@@ -720,7 +720,8 @@ pub async fn promote_to_long_term<S: SessionDigestSummarizer>(
 ///
 /// This determines the appropriate `memory_kind` field in the
 /// long-term memory frontmatter based on the session's task type.
-fn task_kind_to_memory_kind(task_kind: &str) -> &'static str {
+#[must_use]
+pub fn task_kind_to_memory_kind(task_kind: &str) -> &'static str {
     match task_kind.to_lowercase().as_str() {
         "brainstorm" | "chapter" => "story_summary",
         "outline" => "plot_outline",
