@@ -25,6 +25,28 @@
 //! [`CHARACTER_KIND_NS`]); every other subject projects nothing. Character rows
 //! and files are additionally re-checked against the workspace's owning Creator,
 //! because the legacy character tables are keyed by `character_id` alone.
+//!
+//! **Bearer → subject mapping.** A legacy bearer projects under exactly one
+//! provider subject per space: the lexicographically smallest `subject_id` whose
+//! kind names that bearer. List, by-id and profile reads resolve that same
+//! subject, so a caller can list a projected id only when it can also read that
+//! id by id; another subject naming the same bearer projects nothing. Task 2's
+//! adoption and P5's migration pass derive each legacy row's subject from this
+//! rule, never from whichever subject a draft happens to name.
+//!
+//! **Completion marker.** P5 publishes [`legacy_migration_key`] in
+//! `memory_provider_meta` — any non-empty value — once every legacy object of
+//! the space is migrated. Every projection entry point reads that row in the
+//! caller's read transaction before projecting anything and then projects
+//! nothing, so post-migration reads serve provider-native rows only: a legacy
+//! object that was not migrated, an unmigrated `SOUL.md` or an already-stale
+//! legacy row cannot resurface through the bridge.
+//!
+//! **Cursor versions.** A projected record has no provider revision to bump, so
+//! [`record_version`] digests every value a merged read serves from its legacy
+//! source and the composing page read folds those digests into the MEM-R026
+//! snapshot marker. A bearer file or legacy row rewritten between two pages
+//! therefore invalidates the cursor instead of silently shifting its offset.
 
 use std::path::PathBuf;
 
@@ -35,6 +57,7 @@ use sqlx::Sqlite;
 use nexus_creator_memory::errors::MemoryError;
 use nexus_creator_memory::memory_io;
 use nexus_creator_memory::MemoryBearerRef;
+use spoke_operations::{jcs_sha256_hex, SpokeResult};
 
 use super::policy;
 use super::storage::{
@@ -94,6 +117,16 @@ const NULL_COMPONENT: &str = "\0";
 /// Timestamp used when a bearer file's mtime cannot be read: a fixed epoch keeps
 /// the projection deterministic instead of stamping the read time.
 const EPOCH_TIMESTAMP: &str = "1970-01-01T00:00:00Z";
+
+/// The `memory_provider_meta` key that closes the bridge for one space.
+///
+/// P5 publishes it (presence is completion; the value is not interpreted) in the
+/// same transaction as its last migration effect, and every projection entry
+/// point then serves provider-native rows only.
+#[must_use]
+pub fn legacy_migration_key(space_id: &str) -> String {
+    format!("legacy_content_migration:{space_id}")
+}
 
 /// The legacy bearer roots of one opened workspace: the user home the bearer
 /// layout resolves from, and the Creator that owns it.
@@ -160,7 +193,10 @@ pub(super) async fn records_in_tx(
     filter: Option<&[String]>,
     kinds: &[String],
 ) -> StoreResult<Vec<RecordRow>> {
-    let Some(owner) = owner_of(tx, roots, subject).await? else {
+    if migration_complete(tx, space_id).await? {
+        return Ok(Vec::new());
+    }
+    let Some(owner) = owner_of(tx, roots, space_id, subject).await? else {
         return Ok(Vec::new());
     };
     let subject_id = subject.map_or("", |subject| subject.subject_id.as_str());
@@ -183,6 +219,9 @@ pub(super) async fn record_by_id_in_tx(
     space_id: &str,
     record_id: &str,
 ) -> StoreResult<Option<RecordRow>> {
+    if migration_complete(tx, space_id).await? {
+        return Ok(None);
+    }
     let Some((family, components)) = parse_id(record_id) else {
         return Ok(None);
     };
@@ -206,10 +245,13 @@ pub(super) async fn candidates_in_tx(
     subject: Option<&SubjectRow>,
     status: Option<&str>,
 ) -> StoreResult<Vec<CandidateRow>> {
+    if migration_complete(tx, space_id).await? {
+        return Ok(Vec::new());
+    }
     if status.is_some_and(|status| status != "pending") {
         return Ok(Vec::new());
     }
-    let Some(owner) = owner_of(tx, roots, subject).await? else {
+    let Some(owner) = owner_of(tx, roots, space_id, subject).await? else {
         return Ok(Vec::new());
     };
     let subject_id = subject.map_or("", |subject| subject.subject_id.as_str());
@@ -223,6 +265,9 @@ pub(super) async fn candidate_by_id_in_tx(
     space_id: &str,
     candidate_id: &str,
 ) -> StoreResult<Option<CandidateRow>> {
+    if migration_complete(tx, space_id).await? {
+        return Ok(None);
+    }
     let Some((family, components)) = parse_id(candidate_id) else {
         return Ok(None);
     };
@@ -247,7 +292,10 @@ pub(super) async fn profiles_in_tx(
     space_id: &str,
     subject: Option<&SubjectRow>,
 ) -> StoreResult<Vec<ProfileRow>> {
-    let Some(owner) = owner_of(tx, roots, subject).await? else {
+    if migration_complete(tx, space_id).await? {
+        return Ok(Vec::new());
+    }
+    let Some(owner) = owner_of(tx, roots, space_id, subject).await? else {
         return Ok(Vec::new());
     };
     let subject_id = subject.map_or("", |subject| subject.subject_id.as_str());
@@ -269,10 +317,28 @@ pub(super) async fn profiles_in_tx(
 
 // ── Owner resolution ────────────────────────────────────────────────────
 
-/// Which legacy bearer this provider subject stands for, if any.
+/// Whether P5's completion marker is present, read on the caller's read
+/// transaction so the marker and the projection it decides see one snapshot.
+async fn migration_complete(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    space_id: &str,
+) -> StoreResult<bool> {
+    let value: Option<String> =
+        sqlx::query_scalar("SELECT value FROM memory_provider_meta WHERE key = ?")
+            .bind(legacy_migration_key(space_id))
+            .fetch_optional(&mut **tx)
+            .await?;
+    Ok(value.is_some())
+}
+
+/// Which legacy bearer this provider subject stands for, if any. Only the
+/// bearer's canonical subject (see the module's bearer → subject mapping)
+/// projects, so a list read and a by-id read of the same external id always
+/// resolve the same subject — and therefore the same grants.
 async fn owner_of(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
     roots: &LegacyRoots,
+    space_id: &str,
     subject: Option<&SubjectRow>,
 ) -> StoreResult<Option<Owner>> {
     let Some(subject) = subject else {
@@ -282,11 +348,15 @@ async fn owner_of(
     else {
         return Ok(None);
     };
-    match namespace {
-        CREATOR_KIND_NS if kind_id == roots.creator_id => Ok(Some(Owner::Creator)),
+    let owner = match namespace {
+        CREATOR_KIND_NS if kind_id == roots.creator_id => Owner::Creator,
         CHARACTER_KIND_NS if character_owned(tx, roots, kind_id).await? => {
-            Ok(Some(Owner::Character(kind_id.to_string())))
+            Owner::Character(kind_id.to_string())
         }
+        _ => return Ok(None),
+    };
+    match subject_of(tx, roots, space_id, &owner).await? {
+        Some(canonical) if canonical.subject_id == subject.subject_id => Ok(Some(owner)),
         _ => Ok(None),
     }
 }
@@ -393,9 +463,11 @@ async fn character_owned(
     Ok(owned.is_some())
 }
 
-/// The provider subject standing for a legacy owner, if the caller has ensured
-/// one. A projected row names its subject's own id, so grants and coverage keep
-/// applying to exactly the row a merged read returns.
+/// The canonical provider subject standing for a legacy owner: the smallest
+/// `subject_id` naming that bearer, if one has been ensured. This is the only
+/// subject the bearer projects under, so grants and coverage keep applying to
+/// exactly the row a merged read returns, and every entry point resolves the
+/// same subject for the same external id.
 async fn subject_of(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
     roots: &LegacyRoots,
@@ -887,6 +959,29 @@ fn long_term_records(
         )?);
     }
     Ok(rows)
+}
+
+// ── Cursor versions ─────────────────────────────────────────────────────
+
+/// The MEM-R026 version token of a projected record. A projection has no
+/// provider revision to bump, so a digest over every value a merged read serves
+/// stands in for one: a rewritten bearer file, an updated narrative or a changed
+/// legacy timestamp changes the token and invalidates a cursor issued before it.
+pub(super) fn record_version(row: &RecordRow) -> StoreResult<String> {
+    let parts = json!({
+        "record_id": row.record_id,
+        "kind": row.kind,
+        "content": row.content_json,
+        "scope": [row.scope_visibility, row.scope_context_id],
+        "provenance": row.provenance_json,
+        "occurred_at": row.occurred_at,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+    });
+    match jcs_sha256_hex(&parts) {
+        SpokeResult::Ok(digest) => Ok(digest),
+        SpokeResult::Reject(reject) => Err(StoreError::Corrupt(reject.message)),
+    }
 }
 
 // ── Candidate projections ───────────────────────────────────────────────

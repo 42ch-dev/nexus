@@ -2821,8 +2821,14 @@ impl RecordRead {
 /// revision, every grant revision in the space, and the subject's lifecycle
 /// status. A bare revision sum can stay equal while one visible row is swapped
 /// for another, and cannot see a grant change that leaves the rows unchanged.
+///
+/// A projected row has no provider revision to bump, so it enters the marker as
+/// `(id, digest)` under `projected` — [`legacy::record_version`] covers every
+/// value the merged read serves. A bearer file rewritten between pages therefore
+/// invalidates the cursor even though the projected revision stays 1.
 fn snapshot_marker<'a>(
     rows: impl Iterator<Item = (&'a str, i64)>,
+    projections: impl Iterator<Item = (&'a str, &'a str)>,
     grants: &[GrantRow],
     subject_status: Option<&str>,
 ) -> StoreResult<String> {
@@ -2830,6 +2836,10 @@ fn snapshot_marker<'a>(
         .map(|(record_id, revision)| (record_id.to_string(), revision))
         .collect();
     visible.sort();
+    let mut projected: Vec<(String, String)> = projections
+        .map(|(record_id, version)| (record_id.to_string(), version.to_string()))
+        .collect();
+    projected.sort();
     let mut grant_revisions: Vec<(String, i64)> = grants
         .iter()
         .map(|grant| (grant.grant_id.clone(), grant.revision))
@@ -2837,6 +2847,7 @@ fn snapshot_marker<'a>(
     grant_revisions.sort();
     let parts = json!({
         "rows": visible,
+        "projected": projected,
         "grants": grant_revisions,
         "subject": subject_status,
     });
@@ -3389,8 +3400,12 @@ impl MemoryStore {
         let hidden = withheld(unsettled.as_deref(), subject_id)?;
         if archived || hidden {
             tx.commit().await?;
-            let marker =
-                snapshot_marker(std::iter::empty(), &grant_rows, subject_status.as_deref())?;
+            let marker = snapshot_marker(
+                std::iter::empty(),
+                std::iter::empty(),
+                &grant_rows,
+                subject_status.as_deref(),
+            )?;
             return Ok((Vec::new(), marker, false));
         }
         // Constant predicates, as separate statements rather than
@@ -3533,6 +3548,10 @@ impl MemoryStore {
             authorized
                 .iter()
                 .map(|(candidate_id, revision, _)| (candidate_id.as_str(), *revision)),
+            // A pending-review row is insert-once, so a projected candidate keeps
+            // one fixed identity for as long as it is pending; only records can
+            // change content while keeping their id.
+            std::iter::empty(),
             &grant_rows,
             subject_status.as_deref(),
         )?;
@@ -3819,8 +3838,12 @@ impl MemoryStore {
         let subject_all = matches!(selection, Selection::SubjectAll);
         if archived || hidden {
             tx.commit().await?;
-            let marker =
-                snapshot_marker(std::iter::empty(), &grant_rows, subject_status.as_deref())?;
+            let marker = snapshot_marker(
+                std::iter::empty(),
+                std::iter::empty(),
+                &grant_rows,
+                subject_status.as_deref(),
+            )?;
             return Ok((Vec::new(), marker, 0));
         }
         let (where_sql, binds) = record_predicate(
@@ -3894,6 +3917,7 @@ impl MemoryStore {
                 .map(|row| (row.record_id.clone(), row.revision))
                 .collect()
         };
+        let mut projected_versions: Vec<(String, String)> = Vec::new();
         if projected {
             // A migrated object carries this projection's own external id, so
             // the provider row wins whatever the request predicate says about it
@@ -3909,6 +3933,9 @@ impl MemoryStore {
                     .iter()
                     .map(|row| (row.record_id.clone(), row.revision)),
             );
+            for row in &legacy_rows {
+                projected_versions.push((row.record_id.clone(), legacy::record_version(row)?));
+            }
             rows.extend(legacy_rows);
             rows.sort_by(|left, right| {
                 right
@@ -3941,6 +3968,9 @@ impl MemoryStore {
             visible
                 .iter()
                 .map(|(record_id, revision)| (record_id.as_str(), *revision)),
+            projected_versions
+                .iter()
+                .map(|(record_id, version)| (record_id.as_str(), version.as_str())),
             &grant_rows,
             subject_status.as_deref(),
         )?;

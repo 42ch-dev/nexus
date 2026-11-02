@@ -30,7 +30,7 @@ use nexus_creator_memory::errors::MemoryError;
 use nexus_creator_memory::soul_narrative::{
     SoulNarrativeDraft, SoulNarrativeSynthesisInput, SoulNarrativeSynthesizer,
 };
-use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
+use nexus_local_db::writer_protocol::{init_engine_pool, init_guarded_pool, GuardedPoolOptions};
 use nexus_local_db::{
     create_character_with_initial_binding, ensure_creator_row, CreateCharacterParams,
 };
@@ -1794,6 +1794,46 @@ fn bridge_report_ids(body: &serde_json::Value, field: &str) -> Vec<String> {
         .collect()
 }
 
+/// The wire reject code of a refused port result; a success panics.
+fn bridge_reject_code<T>(result: &SpokeResult<T>) -> String {
+    match result {
+        SpokeResult::Ok(_) => panic!("expected a refusal"),
+        SpokeResult::Reject(reject) => reject.code.as_str().to_string(),
+    }
+}
+
+/// One records page under an explicit limit and cursor.
+fn bridge_records_page_request(
+    subject: &str,
+    limit: u64,
+    cursor: Option<&str>,
+) -> bridge_schemas::MemoryRecordsListRequest {
+    dto(serde_json::json!({
+        "space_id": BRIDGE_SPACE,
+        "subject_id": subject,
+        "selection": { "mode": "subject_all" },
+        "kinds": [],
+        "limit": limit,
+        "cursor": cursor,
+    }))
+}
+
+/// Publish P5's completion marker the way the migration pass does: a
+/// `memory_provider_meta` row written by a registered core writer.
+async fn publish_migration_marker(env: &Env) {
+    let guarded = init_guarded_pool(&env.db_path, CREATOR).await.unwrap();
+    let pool = guarded.clone_pool();
+    sqlx::query("INSERT INTO memory_provider_meta (key, value, updated_at) VALUES (?, ?, ?)")
+        .bind(legacy::legacy_migration_key(BRIDGE_SPACE))
+        .bind("2026-11-02T00:00:00Z")
+        .bind("2026-11-02T00:00:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    drop(guarded);
+}
+
 /// Seed every Creator legacy surface the bridge projects: one fragment, one
 /// soul narrative, one long-term memory file, `SOUL.md` and one pending-review
 /// row.
@@ -2326,4 +2366,255 @@ async fn merged_character_reads_respect_binding_placement_and_ownership() {
             .await,
     );
     assert_eq!(foreign_records["total_authorized"], 0, "{foreign_records}");
+}
+
+/// F1: once P5 publishes the completion marker, the bridge serves nothing —
+/// list, by-id, candidate and profile reads are provider-native only, and the
+/// next read of the already-open provider sees that without a reopen.
+#[tokio::test]
+async fn completion_marker_closes_the_legacy_projection() {
+    let env = seed_env().await;
+    seed_legacy_creator_content(&env).await;
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    bridge_ok(
+        &provider
+            .ensure_subject(
+                &admin,
+                bridge_ensure_request(BRIDGE_CREATOR_SUBJECT, legacy::CREATOR_KIND_NS, CREATOR),
+            )
+            .await,
+    );
+    let before = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    BRIDGE_CREATOR_SUBJECT,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(
+        before["total_authorized"], 3,
+        "pre-migration the bridge projects the fragment, narrative and file: {before}"
+    );
+
+    publish_migration_marker(&env).await;
+
+    let after = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    BRIDGE_CREATOR_SUBJECT,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(after["total_authorized"], 0, "{after}");
+    assert!(bridge_report_ids(&after, "records").is_empty());
+
+    let record = provider
+        .get_record(
+            &admin,
+            bridge_record_get_request("lgc:memory_fragments:frag_bridge"),
+        )
+        .await;
+    assert_eq!(bridge_reject_code(&record), "NOT_FOUND");
+    let candidate = provider
+        .get_candidate(
+            &admin,
+            dto(serde_json::json!({
+                "space_id": BRIDGE_SPACE,
+                "candidate_id": "lgc:memory_pending_review:pend_bridge",
+            })),
+        )
+        .await;
+    assert_eq!(bridge_reject_code(&candidate), "NOT_FOUND");
+    let candidates = bridge_ok(
+        &provider
+            .list_candidates(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": BRIDGE_CREATOR_SUBJECT,
+                })),
+            )
+            .await,
+    );
+    assert_eq!(
+        candidates["candidates"],
+        serde_json::json!([]),
+        "{candidates}"
+    );
+    let profile = bridge_ok(
+        &provider
+            .get_profile(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": BRIDGE_CREATOR_SUBJECT,
+                })),
+            )
+            .await,
+    );
+    assert_eq!(
+        profile["profiles"],
+        serde_json::json!([]),
+        "an unmigrated SOUL.md stops projecting after the marker: {profile}"
+    );
+}
+
+/// F2: one bearer projects under exactly one canonical subject, so a subject
+/// that lists nothing is a subject that can read nothing by id.
+#[tokio::test]
+async fn legacy_bearer_projects_under_one_canonical_subject() {
+    const CANONICAL: &str = "sbj_bridge_aaa";
+    const SHADOW: &str = "sbj_bridge_zzz";
+    const SHADOW_PRINCIPAL: &str = "prn_bridge_shadow";
+
+    let env = seed_env().await;
+    seed_legacy_creator_content(&env).await;
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    for subject in [CANONICAL, SHADOW] {
+        bridge_ok(
+            &provider
+                .ensure_subject(
+                    &admin,
+                    bridge_ensure_request(subject, legacy::CREATOR_KIND_NS, CREATOR),
+                )
+                .await,
+        );
+    }
+    bridge_ok(
+        &provider
+            .grant(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": SHADOW,
+                    "principal_id": SHADOW_PRINCIPAL,
+                    "capabilities": ["records_read", "recall"],
+                    "idempotency_key": "k-bridge-shadow-grant",
+                })),
+            )
+            .await,
+    );
+    let shadow: bridge_schemas::Principal = dto(serde_json::json!({
+        "principal_id": SHADOW_PRINCIPAL,
+        "extensions": {},
+    }));
+
+    let canonical = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    CANONICAL,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(canonical["total_authorized"], 3, "{canonical}");
+
+    // The second subject naming the same bearer projects nothing even though it
+    // is granted: its listing and its by-id read agree instead of the listing
+    // revealing an object that the by-id read reports absent.
+    let shadow_page = bridge_ok(
+        &provider
+            .list_records(
+                &shadow,
+                bridge_records_request(
+                    SHADOW,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(shadow_page["total_authorized"], 0, "{shadow_page}");
+    assert!(bridge_report_ids(&shadow_page, "records").is_empty());
+    let absent = provider
+        .get_record(
+            &shadow,
+            bridge_record_get_request("lgc:memory_fragments:frag_bridge"),
+        )
+        .await;
+    assert_eq!(bridge_reject_code(&absent), "NOT_FOUND");
+
+    // The canonical subject serves the same id under its own subject.
+    let served = bridge_ok(
+        &provider
+            .get_record(
+                &admin,
+                bridge_record_get_request("lgc:memory_fragments:frag_bridge"),
+            )
+            .await,
+    );
+    assert_eq!(served["record"]["subject_id"], CANONICAL);
+}
+
+/// F3: a projected record keeps revision 1, so the cursor marker carries a
+/// digest of the projection: rewriting a bearer file between two pages
+/// invalidates the cursor instead of shifting its offset.
+#[tokio::test]
+async fn legacy_file_change_between_pages_invalidates_the_cursor() {
+    let env = seed_env().await;
+    seed_legacy_creator_content(&env).await;
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    bridge_ok(
+        &provider
+            .ensure_subject(
+                &admin,
+                bridge_ensure_request(BRIDGE_CREATOR_SUBJECT, legacy::CREATOR_KIND_NS, CREATOR),
+            )
+            .await,
+    );
+
+    let first = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_page_request(BRIDGE_CREATOR_SUBJECT, 1, None),
+            )
+            .await,
+    );
+    assert_eq!(
+        first["records"].as_array().map(Vec::len),
+        Some(1),
+        "{first}"
+    );
+    let cursor = first["next_cursor"]
+        .as_str()
+        .expect("a first page over three projected records has a next cursor")
+        .to_string();
+
+    // Same slug, same projected id and revision — a new body and timestamp.
+    let bearer = MemoryBearerRef::Creator(CREATOR);
+    let mut memory = nexus_creator_memory::LongTermMemory::new("story_summary");
+    memory.set_body("Rewritten long-term body.");
+    nexus_creator_memory::memory_io::save_memory(
+        env.user_home.as_path(),
+        bearer,
+        "bridge-memory",
+        &memory,
+    )
+    .expect("long-term memory rewrite");
+
+    let stale = provider
+        .list_records(
+            &admin,
+            bridge_records_page_request(BRIDGE_CREATOR_SUBJECT, 1, Some(&cursor)),
+        )
+        .await;
+    assert_eq!(bridge_reject_code(&stale), "CURSOR_INVALID");
 }
