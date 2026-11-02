@@ -1889,6 +1889,35 @@ async fn publish_migration_marker(env: &Env, space_id: &str) {
     drop(guarded);
 }
 
+/// Capture one provider-native pending candidate under `subject` and return its
+/// id, so a marker scenario can prove the provider's own state stays readable.
+async fn native_pending_candidate(
+    provider: &LocalMemoryProvider,
+    admin: &bridge_schemas::Principal,
+    subject: &str,
+    idempotency_key: &str,
+) -> String {
+    let captured = bridge_ok(
+        &provider
+            .capture(
+                admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": subject,
+                    "content": { "text": FRAGMENT_DIGEST },
+                    "capture_scope": { "visibility": "shared" },
+                    "source_context_ids": [],
+                    "idempotency_key": idempotency_key,
+                })),
+            )
+            .await,
+    );
+    captured["result"]["candidate_ids"][0]
+        .as_str()
+        .expect("a committed capture names its candidate")
+        .to_string()
+}
+
 /// Seed every Creator legacy surface the bridge projects: one fragment, one
 /// soul narrative, one long-term memory file, `SOUL.md` and one pending-review
 /// row.
@@ -2457,6 +2486,28 @@ async fn completion_marker_closes_the_legacy_projection() {
         "pre-migration the bridge projects the fragment, narrative and file: {before}"
     );
 
+    // A provider-native record alongside the legacy surface: the marker must
+    // close the projection, not the provider.
+    let created = bridge_ok(
+        &provider
+            .create_record(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": BRIDGE_CREATOR_SUBJECT,
+                    "kind": "note",
+                    "content": { "text": BRIDGE_TEXT },
+                    "scope": { "visibility": "shared" },
+                    "idempotency_key": "k-marker-native",
+                })),
+            )
+            .await,
+    );
+    let native_id = created["result"]["record_id"]
+        .as_str()
+        .expect("a created record id")
+        .to_string();
+
     publish_migration_marker(&env, BRIDGE_SPACE).await;
 
     let after = bridge_ok(
@@ -2471,8 +2522,11 @@ async fn completion_marker_closes_the_legacy_projection() {
             )
             .await,
     );
-    assert_eq!(after["total_authorized"], 0, "{after}");
-    assert!(bridge_report_ids(&after, "records").is_empty());
+    assert_eq!(
+        bridge_report_ids(&after, "records"),
+        vec![native_id.clone()],
+        "the marker withdraws the legacy projection, never the provider's own row: {after}"
+    );
 
     let record = provider
         .get_record(
@@ -2481,6 +2535,15 @@ async fn completion_marker_closes_the_legacy_projection() {
         )
         .await;
     assert_eq!(bridge_reject_code(&record), "NOT_FOUND");
+    let native = bridge_ok(
+        &provider
+            .get_record(&admin, bridge_record_get_request(&native_id))
+            .await,
+    );
+    assert_eq!(
+        native["record"]["content"]["text"], BRIDGE_TEXT,
+        "the provider-native row is still readable by id: {native}"
+    );
     let candidate = provider
         .get_candidate(
             &admin,
@@ -2816,6 +2879,21 @@ async fn character_dismissal_adopts_the_projected_row_before_consuming_it() {
 async fn just_in_time_adoption_is_inert_after_the_completion_marker() {
     let env = seed_env().await;
     seed_creator_pending_row(&env, "pend_post_marker", None, "2026-01-01T00:00:01Z").await;
+    // A provider-native candidate alongside the legacy row: the marker closes
+    // the legacy projection only, so this one stays readable.
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    let subject = legacy::creator_subject_id(CREATOR);
+    bridge_ok(
+        &provider
+            .ensure_subject(
+                &admin,
+                bridge_ensure_request(&subject, legacy::CREATOR_KIND_NS, CREATOR),
+            )
+            .await,
+    );
+    let native_candidate =
+        native_pending_candidate(&provider, &admin, &subject, "k-marker-native-candidate").await;
     publish_migration_marker(&env, BRIDGE_SPACE).await;
     let (core, principal) = open_core(&env).await;
 
@@ -2844,6 +2922,25 @@ async fn just_in_time_adoption_is_inert_after_the_completion_marker() {
         .await,
         None,
         "no adoption path runs after the marker"
+    );
+    assert_eq!(
+        provider_candidate_status(&provider, &admin, &native_candidate).await,
+        "pending",
+        "the marker leaves the provider's own candidate alone"
+    );
+    let legacy_candidate = provider
+        .get_candidate(
+            &admin,
+            dto(serde_json::json!({
+                "space_id": BRIDGE_SPACE,
+                "candidate_id": legacy::pending_review_candidate_id("pend_post_marker"),
+            })),
+        )
+        .await;
+    assert_eq!(
+        bridge_reject_code(&legacy_candidate),
+        "NOT_FOUND",
+        "the legacy candidate is no longer projected"
     );
 }
 
@@ -4092,28 +4189,65 @@ async fn completion_marker_closes_only_the_space_it_names() {
         "{shadow_candidates_before}"
     );
 
+    // A provider-native record in the marked space must outlive its marker.
+    let created = bridge_ok(
+        &provider
+            .create_record(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": BRIDGE_CREATOR_SUBJECT,
+                    "kind": "note",
+                    "content": { "text": BRIDGE_TEXT },
+                    "scope": { "visibility": "shared" },
+                    "idempotency_key": "k-space-native",
+                })),
+            )
+            .await,
+    );
+    let native_id = created["result"]["record_id"]
+        .as_str()
+        .expect("a created record id")
+        .to_string();
+
     // P5 completes the marked space only.
     publish_migration_marker(&env, BRIDGE_SPACE).await;
 
-    // Every projection entry point of that space closes, for both bearers.
-    for subject in [BRIDGE_CREATOR_SUBJECT, BRIDGE_CHARACTER_SUBJECT] {
-        let closed = bridge_ok(
-            &provider
-                .list_records(
-                    &admin,
-                    bridge_records_request(
-                        subject,
-                        serde_json::json!({ "mode": "subject_all" }),
-                        serde_json::json!([]),
-                    ),
-                )
-                .await,
-        );
-        assert_eq!(
-            closed["total_authorized"], 0,
-            "the marker is not subject-scoped: {subject} projects nothing after it: {closed}"
-        );
-    }
+    // Every legacy projection entry point of that space closes, for both
+    // bearers; the provider's own record keeps serving.
+    let creator_closed = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    BRIDGE_CREATOR_SUBJECT,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(
+        bridge_report_ids(&creator_closed, "records"),
+        vec![native_id.clone()],
+        "the marker is not subject-scoped and never hides a provider-native row: {creator_closed}"
+    );
+    let character_closed = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    BRIDGE_CHARACTER_SUBJECT,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(
+        character_closed["total_authorized"], 0,
+        "the marker is not subject-scoped: {character_closed}"
+    );
     let closed_candidates = bridge_ok(
         &provider
             .list_candidates(
@@ -4157,6 +4291,21 @@ async fn completion_marker_closes_only_the_space_it_names() {
         )
         .await;
     assert_eq!(bridge_reject_code(&closed_by_id), "NOT_FOUND");
+    let native_by_id = bridge_ok(
+        &provider
+            .get_record(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "record_id": native_id,
+                })),
+            )
+            .await,
+    );
+    assert_eq!(
+        native_by_id["record"]["content"]["text"], BRIDGE_TEXT,
+        "the provider-native record is still readable by id: {native_by_id}"
+    );
 
     // The other space is untouched: same external ids, same queue, same SOUL.
     let shadow_after = bridge_ok(
@@ -4442,11 +4591,15 @@ async fn record_cursor_survives_a_dismissal_that_adopts_a_projected_row() {
     walked.extend(bridge_report_ids(&second, "records"));
     walked.extend(bridge_report_ids(&third, "records"));
     walked.sort();
-    walked.dedup();
+    let mut expected = vec![
+        "lgc:memory_fragments:frag_bridge".to_string(),
+        format!("lgc:memory_long_term:{CREATOR}:bridge-memory"),
+        "lgc:memory_soul_narratives:%00".to_string(),
+    ];
+    expected.sort();
     assert_eq!(
-        walked.len(),
-        3,
-        "the cursor path across the adoption serves every projected record once"
+        walked, expected,
+        "the walk is exactly the seeded record set: no gap, no duplicate, no extra id"
     );
 
     // The candidate snapshot really changed: the adopted row left the queue.
@@ -4474,6 +4627,21 @@ async fn record_cursor_survives_a_dismissal_that_adopts_a_projected_row() {
 async fn dismissal_racing_the_completion_marker_adopts_nothing() {
     let env = seed_env().await;
     seed_creator_pending_row(&env, "pend_race", None, "2026-01-01T00:00:01Z").await;
+    // A provider-native candidate alongside the legacy row: the marker must
+    // leave the provider's own state readable.
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    let subject = legacy::creator_subject_id(CREATOR);
+    bridge_ok(
+        &provider
+            .ensure_subject(
+                &admin,
+                bridge_ensure_request(&subject, legacy::CREATOR_KIND_NS, CREATOR),
+            )
+            .await,
+    );
+    let native_candidate =
+        native_pending_candidate(&provider, &admin, &subject, "k-race-native").await;
     let (core, principal) = open_core(&env).await;
     let pinned = core.memory_provider_for_test().expect("pinned provider");
     let entered = Arc::new(tokio::sync::Notify::new());
@@ -4511,14 +4679,38 @@ async fn dismissal_racing_the_completion_marker_adopts_nothing() {
         "the legacy row is still there and was never written"
     );
     assert_eq!(
-        count_where(&pool, "SELECT COUNT(*) FROM memory_candidates").await,
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM memory_candidates WHERE candidate_id = \
+             'lgc:memory_pending_review:pend_race'"
+        )
+        .await,
         0,
         "no adoption was committed"
     );
     pool.close().await;
     assert_eq!(
+        provider_candidate_status(&provider, &admin, &native_candidate).await,
+        "pending",
+        "the marker leaves the provider's own candidate alone"
+    );
+    let legacy_candidate = provider
+        .get_candidate(
+            &admin,
+            dto(serde_json::json!({
+                "space_id": BRIDGE_SPACE,
+                "candidate_id": legacy::pending_review_candidate_id("pend_race"),
+            })),
+        )
+        .await;
+    assert_eq!(
+        bridge_reject_code(&legacy_candidate),
+        "NOT_FOUND",
+        "the legacy candidate closed with the marker"
+    );
+    assert_eq!(
         core.count_pending_reviews(&principal).await.unwrap().count,
         0,
-        "post-marker reads serve provider-native rows only"
+        "post-marker the legacy-derived queue is empty"
     );
 }
