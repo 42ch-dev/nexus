@@ -31,6 +31,9 @@ const OTHER_CHARACTER_WORLD: &str = "wld_worldOther";
 /// A third owned world: the second binding of the primary Character, an
 /// unrelated SOUL-narrative cache scope.
 const UNRELATED_WORLD: &str = "wld_worldUnrelated";
+/// A fourth owned world: the context a fragment's provenance names while the
+/// fragment itself is placed in the primary binding (the two are independent).
+const PROVENANCE_WORLD: &str = "wld_worldProvenance";
 
 async fn seed_world_row(pool: &SqlitePool, world_id: &str) {
     sqlx::query(
@@ -85,7 +88,12 @@ async fn seed_env() -> Env {
             .unwrap();
         let pool = guarded.clone_pool();
         ensure_creator_row(&pool, CREATOR, "Owner").await.unwrap();
-        for world in [WORLD, OTHER_CHARACTER_WORLD, UNRELATED_WORLD] {
+        for world in [
+            WORLD,
+            OTHER_CHARACTER_WORLD,
+            UNRELATED_WORLD,
+            PROVENANCE_WORLD,
+        ] {
             seed_world_row(&pool, world).await;
         }
         let created = create_character_with_initial_binding(
@@ -569,6 +577,60 @@ async fn record_placement(
     .unwrap()
 }
 
+/// One provider-native `fact` fragment of the Character, placed in a binding
+/// context, carrying the provenance the caller chose.
+///
+/// The provider records `source_context_ids` verbatim and independently of the
+/// placement (`memory_provider/mod.rs` capture/review), so a valid fragment may
+/// name no source context at all or name another context first.
+async fn seed_fragment_record(
+    env: &Env,
+    character_id: &str,
+    record_id: &str,
+    placement_context: &str,
+    source_context_ids: &[&str],
+) {
+    let pool = db_pool(env).await;
+    sqlx::query(
+        "INSERT INTO memory_records \
+         (record_id, space_id, subject_id, kind, content_json, scope_visibility, \
+          scope_context_id, provenance_json, import_ref_json, occurred_at, tombstone_json, \
+          revision, created_at, updated_at) \
+         VALUES (?, 'spc_local_default', ?, 'fact', '{\"text\":\"a durable fact\"}', \
+                 'context', ?, ?, NULL, NULL, NULL, 1, \
+                 '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+    )
+    .bind(record_id)
+    .bind(legacy::character_subject_id(character_id))
+    .bind(placement_context)
+    .bind(
+        serde_json::to_string(&serde_json::json!({
+            "source_context_ids": source_context_ids,
+            "anchors": [],
+            "captured_by": "test",
+            "captured_at": "2026-01-01T00:00:00Z",
+        }))
+        .unwrap(),
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+}
+
+/// The promote transaction's recovery row for one record: the placement whose
+/// SOUL-narrative cache is still owed (R4-F3 round 2).
+async fn soul_invalidation_marker(env: &Env, record_id: &str) -> Option<String> {
+    let pool = db_pool(env).await;
+    let value = sqlx::query_scalar("SELECT value FROM memory_provider_meta WHERE key = ?")
+        .bind(format!("soul_invalidation:spc_local_default:{record_id}"))
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    value
+}
+
 /// R4-F1: a fragment the list served promotes. The DTO serves the legacy
 /// `fragment_id` while the bridge names that row by its deterministic external
 /// id, so the promotion resolves the listed id through the bridge and adopts
@@ -948,5 +1010,206 @@ async fn promotion_retry_finishes_an_interrupted_cache_invalidation() {
         shared.fragments.len(),
         1,
         "one consistent state after the retry"
+    );
+}
+
+/// R4-F3 round 2 (R2-C1): the pre-promotion placement is recovery state the
+/// promote transaction wrote, not something inferred from the record. A valid
+/// `fact` fragment may carry no `source_context_ids` at all, so a retry that
+/// reconstructed the old binding from that list would delete the shared cache
+/// and leave the binding's cache stale.
+#[tokio::test]
+async fn promotion_retry_recovers_a_fragment_without_source_contexts() {
+    const RECORD: &str = "rec_empty_provenance";
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let character_id = env.character_id.clone();
+    let binding_id = env.binding_id.clone();
+    let unrelated_binding = core
+        .add_binding(
+            &principal,
+            character_id.clone(),
+            UNRELATED_WORLD.to_string(),
+            None,
+        )
+        .await
+        .expect("second binding")
+        .binding
+        .binding_id
+        .as_str()
+        .to_string();
+
+    let pool = db_pool(&env).await;
+    for binding in [
+        None,
+        Some(binding_id.as_str()),
+        Some(unrelated_binding.as_str()),
+    ] {
+        nexus_local_db::upsert_character_soul_narrative(
+            &pool,
+            CREATOR,
+            &soul_narrative_cache_record(&character_id, binding),
+        )
+        .await
+        .unwrap();
+    }
+    pool.close().await;
+    let mut stale = vec![
+        None,
+        Some(binding_id.clone()),
+        Some(unrelated_binding.clone()),
+    ];
+    stale.sort();
+    assert_eq!(soul_narrative_scopes(&env, &character_id).await, stale);
+
+    seed_fragment_record(&env, &character_id, RECORD, &binding_id, &[]).await;
+
+    core.fail_next_soul_narrative_invalidation();
+    let failed = core
+        .promote_character_fragment(&principal, character_id.clone(), RECORD.to_string(), 0)
+        .await
+        .expect_err("the injected invalidation failure must surface");
+    assert!(
+        matches!(failed, CoreError::Internal { .. }),
+        "got {failed:?}"
+    );
+    let pool = db_pool(&env).await;
+    assert_eq!(
+        record_placement(&pool, RECORD).await,
+        Some(("fact".to_string(), "shared".to_string(), None)),
+        "the promotion committed before the invalidation"
+    );
+    pool.close().await;
+    assert_eq!(
+        soul_invalidation_marker(&env, RECORD).await,
+        Some(binding_id.clone()),
+        "the promote transaction recorded the placement it left"
+    );
+    assert_eq!(
+        soul_narrative_scopes(&env, &character_id).await,
+        stale,
+        "the failed invalidation left the cache stale"
+    );
+
+    let retried = core
+        .promote_character_fragment(&principal, character_id.clone(), RECORD.to_string(), 1)
+        .await
+        .expect_err("re-promotion conflicts");
+    assert!(
+        matches!(&retried, CoreError::ActorConflict { code, .. } if code == "character_fragment_already_shared"),
+        "got {retried:?}"
+    );
+    assert_eq!(
+        soul_narrative_scopes(&env, &character_id).await,
+        vec![Some(unrelated_binding)],
+        "the retry invalidated the shared and the recorded binding scopes"
+    );
+    assert_eq!(
+        soul_invalidation_marker(&env, RECORD).await,
+        None,
+        "the recovery row is cleared once the invalidation ran"
+    );
+}
+
+/// R4-F3 round 2 (R2-C1): a fragment's claimed source contexts can start with a
+/// context other than the one it is placed in — the provider records the claims
+/// verbatim and independently of the placement. The retry must invalidate the
+/// binding the record actually left (B), and leave the merely claimed context's
+/// cache (A) alone.
+#[tokio::test]
+async fn promotion_retry_recovers_a_fragment_placed_apart_from_its_provenance() {
+    const RECORD: &str = "rec_claimed_elsewhere";
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let character_id = env.character_id.clone();
+    let binding_id = env.binding_id.clone();
+    let mut extra_bindings = Vec::new();
+    for world in [UNRELATED_WORLD, PROVENANCE_WORLD] {
+        extra_bindings.push(
+            core.add_binding(&principal, character_id.clone(), world.to_string(), None)
+                .await
+                .expect("extra binding")
+                .binding
+                .binding_id
+                .as_str()
+                .to_string(),
+        );
+    }
+    let unrelated_binding = extra_bindings[0].clone();
+    let claimed_binding = extra_bindings[1].clone();
+
+    let pool = db_pool(&env).await;
+    for binding in [
+        None,
+        Some(binding_id.as_str()),
+        Some(claimed_binding.as_str()),
+        Some(unrelated_binding.as_str()),
+    ] {
+        nexus_local_db::upsert_character_soul_narrative(
+            &pool,
+            CREATOR,
+            &soul_narrative_cache_record(&character_id, binding),
+        )
+        .await
+        .unwrap();
+    }
+    pool.close().await;
+    let mut stale = vec![
+        None,
+        Some(binding_id.clone()),
+        Some(claimed_binding.clone()),
+        Some(unrelated_binding.clone()),
+    ];
+    stale.sort();
+    assert_eq!(soul_narrative_scopes(&env, &character_id).await, stale);
+
+    seed_fragment_record(
+        &env,
+        &character_id,
+        RECORD,
+        &binding_id,
+        &[claimed_binding.as_str()],
+    )
+    .await;
+
+    core.fail_next_soul_narrative_invalidation();
+    let failed = core
+        .promote_character_fragment(&principal, character_id.clone(), RECORD.to_string(), 0)
+        .await
+        .expect_err("the injected invalidation failure must surface");
+    assert!(
+        matches!(failed, CoreError::Internal { .. }),
+        "got {failed:?}"
+    );
+    assert_eq!(
+        soul_invalidation_marker(&env, RECORD).await,
+        Some(binding_id.clone()),
+        "the promote transaction recorded the placement it left, not the claim"
+    );
+    assert_eq!(
+        soul_narrative_scopes(&env, &character_id).await,
+        stale,
+        "the failed invalidation left the cache stale"
+    );
+
+    let retried = core
+        .promote_character_fragment(&principal, character_id.clone(), RECORD.to_string(), 1)
+        .await
+        .expect_err("re-promotion conflicts");
+    assert!(
+        matches!(&retried, CoreError::ActorConflict { code, .. } if code == "character_fragment_already_shared"),
+        "got {retried:?}"
+    );
+    let mut expected = vec![Some(claimed_binding), Some(unrelated_binding)];
+    expected.sort();
+    assert_eq!(
+        soul_narrative_scopes(&env, &character_id).await,
+        expected,
+        "the retry invalidated the shared and the placed binding scopes, not the claimed one"
+    );
+    assert_eq!(
+        soul_invalidation_marker(&env, RECORD).await,
+        None,
+        "the recovery row is cleared once the invalidation ran"
     );
 }

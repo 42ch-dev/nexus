@@ -1532,6 +1532,38 @@ impl LocalMemoryProvider {
             Err(error) => deny(&store_error(error)),
         }
     }
+
+    /// R4-F3 round 2: the placement a committed Character-fragment promotion
+    /// left behind, while the caller's SOUL-narrative invalidation has not
+    /// succeeded yet.
+    ///
+    /// The promotion's own transaction wrote it ([`Self::promote_character_fragment`]),
+    /// so a retry reads the scope the record actually left instead of inferring
+    /// one from the record (its scope is the target now) or its provenance (a
+    /// client claim). Cleared by [`Self::finish_soul_invalidation`].
+    ///
+    /// # Errors
+    /// [`CoreError::Internal`] when the workspace database cannot be read.
+    pub async fn soul_invalidation_binding(&self, record_id: &str) -> CoreResult<Option<String>> {
+        self.store
+            .soul_invalidation_binding(&self.space_id, record_id)
+            .await
+            .map_err(store_error)
+            .map_err(to_core_error)
+    }
+
+    /// Clear the recovery row once the invalidation it names ran; a repeated
+    /// clear is a no-op.
+    ///
+    /// # Errors
+    /// [`CoreError::Internal`] when the workspace database cannot be written.
+    pub async fn finish_soul_invalidation(&self, record_id: &str) -> CoreResult<()> {
+        self.store
+            .clear_soul_invalidation(&self.space_id, record_id)
+            .await
+            .map_err(store_error)
+            .map_err(to_core_error)
+    }
 }
 
 /// The facts both `memory.grants.grant` request shapes name (§7.9); the restricted

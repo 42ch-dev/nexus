@@ -2122,6 +2122,36 @@ impl MemoryStore {
         Ok(())
     }
 
+    /// The placement a committed promotion left for one record, while the cache
+    /// invalidation it owes has not succeeded yet (R4-F3 round 2). `None` when
+    /// no promotion of this record is outstanding.
+    pub(super) async fn soul_invalidation_binding(
+        &self,
+        space_id: &str,
+        record_id: &str,
+    ) -> StoreResult<Option<String>> {
+        let value: Option<String> =
+            sqlx::query_scalar("SELECT value FROM memory_provider_meta WHERE key = ?")
+                .bind(soul_invalidation_key(space_id, record_id))
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(value)
+    }
+
+    /// Clear that row once the invalidation it names ran; a repeated clear (a
+    /// retry after a crash between the delete and this clear) is a no-op.
+    pub(super) async fn clear_soul_invalidation(
+        &self,
+        space_id: &str,
+        record_id: &str,
+    ) -> StoreResult<()> {
+        sqlx::query("DELETE FROM memory_provider_meta WHERE key = ?")
+            .bind(soul_invalidation_key(space_id, record_id))
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     /// Settle one journal row from the crash-consistent disk state and record the
     /// outcome. The caller holds the publication section (workspace gate and
     /// flock); the filesystem half runs inside [`PublicationGuard::files`],
@@ -2257,6 +2287,13 @@ struct JournalEntry {
 /// pass stopped (§5.2 step 3 fairness).
 fn recovery_cursor_key(space_id: &str) -> String {
     format!("recovery_cursor:{space_id}")
+}
+
+/// The `memory_provider_meta` row holding the placement a committed
+/// Character-fragment promotion left behind, until its SOUL-narrative cache is
+/// invalidated (R4-F3 round 2).
+fn soul_invalidation_key(space_id: &str, record_id: &str) -> String {
+    format!("soul_invalidation:{space_id}:{record_id}")
 }
 
 impl JournalEntry {
@@ -2738,6 +2775,33 @@ async fn record_clock_floor(
     )
     .bind(CLOCK_FLOOR_KEY)
     .bind(now.timestamp_micros().to_string())
+    .bind(timestamp(now))
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+/// Persist the placement one Character-fragment promotion leaves, in the
+/// promotion's own transaction (R4-F3 round 2).
+///
+/// The record cannot carry its previous placement afterwards (the promotion
+/// overwrites its scope) and its provenance is a client claim that need not name
+/// the placement at all, so the post-commit cache invalidation reads this row
+/// instead of guessing. Committed with the promotion: a promotion that does not
+/// commit leaves no row.
+async fn record_soul_invalidation(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    space_id: &str,
+    record_id: &str,
+    context_id: &str,
+    now: DateTime<Utc>,
+) -> StoreResult<()> {
+    sqlx::query(
+        "INSERT INTO memory_provider_meta (key, value, updated_at) VALUES (?, ?, ?) \
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+    )
+    .bind(soul_invalidation_key(space_id, record_id))
+    .bind(context_id)
     .bind(timestamp(now))
     .execute(&mut **tx)
     .await?;
@@ -5047,6 +5111,18 @@ impl MemoryStore {
             }
             record.revision + 1
         };
+        // R4-F3 round 2: the placement this promotion leaves is in neither the
+        // row (its scope is the target now) nor its provenance (a client claim
+        // that need not name the placement at all), so a post-commit cache
+        // invalidation could not recover it. The promotion's own transaction
+        // records it, and the invalidating caller clears it once the cache rows
+        // are gone: a crash in between leaves one row a retry consumes.
+        if adopt_subject.is_some() && revision != record.revision {
+            if let Some(prior_context) = record.scope_context_id.as_deref() {
+                record_soul_invalidation(&mut tx, ctx.space_id, record_id, prior_context, now)
+                    .await?;
+            }
+        }
         let scope = json!({
             "visibility": target.visibility,
             "context_id": target.context_id,

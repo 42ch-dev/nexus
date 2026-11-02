@@ -514,6 +514,17 @@ impl MemoryAdapter {
             }),
         }
     }
+
+    /// The placement a committed promotion left for one record, while the
+    /// SOUL-narrative invalidation it owes has not run (R4-F3 round 2).
+    async fn soul_invalidation_binding(&self, record_id: &str) -> CoreResult<Option<String>> {
+        self.provider.soul_invalidation_binding(record_id).await
+    }
+
+    /// Clear that recovery row once the invalidation ran.
+    async fn finish_soul_invalidation(&self, record_id: &str) -> CoreResult<()> {
+        self.provider.finish_soul_invalidation(record_id).await
+    }
 }
 
 /// A deterministic idempotency key for one memory write: `<op>:<digest>`.
@@ -1076,28 +1087,29 @@ impl CoreService {
                 "fragment_id must name a Character memory fragment",
             ));
         }
-        // The old binding survives the promotion (the scope is cleared, the
-        // provenance is untouched), so a retry after a committed promotion still
-        // invalidates the same two cache scopes (R4-F3).
-        let source_binding = current.pointer("/scope/context_id").and_then(Value::as_str);
-        let binding = source_binding
-            .or_else(|| {
-                current
-                    .pointer("/provenance/source_context_ids/0")
-                    .and_then(Value::as_str)
-            })
-            .map(str::to_string);
-        if source_binding.is_none() {
+        // The placement the promotion leaves. While the record is still
+        // binding-local its own scope names it; once the promotion committed it
+        // names the target, and its provenance is a client claim that need not
+        // name the placement at all — so the promotion's transaction recorded the
+        // old binding and a retry reads that recovery row instead of guessing
+        // (R4-F3 round 2).
+        let Some(source_binding) = current
+            .pointer("/scope/context_id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+        else {
             // The promotion already committed and only its invalidation is
             // outstanding: finish it before answering the stable conflict, so a
             // retry never leaves the shared fragment behind a stale cache.
+            let binding = memory.soul_invalidation_binding(&record_id).await?;
             self.invalidate_character_soul_narratives(&character_id, binding.as_deref())
                 .await?;
+            memory.finish_soul_invalidation(&record_id).await?;
             return Err(CoreError::ActorConflict {
                 code: "character_fragment_already_shared".to_string(),
                 message: "character memory fragment is already shared".to_string(),
             });
-        }
+        };
         let provider_revision = expected_revision
             .checked_add(1)
             .filter(|revision| *revision > 0)
@@ -1112,8 +1124,9 @@ impl CoreService {
             .await?;
         // Retained cache semantics: exactly the affected SOUL-narrative scopes
         // (shared + the old binding) are invalidated.
-        self.invalidate_character_soul_narratives(&character_id, binding.as_deref())
+        self.invalidate_character_soul_narratives(&character_id, Some(source_binding.as_str()))
             .await?;
+        memory.finish_soul_invalidation(&record_id).await?;
         let promoted = memory.record(&record_id).await?.ok_or_else(absent)?;
         map_wire(json!({
             "fragment": character_fragment_from_provider(&promoted, &character_id)?,
@@ -1127,7 +1140,9 @@ impl CoreService {
     /// The promotion this follows is already committed, so the retry path
     /// ([`Self::promote_character_fragment`] on an already-shared fragment) runs
     /// the same invalidation: the delete is a function of the record's state,
-    /// not of the call that promoted it (R4-F3).
+    /// not of the call that promoted it (R4-F3). The old binding comes from the
+    /// promote transaction's recovery row for a retry — the record no longer
+    /// names it and its provenance never had to (R4-F3 round 2).
     ///
     /// shortcut: this is the one legacy-table write the rerouted promotion
     /// keeps; it disappears with the projection reroute that serves the
