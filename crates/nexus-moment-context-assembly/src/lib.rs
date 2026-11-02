@@ -55,7 +55,7 @@ pub use moment::{
     MomentActorKind, MomentContext, MomentRequest, CHARACTER_MIND_MAX_ENTRY_CHARS,
     CHARACTER_MIND_MAX_MEMORY_ENTRIES, CHARACTER_MIND_MAX_SOUL_CHARS,
 };
-pub use recall::{partition, FragmentMemory, FragmentScope, RecallPartition};
+pub use recall::{partition, FragmentMemory, FragmentScope, RecallPartition, FACT_KIND};
 pub use stage0::Stage0Assembly;
 pub use world_context::{
     build_chapter_kb_block, ChapterKbBlockParams, CharacterViewInput, WorldContextBlock,

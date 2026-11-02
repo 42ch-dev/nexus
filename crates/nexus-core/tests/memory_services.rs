@@ -4851,8 +4851,10 @@ async fn dismissal_racing_the_completion_marker_adopts_nothing() {
 
 const MIND_SOUL: &str = "# Soul\n\nA provider-seeded Character soul.\n";
 
-/// Seed the Character's legacy surfaces below three pages of newer `event`
-/// records and return the exact bytes of its two promoted memory files.
+/// Seed the Character's legacy surfaces below 830 newer `event` records — more
+/// than eight recall pages, the scale at which the round-2 review showed a
+/// global page budget silently evicting memory — and return the exact bytes of
+/// its two promoted memory files.
 async fn seed_mind_projection_fixtures(env: &Env, other_binding: &str) -> (String, String) {
     let guarded = init_engine_pool(&env.db_path, CREATOR, GuardedPoolOptions::default())
         .await
@@ -4904,7 +4906,7 @@ async fn seed_mind_projection_fixtures(env: &Env, other_binding: &str) -> (Strin
         .await
         .unwrap();
     }
-    for index in 0..230_u32 {
+    for index in 0..830_u32 {
         let operation_id = format!("op_mind_{index:03}");
         let session_id = format!("sess_mind_{index:03}");
         let pending_id = format!("pend_mind_{index:03}");
@@ -4937,12 +4939,25 @@ async fn seed_mind_projection_fixtures(env: &Env, other_binding: &str) -> (Strin
         owner_creator_id: CREATOR,
         character_id: &env.character_id,
     };
-    for (slug, kind, body) in [
-        ("alpha-memory", "story_summary", "Alpha memory body."),
-        ("zeta-memory", "character_note", "Zeta memory body."),
+    for (slug, kind, body, updated_at) in [
+        (
+            "alpha-memory",
+            "story_summary",
+            "Alpha memory body.",
+            "2026-01-05T00:00:00Z",
+        ),
+        (
+            "zeta-memory",
+            "character_note",
+            "Zeta memory body.",
+            "2026-01-06T00:00:00Z",
+        ),
     ] {
         let mut memory = nexus_creator_memory::LongTermMemory::new(kind);
         memory.set_body(body);
+        // Older than every seeded event row: a promoted memory must survive a
+        // flood of newer unrelated records regardless of how large it is.
+        memory.frontmatter.updated_at = updated_at.to_string();
         nexus_creator_memory::memory_io::save_memory(&env.user_home, bearer, slug, &memory)
             .expect("promoted memory fixture");
     }
@@ -5001,8 +5016,9 @@ async fn character_mind_projection_serves_provider_seeded_soul_fragments_and_mem
             format!("- {alpha}"),
             format!("- {zeta}"),
         ],
-        "newer event pages never evict the fragments, and each promoted memory \
-         renders as the legacy memory file it came from, in slug order"
+        "830 newer unrelated events never evict the fragments or the promoted \
+         memories, and each promoted memory renders as the legacy memory file \
+         it came from, in slug order"
     );
 
     let shared_only = CoreCharacterMind::new(
@@ -5027,6 +5043,65 @@ async fn character_mind_projection_serves_provider_seeded_soul_fragments_and_mem
             .iter()
             .any(|line| line.contains("Legacy long-term body.")),
         "the Creator's promoted memory is not the Character's"
+    );
+}
+
+/// The legacy projection listed the complete memory directory by slug and then
+/// took the head 20 (`memory_io::list_memories` + `take`). Ranking a recency
+/// window instead drops the slug-first memory whenever 20 newer memories exist,
+/// so this fixture makes recency and slug order disagree: `alpha-memory` is the
+/// oldest file and exactly the memory a recency window would drop.
+#[tokio::test]
+async fn character_mind_projection_ranks_the_complete_memory_set_by_slug_before_capping() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let bearer = MemoryBearerRef::Character {
+        owner_creator_id: CREATOR,
+        character_id: &env.character_id,
+    };
+    let mut slugs = vec!["alpha-memory".to_string()];
+    for index in 0..20_u32 {
+        slugs.push(format!("memory-{index:02}"));
+    }
+    let mut expected: Vec<String> = Vec::new();
+    for (index, slug) in slugs.iter().enumerate() {
+        let mut memory = nexus_creator_memory::LongTermMemory::new("story_summary");
+        memory.set_body(&format!("Memory {slug} body."));
+        // `alpha-memory` is older than every other file, so only the complete
+        // slug ranking keeps it inside the 20-entry selection.
+        memory.frontmatter.updated_at = if index == 0 {
+            "2025-12-01T00:00:00Z".to_string()
+        } else {
+            format!("2026-01-{index:02}T00:00:00Z")
+        };
+        nexus_creator_memory::memory_io::save_memory(&env.user_home, bearer, slug, &memory)
+            .expect("promoted memory fixture");
+        if index < 20 {
+            let bytes = std::fs::read_to_string(bearer.long_term_memory_path(&env.user_home, slug))
+                .expect("memory file bytes");
+            expected.push(format!("- {bytes}"));
+        }
+    }
+
+    let mind = CoreCharacterMind::new(
+        plain_pool(&env).await,
+        core.memory_provider_for_test().expect("pinned provider"),
+    )
+    .projection(&principal, CREATOR, &env.character_id, None)
+    .await
+    .expect("the projection serves the promoted set");
+
+    assert_eq!(
+        mind.memory, expected,
+        "the slug-first 20 of the complete promoted set survive; provider recency \
+         never evicts the legacy selection"
+    );
+    assert!(
+        !mind
+            .memory
+            .iter()
+            .any(|line| line.contains("memory-19 body.")),
+        "the slug-last memory falls outside the 20-entry selection"
     );
 }
 

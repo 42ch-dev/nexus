@@ -346,31 +346,28 @@ impl MemoryAdapter {
         Ok(rows)
     }
 
-    /// One `memory.recall` page of the subject's merged read (NXM-7).
+    /// One kind-filtered family read of the subject's retained records, as the
+    /// upstream contract DTO (the data-target `RetainedRecord`) E6 and E10
+    /// consume (NXM-7 fix round 2).
     ///
-    /// `selection` is the §6.12 arm the caller needs — `shared_only`, or
-    /// `selected_contexts` with `include_shared` for a binding-local merge — so
-    /// the placement filter stays the provider's own. The page comes back as
-    /// the upstream contract DTO (the data-target `RetainedRecord`), which is
-    /// what E6's projection and E10's MCA inputs both consume; `next_cursor`
-    /// continues the ranking this page was minted under.
-    pub(crate) async fn recall(
+    /// `memory.recall` ranks every record kind together and offers no kind
+    /// filter, so a family read through it has to share pages with unrelated
+    /// kinds — events, the derived narrative cache — and any page budget can
+    /// then silently truncate the family. `memory.records.list` takes the kind
+    /// filter (`kinds`), which is the same authorized read path the E4 bridge
+    /// uses; `want` bounds the walk at the caller's legacy bound, and `None`
+    /// walks the family to exhaustion.
+    pub(crate) async fn family(
         &self,
         selection: Value,
-        max_items: u64,
-        cursor: Option<&str>,
-    ) -> CoreResult<(Vec<spoke_schemas::RetainedRecord>, Option<String>)> {
-        let request: spoke_schemas::MemoryRecallRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
-            "subject_id": self.subject_id,
-            "selection": selection,
-            "budget": { "max_items": max_items },
-            "cursor": cursor,
-        }))?;
-        let body = memory_ok(self.provider.recall(&self.principal, request).await)?;
-        let records: Vec<spoke_schemas::RetainedRecord> =
-            serde_json::from_value(body["records"].clone()).map_err(wire_err)?;
-        Ok((records, body["next_cursor"].as_str().map(str::to_string)))
+        kinds: &[&str],
+        want: Option<usize>,
+    ) -> CoreResult<Vec<spoke_schemas::RetainedRecord>> {
+        self.records(selection, kinds, None, want)
+            .await?
+            .into_iter()
+            .map(|record| serde_json::from_value(record).map_err(wire_err))
+            .collect()
     }
 
     /// The subject's `personality` profile body — `SOUL.md` as the provider

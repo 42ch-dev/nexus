@@ -20,7 +20,7 @@ use std::sync::Arc;
 use crate::error::{CoreError, CoreResult};
 use crate::memory::{CharacterTomService, MemoryAdapter};
 use crate::memory_pipeline::{internal_err, map_local_db_error, sqlx_internal, MemoryPipelineCtx};
-use crate::memory_provider::{legacy, LocalMemoryProvider};
+use crate::memory_provider::{legacy, policy, LocalMemoryProvider};
 use crate::principal::Principal;
 use crate::service::CoreService;
 use nexus_contracts::generated::daemon_api::characters::soul::character_soul_narrative_request::CharacterSoulNarrativeRequest;
@@ -33,8 +33,7 @@ use nexus_creator_memory::long_term_memory::{LongTermMemory, LongTermMemoryFront
 use nexus_creator_memory::soul_narrative::{SoulNarrativeSynthesisInput, SoulNarrativeSynthesizer};
 use nexus_local_db::SoulNarrativeFragmentStats;
 use nexus_moment_context_assembly::recall::{
-    memory_display_id, memory_document, memory_slug, partition, FragmentMemory, FragmentScope,
-    RecallPartition,
+    memory_display_id, memory_document, memory_slug, partition, FragmentMemory, FACT_KIND,
 };
 use nexus_moment_context_assembly::CharacterMindInput;
 use nexus_spoke_adapter::spoke_schemas::RetainedRecord;
@@ -592,29 +591,11 @@ fn has_forward_looking_suffix(narrative: &str) -> bool {
 // ── Character mind projection (v1.184 P3; core-owned since v1.190 P2-T2) ──
 
 /// Fragments the shared scope and the selected binding scope each contribute
-/// to the merged projection.
-const MIND_PROJECTION_FETCH_LIMIT: u64 = 100;
+/// to the merged projection — the legacy per-scope `LIMIT`.
+const MIND_PROJECTION_FETCH_LIMIT: usize = 100;
 
 /// Max Character long-term-memory records projected before deterministic cap.
 const MIND_PROJECTION_LTM_LIMIT: usize = 20;
-
-/// One `memory.recall` page's `budget.max_items` ceiling: the provider's
-/// advertised `max_page_size`, so a wider projection walks pages instead of
-/// asking past the bound.
-const MIND_PROJECTION_RECALL_PAGE: u64 = 100;
-
-/// Recall pages one projection walk may read.
-///
-/// The provider ranks every record kind together and `memory.recall` offers no
-/// kind filter, so the projection filters each page itself and keeps walking
-/// while a family's legacy bound is unfilled: an unrelated kind can occupy
-/// pages, never another family's quota. This budget bounds that walk.
-///
-/// shortcut: a subject whose newest
-/// `MIND_PROJECTION_RECALL_PAGES * MIND_PROJECTION_RECALL_PAGE` records are
-/// all unrelated kinds can still under-fill the slots; upgrade by adding a
-/// kind filter to `memory.recall` rather than widening this budget.
-const MIND_PROJECTION_RECALL_PAGES: u64 = 8;
 
 /// Per-order MCA `ToM` fetch bound: L1 and L2 are fetched independently at the
 /// `CharacterMindInput` slot cap so neither order can starve the other
@@ -639,9 +620,12 @@ fn format_tom_belief_line(row: &crate::memory::CharacterTomBeliefRow) -> String 
 /// reads the legacy fragment tables or the bearer memory files. It addresses
 /// the provider subject the NXM-5 read bridge projects that bearer under, so
 /// migrated and not-yet-migrated content arrive through the same
-/// `memory.profile.get` (SOUL) and `memory.recall` (fragments + promoted
-/// memories) reads, and once P5 publishes the migration marker those reads are
-/// provider-only with no second fallback here.
+/// `memory.profile.get` (SOUL) and kind-filtered `memory.records.list`
+/// (fragments + promoted memories) reads, and once P5 publishes the migration
+/// marker those reads are provider-only with no second fallback here. The kind
+/// filter is what keeps each family independent: `memory.recall` ranks every
+/// record kind together, so a family read through it could be silently
+/// truncated by unrelated kinds no matter how the page budget was set.
 ///
 /// **Content-preserving:** the projected lines keep the pre-provider
 /// projection's text — a fragment is its summary plus the keywords the legacy
@@ -650,7 +634,7 @@ fn format_tom_belief_line(row: &crate::memory::CharacterTomBeliefRow) -> String 
 ///
 /// **Honest-empty vs fail-closed:** only explicit *absent* optional data is an
 /// honest empty — an absent `personality` profile yields `None` and an empty
-/// recall result yields no lines. Any other read/refusal error is propagated so
+/// family result yields no lines. Any other read/refusal error is propagated so
 /// the caller aborts **before** host launch rather than executing with an
 /// incomplete Character mind. Only the executing Character's shared scope + the
 /// selected binding-local scope are included — never another Character's or the
@@ -692,7 +676,7 @@ pub async fn load_character_mind_projection(
     // that document, and the provider serves a migrated one the same way.
     let soul = read.personality().await?;
 
-    // One merged recall over the admitted scope: the Character-shared records
+    // The promoted-memory read's admitted scope: the Character-shared records
     // plus, when a binding is selected, that binding's own records.
     let selection = binding_id.map_or_else(
         || serde_json::json!({ "mode": "shared_only" }),
@@ -704,33 +688,29 @@ pub async fn load_character_mind_projection(
             })
         },
     );
-    let mut shared_fragments: Vec<FragmentMemory> = Vec::new();
-    let mut binding_fragments: Vec<FragmentMemory> = Vec::new();
-    let mut long_term_memories: Vec<RetainedRecord> = Vec::new();
-    let mut cursor: Option<String> = None;
-    for _ in 0..MIND_PROJECTION_RECALL_PAGES {
-        let (page, next) = read
-            .recall(
-                selection.clone(),
-                MIND_PROJECTION_RECALL_PAGE,
-                cursor.as_deref(),
+
+    // Fragments: the shared scope and, when selected, the binding-local scope
+    // are read independently at the legacy per-scope `LIMIT` — the same pair of
+    // legacy reads, so neither scope's content is traded against the other's.
+    // Each read is kind-filtered, so unrelated kinds (events, the derived
+    // narrative cache) occupy no page and no page budget can truncate a
+    // family: a scope serves its newest records or its complete set.
+    let shared_fragments =
+        projection_fragments(&read, serde_json::json!({ "mode": "shared_only" })).await?;
+    let binding_fragments = match binding_id {
+        Some(binding) => {
+            projection_fragments(
+                &read,
+                serde_json::json!({
+                    "mode": "selected_contexts",
+                    "context_ids": [binding],
+                    "include_shared": false,
+                }),
             )
-            .await?;
-        if page.is_empty() {
-            break;
+            .await?
         }
-        let families_filled = collect_mind_page(
-            page,
-            binding_id.is_some(),
-            &mut shared_fragments,
-            &mut binding_fragments,
-            &mut long_term_memories,
-        );
-        match next {
-            Some(next) if !families_filled => cursor = Some(next),
-            _ => break,
-        }
-    }
+        None => Vec::new(),
+    };
 
     // Deterministic merge: fragments newest first (`created_at DESC`,
     // `fragment_id DESC`) across both admitted scopes, rendered with the
@@ -756,66 +736,40 @@ pub async fn load_character_mind_projection(
         )
         .collect();
 
-    // Promoted memories join below the fragment block in the bearer's slug
-    // order — the order the legacy file listing served — and fill only the
-    // remaining Character-mind capacity, so they never crowd out
+    // Promoted memories: the complete authored set ranked by the bearer's slug
+    // order — the order the legacy file listing served — BEFORE the projection's
+    // 20-entry bound, so provider recency can never decide which memories the
+    // legacy slug-head selection kept. They join below the fragment block and
+    // fill only the remaining Character-mind capacity, so they never crowd out
     // binding-local fragments.
+    let authored_kinds: Vec<String> = policy::NEXUS_MEMORY_KINDS
+        .iter()
+        .map(|kind| policy::namespaced_record_kind(kind))
+        .collect();
+    let authored_kind_refs: Vec<&str> = authored_kinds.iter().map(String::as_str).collect();
+    let mut long_term_memories = read.family(selection, &authored_kind_refs, None).await?;
     long_term_memories.sort_by(|left, right| {
         memory_slug(left)
             .cmp(&memory_slug(right))
             .then_with(|| memory_display_id(left).cmp(&memory_display_id(right)))
     });
+    long_term_memories.truncate(MIND_PROJECTION_LTM_LIMIT);
     for record in &long_term_memories {
         lines.push(memory_document_line(record)?);
     }
     Ok(CharacterMindInput::new(soul, lines))
 }
 
-/// Absorb one recall page into the projection's per-family quotas.
-///
-/// The provider ranks every record kind together, so this filter is what stops
-/// an unrelated kind (events, the derived narrative cache) from consuming a
-/// family's legacy bound: fragments are kept per admitted scope at the legacy
-/// per-scope `LIMIT`, promoted memories at the projection's own limit. Returns
-/// whether every quota is now filled.
-fn collect_mind_page(
-    page: Vec<RetainedRecord>,
-    binding_selected: bool,
-    shared_fragments: &mut Vec<FragmentMemory>,
-    binding_fragments: &mut Vec<FragmentMemory>,
-    long_term_memories: &mut Vec<RetainedRecord>,
-) -> bool {
-    // The authored `nexus.<MemoryKind>` records are promoted memories, `fact`
-    // records are the fragment family, and the derived narrative cache /
-    // provenance rows are not Character memory at all.
-    let RecallPartition {
-        long_term_memories: page_memories,
-        fragments,
-        ..
-    } = partition(page);
-    let fragment_quota = usize::try_from(MIND_PROJECTION_FETCH_LIMIT).unwrap_or(usize::MAX);
-    for fragment in fragments {
-        // Pages arrive newest first, so the records a scope keeps are exactly
-        // its newest ones — the legacy `LIMIT` per scope.
-        let target = match &fragment.scope {
-            FragmentScope::Shared => &mut *shared_fragments,
-            FragmentScope::Context(_) if binding_selected => &mut *binding_fragments,
-            // Never admitted without a selected binding.
-            FragmentScope::Context(_) => continue,
-        };
-        if target.len() < fragment_quota {
-            target.push(fragment);
-        }
-    }
-    for record in page_memories {
-        if long_term_memories.len() < MIND_PROJECTION_LTM_LIMIT {
-            long_term_memories.push(record);
-        }
-    }
-    let binding_quota = if binding_selected { fragment_quota } else { 0 };
-    shared_fragments.len() == fragment_quota
-        && binding_fragments.len() == binding_quota
-        && long_term_memories.len() == MIND_PROJECTION_LTM_LIMIT
+/// The newest fragments of one admitted scope, as the legacy per-scope read
+/// served them: a kind-filtered read bounded at the legacy `LIMIT`.
+async fn projection_fragments(
+    read: &MemoryAdapter,
+    selection: serde_json::Value,
+) -> CoreResult<Vec<FragmentMemory>> {
+    let records = read
+        .family(selection, &[FACT_KIND], Some(MIND_PROJECTION_FETCH_LIMIT))
+        .await?;
+    Ok(partition(records).fragments)
 }
 
 /// One promoted-memory line exactly as the legacy projection rendered it: the

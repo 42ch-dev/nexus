@@ -27,7 +27,7 @@ use serde_json::Value;
 use std::collections::BTreeSet;
 
 /// Record kind of a fragment: the provider's core `fact` vocabulary.
-const FACT_KIND: &str = "fact";
+pub const FACT_KIND: &str = "fact";
 
 /// The legacy memory-file format version (`nexus_creator_memory::MEMORY_FILE_VERSION`),
 /// repeated because the DTO is what a provider-native record offers.
