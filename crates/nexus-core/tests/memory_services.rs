@@ -25,8 +25,8 @@ use nexus_contracts::generated::core::{
     CoreCharacterTransitionRequest, CoreCharacterTransitionRequestTargetStatus,
 };
 use nexus_core::{
-    AdmittedActor, CoreAccess, CoreError, CoreOpenOptions, CoreService, MemoryReviewPause,
-    MemoryReviewRendezvous,
+    AdmittedActor, CoreAccess, CoreCharacterMind, CoreError, CoreOpenOptions, CoreService,
+    MemoryReviewPause, MemoryReviewRendezvous,
 };
 use nexus_creator_memory::bearer::MemoryBearerRef;
 use nexus_creator_memory::errors::MemoryError;
@@ -4836,5 +4836,232 @@ async fn dismissal_racing_the_completion_marker_adopts_nothing() {
         core.count_pending_reviews(&principal).await.unwrap().count,
         0,
         "post-marker the legacy-derived queue is empty"
+    );
+}
+
+// ═══ NXM-7 fix round 1 ═══════════════════════════════════════════════════
+//
+// P3-F1/P3-F2/P3-F4: the rerouted E6 projection is consumer-visible, so these
+// tests assert the final mind-slot content against provider-seeded fixtures —
+// the Character SOUL, its shared and binding-local fragments, and the promoted
+// memories rendered as the legacy memory files they came from. The fixtures
+// flood three recall pages with newer `event` rows, so the projection must
+// filter per family while it pages rather than let one global cap serve every
+// kind.
+
+const MIND_SOUL: &str = "# Soul\n\nA provider-seeded Character soul.\n";
+
+/// Seed the Character's legacy surfaces below three pages of newer `event`
+/// records and return the exact bytes of its two promoted memory files.
+async fn seed_mind_projection_fixtures(env: &Env, other_binding: &str) -> (String, String) {
+    let guarded = init_engine_pool(&env.db_path, CREATOR, GuardedPoolOptions::default())
+        .await
+        .unwrap();
+    let pool = guarded.clone_pool();
+    let lifecycle_epoch: i64 =
+        sqlx::query_scalar("SELECT lifecycle_epoch FROM characters WHERE character_id = ?")
+            .bind(&env.character_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    for (fragment_id, summary, keywords, binding, created_at) in [
+        (
+            "mfrag_shared",
+            "Shared Character fragment.",
+            r#"["kw_shared"]"#,
+            None,
+            "2026-01-02T00:00:00Z",
+        ),
+        (
+            "mfrag_binding",
+            "Binding-local Character fragment.",
+            r#"["kw_binding"]"#,
+            Some(env.binding_id.as_str()),
+            "2026-01-03T00:00:00Z",
+        ),
+        (
+            "mfrag_other",
+            "Other-binding Character fragment.",
+            r#"["kw_other"]"#,
+            Some(other_binding),
+            "2026-01-04T00:00:00Z",
+        ),
+    ] {
+        nexus_local_db::create_character_fragment(
+            &pool,
+            CREATOR,
+            &nexus_local_db::NewCharacterMemoryFragment {
+                fragment_id: fragment_id.to_string(),
+                session_id: format!("sess_{fragment_id}"),
+                character_id: env.character_id.clone(),
+                actor_world_binding_id: binding.map(str::to_string),
+                keywords: keywords.to_string(),
+                summary: summary.to_string(),
+                created_at: created_at.to_string(),
+                ttl: None,
+            },
+        )
+        .await
+        .unwrap();
+    }
+    for index in 0..230_u32 {
+        let operation_id = format!("op_mind_{index:03}");
+        let session_id = format!("sess_mind_{index:03}");
+        let pending_id = format!("pend_mind_{index:03}");
+        let captured_at = format!("2026-04-01T{:02}:{:02}:00Z", index / 60, index % 60);
+        nexus_local_db::capture_character_run(
+            &pool,
+            CREATOR,
+            nexus_local_db::RunCaptureInput {
+                operation_id: &operation_id,
+                session_id: &session_id,
+                character_id: &env.character_id,
+                binding_id: &env.binding_id,
+                pending_id: &pending_id,
+                raw_digest: FRAGMENT_DIGEST,
+                captured_at: &captured_at,
+                lifecycle_epoch,
+            },
+        )
+        .await
+        .unwrap();
+    }
+    pool.close().await;
+    drop(guarded);
+
+    let soul_path =
+        nexus_home_layout::character_soul_md_path(&env.user_home, CREATOR, &env.character_id);
+    std::fs::create_dir_all(soul_path.parent().expect("character root")).unwrap();
+    std::fs::write(&soul_path, MIND_SOUL).unwrap();
+    let bearer = MemoryBearerRef::Character {
+        owner_creator_id: CREATOR,
+        character_id: &env.character_id,
+    };
+    for (slug, kind, body) in [
+        ("alpha-memory", "story_summary", "Alpha memory body."),
+        ("zeta-memory", "character_note", "Zeta memory body."),
+    ] {
+        let mut memory = nexus_creator_memory::LongTermMemory::new(kind);
+        memory.set_body(body);
+        nexus_creator_memory::memory_io::save_memory(&env.user_home, bearer, slug, &memory)
+            .expect("promoted memory fixture");
+    }
+    let read = |slug: &str| {
+        std::fs::read_to_string(bearer.long_term_memory_path(&env.user_home, slug))
+            .expect("memory file bytes")
+    };
+    (read("alpha-memory"), read("zeta-memory"))
+}
+
+#[tokio::test]
+async fn character_mind_projection_serves_provider_seeded_soul_fragments_and_memories() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let other_binding = core
+        .add_binding(
+            &principal,
+            env.character_id.clone(),
+            WORLD_B.to_string(),
+            None,
+        )
+        .await
+        .expect("second binding")
+        .binding
+        .binding_id
+        .as_str()
+        .to_string();
+    // Creator-side content of the same workspace: never part of the Character's
+    // mind (a bearer sees its own subject only).
+    seed_legacy_creator_content(&env).await;
+    let (alpha, zeta) = seed_mind_projection_fixtures(&env, &other_binding).await;
+
+    let mind = CoreCharacterMind::new(
+        plain_pool(&env).await,
+        core.memory_provider_for_test().expect("pinned provider"),
+    )
+    .projection(
+        &principal,
+        CREATOR,
+        &env.character_id,
+        Some(&env.binding_id),
+    )
+    .await
+    .expect("the projection serves the seeded Character mind");
+
+    assert_eq!(
+        mind.soul.as_deref(),
+        Some(MIND_SOUL),
+        "the SOUL slot carries the Character's own document"
+    );
+    assert_eq!(
+        mind.memory,
+        vec![
+            "- Binding-local Character fragment. — keywords: [\"kw_binding\"]".to_string(),
+            "- Shared Character fragment. — keywords: [\"kw_shared\"]".to_string(),
+            format!("- {alpha}"),
+            format!("- {zeta}"),
+        ],
+        "newer event pages never evict the fragments, and each promoted memory \
+         renders as the legacy memory file it came from, in slug order"
+    );
+
+    let shared_only = CoreCharacterMind::new(
+        plain_pool(&env).await,
+        core.memory_provider_for_test().expect("pinned provider"),
+    )
+    .projection(&principal, CREATOR, &env.character_id, None)
+    .await
+    .expect("shared-scope projection");
+    assert_eq!(
+        shared_only.memory,
+        vec![
+            "- Shared Character fragment. — keywords: [\"kw_shared\"]".to_string(),
+            format!("- {alpha}"),
+            format!("- {zeta}"),
+        ],
+        "a shared-scope projection keeps shared records and never leaks a binding's"
+    );
+    assert!(
+        !shared_only
+            .memory
+            .iter()
+            .any(|line| line.contains("Legacy long-term body.")),
+        "the Creator's promoted memory is not the Character's"
+    );
+}
+
+#[tokio::test]
+async fn character_mind_projection_fails_closed_when_the_provider_refuses() {
+    let env = seed_env().await;
+    // A read-only open with no writer behind it: no space or subject exists, so
+    // the projection's first read is refused instead of yielding an empty mind.
+    let read_only = CoreService::open(CoreOpenOptions {
+        user_home: env.user_home.clone(),
+        access: CoreAccess::ReadOnly,
+    })
+    .await
+    .expect("read-only open");
+    let principal = read_only.active_principal().await.unwrap();
+    let provider = read_only
+        .memory_provider_for_test()
+        .expect("pinned provider");
+    let pool = plain_pool(&env).await;
+
+    let refused = CoreCharacterMind::new(pool.clone(), provider.clone())
+        .projection(&principal, CREATOR, &env.character_id, None)
+        .await
+        .expect_err("an absent provider space cannot serve the projection");
+    assert!(
+        matches!(refused, CoreError::NotFound { .. }),
+        "the refusal propagates instead of becoming an empty mind: {refused:?}"
+    );
+
+    let malformed = CoreCharacterMind::new(pool, provider)
+        .projection(&principal, CREATOR, "not-a-character", None)
+        .await
+        .expect_err("a malformed bearer id names no subject");
+    assert!(
+        matches!(malformed, CoreError::InvalidInput { ref field, .. } if field == "character_id"),
+        "got {malformed:?}"
     );
 }

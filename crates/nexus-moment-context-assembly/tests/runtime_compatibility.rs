@@ -75,7 +75,11 @@ fn two_stage_fallback_empty_response() {
         stage1_response: Some(empty_response),
         personality: "Test personality".into(),
         experience: "Test experience".into(),
-        long_term_memories: vec![make_memory("story_summary", "Local memory", "2026-04-15")],
+        long_term_memories: vec![make_memory(
+            "story_summary",
+            "Local memory",
+            "2026-04-15T00:00:00Z",
+        )],
         fragment_keywords: vec!["keyword".into()],
         user_prompt: "Task".into(),
         system_prefix: String::new(),
@@ -90,7 +94,12 @@ fn two_stage_fallback_empty_response() {
 
 #[test]
 fn dedup_platform_memory_with_local_priority() {
-    let local_mem = common::memory("mem-1", "character_note", "Local content", "2026-04-15");
+    let local_mem = common::memory(
+        "mem-1",
+        "character_note",
+        "Local content",
+        "2026-04-15T00:00:00Z",
+    );
 
     let platform_item = MemoryItemRef {
         memory_id: "mem-1".into(),

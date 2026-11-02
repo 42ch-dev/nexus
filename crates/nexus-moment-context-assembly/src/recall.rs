@@ -16,16 +16,22 @@
 //!   (and any future product kind does too until it joins that taxonomy).
 //!
 //! Legacy-only metadata (`nexus_legacy`) is read here, never exposed as an MCA
-//! input: the display id, the slug and the per-fragment keywords are the only
-//! members the projection needs, and the rest stays provider/CLI provenance.
+//! input: the display id, the slug, the per-fragment keywords and the memory
+//! file's frontmatter are the only members the projections need, and the rest
+//! stays provider/CLI provenance.
 
 use nexus_contracts::generated::domain::memory::MemoryMemoryKind;
+use nexus_spoke_adapter::spoke_schemas::data::retained_record::PlacementScope;
 use nexus_spoke_adapter::spoke_schemas::RetainedRecord;
 use serde_json::Value;
 use std::collections::BTreeSet;
 
 /// Record kind of a fragment: the provider's core `fact` vocabulary.
 const FACT_KIND: &str = "fact";
+
+/// The legacy memory-file format version (`nexus_creator_memory::MEMORY_FILE_VERSION`),
+/// repeated because the DTO is what a provider-native record offers.
+const DEFAULT_MEMORY_VERSION: u32 = 1;
 
 /// Prefix of a namespaced Nexus `MemoryKind`. The provider-side source of this
 /// string is `nexus_core::memory_provider::policy::NEXUS_KIND_PREFIX`; it is
@@ -44,6 +50,41 @@ pub struct FragmentMemory {
     /// carries no keyword member at all (the distinction the projection's
     /// rendered line preserves).
     pub keywords: Option<Vec<String>>,
+    /// The record's `created_at`: E6's newest-first merge key.
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    /// The admitted scope the fragment sits in. E6 bounds each scope's
+    /// fragments separately, exactly as the legacy per-scope queries did.
+    pub scope: FragmentScope,
+}
+
+/// A recall record's placement as E6's per-scope fragment bounds need it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FragmentScope {
+    /// The bearer-shared scope.
+    Shared,
+    /// One binding-local scope (`context` placement).
+    Context(String),
+}
+
+/// A legacy memory file's frontmatter plus its body.
+///
+/// A migrated record carries these fields in `nexus_legacy`; a provider-native
+/// record never had a file, so its frontmatter is derived from the retained
+/// record itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryDocument {
+    /// `nexus_memory_version` — the legacy file format version.
+    pub nexus_memory_version: u32,
+    /// `memory_id` — the logical id (`mem_<hex>`).
+    pub memory_id: String,
+    /// `memory_kind` — the bare authored kind (`story_summary`, …).
+    pub memory_kind: String,
+    /// `updated_at` — the file's own timestamp text.
+    pub updated_at: String,
+    /// `source_session_ids` — the ACP sessions that produced the memory.
+    pub source_session_ids: Vec<String>,
+    /// The markdown body (`content.text`).
+    pub body: String,
 }
 
 /// One recall result set split into the inputs E6 and E10 consume.
@@ -84,12 +125,15 @@ pub fn partition(records: Vec<RetainedRecord>) -> RecallPartition {
                         .collect()
                 });
             keywords.extend(fragment_keywords.iter().flatten().cloned());
+            let at = *created_at(&record);
             keyed.push((
-                *created_at(&record),
+                at,
                 FragmentMemory {
                     fragment_id,
                     summary: memory_body(&record).to_string(),
                     keywords: fragment_keywords,
+                    created_at: at,
+                    scope: placement(&record),
                 },
             ));
         } else if is_authored_kind(kind) {
@@ -149,6 +193,62 @@ pub fn memory_slug(record: &RetainedRecord) -> Option<&str> {
     legacy_metadata(record)
         .and_then(|legacy| legacy.get("slug"))
         .and_then(Value::as_str)
+}
+
+/// The memory-file document a promoted record stands for.
+///
+/// The frontmatter is the one the migration preserves verbatim in
+/// `nexus_legacy`, plus the body. A record the provider authored natively never
+/// had a file, so its frontmatter is derived from the record (record id as the
+/// memory id, the bare kind, its own `updated_at`).
+#[must_use]
+pub fn memory_document(record: &RetainedRecord) -> MemoryDocument {
+    let legacy = legacy_metadata(record);
+    let member = |name: &str| legacy.and_then(|legacy| legacy.get(name));
+    let kind = memory_kind(record);
+    MemoryDocument {
+        nexus_memory_version: member("nexus_memory_version")
+            .and_then(Value::as_u64)
+            .and_then(|version| u32::try_from(version).ok())
+            .unwrap_or(DEFAULT_MEMORY_VERSION),
+        memory_id: memory_display_id(record),
+        memory_kind: member("memory_kind").and_then(Value::as_str).map_or_else(
+            || {
+                kind.strip_prefix(NEXUS_KIND_PREFIX)
+                    .unwrap_or(kind)
+                    .to_string()
+            },
+            str::to_string,
+        ),
+        updated_at: member("updated_at")
+            .and_then(Value::as_str)
+            .map_or_else(|| memory_updated_at(record).to_rfc3339(), str::to_string),
+        source_session_ids: member("source_session_ids")
+            .and_then(Value::as_array)
+            .map(|sessions| {
+                sessions
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        body: memory_body(record).to_string(),
+    }
+}
+
+/// The record's placement as E6's per-scope fragment bounds need it.
+fn placement(record: &RetainedRecord) -> FragmentScope {
+    let scope = match record {
+        RetainedRecord::LiveRecord(live) => &live.scope,
+        RetainedRecord::TombstonedRecord(tombstoned) => &tombstoned.scope,
+    };
+    match scope {
+        PlacementScope::Shared => FragmentScope::Shared,
+        PlacementScope::Context(context_id) => {
+            FragmentScope::Context(context_id.as_str().to_string())
+        }
+    }
 }
 
 /// The `updated_at` recency key of the `nexus.<MemoryKind>` sort.
@@ -220,7 +320,25 @@ mod tests {
         );
         assert_eq!(partition.fragments.len(), 1);
         assert_eq!(partition.fragments[0].summary, "a fragment");
+        assert_eq!(partition.fragments[0].scope, FragmentScope::Shared);
         assert_eq!(partition.fragment_keywords, vec!["gate".to_string()]);
+    }
+
+    #[test]
+    fn memory_document_derives_the_frontmatter_a_record_never_had() {
+        let record = memory(
+            "mem_abc",
+            "story_summary",
+            "body text",
+            "2026-01-01T00:00:00Z",
+        );
+        let document = memory_document(&record);
+        assert_eq!(document.nexus_memory_version, 1);
+        assert_eq!(document.memory_id, "mem_abc");
+        assert_eq!(document.memory_kind, "story_summary");
+        assert_eq!(document.updated_at, memory_updated_at(&record).to_rfc3339());
+        assert!(document.source_session_ids.is_empty());
+        assert_eq!(document.body, "body text");
     }
 
     #[test]
