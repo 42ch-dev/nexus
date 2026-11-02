@@ -134,6 +134,11 @@ pub struct CoreInner {
     /// of a production build.
     #[cfg(feature = "test-hooks")]
     pub(crate) memory_review_pause: Mutex<Option<crate::memory::MemoryReviewRendezvous>>,
+    /// Test-only: fail the next retained SOUL-narrative invalidation after the
+    /// promotion it follows committed (R4-F3 failure/retry boundary). Compiled
+    /// out of a production build.
+    #[cfg(feature = "test-hooks")]
+    pub(crate) soul_narrative_invalidation_fault: AtomicBool,
     /// Established-owner slot for the Host authority (P4-T2): at most one
     /// `open_host` manager per open service — a second start is a typed busy
     /// rejection, never a second engine. Reset only by a confirmed close.
@@ -363,6 +368,8 @@ impl CoreService {
                 character_fences: ActorFenceTable::new(&db_path),
                 #[cfg(feature = "test-hooks")]
                 memory_review_pause: Mutex::new(None),
+                #[cfg(feature = "test-hooks")]
+                soul_narrative_invalidation_fault: AtomicBool::new(false),
                 #[cfg(feature = "execution")]
                 execution: std::sync::Mutex::new(None),
                 #[cfg(feature = "execution")]

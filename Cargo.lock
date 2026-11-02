@@ -3949,7 +3949,6 @@ dependencies = [
  "chrono",
  "nexus-cloud-sync",
  "nexus-contracts",
- "nexus-creator-memory",
  "nexus-knowledge",
  "nexus-narrative",
  "nexus-spoke-adapter",

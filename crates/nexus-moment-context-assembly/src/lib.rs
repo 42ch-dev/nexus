@@ -20,7 +20,8 @@
 //!
 //! # Domain dependencies
 //!
-//! - `nexus-creator-memory` — SOUL sections, long-term memories, fragment keywords
+//! - `nexus-spoke-adapter` — the upstream `RetainedRecord` contract DTO that
+//!   carries long-term memories and fragments (E10 recall inputs, NXM-7)
 //! - `nexus-narrative` — World state, timeline, events (via `NarrativeGateway`)
 //! - `nexus-kb` — World-scoped key blocks (via `KbStore`)
 //! - `nexus-knowledge` — User-scoped knowledge entries (via `KnowledgeStore`)
@@ -30,8 +31,11 @@ pub mod generation;
 pub mod hygiene;
 pub mod inspector;
 pub mod moment;
+pub mod recall;
 pub mod slots;
 pub mod stage0;
+#[cfg(test)]
+mod test_support;
 pub mod world_context;
 
 // Cloud-stage types gated behind feature flag
@@ -51,6 +55,7 @@ pub use moment::{
     MomentActorKind, MomentContext, MomentRequest, CHARACTER_MIND_MAX_ENTRY_CHARS,
     CHARACTER_MIND_MAX_MEMORY_ENTRIES, CHARACTER_MIND_MAX_SOUL_CHARS,
 };
+pub use recall::{partition, FragmentMemory, FragmentScope, RecallPartition, FACT_KIND};
 pub use stage0::Stage0Assembly;
 pub use world_context::{
     build_chapter_kb_block, ChapterKbBlockParams, CharacterViewInput, WorldContextBlock,

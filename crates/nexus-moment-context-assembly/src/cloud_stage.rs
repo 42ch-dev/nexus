@@ -5,8 +5,9 @@
 //!
 //! Spec: `creator-memory-soul-lifecycle.md` §9
 
+use crate::recall::{memory_body, memory_display_id, memory_kind, memory_updated_at};
 use nexus_contracts::local::domain::RuntimeMode;
-use nexus_creator_memory::LongTermMemory;
+use nexus_spoke_adapter::spoke_schemas::RetainedRecord;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
 
@@ -83,8 +84,8 @@ pub struct TwoStageAssembly {
     pub personality: String,
     /// Local SOUL experience section.
     pub experience: String,
-    /// Local long-term memories.
-    pub long_term_memories: Vec<LongTermMemory>,
+    /// Local long-term memories: the contract `nexus.<MemoryKind>` records.
+    pub long_term_memories: Vec<RetainedRecord>,
     /// Local fragment keywords (union from `memory_fragments`).
     pub fragment_keywords: Vec<String>,
     /// User task prompt.
@@ -113,8 +114,8 @@ impl TwoStageAssembly {
 
         let sorted = self.sorted_memories();
         for mem in &sorted {
-            let title = format!("### Memory: {}", mem.frontmatter.memory_id);
-            parts.push(format!("{title}\n\n{}\n", mem.body));
+            let title = format!("### Memory: {}", memory_display_id(mem));
+            parts.push(format!("{title}\n\n{}\n", memory_body(mem)));
         }
 
         let keywords = self.deduped_keywords();
@@ -208,8 +209,8 @@ impl TwoStageAssembly {
 
         let sorted = self.sorted_memories();
         for mem in &sorted {
-            let title = format!("### Memory: {}", mem.frontmatter.memory_id);
-            parts.push(format!("{title}\n\n{}\n", mem.body));
+            let title = format!("### Memory: {}", memory_display_id(mem));
+            parts.push(format!("{title}\n\n{}\n", memory_body(mem)));
         }
 
         let keywords = self.deduped_keywords();
@@ -232,25 +233,25 @@ impl TwoStageAssembly {
     }
 
     fn deduped_platform_memories<'a>(&self, items: &'a [MemoryItemRef]) -> Vec<&'a MemoryItemRef> {
-        let local_ids: HashSet<&str> = self
+        let local_ids: HashSet<String> = self
             .long_term_memories
             .iter()
-            .map(|m| m.frontmatter.memory_id.as_str())
+            .map(memory_display_id)
             .collect();
         items
             .iter()
-            .filter(|item| !local_ids.contains(item.memory_id.as_str()))
+            .filter(|item| !local_ids.contains(&item.memory_id))
             .collect()
     }
 
-    fn sorted_memories(&self) -> Vec<&LongTermMemory> {
-        let mut sorted: Vec<&LongTermMemory> = self.long_term_memories.iter().collect();
+    fn sorted_memories(&self) -> Vec<&RetainedRecord> {
+        let mut sorted: Vec<&RetainedRecord> = self.long_term_memories.iter().collect();
         sorted.sort_by(|a, b| {
-            let kind_cmp = a.frontmatter.memory_kind.cmp(&b.frontmatter.memory_kind);
+            let kind_cmp = memory_kind(a).cmp(memory_kind(b));
             if kind_cmp != std::cmp::Ordering::Equal {
                 return kind_cmp;
             }
-            b.frontmatter.updated_at.cmp(&a.frontmatter.updated_at)
+            memory_updated_at(b).cmp(memory_updated_at(a))
         });
         sorted
     }
@@ -270,11 +271,8 @@ impl TwoStageAssembly {
 mod tests {
     use super::*;
 
-    fn make_memory(kind: &str, body: &str, updated_at: &str) -> LongTermMemory {
-        let mut mem = LongTermMemory::new(kind);
-        mem.set_body(body);
-        mem.frontmatter.updated_at = updated_at.to_string();
-        mem
+    fn make_memory(kind: &str, body: &str, updated_at: &str) -> RetainedRecord {
+        crate::test_support::memory(&format!("mem_{kind}_{updated_at}"), kind, body, updated_at)
     }
 
     #[test]
@@ -347,12 +345,12 @@ mod tests {
 
     #[test]
     fn memory_dedup_local_over_platform() {
-        let mut local_mem = make_memory(
+        let local_mem = crate::test_support::memory(
+            "mem_overlap",
             "story_summary",
             "LOCAL content wins.",
             "2026-04-14T00:00:00Z",
         );
-        local_mem.frontmatter.memory_id = "mem_overlap".to_string();
 
         let asm = TwoStageAssembly {
             stage1_response: Some(AssembleResponse {
