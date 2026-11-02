@@ -1452,6 +1452,86 @@ impl LocalMemoryProvider {
             Err(error) => deny(&store_error(error)),
         }
     }
+
+    /// §7.21 explicit promotion of one Character fragment addressed by the id the
+    /// E4 DTO serves.
+    ///
+    /// A listed legacy fragment's id is the legacy column, not a provider record
+    /// id: the bridge indexes that row under its deterministic external id
+    /// (`lgc:character_memory_fragments:<id>`), so the promotion resolves the id
+    /// through the bridge and, when the row is still a projection, adopts it
+    /// inside the promotion's own guarded transaction (R4-F1; NXM-5 D13's
+    /// mutation-time adoption, reused for records). `subject_id` is the bearer
+    /// whose activity lease the caller holds: a record owned by another subject,
+    /// or one that is not a `fact` fragment, is refused before any write
+    /// (R4-F2).
+    ///
+    /// # Refusals
+    /// `NOT_FOUND` when nothing resolves to the id, `NOT_AUTHORIZED` when the
+    /// record belongs to another subject or is not a fragment, `REVISION_CONFLICT`
+    /// when the CAS cannot land, and the admission codes otherwise.
+    pub async fn promote_character_fragment(
+        &self,
+        principal: &schemas::Principal,
+        subject_id: &str,
+        record_id: &str,
+        expected_revision: u64,
+        idempotency_key: &str,
+    ) -> SpokeResult<schemas::MemoryRecordsPromoteResponse> {
+        let principal_id = principal_id(principal);
+        let op = OP_RECORDS_PROMOTE;
+        let digest = match jcs_sha256_hex(&json!({
+            "record_id": record_id,
+            "expected_revision": expected_revision,
+            "idempotency_key": idempotency_key,
+        })) {
+            SpokeResult::Ok(digest) => digest,
+            SpokeResult::Reject(reject) => {
+                return deny(&ProviderError::Internal(reject.message));
+            }
+        };
+        let ctx = OpContext {
+            space_id: &self.space_id,
+            requester_principal_id: principal_id,
+            op,
+            idempotency_key: Some(idempotency_key),
+            payload_digest: &digest,
+        };
+        let target = Placement {
+            visibility: Placement::SHARED,
+            context_id: None,
+        };
+        // §7.21: `promote` + `records_write` over BOTH placements.
+        let admission = Admission {
+            op,
+            space_id: &self.space_id,
+            principal_id,
+            coverage: Coverage::Record {
+                record_id,
+                capabilities: &["promote", "records_write"],
+                target: Some(target),
+            },
+            issuance: None,
+            subject_gate: None,
+            placement_gate: None,
+            freeze_gated: true,
+        };
+        match self
+            .store
+            .promote_record(
+                &ctx,
+                &admission,
+                record_id,
+                i64::try_from(expected_revision).unwrap_or(i64::MAX),
+                target,
+                Some(subject_id),
+            )
+            .await
+        {
+            Ok(receipt) => settle_receipt(&receipt),
+            Err(error) => deny(&store_error(error)),
+        }
+    }
 }
 
 /// The facts both `memory.grants.grant` request shapes name (§7.9); the restricted
@@ -2845,6 +2925,7 @@ impl MemoryPort for LocalMemoryProvider {
                 request.record_id.as_str(),
                 expected_revision(request.expected_revision),
                 target,
+                None,
             )
             .await
         {

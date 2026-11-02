@@ -277,6 +277,12 @@ impl MemoryAdapter {
         self.provider.review_disposition(&self.subject_id).await
     }
 
+    /// The provider subject this adapter speaks for: the bearer a write under
+    /// this adapter may mutate (R4-F2).
+    const fn subject_id(&self) -> &str {
+        self.subject_id.as_str()
+    }
+
     /// Every pending candidate of the subject, newest first in the retained
     /// `(created_at DESC, pending_id DESC)` order.
     ///
@@ -465,18 +471,36 @@ impl MemoryAdapter {
         }
     }
 
-    /// §7.21 explicit placement change to shared, revision-checked. A CAS miss
+    /// One Character fragment record by the id the fragment DTO serves.
+    ///
+    /// A provider-native fragment is addressed by its own record id; a projected
+    /// legacy fragment is addressed by the bridge's deterministic external id
+    /// while the DTO serves its legacy `fragment_id` (D5), so the listed id is
+    /// resolved through the bridge id before it can name a record (R4-F1).
+    async fn character_fragment(&self, fragment_id: &str) -> CoreResult<Option<Value>> {
+        if let Some(record) = self.record(fragment_id).await? {
+            return Ok(Some(record));
+        }
+        self.record(&legacy::character_fragment_record_id(fragment_id))
+            .await
+    }
+
+    /// §7.21 explicit placement change to shared, revision-checked, adopting a
+    /// still-projected legacy row inside the promotion's transaction. A CAS miss
     /// keeps the retained `version_mismatch` conflict; an absent record keeps
     /// the retained not-found answer.
-    async fn promote_to_shared(&self, record_id: &str, expected_revision: u64) -> CoreResult<()> {
-        let request: spoke_schemas::MemoryRecordsPromoteRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
-            "record_id": record_id,
-            "expected_revision": expected_revision,
-            "target_scope": { "visibility": "shared" },
-            "idempotency_key": idempotency_key("promote", record_id)?,
-        }))?;
-        match self.provider.promote_record(&self.principal, request).await {
+    async fn promote_fragment(&self, record_id: &str, expected_revision: u64) -> CoreResult<()> {
+        match self
+            .provider
+            .promote_character_fragment(
+                &self.principal,
+                &self.subject_id,
+                record_id,
+                expected_revision,
+                &idempotency_key("promote", record_id)?,
+            )
+            .await
+        {
             SpokeResult::Ok(_) => Ok(()),
             SpokeResult::Reject(reject) => Err(match reject.code {
                 SpokeRejectCode::NotFound => {
@@ -548,6 +572,16 @@ impl CoreService {
             .memory_review_pause
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(rendezvous);
+    }
+
+    /// Test-only: fail the next retained SOUL-narrative invalidation, which runs
+    /// after its promotion already committed, so a regression can drive the
+    /// failure/retry boundary (R4-F3). Compiled out of a production build.
+    #[doc(hidden)]
+    pub fn fail_next_soul_narrative_invalidation(&self) {
+        self.inner
+            .soul_narrative_invalidation_fault
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// Park at `at` when a test armed that step-point.
@@ -983,9 +1017,18 @@ impl CoreService {
     /// DTO's `N - 1`, so the caller's expected DTO revision is the provider CAS
     /// value `expected + 1`.
     ///
+    /// The id is the one the fragment DTO served, so a legacy-projected fragment
+    /// resolves through the bridge's external id and is adopted inside the
+    /// promotion's own transaction (R4-F1); the record must belong to this
+    /// Character and be a `fact` fragment (R4-F2). The retained SOUL-narrative
+    /// invalidation runs on the already-shared path too, so a retry after a
+    /// failed invalidation reaches one consistent state (R4-F3).
+    ///
     /// # Errors
     /// As [`Self::acquire_actor_activity`], plus the mapped storage conflicts
-    /// (`version_mismatch`, `character_fragment_already_shared`).
+    /// (`version_mismatch`, `character_fragment_already_shared`) and the
+    /// retained not-found answer for an id that names no fragment of this
+    /// Character.
     pub async fn promote_character_fragment(
         &self,
         principal: &Principal,
@@ -1009,17 +1052,52 @@ impl CoreService {
         // same-target promotion is a §7.0.4 no-op, so the adapter refuses an
         // already-shared fragment itself.
         let absent = || not_found("character memory fragment", &format!("'{fragment_id}'"));
-        let current = memory.record(&fragment_id).await?.ok_or_else(absent)?;
-        let Some(binding) = current
-            .pointer("/scope/context_id")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-        else {
+        // The listed id resolves through the bridge, so a legacy-projected
+        // fragment is promotable at all: the DTO serves the legacy
+        // `fragment_id` while the provider names that row by its external id
+        // (R4-F1).
+        let current = memory
+            .character_fragment(&fragment_id)
+            .await?
+            .ok_or_else(absent)?;
+        let record_id = current["record_id"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        // R4-F2: the lease above names one Character, so the record must be that
+        // Character's own and a `fact` fragment. The read alone is authorized by
+        // the principal's grants, which also cover every other Character it
+        // owns, so the owner and kind are checked here — before any mutation.
+        if current["subject_id"].as_str() != Some(memory.subject_id()) {
+            return Err(absent());
+        }
+        if current["kind"].as_str() != Some("fact") {
+            return Err(invalid_input(
+                "fragment_id must name a Character memory fragment",
+            ));
+        }
+        // The old binding survives the promotion (the scope is cleared, the
+        // provenance is untouched), so a retry after a committed promotion still
+        // invalidates the same two cache scopes (R4-F3).
+        let source_binding = current.pointer("/scope/context_id").and_then(Value::as_str);
+        let binding = source_binding
+            .or_else(|| {
+                current
+                    .pointer("/provenance/source_context_ids/0")
+                    .and_then(Value::as_str)
+            })
+            .map(str::to_string);
+        if source_binding.is_none() {
+            // The promotion already committed and only its invalidation is
+            // outstanding: finish it before answering the stable conflict, so a
+            // retry never leaves the shared fragment behind a stale cache.
+            self.invalidate_character_soul_narratives(&character_id, binding.as_deref())
+                .await?;
             return Err(CoreError::ActorConflict {
                 code: "character_fragment_already_shared".to_string(),
                 message: "character memory fragment is already shared".to_string(),
             });
-        };
+        }
         let provider_revision = expected_revision
             .checked_add(1)
             .filter(|revision| *revision > 0)
@@ -1027,16 +1105,16 @@ impl CoreService {
                 invalid_input("expected_revision must be a non-negative fragment revision")
             })?;
         memory
-            .promote_to_shared(
-                &fragment_id,
+            .promote_fragment(
+                &record_id,
                 u64::try_from(provider_revision).unwrap_or(u64::MAX),
             )
             .await?;
         // Retained cache semantics: exactly the affected SOUL-narrative scopes
         // (shared + the old binding) are invalidated.
-        self.invalidate_character_soul_narratives(&character_id, Some(&binding))
+        self.invalidate_character_soul_narratives(&character_id, binding.as_deref())
             .await?;
-        let promoted = memory.record(&fragment_id).await?.ok_or_else(absent)?;
+        let promoted = memory.record(&record_id).await?.ok_or_else(absent)?;
         map_wire(json!({
             "fragment": character_fragment_from_provider(&promoted, &character_id)?,
         }))
@@ -1046,6 +1124,11 @@ impl CoreService {
     /// SOUL-narrative scopes (the shared scope and the old binding) are
     /// invalidated.
     ///
+    /// The promotion this follows is already committed, so the retry path
+    /// ([`Self::promote_character_fragment`] on an already-shared fragment) runs
+    /// the same invalidation: the delete is a function of the record's state,
+    /// not of the call that promoted it (R4-F3).
+    ///
     /// shortcut: this is the one legacy-table write the rerouted promotion
     /// keeps; it disappears with the projection reroute that serves the
     /// narrative from records.
@@ -1054,6 +1137,19 @@ impl CoreService {
         character_id: &str,
         binding_id: Option<&str>,
     ) -> CoreResult<()> {
+        // Test-only fault: the promotion it follows has already committed, so a
+        // regression can prove the retry still finishes the invalidation.
+        #[cfg(feature = "test-hooks")]
+        if self
+            .inner
+            .soul_narrative_invalidation_fault
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(internal_err(
+                "test-hook",
+                "injected SOUL narrative invalidation failure",
+            ));
+        }
         sqlx::query(
             "DELETE FROM character_soul_narratives \
              WHERE character_id = ? AND (actor_world_binding_id IS NULL OR actor_world_binding_id = ?)",

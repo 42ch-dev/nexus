@@ -129,7 +129,7 @@ const FAMILY_RUN_CAPTURES: &str = "character_run_captures";
 /// Record kind shared by a legacy fragment and by a promoted long-term memory of
 /// the `custom` kind is *not* collapsed: fragments use `fact`, long-term files
 /// keep their authored kind through [`policy::namespaced_record_kind`].
-const FACT_KIND: &str = "fact";
+pub(super) const FACT_KIND: &str = "fact";
 /// Record kind of a `character_run_captures` provenance row.
 const EVENT_KIND: &str = "event";
 /// The external-id prefix. Provider-minted ids use `rec_`/`cnd_`, so a projected
@@ -166,6 +166,17 @@ pub fn pending_review_candidate_id(pending_id: &str) -> String {
 #[must_use]
 pub fn character_pending_review_candidate_id(pending_id: &str) -> String {
     external_id(FAMILY_CHARACTER_PENDING_REVIEW, &[pending_id])
+}
+
+/// The deterministic external id of a Character memory fragment.
+///
+/// The E4 fragment DTOs name the legacy `fragment_id` verbatim (D5) while the
+/// bridge indexes that row under this id, so a promotion that receives a listed
+/// id has to resolve it here before it can name a provider record (R4-F1) — and
+/// an adoption under this id is the one P5's migration key agrees with.
+#[must_use]
+pub fn character_fragment_record_id(fragment_id: &str) -> String {
+    external_id(FAMILY_CHARACTER_FRAGMENTS, &[fragment_id])
 }
 
 /// The legacy bearer roots of one opened workspace: the user home the bearer

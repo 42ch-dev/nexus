@@ -3692,6 +3692,76 @@ async fn adopt_in_tx(
     Ok(adopted)
 }
 
+/// [`adopt_in_tx`] for projected **records**: every row `ids` names is inserted
+/// under the id the bridge projects it with, inside the caller's transaction.
+///
+/// Only the mutation that consumes the projection calls this (the explicit
+/// fragment promotion), so "adopt then mutate" is one guarded write and no
+/// adopted record can be left behind by a promotion that did not commit. The
+/// row the provider already owns is left as it is: the id and the content are
+/// the projection's own, so a second adoption is a no-op.
+/// Returns the number of rows actually inserted.
+async fn adopt_records_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    roots: &LegacyRoots,
+    space_id: &str,
+    principal_id: &str,
+    subject_id: &str,
+    ids: &[String],
+    now: DateTime<Utc>,
+) -> StoreResult<i64> {
+    let mut adopted = 0_i64;
+    for id in ids {
+        let Some(row) = legacy::record_by_id_in_tx(tx, roots, space_id, id).await? else {
+            continue;
+        };
+        // The bridge resolves the bearer's canonical subject; an id that
+        // resolves under another subject is not this caller's to adopt.
+        if row.subject_id != subject_id {
+            continue;
+        }
+        let requirements = [row.requirement("records_write", false)];
+        let admission = Admission {
+            op: super::OP_LEGACY_ADOPT,
+            space_id,
+            principal_id,
+            coverage: Coverage::Requirements(&requirements),
+            issuance: None,
+            subject_gate: Some(subject_id),
+            placement_gate: Some(row.scope()),
+            freeze_gated: true,
+        };
+        let _ = authorize(tx, &admission, now).await?;
+        gate(tx, &admission).await?;
+        let inserted = sqlx::query(
+            "INSERT INTO memory_records \
+             (record_id, space_id, subject_id, kind, content_json, scope_visibility, \
+              scope_context_id, provenance_json, import_ref_json, occurred_at, tombstone_json, \
+              revision, created_at, updated_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+             ON CONFLICT(record_id) DO NOTHING",
+        )
+        .bind(row.record_id.as_str())
+        .bind(row.space_id.as_str())
+        .bind(row.subject_id.as_str())
+        .bind(row.kind.as_str())
+        .bind(row.content_json.as_str())
+        .bind(row.scope_visibility.as_str())
+        .bind(row.scope_context_id.as_deref())
+        .bind(row.provenance_json.as_str())
+        .bind(row.import_ref_json.as_deref())
+        .bind(row.occurred_at.as_deref())
+        .bind(row.tombstone_json.as_deref())
+        .bind(row.revision)
+        .bind(row.created_at.as_str())
+        .bind(row.updated_at.as_str())
+        .execute(&mut **tx)
+        .await?;
+        adopted += i64::try_from(inserted.rows_affected()).unwrap_or(0);
+    }
+    Ok(adopted)
+}
+
 impl MemoryStore {
     /// The bearer subject that owns one provider-native candidate row, if this
     /// store holds it.
@@ -4817,6 +4887,16 @@ impl MemoryStore {
     }
 
     /// §7.21 explicit placement change; provenance is untouched.
+    ///
+    /// `adopt_subject` names the bearer whose activity lease the caller holds
+    /// when the record may still be a bridge projection (the explicit Character
+    /// fragment promotion, R4-F1). The projection is then adopted under its
+    /// deterministic external id **inside this promotion's guarded transaction**
+    /// — NXM-5 D13's mutation-time adoption, reused for records — and the
+    /// promotion is re-authorized against the adopted row. Everything else is
+    /// one path: the wire op passes `None` and promotes a record the provider
+    /// already owns.
+    #[allow(clippy::too_many_lines)] // resolution, adoption, admission and the CAS are one write
     pub(super) async fn promote_record(
         &self,
         ctx: &OpContext<'_>,
@@ -4824,11 +4904,60 @@ impl MemoryStore {
         record_id: &str,
         expected_revision: i64,
         target: Placement<'_>,
+        adopt_subject: Option<&str>,
     ) -> StoreResult<ReceiptRow> {
+        // Resolve what this promotion has to be authorized as BEFORE the
+        // publication section (which evaluates the caller's admission): a row
+        // the provider does not own yet is authorized exactly as the bridge
+        // projects it, because the adopted row carries its subject and its
+        // placement verbatim.
+        let projected = match adopt_subject {
+            Some(_) => {
+                let (mut read, _) = self.begin_read().await?;
+                let owned = record_in_tx(&mut read, ctx.space_id, record_id).await?;
+                let row = match owned {
+                    Some(_) => None,
+                    None => {
+                        legacy::record_by_id_in_tx(&mut read, &self.legacy, ctx.space_id, record_id)
+                            .await?
+                    }
+                };
+                read.rollback().await?;
+                row
+            }
+            None => None,
+        };
+        let capabilities: &[&str] = match &admission.coverage {
+            Coverage::Record { capabilities, .. } => capabilities,
+            _ => &[],
+        };
+        let requirements: Vec<GrantRequirement<'_>> = projected
+            .iter()
+            .flat_map(|row| {
+                capabilities
+                    .iter()
+                    .map(move |capability| row.requirement(capability, false))
+            })
+            .collect();
+        let projected_admission = Admission {
+            op: super::OP_LEGACY_ADOPT,
+            space_id: ctx.space_id,
+            principal_id: admission.principal_id,
+            coverage: Coverage::Requirements(&requirements),
+            issuance: None,
+            subject_gate: projected.as_ref().map(|row| row.subject_id.as_str()),
+            placement_gate: projected.as_ref().map(RecordRow::scope),
+            freeze_gated: true,
+        };
+        let effective = if projected.is_some() {
+            &projected_admission
+        } else {
+            admission
+        };
         let targets = [journal::record_target(record_id)];
-        let mut publication = self.begin_publication(ctx, admission, &targets).await?;
+        let mut publication = self.begin_publication(ctx, effective, &targets).await?;
         let (mut tx, now) = self.begin_admission().await?;
-        let _ = authorize(&mut tx, admission, now).await?;
+        let _ = authorize(&mut tx, effective, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
             // §5.2 step 2/S-2: settle the replayed intent before serving it, so
             // a duplicate key reaches the published outcome (or the recorded
@@ -4837,10 +4966,42 @@ impl MemoryStore {
             return self.settle_replayed(&mut publication, row).await;
         }
         require_settled_targets(&mut tx, ctx.space_id, &targets).await?;
-        gate(&mut tx, admission).await?;
+        if let Some(subject_id) = adopt_subject {
+            adopt_records_in_tx(
+                &mut tx,
+                &self.legacy,
+                ctx.space_id,
+                admission.principal_id,
+                subject_id,
+                &[record_id.to_string()],
+                now,
+            )
+            .await?;
+            // Re-authorize against the adopted row inside this transaction, so
+            // the promotion is admitted on exactly the row it mutates.
+            let _ = authorize(&mut tx, admission, now).await?;
+        }
+        gate(&mut tx, effective).await?;
         let record = record_in_tx(&mut tx, ctx.space_id, record_id)
             .await?
             .ok_or_else(|| StoreError::NotFound(format!("record {record_id}")))?;
+        // R4-F2: this seam promotes one bearer's own fragment, so the record the
+        // lease names must be that bearer's and must be a `fact` fragment. The
+        // check sits where the mutation commits, not at the caller's read, so no
+        // caller can reach another Character's record through this path.
+        if let Some(subject_id) = adopt_subject {
+            if record.subject_id != subject_id {
+                return Err(StoreError::NotAuthorized(format!(
+                    "record {record_id} belongs to subject {}, not {subject_id}",
+                    record.subject_id
+                )));
+            }
+            if record.kind != legacy::FACT_KIND {
+                return Err(StoreError::NotAuthorized(format!(
+                    "record {record_id} is not a Character fragment"
+                )));
+            }
+        }
         require_subject_writable(
             &mut tx,
             ctx.space_id,
