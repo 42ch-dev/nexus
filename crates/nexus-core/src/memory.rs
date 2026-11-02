@@ -15,7 +15,6 @@
 use nexus_contracts::generated::daemon_api::characters::memory::capture_character_pending_review_request::CaptureCharacterPendingReviewRequest;
 use nexus_contracts::generated::daemon_api::characters::memory::capture_character_pending_review_response::CaptureCharacterPendingReviewResponse;
 use nexus_contracts::generated::daemon_api::characters::memory::character_memory_fragment_info::CharacterMemoryFragmentInfo;
-use nexus_contracts::generated::daemon_api::characters::memory::character_pending_review_info::CharacterPendingReviewInfo;
 use nexus_contracts::generated::daemon_api::characters::memory::count_character_pending_reviews_response::CountCharacterPendingReviewsResponse;
 use nexus_contracts::generated::daemon_api::characters::memory::delete_character_pending_review_response::DeleteCharacterPendingReviewResponse;
 use nexus_contracts::generated::daemon_api::characters::memory::list_character_memory_fragments_response::ListCharacterMemoryFragmentsResponse;
@@ -55,8 +54,14 @@ use crate::memory_pipeline::{
     internal_err, map_local_db_error, process_bearer_review_batch, sqlx_internal,
     MemoryPipelineCtx, REVIEW_BATCH_LIMIT,
 };
+use std::collections::HashSet;
+use std::sync::Arc;
+
+use crate::memory_provider::legacy;
+use crate::memory_provider::{created_at_cmp, LocalMemoryProvider, MemoryDisposition};
 use crate::principal::Principal;
 use crate::service::CoreService;
+use spoke_operations::{spoke_schemas, MemoryPort, SpokeReject, SpokeRejectCode, SpokeResult};
 
 /// Per-Character review-call budget (mirrors the Creator review handler — the
 /// batch drains at most one bounded slice per call and reports `has_more`).
@@ -97,6 +102,506 @@ fn pagination_info(limit: u32, has_more: bool, next_cursor: Option<&str>) -> ser
 
 fn decode_fragment_keywords(raw: &str) -> Vec<String> {
     serde_json::from_str::<Vec<String>>(raw).unwrap_or_default()
+}
+
+// ── Provider seam (NXM-5 Task 2) ─────────────────────────────────────────
+//
+// The read and dismissal handlers below serve the memory family through the
+// `MemoryPort` the open pinned ([`CoreService::memory_provider`]) instead of
+// the legacy tables. This block is the existing-DTO/error adapter: a handler
+// keeps its retained request/response shape (compass D5) while the adapter
+// records the legacy page/keyset/offset semantics on top of provider reads and
+// maps a port refusal back onto the core error taxonomy.
+//
+// The provider projects the unmigrated legacy rows through one merged read
+// (the NXM-5 Task 1 bridge), so a handler serves migrated and not-yet-migrated
+// content alike. Legacy metadata rides in `content.structured.nexus_legacy`,
+// which is what lets the retained DTOs render the legacy display fields
+// (`pending_id`, `fragment_id`, `world_id`, keywords) rather than provider ids.
+
+/// The provider space this workspace serves (`memory.describe` reports it).
+const MEMORY_SPACE_ID: &str = crate::memory_provider::DEFAULT_SPACE_ID;
+
+/// Rows the adapter asks for per internal provider page: the provider's own
+/// advertised `max_page_size`, so a legacy DTO never names a bigger bound.
+const MEMORY_PAGE_SIZE: u64 = 100;
+
+/// Map one port refusal onto the retained core error taxonomy.
+fn memory_reject(reject: &SpokeReject) -> CoreError {
+    match reject.code {
+        SpokeRejectCode::NotFound => CoreError::NotFound {
+            resource: reject.message.clone(),
+        },
+        SpokeRejectCode::NotAuthorized => CoreError::ForbiddenReason {
+            resource: "memory".to_string(),
+            reason: reject.message.clone(),
+        },
+        SpokeRejectCode::InvalidInput => CoreError::InvalidInput {
+            field: "memory".to_string(),
+            reason: reject.message.clone(),
+        },
+        _ => internal_err("memory_provider", reject.message.clone()),
+    }
+}
+
+/// The success body of a port result as JSON, or its refusal as a core error.
+fn memory_ok<T: serde::Serialize>(result: SpokeResult<T>) -> CoreResult<Value> {
+    match result {
+        SpokeResult::Ok(value) => serde_json::to_value(&value).map_err(wire_err),
+        SpokeResult::Reject(reject) => Err(memory_reject(&reject)),
+    }
+}
+
+/// One pending-review row as the retained DTOs render it.
+struct PendingMemoryRow {
+    pending_id: String,
+    session_id: String,
+    task_kind: String,
+    raw_digest: String,
+    world_id: Option<String>,
+    source_operation_id: Option<String>,
+    binding_id: Option<String>,
+    shared: bool,
+    created_at: String,
+}
+
+impl PendingMemoryRow {
+    /// Project one provider candidate onto the legacy pending-review row it
+    /// stands for; a candidate with no legacy origin is not part of this DTO.
+    fn from_candidate(candidate: &Value) -> Option<Self> {
+        let origin = candidate.pointer("/proposed/content/structured/nexus_legacy")?;
+        let scope = &candidate["capture_scope"];
+        Some(Self {
+            pending_id: origin["pending_id"].as_str()?.to_string(),
+            session_id: origin["session_id"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            task_kind: origin["task_kind"].as_str().unwrap_or_default().to_string(),
+            raw_digest: origin["raw_digest"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            world_id: origin["world_id"].as_str().map(str::to_string),
+            source_operation_id: origin["source_operation_id"].as_str().map(str::to_string),
+            binding_id: scope["context_id"].as_str().map(str::to_string),
+            shared: scope["visibility"].as_str() == Some("shared"),
+            created_at: origin["created_at"]
+                .as_str()
+                .or_else(|| candidate["created_at"].as_str())
+                .unwrap_or_default()
+                .to_string(),
+        })
+    }
+}
+
+/// Whether one projected pending row belongs to the requested retained scope:
+/// `None` is the Character-shared queue, `Some(binding)` that binding's own.
+fn pending_row_in_scope(row: &PendingMemoryRow, binding_id: Option<&str>) -> bool {
+    binding_id.map_or(row.shared, |binding| {
+        !row.shared && row.binding_id.as_deref() == Some(binding)
+    })
+}
+
+/// One provider subject standing for a legacy memory bearer, plus the
+/// authenticated principal that addresses it.
+///
+/// A subject opts into the bridge's legacy projection by naming its bearer in
+/// its own kind (`legacy::CREATOR_KIND_NS` / `CHARACTER_KIND_NS`), so every E4
+/// handler ensures that subject before it reads or mutates; the id comes from
+/// the bridge's deterministic scheme, which P5's migration key shares.
+struct MemoryAdapter {
+    provider: Arc<LocalMemoryProvider>,
+    principal: spoke_schemas::Principal,
+    subject_id: String,
+}
+
+impl MemoryAdapter {
+    /// The adapter for one bearer, get-or-creating its provider subject.
+    ///
+    /// Ensuring the subject is the write that opts the bearer into the bridge's
+    /// legacy projection, so it runs only on a writable provider: a read-only
+    /// core (NXM-5 Task 2 fix round 1, finding F6) serves the projection of the
+    /// subject an earlier writer open already ensured, and writes nothing.
+    async fn open(
+        provider: Arc<LocalMemoryProvider>,
+        principal: &Principal,
+        subject_id: String,
+        kind_ns: &str,
+        kind_id: &str,
+    ) -> CoreResult<Self> {
+        let spoke_principal: spoke_schemas::Principal =
+            map_wire(json!({ "principal_id": principal.creator_id(), "extensions": {} }))?;
+        if provider.is_writable() {
+            let request: spoke_schemas::MemorySubjectsEnsureRequest = map_wire(json!({
+                "space_id": MEMORY_SPACE_ID,
+                "subject_id": subject_id,
+                "kind": { "ns": kind_ns, "id": kind_id },
+            }))?;
+            if let SpokeResult::Reject(reject) =
+                provider.ensure_subject(&spoke_principal, request).await
+            {
+                return Err(memory_reject(&reject));
+            }
+        }
+        Ok(Self {
+            provider,
+            principal: spoke_principal,
+            subject_id,
+        })
+    }
+
+    /// The bearer's memory-disposition section: a review drain holds it across
+    /// the consumed-check, the classification and the persistence of every row
+    /// it processes (NXM-5 Task 2 fix round 2, finding F1).
+    async fn review_claim(&self) -> CoreResult<MemoryDisposition> {
+        self.provider.review_disposition(&self.subject_id).await
+    }
+
+    /// Every pending candidate of the subject, newest first in the retained
+    /// `(created_at DESC, pending_id DESC)` order.
+    ///
+    /// Walks the provider's own bounded pages to the end of the authorized set:
+    /// the retained DTO orders newest-first while the provider pages
+    /// oldest-first, so the head of the retained order is the tail of the walk.
+    /// There is no scan cap to fail on — a page that exists in the provider is
+    /// served (fix round 1, finding F5).
+    async fn pending_rows(&self) -> CoreResult<Vec<PendingMemoryRow>> {
+        let mut rows = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let request: spoke_schemas::MemoryCandidatesListRequest = map_wire(json!({
+                "space_id": MEMORY_SPACE_ID,
+                "subject_id": self.subject_id,
+                "status": "pending",
+                "limit": MEMORY_PAGE_SIZE,
+                "cursor": cursor,
+            }))?;
+            let body = memory_ok(
+                self.provider
+                    .list_candidates(&self.principal, request)
+                    .await,
+            )?;
+            rows.extend(
+                body["candidates"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(PendingMemoryRow::from_candidate),
+            );
+            match body["next_cursor"].as_str() {
+                Some(next) => cursor = Some(next.to_string()),
+                None => break,
+            }
+        }
+        rows.sort_by(|left, right| {
+            created_at_cmp(&right.created_at, &left.created_at)
+                .then_with(|| right.pending_id.cmp(&left.pending_id))
+        });
+        Ok(rows)
+    }
+
+    /// The subject's records in the provider's `created_at DESC` order: at most
+    /// `want` rows, or the whole subject set when `want` is `None`.
+    ///
+    /// A `None` bound is the honest one for a caller that filters after the read
+    /// (the keyword scan): the provider has no keyword index, so stopping early
+    /// would silently drop matches the retained SQL found (fix round 1, finding
+    /// F5).
+    async fn records(
+        &self,
+        selection: Value,
+        kinds: &[&str],
+        filter: Option<&[String]>,
+        want: Option<usize>,
+    ) -> CoreResult<Vec<Value>> {
+        let mut rows: Vec<Value> = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let request: spoke_schemas::MemoryRecordsListRequest = map_wire(json!({
+                "space_id": MEMORY_SPACE_ID,
+                "subject_id": self.subject_id,
+                "selection": selection,
+                "kinds": kinds,
+                "filter": filter.map(|ids| json!({ "source_context_ids": ids })),
+                "limit": MEMORY_PAGE_SIZE,
+                "cursor": cursor,
+            }))?;
+            let body = memory_ok(self.provider.list_records(&self.principal, request).await)?;
+            rows.extend(body["records"].as_array().cloned().unwrap_or_default());
+            if want.is_some_and(|want| rows.len() >= want) {
+                break;
+            }
+            match body["next_cursor"].as_str() {
+                Some(next) => cursor = Some(next.to_string()),
+                None => break,
+            }
+        }
+        Ok(rows)
+    }
+
+    /// One candidate by its provider id (the bridge's projected row included);
+    /// `None` is the retained not-found answer.
+    async fn candidate(&self, candidate_id: &str) -> CoreResult<Option<Value>> {
+        let request: spoke_schemas::MemoryCandidatesGetRequest = map_wire(json!({
+            "space_id": MEMORY_SPACE_ID,
+            "candidate_id": candidate_id,
+        }))?;
+        match self.provider.get_candidate(&self.principal, request).await {
+            SpokeResult::Ok(body) => Ok(serde_json::to_value(&body)
+                .map_err(wire_err)?
+                .get("candidate")
+                .cloned()),
+            SpokeResult::Reject(reject) if reject.code == SpokeRejectCode::NotFound => Ok(None),
+            SpokeResult::Reject(reject) => Err(memory_reject(&reject)),
+        }
+    }
+
+    /// Dismiss one legacy-derived pending row: adopt it under the bridge's
+    /// deterministic id and consume it **in one guarded transaction** (NXM-5
+    /// Task 2 fix round 1, finding F4).
+    ///
+    /// `Ok(false)` means nothing was pending under that id — absent, already
+    /// consumed, or concurrently dismissed — which the handlers render as their
+    /// retained not-found answer.
+    async fn dismiss_legacy(&self, candidate_id: &str) -> CoreResult<bool> {
+        let digest = match spoke_operations::jcs_sha256_hex(&json!(candidate_id)) {
+            SpokeResult::Ok(digest) => digest,
+            SpokeResult::Reject(reject) => return Err(memory_reject(&reject)),
+        };
+        match self
+            .provider
+            .dismiss_legacy_candidate(
+                &self.principal,
+                &self.subject_id,
+                candidate_id,
+                None,
+                &format!("e4dismiss:{digest}"),
+            )
+            .await
+        {
+            SpokeResult::Ok(_) => Ok(true),
+            // Only consumption bumps a candidate's revision, so a CAS miss is
+            // the same answer as a consumed row: it is no longer pending (a
+            // concurrent dismissal won), which the retained contract renders as
+            // the row being gone.
+            SpokeResult::Reject(reject)
+                if matches!(
+                    reject.code,
+                    SpokeRejectCode::NotFound
+                        | SpokeRejectCode::CandidateConsumed
+                        | SpokeRejectCode::RevisionConflict
+                ) =>
+            {
+                Ok(false)
+            }
+            SpokeResult::Reject(reject) => Err(memory_reject(&reject)),
+        }
+    }
+}
+
+// ── Review disposition authority (NXM-5 Task 2 fix round 2) ──────────────
+//
+// A provider dismissal and a legacy review drain decide the same digest, so
+// both hold the bearer's [`MemoryDisposition`] section: the drain across its
+// consumed-check and classification, the dismissal across its consume. The
+// step-point below lets a regression drive the exact interleaving a dismissal
+// would need and observe the section is not available to it.
+
+/// A step-point inside a review drain's disposition section (test builds only).
+#[cfg(feature = "test-hooks")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryReviewPause {
+    /// The fetch-time check selected the slice; the drain is about to take the
+    /// bearer's disposition section and re-check it there — the exact window a
+    /// dismissal could otherwise slip into.
+    AfterFetchCheck,
+    /// The slice was re-checked inside the section and is about to be
+    /// classified and persisted.
+    AfterRecheck,
+}
+
+/// The rendezvous a test arms for one [`MemoryReviewPause`].
+#[cfg(feature = "test-hooks")]
+#[derive(Debug, Clone)]
+pub struct MemoryReviewRendezvous {
+    /// The step-point this rendezvous arms.
+    pub at: MemoryReviewPause,
+    /// Fires once the drain is parked at `at`.
+    pub entered: Arc<tokio::sync::Notify>,
+    /// Fires to resume the parked drain.
+    pub release: Arc<tokio::sync::Notify>,
+}
+
+#[cfg(feature = "test-hooks")]
+impl CoreService {
+    /// Test-only: park the next Creator or Character review drain at
+    /// `rendezvous.at`. Compiled out of a production build.
+    #[doc(hidden)]
+    pub fn pause_memory_review(&self, rendezvous: MemoryReviewRendezvous) {
+        *self
+            .inner
+            .memory_review_pause
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(rendezvous);
+    }
+
+    /// Park at `at` when a test armed that step-point.
+    async fn park_memory_review(&self, at: MemoryReviewPause) {
+        // Only the armed step-point consumes the rendezvous: the drain walks
+        // every step-point, and taking a later one's rendezvous here would drop
+        // it before the drain reached it.
+        let armed = {
+            let mut slot = self
+                .inner
+                .memory_review_pause
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if slot.as_ref().is_some_and(|rendezvous| rendezvous.at == at) {
+                slot.take()
+            } else {
+                None
+            }
+        };
+        if let Some(rendezvous) = armed {
+            rendezvous.entered.notify_one();
+            rendezvous.release.notified().await;
+        }
+    }
+}
+
+impl CoreService {
+    /// The provider adapter for the principal's own Creator bearer, over the
+    /// pinned `MemoryPort` (a read-only core serves reads from it too).
+    async fn creator_memory(&self, principal: &Principal) -> CoreResult<MemoryAdapter> {
+        MemoryAdapter::open(
+            self.memory_provider()?,
+            principal,
+            legacy::creator_subject_id(principal.creator_id()),
+            legacy::CREATOR_KIND_NS,
+            principal.creator_id(),
+        )
+        .await
+    }
+
+    /// The adapter the dismissal write paths use: a read-only core refuses here
+    /// with the retained typed error instead of attempting the write.
+    async fn creator_memory_writer(&self, principal: &Principal) -> CoreResult<MemoryAdapter> {
+        MemoryAdapter::open(
+            self.memory_writer()?,
+            principal,
+            legacy::creator_subject_id(principal.creator_id()),
+            legacy::CREATOR_KIND_NS,
+            principal.creator_id(),
+        )
+        .await
+    }
+
+    /// The provider adapter for one Character bearer.
+    async fn character_memory(
+        &self,
+        principal: &Principal,
+        character_id: &str,
+    ) -> CoreResult<MemoryAdapter> {
+        MemoryAdapter::open(
+            self.memory_provider()?,
+            principal,
+            legacy::character_subject_id(character_id),
+            legacy::CHARACTER_KIND_NS,
+            character_id,
+        )
+        .await
+    }
+
+    /// The Character adapter the dismissal write path uses (see
+    /// [`Self::creator_memory_writer`]).
+    async fn character_memory_writer(
+        &self,
+        principal: &Principal,
+        character_id: &str,
+    ) -> CoreResult<MemoryAdapter> {
+        MemoryAdapter::open(
+            self.memory_writer()?,
+            principal,
+            legacy::character_subject_id(character_id),
+            legacy::CHARACTER_KIND_NS,
+            character_id,
+        )
+        .await
+    }
+}
+
+/// Whether the provider currently reports this candidate as pending.
+async fn pending_now(memory: &MemoryAdapter, candidate_id: &str) -> CoreResult<bool> {
+    Ok(memory
+        .candidate(candidate_id)
+        .await?
+        .is_some_and(|candidate| candidate["status"].as_str() == Some("pending")))
+}
+
+/// The subset of `candidate_ids` the provider has already consumed.
+///
+/// A dismissal consumes the provider's row while the legacy row the bridge
+/// projected it from stays in place (a provider write never touches the legacy
+/// surface — compass D6), so the legacy review drain would otherwise classify a
+/// digest the caller explicitly rejected. This is the dismissal-vs-drain
+/// authority check (NXM-5 Task 2 fix round 1, finding F1), and it is a plain
+/// provider read: no journal, no receipt, no write.
+///
+/// A row the provider cannot see (never projected, or hidden by authorization)
+/// is *not* consumed: the drain keeps the behavior it had before the reroute.
+async fn consumed_candidates(
+    memory: &MemoryAdapter,
+    candidate_ids: impl IntoIterator<Item = String>,
+) -> CoreResult<HashSet<String>> {
+    let mut consumed = HashSet::new();
+    for candidate_id in candidate_ids {
+        match memory.candidate(&candidate_id).await? {
+            Some(candidate) if candidate["status"].as_str() != Some("pending") => {
+                consumed.insert(candidate_id);
+            }
+            _ => {}
+        }
+    }
+    Ok(consumed)
+}
+
+/// The `nexus_legacy` metadata block of a projected role, if this row carries
+/// one (a provider-native row of another origin does not).
+fn nexus_legacy(record: &Value) -> &Value {
+    record
+        .pointer("/content/structured/nexus_legacy")
+        .unwrap_or(&NULL_LEGACY)
+}
+
+/// Absent `nexus_legacy` block: indexing it yields `null` for every field, so
+/// the readers below can stay branch-free.
+static NULL_LEGACY: Value = Value::Null;
+
+fn record_keywords(record: &Value) -> Vec<String> {
+    nexus_legacy(record)["keywords"]
+        .as_array()
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The world provenance of one Creator record: the legacy column when the row
+/// is projected, else the record's own source context.
+fn creator_world_id(record: &Value) -> Option<String> {
+    nexus_legacy(record)["world_id"]
+        .as_str()
+        .map(str::to_string)
+        .or_else(|| {
+            record
+                .pointer("/provenance/source_context_ids/0")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
 }
 
 // ── Character memory family ──────────────────────────────────────────────
@@ -170,6 +675,10 @@ impl CoreService {
     /// List one owned Character's pending reviews (retained read; any
     /// lifecycle status), offset-paginated.
     ///
+    /// Served through the pinned `MemoryPort` (NXM-5 Task 2): the provider's
+    /// merged read projects the Character's unmigrated pending rows, and this
+    /// adapter keeps the retained offset/`v1:{offset}` pagination.
+    ///
     /// # Errors
     /// [`CoreError::NotFound`] for a foreign/missing Character and the mapped
     /// storage error otherwise.
@@ -182,45 +691,43 @@ impl CoreService {
         offset: u32,
     ) -> CoreResult<ListCharacterPendingReviewsResponse> {
         self.verify_principal(principal)?;
-        let pool = &self.inner.pool;
-        let ctx = MemoryPipelineCtx::character_read(
-            pool,
+        // Retained bearer admission (404 for a foreign/missing Character)
+        // precedes the provider read.
+        let _admission = MemoryPipelineCtx::character_read(
+            &self.inner.pool,
             principal.creator_id(),
             &character_id,
             binding_id.as_deref(),
         )
         .await?;
-        let _ = ctx;
-
-        let fetch_limit = i64::from(limit) + 1;
-        let rows = nexus_local_db::list_character_pending_reviews(
-            pool,
-            principal.creator_id(),
-            &character_id,
-            binding_id.as_deref(),
-            fetch_limit,
-            i64::from(offset),
-        )
-        .await
-        .map_err(map_local_db_error)?;
-        let has_more = rows.len() > limit as usize;
-        let next_cursor = has_more.then(|| format!("v1:{}", offset.saturating_add(limit)));
-        let items: Vec<CharacterPendingReviewInfo> = rows
+        let memory = self.character_memory(principal, &character_id).await?;
+        let scoped: Vec<PendingMemoryRow> = memory
+            .pending_rows()
+            .await?
             .into_iter()
-            .take(limit as usize)
-            .map(|r| {
-                map_wire(json!({
-                    "pending_id": r.pending_id,
-                    "session_id": r.session_id,
-                    "character_id": r.character_id,
-                    "binding_id": r.actor_world_binding_id,
-                    "task_kind": r.task_kind,
-                    "raw_digest": r.raw_digest,
-                    "created_at": r.created_at,
-                    "source_operation_id": r.source_operation_id,
-                }))
+            .filter(|row| pending_row_in_scope(row, binding_id.as_deref()))
+            .collect();
+        let start = usize::try_from(offset).unwrap_or(usize::MAX);
+        let page_size = usize::try_from(limit).unwrap_or(usize::MAX);
+        let page: Vec<&PendingMemoryRow> = scoped.iter().skip(start).take(page_size).collect();
+        let consumed = start.saturating_add(page.len());
+        let has_more = consumed < scoped.len();
+        let next_cursor = has_more.then(|| format!("v1:{consumed}"));
+        let items: Vec<Value> = page
+            .iter()
+            .map(|row| {
+                json!({
+                    "pending_id": row.pending_id,
+                    "session_id": row.session_id,
+                    "character_id": character_id.as_str(),
+                    "binding_id": row.binding_id,
+                    "task_kind": row.task_kind,
+                    "raw_digest": row.raw_digest,
+                    "created_at": row.created_at,
+                    "source_operation_id": row.source_operation_id,
+                })
             })
-            .collect::<CoreResult<_>>()?;
+            .collect();
         map_wire(json!({
             "items": items,
             "pagination": pagination_info(limit, has_more, next_cursor.as_deref()),
@@ -240,23 +747,20 @@ impl CoreService {
         binding_id: Option<String>,
     ) -> CoreResult<CountCharacterPendingReviewsResponse> {
         self.verify_principal(principal)?;
-        let pool = &self.inner.pool;
-        let ctx = MemoryPipelineCtx::character_read(
-            pool,
+        let _admission = MemoryPipelineCtx::character_read(
+            &self.inner.pool,
             principal.creator_id(),
             &character_id,
             binding_id.as_deref(),
         )
         .await?;
-        let _ = ctx;
-        let count = nexus_local_db::count_character_pending_reviews(
-            pool,
-            principal.creator_id(),
-            &character_id,
-            binding_id.as_deref(),
-        )
-        .await
-        .map_err(map_local_db_error)?;
+        let memory = self.character_memory(principal, &character_id).await?;
+        let count = memory
+            .pending_rows()
+            .await?
+            .into_iter()
+            .filter(|row| pending_row_in_scope(row, binding_id.as_deref()))
+            .count();
         map_wire(json!({
             "count": i64::try_from(count).unwrap_or(i64::MAX),
         }))
@@ -265,6 +769,11 @@ impl CoreService {
     /// Delete one pending row from an owned Character's queue. Holds the
     /// per-Character activity lease; a missing row is `404` and mutates
     /// nothing.
+    ///
+    /// Served through the pinned `MemoryPort`: the row is adopted under the
+    /// bridge's deterministic id and consumed in the same guarded transaction,
+    /// so a dismissal can never leave an adopted pending row behind (NXM-5 Task
+    /// 2 fix round 1, finding F4).
     ///
     /// # Errors
     /// As [`Self::acquire_actor_activity`], plus [`CoreError::NotFound`] when
@@ -284,16 +793,16 @@ impl CoreService {
                 },
             )
             .await?;
-        let deleted = nexus_local_db::delete_character_pending_review(
-            &self.inner.pool,
-            principal.creator_id(),
-            &character_id,
-            &pending_id,
-        )
-        .await
-        .map_err(map_local_db_error)?;
-        if !deleted {
-            return Err(not_found("pending review", &format!("'{pending_id}'")));
+        let memory = self
+            .character_memory_writer(principal, &character_id)
+            .await?;
+        let candidate_id = legacy::character_pending_review_candidate_id(&pending_id);
+        let missing = || not_found("pending review", &format!("'{pending_id}'"));
+        if !pending_now(&memory, &candidate_id).await? {
+            return Err(missing());
+        }
+        if !memory.dismiss_legacy(&candidate_id).await? {
+            return Err(missing());
         }
         map_wire(json!({
             "success": true,
@@ -304,6 +813,10 @@ impl CoreService {
     #[allow(clippy::significant_drop_tightening)] // the guard deliberately spans the whole operation
     /// List one owned Character's memory fragments (retained read),
     /// offset-paginated.
+    ///
+    /// Served through the pinned `MemoryPort`: the retained scope split
+    /// (`binding_id` present = that binding's local fragments, absent = the
+    /// Character-shared ones) becomes the provider's placement selection.
     ///
     /// # Errors
     /// [`CoreError::NotFound`] for a foreign/missing Character and the mapped
@@ -317,33 +830,35 @@ impl CoreService {
         offset: u32,
     ) -> CoreResult<ListCharacterMemoryFragmentsResponse> {
         self.verify_principal(principal)?;
-        let pool = &self.inner.pool;
-        let ctx = MemoryPipelineCtx::character_read(
-            pool,
+        let _admission = MemoryPipelineCtx::character_read(
+            &self.inner.pool,
             principal.creator_id(),
             &character_id,
             binding_id.as_deref(),
         )
         .await?;
-        let _ = ctx;
-
-        let fetch_limit = i64::from(limit) + 1;
-        let rows = nexus_local_db::list_character_fragments(
-            pool,
-            principal.creator_id(),
-            &character_id,
-            binding_id.as_deref(),
-            fetch_limit,
-            i64::from(offset),
-        )
-        .await
-        .map_err(map_local_db_error)?;
-        let has_more = rows.len() > limit as usize;
+        let memory = self.character_memory(principal, &character_id).await?;
+        let selection = binding_id.as_deref().map_or_else(
+            || json!({ "mode": "shared_only" }),
+            |binding| json!({ "mode": "selected_contexts", "context_ids": [binding] }),
+        );
+        let start = usize::try_from(offset).unwrap_or(usize::MAX);
+        let page_size = usize::try_from(limit).unwrap_or(usize::MAX);
+        // One row past the page proves more rows exist (the retained
+        // `limit + 1` overfetch). The page window is served as asked: clamping
+        // it to an internal bound used to answer an empty page with
+        // `has_more = false` while records existed past the window (fix round 1,
+        // finding F5).
+        let want = start.saturating_add(page_size).saturating_add(1);
+        let records = memory
+            .records(selection, &["fact"], None, Some(want))
+            .await?;
+        let page: Vec<&Value> = records.iter().skip(start).take(page_size).collect();
+        let has_more = records.len() > start.saturating_add(page.len());
         let next_cursor = has_more.then(|| format!("v1:{}", offset.saturating_add(limit)));
-        let fragments: Vec<CharacterMemoryFragmentInfo> = rows
-            .into_iter()
-            .take(limit as usize)
-            .map(|r| character_fragment_info(&r))
+        let fragments: Vec<CharacterMemoryFragmentInfo> = page
+            .iter()
+            .map(|record| character_fragment_from_provider(record, &character_id))
             .collect::<CoreResult<_>>()?;
         map_wire(json!({
             "fragments": fragments,
@@ -406,6 +921,7 @@ impl CoreService {
     /// # Errors
     /// As [`Self::acquire_actor_activity`], plus the mapped pipeline/storage
     /// errors otherwise.
+    #[allow(clippy::too_many_lines)] // the bounded fetch + disposition section are one flow
     pub async fn review_character_memory(
         &self,
         principal: &Principal,
@@ -430,27 +946,79 @@ impl CoreService {
             binding_id,
         )?;
         let nexus_home = self.nexus_home();
+        // The dismissal-vs-drain authority check (fix round 1, finding F1): skip
+        // the rows a provider dismissal already consumed while their legacy rows
+        // stay in place.
+        let memory = self
+            .character_memory_writer(principal, &character_id)
+            .await?;
         // Fetch batch_limit + 1 so the extra row proves more rows exist;
         // truncate the processing slice back to the documented batch bound
         // (mirrors the Creator memory review handler — no off-by-one on
         // has_more).
         let fetch_limit = REVIEW_BATCH_LIMIT + 1;
-        let mut rows = nexus_local_db::list_character_pending_reviews(
-            pool,
-            principal.creator_id(),
-            &character_id,
-            binding_id,
-            fetch_limit,
-            0,
-        )
-        .await
-        .map_err(map_local_db_error)?;
+        let fetch_page = usize::try_from(fetch_limit).unwrap_or(usize::MAX);
         let batch_limit = usize::try_from(REVIEW_BATCH_LIMIT).unwrap_or(usize::MAX);
+        let mut rows: Vec<nexus_local_db::CharacterPendingReviewRecord> = Vec::new();
+        let mut offset: i64 = 0;
+        loop {
+            let page = nexus_local_db::list_character_pending_reviews(
+                pool,
+                principal.creator_id(),
+                &character_id,
+                binding_id,
+                fetch_limit,
+                offset,
+            )
+            .await
+            .map_err(map_local_db_error)?;
+            let exhausted = page.len() < fetch_page;
+            offset = offset.saturating_add(i64::try_from(page.len()).unwrap_or(i64::MAX));
+            let mut identities = Vec::with_capacity(page.len());
+            for row in &page {
+                identities.push(legacy::character_pending_review_candidate_id(
+                    &row.pending_id,
+                ));
+            }
+            let consumed = consumed_candidates(&memory, identities).await?;
+            for row in page {
+                if !consumed.contains(&legacy::character_pending_review_candidate_id(
+                    &row.pending_id,
+                )) {
+                    rows.push(row);
+                }
+            }
+            if rows.len() > batch_limit || exhausted {
+                break;
+            }
+        }
         let more_in_db = rows.len() > batch_limit;
         if more_in_db {
             rows.truncate(batch_limit);
         }
+        // The check/use boundary (fix round 2, finding F1): the fetch-time check
+        // above only selects the slice. This re-check runs inside the bearer's
+        // disposition section, so a dismissal can neither commit between it and
+        // the classification below nor be classified after it: one that already
+        // committed is observed here and its row is dropped.
+        #[cfg(feature = "test-hooks")]
+        self.park_memory_review(MemoryReviewPause::AfterFetchCheck)
+            .await;
+        let _disposition = memory.review_claim().await?;
+        let rechecked: Vec<String> = rows
+            .iter()
+            .map(|row| legacy::character_pending_review_candidate_id(&row.pending_id))
+            .collect();
+        let consumed = consumed_candidates(&memory, rechecked).await?;
+        rows.retain(|row| {
+            !consumed.contains(&legacy::character_pending_review_candidate_id(
+                &row.pending_id,
+            ))
+        });
         let processing_slice = rows.len();
+        #[cfg(feature = "test-hooks")]
+        self.park_memory_review(MemoryReviewPause::AfterRecheck)
+            .await;
         let inputs: Vec<nexus_creator_memory::review::PendingReviewInput> = rows
             .into_iter()
             .map(|r| nexus_creator_memory::review::PendingReviewInput {
@@ -532,6 +1100,61 @@ fn character_fragment_info(
     }))
 }
 
+/// One provider record rendered as the retained Character fragment DTO.
+///
+/// The bridge stores the legacy display fields in `nexus_legacy` and serves a
+/// Character fragment's legacy revision as `legacy + 1` (so the 0→1 promotion
+/// step survives the seam); the DTO exposes the legacy numbering again. A
+/// provider-native record of another origin falls back to its own id/revision.
+fn character_fragment_from_provider(
+    record: &Value,
+    character_id: &str,
+) -> CoreResult<CharacterMemoryFragmentInfo> {
+    let origin = nexus_legacy(record);
+    let fragment_id = origin["fragment_id"]
+        .as_str()
+        .or_else(|| record["record_id"].as_str())
+        .unwrap_or_default();
+    let revision = record["revision"].as_u64().unwrap_or(1).saturating_sub(1);
+    map_wire(json!({
+        "fragment_id": fragment_id,
+        "session_id": origin["session_id"].as_str().unwrap_or_default(),
+        "character_id": character_id,
+        "binding_id": record.pointer("/scope/context_id"),
+        "summary": record.pointer("/content/text").and_then(Value::as_str).unwrap_or_default(),
+        "keywords": record_keywords(record),
+        "created_at": origin["created_at"]
+            .as_str()
+            .or_else(|| record["created_at"].as_str())
+            .unwrap_or_default(),
+        "ttl": origin["ttl"],
+        "revision": revision,
+    }))
+}
+
+/// One provider record rendered as the retained Creator fragment DTO.
+///
+/// The bridge keeps the legacy display fields (fragment id, keywords, world)
+/// in `nexus_legacy`, so the retained projection is identical for a projected
+/// and an adopted row; a provider-native record of another origin falls back to
+/// its own id and source context.
+fn creator_fragment_from_provider(record: &Value) -> CoreResult<MemoryFragmentInfo> {
+    let origin = nexus_legacy(record);
+    let fragment_id = origin["fragment_id"]
+        .as_str()
+        .or_else(|| record["record_id"].as_str())
+        .unwrap_or_default();
+    map_wire(json!({
+        "fragment_id": fragment_id,
+        "summary": record.pointer("/content/text").and_then(Value::as_str).unwrap_or_default(),
+        "world_id": creator_world_id(record),
+        "keywords": record_keywords(record),
+        "created_at": origin["created_at"]
+            .as_str()
+            .or_else(|| record["created_at"].as_str()),
+    }))
+}
+
 /// Retained promote-error texture: the CAS miss is the stable
 /// `version_mismatch` conflict, everything else keeps the generic
 /// local-db mapping.
@@ -551,6 +1174,11 @@ impl CoreService {
     /// List the principal's pending reviews (keyset on
     /// `(created_at DESC, pending_id DESC)`, bounded at `limit + 1`).
     ///
+    /// Served through the pinned `MemoryPort` (NXM-5 Task 2): the provider's
+    /// merged read projects the principal's unmigrated pending rows, and this
+    /// adapter keeps the retained `pending_id` keyset cursor (a cursor whose row
+    /// is gone restarts from the top, as the retained contract promises).
+    ///
     /// # Errors
     /// [`CoreError::AuthRequired`] when the principal fails verification and
     /// the mapped storage error otherwise.
@@ -561,28 +1189,31 @@ impl CoreService {
         limit: usize,
     ) -> CoreResult<ListPendingReviewsResponse> {
         self.verify_principal(principal)?;
-        let fetch_limit = i64::try_from(limit + 1).unwrap_or(i64::MAX);
-        let mut items = fetch_pending_reviews_page(
-            &self.inner.pool,
-            principal.creator_id(),
-            cursor.as_deref(),
-            fetch_limit,
-        )
-        .await
-        .map_err(|e| {
-            internal_err(
-                "database_error",
-                format!("failed to list pending reviews: {e}"),
-            )
-        })?;
-        let next_cursor = if items.len() > limit {
-            items.truncate(limit);
-            items.last().map(|i| i.pending_id.clone())
-        } else {
-            None
-        };
-        // serde round-trip between the shared and response-local generated
-        // clones (the retained `wire_cast` translation, now core-side).
+        let memory = self.creator_memory(principal).await?;
+        let rows = memory.pending_rows().await?;
+        let start = cursor
+            .as_deref()
+            .and_then(|pending_id| rows.iter().position(|row| row.pending_id == pending_id))
+            .map_or(0, |position| position.saturating_add(1));
+        let page: Vec<&PendingMemoryRow> = rows.iter().skip(start).take(limit).collect();
+        let has_more = !page.is_empty() && start.saturating_add(page.len()) < rows.len();
+        let next_cursor = has_more
+            .then(|| page.last().map(|row| row.pending_id.clone()))
+            .flatten();
+        let items: Vec<Value> = page
+            .iter()
+            .map(|row| {
+                json!({
+                    "pending_id": row.pending_id,
+                    "session_id": row.session_id,
+                    "creator_id": principal.creator_id(),
+                    "world_id": row.world_id,
+                    "task_kind": row.task_kind,
+                    "raw_digest": row.raw_digest,
+                    "created_at": row.created_at,
+                })
+            })
+            .collect();
         map_wire(json!({
             "items": items,
             "pagination": {
@@ -602,82 +1233,104 @@ impl CoreService {
         principal: &Principal,
     ) -> CoreResult<CountPendingReviewsResponse> {
         self.verify_principal(principal)?;
-        let row = sqlx::query_scalar!(
-            r#"SELECT COUNT(*) as "count!" FROM memory_pending_review WHERE creator_id = ?"#,
-            principal.creator_id()
-        )
-        .fetch_one(&self.inner.pool)
-        .await
-        .map_err(|e| {
-            internal_err(
-                "database_error",
-                format!("failed to count pending reviews: {e}"),
-            )
-        })?;
-        Ok(CountPendingReviewsResponse { count: row })
+        let memory = self.creator_memory(principal).await?;
+        let count = memory.pending_rows().await?.len();
+        Ok(CountPendingReviewsResponse {
+            count: i64::try_from(count).unwrap_or(i64::MAX),
+        })
     }
 
-    /// Delete one of the principal's pending reviews after an ownership
-    /// re-read; a missing row is `404` and a foreign row is the retained
-    /// `pending_review` 403. Zero mutation on either.
+    /// Delete one of the principal's pending reviews; a missing row is `404`
+    /// and mutates nothing.
+    ///
+    /// Served through the pinned `MemoryPort`. The row is adopted under the
+    /// bridge's deterministic id and consumed in the same guarded transaction,
+    /// so the legacy table stays write-idle, the id can never resurface through
+    /// the bridge, and a dismissal can never leave an adopted pending row behind
+    /// (NXM-5 Task 2 fix round 1, finding F4).
+    ///
+    /// A row that belongs to another Creator keeps the retained
+    /// `pending_review` `ForbiddenReason`: the provider cannot see it, so the
+    /// ownership re-read that distinguishes `403` from `404` is the legacy
+    /// table's — read-only, exactly as before the reroute (fix round 1,
+    /// finding F2).
     ///
     /// # Errors
-    /// [`CoreError::NotFound`] / [`CoreError::ForbiddenReason`] as retained,
-    /// plus the mapped storage error.
+    /// [`CoreError::NotFound`] when the row is absent,
+    /// [`CoreError::ForbiddenReason`] when it belongs to another Creator,
+    /// [`CoreError::Forbidden`] under read-only core access, and the retained
+    /// `database_error` internal when the ownership re-read fails
+    /// (NXM-5 QC1-F3).
     pub async fn delete_pending_review(
         &self,
         principal: &Principal,
         pending_id: String,
     ) -> CoreResult<DeletePendingReviewResponse> {
         self.verify_principal(principal)?;
-        let review = sqlx::query!(
-            r#"SELECT pending_id as "pending_id!", session_id, creator_id, world_id, task_kind, raw_digest, created_at
-         FROM memory_pending_review WHERE pending_id = ?"#, // sqlx R3: use ? instead of ?1
-            pending_id.as_str()
-        )
-        .fetch_optional(&self.inner.pool)
-        .await
-        .map_err(|e| internal_err("database_error", format!("failed to lookup pending review: {e}")))?;
-
-        match review {
-            None => {
-                return Err(CoreError::NotFound {
-                    resource: format!("pending review '{pending_id}' not found"),
-                });
-            }
-            Some(ref r) if r.creator_id != principal.creator_id() => {
-                return Err(CoreError::ForbiddenReason {
-                    resource: "pending_review".to_string(),
-                    reason: format!(
-                        "pending review '{}' does not belong to creator '{}'",
-                        pending_id,
-                        principal.creator_id()
-                    ),
-                });
-            }
-            _ => {}
+        let memory = self.creator_memory_writer(principal).await?;
+        let candidate_id = legacy::pending_review_candidate_id(&pending_id);
+        // The retained answer for a row that is no longer queued is `404`
+        // (before the reroute the row was deleted, so a repeat dismissal found
+        // nothing). The authoritative decision is still the guarded dismissal
+        // below; this read only keeps that answer.
+        if !pending_now(&memory, &candidate_id).await? {
+            return Err(self.pending_review_refusal(principal, &pending_id).await?);
         }
-
-        sqlx::query!(
-            "DELETE FROM memory_pending_review WHERE pending_id = ?",
-            pending_id
-        )
-        .execute(&self.inner.pool)
-        .await
-        .map_err(|e| {
-            internal_err(
-                "database_error",
-                format!("failed to delete pending review: {e}"),
-            )
-        })?;
+        if !memory.dismiss_legacy(&candidate_id).await? {
+            return Err(self.pending_review_refusal(principal, &pending_id).await?);
+        }
         Ok(DeletePendingReviewResponse {
             success: true,
             pending_id,
         })
     }
 
+    /// The retained refusal for a dismissal that found nothing to consume: a
+    /// row another Creator owns is the `pending_review` `ForbiddenReason`, an
+    /// absent or already-consumed row the `NotFound` it always was. The
+    /// ownership re-read is the same read-only legacy lookup the pre-reroute
+    /// handler performed, so its failure keeps the pre-reroute
+    /// `database_error` mapping instead of masquerading as an absence
+    /// (NXM-5 QC1-F3).
+    async fn pending_review_refusal(
+        &self,
+        principal: &Principal,
+        pending_id: &str,
+    ) -> CoreResult<CoreError> {
+        let owner: Option<String> =
+            sqlx::query_scalar("SELECT creator_id FROM memory_pending_review WHERE pending_id = ?")
+                .bind(pending_id)
+                .fetch_optional(&self.inner.pool)
+                .await
+                .map_err(|e| {
+                    internal_err(
+                        "database_error",
+                        format!("failed to lookup pending review: {e}"),
+                    )
+                })?;
+        Ok(match owner {
+            Some(owner) if owner != principal.creator_id() => CoreError::ForbiddenReason {
+                resource: "pending_review".to_string(),
+                reason: format!(
+                    "pending review '{pending_id}' does not belong to creator '{}'",
+                    principal.creator_id()
+                ),
+            },
+            _ => CoreError::NotFound {
+                resource: format!("pending review '{pending_id}' not found"),
+            },
+        })
+    }
+
     /// List the principal's memory fragments with optional keyword/world
     /// filtering, bounded at `limit`.
+    ///
+    /// Served through the pinned `MemoryPort`: the provider's `fact` records
+    /// are the reviewed fragments, and the retained world filter is the record's
+    /// source-context predicate. The provider has no keyword index, so a keyword
+    /// filter walks the subject's whole fragment set before applying its
+    /// predicate — the retained SQL did the same over every row, and stopping
+    /// early would silently drop matches (fix round 1, finding F5).
     ///
     /// # Errors
     /// As [`Self::list_pending_reviews`].
@@ -689,49 +1342,34 @@ impl CoreService {
         limit: usize,
     ) -> CoreResult<ListMemoryFragmentsResponse> {
         self.verify_principal(principal)?;
-        let records = if keyword.is_some() {
-            let limit_u32 = u32::try_from(limit).unwrap_or(u32::MAX);
-            nexus_local_db::memory_fragment::list_fragments_filtered(
-                &self.inner.pool,
-                principal.creator_id(),
-                keyword.as_deref(),
-                world_id.as_deref(),
-                limit_u32,
+        if limit == 0 {
+            return map_wire(json!({ "fragments": [] }));
+        }
+        let memory = self.creator_memory(principal).await?;
+        let filter: Option<Vec<String>> = world_id.as_ref().map(|world| vec![world.clone()]);
+        // A keyword read filters after the provider read, so it must see the
+        // whole set; an unfiltered read needs only its own page.
+        let want = keyword.is_none().then_some(limit);
+        let records = memory
+            .records(
+                json!({ "mode": "shared_only" }),
+                &["fact"],
+                filter.as_deref(),
+                want,
             )
-            .await
-            .map_err(|e| {
-                internal_err(
-                    "database_error",
-                    format!("failed to list memory fragments: {e}"),
-                )
-            })?
-        } else {
-            let limit_i64 = i64::try_from(limit).unwrap_or(i64::MAX);
-            nexus_local_db::memory_fragment::list_fragments_limited(
-                &self.inner.pool,
-                principal.creator_id(),
-                world_id.as_deref(),
-                limit_i64,
-            )
-            .await
-            .map_err(|e| {
-                internal_err(
-                    "database_error",
-                    format!("failed to list memory fragments: {e}"),
-                )
-            })?
-        };
-
-        let fragments: Vec<MemoryFragmentInfo> = records
-            .into_iter()
-            .map(|r| MemoryFragmentInfo {
-                fragment_id: r.fragment_id,
-                summary: r.summary,
-                world_id: r.world_id,
-                keywords: decode_fragment_keywords(&r.keywords),
-                created_at: Some(r.created_at),
-            })
-            .collect();
+            .await?;
+        let mut fragments = Vec::new();
+        for record in &records {
+            if let Some(keyword) = keyword.as_deref() {
+                if !record_keywords(record).iter().any(|value| value == keyword) {
+                    continue;
+                }
+            }
+            fragments.push(creator_fragment_from_provider(record)?);
+            if fragments.len() == limit {
+                break;
+            }
+        }
         map_wire(json!({ "fragments": fragments }))
     }
 
@@ -746,6 +1384,7 @@ impl CoreService {
     ///
     /// # Errors
     /// As [`Self::review_character_memory`] for the Creator arm.
+    #[allow(clippy::too_many_lines)] // the bounded fetch + disposition section are one flow
     pub async fn review_memory(
         &self,
         principal: &Principal,
@@ -763,23 +1402,81 @@ impl CoreService {
             });
         }
         let nexus_home = self.nexus_home();
+        // The dismissal-vs-drain authority check (fix round 1, finding F1): a
+        // row a provider dismissal consumed is no longer queued, but its legacy
+        // row stays in place (a provider dismissal never writes the legacy
+        // surface), so the drain has to skip it explicitly rather than
+        // classify a digest the caller rejected.
+        let memory = self.creator_memory_writer(principal).await?;
         // Bounded fetch: REVIEW_BATCH_LIMIT + 1 overfetch drives `has_more`.
         let fetch_limit = REVIEW_BATCH_LIMIT + 1;
-        let mut rows =
-            fetch_pending_reviews_page(&self.inner.pool, principal.creator_id(), None, fetch_limit)
-                .await
-                .map_err(|e| {
-                    internal_err(
-                        "database_error",
-                        format!("failed to fetch pending reviews for review: {e}"),
-                    )
-                })?;
         let batch_limit = usize::try_from(REVIEW_BATCH_LIMIT).unwrap_or(usize::MAX);
+        let mut rows: Vec<PendingReviewInfo> = Vec::new();
+        let mut cursor: Option<String> = None;
+        let mut previous_head: Option<String> = None;
+        loop {
+            let page = fetch_pending_reviews_page(
+                &self.inner.pool,
+                principal.creator_id(),
+                cursor.as_deref(),
+                fetch_limit,
+            )
+            .await
+            .map_err(|e| {
+                internal_err(
+                    "database_error",
+                    format!("failed to fetch pending reviews for review: {e}"),
+                )
+            })?;
+            let exhausted = usize::try_from(fetch_limit).map_or(true, |limit| page.len() < limit);
+            let head = page.first().map(|row| row.pending_id.clone());
+            // A cursor row that vanished restarts the page at the top; refusing
+            // to repeat it keeps the drain bounded instead of spinning on a
+            // page whose rows are all consumed.
+            if head.is_some() && head == previous_head {
+                break;
+            }
+            previous_head = head;
+            cursor = page.last().map(|row| row.pending_id.clone());
+            let mut identities = Vec::with_capacity(page.len());
+            for row in &page {
+                identities.push(legacy::pending_review_candidate_id(&row.pending_id));
+            }
+            let consumed = consumed_candidates(&memory, identities).await?;
+            for row in page {
+                if !consumed.contains(&legacy::pending_review_candidate_id(&row.pending_id)) {
+                    rows.push(row);
+                }
+            }
+            if rows.len() > batch_limit || exhausted {
+                break;
+            }
+        }
         let more_in_db = rows.len() > batch_limit;
         if more_in_db {
             rows.truncate(batch_limit);
         }
+        // The check/use boundary (fix round 2, finding F1): the fetch-time check
+        // above only selects the slice. This re-check runs inside the bearer's
+        // disposition section, so a dismissal can neither commit between it and
+        // the classification below nor be classified after it: one that already
+        // committed is observed here and its row is dropped.
+        #[cfg(feature = "test-hooks")]
+        self.park_memory_review(MemoryReviewPause::AfterFetchCheck)
+            .await;
+        let _disposition = memory.review_claim().await?;
+        let rechecked: Vec<String> = rows
+            .iter()
+            .map(|row| legacy::pending_review_candidate_id(&row.pending_id))
+            .collect();
+        let consumed = consumed_candidates(&memory, rechecked).await?;
+        rows.retain(|row| {
+            !consumed.contains(&legacy::pending_review_candidate_id(&row.pending_id))
+        });
         let processing_slice = rows.len();
+        #[cfg(feature = "test-hooks")]
+        self.park_memory_review(MemoryReviewPause::AfterRecheck)
+            .await;
 
         let deadline = tokio::time::Instant::now() + REVIEW_CALL_TIMEOUT;
         let inputs: Vec<nexus_creator_memory::review::PendingReviewInput> = rows

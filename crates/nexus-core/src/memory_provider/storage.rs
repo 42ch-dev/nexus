@@ -76,11 +76,13 @@
 //! placement, so [`Coverage`] resolves those requirements inside the effect
 //! transaction instead of trusting a value read before it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 #[cfg(feature = "test-hooks")]
 use std::sync::atomic::AtomicU8;
-use std::sync::atomic::{AtomicI64, Ordering};
+#[cfg(feature = "test-hooks")]
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
 use chrono::{DateTime, SecondsFormat, Utc};
@@ -90,13 +92,15 @@ use spoke_operations::{
     grant_covers, is_freeze_allowlisted, validate_grant_issuance, GrantRequirement, IssuedGrant,
     SpokeResult,
 };
-use sqlx::SqlitePool;
+use sqlx::{Sqlite, SqlitePool};
 use uuid::Uuid;
 
 use nexus_local_db::writer_protocol::{init_guarded_pool, GuardedPool};
 use nexus_local_db::{begin_immediate, LocalDbError};
 
+use super::created_at_cmp;
 use super::journal::{self, FileEffect};
+use super::legacy::{self, LegacyRoots};
 
 /// §6.10 receipt ids are provider-assigned opaque strings.
 fn mint_receipt_id() -> String {
@@ -161,6 +165,10 @@ pub(super) enum StoreError {
     },
     /// A stored row this provider's own writer could not have produced.
     Corrupt(String),
+    /// The store was opened read-only: a mutation is refused before admission,
+    /// retention, the publication lock or any connection write (fix round 2,
+    /// finding F3).
+    ReadOnly(String),
     Database(LocalDbError),
 }
 
@@ -488,9 +496,13 @@ impl PublicationGuard {
 pub(super) struct MemoryStore {
     pool: SqlitePool,
     /// Holds this provider's writer admission for the provider's lifetime.
-    _guarded: GuardedPool,
+    /// `None` on a read-only store, which holds no admission at all.
+    guarded: Option<GuardedPool>,
     /// Root of the provider's own markdown projection, next to `state.db`.
     files_root: PathBuf,
+    /// Legacy bearer roots read by the projection bridge ([`super::legacy`]).
+    /// Held here so every composed read path projects the same sources.
+    legacy: LegacyRoots,
     /// §5.2 step 2: serializes the settle-to-publish window of every operation
     /// with a file effect (and the recovery pass) **within this process**. SQLite
     /// serializes the row writes, but the publish happens after that transaction
@@ -508,6 +520,11 @@ pub(super) struct MemoryStore {
     /// so retention verdicts cannot be re-derived downwards (§6.10); seeded from
     /// the persisted floor at [`Self::open`] and persisted again by every sweep.
     clock_floor: AtomicI64,
+    /// Whether this database carries the provider schema. A read-only open can
+    /// be taken over a workspace no writer ever provisioned; its reads then
+    /// answer the space's absence instead of a driver error (fix round 2,
+    /// finding F2).
+    provisioned: AtomicBool,
     #[cfg(feature = "test-hooks")]
     commit_fault: AtomicU8,
     /// Test-only file-effect fault (§5.2/C-113 crash windows).
@@ -536,6 +553,17 @@ pub(super) struct MemoryStore {
     /// really reached the wait. Every wait reports while it is installed.
     #[cfg(feature = "test-hooks")]
     flock_wait_report: std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>>,
+    /// Test-only count of write entries that reached the admission or
+    /// publication machinery, i.e. passed the read-only gate. A refused
+    /// read-only write leaves it at zero (fix round 3, finding F5).
+    #[cfg(feature = "test-hooks")]
+    lock_attempts: AtomicUsize,
+    /// Test-only report a disposition acquisition sends **from inside the lock
+    /// attempt** when its non-blocking probe finds the section held, i.e. the
+    /// caller is really about to block on the OS lock (fix round 4, finding
+    /// R4-F3).
+    #[cfg(feature = "test-hooks")]
+    disposition_wait_report: std::sync::Mutex<Option<Arc<tokio::sync::Notify>>>,
 }
 
 const SPACE_COLUMNS: &str = "s.space_id, s.display_name, s.authority_host_id, \
@@ -543,7 +571,7 @@ const SPACE_COLUMNS: &str = "s.space_id, s.display_name, s.authority_host_id, \
      (SELECT COUNT(*) FROM memory_receipts r WHERE r.space_id = s.space_id \
       AND r.status = 'pending') AS pending_receipts";
 
-const SUBJECT_COLUMNS: &str = "space_id, subject_id, kind_ns, kind_id, status, \
+pub(super) const SUBJECT_COLUMNS: &str = "space_id, subject_id, kind_ns, kind_id, status, \
      fenced_contexts_json, revision, created_at";
 
 const GRANT_COLUMNS: &str = "grant_id, space_id, subject_id, principal_id, \
@@ -577,6 +605,11 @@ impl MemoryStore {
     async fn begin_admission(
         &self,
     ) -> StoreResult<(sqlx::Transaction<'_, sqlx::Sqlite>, DateTime<Utc>)> {
+        // A read-only store refuses before the retention sweep and before the
+        // connection is touched (fix round 2, finding F3).
+        self.require_writable()?;
+        #[cfg(feature = "test-hooks")]
+        self.lock_attempts.fetch_add(1, Ordering::SeqCst);
         self.reclaim_expired().await;
         let tx = begin_immediate(&self.pool).await?;
         Ok((tx, self.now()))
@@ -664,33 +697,75 @@ impl MemoryStore {
     /// process — [`Self::provision`]'s — already judges retention at a reading
     /// the previous process committed to, not at a wall clock that may have moved
     /// backwards across the restart.
-    pub(super) async fn open(db_path: &Path, creator_id: &str) -> StoreResult<Self> {
+    pub(super) async fn open(
+        db_path: &Path,
+        creator_id: &str,
+        user_home: &Path,
+    ) -> StoreResult<Self> {
         let guarded = init_guarded_pool(db_path, creator_id).await?;
         let pool = guarded.clone_pool();
+        Self::compose(pool, Some(guarded), db_path, creator_id, user_home).await
+    }
+
+    /// Open the same store over a **read-only** connection (NXM-5 Task 2 fix
+    /// round 1, finding F6).
+    ///
+    /// No writer admission, no space provisioning, no journal recovery and no
+    /// retention sweep: a read-only core can serve memory reads without writing
+    /// anything. Every write path still refuses (the core refuses it before it
+    /// reaches this store), so this mode has no effect half at all.
+    ///
+    /// A database no writer open has migrated yet carries no provider tables;
+    /// the retention clock then starts at the same zero floor a fresh storage
+    /// has, instead of failing the whole read-only open over an absent table.
+    pub(super) async fn open_read_only(
+        db_path: &Path,
+        creator_id: &str,
+        user_home: &Path,
+    ) -> StoreResult<Self> {
+        let pool = nexus_local_db::open_pool_read_only(db_path).await?;
+        Self::compose(pool, None, db_path, creator_id, user_home).await
+    }
+
+    /// Whether this store may write. A read-only store holds no writer
+    /// admission; its reads include the legacy projection exactly as a
+    /// writer-open store's do.
+    pub(super) const fn writable(&self) -> bool {
+        self.guarded.is_some()
+    }
+
+    /// The directory of the workspace memory-disposition lock files (fix round
+    /// 2, finding F1): next to `state.db`, so two providers over one workspace —
+    /// in this process or in another — contend on the same files.
+    pub(super) fn disposition_dir(&self) -> PathBuf {
+        self.files_root
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("memory_locks")
+    }
+
+    async fn compose(
+        pool: SqlitePool,
+        guarded: Option<GuardedPool>,
+        db_path: &Path,
+        creator_id: &str,
+        user_home: &Path,
+    ) -> StoreResult<Self> {
         let files_root = db_path.parent().map_or_else(
             || PathBuf::from(journal::FILES_DIR),
             |dir| dir.join(journal::FILES_DIR),
         );
-        let persisted: Option<String> =
-            sqlx::query_scalar("SELECT value FROM memory_provider_meta WHERE key = ?")
-                .bind(CLOCK_FLOOR_KEY)
-                .fetch_optional(&pool)
-                .await?;
-        let clock_floor = persisted
-            .map(|value| {
-                value.parse::<i64>().map_err(|error| {
-                    StoreError::Corrupt(format!("memory_provider_meta.{CLOCK_FLOOR_KEY}: {error}"))
-                })
-            })
-            .transpose()?
-            .unwrap_or(0);
+        let clock_floor = Self::stored_clock_floor(&pool).await?;
+        let provisioned = Self::provider_tables_present(&pool).await?;
         let publish_gate = workspace_publish_gate(&files_root);
         Ok(Self {
             pool,
-            _guarded: guarded,
+            guarded,
             files_root,
+            legacy: LegacyRoots::new(user_home.to_path_buf(), creator_id),
             publish_gate,
             clock_floor: AtomicI64::new(clock_floor),
+            provisioned: AtomicBool::new(provisioned),
             #[cfg(feature = "test-hooks")]
             commit_fault: AtomicU8::new(COMMIT_FAULT_NONE),
             #[cfg(feature = "test-hooks")]
@@ -705,7 +780,92 @@ impl MemoryStore {
             publish_barrier: std::sync::Mutex::new(None),
             #[cfg(feature = "test-hooks")]
             flock_wait_report: std::sync::Mutex::new(None),
+            #[cfg(feature = "test-hooks")]
+            lock_attempts: AtomicUsize::new(0),
+            #[cfg(feature = "test-hooks")]
+            disposition_wait_report: std::sync::Mutex::new(None),
         })
+    }
+
+    /// Whether the provider schema exists in this database. A read-only open
+    /// can precede any writer provisioning it.
+    async fn provider_tables_present(pool: &SqlitePool) -> StoreResult<bool> {
+        let present: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master \
+             WHERE type = 'table' AND name = 'memory_spaces')",
+        )
+        .fetch_one(pool)
+        .await?;
+        Ok(present)
+    }
+
+    /// Whether the provider schema exists **now**: the open-time snapshot once
+    /// it is true, otherwise a fresh probe of the database (fix round 3,
+    /// finding F2).
+    ///
+    /// The snapshot alone went stale for a read-only instance that opened before
+    /// any writer provisioned the workspace: the only other update is the writer
+    /// instance's own `provision`. The probe is a read — no durable write — and
+    /// runs only while the cache says absent, so a provisioned store never
+    /// re-checks on the read path.
+    async fn provider_schema_present(&self) -> StoreResult<bool> {
+        if self.provisioned.load(Ordering::Relaxed) {
+            return Ok(true);
+        }
+        let present = Self::provider_tables_present(&self.pool).await?;
+        self.provisioned.store(present, Ordering::Relaxed);
+        Ok(present)
+    }
+
+    /// Refuse a read against a database that carries no provider schema: the
+    /// space genuinely does not exist there (fix round 2, finding F2), so the
+    /// answer is the space's absence rather than a driver error.
+    async fn require_provisioned(&self, space_id: &str) -> StoreResult<()> {
+        if self.provider_schema_present().await? {
+            Ok(())
+        } else {
+            Err(StoreError::NotFound(format!("space {space_id}")))
+        }
+    }
+
+    /// Refuse a mutation on a read-only store before it reaches retention, the
+    /// publication lock or the connection (fix round 2, finding F3).
+    fn require_writable(&self) -> StoreResult<()> {
+        if self.writable() {
+            Ok(())
+        } else {
+            Err(StoreError::ReadOnly(
+                "this memory provider was opened read-only; write operations are refused"
+                    .to_string(),
+            ))
+        }
+    }
+
+    /// The durable retention floor, or `0` when the provider has no meta table
+    /// yet (a database only ever opened read-only).
+    async fn stored_clock_floor(pool: &SqlitePool) -> StoreResult<i64> {
+        let present: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master \
+             WHERE type = 'table' AND name = 'memory_provider_meta')",
+        )
+        .fetch_one(pool)
+        .await?;
+        if !present {
+            return Ok(0);
+        }
+        let persisted: Option<String> =
+            sqlx::query_scalar("SELECT value FROM memory_provider_meta WHERE key = ?")
+                .bind(CLOCK_FLOOR_KEY)
+                .fetch_optional(pool)
+                .await?;
+        Ok(persisted
+            .map(|value| {
+                value.parse::<i64>().map_err(|error| {
+                    StoreError::Corrupt(format!("memory_provider_meta.{CLOCK_FLOOR_KEY}: {error}"))
+                })
+            })
+            .transpose()?
+            .unwrap_or(0))
     }
 
     /// §6.5/§6.10 proof seam: move the provider clock forward so the grant
@@ -749,6 +909,38 @@ impl MemoryStore {
     #[cfg(feature = "test-hooks")]
     pub(super) fn report_flock_waits(&self, report: std::sync::mpsc::Sender<()>) {
         *self.flock_wait_report.lock().expect("flock wait report") = Some(report);
+    }
+
+    /// NXM-5 Task 2 fix round 4 (finding R4-F3) proof seam: report, from inside
+    /// the lock attempt, that the section is held and the caller is about to
+    /// block on the OS lock. The report fires only after the non-blocking probe
+    /// has failed, so a regression that observes it knows the dismissal really
+    /// reached the contended lock, not merely that its task has been scheduled.
+    /// Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    pub(super) fn report_disposition_waits(&self, report: Arc<tokio::sync::Notify>) {
+        *self
+            .disposition_wait_report
+            .lock()
+            .expect("disposition wait report") = Some(report);
+    }
+
+    /// The armed report of [`Self::report_disposition_waits`], if any.
+    #[cfg(feature = "test-hooks")]
+    pub(super) fn take_disposition_wait_report(&self) -> Option<Arc<tokio::sync::Notify>> {
+        self.disposition_wait_report
+            .lock()
+            .expect("disposition wait report")
+            .take()
+    }
+
+    /// NXM-5 Task 2 fix round 3 (finding F5) proof seam: how many write entries
+    /// passed the read-only gate and reached the admission or publication
+    /// machinery. Zero after refused writes proves no lock was attempted.
+    /// Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    pub(super) fn lock_attempts(&self) -> usize {
+        self.lock_attempts.load(Ordering::SeqCst)
     }
 
     #[cfg(feature = "test-hooks")]
@@ -867,6 +1059,7 @@ impl MemoryStore {
         tx.commit()
             .await
             .map_err(|e| StoreError::CommitUnknown(e.to_string()))?;
+        self.provisioned.store(true, Ordering::Relaxed);
         Ok(())
     }
 
@@ -890,6 +1083,9 @@ impl MemoryStore {
         space_id: &str,
         receipt_id: &str,
     ) -> StoreResult<ReceiptRow> {
+        // A workspace with no provider schema has no receipt and no space
+        // (fix round 3, finding F3): the declared absence, not a driver error.
+        self.require_provisioned(space_id).await?;
         let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let grant_rows = grants_in_tx(&mut tx, space_id).await?;
@@ -962,6 +1158,9 @@ impl MemoryStore {
         space_id: &str,
         subject_id: &str,
     ) -> StoreResult<SubjectRow> {
+        // Same absence policy as the other space-scoped reads (fix round 3,
+        // finding F3): authorization is unchanged where the space exists.
+        self.require_provisioned(space_id).await?;
         let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let rows = grants_in_tx(&mut tx, space_id).await?;
@@ -985,6 +1184,13 @@ impl MemoryStore {
         &self,
         principal_id: &str,
     ) -> StoreResult<(Vec<SpaceRow>, String)> {
+        // A workspace no writer ever provisioned carries no provider space
+        // (fix round 2, finding F2): an empty listing, not a driver error. The
+        // check re-probes while the cache says absent, so a later writer
+        // provisioning is observed here (fix round 3, finding F2).
+        if !self.provider_schema_present().await? {
+            return Ok((Vec::new(), "0".to_string()));
+        }
         let (mut tx, now) = self.begin_read().await?;
         let rows_sql = format!(
             "SELECT {SPACE_COLUMNS} FROM memory_spaces s \
@@ -1180,6 +1386,9 @@ impl MemoryStore {
         principal_filter: Option<&str>,
         page: Option<(u64, u64)>,
     ) -> StoreResult<(Vec<GrantRow>, String, Option<String>, bool)> {
+        // The grants page is space-scoped too: a workspace with no provider
+        // schema answers the space's absence (fix round 3, finding F3).
+        self.require_provisioned(space_id).await?;
         let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let grant_rows = grants_in_tx(&mut tx, space_id).await?;
@@ -1759,6 +1968,11 @@ impl MemoryStore {
     /// that wait is still in flight — the task holds it until the lease is taken
     /// and hands both back.
     async fn begin_publication_section(&self) -> StoreResult<PublicationGuard> {
+        // The publication path refuses a read-only store before it takes this
+        // process's gate or the workspace flock (fix round 2, finding F3).
+        self.require_writable()?;
+        #[cfg(feature = "test-hooks")]
+        self.lock_attempts.fetch_add(1, Ordering::SeqCst);
         let gate = Arc::clone(&self.publish_gate).lock_owned().await;
         #[cfg(feature = "test-hooks")]
         let report = self
@@ -2812,8 +3026,14 @@ impl RecordRead {
 /// revision, every grant revision in the space, and the subject's lifecycle
 /// status. A bare revision sum can stay equal while one visible row is swapped
 /// for another, and cannot see a grant change that leaves the rows unchanged.
+///
+/// A projected row has no provider revision to bump, so it enters the marker as
+/// `(id, digest)` under `projected` — [`legacy::record_version`] covers every
+/// value the merged read serves. A bearer file rewritten between pages therefore
+/// invalidates the cursor even though the projected revision stays 1.
 fn snapshot_marker<'a>(
     rows: impl Iterator<Item = (&'a str, i64)>,
+    projections: impl Iterator<Item = (&'a str, &'a str)>,
     grants: &[GrantRow],
     subject_status: Option<&str>,
 ) -> StoreResult<String> {
@@ -2821,6 +3041,10 @@ fn snapshot_marker<'a>(
         .map(|(record_id, revision)| (record_id.to_string(), revision))
         .collect();
     visible.sort();
+    let mut projected: Vec<(String, String)> = projections
+        .map(|(record_id, version)| (record_id.to_string(), version.to_string()))
+        .collect();
+    projected.sort();
     let mut grant_revisions: Vec<(String, i64)> = grants
         .iter()
         .map(|grant| (grant.grant_id.clone(), grant.revision))
@@ -2828,6 +3052,7 @@ fn snapshot_marker<'a>(
     grant_revisions.sort();
     let parts = json!({
         "rows": visible,
+        "projected": projected,
         "grants": grant_revisions,
         "subject": subject_status,
     });
@@ -2848,6 +3073,50 @@ fn page_had_more<T>(rows: &mut Vec<T>, limit: u64) -> bool {
     let more = u64::try_from(rows.len()).unwrap_or(u64::MAX) > limit;
     rows.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
     more
+}
+
+/// Cut one page out of a merged list that is already ordered the page's way.
+fn page_rows<T>(rows: Vec<T>, limit: u64, offset: u64) -> Vec<T> {
+    rows.into_iter()
+        .skip(usize::try_from(offset).unwrap_or(usize::MAX))
+        .take(usize::try_from(limit).unwrap_or(usize::MAX))
+        .collect()
+}
+
+/// Every provider record id of the subject, independent of the request
+/// predicate: a migrated legacy object carries the bridge's own external id, so
+/// the provider row must win even when the predicate would hide it (see the
+/// merge in [`MemoryStore::records`]).
+async fn provider_record_ids(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    space_id: &str,
+    subject_id: &str,
+) -> StoreResult<HashSet<String>> {
+    let ids = sqlx::query_scalar::<_, String>(
+        "SELECT record_id FROM memory_records WHERE space_id = ? AND subject_id = ?",
+    )
+    .bind(space_id)
+    .bind(subject_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    Ok(ids.into_iter().collect())
+}
+
+/// Every provider candidate id of the subject, independent of the request
+/// status filter (see the merge in [`MemoryStore::candidates`]).
+async fn provider_candidate_ids(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    space_id: &str,
+    subject_id: &str,
+) -> StoreResult<HashSet<String>> {
+    let ids = sqlx::query_scalar::<_, String>(
+        "SELECT candidate_id FROM memory_candidates WHERE space_id = ? AND subject_id = ?",
+    )
+    .bind(space_id)
+    .bind(subject_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    Ok(ids.into_iter().collect())
 }
 
 /// A pending/consumed review candidate as stored (§6.7).
@@ -3113,13 +3382,14 @@ async fn profile_in_tx(
 }
 
 /// §7.14/§7.15 shared consumption prelude: load the shell, gate its subject and
-/// its immutable capture placement, then check that it is still pending and at
-/// the expected revision.
+/// its immutable capture placement, then check that it is still pending and —
+/// when the caller named a revision — at that revision. `None` consumes at the
+/// revision read here (the dismissal has no caller-supplied CAS).
 async fn consumable_candidate(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     space_id: &str,
     candidate_id: &str,
-    expected_revision: i64,
+    expected_revision: Option<i64>,
 ) -> StoreResult<CandidateRow> {
     let candidate = candidate_in_tx(tx, space_id, candidate_id)
         .await?
@@ -3136,7 +3406,7 @@ async fn consumable_candidate(
             "candidate {candidate_id} was already consumed"
         )));
     }
-    if candidate.revision != expected_revision {
+    if expected_revision.is_some_and(|expected| candidate.revision != expected) {
         return Err(StoreError::RevisionConflict {
             current: candidate.revision,
         });
@@ -3246,7 +3516,160 @@ pub(super) fn mint_candidate_id() -> String {
     format!("cnd_{}", Uuid::new_v4().simple())
 }
 
+/// The adoption insert itself: every projected row `ids` names, under the id
+/// the bridge projects it with, inside the caller's transaction.
+///
+/// Only the dismissal that adopts what it consumes calls this, so "adopt then
+/// mutate" is one guarded write and no adopted pending row can be left behind
+/// (NXM-5 Task 2 fix round 3, finding F1: there is no standalone adoption).
+/// Returns the number of rows actually inserted.
+#[allow(clippy::too_many_arguments)]
+async fn adopt_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    roots: &LegacyRoots,
+    space_id: &str,
+    principal_id: &str,
+    subject_id: &str,
+    ids: &[String],
+    now: DateTime<Utc>,
+) -> StoreResult<i64> {
+    let mut adopted = 0_i64;
+    for id in ids {
+        let Some(row) = legacy::candidate_by_id_in_tx(tx, roots, space_id, id).await? else {
+            continue;
+        };
+        // The bridge resolves the bearer's canonical subject; an id that
+        // resolves under another subject is not this caller's to adopt.
+        if row.subject_id != subject_id {
+            continue;
+        }
+        let requirements = [row.requirement("capture")];
+        let admission = Admission {
+            op: super::OP_LEGACY_ADOPT,
+            space_id,
+            principal_id,
+            coverage: Coverage::Requirements(&requirements),
+            issuance: None,
+            subject_gate: Some(subject_id),
+            placement_gate: Some(row.scope()),
+            freeze_gated: true,
+        };
+        let _ = authorize(tx, &admission, now).await?;
+        gate(tx, &admission).await?;
+        let inserted = sqlx::query(
+            "INSERT INTO memory_candidates \
+             (candidate_id, space_id, subject_id, capture_visibility, capture_context_id, kind, \
+              content_json, provenance_json, classification_json, status, consumed_by_json, \
+              content_digest, occurred_at, expires_at, revision, created_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, ?, ?, ?, ?) \
+             ON CONFLICT(candidate_id) DO NOTHING",
+        )
+        .bind(row.candidate_id.as_str())
+        .bind(row.space_id.as_str())
+        .bind(row.subject_id.as_str())
+        .bind(row.capture_visibility.as_str())
+        .bind(row.capture_context_id.as_deref())
+        .bind(row.kind.as_str())
+        .bind(row.content_json.as_deref())
+        .bind(row.provenance_json.as_str())
+        .bind(row.classification_json.as_str())
+        .bind(row.occurred_at.as_deref())
+        .bind(row.expires_at.as_deref())
+        .bind(row.revision)
+        .bind(legacy::provider_timestamp(&row.created_at))
+        .execute(&mut **tx)
+        .await?;
+        adopted += i64::try_from(inserted.rows_affected()).unwrap_or(0);
+    }
+    Ok(adopted)
+}
+
 impl MemoryStore {
+    /// The bearer subject that owns one provider-native candidate row, if this
+    /// store holds it.
+    ///
+    /// A projected legacy id is not a row here (`None`), and neither is an id
+    /// this space never held: the caller's own path answers that absence. The
+    /// probe decides which per-bearer authority section a candidate mutation
+    /// must take (NXM-5 Task 2 fix round 3, finding F1), so it runs before the
+    /// mutation and reads only.
+    pub(super) async fn candidate_subject(
+        &self,
+        space_id: &str,
+        candidate_id: &str,
+    ) -> StoreResult<Option<String>> {
+        self.require_provisioned(space_id).await?;
+        let (mut tx, _now) = self.begin_read().await?;
+        let subject: Option<String> = sqlx::query_scalar(
+            "SELECT subject_id FROM memory_candidates \
+             WHERE space_id = ? AND candidate_id = ?",
+        )
+        .bind(space_id)
+        .bind(candidate_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        tx.rollback().await?;
+        Ok(subject)
+    }
+
+    /// The bearer subject that owns one provider-native candidate, if this
+    /// principal may review it (NXM-5 Task 2 fix round 5, finding R5-F1).
+    ///
+    /// Authorization is part of the probe, not a later step: the next thing the
+    /// caller does with the answer is name the owner in an error, so a principal
+    /// without `review` coverage must never reach it. An uncovered candidate
+    /// answers exactly like one this store never held — the same `NotFound` the
+    /// effect transaction raises — so the refusal discloses neither existence
+    /// nor ownership. This is the disclosure check, not the effect check: the
+    /// admission transaction still authorizes the write itself against the row
+    /// it consumes, so a grant withdrawn between the two is refused there.
+    ///
+    /// A projected legacy id is still `None`: the bridge authorizes those inside
+    /// the adoption, from the row it projects.
+    pub(super) async fn reviewable_candidate_subject(
+        &self,
+        space_id: &str,
+        candidate_id: &str,
+        principal_id: &str,
+    ) -> StoreResult<Option<String>> {
+        self.require_provisioned(space_id).await?;
+        let (mut tx, now) = self.begin_read().await?;
+        let subject: Option<String> = sqlx::query_scalar(
+            "SELECT subject_id FROM memory_candidates \
+             WHERE space_id = ? AND candidate_id = ?",
+        )
+        .bind(space_id)
+        .bind(candidate_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if subject.is_none() {
+            tx.rollback().await?;
+            return Ok(None);
+        }
+        let admission = Admission {
+            op: super::OP_CANDIDATES_DISMISS,
+            space_id,
+            principal_id,
+            coverage: Coverage::Candidate {
+                candidate_id,
+                capabilities: &["review"],
+            },
+            issuance: None,
+            subject_gate: None,
+            placement_gate: None,
+            freeze_gated: true,
+        };
+        let admitted = authorize(&mut tx, &admission, now).await;
+        tx.rollback().await?;
+        match admitted {
+            Ok(_) => Ok(subject),
+            Err(StoreError::NotAuthorized(_)) => {
+                Err(StoreError::NotFound(format!("candidate {candidate_id}")))
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     /// §7.11: admission + candidate inserts + receipt, one transaction.
     pub(super) async fn capture(
         &self,
@@ -3310,6 +3733,7 @@ impl MemoryStore {
         principal_id: &str,
         page: Option<(u64, u64)>,
     ) -> StoreResult<(Vec<CandidateRow>, String, bool)> {
+        self.require_provisioned(space_id).await?;
         let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let grant_rows = grants_in_tx(&mut tx, space_id).await?;
@@ -3326,9 +3750,8 @@ impl MemoryStore {
                 "principal {principal_id} holds no review grant on subject {subject_id}"
             )));
         }
-        let subject_status = subject_in_tx(&mut tx, space_id, subject_id)
-            .await?
-            .map(|subject| subject.status);
+        let subject_row = subject_in_tx(&mut tx, space_id, subject_id).await?;
+        let subject_status = subject_row.as_ref().map(|subject| subject.status.clone());
         let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
         // §7.7: `archived` hides the subject from the *default* listing; a
         // status-filtered listing is an explicit audit query and stays readable.
@@ -3337,8 +3760,12 @@ impl MemoryStore {
         let hidden = withheld(unsettled.as_deref(), subject_id)?;
         if archived || hidden {
             tx.commit().await?;
-            let marker =
-                snapshot_marker(std::iter::empty(), &grant_rows, subject_status.as_deref())?;
+            let marker = snapshot_marker(
+                std::iter::empty(),
+                std::iter::empty(),
+                &grant_rows,
+                subject_status.as_deref(),
+            )?;
             return Ok((Vec::new(), marker, false));
         }
         // Constant predicates, as separate statements rather than
@@ -3357,15 +3784,15 @@ impl MemoryStore {
         // authorization authority and coverage needs each row's placement;
         // only the page's own ids then fetch their bodies.
         let identity_sql = format!(
-            "SELECT candidate_id, subject_id, capture_visibility, capture_context_id, revision \
-             FROM memory_candidates{where_sql} ORDER BY created_at, candidate_id"
+            "SELECT candidate_id, subject_id, capture_visibility, capture_context_id, revision, \
+             created_at FROM memory_candidates{where_sql} ORDER BY created_at, candidate_id"
         );
-        let mut identity_query =
-            sqlx::query_as::<_, (String, String, String, Option<String>, i64)>(
-                sqlx::AssertSqlSafe(identity_sql),
-            )
-            .bind(space_id)
-            .bind(subject_id);
+        let mut identity_query = sqlx::query_as::<
+            _,
+            (String, String, String, Option<String>, i64, String),
+        >(sqlx::AssertSqlSafe(identity_sql))
+        .bind(space_id)
+        .bind(subject_id);
         if let Some(status) = status {
             identity_query = identity_query.bind(status);
         }
@@ -3373,7 +3800,7 @@ impl MemoryStore {
             .bind(timestamp(now))
             .fetch_all(&mut *tx)
             .await?;
-        let authorized: Vec<(&str, i64)> = identity
+        let mut authorized: Vec<(String, i64, String)> = identity
             .iter()
             .filter(|row| {
                 covered(
@@ -3384,8 +3811,52 @@ impl MemoryStore {
                     &candidate_requirement("review", &row.1, &row.2, row.3.as_deref()),
                 )
             })
-            .map(|row| (row.0.as_str(), row.4))
+            .map(|row| (row.0.clone(), row.4, row.5.clone()))
             .collect();
+        // Legacy read bridge (NXM-5 Task 1): projected queue entries join the
+        // same authorized identity set under the same coverage rule. A migrated
+        // candidate carries the bridge's own external id, so the provider row
+        // wins and the projection is dropped.
+        let mut projected: HashMap<String, CandidateRow> = HashMap::new();
+        let legacy_rows = legacy::candidates_in_tx(
+            &mut tx,
+            &self.legacy,
+            space_id,
+            subject_row.as_ref(),
+            subject_id,
+            status,
+        )
+        .await?;
+        if !legacy_rows.is_empty() {
+            let owned = provider_candidate_ids(&mut tx, space_id, subject_id).await?;
+            for row in legacy_rows {
+                if owned.contains(&row.candidate_id)
+                    || !covered(
+                        &grants,
+                        principal_id,
+                        space_id,
+                        now,
+                        &candidate_requirement(
+                            "review",
+                            &row.subject_id,
+                            &row.capture_visibility,
+                            row.capture_context_id.as_deref(),
+                        ),
+                    )
+                {
+                    continue;
+                }
+                authorized.push((
+                    row.candidate_id.clone(),
+                    row.revision,
+                    row.created_at.clone(),
+                ));
+                projected.insert(row.candidate_id.clone(), row);
+            }
+            authorized.sort_by(|left, right| {
+                created_at_cmp(&left.2, &right.2).then_with(|| left.0.cmp(&right.0))
+            });
+        }
         // Cursor offsets index the authorized set, never the predicate set: a
         // hidden candidate can neither consume a page nor skip a visible row
         // across a boundary (MEM-R006).
@@ -3399,14 +3870,19 @@ impl MemoryStore {
         });
         let end = start.saturating_add(take).min(authorized.len());
         let more = end < authorized.len();
-        let page_ids: Vec<&str> = authorized[start..end]
+        let page_ids: Vec<String> = authorized[start..end]
             .iter()
-            .map(|(candidate_id, _)| *candidate_id)
+            .map(|(candidate_id, _, _)| candidate_id.clone())
             .collect();
-        let rows = if page_ids.is_empty() {
+        let stored_ids: Vec<&str> = page_ids
+            .iter()
+            .filter(|candidate_id| !projected.contains_key(*candidate_id))
+            .map(String::as_str)
+            .collect();
+        let mut rows = if stored_ids.is_empty() {
             Vec::new()
         } else {
-            let placeholders = std::iter::repeat_n("?", page_ids.len())
+            let placeholders = std::iter::repeat_n("?", stored_ids.len())
                 .collect::<Vec<_>>()
                 .join(",");
             let page_sql = format!(
@@ -3414,16 +3890,29 @@ impl MemoryStore {
                  WHERE candidate_id IN ({placeholders}) ORDER BY created_at, candidate_id"
             );
             let mut rows_query = sqlx::query_as::<_, CandidateRow>(sqlx::AssertSqlSafe(page_sql));
-            for candidate_id in &page_ids {
+            for candidate_id in &stored_ids {
                 rows_query = rows_query.bind(*candidate_id);
             }
             rows_query.fetch_all(&mut *tx).await?
         };
+        rows.extend(
+            page_ids
+                .iter()
+                .filter_map(|candidate_id| projected.remove(candidate_id)),
+        );
+        rows.sort_by(|left, right| {
+            created_at_cmp(&left.created_at, &right.created_at)
+                .then_with(|| left.candidate_id.cmp(&right.candidate_id))
+        });
         tx.commit().await?;
         let marker = snapshot_marker(
             authorized
                 .iter()
-                .map(|(candidate_id, revision)| (*candidate_id, *revision)),
+                .map(|(candidate_id, revision, _)| (candidate_id.as_str(), *revision)),
+            // A pending-review row is insert-once, so a projected candidate keeps
+            // one fixed identity for as long as it is pending; only records can
+            // change content while keeping their id.
+            std::iter::empty(),
             &grant_rows,
             subject_status.as_deref(),
         )?;
@@ -3438,10 +3927,19 @@ impl MemoryStore {
         candidate_id: &str,
         principal_id: &str,
     ) -> StoreResult<Option<CandidateRow>> {
+        self.require_provisioned(space_id).await?;
         let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let grants = wire_grants(&grants_in_tx(&mut tx, space_id).await?)?;
         let row = candidate_in_tx(&mut tx, space_id, candidate_id).await?;
+        // Legacy read bridge (NXM-5 Task 1): a projected id resolves to its
+        // unmigrated queue entry; coverage below applies to the projection.
+        let row = match row {
+            Some(row) => Some(row),
+            None => {
+                legacy::candidate_by_id_in_tx(&mut tx, &self.legacy, space_id, candidate_id).await?
+            }
+        };
         let unsettled = match &row {
             Some(row) => unsettled_in(&mut tx, space_id, row.subject_id.as_str()).await?,
             None => None,
@@ -3475,10 +3973,97 @@ impl MemoryStore {
         candidate_id: &str,
         expected_revision: i64,
     ) -> StoreResult<ReceiptRow> {
+        self.dismiss_adopting(ctx, admission, candidate_id, None, Some(expected_revision))
+            .await
+    }
+
+    /// NXM-5 Task 2: dismiss a legacy-derived candidate, adopting the projection
+    /// under its deterministic external id **inside this dismissal's guarded
+    /// transaction**.
+    ///
+    /// Adoption and consumption commit together or not at all: there is no
+    /// window in which an adopted pending row exists without the dismissal that
+    /// asked for it, and no window in which a legacy review drain can see a row
+    /// the provider has taken ownership of but not yet consumed (NXM-5 Task 2
+    /// fix round 1, finding F4). `expected_revision` is `None` because the E4
+    /// dismissal has no caller-supplied CAS: the revision read inside the
+    /// transaction is the one consumed.
+    pub(super) async fn dismiss_legacy_candidate(
+        &self,
+        ctx: &OpContext<'_>,
+        admission: &Admission<'_>,
+        candidate_id: &str,
+        subject_id: &str,
+        expected_revision: Option<i64>,
+    ) -> StoreResult<ReceiptRow> {
+        self.dismiss_adopting(
+            ctx,
+            admission,
+            candidate_id,
+            Some(subject_id),
+            expected_revision,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_lines)]
+    async fn dismiss_adopting(
+        &self,
+        ctx: &OpContext<'_>,
+        admission: &Admission<'_>,
+        candidate_id: &str,
+        adopt_subject: Option<&str>,
+        expected_revision: Option<i64>,
+    ) -> StoreResult<ReceiptRow> {
+        // Resolve what this dismissal has to be authorized as BEFORE the
+        // publication section (which evaluates the caller's admission): a row the
+        // provider does not own yet is authorized exactly as the bridge projects
+        // it, because the adopted row carries the same subject and immutable
+        // capture placement.
+        let projected = match adopt_subject {
+            Some(_) => {
+                let (mut read, _) = self.begin_read().await?;
+                let owned = candidate_in_tx(&mut read, ctx.space_id, candidate_id).await?;
+                let row = match owned {
+                    Some(_) => None,
+                    None => {
+                        legacy::candidate_by_id_in_tx(
+                            &mut read,
+                            &self.legacy,
+                            ctx.space_id,
+                            candidate_id,
+                        )
+                        .await?
+                    }
+                };
+                read.rollback().await?;
+                row
+            }
+            None => None,
+        };
+        let requirements: Vec<GrantRequirement<'_>> = projected
+            .iter()
+            .map(|row| row.requirement("review"))
+            .collect();
+        let projected_admission = Admission {
+            op: super::OP_LEGACY_ADOPT,
+            space_id: ctx.space_id,
+            principal_id: admission.principal_id,
+            coverage: Coverage::Requirements(&requirements),
+            issuance: None,
+            subject_gate: projected.as_ref().map(|row| row.subject_id.as_str()),
+            placement_gate: projected.as_ref().map(CandidateRow::scope),
+            freeze_gated: true,
+        };
+        let effective = if projected.is_some() {
+            &projected_admission
+        } else {
+            admission
+        };
         let targets = [journal::candidate_target(candidate_id)];
-        let mut publication = self.begin_publication(ctx, admission, &targets).await?;
+        let mut publication = self.begin_publication(ctx, effective, &targets).await?;
         let (mut tx, now) = self.begin_admission().await?;
-        let _ = authorize(&mut tx, admission, now).await?;
+        let _ = authorize(&mut tx, effective, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
             // §5.2 step 2/S-2: settle the replayed intent before serving it, so
             // a duplicate key reaches the published outcome (or the recorded
@@ -3487,9 +4072,37 @@ impl MemoryStore {
             return self.settle_replayed(&mut publication, row).await;
         }
         require_settled_targets(&mut tx, ctx.space_id, &targets).await?;
-        gate(&mut tx, admission).await?;
+        if let Some(subject_id) = adopt_subject {
+            adopt_in_tx(
+                &mut tx,
+                &self.legacy,
+                ctx.space_id,
+                admission.principal_id,
+                subject_id,
+                &[candidate_id.to_string()],
+                now,
+            )
+            .await?;
+            // The projection above was read before this transaction. Re-authorize
+            // against the adopted row inside it, so the dismissal is admitted on
+            // exactly the placement it consumes.
+            let _ = authorize(&mut tx, admission, now).await?;
+        }
+        gate(&mut tx, effective).await?;
         let candidate =
             consumable_candidate(&mut tx, ctx.space_id, candidate_id, expected_revision).await?;
+        // A dismissal that names a bearer consumes only that bearer's row (fix
+        // round 4, finding R4-F1): the entry point already resolved the owner
+        // before taking its section, and this guard keeps the match where the
+        // consumption happens, so no future caller can bypass it.
+        if let Some(subject_id) = adopt_subject {
+            if candidate.subject_id != subject_id {
+                return Err(StoreError::NotAuthorized(format!(
+                    "candidate {candidate_id} belongs to subject {}, not {subject_id}",
+                    candidate.subject_id
+                )));
+            }
+        }
         let receipt_id = mint_receipt_id();
         let consumed_by = json!({
             "op": "memory.candidates.dismiss",
@@ -3501,7 +4114,7 @@ impl MemoryStore {
         let effect = consume_candidate(
             &mut tx,
             &candidate,
-            expected_revision,
+            candidate.revision,
             &consumed_by,
             &digest,
         )
@@ -3546,7 +4159,8 @@ impl MemoryStore {
         require_settled_targets(&mut tx, ctx.space_id, &targets).await?;
         gate(&mut tx, admission).await?;
         let candidate =
-            consumable_candidate(&mut tx, ctx.space_id, candidate_id, expected_revision).await?;
+            consumable_candidate(&mut tx, ctx.space_id, candidate_id, Some(expected_revision))
+                .await?;
         let provenance: Value = serde_json::from_str(&candidate.provenance_json)
             .map_err(|e| StoreError::Corrupt(format!("candidate provenance: {e}")))?;
         let content: Value = match candidate.content_json.as_deref() {
@@ -3660,6 +4274,7 @@ impl MemoryStore {
         principal_id: &str,
         page: Option<(u64, u64)>,
     ) -> StoreResult<(Vec<RecordRow>, String, u64)> {
+        self.require_provisioned(space_id).await?;
         let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let grant_rows = grants_in_tx(&mut tx, space_id).await?;
@@ -3691,9 +4306,8 @@ impl MemoryStore {
                 "include_tombstoned requires admin coverage (§7.20)".to_string(),
             ));
         }
-        let subject_status = subject_in_tx(&mut tx, space_id, subject_id)
-            .await?
-            .map(|subject| subject.status);
+        let subject_row = subject_in_tx(&mut tx, space_id, subject_id).await?;
+        let subject_status = subject_row.as_ref().map(|subject| subject.status.clone());
         let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
         // §7.7: an archived subject's records leave recall; the listing and
         // by-id audit routes still serve them.
@@ -3703,8 +4317,12 @@ impl MemoryStore {
         let subject_all = matches!(selection, Selection::SubjectAll);
         if archived || hidden {
             tx.commit().await?;
-            let marker =
-                snapshot_marker(std::iter::empty(), &grant_rows, subject_status.as_deref())?;
+            let marker = snapshot_marker(
+                std::iter::empty(),
+                std::iter::empty(),
+                &grant_rows,
+                subject_status.as_deref(),
+            )?;
             return Ok((Vec::new(), marker, 0));
         }
         let (where_sql, binds) = record_predicate(
@@ -3715,9 +4333,33 @@ impl MemoryStore {
             space_id,
             subject_id,
         );
+        // Legacy read bridge (NXM-5 Task 1): the subject's unmigrated content is
+        // projected through the same predicate, so the page below is a slice of
+        // one authorized set spanning both sources.
+        let legacy_rows = legacy::records_in_tx(
+            &mut tx,
+            &self.legacy,
+            space_id,
+            subject_row.as_ref(),
+            subject_id,
+            selection,
+            filter,
+            kinds,
+        )
+        .await?;
+        let projected = !legacy_rows.is_empty();
+        // A projected row inserts itself into the order, so the SQL half returns
+        // a prefix that cannot omit a provider row of the merged page: a provider
+        // row inside the merged prefix `[0, offset + limit)` ranks below
+        // `offset + limit` in the table as well.
+        let fetch = if projected {
+            page.map(|(limit, offset)| (limit.saturating_add(offset), 0))
+        } else {
+            page
+        };
         // `Some((limit, offset))` cuts the page in SQL; `None` is recall, which
         // ranks the whole authorized set (§9.2) and so cannot page before it.
-        let page_clause = if page.is_some() {
+        let page_clause = if fetch.is_some() {
             " LIMIT ? OFFSET ?"
         } else {
             ""
@@ -3730,16 +4372,16 @@ impl MemoryStore {
         for bind in &binds {
             rows_query = rows_query.bind(bind);
         }
-        if let Some((limit, offset)) = page {
+        if let Some((limit, offset)) = fetch {
             rows_query = rows_query
                 .bind(i64::try_from(limit).unwrap_or(i64::MAX))
                 .bind(i64::try_from(offset).unwrap_or(i64::MAX));
         }
-        let rows = rows_query.fetch_all(&mut *tx).await?;
+        let mut rows = rows_query.fetch_all(&mut *tx).await?;
         // The authorized identity set: the marker and the count, never the
         // bodies of rows the page will not serve. A whole-set read already has
         // them.
-        let visible: Vec<(String, i64)> = if page.is_some() {
+        let mut visible: Vec<(String, i64)> = if page.is_some() {
             let identity_sql = format!(
                 "SELECT record_id, revision FROM memory_records{where_sql} \
                  ORDER BY created_at DESC, record_id"
@@ -3755,6 +4397,34 @@ impl MemoryStore {
                 .map(|row| (row.record_id.clone(), row.revision))
                 .collect()
         };
+        let mut projected_versions: Vec<(String, String)> = Vec::new();
+        if projected {
+            // A migrated object carries this projection's own external id, so
+            // the provider row wins whatever the request predicate says about it
+            // — a tombstoned migrated record must stay deleted, not reappear
+            // through the bridge.
+            let owned = provider_record_ids(&mut tx, space_id, subject_id).await?;
+            let legacy_rows: Vec<RecordRow> = legacy_rows
+                .into_iter()
+                .filter(|row| !owned.contains(&row.record_id))
+                .collect();
+            visible.extend(
+                legacy_rows
+                    .iter()
+                    .map(|row| (row.record_id.clone(), row.revision)),
+            );
+            for row in &legacy_rows {
+                projected_versions.push((row.record_id.clone(), legacy::record_version(row)?));
+            }
+            rows.extend(legacy_rows);
+            rows.sort_by(|left, right| {
+                created_at_cmp(&right.created_at, &left.created_at)
+                    .then_with(|| left.record_id.cmp(&right.record_id))
+            });
+            if let Some((limit, offset)) = page {
+                rows = page_rows(rows, limit, offset);
+            }
+        }
         tx.commit().await?;
         // §6.5: the selection check above covers every row the selection admits
         // (a grant covering all of its named contexts covers each of them), so
@@ -3776,6 +4446,9 @@ impl MemoryStore {
             visible
                 .iter()
                 .map(|(record_id, revision)| (record_id.as_str(), *revision)),
+            projected_versions
+                .iter()
+                .map(|(record_id, version)| (record_id.as_str(), version.as_str())),
             &grant_rows,
             subject_status.as_deref(),
         )?;
@@ -3794,10 +4467,18 @@ impl MemoryStore {
         record_id: &str,
         principal_id: &str,
     ) -> StoreResult<Option<RecordRow>> {
+        self.require_provisioned(space_id).await?;
         let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let grants = wire_grants(&grants_in_tx(&mut tx, space_id).await?)?;
         let row = record_in_tx(&mut tx, space_id, record_id).await?;
+        // Legacy read bridge (NXM-5 Task 1): a projected id resolves to its
+        // unmigrated source; the coverage/tombstone/unsettled gates below apply
+        // to the projected row exactly as they do to a provider row.
+        let row = match row {
+            Some(row) => Some(row),
+            None => legacy::record_by_id_in_tx(&mut tx, &self.legacy, space_id, record_id).await?,
+        };
         let unsettled = match &row {
             Some(row) => unsettled_in(&mut tx, space_id, row.subject_id.as_str()).await?,
             None => None,
@@ -4173,6 +4854,7 @@ impl MemoryStore {
         subject_id: &str,
         principal_id: &str,
     ) -> StoreResult<Option<Vec<ProfileRow>>> {
+        self.require_provisioned(space_id).await?;
         let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
         let rows = grants_in_tx(&mut tx, space_id).await?;
@@ -4186,16 +4868,38 @@ impl MemoryStore {
             tx.commit().await?;
             return Ok(None);
         }
+        let subject_row = subject_in_tx(&mut tx, space_id, subject_id).await?;
         let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
         let sql = format!(
             "SELECT {PROFILE_COLUMNS} FROM memory_profiles \
              WHERE space_id = ? AND subject_id = ? ORDER BY profile_kind"
         );
-        let rows = sqlx::query_as::<_, ProfileRow>(sqlx::AssertSqlSafe(sql))
+        let mut rows = sqlx::query_as::<_, ProfileRow>(sqlx::AssertSqlSafe(sql))
             .bind(space_id)
             .bind(subject_id)
             .fetch_all(&mut *tx)
             .await?;
+        // Legacy read bridge (NXM-5 Task 1): `SOUL.md` is the subject's authored
+        // personality document until it is migrated. A stored profile of the
+        // same kind always wins, so a migrated document never appears twice.
+        let projected = legacy::profiles_in_tx(
+            &mut tx,
+            &self.legacy,
+            space_id,
+            subject_row.as_ref(),
+            subject_id,
+        )
+        .await?;
+        for row in projected {
+            if rows
+                .iter()
+                .any(|stored| stored.profile_kind == row.profile_kind)
+            {
+                continue;
+            }
+            rows.push(row);
+        }
+        rows.sort_by(|left, right| left.profile_kind.cmp(&right.profile_kind));
         tx.commit().await?;
         // §5.2/D-10: a subject whose file intent is unsettled has no readable
         // profile surface yet.

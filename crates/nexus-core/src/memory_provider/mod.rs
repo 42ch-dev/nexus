@@ -34,6 +34,8 @@
 //! served.
 
 mod journal;
+/// The single provider-seam legacy projection/read bridge (NXM-5 Task 1).
+pub mod legacy;
 pub mod policy;
 pub mod profile;
 mod storage;
@@ -89,6 +91,36 @@ const OP_RECORDS_LIST: &str = "memory.records.list";
 const OP_RECORDS_PROMOTE: &str = "memory.records.promote";
 const OP_RECALL: &str = "memory.recall";
 const OP_PROFILE_UPDATE: &str = "memory.profile.update";
+/// NXM-5 Task 2's internal op: adopting a legacy-derived object into provider
+/// storage. It is never a wire op — it is the receipt identity of the
+/// just-in-time adoption a dismissal performs **inside the transaction that
+/// consumes the row** (NXM-5 Task 2 fix round 3, finding F1), so a retried
+/// dismissal replays instead of duplicating and no adopted row is left pending.
+const OP_LEGACY_ADOPT: &str = "memory.legacy.adopt";
+
+/// Time order for a merged read: a provider row renders whole seconds, while a
+/// projected legacy row keeps the precision its legacy column carried, so the
+/// two renderings are not comparable as text (NXM-5 QC1-F1).
+///
+/// Both sides order through [`legacy::parse_timestamp`] — the parser the legacy
+/// projection itself uses, which accepts RFC 3339 and the SQLite/bare-`T`
+/// forms — so a queue mixing those formats still shares one instant order. Any
+/// value it cannot parse is a separate class after every parsed instant,
+/// ordered by its raw text; the class assignment never depends on the pair
+/// being compared, which is what makes this comparator transitive and gives
+/// `sort_by` the total order it requires (NXM-5 QC1-F1 fix round 2).
+pub(crate) fn created_at_cmp(left: &str, right: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (
+        legacy::parse_timestamp(left),
+        legacy::parse_timestamp(right),
+    ) {
+        (Some(left), Some(right)) => left.cmp(&right),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => left.cmp(right),
+    }
+}
 
 /// §7.3/§7.4: the two space lifecycle transitions, each naming its op string and
 /// the state it writes.
@@ -176,6 +208,10 @@ enum ProviderError {
         receipt_id: String,
         state: String,
     },
+    /// The provider was opened read-only: a mutation is refused before
+    /// admission, retention, the publication lock or any connection write
+    /// (fix round 2, finding F3).
+    ReadOnly(String),
     Internal(String),
 }
 
@@ -183,7 +219,7 @@ impl ProviderError {
     const fn reject_code(&self) -> SpokeRejectCode {
         match self {
             Self::NotFound(_) => SpokeRejectCode::NotFound,
-            Self::NotAuthorized(_) => SpokeRejectCode::NotAuthorized,
+            Self::NotAuthorized(_) | Self::ReadOnly(_) => SpokeRejectCode::NotAuthorized,
             Self::SpaceFrozen(_) => SpokeRejectCode::SpaceFrozen,
             Self::SubjectFenced { .. } => SpokeRejectCode::SubjectFenced,
             Self::RevisionConflict { .. } => SpokeRejectCode::RevisionConflict,
@@ -226,6 +262,7 @@ impl ProviderError {
                 missing.join(", ")
             ),
             Self::NotAuthorized(reason)
+            | Self::ReadOnly(reason)
             | Self::SpaceFrozen(reason)
             | Self::StatusTransition(reason)
             | Self::CandidateConsumed(reason)
@@ -350,6 +387,7 @@ fn store_error(error: StoreError) -> ProviderError {
             ProviderError::UnsettledPredecessor { receipt_id, state }
         }
         StoreError::Corrupt(reason) => ProviderError::Internal(reason),
+        StoreError::ReadOnly(reason) => ProviderError::ReadOnly(reason),
         StoreError::Database(error) => ProviderError::Internal(error.to_string()),
     }
 }
@@ -717,6 +755,33 @@ pub struct LocalMemoryProvider {
     space_id: String,
 }
 
+/// Exclusive per-bearer memory-disposition section
+/// ([`LocalMemoryProvider::review_disposition`]).
+///
+/// Held for the critical section and released on drop. It is not a writer
+/// admission and grants nothing on its own.
+pub struct MemoryDisposition {
+    _file: std::fs::File,
+}
+
+/// The lock file name for one bearer: a SHA-256 digest of the exact subject id
+/// under `<state db dir>/memory_locks/` (NXM-5 Task 2 fix round 4, finding
+/// R4-F2).
+///
+/// The digest is the identity: it distinguishes ids that differ only by ASCII
+/// case (unlike a readable encoding on a case-insensitive volume) and it is
+/// fixed-length, so any subject id maps to a name well inside the filesystem
+/// component limit. Confinement comes from the fixed prefix plus the digest's
+/// hex alphabet, so no id can name a path component, `..`, or another subject's
+/// lock.
+fn disposition_lock_file(subject_id: &str) -> Result<String, ProviderError> {
+    let digest = match jcs_sha256_hex(&Value::String(subject_id.to_owned())) {
+        SpokeResult::Ok(digest) => digest,
+        SpokeResult::Reject(reject) => return Err(ProviderError::Internal(reject.message)),
+    };
+    Ok(format!("subject-{digest}.lock"))
+}
+
 impl LocalMemoryProvider {
     /// Open (or join) the workspace's admitted writer and provision the local
     /// space plus its first `admin` grant (§7.0.6). Re-opening is a no-op.
@@ -740,7 +805,7 @@ impl LocalMemoryProvider {
                     category: format!("memory provider workspace dir: {error}"),
                 })?;
         }
-        let store = MemoryStore::open(&db_path, creator_id)
+        let store = MemoryStore::open(&db_path, creator_id, &user_home)
             .await
             .map_err(store_error)
             .map_err(to_core_error)?;
@@ -766,6 +831,178 @@ impl LocalMemoryProvider {
     #[must_use]
     pub fn space_id(&self) -> &str {
         &self.space_id
+    }
+
+    /// Open the provider over a **read-only** connection (NXM-5 Task 2 fix round
+    /// 1, finding F6).
+    ///
+    /// A read-only core access must keep serving memory reads, so this open
+    /// serves the same `MemoryPort` reads over `mode=ro` storage. It takes no
+    /// writer admission and performs no provisioning, journal recovery or
+    /// retention sweep: an open-pinned provider on that access mode must not
+    /// write. A write op reached through this handle is refused by the writer
+    /// protocol (the read-only connection rejects it), and `CoreService` refuses
+    /// the E4 write handlers before they get here.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError`] when the workspace database cannot be read.
+    pub async fn open_read_only(
+        user_home: PathBuf,
+        creator_id: &str,
+        workspace_slug: &str,
+    ) -> CoreResult<Self> {
+        let db_path =
+            nexus_home_layout::workspace_state_db_path(&user_home, creator_id, workspace_slug);
+        let store = MemoryStore::open_read_only(&db_path, creator_id, &user_home)
+            .await
+            .map_err(store_error)
+            .map_err(to_core_error)?;
+        Ok(Self {
+            store,
+            space_id: DEFAULT_SPACE_ID.to_string(),
+        })
+    }
+
+    /// Whether this provider may write (`false` for a read-only open).
+    #[must_use]
+    pub const fn is_writable(&self) -> bool {
+        self.store.writable()
+    }
+
+    /// The bearer's memory-disposition section (NXM-5 Task 2 fix round 2,
+    /// finding F1).
+    ///
+    /// A provider candidate consumption and the legacy review drain's
+    /// consumed-check plus classification are one decision in two halves, so
+    /// both take this exclusive OS lock for their whole critical section: a
+    /// dismissal can never commit between the check and the classify write.
+    /// One lock file per bearer under `<state db dir>/memory_locks/`, opened per
+    /// acquisition — descriptors in one process contend exactly like two
+    /// processes (the same primitive the Character activity fences use), so a
+    /// daemon drain and a CLI dismissal over one workspace serialize too.
+    ///
+    /// # Errors
+    /// [`CoreError::Forbidden`] under read-only access (a section that exists to
+    /// decide a write is not served) and [`CoreError::Internal`] when the lock
+    /// file cannot be opened or locked.
+    pub async fn review_disposition(&self, subject_id: &str) -> CoreResult<MemoryDisposition> {
+        self.disposition(subject_id)
+            .await
+            .map_err(|error| match error {
+                ProviderError::ReadOnly(reason) => CoreError::Forbidden { resource: reason },
+                other => to_core_error(other),
+            })
+    }
+
+    /// [`Self::review_disposition`] as the provider's own error taxonomy.
+    async fn disposition(&self, subject_id: &str) -> Result<MemoryDisposition, ProviderError> {
+        if !self.is_writable() {
+            return Err(ProviderError::ReadOnly(
+                "memory: read-only core access".to_string(),
+            ));
+        }
+        let dir = self.store.disposition_dir();
+        let name = disposition_lock_file(subject_id)?;
+        let opened = tokio::task::spawn_blocking(move || -> std::io::Result<std::fs::File> {
+            std::fs::create_dir_all(&dir)?;
+            std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(dir.join(name))
+        })
+        .await;
+        let file = match opened {
+            Ok(Ok(file)) => file,
+            Ok(Err(error)) => {
+                return Err(ProviderError::Internal(format!(
+                    "memory disposition lock: {error}"
+                )))
+            }
+            Err(error) => {
+                return Err(ProviderError::Internal(format!(
+                    "memory disposition lock task: {error}"
+                )))
+            }
+        };
+        // The attempt itself (fix round 4, finding R4-F3): the non-blocking
+        // probe decides whether this acquisition is contended, so a test can
+        // observe a real lock wait instead of a pre-lock rendezvous. The probe
+        // also takes the section when free, so the blocking `lock()` below runs
+        // only when another descriptor really holds it.
+        #[cfg(feature = "test-hooks")]
+        let wait_report = self.store.take_disposition_wait_report();
+        let locked = tokio::task::spawn_blocking(move || -> std::io::Result<std::fs::File> {
+            match file.try_lock() {
+                Ok(()) => {}
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    #[cfg(feature = "test-hooks")]
+                    if let Some(report) = wait_report.as_ref() {
+                        report.notify_one();
+                    }
+                    file.lock()?;
+                }
+                Err(std::fs::TryLockError::Error(error)) => return Err(error),
+            }
+            Ok(file)
+        })
+        .await;
+        match locked {
+            Ok(Ok(file)) => Ok(MemoryDisposition { _file: file }),
+            Ok(Err(error)) => Err(ProviderError::Internal(format!(
+                "memory disposition lock: {error}"
+            ))),
+            Err(error) => Err(ProviderError::Internal(format!(
+                "memory disposition lock task: {error}"
+            ))),
+        }
+    }
+
+    /// §14.2 proof seam: whether the bearer's disposition section is free right
+    /// now. Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn disposition_available(&self, subject_id: &str) -> bool {
+        let Ok(name) = disposition_lock_file(subject_id) else {
+            return false;
+        };
+        let path = self.store.disposition_dir().join(name);
+        let Ok(file) = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path)
+        else {
+            return false;
+        };
+        let free = file.try_lock().is_ok();
+        if free {
+            let _ = file.unlock();
+        }
+        free
+    }
+
+    /// NXM-5 Task 2 fix round 4 (finding R4-F3) proof seam: notify `waiter`
+    /// from inside the lock attempt of the next disposition acquisition whose
+    /// non-blocking probe finds the section held, i.e. only after the caller has
+    /// really reached the contended lock. Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn report_disposition_waits(&self, waiter: std::sync::Arc<tokio::sync::Notify>) {
+        self.store.report_disposition_waits(waiter);
+    }
+
+    /// NXM-5 Task 2 fix round 3 (finding F5) proof seam: entries that passed the
+    /// read-only gate and reached the admission or publication machinery.
+    /// Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn lock_attempts(&self) -> usize {
+        self.store.lock_attempts()
     }
 
     /// MEM-R005 profile admission gate: the authored content kinds a subject
@@ -810,6 +1047,152 @@ impl LocalMemoryProvider {
                 missing,
             }),
         }
+    }
+
+    /// Dismiss a legacy-derived candidate: adopt the projection under the
+    /// bridge's deterministic id and consume it **in one guarded transaction**
+    /// (NXM-5 Task 2 fix round 1, finding F4).
+    ///
+    /// The adoption is not a separate step a caller can interleave with: a
+    /// failure of either half leaves neither effect, so an adopted pending row
+    /// can never be left behind by a dismissal that did not commit. There is no
+    /// standalone adoption entry point at all (fix round 3, finding F1): every
+    /// provider adoption happens inside the mutation that consumes the row, and
+    /// every candidate-consuming provider op holds the bearer's disposition
+    /// section. The departure from the wire request shape is deliberate — the E4
+    /// dismissal has no caller-supplied revision (`expected_revision: None`
+    /// consumes the revision the transaction reads) and it names the bearer's
+    /// subject, which only this seam knows.
+    ///
+    /// # Refusals
+    /// The same reject codes `memory.candidates.dismiss` answers: `NOT_FOUND`
+    /// when nothing resolves to the id, `CANDIDATE_CONSUMED`/
+    /// `REVISION_CONFLICT` when the CAS cannot land, and the admission codes.
+    /// A stored candidate owned by another subject is `INVALID_REQUEST`: the
+    /// dismissal names the bearer whose section it takes, and only the row's
+    /// owner is that bearer (fix round 4, finding R4-F1). Authorization runs
+    /// before that answer is chosen (fix round 5, finding R5-F1): a principal
+    /// the candidate's `review` coverage does not admit is `NOT_FOUND`, the same
+    /// refusal an id this store never held produces, so no caller without
+    /// coverage can learn the candidate exists or who owns it.
+    pub async fn dismiss_legacy_candidate(
+        &self,
+        principal: &schemas::Principal,
+        subject_id: &str,
+        candidate_id: &str,
+        expected_revision: Option<i64>,
+        idempotency_key: &str,
+    ) -> SpokeResult<schemas::MemoryCandidatesDismissResponse> {
+        // The section must belong to the row's owner, not to whatever subject the
+        // caller named (fix round 4, finding R4-F1): resolving the stored owner
+        // before locking means a caller can never consume A while holding B's
+        // section, interleaving A's review drain. The probe authorizes the
+        // caller first (fix round 5, finding R5-F1): the owner is the only thing
+        // the mismatch refusal would disclose, so a principal the candidate's
+        // coverage does not admit never learns it exists. A projected-only id has
+        // no provider row (`None`), so the supplied subject is the only owner it
+        // can adopt under, and the store's own adoption refuses a legacy row of
+        // another subject.
+        let owner = match self
+            .store
+            .reviewable_candidate_subject(&self.space_id, candidate_id, principal_id(principal))
+            .await
+        {
+            Ok(owner) => owner,
+            Err(error) => return deny(&store_error(error)),
+        };
+        let subject_id = match owner.as_deref() {
+            Some(owner) if owner != subject_id => {
+                return deny(&ProviderError::InvalidInput {
+                    field: "subject_id".to_string(),
+                    reason: format!(
+                        "candidate {candidate_id} belongs to subject {owner}, not {subject_id}"
+                    ),
+                })
+            }
+            Some(owner) => owner,
+            None => subject_id,
+        };
+        // The consumption decision holds the bearer's disposition section (fix
+        // round 2, finding F1): a legacy review drain holds the same section
+        // across its consumed-check, classification and persistence, so a
+        // dismissal can never commit in between.
+        let _disposition = match self.disposition(subject_id).await {
+            Ok(section) => section,
+            Err(error) => return deny(&error),
+        };
+        let principal_id = principal_id(principal);
+        let op = OP_CANDIDATES_DISMISS;
+        let digest = match jcs_sha256_hex(&json!({
+            "candidate_id": candidate_id,
+            "expected_revision": expected_revision,
+            "idempotency_key": idempotency_key,
+        })) {
+            SpokeResult::Ok(digest) => digest,
+            SpokeResult::Reject(reject) => {
+                return deny(&ProviderError::Internal(reject.message));
+            }
+        };
+        let ctx = OpContext {
+            space_id: &self.space_id,
+            requester_principal_id: principal_id,
+            op,
+            idempotency_key: Some(idempotency_key),
+            payload_digest: &digest,
+        };
+        let admission = Admission {
+            op,
+            space_id: &self.space_id,
+            principal_id,
+            coverage: Coverage::Candidate {
+                candidate_id,
+                capabilities: &["review"],
+            },
+            issuance: None,
+            subject_gate: None,
+            placement_gate: None,
+            freeze_gated: true,
+        };
+        match self
+            .store
+            .dismiss_legacy_candidate(
+                &ctx,
+                &admission,
+                candidate_id,
+                subject_id,
+                expected_revision,
+            )
+            .await
+        {
+            Ok(receipt) => settle_receipt(&receipt),
+            Err(error) => deny(&store_error(error)),
+        }
+    }
+
+    /// The disposition section of the bearer that owns one provider-native
+    /// candidate, or `None` when this store holds no such row (NXM-5 Task 2 fix
+    /// round 3, finding F1).
+    ///
+    /// Every candidate consumption takes the owning bearer's section, so the
+    /// ordinary wire dismissal/review cannot consume a legacy-derived row behind
+    /// a review drain's back. A projected legacy id has no provider row: there
+    /// is nothing for the wire path to consume and its own read answers the
+    /// absence, so no section is taken. A failed probe fails the operation
+    /// rather than proceeding unsectioned.
+    async fn candidate_disposition(
+        &self,
+        space_id: &str,
+        candidate_id: &str,
+    ) -> Result<Option<MemoryDisposition>, ProviderError> {
+        let Some(subject) = self
+            .store
+            .candidate_subject(space_id, candidate_id)
+            .await
+            .map_err(store_error)?
+        else {
+            return Ok(None);
+        };
+        self.disposition(&subject).await.map(Some)
     }
 
     /// §14.2/§14.3 proof seam: force the next committing transaction to fail at
@@ -1840,6 +2223,16 @@ impl MemoryPort for LocalMemoryProvider {
         principal: &schemas::Principal,
         request: schemas::MemoryCandidatesDismissRequest,
     ) -> SpokeResult<schemas::MemoryCandidatesDismissResponse> {
+        // Whichever op consumes a candidate, it holds the owning bearer's
+        // disposition section (fix round 3, finding F1): the legacy review drain
+        // holds the same section across its consumed-check and classification.
+        let _disposition = match self
+            .candidate_disposition(request.space_id.as_str(), request.candidate_id.as_str())
+            .await
+        {
+            Ok(section) => section,
+            Err(error) => return deny(&error),
+        };
         let principal_id = principal_id(principal);
         let op = OP_CANDIDATES_DISMISS;
         let digest = match payload_digest(op, &request) {
@@ -1896,6 +2289,16 @@ impl MemoryPort for LocalMemoryProvider {
                 reason: reject.message,
             });
         }
+        // A review consumes the candidate exactly as a dismissal does, so it
+        // takes the owning bearer's disposition section too (fix round 3,
+        // finding F1).
+        let _disposition = match self
+            .candidate_disposition(request.space_id.as_str(), request.candidate_id.as_str())
+            .await
+        {
+            Ok(section) => section,
+            Err(error) => return deny(&error),
+        };
         let op = OP_CANDIDATES_REVIEW;
         let digest = match payload_digest(op, &request) {
             Ok(digest) => digest,
@@ -2480,7 +2883,7 @@ impl MemoryPort for LocalMemoryProvider {
         ranked.sort_by(|(left_score, left), (right_score, right)| {
             right_score
                 .cmp(left_score)
-                .then_with(|| right.created_at.cmp(&left.created_at))
+                .then_with(|| created_at_cmp(&right.created_at, &left.created_at))
                 .then_with(|| left.record_id.cmp(&right.record_id))
         });
         // §9.3 budget over what remains after the cursor.
@@ -2709,5 +3112,86 @@ impl MemoryPort for LocalMemoryProvider {
         _request: schemas::MemoryImportsDiscardRequest,
     ) -> SpokeResult<schemas::MemoryImportsDiscardResponse> {
         unsupported("memory.imports.discard")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::created_at_cmp;
+    use std::cmp::Ordering;
+
+    /// NXM-5 QC1-F1 fix round 2: the merged-read comparator must be a total
+    /// order for every supported legacy timestamp format. The reported cycle —
+    /// RFC 3339 second `A < B` (fractional RFC 3339) by parse, `B < C` and
+    /// `C < A` by pairwise text fallback — must not be expressible.
+    #[test]
+    fn created_at_cmp_is_a_total_order_for_mixed_legacy_formats() {
+        let values = [
+            "2026-01-01T00:00:00Z",     // A: RFC 3339, whole second
+            "2026-01-01T00:00:00.900Z", // B: RFC 3339 with fraction
+            "2026-01-01T00:00:00.950",  // C: bare-T form (no offset)
+            "2026-01-01 00:00:00.950",  // the same instant in the SQLite form
+            "2026-01-01T00:00:01Z",     // D: one second later
+            "not a timestamp",          // unparseable class
+            "also not a timestamp",     // unparseable class
+        ];
+
+        for left in values {
+            assert_eq!(created_at_cmp(left, left), Ordering::Equal);
+            for right in values {
+                assert_eq!(
+                    created_at_cmp(left, right),
+                    created_at_cmp(right, left).reverse(),
+                    "antisymmetry: {left} vs {right}"
+                );
+            }
+        }
+        for a in values {
+            for b in values {
+                for c in values {
+                    if created_at_cmp(a, b) == Ordering::Less
+                        && created_at_cmp(b, c) == Ordering::Less
+                    {
+                        assert_eq!(
+                            created_at_cmp(a, c),
+                            Ordering::Less,
+                            "transitivity: {a} < {b} < {c}"
+                        );
+                    }
+                }
+            }
+        }
+
+        // The reported triple now ranks by instant: A < B < C and therefore
+        // A < C, with no cycle.
+        assert_eq!(
+            created_at_cmp("2026-01-01T00:00:00Z", "2026-01-01T00:00:00.900Z"),
+            Ordering::Less
+        );
+        assert_eq!(
+            created_at_cmp("2026-01-01T00:00:00.900Z", "2026-01-01T00:00:00.950"),
+            Ordering::Less
+        );
+        assert_eq!(
+            created_at_cmp("2026-01-01T00:00:00Z", "2026-01-01T00:00:00.950"),
+            Ordering::Less
+        );
+
+        // One sort yields exactly one ranking, parseable instants first and
+        // the unparseable class last in raw-text order.
+        let mut sorted = values;
+        sorted.sort_by(|left, right| created_at_cmp(left, right));
+        assert_eq!(
+            sorted,
+            [
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:00:00.900Z",
+                "2026-01-01T00:00:00.950",
+                "2026-01-01 00:00:00.950",
+                "2026-01-01T00:00:01Z",
+                "also not a timestamp",
+                "not a timestamp",
+            ]
+        );
     }
 }
