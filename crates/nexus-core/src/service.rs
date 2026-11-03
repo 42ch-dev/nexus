@@ -139,12 +139,6 @@ pub struct CoreInner {
     /// out of a production build.
     #[cfg(feature = "test-hooks")]
     pub(crate) soul_narrative_invalidation_fault: AtomicBool,
-    /// Test-only report the next binding removal sends from its own first
-    /// write-lock attempt once that attempt is refused by another writer's held
-    /// lock (compass D15 B1, PR #469 fix round 8). Compiled out of a production
-    /// build.
-    #[cfg(feature = "test-hooks")]
-    pub(crate) binding_removal_write_report: Mutex<Option<Arc<tokio::sync::Notify>>>,
     /// Established-owner slot for the Host authority (P4-T2): at most one
     /// `open_host` manager per open service — a second start is a typed busy
     /// rejection, never a second engine. Reset only by a confirmed close.
@@ -376,8 +370,6 @@ impl CoreService {
                 memory_review_pause: Mutex::new(None),
                 #[cfg(feature = "test-hooks")]
                 soul_narrative_invalidation_fault: AtomicBool::new(false),
-                #[cfg(feature = "test-hooks")]
-                binding_removal_write_report: Mutex::new(None),
                 #[cfg(feature = "execution")]
                 execution: std::sync::Mutex::new(None),
                 #[cfg(feature = "execution")]
@@ -413,33 +405,6 @@ impl CoreService {
     #[doc(hidden)]
     pub fn memory_provider_for_test(&self) -> CoreResult<Arc<LocalMemoryProvider>> {
         self.memory_provider()
-    }
-
-    /// D15 proof seam (PR #469 B1): arm `waiter` for the next binding removal,
-    /// which notifies it from its own first `BEGIN IMMEDIATE` and only once
-    /// that attempt is refused by a lock another writer holds — the removal
-    /// then retries on that same lock for its transaction, so whoever this
-    /// releases acts while the removal is provably contending. A removal that
-    /// finds the lock free never reports. Compiled out of a production build.
-    #[cfg(feature = "test-hooks")]
-    #[doc(hidden)]
-    pub fn report_binding_removal_write_waits(&self, waiter: Arc<tokio::sync::Notify>) {
-        *self
-            .inner
-            .binding_removal_write_report
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(waiter);
-    }
-
-    /// The report [`Self::report_binding_removal_write_waits`] armed, if any:
-    /// one removal observes it, the next runs unreported.
-    #[cfg(feature = "test-hooks")]
-    pub(crate) fn take_binding_removal_write_report(&self) -> Option<Arc<tokio::sync::Notify>> {
-        self.inner
-            .binding_removal_write_report
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
     }
 
     /// The `MemoryPort` this open pinned for the memory family (NXM-5 Task 2).

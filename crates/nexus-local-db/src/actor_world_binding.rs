@@ -662,34 +662,6 @@ pub async fn remove_binding(
     .await
 }
 
-/// Test-only removal entry that reports the write-lock contention it hits.
-///
-/// This removal's own first `BEGIN IMMEDIATE` runs without a busy wait, so a
-/// store another writer holds refuses that very attempt with SQLite's
-/// lock/busy code and `contention` is notified before the busy-timeout retry
-/// takes the transaction the removal then uses. `None` is the production path;
-/// the whole seam is compiled out of a production build.
-///
-/// # Errors
-///
-/// As [`remove_binding`].
-#[cfg(feature = "test-hooks")]
-pub async fn remove_binding_reporting(
-    pool: &SqlitePool,
-    owner_creator_id: &str,
-    character_id: &str,
-    binding_id: &str,
-    contention: Option<&tokio::sync::Notify>,
-) -> Result<(), LocalDbError> {
-    commit_binding_removal(
-        begin_immediate_reporting(pool, contention).await?,
-        owner_creator_id,
-        character_id,
-        binding_id,
-    )
-    .await
-}
-
 async fn commit_binding_removal(
     mut tx: Transaction<'_, Sqlite>,
     owner_creator_id: &str,
@@ -707,62 +679,6 @@ async fn commit_binding_removal(
             Err(err)
         }
     }
-}
-
-/// [`begin_immediate`] whose write-lock attempt reports the contention it
-/// really hits: the attempt runs on the removal's own connection with the busy
-/// timeout at zero, so a held store refuses it at once instead of parking, and
-/// the transaction handed back is begun on that same connection by the normal
-/// busy-timeout retry.
-#[cfg(feature = "test-hooks")]
-async fn begin_immediate_reporting<'a>(
-    pool: &'a SqlitePool,
-    contention: Option<&tokio::sync::Notify>,
-) -> Result<Transaction<'a, Sqlite>, LocalDbError> {
-    let Some(contention) = contention else {
-        return begin_immediate(pool).await;
-    };
-    let mut conn = pool.acquire().await?;
-    let busy_timeout: i64 = sqlx::query_scalar("PRAGMA busy_timeout")
-        .fetch_one(&mut *conn)
-        .await?;
-    sqlx::query("PRAGMA busy_timeout = 0")
-        .execute(&mut *conn)
-        .await?;
-    match sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await {
-        // The lock was free, so nothing contended: the rolled-back attempt
-        // leaves the connection exactly as it found it.
-        Ok(_) => {
-            sqlx::query("ROLLBACK").execute(&mut *conn).await?;
-        }
-        Err(sqlx::Error::Database(error)) if matches!(error.code().as_deref(), Some("5" | "6")) => {
-            contention.notify_one();
-        }
-        Err(error) => {
-            restore_busy_timeout(&mut conn, busy_timeout).await?;
-            return Err(error.into());
-        }
-    }
-    restore_busy_timeout(&mut conn, busy_timeout).await?;
-    sqlx::Transaction::begin(conn, Some(sqlx::SqlStr::from_static("BEGIN IMMEDIATE")))
-        .await
-        .map_err(LocalDbError::from)
-}
-
-/// Put back the busy timeout [`begin_immediate_reporting`] read off the
-/// connection. The value is a configured integer, never text from a caller, so
-/// the interpolated statement is audited and safe.
-#[cfg(feature = "test-hooks")]
-async fn restore_busy_timeout(
-    conn: &mut sqlx::pool::PoolConnection<Sqlite>,
-    busy_timeout: i64,
-) -> Result<(), LocalDbError> {
-    sqlx::query(sqlx::AssertSqlSafe(format!(
-        "PRAGMA busy_timeout = {busy_timeout}"
-    )))
-    .execute(&mut **conn)
-    .await?;
-    Ok(())
 }
 
 async fn remove_binding_tx(

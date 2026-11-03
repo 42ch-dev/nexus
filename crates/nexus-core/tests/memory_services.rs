@@ -6414,20 +6414,23 @@ async fn character_capture_binding_never_outlives_the_provenance_check() {
         }
     });
     entered.notified().await;
-    // The removal's own first `BEGIN IMMEDIATE`, made without a busy wait, is
-    // what reports here: the capture's held write lock refuses that very
-    // attempt, and the removal then retries on that same lock for its
-    // transaction. A sequential execution — capture committed first — finds the
-    // lock free, reports nothing, and never reaches this release.
+    // The production `begin_immediate` inside this removal makes its own first
+    // `BEGIN IMMEDIATE` without a busy wait, and that is what reports here: the
+    // capture's held write lock refuses that very attempt, and the removal then
+    // retries on that same lock for its transaction. A sequential execution —
+    // capture committed first — finds the lock free, reports nothing, and never
+    // reaches this release.
     let attempted = Arc::new(tokio::sync::Notify::new());
-    core.report_binding_removal_write_waits(Arc::clone(&attempted));
-    let removal = tokio::spawn({
-        let core = core.clone();
-        let principal = principal.clone();
-        let chr = chr.clone();
-        let binding = keep.clone();
-        async move { core.remove_binding(&principal, chr, binding).await }
-    });
+    let removal = tokio::spawn(nexus_local_db::begin_immediate_report::scope(
+        Arc::clone(&attempted),
+        {
+            let core = core.clone();
+            let principal = principal.clone();
+            let chr = chr.clone();
+            let binding = keep.clone();
+            async move { core.remove_binding(&principal, chr, binding).await }
+        },
+    ));
     // The wait is a deadlock guard, not synchronization: a regression that lets
     // the capture commit first leaves the lock free, so no report arrives and
     // this fails instead of hanging the suite.
