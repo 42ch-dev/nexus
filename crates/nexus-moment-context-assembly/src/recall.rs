@@ -352,7 +352,7 @@ mod tests {
         assert_eq!(document.memory_id, "mem_abc");
         assert_eq!(document.memory_kind, "story_summary");
         assert_eq!(document.updated_at, memory_updated_at(&record).to_rfc3339());
-        assert!(document.source_session_ids.is_empty());
+        assert_eq!(document.source_session_ids.len(), 0);
         assert_eq!(document.body, "body text");
     }
 
