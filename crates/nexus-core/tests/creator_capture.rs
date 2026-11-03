@@ -3,19 +3,20 @@
 //!
 //! The capture leg is `CoreService::create_pending_review` — the typed Creator
 //! capability the napi binding, the service route and `nexus42 creator memory
-//! capture` wrap. It writes the provider candidate the review family consumes;
-//! the review/promotion legs below drive that candidate through the pinned
-//! `MemoryPort` (the same port the deployment review drain uses), because the
-//! drain reroute itself is NXM-8. The promoted record is read back through the
-//! typed Creator long-term-memory read.
+//! capture` wrap. The review leg is the command's own path,
+//! `CoreService::review_memory`: the drain reads the provider candidates the
+//! capture wrote, classifies each with the unchanged deterministic classifier
+//! and consumes it through the pinned `MemoryPort`. The promoted record is read
+//! back through the typed Creator long-term-memory read.
 //!
 //! Explicit capture only: Host auto-`remember` stays refused (D-4 / C-115), and
 //! this target never sets it.
 
 use nexus_contracts::generated::daemon_api::memory::create_pending_review_request::CreatePendingReviewRequest;
+use nexus_contracts::generated::daemon_api::memory::review_request::ReviewRequest;
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, Principal};
-use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
 use nexus_local_db::ensure_creator_row;
+use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
 use serde_json::{json, Value};
 use spoke_operations::{spoke_schemas, MemoryPort, SpokeResult};
 use std::path::PathBuf;
@@ -158,7 +159,10 @@ async fn creator_capture_review_promote_round_trip() {
     assert_eq!(item.task_kind, "chapter");
     assert_eq!(item.raw_digest, DIGEST);
     assert_eq!(item.created_at, CREATED_AT);
-    assert_eq!(core.count_pending_reviews(&principal).await.unwrap().count, 1);
+    assert_eq!(
+        core.count_pending_reviews(&principal).await.unwrap().count,
+        1
+    );
 
     // 3. an exact retry replays the capture instead of queueing a second row.
     let retry = core
@@ -166,7 +170,10 @@ async fn creator_capture_review_promote_round_trip() {
         .await
         .expect("capture retry replays");
     assert_eq!(retry.pending_id, PENDING);
-    assert_eq!(core.count_pending_reviews(&principal).await.unwrap().count, 1);
+    assert_eq!(
+        core.count_pending_reviews(&principal).await.unwrap().count,
+        1
+    );
 
     // 4. the capture is a provider candidate carrying the task-kind mapping
     // (`chapter` → the `story_summary` authored kind) and the world context.
@@ -188,34 +195,24 @@ async fn creator_capture_review_promote_round_trip() {
         candidate["provenance"]["anchors"][0]["source_id"], SESSION,
         "session_id is the source anchor"
     );
-    let candidate_id = candidate["candidate_id"]
-        .as_str()
-        .expect("a provider candidate names itself")
-        .to_string();
 
-    // 5. review + promote through the pinned port.
-    let provider = core.memory_provider_for_test().expect("pinned provider");
-    let reviewed = wire(
-        &provider
-            .review_candidate(
-                &spoke_principal(),
-                dto(json!({
-                    "space_id": provider.space_id(),
-                    "candidate_id": candidate_id,
-                    "expected_revision": 1,
-                    "decision": { "action": "promote" },
-                    "idempotency_key": "k-creator-capture-review",
-                })),
-            )
-            .await,
-    );
-    let reviewed = &reviewed["result"];
-    assert_eq!(reviewed["outcome"], "promoted");
-    assert_eq!(
-        reviewed["record_ids"].as_array().map(Vec::len),
-        Some(1),
-        "the promotion created exactly one record"
-    );
+    // 5. review + promote through the typed drain the `creator memory review`
+    // command runs. The captured candidate is what it consumes; `chapter` with
+    // a high-signal digest classifies as `PromoteToLongTerm`.
+    let reviewed = core
+        .review_memory(
+            &principal,
+            ReviewRequest {
+                creator_id: CREATOR.to_string(),
+            },
+        )
+        .await
+        .expect("the typed review drain consumes the captured candidate");
+    assert_eq!(reviewed.promoted, 1, "the capture promoted");
+    assert_eq!(reviewed.fragmented, 0);
+    assert_eq!(reviewed.dropped, 0);
+    assert_eq!(reviewed.processed, Some(1));
+    assert_eq!(reviewed.has_more, Some(false));
 
     // 6. the promoted record is the Creator's long-term memory now, and the
     // queue is consumed.
@@ -226,9 +223,58 @@ async fn creator_capture_review_promote_round_trip() {
     assert_eq!(records.len(), 1, "the promoted record is listed");
     let promoted = serde_json::to_value(&records[0]).expect("serializable record");
     assert_eq!(promoted["kind"], "nexus.story_summary");
-    assert_eq!(promoted["content"]["text"], DIGEST);
-    assert_eq!(core.count_pending_reviews(&principal).await.unwrap().count, 0);
+    let body = promoted["content"]["text"]
+        .as_str()
+        .expect("the promoted body is text");
+    assert!(
+        body.contains(DIGEST),
+        "the promoted body carries the captured digest: {body}"
+    );
+    assert_eq!(
+        core.count_pending_reviews(&principal).await.unwrap().count,
+        0
+    );
     assert_eq!(pending_candidates(&core).await.len(), 0);
+}
+
+/// A capture retried without an explicit timestamp replays instead of failing.
+///
+/// `nexus42 creator memory capture` never sends `--created-at` unless asked, so
+/// the retry after a lost response once regenerated the timestamp while reusing
+/// the pending id's key — the provider then refused the changed payload as
+/// `IDEMPOTENCY_CONFLICT` for a capture it had already committed (NXM-6 fix
+/// round 1, finding F4). The retained DTO still renders a `created_at`: the
+/// provider's own candidate instant.
+#[tokio::test]
+async fn creator_capture_retry_without_timestamp_replays() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+
+    let mut body = capture_body(PENDING, CREATOR);
+    body.created_at = None;
+    core.create_pending_review(&principal, body.clone())
+        .await
+        .expect("first capture");
+
+    let retry = core
+        .create_pending_review(&principal, body)
+        .await
+        .expect("a retried default-timestamp capture replays");
+    assert_eq!(retry.pending_id, PENDING);
+    assert_eq!(
+        core.count_pending_reviews(&principal).await.unwrap().count,
+        1
+    );
+    assert_eq!(pending_candidates(&core).await.len(), 1);
+
+    let pending = core
+        .list_pending_reviews(&principal, None, 50)
+        .await
+        .expect("list pending reviews");
+    assert!(
+        !pending.items[0].created_at.is_empty(),
+        "the retained DTO renders the provider's capture instant"
+    );
 }
 
 /// The capture refuses another creator's identity with the retained ownership
@@ -246,7 +292,10 @@ async fn creator_capture_refuses_a_foreign_creator() {
         CoreError::ForbiddenReason { resource, .. } => assert_eq!(resource, "pending_review"),
         other => panic!("expected the pending_review refusal, got {other:?}"),
     }
-    assert_eq!(core.count_pending_reviews(&principal).await.unwrap().count, 0);
+    assert_eq!(
+        core.count_pending_reviews(&principal).await.unwrap().count,
+        0
+    );
 }
 
 /// The retained capture-field limits stay handler-owned: an empty digest and a
@@ -277,5 +326,8 @@ async fn creator_capture_validates_its_fields() {
         "expected invalid_input, got {error:?}"
     );
 
-    assert_eq!(core.count_pending_reviews(&principal).await.unwrap().count, 0);
+    assert_eq!(
+        core.count_pending_reviews(&principal).await.unwrap().count,
+        0
+    );
 }

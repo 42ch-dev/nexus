@@ -1851,6 +1851,231 @@ fn profile_body(row: &ProfileRow) -> Result<Value, ProviderError> {
     }))
 }
 
+/// §7.18/§7.19 with mutation-time adoption (NXM-6 fix round 1, finding F2).
+///
+/// The E4 adapter addresses a Creator or Character memory by the id its DTO
+/// serves, which for an unmigrated item is the bridge's projection: no provider
+/// row exists yet, so the plain wire mutations answer `NOT_FOUND` for content
+/// the user can read. These entry points name the bearer the adapter speaks for;
+/// the store adopts the projection under its deterministic external id inside
+/// the mutation's own guarded transaction (NXM-5 D13's adoption, reused for
+/// records) and re-authorizes the mutation against the adopted row. Nothing is
+/// written to the legacy surface (D6).
+impl LocalMemoryProvider {
+    /// One §7.18 edit, adopting a still-projected record inside the edit.
+    pub async fn update_legacy_record(
+        &self,
+        principal: &schemas::Principal,
+        subject_id: &str,
+        request: schemas::MemoryRecordsUpdateRequest,
+    ) -> SpokeResult<schemas::MemoryRecordsUpdateResponse> {
+        self.update_record_with(principal, request, Some(subject_id))
+            .await
+    }
+
+    /// One §7.19 tombstone, adopting a still-projected record inside the delete.
+    pub async fn delete_legacy_record(
+        &self,
+        principal: &schemas::Principal,
+        subject_id: &str,
+        request: schemas::MemoryRecordsDeleteRequest,
+    ) -> SpokeResult<schemas::MemoryRecordsDeleteResponse> {
+        self.delete_record_with(principal, request, Some(subject_id))
+            .await
+    }
+
+    #[allow(clippy::too_many_lines)]
+    async fn update_record_with(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryRecordsUpdateRequest,
+        adopt_subject: Option<&str>,
+    ) -> SpokeResult<schemas::MemoryRecordsUpdateResponse> {
+        use schemas::memory_records_update_request::MemoryRecordsUpdateRequest as UpdateRequest;
+
+        let principal_id = principal_id(principal);
+        if let SpokeResult::Reject(reject) =
+            validate_memory_records_update(&request, policy::max_content_bytes())
+        {
+            return deny(&ProviderError::InvalidInput {
+                field: "content".to_string(),
+                reason: reject.message,
+            });
+        }
+        let (space_id, record_id, expected, content, kind) = match &request {
+            UpdateRequest::Variant0 {
+                content,
+                expected_revision,
+                record_id,
+                space_id,
+                ..
+            } => match to_json(content, "record content") {
+                Ok(content) => (
+                    space_id.as_str(),
+                    record_id.as_str(),
+                    *expected_revision,
+                    Some(content),
+                    None,
+                ),
+                Err(error) => return deny(&error),
+            },
+            UpdateRequest::Variant1 {
+                content,
+                expected_revision,
+                kind,
+                record_id,
+                space_id,
+                ..
+            } => {
+                let content = match content {
+                    Some(content) => match to_json(content, "record content") {
+                        Ok(content) => Some(content),
+                        Err(error) => return deny(&error),
+                    },
+                    None => None,
+                };
+                (
+                    space_id.as_str(),
+                    record_id.as_str(),
+                    *expected_revision,
+                    content,
+                    Some(kind.as_str()),
+                )
+            }
+        };
+        let op = OP_RECORDS_UPDATE;
+        let digest = match payload_digest(op, &request) {
+            Ok(digest) => digest,
+            Err(error) => return deny(&error),
+        };
+        let ctx = OpContext {
+            space_id,
+            requester_principal_id: principal_id,
+            op,
+            idempotency_key: Some(match &request {
+                UpdateRequest::Variant0 {
+                    idempotency_key, ..
+                }
+                | UpdateRequest::Variant1 {
+                    idempotency_key, ..
+                } => idempotency_key.as_str(),
+            }),
+            payload_digest: &digest,
+        };
+        let admission = Admission {
+            op,
+            space_id,
+            principal_id,
+            coverage: Coverage::Record {
+                record_id,
+                capabilities: &["records_write"],
+                target: None,
+            },
+            issuance: None,
+            subject_gate: None,
+            placement_gate: None,
+            freeze_gated: true,
+        };
+        let stored = match adopt_subject {
+            Some(subject_id) => {
+                self.store
+                    .update_legacy_record(
+                        &ctx,
+                        &admission,
+                        subject_id,
+                        record_id,
+                        expected_revision(expected),
+                        content.as_ref(),
+                        kind,
+                    )
+                    .await
+            }
+            None => {
+                self.store
+                    .update_record(
+                        &ctx,
+                        &admission,
+                        record_id,
+                        expected_revision(expected),
+                        content.as_ref(),
+                        kind,
+                    )
+                    .await
+            }
+        };
+        match stored {
+            Ok(receipt) => settle_receipt(&receipt),
+            Err(error) => deny(&store_error(error)),
+        }
+    }
+
+    async fn delete_record_with(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryRecordsDeleteRequest,
+        adopt_subject: Option<&str>,
+    ) -> SpokeResult<schemas::MemoryRecordsDeleteResponse> {
+        let principal_id = principal_id(principal);
+        let op = OP_RECORDS_DELETE;
+        let digest = match payload_digest(op, &request) {
+            Ok(digest) => digest,
+            Err(error) => return deny(&error),
+        };
+        let ctx = OpContext {
+            space_id: request.space_id.as_str(),
+            requester_principal_id: principal_id,
+            op,
+            idempotency_key: Some(request.idempotency_key.as_str()),
+            payload_digest: &digest,
+        };
+        let admission = Admission {
+            op,
+            space_id: request.space_id.as_str(),
+            principal_id,
+            coverage: Coverage::Record {
+                record_id: request.record_id.as_str(),
+                capabilities: &["records_write"],
+                target: None,
+            },
+            issuance: None,
+            subject_gate: None,
+            placement_gate: None,
+            freeze_gated: true,
+        };
+        let stored = match adopt_subject {
+            Some(subject_id) => {
+                self.store
+                    .delete_legacy_record(
+                        &ctx,
+                        &admission,
+                        subject_id,
+                        request.record_id.as_str(),
+                        expected_revision(request.expected_revision),
+                        request.reason.as_deref(),
+                        principal_id,
+                    )
+                    .await
+            }
+            None => {
+                self.store
+                    .delete_record(
+                        &ctx,
+                        &admission,
+                        request.record_id.as_str(),
+                        expected_revision(request.expected_revision),
+                        request.reason.as_deref(),
+                        principal_id,
+                    )
+                    .await
+            }
+        };
+        match stored {
+            Ok(receipt) => settle_receipt(&receipt),
+            Err(error) => deny(&store_error(error)),
+        }
+    }
+}
+
 #[async_trait]
 impl MemoryPort for LocalMemoryProvider {
     async fn describe(
@@ -2658,112 +2883,12 @@ impl MemoryPort for LocalMemoryProvider {
         }
     }
 
-    #[allow(clippy::too_many_lines)]
     async fn update_record(
         &self,
         principal: &schemas::Principal,
         request: schemas::MemoryRecordsUpdateRequest,
     ) -> SpokeResult<schemas::MemoryRecordsUpdateResponse> {
-        use schemas::memory_records_update_request::MemoryRecordsUpdateRequest as UpdateRequest;
-
-        let principal_id = principal_id(principal);
-        if let SpokeResult::Reject(reject) =
-            validate_memory_records_update(&request, policy::max_content_bytes())
-        {
-            return deny(&ProviderError::InvalidInput {
-                field: "content".to_string(),
-                reason: reject.message,
-            });
-        }
-        let (space_id, record_id, expected, content, kind) = match &request {
-            UpdateRequest::Variant0 {
-                content,
-                expected_revision,
-                record_id,
-                space_id,
-                ..
-            } => match to_json(content, "record content") {
-                Ok(content) => (
-                    space_id.as_str(),
-                    record_id.as_str(),
-                    *expected_revision,
-                    Some(content),
-                    None,
-                ),
-                Err(error) => return deny(&error),
-            },
-            UpdateRequest::Variant1 {
-                content,
-                expected_revision,
-                kind,
-                record_id,
-                space_id,
-                ..
-            } => {
-                let content = match content {
-                    Some(content) => match to_json(content, "record content") {
-                        Ok(content) => Some(content),
-                        Err(error) => return deny(&error),
-                    },
-                    None => None,
-                };
-                (
-                    space_id.as_str(),
-                    record_id.as_str(),
-                    *expected_revision,
-                    content,
-                    Some(kind.as_str()),
-                )
-            }
-        };
-        let op = OP_RECORDS_UPDATE;
-        let digest = match payload_digest(op, &request) {
-            Ok(digest) => digest,
-            Err(error) => return deny(&error),
-        };
-        let ctx = OpContext {
-            space_id,
-            requester_principal_id: principal_id,
-            op,
-            idempotency_key: Some(match &request {
-                UpdateRequest::Variant0 {
-                    idempotency_key, ..
-                }
-                | UpdateRequest::Variant1 {
-                    idempotency_key, ..
-                } => idempotency_key.as_str(),
-            }),
-            payload_digest: &digest,
-        };
-        let admission = Admission {
-            op,
-            space_id,
-            principal_id,
-            coverage: Coverage::Record {
-                record_id,
-                capabilities: &["records_write"],
-                target: None,
-            },
-            issuance: None,
-            subject_gate: None,
-            placement_gate: None,
-            freeze_gated: true,
-        };
-        match self
-            .store
-            .update_record(
-                &ctx,
-                &admission,
-                record_id,
-                expected_revision(expected),
-                content.as_ref(),
-                kind,
-            )
-            .await
-        {
-            Ok(receipt) => settle_receipt(&receipt),
-            Err(error) => deny(&store_error(error)),
-        }
+        self.update_record_with(principal, request, None).await
     }
 
     async fn delete_record(
@@ -2771,48 +2896,7 @@ impl MemoryPort for LocalMemoryProvider {
         principal: &schemas::Principal,
         request: schemas::MemoryRecordsDeleteRequest,
     ) -> SpokeResult<schemas::MemoryRecordsDeleteResponse> {
-        let principal_id = principal_id(principal);
-        let op = OP_RECORDS_DELETE;
-        let digest = match payload_digest(op, &request) {
-            Ok(digest) => digest,
-            Err(error) => return deny(&error),
-        };
-        let ctx = OpContext {
-            space_id: request.space_id.as_str(),
-            requester_principal_id: principal_id,
-            op,
-            idempotency_key: Some(request.idempotency_key.as_str()),
-            payload_digest: &digest,
-        };
-        let admission = Admission {
-            op,
-            space_id: request.space_id.as_str(),
-            principal_id,
-            coverage: Coverage::Record {
-                record_id: request.record_id.as_str(),
-                capabilities: &["records_write"],
-                target: None,
-            },
-            issuance: None,
-            subject_gate: None,
-            placement_gate: None,
-            freeze_gated: true,
-        };
-        match self
-            .store
-            .delete_record(
-                &ctx,
-                &admission,
-                request.record_id.as_str(),
-                expected_revision(request.expected_revision),
-                request.reason.as_deref(),
-                principal_id,
-            )
-            .await
-        {
-            Ok(receipt) => settle_receipt(&receipt),
-            Err(error) => deny(&store_error(error)),
-        }
+        self.delete_record_with(principal, request, None).await
     }
 
     async fn list_records(

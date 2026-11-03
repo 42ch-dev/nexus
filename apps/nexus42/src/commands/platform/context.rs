@@ -12,7 +12,6 @@ use crate::errors::Result;
 use clap::Subcommand;
 use nexus_contracts::local::domain::RuntimeMode;
 use nexus_core::RetainedRecord;
-use nexus_creator_memory::long_term_memory::LongTermMemory;
 use nexus_creator_memory::soul::SoulDocument;
 use nexus_moment_context_assembly::cloud_stage::AssembleResponse;
 use nexus_moment_context_assembly::{
@@ -386,7 +385,7 @@ async fn build_stage0_from_local(
             Ok((
                 document.personality.unwrap_or_default(),
                 document.experience.unwrap_or_default(),
-                records.iter().filter_map(stage0_memory).collect(),
+                stage0_memories(records),
             ))
         })
         .await?;
@@ -410,55 +409,26 @@ async fn build_stage0_from_local(
     })
 }
 
-/// The stage-0 long-term-memory projection of one Creator record.
+/// The stage-0 long-term-memory selection: every Creator contract record except
+/// `personality_core`, whose body is the SOUL personality section above.
 ///
-/// The assembly renders `memory_id`, `memory_kind`, `updated_at` and the body,
-/// so this builds exactly those fields from the record's authored identity and
-/// skips `personality_core` (it is already the SOUL personality section).
-///
-/// shortcut: the transient `LongTermMemory` input; NXM-7 replaces the assembly
-/// DTO with the contract record.
-fn stage0_memory(record: &RetainedRecord) -> Option<LongTermMemory> {
-    let RetainedRecord::LiveRecord(live) = record else {
-        return None;
-    };
-    let legacy = live
-        .content
-        .structured
-        .as_ref()
-        .and_then(|structured| structured.get("nexus_legacy"));
-    let kind = legacy
-        .and_then(|legacy| legacy["memory_kind"].as_str())
-        .map_or_else(
-            || {
-                live.kind
-                    .as_str()
-                    .strip_prefix("nexus.")
-                    .unwrap_or(live.kind.as_str())
-                    .to_string()
-            },
-            str::to_string,
-        );
-    if kind == "personality_core" {
-        return None;
-    }
-    let mut memory = LongTermMemory::new(&kind);
-    memory.frontmatter.memory_id = legacy
-        .and_then(|legacy| legacy["memory_id"].as_str())
-        .map_or_else(|| live.record_id.as_str().to_string(), str::to_string);
-    memory.frontmatter.updated_at = legacy
-        .and_then(|legacy| legacy["updated_at"].as_str())
-        .map_or_else(|| live.updated_at.to_rfc3339(), str::to_string);
-    memory.frontmatter.source_session_ids = legacy
-        .and_then(|legacy| legacy["source_session_ids"].as_array())
-        .map(|ids| {
-            ids.iter()
-                .filter_map(|id| id.as_str().map(str::to_string))
-                .collect()
+/// The assembly renders `memory_id`, `memory_kind`, `updated_at` and the body
+/// straight from the record's `nexus_legacy` block, so the typed records pass
+/// through unchanged (NXM-7's contract DTO).
+fn stage0_memories(records: Vec<RetainedRecord>) -> Vec<RetainedRecord> {
+    records
+        .into_iter()
+        .filter(|record| {
+            let RetainedRecord::LiveRecord(live) = record else {
+                return true;
+            };
+            live.kind
+                .as_str()
+                .strip_prefix("nexus.")
+                .unwrap_or(live.kind.as_str())
+                != "personality_core"
         })
-        .unwrap_or_default();
-    memory.body.clone_from(&live.content.text);
-    Some(memory)
+        .collect()
 }
 
 /// Try to obtain a platform assemble response (best-effort).

@@ -13,7 +13,7 @@ use clap::Subcommand;
 use nexus_contracts::daemon_api::memory::create_pending_review_request::CreatePendingReviewRequest;
 use nexus_contracts::daemon_api::memory::create_pending_review_response::CreatePendingReviewResponse;
 use nexus_contracts::daemon_api::memory::{ReviewRequest, ReviewResponse};
-use nexus_core::{CoreService, Principal, RetainedRecord};
+use nexus_core::{CoreService, MemoryRevision, Principal, RetainedRecord};
 use nexus_creator_memory::long_term_memory::slug_is_safe;
 use nexus_creator_memory::memory_item::MemoryKind;
 use std::io::Write;
@@ -437,23 +437,42 @@ fn render_memory(record: &RetainedRecord) -> String {
     lines.join("\n")
 }
 
+/// The identity and revision to carry from a read into a guarded write
+/// (NXM-6 fix round 1, finding F3).
+fn memory_revision(record: &RetainedRecord) -> Option<MemoryRevision> {
+    let RetainedRecord::LiveRecord(live) = record else {
+        return None;
+    };
+    Some(MemoryRevision {
+        record_id: live.record_id.as_str().to_string(),
+        revision: live.revision.get(),
+    })
+}
+
 async fn edit(config: &CliConfig, creator_id: &str, slug: &str) -> Result<()> {
     // Read, edit with nothing admitted, then write: an editor session never
-    // holds the workspace writer.
-    let current = with_read_only_core(config, async |core, principal| {
+    // holds the workspace writer. The read's identity and revision ride into the
+    // guarded write, so a change another writer made while the editor was open
+    // is refused instead of silently overwritten (NXM-6 fix round 1, finding F3).
+    let (revision, current) = with_read_only_core(config, async |core, principal| {
         let record = core
             .get_creator_memory(principal, slug)
             .await
             .map_err(map_core_error)?
             .ok_or_else(|| memory_not_found(creator_id, slug))?;
-        Ok(MemoryLine::from_record(&record).map_or_else(String::new, |row| row.body))
+        let revision =
+            memory_revision(&record).ok_or_else(|| memory_not_found(creator_id, slug))?;
+        Ok((
+            revision,
+            MemoryLine::from_record(&record).map_or_else(String::new, |row| row.body),
+        ))
     })
     .await?;
     let body = open_editor_temp("Memory content", &current)?;
 
     let text = with_direct_core(config, async |core, principal| {
         if !core
-            .update_creator_memory(principal, slug, &body)
+            .update_creator_memory(principal, slug, &body, Some(&revision))
             .await
             .map_err(map_core_error)?
         {
@@ -467,17 +486,33 @@ async fn edit(config: &CliConfig, creator_id: &str, slug: &str) -> Result<()> {
 }
 
 async fn delete(config: &CliConfig, creator_id: &str, slug: &str, force: bool) -> Result<()> {
-    let text = with_direct_core(config, async |core, principal| {
-        if core
+    // The target is read and the confirmation answered with nothing admitted:
+    // an interactive prompt must never hold the workspace writer, so an
+    // unattended prompt cannot stall a daemon (NXM-6 fix round 1, finding F6).
+    let revision = with_read_only_core(config, async |core, principal| {
+        let record = core
             .get_creator_memory(principal, slug)
             .await
             .map_err(map_core_error)?
-            .is_none()
-        {
-            return Err(memory_not_found(creator_id, slug));
-        }
-        if !force && !confirm_delete(creator_id, slug)? {
-            return Ok(String::new());
+            .ok_or_else(|| memory_not_found(creator_id, slug))?;
+        memory_revision(&record).ok_or_else(|| memory_not_found(creator_id, slug))
+    })
+    .await?;
+    if !force && !confirm_delete(creator_id, slug)? {
+        return Ok(());
+    }
+    let text = with_direct_core(config, async |core, principal| {
+        // The confirmed target is re-read under the writer: a record deleted or
+        // replaced while the prompt was open is not the one the user confirmed.
+        let target = core
+            .get_creator_memory(principal, slug)
+            .await
+            .map_err(map_core_error)?
+            .ok_or_else(|| memory_not_found(creator_id, slug))?;
+        if memory_revision(&target).as_ref() != Some(&revision) {
+            return Err(CliError::Other(format!(
+                "Memory '{slug}' changed while the deletion was confirmed. Re-run `memory delete {slug}`."
+            )));
         }
         if !core
             .delete_creator_memory(principal, slug)
@@ -489,9 +524,7 @@ async fn delete(config: &CliConfig, creator_id: &str, slug: &str, force: bool) -
         Ok(format!("Memory '{slug}' deleted."))
     })
     .await?;
-    if !text.is_empty() {
-        println!("{text}");
-    }
+    println!("{text}");
     Ok(())
 }
 

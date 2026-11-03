@@ -2068,6 +2068,235 @@ async fn seed_legacy_creator_content(env: &Env) {
     .expect("SOUL.md fixture");
 }
 
+/// Existing content that still lives only in a bearer file is editable and
+/// deletable before P5's migration (NXM-6 fix round 1, finding F2).
+///
+/// The mutation adopts the projected row under the bridge's deterministic id
+/// inside its own guarded transaction, so the user's write lands on the provider
+/// and the legacy file keeps every byte it had (D6).
+#[tokio::test]
+async fn creator_mutations_adopt_projected_legacy_memories() {
+    let env = seed_env().await;
+    seed_legacy_creator_content(&env).await;
+    let bearer = MemoryBearerRef::Creator(CREATOR);
+    let memory_path = bearer.long_term_memory_path(&env.user_home, "bridge-memory");
+    let projected_bytes = std::fs::read(&memory_path).expect("legacy memory bytes");
+    let mut personality = nexus_creator_memory::LongTermMemory::new("personality_core");
+    personality.set_body("Projected personality body.");
+    nexus_creator_memory::memory_io::save_memory(
+        &env.user_home,
+        bearer,
+        "personality-core",
+        &personality,
+    )
+    .expect("personality memory fixture");
+    let personality_path = bearer.long_term_memory_path(&env.user_home, "personality-core");
+    let personality_bytes = std::fs::read(&personality_path).expect("legacy personality bytes");
+
+    let (core, principal) = open_core(&env).await;
+
+    // The read serves the projection …
+    let listed = serde_json::to_value(
+        core.get_creator_memory(&principal, "bridge-memory")
+            .await
+            .unwrap()
+            .expect("the projected memory is listed"),
+    )
+    .unwrap();
+    assert_eq!(listed["content"]["text"], "Legacy long-term body.");
+
+    // … and the edit replaces it on the provider.
+    assert!(core
+        .update_creator_memory(&principal, "bridge-memory", "Edited body.", None)
+        .await
+        .expect("the edit adopts the projection"));
+    let edited = serde_json::to_value(
+        core.get_creator_memory(&principal, "bridge-memory")
+            .await
+            .unwrap()
+            .expect("the edited memory is listed"),
+    )
+    .unwrap();
+    assert_eq!(edited["content"]["text"], "Edited body.");
+    assert_eq!(
+        std::fs::read(&memory_path).unwrap(),
+        projected_bytes,
+        "the edit never writes the legacy file"
+    );
+
+    // The SOUL push targets the same kind of projected row.
+    let pushed = serde_json::to_value(
+        core.push_creator_personality(&principal, "Pushed personality section.")
+            .await
+            .expect("the push adopts the projection"),
+    )
+    .unwrap();
+    assert_eq!(pushed["content"]["text"], "Pushed personality section.");
+    assert_eq!(
+        std::fs::read(&personality_path).unwrap(),
+        personality_bytes,
+        "the push never writes the legacy file"
+    );
+
+    // The delete tombstones the adopted row while the file stays as it was.
+    assert!(core
+        .delete_creator_memory(&principal, "bridge-memory")
+        .await
+        .expect("the delete adopts the projection"));
+    assert!(core
+        .get_creator_memory(&principal, "bridge-memory")
+        .await
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        std::fs::read(&memory_path).unwrap(),
+        projected_bytes,
+        "the delete never writes the legacy file"
+    );
+}
+
+/// An interactive edit's read is the write's precondition, and two different
+/// mutations never share an idempotency key (NXM-6 fix round 1, F3/F4).
+#[tokio::test]
+async fn creator_memory_writes_guard_the_read_revision_and_name_their_mutation() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    assert!(core
+        .create_creator_memory(&principal, "edit-guard", "story_summary", "First body.")
+        .await
+        .unwrap());
+
+    // The editor's read: the identity and revision it carries into the write.
+    let read = serde_json::to_value(
+        core.get_creator_memory(&principal, "edit-guard")
+            .await
+            .unwrap()
+            .expect("the created memory is listed"),
+    )
+    .unwrap();
+    let expected = nexus_core::MemoryRevision {
+        record_id: read["record_id"]
+            .as_str()
+            .expect("the record names itself")
+            .to_string(),
+        revision: read["revision"]
+            .as_u64()
+            .expect("the record carries a revision"),
+    };
+
+    // A concurrent writer commits while the editor is open.
+    assert!(core
+        .update_creator_memory(&principal, "edit-guard", "Concurrent body.", None)
+        .await
+        .unwrap());
+    let error = core
+        .update_creator_memory(
+            &principal,
+            "edit-guard",
+            "Stale editor body.",
+            Some(&expected),
+        )
+        .await
+        .expect_err("a stale editor revision is refused");
+    assert_conflict(error, "version_mismatch");
+    let current = serde_json::to_value(
+        core.get_creator_memory(&principal, "edit-guard")
+            .await
+            .unwrap()
+            .expect("the memory still exists"),
+    )
+    .unwrap();
+    assert_eq!(
+        current["content"]["text"], "Concurrent body.",
+        "the concurrent change survives the stale write"
+    );
+
+    // Repeated edits of one slug are distinct mutations: X, Y, X all land.
+    assert!(core
+        .update_creator_memory(&principal, "edit-guard", "Edited again.", None)
+        .await
+        .unwrap());
+    assert!(core
+        .update_creator_memory(&principal, "edit-guard", "Concurrent body.", None)
+        .await
+        .unwrap());
+    let current = serde_json::to_value(
+        core.get_creator_memory(&principal, "edit-guard")
+            .await
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(current["content"]["text"], "Concurrent body.");
+
+    // delete → recreate → delete is three mutations of the same slug.
+    assert!(core
+        .create_creator_memory(&principal, "recycled", "story_summary", "Recycled body.")
+        .await
+        .unwrap());
+    assert!(core
+        .delete_creator_memory(&principal, "recycled")
+        .await
+        .unwrap());
+    assert!(core
+        .create_creator_memory(&principal, "recycled", "story_summary", "Recycled body.")
+        .await
+        .unwrap());
+    assert!(core
+        .delete_creator_memory(&principal, "recycled")
+        .await
+        .unwrap());
+    assert!(core
+        .get_creator_memory(&principal, "recycled")
+        .await
+        .unwrap()
+        .is_none());
+}
+
+/// Each SOUL refresh is a distinct mutation of the profile revision, so a
+/// second refresh cannot collide with the first one's receipt (NXM-6 fix round
+/// 1, finding F4).
+#[tokio::test]
+async fn creator_experience_refresh_repeats_without_a_key_collision() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    core.set_creator_soul(&principal, "# Soul\n\nAuthored body.\n", None)
+        .await
+        .expect("create the SOUL document");
+    assert!(core
+        .create_creator_memory(
+            &principal,
+            "experience-source",
+            "story_summary",
+            "The alliance holds the harbor."
+        )
+        .await
+        .unwrap());
+
+    let (first, processed) = core
+        .refresh_creator_experience(&principal)
+        .await
+        .expect("first refresh");
+    assert_eq!(processed, 1, "one memory feeds the Experience section");
+    let (second, _) = core
+        .refresh_creator_experience(&principal)
+        .await
+        .expect("a repeated refresh is a new mutation, not a receipt collision");
+    assert_eq!(first, second, "the rendered section is deterministic");
+    let soul = core
+        .get_creator_soul(&principal)
+        .await
+        .unwrap()
+        .expect("the SOUL document exists");
+    assert!(
+        soul.document
+            .body
+            .contains("### Story Summary: experience-source"),
+        "the SOUL carries the rendered Experience section: {}",
+        soul.document.body
+    );
+}
+
 /// Seed the Character legacy surfaces: one binding-local fragment and one run
 /// capture receipt (which also enqueues its own pending row).
 async fn seed_legacy_character_content(env: &Env) {

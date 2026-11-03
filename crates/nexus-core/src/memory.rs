@@ -634,6 +634,11 @@ impl MemoryAdapter {
     }
 
     /// Replace one Creator record's content on the expected revision.
+    ///
+    /// A record the bridge still projects is adopted under its deterministic id
+    /// inside this write's guarded transaction (NXM-6 fix round 1, finding F2):
+    /// the user edits a memory they can read, and the legacy file is never
+    /// written (D6).
     async fn update_memory_record(
         &self,
         record_id: &str,
@@ -648,10 +653,17 @@ impl MemoryAdapter {
             "content": content,
             "idempotency_key": idempotency_key,
         }))?;
-        memory_ok(self.provider.update_record(&self.principal, request).await).map(|_| ())
+        memory_ok(
+            self.provider
+                .update_legacy_record(&self.principal, &self.subject_id, request)
+                .await,
+        )
+        .map(|_| ())
     }
 
-    /// Tombstone one Creator record on the expected revision.
+    /// Tombstone one Creator record on the expected revision, adopting a
+    /// still-projected record inside the guarded write (see
+    /// [`Self::update_memory_record`]).
     async fn delete_memory_record(
         &self,
         record_id: &str,
@@ -665,7 +677,12 @@ impl MemoryAdapter {
             "reason": "deleted through the creator memory CLI",
             "idempotency_key": idempotency_key,
         }))?;
-        memory_ok(self.provider.delete_record(&self.principal, request).await).map(|_| ())
+        memory_ok(
+            self.provider
+                .delete_legacy_record(&self.principal, &self.subject_id, request)
+                .await,
+        )
+        .map(|_| ())
     }
 
     /// Write the `personality` profile document.
@@ -1051,14 +1068,25 @@ fn task_kind_to_memory_kind(task_kind: &str) -> &'static str {
     }
 }
 
-/// A stable memory idempotency key: the operation, its subject and its payload
-/// decide the key, so a retried write replays instead of duplicating.
-fn creator_memory_key(op: &str, subject: &str, body: &str) -> String {
-    match spoke_operations::jcs_sha256_hex(&json!({ "op": op, "subject": subject, "body": body })) {
+/// A stable memory idempotency key: the operation, the mutation it applies and
+/// its payload decide the key, so a retried write replays while two different
+/// logical mutations never share one (NXM-6 fix round 1, finding F4).
+///
+/// `identity` must name one logical mutation, not a resource: a record id plus
+/// its CAS revision for an edit, a freshly minted `memory_id` for a create, the
+/// profile revision for a SOUL write. The provider's namespace is
+/// `(space, requester, op, key)`, so a resource-only key would replay the
+/// previous mutation for a *later* one (or refuse it as `IDEMPOTENCY_CONFLICT`).
+fn creator_memory_key(op: &str, identity: &str, body: &str) -> String {
+    match spoke_operations::jcs_sha256_hex(&json!({
+        "op": op,
+        "identity": identity,
+        "body": body,
+    })) {
         SpokeResult::Ok(digest) => format!("e4memory:{digest}"),
         // The three-string payload always canonicalizes; keep the spelling
         // total rather than reporting an unreachable interior failure.
-        SpokeResult::Reject(_) => format!("e4memory:{op}:{subject}"),
+        SpokeResult::Reject(_) => format!("e4memory:{op}:{identity}"),
     }
 }
 
@@ -1078,7 +1106,48 @@ fn creator_record_identity(record: &Value) -> CoreResult<(String, u64)> {
     let record_id = record["record_id"]
         .as_str()
         .ok_or_else(|| internal_err("memory_record", "a provider record carries no record_id"))?;
-    Ok((record_id.to_string(), record["revision"].as_u64().unwrap_or(1)))
+    Ok((
+        record_id.to_string(),
+        record["revision"].as_u64().unwrap_or(1),
+    ))
+}
+
+/// The record a caller read before it prepared a mutation, carried into the
+/// guarded write (NXM-6 fix round 1, finding F3).
+///
+/// An interactive editor reads a record, spends arbitrary time in the editor,
+/// then writes. Carrying this value through the editor session lets the guarded
+/// update refuse a write aimed at a record someone else changed — or replaced
+/// under the same slug — meanwhile, instead of silently overwriting it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryRevision {
+    /// The provider record id the read served.
+    pub record_id: String,
+    /// The revision the read served.
+    pub revision: u64,
+}
+
+impl MemoryRevision {
+    /// The identity and revision of one provider record body.
+    fn of(record: &Value) -> CoreResult<Self> {
+        let (record_id, revision) = creator_record_identity(record)?;
+        Ok(Self {
+            record_id,
+            revision,
+        })
+    }
+
+    /// The typed stale-identity refusal: the same `version_mismatch` code the
+    /// provider's CAS answer renders, raised before the write instead of after.
+    fn conflict(&self) -> CoreError {
+        CoreError::ActorConflict {
+            code: "version_mismatch".to_string(),
+            message: format!(
+                "memory record changed since it was read: expected {}/{}",
+                self.record_id, self.revision
+            ),
+        }
+    }
 }
 
 /// The authored identity of one Creator memory record: `(memory_id, kind,
@@ -1086,12 +1155,7 @@ fn creator_record_identity(record: &Value) -> CoreResult<(String, u64)> {
 fn creator_memory_identity(record: &Value) -> (String, String, Vec<String>) {
     let legacy = nexus_legacy(record);
     let memory_id = legacy["memory_id"].as_str().map_or_else(
-        || {
-            record["record_id"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string()
-        },
+        || record["record_id"].as_str().unwrap_or_default().to_string(),
         str::to_string,
     );
     let kind = legacy["memory_kind"]
@@ -1123,6 +1187,10 @@ fn creator_memory_content(
     body: &str,
     source_session_ids: &[String],
 ) -> Value {
+    // The row's own `updated_at` is the provider's, so the authored block holds
+    // no per-attempt timestamp: a retried write must reach the same receipt
+    // payload (NXM-6 fix round 1, finding F4). Readers fall back to the record's
+    // timestamp, which is the same instant for a row this family authored.
     json!({
         "text": body,
         "structured": { "nexus_legacy": {
@@ -1130,7 +1198,6 @@ fn creator_memory_content(
             "memory_id": memory_id,
             "memory_kind": kind,
             "nexus_memory_version": 1,
-            "updated_at": chrono::Utc::now().to_rfc3339(),
             "source_session_ids": source_session_ids,
         }},
     })
@@ -1270,10 +1337,12 @@ impl CoreService {
             .unwrap_or("unknown")
             .to_string();
         let raw_digest = request.raw_digest.as_str().to_string();
-        let created_at = request.created_at.as_deref().map_or_else(
-            || chrono::Utc::now().to_rfc3339(),
-            str::to_string,
-        );
+        // A capture without an explicit timestamp keeps none: the provider's own
+        // candidate `created_at` is what the retained DTO then serves (a pending
+        // row falls back to it), so a retried capture — the CLI omits the flag —
+        // reaches the same receipt payload instead of regenerating a different
+        // one and failing as `IDEMPOTENCY_CONFLICT` (NXM-6 fix round 1, F4).
+        let created_at = request.created_at.as_deref();
         validate_capture_fields(
             &pending_id,
             &session_id,
@@ -1287,20 +1356,23 @@ impl CoreService {
             SpokeResult::Ok(digest) => digest,
             SpokeResult::Reject(reject) => return Err(memory_reject(&reject)),
         };
+        let mut legacy = json!({
+            "pending_id": pending_id.as_str(),
+            "session_id": session_id.as_str(),
+            "creator_id": principal.creator_id(),
+            "world_id": world_id.as_deref(),
+            "task_kind": task_kind.as_str(),
+            "raw_digest": raw_digest.as_str(),
+        });
+        if let Some(created_at) = created_at {
+            legacy["created_at"] = json!(created_at);
+        }
         let capture: spoke_schemas::MemoryCaptureRequest = map_wire(json!({
             "space_id": MEMORY_SPACE_ID,
             "subject_id": memory.subject_id.as_str(),
             "content": {
                 "text": raw_digest.as_str(),
-                "structured": { "nexus_legacy": {
-                    "pending_id": pending_id.as_str(),
-                    "session_id": session_id.as_str(),
-                    "creator_id": principal.creator_id(),
-                    "world_id": world_id.as_deref(),
-                    "task_kind": task_kind.as_str(),
-                    "raw_digest": raw_digest.as_str(),
-                    "created_at": created_at.as_str(),
-                }},
+                "structured": { "nexus_legacy": legacy },
             },
             "capture_scope": { "visibility": "shared" },
             "source_context_ids": world_id.iter().collect::<Vec<_>>(),
@@ -1372,48 +1444,67 @@ impl CoreService {
         if memory.memory_by_slug(slug).await?.is_some() {
             return Ok(false);
         }
-        let content =
-            creator_memory_content(slug, kind, &mint_creator_memory_id(), body, &[]);
+        // The minted `memory_id` is the mutation's identity: a create after a
+        // delete of the same slug is a new record, not a replay of the first
+        // create's receipt (NXM-6 fix round 1, finding F4).
+        let memory_id = mint_creator_memory_id();
+        let content = creator_memory_content(slug, kind, &memory_id, body, &[]);
         memory
             .create_memory_record(
                 &policy::namespaced_record_kind(kind),
                 content,
-                &creator_memory_key("create", slug, body),
+                &creator_memory_key("create", &memory_id, body),
             )
             .await?;
         Ok(true)
     }
 
-    /// Replace one Creator memory's body, addressed by its authored slug, on the
-    /// revision read with it.
+    /// Replace one Creator memory's body, addressed by its authored slug.
     ///
-    /// `Ok(false)` reports that no mutable record carries the slug: absent, or
-    /// still the bridge's projection of an unmigrated file — a projection is
-    /// read-only by design (`legacy.rs`), and P5's migration is what turns it
-    /// into a mutable provider row with the same identity.
+    /// `expected` is the record the caller read before it prepared the write (an
+    /// interactive editor's read): when the slug now resolves to a different
+    /// record or revision, the write is refused with the retained
+    /// `version_mismatch` conflict instead of overwriting the change made in
+    /// between (NXM-6 fix round 1, finding F3). `None` is a caller that took no
+    /// such read.
+    ///
+    /// A memory the bridge still projects is adopted inside the write's guarded
+    /// transaction (finding F2), so an unmigrated memory is editable before P5's
+    /// migration and the legacy file is never written.
+    ///
+    /// `Ok(false)` reports that no live record carries the slug.
     ///
     /// # Errors
-    /// As [`Self::list_creator_memories`].
+    /// [`CoreError::ActorConflict`] for a stale `expected`, plus
+    /// [`Self::list_creator_memories`]'s errors.
     pub async fn update_creator_memory(
         &self,
         principal: &Principal,
         slug: &str,
         body: &str,
+        expected: Option<&MemoryRevision>,
     ) -> CoreResult<bool> {
         self.verify_principal(principal)?;
         let memory = self.creator_memory_writer(principal).await?;
         let Some(record) = memory.memory_by_slug(slug).await? else {
             return Ok(false);
         };
-        let (record_id, revision) = creator_record_identity(&record)?;
+        let revision = MemoryRevision::of(&record)?;
+        if expected.is_some_and(|expected| *expected != revision) {
+            return Err(revision.conflict());
+        }
         let (memory_id, kind, source_session_ids) = creator_memory_identity(&record);
         let content = creator_memory_content(slug, &kind, &memory_id, body, &source_session_ids);
+        // The key names this mutation — the record and the revision it replaces
+        // — so a repeated edit after an intervening one is a new mutation, while
+        // repeating this exact edit reaches the same receipt (finding F4).
+        let identity = format!("{}@{}", revision.record_id, revision.revision);
         match memory
             .update_memory_record(
-                &record_id,
-                revision,
+                &revision.record_id,
+                revision.revision,
                 content,
-                &creator_memory_key("update", slug, body),
+                &creator_memory_key("update", &identity, body),
             )
             .await
         {
@@ -1425,8 +1516,9 @@ impl CoreService {
 
     /// Delete one Creator memory, addressed by its authored slug.
     ///
-    /// `Ok(false)` carries the same answer as [`Self::update_creator_memory`]:
-    /// no mutable record carries the slug.
+    /// `Ok(false)` reports that no live record carries the slug. A memory the
+    /// bridge still projects is adopted inside the delete's guarded transaction
+    /// (NXM-6 fix round 1, finding F2); the legacy file stays untouched.
     ///
     /// # Errors
     /// As [`Self::list_creator_memories`].
@@ -1440,12 +1532,15 @@ impl CoreService {
         let Some(record) = memory.memory_by_slug(slug).await? else {
             return Ok(false);
         };
-        let (record_id, revision) = creator_record_identity(&record)?;
+        let revision = MemoryRevision::of(&record)?;
+        // Record + revision: a delete after the same slug was re-created is a
+        // new mutation, not a replay of the first record's tombstone (F4).
+        let identity = format!("delete:{}@{}", revision.record_id, revision.revision);
         match memory
             .delete_memory_record(
-                &record_id,
-                revision,
-                &creator_memory_key("delete", slug, ""),
+                &revision.record_id,
+                revision.revision,
+                &creator_memory_key("delete", &identity, ""),
             )
             .await
         {
@@ -1486,11 +1581,17 @@ impl CoreService {
     ) -> CoreResult<()> {
         self.verify_principal(principal)?;
         let memory = self.creator_memory_writer(principal).await?;
+        // Create-only (`None`) and revision-checked writes are different
+        // mutations, so the revision is part of the key (F4).
+        let identity = expected_revision.map_or_else(
+            || "profile@new".to_string(),
+            |revision| format!("profile@{revision}"),
+        );
         memory
             .write_personality_profile(
                 body,
                 expected_revision,
-                &creator_memory_key("soul", &expected_revision.map_or_else(String::new, |r| r.to_string()), body),
+                &creator_memory_key("soul", &identity, body),
             )
             .await
     }
@@ -1518,11 +1619,20 @@ impl CoreService {
             .map_err(|error| internal_err("soul_parse", error))?;
         let (markdown, processed) = experience_markdown(&memory.memory_records().await?);
         soul.set_experience(markdown.clone());
+        // The key names this mutation — the profile revision it replaces plus
+        // the rendered section — so a repeated refresh after the revision moved
+        // is a new mutation instead of an `IDEMPOTENCY_CONFLICT` on the old key
+        // (NXM-6 fix round 1, finding F4).
+        let revision = profile["revision"].as_u64();
+        let identity = format!(
+            "profile@{}",
+            revision.map_or_else(|| "new".to_string(), |revision| revision.to_string())
+        );
         memory
             .write_personality_profile(
                 &soul.render(),
-                profile["revision"].as_u64(),
-                &creator_memory_key("experience", "", &markdown),
+                revision,
+                &creator_memory_key("experience", &identity, &markdown),
             )
             .await?;
         Ok((markdown, processed))
@@ -1550,9 +1660,8 @@ impl CoreService {
         }
         let memory = self.creator_memory_writer(principal).await?;
         let existing = memory.memory_by_slug(PERSONALITY_MEMORY_SLUG).await?;
-        let key = creator_memory_key("personality", PERSONALITY_MEMORY_SLUG, personality);
         let memory_id = if let Some(record) = &existing {
-            let (record_id, revision) = creator_record_identity(record)?;
+            let revision = MemoryRevision::of(record)?;
             let (memory_id, _, _) = creator_memory_identity(record);
             let content = creator_memory_content(
                 PERSONALITY_MEMORY_SLUG,
@@ -1561,11 +1670,22 @@ impl CoreService {
                 personality,
                 &[],
             );
+            // The record and the revision it replaces name this mutation, so a
+            // repeated push after an intervening write is a new mutation (F4).
+            let identity = format!("{}@{}", revision.record_id, revision.revision);
             memory
-                .update_memory_record(&record_id, revision, content, &key)
+                .update_memory_record(
+                    &revision.record_id,
+                    revision.revision,
+                    content,
+                    &creator_memory_key("personality", &identity, personality),
+                )
                 .await?;
             memory_id
         } else {
+            // The minted `memory_id` is the mutation's identity: a push after
+            // the memory was deleted creates a new record instead of replaying
+            // the deleted one's receipt (F4).
             let memory_id = mint_creator_memory_id();
             let content = creator_memory_content(
                 PERSONALITY_MEMORY_SLUG,
@@ -1578,7 +1698,7 @@ impl CoreService {
                 .create_memory_record(
                     &policy::namespaced_record_kind("personality_core"),
                     content,
-                    &key,
+                    &creator_memory_key("personality", &memory_id, personality),
                 )
                 .await?;
             memory_id
@@ -2331,7 +2451,9 @@ impl CoreService {
         // (before the reroute the row was deleted, so a repeat dismissal found
         // nothing). The authoritative decision is still the guarded dismissal
         // below; this read only keeps that answer.
-        if pending_now(&memory, &candidate_id).await? && memory.dismiss_legacy(&candidate_id).await? {
+        if pending_now(&memory, &candidate_id).await?
+            && memory.dismiss_legacy(&candidate_id).await?
+        {
             return Ok(DeletePendingReviewResponse {
                 success: true,
                 pending_id,
@@ -2347,7 +2469,10 @@ impl CoreService {
             .into_iter()
             .find(|row| row.pending_id == pending_id)
         {
-            if memory.dismiss_native(&row.candidate_id, row.revision).await? {
+            if memory
+                .dismiss_native(&row.candidate_id, row.revision)
+                .await?
+            {
                 return Ok(DeletePendingReviewResponse {
                     success: true,
                     pending_id,
