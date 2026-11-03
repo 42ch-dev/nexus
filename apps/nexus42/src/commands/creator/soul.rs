@@ -190,13 +190,24 @@ async fn push_personality(config: &CliConfig, creator_id: &str) -> Result<()> {
             .map_err(map_core_error)
     })
     .await?;
-    let (memory_id, kind) =
-        memory_identity(&record).unwrap_or_else(|| (String::new(), "personality_core".to_string()));
 
     println!("Personality pushed to long-term memory for creator '{creator_id}'.");
-    println!("  Memory ID: {memory_id}");
-    println!("  Kind: {kind}");
+    for line in personality_identity_lines(memory_identity(&record)) {
+        println!("{line}");
+    }
     Ok(())
+}
+
+/// The identity report `soul push-personality` appends: the memory id and kind
+/// the pushed record carries, or neither line when it carries no authored
+/// identity — never a fabricated kind under an empty id (fix round 3, F5).
+fn personality_identity_lines(identity: Option<(String, String)>) -> Vec<String> {
+    identity.map_or_else(Vec::new, |(memory_id, kind)| {
+        vec![
+            format!("  Memory ID: {memory_id}"),
+            format!("  Kind: {kind}"),
+        ]
+    })
 }
 
 async fn refresh_experience(config: &CliConfig, creator_id: &str) -> Result<()> {
@@ -233,5 +244,27 @@ mod tests {
         };
         let _ = SoulCommand::PushPersonality;
         let _ = SoulCommand::RefreshExperience;
+    }
+
+    #[test]
+    fn push_personality_identity_is_never_fabricated() {
+        // No authored identity on the pushed record: no lines at all. The old
+        // fallback printed an empty memory id and a made-up `personality_core`
+        // kind (fix round 3, F5).
+        assert_eq!(
+            personality_identity_lines(None),
+            [] as [String; 0],
+            "no identity means no identity lines"
+        );
+        assert_eq!(
+            personality_identity_lines(Some((
+                "mem_0123456789abcdef0123456789abcdef".to_string(),
+                "personality_core".to_string(),
+            ))),
+            vec![
+                "  Memory ID: mem_0123456789abcdef0123456789abcdef".to_string(),
+                "  Kind: personality_core".to_string(),
+            ]
+        );
     }
 }

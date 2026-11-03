@@ -293,14 +293,17 @@ impl MemoryLine {
             .structured
             .as_ref()
             .and_then(|structured| structured.get("nexus_legacy"));
+        // A record with no authored slug has no address on this surface, so it
+        // is not listed under one: a blank SLUG column named nothing (fix
+        // round 3, F6).
         Some(Self {
             slug: legacy
-                .and_then(|legacy| legacy["slug"].as_str())
-                .unwrap_or_default()
+                .and_then(|legacy| legacy["slug"].as_str())?
                 .to_string(),
             kind: legacy
                 .and_then(|legacy| legacy["memory_kind"].as_str())
-                .map_or_else(|| live.kind.as_str().to_string(), ToString::to_string),
+                .unwrap_or_else(|| memory_kind_label(live.kind.as_str()))
+                .to_string(),
             memory_id: legacy
                 .and_then(|legacy| legacy["memory_id"].as_str())
                 .map_or_else(|| live.record_id.as_str().to_string(), ToString::to_string),
@@ -318,6 +321,13 @@ impl MemoryLine {
             body: live.content.text.clone(),
         })
     }
+}
+
+/// The authored kind one record renders with: the `nexus.<MemoryKind>` namespace
+/// is transport (D-7), so a namespaced kind renders as its bare value. The
+/// stage-0 filter reads the same normalization.
+pub(crate) fn memory_kind_label(kind: &str) -> &str {
+    kind.strip_prefix("nexus.").unwrap_or(kind)
 }
 
 /// The retained "no such memory" refusal for one authored slug.
@@ -1229,5 +1239,92 @@ mod tests {
         let lines = review_human_lines(&drain_outcome(3, 50, true, false));
         assert!(lines[0].contains("promoted=3"), "{lines:?}");
         assert!(lines[1].contains("not fully drained"), "{lines:?}");
+    }
+
+    /// One retained record from its wire JSON (`RetainedRecord` has no literal
+    /// constructor); `legacy` is the record's authored `nexus_legacy` block.
+    fn retained(kind: &str, text: &str, legacy: Option<serde_json::Value>) -> RetainedRecord {
+        let mut record = serde_json::json!({
+            "record_id": format!("rec_{kind}_{text}"),
+            "space_id": "spc_local_default",
+            "subject_id": "sbj_test",
+            "kind": format!("nexus.{kind}"),
+            "content": { "text": text },
+            "extensions": {},
+            "scope": { "visibility": "shared" },
+            "provenance": {
+                "anchors": [],
+                "captured_at": "2026-01-01T00:00:00Z",
+                "captured_by": "nexus:legacy",
+                "source_context_ids": [],
+            },
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+            "revision": 1,
+            "schema_version": 1,
+        });
+        if let Some(legacy) = legacy {
+            record["content"]["structured"] = serde_json::json!({ "nexus_legacy": legacy });
+        }
+        serde_json::from_value(record).expect("retained record fixture")
+    }
+
+    /// F6 (BUG-03, `memory.rs:311`): a record without an authored slug is not
+    /// listed under a blank one, and a record kind the bridge did not author
+    /// renders as its bare kind instead of the `nexus.` namespace.
+    #[test]
+    fn memory_list_skips_slugless_records_and_renders_bare_kinds() {
+        let authored = retained(
+            "story_summary",
+            "Authored body.",
+            Some(serde_json::json!({
+                "slug": "authored-memory",
+                "memory_id": "mem_authored",
+                "memory_kind": "story_summary",
+                "updated_at": "2026-01-01T00:00:00Z",
+            })),
+        );
+        // No `nexus_legacy` at all: the provider's own record has no slug to
+        // address it by, so it is not a list row.
+        let slugless = retained("research_material", "Native body.", None);
+        assert!(MemoryLine::from_record(&slugless).is_none());
+
+        // A slug with no authored `memory_kind`: the kind fallback normalizes
+        // the record's namespaced kind.
+        let bare_kind = retained(
+            "research_material",
+            "Native body.",
+            Some(serde_json::json!({
+                "slug": "native-memory",
+                "memory_id": "rec_native",
+            })),
+        );
+        assert_eq!(
+            MemoryLine::from_record(&bare_kind).map(|row| row.kind),
+            Some("research_material".to_string())
+        );
+
+        let text = render_memory_list("ctr_test", &[authored, slugless, bare_kind]);
+        assert!(
+            text.contains(&format!(
+                "{:<30} {:<20} {}",
+                "authored-memory", "story_summary", "2026-01-01T00:00:00Z"
+            )),
+            "fixed-width row shape drifted: {text}"
+        );
+        // The bare-kind row's `updated_at` is the record's own provider
+        // timestamp (no authored `updated_at` in its legacy block).
+        assert!(
+            text.contains(&format!(
+                "{:<30} {:<20} {}",
+                "native-memory", "research_material", "2026-01-01T00:00:00+00:00"
+            )),
+            "bare kind row missing: {text}"
+        );
+        assert!(
+            !text.contains("rec_research_material"),
+            "the slugless record must not be listed: {text}"
+        );
+        assert!(text.ends_with("2 memories"), "{text}");
     }
 }

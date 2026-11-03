@@ -700,8 +700,10 @@ pub async fn promote_to_long_term<S: SessionDigestSummarizer>(
 
     // 6. Generate the authored slug from memory_id: only the leading `mem_`
     // prefix maps, so the derivation is one-to-one and two memories can never
-    // address one file.
-    let slug = crate::long_term_memory::slug_from_memory_id(&memory.frontmatter.memory_id);
+    // address one file. The id is minted by `LongTermMemory::new`, so a missing
+    // prefix is a broken local invariant, not a caller error.
+    let slug = crate::long_term_memory::slug_from_memory_id(&memory.frontmatter.memory_id)
+        .ok_or_else(|| MemoryError::InvalidIdFormat(memory.frontmatter.memory_id.clone()))?;
 
     // 7. Save via memory_io
     crate::memory_io::save_memory(home, bearer, &slug, &memory)?;

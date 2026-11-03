@@ -235,19 +235,22 @@ pub const MEMORY_ID_PREFIX: &str = "mem_";
 /// The slug prefix a minted `memory_id` maps to.
 pub const MEMORY_SLUG_PREFIX: &str = "memory-";
 
-/// The authored slug of a memory id: one-to-one with the id.
+/// The authored slug of a minted memory id: one-to-one with every accepted id.
 ///
 /// Only the leading `mem_` becomes `memory-` and everything after it stays
-/// verbatim, so distinct ids can never address one file. A global replace is
-/// not one-to-one: `mem_a_mem_b` and `mem_a_memory-b` both became
-/// `memory-a_memory-b`, and one of two promoted memories was unreachable by its
-/// slug (fix round 2, Greptile `memory_pipeline.rs:443`).
+/// verbatim. A global replace is not one-to-one: `mem_a_mem_b` and
+/// `mem_a_memory-b` both became `memory-a_memory-b`, and one of two promoted
+/// memories was unreachable by its slug (fix round 2, Greptile
+/// `memory_pipeline.rs:443`).
+///
+/// An id outside the `mem_` namespace has no slug: passing it through unchanged
+/// would let `memory-a` name the same file as `mem_a`, so the pair is refused
+/// rather than folded (fix round 3, Greptile `long_term_memory.rs:250`).
 #[must_use]
-pub fn slug_from_memory_id(memory_id: &str) -> String {
-    memory_id.strip_prefix(MEMORY_ID_PREFIX).map_or_else(
-        || memory_id.to_string(),
-        |rest| format!("{MEMORY_SLUG_PREFIX}{rest}"),
-    )
+pub fn slug_from_memory_id(memory_id: &str) -> Option<String> {
+    memory_id
+        .strip_prefix(MEMORY_ID_PREFIX)
+        .map(|rest| format!("{MEMORY_SLUG_PREFIX}{rest}"))
 }
 
 /// The exact source spans of a memory file's frontmatter and body.
@@ -605,6 +608,23 @@ Character analysis: Alice is a determined protagonist.
         assert!(!slug_is_safe("foo\0bar"));
         assert!(!slug_is_safe("foo\nbar"));
         assert!(!slug_is_safe("foo\tbar"));
+    }
+
+    #[test]
+    fn slug_from_memory_id_is_one_to_one_on_minted_ids() {
+        // The two ids a global replace folded into one slug stay distinct.
+        assert_eq!(
+            slug_from_memory_id("mem_a_mem_b").as_deref(),
+            Some("memory-a_mem_b")
+        );
+        assert_eq!(
+            slug_from_memory_id("mem_a_memory-b").as_deref(),
+            Some("memory-a_memory-b")
+        );
+        // `mem_a` and `memory-a` must not address one file: the out-of-namespace
+        // id has no slug at all.
+        assert_eq!(slug_from_memory_id("mem_a").as_deref(), Some("memory-a"));
+        assert_eq!(slug_from_memory_id("memory-a"), None);
     }
 
     #[test]

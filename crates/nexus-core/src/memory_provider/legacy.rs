@@ -286,7 +286,16 @@ pub(super) async fn records_in_tx(
     } else {
         LongTerm::None
     };
-    let mut rows = project_records(tx, roots, space_id, subject_id, &owner, long_term).await?;
+    let mut rows = project_records(
+        tx,
+        roots,
+        space_id,
+        subject_id,
+        &owner,
+        long_term,
+        Fragments::All,
+    )
+    .await?;
     rows.retain(|row| {
         selection_admits(selection, row)
             && provenance_admits(filter, row)
@@ -331,7 +340,30 @@ pub(super) async fn record_by_id_in_tx(
         }
         _ => LongTerm::None,
     };
-    let rows = project_records(tx, roots, space_id, &subject_id, &owner, long_term).await?;
+    // The requested row is selected before its keywords are parsed, so a
+    // damaged sibling fragment cannot fail a read of another memory.
+    let fragments = match family.as_str() {
+        FAMILY_MEMORY_FRAGMENTS | FAMILY_CHARACTER_FRAGMENTS => {
+            let Some(fragment_id) = components.first() else {
+                return Ok(None);
+            };
+            Fragments::Only {
+                family: family.as_str(),
+                fragment_id: fragment_id.as_str(),
+            }
+        }
+        _ => Fragments::None,
+    };
+    let rows = project_records(
+        tx,
+        roots,
+        space_id,
+        &subject_id,
+        &owner,
+        long_term,
+        fragments,
+    )
+    .await?;
     Ok(rows.into_iter().find(|row| row.record_id == record_id))
 }
 
@@ -722,6 +754,51 @@ enum LongTerm<'a> {
     None,
 }
 
+/// Which fragment rows a projection may parse keywords for.
+///
+/// A fragment's stored keyword list is authored content, so parsing it is the
+/// only part of a projection a malformed sibling row can break: a by-id read
+/// selects exactly the row it addresses and never parses another one's keywords
+/// (fix round 3, Greptile `legacy.rs:1717`); a list read and the migration
+/// snapshot project the whole family.
+#[derive(Clone, Copy)]
+enum Fragments<'a> {
+    /// Every row of the owner's fragment family.
+    All,
+    /// Only the row this external id names.
+    Only {
+        family: &'a str,
+        fragment_id: &'a str,
+    },
+    /// No row: a by-id read of another family.
+    None,
+}
+
+impl<'a> Fragments<'a> {
+    /// How the named fragment family projects under this selector.
+    fn select(&self, family: &str) -> FragmentSelect<'a> {
+        match *self {
+            Self::All => FragmentSelect::Family,
+            Self::Only {
+                family: asked,
+                fragment_id,
+            } if asked == family => FragmentSelect::Row(fragment_id),
+            Self::Only { .. } | Self::None => FragmentSelect::Skip,
+        }
+    }
+}
+
+/// How one fragment family projects under a [`Fragments`] selector.
+#[derive(Clone, Copy)]
+enum FragmentSelect<'a> {
+    /// Every row of the family.
+    Family,
+    /// Exactly the named row.
+    Row(&'a str),
+    /// No row at all.
+    Skip,
+}
+
 async fn project_records(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
     roots: &LegacyRoots,
@@ -729,15 +806,33 @@ async fn project_records(
     subject_id: &str,
     owner: &Owner,
     long_term: LongTerm<'_>,
+    fragments: Fragments<'_>,
 ) -> StoreResult<Vec<RecordRow>> {
     let mut rows = match owner {
         Owner::Creator => {
-            let mut rows = creator_fragments(tx, roots, space_id, subject_id).await?;
+            let mut rows = match fragments.select(FAMILY_MEMORY_FRAGMENTS) {
+                FragmentSelect::Family => {
+                    creator_fragments(tx, roots, space_id, subject_id, None).await?
+                }
+                FragmentSelect::Row(fragment_id) => {
+                    creator_fragments(tx, roots, space_id, subject_id, Some(fragment_id)).await?
+                }
+                FragmentSelect::Skip => Vec::new(),
+            };
             rows.extend(creator_narratives(tx, roots, space_id, subject_id).await?);
             rows
         }
         Owner::Character(character_id) => {
-            let mut rows = character_fragments(tx, space_id, subject_id, character_id).await?;
+            let mut rows = match fragments.select(FAMILY_CHARACTER_FRAGMENTS) {
+                FragmentSelect::Family => {
+                    character_fragments(tx, space_id, subject_id, character_id, None).await?
+                }
+                FragmentSelect::Row(fragment_id) => {
+                    character_fragments(tx, space_id, subject_id, character_id, Some(fragment_id))
+                        .await?
+                }
+                FragmentSelect::Skip => Vec::new(),
+            };
             rows.extend(character_narratives(tx, space_id, subject_id, character_id).await?);
             rows.extend(character_run_captures(tx, space_id, subject_id, character_id).await?);
             rows
@@ -765,12 +860,16 @@ async fn creator_fragments(
     roots: &LegacyRoots,
     space_id: &str,
     subject_id: &str,
+    only: Option<&str>,
 ) -> StoreResult<Vec<RecordRow>> {
     let rows = sqlx::query_as::<_, CreatorFragmentRow>(
         "SELECT fragment_id, session_id, keywords, summary, created_at, ttl, world_id \
-         FROM memory_fragments WHERE creator_id = ? ORDER BY created_at DESC, fragment_id DESC",
+         FROM memory_fragments WHERE creator_id = ? AND (? IS NULL OR fragment_id = ?) \
+         ORDER BY created_at DESC, fragment_id DESC",
     )
     .bind(&roots.creator_id)
+    .bind(only)
+    .bind(only)
     .fetch_all(&mut **tx)
     .await?;
     rows.into_iter()
@@ -837,13 +936,17 @@ async fn character_fragments(
     space_id: &str,
     subject_id: &str,
     character_id: &str,
+    only: Option<&str>,
 ) -> StoreResult<Vec<RecordRow>> {
     let rows = sqlx::query_as::<_, CharacterFragmentRow>(
         "SELECT fragment_id, session_id, actor_world_binding_id, keywords, summary, \
          created_at, ttl, revision FROM character_memory_fragments \
-         WHERE character_id = ? ORDER BY created_at DESC, fragment_id DESC",
+         WHERE character_id = ? AND (? IS NULL OR fragment_id = ?) \
+         ORDER BY created_at DESC, fragment_id DESC",
     )
     .bind(character_id)
+    .bind(only)
+    .bind(only)
     .fetch_all(&mut **tx)
     .await?;
     rows.into_iter()
@@ -1465,8 +1568,16 @@ pub(super) async fn migration_snapshot(
     let mut profiles = Vec::new();
     for owner in migration_owners(tx, roots).await? {
         let subject_id = migration_subject_id(tx, roots, space_id, &owner).await?;
-        let owner_records =
-            project_records(tx, roots, space_id, &subject_id, &owner, LongTerm::All).await?;
+        let owner_records = project_records(
+            tx,
+            roots,
+            space_id,
+            &subject_id,
+            &owner,
+            LongTerm::All,
+            Fragments::All,
+        )
+        .await?;
         let owner_candidates =
             candidates_for_owner(tx, roots, space_id, &subject_id, &owner).await?;
         let owner_profile = profile_of(roots, space_id, &subject_id, &owner)?;
@@ -1987,12 +2098,13 @@ mod tests {
             .expect("reopened database");
         let roots = LegacyRoots::new(tmp.path().to_path_buf(), CREATOR);
         let mut tx = pool.begin().await.expect("read transaction");
-        let creator_rows = creator_fragments(&mut tx, &roots, SPACE, "subj_creator")
+        let creator_rows = creator_fragments(&mut tx, &roots, SPACE, "subj_creator", None)
             .await
             .expect("creator fragments");
-        let character_rows = character_fragments(&mut tx, SPACE, "subj_character", &character_id)
-            .await
-            .expect("character fragments");
+        let character_rows =
+            character_fragments(&mut tx, SPACE, "subj_character", &character_id, None)
+                .await
+                .expect("character fragments");
         tx.rollback().await.expect("read-only transaction");
         pool.close().await;
 

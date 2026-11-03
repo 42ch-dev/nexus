@@ -412,21 +412,20 @@ async fn build_stage0_from_local(
 /// The stage-0 long-term-memory selection: every Creator contract record except
 /// `personality_core`, whose body is the SOUL personality section above.
 ///
-/// The assembly renders `memory_id`, `memory_kind`, `updated_at` and the body
-/// straight from the record's `nexus_legacy` block, so the typed records pass
-/// through unchanged (NXM-7's contract DTO).
+/// A tombstoned record is a memory the user deleted, so it never enters prompt
+/// assembly: only a live record with an authored kind is assembled (fix round 3,
+/// F4). The assembly renders `memory_id`, `memory_kind`, `updated_at` and the
+/// body straight from the record's `nexus_legacy` block, so the typed records
+/// pass through unchanged (NXM-7's contract DTO).
 fn stage0_memories(records: Vec<RetainedRecord>) -> Vec<RetainedRecord> {
     records
         .into_iter()
-        .filter(|record| {
-            let RetainedRecord::LiveRecord(live) = record else {
-                return true;
-            };
-            live.kind
-                .as_str()
-                .strip_prefix("nexus.")
-                .unwrap_or(live.kind.as_str())
-                != "personality_core"
+        .filter(|record| match record {
+            RetainedRecord::LiveRecord(live) => {
+                crate::commands::creator::memory::memory_kind_label(live.kind.as_str())
+                    != "personality_core"
+            }
+            RetainedRecord::TombstonedRecord(_) => false,
         })
         .collect()
 }
@@ -2220,5 +2219,56 @@ mod tests {
             conflict.is_err(),
             "--inspect + --emit-packet must be rejected by clap"
         );
+    }
+
+    /// One retained record from its wire JSON (`RetainedRecord` has no literal
+    /// constructor); `tombstoned` adds the audit block that selects the
+    /// tombstoned variant.
+    fn retained(kind: &str, text: &str, tombstoned: bool) -> RetainedRecord {
+        let mut record = serde_json::json!({
+            "record_id": format!("rec_{kind}_{text}"),
+            "space_id": "spc_local_default",
+            "subject_id": "sbj_test",
+            "kind": format!("nexus.{kind}"),
+            "content": { "text": text },
+            "extensions": {},
+            "scope": { "visibility": "shared" },
+            "provenance": {
+                "anchors": [],
+                "captured_at": "2026-01-01T00:00:00Z",
+                "captured_by": "nexus:legacy",
+                "source_context_ids": [],
+            },
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+            "revision": 1,
+            "schema_version": 1,
+        });
+        if tombstoned {
+            record["content"] = serde_json::json!({ "text": "" });
+            record["tombstone"] = serde_json::json!({
+                "deleted_at": "2026-01-02T00:00:00Z",
+                "deleted_by": "ctr_test",
+            });
+        }
+        serde_json::from_value(record).expect("retained record fixture")
+    }
+
+    /// F4 (BUG-01, `context.rs:432`): a user-deleted memory never enters prompt
+    /// assembly, and the SOUL personality record still stays out because its
+    /// body is already the personality section.
+    #[test]
+    fn stage0_drops_tombstoned_and_personality_records() {
+        let kept = retained("story_summary", "A live memory.", false);
+        let filtered = stage0_memories(vec![
+            kept,
+            retained("story_summary", "A deleted memory.", true),
+            retained("personality_core", "The personality section.", false),
+        ]);
+        assert_eq!(filtered.len(), 1, "only the live authored memory remains");
+        let RetainedRecord::LiveRecord(live) = &filtered[0] else {
+            panic!("a stage-0 memory is always live");
+        };
+        assert_eq!(live.content.text, "A live memory.");
     }
 }

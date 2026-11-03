@@ -6092,6 +6092,29 @@ async fn promoted_memory_slugs_stay_one_to_one() {
             "{slug} addresses its own promoted memory"
         );
     }
+
+    // Both promoted rows are listed under their own slug, so the second
+    // promotion overwrote nothing the first one stored.
+    let mut listed: Vec<String> = core
+        .list_creator_memories(&principal)
+        .await
+        .expect("creator memory list")
+        .iter()
+        .map(|record| serde_json::to_value(record).unwrap())
+        .filter_map(|record| {
+            record["content"]["structured"]["nexus_legacy"]["slug"]
+                .as_str()
+                .map(str::to_string)
+        })
+        .collect();
+    listed.sort();
+    assert_eq!(
+        listed,
+        [
+            "memory-a_mem_b".to_string(),
+            "memory-a_memory-b".to_string()
+        ]
+    );
 }
 
 /// F5 (`legacy.rs:1716`): a malformed stored `keywords` column is the module's
@@ -6119,6 +6142,73 @@ async fn malformed_legacy_keywords_are_a_corrupt_read() {
     pool.close().await;
 
     let (core, principal) = open_core(&env).await;
+    let error = core
+        .list_memory_fragments(&principal, None, None, 50)
+        .await
+        .expect_err("a malformed stored keyword list is a corrupt read");
+    match error {
+        CoreError::Internal { category } => assert!(
+            category.contains("legacy fragment keywords"),
+            "the corrupt answer names the damaged column: {category}"
+        ),
+        other => panic!("expected the corrupt-read internal error, got {other:?}"),
+    }
+}
+
+/// F1 (Greptile P1, `legacy.rs:1717`): the bridge parses a fragment's keywords
+/// only for the row a by-id read returns, so one damaged fragment cannot block
+/// showing, editing or deleting a valid memory of the same bearer.
+#[tokio::test]
+async fn damaged_fragment_does_not_block_unrelated_memory_reads() {
+    let env = seed_env().await;
+    let pool = plain_pool(&env).await;
+    nexus_local_db::memory_fragment::create_fragment(
+        &pool,
+        &nexus_local_db::memory_fragment::MemoryFragmentRecord {
+            fragment_id: "frag_damaged".to_string(),
+            session_id: "sess_damaged".to_string(),
+            creator_id: CREATOR.to_string(),
+            keywords: "{not a keyword list".to_string(),
+            summary: "A fragment whose stored keyword list is malformed.".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            ttl: None,
+            world_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let bearer = MemoryBearerRef::Creator(CREATOR);
+    let mut memory = nexus_creator_memory::LongTermMemory::new("story_summary");
+    memory.set_body("Legacy valid body.");
+    nexus_creator_memory::memory_io::save_memory(&env.user_home, bearer, "valid-memory", &memory)
+        .expect("long-term memory fixture");
+
+    let (core, principal) = open_core(&env).await;
+
+    // Show: the by-id read of the memory family never opens the fragment row.
+    let shown = serde_json::to_value(
+        core.get_creator_memory(&principal, "valid-memory")
+            .await
+            .expect("a damaged sibling fragment must not fail the read")
+            .expect("the valid memory is listed"),
+    )
+    .unwrap();
+    assert_eq!(shown["content"]["text"], "Legacy valid body.");
+
+    // Edit and delete resolve the same by-id projection before mutating.
+    assert!(core
+        .update_creator_memory(&principal, "valid-memory", "Edited body.", None)
+        .await
+        .expect("the edit is not blocked by a damaged sibling fragment"));
+    assert!(core
+        .delete_creator_memory(&principal, "valid-memory")
+        .await
+        .expect("the delete is not blocked by a damaged sibling fragment"));
+
+    // The damaged fragment itself is still a corrupt read: the row a read
+    // genuinely returns is parsed and refused.
     let error = core
         .list_memory_fragments(&principal, None, None, 50)
         .await
