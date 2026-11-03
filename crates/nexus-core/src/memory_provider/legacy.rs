@@ -119,7 +119,7 @@ const PENDING_REVIEW_DISPOSITION: &str = "fragment";
 /// (P5's migration key is `(space, source family, source primary key)`), so they
 /// name both the projected family and the id segment.
 const FAMILY_MEMORY_PENDING_REVIEW: &str = "memory_pending_review";
-const FAMILY_CHARACTER_PENDING_REVIEW: &str = "character_memory_pending_review";
+pub(crate) const FAMILY_CHARACTER_PENDING_REVIEW: &str = "character_memory_pending_review";
 const FAMILY_MEMORY_FRAGMENTS: &str = "memory_fragments";
 const FAMILY_CHARACTER_FRAGMENTS: &str = "character_memory_fragments";
 const FAMILY_MEMORY_NARRATIVES: &str = "memory_soul_narratives";

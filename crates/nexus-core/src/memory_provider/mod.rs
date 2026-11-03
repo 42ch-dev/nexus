@@ -2071,6 +2071,131 @@ impl LocalMemoryProvider {
         }
     }
 
+    /// §7.11 capture under a caller-fixed candidate id.
+    ///
+    /// The Character capture writes its provider candidate under the bridge's
+    /// deterministic id for the same `pending_id`, so the candidate still aligns
+    /// with an existing legacy row the bridge projects under that id, and the
+    /// capture is one authoritative provider write instead of a legacy insert
+    /// followed by an adoption (fix round 5, B1).
+    pub(crate) async fn capture_identified(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryCaptureRequest,
+        candidate_id: &str,
+    ) -> SpokeResult<schemas::MemoryCaptureResponse> {
+        self.capture_request(principal, request, Some(candidate_id))
+            .await
+    }
+
+    /// The §7.11 capture every entry point above runs; `candidate_id` fixes the
+    /// candidate's identity (and makes a repeat a no-op on the stored row),
+    /// `None` mints one.
+    async fn capture_request(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryCaptureRequest,
+        candidate_id: Option<&str>,
+    ) -> SpokeResult<schemas::MemoryCaptureResponse> {
+        let principal_id = principal_id(principal);
+        if let SpokeResult::Reject(reject) =
+            validate_memory_capture(&request, policy::max_content_bytes())
+        {
+            return deny(&ProviderError::InvalidInput {
+                field: "content".to_string(),
+                reason: reject.message,
+            });
+        }
+        let op = OP_CAPTURE;
+        let digest = match payload_digest(op, &request) {
+            Ok(digest) => digest,
+            Err(error) => return deny(&error),
+        };
+        let ctx = OpContext {
+            space_id: request.space_id.as_str(),
+            requester_principal_id: principal_id,
+            op,
+            idempotency_key: Some(request.idempotency_key.as_str()),
+            payload_digest: &digest,
+        };
+        let subject_id = request.subject_id.as_str();
+        // §7.11: `capture_scope` is the admitted placement and becomes the
+        // candidate's immutable authorization fence.
+        let placement = match &request.capture_scope {
+            schemas::memory_capture_request::PlacementScope::Shared => Placement {
+                visibility: Placement::SHARED,
+                context_id: None,
+            },
+            schemas::memory_capture_request::PlacementScope::Context(context_id) => Placement {
+                visibility: Placement::CONTEXT,
+                context_id: Some(context_id.as_str()),
+            },
+        };
+        let requirements = [placement_requirement("capture", subject_id, placement)];
+        let admission = Admission {
+            op,
+            space_id: request.space_id.as_str(),
+            principal_id,
+            coverage: Coverage::Requirements(&requirements),
+            issuance: None,
+            subject_gate: Some(subject_id),
+            placement_gate: Some(placement),
+            freeze_gated: true,
+        };
+        let now = Utc::now();
+        let kind = candidate_kind(request.kind_hint.as_ref().map(|hint| hint.as_str()));
+        let classification = policy::classify(
+            request.content.text.as_str(),
+            request.kind_hint.as_ref().map(|hint| hint.as_str()),
+        );
+        let content = match to_json(&request.content, "capture content") {
+            Ok(content) => content,
+            Err(error) => return deny(&error),
+        };
+        let anchors = match to_json(&request.anchors, "capture anchors") {
+            Ok(anchors) => anchors,
+            Err(error) => return deny(&error),
+        };
+        let provenance = json!({
+            "source_context_ids": request.source_context_ids,
+            "anchors": anchors,
+            "captured_by": principal_id,
+            "captured_at": storage::timestamp(now),
+        });
+        let classification_json = json!({
+            "disposition": classification.disposition,
+            "rationale_codes": classification.rationale_codes,
+        });
+        let occurred_at = request.occurred_at.map(storage::timestamp);
+        // §7.11/§6.7: the advisory classifier can leave a capture with no
+        // candidate at all; that is a committed outcome with its count recorded.
+        let keep_existing = candidate_id.is_some();
+        let candidate_id = candidate_id.map_or_else(storage::mint_candidate_id, str::to_string);
+        let candidates: Vec<NewCandidate<'_>> = if classification.disposition == "drop" {
+            Vec::new()
+        } else {
+            vec![NewCandidate {
+                candidate_id: candidate_id.as_str(),
+                subject_id,
+                placement,
+                kind: kind.as_str(),
+                content: &content,
+                provenance: &provenance,
+                classification: &classification_json,
+                occurred_at: occurred_at.as_deref(),
+                expires_at: None,
+            }]
+        };
+        match self
+            .store
+            .capture(&ctx, &admission, &candidates, keep_existing)
+            .await
+        {
+            Ok(receipt) => settle_receipt(&receipt),
+            Err(error) => deny(&store_error(error)),
+        }
+    }
+
     /// One §7.18 edit, adopting a still-projected record inside the edit.
     pub async fn update_legacy_record(
         &self,
@@ -2282,6 +2407,106 @@ impl LocalMemoryProvider {
             Ok(receipt) => settle_receipt(&receipt),
             Err(error) => deny(&store_error(error)),
         }
+    }
+}
+
+/// The §7.20 record list with the legacy bridge's projection made optional.
+///
+/// A provider-native read (`project_legacy = false`) serves the provider's own
+/// rows only: resolving a promoted memory by its authored slug must not parse
+/// an unrelated bearer file, because one malformed memory would then break the
+/// read of another (fix round 5, B2). Authorization, paging and the cursor are
+/// the list op's own either way.
+impl LocalMemoryProvider {
+    pub(crate) async fn list_records_scoped(
+        &self,
+        principal: &schemas::Principal,
+        request: schemas::MemoryRecordsListRequest,
+        project_legacy: bool,
+    ) -> SpokeResult<schemas::MemoryRecordsListResponse> {
+        use schemas::memory_records_list_request::ReadSelection;
+
+        let principal_id = principal_id(principal);
+        if let SpokeResult::Reject(reject) =
+            validate_memory_records_list(&request, policy::MAX_PAGE_SIZE_BOUND)
+        {
+            return deny(&ProviderError::InvalidInput {
+                field: "selection".to_string(),
+                reason: reject.message,
+            });
+        }
+        let selection = match &request.selection {
+            ReadSelection::SubjectAll => Selection::SubjectAll,
+            ReadSelection::SharedOnly => Selection::SharedOnly,
+            ReadSelection::SelectedContexts {
+                context_ids,
+                include_shared,
+            } => Selection::SelectedContexts {
+                context_ids: context_ids.clone(),
+                include_shared: include_shared.unwrap_or(false),
+            },
+        };
+        let filter: Option<Vec<String>> = request
+            .filter
+            .as_ref()
+            .map(|filter| filter.source_context_ids.clone());
+        let scope = format!(
+            "{}|sel={}|filter={}|kinds={}|tombstoned={}",
+            cursor_scope(
+                OP_RECORDS_LIST,
+                Some(request.space_id.as_str()),
+                Some(request.subject_id.as_str()),
+                None,
+            ),
+            selection_key(&selection),
+            filter_key(filter.as_deref()),
+            request.kinds.join(","),
+            request.include_tombstoned
+        );
+        // §7.0.7/MEM-R026: the cursor's offset selects the SQL page; its marker
+        // is verified against the snapshot the page was read in.
+        let (offset, claimed) =
+            match cursor_page(cursor_text(request.cursor.as_ref()), principal_id, &scope) {
+                Ok(page) => page,
+                Err(error) => return deny(&error),
+            };
+        let (rows, marker, total) = match self
+            .store
+            .records(
+                request.space_id.as_str(),
+                request.subject_id.as_str(),
+                &selection,
+                filter.as_deref(),
+                &request.kinds,
+                request.include_tombstoned,
+                RecordRead::List,
+                principal_id,
+                Some((page_limit(request.limit), offset)),
+                project_legacy,
+            )
+            .await
+        {
+            Ok(page) => page,
+            Err(error) => return deny(&store_error(error)),
+        };
+        if let Err(error) = verify_cursor(claimed.as_deref(), &marker) {
+            return deny(&error);
+        }
+        let consumed = offset.saturating_add(u64::try_from(rows.len()).unwrap_or(u64::MAX));
+        let next = (consumed < total).then_some(consumed);
+        let mut bodies = Vec::with_capacity(rows.len());
+        for row in &rows {
+            match record_body(row) {
+                Ok(body) => bodies.push(body),
+                Err(error) => return deny(&error),
+            }
+        }
+        let next_cursor = next.map(|offset| encode_cursor(principal_id, &scope, offset, &marker));
+        respond(json!({
+            "records": bodies,
+            "total_authorized": total,
+            "next_cursor": next_cursor,
+        }))
     }
 }
 
@@ -2708,98 +2933,7 @@ impl MemoryPort for LocalMemoryProvider {
         principal: &schemas::Principal,
         request: schemas::MemoryCaptureRequest,
     ) -> SpokeResult<schemas::MemoryCaptureResponse> {
-        let principal_id = principal_id(principal);
-        if let SpokeResult::Reject(reject) =
-            validate_memory_capture(&request, policy::max_content_bytes())
-        {
-            return deny(&ProviderError::InvalidInput {
-                field: "content".to_string(),
-                reason: reject.message,
-            });
-        }
-        let op = OP_CAPTURE;
-        let digest = match payload_digest(op, &request) {
-            Ok(digest) => digest,
-            Err(error) => return deny(&error),
-        };
-        let ctx = OpContext {
-            space_id: request.space_id.as_str(),
-            requester_principal_id: principal_id,
-            op,
-            idempotency_key: Some(request.idempotency_key.as_str()),
-            payload_digest: &digest,
-        };
-        let subject_id = request.subject_id.as_str();
-        // §7.11: `capture_scope` is the admitted placement and becomes the
-        // candidate's immutable authorization fence.
-        let placement = match &request.capture_scope {
-            schemas::memory_capture_request::PlacementScope::Shared => Placement {
-                visibility: Placement::SHARED,
-                context_id: None,
-            },
-            schemas::memory_capture_request::PlacementScope::Context(context_id) => Placement {
-                visibility: Placement::CONTEXT,
-                context_id: Some(context_id.as_str()),
-            },
-        };
-        let requirements = [placement_requirement("capture", subject_id, placement)];
-        let admission = Admission {
-            op,
-            space_id: request.space_id.as_str(),
-            principal_id,
-            coverage: Coverage::Requirements(&requirements),
-            issuance: None,
-            subject_gate: Some(subject_id),
-            placement_gate: Some(placement),
-            freeze_gated: true,
-        };
-        let now = Utc::now();
-        let kind = candidate_kind(request.kind_hint.as_ref().map(|hint| hint.as_str()));
-        let classification = policy::classify(
-            request.content.text.as_str(),
-            request.kind_hint.as_ref().map(|hint| hint.as_str()),
-        );
-        let content = match to_json(&request.content, "capture content") {
-            Ok(content) => content,
-            Err(error) => return deny(&error),
-        };
-        let anchors = match to_json(&request.anchors, "capture anchors") {
-            Ok(anchors) => anchors,
-            Err(error) => return deny(&error),
-        };
-        let provenance = json!({
-            "source_context_ids": request.source_context_ids,
-            "anchors": anchors,
-            "captured_by": principal_id,
-            "captured_at": storage::timestamp(now),
-        });
-        let classification_json = json!({
-            "disposition": classification.disposition,
-            "rationale_codes": classification.rationale_codes,
-        });
-        let occurred_at = request.occurred_at.map(storage::timestamp);
-        // §7.11/§6.7: the advisory classifier can leave a capture with no
-        // candidate at all; that is a committed outcome with its count recorded.
-        let candidate_id = storage::mint_candidate_id();
-        let candidates: Vec<NewCandidate<'_>> = if classification.disposition == "drop" {
-            Vec::new()
-        } else {
-            vec![NewCandidate {
-                candidate_id: candidate_id.as_str(),
-                subject_id,
-                placement,
-                kind: kind.as_str(),
-                content: &content,
-                provenance: &provenance,
-                classification: &classification_json,
-                occurred_at: occurred_at.as_deref(),
-                expires_at: None,
-            }]
-        };
-        match self.store.capture(&ctx, &admission, &candidates).await {
-            Ok(receipt) => settle_receipt(&receipt),
-            Err(error) => deny(&store_error(error)),
-        }
+        self.capture_request(principal, request, None).await
     }
 
     async fn list_candidates(
@@ -3113,88 +3247,7 @@ impl MemoryPort for LocalMemoryProvider {
         principal: &schemas::Principal,
         request: schemas::MemoryRecordsListRequest,
     ) -> SpokeResult<schemas::MemoryRecordsListResponse> {
-        use schemas::memory_records_list_request::ReadSelection;
-
-        let principal_id = principal_id(principal);
-        if let SpokeResult::Reject(reject) =
-            validate_memory_records_list(&request, policy::MAX_PAGE_SIZE_BOUND)
-        {
-            return deny(&ProviderError::InvalidInput {
-                field: "selection".to_string(),
-                reason: reject.message,
-            });
-        }
-        let selection = match &request.selection {
-            ReadSelection::SubjectAll => Selection::SubjectAll,
-            ReadSelection::SharedOnly => Selection::SharedOnly,
-            ReadSelection::SelectedContexts {
-                context_ids,
-                include_shared,
-            } => Selection::SelectedContexts {
-                context_ids: context_ids.clone(),
-                include_shared: include_shared.unwrap_or(false),
-            },
-        };
-        let filter: Option<Vec<String>> = request
-            .filter
-            .as_ref()
-            .map(|filter| filter.source_context_ids.clone());
-        let scope = format!(
-            "{}|sel={}|filter={}|kinds={}|tombstoned={}",
-            cursor_scope(
-                OP_RECORDS_LIST,
-                Some(request.space_id.as_str()),
-                Some(request.subject_id.as_str()),
-                None,
-            ),
-            selection_key(&selection),
-            filter_key(filter.as_deref()),
-            request.kinds.join(","),
-            request.include_tombstoned
-        );
-        // §7.0.7/MEM-R026: the cursor's offset selects the SQL page; its marker
-        // is verified against the snapshot the page was read in.
-        let (offset, claimed) =
-            match cursor_page(cursor_text(request.cursor.as_ref()), principal_id, &scope) {
-                Ok(page) => page,
-                Err(error) => return deny(&error),
-            };
-        let (rows, marker, total) = match self
-            .store
-            .records(
-                request.space_id.as_str(),
-                request.subject_id.as_str(),
-                &selection,
-                filter.as_deref(),
-                &request.kinds,
-                request.include_tombstoned,
-                RecordRead::List,
-                principal_id,
-                Some((page_limit(request.limit), offset)),
-            )
-            .await
-        {
-            Ok(page) => page,
-            Err(error) => return deny(&store_error(error)),
-        };
-        if let Err(error) = verify_cursor(claimed.as_deref(), &marker) {
-            return deny(&error);
-        }
-        let consumed = offset.saturating_add(u64::try_from(rows.len()).unwrap_or(u64::MAX));
-        let next = (consumed < total).then_some(consumed);
-        let mut bodies = Vec::with_capacity(rows.len());
-        for row in &rows {
-            match record_body(row) {
-                Ok(body) => bodies.push(body),
-                Err(error) => return deny(&error),
-            }
-        }
-        let next_cursor = next.map(|offset| encode_cursor(principal_id, &scope, offset, &marker));
-        respond(json!({
-            "records": bodies,
-            "total_authorized": total,
-            "next_cursor": next_cursor,
-        }))
+        self.list_records_scoped(principal, request, true).await
     }
 
     async fn promote_record(
@@ -3305,6 +3358,7 @@ impl MemoryPort for LocalMemoryProvider {
                 RecordRead::Recall,
                 principal_id,
                 None,
+                true,
             )
             .await
         {

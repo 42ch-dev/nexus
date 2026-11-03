@@ -3189,7 +3189,7 @@ async fn dismissal_adopts_the_projected_row_before_consuming_it() {
 }
 
 #[tokio::test]
-async fn character_dismissal_adopts_the_projected_row_before_consuming_it() {
+async fn character_dismissal_consumes_the_captured_row_under_its_bridge_id() {
     let env = seed_env().await;
     let (core, principal) = open_core(&env).await;
     let chr = env.character_id.clone();
@@ -3208,7 +3208,7 @@ async fn character_dismissal_adopts_the_projected_row_before_consuming_it() {
 
     core.delete_character_pending_review(&principal, chr.clone(), "pend_char_adopt".to_string())
         .await
-        .expect("the projected row is adopted, then dismissed");
+        .expect("the captured row is consumed under its bridge id");
 
     assert_eq!(
         adopted_candidate(
@@ -3573,8 +3573,8 @@ async fn dismissed_character_digest_is_never_classified_by_the_review_drain() {
             "SELECT COUNT(*) FROM character_memory_pending_review"
         )
         .await,
-        2,
-        "the drain writes no legacy row; both queued rows stay untouched"
+        0,
+        "the captures wrote no legacy row at all; both rows are provider candidates"
     );
     pool.close().await;
 }
@@ -4238,8 +4238,8 @@ async fn character_dismissal_cannot_commit_inside_the_review_decision() {
             "SELECT COUNT(*) FROM character_memory_pending_review"
         )
         .await,
-        1,
-        "the drain consumes the provider candidate, never the legacy row"
+        0,
+        "the capture wrote no legacy row; the drain consumed the provider candidate"
     );
     pool.close().await;
 }
@@ -4372,7 +4372,8 @@ async fn character_dismissal_between_check_and_classification_is_reverified() {
             "SELECT COUNT(*) FROM character_memory_pending_review"
         )
         .await,
-        1
+        0,
+        "the capture wrote no legacy row and the dismissal consumed the provider candidate"
     );
     pool.close().await;
 }
@@ -6217,6 +6218,232 @@ async fn damaged_fragment_does_not_block_unrelated_memory_reads() {
         CoreError::Internal { category } => assert!(
             category.contains("legacy fragment keywords"),
             "the corrupt answer names the damaged column: {category}"
+        ),
+        other => panic!("expected the corrupt-read internal error, got {other:?}"),
+    }
+}
+
+// ═══ PR #469 fix round 5: final-review blockers ═════════════════════════════
+
+/// B1 (`memory.rs:1856`): the Character capture is one authoritative provider
+/// write. It never inserts a legacy queue row (so there is no window in which a
+/// legacy row exists without its provider successor), it keeps the bridge's
+/// deterministic candidate id and placement, a re-delivered digest replays
+/// instead of duplicating, and list / count / dismissal / review all serve it.
+#[tokio::test]
+async fn character_capture_is_one_provider_write_served_by_every_reader() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let chr = env.character_id.clone();
+    let bind = env.binding_id.clone();
+
+    // One shared and one binding-local capture, each delivered twice: the
+    // re-delivery replays the stored capture instead of writing a second row.
+    for (pending_id, binding) in [
+        ("pend_shared_write", None),
+        ("pend_local_write", Some(bind.as_str())),
+    ] {
+        for attempt in 0..2 {
+            core.capture_character_pending_review(
+                &principal,
+                chr.clone(),
+                dto(json_capture(pending_id, binding, "2026-05-01T00:00:01Z")),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("capture attempt {attempt}: {error:?}"));
+        }
+    }
+
+    // The legacy queue is never written, and the provider holds exactly the two
+    // candidates under the bridge's deterministic ids and placements.
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM character_memory_pending_review"
+        )
+        .await,
+        0,
+        "the Character capture writes no legacy queue row"
+    );
+    let candidates: Vec<(String, String, Option<String>)> = sqlx::query_as(
+        "SELECT candidate_id, status, capture_context_id FROM memory_candidates \
+         WHERE subject_id = ? ORDER BY candidate_id",
+    )
+    .bind(legacy::character_subject_id(&chr))
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        candidates,
+        vec![
+            (
+                legacy::character_pending_review_candidate_id("pend_local_write"),
+                "pending".to_string(),
+                Some(bind.clone()),
+            ),
+            (
+                legacy::character_pending_review_candidate_id("pend_shared_write"),
+                "pending".to_string(),
+                None,
+            ),
+        ],
+        "one row per capture, under the bridge id and the captured placement"
+    );
+    pool.close().await;
+
+    // The retained readers serve both captures, scope-exactly.
+    let shared = core
+        .list_character_pending_reviews(&principal, chr.clone(), None, 50, 0)
+        .await
+        .expect("list shared");
+    assert_eq!(shared.items.len(), 1);
+    assert_eq!(shared.items[0].pending_id.as_str(), "pend_shared_write");
+    assert!(shared.items[0].binding_id.is_none());
+    let local = core
+        .list_character_pending_reviews(&principal, chr.clone(), Some(bind.clone()), 50, 0)
+        .await
+        .expect("list binding-local");
+    assert_eq!(local.items.len(), 1);
+    assert_eq!(local.items[0].pending_id.as_str(), "pend_local_write");
+    assert_eq!(
+        local.items[0].binding_id.as_ref().map(|id| id.as_str()),
+        Some(bind.as_str())
+    );
+    assert_eq!(
+        core.count_character_pending_reviews(&principal, chr.clone(), None)
+            .await
+            .unwrap()
+            .count,
+        1
+    );
+    assert_eq!(
+        core.count_character_pending_reviews(&principal, chr.clone(), Some(bind.clone()))
+            .await
+            .unwrap()
+            .count,
+        1
+    );
+
+    // Dismissal consumes the shared capture, and the review drain consumes the
+    // binding-local one.
+    core.delete_character_pending_review(&principal, chr.clone(), "pend_shared_write".to_string())
+        .await
+        .expect("dismiss the shared capture");
+    assert_eq!(
+        core.count_character_pending_reviews(&principal, chr.clone(), None)
+            .await
+            .unwrap()
+            .count,
+        0
+    );
+    let reviewed = core
+        .review_character_memory(
+            &principal,
+            chr.clone(),
+            dto::<ReviewCharacterMemoryRequest>(serde_json::json!({ "binding_id": bind.clone() })),
+        )
+        .await
+        .expect("review drains the binding-local capture");
+    assert_eq!(reviewed.processed, Some(1), "the capture reached the drain");
+    assert_eq!(reviewed.fragmented, 1);
+    assert_eq!(
+        core.list_character_memory_fragments(&principal, chr.clone(), Some(bind), 50, 0)
+            .await
+            .unwrap()
+            .fragments
+            .len(),
+        1,
+        "the review saw the capture"
+    );
+}
+
+/// B2 (`memory.rs:645`): a provider-native promoted memory resolves by its
+/// authored slug without projecting the legacy long-term directory, so one
+/// damaged unrelated memory file cannot break its show/edit/delete. A read that
+/// genuinely returns the damaged file still refuses.
+#[tokio::test]
+async fn a_damaged_memory_file_does_not_break_a_promoted_memory_by_slug() {
+    let env = seed_env().await;
+    let pool = plain_pool(&env).await;
+    nexus_local_db::create_pending_review(
+        &pool,
+        &nexus_local_db::PendingReviewRecord {
+            pending_id: "a_mem_b".to_string(),
+            session_id: "sess_a_mem_b".to_string(),
+            creator_id: CREATOR.to_string(),
+            world_id: None,
+            task_kind: "chapter".to_string(),
+            raw_digest: PROMOTE_DIGEST.to_string(),
+            created_at: "2026-01-01T00:00:01Z".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let (core, principal) = open_core(&env).await;
+    let reviewed = core
+        .review_memory(
+            &principal,
+            dto::<ReviewRequest>(serde_json::json!({ "creator_id": CREATOR })),
+        )
+        .await
+        .expect("creator review batch");
+    assert_eq!(reviewed.promoted, 1, "one provider-native memory");
+    let slug = "memory-a_mem_b";
+
+    // An unrelated, damaged legacy memory file in the same bearer directory.
+    let bearer = MemoryBearerRef::Creator(CREATOR);
+    let dir = bearer
+        .validated_long_term_memory_dir(&env.user_home)
+        .expect("creator memory dir");
+    std::fs::create_dir_all(&dir).expect("creator memory dir");
+    std::fs::write(dir.join("broken.md"), "---\n[unclosed: yaml\n---\nbody\n")
+        .expect("malformed memory fixture");
+
+    // Show resolves the promoted record by its authored slug.
+    let shown = serde_json::to_value(
+        core.get_creator_memory(&principal, slug)
+            .await
+            .expect("the by-slug read ignores the damaged unrelated file")
+            .expect("the promoted memory is served"),
+    )
+    .unwrap();
+    assert_eq!(shown["content"]["structured"]["nexus_legacy"]["slug"], slug);
+
+    // Edit and delete resolve the same record before mutating.
+    assert!(core
+        .update_creator_memory(&principal, slug, "Edited promoted body.", None)
+        .await
+        .expect("the edit is not blocked by the damaged unrelated file"));
+    let edited = serde_json::to_value(
+        core.get_creator_memory(&principal, slug)
+            .await
+            .expect("the edited record still resolves")
+            .expect("the edited memory is served"),
+    )
+    .unwrap();
+    assert_eq!(edited["content"]["text"], "Edited promoted body.");
+    assert!(core
+        .delete_creator_memory(&principal, slug)
+        .await
+        .expect("the delete is not blocked by the damaged unrelated file"));
+    assert!(core
+        .get_creator_memory(&principal, slug)
+        .await
+        .expect("the deleted slug is absent, not corrupt")
+        .is_none());
+
+    // The damaged file is still refused by the read that returns it.
+    let error = core
+        .list_creator_memories(&principal)
+        .await
+        .expect_err("a read that genuinely returns the damaged file fails");
+    match error {
+        CoreError::Internal { category } => assert!(
+            category.contains("legacy bearer file"),
+            "the corrupt answer names the damaged file: {category}"
         ),
         other => panic!("expected the corrupt-read internal error, got {other:?}"),
     }

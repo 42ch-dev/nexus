@@ -407,6 +407,33 @@ impl MemoryAdapter {
         filter: Option<&[String]>,
         want: Option<usize>,
     ) -> CoreResult<Vec<Value>> {
+        self.records_from(selection, kinds, filter, want, true)
+            .await
+    }
+
+    /// The Creator's authored long-term records as the provider itself stores
+    /// them, without the bridge's projection.
+    ///
+    /// A promoted memory is provider-native (a minted id) and carries its slug
+    /// only as authored content, so it can be found only by the authored-kind
+    /// read — but the merged read would open every bearer memory file, and one
+    /// malformed file must not break the read of another (fix round 5, B2).
+    async fn native_records(&self) -> CoreResult<Vec<Value>> {
+        let kinds = creator_record_kinds();
+        let kinds: Vec<&str> = kinds.iter().map(String::as_str).collect();
+        self.records_from(json!({ "mode": "shared_only" }), &kinds, None, None, false)
+            .await
+    }
+
+    /// [`Self::records`] with the legacy bridge's projection made optional.
+    async fn records_from(
+        &self,
+        selection: Value,
+        kinds: &[&str],
+        filter: Option<&[String]>,
+        want: Option<usize>,
+        project_legacy: bool,
+    ) -> CoreResult<Vec<Value>> {
         let mut rows: Vec<Value> = Vec::new();
         let mut cursor: Option<String> = None;
         loop {
@@ -419,7 +446,11 @@ impl MemoryAdapter {
                 "limit": MEMORY_PAGE_SIZE,
                 "cursor": cursor,
             }))?;
-            let body = memory_ok(self.provider.list_records(&self.principal, request).await)?;
+            let body = memory_ok(
+                self.provider
+                    .list_records_scoped(&self.principal, request, project_legacy)
+                    .await,
+            )?;
             rows.extend(body["records"].as_array().cloned().unwrap_or_default());
             if want.is_some_and(|want| rows.len() >= want) {
                 break;
@@ -648,16 +679,16 @@ impl MemoryAdapter {
     /// exactly that record and never parses another bearer file (one malformed
     /// memory must not break this read — fix round 1, Greptile `legacy.rs:270`).
     /// A promoted memory is provider-native (a minted id) and only carries the
-    /// slug as authored content, so that case still needs the authored-kind
-    /// read and the match after it.
+    /// slug as authored content, so that case reads the provider's own records
+    /// with the authored kinds — again without projecting a bearer file, so a
+    /// damaged unrelated memory cannot break it (fix round 5, B2).
     async fn memory_by_slug(&self, creator_id: &str, slug: &str) -> CoreResult<Option<Value>> {
         let record_id = legacy::memory_long_term_record_id(creator_id, slug);
         let stored = self.record(&record_id).await?;
         // The by-id read serves a tombstone to admin coverage; the slug read is
         // the creator's own listing surface, where a deleted memory is absent.
         // Anything the deterministic id does not serve falls through to the
-        // authored-kind scan, which excludes tombstones and legacy rows the
-        // provider owns.
+        // authored-kind read of provider rows, which excludes tombstones.
         if stored
             .as_ref()
             .is_some_and(|record| record.get("tombstone").is_none())
@@ -665,7 +696,7 @@ impl MemoryAdapter {
             return Ok(stored);
         }
         Ok(self
-            .memory_records()
+            .native_records()
             .await?
             .into_iter()
             .find(|record| creator_slug(record) == Some(slug)))
@@ -1801,13 +1832,22 @@ impl CoreService {
 
 impl CoreService {
     /// Capture one session digest into an owned Character's pending-review
-    /// queue. Holds the per-Character activity lease across the guarded
-    /// insert (404 foreign/missing, 409 `character_inactive` for an archived
-    /// Character).
+    /// queue. Holds the per-Character activity lease across the capture (404
+    /// foreign/missing, 409 `character_inactive` for an archived Character).
+    ///
+    /// The capture is one provider write (fix round 5, B1): the candidate lands
+    /// on the pinned `MemoryPort` under the bridge's deterministic id for this
+    /// `pending_id`, and `content.structured.nexus_legacy` carries the retained
+    /// fields the pending-review DTOs render. The legacy queue is never written,
+    /// so there is no window in which a legacy row exists without its provider
+    /// successor, and the capture stays visible after the one-shot migration
+    /// turns the legacy queue reads off.
     ///
     /// # Errors
     /// As [`Self::acquire_actor_activity`], plus `invalid_input` for malformed
-    /// capture fields and the mapped storage error otherwise.
+    /// capture fields, the binding admission an active binding of this Character
+    /// on an owned active World (`actor_not_found`), and the mapped storage
+    /// error otherwise.
     pub async fn capture_character_pending_review(
         &self,
         principal: &Principal,
@@ -1834,43 +1874,66 @@ impl CoreService {
             .unwrap_or("unknown")
             .to_string();
         let raw_digest = request.raw_digest.as_str().to_string();
-        let created_at = request
-            .created_at
-            .map_or_else(|| chrono::Utc::now().to_rfc3339(), |t| t.to_rfc3339());
+        // A capture without an explicit timestamp keeps none: the provider's own
+        // candidate instant is what the pending DTO then serves, so a retried
+        // capture reaches the same receipt instead of regenerating a different
+        // payload (the Creator arm's F4 rule).
+        let created_at = request.created_at.map(|instant| instant.to_rfc3339());
 
         validate_capture_input(&request, &raw_digest)?;
 
         let memory = self
             .character_memory_writer(principal, &character_id)
             .await?;
-        let record = nexus_local_db::CharacterPendingReviewRecord {
-            pending_id: pending_id.clone(),
-            session_id,
-            character_id: character_id.clone(),
-            actor_world_binding_id: binding_id.map(str::to_string),
-            task_kind,
-            raw_digest,
-            created_at,
-            source_operation_id: None,
-        };
-        nexus_local_db::create_character_pending_review(
+        // The binding the legacy insert admitted is still admitted, now as a
+        // read: this Character's own active binding on an owned active World.
+        nexus_local_db::require_character_binding_provenance(
             &self.inner.pool,
             principal.creator_id(),
-            &record,
+            &character_id,
+            binding_id,
         )
         .await
         .map_err(map_local_db_error)?;
-        // The capture lands on the provider now, not when a reader first adopts
-        // it: after the one-shot migration the legacy queue is not read at all,
-        // so a legacy-only write would be invisible to the list, count,
-        // dismissal and review paths (fix round 1, Greptile `legacy.rs:318`).
+        let mut origin = json!({
+            "family": legacy::FAMILY_CHARACTER_PENDING_REVIEW,
+            "pending_id": pending_id.as_str(),
+            "session_id": session_id.as_str(),
+            "actor_world_binding_id": binding_id,
+            "task_kind": task_kind.as_str(),
+            "raw_digest": raw_digest.as_str(),
+            "source_operation_id": Value::Null,
+        });
+        if let Some(created_at) = created_at.as_deref() {
+            origin["created_at"] = json!(created_at);
+        }
+        let capture: spoke_schemas::MemoryCaptureRequest = map_wire(json!({
+            "space_id": MEMORY_SPACE_ID,
+            "subject_id": memory.subject_id.as_str(),
+            "content": {
+                "text": raw_digest.as_str(),
+                "structured": { "nexus_legacy": origin },
+            },
+            // The placement the bridge projects for this row: a binding-local
+            // capture is a context placement on that binding, a shared capture
+            // carries none.
+            "capture_scope": binding_id.map_or_else(
+                || json!({ "visibility": "shared" }),
+                |binding| json!({ "visibility": "context", "context_id": binding }),
+            ),
+            "source_context_ids": binding_id.iter().collect::<Vec<_>>(),
+            // A non-empty hint keeps the advisory classifier from dropping a
+            // capture: every accepted digest must reach the queue.
+            "kind_hint": task_kind_to_memory_kind(&task_kind),
+            "idempotency_key": character_capture_key(&pending_id)?,
+        }))?;
         let candidate_id = legacy::character_pending_review_candidate_id(&pending_id);
         match memory
             .provider
-            .adopt_legacy_candidate(&memory.principal, memory.subject_id(), &candidate_id)
+            .capture_identified(&memory.principal, capture, &candidate_id)
             .await
         {
-            SpokeResult::Ok(()) => {}
+            SpokeResult::Ok(_) => {}
             SpokeResult::Reject(reject) => return Err(memory_reject(&reject)),
         }
 
@@ -2365,6 +2428,17 @@ fn validate_capture_input(
         optional_str(request.task_kind.as_ref()),
         None,
     )
+}
+
+/// The Character capture's idempotency key: the `pending_id` names one logical
+/// capture, so a re-delivered digest replays the stored outcome instead of
+/// duplicating it. The arm prefix keeps it disjoint from the Creator arm's key
+/// for the same `pending_id` (both arms share the capture op's dedup namespace).
+fn character_capture_key(pending_id: &str) -> CoreResult<String> {
+    match spoke_operations::jcs_sha256_hex(&json!(pending_id)) {
+        SpokeResult::Ok(digest) => Ok(format!("e4capture:character:{digest}")),
+        SpokeResult::Reject(reject) => Err(memory_reject(&reject)),
+    }
 }
 
 /// The capture-field validation both memory bearers share (a Character capture

@@ -4456,8 +4456,11 @@ fn legacy_create(
 }
 
 /// Session-end capture-queue rows (memory candidates) the guarded store holds.
+///
+/// A Character capture is one provider write (PR #469 fix round 5, B1), so the
+/// provider's candidate table — never the retired legacy queue — is the pin.
 async fn memory_candidates(env: &Env) -> i64 {
-    sqlx::query_scalar("SELECT COUNT(*) FROM character_memory_pending_review")
+    sqlx::query_scalar("SELECT COUNT(*) FROM memory_candidates")
         .fetch_one(&plain_pool(env).await)
         .await
         .unwrap()

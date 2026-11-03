@@ -343,6 +343,80 @@ async fn legacy_tables(pool: &SqlitePool) -> Vec<(String, Vec<String>)> {
     out
 }
 
+/// The index of one column in [`table_rows`]' rendering of a table (the
+/// columns are `pragma_table_info`'s order).
+async fn column_index(pool: &SqlitePool, table: &str, column: &str) -> usize {
+    sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
+        "SELECT name FROM pragma_table_info('{table}')"
+    )))
+    .fetch_all(pool)
+    .await
+    .unwrap()
+    .iter()
+    .position(|name| name == column)
+    .unwrap_or_else(|| panic!("{table} carries the {column} column"))
+}
+
+/// One row's cells as a canonical JSON string, so two renderings compare byte
+/// for byte.
+fn canonical(cells: &[serde_json::Value]) -> String {
+    serde_json::Value::Array(cells.to_vec()).to_string()
+}
+
+/// [`table_rows`] rows as canonical cell arrays, in a stable order that does not
+/// depend on the rendered text.
+fn row_cells(rows: &[String]) -> Vec<String> {
+    let mut cells: Vec<String> = rows
+        .iter()
+        .map(|row| {
+            canonical(
+                &serde_json::from_str::<Vec<serde_json::Value>>(row)
+                    .expect("table_rows renders a JSON array"),
+            )
+        })
+        .collect();
+    cells.sort();
+    cells
+}
+
+/// [`row_cells`] with the `binding` column of every row that held `released`
+/// rendered the way SQLite renders a NULL there (`quote(NULL)` is the text
+/// `NULL`): the comparison a provenance release must satisfy — every other
+/// column byte-identical, and every other row untouched.
+///
+/// `revision` names the row's OCC counter where the table's own writer-protocol
+/// trigger bumps it on every update (`bump_character_memory_fragments_revision`):
+/// that derived `revision + 1` is the release's only other effect, never a
+/// content rewrite.
+fn released_cells(
+    rows: &[String],
+    binding: usize,
+    released: &str,
+    revision: Option<usize>,
+) -> Vec<String> {
+    let released = serde_json::Value::String(format!("'{released}'"));
+    let mut cells: Vec<String> = rows
+        .iter()
+        .map(|row| {
+            let mut cells: Vec<serde_json::Value> =
+                serde_json::from_str(row).expect("table_rows renders a JSON array");
+            if cells[binding] == released {
+                cells[binding] = serde_json::Value::String("NULL".to_string());
+                if let Some(revision) = revision {
+                    let current: i64 = cells[revision]
+                        .as_str()
+                        .and_then(|raw| raw.parse().ok())
+                        .expect("the OCC revision renders as an integer");
+                    cells[revision] = serde_json::Value::String((current + 1).to_string());
+                }
+            }
+            canonical(&cells)
+        })
+        .collect();
+    cells.sort();
+    cells
+}
+
 fn files_under(root: &Path, out: &mut Vec<(PathBuf, Vec<u8>)>) {
     let Ok(entries) = std::fs::read_dir(root) else {
         return;
@@ -1646,9 +1720,42 @@ async fn migration_accepts_a_binding_release_made_before_the_pass() {
     )
     .await
     .expect("dismiss the binding-local review");
+    // B3 (PM ruling): the provenance release is legacy-domain foreign-key
+    // bookkeeping, so it may clear only `actor_world_binding_id` — every other
+    // column of the retained rows must survive byte-identically (the fragment
+    // table's own OCC trigger is the one derived change: any update bumps
+    // `revision`).
+    let pool = plain_pool(&env).await;
+    let pending_table = "character_memory_pending_review";
+    let fragment_table = "character_memory_fragments";
+    let pending_before = table_rows(&pool, pending_table).await;
+    let fragment_before = table_rows(&pool, fragment_table).await;
+    let pending_binding = column_index(&pool, pending_table, "actor_world_binding_id").await;
+    let fragment_binding = column_index(&pool, fragment_table, "actor_world_binding_id").await;
+    let fragment_revision = column_index(&pool, fragment_table, "revision").await;
+    pool.close().await;
+
     core.remove_binding(&principal, character_id.clone(), second.clone())
         .await
         .expect("the released rows no longer hold the binding");
+
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        row_cells(&table_rows(&pool, pending_table).await),
+        released_cells(&pending_before, pending_binding, &second, None),
+        "the removal releases only the retained review row's binding column"
+    );
+    assert_eq!(
+        row_cells(&table_rows(&pool, fragment_table).await),
+        released_cells(
+            &fragment_before,
+            fragment_binding,
+            &second,
+            Some(fragment_revision)
+        ),
+        "the removal releases only the retained fragment row's binding column"
+    );
+    pool.close().await;
 
     let migration = core.migrate_legacy_content(&principal).await.unwrap();
     assert_eq!(migration.status, LegacyMigrationStatus::Migrated);

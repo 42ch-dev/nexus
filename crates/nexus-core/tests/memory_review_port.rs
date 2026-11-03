@@ -223,14 +223,15 @@ async fn binding_local_promote_is_coerced_to_a_fact_fragment() {
     assert_eq!(reviewed.processed, Some(1));
     assert_eq!(reviewed.has_more, Some(false));
 
-    // The candidate was consumed under the bridge's deterministic id, and the
-    // legacy queue row the bridge projected it from was never written.
+    // The candidate was written by the capture under the bridge's deterministic
+    // id and then consumed by the drain: the legacy queue is never written at
+    // all (fix round 5, B1 — the capture is one provider write).
     let pool = db_pool(&env).await;
     let candidate_id = legacy::character_pending_review_candidate_id("pend_coerce");
     assert_eq!(
         provider_candidate(&pool, &candidate_id).await,
         Some(("consumed".to_string(), Some(binding_id.clone()))),
-        "the drain adopts and consumes the projected candidate"
+        "the capture lands on the provider under the bridge id, and the drain consumes it"
     );
     assert_eq!(
         count_rows(
@@ -238,7 +239,7 @@ async fn binding_local_promote_is_coerced_to_a_fact_fragment() {
             "SELECT COUNT(*) FROM character_memory_pending_review"
         )
         .await,
-        1,
+        0,
         "the legacy pending table stays write-idle (D6)"
     );
     assert_eq!(

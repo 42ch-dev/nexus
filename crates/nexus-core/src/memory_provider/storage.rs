@@ -4354,11 +4354,20 @@ impl MemoryStore {
     }
 
     /// §7.11: admission + candidate inserts + receipt, one transaction.
+    ///
+    /// `keep_existing` is the caller's identity guarantee: a capture whose
+    /// candidate id is deterministic (the Character capture's bridge id) may
+    /// find that id already stored — an earlier capture, or a legacy row the
+    /// bridge adopted under the same id — and the retained answer for a
+    /// re-delivered capture is the same success the legacy queue's
+    /// `INSERT OR IGNORE` gave, so the insert leaves the stored row in place.
+    /// A minted id keeps the strict insert.
     pub(super) async fn capture(
         &self,
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
         candidates: &[NewCandidate<'_>],
+        keep_existing: bool,
     ) -> StoreResult<ReceiptRow> {
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
@@ -4368,28 +4377,37 @@ impl MemoryStore {
         gate(&mut tx, admission).await?;
         let at = timestamp(now);
         let mut ids = Vec::with_capacity(candidates.len());
+        let conflict = if keep_existing {
+            " ON CONFLICT(candidate_id) DO NOTHING"
+        } else {
+            ""
+        };
+        let insert = format!(
+            "INSERT INTO memory_candidates \
+             (candidate_id, space_id, subject_id, capture_visibility, capture_context_id, kind, \
+              content_json, provenance_json, classification_json, status, consumed_by_json, \
+              content_digest, occurred_at, expires_at, revision, created_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, ?, ?, 1, ?){conflict}"
+        );
         for candidate in candidates {
-            sqlx::query(
-                "INSERT INTO memory_candidates \
-                 (candidate_id, space_id, subject_id, capture_visibility, capture_context_id, kind, \
-                  content_json, provenance_json, classification_json, status, consumed_by_json, \
-                  content_digest, occurred_at, expires_at, revision, created_at) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, ?, ?, 1, ?)",
-            )
-            .bind(candidate.candidate_id)
-            .bind(ctx.space_id)
-            .bind(candidate.subject_id)
-            .bind(candidate.placement.visibility)
-            .bind(candidate.placement.context_id)
-            .bind(candidate.kind)
-            .bind(serialize(candidate.content, "candidate content")?)
-            .bind(serialize(candidate.provenance, "candidate provenance")?)
-            .bind(serialize(candidate.classification, "candidate classification")?)
-            .bind(candidate.occurred_at)
-            .bind(candidate.expires_at)
-            .bind(&at)
-            .execute(&mut *tx)
-            .await?;
+            sqlx::query(sqlx::AssertSqlSafe(insert.clone()))
+                .bind(candidate.candidate_id)
+                .bind(ctx.space_id)
+                .bind(candidate.subject_id)
+                .bind(candidate.placement.visibility)
+                .bind(candidate.placement.context_id)
+                .bind(candidate.kind)
+                .bind(serialize(candidate.content, "candidate content")?)
+                .bind(serialize(candidate.provenance, "candidate provenance")?)
+                .bind(serialize(
+                    candidate.classification,
+                    "candidate classification",
+                )?)
+                .bind(candidate.occurred_at)
+                .bind(candidate.expires_at)
+                .bind(&at)
+                .execute(&mut *tx)
+                .await?;
             ids.push(candidate.candidate_id.to_string());
         }
         let classified = ids.len();
@@ -4916,6 +4934,7 @@ impl MemoryStore {
         read: RecordRead,
         principal_id: &str,
         page: Option<(u64, u64)>,
+        project_legacy: bool,
     ) -> StoreResult<(Vec<RecordRow>, String, u64)> {
         self.require_provisioned(space_id).await?;
         let (mut tx, now) = self.begin_read().await?;
@@ -4978,18 +4997,24 @@ impl MemoryStore {
         );
         // Legacy read bridge (NXM-5 Task 1): the subject's unmigrated content is
         // projected through the same predicate, so the page below is a slice of
-        // one authorized set spanning both sources.
-        let legacy_rows = legacy::records_in_tx(
-            &mut tx,
-            &self.legacy,
-            space_id,
-            subject_row.as_ref(),
-            subject_id,
-            selection,
-            filter,
-            kinds,
-        )
-        .await?;
+        // one authorized set spanning both sources. A provider-only read skips
+        // the projection entirely: resolving a provider-native slug must not
+        // parse a bearer file (fix round 5, B2).
+        let legacy_rows = if project_legacy {
+            legacy::records_in_tx(
+                &mut tx,
+                &self.legacy,
+                space_id,
+                subject_row.as_ref(),
+                subject_id,
+                selection,
+                filter,
+                kinds,
+            )
+            .await?
+        } else {
+            Vec::new()
+        };
         let projected = !legacy_rows.is_empty();
         // A projected row inserts itself into the order, so the SQL half returns
         // a prefix that cannot omit a provider row of the merged page: a provider
