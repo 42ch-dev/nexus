@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT (\n                   (SELECT COUNT(*) FROM character_memory_pending_review l\n                    WHERE l.actor_world_binding_id = ?\n                      AND NOT EXISTS (\n                          SELECT 1 FROM memory_candidates c\n                          WHERE c.candidate_id =\n                              'lgc:character_memory_pending_review:' || l.pending_id)) +\n                   (SELECT COUNT(*) FROM memory_candidates c\n                    WHERE c.capture_context_id = ? AND c.status = 'pending') +\n                   (SELECT COUNT(*) FROM character_memory_fragments l\n                    WHERE l.actor_world_binding_id = ?\n                      AND NOT EXISTS (\n                          SELECT 1 FROM memory_records r\n                          WHERE r.record_id =\n                              'lgc:character_memory_fragments:' || l.fragment_id)) +\n                   (SELECT COUNT(*) FROM memory_records r\n                    WHERE r.scope_context_id = ? AND r.tombstone_json IS NULL) +\n                   (SELECT COUNT(*) FROM character_soul_narratives\n                    WHERE actor_world_binding_id = ?)\n                  ) as \"count!: i64\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "count!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "31c604959043df9ea3521c10c42df69181fe35bdca7513870f5a769a2510d299"
+}

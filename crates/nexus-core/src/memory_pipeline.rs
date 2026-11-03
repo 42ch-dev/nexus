@@ -440,7 +440,7 @@ async fn promote_decision(
     // (fix round 1, Greptile `memory_pipeline.rs:441`).
     let memory_kind = nexus_creator_memory::review::task_kind_to_memory_kind(&input.task_kind);
     let memory_id = format!("mem_{}", input.pending_id);
-    let slug = memory_id.replace("mem_", "memory-");
+    let slug = nexus_creator_memory::long_term_memory::slug_from_memory_id(&memory_id);
     Ok(json!({
         "action": "promote",
         "kind": crate::memory_provider::policy::namespaced_record_kind(memory_kind),

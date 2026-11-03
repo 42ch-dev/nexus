@@ -167,7 +167,8 @@ async fn creator_promote_output_shape_is_stable() {
     );
 
     // Slug derivation is pinned: `mem_<id>` → `memory-<id>`.
-    let expected_slug = memory.frontmatter.memory_id.replace("mem_", "memory-");
+    let expected_slug =
+        nexus_creator_memory::long_term_memory::slug_from_memory_id(&memory.frontmatter.memory_id);
     let file = memory_io::memory_path(&home, creator(), &expected_slug);
     assert!(file.exists(), "promoted memory file at {file:?}");
 

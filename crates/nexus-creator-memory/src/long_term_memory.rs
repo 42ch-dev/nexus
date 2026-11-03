@@ -229,6 +229,27 @@ pub fn slug_is_safe(slug: &str) -> bool {
         && !slug.chars().any(char::is_control)
 }
 
+/// The `memory_id` prefix a minted id carries.
+pub const MEMORY_ID_PREFIX: &str = "mem_";
+
+/// The slug prefix a minted `memory_id` maps to.
+pub const MEMORY_SLUG_PREFIX: &str = "memory-";
+
+/// The authored slug of a memory id: one-to-one with the id.
+///
+/// Only the leading `mem_` becomes `memory-` and everything after it stays
+/// verbatim, so distinct ids can never address one file. A global replace is
+/// not one-to-one: `mem_a_mem_b` and `mem_a_memory-b` both became
+/// `memory-a_memory-b`, and one of two promoted memories was unreachable by its
+/// slug (fix round 2, Greptile `memory_pipeline.rs:443`).
+#[must_use]
+pub fn slug_from_memory_id(memory_id: &str) -> String {
+    memory_id.strip_prefix(MEMORY_ID_PREFIX).map_or_else(
+        || memory_id.to_string(),
+        |rest| format!("{MEMORY_SLUG_PREFIX}{rest}"),
+    )
+}
+
 /// The exact source spans of a memory file's frontmatter and body.
 ///
 /// Each span starts at the authored text, after the line break that ends the

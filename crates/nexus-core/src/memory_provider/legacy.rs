@@ -768,7 +768,7 @@ async fn creator_fragments(
 ) -> StoreResult<Vec<RecordRow>> {
     let rows = sqlx::query_as::<_, CreatorFragmentRow>(
         "SELECT fragment_id, session_id, keywords, summary, created_at, ttl, world_id \
-         FROM memory_fragments WHERE creator_id = ? ORDER BY created_at DESC, fragment_id",
+         FROM memory_fragments WHERE creator_id = ? ORDER BY created_at DESC, fragment_id DESC",
     )
     .bind(&roots.creator_id)
     .fetch_all(&mut **tx)
@@ -792,7 +792,7 @@ async fn creator_fragments(
                     "family": FAMILY_MEMORY_FRAGMENTS,
                     "fragment_id": fragment_id,
                     "session_id": session_id,
-                    "keywords": keywords_json(&keywords),
+                    "keywords": keywords_json(&keywords)?,
                     "ttl": ttl,
                     "world_id": world_id,
                     // The E4 DTO serves the legacy column verbatim (D5); the
@@ -841,7 +841,7 @@ async fn character_fragments(
     let rows = sqlx::query_as::<_, CharacterFragmentRow>(
         "SELECT fragment_id, session_id, actor_world_binding_id, keywords, summary, \
          created_at, ttl, revision FROM character_memory_fragments \
-         WHERE character_id = ? ORDER BY created_at DESC, fragment_id",
+         WHERE character_id = ? ORDER BY created_at DESC, fragment_id DESC",
     )
     .bind(character_id)
     .fetch_all(&mut **tx)
@@ -869,7 +869,7 @@ async fn character_fragments(
                     "fragment_id": fragment_id,
                     "session_id": session_id,
                     "actor_world_binding_id": actor_world_binding_id,
-                    "keywords": keywords_json(&keywords),
+                    "keywords": keywords_json(&keywords)?,
                     "ttl": ttl,
                     // The E4 DTO serves the legacy column verbatim (D5).
                     "created_at": raw_created_at,
@@ -1709,10 +1709,12 @@ const fn binding_visibility(binding_id: Option<&str>) -> &'static str {
     }
 }
 
-/// E4 tolerates a malformed `keywords` column as empty (its own fragment
-/// projection does), so the bridge reports the same value it would.
-fn keywords_json(raw: &str) -> Vec<String> {
-    serde_json::from_str(raw).unwrap_or_default()
+/// The parsed `keywords` column. A malformed stored value is the module's
+/// `Corrupt` answer — the same discipline every other unparsable legacy value
+/// gets — never a silently empty keyword list that hides the damaged row.
+fn keywords_json(raw: &str) -> StoreResult<Vec<String>> {
+    serde_json::from_str(raw)
+        .map_err(|error| StoreError::Corrupt(format!("legacy fragment keywords: {error}")))
 }
 
 /// One UTC rendering of a legacy timestamp that keeps the precision the legacy
@@ -1881,6 +1883,140 @@ mod tests {
         assert_eq!(
             provider_timestamp("2026-11-02T08:05:00.900Z"),
             "2026-11-02T08:05:00Z"
+        );
+    }
+
+    /// One row of each fragment family, both created in the same instant, so the
+    /// projection order is decided by the legacy tie-break alone. Returns the
+    /// Character that owns the Character family.
+    async fn seed_same_instant_fragments(home: &std::path::Path) -> String {
+        const CREATOR: &str = "ctr_fragment_order";
+        const WORLD: &str = "wld_fragment_order";
+        const CREATED_AT: &str = "2026-02-01T00:00:00Z";
+
+        let guarded = nexus_local_db::writer_protocol::init_engine_pool(
+            &home.join("state.db"),
+            CREATOR,
+            nexus_local_db::writer_protocol::GuardedPoolOptions::default(),
+        )
+        .await
+        .expect("migrated database");
+        let pool = guarded.clone_pool();
+        nexus_local_db::ensure_creator_row(&pool, CREATOR, "Owner")
+            .await
+            .expect("creator row");
+        sqlx::query(
+            "INSERT INTO narrative_worlds \
+             (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+              time_policy, metadata_json, created_at) \
+             VALUES (?, 'wrk', ?, ?, ?, 'active', 'private', 'manual', '{}', datetime('now'))",
+        )
+        .bind(WORLD)
+        .bind(CREATOR)
+        .bind(WORLD)
+        .bind(WORLD)
+        .execute(&pool)
+        .await
+        .expect("world row");
+        let created = nexus_local_db::create_character_with_initial_binding(
+            &pool,
+            nexus_local_db::CreateCharacterParams {
+                owner_creator_id: CREATOR,
+                display_name: "Ada",
+                image_uri: None,
+                persona_json: "{}",
+                world_id: WORLD,
+                world_sheet_entry_id: None,
+            },
+        )
+        .await
+        .expect("character row");
+        let character_id = created.character.character_id.clone();
+        for fragment_id in ["frag_a", "frag_b"] {
+            nexus_local_db::memory_fragment::create_fragment(
+                &pool,
+                &nexus_local_db::memory_fragment::MemoryFragmentRecord {
+                    fragment_id: fragment_id.to_string(),
+                    session_id: "sess_order".to_string(),
+                    creator_id: CREATOR.to_string(),
+                    keywords: "[]".to_string(),
+                    summary: format!("Creator fragment {fragment_id}."),
+                    created_at: CREATED_AT.to_string(),
+                    ttl: None,
+                    world_id: Some(WORLD.to_string()),
+                },
+            )
+            .await
+            .expect("creator fragment");
+            nexus_local_db::create_character_fragment(
+                &pool,
+                CREATOR,
+                &nexus_local_db::NewCharacterMemoryFragment {
+                    fragment_id: fragment_id.to_string(),
+                    session_id: "sess_order".to_string(),
+                    character_id: character_id.clone(),
+                    actor_world_binding_id: None,
+                    keywords: "[]".to_string(),
+                    summary: format!("Character fragment {fragment_id}."),
+                    created_at: CREATED_AT.to_string(),
+                    ttl: None,
+                },
+            )
+            .await
+            .expect("character fragment");
+        }
+
+        pool.close().await;
+        drop(guarded);
+        character_id
+    }
+
+    /// F6 (`legacy.rs:770-771/841-845`): both fragment families project in the
+    /// order the legacy per-scope read served — the RAW `created_at` TEXT
+    /// descending, then `fragment_id` descending — including the tie-break
+    /// between two rows created in the same instant.
+    #[tokio::test]
+    async fn fragment_projections_keep_the_legacy_tie_break() {
+        const CREATOR: &str = "ctr_fragment_order";
+        const SPACE: &str = "spc_fragment_order";
+
+        let tmp = tempfile::tempdir().expect("temp home");
+        let character_id = seed_same_instant_fragments(tmp.path()).await;
+        let pool = nexus_local_db::open_pool(&tmp.path().join("state.db"))
+            .await
+            .expect("reopened database");
+        let roots = LegacyRoots::new(tmp.path().to_path_buf(), CREATOR);
+        let mut tx = pool.begin().await.expect("read transaction");
+        let creator_rows = creator_fragments(&mut tx, &roots, SPACE, "subj_creator")
+            .await
+            .expect("creator fragments");
+        let character_rows = character_fragments(&mut tx, SPACE, "subj_character", &character_id)
+            .await
+            .expect("character fragments");
+        tx.rollback().await.expect("read-only transaction");
+        pool.close().await;
+
+        assert_eq!(
+            creator_rows
+                .iter()
+                .map(|row| row.record_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                external_id(FAMILY_MEMORY_FRAGMENTS, &["frag_b"]),
+                external_id(FAMILY_MEMORY_FRAGMENTS, &["frag_a"]),
+            ],
+            "the creator family keeps the legacy `fragment_id DESC` tie-break"
+        );
+        assert_eq!(
+            character_rows
+                .iter()
+                .map(|row| row.record_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                external_id(FAMILY_CHARACTER_FRAGMENTS, &["frag_b"]),
+                external_id(FAMILY_CHARACTER_FRAGMENTS, &["frag_a"]),
+            ],
+            "the character family keeps the legacy `fragment_id DESC` tie-break"
         );
     }
 }

@@ -706,8 +706,8 @@ async fn remove_binding_tx(
     // candidate and a tombstoned record carry no body to read the legacy
     // identity from. Narrative cache rows have no provider counterpart yet and
     // keep counting.
-    let local_memory: i64 = sqlx::query_scalar(
-        r"SELECT (
+    let local_memory = sqlx::query_scalar!(
+        r#"SELECT (
                    (SELECT COUNT(*) FROM character_memory_pending_review l
                     WHERE l.actor_world_binding_id = ?
                       AND NOT EXISTS (
@@ -726,13 +726,13 @@ async fn remove_binding_tx(
                     WHERE r.scope_context_id = ? AND r.tombstone_json IS NULL) +
                    (SELECT COUNT(*) FROM character_soul_narratives
                     WHERE actor_world_binding_id = ?)
-                  )",
+                  ) as "count!: i64""#,
+        binding_id,
+        binding_id,
+        binding_id,
+        binding_id,
+        binding_id
     )
-    .bind(binding_id)
-    .bind(binding_id)
-    .bind(binding_id)
-    .bind(binding_id)
-    .bind(binding_id)
     .fetch_one(&mut **tx)
     .await?;
     if local_memory > 0 {
@@ -745,24 +745,24 @@ async fn remove_binding_tx(
     // binding in their foreign key (`ON DELETE RESTRICT`), so removal releases
     // that provenance the way the legacy local→shared promotion does: the row
     // stays, the binding it no longer holds goes.
-    sqlx::query(
+    sqlx::query!(
         r"UPDATE character_memory_pending_review SET actor_world_binding_id = NULL
           WHERE actor_world_binding_id = ?
             AND EXISTS (SELECT 1 FROM memory_candidates c
                         WHERE c.candidate_id =
                             'lgc:character_memory_pending_review:' || pending_id)",
+        binding_id
     )
-    .bind(binding_id)
     .execute(&mut **tx)
     .await?;
-    sqlx::query(
+    sqlx::query!(
         r"UPDATE character_memory_fragments SET actor_world_binding_id = NULL
           WHERE actor_world_binding_id = ?
             AND EXISTS (SELECT 1 FROM memory_records r
                         WHERE r.record_id =
                             'lgc:character_memory_fragments:' || fragment_id)",
+        binding_id
     )
-    .bind(binding_id)
     .execute(&mut **tx)
     .await?;
 

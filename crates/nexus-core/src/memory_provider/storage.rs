@@ -3233,7 +3233,7 @@ async fn provider_candidate_ids(
 }
 
 /// A pending/consumed review candidate as stored (§6.7).
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Clone, Debug, sqlx::FromRow)]
 pub(super) struct CandidateRow {
     pub candidate_id: String,
     pub space_id: String,
@@ -3294,7 +3294,7 @@ fn candidate_requirement<'a>(
 }
 
 /// A retained record as stored (§6.6).
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Clone, Debug, sqlx::FromRow)]
 pub(super) struct RecordRow {
     pub record_id: String,
     pub space_id: String,
@@ -3337,7 +3337,7 @@ impl RecordRow {
 }
 
 /// A trusted authored subject document as stored (§6.8).
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Clone, Debug, sqlx::FromRow)]
 pub(super) struct ProfileRow {
     pub space_id: String,
     pub subject_id: String,
@@ -3984,8 +3984,44 @@ async fn insert_legacy_profile(
 /// projection (D13), so a legitimate successor may differ in all of them.
 fn same_legacy_record(stored: &RecordRow, projected: &RecordRow) -> bool {
     stored.subject_id == projected.subject_id
-        && stored.provenance_json == projected.provenance_json
+        && same_legacy_provenance(&stored.provenance_json, &projected.provenance_json)
         && stored.created_at == projected.created_at
+}
+
+/// Whether two bridge provenances still name the same legacy object.
+///
+/// The bridge's own claim — `captured_by` and `captured_at` (with the empty
+/// anchor set) — is the identity. `source_context_ids` is the placement
+/// provenance a binding removal releases on the retained legacy row (F2), so a
+/// projection that lost exactly that list is still the successor's source;
+/// anything else, including a foreign or malformed claim, must compare equal.
+fn same_legacy_provenance(stored: &str, projected: &str) -> bool {
+    if stored == projected {
+        return true;
+    }
+    let (Ok(stored), Ok(projected)) = (
+        serde_json::from_str::<Value>(stored),
+        serde_json::from_str::<Value>(projected),
+    ) else {
+        return false;
+    };
+    let released = |value: &Value| {
+        value
+            .get("source_context_ids")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
+    };
+    let names_a_source = |value: &Value| {
+        value
+            .get("source_context_ids")
+            .and_then(Value::as_array)
+            .is_some_and(|ids| !ids.is_empty())
+    };
+    stored["captured_by"] == projected["captured_by"]
+        && stored["captured_at"] == projected["captured_at"]
+        && stored["anchors"] == projected["anchors"]
+        && names_a_source(&stored)
+        && released(&projected)
 }
 
 /// A provider row that already owns a candidate's migrated id must still be
@@ -4015,7 +4051,12 @@ fn require_same_candidate(stored: &CandidateRow, projected: &CandidateRow) -> St
         && stored.occurred_at == projected.occurred_at
         && stored.expires_at == projected.expires_at
         && stored.revision == projected.revision
-        && stored.created_at == projected.created_at
+        // Adoption writes the provider's whole-second rendering into the
+        // column, while the projection keeps the legacy precision, so the two
+        // values compare at the precision the provider actually stores (F1:
+        // the same creation instant, not the same text).
+        && legacy::provider_timestamp(&stored.created_at)
+            == legacy::provider_timestamp(&projected.created_at)
     {
         return Ok(());
     }
@@ -4033,32 +4074,43 @@ fn require_same_candidate(stored: &CandidateRow, projected: &CandidateRow) -> St
 /// with a projected id without carrying that legacy identity is unrelated
 /// content, and the pass refuses instead of absorbing it.
 ///
-/// The legacy source snapshot is kept beside the served one (`source_digest`):
-/// a re-run still detects a source that moved, while the values the marker
-/// records are the served ones.
+/// The marker records the **served** values beside the legacy source they came
+/// from (`source_digest`), so a re-run detects a source that moved. The source
+/// is normalized for a legitimate binding release: an owned row's source value
+/// gets back the binding its successor still names, because recording the
+/// released projection instead would re-conflict a release the gate proved
+/// legitimate (F2) without protecting anything a read serves.
 async fn resolve_legacy_snapshot(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     space_id: &str,
     snapshot: &mut legacy::MigrationSnapshot,
 ) -> StoreResult<()> {
-    let source_digest = snapshot.manifest["digest"].clone();
+    let mut source_records = Vec::with_capacity(snapshot.records.len());
     for row in &mut snapshot.records {
-        let Some(stored) = record_in_tx(tx, space_id, row.record_id.as_str()).await? else {
-            continue;
-        };
-        if !same_legacy_record(&stored, row) {
-            return Err(StoreError::IdempotencyConflict);
+        let stored = record_in_tx(tx, space_id, row.record_id.as_str()).await?;
+        if let Some(stored) = &stored {
+            if !same_legacy_record(stored, row) {
+                return Err(StoreError::IdempotencyConflict);
+            }
+            restore_released_record_binding(stored, row)?;
         }
-        *row = stored;
+        source_records.push(row.clone());
+        if let Some(stored) = stored {
+            *row = stored;
+        }
     }
     for row in &mut snapshot.candidates {
-        if let Some(stored) = candidate_in_tx(tx, space_id, row.candidate_id.as_str()).await? {
-            require_same_candidate(&stored, row)?;
-        }
+        let Some(stored) = candidate_in_tx(tx, space_id, row.candidate_id.as_str()).await? else {
+            continue;
+        };
+        restore_released_binding(&stored, row)?;
+        require_same_candidate(&stored, row)?;
     }
+    let mut source_profiles = Vec::with_capacity(snapshot.profiles.len());
     for row in &mut snapshot.profiles {
-        let Some(stored) = profile_in_tx(tx, space_id, &row.subject_id, &row.profile_kind).await?
-        else {
+        let stored = profile_in_tx(tx, space_id, &row.subject_id, &row.profile_kind).await?;
+        source_profiles.push(row.clone());
+        let Some(stored) = stored else {
             continue;
         };
         // The stored profile of the subject's kind *is* that document: a
@@ -4066,14 +4118,106 @@ async fn resolve_legacy_snapshot(
         // projection, so its document and revision are the provider's own.
         *row = stored;
     }
+    let source =
+        legacy::migration_manifest(&source_records, &snapshot.candidates, &source_profiles)?;
     let served =
         legacy::migration_manifest(&snapshot.records, &snapshot.candidates, &snapshot.profiles)?;
     snapshot.manifest = json!({
         "digest": served["digest"],
-        "source_digest": source_digest,
+        "source_digest": source["digest"],
         "counts": served["counts"],
         "families": served["families"],
     });
+    Ok(())
+}
+
+/// The record half of [`restore_released_binding`]: a binding removal clears the
+/// legacy fragment row's binding, so its projection loses the placement and the
+/// `actor_world_binding_id` content member the successor's provenance still
+/// names. A row that still projects a binding, or whose successor never named
+/// one, is left exactly as it projects.
+fn restore_released_record_binding(
+    stored: &RecordRow,
+    projected: &mut RecordRow,
+) -> StoreResult<()> {
+    if projected.scope_context_id.is_some() {
+        return Ok(());
+    }
+    let provenance: Value = serde_json::from_str(&stored.provenance_json)
+        .map_err(|error| StoreError::Corrupt(format!("record provenance: {error}")))?;
+    let Some(binding) = provenance["source_context_ids"]
+        .as_array()
+        .and_then(|ids| ids.first())
+        .and_then(Value::as_str)
+    else {
+        return Ok(());
+    };
+    let mut content: Value = serde_json::from_str(&projected.content_json)
+        .map_err(|error| StoreError::Corrupt(format!("record content: {error}")))?;
+    let Some(legacy) = content
+        .pointer_mut("/structured/nexus_legacy")
+        .and_then(Value::as_object_mut)
+    else {
+        return Ok(());
+    };
+    if legacy.get("actor_world_binding_id") != Some(&Value::Null) {
+        return Ok(());
+    }
+    legacy.insert(
+        "actor_world_binding_id".to_string(),
+        Value::String(binding.to_string()),
+    );
+    projected.content_json = serialize(&content, "legacy record content")?;
+    projected.scope_visibility = Placement::CONTEXT.to_string();
+    projected.scope_context_id = Some(binding.to_string());
+    projected
+        .provenance_json
+        .clone_from(&stored.provenance_json);
+    Ok(())
+}
+
+/// A binding removal clears the legacy row's binding while the provider still
+/// owns the row it adopted from it; the successor's own capture context restores
+/// what the removal released, so the release is not a change of the migrated
+/// object (F2, beside PR-F1's successor identity). A pending candidate — one
+/// removal cannot see, because it holds the binding — or a row whose successor
+/// never carried a binding is left exactly as it projects.
+fn restore_released_binding(
+    stored: &CandidateRow,
+    projected: &mut CandidateRow,
+) -> StoreResult<()> {
+    if stored.status != "consumed" || projected.capture_context_id.is_some() {
+        return Ok(());
+    }
+    let Some(binding) = stored.capture_context_id.as_deref() else {
+        return Ok(());
+    };
+    let Some(raw) = projected.content_json.as_deref() else {
+        return Ok(());
+    };
+    let mut content: Value = serde_json::from_str(raw)
+        .map_err(|error| StoreError::Corrupt(format!("candidate content: {error}")))?;
+    let Some(legacy) = content
+        .pointer_mut("/structured/nexus_legacy")
+        .and_then(Value::as_object_mut)
+    else {
+        return Ok(());
+    };
+    if legacy.get("actor_world_binding_id") != Some(&Value::Null) {
+        return Ok(());
+    }
+    legacy.insert(
+        "actor_world_binding_id".to_string(),
+        Value::String(binding.to_string()),
+    );
+    projected
+        .capture_visibility
+        .clone_from(&stored.capture_visibility);
+    projected.capture_context_id = Some(binding.to_string());
+    projected
+        .provenance_json
+        .clone_from(&stored.provenance_json);
+    projected.content_json = Some(serialize(&content, "candidate content")?);
     Ok(())
 }
 

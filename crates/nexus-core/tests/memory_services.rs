@@ -6040,3 +6040,94 @@ async fn keyword_search_ignores_ascii_case() {
     );
     assert_eq!(found.fragments[0].fragment_id.as_str(), "frag_case");
 }
+
+/// F3 (Greptile `memory_pipeline.rs:443`): the promoted slug maps the leading
+/// `mem_` prefix only, so two pending ids a global replace folded into one
+/// address stay distinct and each promoted memory resolves by its own slug.
+#[tokio::test]
+async fn promoted_memory_slugs_stay_one_to_one() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let pending_ids = ["a_mem_b", "a_memory-b"];
+    let pool = plain_pool(&env).await;
+    for pending_id in pending_ids {
+        nexus_local_db::create_pending_review(
+            &pool,
+            &nexus_local_db::PendingReviewRecord {
+                pending_id: pending_id.to_string(),
+                session_id: format!("sess_{pending_id}"),
+                creator_id: CREATOR.to_string(),
+                world_id: None,
+                task_kind: "chapter".to_string(),
+                raw_digest: PROMOTE_DIGEST.to_string(),
+                created_at: "2026-01-01T00:00:01Z".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    }
+    pool.close().await;
+
+    let reviewed = core
+        .review_memory(
+            &principal,
+            dto::<ReviewRequest>(serde_json::json!({ "creator_id": CREATOR })),
+        )
+        .await
+        .expect("creator review batch");
+    assert_eq!(reviewed.promoted, 2, "both pending rows promote");
+
+    for pending_id in pending_ids {
+        let slug = format!("memory-{pending_id}");
+        let record = serde_json::to_value(
+            core.get_creator_memory(&principal, &slug)
+                .await
+                .expect("the slug read")
+                .unwrap_or_else(|| panic!("{slug} resolves")),
+        )
+        .unwrap();
+        assert_eq!(
+            record["content"]["structured"]["nexus_legacy"]["memory_id"],
+            format!("mem_{pending_id}"),
+            "{slug} addresses its own promoted memory"
+        );
+    }
+}
+
+/// F5 (`legacy.rs:1716`): a malformed stored `keywords` column is the module's
+/// `Corrupt` answer — not a silently empty keyword list that hides the damaged
+/// row behind content nobody wrote.
+#[tokio::test]
+async fn malformed_legacy_keywords_are_a_corrupt_read() {
+    let env = seed_env().await;
+    let pool = plain_pool(&env).await;
+    nexus_local_db::memory_fragment::create_fragment(
+        &pool,
+        &nexus_local_db::memory_fragment::MemoryFragmentRecord {
+            fragment_id: "frag_damaged".to_string(),
+            session_id: "sess_damaged".to_string(),
+            creator_id: CREATOR.to_string(),
+            keywords: "{not a keyword list".to_string(),
+            summary: "A fragment whose stored keyword list is malformed.".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            ttl: None,
+            world_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let (core, principal) = open_core(&env).await;
+    let error = core
+        .list_memory_fragments(&principal, None, None, 50)
+        .await
+        .expect_err("a malformed stored keyword list is a corrupt read");
+    match error {
+        CoreError::Internal { category } => assert!(
+            category.contains("legacy fragment keywords"),
+            "the corrupt answer names the damaged column: {category}"
+        ),
+        other => panic!("expected the corrupt-read internal error, got {other:?}"),
+    }
+}

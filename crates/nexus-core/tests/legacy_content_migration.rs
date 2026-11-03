@@ -34,6 +34,7 @@ use tempfile::TempDir;
 
 const CREATOR: &str = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const WORLD: &str = "wld_worldA";
+const WORLD_B: &str = "wld_worldB";
 const CREATOR_SOUL: &str = "# Soul\n\nLegacy creator soul document.\n";
 const CHARACTER_SOUL: &str = "# Character soul\n\nLegacy character soul document.\n";
 const FRAGMENT_TEXT: &str = "Legacy creator fragment summary text.";
@@ -1523,6 +1524,162 @@ async fn a_provider_row_that_moved_after_the_pass_refuses_the_rerun() {
     assert_eq!(
         marker_after, marker_before,
         "a refused re-run leaves the recorded marker as it was"
+    );
+    pool.close().await;
+}
+
+/// F1 (`memory.rs:1825`): a Character capture records the request's fractional
+/// instant in the legacy queue row, while adoption stores the row at the
+/// provider's whole-second precision. The pass compares the two at the
+/// precision the provider column actually carries, so a pending capture no
+/// longer refuses the whole workspace.
+#[tokio::test]
+async fn migration_accepts_a_capture_with_a_fractional_created_at() {
+    let env = seed_legacy_home().await;
+    let (core, principal) = open_core(&env).await;
+    core.capture_character_pending_review(
+        &principal,
+        env.character_id.clone(),
+        serde_json::from_value(json!({
+            "pending_id": "pend_fractional",
+            "session_id": "sess_fractional",
+            "task_kind": "research",
+            "raw_digest": PENDING_DIGEST,
+            "created_at": "2026-03-03T00:00:00.123Z",
+        }))
+        .expect("wire-valid capture request"),
+    )
+    .await
+    .expect("the fractional-second capture");
+
+    let migration = core.migrate_legacy_content(&principal).await.unwrap();
+    assert_eq!(migration.status, LegacyMigrationStatus::Migrated);
+    let rerun = core.migrate_legacy_content(&principal).await.unwrap();
+    assert_eq!(rerun.status, LegacyMigrationStatus::AlreadyComplete);
+    assert_eq!(rerun.digest, migration.digest, "the same served snapshot");
+
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT COUNT(*) FROM memory_candidates \
+             WHERE candidate_id = 'lgc:character_memory_pending_review:pend_fractional'",
+        )
+        .await,
+        1,
+        "the capture was adopted before the pass and is the provider's row"
+    );
+    pool.close().await;
+}
+
+/// F2 (`actor_world_binding.rs:753`): removing a binding releases the legacy
+/// rows it proved the provider already serves (`actor_world_binding_id = NULL`).
+/// That release changes the values the projection rebuilds from, but the
+/// provider row is the object's successor and its own capture context still
+/// names the released binding, so the pass accepts the release — on its first
+/// run and on a re-run that compares the marker.
+#[tokio::test]
+async fn migration_accepts_a_binding_release_made_before_the_pass() {
+    let env = seed_legacy_home().await;
+    let (core, principal) = open_core(&env).await;
+    let character_id = env.character_id.clone();
+
+    // The scenario's rows move to a second binding (and the World it needs), so
+    // removing that binding releases them and leaves the first one in place.
+    let pool = plain_pool(&env).await;
+    seed_world(&pool, WORLD_B).await;
+    pool.close().await;
+    let second = core
+        .add_binding(&principal, character_id.clone(), WORLD_B.to_string(), None)
+        .await
+        .expect("second binding")
+        .binding
+        .binding_id
+        .as_str()
+        .to_string();
+    let pool = plain_pool(&env).await;
+    for sql in [
+        "UPDATE character_memory_pending_review SET actor_world_binding_id = ? \
+         WHERE pending_id = 'pend_char_legacy'",
+        "UPDATE character_memory_fragments SET actor_world_binding_id = ? \
+         WHERE fragment_id = 'hfrag_legacy'",
+    ] {
+        sqlx::query(sqlx::AssertSqlSafe(sql.to_string()))
+            .bind(&second)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    pool.close().await;
+
+    // Provider ownership: the promotion adopts the fragment and the dismissal
+    // adopts and consumes the review, so the dependency gate stops counting
+    // either legacy row and the removal releases its provenance.
+    let served = core
+        .list_character_memory_fragments(
+            &principal,
+            character_id.clone(),
+            Some(second.clone()),
+            10,
+            0,
+        )
+        .await
+        .expect("the binding-local fragment list");
+    let expected_revision = served
+        .fragments
+        .iter()
+        .find(|fragment| fragment.fragment_id.as_str() == "hfrag_legacy")
+        .expect("the moved fragment is served")
+        .revision;
+    core.promote_character_fragment(
+        &principal,
+        character_id.clone(),
+        "hfrag_legacy".to_string(),
+        i64::try_from(expected_revision).expect("the served revision fits"),
+    )
+    .await
+    .expect("promote the binding-local fragment");
+    core.delete_character_pending_review(
+        &principal,
+        character_id.clone(),
+        "pend_char_legacy".to_string(),
+    )
+    .await
+    .expect("dismiss the binding-local review");
+    core.remove_binding(&principal, character_id.clone(), second.clone())
+        .await
+        .expect("the released rows no longer hold the binding");
+
+    let migration = core.migrate_legacy_content(&principal).await.unwrap();
+    assert_eq!(migration.status, LegacyMigrationStatus::Migrated);
+    let rerun = core.migrate_legacy_content(&principal).await.unwrap();
+    assert_eq!(
+        rerun.status,
+        LegacyMigrationStatus::AlreadyComplete,
+        "the release never re-conflicts the recorded marker"
+    );
+    assert_eq!(rerun.digest, migration.digest, "the same served snapshot");
+
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT COUNT(*) FROM character_memory_pending_review \
+             WHERE pending_id = 'pend_char_legacy' AND actor_world_binding_id IS NULL",
+        )
+        .await,
+        1,
+        "the removal released the retained review row"
+    );
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT COUNT(*) FROM character_memory_fragments \
+             WHERE fragment_id = 'hfrag_legacy' AND actor_world_binding_id IS NULL",
+        )
+        .await,
+        1,
+        "the removal released the retained fragment row"
     );
     pool.close().await;
 }
