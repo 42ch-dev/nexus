@@ -65,9 +65,7 @@ use std::sync::Arc;
 use crate::memory_provider::legacy;
 use crate::memory_provider::policy;
 use crate::memory_provider::profile;
-use crate::memory_provider::{
-    LegacyContentMigration, LocalMemoryProvider, MemoryDisposition,
-};
+use crate::memory_provider::{LegacyContentMigration, LocalMemoryProvider, MemoryDisposition};
 use crate::principal::Principal;
 use crate::service::CoreService;
 use spoke_operations::{spoke_schemas, MemoryPort, SpokeReject, SpokeRejectCode, SpokeResult};
@@ -608,8 +606,17 @@ impl MemoryAdapter {
     /// read and the match after it.
     async fn memory_by_slug(&self, creator_id: &str, slug: &str) -> CoreResult<Option<Value>> {
         let record_id = legacy::memory_long_term_record_id(creator_id, slug);
-        if let Some(record) = self.record(&record_id).await? {
-            return Ok(Some(record));
+        let stored = self.record(&record_id).await?;
+        // The by-id read serves a tombstone to admin coverage; the slug read is
+        // the creator's own listing surface, where a deleted memory is absent.
+        // Anything the deterministic id does not serve falls through to the
+        // authored-kind scan, which excludes tombstones and legacy rows the
+        // provider owns.
+        if stored
+            .as_ref()
+            .is_some_and(|record| record.get("tombstone").is_none())
+        {
+            return Ok(stored);
         }
         Ok(self
             .memory_records()
@@ -1020,7 +1027,7 @@ fn nexus_legacy(record: &Value) -> &Value {
 /// the readers below can stay branch-free.
 static NULL_LEGACY: Value = Value::Null;
 
-pub(crate) fn record_keywords(record: &Value) -> Vec<String> {
+pub fn record_keywords(record: &Value) -> Vec<String> {
     nexus_legacy(record)["keywords"]
         .as_array()
         .map(|values| {
@@ -1466,7 +1473,11 @@ impl CoreService {
     ) -> CoreResult<bool> {
         self.verify_principal(principal)?;
         let memory = self.creator_memory_writer(principal).await?;
-        if memory.memory_by_slug(principal.creator_id(), slug).await?.is_some() {
+        if memory
+            .memory_by_slug(principal.creator_id(), slug)
+            .await?
+            .is_some()
+        {
             return Ok(false);
         }
         // The minted `memory_id` is the mutation's identity: a create after a
@@ -1684,7 +1695,9 @@ impl CoreService {
             ));
         }
         let memory = self.creator_memory_writer(principal).await?;
-        let existing = memory.memory_by_slug(principal.creator_id(), PERSONALITY_MEMORY_SLUG).await?;
+        let existing = memory
+            .memory_by_slug(principal.creator_id(), PERSONALITY_MEMORY_SLUG)
+            .await?;
         let memory_id = if let Some(record) = &existing {
             let revision = MemoryRevision::of(record)?;
             let (memory_id, _, _) = creator_memory_identity(record);

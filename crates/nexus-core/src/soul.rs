@@ -1087,8 +1087,7 @@ impl CoreService {
         };
         let memory = self.character_memory(principal, &character_id).await?;
         let outcome =
-            reflect_bearer_soul(pool, &memory, &ctx, request.force_regenerate, synthesizer)
-                .await?;
+            reflect_bearer_soul(pool, &memory, &ctx, request.force_regenerate, synthesizer).await?;
         drop(ctx);
         character_reflect_wire(&character_id, &outcome)
     }

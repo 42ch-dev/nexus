@@ -698,38 +698,36 @@ async fn remove_binding_tx(
 
     // v1.184 P3: binding-local Character memory is the final dependency gate.
     // The gate counts what is *served* for this binding, not the historical
-    // legacy rows: a legacy row the provider already owns under its origin
-    // (`nexus_legacy.pending_id` / `nexus_legacy.fragment_id`) is the
-    // provider's disposition — a dismissed pending review and a promoted
-    // fragment no longer hold the binding — while the provider's own
-    // binding-placed pending candidates and live records block as before.
-    // Narrative cache rows have no provider counterpart yet and keep counting.
+    // legacy rows: a legacy row the provider owns under the bridge's
+    // deterministic id is the provider's disposition — a dismissed pending
+    // review and a promoted fragment no longer hold the binding — while the
+    // provider's own binding-placed pending candidates and live records block
+    // as before. Ownership is matched on the id alone because a consumed
+    // candidate and a tombstoned record carry no body to read the legacy
+    // identity from. Narrative cache rows have no provider counterpart yet and
+    // keep counting.
     let local_memory: i64 = sqlx::query_scalar(
-        r#"SELECT (
+        r"SELECT (
                    (SELECT COUNT(*) FROM character_memory_pending_review l
                     WHERE l.actor_world_binding_id = ?
                       AND NOT EXISTS (
                           SELECT 1 FROM memory_candidates c
-                          WHERE c.capture_context_id = ?
-                            AND json_extract(c.content_json,
-                                '$.structured.nexus_legacy.pending_id') = l.pending_id)) +
+                          WHERE c.candidate_id =
+                              'lgc:character_memory_pending_review:' || l.pending_id)) +
                    (SELECT COUNT(*) FROM memory_candidates c
                     WHERE c.capture_context_id = ? AND c.status = 'pending') +
                    (SELECT COUNT(*) FROM character_memory_fragments l
                     WHERE l.actor_world_binding_id = ?
                       AND NOT EXISTS (
                           SELECT 1 FROM memory_records r
-                          WHERE r.scope_context_id = ? AND r.tombstone_json IS NULL
-                            AND json_extract(r.content_json,
-                                '$.structured.nexus_legacy.fragment_id') = l.fragment_id)) +
+                          WHERE r.record_id =
+                              'lgc:character_memory_fragments:' || l.fragment_id)) +
                    (SELECT COUNT(*) FROM memory_records r
                     WHERE r.scope_context_id = ? AND r.tombstone_json IS NULL) +
                    (SELECT COUNT(*) FROM character_soul_narratives
                     WHERE actor_world_binding_id = ?)
-                  )"#,
+                  )",
     )
-    .bind(binding_id)
-    .bind(binding_id)
     .bind(binding_id)
     .bind(binding_id)
     .bind(binding_id)
@@ -742,6 +740,31 @@ async fn remove_binding_tx(
             code: ActorContractConflict::BindingHasLocalMemory,
         });
     }
+
+    // The legacy rows the gate proved are no longer served still name this
+    // binding in their foreign key (`ON DELETE RESTRICT`), so removal releases
+    // that provenance the way the legacy local→shared promotion does: the row
+    // stays, the binding it no longer holds goes.
+    sqlx::query(
+        r"UPDATE character_memory_pending_review SET actor_world_binding_id = NULL
+          WHERE actor_world_binding_id = ?
+            AND EXISTS (SELECT 1 FROM memory_candidates c
+                        WHERE c.candidate_id =
+                            'lgc:character_memory_pending_review:' || pending_id)",
+    )
+    .bind(binding_id)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        r"UPDATE character_memory_fragments SET actor_world_binding_id = NULL
+          WHERE actor_world_binding_id = ?
+            AND EXISTS (SELECT 1 FROM memory_records r
+                        WHERE r.record_id =
+                            'lgc:character_memory_fragments:' || fragment_id)",
+    )
+    .bind(binding_id)
+    .execute(&mut **tx)
+    .await?;
 
     let deleted = sqlx::query!(
         r#"DELETE FROM actor_world_bindings WHERE binding_id = ? AND character_id = ? AND status = 'active'"#,

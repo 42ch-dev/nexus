@@ -359,13 +359,21 @@ pub(super) async fn candidates_in_tx(
 }
 
 /// One projected candidate by its external id (see [`record_by_id_in_tx`]).
+///
+/// `include_migrated` keeps the projection alive past the completion marker for
+/// the write paths that adopt or consume a named row: a Character capture keeps
+/// writing the retained queue row (D6), so a capture that arrives after the
+/// marker must still be adoptable by id, and the dismissal of one must still
+/// resolve it. The read path passes `false`: past the marker the legacy queue is
+/// never served, and everything the marker covers is already provider-owned.
 pub(super) async fn candidate_by_id_in_tx(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
     roots: &LegacyRoots,
     space_id: &str,
     candidate_id: &str,
+    include_migrated: bool,
 ) -> StoreResult<Option<CandidateRow>> {
-    if migration_complete(tx, space_id).await? {
+    if !include_migrated && migration_complete(tx, space_id).await? {
         return Ok(None);
     }
     let Some((family, components)) = parse_id(candidate_id) else {

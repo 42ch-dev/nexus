@@ -1516,7 +1516,10 @@ async fn a_provider_row_that_moved_after_the_pass_refuses_the_rerun() {
         1,
         "the provider keeps its metadata"
     );
-    let marker_after: String = sqlx::query_scalar(marker_sql).fetch_one(&pool).await.unwrap();
+    let marker_after: String = sqlx::query_scalar(marker_sql)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     assert_eq!(
         marker_after, marker_before,
         "a refused re-run leaves the recorded marker as it was"

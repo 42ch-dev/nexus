@@ -3740,9 +3740,12 @@ pub(super) fn mint_candidate_id() -> String {
 /// The adoption insert itself: every projected row `ids` names, under the id
 /// the bridge projects it with, inside the caller's transaction.
 ///
-/// Only the dismissal that adopts what it consumes calls this, so "adopt then
-/// mutate" is one guarded write and no adopted pending row can be left behind
-/// (NXM-5 Task 2 fix round 3, finding F1: there is no standalone adoption).
+/// A dismissal adopts what it consumes, so "adopt then mutate" is one guarded
+/// write and no adopted pending row can be left behind (NXM-5 Task 2 fix round
+/// 3, finding F1: there is no standalone adoption). A capture adopts the row it
+/// just wrote, which is the one adopter that may run past the completion marker:
+/// the marker covers the rows that existed when it was published, not a capture
+/// that arrives afterwards (`include_migrated`).
 /// Returns the number of rows actually inserted.
 #[allow(clippy::too_many_arguments)]
 async fn adopt_in_tx(
@@ -3753,10 +3756,13 @@ async fn adopt_in_tx(
     subject_id: &str,
     ids: &[String],
     now: DateTime<Utc>,
+    include_migrated: bool,
 ) -> StoreResult<i64> {
     let mut adopted = 0_i64;
     for id in ids {
-        let Some(row) = legacy::candidate_by_id_in_tx(tx, roots, space_id, id).await? else {
+        let Some(row) =
+            legacy::candidate_by_id_in_tx(tx, roots, space_id, id, include_migrated).await?
+        else {
             continue;
         };
         // The bridge resolves the bearer's canonical subject; an id that
@@ -4051,8 +4057,7 @@ async fn resolve_legacy_snapshot(
         }
     }
     for row in &mut snapshot.profiles {
-        let Some(stored) =
-            profile_in_tx(tx, space_id, &row.subject_id, &row.profile_kind).await?
+        let Some(stored) = profile_in_tx(tx, space_id, &row.subject_id, &row.profile_kind).await?
         else {
             continue;
         };
@@ -4197,6 +4202,7 @@ impl MemoryStore {
             subject_id,
             ids,
             now,
+            true,
         )
         .await?;
         tx.commit().await?;
@@ -4470,7 +4476,8 @@ impl MemoryStore {
         let row = match row {
             Some(row) => Some(row),
             None => {
-                legacy::candidate_by_id_in_tx(&mut tx, &self.legacy, space_id, candidate_id).await?
+                legacy::candidate_by_id_in_tx(&mut tx, &self.legacy, space_id, candidate_id, false)
+                    .await?
             }
         };
         let unsettled = match &row {
@@ -4574,6 +4581,7 @@ impl MemoryStore {
                             &self.legacy,
                             ctx.space_id,
                             candidate_id,
+                            false,
                         )
                         .await?
                     }
@@ -4627,6 +4635,7 @@ impl MemoryStore {
                 subject_id,
                 &[candidate_id.to_string()],
                 now,
+                false,
             )
             .await?;
             // The projection above was read before this transaction. Re-authorize
