@@ -48,6 +48,7 @@
 //! snapshot marker. A bearer file or legacy row rewritten between two pages
 //! therefore invalidates the cursor instead of silently shifting its offset.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use chrono::{DateTime, NaiveDateTime, SecondsFormat, Utc};
@@ -55,6 +56,7 @@ use serde_json::{json, Value};
 use sqlx::Sqlite;
 
 use nexus_creator_memory::errors::MemoryError;
+use nexus_creator_memory::long_term_memory;
 use nexus_creator_memory::memory_io;
 use nexus_creator_memory::MemoryBearerRef;
 use spoke_operations::{jcs_sha256_hex, SpokeResult};
@@ -366,20 +368,35 @@ pub(super) async fn profiles_in_tx(
     let Some(owner) = owner_of(tx, roots, space_id, subject, subject_id).await? else {
         return Ok(Vec::new());
     };
-    let Some(body) = soul_document(roots, &owner)? else {
-        return Ok(Vec::new());
+    Ok(profile_of(roots, space_id, subject_id, &owner)?
+        .into_iter()
+        .collect())
+}
+
+/// The one authored profile a bearer's `SOUL.md` yields, or `None` when the
+/// file is absent. Shared by the projection and P5's migration pass so the
+/// migrated row and the pre-marker read carry the same document.
+fn profile_of(
+    roots: &LegacyRoots,
+    space_id: &str,
+    subject_id: &str,
+    owner: &Owner,
+) -> StoreResult<Option<ProfileRow>> {
+    let Some(body) = soul_document(roots, owner)? else {
+        return Ok(None);
     };
+    let at = soul_timestamp(roots, owner);
     let document = json!({ "format": "markdown", "body": body });
-    Ok(vec![ProfileRow {
+    Ok(Some(ProfileRow {
         space_id: space_id.to_string(),
         subject_id: subject_id.to_string(),
         profile_kind: SOUL_PROFILE_KIND.to_string(),
         document_json: serialize(&document, "legacy profile document")?,
         updated_by: LEGACY_CAPTURED_BY.to_string(),
         revision: 1,
-        created_at: soul_timestamp(roots, &owner),
-        updated_at: soul_timestamp(roots, &owner),
-    }])
+        created_at: at.clone(),
+        updated_at: at,
+    }))
 }
 
 // ── Owner resolution ────────────────────────────────────────────────────
@@ -390,12 +407,20 @@ async fn migration_complete(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
     space_id: &str,
 ) -> StoreResult<bool> {
-    let value: Option<String> =
-        sqlx::query_scalar("SELECT value FROM memory_provider_meta WHERE key = ?")
-            .bind(legacy_migration_key(space_id))
-            .fetch_optional(&mut **tx)
-            .await?;
-    Ok(value.is_some())
+    Ok(migration_marker(tx, space_id).await?.is_some())
+}
+
+/// The completion marker's value — the migration manifest JSON recorded by P5 —
+/// or `None` while the space is unmigrated.
+pub(super) async fn migration_marker(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    space_id: &str,
+) -> StoreResult<Option<String>> {
+    sqlx::query_scalar("SELECT value FROM memory_provider_meta WHERE key = ?")
+        .bind(legacy_migration_key(space_id))
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(StoreError::from)
 }
 
 /// Which legacy bearer this provider subject stands for, if any. Only the
@@ -849,7 +874,11 @@ async fn creator_narratives(
                 FAMILY_MEMORY_NARRATIVES,
                 &[scope_id.as_deref().unwrap_or(NULL_COMPONENT)],
                 row,
-                Placement::SHARED,
+                // A per-World narrative is World-scoped exactly like a
+                // Character's binding-scoped one: the provider's placement
+                // invariant is "context visibility iff a context id", so a
+                // shared row could not carry the World it belongs to.
+                binding_visibility(scope_id.as_deref()),
                 scope_id.clone().into_iter().collect(),
             )
         })
@@ -1028,13 +1057,25 @@ fn long_term_records(
     };
     let mut rows = Vec::with_capacity(slugs.len());
     for slug in slugs {
-        let memory = memory_io::load_memory(&roots.home, bearer, &slug)
+        let (memory, document) = memory_io::load_memory_source(&roots.home, bearer, &slug)
             .map_err(|error| legacy_error(&error))?;
+        // The exact source framing: the parsed view trims the body and keeps
+        // only the known frontmatter fields, so the file's own bytes travel with
+        // the projection and a rewrite of bytes the view drops still changes the
+        // migration manifest (P5-F3). The served text is the file's body, while
+        // the parsed frontmatter still names the record's identity and kind.
+        let spans =
+            long_term_memory::source_spans(&document).map_err(|error| legacy_error(&error))?;
+        let frontmatter = document[spans.frontmatter].to_string();
+        let body = document[spans.body].to_string();
         let kind = policy::namespaced_record_kind(&memory.frontmatter.memory_kind);
         let updated_at = normalize_timestamp(&memory.frontmatter.updated_at);
         let record_id = external_id(family, &[owner_key, slug.as_str()]);
         let content = json!({
-            "text": memory.body,
+            // The served text is the file's own body, not the parsed view: the
+            // parser trims a leading blank line or indentation the author wrote,
+            // and the migration preserves the authored body exactly (R2-C1).
+            "text": body,
             "structured": { "nexus_legacy": {
                 "family": family,
                 "slug": slug,
@@ -1043,6 +1084,9 @@ fn long_term_records(
                 "nexus_memory_version": memory.frontmatter.nexus_memory_version,
                 "updated_at": memory.frontmatter.updated_at,
                 "source_session_ids": memory.frontmatter.source_session_ids,
+                "frontmatter": frontmatter,
+                "body": body,
+                "document": document,
             }},
         });
         rows.push(record_row(
@@ -1302,6 +1346,224 @@ fn soul_timestamp(roots: &LegacyRoots, owner: &Owner) -> String {
 
 fn legacy_error(error: &MemoryError) -> StoreError {
     StoreError::Corrupt(format!("legacy bearer file: {error}"))
+}
+
+// ── Migration snapshot (P5) ─────────────────────────────────────────────
+
+/// One provider subject the migration pass writes under.
+pub(super) struct MigrationSubject {
+    pub subject_id: String,
+    pub kind_ns: &'static str,
+    pub kind_id: String,
+}
+
+/// Every legacy object of one space, as the provider stores it after the
+/// one-shot migration, plus the manifest the completion marker records.
+///
+/// The rows are the bridge's own projections, so a migrated space serves
+/// exactly the content its merged reads served before the marker existed: the
+/// migration never re-derives a mapping the read path already owns.
+pub(super) struct MigrationSnapshot {
+    pub subjects: Vec<MigrationSubject>,
+    pub records: Vec<RecordRow>,
+    pub candidates: Vec<CandidateRow>,
+    pub profiles: Vec<ProfileRow>,
+    pub manifest: Value,
+}
+
+/// The family name of `SOUL.md` in the manifest's counts. Every other family
+/// name is the external-id segment the bridge projects.
+pub(super) const SOUL_FAMILY: &str = "SOUL.md";
+
+/// Every legacy object of `space_id`, read on the caller's transaction.
+///
+/// A bearer with nothing to migrate contributes no subject: the pass never
+/// registers a subject for an empty bearer.
+pub(super) async fn migration_snapshot(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    roots: &LegacyRoots,
+    space_id: &str,
+) -> StoreResult<MigrationSnapshot> {
+    let mut subjects = Vec::new();
+    let mut records = Vec::new();
+    let mut candidates = Vec::new();
+    let mut profiles = Vec::new();
+    for owner in migration_owners(tx, roots).await? {
+        let subject_id = migration_subject_id(tx, roots, space_id, &owner).await?;
+        let owner_records = project_records(tx, roots, space_id, &subject_id, &owner).await?;
+        let owner_candidates =
+            candidates_for_owner(tx, roots, space_id, &subject_id, &owner).await?;
+        let owner_profile = profile_of(roots, space_id, &subject_id, &owner)?;
+        if owner_records.is_empty() && owner_candidates.is_empty() && owner_profile.is_none() {
+            continue;
+        }
+        subjects.push(MigrationSubject {
+            subject_id,
+            kind_ns: owner.namespace(),
+            kind_id: owner.kind_id(roots).to_string(),
+        });
+        records.extend(owner_records);
+        candidates.extend(owner_candidates);
+        profiles.extend(owner_profile);
+    }
+    // One order for every read of the same snapshot, so the manifest digest and
+    // the rows a re-run compares are stable however the source rows are paged.
+    records.sort_by(|left, right| left.record_id.cmp(&right.record_id));
+    candidates.sort_by(|left, right| left.candidate_id.cmp(&right.candidate_id));
+    profiles.sort_by(|left, right| {
+        (&left.subject_id, &left.profile_kind).cmp(&(&right.subject_id, &right.profile_kind))
+    });
+    let manifest = migration_manifest(&records, &candidates, &profiles)?;
+    Ok(MigrationSnapshot {
+        subjects,
+        records,
+        candidates,
+        profiles,
+        manifest,
+    })
+}
+
+/// The subject the migration's journal intent is recorded against: the first
+/// bearer it migrates (the Creator, whenever the Creator carried anything).
+pub(super) fn migration_journal_subject(snapshot: &MigrationSnapshot) -> &str {
+    snapshot
+        .subjects
+        .first()
+        .map_or("", |subject| subject.subject_id.as_str())
+}
+
+/// Every subject the migration's file effects belong to — the full fence set the
+/// one intent carries until the projections settle.
+///
+/// The pass commits one intent for effects that span bearers, so a read
+/// isolation rule that names only the row's own subject would leave the other
+/// subjects readable while their committed files are unpublished (P5-F1).
+pub(super) fn migration_fences(snapshot: &MigrationSnapshot) -> Vec<String> {
+    snapshot
+        .subjects
+        .iter()
+        .map(|subject| subject.subject_id.clone())
+        .collect()
+}
+
+/// Every bearer of this workspace: the Creator plus the Characters it owns.
+async fn migration_owners(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    roots: &LegacyRoots,
+) -> StoreResult<Vec<Owner>> {
+    let characters: Vec<(String,)> = sqlx::query_as(
+        "SELECT character_id FROM characters WHERE owner_creator_id = ? ORDER BY character_id",
+    )
+    .bind(&roots.creator_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    let mut owners = Vec::with_capacity(characters.len() + 1);
+    owners.push(Owner::Creator);
+    owners.extend(characters.into_iter().map(|(id,)| Owner::Character(id)));
+    Ok(owners)
+}
+
+/// The subject the migration writes a bearer's objects under: the canonical
+/// subject the bridge serves, or the deterministic identity a writer would have
+/// ensured when no subject names the bearer yet.
+async fn migration_subject_id(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    roots: &LegacyRoots,
+    space_id: &str,
+    owner: &Owner,
+) -> StoreResult<String> {
+    Ok(subject_of(tx, roots, space_id, owner)
+        .await?
+        .map_or_else(|| owner.canonical_subject_id(roots), |row| row.subject_id))
+}
+
+/// The manifest the completion marker records: one digest over every projected
+/// object's served values, the object counts, and the per-family counts.
+///
+/// The digest covers content, not the derived profile timestamps: a re-run must
+/// verify the same legacy snapshot without depending on `SOUL.md`'s mtime, which
+/// the migration never writes but the file system may change.
+fn migration_manifest(
+    records: &[RecordRow],
+    candidates: &[CandidateRow],
+    profiles: &[ProfileRow],
+) -> StoreResult<Value> {
+    let mut families: BTreeMap<String, u64> = BTreeMap::new();
+    let mut record_values = Vec::with_capacity(records.len());
+    for row in records {
+        let (family, _) = parse_id(&row.record_id).ok_or_else(|| {
+            StoreError::Corrupt(format!(
+                "migration record {} is not a legacy external id",
+                row.record_id
+            ))
+        })?;
+        *families.entry(family).or_default() += 1;
+        record_values.push(json!({
+            "record_id": row.record_id,
+            "subject_id": row.subject_id,
+            "kind": row.kind,
+            "content": row.content_json,
+            "visibility": row.scope_visibility,
+            "context_id": row.scope_context_id,
+            "provenance": row.provenance_json,
+            "occurred_at": row.occurred_at,
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+            "revision": row.revision,
+        }));
+    }
+    let mut candidate_values = Vec::with_capacity(candidates.len());
+    for row in candidates {
+        let (family, _) = parse_id(&row.candidate_id).ok_or_else(|| {
+            StoreError::Corrupt(format!(
+                "migration candidate {} is not a legacy external id",
+                row.candidate_id
+            ))
+        })?;
+        *families.entry(family).or_default() += 1;
+        candidate_values.push(json!({
+            "candidate_id": row.candidate_id,
+            "subject_id": row.subject_id,
+            "kind": row.kind,
+            "content": row.content_json,
+            "visibility": row.capture_visibility,
+            "context_id": row.capture_context_id,
+            "provenance": row.provenance_json,
+            "classification": row.classification_json,
+            "occurred_at": row.occurred_at,
+            "expires_at": row.expires_at,
+            "revision": row.revision,
+            "created_at": row.created_at,
+        }));
+    }
+    let mut profile_values = Vec::with_capacity(profiles.len());
+    for row in profiles {
+        *families.entry(SOUL_FAMILY.to_string()).or_default() += 1;
+        profile_values.push(json!({
+            "subject_id": row.subject_id,
+            "profile_kind": row.profile_kind,
+            "document": row.document_json,
+            "revision": row.revision,
+        }));
+    }
+    let counts = json!({
+        "records": u64::try_from(records.len()).unwrap_or(u64::MAX),
+        "candidates": u64::try_from(candidates.len()).unwrap_or(u64::MAX),
+        "profiles": u64::try_from(profiles.len()).unwrap_or(u64::MAX),
+    });
+    let digest = match jcs_sha256_hex(&json!({
+        "records": record_values,
+        "candidates": candidate_values,
+        "profiles": profile_values,
+    })) {
+        SpokeResult::Ok(digest) => digest,
+        SpokeResult::Reject(reject) => return Err(StoreError::Corrupt(reject.message)),
+    };
+    Ok(json!({
+        "digest": digest,
+        "counts": counts,
+        "families": families,
+    }))
 }
 
 // ── Projection helpers ──────────────────────────────────────────────────

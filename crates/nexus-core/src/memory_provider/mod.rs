@@ -40,6 +40,7 @@ pub mod policy;
 pub mod profile;
 mod storage;
 
+use std::collections::BTreeMap;
 use std::num::NonZeroU64;
 use std::path::PathBuf;
 
@@ -60,8 +61,9 @@ use spoke_operations::{
 use crate::error::{CoreError, CoreResult};
 use storage::{
     Admission, CandidateRow, Coverage, Fence, FenceAction, FenceTarget, GrantRow, MemoryStore,
-    NewCandidate, NewGrant, OpContext, Placement, ProfileRow, ReceiptRow, RecordRead, RecordRow,
-    ReviewDecision, Selection, SpaceRow, StoreError, SubjectRow, RECEIPT_FAILED, RECEIPT_PENDING,
+    MigrationOutcome, NewCandidate, NewGrant, OpContext, Placement, ProfileRow, ReceiptRow,
+    RecordRead, RecordRow, ReviewDecision, Selection, SpaceRow, StoreError, SubjectRow,
+    RECEIPT_FAILED, RECEIPT_PENDING,
 };
 
 /// The single space this provider provisions (§7.0.6). Clients discover it via
@@ -97,6 +99,12 @@ const OP_PROFILE_UPDATE: &str = "memory.profile.update";
 /// consumes the row** (NXM-5 Task 2 fix round 3, finding F1), so a retried
 /// dismissal replays instead of duplicating and no adopted row is left pending.
 const OP_LEGACY_ADOPT: &str = "memory.legacy.adopt";
+
+/// P5's one-shot legacy-content migration. Like [`OP_LEGACY_ADOPT`] it is never
+/// a wire op: it is the operator-invoked pass's receipt identity, so the
+/// migration commits a journal intent and a receipt through the same protocol
+/// every other guarded write uses.
+const OP_LEGACY_MIGRATE: &str = "memory.legacy.migrate";
 
 /// Time order for a merged read: a provider row renders whole seconds, while a
 /// projected legacy row keeps the precision its legacy column carried, so the
@@ -764,6 +772,38 @@ pub struct MemoryDisposition {
     _file: std::fs::File,
 }
 
+/// What one `creator memory migrate-legacy` pass did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LegacyMigrationStatus {
+    /// The pass wrote the space's legacy content into provider storage.
+    Migrated,
+    /// The space was already migrated and its manifest still matches the source.
+    AlreadyComplete,
+}
+
+/// What one legacy-content migration pass moved (P5, compass D7).
+///
+/// The counts and the digest are the completion marker's own manifest, so a
+/// re-run reports exactly what the marker records.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct LegacyContentMigration {
+    /// The provider space the pass migrated.
+    pub space_id: String,
+    /// Whether this pass wrote, or verified an earlier one.
+    pub status: LegacyMigrationStatus,
+    /// The source-snapshot digest the completion marker records.
+    pub digest: String,
+    /// Migrated `memory_records` rows.
+    pub records: u64,
+    /// Migrated `memory_candidates` rows.
+    pub candidates: u64,
+    /// Migrated `memory_profiles` rows (one per bearer's `SOUL.md`).
+    pub profiles: u64,
+    /// Object count per legacy family (including `SOUL.md`).
+    pub families: BTreeMap<String, u64>,
+}
+
 /// The lock file name for one bearer: a SHA-256 digest of the exact subject id
 /// under `<state db dir>/memory_locks/` (NXM-5 Task 2 fix round 4, finding
 /// R4-F2).
@@ -868,6 +908,87 @@ impl LocalMemoryProvider {
     #[must_use]
     pub const fn is_writable(&self) -> bool {
         self.store.writable()
+    }
+
+    /// P5: migrate every legacy table row and bearer file of this workspace into
+    /// the provider's own surfaces, in one guarded transaction, and publish the
+    /// completion marker the legacy read bridge then honours.
+    ///
+    /// Explicit and operator-invoked (MEM-R011): no open and no read calls this.
+    /// A space already migrated verifies its recorded manifest and writes
+    /// nothing; a space whose legacy sources changed since that pass refuses
+    /// `IDEMPOTENCY_CONFLICT` instead of silently re-entering or overwriting an
+    /// object the provider already owns.
+    ///
+    /// # Errors
+    ///
+    /// [`CoreError::Forbidden`] on a read-only provider, and the mapped storage
+    /// refusal (no `admin` grant, a frozen space, an adopted object whose stored
+    /// body differs from the legacy source).
+    pub async fn migrate_legacy(
+        &self,
+        principal: &schemas::Principal,
+    ) -> CoreResult<LegacyContentMigration> {
+        if !self.is_writable() {
+            return Err(CoreError::Forbidden {
+                resource: "memory: migrate-legacy needs the workspace writer".to_string(),
+            });
+        }
+        let principal_id = principal_id(principal);
+        let payload = json!({ "space_id": self.space_id });
+        let digest = payload_digest(OP_LEGACY_MIGRATE, &payload)
+            .map_err(|error| migration_core_error(&error))?;
+        let idempotency_key = format!("legacy-content-migration:{}", self.space_id);
+        let ctx = OpContext {
+            space_id: &self.space_id,
+            requester_principal_id: principal_id,
+            op: OP_LEGACY_MIGRATE,
+            idempotency_key: Some(&idempotency_key),
+            payload_digest: &digest,
+        };
+        let requirements = [GrantRequirement {
+            capability: "admin",
+            subject_id: None,
+            context_ids: Vec::new(),
+            reads_shared: false,
+            subject_all: false,
+        }];
+        let admission = Admission {
+            op: OP_LEGACY_MIGRATE,
+            space_id: &self.space_id,
+            principal_id,
+            coverage: Coverage::Requirements(&requirements),
+            issuance: None,
+            subject_gate: None,
+            placement_gate: None,
+            freeze_gated: true,
+        };
+        let outcome = self
+            .store
+            .migrate_legacy(&ctx, &admission)
+            .await
+            .map_err(store_error)
+            .map_err(|error| migration_core_error(&error))?;
+        let (status, manifest) = match outcome {
+            MigrationOutcome::Migrated(receipt) => {
+                let recorded = receipt.result_json.as_deref().ok_or_else(|| {
+                    migration_core_error(&ProviderError::Internal(
+                        "migrated receipt carries no result".to_string(),
+                    ))
+                })?;
+                let result: Value = serde_json::from_str(recorded).map_err(|e| {
+                    migration_core_error(&ProviderError::Internal(format!(
+                        "migration receipt: {e}"
+                    )))
+                })?;
+                (LegacyMigrationStatus::Migrated, result["manifest"].clone())
+            }
+            MigrationOutcome::Verified(manifest) => {
+                (LegacyMigrationStatus::AlreadyComplete, manifest)
+            }
+        };
+        migration_report(&self.space_id, status, &manifest)
+            .map_err(|error| migration_core_error(&error))
     }
 
     /// The bearer's memory-disposition section (NXM-5 Task 2 fix round 2,
@@ -1647,6 +1768,72 @@ fn to_core_error(error: ProviderError) -> CoreError {
             category: other.message(),
         },
     }
+}
+
+/// The conflict code a migration pass reports when its recorded manifest no
+/// longer matches the legacy source, or when an adopted object's stored body
+/// differs from it.
+const IDEMPOTENCY_CONFLICT_CODE: &str = "idempotency_conflict";
+
+/// [`to_core_error`] for the migration pass, which is not a wire op: its
+/// refusals keep the retained taxonomy — a missing `admin` grant reads
+/// `forbidden`, a conflicting adopted body reads `idempotency_conflict` — so an
+/// operator can act on them instead of seeing one flat internal error.
+fn migration_core_error(error: &ProviderError) -> CoreError {
+    match error {
+        ProviderError::NotAuthorized(_) | ProviderError::ReadOnly(_) => {
+            CoreError::ForbiddenReason {
+                resource: "memory: migrate-legacy".to_string(),
+                reason: error.message(),
+            }
+        }
+        ProviderError::IdempotencyConflict => CoreError::ActorConflict {
+            code: IDEMPOTENCY_CONFLICT_CODE.to_string(),
+            message: error.message(),
+        },
+        ProviderError::NotFound(_) => CoreError::NotFound {
+            resource: error.message(),
+        },
+        _ => CoreError::Internal {
+            category: error.message(),
+        },
+    }
+}
+
+/// Project the completion marker's manifest onto the public migration report.
+fn migration_report(
+    space_id: &str,
+    status: LegacyMigrationStatus,
+    manifest: &Value,
+) -> Result<LegacyContentMigration, ProviderError> {
+    let invalid = |field: &str| {
+        ProviderError::Internal(format!("legacy migration manifest: missing {field}"))
+    };
+    let digest = manifest["digest"]
+        .as_str()
+        .ok_or_else(|| invalid("digest"))?
+        .to_string();
+    let counts = &manifest["counts"];
+    let count = |field: &str| counts[field].as_u64().ok_or_else(|| invalid(field));
+    let families = manifest["families"]
+        .as_object()
+        .ok_or_else(|| invalid("families"))?;
+    let mut family_counts = BTreeMap::new();
+    for (family, value) in families {
+        family_counts.insert(
+            family.clone(),
+            value.as_u64().ok_or_else(|| invalid("families"))?,
+        );
+    }
+    Ok(LegacyContentMigration {
+        space_id: space_id.to_string(),
+        status,
+        digest,
+        records: count("records")?,
+        candidates: count("candidates")?,
+        profiles: count("profiles")?,
+        families: family_counts,
+    })
 }
 
 fn principal_id(principal: &schemas::Principal) -> &str {

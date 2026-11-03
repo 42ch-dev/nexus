@@ -380,3 +380,57 @@ async fn pending_show_missing_id_past_first_page_fails_closed() {
         "stderr should surface not-found: {err}"
     );
 }
+
+// ── migrate-legacy (P5) ───────────────────────────────────────────────────
+
+/// `creator memory migrate-legacy` runs the P5 pass on the real binary and is
+/// idempotent: the first call migrates the legacy rows and the bearer file, the
+/// second verifies the recorded manifest and reports no change.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn migrate_legacy_migrates_then_verifies() {
+    let env = fresh_env().await;
+    seed_fragment(&env).await;
+    let bearer = nexus_creator_memory::bearer::MemoryBearerRef::Creator(&env.creator_id);
+    let mut memory = nexus_creator_memory::LongTermMemory::new("story_summary");
+    memory.set_body("Legacy long-term memory body.");
+    nexus_creator_memory::memory_io::save_memory(
+        env.fixture.home.path(),
+        bearer,
+        "legacy-cli",
+        &memory,
+    )
+    .expect("seed long-term memory");
+
+    let out = env.cli(&["creator", "memory", "migrate-legacy", "--json"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let report: serde_json::Value =
+        serde_json::from_str(&stdout(&out)).expect("migration report JSON");
+    assert_eq!(report["status"], "migrated", "{report}");
+    assert_eq!(
+        report["records"], 2,
+        "fragment + long-term memory: {report}"
+    );
+    assert_eq!(report["candidates"], 0, "{report}");
+    assert_eq!(report["profiles"], 0, "{report}");
+    assert_eq!(report["families"]["memory_fragments"], 1, "{report}");
+    assert_eq!(report["families"]["memory_long_term"], 1, "{report}");
+
+    // After the marker the unified read path serves the migrated memory.
+    let listed = env.cli(&["creator", "memory", "list"]);
+    assert!(listed.status.success(), "stderr: {}", stderr(&listed));
+    assert!(
+        stdout(&listed).contains("legacy-cli"),
+        "the migrated memory is listed: {}",
+        stdout(&listed)
+    );
+
+    let again = env.cli(&["creator", "memory", "migrate-legacy", "--json"]);
+    assert!(again.status.success(), "stderr: {}", stderr(&again));
+    let report: serde_json::Value =
+        serde_json::from_str(&stdout(&again)).expect("migration report JSON");
+    assert_eq!(report["status"], "already_complete", "{report}");
+    assert_eq!(
+        report["records"], 2,
+        "a re-run reports the recorded counts: {report}"
+    );
+}

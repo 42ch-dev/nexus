@@ -65,7 +65,9 @@ use std::sync::Arc;
 use crate::memory_provider::legacy;
 use crate::memory_provider::policy;
 use crate::memory_provider::profile;
-use crate::memory_provider::{created_at_cmp, LocalMemoryProvider, MemoryDisposition};
+use crate::memory_provider::{
+    created_at_cmp, LegacyContentMigration, LocalMemoryProvider, MemoryDisposition,
+};
 use crate::principal::Principal;
 use crate::service::CoreService;
 use spoke_operations::{spoke_schemas, MemoryPort, SpokeReject, SpokeRejectCode, SpokeResult};
@@ -1284,7 +1286,14 @@ fn experience_kind_label(kind: &str) -> String {
 
 /// Truncate an entry body the way the aggregation does: the first
 /// [`EXPERIENCE_EXCERPT_CHARS`] characters, broken at the last space, `...`.
+///
+/// The record's text is the memory file's exact body (`legacy.rs`'s long-term
+/// projection), while the legacy aggregation excerpts the parsed body, so the
+/// leading whitespace the parser trims is trimmed here too: the rendered
+/// `## Experience` section stays identical to
+/// `nexus_creator_memory::experience_aggregation`'s.
 fn experience_excerpt(body: &str) -> String {
+    let body = body.trim_start();
     if body.chars().count() <= EXPERIENCE_EXCERPT_CHARS {
         return body.to_string();
     }
@@ -3939,4 +3948,34 @@ fn tom_item_value(row: &CharacterTomBeliefRow) -> CoreResult<serde_json::Value> 
         value["carrier_recorded_at"] = serde_json::json!(parsed);
     }
     Ok(value)
+}
+
+impl CoreService {
+    /// P5: migrate every legacy memory-table row and bearer file of the active
+    /// creator's workspace into provider surfaces, and publish the completion
+    /// marker that flips every E4/E6/E10/E11 read to provider-only.
+    ///
+    /// The migration is explicit and operator-invoked (MEM-R011): no open and no
+    /// read reaches it. It runs on the workspace writer with the creator's own
+    /// `admin` grant, because it writes provider objects of every subject the
+    /// workspace owns, and it never writes a legacy table or bearer file (D6).
+    ///
+    /// # Errors
+    /// [`CoreError::Forbidden`] under read-only core access,
+    /// [`CoreError::ForbiddenReason`] when the principal holds no `admin` grant,
+    /// [`CoreError::ActorConflict`] (`idempotency_conflict`) when the recorded
+    /// manifest no longer matches the legacy source or an adopted object's
+    /// stored body differs from it, and the mapped storage error otherwise.
+    pub async fn migrate_legacy_content(
+        &self,
+        principal: &Principal,
+    ) -> CoreResult<LegacyContentMigration> {
+        self.verify_principal(principal)?;
+        let provider = self.memory_writer()?;
+        let spoke_principal: spoke_schemas::Principal = map_wire(json!({
+            "principal_id": principal.creator_id(),
+            "extensions": {},
+        }))?;
+        provider.migrate_legacy(&spoke_principal).await
+    }
 }
