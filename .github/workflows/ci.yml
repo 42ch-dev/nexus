@@ -896,6 +896,7 @@ jobs:
           --test local_memory_provider --test memory_receipts --test memory_reconcile
           --test memory_profile_admission
           --test legacy_content_migration
+          --test creator_capture
           -- --test-threads=2
 
   rust-core-host-execution:

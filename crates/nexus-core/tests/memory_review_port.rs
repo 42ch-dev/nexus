@@ -482,7 +482,33 @@ async fn creator_promote_writes_a_provider_record_and_leaves_the_legacy_queue_al
             .is_some_and(|text| text.starts_with("# UNTRUSTED:")),
         "the promoted body keeps the passthrough UNTRUSTED header: {content}"
     );
+    // The promoted record keeps the authored identity the CLI addresses it by:
+    // the slug it derives from the pending row, so list/show/edit/delete reach
+    // it instead of a blank-slug row (fix round 1, Greptile
+    // `memory_pipeline.rs:441`).
+    let slug = content["structured"]["nexus_legacy"]["slug"]
+        .as_str()
+        .expect("a promoted memory keeps an authored slug");
+    assert_eq!(slug, "memory-pend_creator", "derived from the pending row");
+    assert_eq!(
+        content["structured"]["nexus_legacy"]["memory_kind"], "story_summary",
+        "the authored kind survives the namespaced record kind"
+    );
     pool.close().await;
+
+    let listed = core.list_creator_memories(&principal).await.unwrap();
+    let rendered = serde_json::to_string(&listed).unwrap();
+    assert!(
+        rendered.contains("\"slug\":\"memory-pend_creator\""),
+        "the promoted memory is listed with its slug: {rendered}"
+    );
+    assert!(
+        core.get_creator_memory(&principal, slug)
+            .await
+            .expect("the slug read")
+            .is_some(),
+        "the promoted memory is addressable by its slug"
+    );
 
     // The promoted record is not listed as a fragment (same retained split).
     let fragments = core

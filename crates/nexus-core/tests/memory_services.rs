@@ -3008,7 +3008,11 @@ async fn legacy_bearer_projects_under_one_canonical_subject() {
             .await,
     );
     assert_eq!(shadow_page["total_authorized"], 0, "{shadow_page}");
-    assert!(bridge_report_ids(&shadow_page, "records").is_empty());
+    assert_eq!(
+        bridge_report_ids(&shadow_page, "records").len(),
+        0,
+        "{shadow_page}"
+    );
     let absent = provider
         .get_record(
             &shadow,
@@ -3386,6 +3390,39 @@ async fn seed_character_pending_past_former_cap(env: &Env, count: i64) {
     pool.close().await;
 }
 
+/// Seed `count` Character-shared pending rows at one whole-second `created_at`
+/// plus one row a fractional second later — the value SQLite's TEXT order ranks
+/// *below* every `Z` row while the parsed instant ranks it first.
+async fn seed_character_pending_mixed_formats(env: &Env, count: i64) {
+    let pool = plain_pool(env).await;
+    sqlx::query(
+        "WITH RECURSIVE seq(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM seq WHERE i + 1 < ?)
+         INSERT INTO character_memory_pending_review
+             (pending_id, session_id, character_id, actor_world_binding_id, task_kind, raw_digest,
+              created_at)
+         SELECT printf('cpending_z_%02d', i), printf('csess_z_%02d', i), ?, NULL, 'research',
+                'tiny', '2026-02-01T00:00:00Z'
+         FROM seq",
+    )
+    .bind(count)
+    .bind(&env.character_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO character_memory_pending_review
+             (pending_id, session_id, character_id, actor_world_binding_id, task_kind, raw_digest,
+              created_at)
+         VALUES ('cpending_frac', 'csess_frac', ?, NULL, 'research', 'tiny',
+                 '2026-02-01T00:00:00.900Z')",
+    )
+    .bind(&env.character_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+}
+
 /// Seed `count` Creator fragments; only the last one carries `kw_past_cap`.
 async fn seed_creator_fragments_past_former_cap(env: &Env, count: i64) {
     let pool = plain_pool(env).await;
@@ -3739,12 +3776,14 @@ async fn pending_pages_keep_sub_second_order_opposite_to_ids() {
     assert!(!second.pagination.has_more);
 }
 
-/// QC1-F1 fix round 2: one pending queue mixes an RFC 3339 whole second, a
-/// fractional RFC 3339 value and a timezone-less bare-`T` legacy value. Ordering
-/// by the shared legacy parser keeps the retained `created_at DESC` order and
-/// its keyset page boundaries consistent with one total order.
+/// PR-F2: one pending queue mixes an RFC 3339 whole second, a fractional
+/// RFC 3339 value and a timezone-less bare-`T` legacy value. The retained query
+/// ordered by its RAW `created_at` TEXT (`ORDER BY created_at DESC`), and the
+/// `Z` row is the textually largest — the parsed instant puts the timezone-less
+/// fractional value first — so the queue and its keyset page boundaries follow
+/// the text order.
 #[tokio::test]
-async fn pending_mixed_timestamp_formats_order_as_instants_across_pages() {
+async fn pending_mixed_timestamp_formats_keep_the_legacy_text_order() {
     let env = seed_env().await;
     seed_creator_pending_row(&env, "pending_a", None, "2026-01-01T00:00:00Z").await;
     seed_creator_pending_row(&env, "pending_b", None, "2026-01-01T00:00:00.900Z").await;
@@ -3757,11 +3796,11 @@ async fn pending_mixed_timestamp_formats_order_as_instants_across_pages() {
         .unwrap();
     assert_eq!(first.items.len(), 1);
     assert_eq!(
-        first.items[0].pending_id, "pending_c",
-        "the timezone-less bare-T value is the newest, not the textually largest"
+        first.items[0].pending_id, "pending_a",
+        "the whole-second `Z` value is the textually largest, not newest by instant"
     );
     assert_eq!(
-        first.items[0].created_at, "2026-01-01T00:00:00.950",
+        first.items[0].created_at, "2026-01-01T00:00:00Z",
         "the legacy value is served verbatim"
     );
     assert!(first.pagination.has_more);
@@ -3776,8 +3815,8 @@ async fn pending_mixed_timestamp_formats_order_as_instants_across_pages() {
         .await
         .unwrap();
     assert_eq!(second.items.len(), 1);
-    assert_eq!(second.items[0].pending_id, "pending_b");
-    assert_eq!(second.items[0].created_at, "2026-01-01T00:00:00.900Z");
+    assert_eq!(second.items[0].pending_id, "pending_c");
+    assert_eq!(second.items[0].created_at, "2026-01-01T00:00:00.950");
     assert!(second.pagination.has_more);
     let cursor = second
         .pagination
@@ -3790,8 +3829,8 @@ async fn pending_mixed_timestamp_formats_order_as_instants_across_pages() {
         .await
         .unwrap();
     assert_eq!(third.items.len(), 1);
-    assert_eq!(third.items[0].pending_id, "pending_a");
-    assert_eq!(third.items[0].created_at, "2026-01-01T00:00:00Z");
+    assert_eq!(third.items[0].pending_id, "pending_b");
+    assert_eq!(third.items[0].created_at, "2026-01-01T00:00:00.900Z");
     assert!(!third.pagination.has_more);
     assert!(third.pagination.next_cursor.is_none());
 }
@@ -3811,6 +3850,65 @@ async fn character_offset_window_serves_rows_past_the_former_scan_cap() {
         .unwrap();
     assert_eq!(page.items.len(), 1, "the row past the old window is served");
     assert!(!page.pagination.has_more);
+}
+
+/// PR-F2: the Character pending queue orders by the RAW legacy `created_at`
+/// TEXT (`ORDER BY created_at DESC, pending_id DESC`). A whole-second `Z` row
+/// outranks a fractional-second one as text while the parsed instant puts the
+/// fractional row first, so mixed-format data must keep the legacy text order
+/// on both the offset page and the bounded review batch.
+#[tokio::test]
+async fn character_pending_queue_keeps_the_legacy_text_order_for_mixed_formats() {
+    const Z_ROWS: i64 = 50;
+    let env = seed_env().await;
+    seed_character_pending_mixed_formats(&env, Z_ROWS).await;
+    let (core, principal) = open_core(&env).await;
+    let chr = env.character_id.clone();
+
+    // Offset pagination starts at the textually largest `Z` head.
+    let first = core
+        .list_character_pending_reviews(&principal, chr.clone(), None, 2, 0)
+        .await
+        .unwrap();
+    assert_eq!(first.items.len(), 2);
+    assert_eq!(first.items[0].pending_id.as_str(), "cpending_z_49");
+    assert_eq!(first.items[1].pending_id.as_str(), "cpending_z_48");
+    let tail = core
+        .list_character_pending_reviews(&principal, chr.clone(), None, 2, 50)
+        .await
+        .unwrap();
+    assert_eq!(tail.items.len(), 1);
+    assert_eq!(
+        tail.items[0].pending_id.as_str(),
+        "cpending_frac",
+        "the fractional row is the textually smallest, so it is the queue tail"
+    );
+    assert!(!tail.pagination.has_more);
+
+    // The bounded review batch takes the same head: one call drains at most the
+    // batch bound of the `Z` rows and never reaches the fractional tail.
+    let batch = core
+        .review_character_memory(
+            &principal,
+            chr.clone(),
+            dto::<ReviewCharacterMemoryRequest>(serde_json::json!({})),
+        )
+        .await
+        .unwrap();
+    let processed = batch.processed.expect("processed count");
+    assert!(processed > 0 && processed <= 50, "got {processed}");
+    let remaining = core
+        .list_character_pending_reviews(&principal, chr.clone(), None, 60, 0)
+        .await
+        .unwrap();
+    assert!(
+        remaining
+            .items
+            .iter()
+            .any(|item| item.pending_id.as_str() == "cpending_frac"),
+        "the fractional row ranks last under the legacy text key: {:?}",
+        remaining.items
+    );
 }
 
 #[tokio::test]
@@ -5717,4 +5815,228 @@ async fn character_mind_projection_fails_closed_when_the_provider_refuses() {
         matches!(malformed, CoreError::InvalidInput { ref field, .. } if field == "character_id"),
         "got {malformed:?}"
     );
+}
+
+// ═══ PR #469 fix round 1: Greptile review threads ═════════════════════════
+
+/// Greptile `legacy.rs:318`: a Character capture that arrives after the
+/// one-shot migration must still be served. The capture adopts its own retained
+/// queue row on the provider, so list/count/dismissal/review all keep seeing it
+/// once the marker turned the legacy queue reads off.
+#[tokio::test]
+async fn character_captures_survive_the_migration_marker() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let chr = env.character_id.clone();
+
+    let migrated = core.migrate_legacy_content(&principal).await.unwrap();
+    assert_eq!(migrated.status, nexus_core::LegacyMigrationStatus::Migrated);
+
+    core.capture_character_pending_review(
+        &principal,
+        chr.clone(),
+        dto(json_capture(
+            "pend_after_marker",
+            None,
+            "2026-04-01T00:00:00Z",
+        )),
+    )
+    .await
+    .expect("a post-marker capture");
+
+    let listed = core
+        .list_character_pending_reviews(&principal, chr.clone(), None, 50, 0)
+        .await
+        .unwrap();
+    assert_eq!(listed.items.len(), 1, "the capture is listed: {listed:?}");
+    assert_eq!(listed.items[0].pending_id.as_str(), "pend_after_marker");
+    assert_eq!(
+        core.count_character_pending_reviews(&principal, chr.clone(), None)
+            .await
+            .unwrap()
+            .count,
+        1,
+        "the capture is counted"
+    );
+
+    core.delete_character_pending_review(&principal, chr.clone(), "pend_after_marker".to_string())
+        .await
+        .expect("the capture is dismissible");
+    assert_eq!(
+        core.count_character_pending_reviews(&principal, chr.clone(), None)
+            .await
+            .unwrap()
+            .count,
+        0
+    );
+}
+
+/// Greptile `memory.rs:1923`: a dismissed binding-local pending review must stop
+/// holding its binding. The dismissal consumes the provider candidate and leaves
+/// the retained legacy row (D6), so the removal gate reads the provider's
+/// disposition instead of the historical row.
+#[tokio::test]
+async fn a_dismissed_binding_pending_review_no_longer_holds_its_binding() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let chr = env.character_id.clone();
+    let second = core
+        .add_binding(&principal, chr.clone(), WORLD_B.to_string(), None)
+        .await
+        .expect("second binding")
+        .binding
+        .binding_id
+        .as_str()
+        .to_string();
+
+    core.capture_character_pending_review(
+        &principal,
+        chr.clone(),
+        dto(json_capture(
+            "pend_remove",
+            Some(&second),
+            "2026-01-01T00:00:01Z",
+        )),
+    )
+    .await
+    .expect("binding-local capture");
+
+    // A queued binding-local review still holds the binding.
+    let blocked = core
+        .remove_binding(&principal, chr.clone(), second.clone())
+        .await
+        .expect_err("a queued review holds the binding");
+    assert!(
+        matches!(&blocked, CoreError::ActorConflict { code, .. } if code == "binding_has_local_memory"),
+        "got {blocked:?}"
+    );
+
+    core.delete_character_pending_review(&principal, chr.clone(), "pend_remove".to_string())
+        .await
+        .expect("dismiss the binding-local review");
+
+    core.remove_binding(&principal, chr.clone(), second)
+        .await
+        .expect("the dismissed review no longer holds the binding");
+}
+
+/// Greptile `memory_pipeline.rs:382`: a fragment a review saved on the provider
+/// must count for reflection even though the legacy fragment table stays empty.
+#[tokio::test]
+async fn reflection_counts_reviewed_provider_fragments() {
+    let env = seed_env().await;
+    seed_creator_pending_digest(&env, "pend_soul", FRAGMENT_DIGEST, "2026-01-01T00:00:01Z").await;
+    let (core, principal) = open_core(&env).await;
+
+    let reviewed = core
+        .review_memory(&principal, creator_review_request())
+        .await
+        .expect("creator review batch");
+    assert_eq!(reviewed.fragmented, 1, "one provider `fact` fragment");
+
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM memory_fragments").await,
+        0,
+        "the legacy fragment table stays write-idle (D6)"
+    );
+    pool.close().await;
+
+    let read = core
+        .reflect_creator_soul::<MockSynth>(
+            &principal,
+            dto(serde_json::json!({
+                "creator_id": CREATOR,
+                "force_regenerate": false,
+            })),
+            || None::<MockSynth>,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        read.current_fragment_count, 1,
+        "the served fragment counts for reflection"
+    );
+    assert!(
+        read.current_distinct_keyword_count > 0,
+        "its keywords count too: {read:?}"
+    );
+    assert_eq!(
+        read.state.to_string(),
+        "insufficient_data",
+        "one fragment is still under the retained gate"
+    );
+}
+
+/// Greptile `legacy.rs:270`: one malformed bearer memory file must not break a
+/// read of an unrelated fragment, nor a by-slug read of another memory.
+#[tokio::test]
+async fn a_malformed_memory_file_does_not_break_other_reads() {
+    let env = seed_env().await;
+    seed_legacy_creator_content(&env).await;
+    let bearer = MemoryBearerRef::Creator(CREATOR);
+    let mut memory = nexus_creator_memory::LongTermMemory::new("story_summary");
+    memory.set_body("A readable long-term body.");
+    nexus_creator_memory::memory_io::save_memory(&env.user_home, bearer, "readable", &memory)
+        .expect("valid memory fixture");
+    let dir = bearer
+        .validated_long_term_memory_dir(&env.user_home)
+        .expect("bearer memory dir");
+    std::fs::write(dir.join("broken.md"), "---\n[unclosed: yaml\n---\nbody\n")
+        .expect("malformed memory fixture");
+
+    let (core, principal) = open_core(&env).await;
+
+    // The fragment read asks for `fact` only: no memory file is opened.
+    let fragments = core
+        .list_memory_fragments(&principal, None, None, 50)
+        .await
+        .expect("the fragment list ignores the malformed memory file");
+    assert_eq!(fragments.fragments.len(), 1, "{fragments:?}");
+
+    // A by-slug read opens exactly its own file.
+    let record = serde_json::to_value(
+        core.get_creator_memory(&principal, "readable")
+            .await
+            .expect("the by-slug read ignores the malformed memory file")
+            .expect("the readable memory is served"),
+    )
+    .unwrap();
+    assert_eq!(record["content"]["text"], "A readable long-term body.");
+}
+
+/// Greptile `memory.rs:2570`: the retained keyword filter was a `LIKE` and stayed
+/// case-insensitive, so a mixed-case keyword must still find the fragment.
+#[tokio::test]
+async fn keyword_search_ignores_ascii_case() {
+    let env = seed_env().await;
+    let pool = plain_pool(&env).await;
+    nexus_local_db::memory_fragment::create_fragment(
+        &pool,
+        &nexus_local_db::memory_fragment::MemoryFragmentRecord {
+            fragment_id: "frag_case".to_string(),
+            session_id: "sess_case".to_string(),
+            creator_id: CREATOR.to_string(),
+            keywords: serde_json::json!(["Kw_Legacy"]).to_string(),
+            summary: "A fragment whose keyword is mixed case.".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            ttl: None,
+            world_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let (core, principal) = open_core(&env).await;
+    let found = core
+        .list_memory_fragments(&principal, Some("kw_LEGACY".to_string()), None, 50)
+        .await
+        .unwrap();
+    assert_eq!(
+        found.fragments.len(),
+        1,
+        "a mixed-case keyword matches like the legacy `LIKE`: {found:?}"
+    );
+    assert_eq!(found.fragments[0].fragment_id.as_str(), "frag_case");
 }

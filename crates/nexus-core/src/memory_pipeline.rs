@@ -433,12 +433,26 @@ async fn promote_decision(
         )
         .await
         .map_err(|error| internal_err("promote_to_long_term_failed", error))?;
+    // The authored identity the CLI addresses a long-term memory by: the
+    // promotion derives it from the pending row, because the retained file
+    // promotion's slug came from its minted `memory_id` and a promoted record
+    // with no slug cannot be listed, shown, edited or deleted
+    // (fix round 1, Greptile `memory_pipeline.rs:441`).
+    let memory_kind = nexus_creator_memory::review::task_kind_to_memory_kind(&input.task_kind);
+    let memory_id = format!("mem_{}", input.pending_id);
+    let slug = memory_id.replace("mem_", "memory-");
     Ok(json!({
         "action": "promote",
-        "kind": crate::memory_provider::policy::namespaced_record_kind(
-            nexus_creator_memory::review::task_kind_to_memory_kind(&input.task_kind),
-        ),
-        "content_override": { "text": body },
+        "kind": crate::memory_provider::policy::namespaced_record_kind(memory_kind),
+        "content_override": {
+            "text": body,
+            "structured": { "nexus_legacy": {
+                "slug": slug,
+                "memory_id": memory_id,
+                "memory_kind": memory_kind,
+                "source_session_ids": [input.session_id],
+            }},
+        },
     }))
 }
 

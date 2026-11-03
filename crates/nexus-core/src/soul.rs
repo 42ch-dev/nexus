@@ -18,9 +18,9 @@
 use std::sync::Arc;
 
 use crate::error::{CoreError, CoreResult};
-use crate::memory::{CharacterTomService, MemoryAdapter};
+use crate::memory::{record_keywords, CharacterTomService, MemoryAdapter};
 use crate::memory_pipeline::{internal_err, map_local_db_error, sqlx_internal, MemoryPipelineCtx};
-use crate::memory_provider::{legacy, policy, LocalMemoryProvider};
+use crate::memory_provider::{created_at_cmp, legacy, policy, LocalMemoryProvider};
 use crate::principal::Principal;
 use crate::service::CoreService;
 use nexus_contracts::generated::daemon_api::characters::soul::character_soul_narrative_request::CharacterSoulNarrativeRequest;
@@ -37,6 +37,7 @@ use nexus_moment_context_assembly::recall::{
 };
 use nexus_moment_context_assembly::CharacterMindInput;
 use nexus_spoke_adapter::spoke_schemas::RetainedRecord;
+use serde_json::json;
 use sqlx::SqlitePool;
 
 /// Maximum Unicode scalar chars persisted for a synthesized narrative.
@@ -116,6 +117,7 @@ fn map_soul_narrative_memory_error(err: MemoryError) -> CoreError {
 /// 5. force=true synthesizes (on-demand only), validates/caps, persists.
 pub async fn reflect_bearer_soul<S: SoulNarrativeSynthesizer>(
     pool: &SqlitePool,
+    memory: &MemoryAdapter,
     ctx: &MemoryPipelineCtx,
     force: bool,
     synthesizer: impl FnOnce() -> Option<S>,
@@ -127,8 +129,8 @@ pub async fn reflect_bearer_soul<S: SoulNarrativeSynthesizer>(
     if force {
         ctx.bearer_for_write()?;
     }
-    // 1. fragment stats + cache row in one DB round-trip.
-    let (fragment_stats, cached) = bearer_fragment_stats(pool, ctx).await?;
+    // 1. fragment stats (served fragments) + retained cache row.
+    let (fragment_stats, cached) = bearer_fragment_stats(pool, memory, ctx).await?;
 
     // 2. insufficient-data gate (before any ACP call).
     let min_distinct = usize::try_from(MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS).unwrap_or(usize::MAX);
@@ -179,7 +181,7 @@ pub async fn reflect_bearer_soul<S: SoulNarrativeSynthesizer>(
     //    unauthorized or under-gate request never touches provider state.
     //    A missing provider is the retained truthful 503 — no background
     //    synthesis and no empty success.
-    let signals = bearer_recent_fragment_signals(pool, ctx).await?;
+    let signals = bearer_recent_fragment_signals(memory, ctx).await?;
     let input = build_soul_narrative_synthesis_input(&signals, &fragment_stats);
 
     let top_keywords = input.top_keywords.clone();
@@ -265,37 +267,90 @@ fn outcome_current(
     }
 }
 
-/// Dispatch fragment-stats + cache-row lookup to the bearer's scope.
+/// The bearer's provider `fact` fragments — the reviewed fragments — for the
+/// context's scope.
 ///
-/// Read-only by contract: the local-db `*_readonly` variants never persist
-/// stats-only cache rows, so a non-forced reflect performs zero DB writes
-/// (rows, cache rows and files) even on fingerprint mismatch or for an
-/// archived Character's retained read. The cache is only ever persisted by
-/// the explicit write path (`bearer_persist_narrative` after a successful
-/// synthesis).
+/// A review saves fragments on the provider, so reflection must read them
+/// there: the legacy fragment tables stop receiving them, and a reader over the
+/// legacy rows would call a fresh workspace `insufficient_data` with enough
+/// fragments while keeping an existing narrative falsely current (fix round 1,
+/// Greptile `memory_pipeline.rs:382`).
+async fn bearer_fragment_records(
+    memory: &MemoryAdapter,
+    ctx: &MemoryPipelineCtx,
+) -> CoreResult<Vec<serde_json::Value>> {
+    let (selection, filter) = match ctx.bearer_ref() {
+        // The Creator's scope is a World provenance filter on shared fragments.
+        MemoryBearerRef::Creator(_) => (
+            json!({ "mode": "shared_only" }),
+            ctx.scope().map(|world| vec![world.to_string()]),
+        ),
+        // A Character's scope is the binding placement of its local fragments.
+        MemoryBearerRef::Character { .. } => (
+            ctx.scope().map_or_else(
+                || json!({ "mode": "shared_only" }),
+                |binding| json!({ "mode": "selected_contexts", "context_ids": [binding] }),
+            ),
+            None,
+        ),
+    };
+    memory
+        .records(selection, &["fact"], filter.as_deref(), None)
+        .await
+}
+
+/// The values the insufficient-data gate and stale detection compare: the served
+/// fragment count, its distinct keyword count and its newest `created_at`.
+fn fragment_stats(records: &[serde_json::Value]) -> SoulNarrativeFragmentStats {
+    let mut keywords: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut max_created_at: Option<String> = None;
+    for record in records {
+        keywords.extend(record_keywords(record));
+        let Some(created_at) = record["created_at"].as_str() else {
+            continue;
+        };
+        if max_created_at
+            .as_deref()
+            .is_none_or(|max| created_at_cmp(created_at, max).is_gt())
+        {
+            max_created_at = Some(created_at.to_string());
+        }
+    }
+    SoulNarrativeFragmentStats {
+        fragment_count: i64::try_from(records.len()).unwrap_or(i64::MAX),
+        distinct_keyword_count: keywords.len(),
+        max_created_at,
+    }
+}
+
+/// Dispatch the fragment stats (served fragments) and the cache-row lookup (the
+/// retained narrative table) to the bearer's scope.
+///
+/// Read-only by contract: the cache read never persists a stats-only row, so a
+/// non-forced reflect performs zero DB writes (rows, cache rows and files) even
+/// on fingerprint mismatch or for an archived Character's retained read. The
+/// cache is only ever persisted by the explicit write path
+/// (`bearer_persist_narrative` after a successful synthesis).
 async fn bearer_fragment_stats(
     pool: &SqlitePool,
+    memory: &MemoryAdapter,
     ctx: &MemoryPipelineCtx,
 ) -> CoreResult<(
     SoulNarrativeFragmentStats,
     Option<nexus_local_db::SoulNarrativeRecord>,
 )> {
-    match ctx.bearer_ref() {
+    let records = bearer_fragment_records(memory, ctx).await?;
+    let cached = match ctx.bearer_ref() {
         MemoryBearerRef::Creator(creator_id) => {
-            let (stats, cached) = nexus_local_db::soul_narrative_fragment_stats_readonly(
-                pool,
-                creator_id,
-                ctx.scope(),
-            )
-            .await
-            .map_err(map_local_db_error)?;
-            Ok((stats, cached))
+            nexus_local_db::get_soul_narrative(pool, creator_id, ctx.scope())
+                .await
+                .map_err(map_local_db_error)?
         }
         MemoryBearerRef::Character {
             owner_creator_id,
             character_id,
         } => {
-            let (stats, cached) = nexus_local_db::character_soul_narrative_fragment_stats_readonly(
+            let cached = nexus_local_db::get_character_soul_narrative(
                 pool,
                 owner_creator_id,
                 character_id,
@@ -304,7 +359,7 @@ async fn bearer_fragment_stats(
             .await
             .map_err(map_local_db_error)?;
             // Same record shape — the creator cache uses `SoulNarrativeRecord`.
-            let cached = cached.map(|c| nexus_local_db::SoulNarrativeRecord {
+            cached.map(|c| nexus_local_db::SoulNarrativeRecord {
                 creator_id: character_id.to_string(),
                 world_id: c.actor_world_binding_id,
                 narrative: c.narrative,
@@ -315,57 +370,42 @@ async fn bearer_fragment_stats(
                 stats_fingerprint: c.stats_fingerprint,
                 created_at: c.created_at,
                 updated_at: c.updated_at,
-            });
-            Ok((stats, cached))
+            })
         }
-    }
+    };
+    Ok((fragment_stats(&records), cached))
 }
 
-/// Fetch a bounded page of recent fragments for the bearer's scope.
+/// Fetch a bounded page of recent fragments for the bearer's scope, newest
+/// first.
 async fn bearer_recent_fragment_signals(
-    pool: &SqlitePool,
+    memory: &MemoryAdapter,
     ctx: &MemoryPipelineCtx,
 ) -> CoreResult<Vec<FragmentSignal>> {
-    const FETCH_LIMIT: i64 = 100;
-    match ctx.bearer_ref() {
-        MemoryBearerRef::Creator(creator_id) => {
-            let rows =
-                nexus_local_db::list_fragments_limited(pool, creator_id, ctx.scope(), FETCH_LIMIT)
-                    .await
-                    .map_err(map_local_db_error)?;
-            Ok(rows
-                .into_iter()
-                .map(|f| FragmentSignal {
-                    keywords: f.keywords,
-                    summary: f.summary,
-                    created_at: f.created_at,
-                })
-                .collect())
-        }
-        MemoryBearerRef::Character {
-            owner_creator_id,
-            character_id,
-        } => {
-            let rows = nexus_local_db::list_character_fragments(
-                pool,
-                owner_creator_id,
-                character_id,
-                ctx.scope(),
-                FETCH_LIMIT,
-                0,
-            )
-            .await
-            .map_err(map_local_db_error)?;
-            Ok(rows
-                .into_iter()
-                .map(|f| FragmentSignal {
-                    keywords: f.keywords,
-                    summary: f.summary,
-                    created_at: f.created_at,
-                })
-                .collect())
-        }
-    }
+    const FETCH_LIMIT: usize = 100;
+    let mut records = bearer_fragment_records(memory, ctx).await?;
+    records.sort_by(|left, right| {
+        created_at_cmp(
+            right["created_at"].as_str().unwrap_or_default(),
+            left["created_at"].as_str().unwrap_or_default(),
+        )
+    });
+    records.truncate(FETCH_LIMIT);
+    Ok(records
+        .iter()
+        .map(|record| FragmentSignal {
+            keywords: serde_json::to_string(&record_keywords(record))
+                .unwrap_or_else(|_| "[]".to_string()),
+            summary: record["content"]["text"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            created_at: record["created_at"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+        })
+        .collect())
 }
 
 /// Persist a synthesized narrative (with its stats cache) to the bearer's
@@ -1045,8 +1085,10 @@ impl CoreService {
             )
             .await?
         };
+        let memory = self.character_memory(principal, &character_id).await?;
         let outcome =
-            reflect_bearer_soul(pool, &ctx, request.force_regenerate, synthesizer).await?;
+            reflect_bearer_soul(pool, &memory, &ctx, request.force_regenerate, synthesizer)
+                .await?;
         drop(ctx);
         character_reflect_wire(&character_id, &outcome)
     }
@@ -1087,8 +1129,10 @@ impl CoreService {
         }
 
         let ctx = MemoryPipelineCtx::creator(principal.creator_id(), world_id);
+        let memory = self.creator_memory(principal).await?;
         let outcome = reflect_bearer_soul(
             &self.inner.pool,
+            &memory,
             &ctx,
             request.force_regenerate,
             synthesizer,

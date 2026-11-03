@@ -11,9 +11,11 @@
 //!   `memory-store/` projections;
 //! * every legacy table and bearer file is byte-identical afterwards (D6);
 //! * a completed re-run verifies its manifest and writes nothing;
-//! * an already-adopted candidate is accepted, a body that differs from the
-//!   legacy source refuses `idempotency_conflict`, and after the marker the
-//!   legacy tables no longer reach any read or just-in-time adoption.
+//! * an already-adopted candidate, and an edit made before the pass through the
+//!   rerouted entry points, are the provider's own successor and are accepted;
+//!   a row at a legacy id without that legacy identity refuses
+//!   `idempotency_conflict`; after the marker the legacy tables no longer reach
+//!   any read or just-in-time adoption.
 
 #![allow(clippy::too_many_lines)] // one end-to-end scenario per test
 
@@ -1010,12 +1012,16 @@ async fn migration_accepts_an_already_consumed_adoption() {
     pool.close().await;
 }
 
-/// An adopted record whose body no longer matches the legacy source refuses the
-/// pass (`idempotency_conflict`) instead of overwriting the provider's state.
+/// PR-F1: an edit made through the rerouted entry point before the pass adopts
+/// the legacy row and then changes it. That adopted row is the object's
+/// legitimate successor — the legacy source is never written (D6) — so the pass
+/// accepts it, publishes the marker for the whole space, and provider-only
+/// reads serve the edited body.
 #[tokio::test]
-async fn migration_refuses_a_body_that_differs_from_the_legacy_source() {
+async fn migration_accepts_a_memory_edit_made_before_the_pass() {
     let env = seed_legacy_home().await;
     let (core, principal) = open_core(&env).await;
+    let files_before = bearer_files(&env);
 
     // The edit adopts the projected long-term memory and then changes its body.
     assert!(core
@@ -1023,29 +1029,101 @@ async fn migration_refuses_a_body_that_differs_from_the_legacy_source() {
         .await
         .unwrap());
 
+    let migration = core.migrate_legacy_content(&principal).await.unwrap();
+    assert_eq!(migration.status, LegacyMigrationStatus::Migrated);
+
+    // The marker records the revision provider-only reads serve: a rebuilt
+    // served snapshot equals it, while a source-derived one would not.
+    let rerun = core.migrate_legacy_content(&principal).await.unwrap();
+    assert_eq!(rerun.status, LegacyMigrationStatus::AlreadyComplete);
+    assert_eq!(rerun.digest, migration.digest, "the same served snapshot");
+
+    let record = serde_json::to_value(
+        core.get_creator_memory(&principal, "legacy-memory")
+            .await
+            .unwrap()
+            .expect("the edited memory is listed"),
+    )
+    .unwrap();
+    assert_eq!(
+        record["content"]["text"], "Edited after adoption.",
+        "provider-only reads serve the edit"
+    );
+    assert_eq!(
+        bearer_files(&env),
+        files_before,
+        "the edit never writes the legacy source"
+    );
+}
+
+/// PR-F1: the same for a `SOUL.md` edited before the pass. The profile write
+/// creates the provider row instead of adopting a projection, so its document
+/// and revision are the provider's own successor as well.
+#[tokio::test]
+async fn migration_accepts_a_soul_edit_made_before_the_pass() {
+    const EDITED_SOUL: &str = "# Soul\n\nEdited before the migration.\n";
+    let env = seed_legacy_home().await;
+    let (core, principal) = open_core(&env).await;
+    let files_before = bearer_files(&env);
+
+    core.set_creator_soul(&principal, EDITED_SOUL, None)
+        .await
+        .expect("the pre-migration SOUL write");
+
+    let migration = core.migrate_legacy_content(&principal).await.unwrap();
+    assert_eq!(migration.status, LegacyMigrationStatus::Migrated);
+    let rerun = core.migrate_legacy_content(&principal).await.unwrap();
+    assert_eq!(rerun.status, LegacyMigrationStatus::AlreadyComplete);
+    assert_eq!(rerun.digest, migration.digest, "the same served snapshot");
+
+    let soul = core
+        .get_creator_soul(&principal)
+        .await
+        .unwrap()
+        .expect("the edited SOUL is listed");
+    assert_eq!(
+        soul.document.body, EDITED_SOUL,
+        "provider-only SOUL reads serve the edit"
+    );
+    assert_eq!(
+        bearer_files(&env),
+        files_before,
+        "the write never touches `SOUL.md`"
+    );
+}
+
+/// The successor rule is bounded by identity: a row that sits at a legacy id
+/// without the bridge's own provenance is unrelated content, so the pass
+/// refuses instead of absorbing it into the marker.
+#[tokio::test]
+async fn a_row_without_the_legacy_identity_at_a_legacy_id_refuses_the_pass() {
+    let env = seed_legacy_home().await;
+    let (core, principal) = open_core(&env).await;
+    core.migrate_legacy_content(&principal).await.unwrap();
+
+    // A foreign provenance at the migrated id, and the marker lost (an
+    // interrupted upgrade), so the pass re-enters its first-pass path.
+    let record_id = "lgc:memory_fragments:frag_legacy";
+    let rewritten = sqlx::query(
+        "UPDATE memory_records \
+         SET provenance_json = '{\"captured_by\":\"someone-else\"}' WHERE record_id = ?",
+    )
+    .bind(record_id)
+    .execute(core.pool())
+    .await
+    .unwrap();
+    assert_eq!(rewritten.rows_affected(), 1, "the migrated fragment exists");
+    sqlx::query("DELETE FROM memory_provider_meta WHERE key = ?")
+        .bind(nexus_core::memory_provider::legacy::legacy_migration_key(
+            nexus_core::memory_provider::DEFAULT_SPACE_ID,
+        ))
+        .execute(core.pool())
+        .await
+        .unwrap();
+
     let refused = core.migrate_legacy_content(&principal).await.unwrap_err();
     assert_core_conflict(refused, "idempotency_conflict");
-
     let pool = plain_pool(&env).await;
-    assert_eq!(
-        count(
-            &pool,
-            "SELECT COUNT(*) FROM memory_provider_meta \
-             WHERE key = 'legacy_content_migration:spc_local_default'",
-        )
-        .await,
-        0,
-        "a refused pass publishes no completion marker"
-    );
-    assert_eq!(
-        count(
-            &pool,
-            "SELECT COUNT(*) FROM memory_records WHERE content_json LIKE '%Edited after adoption.%'",
-        )
-        .await,
-        1,
-        "the provider keeps the user's edit"
-    );
     assert_eq!(
         count(&pool, "SELECT COUNT(*) FROM memory_journal").await,
         1,
@@ -1382,19 +1460,17 @@ async fn a_long_term_byte_change_outside_the_parsed_view_refuses_the_rerun() {
     assert_core_conflict(refused, "idempotency_conflict");
 }
 
-/// P5-F4: a provider row whose content matches but whose served metadata does
-/// not is a conflict — the marker may not record a revision, timestamp or
-/// provenance that provider-only reads never serve.
+/// P5-F4: the marker records the values provider-only reads served when it was
+/// written, so a provider row that moved afterwards is a drift conflict — the
+/// re-run may not silently adopt it as the recorded snapshot.
 #[tokio::test]
-async fn a_metadata_only_differing_row_refuses_the_pass() {
+async fn a_provider_row_that_moved_after_the_pass_refuses_the_rerun() {
     let env = seed_legacy_home().await;
     let (core, principal) = open_core(&env).await;
     core.migrate_legacy_content(&principal).await.unwrap();
 
     // The row the pass wrote, then a provider-native metadata bump: the content
-    // is untouched while its revision and timestamp move. The marker is cleared
-    // so the pass re-enters its comparison path (a marker that did not survive,
-    // e.g. an interrupted upgrade).
+    // is untouched while its revision and timestamp move.
     let record_id = "lgc:memory_fragments:frag_legacy";
     let bumped = sqlx::query(
         "UPDATE memory_records SET revision = revision + 1, \
@@ -1411,18 +1487,18 @@ async fn a_metadata_only_differing_row_refuses_the_pass() {
             .fetch_one(core.pool())
             .await
             .unwrap();
-    sqlx::query("DELETE FROM memory_provider_meta WHERE key = ?")
-        .bind(nexus_core::memory_provider::legacy::legacy_migration_key(
-            nexus_core::memory_provider::DEFAULT_SPACE_ID,
-        ))
-        .execute(core.pool())
+    let marker_sql =
+        "SELECT value FROM memory_provider_meta WHERE key = 'legacy_content_migration:spc_local_default'";
+    let marker_before: String = sqlx::query_scalar(marker_sql)
+        .fetch_one(core.pool())
         .await
         .unwrap();
 
     let refused = core.migrate_legacy_content(&principal).await.unwrap_err();
     assert_core_conflict(refused, "idempotency_conflict");
 
-    // Nothing was overwritten and no marker was published.
+    // Nothing was overwritten, the drifted row stays, and the marker keeps the
+    // snapshot the completed pass recorded.
     let pool = plain_pool(&env).await;
     let content_after: String =
         sqlx::query_scalar("SELECT content_json FROM memory_records WHERE record_id = ?")
@@ -1440,15 +1516,10 @@ async fn a_metadata_only_differing_row_refuses_the_pass() {
         1,
         "the provider keeps its metadata"
     );
+    let marker_after: String = sqlx::query_scalar(marker_sql).fetch_one(&pool).await.unwrap();
     assert_eq!(
-        count(
-            &pool,
-            "SELECT COUNT(*) FROM memory_provider_meta \
-             WHERE key = 'legacy_content_migration:spc_local_default'",
-        )
-        .await,
-        0,
-        "a refused pass publishes no completion marker"
+        marker_after, marker_before,
+        "a refused re-run leaves the recorded marker as it was"
     );
     pool.close().await;
 }

@@ -2049,6 +2049,28 @@ fn profile_body(row: &ProfileRow) -> Result<Value, ProviderError> {
 /// records) and re-authorizes the mutation against the adopted row. Nothing is
 /// written to the legacy surface (D6).
 impl LocalMemoryProvider {
+    /// Materialize one still-projected legacy candidate on the provider without
+    /// consuming it: the Character capture adopts its own retained queue row in
+    /// the same call, so the row stays visible after the migration's marker
+    /// turns the legacy queue reads off (fix round 1, Greptile `legacy.rs:318`).
+    pub async fn adopt_legacy_candidate(
+        &self,
+        principal: &schemas::Principal,
+        subject_id: &str,
+        candidate_id: &str,
+    ) -> SpokeResult<()> {
+        let principal_id = principal_id(principal);
+        let ids = [candidate_id.to_string()];
+        match self
+            .store
+            .adopt_legacy_candidates(DEFAULT_SPACE_ID, principal_id, subject_id, &ids)
+            .await
+        {
+            Ok(()) => SpokeResult::Ok(()),
+            Err(error) => deny(&store_error(error)),
+        }
+    }
+
     /// One §7.18 edit, adopting a still-projected record inside the edit.
     pub async fn update_legacy_record(
         &self,

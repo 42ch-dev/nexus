@@ -66,7 +66,7 @@ use crate::memory_provider::legacy;
 use crate::memory_provider::policy;
 use crate::memory_provider::profile;
 use crate::memory_provider::{
-    created_at_cmp, LegacyContentMigration, LocalMemoryProvider, MemoryDisposition,
+    LegacyContentMigration, LocalMemoryProvider, MemoryDisposition,
 };
 use crate::principal::Principal;
 use crate::service::CoreService;
@@ -341,8 +341,17 @@ impl MemoryAdapter {
                 None => break,
             }
         }
+        // The retained query ordered by its RAW `created_at` TEXT
+        // (`ORDER BY created_at DESC, pending_id DESC`), and mixed legacy
+        // formats do not parse into that order: a whole-second `…00Z` row
+        // outranks a `…00.900Z` one as text while the instant order puts the
+        // fractional row first (same distinction as the fragment selection,
+        // NXM-7 fix 4). The legacy column is served verbatim, so its text is
+        // the queue key.
         rows.sort_by(|left, right| {
-            created_at_cmp(&right.created_at, &left.created_at)
+            right
+                .created_at
+                .cmp(&left.created_at)
                 .then_with(|| right.pending_id.cmp(&left.pending_id))
         });
         Ok(rows)
@@ -355,7 +364,7 @@ impl MemoryAdapter {
     /// (the keyword scan): the provider has no keyword index, so stopping early
     /// would silently drop matches the retained SQL found (fix round 1, finding
     /// F5).
-    async fn records(
+    pub(crate) async fn records(
         &self,
         selection: Value,
         kinds: &[&str],
@@ -591,10 +600,17 @@ impl MemoryAdapter {
 
     /// One long-term memory record by its authored slug.
     ///
-    /// The slug is authored content (`nexus_legacy.slug`) and the provider has
-    /// no slug index, so the match happens after the read — exactly the
-    /// directory scan the CLI used to perform.
-    async fn memory_by_slug(&self, slug: &str) -> CoreResult<Option<Value>> {
+    /// A projected memory has the bridge's deterministic id, so the read opens
+    /// exactly that record and never parses another bearer file (one malformed
+    /// memory must not break this read — fix round 1, Greptile `legacy.rs:270`).
+    /// A promoted memory is provider-native (a minted id) and only carries the
+    /// slug as authored content, so that case still needs the authored-kind
+    /// read and the match after it.
+    async fn memory_by_slug(&self, creator_id: &str, slug: &str) -> CoreResult<Option<Value>> {
+        let record_id = legacy::memory_long_term_record_id(creator_id, slug);
+        if let Some(record) = self.record(&record_id).await? {
+            return Ok(Some(record));
+        }
         Ok(self
             .memory_records()
             .await?
@@ -899,7 +915,7 @@ impl CoreService {
 impl CoreService {
     /// The provider adapter for the principal's own Creator bearer, over the
     /// pinned `MemoryPort` (a read-only core serves reads from it too).
-    async fn creator_memory(&self, principal: &Principal) -> CoreResult<MemoryAdapter> {
+    pub(crate) async fn creator_memory(&self, principal: &Principal) -> CoreResult<MemoryAdapter> {
         MemoryAdapter::open(
             self.memory_provider()?,
             principal,
@@ -924,7 +940,7 @@ impl CoreService {
     }
 
     /// The provider adapter for one Character bearer.
-    async fn character_memory(
+    pub(crate) async fn character_memory(
         &self,
         principal: &Principal,
         character_id: &str,
@@ -1004,7 +1020,7 @@ fn nexus_legacy(record: &Value) -> &Value {
 /// the readers below can stay branch-free.
 static NULL_LEGACY: Value = Value::Null;
 
-fn record_keywords(record: &Value) -> Vec<String> {
+pub(crate) fn record_keywords(record: &Value) -> Vec<String> {
     nexus_legacy(record)["keywords"]
         .as_array()
         .map(|values| {
@@ -1428,7 +1444,7 @@ impl CoreService {
         self.verify_principal(principal)?;
         let memory = self.creator_memory(principal).await?;
         memory
-            .memory_by_slug(slug)
+            .memory_by_slug(principal.creator_id(), slug)
             .await?
             .as_ref()
             .map(map_wire)
@@ -1450,7 +1466,7 @@ impl CoreService {
     ) -> CoreResult<bool> {
         self.verify_principal(principal)?;
         let memory = self.creator_memory_writer(principal).await?;
-        if memory.memory_by_slug(slug).await?.is_some() {
+        if memory.memory_by_slug(principal.creator_id(), slug).await?.is_some() {
             return Ok(false);
         }
         // The minted `memory_id` is the mutation's identity: a create after a
@@ -1495,7 +1511,7 @@ impl CoreService {
     ) -> CoreResult<bool> {
         self.verify_principal(principal)?;
         let memory = self.creator_memory_writer(principal).await?;
-        let Some(record) = memory.memory_by_slug(slug).await? else {
+        let Some(record) = memory.memory_by_slug(principal.creator_id(), slug).await? else {
             return Ok(false);
         };
         let revision = MemoryRevision::of(&record)?;
@@ -1538,7 +1554,7 @@ impl CoreService {
     ) -> CoreResult<bool> {
         self.verify_principal(principal)?;
         let memory = self.creator_memory_writer(principal).await?;
-        let Some(record) = memory.memory_by_slug(slug).await? else {
+        let Some(record) = memory.memory_by_slug(principal.creator_id(), slug).await? else {
             return Ok(false);
         };
         let revision = MemoryRevision::of(&record)?;
@@ -1668,7 +1684,7 @@ impl CoreService {
             ));
         }
         let memory = self.creator_memory_writer(principal).await?;
-        let existing = memory.memory_by_slug(PERSONALITY_MEMORY_SLUG).await?;
+        let existing = memory.memory_by_slug(principal.creator_id(), PERSONALITY_MEMORY_SLUG).await?;
         let memory_id = if let Some(record) = &existing {
             let revision = MemoryRevision::of(record)?;
             let (memory_id, _, _) = creator_memory_identity(record);
@@ -1713,7 +1729,7 @@ impl CoreService {
             memory_id
         };
         let record = memory
-            .memory_by_slug(PERSONALITY_MEMORY_SLUG)
+            .memory_by_slug(principal.creator_id(), PERSONALITY_MEMORY_SLUG)
             .await?
             .ok_or_else(|| CoreError::NotFound {
                 resource: format!("memory '{PERSONALITY_MEMORY_SLUG}' ({memory_id})"),
@@ -1765,6 +1781,9 @@ impl CoreService {
 
         validate_capture_input(&request, &raw_digest)?;
 
+        let memory = self
+            .character_memory_writer(principal, &character_id)
+            .await?;
         let record = nexus_local_db::CharacterPendingReviewRecord {
             pending_id: pending_id.clone(),
             session_id,
@@ -1782,6 +1801,19 @@ impl CoreService {
         )
         .await
         .map_err(map_local_db_error)?;
+        // The capture lands on the provider now, not when a reader first adopts
+        // it: after the one-shot migration the legacy queue is not read at all,
+        // so a legacy-only write would be invisible to the list, count,
+        // dismissal and review paths (fix round 1, Greptile `legacy.rs:318`).
+        let candidate_id = legacy::character_pending_review_candidate_id(&pending_id);
+        match memory
+            .provider
+            .adopt_legacy_candidate(&memory.principal, memory.subject_id(), &candidate_id)
+            .await
+        {
+            SpokeResult::Ok(()) => {}
+            SpokeResult::Reject(reject) => return Err(memory_reject(&reject)),
+        }
 
         map_wire(json!({
             "success": true,
@@ -1917,6 +1949,25 @@ impl CoreService {
         let candidate_id = legacy::character_pending_review_candidate_id(&pending_id);
         let missing = || not_found("pending review", &format!("'{pending_id}'"));
         if !pending_now(&memory, &candidate_id).await? {
+            // A capture the provider owns outright carries a minted candidate
+            // id: address it through the row itself, exactly as the Creator
+            // dismissal does (NXM-16).
+            if let Some(row) = memory
+                .pending_rows()
+                .await?
+                .into_iter()
+                .find(|row| row.pending_id == pending_id)
+            {
+                if memory
+                    .dismiss_native(&row.candidate_id, row.revision)
+                    .await?
+                {
+                    return map_wire(json!({
+                        "success": true,
+                        "pending_id": pending_id,
+                    }));
+                }
+            }
             return Err(missing());
         }
         if !memory.dismiss_legacy(&candidate_id).await? {
@@ -2567,7 +2618,13 @@ impl CoreService {
         let mut fragments = Vec::new();
         for record in &records {
             if let Some(keyword) = keyword.as_deref() {
-                if !record_keywords(record).iter().any(|value| value == keyword) {
+                // The retained SQL matched with `LIKE`, which is
+                // case-insensitive for ASCII: a mixed-case keyword must not
+                // hide the fragment a lowercase one finds.
+                if !record_keywords(record)
+                    .iter()
+                    .any(|value| value.eq_ignore_ascii_case(keyword))
+                {
                     continue;
                 }
             }

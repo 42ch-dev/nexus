@@ -697,17 +697,44 @@ async fn remove_binding_tx(
     }
 
     // v1.184 P3: binding-local Character memory is the final dependency gate.
-    // Pending rows, fragments, or narrative cache rows carrying this binding's
-    // provenance block removal with a stable zero-mutation 409.
-    let local_memory = sqlx::query_scalar!(
-        r#"SELECT (SELECT COUNT(*) FROM character_memory_pending_review WHERE actor_world_binding_id = ?) +
-                  (SELECT COUNT(*) FROM character_memory_fragments WHERE actor_world_binding_id = ?) +
-                  (SELECT COUNT(*) FROM character_soul_narratives WHERE actor_world_binding_id = ?)
-                  as "count!: i64""#,
-        binding_id,
-        binding_id,
-        binding_id
+    // The gate counts what is *served* for this binding, not the historical
+    // legacy rows: a legacy row the provider already owns under its origin
+    // (`nexus_legacy.pending_id` / `nexus_legacy.fragment_id`) is the
+    // provider's disposition — a dismissed pending review and a promoted
+    // fragment no longer hold the binding — while the provider's own
+    // binding-placed pending candidates and live records block as before.
+    // Narrative cache rows have no provider counterpart yet and keep counting.
+    let local_memory: i64 = sqlx::query_scalar(
+        r#"SELECT (
+                   (SELECT COUNT(*) FROM character_memory_pending_review l
+                    WHERE l.actor_world_binding_id = ?
+                      AND NOT EXISTS (
+                          SELECT 1 FROM memory_candidates c
+                          WHERE c.capture_context_id = ?
+                            AND json_extract(c.content_json,
+                                '$.structured.nexus_legacy.pending_id') = l.pending_id)) +
+                   (SELECT COUNT(*) FROM memory_candidates c
+                    WHERE c.capture_context_id = ? AND c.status = 'pending') +
+                   (SELECT COUNT(*) FROM character_memory_fragments l
+                    WHERE l.actor_world_binding_id = ?
+                      AND NOT EXISTS (
+                          SELECT 1 FROM memory_records r
+                          WHERE r.scope_context_id = ? AND r.tombstone_json IS NULL
+                            AND json_extract(r.content_json,
+                                '$.structured.nexus_legacy.fragment_id') = l.fragment_id)) +
+                   (SELECT COUNT(*) FROM memory_records r
+                    WHERE r.scope_context_id = ? AND r.tombstone_json IS NULL) +
+                   (SELECT COUNT(*) FROM character_soul_narratives
+                    WHERE actor_world_binding_id = ?)
+                  )"#,
     )
+    .bind(binding_id)
+    .bind(binding_id)
+    .bind(binding_id)
+    .bind(binding_id)
+    .bind(binding_id)
+    .bind(binding_id)
+    .bind(binding_id)
     .fetch_one(&mut **tx)
     .await?;
     if local_memory > 0 {

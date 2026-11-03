@@ -181,6 +181,17 @@ pub fn character_fragment_record_id(fragment_id: &str) -> String {
     external_id(FAMILY_CHARACTER_FRAGMENTS, &[fragment_id])
 }
 
+/// The deterministic external id of one Creator long-term memory, addressed by
+/// its authored slug.
+///
+/// A slug read resolves this id first instead of projecting every bearer file:
+/// one malformed memory file must not break a read of another (fix round 1,
+/// Greptile `legacy.rs:270`).
+#[must_use]
+pub fn memory_long_term_record_id(creator_id: &str, slug: &str) -> String {
+    external_id(FAMILY_MEMORY_LONG_TERM, &[creator_id, slug])
+}
+
 /// The legacy bearer roots of one opened workspace: the user home the bearer
 /// layout resolves from, and the Creator that owns it.
 #[derive(Debug, Clone)]
@@ -263,7 +274,19 @@ pub(super) async fn records_in_tx(
     let Some(owner) = owner_of(tx, roots, space_id, subject, subject_id).await? else {
         return Ok(Vec::new());
     };
-    let mut rows = project_records(tx, roots, space_id, subject_id, &owner).await?;
+    // An authored long-term memory always carries an `nexus.<MemoryKind>` kind
+    // (D-7), so a request for other kinds cannot serve one: the files stay
+    // unopened and a malformed one cannot break the read.
+    let long_term = if kinds.is_empty()
+        || kinds
+            .iter()
+            .any(|kind| kind.starts_with(policy::NEXUS_KIND_PREFIX))
+    {
+        LongTerm::All
+    } else {
+        LongTerm::None
+    };
+    let mut rows = project_records(tx, roots, space_id, subject_id, &owner, long_term).await?;
     rows.retain(|row| {
         selection_admits(selection, row)
             && provenance_admits(filter, row)
@@ -299,7 +322,16 @@ pub(super) async fn record_by_id_in_tx(
         Some(subject) => subject.subject_id,
         None => owner.canonical_subject_id(roots),
     };
-    let rows = project_records(tx, roots, space_id, &subject_id, &owner).await?;
+    let long_term = match family.as_str() {
+        FAMILY_MEMORY_LONG_TERM | FAMILY_CHARACTER_LONG_TERM => {
+            let Some(slug) = components.get(1) else {
+                return Ok(None);
+            };
+            LongTerm::Slug(slug)
+        }
+        _ => LongTerm::None,
+    };
+    let rows = project_records(tx, roots, space_id, &subject_id, &owner, long_term).await?;
     Ok(rows.into_iter().find(|row| row.record_id == record_id))
 }
 
@@ -665,12 +697,30 @@ fn kind_admits(kinds: &[String], row: &RecordRow) -> bool {
 
 // ── Record projections ──────────────────────────────────────────────────
 
+/// Which bearer long-term memory files a projection may open.
+///
+/// A memory file is authored content on disk, so parsing one is the only part
+/// of a projection that a malformed unrelated file can break: a read selects
+/// the family it asks for and never opens a file it cannot serve (fix round 1,
+/// Greptile `legacy.rs:270`).
+#[derive(Clone, Copy)]
+enum LongTerm<'a> {
+    /// Every authored memory file: the migration snapshot and the authored-kind
+    /// reads.
+    All,
+    /// Only the named file: a by-id read addresses one record.
+    Slug(&'a str),
+    /// No file: the requested kinds cannot be an authored memory.
+    None,
+}
+
 async fn project_records(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
     roots: &LegacyRoots,
     space_id: &str,
     subject_id: &str,
     owner: &Owner,
+    long_term: LongTerm<'_>,
 ) -> StoreResult<Vec<RecordRow>> {
     let mut rows = match owner {
         Owner::Creator => {
@@ -685,7 +735,9 @@ async fn project_records(
             rows
         }
     };
-    rows.extend(long_term_records(roots, space_id, subject_id, owner)?);
+    rows.extend(long_term_records(
+        roots, space_id, subject_id, owner, long_term,
+    )?);
     Ok(rows)
 }
 
@@ -1047,10 +1099,23 @@ fn long_term_records(
     space_id: &str,
     subject_id: &str,
     owner: &Owner,
+    long_term: LongTerm<'_>,
 ) -> StoreResult<Vec<RecordRow>> {
     let bearer = roots.bearer(owner);
-    let slugs =
-        memory_io::list_memories(&roots.home, bearer).map_err(|error| legacy_error(&error))?;
+    let slugs = match long_term {
+        LongTerm::None => return Ok(Vec::new()),
+        LongTerm::Slug(slug) => {
+            let known = memory_io::list_memories(&roots.home, bearer)
+                .map_err(|error| legacy_error(&error))?;
+            if !known.iter().any(|known| known == slug) {
+                return Ok(Vec::new());
+            }
+            vec![slug.to_string()]
+        }
+        LongTerm::All => {
+            memory_io::list_memories(&roots.home, bearer).map_err(|error| legacy_error(&error))?
+        }
+    };
     let (family, owner_key) = match owner {
         Owner::Creator => (FAMILY_MEMORY_LONG_TERM, roots.creator_id.as_str()),
         Owner::Character(character_id) => (FAMILY_CHARACTER_LONG_TERM, character_id.as_str()),
@@ -1357,12 +1422,14 @@ pub(super) struct MigrationSubject {
     pub kind_id: String,
 }
 
-/// Every legacy object of one space, as the provider stores it after the
-/// one-shot migration, plus the manifest the completion marker records.
+/// Every legacy object of one space, as the bridge projects it, plus the
+/// manifest the completion marker records.
 ///
 /// The rows are the bridge's own projections, so a migrated space serves
 /// exactly the content its merged reads served before the marker existed: the
-/// migration never re-derives a mapping the read path already owns.
+/// migration never re-derives a mapping the read path already owns. The pass
+/// then replaces every row the provider already owns with that stored successor
+/// and records the served values in the manifest.
 pub(super) struct MigrationSnapshot {
     pub subjects: Vec<MigrationSubject>,
     pub records: Vec<RecordRow>,
@@ -1390,7 +1457,8 @@ pub(super) async fn migration_snapshot(
     let mut profiles = Vec::new();
     for owner in migration_owners(tx, roots).await? {
         let subject_id = migration_subject_id(tx, roots, space_id, &owner).await?;
-        let owner_records = project_records(tx, roots, space_id, &subject_id, &owner).await?;
+        let owner_records =
+            project_records(tx, roots, space_id, &subject_id, &owner, LongTerm::All).await?;
         let owner_candidates =
             candidates_for_owner(tx, roots, space_id, &subject_id, &owner).await?;
         let owner_profile = profile_of(roots, space_id, &subject_id, &owner)?;
@@ -1483,7 +1551,7 @@ async fn migration_subject_id(
 /// The digest covers content, not the derived profile timestamps: a re-run must
 /// verify the same legacy snapshot without depending on `SOUL.md`'s mtime, which
 /// the migration never writes but the file system may change.
-fn migration_manifest(
+pub(super) fn migration_manifest(
     records: &[RecordRow],
     candidates: &[CandidateRow],
     profiles: &[ProfileRow],

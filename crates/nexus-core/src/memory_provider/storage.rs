@@ -3971,33 +3971,21 @@ async fn insert_legacy_profile(
     Ok(())
 }
 
-/// A record the provider already owns under a migrated id must still be that
-/// legacy object. A tombstone is the provider's own disposition (the user
-/// deleted it), so it is kept; anything else the completion manifest records —
-/// content, placement, provenance, timestamps and revision — must match exactly,
-/// or the marker would claim values provider-only reads never serve (P5-F4).
-fn require_same_record(stored: &RecordRow, projected: &RecordRow) -> StoreResult<()> {
-    if stored.tombstoned()
-        || (stored.subject_id == projected.subject_id
-            && stored.kind == projected.kind
-            && stored.content_json == projected.content_json
-            && stored.scope_visibility == projected.scope_visibility
-            && stored.scope_context_id == projected.scope_context_id
-            && stored.provenance_json == projected.provenance_json
-            && stored.occurred_at == projected.occurred_at
-            && stored.created_at == projected.created_at
-            && stored.updated_at == projected.updated_at
-            && stored.revision == projected.revision)
-    {
-        return Ok(());
-    }
-    Err(StoreError::IdempotencyConflict)
+/// Whether a provider row at a projected record's legacy id is that same legacy
+/// object: the bridge's own provenance names the same source, for the same
+/// subject and creation time. Content, kind, placement, revision and
+/// timestamps are what the edit entry points rewrite after they adopt the
+/// projection (D13), so a legitimate successor may differ in all of them.
+fn same_legacy_record(stored: &RecordRow, projected: &RecordRow) -> bool {
+    stored.subject_id == projected.subject_id
+        && stored.provenance_json == projected.provenance_json
+        && stored.created_at == projected.created_at
 }
 
-/// [`require_same_record`] for a candidate: a consumed shell keeps the
-/// provider's own outcome (it names the body it consumed through
-/// `content_digest`), while a pending row must still carry the legacy content
-/// and the metadata the manifest records.
+/// A provider row that already owns a candidate's migrated id must still be
+/// that legacy candidate: a consumed shell keeps the provider's own outcome (it
+/// names the body it consumed through `content_digest`), while a pending row
+/// must still carry the legacy content and the metadata the manifest records.
 fn require_same_candidate(stored: &CandidateRow, projected: &CandidateRow) -> StoreResult<()> {
     if stored.status == "consumed" {
         let consumed = stored.content_digest.as_deref().ok_or_else(|| {
@@ -4028,17 +4016,60 @@ fn require_same_candidate(stored: &CandidateRow, projected: &CandidateRow) -> St
     Err(StoreError::IdempotencyConflict)
 }
 
-/// [`require_same_record`] for the `SOUL.md` profile: the document and the
-/// revision the manifest records.
-fn require_same_profile(stored: &ProfileRow, projected: &ProfileRow) -> StoreResult<()> {
-    if stored.subject_id == projected.subject_id
-        && stored.profile_kind == projected.profile_kind
-        && stored.document_json == projected.document_json
-        && stored.revision == projected.revision
-    {
-        return Ok(());
+/// Resolve every projected row against the provider's own row before the pass
+/// records or writes anything.
+///
+/// A legacy id the provider already owns was written by a just-in-time
+/// adoption (an edit, a dismissal, a promotion) or by an interrupted earlier
+/// pass, so the stored row is the object's successor: its content and revision
+/// are what provider-only reads serve, and the marker must record those (a
+/// pre-migration edit never touches the legacy source). A row that collides
+/// with a projected id without carrying that legacy identity is unrelated
+/// content, and the pass refuses instead of absorbing it.
+///
+/// The legacy source snapshot is kept beside the served one (`source_digest`):
+/// a re-run still detects a source that moved, while the values the marker
+/// records are the served ones.
+async fn resolve_legacy_snapshot(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    space_id: &str,
+    snapshot: &mut legacy::MigrationSnapshot,
+) -> StoreResult<()> {
+    let source_digest = snapshot.manifest["digest"].clone();
+    for row in &mut snapshot.records {
+        let Some(stored) = record_in_tx(tx, space_id, row.record_id.as_str()).await? else {
+            continue;
+        };
+        if !same_legacy_record(&stored, row) {
+            return Err(StoreError::IdempotencyConflict);
+        }
+        *row = stored;
     }
-    Err(StoreError::IdempotencyConflict)
+    for row in &mut snapshot.candidates {
+        if let Some(stored) = candidate_in_tx(tx, space_id, row.candidate_id.as_str()).await? {
+            require_same_candidate(&stored, row)?;
+        }
+    }
+    for row in &mut snapshot.profiles {
+        let Some(stored) =
+            profile_in_tx(tx, space_id, &row.subject_id, &row.profile_kind).await?
+        else {
+            continue;
+        };
+        // The stored profile of the subject's kind *is* that document: a
+        // pre-migration `SOUL.md` write creates it without adopting a
+        // projection, so its document and revision are the provider's own.
+        *row = stored;
+    }
+    let served =
+        legacy::migration_manifest(&snapshot.records, &snapshot.candidates, &snapshot.profiles)?;
+    snapshot.manifest = json!({
+        "digest": served["digest"],
+        "source_digest": source_digest,
+        "counts": served["counts"],
+        "families": served["families"],
+    });
+    Ok(())
 }
 
 /// What one record mutation applies after adoption (§7.18/§7.19). Both shares
@@ -4139,6 +4170,37 @@ impl MemoryStore {
             }
             Err(error) => Err(error),
         }
+    }
+
+    /// Materialize the named projected legacy candidates into the provider under
+    /// their deterministic ids, without consuming them.
+    ///
+    /// The Character capture writes the retained queue row and adopts it in the
+    /// same call: the one-shot migration turns every legacy queue read off, so a
+    /// capture that only wrote the legacy row would be invisible to the list,
+    /// count, dismissal and review paths afterwards (fix round 1, Greptile
+    /// `legacy.rs:318`). Adoption is the projection's own insert, so the row the
+    /// pass later compares is byte-identical to the source.
+    pub(super) async fn adopt_legacy_candidates(
+        &self,
+        space_id: &str,
+        principal_id: &str,
+        subject_id: &str,
+        ids: &[String],
+    ) -> StoreResult<()> {
+        let (mut tx, now) = self.begin_admission().await?;
+        adopt_in_tx(
+            &mut tx,
+            &self.legacy,
+            space_id,
+            principal_id,
+            subject_id,
+            ids,
+            now,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(())
     }
 
     /// §7.11: admission + candidate inserts + receipt, one transaction.
@@ -5517,12 +5579,14 @@ impl MemoryStore {
     ///
     /// A provider row that already carries a migrated object's id (a
     /// just-in-time adoption, or an interrupted earlier pass) is never
-    /// overwritten: the stored object — content *and* the served metadata the
-    /// manifest records — must be the legacy source, otherwise the pass refuses
-    /// `IDEMPOTENCY_CONFLICT`. A completed pass verifies its manifest instead of
-    /// writing, but only after it has settled any intent the marker's pass left
-    /// unsettled: a marker whose projection is still owed is not "complete"
-    /// (P5-F2).
+    /// overwritten: a row that still carries the legacy object's identity is
+    /// that object's successor — the entry points adopt and then edit it — so
+    /// the manifest records the values provider-only reads serve, and a row
+    /// that collides with the id without that identity is unrelated content and
+    /// refuses `IDEMPOTENCY_CONFLICT`. A completed pass verifies its manifest
+    /// instead of writing, but only after it has settled any intent the
+    /// marker's pass left unsettled: a marker whose projection is still owed is
+    /// not "complete" (P5-F2).
     pub(super) async fn migrate_legacy(
         &self,
         ctx: &OpContext<'_>,
@@ -5532,7 +5596,9 @@ impl MemoryStore {
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(recorded) = legacy::migration_marker(&mut tx, ctx.space_id).await? {
-            let snapshot = legacy::migration_snapshot(&mut tx, &self.legacy, ctx.space_id).await?;
+            let mut snapshot =
+                legacy::migration_snapshot(&mut tx, &self.legacy, ctx.space_id).await?;
+            resolve_legacy_snapshot(&mut tx, ctx.space_id, &mut snapshot).await?;
             tx.rollback().await?;
             // A committed marker can still owe its file publication: re-drive
             // whatever this op left unsettled before calling the space complete.
@@ -5545,7 +5611,8 @@ impl MemoryStore {
             return Ok(MigrationOutcome::Verified(snapshot.manifest));
         }
         gate(&mut tx, admission).await?;
-        let snapshot = legacy::migration_snapshot(&mut tx, &self.legacy, ctx.space_id).await?;
+        let mut snapshot = legacy::migration_snapshot(&mut tx, &self.legacy, ctx.space_id).await?;
+        resolve_legacy_snapshot(&mut tx, ctx.space_id, &mut snapshot).await?;
         let mut effects = Vec::new();
         for subject in &snapshot.subjects {
             sqlx::query(
@@ -5564,25 +5631,29 @@ impl MemoryStore {
             .await?;
         }
         for row in &snapshot.records {
-            if let Some(stored) = record_in_tx(&mut tx, ctx.space_id, &row.record_id).await? {
-                require_same_record(&stored, row)?;
+            if record_in_tx(&mut tx, ctx.space_id, &row.record_id)
+                .await?
+                .is_some()
+            {
                 continue;
             }
             insert_legacy_record(&mut tx, row).await?;
             effects.push(journal::record_effect(row)?);
         }
         for row in &snapshot.candidates {
-            if let Some(stored) = candidate_in_tx(&mut tx, ctx.space_id, &row.candidate_id).await? {
-                require_same_candidate(&stored, row)?;
+            if candidate_in_tx(&mut tx, ctx.space_id, &row.candidate_id)
+                .await?
+                .is_some()
+            {
                 continue;
             }
             insert_legacy_candidate(&mut tx, row).await?;
         }
         for row in &snapshot.profiles {
-            if let Some(stored) =
-                profile_in_tx(&mut tx, ctx.space_id, &row.subject_id, &row.profile_kind).await?
+            if profile_in_tx(&mut tx, ctx.space_id, &row.subject_id, &row.profile_kind)
+                .await?
+                .is_some()
             {
-                require_same_profile(&stored, row)?;
                 continue;
             }
             insert_legacy_profile(&mut tx, row).await?;
