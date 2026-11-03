@@ -355,6 +355,44 @@ impl MemoryAdapter {
         Ok(rows)
     }
 
+    /// The number of pending candidates `keep` admits, walked page by page.
+    ///
+    /// A count needs neither the retained order nor the rows themselves, so the
+    /// same authorized pages [`Self::pending_rows`] reads are counted here
+    /// instead of materialized and sorted (`keep` is the caller's own scope
+    /// predicate, applied to the same projected rows) — fix round 4, finding
+    /// F1.
+    async fn pending_count(&self, keep: impl Fn(&PendingMemoryRow) -> bool) -> CoreResult<usize> {
+        let mut count = 0;
+        let mut cursor: Option<String> = None;
+        loop {
+            let request: spoke_schemas::MemoryCandidatesListRequest = map_wire(json!({
+                "space_id": MEMORY_SPACE_ID,
+                "subject_id": self.subject_id,
+                "status": "pending",
+                "limit": MEMORY_PAGE_SIZE,
+                "cursor": cursor,
+            }))?;
+            let body = memory_ok(
+                self.provider
+                    .list_candidates(&self.principal, request)
+                    .await,
+            )?;
+            count += body["candidates"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(PendingMemoryRow::from_candidate)
+                .filter(|row| keep(row))
+                .count();
+            match body["next_cursor"].as_str() {
+                Some(next) => cursor = Some(next.to_string()),
+                None => break,
+            }
+        }
+        Ok(count)
+    }
+
     /// The subject's records in the provider's `created_at DESC` order: at most
     /// `want` rows, or the whole subject set when `want` is `None`.
     ///
@@ -390,6 +428,12 @@ impl MemoryAdapter {
                 Some(next) => cursor = Some(next.to_string()),
                 None => break,
             }
+        }
+        if let Some(want) = want {
+            // The loop stops after the page that reaches the bound, so this
+            // drops that page's remainder: the bound is the caller's, not the
+            // provider's page size (fix round 4, finding F2).
+            rows.truncate(want);
         }
         Ok(rows)
     }
@@ -505,10 +549,12 @@ impl MemoryAdapter {
             .await
         {
             SpokeResult::Ok(_) => Ok(true),
-            // Only consumption bumps a candidate's revision, so a CAS miss is
-            // the same answer as a consumed row: it is no longer pending (a
-            // concurrent dismissal won), which the retained contract renders as
-            // the row being gone.
+            // `Ok(false)` is "nothing was pending under that id", and only the
+            // `Ok` receipt above means this dismissal consumed the row: a
+            // candidate the review drain already promoted or fragmented is
+            // `CandidateConsumed`, an absent row is `NotFound`, and a lost CAS
+            // is `RevisionConflict` — all three are the retained not-found
+            // answer, never dismissal success (fix round 4, finding F3).
             SpokeResult::Reject(reject)
                 if matches!(
                     reject.code,
@@ -1919,11 +1965,8 @@ impl CoreService {
         .await?;
         let memory = self.character_memory(principal, &character_id).await?;
         let count = memory
-            .pending_rows()
-            .await?
-            .into_iter()
-            .filter(|row| pending_row_in_scope(row, binding_id.as_deref()))
-            .count();
+            .pending_count(|row| pending_row_in_scope(row, binding_id.as_deref()))
+            .await?;
         map_wire(json!({
             "count": i64::try_from(count).unwrap_or(i64::MAX),
         }))
@@ -2485,7 +2528,7 @@ impl CoreService {
     ) -> CoreResult<CountPendingReviewsResponse> {
         self.verify_principal(principal)?;
         let memory = self.creator_memory(principal).await?;
-        let count = memory.pending_rows().await?.len();
+        let count = memory.pending_count(|_| true).await?;
         Ok(CountPendingReviewsResponse {
             count: i64::try_from(count).unwrap_or(i64::MAX),
         })
@@ -4047,5 +4090,122 @@ impl CoreService {
             "extensions": {},
         }))?;
         provider.migrate_legacy(&spoke_principal).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::service::{CoreAccess, CoreOpenOptions};
+    use nexus_local_db::ensure_creator_row;
+    use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
+    use tempfile::TempDir;
+
+    const CREATOR_UNDER_TEST: &str = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    fn capture(pending_id: &str, raw_digest: &str) -> CreatePendingReviewRequest {
+        serde_json::from_value(json!({
+            "pending_id": pending_id,
+            "session_id": "sess_records_want",
+            "creator_id": CREATOR_UNDER_TEST,
+            "world_id": "wld_records_want",
+            "task_kind": "chapter",
+            "raw_digest": raw_digest,
+            "created_at": "2026-11-02T10:00:00Z",
+        }))
+        .expect("wire-valid capture body")
+    }
+
+    /// F2 (fix round 4): `records()` returns at most `want` rows, so `want = 1`
+    /// is exactly one row even when the subject holds more.
+    ///
+    /// `records()` is `pub(crate)`, so the bound can only be pinned from inside
+    /// the crate. The promotion path is the shortest public way to give the
+    /// adapter more than one record of one kind.
+    #[tokio::test]
+    async fn records_returns_at_most_want_rows() {
+        let tmp = TempDir::new().unwrap();
+        let user_home = tmp.path().to_path_buf();
+        let nexus_home = user_home.join(".nexus42");
+        std::fs::create_dir_all(&nexus_home).unwrap();
+        std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+            &user_home,
+            CREATOR_UNDER_TEST,
+            "default",
+        ))
+        .unwrap();
+        std::fs::write(
+            nexus_home.join("config.toml"),
+            format!(
+                "active_creator_id = \"{CREATOR_UNDER_TEST}\"\n\
+                 [active_workspace_slug_by_creator]\n\
+                 \"{CREATOR_UNDER_TEST}\" = \"default\""
+            ),
+        )
+        .unwrap();
+        let db_path =
+            nexus_home_layout::workspace_state_db_path(&user_home, CREATOR_UNDER_TEST, "default");
+        {
+            let guarded =
+                init_engine_pool(&db_path, CREATOR_UNDER_TEST, GuardedPoolOptions::default())
+                    .await
+                    .unwrap();
+            let pool = guarded.clone_pool();
+            ensure_creator_row(&pool, CREATOR_UNDER_TEST, "Owner")
+                .await
+                .unwrap();
+            pool.close().await;
+        }
+        let core = CoreService::open(CoreOpenOptions {
+            user_home,
+            access: CoreAccess::EngineOwner,
+        })
+        .await
+        .unwrap();
+        let principal = core.active_principal().await.unwrap();
+        for index in 0..2 {
+            core.create_pending_review(
+                &principal,
+                capture(
+                    &format!("pend_records_want_{index}"),
+                    "The chapter pivots from betrayal to alliance, with causal consequences \
+                     for three factions.",
+                ),
+            )
+            .await
+            .unwrap();
+        }
+        let reviewed = core
+            .review_memory(
+                &principal,
+                ReviewRequest {
+                    creator_id: CREATOR_UNDER_TEST.to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(reviewed.promoted, 2, "both captures promote");
+
+        let memory = core.creator_memory(&principal).await.unwrap();
+        let kinds = creator_record_kinds();
+        let kinds: Vec<&str> = kinds.iter().map(String::as_str).collect();
+        assert_eq!(
+            memory
+                .records(json!({ "mode": "shared_only" }), &kinds, None, None)
+                .await
+                .unwrap()
+                .len(),
+            2,
+            "the unbounded read serves the whole subject set"
+        );
+        assert_eq!(
+            memory
+                .records(json!({ "mode": "shared_only" }), &kinds, None, Some(1))
+                .await
+                .unwrap()
+                .len(),
+            1,
+            "`want` bounds the returned set, not the provider page"
+        );
     }
 }

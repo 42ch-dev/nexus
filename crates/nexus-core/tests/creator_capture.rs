@@ -235,6 +235,63 @@ async fn creator_capture_review_promote_round_trip() {
         0
     );
     assert_eq!(pending_candidates(&core).await.len(), 0);
+
+    // 7. the review consumed the candidate, so a dismissal now is the retained
+    // not-found answer — only a dismissal that itself consumed the row answers
+    // success (fix round 4, F3).
+    let late = core
+        .delete_pending_review(&principal, PENDING.to_string())
+        .await
+        .expect_err("the review consumed the row before the dismissal");
+    assert!(matches!(late, CoreError::NotFound { .. }), "got {late:?}");
+}
+
+/// F1 (fix round 4): the count walks the provider's pages without materializing
+/// them, and still equals the listed length across multiple pages.
+#[tokio::test]
+async fn creator_pending_count_matches_the_listed_length_across_pages() {
+    // 101 rows: one full provider page of 100 plus a second page.
+    const TOTAL: usize = 101;
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+
+    for index in 0..TOTAL {
+        let mut body = capture_body(&format!("pend_count_{index:03}"), CREATOR);
+        body.raw_digest = format!("Captured digest {index} for the page-walk count.");
+        core.create_pending_review(&principal, body)
+            .await
+            .expect("capture");
+    }
+    assert_eq!(
+        core.count_pending_reviews(&principal).await.unwrap().count,
+        i64::try_from(TOTAL).unwrap(),
+        "the count covers every provider page"
+    );
+
+    // The listed length across two pages is the same number.
+    let mut listed: Vec<String> = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let page = core
+            .list_pending_reviews(&principal, cursor, 60)
+            .await
+            .expect("list pending reviews");
+        listed.extend(page.items.iter().map(|item| item.pending_id.clone()));
+        match page.pagination.next_cursor.clone() {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
+    }
+    assert_eq!(
+        listed.len(),
+        TOTAL,
+        "every pending row is listed exactly once"
+    );
+    assert_eq!(
+        core.count_pending_reviews(&principal).await.unwrap().count,
+        i64::try_from(listed.len()).unwrap(),
+        "the count is the listed length"
+    );
 }
 
 /// A capture retried without an explicit timestamp replays instead of failing.
