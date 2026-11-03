@@ -229,30 +229,74 @@ pub fn slug_is_safe(slug: &str) -> bool {
         && !slug.chars().any(char::is_control)
 }
 
-/// Extract YAML frontmatter and body from markdown content.
+/// The exact source spans of a memory file's frontmatter and body.
 ///
-/// Returns `(frontmatter_yaml_string, body_string)`.
-/// Returns an error if the content doesn't start with `---`.
-fn extract_frontmatter_and_body(content: &str) -> Result<(String, String), String> {
+/// Each span starts at the authored text, after the line break that ends the
+/// file's own `---` delimiter line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemorySourceSpans {
+    /// The YAML block between the delimiters, verbatim: extra fields and
+    /// comments the parsed frontmatter drops are inside this span.
+    pub frontmatter: std::ops::Range<usize>,
+    /// Everything after the closing delimiter, verbatim: the blank or indented
+    /// first line the parsed body trims away is inside this span.
+    pub body: std::ops::Range<usize>,
+}
+
+/// Locate the frontmatter and body spans of memory file content.
+///
+/// A caller that must keep the file's bytes (the P5 migration) slices the same
+/// framing [`LongTermMemory::parse`] read, instead of re-deriving it: the
+/// parser serves a trimmed view, while these spans name the source.
+///
+/// # Errors
+///
+/// Returns [`MemoryError::ValidationError`] when the delimiters are missing.
+pub fn source_spans(content: &str) -> Result<MemorySourceSpans, MemoryError> {
+    locate_spans(content)
+        .map_err(|e| MemoryError::ValidationError(format!("cannot parse memory file: {e}")))
+}
+
+/// The first byte after the line break at `at`, if one starts there.
+fn after_line_break(content: &str, at: usize) -> usize {
+    let bytes = content.as_bytes();
+    match (bytes.get(at), bytes.get(at + 1)) {
+        (Some(b'\n'), _) => at + 1,
+        (Some(b'\r'), Some(b'\n')) => at + 2,
+        _ => at,
+    }
+}
+
+fn locate_spans(content: &str) -> Result<MemorySourceSpans, String> {
     let trimmed = content.trim_start();
+    let offset = content.len() - trimmed.len();
     if !trimmed.starts_with("---") {
         return Err("content does not start with frontmatter delimiter '---'".to_string());
     }
     // Find closing ---
     let after_open = &trimmed[3..];
-    after_open.find("\n---").map_or_else(
-        || Err("missing closing frontmatter delimiter '---'".to_string()),
-        |end_offset| {
-            let fm_str = after_open[..end_offset].trim().to_string();
-            let body_start = 3 + end_offset + 4; // skip "---\n---"
-            let body = if body_start < trimmed.len() {
-                trimmed[body_start..].trim_start().to_string()
-            } else {
-                String::new()
-            };
-            Ok((fm_str, body))
-        },
-    )
+    let end_offset = after_open
+        .find("\n---")
+        .ok_or_else(|| "missing closing frontmatter delimiter '---'".to_string())?;
+    let body = offset + 3 + end_offset + 4; // skip "---\n---"
+    let frontmatter_end = offset + 3 + end_offset;
+    Ok(MemorySourceSpans {
+        // An empty block (`---\n---`) has no line break to skip past.
+        frontmatter: after_line_break(content, offset + 3).min(frontmatter_end)..frontmatter_end,
+        body: after_line_break(content, body)..content.len(),
+    })
+}
+
+/// Extract YAML frontmatter and body from markdown content.
+///
+/// Returns `(frontmatter_yaml_string, body_string)`.
+/// Returns an error if the content doesn't start with `---`.
+fn extract_frontmatter_and_body(content: &str) -> Result<(String, String), String> {
+    let spans = locate_spans(content)?;
+    Ok((
+        content[spans.frontmatter].trim().to_string(),
+        content[spans.body].trim_start().to_string(),
+    ))
 }
 
 #[cfg(test)]
@@ -568,5 +612,35 @@ Character analysis: Alice is a determined protagonist.
         let (fm, body) = extract_frontmatter_and_body(content).unwrap();
         assert_eq!(fm, "key: val");
         assert_eq!(body, "");
+    }
+
+    /// The spans name the bytes the parsed view drops: an extra YAML field and
+    /// comment, and the blank first body line `trim_start` removes.
+    #[test]
+    fn source_spans_keep_what_the_parsed_view_drops() {
+        let content = "---\nnexus_memory_version: 1\nmemory_id: mem_x\nmemory_kind: fact\n\
+                       updated_at: 2026-01-01T00:00:00Z\n# authored comment\nowner_note: kept\n---\n\n  indented first line\n";
+        let spans = source_spans(content).unwrap();
+        assert_eq!(
+            &content[spans.frontmatter],
+            "nexus_memory_version: 1\nmemory_id: mem_x\nmemory_kind: fact\n\
+             updated_at: 2026-01-01T00:00:00Z\n# authored comment\nowner_note: kept"
+        );
+        assert_eq!(&content[spans.body], "\n  indented first line\n");
+        let parsed = LongTermMemory::parse(content).unwrap();
+        assert_eq!(parsed.body, "indented first line\n", "the view is trimmed");
+        let rendered = parsed.render().unwrap();
+        assert!(
+            !rendered.contains("authored comment") && !rendered.contains("owner_note"),
+            "the rendered view drops what the source keeps: {rendered}"
+        );
+    }
+
+    #[test]
+    fn source_spans_of_an_empty_block_are_empty() {
+        let content = "---\n---\nbody";
+        let spans = source_spans(content).unwrap();
+        assert_eq!(&content[spans.frontmatter], "");
+        assert_eq!(&content[spans.body], "body");
     }
 }

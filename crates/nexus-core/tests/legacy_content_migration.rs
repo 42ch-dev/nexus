@@ -26,6 +26,7 @@ use nexus_local_db::writer_protocol::{init_engine_pool, init_guarded_pool, Guard
 use nexus_local_db::{
     create_character_with_initial_binding, ensure_creator_row, CreateCharacterParams,
 };
+use serde_json::json;
 use sqlx::SqlitePool;
 use tempfile::TempDir;
 
@@ -386,6 +387,47 @@ fn assert_core_conflict(error: CoreError, code: &str) {
     }
 }
 
+/// Every JSON document one column holds, in id order.
+async fn contents(pool: &SqlitePool, sql: &str) -> Vec<serde_json::Value> {
+    let raw: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(sql.to_string()))
+        .fetch_all(pool)
+        .await
+        .unwrap();
+    raw.iter()
+        .map(|value| serde_json::from_str(value).expect("stored JSON"))
+        .collect()
+}
+
+/// The `nexus_legacy` block of one projected content, or null.
+fn legacy(content: &serde_json::Value) -> serde_json::Value {
+    content
+        .pointer("/structured/nexus_legacy")
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// Assert `expected`'s fields equal the projected `nexus_legacy` block's.
+fn assert_legacy(content: &serde_json::Value, expected: &serde_json::Value, label: &str) {
+    let block = legacy(content);
+    for (field, want) in expected.as_object().expect("expected legacy fields") {
+        assert_eq!(&block[field], want, "{label}.{field}: {content}");
+    }
+}
+
+/// The terminal refusal of a subject whose journaled file intent is unsettled.
+fn assert_unreconciled(error: CoreError, subject_id: &str) {
+    match error {
+        CoreError::Internal { category } => {
+            assert!(
+                category.contains("unresolved memory journal intent"),
+                "{category}"
+            );
+            assert!(category.contains(subject_id), "{subject_id}: {category}");
+        }
+        other => panic!("expected the unresolved-intent refusal, got {other:?}"),
+    }
+}
+
 /// The migration moves every legacy row and bearer file into provider surfaces
 /// with the unified read path serving the same content before and after, and a
 /// re-run verifies its manifest instead of writing (compass D7).
@@ -487,51 +529,117 @@ async fn migration_preserves_every_legacy_object_and_rerun_is_a_no_op() {
         );
     }
 
-    // (4) Every legacy object's content is present in provider surfaces …
+    // (4) Every legacy object's content is in provider surfaces, value-exact:
+    // each record/candidate carries the legacy text and fields verbatim, and
+    // each bearer file's own bytes travel with its projection (P3-F3).
     let pool = plain_pool(&env).await;
-    for (family, needle) in [
-        ("memory_fragments", FRAGMENT_TEXT),
-        ("memory_soul_narratives", CREATOR_NARRATIVE_TEXT),
-        ("memory_long_term", LONG_TERM_BODY),
-        ("character_memory_fragments", CHARACTER_FRAGMENT_TEXT),
-        ("character_soul_narratives", CHARACTER_NARRATIVE_TEXT),
-        ("character_run_captures", "op_run_legacy"),
-        ("character_long_term", CHARACTER_LONG_TERM_BODY),
-        ("memory_pending_review", PENDING_DIGEST),
-        ("character_memory_pending_review", "hsess_pend_legacy"),
-        ("SOUL.md", "Legacy creator soul document."),
-        ("SOUL.md", "Legacy character soul document."),
+    let records = contents(
+        &pool,
+        "SELECT content_json FROM memory_records ORDER BY record_id",
+    )
+    .await;
+    let candidates = contents(
+        &pool,
+        "SELECT content_json FROM memory_candidates ORDER BY candidate_id",
+    )
+    .await;
+    for (family, text, expected) in [
+        (
+            "memory_fragments",
+            FRAGMENT_TEXT,
+            json!({
+                "family": "memory_fragments",
+                "fragment_id": "frag_legacy",
+                "session_id": "sess_legacy",
+                "world_id": WORLD,
+                "keywords": ["kw_legacy"],
+                "created_at": "2026-03-01T00:00:00Z",
+            }),
+        ),
+        (
+            "memory_soul_narratives",
+            CREATOR_NARRATIVE_TEXT,
+            json!({
+                "family": "memory_soul_narratives",
+                "scope_id": null,
+                "generated_at": "2026-03-01T00:00:03Z",
+                "fragment_count_at_generation": 1,
+            }),
+        ),
+        (
+            "character_memory_fragments",
+            CHARACTER_FRAGMENT_TEXT,
+            json!({
+                "family": "character_memory_fragments",
+                "fragment_id": "hfrag_legacy",
+                "session_id": "hsess_legacy",
+                "actor_world_binding_id": binding_id,
+                "keywords": ["kw_binding"],
+                "created_at": "2026-03-02T00:00:00Z",
+            }),
+        ),
+        (
+            "character_soul_narratives",
+            CHARACTER_NARRATIVE_TEXT,
+            json!({
+                "family": "character_soul_narratives",
+                "scope_id": binding_id,
+                "generated_at": "2026-03-02T00:00:03Z",
+                "fragment_count_at_generation": 1,
+            }),
+        ),
+        (
+            "memory_long_term",
+            LONG_TERM_BODY,
+            json!({
+                "family": "memory_long_term",
+                "slug": "legacy-memory",
+                "memory_kind": "story_summary",
+            }),
+        ),
+        (
+            "character_long_term",
+            CHARACTER_LONG_TERM_BODY,
+            json!({
+                "family": "character_long_term",
+                "slug": "legacy-character-memory",
+                "memory_kind": "fact",
+            }),
+        ),
     ] {
-        let found = count(
-            &pool,
-            &format!(
-                "SELECT (SELECT COUNT(*) FROM memory_records WHERE content_json LIKE '%{needle}%') \
-                 + (SELECT COUNT(*) FROM memory_candidates WHERE content_json LIKE '%{needle}%') \
-                 + (SELECT COUNT(*) FROM memory_profiles WHERE document_json LIKE '%{needle}%')"
-            ),
-        )
-        .await;
-        assert!(found > 0, "family {family} content {needle:?} is missing");
+        let matched: Vec<&serde_json::Value> = records
+            .iter()
+            .filter(|content| content["text"] == text && legacy(content)["family"] == family)
+            .collect();
+        assert_eq!(matched.len(), 1, "family {family} maps to one record");
+        assert_eq!(matched[0]["text"], text, "{family}: the exact source text");
+        assert_legacy(matched[0], &expected, family);
     }
-    assert_eq!(count(&pool, "SELECT COUNT(*) FROM memory_records").await, 8);
-    assert_eq!(
-        count(&pool, "SELECT COUNT(*) FROM memory_candidates").await,
-        3
+    // A receipt-only capture keeps its tuple and invents no review outcome; the
+    // stats-only narrative maps its absent narrative to empty text.
+    let run_capture = records
+        .iter()
+        .find(|content| legacy(content)["family"] == "character_run_captures")
+        .expect("the receipt-only run capture");
+    assert_eq!(run_capture["text"], "", "a capture carries no text");
+    assert_legacy(
+        run_capture,
+        &json!({
+            "family": "character_run_captures",
+            "operation_id": "op_run_legacy",
+            "session_id": "sess_run_legacy",
+            "binding_id": binding_id,
+            "pending_id": "pend_run_legacy",
+        }),
+        "character_run_captures",
     );
+    let stats_only = records
+        .iter()
+        .find(|content| legacy(content)["stats_fingerprint"] == "stats-only-fingerprint")
+        .expect("the stats-only narrative");
     assert_eq!(
-        count(&pool, "SELECT COUNT(*) FROM memory_profiles").await,
-        2
-    );
-    // The stats-only narrative keeps its nullable narrative (empty text) and the
-    // receipt-only run capture keeps its tuple without inventing a review.
-    assert_eq!(
-        count(
-            &pool,
-            "SELECT COUNT(*) FROM memory_records \
-             WHERE content_json LIKE '%stats-only-fingerprint%'",
-        )
-        .await,
-        1
+        stats_only["text"], "",
+        "an absent narrative maps to empty text"
     );
     assert_eq!(
         count(
@@ -539,7 +647,8 @@ async fn migration_preserves_every_legacy_object_and_rerun_is_a_no_op() {
             "SELECT COUNT(*) FROM memory_records WHERE kind = 'nexus.soul_narrative'",
         )
         .await,
-        3
+        3,
+        "both Creators' scopes plus the Character's one narrative"
     );
     // A fragment's provider revision is its preserved legacy revision + 1.
     assert_eq!(
@@ -549,8 +658,133 @@ async fn migration_preserves_every_legacy_object_and_rerun_is_a_no_op() {
              WHERE record_id LIKE 'lgc:character_memory_fragments:%' AND revision = 1",
         )
         .await,
-        1
+        1,
+        "legacy revision 0 is provider revision 1"
     );
+    assert_eq!(count(&pool, "SELECT COUNT(*) FROM memory_records").await, 8);
+    assert_eq!(
+        count(&pool, "SELECT COUNT(*) FROM memory_candidates").await,
+        3
+    );
+    assert_eq!(
+        count(&pool, "SELECT COUNT(*) FROM memory_profiles").await,
+        2
+    );
+
+    // The writer's own long-term files, byte-exact per file: the served text is
+    // the parsed view, while the source document, its frontmatter block and its
+    // body are the file's own bytes (P3-F3).
+    for (bearer, slug) in [
+        (MemoryBearerRef::Creator(CREATOR), "legacy-memory"),
+        (
+            MemoryBearerRef::Character {
+                owner_creator_id: CREATOR,
+                character_id: &env.character_id,
+            },
+            "legacy-character-memory",
+        ),
+    ] {
+        let source = std::fs::read_to_string(bearer.long_term_memory_path(&env.home, slug))
+            .expect("long-term file bytes");
+        let spans = nexus_creator_memory::long_term_memory::source_spans(&source)
+            .expect("memory source spans");
+        let content = records
+            .iter()
+            .find(|content| legacy(content)["slug"] == slug)
+            .unwrap_or_else(|| panic!("no migrated record for {slug}"));
+        assert_eq!(
+            content["text"],
+            LongTermMemory::parse(&source).expect("parsed memory").body,
+            "{slug}: the served text is the parsed view"
+        );
+        assert_eq!(
+            legacy(content)["document"],
+            source,
+            "{slug}: the exact file bytes"
+        );
+        assert_eq!(
+            legacy(content)["frontmatter"],
+            &source[spans.frontmatter],
+            "{slug}: the exact frontmatter block"
+        );
+        assert_eq!(
+            legacy(content)["body"],
+            &source[spans.body],
+            "{slug}: the exact body bytes"
+        );
+    }
+
+    // Every pending queue row keeps its own values, exactly.
+    let creator_pending = candidates
+        .iter()
+        .find(|content| legacy(content)["family"] == "memory_pending_review")
+        .expect("the creator pending review");
+    assert_legacy(
+        creator_pending,
+        &json!({
+            "family": "memory_pending_review",
+            "pending_id": "pend_legacy",
+            "session_id": "sess_pend_legacy",
+            "world_id": WORLD,
+            "task_kind": "research",
+            "raw_digest": PENDING_DIGEST,
+        }),
+        "memory_pending_review",
+    );
+    let character_pending: Vec<&serde_json::Value> = candidates
+        .iter()
+        .filter(|content| legacy(content)["family"] == "character_memory_pending_review")
+        .collect();
+    assert_eq!(character_pending.len(), 2, "the captured queue rows");
+    let queued = character_pending
+        .iter()
+        .find(|content| legacy(content)["pending_id"] == "pend_char_legacy")
+        .expect("the seeded character queue row");
+    assert_legacy(
+        queued,
+        &json!({
+            "family": "character_memory_pending_review",
+            "pending_id": "pend_char_legacy",
+            "session_id": "hsess_pend_legacy",
+            "task_kind": "chapter",
+            "raw_digest": PENDING_DIGEST,
+            "actor_world_binding_id": binding_id,
+        }),
+        "character_memory_pending_review",
+    );
+    let captured = character_pending
+        .iter()
+        .find(|content| legacy(content)["pending_id"] == "pend_run_legacy")
+        .expect("the receipt-only queue row");
+    assert_legacy(
+        captured,
+        &json!({
+            "family": "character_memory_pending_review",
+            "session_id": "sess_run_legacy",
+            "task_kind": "unknown",
+            "source_operation_id": "op_run_legacy",
+        }),
+        "character_memory_pending_review (receipt-only)",
+    );
+
+    // Both `SOUL.md` documents are their files' exact bytes.
+    let souls: Vec<String> = sqlx::query_scalar("SELECT document_json FROM memory_profiles")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    let mut bodies: Vec<String> = souls
+        .iter()
+        .map(|document| {
+            serde_json::from_str::<serde_json::Value>(document).expect("profile document")["body"]
+                .as_str()
+                .expect("profile body")
+                .to_string()
+        })
+        .collect();
+    bodies.sort();
+    let mut expected_souls = vec![CREATOR_SOUL.to_string(), CHARACTER_SOUL.to_string()];
+    expected_souls.sort();
+    assert_eq!(bodies, expected_souls, "each SOUL.md's exact bytes");
 
     // … and every migrated record owns its `memory-store/` projection.
     let store = env.db_path.parent().unwrap().join("memory-store");
@@ -575,15 +809,24 @@ async fn migration_preserves_every_legacy_object_and_rerun_is_a_no_op() {
         2,
         "one projection per migrated SOUL.md"
     );
-    let profiles = profile_files
+    let mut projected_souls = profile_files
         .iter()
-        .map(|(_, bytes)| text(bytes))
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(profiles.contains(CREATOR_SOUL.trim()), "creator SOUL bytes");
-    assert!(
-        profiles.contains(CHARACTER_SOUL.trim()),
-        "character SOUL bytes"
+        .map(|(_, bytes)| {
+            let rendered = text(bytes);
+            // `---`-delimited header, one blank line, then the exact document.
+            rendered
+                .split_once("\n\n")
+                .unwrap_or_else(|| panic!("profile projection framing: {rendered}"))
+                .1
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    projected_souls.sort();
+    let mut expected_projected = vec![CREATOR_SOUL.to_string(), CHARACTER_SOUL.to_string()];
+    expected_projected.sort();
+    assert_eq!(
+        projected_souls, expected_projected,
+        "each projection's exact SOUL bytes"
     );
     pool.close().await;
 
@@ -842,4 +1085,334 @@ async fn markers_turn_reads_and_adoption_provider_only() {
     // rather than silently absorbing the late write.
     let refused = core.migrate_legacy_content(&principal).await.unwrap_err();
     assert_core_conflict(refused, "idempotency_conflict");
+}
+
+/// P5-F1: the migration commits file effects for every bearer under **one**
+/// intent, so an interrupted publication withholds every affected subject — not
+/// only the first — and the recovery pass then publishes them all.
+#[tokio::test]
+async fn a_failed_publication_fences_every_affected_subject_until_recovery() {
+    let env = seed_legacy_home().await;
+    let (core, principal) = open_core(&env).await;
+    let character_id = env.character_id.clone();
+    let binding_id = env.binding_id.clone();
+    let creator_subject = nexus_core::memory_provider::legacy::creator_subject_id(CREATOR);
+    let character_subject =
+        nexus_core::memory_provider::legacy::character_subject_id(&character_id);
+
+    // Marker, rows and intent commit; the file publication stops after staging.
+    core.memory_provider_for_test()
+        .expect("pinned provider")
+        .inject_file_fault(false);
+    let failed = core.migrate_legacy_content(&principal).await.unwrap_err();
+    assert!(
+        matches!(failed, CoreError::Internal { .. }),
+        "outcome uncertain: {failed:?}"
+    );
+
+    // Both bearers answer the terminal unresolved-intent refusal: the one intent
+    // fences every subject it committed files for.
+    assert_unreconciled(
+        core.list_creator_memories(&principal).await.unwrap_err(),
+        &creator_subject,
+    );
+    assert_unreconciled(
+        core.list_character_memory_fragments(
+            &principal,
+            character_id.clone(),
+            Some(binding_id.clone()),
+            100,
+            0,
+        )
+        .await
+        .unwrap_err(),
+        &character_subject,
+    );
+    // The queues are fenced by the same set.
+    assert_unreconciled(
+        core.list_pending_reviews(&principal, None, 100)
+            .await
+            .unwrap_err(),
+        &creator_subject,
+    );
+    assert_unreconciled(
+        core.list_character_pending_reviews(
+            &principal,
+            character_id.clone(),
+            Some(binding_id.clone()),
+            100,
+            0,
+        )
+        .await
+        .unwrap_err(),
+        &character_subject,
+    );
+
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT state FROM memory_journal")
+            .fetch_all(&pool)
+            .await
+            .unwrap(),
+        vec!["quarantined".to_string()]
+    );
+    let record_ids: Vec<String> =
+        sqlx::query_scalar("SELECT record_id FROM memory_records ORDER BY record_id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(record_ids.len(), 8);
+    let store = env.db_path.parent().unwrap().join("memory-store");
+    assert!(
+        !store
+            .join("records")
+            .join(format!("{}.md", record_ids[0]))
+            .exists(),
+        "the failed pass published no projection"
+    );
+    pool.close().await;
+
+    // A reopen runs the recovery pass, which publishes every owed projection.
+    drop(core);
+    let (core, principal) = open_core(&env).await;
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT state FROM memory_journal")
+            .fetch_all(&pool)
+            .await
+            .unwrap(),
+        vec!["applied".to_string()]
+    );
+    for record_id in &record_ids {
+        assert!(
+            store
+                .join("records")
+                .join(format!("{record_id}.md"))
+                .exists(),
+            "recovery publishes {record_id}"
+        );
+    }
+    pool.close().await;
+    assert_eq!(
+        core.list_creator_memories(&principal).await.unwrap().len(),
+        1,
+        "the creator's content is readable once its files are published"
+    );
+    let fragments = serde_json::to_value(
+        core.list_character_memory_fragments(&principal, character_id, Some(binding_id), 100, 0)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        fragments["fragments"].as_array().unwrap().len(),
+        1,
+        "the character's content is readable once its files are published"
+    );
+    // Retry after recovery: the marker verifies (P5-F2's success branch).
+    assert_eq!(
+        core.migrate_legacy_content(&principal)
+            .await
+            .unwrap()
+            .status,
+        LegacyMigrationStatus::AlreadyComplete
+    );
+}
+
+/// P5-F2: a retry on the completed marker re-drives the intent the failed pass
+/// left unsettled instead of reporting the space `already_complete`.
+#[tokio::test]
+async fn a_retry_settles_the_unsettled_migration_before_reporting_complete() {
+    let env = seed_legacy_home().await;
+    let (core, principal) = open_core(&env).await;
+    core.memory_provider_for_test()
+        .expect("pinned provider")
+        .inject_file_fault(false);
+    assert!(core.migrate_legacy_content(&principal).await.is_err());
+
+    // No reopen: the retry itself publishes what the failed pass owed.
+    let retried = core.migrate_legacy_content(&principal).await.unwrap();
+    assert_eq!(retried.status, LegacyMigrationStatus::AlreadyComplete);
+
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT state FROM memory_journal")
+            .fetch_all(&pool)
+            .await
+            .unwrap(),
+        vec!["applied".to_string()]
+    );
+    let record_ids: Vec<String> =
+        sqlx::query_scalar("SELECT record_id FROM memory_records ORDER BY record_id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    let store = env.db_path.parent().unwrap().join("memory-store");
+    for record_id in &record_ids {
+        assert!(
+            store
+                .join("records")
+                .join(format!("{record_id}.md"))
+                .exists(),
+            "the retry publishes {record_id}"
+        );
+    }
+    pool.close().await;
+    assert_eq!(
+        core.list_creator_memories(&principal).await.unwrap().len(),
+        1,
+        "the retry un-fences the subject it settled"
+    );
+}
+
+/// P5-F2's other branch: while the owed target cannot be settled, the marker
+/// path refuses with the retryable unsettled-predecessor error — never
+/// `already_complete`, and never by overwriting the foreign bytes.
+#[tokio::test]
+async fn a_retry_refuses_while_the_owed_target_stays_quarantined() {
+    let env = seed_legacy_home().await;
+    let (core, principal) = open_core(&env).await;
+    core.memory_provider_for_test()
+        .expect("pinned provider")
+        .inject_file_fault(false);
+    assert!(core.migrate_legacy_content(&principal).await.is_err());
+
+    // A foreign write now owns one owed target, so the re-drive cannot publish.
+    let pool = plain_pool(&env).await;
+    let targets: String = sqlx::query_scalar("SELECT targets_json FROM memory_journal")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    let effects: serde_json::Value = serde_json::from_str(&targets).unwrap();
+    let path = effects[0]["path"]
+        .as_str()
+        .expect("effect path")
+        .to_string();
+    let store = env.db_path.parent().unwrap().join("memory-store");
+    let target = store.join(&path);
+    std::fs::create_dir_all(target.parent().expect("target dir")).unwrap();
+    std::fs::write(&target, "someone else's file\n").unwrap();
+
+    let refused = core.migrate_legacy_content(&principal).await.unwrap_err();
+    match refused {
+        CoreError::Internal { category } => assert!(
+            category.contains("unsettled"),
+            "the retryable unsettled-predecessor refusal: {category}"
+        ),
+        other => panic!("expected a typed refusal, got {other:?}"),
+    }
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT state FROM memory_journal")
+            .fetch_all(&pool)
+            .await
+            .unwrap(),
+        vec!["quarantined".to_string()]
+    );
+    pool.close().await;
+    assert_eq!(
+        std::fs::read_to_string(&target).unwrap(),
+        "someone else's file\n",
+        "the pass never overwrites bytes it did not produce"
+    );
+}
+
+/// P3-F3: the manifest covers the source bytes, so a rewrite of bytes the
+/// parsed view drops — an authored YAML comment, a blank first body line — is a
+/// changed snapshot, never a silent no-op.
+#[tokio::test]
+async fn a_long_term_byte_change_outside_the_parsed_view_refuses_the_rerun() {
+    let env = seed_legacy_home().await;
+    let (core, principal) = open_core(&env).await;
+    core.migrate_legacy_content(&principal).await.unwrap();
+
+    let creator = MemoryBearerRef::Creator(CREATOR);
+    let path = creator.long_term_memory_path(&env.home, "legacy-memory");
+    let source = std::fs::read_to_string(&path).expect("long-term file");
+    let (front, body) = source.split_once("\n---\n").expect("frontmatter framing");
+    let changed = format!("{front}\n# an authored comment\n---\n\n{body}");
+    let before = LongTermMemory::parse(&source).expect("parsed before");
+    let after = LongTermMemory::parse(&changed).expect("parsed after");
+    assert_eq!(
+        after.frontmatter, before.frontmatter,
+        "the parsed frontmatter is unchanged"
+    );
+    assert_eq!(after.body, before.body, "the parsed body is unchanged");
+    assert_ne!(changed, source, "the file's bytes did change");
+    std::fs::write(&path, &changed).expect("rewrite the source file");
+
+    let refused = core.migrate_legacy_content(&principal).await.unwrap_err();
+    assert_core_conflict(refused, "idempotency_conflict");
+}
+
+/// P5-F4: a provider row whose content matches but whose served metadata does
+/// not is a conflict — the marker may not record a revision, timestamp or
+/// provenance that provider-only reads never serve.
+#[tokio::test]
+async fn a_metadata_only_differing_row_refuses_the_pass() {
+    let env = seed_legacy_home().await;
+    let (core, principal) = open_core(&env).await;
+    core.migrate_legacy_content(&principal).await.unwrap();
+
+    // The row the pass wrote, then a provider-native metadata bump: the content
+    // is untouched while its revision and timestamp move. The marker is cleared
+    // so the pass re-enters its comparison path (a marker that did not survive,
+    // e.g. an interrupted upgrade).
+    let record_id = "lgc:memory_fragments:frag_legacy";
+    let bumped = sqlx::query(
+        "UPDATE memory_records SET revision = revision + 1, \
+         updated_at = '2026-05-01T00:00:00Z' WHERE record_id = ?",
+    )
+    .bind(record_id)
+    .execute(core.pool())
+    .await
+    .unwrap();
+    assert_eq!(bumped.rows_affected(), 1, "the migrated fragment exists");
+    let content_before: String =
+        sqlx::query_scalar("SELECT content_json FROM memory_records WHERE record_id = ?")
+            .bind(record_id)
+            .fetch_one(core.pool())
+            .await
+            .unwrap();
+    sqlx::query("DELETE FROM memory_provider_meta WHERE key = ?")
+        .bind(nexus_core::memory_provider::legacy::legacy_migration_key(
+            nexus_core::memory_provider::DEFAULT_SPACE_ID,
+        ))
+        .execute(core.pool())
+        .await
+        .unwrap();
+
+    let refused = core.migrate_legacy_content(&principal).await.unwrap_err();
+    assert_core_conflict(refused, "idempotency_conflict");
+
+    // Nothing was overwritten and no marker was published.
+    let pool = plain_pool(&env).await;
+    let content_after: String =
+        sqlx::query_scalar("SELECT content_json FROM memory_records WHERE record_id = ?")
+            .bind(record_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(content_after, content_before, "the provider keeps its row");
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT COUNT(*) FROM memory_records WHERE record_id = 'lgc:memory_fragments:frag_legacy' AND revision = 2",
+        )
+        .await,
+        1,
+        "the provider keeps its metadata"
+    );
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT COUNT(*) FROM memory_provider_meta \
+             WHERE key = 'legacy_content_migration:spc_local_default'",
+        )
+        .await,
+        0,
+        "a refused pass publishes no completion marker"
+    );
+    pool.close().await;
 }

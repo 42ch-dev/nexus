@@ -2240,6 +2240,45 @@ impl MemoryStore {
                 )),
             })
     }
+
+    /// §5.2 step 3 on the completed-marker path (P5-F2): settle every unsettled
+    /// intent this operation still owns, then refuse while one remains.
+    ///
+    /// P5's marker commits with its intent in one transaction, so a marker can
+    /// outlive an unpublished projection. The pass reports the space complete
+    /// only once it is published; whatever the re-drive cannot publish is the
+    /// retryable [`StoreError::UnsettledPredecessor`] refusal, never a silent
+    /// `already_complete`.
+    async fn settle_own_intents(
+        &self,
+        publication: &mut PublicationGuard,
+        ctx: &OpContext<'_>,
+    ) -> StoreResult<()> {
+        let entries: Vec<JournalEntry> = sqlx::query_as(
+            "SELECT seq, receipt_id, subject_id, targets_json, result_json FROM memory_journal \
+             WHERE space_id = ? AND op = ? AND state <> 'applied' ORDER BY seq",
+        )
+        .bind(ctx.space_id)
+        .bind(ctx.op)
+        .fetch_all(&self.pool)
+        .await?;
+        for entry in &entries {
+            // A settle that cannot publish records its quarantine; the re-read
+            // below decides whether the projection is still owed.
+            self.settle_intent(publication, entry).await;
+        }
+        let unsettled: Option<(String, String)> = sqlx::query_as(
+            "SELECT receipt_id, state FROM memory_journal \
+             WHERE space_id = ? AND op = ? AND state <> 'applied' ORDER BY seq LIMIT 1",
+        )
+        .bind(ctx.space_id)
+        .bind(ctx.op)
+        .fetch_optional(&self.pool)
+        .await?;
+        unsettled.map_or(Ok(()), |(receipt_id, state)| {
+            Err(StoreError::UnsettledPredecessor { receipt_id, state })
+        })
+    }
 }
 
 /// How one intent settled, as [`MemoryStore::settle_journal`] records it.
@@ -2432,7 +2471,13 @@ async fn write_journal_entry(
     Ok(())
 }
 
-/// The unsettled journal state of one subject (D-10 read isolation).
+/// The unsettled journal state that fences one subject (D-10 read isolation).
+///
+/// The row's own `subject_id` fences its subject, and so does every subject its
+/// recorded outcome lists as committed-but-unpublished: P5's migration commits
+/// file effects for **every** bearer in one intent, so fencing only the row's
+/// own subject left the other bearers readable while their files were owed
+/// (P5-F1).
 ///
 /// Terminal unresolved states outrank a merely pending one: a quarantined
 /// subject — and one a bounded pass left `deferred` — has an outcome no later
@@ -2445,10 +2490,14 @@ async fn unsettled_in(
 ) -> StoreResult<Option<String>> {
     let row: Option<(String,)> = sqlx::query_as(
         "SELECT state FROM memory_journal \
-         WHERE space_id = ? AND subject_id = ? AND state <> 'applied' \
+         WHERE space_id = ? AND state <> 'applied' \
+           AND (subject_id = ? OR EXISTS ( \
+               SELECT 1 FROM json_each(json_extract(result_json, '$.fenced_subjects')) \
+               WHERE json_each.value = ?)) \
          ORDER BY CASE state WHEN ? THEN 0 WHEN ? THEN 1 ELSE 2 END, created_at LIMIT 1",
     )
     .bind(space_id)
+    .bind(subject_id)
     .bind(subject_id)
     .bind(journal::STATE_QUARANTINED)
     .bind(journal::STATE_DEFERRED)
@@ -3924,15 +3973,21 @@ async fn insert_legacy_profile(
 
 /// A record the provider already owns under a migrated id must still be that
 /// legacy object. A tombstone is the provider's own disposition (the user
-/// deleted it), so it is kept; a different body is a conflict, because the
-/// pass cannot tell which version is the truth and must never overwrite.
+/// deleted it), so it is kept; anything else the completion manifest records —
+/// content, placement, provenance, timestamps and revision — must match exactly,
+/// or the marker would claim values provider-only reads never serve (P5-F4).
 fn require_same_record(stored: &RecordRow, projected: &RecordRow) -> StoreResult<()> {
     if stored.tombstoned()
         || (stored.subject_id == projected.subject_id
             && stored.kind == projected.kind
             && stored.content_json == projected.content_json
             && stored.scope_visibility == projected.scope_visibility
-            && stored.scope_context_id == projected.scope_context_id)
+            && stored.scope_context_id == projected.scope_context_id
+            && stored.provenance_json == projected.provenance_json
+            && stored.occurred_at == projected.occurred_at
+            && stored.created_at == projected.created_at
+            && stored.updated_at == projected.updated_at
+            && stored.revision == projected.revision)
     {
         return Ok(());
     }
@@ -3941,7 +3996,8 @@ fn require_same_record(stored: &RecordRow, projected: &RecordRow) -> StoreResult
 
 /// [`require_same_record`] for a candidate: a consumed shell keeps the
 /// provider's own outcome (it names the body it consumed through
-/// `content_digest`), while a pending row must still carry the legacy content.
+/// `content_digest`), while a pending row must still carry the legacy content
+/// and the metadata the manifest records.
 fn require_same_candidate(stored: &CandidateRow, projected: &CandidateRow) -> StoreResult<()> {
     if stored.status == "consumed" {
         let consumed = stored.content_digest.as_deref().ok_or_else(|| {
@@ -3960,17 +4016,25 @@ fn require_same_candidate(stored: &CandidateRow, projected: &CandidateRow) -> St
         && stored.content_json == projected.content_json
         && stored.capture_visibility == projected.capture_visibility
         && stored.capture_context_id == projected.capture_context_id
+        && stored.provenance_json == projected.provenance_json
+        && stored.classification_json == projected.classification_json
+        && stored.occurred_at == projected.occurred_at
+        && stored.expires_at == projected.expires_at
+        && stored.revision == projected.revision
+        && stored.created_at == projected.created_at
     {
         return Ok(());
     }
     Err(StoreError::IdempotencyConflict)
 }
 
-/// [`require_same_record`] for the `SOUL.md` profile.
+/// [`require_same_record`] for the `SOUL.md` profile: the document and the
+/// revision the manifest records.
 fn require_same_profile(stored: &ProfileRow, projected: &ProfileRow) -> StoreResult<()> {
     if stored.subject_id == projected.subject_id
         && stored.profile_kind == projected.profile_kind
         && stored.document_json == projected.document_json
+        && stored.revision == projected.revision
     {
         return Ok(());
     }
@@ -5447,12 +5511,18 @@ impl MemoryStore {
     /// projection entry point reads: the pass either migrates a space whole or
     /// leaves it exactly as it was.
     ///
+    /// The single intent names every subject its file effects belong to
+    /// (`fenced_subjects` in its recorded outcome), so an interrupted publication
+    /// withholds **every** affected bearer, not only the first one (P5-F1).
+    ///
     /// A provider row that already carries a migrated object's id (a
     /// just-in-time adoption, or an interrupted earlier pass) is never
-    /// overwritten: the stored content must be the legacy source, otherwise the
-    /// pass refuses `IDEMPOTENCY_CONFLICT`. A completed pass verifies its
-    /// manifest instead of writing: the same digest and counts are a no-op, a
-    /// changed legacy snapshot is a conflict.
+    /// overwritten: the stored object — content *and* the served metadata the
+    /// manifest records — must be the legacy source, otherwise the pass refuses
+    /// `IDEMPOTENCY_CONFLICT`. A completed pass verifies its manifest instead of
+    /// writing, but only after it has settled any intent the marker's pass left
+    /// unsettled: a marker whose projection is still owed is not "complete"
+    /// (P5-F2).
     pub(super) async fn migrate_legacy(
         &self,
         ctx: &OpContext<'_>,
@@ -5464,6 +5534,9 @@ impl MemoryStore {
         if let Some(recorded) = legacy::migration_marker(&mut tx, ctx.space_id).await? {
             let snapshot = legacy::migration_snapshot(&mut tx, &self.legacy, ctx.space_id).await?;
             tx.rollback().await?;
+            // A committed marker can still owe its file publication: re-drive
+            // whatever this op left unsettled before calling the space complete.
+            self.settle_own_intents(&mut publication, ctx).await?;
             let recorded: Value = serde_json::from_str(&recorded)
                 .map_err(|e| StoreError::Corrupt(format!("legacy migration marker: {e}")))?;
             if recorded != snapshot.manifest {
@@ -5525,7 +5598,12 @@ impl MemoryStore {
             .await?;
         let targets: Vec<String> = effects.iter().map(|effect| effect.path.clone()).collect();
         require_settled_targets(&mut tx, ctx.space_id, &targets).await?;
-        let result = json!({ "status": "migrated", "manifest": snapshot.manifest });
+        let fences = legacy::migration_fences(&snapshot);
+        let result = json!({
+            "status": "migrated",
+            "manifest": snapshot.manifest,
+            "fenced_subjects": fences,
+        });
         let subject_id = legacy::migration_journal_subject(&snapshot).to_string();
         self.commit_journalled(
             tx,

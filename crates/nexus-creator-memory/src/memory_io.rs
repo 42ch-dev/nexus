@@ -116,6 +116,22 @@ pub fn load_memory(
     bearer: MemoryBearerRef<'_>,
     slug: &str,
 ) -> Result<LongTermMemory, MemoryError> {
+    load_memory_source(home, bearer, slug).map(|(memory, _)| memory)
+}
+
+/// [`load_memory`] plus the file's exact source text.
+///
+/// The parsed view trims the body and keeps only the known frontmatter fields,
+/// so a caller that must preserve the file's bytes (the P5 migration) keeps the
+/// one read it parsed instead of reading the file twice.
+///
+/// # Errors
+/// Returns `Err(MemoryError::...)` if validation fails.
+pub fn load_memory_source(
+    home: &Path,
+    bearer: MemoryBearerRef<'_>,
+    slug: &str,
+) -> Result<(LongTermMemory, String), MemoryError> {
     bearer.validate()?;
     if !slug_is_safe(slug) {
         return Err(MemoryError::ValidationError(format!(
@@ -134,7 +150,7 @@ pub fn load_memory(
     let mut memory = LongTermMemory::parse(&content)
         .map_err(|e| MemoryError::ValidationError(format!("cannot parse memory file: {e}")))?;
     memory.source_path = Some(path);
-    Ok(memory)
+    Ok((memory, content))
 }
 ///
 /// # Errors

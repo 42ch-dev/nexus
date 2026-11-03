@@ -56,6 +56,7 @@ use serde_json::{json, Value};
 use sqlx::Sqlite;
 
 use nexus_creator_memory::errors::MemoryError;
+use nexus_creator_memory::long_term_memory;
 use nexus_creator_memory::memory_io;
 use nexus_creator_memory::MemoryBearerRef;
 use spoke_operations::{jcs_sha256_hex, SpokeResult};
@@ -1056,8 +1057,16 @@ fn long_term_records(
     };
     let mut rows = Vec::with_capacity(slugs.len());
     for slug in slugs {
-        let memory = memory_io::load_memory(&roots.home, bearer, &slug)
+        let (memory, document) = memory_io::load_memory_source(&roots.home, bearer, &slug)
             .map_err(|error| legacy_error(&error))?;
+        // The exact source framing: the parsed view trims the body and keeps
+        // only the known frontmatter fields, so the file's own bytes travel with
+        // the projection and a rewrite of bytes the view drops still changes the
+        // migration manifest (P5-F3).
+        let spans =
+            long_term_memory::source_spans(&document).map_err(|error| legacy_error(&error))?;
+        let frontmatter = document[spans.frontmatter].to_string();
+        let body = document[spans.body].to_string();
         let kind = policy::namespaced_record_kind(&memory.frontmatter.memory_kind);
         let updated_at = normalize_timestamp(&memory.frontmatter.updated_at);
         let record_id = external_id(family, &[owner_key, slug.as_str()]);
@@ -1071,6 +1080,9 @@ fn long_term_records(
                 "nexus_memory_version": memory.frontmatter.nexus_memory_version,
                 "updated_at": memory.frontmatter.updated_at,
                 "source_session_ids": memory.frontmatter.source_session_ids,
+                "frontmatter": frontmatter,
+                "body": body,
+                "document": document,
             }},
         });
         rows.push(record_row(
@@ -1414,6 +1426,20 @@ pub(super) fn migration_journal_subject(snapshot: &MigrationSnapshot) -> &str {
         .subjects
         .first()
         .map_or("", |subject| subject.subject_id.as_str())
+}
+
+/// Every subject the migration's file effects belong to — the full fence set the
+/// one intent carries until the projections settle.
+///
+/// The pass commits one intent for effects that span bearers, so a read
+/// isolation rule that names only the row's own subject would leave the other
+/// subjects readable while their committed files are unpublished (P5-F1).
+pub(super) fn migration_fences(snapshot: &MigrationSnapshot) -> Vec<String> {
+    snapshot
+        .subjects
+        .iter()
+        .map(|subject| subject.subject_id.clone())
+        .collect()
 }
 
 /// Every bearer of this workspace: the Creator plus the Characters it owns.
