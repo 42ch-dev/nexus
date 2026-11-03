@@ -59,12 +59,25 @@ use spoke_operations::{
 };
 
 use crate::error::{CoreError, CoreResult};
+use nexus_local_db::LocalDbError;
 use storage::{
-    Admission, CandidateRow, Coverage, Fence, FenceAction, FenceTarget, GrantRow, MemoryStore,
-    MigrationOutcome, NewCandidate, NewGrant, OpContext, Placement, ProfileRow, ReceiptRow,
-    RecordRead, RecordRow, ReviewDecision, Selection, SpaceRow, StoreError, SubjectRow,
+    Admission, CandidateRow, CaptureError, Coverage, Fence, FenceAction, FenceTarget, GrantRow,
+    MemoryStore, MigrationOutcome, NewCandidate, NewGrant, OpContext, Placement, ProfileRow,
+    ReceiptRow, RecordRead, RecordRow, ReviewDecision, Selection, SpaceRow, StoreError, SubjectRow,
     RECEIPT_FAILED, RECEIPT_PENDING,
 };
+
+/// The Character binding a binding-local capture stands on (compass D15).
+///
+/// The capture hands it to the provider's own write transaction, which re-reads
+/// the binding rows on that connection before inserting the candidate, so the
+/// check and the write are never separated by a `remove_binding`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CaptureBinding<'a> {
+    pub owner_creator: &'a str,
+    pub character: &'a str,
+    pub binding: &'a str,
+}
 
 /// The single space this provider provisions (§7.0.6). Clients discover it via
 /// `memory.describe`/`memory.spaces.list`; it is never a payload default.
@@ -1519,6 +1532,20 @@ impl LocalMemoryProvider {
         self.store.park_next_publish(entered, release);
     }
 
+    /// D15 proof seam: park the next capture once its write transaction holds
+    /// the lock and has validated the caller's binding (`entered` signals it,
+    /// `release` frees it), so a test can show a concurrent `remove_binding`
+    /// cannot interleave. Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn park_next_capture(
+        &self,
+        entered: std::sync::Arc<tokio::sync::Notify>,
+        release: std::sync::Arc<tokio::sync::Barrier>,
+    ) {
+        self.store.park_next_capture(entered, release);
+    }
+
     /// §5.2 step 2 proof seam: have every workspace flock **wait** report from
     /// its blocking task just before it blocks, so a test can cancel callers that
     /// have really reached the wait. Compiled out of a production build.
@@ -2078,13 +2105,19 @@ impl LocalMemoryProvider {
     /// with an existing legacy row the bridge projects under that id, and the
     /// capture is one authoritative provider write instead of a legacy insert
     /// followed by an adoption (fix round 5, B1).
+    ///
+    /// `binding` is the provenance obligation checked inside that same write
+    /// transaction (compass D15). Its failure is returned outside the port
+    /// vocabulary — the Character capture answered it with the legacy-domain
+    /// 403 before, and that answer does not change just because the check moved.
     pub(crate) async fn capture_identified(
         &self,
         principal: &schemas::Principal,
         request: schemas::MemoryCaptureRequest,
         candidate_id: &str,
-    ) -> SpokeResult<schemas::MemoryCaptureResponse> {
-        self.capture_request(principal, request, Some(candidate_id))
+        binding: Option<&CaptureBinding<'_>>,
+    ) -> Result<SpokeResult<schemas::MemoryCaptureResponse>, LocalDbError> {
+        self.capture_request(principal, request, Some(candidate_id), binding)
             .await
     }
 
@@ -2096,20 +2129,21 @@ impl LocalMemoryProvider {
         principal: &schemas::Principal,
         request: schemas::MemoryCaptureRequest,
         candidate_id: Option<&str>,
-    ) -> SpokeResult<schemas::MemoryCaptureResponse> {
+        binding: Option<&CaptureBinding<'_>>,
+    ) -> Result<SpokeResult<schemas::MemoryCaptureResponse>, LocalDbError> {
         let principal_id = principal_id(principal);
         if let SpokeResult::Reject(reject) =
             validate_memory_capture(&request, policy::max_content_bytes())
         {
-            return deny(&ProviderError::InvalidInput {
+            return Ok(deny(&ProviderError::InvalidInput {
                 field: "content".to_string(),
                 reason: reject.message,
-            });
+            }));
         }
         let op = OP_CAPTURE;
         let digest = match payload_digest(op, &request) {
             Ok(digest) => digest,
-            Err(error) => return deny(&error),
+            Err(error) => return Ok(deny(&error)),
         };
         let ctx = OpContext {
             space_id: request.space_id.as_str(),
@@ -2150,11 +2184,11 @@ impl LocalMemoryProvider {
         );
         let content = match to_json(&request.content, "capture content") {
             Ok(content) => content,
-            Err(error) => return deny(&error),
+            Err(error) => return Ok(deny(&error)),
         };
         let anchors = match to_json(&request.anchors, "capture anchors") {
             Ok(anchors) => anchors,
-            Err(error) => return deny(&error),
+            Err(error) => return Ok(deny(&error)),
         };
         let provenance = json!({
             "source_context_ids": request.source_context_ids,
@@ -2188,11 +2222,12 @@ impl LocalMemoryProvider {
         };
         match self
             .store
-            .capture(&ctx, &admission, &candidates, keep_existing)
+            .capture(&ctx, &admission, &candidates, keep_existing, binding)
             .await
         {
-            Ok(receipt) => settle_receipt(&receipt),
-            Err(error) => deny(&store_error(error)),
+            Ok(receipt) => Ok(settle_receipt(&receipt)),
+            Err(CaptureError::Store(error)) => Ok(deny(&store_error(error))),
+            Err(CaptureError::Binding(error)) => Err(error),
         }
     }
 
@@ -2933,7 +2968,12 @@ impl MemoryPort for LocalMemoryProvider {
         principal: &schemas::Principal,
         request: schemas::MemoryCaptureRequest,
     ) -> SpokeResult<schemas::MemoryCaptureResponse> {
-        self.capture_request(principal, request, None).await
+        match self.capture_request(principal, request, None, None).await {
+            Ok(result) => result,
+            // Only a named binding can fail this way, and this entry point
+            // names none.
+            Err(error) => deny(&store_error(StoreError::Database(error))),
+        }
     }
 
     async fn list_candidates(

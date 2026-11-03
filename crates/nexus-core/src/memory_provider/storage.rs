@@ -186,6 +186,29 @@ impl From<sqlx::Error> for StoreError {
 
 pub(super) type StoreResult<T> = Result<T, StoreError>;
 
+/// A capture transaction's two failure classes.
+///
+/// The store's own refusal travels as [`StoreError`] and maps onto the port
+/// vocabulary. The caller's binding provenance (compass D15) is not a provider
+/// refusal — it is the legacy-domain admission the Character capture always
+/// answered — so it travels as itself and the adapter keeps that error.
+pub(super) enum CaptureError {
+    Store(StoreError),
+    Binding(LocalDbError),
+}
+
+impl From<StoreError> for CaptureError {
+    fn from(value: StoreError) -> Self {
+        Self::Store(value)
+    }
+}
+
+impl From<sqlx::Error> for CaptureError {
+    fn from(value: sqlx::Error) -> Self {
+        Self::Store(StoreError::from(value))
+    }
+}
+
 /// Test-only commit fault, injected by the §14.2/§14.3 proof; compiled out of a
 /// production build (`test-hooks`).
 #[cfg(feature = "test-hooks")]
@@ -233,6 +256,15 @@ struct PublishRendezvous {
 /// the wait, `release` frees it. Test only.
 #[cfg(feature = "test-hooks")]
 struct ReadRendezvous {
+    entered: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Barrier>,
+}
+
+/// D15 proof seam: the rendezvous a parked capture waits at — `entered` reports
+/// that it holds its write transaction and has already validated the caller's
+/// binding, `release` frees it. Test only.
+#[cfg(feature = "test-hooks")]
+struct CaptureRendezvous {
     entered: Arc<tokio::sync::Notify>,
     release: Arc<tokio::sync::Barrier>,
 }
@@ -542,6 +574,12 @@ pub(super) struct MemoryStore {
     /// test can move the clock while the read is queued.
     #[cfg(feature = "test-hooks")]
     read_barrier: std::sync::Mutex<Option<ReadRendezvous>>,
+    /// Test-only rendezvous a capture waits at once its write transaction holds
+    /// the lock and has validated the caller's binding — `entered` tells the
+    /// test the capture is parked, `release` frees it — so a test can show a
+    /// concurrent `remove_binding` cannot interleave (compass D15).
+    #[cfg(feature = "test-hooks")]
+    capture_barrier: std::sync::Mutex<Option<CaptureRendezvous>>,
     /// Test-only rendezvous a publication waits at **while it holds the
     /// workspace publication gate** — `entered` tells the test the gate is held,
     /// `release` frees it — so a second provider instance on the same workspace
@@ -777,6 +815,8 @@ impl MemoryStore {
             #[cfg(feature = "test-hooks")]
             read_barrier: std::sync::Mutex::new(None),
             #[cfg(feature = "test-hooks")]
+            capture_barrier: std::sync::Mutex::new(None),
+            #[cfg(feature = "test-hooks")]
             publish_barrier: std::sync::Mutex::new(None),
             #[cfg(feature = "test-hooks")]
             flock_wait_report: std::sync::Mutex::new(None),
@@ -889,6 +929,21 @@ impl MemoryStore {
         *self.read_barrier.lock().expect("read gate") = Some(ReadRendezvous { entered, release });
     }
 
+    /// D15 proof seam: park the next capture once its write transaction holds
+    /// the lock and has validated the caller's binding — `entered` signals it is
+    /// parked, `release` frees it — so a test can show a concurrent
+    /// `remove_binding` cannot slip between that validation and the insert.
+    /// Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    pub(super) fn park_next_capture(
+        &self,
+        entered: Arc<tokio::sync::Notify>,
+        release: Arc<tokio::sync::Barrier>,
+    ) {
+        *self.capture_barrier.lock().expect("capture gate") =
+            Some(CaptureRendezvous { entered, release });
+    }
+
     /// §5.2 step 2 proof seam: park the next publication once it holds the
     /// workspace publication section and before it settles or stages anything, so
     /// a test can observe another provider instance on the same workspace waiting
@@ -947,6 +1002,20 @@ impl MemoryStore {
     async fn read_gate(&self) {
         let parked = {
             let mut gate = self.read_barrier.lock().expect("read gate");
+            gate.take()
+        };
+        if let Some(rendezvous) = parked {
+            rendezvous.entered.notify_one();
+            rendezvous.release.wait().await;
+        }
+    }
+
+    /// The [`Self::park_next_capture`] wait, taken at the same point in every
+    /// capture: past the caller's binding validation, before any insert.
+    #[cfg(feature = "test-hooks")]
+    async fn capture_gate(&self) {
+        let parked = {
+            let mut gate = self.capture_barrier.lock().expect("capture gate");
             gate.take()
         };
         if let Some(rendezvous) = parked {
@@ -4362,19 +4431,67 @@ impl MemoryStore {
     /// re-delivered capture is the same success the legacy queue's
     /// `INSERT OR IGNORE` gave, so the insert leaves the stored row in place.
     /// A minted id keeps the strict insert.
+    ///
+    /// `binding` is the caller's provenance obligation (compass D15): the
+    /// Character binding a binding-local capture stands on is re-read on this
+    /// transaction's own connection, under its `BEGIN IMMEDIATE`, before any
+    /// insert. `remove_binding` takes the same write lock and counts the
+    /// pending candidate this transaction inserts, so it cannot delete the
+    /// binding in between: whichever transaction commits first, the other sees
+    /// its result and refuses.
+    ///
+    /// A deterministic id that names an **unmigrated legacy row** with no
+    /// provider row is the stock state of a pre-fix interrupted capture
+    /// (compass D16). The legacy row is the authoritative content of that
+    /// attempt, so the projection is adopted under the same id and the
+    /// re-delivery writes nothing of its own — migration's same-candidate
+    /// check then sees one version, never two.
     pub(super) async fn capture(
         &self,
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
         candidates: &[NewCandidate<'_>],
         keep_existing: bool,
-    ) -> StoreResult<ReceiptRow> {
+        binding: Option<&super::CaptureBinding<'_>>,
+    ) -> Result<ReceiptRow, CaptureError> {
         let (mut tx, now) = self.begin_admission().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
             return Ok(row);
         }
         gate(&mut tx, admission).await?;
+        if let Some(binding) = binding {
+            nexus_local_db::require_valid_provenance_tx(
+                &mut tx,
+                binding.owner_creator,
+                binding.character,
+                Some(binding.binding),
+            )
+            .await
+            .map_err(CaptureError::Binding)?;
+        }
+        #[cfg(feature = "test-hooks")]
+        self.capture_gate().await;
+        let mut replayed = Vec::with_capacity(candidates.len());
+        if keep_existing {
+            for candidate in candidates {
+                let ids = [candidate.candidate_id.to_string()];
+                let adopted = adopt_in_tx(
+                    &mut tx,
+                    &self.legacy,
+                    ctx.space_id,
+                    ctx.requester_principal_id,
+                    candidate.subject_id,
+                    &ids,
+                    now,
+                    true,
+                )
+                .await?;
+                if adopted > 0 {
+                    replayed.push(candidate.candidate_id);
+                }
+            }
+        }
         let at = timestamp(now);
         let mut ids = Vec::with_capacity(candidates.len());
         let conflict = if keep_existing {
@@ -4390,6 +4507,10 @@ impl MemoryStore {
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, ?, ?, 1, ?){conflict}"
         );
         for candidate in candidates {
+            ids.push(candidate.candidate_id.to_string());
+            if replayed.contains(&candidate.candidate_id) {
+                continue;
+            }
             sqlx::query(sqlx::AssertSqlSafe(insert.clone()))
                 .bind(candidate.candidate_id)
                 .bind(ctx.space_id)
@@ -4408,11 +4529,12 @@ impl MemoryStore {
                 .bind(&at)
                 .execute(&mut *tx)
                 .await?;
-            ids.push(candidate.candidate_id.to_string());
         }
         let classified = ids.len();
         let result = json!({ "candidate_ids": ids, "classified": classified });
-        self.commit_receipt(tx, ctx, &result, now).await
+        self.commit_receipt(tx, ctx, &result, now)
+            .await
+            .map_err(CaptureError::Store)
     }
 
     /// §7.12: the authorized page and its invalidation marker from one read.

@@ -65,7 +65,9 @@ use std::sync::Arc;
 use crate::memory_provider::legacy;
 use crate::memory_provider::policy;
 use crate::memory_provider::profile;
-use crate::memory_provider::{LegacyContentMigration, LocalMemoryProvider, MemoryDisposition};
+use crate::memory_provider::{
+    CaptureBinding, LegacyContentMigration, LocalMemoryProvider, MemoryDisposition,
+};
 use crate::principal::Principal;
 use crate::service::CoreService;
 use spoke_operations::{spoke_schemas, MemoryPort, SpokeReject, SpokeRejectCode, SpokeResult};
@@ -1885,16 +1887,15 @@ impl CoreService {
         let memory = self
             .character_memory_writer(principal, &character_id)
             .await?;
-        // The binding the legacy insert admitted is still admitted, now as a
-        // read: this Character's own active binding on an owned active World.
-        nexus_local_db::require_character_binding_provenance(
-            &self.inner.pool,
-            principal.creator_id(),
-            &character_id,
-            binding_id,
-        )
-        .await
-        .map_err(map_local_db_error)?;
+        // The binding the legacy insert admitted is still admitted, and the
+        // check now runs inside the provider's own write transaction (D15):
+        // `remove_binding` takes the same write lock, so it cannot delete the
+        // binding between the check and the candidate write.
+        let binding = binding_id.map(|binding| CaptureBinding {
+            owner_creator: principal.creator_id(),
+            character: &character_id,
+            binding,
+        });
         let mut origin = json!({
             "family": legacy::FAMILY_CHARACTER_PENDING_REVIEW,
             "pending_id": pending_id.as_str(),
@@ -1930,11 +1931,12 @@ impl CoreService {
         let candidate_id = legacy::character_pending_review_candidate_id(&pending_id);
         match memory
             .provider
-            .capture_identified(&memory.principal, capture, &candidate_id)
+            .capture_identified(&memory.principal, capture, &candidate_id, binding.as_ref())
             .await
         {
-            SpokeResult::Ok(_) => {}
-            SpokeResult::Reject(reject) => return Err(memory_reject(&reject)),
+            Ok(SpokeResult::Ok(_)) => {}
+            Ok(SpokeResult::Reject(reject)) => return Err(memory_reject(&reject)),
+            Err(error) => return Err(map_local_db_error(error)),
         }
 
         map_wire(json!({

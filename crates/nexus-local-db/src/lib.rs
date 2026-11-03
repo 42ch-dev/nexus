@@ -97,9 +97,8 @@ pub use actor_knowledge_store::{
 };
 pub use actor_world_binding::{
     add_actor_world_binding, count_bindings_for_world_tx, get_actor_world_binding,
-    list_bindings_for_character, mint_binding_id, remove_binding,
-    require_character_binding_provenance, update_actor_world_binding, ActorWorldBindingRecord,
-    CreateBindingParams,
+    list_bindings_for_character, mint_binding_id, remove_binding, require_valid_provenance_tx,
+    update_actor_world_binding, ActorWorldBindingRecord, CreateBindingParams,
 };
 pub use character::{
     create_character_with_initial_binding, delete_character, get_character, list_characters,

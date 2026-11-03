@@ -46,6 +46,9 @@ const LONG_TERM_BODY: &str = "Legacy creator long-term body.";
 /// parser trims that prefix, so the migration must serve the authored bytes.
 const CHARACTER_LONG_TERM_BODY: &str = "\n    Legacy character long-term body.\n";
 const PENDING_DIGEST: &str = "Legacy creator pending review raw digest long enough to classify.";
+/// The digest an interrupted pre-fix Character capture left on its legacy queue
+/// row (B2's stock state, compass D16).
+const STOCK_DIGEST: &str = "The interrupted attempt's own pending digest, long enough to classify.";
 
 /// Every legacy memory table the migration must preserve, in a stable order.
 const LEGACY_TABLES: [&str; 7] = [
@@ -381,13 +384,14 @@ fn row_cells(rows: &[String]) -> Vec<String> {
 
 /// [`row_cells`] with the `binding` column of every row that held `released`
 /// rendered the way SQLite renders a NULL there (`quote(NULL)` is the text
-/// `NULL`): the comparison a provenance release must satisfy — every other
+/// `NULL`): the comparison a provenance release must satisfy — every content
 /// column byte-identical, and every other row untouched.
 ///
 /// `revision` names the row's OCC counter where the table's own writer-protocol
-/// trigger bumps it on every update (`bump_character_memory_fragments_revision`):
-/// that derived `revision + 1` is the release's only other effect, never a
-/// content rewrite.
+/// trigger bumps it on every update
+/// (`bump_character_memory_fragments_revision`, D14's schema-owned audit
+/// column): that derived `revision + 1` is the release's only other effect,
+/// never a content rewrite.
 fn released_cells(
     rows: &[String],
     binding: usize,
@@ -1646,6 +1650,107 @@ async fn migration_accepts_a_capture_with_a_fractional_created_at() {
     pool.close().await;
 }
 
+/// B2 (compass D16, fix round 6): a capture re-delivered after a pre-fix
+/// interruption finds its deterministic id already named by a legacy-only
+/// projection. The legacy row is the authoritative content of that attempt, so
+/// the re-delivery adopts the projection and writes nothing of its own, and the
+/// one-shot migration then sees one version instead of two divergent ones.
+#[tokio::test]
+async fn migration_accepts_a_recapture_over_a_legacy_only_projection() {
+    let env = seed_legacy_home().await;
+    let (core, principal) = open_core(&env).await;
+    let character_id = env.character_id.clone();
+    let binding_id = env.binding_id.clone();
+
+    // The stock state of an interrupted pre-fix capture: the legacy queue row
+    // exists and no provider row does.
+    let pool = plain_pool(&env).await;
+    nexus_local_db::create_character_pending_review(
+        &pool,
+        CREATOR,
+        &nexus_local_db::CharacterPendingReviewRecord {
+            pending_id: "pend_stock".to_string(),
+            session_id: "sess_stock".to_string(),
+            character_id: character_id.clone(),
+            actor_world_binding_id: Some(binding_id.clone()),
+            task_kind: "chapter".to_string(),
+            raw_digest: STOCK_DIGEST.to_string(),
+            created_at: "2026-02-02T00:00:00Z".to_string(),
+            source_operation_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    pool.close().await;
+
+    // The re-delivery carries a different body and instant. Neither may reach
+    // the provider: the interrupted attempt's legacy row is authoritative.
+    core.capture_character_pending_review(
+        &principal,
+        character_id.clone(),
+        serde_json::from_value(json!({
+            "pending_id": "pend_stock",
+            "session_id": "sess_stock",
+            "binding_id": binding_id,
+            "task_kind": "research",
+            "raw_digest": PENDING_DIGEST,
+            "created_at": "2026-06-06T00:00:00Z",
+        }))
+        .expect("wire-valid capture request"),
+    )
+    .await
+    .expect("the re-delivery is replayed, not refused");
+
+    let candidate_id = "lgc:character_memory_pending_review:pend_stock";
+    let pool = plain_pool(&env).await;
+    let (kind, content): (String, String) =
+        sqlx::query_as("SELECT kind, content_json FROM memory_candidates WHERE candidate_id = ?")
+            .bind(candidate_id)
+            .fetch_one(&pool)
+            .await
+            .expect("the capture adopted the projection under the bridge id");
+    assert_eq!(
+        kind, "event",
+        "the legacy projection's kind, not the re-delivery's"
+    );
+    let content: serde_json::Value =
+        serde_json::from_str(&content).expect("the candidate content is JSON");
+    assert_eq!(content["text"], "", "the projection carries no body text");
+    assert_eq!(
+        content["structured"]["nexus_legacy"]["raw_digest"], STOCK_DIGEST,
+        "the interrupted attempt's digest is the provider's content"
+    );
+    assert_eq!(
+        content["structured"]["nexus_legacy"]["created_at"],
+        "2026-02-02T00:00:00Z"
+    );
+    assert_eq!(
+        content["structured"]["nexus_legacy"]["task_kind"],
+        "chapter"
+    );
+    pool.close().await;
+
+    // One version in storage, so the pass accepts the workspace instead of
+    // refusing it with an idempotency conflict.
+    let migrated = core.migrate_legacy_content(&principal).await.unwrap();
+    assert_eq!(migrated.status, LegacyMigrationStatus::Migrated);
+    let rerun = core.migrate_legacy_content(&principal).await.unwrap();
+    assert_eq!(rerun.status, LegacyMigrationStatus::AlreadyComplete);
+
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT COUNT(*) FROM memory_candidates \
+             WHERE candidate_id = 'lgc:character_memory_pending_review:pend_stock'",
+        )
+        .await,
+        1,
+        "the stock capture and the re-delivery are one candidate"
+    );
+    pool.close().await;
+}
+
 /// F2 (`actor_world_binding.rs:753`): removing a binding releases the legacy
 /// rows it proved the provider already serves (`actor_world_binding_id = NULL`).
 /// That release changes the values the projection rebuilds from, but the
@@ -1720,11 +1825,14 @@ async fn migration_accepts_a_binding_release_made_before_the_pass() {
     )
     .await
     .expect("dismiss the binding-local review");
-    // B3 (PM ruling): the provenance release is legacy-domain foreign-key
-    // bookkeeping, so it may clear only `actor_world_binding_id` — every other
-    // column of the retained rows must survive byte-identically (the fragment
-    // table's own OCC trigger is the one derived change: any update bumps
-    // `revision`).
+    // B3 (PM ruling D14): the provenance release is legacy-domain foreign-key
+    // bookkeeping, so it may clear only `actor_world_binding_id`. The amended
+    // condition is "no **content** column changes": `character_memory_fragments`
+    // carries the writer-protocol trigger `bump_character_memory_fragments_revision`,
+    // which advances that row's `revision` audit column on *any* UPDATE (no DDL
+    // is permitted, so it is the legacy schema's own behaviour). Every other
+    // column — and the pending table, which has no such trigger — survives
+    // byte-identically.
     let pool = plain_pool(&env).await;
     let pending_table = "character_memory_pending_review";
     let fragment_table = "character_memory_fragments";
@@ -1733,6 +1841,12 @@ async fn migration_accepts_a_binding_release_made_before_the_pass() {
     let pending_binding = column_index(&pool, pending_table, "actor_world_binding_id").await;
     let fragment_binding = column_index(&pool, fragment_table, "actor_world_binding_id").await;
     let fragment_revision = column_index(&pool, fragment_table, "revision").await;
+    let revision_before: i64 = sqlx::query_scalar(
+        "SELECT revision FROM character_memory_fragments WHERE fragment_id = 'hfrag_legacy'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     pool.close().await;
 
     core.remove_binding(&principal, character_id.clone(), second.clone())
@@ -1740,6 +1854,17 @@ async fn migration_accepts_a_binding_release_made_before_the_pass() {
         .expect("the released rows no longer hold the binding");
 
     let pool = plain_pool(&env).await;
+    let revision_after: i64 = sqlx::query_scalar(
+        "SELECT revision FROM character_memory_fragments WHERE fragment_id = 'hfrag_legacy'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        revision_after,
+        revision_before + 1,
+        "the fragment's own UPDATE trigger advanced its audit revision by one"
+    );
     assert_eq!(
         row_cells(&table_rows(&pool, pending_table).await),
         released_cells(&pending_before, pending_binding, &second, None),

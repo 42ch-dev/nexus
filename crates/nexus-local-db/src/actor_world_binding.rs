@@ -250,11 +250,16 @@ pub(crate) async fn require_active_character_binding_tx(
 /// path so binding-local rows cannot be created against a foreign Character,
 /// a non-active binding, or a World owned by someone else.
 ///
+/// The Character capture also runs it on the *provider's* write transaction,
+/// the one that inserts its candidate (compass D15): `remove_binding` takes the
+/// same `BEGIN IMMEDIATE` lock, so it cannot delete the binding between this
+/// check and the provider write.
+///
 /// # Errors
 ///
 /// Returns `LocalDbError::ActorNotFound` for a missing, foreign, or inactive
 /// binding; `LocalDbError` on owner/world or database failure.
-pub(crate) async fn require_valid_provenance_tx(
+pub async fn require_valid_provenance_tx(
     tx: &mut Transaction<'_, Sqlite>,
     owner_creator_id: &str,
     character_id: &str,
@@ -266,38 +271,6 @@ pub(crate) async fn require_valid_provenance_tx(
     let binding = require_active_character_binding_tx(tx, character_id, binding_id).await?;
     crate::character::require_owned_active_world(tx, owner_creator_id, &binding.world_id).await?;
     Ok(())
-}
-
-/// Read-only [`require_valid_provenance_tx`].
-///
-/// The same admission for a caller that records the binding on the provider
-/// instead of a legacy row (the Character capture's provider-first path, fix
-/// round 5, B1). Nothing is written, so the ordering is the validator's, not a
-/// transaction's.
-///
-/// # Errors
-///
-/// Returns `LocalDbError::ActorNotFound` for a missing, foreign, or inactive
-/// binding; `LocalDbError` on owner/world or database failure.
-pub async fn require_character_binding_provenance(
-    pool: &SqlitePool,
-    owner_creator_id: &str,
-    character_id: &str,
-    actor_world_binding_id: Option<&str>,
-) -> Result<(), LocalDbError> {
-    if actor_world_binding_id.is_none() {
-        return Ok(());
-    }
-    let mut tx = pool.begin().await?;
-    let checked = require_valid_provenance_tx(
-        &mut tx,
-        owner_creator_id,
-        character_id,
-        actor_world_binding_id,
-    )
-    .await;
-    tx.rollback().await?;
-    checked
 }
 
 async fn load_binding_pool(
@@ -778,14 +751,18 @@ async fn remove_binding_tx(
     // that provenance the way the legacy local→shared promotion does: the row
     // stays, the binding it no longer holds goes.
     //
-    // PM ruling (PR #469 fix round 5, B3): this narrow provenance release is
-    // legacy-domain foreign-key bookkeeping — the same shape the legacy
-    // local→shared promotion uses — NOT memory-content migration, so it is
-    // permitted in exactly this scope: only rows the gate above proved the
-    // provider already owns, only the `actor_world_binding_id` column, and
-    // nothing else about the row. Compass D6 ("write-idle") governs memory
-    // content and the provider cutover; it does not forbid the legacy-domain FK
-    // maintenance that has to precede a binding's deletion. Do not broaden
+    // PM ruling D14 (compass `## Decisions`, PR #469 final review round 2, B3):
+    // this narrow release is legacy-domain foreign-key bookkeeping — the same
+    // shape the legacy local→shared promotion uses — NOT memory-content
+    // migration, so it is permitted in exactly this scope: only rows the gate
+    // above proved the provider already owns, and only the
+    // `actor_world_binding_id` column. D6 ("write-idle") governs memory content
+    // and the provider cutover; it does not forbid the legacy-domain FK
+    // maintenance that has to precede a binding's deletion. The condition is
+    // "no **content** column changes": this table's own UPDATE trigger
+    // (`bump_character_memory_fragments_revision`) still advances its `revision`
+    // audit column on any update, which is the legacy schema's own behaviour and
+    // cannot be suppressed without the DDL the ruling forbids. Do not broaden
     // these writes.
     sqlx::query!(
         r"UPDATE character_memory_pending_review SET actor_world_binding_id = NULL

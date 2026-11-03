@@ -6358,6 +6358,144 @@ async fn character_capture_is_one_provider_write_served_by_every_reader() {
     );
 }
 
+/// B1 (compass D15, fix round 6): the Character capture's binding provenance is
+/// checked inside the provider's own write transaction. `remove_binding` takes
+/// the same `BEGIN IMMEDIATE` lock and counts the pending candidate, so the two
+/// cannot interleave into a candidate that names a deleted binding.
+///
+/// Both lock orderings are pinned:
+///
+/// * the capture holds the transaction when the removal starts — the removal
+///   waits, then refuses `binding_has_local_memory`, and the candidate and the
+///   binding both survive;
+/// * the binding is already gone when the capture reaches its write
+///   transaction — it refuses with the retained `character_memory` 403 and
+///   inserts nothing.
+#[tokio::test]
+async fn character_capture_binding_never_outlives_the_provenance_check() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let chr = env.character_id.clone();
+    let keep = env.binding_id.clone();
+    // A second active binding, so removing `keep` is not the last-active
+    // refusal and the memory dependency is what the removal is judged by.
+    let removable = core
+        .add_binding(&principal, chr.clone(), WORLD_B.to_string(), None)
+        .await
+        .expect("second binding")
+        .binding
+        .binding_id
+        .as_str()
+        .to_string();
+
+    // Ordering 1: the capture validates its binding, then parks inside the same
+    // write transaction; the removal starts in that window and cannot commit
+    // ahead of it.
+    let pinned = core.memory_provider_for_test().expect("pinned provider");
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Barrier::new(2));
+    pinned.park_next_capture(Arc::clone(&entered), Arc::clone(&release));
+    let capture = tokio::spawn({
+        let core = core.clone();
+        let principal = principal.clone();
+        let chr = chr.clone();
+        let binding = keep.clone();
+        async move {
+            core.capture_character_pending_review(
+                &principal,
+                chr,
+                dto(json_capture(
+                    "pend_race",
+                    Some(&binding),
+                    "2026-05-01T00:00:02Z",
+                )),
+            )
+            .await
+        }
+    });
+    entered.notified().await;
+    let removal = tokio::spawn({
+        let core = core.clone();
+        let principal = principal.clone();
+        let chr = chr.clone();
+        let binding = keep.clone();
+        async move { core.remove_binding(&principal, chr, binding).await }
+    });
+    tokio::task::yield_now().await;
+    release.wait().await;
+
+    capture
+        .await
+        .unwrap()
+        .expect("the capture owns the write lock and commits its candidate");
+    let blocked = removal
+        .await
+        .unwrap()
+        .expect_err("the committed capture now holds the binding");
+    assert!(
+        matches!(&blocked, CoreError::ActorConflict { code, .. } if code == "binding_has_local_memory"),
+        "the removal is refused by the candidate, not by a lock failure: {blocked:?}"
+    );
+
+    let race = legacy::character_pending_review_candidate_id("pend_race");
+    let pool = plain_pool(&env).await;
+    let bound: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM actor_world_bindings WHERE binding_id = ? AND status = 'active'",
+    )
+    .bind(&keep)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(bound, 1, "the refused removal left the binding in place");
+    let queued: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM memory_candidates WHERE candidate_id = ? AND status = 'pending'",
+    )
+    .bind(&race)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        queued, 1,
+        "the committed candidate names the binding the removal could not delete"
+    );
+    pool.close().await;
+
+    // Ordering 2: the binding is removed before the capture, so the check that
+    // now runs inside the write transaction is the one that refuses it.
+    core.remove_binding(&principal, chr.clone(), removable.clone())
+        .await
+        .expect("a binding with no memory is removable");
+    let refused = core
+        .capture_character_pending_review(
+            &principal,
+            chr.clone(),
+            dto(json_capture(
+                "pend_gone",
+                Some(&removable),
+                "2026-05-01T00:00:01Z",
+            )),
+        )
+        .await
+        .expect_err("a capture on a removed binding is refused");
+    match refused {
+        CoreError::ForbiddenReason { resource, .. } => assert_eq!(
+            resource, "character_memory",
+            "the retained provenance envelope is unchanged"
+        ),
+        other => panic!("expected the retained provenance 403, got {other:?}"),
+    }
+    let gone = legacy::character_pending_review_candidate_id("pend_gone");
+    let pool = plain_pool(&env).await;
+    let written: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM memory_candidates WHERE candidate_id = ?")
+            .bind(&gone)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(written, 0, "a refused capture writes no candidate");
+    pool.close().await;
+}
+
 /// B2 (`memory.rs:645`): a provider-native promoted memory resolves by its
 /// authored slug without projecting the legacy long-term directory, so one
 /// damaged unrelated memory file cannot break its show/edit/delete. A read that
