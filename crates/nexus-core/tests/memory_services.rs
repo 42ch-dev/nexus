@@ -2155,6 +2155,42 @@ async fn creator_mutations_adopt_projected_legacy_memories() {
     );
 }
 
+/// A projected record that was never edited is deleted directly, through the
+/// delete-only adoption route (NXM-6 fix round 2, R2-F2). The record disappears
+/// from reads and the legacy bearer file keeps every byte it had (D6).
+#[tokio::test]
+async fn creator_delete_adopts_an_unmodified_projected_legacy_memory() {
+    let env = seed_env().await;
+    seed_legacy_creator_content(&env).await;
+    let bearer = MemoryBearerRef::Creator(CREATOR);
+    let memory_path = bearer.long_term_memory_path(&env.user_home, "bridge-memory");
+    let projected_bytes = std::fs::read(&memory_path).expect("legacy memory bytes");
+
+    let (core, principal) = open_core(&env).await;
+
+    // Reading the projection is not a mutation, so the delete below is the
+    // first and only write this record ever sees.
+    assert!(core
+        .get_creator_memory(&principal, "bridge-memory")
+        .await
+        .unwrap()
+        .is_some());
+    assert!(core
+        .delete_creator_memory(&principal, "bridge-memory")
+        .await
+        .expect("the delete adopts the untouched projection"));
+    assert!(core
+        .get_creator_memory(&principal, "bridge-memory")
+        .await
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        std::fs::read(&memory_path).unwrap(),
+        projected_bytes,
+        "the delete never writes the legacy file"
+    );
+}
+
 /// An interactive edit's read is the write's precondition, and two different
 /// mutations never share an idempotency key (NXM-6 fix round 1, F3/F4).
 #[tokio::test]
