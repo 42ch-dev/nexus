@@ -1002,6 +1002,8 @@ impl CoreService {
                 },
             )
             .await?;
+        #[cfg(feature = "test-hooks")]
+        self.report_binding_removal_write_contention().await;
         nexus_local_db::remove_binding(
             &self.inner.pool,
             principal.creator_id(),

@@ -6414,6 +6414,13 @@ async fn character_capture_binding_never_outlives_the_provenance_check() {
         }
     });
     entered.notified().await;
+    // The removal's own write attempt, not its task being scheduled: it probes
+    // the `BEGIN IMMEDIATE` it is about to take and reports only once that
+    // probe finds the capture's transaction holding the lock. A sequential
+    // execution — removal still unscheduled — never reaches this point, so the
+    // capture can only be released after the delete really contended.
+    let attempted = Arc::new(tokio::sync::Notify::new());
+    core.report_binding_removal_write_waits(Arc::clone(&attempted));
     let removal = tokio::spawn({
         let core = core.clone();
         let principal = principal.clone();
@@ -6421,7 +6428,7 @@ async fn character_capture_binding_never_outlives_the_provenance_check() {
         let binding = keep.clone();
         async move { core.remove_binding(&principal, chr, binding).await }
     });
-    tokio::task::yield_now().await;
+    attempted.notified().await;
     release.wait().await;
 
     capture
