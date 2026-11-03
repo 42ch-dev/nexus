@@ -1,12 +1,15 @@
 //! Creator memory review family against the direct-core fixture (v1.193
 //! P0-T12).
 //!
-//! `creator memory review|fragments|pending-list|pending count|pending-show|
-//! pending-dismiss` run the REAL `nexus42` binary against a hermetic
-//! direct-core home — no daemon fixture, no HTTP client. The queue rows are
-//! seeded on the released workspace DB and every read is the typed core's own
-//! bearer operation. `pending-show` walks list pagination (PR #230 Greptile
-//! P1) so an ID past the first 50-row page is still found.
+//! `creator memory capture|review|fragments|pending-list|pending count|
+//! pending-show|pending-dismiss` run the REAL `nexus42` binary against a
+//! hermetic direct-core home — no daemon fixture, no HTTP client. The capture
+//! case takes the command's default timestamp path (no `--created-at`), so the
+//! request construction, the queued candidate and its rendering are exercised;
+//! the remaining queue rows are seeded on the released workspace DB and every
+//! read is the typed core's own bearer operation. `pending-show` walks list
+//! pagination (PR #230 Greptile P1) so an ID past the first 50-row page is still
+//! found.
 
 #[path = "common/direct.rs"]
 mod direct;
@@ -194,6 +197,71 @@ async fn pending_count_zero_when_empty() {
     assert!(out.status.success(), "count failed: {}", stderr(&out));
     let text = stdout(&out);
     assert!(text.contains("0 pending review(s)"), "{text}");
+}
+
+// ── capture (default timestamp path) ──────────────────────────────────────
+
+/// `creator memory capture` runs through the real binary without `--created-at`,
+/// and re-running it replays instead of failing (NXM-6 fix round 1, F4/F5).
+///
+/// The command is the Creator half of the explicit-capture contract: argument
+/// parsing, the typed request, the provider candidate and the human rendering
+/// are all exercised here, and the default timestamp path is the one the CLI
+/// actually takes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn capture_defaults_timestamp_and_replays_on_retry() {
+    let env = fresh_env().await;
+    let args = [
+        "creator",
+        "memory",
+        "capture",
+        "--pending-id",
+        "pend_cli_capture",
+        "--session-id",
+        "sess_cli_capture",
+        "--task-kind",
+        "chapter",
+        "--digest",
+        "The chapter pivots from betrayal to alliance, with causal consequences \
+         for three factions.",
+    ];
+
+    let out = env.cli(&args);
+    assert!(out.status.success(), "capture failed: {}", stderr(&out));
+    let text = stdout(&out);
+    assert!(text.contains("pend_cli_capture"), "{text}");
+    assert!(!text.trim_start().starts_with('{'));
+
+    // The default-timestamp retry replays: one queued row, no idempotency error.
+    let out = env.cli(&args);
+    assert!(
+        out.status.success(),
+        "capture retry failed: {}",
+        stderr(&out)
+    );
+
+    let out = env.cli(&["creator", "memory", "pending", "count", "--json"]);
+    assert!(out.status.success(), "count failed: {}", stderr(&out));
+    let parsed: serde_json::Value = serde_json::from_str(&stdout(&out)).expect("valid JSON");
+    assert_eq!(parsed["count"], 1, "the retry queued nothing new");
+
+    let out = env.cli(&["creator", "memory", "pending-list", "--json"]);
+    assert!(
+        out.status.success(),
+        "pending-list failed: {}",
+        stderr(&out)
+    );
+    let parsed: serde_json::Value = serde_json::from_str(&stdout(&out)).expect("valid JSON");
+    assert_eq!(parsed["items"][0]["pending_id"], "pend_cli_capture");
+    assert_eq!(parsed["items"][0]["session_id"], "sess_cli_capture");
+    assert_eq!(parsed["items"][0]["task_kind"], "chapter");
+    assert!(
+        !parsed["items"][0]["created_at"]
+            .as_str()
+            .unwrap_or_default()
+            .is_empty(),
+        "the defaulted timestamp renders on the pending row: {parsed}"
+    );
 }
 
 // ── review drain ──────────────────────────────────────────────────────────

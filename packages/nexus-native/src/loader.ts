@@ -326,6 +326,7 @@ export interface NativeCoreBinding {
     requestJson: Uint8Array,
   ): Promise<Uint8Array>;
   listCharacterTom(principal: string, characterId: string, queryJson: Uint8Array): Promise<Uint8Array>;
+  createPendingReview(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
   listPendingReviews(principal: string, queryJson: Uint8Array): Promise<Uint8Array>;
   countPendingReviews(principal: string, queryJson: Uint8Array): Promise<Uint8Array>;
   deletePendingReview(

@@ -7,9 +7,12 @@
 //! with its guidance/exit-2 arm; `assemble-moment` is the only context leaf.
 
 use crate::config::CliConfig;
+use crate::core::{map_core_error, with_read_only_core};
 use crate::errors::Result;
 use clap::Subcommand;
 use nexus_contracts::local::domain::RuntimeMode;
+use nexus_core::RetainedRecord;
+use nexus_creator_memory::soul::SoulDocument;
 use nexus_moment_context_assembly::cloud_stage::AssembleResponse;
 use nexus_moment_context_assembly::{
     assemble_moment_with_directive, build_inspector_packet, GenerationStage, MomentContext,
@@ -358,24 +361,34 @@ async fn build_stage0_from_local(
         )
     })?;
 
-    let home = crate::config::user_home_dir()?;
-
-    let bearer = nexus_creator_memory::MemoryBearerRef::Creator(creator_id);
-
-    // 1. Load SOUL.md
-    let soul = nexus_creator_memory::soul_io::load(&home, bearer)?;
-
-    // 2. List long-term memories (skip personality_core — already in SOUL personality)
-    let slugs = nexus_creator_memory::memory_io::list_memories(&home, bearer)?;
-    let mut long_term_memories = Vec::new();
-    for slug in &slugs {
-        if let Ok(mem) = nexus_creator_memory::memory_io::load_memory(&home, bearer, slug) {
-            if mem.frontmatter.memory_kind == "personality_core" {
-                continue;
-            }
-            long_term_memories.push(mem);
-        }
-    }
+    // 1+2. The SOUL document and the long-term memories are the provider's own
+    // surfaces (NXM-6): one read-only core serves both, so assembly keeps
+    // working beside a running daemon and never opens a bearer file.
+    let (personality, experience, long_term_memories) =
+        with_read_only_core(config, async |core, principal| {
+            let soul = core
+                .get_creator_soul(principal)
+                .await
+                .map_err(map_core_error)?
+                .ok_or_else(|| {
+                    crate::errors::CliError::Other(format!(
+                        "SOUL.md not found for creator '{creator_id}'."
+                    ))
+                })?;
+            let document = SoulDocument::parse(&soul.document.body).map_err(|error| {
+                crate::errors::CliError::Other(format!("Memory error: {error}"))
+            })?;
+            let records = core
+                .list_creator_memories(principal)
+                .await
+                .map_err(map_core_error)?;
+            Ok((
+                document.personality.unwrap_or_default(),
+                document.experience.unwrap_or_default(),
+                stage0_memories(records),
+            ))
+        })
+        .await?;
 
     // 3. Build fragment keywords (best-effort from daemon, optional)
     let fragment_keywords = if include_fragments {
@@ -386,14 +399,36 @@ async fn build_stage0_from_local(
 
     // 4. Build Stage0Assembly
     Ok(Stage0Assembly {
-        personality: soul.personality.clone().unwrap_or_default(),
-        experience: soul.experience.clone().unwrap_or_default(),
+        personality,
+        experience,
         long_term_memories,
         fragment_keywords,
         system_prefix: String::new(),
         user_prompt: hint.unwrap_or("").to_string(),
         max_tokens,
     })
+}
+
+/// The stage-0 long-term-memory selection: every Creator contract record except
+/// `personality_core`, whose body is the SOUL personality section above.
+///
+/// The assembly renders `memory_id`, `memory_kind`, `updated_at` and the body
+/// straight from the record's `nexus_legacy` block, so the typed records pass
+/// through unchanged (NXM-7's contract DTO).
+fn stage0_memories(records: Vec<RetainedRecord>) -> Vec<RetainedRecord> {
+    records
+        .into_iter()
+        .filter(|record| {
+            let RetainedRecord::LiveRecord(live) = record else {
+                return true;
+            };
+            live.kind
+                .as_str()
+                .strip_prefix("nexus.")
+                .unwrap_or(live.kind.as_str())
+                != "personality_core"
+        })
+        .collect()
 }
 
 /// Try to obtain a platform assemble response (best-effort).

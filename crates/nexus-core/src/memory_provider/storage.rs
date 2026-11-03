@@ -3826,6 +3826,20 @@ async fn adopt_records_in_tx(
     Ok(adopted)
 }
 
+/// What one record mutation applies after adoption (§7.18/§7.19). Both shares
+/// of the path take the CAS, the subject/placement gate and the receipt.
+#[derive(Clone, Copy)]
+enum RecordMutation<'a> {
+    Update {
+        content: Option<&'a Value>,
+        kind: Option<&'a str>,
+    },
+    Delete {
+        reason: Option<&'a str>,
+        deleted_by: &'a str,
+    },
+}
+
 impl MemoryStore {
     /// The bearer subject that owns one provider-native candidate row, if this
     /// store holds it.
@@ -4785,79 +4799,13 @@ impl MemoryStore {
         content: Option<&Value>,
         kind: Option<&str>,
     ) -> StoreResult<ReceiptRow> {
-        let targets = [journal::record_target(record_id)];
-        let mut publication = self.begin_publication(ctx, admission, &targets).await?;
-        let (mut tx, now) = self.begin_admission().await?;
-        let _ = authorize(&mut tx, admission, now).await?;
-        if let Some(row) = probe(&mut tx, ctx, now).await? {
-            // §5.2 step 2/S-2: settle the replayed intent before serving it, so
-            // a duplicate key reaches the published outcome (or the recorded
-            // terminal failure) instead of `OUTCOME_UNCERTAIN`.
-            tx.rollback().await?;
-            return self.settle_replayed(&mut publication, row).await;
-        }
-        require_settled_targets(&mut tx, ctx.space_id, &targets).await?;
-        gate(&mut tx, admission).await?;
-        let record = record_in_tx(&mut tx, ctx.space_id, record_id)
-            .await?
-            .ok_or_else(|| StoreError::NotFound(format!("record {record_id}")))?;
-        require_subject_writable(
-            &mut tx,
-            ctx.space_id,
-            record.subject_id.as_str(),
-            &[record.scope()],
-        )
-        .await?;
-        // MEM-R014: deletion is terminal, so a tombstoned record is never edited
-        // back to life.
-        if record.tombstoned() {
-            return Err(StoreError::StatusTransition(format!(
-                "record {record_id} is tombstoned"
-            )));
-        }
-        if record.revision != expected_revision {
-            return Err(StoreError::RevisionConflict {
-                current: record.revision,
-            });
-        }
-        let content_json = match content {
-            Some(content) => Some(serialize(content, "record content")?),
-            None => None,
-        };
-        // The projection this update replaces: the provider's own previous
-        // version of the row, never whatever bytes sit at the target.
-        let prior = journal::record_effect(&record)?.digest;
-        let updated = sqlx::query(
-            "UPDATE memory_records SET content_json = COALESCE(?, content_json), \
-             kind = COALESCE(?, kind), updated_at = ?, revision = revision + 1 \
-             WHERE space_id = ? AND record_id = ? AND revision = ?",
-        )
-        .bind(content_json)
-        .bind(kind)
-        .bind(timestamp(now))
-        .bind(ctx.space_id)
-        .bind(record_id)
-        .bind(record.revision)
-        .execute(&mut *tx)
-        .await?;
-        if updated.rows_affected() != 1 {
-            return Err(StoreError::RevisionConflict {
-                current: record.revision,
-            });
-        }
-        let effect = record_effect_in_tx(&mut tx, ctx.space_id, record_id)
-            .await?
-            .over(Some(prior));
-        let result = json!({ "record_id": record_id, "revision": record.revision + 1 });
-        self.commit_journalled(
-            tx,
-            &mut publication,
+        self.mutate_record(
             ctx,
-            mint_receipt_id(),
-            record.subject_id.as_str(),
-            std::slice::from_ref(&effect),
-            &result,
-            now,
+            admission,
+            record_id,
+            expected_revision,
+            RecordMutation::Update { content, kind },
+            None,
         )
         .await
     }
@@ -4872,10 +4820,140 @@ impl MemoryStore {
         reason: Option<&str>,
         deleted_by: &str,
     ) -> StoreResult<ReceiptRow> {
+        self.mutate_record(
+            ctx,
+            admission,
+            record_id,
+            expected_revision,
+            RecordMutation::Delete { reason, deleted_by },
+            None,
+        )
+        .await
+    }
+
+    /// §7.18/§7.19 mutation-time adoption for one record addressed by the id the
+    /// E4 DTO serves (NXM-6 fix round 1, finding F2).
+    ///
+    /// A record the bridge still projects has no provider row, so the CAS would
+    /// answer `NOT_FOUND` for a memory the user can read, edit and delete. The
+    /// projection is adopted under its deterministic external id **inside this
+    /// mutation's guarded transaction** (NXM-5 D13's mutation-time adoption,
+    /// reused for records) and the mutation is re-authorized against the adopted
+    /// row; the legacy surface is never written (§D6). A record the provider
+    /// already owns is mutated as it is.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn update_legacy_record(
+        &self,
+        ctx: &OpContext<'_>,
+        admission: &Admission<'_>,
+        adopt_subject: &str,
+        record_id: &str,
+        expected_revision: i64,
+        content: Option<&Value>,
+        kind: Option<&str>,
+    ) -> StoreResult<ReceiptRow> {
+        self.mutate_record(
+            ctx,
+            admission,
+            record_id,
+            expected_revision,
+            RecordMutation::Update { content, kind },
+            Some(adopt_subject),
+        )
+        .await
+    }
+
+    /// [`Self::update_legacy_record`] for a tombstone (§7.19/MEM-R014).
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn delete_legacy_record(
+        &self,
+        ctx: &OpContext<'_>,
+        admission: &Admission<'_>,
+        adopt_subject: &str,
+        record_id: &str,
+        expected_revision: i64,
+        reason: Option<&str>,
+        deleted_by: &str,
+    ) -> StoreResult<ReceiptRow> {
+        self.mutate_record(
+            ctx,
+            admission,
+            record_id,
+            expected_revision,
+            RecordMutation::Delete { reason, deleted_by },
+            Some(adopt_subject),
+        )
+        .await
+    }
+
+    /// §7.18/§7.19: adoption + edit/tombstone + receipt, one transaction.
+    ///
+    /// `adopt_subject` names the bearer whose adapter issued the mutation when
+    /// the record may still be a bridge projection; see
+    /// [`Self::update_legacy_record`]. Everything else is one path: the wire ops
+    /// pass `None` and mutate a record the provider already owns.
+    #[allow(clippy::too_many_lines)] // resolution, adoption, admission and the CAS are one write
+    async fn mutate_record(
+        &self,
+        ctx: &OpContext<'_>,
+        admission: &Admission<'_>,
+        record_id: &str,
+        expected_revision: i64,
+        step: RecordMutation<'_>,
+        adopt_subject: Option<&str>,
+    ) -> StoreResult<ReceiptRow> {
+        // Resolve what this mutation has to be authorized as BEFORE the
+        // publication section (which evaluates the caller's admission): a row
+        // the provider does not own yet is authorized exactly as the bridge
+        // projects it, because the adopted row carries its subject and its
+        // placement verbatim.
+        let projected = match adopt_subject {
+            Some(_) => {
+                let (mut read, _) = self.begin_read().await?;
+                let owned = record_in_tx(&mut read, ctx.space_id, record_id).await?;
+                let row = match owned {
+                    Some(_) => None,
+                    None => {
+                        legacy::record_by_id_in_tx(&mut read, &self.legacy, ctx.space_id, record_id)
+                            .await?
+                    }
+                };
+                read.rollback().await?;
+                row
+            }
+            None => None,
+        };
+        let capabilities: &[&str] = match &admission.coverage {
+            Coverage::Record { capabilities, .. } => capabilities,
+            _ => &[],
+        };
+        let requirements: Vec<GrantRequirement<'_>> = projected
+            .iter()
+            .flat_map(|row| {
+                capabilities
+                    .iter()
+                    .map(move |capability| row.requirement(capability, false))
+            })
+            .collect();
+        let projected_admission = Admission {
+            op: super::OP_LEGACY_ADOPT,
+            space_id: ctx.space_id,
+            principal_id: admission.principal_id,
+            coverage: Coverage::Requirements(&requirements),
+            issuance: None,
+            subject_gate: projected.as_ref().map(|row| row.subject_id.as_str()),
+            placement_gate: projected.as_ref().map(RecordRow::scope),
+            freeze_gated: true,
+        };
+        let effective = if projected.is_some() {
+            &projected_admission
+        } else {
+            admission
+        };
         let targets = [journal::record_target(record_id)];
-        let mut publication = self.begin_publication(ctx, admission, &targets).await?;
+        let mut publication = self.begin_publication(ctx, effective, &targets).await?;
         let (mut tx, now) = self.begin_admission().await?;
-        let _ = authorize(&mut tx, admission, now).await?;
+        let _ = authorize(&mut tx, effective, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
             // §5.2 step 2/S-2: settle the replayed intent before serving it, so
             // a duplicate key reaches the published outcome (or the recorded
@@ -4884,10 +4962,35 @@ impl MemoryStore {
             return self.settle_replayed(&mut publication, row).await;
         }
         require_settled_targets(&mut tx, ctx.space_id, &targets).await?;
-        gate(&mut tx, admission).await?;
+        if let Some(subject_id) = adopt_subject {
+            adopt_records_in_tx(
+                &mut tx,
+                &self.legacy,
+                ctx.space_id,
+                admission.principal_id,
+                subject_id,
+                &[record_id.to_string()],
+                now,
+            )
+            .await?;
+            // Re-authorize against the adopted row inside this transaction, so
+            // the mutation is admitted on exactly the row it writes.
+            let _ = authorize(&mut tx, admission, now).await?;
+        }
+        gate(&mut tx, effective).await?;
         let record = record_in_tx(&mut tx, ctx.space_id, record_id)
             .await?
             .ok_or_else(|| StoreError::NotFound(format!("record {record_id}")))?;
+        // R4-F2's shape: the adapter speaks for one bearer, so a record owned by
+        // another subject is refused where the mutation commits.
+        if let Some(subject_id) = adopt_subject {
+            if record.subject_id != subject_id {
+                return Err(StoreError::NotAuthorized(format!(
+                    "record {record_id} belongs to subject {}, not {subject_id}",
+                    record.subject_id
+                )));
+            }
+        }
         // §7.7/MEM-R014: deletion scrubs content irreversibly, so the subject
         // and placement gates apply exactly as they do to update and promote.
         require_subject_writable(
@@ -4897,37 +5000,74 @@ impl MemoryStore {
             &[record.scope()],
         )
         .await?;
+        // MEM-R014: deletion is terminal, so a tombstoned record is never edited
+        // back to life nor deleted twice.
         if record.tombstoned() {
-            return Err(StoreError::StatusTransition(format!(
-                "record {record_id} is already tombstoned"
-            )));
+            return Err(StoreError::StatusTransition(match step {
+                RecordMutation::Update { .. } => format!("record {record_id} is tombstoned"),
+                RecordMutation::Delete { .. } => {
+                    format!("record {record_id} is already tombstoned")
+                }
+            }));
         }
         if record.revision != expected_revision {
             return Err(StoreError::RevisionConflict {
                 current: record.revision,
             });
         }
-        let tombstone = json!({
-            "deleted_at": timestamp(now),
-            "deleted_by": deleted_by,
-            "reason": reason,
-        });
-        // The content-bearing projection this deletion replaces; only its
-        // digest is journaled, so the removed body is never retained.
+        // The content-bearing projection this mutation replaces: the provider's
+        // own previous version of the row, never whatever bytes sit at the
+        // target (a deletion journals only its digest).
         let prior = journal::record_effect(&record)?.digest;
-        let updated = sqlx::query(
-            "UPDATE memory_records SET content_json = ?, tombstone_json = ?, updated_at = ?, \
-             revision = revision + 1 \
-             WHERE space_id = ? AND record_id = ? AND revision = ?",
-        )
-        .bind(serialize(&json!({ "text": "" }), "scrubbed content")?)
-        .bind(serialize(&tombstone, "tombstone")?)
-        .bind(timestamp(now))
-        .bind(ctx.space_id)
-        .bind(record_id)
-        .bind(record.revision)
-        .execute(&mut *tx)
-        .await?;
+        let (result, updated) = match step {
+            RecordMutation::Update { content, kind } => {
+                let content_json = match content {
+                    Some(content) => Some(serialize(content, "record content")?),
+                    None => None,
+                };
+                let updated = sqlx::query(
+                    "UPDATE memory_records SET content_json = COALESCE(?, content_json), \
+                     kind = COALESCE(?, kind), updated_at = ?, revision = revision + 1 \
+                     WHERE space_id = ? AND record_id = ? AND revision = ?",
+                )
+                .bind(content_json)
+                .bind(kind)
+                .bind(timestamp(now))
+                .bind(ctx.space_id)
+                .bind(record_id)
+                .bind(record.revision)
+                .execute(&mut *tx)
+                .await?;
+                (
+                    json!({ "record_id": record_id, "revision": record.revision + 1 }),
+                    updated,
+                )
+            }
+            RecordMutation::Delete { reason, deleted_by } => {
+                let tombstone = json!({
+                    "deleted_at": timestamp(now),
+                    "deleted_by": deleted_by,
+                    "reason": reason,
+                });
+                let updated = sqlx::query(
+                    "UPDATE memory_records SET content_json = ?, tombstone_json = ?, updated_at = ?, \
+                     revision = revision + 1 \
+                     WHERE space_id = ? AND record_id = ? AND revision = ?",
+                )
+                .bind(serialize(&json!({ "text": "" }), "scrubbed content")?)
+                .bind(serialize(&tombstone, "tombstone")?)
+                .bind(timestamp(now))
+                .bind(ctx.space_id)
+                .bind(record_id)
+                .bind(record.revision)
+                .execute(&mut *tx)
+                .await?;
+                (
+                    json!({ "record_id": record_id, "tombstoned": true }),
+                    updated,
+                )
+            }
+        };
         if updated.rows_affected() != 1 {
             return Err(StoreError::RevisionConflict {
                 current: record.revision,
@@ -4936,7 +5076,6 @@ impl MemoryStore {
         let effect = record_effect_in_tx(&mut tx, ctx.space_id, record_id)
             .await?
             .over(Some(prior));
-        let result = json!({ "record_id": record_id, "tombstoned": true });
         self.commit_journalled(
             tx,
             &mut publication,
