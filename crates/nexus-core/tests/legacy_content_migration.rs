@@ -39,7 +39,9 @@ const CHARACTER_FRAGMENT_TEXT: &str = "Legacy binding-local character fragment t
 const CREATOR_NARRATIVE_TEXT: &str = "Legacy creator soul narrative.";
 const CHARACTER_NARRATIVE_TEXT: &str = "Legacy character soul narrative.";
 const LONG_TERM_BODY: &str = "Legacy creator long-term body.";
-const CHARACTER_LONG_TERM_BODY: &str = "Legacy character long-term body.";
+/// The Character's authored body opens with a blank line and indentation: the
+/// parser trims that prefix, so the migration must serve the authored bytes.
+const CHARACTER_LONG_TERM_BODY: &str = "\n    Legacy character long-term body.\n";
 const PENDING_DIGEST: &str = "Legacy creator pending review raw digest long enough to classify.";
 
 /// Every legacy memory table the migration must preserve, in a stable order.
@@ -671,9 +673,9 @@ async fn migration_preserves_every_legacy_object_and_rerun_is_a_no_op() {
         2
     );
 
-    // The writer's own long-term files, byte-exact per file: the served text is
-    // the parsed view, while the source document, its frontmatter block and its
-    // body are the file's own bytes (P3-F3).
+    // The writer's own long-term files, byte-exact per file: `content.text` is
+    // the file's body, and the source document, its frontmatter block and its
+    // body are the file's own bytes (P3-F3/R2-C1).
     for (bearer, slug) in [
         (MemoryBearerRef::Creator(CREATOR), "legacy-memory"),
         (
@@ -694,8 +696,8 @@ async fn migration_preserves_every_legacy_object_and_rerun_is_a_no_op() {
             .unwrap_or_else(|| panic!("no migrated record for {slug}"));
         assert_eq!(
             content["text"],
-            LongTermMemory::parse(&source).expect("parsed memory").body,
-            "{slug}: the served text is the parsed view"
+            &source[spans.body.clone()],
+            "{slug}: content.text is the exact source body"
         );
         assert_eq!(
             legacy(content)["document"],
@@ -713,6 +715,40 @@ async fn migration_preserves_every_legacy_object_and_rerun_is_a_no_op() {
             "{slug}: the exact body bytes"
         );
     }
+
+    // R2-C1: the Character file's body opens with a blank line and indentation,
+    // so the exact body the record serves and the parser's trimmed view differ —
+    // the assertions above cannot be satisfied by the trimmed view.
+    let character = MemoryBearerRef::Character {
+        owner_creator_id: CREATOR,
+        character_id: &env.character_id,
+    };
+    let character_source = std::fs::read_to_string(
+        character.long_term_memory_path(&env.home, "legacy-character-memory"),
+    )
+    .expect("character long-term file bytes");
+    let character_spans = nexus_creator_memory::long_term_memory::source_spans(&character_source)
+        .expect("memory source spans");
+    let character_body: &str = &character_source[character_spans.body.clone()];
+    assert!(
+        character_body.starts_with("\n    "),
+        "the fixture body opens with a blank line and indentation"
+    );
+    let character_content = records
+        .iter()
+        .find(|content| legacy(content)["slug"] == "legacy-character-memory")
+        .expect("the character's migrated record");
+    assert_eq!(
+        character_content["text"], character_body,
+        "content.text is the exact source body"
+    );
+    assert_ne!(
+        character_content["text"],
+        LongTermMemory::parse(&character_source)
+            .expect("parsed memory")
+            .body,
+        "the served text is not the parser's trimmed view"
+    );
 
     // Every pending queue row keeps its own values, exactly.
     let creator_pending = candidates

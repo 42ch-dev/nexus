@@ -1286,7 +1286,14 @@ fn experience_kind_label(kind: &str) -> String {
 
 /// Truncate an entry body the way the aggregation does: the first
 /// [`EXPERIENCE_EXCERPT_CHARS`] characters, broken at the last space, `...`.
+///
+/// The record's text is the memory file's exact body (`legacy.rs`'s long-term
+/// projection), while the legacy aggregation excerpts the parsed body, so the
+/// leading whitespace the parser trims is trimmed here too: the rendered
+/// `## Experience` section stays identical to
+/// `nexus_creator_memory::experience_aggregation`'s.
 fn experience_excerpt(body: &str) -> String {
+    let body = body.trim_start();
     if body.chars().count() <= EXPERIENCE_EXCERPT_CHARS {
         return body.to_string();
     }

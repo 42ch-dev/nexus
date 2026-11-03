@@ -1062,7 +1062,8 @@ fn long_term_records(
         // The exact source framing: the parsed view trims the body and keeps
         // only the known frontmatter fields, so the file's own bytes travel with
         // the projection and a rewrite of bytes the view drops still changes the
-        // migration manifest (P5-F3).
+        // migration manifest (P5-F3). The served text is the file's body, while
+        // the parsed frontmatter still names the record's identity and kind.
         let spans =
             long_term_memory::source_spans(&document).map_err(|error| legacy_error(&error))?;
         let frontmatter = document[spans.frontmatter].to_string();
@@ -1071,7 +1072,10 @@ fn long_term_records(
         let updated_at = normalize_timestamp(&memory.frontmatter.updated_at);
         let record_id = external_id(family, &[owner_key, slug.as_str()]);
         let content = json!({
-            "text": memory.body,
+            // The served text is the file's own body, not the parsed view: the
+            // parser trims a leading blank line or indentation the author wrote,
+            // and the migration preserves the authored body exactly (R2-C1).
+            "text": body,
             "structured": { "nexus_legacy": {
                 "family": family,
                 "slug": slug,
