@@ -95,6 +95,8 @@ pub use actor_knowledge_store::{
     author_actor_knowledge_entry, delete_actor_knowledge_entry, get_actor_knowledge_entry,
     update_actor_knowledge_entry, ActorKnowledgePatch, ACTOR_KNOWLEDGE_SUMMARY_MAX_UTF8_BYTES,
 };
+#[cfg(feature = "test-hooks")]
+pub use actor_world_binding::remove_binding_reporting;
 pub use actor_world_binding::{
     add_actor_world_binding, count_bindings_for_world_tx, get_actor_world_binding,
     list_bindings_for_character, mint_binding_id, remove_binding, require_valid_provenance_tx,

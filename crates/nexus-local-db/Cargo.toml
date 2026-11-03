@@ -9,6 +9,11 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[features]
+# PR #469 B1: compile the binding-removal write-contention report seam in.
+# Enabled by `nexus-core`'s own test-hooks; never part of a production build.
+test-hooks = []
+
 [dependencies]
 sqlx = { workspace = true }
 thiserror = { workspace = true }

@@ -1003,15 +1003,25 @@ impl CoreService {
             )
             .await?;
         #[cfg(feature = "test-hooks")]
-        self.report_binding_removal_write_contention().await;
-        nexus_local_db::remove_binding(
+        let report = self.take_binding_removal_write_report();
+        #[cfg(feature = "test-hooks")]
+        let removal = nexus_local_db::remove_binding_reporting(
+            &self.inner.pool,
+            principal.creator_id(),
+            &character_id,
+            &binding_id,
+            report.as_deref(),
+        )
+        .await;
+        #[cfg(not(feature = "test-hooks"))]
+        let removal = nexus_local_db::remove_binding(
             &self.inner.pool,
             principal.creator_id(),
             &character_id,
             &binding_id,
         )
-        .await
-        .map_err(actor_db_err)
+        .await;
+        removal.map_err(actor_db_err)
     }
 
     /// Owner-scoped binding detail row (`None` for foreign/missing rows).

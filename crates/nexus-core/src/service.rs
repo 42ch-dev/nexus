@@ -139,9 +139,10 @@ pub struct CoreInner {
     /// out of a production build.
     #[cfg(feature = "test-hooks")]
     pub(crate) soul_narrative_invalidation_fault: AtomicBool,
-    /// Test-only report a binding removal sends **from inside its write
-    /// attempt** when that attempt finds the store's write lock held (compass
-    /// D15 B1, PR #469 fix round 7). Compiled out of a production build.
+    /// Test-only report the next binding removal sends from its own first
+    /// write-lock attempt once that attempt is refused by another writer's held
+    /// lock (compass D15 B1, PR #469 fix round 8). Compiled out of a production
+    /// build.
     #[cfg(feature = "test-hooks")]
     pub(crate) binding_removal_write_report: Mutex<Option<Arc<tokio::sync::Notify>>>,
     /// Established-owner slot for the Host authority (P4-T2): at most one
@@ -414,11 +415,12 @@ impl CoreService {
         self.memory_provider()
     }
 
-    /// D15 proof seam (PR #469 fix round 7): notify `waiter` from inside the
-    /// next binding removal's write attempt, and only once that attempt finds
-    /// the store's write lock held — the caller is about to park on the same
-    /// lock `remove_binding` takes. A removal that runs with the lock free
-    /// never reports. Compiled out of a production build.
+    /// D15 proof seam (PR #469 B1): arm `waiter` for the next binding removal,
+    /// which notifies it from its own first `BEGIN IMMEDIATE` and only once
+    /// that attempt is refused by a lock another writer holds — the removal
+    /// then retries on that same lock for its transaction, so whoever this
+    /// releases acts while the removal is provably contending. A removal that
+    /// finds the lock free never reports. Compiled out of a production build.
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn report_binding_removal_write_waits(&self, waiter: Arc<tokio::sync::Notify>) {
@@ -429,43 +431,15 @@ impl CoreService {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(waiter);
     }
 
-    /// The write attempt [`Self::report_binding_removal_write_waits`] observes,
-    /// run as the last step before [`nexus_local_db::remove_binding`] begins its
-    /// own `BEGIN IMMEDIATE`: the same statement, on the same store, without a
-    /// busy wait, so only a store another writer holds fails it. The probe holds
-    /// no lock itself (a failure begins no transaction; a success is rolled
-    /// back), so it cannot perturb the removal it reports on.
+    /// The report [`Self::report_binding_removal_write_waits`] armed, if any:
+    /// one removal observes it, the next runs unreported.
     #[cfg(feature = "test-hooks")]
-    pub(crate) async fn report_binding_removal_write_contention(&self) {
-        use sqlx::Connection as _;
-        let report = self
-            .inner
+    pub(crate) fn take_binding_removal_write_report(&self) -> Option<Arc<tokio::sync::Notify>> {
+        self.inner
             .binding_removal_write_report
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
-        let Some(report) = report else {
-            return;
-        };
-        let options = sqlx::sqlite::SqliteConnectOptions::new()
-            .filename(&self.inner.db_path)
-            .busy_timeout(std::time::Duration::ZERO);
-        let Ok(mut connection) = sqlx::SqliteConnection::connect_with(&options).await else {
-            return;
-        };
-        let contended = match sqlx::query("BEGIN IMMEDIATE")
-            .execute(&mut connection)
-            .await
-        {
-            Err(sqlx::Error::Database(error)) => {
-                matches!(error.code().as_deref(), Some("5" | "6"))
-            }
-            _ => false,
-        };
-        let _ = connection.close().await;
-        if contended {
-            report.notify_one();
-        }
+            .take()
     }
 
     /// The `MemoryPort` this open pinned for the memory family (NXM-5 Task 2).

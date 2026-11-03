@@ -6414,11 +6414,11 @@ async fn character_capture_binding_never_outlives_the_provenance_check() {
         }
     });
     entered.notified().await;
-    // The removal's own write attempt, not its task being scheduled: it probes
-    // the `BEGIN IMMEDIATE` it is about to take and reports only once that
-    // probe finds the capture's transaction holding the lock. A sequential
-    // execution — removal still unscheduled — never reaches this point, so the
-    // capture can only be released after the delete really contended.
+    // The removal's own first `BEGIN IMMEDIATE`, made without a busy wait, is
+    // what reports here: the capture's held write lock refuses that very
+    // attempt, and the removal then retries on that same lock for its
+    // transaction. A sequential execution — capture committed first — finds the
+    // lock free, reports nothing, and never reaches this release.
     let attempted = Arc::new(tokio::sync::Notify::new());
     core.report_binding_removal_write_waits(Arc::clone(&attempted));
     let removal = tokio::spawn({
@@ -6428,7 +6428,12 @@ async fn character_capture_binding_never_outlives_the_provenance_check() {
         let binding = keep.clone();
         async move { core.remove_binding(&principal, chr, binding).await }
     });
-    attempted.notified().await;
+    // The wait is a deadlock guard, not synchronization: a regression that lets
+    // the capture commit first leaves the lock free, so no report arrives and
+    // this fails instead of hanging the suite.
+    tokio::time::timeout(std::time::Duration::from_secs(10), attempted.notified())
+        .await
+        .expect("the removal must report the write lock the capture holds");
     release.wait().await;
 
     capture
