@@ -3008,7 +3008,7 @@ async fn legacy_bearer_projects_under_one_canonical_subject() {
             .await,
     );
     assert_eq!(shadow_page["total_authorized"], 0, "{shadow_page}");
-    assert!(bridge_report_ids(&shadow_page, "records").is_empty());
+    assert_eq!(bridge_report_ids(&shadow_page, "records"), [] as [std::string::String; 0]);
     let absent = provider
         .get_record(
             &shadow,
