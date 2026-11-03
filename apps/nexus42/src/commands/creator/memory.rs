@@ -13,7 +13,7 @@ use clap::Subcommand;
 use nexus_contracts::daemon_api::memory::create_pending_review_request::CreatePendingReviewRequest;
 use nexus_contracts::daemon_api::memory::create_pending_review_response::CreatePendingReviewResponse;
 use nexus_contracts::daemon_api::memory::{ReviewRequest, ReviewResponse};
-use nexus_core::{CoreService, MemoryRevision, Principal, RetainedRecord};
+use nexus_core::{CoreService, LegacyMigrationStatus, MemoryRevision, Principal, RetainedRecord};
 use nexus_creator_memory::long_term_memory::slug_is_safe;
 use nexus_creator_memory::memory_item::MemoryKind;
 use std::io::Write;
@@ -99,6 +99,15 @@ pub enum MemoryCommand {
         pending_id: String,
         /// Emit machine-readable JSON (the `DeletePendingReviewResponse`
         /// DTO verbatim) instead of human text.
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+
+    /// Migrate every remaining legacy memory row and bearer file into provider
+    /// surfaces (one guarded pass; a completed pass verifies and is a no-op)
+    MigrateLegacy {
+        /// Emit machine-readable JSON (the `LegacyContentMigration` report)
+        /// instead of human text.
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -215,6 +224,7 @@ async fn run_direct(command: MemoryCommand, config: &CliConfig, creator_id: &str
             MemoryCommand::PendingDismiss { pending_id, json } => {
                 pending_dismiss(&core, &principal, &pending_id, json).await
             }
+            MemoryCommand::MigrateLegacy { json } => migrate_legacy(&core, &principal, json).await,
             MemoryCommand::Capture {
                 pending_id,
                 session_id,
@@ -906,6 +916,49 @@ async fn pending_dismiss(
     } else {
         Ok(format!("Dismiss did not succeed for '{pending_id}'."))
     }
+}
+
+/// Migrate the workspace's remaining legacy memory content into provider
+/// surfaces (P5).
+///
+/// One guarded pass on the direct-core writer. A completed pass verifies its
+/// recorded snapshot manifest and reports that nothing changed, so the command
+/// is safe to repeat — and it refuses (`idempotency_conflict`) when the legacy
+/// source no longer matches what was migrated instead of overwriting provider
+/// state.
+async fn migrate_legacy(core: &CoreService, principal: &Principal, json: bool) -> Result<String> {
+    let migration = core
+        .migrate_legacy_content(principal)
+        .await
+        .map_err(map_core_error)?;
+    if json {
+        return Ok(serde_json::to_string_pretty(&migration)?);
+    }
+    let families = migration
+        .families
+        .iter()
+        .map(|(family, count)| format!("{family}={count}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let headline = match migration.status {
+        LegacyMigrationStatus::Migrated => "Migrated legacy memory content into provider storage.",
+        LegacyMigrationStatus::AlreadyComplete => {
+            "Legacy memory content is already migrated; the snapshot verified with no changes."
+        }
+    };
+    Ok(format!(
+        "{headline}\n  space: {}\n  records: {}\n  candidates: {}\n  profiles: {}\n  families: {}\n  digest: {}",
+        migration.space_id,
+        migration.records,
+        migration.candidates,
+        migration.profiles,
+        if families.is_empty() {
+            "none".to_string()
+        } else {
+            families
+        },
+        migration.digest
+    ))
 }
 
 /// Open a temporary file in the user's $EDITOR, return the edited content.

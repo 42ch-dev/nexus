@@ -101,6 +101,7 @@ pub use memory::{
 /// (NXM-5 Task 2 fix round 2, finding F1). Test builds only.
 #[cfg(feature = "test-hooks")]
 pub use memory::{MemoryReviewPause, MemoryReviewRendezvous};
+pub use memory_provider::{LegacyContentMigration, LegacyMigrationStatus};
 pub use presets::PresetError;
 pub use principal::Principal;
 pub use references::{RegisterReferenceParams, REFERENCE_SOURCE_TYPES};
