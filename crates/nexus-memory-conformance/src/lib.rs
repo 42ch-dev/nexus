@@ -11,6 +11,9 @@
 // `MemoryPort` over these slices; the allowance disappears with that consumer.
 #[allow(dead_code)]
 mod candidates;
+// Operator/test-only fault points and the controllable clock; exercised by its
+// embedded tests and consumed by the C7 assembly seam.
+mod faults;
 mod provider;
 // Exercised by its embedded tests until the assembly task implements
 // `MemoryPort` over these slices; the allowance disappears with that consumer.
@@ -26,6 +29,11 @@ mod storage;
 #[allow(dead_code)]
 mod recall;
 
+pub use candidates::{
+    RetentionSweep, DEDUP_RETENTION_SECONDS, IDEMPOTENCY_RETENTION_SECONDS,
+    RECEIPT_RETENTION_SECONDS,
+};
+pub use faults::{FaultHold, FaultPoint, FixtureClock, FixtureFaults};
 pub use provider::{FixtureIdentity, FixtureMemoryProvider};
 
 /// Failure to open the fixture store or provision its durable bootstrap state.

@@ -4,6 +4,7 @@ use chrono::{SecondsFormat, Utc};
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::faults::FixtureFaults;
 use crate::storage::FixtureStore;
 use crate::FixtureError;
 
@@ -31,6 +32,10 @@ pub struct FixtureMemoryProvider {
     /// Crate-private: the operation slices pin every request to the durable
     /// space/authority pair this provider serves.
     pub(crate) identity: FixtureIdentity,
+    /// Operator/test-only control (C7 seam): bounded fault points only. It is
+    /// in-memory state attached to this provider instance, never persisted and
+    /// never consulted as provider authority.
+    faults: FixtureFaults,
 }
 
 impl FixtureMemoryProvider {
@@ -48,13 +53,25 @@ impl FixtureMemoryProvider {
     pub async fn open(database_path: &Path) -> Result<Self, FixtureError> {
         let store = FixtureStore::open(database_path).await?;
         let identity = provision_space(&store).await?;
-        Ok(Self { store, identity })
+        Ok(Self {
+            store,
+            identity,
+            faults: FixtureFaults::new(),
+        })
     }
 
     /// The durable space/authority identity provisioned for this database.
     #[must_use]
     pub fn identity(&self) -> &FixtureIdentity {
         &self.identity
+    }
+
+    /// The operator/test-only fault and clock control for this provider
+    /// instance (C7 seam). Arming a point never changes durable state; the
+    /// provider's mutation path observes it once.
+    #[must_use]
+    pub fn faults(&self) -> &FixtureFaults {
+        &self.faults
     }
 
     /// Storage handle for the provider's operation slices.
