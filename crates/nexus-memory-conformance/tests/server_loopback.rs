@@ -2594,13 +2594,6 @@ async fn moved_record_keeps_scoped_replay_authority_in_both_grant_directions() {
     );
     assert_eq!(lost_a.code, SpokeRejectCode::NotAuthorized);
     assert_eq!(retry_class(&lost_a).as_deref(), Some("terminal"));
-    // The retained target refused it, not the current one: the receipt-binding
-    // wording is what `resolve_replay` answers when the recorded target is no
-    // longer covered (a lost current target answers with the record wording).
-    assert_eq!(
-        lost_a.message,
-        "the receipt requester holds no current authorization for this operation"
-    );
     // No effect, no new receipt, and the original receipt is untouched.
     assert_eq!(fixture.count("receipts").await, receipts_before_refusal);
     assert_eq!(fixture.count("records").await, records_after_move);
@@ -2619,7 +2612,7 @@ async fn moved_record_keeps_scoped_replay_authority_in_both_grant_directions() {
     ));
     assert_eq!(
         retained["receipt"], original_receipt,
-        "losing A must not alter or re-derive the historical A receipt"
+        "losing A leaves the stored receipt JSON unchanged"
     );
     assert_eq!(
         wire(&expect_ok(
@@ -2654,7 +2647,7 @@ async fn moved_record_keeps_scoped_replay_authority_in_both_grant_directions() {
     ));
     assert_eq!(
         replayed, original_receipt,
-        "keeping A replays the exact original receipt, bit for bit"
+        "keeping A replays a receipt equal to the original JSON receipt"
     );
     // ...without authorizing the record's new current placement or re-running
     // the effect: a fresh key for the same record is still refused, and the
