@@ -1,8 +1,9 @@
 -- v1.229 N3 P4 (binding spec §5.1, D18): content-free Nexus dependency
 -- metadata for remote binding-local memory.
 --
--- The owner selected conservative fail-closed continuation: an earlier remote
--- attempt that cannot be proved settled may keep its binding non-removable
+-- Supervisor-selected, owner confirmation pending: the conservative
+-- fail-closed continuation (the recommended option) keeps an earlier remote
+-- attempt that cannot be proved settled as a non-removable binding,
 -- indefinitely. These tables carry only the identity of that dependency, never
 -- memory text, request bodies, credentials, seeds, tokens, raw invokes or
 -- payload digests.

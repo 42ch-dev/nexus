@@ -15,8 +15,8 @@
 //!   references, shared promotion releases the record, and a normal complete
 //!   disposal allows removal;
 //! * a foreign/stale namespace can neither read nor erase another namespace's
-//!   facts, and an unknown admission blocks indefinitely (the owner-selected
-//!   conservative policy);
+//!   facts, and an unknown admission blocks indefinitely (the
+//!   supervisor-selected conservative policy; owner confirmation pending);
 //! * terminal bookkeeping is cleared with the binding and never blocks a valid
 //!   deletion.
 #![allow(clippy::unwrap_used)]

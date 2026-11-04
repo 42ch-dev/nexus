@@ -2392,9 +2392,9 @@ impl CoreService {
     /// this admission — together in one local transaction; a definite no-effect
     /// refusal retires it too. Nothing else clears it: a later attempt, receipt
     /// or counter never settles an older unknown, so an unprovable attempt keeps
-    /// the binding non-removable (the owner-selected conservative policy). The
-    /// provider is never asked to replay or roll back, and no memory content or
-    /// request body is stored.
+    /// binding non-removable (the supervisor-selected conservative policy;
+    /// owner confirmation pending). The provider is never asked to replay or
+    /// roll back, and no memory content or request body is stored.
     ///
     /// shortcut: an unprovable wire outcome keeps its binding non-removable
     /// indefinitely (later attempts and concealed/negative provider reads never
