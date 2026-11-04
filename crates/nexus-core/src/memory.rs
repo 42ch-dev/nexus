@@ -166,10 +166,6 @@ fn memory_ok<T: serde::Serialize>(result: SpokeResult<T>) -> CoreResult<Value> {
 /// One pending-review row as the retained DTOs render it.
 struct PendingMemoryRow {
     pending_id: String,
-    /// The provider subject the candidate belongs to: the bearer identity a
-    /// dismissal must match before it may consume the candidate. A candidate
-    /// that shares this id but belongs to another bearer is not this row.
-    subject_id: String,
     session_id: String,
     task_kind: String,
     raw_digest: String,
@@ -187,11 +183,6 @@ struct PendingMemoryRow {
 impl PendingMemoryRow {
     /// Project one provider candidate onto the legacy pending-review row it
     /// stands for; a candidate with no legacy origin is not part of this DTO.
-    ///
-    /// `subject_id` is the provider's own field, not the legacy origin: it is
-    /// the bearer identity the caller must match before acting on the
-    /// candidate, since the provider authorizes the candidate operation by
-    /// grant coverage (a space-wide grant covers every subject).
     fn from_candidate(candidate: &Value) -> Option<Self> {
         let origin = candidate.pointer("/proposed/content/structured/nexus_legacy")?;
         let scope = &candidate["capture_scope"];
@@ -199,7 +190,6 @@ impl PendingMemoryRow {
             candidate_id: candidate["candidate_id"].as_str()?.to_string(),
             revision: candidate["revision"].as_u64().unwrap_or(1),
             pending_id: origin["pending_id"].as_str()?.to_string(),
-            subject_id: candidate["subject_id"].as_str()?.to_string(),
             session_id: origin["session_id"]
                 .as_str()
                 .unwrap_or_default()
@@ -727,16 +717,22 @@ impl MemoryAdapter {
     }
 
     /// The retained pending row one fetched provider candidate may be dismissed
-    /// as: it must belong to this adapter's subject and carry the requested
-    /// retained `pending_id`.
+    /// as: the candidate's borrowed `subject_id` must be this adapter's subject
+    /// and it must carry the requested retained `pending_id`.
     ///
-    /// A candidate that shares the shaped id but names another bearer (or
-    /// another pending row) is not this row: a space-level provider grant would
-    /// still authorize its candidate-level operation, so this identity check is
-    /// the only thing that keeps one bearer's dismissal off another's item.
+    /// The subject is read straight off the fetched candidate and compared
+    /// before the row is mapped, so the list/count projections (which never
+    /// need it) pay no per-row copy. A candidate that shares the shaped id but
+    /// names another bearer (or another pending row) is not this row: a
+    /// space-level provider grant would still authorize its candidate-level
+    /// operation, so this identity check is the only thing that keeps one
+    /// bearer's dismissal off another's item.
     fn matched_pending_row(&self, candidate: &Value, pending_id: &str) -> Option<PendingMemoryRow> {
+        if candidate["subject_id"].as_str() != Some(self.subject_id.as_str()) {
+            return None;
+        }
         let row = PendingMemoryRow::from_candidate(candidate)?;
-        (row.subject_id == self.subject_id && row.pending_id == pending_id).then_some(row)
+        (row.pending_id == pending_id).then_some(row)
     }
 
     /// Consume one pending candidate with the review decision the drain built.
@@ -4681,10 +4677,6 @@ mod tests {
             .into_iter()
             .find(|row| row.pending_id == "pend_identity_own")
             .expect("the capture is queued under the creator subject");
-        assert_eq!(
-            own.subject_id, memory.subject_id,
-            "the mapped row carries the provider's subject identity"
-        );
 
         // The same opaque id can address another bearer's candidate; the row is
         // shared-scope, so the space-wide grant admits the capture and the read.
@@ -4765,13 +4757,6 @@ mod tests {
             .cloned()
             .expect("the foreign capture is listed under its own subject");
         let foreign_candidate_id = foreign["candidate_id"].as_str().unwrap().to_string();
-        assert_ne!(
-            PendingMemoryRow::from_candidate(&foreign)
-                .unwrap()
-                .subject_id,
-            memory.subject_id,
-            "the foreign candidate maps to another bearer"
-        );
 
         // Another bearer's candidate under the opaque id: refused before the
         // CAS even though the provider grant allows the operation there.
