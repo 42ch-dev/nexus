@@ -123,6 +123,12 @@ pub(super) fn timestamp(now: DateTime<Utc>) -> String {
 pub(super) enum StoreError {
     /// Something the caller can see and correct (missing row, stale revision…).
     NotFound(String),
+    /// The request names something the store cannot admit (§7/I-000149: a
+    /// second subject naming a bearer that already has one).
+    InvalidInput {
+        field: String,
+        reason: String,
+    },
     /// Absence of grant coverage for the op (§6.5/§7.9).
     NotAuthorized(String),
     /// A frozen space refuses an op outside the §8.2 allowlist (§7.3/§8.2).
@@ -1348,6 +1354,23 @@ impl MemoryStore {
         let (created, status, revision) = if let Some(row) = existing {
             (false, row.status, row.revision)
         } else {
+            // §7/I-000149: one subject owns a bearer naming. Reads resolve a
+            // bearer to the smallest subject naming it, so admitting a second
+            // naming here would let a later, smaller ensure re-assign the
+            // projection and resurrect a consumed legacy candidate. Refused in
+            // this transaction, before insertion.
+            if let Some((kind_ns, kind_id)) = kind {
+                if let Some(owner) = subject_naming(&mut tx, ctx.space_id, kind_ns, kind_id).await?
+                {
+                    return Err(StoreError::InvalidInput {
+                        field: "kind".to_string(),
+                        reason: format!(
+                            "subject {} already names {kind_ns}/{kind_id} in space {}; one subject owns a bearer",
+                            owner.subject_id, ctx.space_id
+                        ),
+                    });
+                }
+            }
             sqlx::query(
                 "INSERT INTO memory_subjects \
                  (space_id, subject_id, kind_ns, kind_id, status, fenced_contexts_json, revision, created_at) \
@@ -3070,6 +3093,28 @@ async fn subject_in_tx(
     Ok(sqlx::query_as::<_, SubjectRow>(sqlx::AssertSqlSafe(sql))
         .bind(space_id)
         .bind(subject_id)
+        .fetch_optional(&mut **tx)
+        .await?)
+}
+
+/// The subject a bearer kind is already registered to in this space (§7/
+/// I-000149), if any. It is the same row the read side's smallest-id rule
+/// resolves, so `ensure_subject` can refuse a second naming instead of letting
+/// a later ensure re-select which subject owns the bearer's projection.
+async fn subject_naming(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    space_id: &str,
+    kind_ns: &str,
+    kind_id: &str,
+) -> StoreResult<Option<SubjectRow>> {
+    let sql = format!(
+        "SELECT {SUBJECT_COLUMNS} FROM memory_subjects \
+         WHERE space_id = ? AND kind_ns = ? AND kind_id = ? ORDER BY subject_id LIMIT 1"
+    );
+    Ok(sqlx::query_as::<_, SubjectRow>(sqlx::AssertSqlSafe(sql))
+        .bind(space_id)
+        .bind(kind_ns)
+        .bind(kind_id)
         .fetch_optional(&mut **tx)
         .await?)
 }

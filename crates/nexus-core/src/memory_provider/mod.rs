@@ -384,6 +384,7 @@ impl ProviderError {
 fn store_error(error: StoreError) -> ProviderError {
     match error {
         StoreError::NotFound(target) => ProviderError::NotFound(target),
+        StoreError::InvalidInput { field, reason } => ProviderError::InvalidInput { field, reason },
         StoreError::NotAuthorized(reason) => ProviderError::NotAuthorized(reason),
         StoreError::SpaceFrozen(reason) => ProviderError::SpaceFrozen(reason),
         StoreError::SubjectFenced {
