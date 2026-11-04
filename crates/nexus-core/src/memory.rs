@@ -1000,10 +1000,12 @@ impl CoreService {
 
 impl CoreService {
     /// The provider adapter for the principal's own Creator bearer, over the
-    /// pinned `MemoryPort` (a read-only core serves reads from it too).
+    /// pinned binding's local handle (a read-only core serves reads from it
+    /// too).
     pub(crate) async fn creator_memory(&self, principal: &Principal) -> CoreResult<MemoryAdapter> {
+        let binding = self.memory_binding()?;
         MemoryAdapter::open(
-            self.memory_provider()?,
+            Arc::clone(binding.local()?),
             principal,
             legacy::creator_subject_id(principal.creator_id()),
             legacy::CREATOR_KIND_NS,
@@ -1015,8 +1017,9 @@ impl CoreService {
     /// The adapter the dismissal write paths use: a read-only core refuses here
     /// with the retained typed error instead of attempting the write.
     async fn creator_memory_writer(&self, principal: &Principal) -> CoreResult<MemoryAdapter> {
+        let binding = self.memory_writer_binding()?;
         MemoryAdapter::open(
-            self.memory_writer()?,
+            Arc::clone(binding.local()?),
             principal,
             legacy::creator_subject_id(principal.creator_id()),
             legacy::CREATOR_KIND_NS,
@@ -1031,8 +1034,9 @@ impl CoreService {
         principal: &Principal,
         character_id: &str,
     ) -> CoreResult<MemoryAdapter> {
+        let binding = self.memory_binding()?;
         MemoryAdapter::open(
-            self.memory_provider()?,
+            Arc::clone(binding.local()?),
             principal,
             legacy::character_subject_id(character_id),
             legacy::CHARACTER_KIND_NS,
@@ -1048,8 +1052,9 @@ impl CoreService {
         principal: &Principal,
         character_id: &str,
     ) -> CoreResult<MemoryAdapter> {
+        let binding = self.memory_writer_binding()?;
         MemoryAdapter::open(
-            self.memory_writer()?,
+            Arc::clone(binding.local()?),
             principal,
             legacy::character_subject_id(character_id),
             legacy::CHARACTER_KIND_NS,
@@ -4160,7 +4165,8 @@ impl CoreService {
         principal: &Principal,
     ) -> CoreResult<LegacyContentMigration> {
         self.verify_principal(principal)?;
-        let provider = self.memory_writer()?;
+        let binding = self.memory_writer_binding()?;
+        let provider = binding.local()?;
         let spoke_principal: spoke_schemas::Principal = map_wire(json!({
             "principal_id": principal.creator_id(),
             "extensions": {},

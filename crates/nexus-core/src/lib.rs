@@ -26,6 +26,8 @@ mod home;
 pub mod host;
 mod knowledge;
 mod memory;
+// v1.229 N3 Task 3: the one provider authority an open pins.
+mod memory_binding;
 mod memory_credentials;
 mod memory_pipeline;
 // v1.229 NXM-9: the validated `[memory_provider]` selection an open resolves.
