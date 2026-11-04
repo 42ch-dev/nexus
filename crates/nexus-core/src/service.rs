@@ -23,6 +23,7 @@ use sqlx::SqlitePool;
 use crate::actor_fence::ActorFenceTable;
 use crate::changes::read_changes;
 use crate::error::{local_db_err, CoreError, CoreResult};
+use crate::memory_provider::LocalMemoryProvider;
 use crate::principal::Principal;
 use crate::world_kb::{candidates, graph, patch};
 
@@ -86,6 +87,21 @@ pub struct CoreInner {
     /// co-hosted joiner (the daemon's transport pool and its execution core
     /// over one DB) must never release an admission its creator still owns.
     owns_engine_admission: bool,
+    /// The pinned `MemoryPort` implementation serving the memory family for
+    /// this open's lifetime (NXM-5 Task 2).
+    ///
+    /// Pinned where the open already assembles core state, so every E4 handler
+    /// reaches the provider the open admitted instead of opening a second one.
+    /// It keeps its own guarded writer pool, so a confirmed close must give the
+    /// handle up with [`Self::guarded`] — otherwise a closed-but-referenced
+    /// service would still hold the writer admission it reported released.
+    ///
+    /// `None` only after a confirmed close gives the handle up (and until an
+    /// open stores it); every open pins one. A read-only open pins the
+    /// read-only provider, so a read-only core serves memory reads through it
+    /// while its write handlers refuse via [`Self::memory_writer`] (NXM-5 Task 2
+    /// fix round 1, finding F6).
+    memory: Mutex<Option<Arc<LocalMemoryProvider>>>,
     /// Active creator this service was opened against (open-scoped).
     pub(crate) nexus_home: PathBuf,
     creator_id: String,
@@ -113,6 +129,16 @@ pub struct CoreInner {
     /// Per-Character activity/transition fences (v1.190 P2-T1), Host-free
     /// and separate from any process session registry.
     pub(crate) character_fences: ActorFenceTable,
+    /// Test-only step-point a review drain parks at inside its memory
+    /// disposition section (NXM-5 Task 2 fix round 2, finding F1). Compiled out
+    /// of a production build.
+    #[cfg(feature = "test-hooks")]
+    pub(crate) memory_review_pause: Mutex<Option<crate::memory::MemoryReviewRendezvous>>,
+    /// Test-only: fail the next retained SOUL-narrative invalidation after the
+    /// promotion it follows committed (R4-F3 failure/retry boundary). Compiled
+    /// out of a production build.
+    #[cfg(feature = "test-hooks")]
+    pub(crate) soul_narrative_invalidation_fault: AtomicBool,
     /// Established-owner slot for the Host authority (P4-T2): at most one
     /// `open_host` manager per open service — a second start is a typed busy
     /// rejection, never a second engine. Reset only by a confirmed close.
@@ -223,6 +249,28 @@ impl CoreService {
         Self::open_impl(options, Some(expected)).await
     }
 
+    /// Build the `MemoryPort` this open pins for the memory family.
+    ///
+    /// A read-only open pins the read-only provider: it must keep serving memory
+    /// reads, and it takes no writer admission, provisions nothing and runs no
+    /// recovery (NXM-5 Task 2 fix round 1, finding F6). Its write handlers refuse
+    /// before they reach it.
+    async fn pin_memory_provider(
+        options: &CoreOpenOptions,
+        creator_id: &str,
+        workspace_slug: &str,
+    ) -> CoreResult<Arc<LocalMemoryProvider>> {
+        let user_home = options.user_home.clone();
+        Ok(Arc::new(match options.access {
+            CoreAccess::ReadOnly => {
+                LocalMemoryProvider::open_read_only(user_home, creator_id, workspace_slug).await?
+            }
+            CoreAccess::DirectWriter | CoreAccess::EngineOwner => {
+                LocalMemoryProvider::open(user_home, creator_id, workspace_slug).await?
+            }
+        }))
+    }
+
     async fn open_impl(options: CoreOpenOptions, expected: Option<&Path>) -> CoreResult<Self> {
         let nexus_home = nexus_home_layout::nexus_root_from_home(&options.user_home);
         let cfg = CliConfigSnapshot::load(&nexus_home).map_err(|e| CoreError::Internal {
@@ -292,11 +340,17 @@ impl CoreService {
             }
         };
 
+        // Pin the one `MemoryPort` this open serves the memory family from
+        // (NXM-5 Task 2), built HERE beside the pool admission so an E4 handler
+        // can never mint a second provider instance behind the service.
+        let memory = Some(Self::pin_memory_provider(&options, &creator_id, &workspace_slug).await?);
+
         Ok(Self {
             inner: Arc::new(CoreInner {
                 pool,
                 db_path: db_path.clone(),
                 guarded: Mutex::new(guarded),
+                memory: Mutex::new(memory),
                 owns_engine_admission,
                 nexus_home,
                 creator_id,
@@ -312,6 +366,10 @@ impl CoreService {
                 #[cfg(feature = "execution")]
                 admission_root,
                 character_fences: ActorFenceTable::new(&db_path),
+                #[cfg(feature = "test-hooks")]
+                memory_review_pause: Mutex::new(None),
+                #[cfg(feature = "test-hooks")]
+                soul_narrative_invalidation_fault: AtomicBool::new(false),
                 #[cfg(feature = "execution")]
                 execution: std::sync::Mutex::new(None),
                 #[cfg(feature = "execution")]
@@ -334,6 +392,58 @@ impl CoreService {
     #[cfg(any(test, feature = "test-hooks"))]
     pub fn pool(&self) -> &SqlitePool {
         &self.inner.pool
+    }
+
+    /// The `MemoryPort` this open pinned, for crate-external integration tests
+    /// only (NXM-5 Task 2 fix round 3, finding F5: a regression arms the
+    /// dismissal-side disposition step-point on the very instance the E4
+    /// handlers use). Compiled out of a production build.
+    ///
+    /// # Errors
+    /// [`CoreError::Closing`] after a close began.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn memory_provider_for_test(&self) -> CoreResult<Arc<LocalMemoryProvider>> {
+        self.memory_provider()
+    }
+
+    /// The `MemoryPort` this open pinned for the memory family (NXM-5 Task 2).
+    ///
+    /// The handle is shared, not copied: every E4 handler runs against the one
+    /// provider (and therefore the one guarded pool) this open admitted, and a
+    /// close that already gave it up refuses here instead of serving a released
+    /// service. A read-only open pins a read-only provider, so its reads are
+    /// served too (fix round 1, finding F6).
+    ///
+    /// # Errors
+    /// [`CoreError::Closing`] after a close began.
+    pub(crate) fn memory_provider(&self) -> CoreResult<Arc<LocalMemoryProvider>> {
+        self.ensure_open()?;
+        self.inner
+            .memory
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .ok_or(CoreError::Closing)
+    }
+
+    /// The `MemoryPort` a memory **write** handler must use (NXM-5 Task 2 fix
+    /// round 1, finding F6).
+    ///
+    /// A read-only core serves reads, not writes: a dismissal attempted through
+    /// it keeps its typed refusal instead of reaching a write on a read-only
+    /// connection.
+    ///
+    /// # Errors
+    /// [`CoreError::Closing`] after a close began, and [`CoreError::Forbidden`]
+    /// under read-only core access.
+    pub(crate) fn memory_writer(&self) -> CoreResult<Arc<LocalMemoryProvider>> {
+        if self.inner.access == CoreAccess::ReadOnly {
+            return Err(CoreError::Forbidden {
+                resource: "memory: read-only core access".to_string(),
+            });
+        }
+        self.memory_provider()
     }
 
     #[must_use]
@@ -686,6 +796,15 @@ async fn close_drain(inner: Arc<CoreInner>) {
     if let Some(handle) = &execution_handle {
         handle.shutdown().await;
     }
+    // The pinned memory provider holds its OWN guarded pool (and the writer
+    // admission behind it), so a confirmed close must give that handle up with
+    // this open's own pool — otherwise a closed-but-referenced service would
+    // keep the admission it reported released (same rule as `guarded`).
+    inner
+        .memory
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take();
     inner.pool.close().await;
     // A confirmed close ends the admission THIS open took over the home.
     // Both halves are needed for the OS lock to actually go away:

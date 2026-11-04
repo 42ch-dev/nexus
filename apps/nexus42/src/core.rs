@@ -77,6 +77,71 @@ pub async fn open_engine_owned_core(config: &CliConfig) -> Result<CoreService> {
     .map_err(map_core_error)
 }
 
+/// The same admission as [`open_direct_core`], over a **read-only** connection
+/// instead of the guarded writer pool.
+///
+/// A read leaf (context assembly, `creator memory list|show`, `creator soul
+/// show|validate`) takes no writer admission, so it keeps working while another
+/// process — a running daemon — holds the workspace writer.
+///
+/// # Errors
+/// As [`open_direct_core`]; additionally the mapped core error when the
+/// selected workspace was never provisioned (a read-only open creates nothing).
+pub async fn open_read_only_core(config: &CliConfig) -> Result<CoreService> {
+    let user_home = user_home_dir().map_err(|e| CliError::Config(e.to_string()))?;
+    require_materialized_workspace_from_home(config, &user_home)?;
+    CoreService::open(CoreOpenOptions {
+        user_home,
+        access: CoreAccess::ReadOnly,
+    })
+    .await
+    .map_err(map_core_error)
+}
+
+/// Open the direct-writer core, run one prepared leaf, and release the writer
+/// before returning.
+///
+/// The leaf receives the opened service and the active principal; its output is
+/// handed back only after [`finish_direct`] settled the close, so no command
+/// reports an outcome its core did not settle.
+///
+/// # Errors
+/// As [`open_direct_core`] and [`finish_direct`], plus the leaf's own refusal.
+pub async fn with_direct_core<T>(
+    config: &CliConfig,
+    run: impl AsyncFnOnce(&CoreService, &nexus_core::Principal) -> Result<T>,
+) -> Result<T> {
+    let core = open_direct_core(config).await?;
+    with_core(&core, run).await
+}
+
+/// [`with_direct_core`] over the read-only admission ([`open_read_only_core`]).
+///
+/// # Errors
+/// As [`open_read_only_core`] and [`finish_direct`], plus the leaf's own refusal.
+pub async fn with_read_only_core<T>(
+    config: &CliConfig,
+    run: impl AsyncFnOnce(&CoreService, &nexus_core::Principal) -> Result<T>,
+) -> Result<T> {
+    let core = open_read_only_core(config).await?;
+    with_core(&core, run).await
+}
+
+/// Run one leaf over an already-opened core and resolve it against the close.
+async fn with_core<T>(
+    core: &CoreService,
+    run: impl AsyncFnOnce(&CoreService, &nexus_core::Principal) -> Result<T>,
+) -> Result<T> {
+    let mut run = Some(run);
+    let outcome = async {
+        let principal = core.active_principal().await.map_err(map_core_error)?;
+        let run = run.take().expect("one leaf per core session");
+        run(core, &principal).await
+    }
+    .await;
+    finish_direct(core, outcome).await
+}
+
 /// The same admission, for the entrances that open the **legacy** writer pool
 /// instead of the direct core.
 ///

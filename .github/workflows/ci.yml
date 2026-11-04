@@ -277,6 +277,14 @@ jobs:
           # SQLX_OFFLINE=true makes cargo check use committed .sqlx/ metadata
           # If any query macro's metadata is missing or stale, this will fail
           cargo check --all --all-targets
+          # This proves the cache is *sufficient*, not *current*: an entry for a
+          # query the source no longer has stays invisible here. `cargo sqlx
+          # prepare --check` is the freshness check, but it cannot run in this
+          # job (and does not help): it still needs a live DATABASE_URL that can
+          # describe every query, and a plain migrated DB cannot — the
+          # writer-protocol triggers call connection-local `nexus_writer_*`
+          # UDFs. Run prepare only through the documented escape path
+          # (pr-fix2-report.md F4), never as a CI gate.
 
   # V1.177 P0 (AR-99, PL-1): connect-host lint gate. Runs after Task-1 cleanup
   # (plan 2026-08-27-v1.177-p0-connect-host-clippy-gate) so connect-host clippy
@@ -892,8 +900,11 @@ jobs:
           --test work_services --test home_services --test preset_services
           --test reading_knowledge_services --test context_services
           --test content_services --test timeline_services --test memory_services
+          --test memory_review_port
           --test local_memory_provider --test memory_receipts --test memory_reconcile
           --test memory_profile_admission
+          --test legacy_content_migration
+          --test creator_capture
           -- --test-threads=2
 
   rust-core-host-execution:

@@ -10,6 +10,8 @@
 import type {
   CountPendingReviewsQuery,
   DeletePendingReviewQuery,
+  CreatePendingReviewRequest,
+  CreatePendingReviewResponse,
   CaptureCharacterPendingReviewRequest,
   CharacterSoulNarrativeRequest,
   CountCharacterPendingReviewsQuery,
@@ -196,6 +198,17 @@ export function listCharacterTom(
 }
 
 // ── Creator-scope memory family ─────────────────────────────────────────────
+
+/** `POST /v1/daemon/memory/pending-review` — 201. The active-creator equality
+ * check and the capture-field validation stay native. */
+export function createPendingReview(
+  service: ServiceCore,
+  request: CreatePendingReviewRequest,
+): Promise<CreatePendingReviewResponse> {
+  return withPrincipal(service, (principal) =>
+    service.core.createPendingReview(principal, request),
+  );
+}
 
 /** `GET /v1/daemon/memory/pending-review`. */
 export function listPendingReviews(
@@ -399,6 +412,19 @@ export const MEMORY_ROUTES: readonly DomainRoute[] = [
     family: 'memory',
     handle: async (service, params, search) => ({
       body: await listCharacterTom(service, params[0], search),
+    }),
+  },
+  {
+    method: 'POST',
+    pattern: /^\/v1\/daemon\/memory\/pending-review$/,
+    tier: 'tier2',
+    family: 'memory',
+    status: 201,
+    handle: async (service, _params, _search, body) => ({
+      body: await createPendingReview(
+        service,
+        wirePayload<CreatePendingReviewRequest>(body, 'request'),
+      ),
     }),
   },
   {

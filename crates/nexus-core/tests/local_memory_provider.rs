@@ -57,6 +57,25 @@ async fn open_provider(env: &Env) -> LocalMemoryProvider {
         .expect("provider open")
 }
 
+/// Every file under `root`, recursively and sorted, so a test can assert a
+/// refused write changed nothing on disk.
+fn files_under(root: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return found;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            found.extend(files_under(&path));
+        } else {
+            found.push(path);
+        }
+    }
+    found.sort();
+    found
+}
+
 fn principal(id: &str) -> schemas::Principal {
     dto(json!({ "principal_id": id, "extensions": {} }))
 }
@@ -3973,4 +3992,596 @@ async fn delete_is_gated_by_the_subject_lifecycle() {
         record["record"].get("tombstone").is_none(),
         "a refused delete never tombstones: {record}"
     );
+}
+
+/// NXM-5 Task 2 fix round 2 (R2-F3): the provider itself — not only the
+/// `CoreService` adapter — refuses a direct write on a read-only open, before the
+/// retention sweep, the admission transaction, or the publication section.
+#[tokio::test]
+async fn a_read_only_open_refuses_writes_before_their_machinery() {
+    let env = seed_env();
+
+    // The counter is live, not dead instrumentation: a writable instance counts
+    // its admission attempt (fix round 3, finding F5). Probed on a throwaway
+    // workspace so this test's rows stay untouched.
+    {
+        let probe_env = seed_env();
+        let probe = open_provider(&probe_env).await;
+        let before_attempts = probe.lock_attempts();
+        wire(
+            &probe
+                .ensure_subject(&principal(CREATOR), ensure_request(SUBJECT))
+                .await,
+        );
+        assert!(
+            probe.lock_attempts() > before_attempts,
+            "a writable instance counts its admission attempt"
+        );
+    }
+
+    let provider = open_provider(&env).await;
+    let files_root = provider.file_root();
+    drop(provider);
+    let before = files_under(&files_root);
+
+    let read_only = LocalMemoryProvider::open_read_only(env.user_home.clone(), CREATOR, "default")
+        .await
+        .expect("read-only open");
+    assert!(!read_only.is_writable());
+    assert_eq!(
+        read_only.lock_attempts(),
+        0,
+        "a read-only instance has attempted no admission or publication"
+    );
+    let admin = principal(CREATOR);
+
+    // The normal transaction path (`begin_admission`).
+    let refused = wire(
+        &read_only
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    assert_eq!(error_code(&refused), "NOT_AUTHORIZED");
+    assert_eq!(retry_class(&refused), "terminal");
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("read-only"),
+        "the refusal names the read-only open: {refused}"
+    );
+
+    // The publication path (`begin_publication` → gate → workspace flock).
+    let refused = wire(
+        &read_only
+            .create_record(
+                &admin,
+                record_create_request(
+                    "k-read-only-record",
+                    "note",
+                    &json!({ "visibility": "shared" }),
+                    TEXT,
+                ),
+            )
+            .await,
+    );
+    assert_eq!(error_code(&refused), "NOT_AUTHORIZED");
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("read-only"),
+        "the refusal names the read-only open: {refused}"
+    );
+
+    // Zero lock attempts, observed directly (fix round 3, finding F5): neither
+    // refused write passed the read-only gate, so neither reached the admission
+    // transaction, the retention sweep, the publication gate or the workspace
+    // flock. The filename assertion below is corroboration, not the proof.
+    assert_eq!(
+        read_only.lock_attempts(),
+        0,
+        "a refused read-only write never reaches the admission/publication machinery"
+    );
+
+    // No side effect: no subject, candidate, record, journal intent or receipt,
+    // and no publication lock file or projection under the file root.
+    let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
+    for table in [
+        "memory_subjects",
+        "memory_candidates",
+        "memory_records",
+        "memory_journal",
+        "memory_receipts",
+    ] {
+        let sql = format!("SELECT COUNT(*) FROM {table}");
+        let (count,): (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 0, "{table} untouched by a refused read-only write");
+    }
+    pool.close().await;
+    assert_eq!(
+        files_under(&files_root),
+        before,
+        "no publication section was taken, no lock changed and nothing was projected"
+    );
+}
+
+/// NXM-5 Task 2 fix round 3 (R3-F1/R3-F5): the ordinary wire dismissal consumes
+/// a provider candidate only under the bearer's disposition section — the same
+/// section a legacy review drain holds — and the regression proves it with an
+/// observable lock attempt rather than a scheduling guess.
+#[tokio::test]
+async fn a_wire_dismissal_takes_the_bearer_disposition_section() {
+    let env = seed_env();
+    let provider = Arc::new(open_provider(&env).await);
+    let admin = principal(CREATOR);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    let captured = wire(
+        &provider
+            .capture(&admin, capture_request("k-capture-section", None, TEXT))
+            .await,
+    );
+    let candidate_id = receipt(&captured)["result"]["candidate_ids"][0]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // Another decision on this bearer holds the section.
+    let section = provider
+        .review_disposition(SUBJECT)
+        .await
+        .expect("the bearer's disposition section");
+    assert!(!provider.disposition_available(SUBJECT));
+
+    let waiting = Arc::new(tokio::sync::Notify::new());
+    provider.report_disposition_waits(Arc::clone(&waiting));
+    let dismissal = tokio::spawn({
+        let provider = Arc::clone(&provider);
+        let request = dto(json!({
+            "space_id": SPACE,
+            "candidate_id": candidate_id.clone(),
+            "expected_revision": 1,
+            "reason": "duplicate of an existing note",
+            "idempotency_key": "k-dismiss-section",
+        }));
+        async move {
+            let admin = principal(CREATOR);
+            provider.dismiss_candidate(&admin, request).await
+        }
+    });
+    // The wait signal fires from inside the lock attempt, after the non-blocking
+    // probe found the section held (fix round 4, finding R4-F3): the dismissal
+    // is really blocked on the lock, not merely unscheduled.
+    waiting.notified().await;
+    assert!(
+        !provider.disposition_available(SUBJECT),
+        "the wire dismissal is blocked on the lock the other decision holds"
+    );
+    assert!(
+        !dismissal.is_finished(),
+        "it cannot acquire the section while another decision holds it"
+    );
+
+    drop(section);
+    let dismissed = wire(&dismissal.await.unwrap());
+    let dismissed = receipt(&dismissed);
+    assert_eq!(dismissed["result"]["outcome"], "dismissed");
+    assert_eq!(dismissed["result"]["candidate_id"], candidate_id);
+    assert!(
+        provider.disposition_available(SUBJECT),
+        "the section is released once the dismissal commits"
+    );
+}
+
+/// NXM-5 Task 2 fix round 3 (R3-F3): every direct read entry point of a
+/// read-only provider opened over a workspace with no provider schema answers
+/// the space's absence (or an empty page), never a driver error.
+#[tokio::test]
+async fn a_read_only_open_over_a_pre_provider_workspace_answers_absent_reads() {
+    let env = seed_env();
+    std::fs::create_dir_all(env.db_path.parent().unwrap()).unwrap();
+    std::fs::write(&env.db_path, b"").unwrap();
+
+    let read_only = LocalMemoryProvider::open_read_only(env.user_home.clone(), CREATOR, "default")
+        .await
+        .expect("read-only open over the pre-provider database");
+    assert!(!read_only.is_writable());
+    let admin = principal(CREATOR);
+
+    let absent = [
+        wire(
+            &read_only
+                .get_subject(
+                    &admin,
+                    dto(json!({ "space_id": SPACE, "subject_id": SUBJECT })),
+                )
+                .await,
+        ),
+        wire(
+            &read_only
+                .list_grants(&admin, dto(json!({ "space_id": SPACE })))
+                .await,
+        ),
+        wire(
+            &read_only
+                .get_receipt(
+                    &admin,
+                    dto(json!({ "space_id": SPACE, "receipt_id": "rcp_missing" })),
+                )
+                .await,
+        ),
+        wire(
+            &read_only
+                .list_candidates(&admin, candidates_list_request(None))
+                .await,
+        ),
+        wire(
+            &read_only
+                .list_records(
+                    &admin,
+                    dto(json!({
+                        "space_id": SPACE,
+                        "subject_id": SUBJECT,
+                        "selection": { "mode": "subject_all" },
+                    })),
+                )
+                .await,
+        ),
+        wire(
+            &read_only
+                .get_record(&admin, record_get_request("rec_missing"))
+                .await,
+        ),
+        wire(
+            &read_only
+                .get_profile(
+                    &admin,
+                    dto(json!({ "space_id": SPACE, "subject_id": SUBJECT })),
+                )
+                .await,
+        ),
+    ];
+    for body in &absent {
+        assert_eq!(
+            error_code(body),
+            "NOT_FOUND",
+            "the space's absence, not an internal error: {body}"
+        );
+    }
+    let spaces = wire(&read_only.list_spaces(&admin, dto(json!({}))).await);
+    assert_eq!(spaces["spaces"], json!([]));
+}
+
+/// NXM-5 Task 2 fix round 3 (R3-F4): a subject id maps to exactly one safe
+/// filename inside the lock directory — no escape past it and no alias between
+/// distinct ids.
+#[tokio::test]
+async fn subject_ids_map_to_confined_unique_disposition_locks() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let lock_dir = provider.file_root().parent().unwrap().join("memory_locks");
+
+    // A traversing id is held under the encoded name, and it neither escapes
+    // the directory nor aliases the plain id.
+    let escaping = provider
+        .review_disposition("../escape")
+        .await
+        .expect("the escaping id still gets a section");
+    assert!(
+        !provider.disposition_available("../escape"),
+        "the held id is the one the section was taken under"
+    );
+    assert!(
+        provider.disposition_available("escape"),
+        "an escaping id must not alias a plain id"
+    );
+    drop(escaping);
+    assert!(
+        !lock_dir.join("../escape.lock").exists(),
+        "no lock file is created outside the disposition directory"
+    );
+
+    // Distinct raw ids never share a lock.
+    let dotted = provider
+        .review_disposition("bearer.a")
+        .await
+        .expect("section");
+    assert!(
+        provider.disposition_available("bearer/a"),
+        "distinct ids must map to distinct locks"
+    );
+    drop(dotted);
+
+    let names: Vec<String> = std::fs::read_dir(&lock_dir)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(
+        names.len(),
+        4,
+        "one lock file per distinct subject id (the probe itself creates the file): {names:?}"
+    );
+    for name in &names {
+        let stem = name
+            .strip_prefix("subject-")
+            .and_then(|stem| stem.strip_suffix(".lock"))
+            .unwrap_or_else(|| panic!("a confined, prefixed lock filename: {name}"));
+        assert!(
+            !stem.contains('/') && !stem.contains('.'),
+            "the encoded lock stem can hold no path component or dot: {name}"
+        );
+    }
+}
+
+/// NXM-5 Task 2 fix round 4 (R4-F1): a legacy dismissal holds the section of the
+/// stored candidate's owner — never a section the caller merely named — and a
+/// subject that does not own the row is refused before anything is consumed.
+#[tokio::test]
+async fn a_legacy_dismissal_locks_only_the_candidates_own_subject() {
+    let env = seed_env();
+    let provider = Arc::new(open_provider(&env).await);
+    let admin = principal(CREATOR);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    let captured = wire(
+        &provider
+            .capture(&admin, capture_request("k-capture-owner", None, TEXT))
+            .await,
+    );
+    let candidate_id = receipt(&captured)["result"]["candidate_ids"][0]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // Another bearer's section is held: a dismissal that named it would consume
+    // this row behind the owner's back. It is refused instead, and nothing moves.
+    let other = provider
+        .review_disposition(OTHER_SUBJECT)
+        .await
+        .expect("the other bearer's section");
+    let refused = wire(
+        &provider
+            .dismiss_legacy_candidate(
+                &admin,
+                OTHER_SUBJECT,
+                &candidate_id,
+                None,
+                "k-owner-mismatch",
+            )
+            .await,
+    );
+    assert_eq!(
+        error_code(&refused),
+        "INVALID_INPUT",
+        "a subject that does not own the candidate is refused: {refused}"
+    );
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("belongs to subject"),
+        "the refusal names the owner mismatch: {refused}"
+    );
+    let still_pending = wire(
+        &provider
+            .get_candidate(&admin, candidate_get_request(&candidate_id))
+            .await,
+    );
+    assert_eq!(
+        still_pending["candidate"]["status"], "pending",
+        "the refused dismissal consumes nothing: {still_pending}"
+    );
+    drop(other);
+
+    // The owner's section is the one the dismissal really blocks on.
+    let section = provider
+        .review_disposition(SUBJECT)
+        .await
+        .expect("the owner's section");
+    let waiting = Arc::new(tokio::sync::Notify::new());
+    provider.report_disposition_waits(Arc::clone(&waiting));
+    let dismissal = tokio::spawn({
+        let provider = Arc::clone(&provider);
+        let candidate_id = candidate_id.clone();
+        async move {
+            let admin = principal(CREATOR);
+            provider
+                .dismiss_legacy_candidate(&admin, SUBJECT, &candidate_id, None, "k-owner-dismiss")
+                .await
+        }
+    });
+    waiting.notified().await;
+    assert!(!provider.disposition_available(SUBJECT));
+    assert!(
+        !dismissal.is_finished(),
+        "the owner-exact dismissal cannot complete while its owner's section is held"
+    );
+    drop(section);
+
+    let dismissed = wire(&dismissal.await.unwrap());
+    let dismissed = receipt(&dismissed);
+    assert_eq!(dismissed["result"]["outcome"], "dismissed");
+    assert!(
+        provider.disposition_available(SUBJECT),
+        "the section is free once the dismissal commits"
+    );
+}
+
+/// NXM-5 Task 2 fix round 5 (R5-F1): a dismissal never discloses the candidate's
+/// owner to a principal the candidate's coverage does not admit. The refusal is
+/// exactly the answer an id this store never held produces, so neither the
+/// wrong-subject nor the true-owner-subject call teaches the stranger anything.
+#[tokio::test]
+async fn an_unauthorized_legacy_dismissal_cannot_learn_the_candidates_owner() {
+    let env = seed_env();
+    let provider = Arc::new(open_provider(&env).await);
+    let admin = principal(CREATOR);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    let captured = wire(
+        &provider
+            .capture(&admin, capture_request("k-capture-leak", None, TEXT))
+            .await,
+    );
+    let candidate_id = receipt(&captured)["result"]["candidate_ids"][0]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // The control answer: an id no row carries, from the same principal.
+    let absent = wire(
+        &provider
+            .dismiss_legacy_candidate(
+                &principal(OTHER),
+                OTHER_SUBJECT,
+                "cand_absent_probe",
+                None,
+                "k-absent",
+            )
+            .await,
+    );
+    assert_eq!(error_code(&absent), "NOT_FOUND");
+    let absent_message = absent["error"]["message"].as_str().unwrap();
+
+    // No grant at all, and the caller names the candidate: wrong subject, the
+    // true owner's subject, and a principal that holds nothing anywhere. All
+    // three get the control answer, byte for byte after the id.
+    for (caller, subject, key) in [
+        (OTHER, OTHER_SUBJECT, "k-stranger-mismatch"),
+        (OTHER, SUBJECT, "k-stranger-owner"),
+        (
+            "ctr_dddddddddddddddddddddddddddddddd",
+            OTHER_SUBJECT,
+            "k-stranger-unknown",
+        ),
+    ] {
+        let refused = wire(
+            &provider
+                .dismiss_legacy_candidate(&principal(caller), subject, &candidate_id, None, key)
+                .await,
+        );
+        assert_eq!(
+            error_code(&refused),
+            "NOT_FOUND",
+            "an uncovered dismissal answers like an absent candidate: {refused}"
+        );
+        assert_eq!(error_code(&refused), error_code(&absent));
+        assert_eq!(error_details(&refused), error_details(&absent));
+        let message = refused["error"]["message"].as_str().unwrap();
+        assert_eq!(
+            message,
+            absent_message.replace("cand_absent_probe", &candidate_id),
+            "the refusal is the not-found answer, never an owner mismatch: {refused}"
+        );
+        for owner in [SUBJECT, OTHER_SUBJECT] {
+            assert!(
+                !message.contains(owner),
+                "no refusal names a subject: {refused}"
+            );
+        }
+    }
+
+    let still_pending = wire(
+        &provider
+            .get_candidate(&admin, candidate_get_request(&candidate_id))
+            .await,
+    );
+    assert_eq!(
+        still_pending["candidate"]["status"], "pending",
+        "the refused dismissals consume nothing: {still_pending}"
+    );
+
+    // The same wrong subject from a principal the coverage admits still gets the
+    // informative mismatch refusal (round 4, R4-F1, unchanged).
+    let informed = wire(
+        &provider
+            .dismiss_legacy_candidate(&admin, OTHER_SUBJECT, &candidate_id, None, "k-informed")
+            .await,
+    );
+    assert_eq!(error_code(&informed), "INVALID_INPUT");
+    assert!(
+        informed["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("belongs to subject"),
+        "an authorized mismatch stays informative: {informed}"
+    );
+}
+
+/// NXM-5 Task 2 fix round 4 (R4-F2): the lock identity is a bounded digest, so
+/// ids differing only by ASCII case never alias on a case-insensitive volume and
+/// an arbitrarily long id still maps to a usable filename.
+#[tokio::test]
+async fn case_aliased_and_long_subject_ids_map_to_distinct_bounded_locks() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let lock_dir = provider.file_root().parent().unwrap().join("memory_locks");
+
+    // Two bears that differ only by case are two bearers: both sections can be
+    // held at once, which one shared file could not allow.
+    let upper = provider
+        .review_disposition("Bearer")
+        .await
+        .expect("upper-case section");
+    assert!(!provider.disposition_available("Bearer"));
+    assert!(
+        provider.disposition_available("bearer"),
+        "case aliases must not share a lock"
+    );
+    let lower = provider
+        .review_disposition("bearer")
+        .await
+        .expect("lower-case section");
+    assert!(!provider.disposition_available("bearer"));
+    drop((upper, lower));
+
+    // Far past the 255-byte component limit as a raw name, still one lock.
+    let long = "x".repeat(4096);
+    let held = provider
+        .review_disposition(&long)
+        .await
+        .expect("a long id still gets a section");
+    assert!(!provider.disposition_available(&long));
+    drop(held);
+    assert!(
+        provider.disposition_available(&long),
+        "the bounded lock is released with the section"
+    );
+
+    let mut names: Vec<String> = std::fs::read_dir(&lock_dir)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(names.len(), 3, "one lock file per bearer: {names:?}");
+    for name in &names {
+        let digest = name
+            .strip_prefix("subject-")
+            .and_then(|stem| stem.strip_suffix(".lock"))
+            .unwrap_or_else(|| panic!("a confined, prefixed lock filename: {name}"));
+        assert_eq!(
+            digest.len(),
+            64,
+            "the name is a fixed-length SHA-256 digest, bounded for any id: {name}"
+        );
+        assert!(
+            digest.chars().all(|c| c.is_ascii_hexdigit()),
+            "the digest uses only safe ASCII: {name}"
+        );
+    }
 }

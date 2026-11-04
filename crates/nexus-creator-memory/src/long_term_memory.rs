@@ -229,30 +229,98 @@ pub fn slug_is_safe(slug: &str) -> bool {
         && !slug.chars().any(char::is_control)
 }
 
-/// Extract YAML frontmatter and body from markdown content.
+/// The `memory_id` prefix a minted id carries.
+pub const MEMORY_ID_PREFIX: &str = "mem_";
+
+/// The slug prefix a minted `memory_id` maps to.
+pub const MEMORY_SLUG_PREFIX: &str = "memory-";
+
+/// The authored slug of a minted memory id: one-to-one with every accepted id.
 ///
-/// Returns `(frontmatter_yaml_string, body_string)`.
-/// Returns an error if the content doesn't start with `---`.
-fn extract_frontmatter_and_body(content: &str) -> Result<(String, String), String> {
+/// Only the leading `mem_` becomes `memory-` and everything after it stays
+/// verbatim. A global replace is not one-to-one: `mem_a_mem_b` and
+/// `mem_a_memory-b` both became `memory-a_memory-b`, and one of two promoted
+/// memories was unreachable by its slug (fix round 2, Greptile
+/// `memory_pipeline.rs:443`).
+///
+/// An id outside the `mem_` namespace has no slug: passing it through unchanged
+/// would let `memory-a` name the same file as `mem_a`, so the pair is refused
+/// rather than folded (fix round 3, Greptile `long_term_memory.rs:250`).
+#[must_use]
+pub fn slug_from_memory_id(memory_id: &str) -> Option<String> {
+    memory_id
+        .strip_prefix(MEMORY_ID_PREFIX)
+        .map(|rest| format!("{MEMORY_SLUG_PREFIX}{rest}"))
+}
+
+/// The exact source spans of a memory file's frontmatter and body.
+///
+/// Each span starts at the authored text, after the line break that ends the
+/// file's own `---` delimiter line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemorySourceSpans {
+    /// The YAML block between the delimiters, verbatim: extra fields and
+    /// comments the parsed frontmatter drops are inside this span.
+    pub frontmatter: std::ops::Range<usize>,
+    /// Everything after the closing delimiter, verbatim: the blank or indented
+    /// first line the parsed body trims away is inside this span.
+    pub body: std::ops::Range<usize>,
+}
+
+/// Locate the frontmatter and body spans of memory file content.
+///
+/// A caller that must keep the file's bytes (the P5 migration) slices the same
+/// framing [`LongTermMemory::parse`] read, instead of re-deriving it: the
+/// parser serves a trimmed view, while these spans name the source.
+///
+/// # Errors
+///
+/// Returns [`MemoryError::ValidationError`] when the delimiters are missing.
+pub fn source_spans(content: &str) -> Result<MemorySourceSpans, MemoryError> {
+    locate_spans(content)
+        .map_err(|e| MemoryError::ValidationError(format!("cannot parse memory file: {e}")))
+}
+
+/// The first byte after the line break at `at`, if one starts there.
+fn after_line_break(content: &str, at: usize) -> usize {
+    let bytes = content.as_bytes();
+    match (bytes.get(at), bytes.get(at + 1)) {
+        (Some(b'\n'), _) => at + 1,
+        (Some(b'\r'), Some(b'\n')) => at + 2,
+        _ => at,
+    }
+}
+
+fn locate_spans(content: &str) -> Result<MemorySourceSpans, String> {
     let trimmed = content.trim_start();
+    let offset = content.len() - trimmed.len();
     if !trimmed.starts_with("---") {
         return Err("content does not start with frontmatter delimiter '---'".to_string());
     }
     // Find closing ---
     let after_open = &trimmed[3..];
-    after_open.find("\n---").map_or_else(
-        || Err("missing closing frontmatter delimiter '---'".to_string()),
-        |end_offset| {
-            let fm_str = after_open[..end_offset].trim().to_string();
-            let body_start = 3 + end_offset + 4; // skip "---\n---"
-            let body = if body_start < trimmed.len() {
-                trimmed[body_start..].trim_start().to_string()
-            } else {
-                String::new()
-            };
-            Ok((fm_str, body))
-        },
-    )
+    let end_offset = after_open
+        .find("\n---")
+        .ok_or_else(|| "missing closing frontmatter delimiter '---'".to_string())?;
+    let body = offset + 3 + end_offset + 4; // skip "---\n---"
+    let frontmatter_end = offset + 3 + end_offset;
+    Ok(MemorySourceSpans {
+        // An empty block (`---\n---`) has no line break to skip past.
+        frontmatter: after_line_break(content, offset + 3).min(frontmatter_end)..frontmatter_end,
+        body: after_line_break(content, body)..content.len(),
+    })
+}
+
+/// Extract YAML frontmatter and body from markdown content.
+///
+/// Returns `(frontmatter_yaml_string, body_string)`.
+/// Returns an error if the content doesn't start with `---`.
+fn extract_frontmatter_and_body(content: &str) -> Result<(String, String), String> {
+    let spans = locate_spans(content)?;
+    Ok((
+        content[spans.frontmatter].trim().to_string(),
+        content[spans.body].trim_start().to_string(),
+    ))
 }
 
 #[cfg(test)]
@@ -543,6 +611,23 @@ Character analysis: Alice is a determined protagonist.
     }
 
     #[test]
+    fn slug_from_memory_id_is_one_to_one_on_minted_ids() {
+        // The two ids a global replace folded into one slug stay distinct.
+        assert_eq!(
+            slug_from_memory_id("mem_a_mem_b").as_deref(),
+            Some("memory-a_mem_b")
+        );
+        assert_eq!(
+            slug_from_memory_id("mem_a_memory-b").as_deref(),
+            Some("memory-a_memory-b")
+        );
+        // `mem_a` and `memory-a` must not address one file: the out-of-namespace
+        // id has no slug at all.
+        assert_eq!(slug_from_memory_id("mem_a").as_deref(), Some("memory-a"));
+        assert_eq!(slug_from_memory_id("memory-a"), None);
+    }
+
+    #[test]
     fn extract_frontmatter_and_body_valid() {
         let content = "---\nkey: val\n---\nbody text";
         let (fm, body) = extract_frontmatter_and_body(content).unwrap();
@@ -568,5 +653,35 @@ Character analysis: Alice is a determined protagonist.
         let (fm, body) = extract_frontmatter_and_body(content).unwrap();
         assert_eq!(fm, "key: val");
         assert_eq!(body, "");
+    }
+
+    /// The spans name the bytes the parsed view drops: an extra YAML field and
+    /// comment, and the blank first body line `trim_start` removes.
+    #[test]
+    fn source_spans_keep_what_the_parsed_view_drops() {
+        let content = "---\nnexus_memory_version: 1\nmemory_id: mem_x\nmemory_kind: fact\n\
+                       updated_at: 2026-01-01T00:00:00Z\n# authored comment\nowner_note: kept\n---\n\n  indented first line\n";
+        let spans = source_spans(content).unwrap();
+        assert_eq!(
+            &content[spans.frontmatter],
+            "nexus_memory_version: 1\nmemory_id: mem_x\nmemory_kind: fact\n\
+             updated_at: 2026-01-01T00:00:00Z\n# authored comment\nowner_note: kept"
+        );
+        assert_eq!(&content[spans.body], "\n  indented first line\n");
+        let parsed = LongTermMemory::parse(content).unwrap();
+        assert_eq!(parsed.body, "indented first line\n", "the view is trimmed");
+        let rendered = parsed.render().unwrap();
+        assert!(
+            !rendered.contains("authored comment") && !rendered.contains("owner_note"),
+            "the rendered view drops what the source keeps: {rendered}"
+        );
+    }
+
+    #[test]
+    fn source_spans_of_an_empty_block_are_empty() {
+        let content = "---\n---\nbody";
+        let spans = source_spans(content).unwrap();
+        assert_eq!(&content[spans.frontmatter], "");
+        assert_eq!(&content[spans.body], "body");
     }
 }

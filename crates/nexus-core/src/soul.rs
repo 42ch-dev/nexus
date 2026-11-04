@@ -15,11 +15,12 @@
 //! truthful `ServiceUnavailable` error — never background synthesis and never
 //! an empty success.
 
-use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::error::{CoreError, CoreResult};
-use crate::memory::CharacterTomService;
+use crate::memory::{record_keywords, CharacterTomService, MemoryAdapter};
 use crate::memory_pipeline::{internal_err, map_local_db_error, sqlx_internal, MemoryPipelineCtx};
+use crate::memory_provider::{created_at_cmp, legacy, policy, LocalMemoryProvider};
 use crate::principal::Principal;
 use crate::service::CoreService;
 use nexus_contracts::generated::daemon_api::characters::soul::character_soul_narrative_request::CharacterSoulNarrativeRequest;
@@ -28,9 +29,15 @@ use nexus_contracts::generated::daemon_api::memory::soul_narrative_request::Soul
 use nexus_contracts::generated::daemon_api::memory::soul_narrative_response::SoulNarrativeResponse;
 use nexus_creator_memory::bearer::MemoryBearerRef;
 use nexus_creator_memory::errors::MemoryError;
+use nexus_creator_memory::long_term_memory::{LongTermMemory, LongTermMemoryFrontmatter};
 use nexus_creator_memory::soul_narrative::{SoulNarrativeSynthesisInput, SoulNarrativeSynthesizer};
 use nexus_local_db::SoulNarrativeFragmentStats;
+use nexus_moment_context_assembly::recall::{
+    memory_display_id, memory_document, memory_slug, partition, FragmentMemory, FACT_KIND,
+};
 use nexus_moment_context_assembly::CharacterMindInput;
+use nexus_spoke_adapter::spoke_schemas::RetainedRecord;
+use serde_json::json;
 use sqlx::SqlitePool;
 
 /// Maximum Unicode scalar chars persisted for a synthesized narrative.
@@ -110,6 +117,7 @@ fn map_soul_narrative_memory_error(err: MemoryError) -> CoreError {
 /// 5. force=true synthesizes (on-demand only), validates/caps, persists.
 pub async fn reflect_bearer_soul<S: SoulNarrativeSynthesizer>(
     pool: &SqlitePool,
+    memory: &MemoryAdapter,
     ctx: &MemoryPipelineCtx,
     force: bool,
     synthesizer: impl FnOnce() -> Option<S>,
@@ -121,8 +129,8 @@ pub async fn reflect_bearer_soul<S: SoulNarrativeSynthesizer>(
     if force {
         ctx.bearer_for_write()?;
     }
-    // 1. fragment stats + cache row in one DB round-trip.
-    let (fragment_stats, cached) = bearer_fragment_stats(pool, ctx).await?;
+    // 1. fragment stats (served fragments) + retained cache row.
+    let (fragment_stats, cached) = bearer_fragment_stats(pool, memory, ctx).await?;
 
     // 2. insufficient-data gate (before any ACP call).
     let min_distinct = usize::try_from(MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS).unwrap_or(usize::MAX);
@@ -173,7 +181,7 @@ pub async fn reflect_bearer_soul<S: SoulNarrativeSynthesizer>(
     //    unauthorized or under-gate request never touches provider state.
     //    A missing provider is the retained truthful 503 — no background
     //    synthesis and no empty success.
-    let signals = bearer_recent_fragment_signals(pool, ctx).await?;
+    let signals = bearer_recent_fragment_signals(memory, ctx).await?;
     let input = build_soul_narrative_synthesis_input(&signals, &fragment_stats);
 
     let top_keywords = input.top_keywords.clone();
@@ -259,37 +267,90 @@ fn outcome_current(
     }
 }
 
-/// Dispatch fragment-stats + cache-row lookup to the bearer's scope.
+/// The bearer's provider `fact` fragments — the reviewed fragments — for the
+/// context's scope.
 ///
-/// Read-only by contract: the local-db `*_readonly` variants never persist
-/// stats-only cache rows, so a non-forced reflect performs zero DB writes
-/// (rows, cache rows and files) even on fingerprint mismatch or for an
-/// archived Character's retained read. The cache is only ever persisted by
-/// the explicit write path (`bearer_persist_narrative` after a successful
-/// synthesis).
+/// A review saves fragments on the provider, so reflection must read them
+/// there: the legacy fragment tables stop receiving them, and a reader over the
+/// legacy rows would call a fresh workspace `insufficient_data` with enough
+/// fragments while keeping an existing narrative falsely current (fix round 1,
+/// Greptile `memory_pipeline.rs:382`).
+async fn bearer_fragment_records(
+    memory: &MemoryAdapter,
+    ctx: &MemoryPipelineCtx,
+) -> CoreResult<Vec<serde_json::Value>> {
+    let (selection, filter) = match ctx.bearer_ref() {
+        // The Creator's scope is a World provenance filter on shared fragments.
+        MemoryBearerRef::Creator(_) => (
+            json!({ "mode": "shared_only" }),
+            ctx.scope().map(|world| vec![world.to_string()]),
+        ),
+        // A Character's scope is the binding placement of its local fragments.
+        MemoryBearerRef::Character { .. } => (
+            ctx.scope().map_or_else(
+                || json!({ "mode": "shared_only" }),
+                |binding| json!({ "mode": "selected_contexts", "context_ids": [binding] }),
+            ),
+            None,
+        ),
+    };
+    memory
+        .records(selection, &["fact"], filter.as_deref(), None)
+        .await
+}
+
+/// The values the insufficient-data gate and stale detection compare: the served
+/// fragment count, its distinct keyword count and its newest `created_at`.
+fn fragment_stats(records: &[serde_json::Value]) -> SoulNarrativeFragmentStats {
+    let mut keywords: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut max_created_at: Option<String> = None;
+    for record in records {
+        keywords.extend(record_keywords(record));
+        let Some(created_at) = record["created_at"].as_str() else {
+            continue;
+        };
+        if max_created_at
+            .as_deref()
+            .is_none_or(|max| created_at_cmp(created_at, max).is_gt())
+        {
+            max_created_at = Some(created_at.to_string());
+        }
+    }
+    SoulNarrativeFragmentStats {
+        fragment_count: i64::try_from(records.len()).unwrap_or(i64::MAX),
+        distinct_keyword_count: keywords.len(),
+        max_created_at,
+    }
+}
+
+/// Dispatch the fragment stats (served fragments) and the cache-row lookup (the
+/// retained narrative table) to the bearer's scope.
+///
+/// Read-only by contract: the cache read never persists a stats-only row, so a
+/// non-forced reflect performs zero DB writes (rows, cache rows and files) even
+/// on fingerprint mismatch or for an archived Character's retained read. The
+/// cache is only ever persisted by the explicit write path
+/// (`bearer_persist_narrative` after a successful synthesis).
 async fn bearer_fragment_stats(
     pool: &SqlitePool,
+    memory: &MemoryAdapter,
     ctx: &MemoryPipelineCtx,
 ) -> CoreResult<(
     SoulNarrativeFragmentStats,
     Option<nexus_local_db::SoulNarrativeRecord>,
 )> {
-    match ctx.bearer_ref() {
+    let records = bearer_fragment_records(memory, ctx).await?;
+    let cached = match ctx.bearer_ref() {
         MemoryBearerRef::Creator(creator_id) => {
-            let (stats, cached) = nexus_local_db::soul_narrative_fragment_stats_readonly(
-                pool,
-                creator_id,
-                ctx.scope(),
-            )
-            .await
-            .map_err(map_local_db_error)?;
-            Ok((stats, cached))
+            nexus_local_db::get_soul_narrative(pool, creator_id, ctx.scope())
+                .await
+                .map_err(map_local_db_error)?
         }
         MemoryBearerRef::Character {
             owner_creator_id,
             character_id,
         } => {
-            let (stats, cached) = nexus_local_db::character_soul_narrative_fragment_stats_readonly(
+            let cached = nexus_local_db::get_character_soul_narrative(
                 pool,
                 owner_creator_id,
                 character_id,
@@ -298,7 +359,7 @@ async fn bearer_fragment_stats(
             .await
             .map_err(map_local_db_error)?;
             // Same record shape — the creator cache uses `SoulNarrativeRecord`.
-            let cached = cached.map(|c| nexus_local_db::SoulNarrativeRecord {
+            cached.map(|c| nexus_local_db::SoulNarrativeRecord {
                 creator_id: character_id.to_string(),
                 world_id: c.actor_world_binding_id,
                 narrative: c.narrative,
@@ -309,57 +370,42 @@ async fn bearer_fragment_stats(
                 stats_fingerprint: c.stats_fingerprint,
                 created_at: c.created_at,
                 updated_at: c.updated_at,
-            });
-            Ok((stats, cached))
+            })
         }
-    }
+    };
+    Ok((fragment_stats(&records), cached))
 }
 
-/// Fetch a bounded page of recent fragments for the bearer's scope.
+/// Fetch a bounded page of recent fragments for the bearer's scope, newest
+/// first.
 async fn bearer_recent_fragment_signals(
-    pool: &SqlitePool,
+    memory: &MemoryAdapter,
     ctx: &MemoryPipelineCtx,
 ) -> CoreResult<Vec<FragmentSignal>> {
-    const FETCH_LIMIT: i64 = 100;
-    match ctx.bearer_ref() {
-        MemoryBearerRef::Creator(creator_id) => {
-            let rows =
-                nexus_local_db::list_fragments_limited(pool, creator_id, ctx.scope(), FETCH_LIMIT)
-                    .await
-                    .map_err(map_local_db_error)?;
-            Ok(rows
-                .into_iter()
-                .map(|f| FragmentSignal {
-                    keywords: f.keywords,
-                    summary: f.summary,
-                    created_at: f.created_at,
-                })
-                .collect())
-        }
-        MemoryBearerRef::Character {
-            owner_creator_id,
-            character_id,
-        } => {
-            let rows = nexus_local_db::list_character_fragments(
-                pool,
-                owner_creator_id,
-                character_id,
-                ctx.scope(),
-                FETCH_LIMIT,
-                0,
-            )
-            .await
-            .map_err(map_local_db_error)?;
-            Ok(rows
-                .into_iter()
-                .map(|f| FragmentSignal {
-                    keywords: f.keywords,
-                    summary: f.summary,
-                    created_at: f.created_at,
-                })
-                .collect())
-        }
-    }
+    const FETCH_LIMIT: usize = 100;
+    let mut records = bearer_fragment_records(memory, ctx).await?;
+    records.sort_by(|left, right| {
+        created_at_cmp(
+            right["created_at"].as_str().unwrap_or_default(),
+            left["created_at"].as_str().unwrap_or_default(),
+        )
+    });
+    records.truncate(FETCH_LIMIT);
+    Ok(records
+        .iter()
+        .map(|record| FragmentSignal {
+            keywords: serde_json::to_string(&record_keywords(record))
+                .unwrap_or_else(|_| "[]".to_string()),
+            summary: record["content"]["text"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            created_at: record["created_at"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+        })
+        .collect())
 }
 
 /// Persist a synthesized narrative (with its stats cache) to the bearer's
@@ -584,10 +630,11 @@ fn has_forward_looking_suffix(narrative: &str) -> bool {
 
 // ── Character mind projection (v1.184 P3; core-owned since v1.190 P2-T2) ──
 
-/// Max fragments fetched per scope before deterministic merge + cap.
-const MIND_PROJECTION_FETCH_LIMIT: i64 = 100;
+/// Fragments the shared scope and the selected binding scope each contribute
+/// to the merged projection — the legacy per-scope `LIMIT`.
+const MIND_PROJECTION_FETCH_LIMIT: usize = 100;
 
-/// Max Character long-term-memory files projected before deterministic cap.
+/// Max Character long-term-memory records projected before deterministic cap.
 const MIND_PROJECTION_LTM_LIMIT: usize = 20;
 
 /// Per-order MCA `ToM` fetch bound: L1 and L2 are fetched independently at the
@@ -609,25 +656,43 @@ fn format_tom_belief_line(row: &crate::memory::CharacterTomBeliefRow) -> String 
 ///
 /// Caller guarantees admission (owner/active Character + active binding).
 ///
+/// **Provider-served, not legacy-served (NXM-7):** the projection no longer
+/// reads the legacy fragment tables or the bearer memory files. It addresses
+/// the provider subject the NXM-5 read bridge projects that bearer under, so
+/// migrated and not-yet-migrated content arrive through the same
+/// `memory.profile.get` (SOUL) and kind-filtered `memory.records.list`
+/// (fragments + promoted memories) reads, and once P5 publishes the migration
+/// marker those reads are provider-only with no second fallback here. The kind
+/// filter is what keeps each family independent: `memory.recall` ranks every
+/// record kind together, so a family read through it could be silently
+/// truncated by unrelated kinds no matter how the page budget was set.
+///
+/// **Content-preserving:** the projected lines keep the pre-provider
+/// projection's text — a fragment is its summary plus the keywords the legacy
+/// column carried, and a promoted memory is re-rendered as the memory file
+/// (frontmatter block plus body) it came from.
+///
+/// **Subject state:** the two record families keep recall's §7.7 rule — an
+/// archived subject's records are not projected — because this path replaces
+/// recall while the listing read behind it (the audit route) keeps serving
+/// them. The SOUL slot is a profile, not a record, and keeps its own read.
+///
 /// **Honest-empty vs fail-closed:** only explicit *absent* optional data is an
-/// honest empty — a missing SOUL.md yields `None` and a missing/empty
-/// long-term-memory directory yields no lines. Any other read/DB error (e.g.
-/// a permission error, malformed home path, or a failed fragment query) is
-/// propagated so the caller aborts **before** host launch rather than
-/// executing with an incomplete Character mind. Only the executing
-/// Character's shared scope + the selected binding-local scope are included —
-/// never another Character's or the Creator's data. The merged memory lines
-/// (fragments + promoted long-term memory files) are bounded and
-/// deterministically ordered by [`CharacterMindInput::new`], which caps and
-/// truncates.
+/// honest empty — an absent `personality` profile yields `None` and an empty
+/// family result yields no lines. Any other read/refusal error is propagated so
+/// the caller aborts **before** host launch rather than executing with an
+/// incomplete Character mind. Only the executing Character's shared scope + the
+/// selected binding-local scope are included — never another Character's or the
+/// Creator's data. The merged memory lines are bounded and deterministically
+/// ordered by [`CharacterMindInput::new`], which caps and truncates.
 ///
 /// # Errors
 ///
 /// Returns an internal/`DATABASE_ERROR`/validation [`CoreError`] on any
 /// projection read failure other than a recognised absent-data condition.
 pub async fn load_character_mind_projection(
-    pool: &SqlitePool,
-    nexus_home: &Path,
+    memory: Arc<LocalMemoryProvider>,
+    principal: &Principal,
     owner_creator_id: &str,
     character_id: &str,
     binding_id: Option<&str>,
@@ -636,104 +701,168 @@ pub async fn load_character_mind_projection(
         owner_creator_id,
         character_id,
     };
+    // The bearer id remains the projection's subject key: a malformed id names
+    // no bearer and is refused before it reaches the provider.
     bearer.validate().map_err(|e| CoreError::InvalidInput {
         field: "character_id".to_string(),
         reason: e.to_string(),
     })?;
 
-    // SOUL: a missing SOUL.md is honest-empty; any other read error fails closed.
-    let soul = match std::fs::read_to_string(bearer.soul_path(nexus_home)) {
-        Ok(text) => Some(text),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => {
-            return Err(internal_err(
-                "character_soul_read_error",
-                format!("failed to read Character SOUL.md: {e}"),
-            ));
+    let read = MemoryAdapter::open(
+        memory,
+        principal,
+        legacy::character_subject_id(character_id),
+        legacy::CHARACTER_KIND_NS,
+        character_id,
+    )
+    .await?;
+
+    // SOUL: the `personality` profile — the bridge projects SOUL.md as exactly
+    // that document, and the provider serves a migrated one the same way.
+    let soul = read.personality().await?;
+
+    // The promoted-memory read's admitted scope: the Character-shared records
+    // plus, when a binding is selected, that binding's own records.
+    let selection = binding_id.map_or_else(
+        || serde_json::json!({ "mode": "shared_only" }),
+        |binding| {
+            serde_json::json!({
+                "mode": "selected_contexts",
+                "context_ids": [binding],
+                "include_shared": true,
+            })
+        },
+    );
+
+    // Fragments: the shared scope and, when selected, the binding-local scope
+    // are read independently at the legacy per-scope `LIMIT` — the same pair of
+    // legacy reads, so neither scope's content is traded against the other's.
+    // Each read is kind-filtered, so unrelated kinds (events, the derived
+    // narrative cache) occupy no page and no page budget can truncate a
+    // family: a scope serves its newest records or its complete set.
+    let shared_fragments =
+        projection_fragments(&read, serde_json::json!({ "mode": "shared_only" })).await?;
+    let binding_fragments = match binding_id {
+        Some(binding) => {
+            projection_fragments(
+                &read,
+                serde_json::json!({
+                    "mode": "selected_contexts",
+                    "context_ids": [binding],
+                    "include_shared": false,
+                }),
+            )
+            .await?
         }
+        None => Vec::new(),
     };
 
-    // Fragment rows: shared scope + the selected binding-local scope. A
-    // binding read merges both; a shared read (None) fetches shared once. A
-    // failed query is a fail-closed error, never an empty projection.
-    let mut rows: Vec<(String, String, String)> = Vec::new(); // (created_at, fragment_id, summary)
-    let mut keywords_by_fragment: Vec<(String, String)> = Vec::new(); // (fragment_id, keywords)
-    let mut scopes = vec![None];
-    if let Some(b) = binding_id {
-        scopes.push(Some(b));
-    }
-    for scope in scopes {
-        let fetched = nexus_local_db::list_character_fragments(
-            pool,
-            owner_creator_id,
-            character_id,
-            scope,
-            MIND_PROJECTION_FETCH_LIMIT,
-            0,
-        )
-        .await
-        .map_err(map_local_db_error)?;
-        for f in fetched {
-            rows.push((f.created_at.clone(), f.fragment_id.clone(), f.summary));
-            keywords_by_fragment.push((f.fragment_id, f.keywords));
-        }
-    }
-
-    // Promoted long-term memory files (authoritative pipeline sink): the
-    // capture→review→promote journey must be visible to `character run`.
-    let mut ltm_lines: Vec<String> = Vec::new();
-    let ltm_slugs = nexus_creator_memory::memory_io::list_memories(nexus_home, bearer)
-        .map_err(|e| internal_err("character_memory_list_error", e))?;
-    for slug in ltm_slugs.into_iter().take(MIND_PROJECTION_LTM_LIMIT) {
-        let content = nexus_creator_memory::memory_io::load_memory(nexus_home, bearer, &slug)
-            .map_err(|e| internal_err("character_memory_load_error", e))?;
-        // Render the frontmatter-body text as a deterministic memory line.
-        let body = content
-            .render()
-            .map_err(|e| internal_err("character_memory_render_error", e))?;
-        ltm_lines.push(format!("- {body}"));
-    }
-
-    // Deterministic merge: created_at DESC, fragment_id DESC (newest first).
-    rows.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
-    let lines: Vec<String> = rows
+    // Deterministic merge: the legacy per-scope selection key across both
+    // admitted scopes — the RAW `created_at` TEXT (`created_at DESC`) then
+    // `fragment_id DESC` — rendered with the keywords the legacy column carried.
+    // The text key, not the parsed instant, is what the legacy query ordered by
+    // (fix round 4, finding R4-F1).
+    let mut fragments = shared_fragments;
+    fragments.extend(binding_fragments);
+    fragments.sort_by(|left, right| {
+        right
+            .created_at
+            .cmp(&left.created_at)
+            .then_with(|| right.fragment_id.cmp(&left.fragment_id))
+    });
+    let mut lines: Vec<String> = fragments
         .into_iter()
-        .map(|(_, fragment_id, summary)| {
-            let keywords = keywords_by_fragment
-                .iter()
-                .find(|(id, _)| *id == fragment_id)
-                .map(|(_, kw)| kw.clone())
-                .unwrap_or_default();
-            if keywords.is_empty() {
-                format!("- {summary}")
-            } else {
-                format!("- {summary} — keywords: {keywords}")
-            }
-        })
+        .map(
+            |fragment| match fragment.keywords.filter(|keywords| !keywords.is_empty()) {
+                Some(keywords) => {
+                    let rendered = serde_json::to_string(&keywords).unwrap_or_default();
+                    format!("- {} — keywords: {rendered}", fragment.summary)
+                }
+                None => format!("- {}", fragment.summary),
+            },
+        )
         .collect();
-    // Long-term memory files join the projection (bounded at the top of the
-    // merged list); ordering is deterministic by the LTM slug sort then the
-    // fragmentation merge order is preserved below the LTM block.
-    // Reserve the Character-mind entry budget for the admitted fragment scopes
-    // first (shared + selected binding), so a full global LTM never crowds out
-    // binding-local fragments. LTM files fill only the remaining capacity.
-    let mut all_lines = lines;
-    all_lines.extend(ltm_lines);
-    Ok(CharacterMindInput::new(soul, all_lines))
+
+    // Promoted memories: the complete authored set ranked by the bearer's slug
+    // order — the order the legacy file listing served — BEFORE the projection's
+    // 20-entry bound, so provider recency can never decide which memories the
+    // legacy slug-head selection kept. They join below the fragment block and
+    // fill only the remaining Character-mind capacity, so they never crowd out
+    // binding-local fragments.
+    let authored_kinds: Vec<String> = policy::NEXUS_MEMORY_KINDS
+        .iter()
+        .map(|kind| policy::namespaced_record_kind(kind))
+        .collect();
+    let authored_kind_refs: Vec<&str> = authored_kinds.iter().map(String::as_str).collect();
+    let mut long_term_memories = read.family(selection, &authored_kind_refs).await?;
+    long_term_memories.sort_by(|left, right| {
+        memory_slug(left)
+            .cmp(&memory_slug(right))
+            .then_with(|| memory_display_id(left).cmp(&memory_display_id(right)))
+    });
+    long_term_memories.truncate(MIND_PROJECTION_LTM_LIMIT);
+    for record in &long_term_memories {
+        lines.push(memory_document_line(record)?);
+    }
+    Ok(CharacterMindInput::new(soul, lines))
+}
+
+/// The newest fragments of one admitted scope, as the legacy per-scope read
+/// served them: the top `created_at` TEXT key rows (`fragment_id DESC` inside a
+/// key group) at the legacy `LIMIT`.
+///
+/// The whole kind-filtered family is read because the selection key is the RAW
+/// legacy `created_at` TEXT (`ORDER BY created_at DESC, fragment_id DESC` in the
+/// legacy query), while the provider pages by parsed instant: for mixed
+/// timestamp formats the two orders disagree, so no smaller window can prove it
+/// holds every row that ranks under that key (fix round 4, finding R4-F1).
+/// `partition` applies the text order and this caps back to the legacy `LIMIT`.
+async fn projection_fragments(
+    read: &MemoryAdapter,
+    selection: serde_json::Value,
+) -> CoreResult<Vec<FragmentMemory>> {
+    let records = read.family(selection, &[FACT_KIND]).await?;
+    let mut fragments = partition(records).fragments;
+    fragments.truncate(MIND_PROJECTION_FETCH_LIMIT);
+    Ok(fragments)
+}
+
+/// One promoted-memory line exactly as the legacy projection rendered it: the
+/// memory file's frontmatter block followed by its body. Re-rendering through
+/// the legacy document type keeps the bytes identical to the pre-provider
+/// projection instead of approximating the format here (NXM-7 fix, P3-F1).
+fn memory_document_line(record: &RetainedRecord) -> CoreResult<String> {
+    let document = memory_document(record);
+    let file = LongTermMemory {
+        frontmatter: LongTermMemoryFrontmatter {
+            nexus_memory_version: document.nexus_memory_version,
+            memory_id: document.memory_id,
+            memory_kind: document.memory_kind,
+            updated_at: document.updated_at,
+            source_session_ids: document.source_session_ids,
+        },
+        body: document.body,
+        source_path: None,
+    };
+    let rendered = file
+        .render()
+        .map_err(|error| internal_err("character_memory_render_error", error))?;
+    Ok(format!("- {rendered}"))
 }
 
 /// Load bounded SOUL/Memory plus L1-then-L2 `ToM` for an admitted Character run.
 pub async fn load_character_mind_projection_with_tom(
     pool: &SqlitePool,
-    nexus_home: &Path,
+    memory: Arc<LocalMemoryProvider>,
+    principal: &Principal,
     owner_creator_id: &str,
     character_id: &str,
     world_id: &str,
     binding_id: &str,
 ) -> CoreResult<CharacterMindInput> {
     let mind = load_character_mind_projection(
-        pool,
-        nexus_home,
+        memory,
+        principal,
         owner_creator_id,
         character_id,
         Some(binding_id),
@@ -765,23 +894,27 @@ pub async fn load_character_mind_projection_with_tom(
     Ok(mind.with_tom(tom_l1, tom_l2))
 }
 
-/// Pool-bound bounded Character mind projection (SOUL + Memory + `ToM`).
+/// Provider-bound bounded Character mind projection (SOUL + Memory + `ToM`).
 ///
 /// The daemon `agent_host` composition (P4-T2's file) and the P2-T3 context
 /// assembly consume this reader; [`crate::CoreService`] hosts the
 /// principal-verified families around it. No admission is performed here —
 /// callers guarantee stored ownership exactly as before the migration.
-#[derive(Debug, Clone)]
+///
+/// The reader holds the open's pinned provider (NXM-7), so E6 reads the same
+/// `MemoryPort` the E4 memory family does; the pool remains only for the
+/// `ToM` family, which N2 does not reroute.
+#[derive(Clone)]
 pub struct CoreCharacterMind {
     pool: SqlitePool,
-    nexus_home: PathBuf,
+    memory: Arc<LocalMemoryProvider>,
 }
 
 impl CoreCharacterMind {
-    /// Bind the projection reader to a workspace pool and nexus home.
+    /// Bind the projection reader to a workspace pool and the open's provider.
     #[must_use]
-    pub const fn new(pool: SqlitePool, nexus_home: PathBuf) -> Self {
-        Self { pool, nexus_home }
+    pub const fn new(pool: SqlitePool, memory: Arc<LocalMemoryProvider>) -> Self {
+        Self { pool, memory }
     }
 
     /// Bounded SOUL/Memory projection for one Character scope.
@@ -791,13 +924,14 @@ impl CoreCharacterMind {
     /// [`load_character_mind_projection`]).
     pub async fn projection(
         &self,
+        principal: &Principal,
         owner_creator_id: &str,
         character_id: &str,
         binding_id: Option<&str>,
     ) -> CoreResult<CharacterMindInput> {
         load_character_mind_projection(
-            &self.pool,
-            &self.nexus_home,
+            self.memory.clone(),
+            principal,
             owner_creator_id,
             character_id,
             binding_id,
@@ -811,6 +945,7 @@ impl CoreCharacterMind {
     /// Any fail-closed projection or `ToM` read failure.
     pub async fn projection_with_tom(
         &self,
+        principal: &Principal,
         owner_creator_id: &str,
         character_id: &str,
         world_id: &str,
@@ -818,7 +953,8 @@ impl CoreCharacterMind {
     ) -> CoreResult<CharacterMindInput> {
         load_character_mind_projection_with_tom(
             &self.pool,
-            &self.nexus_home,
+            self.memory.clone(),
+            principal,
             owner_creator_id,
             character_id,
             world_id,
@@ -949,8 +1085,9 @@ impl CoreService {
             )
             .await?
         };
+        let memory = self.character_memory(principal, &character_id).await?;
         let outcome =
-            reflect_bearer_soul(pool, &ctx, request.force_regenerate, synthesizer).await?;
+            reflect_bearer_soul(pool, &memory, &ctx, request.force_regenerate, synthesizer).await?;
         drop(ctx);
         character_reflect_wire(&character_id, &outcome)
     }
@@ -991,8 +1128,10 @@ impl CoreService {
         }
 
         let ctx = MemoryPipelineCtx::creator(principal.creator_id(), world_id);
+        let memory = self.creator_memory(principal).await?;
         let outcome = reflect_bearer_soul(
             &self.inner.pool,
+            &memory,
             &ctx,
             request.force_regenerate,
             synthesizer,

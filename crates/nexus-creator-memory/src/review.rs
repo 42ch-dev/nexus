@@ -698,10 +698,12 @@ pub async fn promote_to_long_term<S: SessionDigestSummarizer>(
     // 5. Validate before saving
     memory.validate()?;
 
-    // 6. Generate slug from memory_id (strip mem_ prefix)
-    // V1.2 residual R10 (pipeline, nit): Slug collision risk (truncation)
-    // Slug collision probability low at expected scale; add collision detection if needed
-    let slug = memory.frontmatter.memory_id.replace("mem_", "memory-");
+    // 6. Generate the authored slug from memory_id: only the leading `mem_`
+    // prefix maps, so the derivation is one-to-one and two memories can never
+    // address one file. The id is minted by `LongTermMemory::new`, so a missing
+    // prefix is a broken local invariant, not a caller error.
+    let slug = crate::long_term_memory::slug_from_memory_id(&memory.frontmatter.memory_id)
+        .ok_or_else(|| MemoryError::InvalidIdFormat(memory.frontmatter.memory_id.clone()))?;
 
     // 7. Save via memory_io
     crate::memory_io::save_memory(home, bearer, &slug, &memory)?;
@@ -720,7 +722,8 @@ pub async fn promote_to_long_term<S: SessionDigestSummarizer>(
 ///
 /// This determines the appropriate `memory_kind` field in the
 /// long-term memory frontmatter based on the session's task type.
-fn task_kind_to_memory_kind(task_kind: &str) -> &'static str {
+#[must_use]
+pub fn task_kind_to_memory_kind(task_kind: &str) -> &'static str {
     match task_kind.to_lowercase().as_str() {
         "brainstorm" | "chapter" => "story_summary",
         "outline" => "plot_outline",

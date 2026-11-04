@@ -40,7 +40,9 @@ execution = [
 # The crash/rendezvous seams the workspace-commit recovery proofs drive. They
 # are compiled out of a production build and enabled by this package's own
 # dev-dependency self-reference, exactly as the daemon did before the move.
-test-hooks = []
+# `nexus-local-db` carries the binding-removal write-contention report the D15
+# ordering proof waits on, so its seam rides the same switch.
+test-hooks = ["nexus-local-db/test-hooks"]
 compute = ["execution", "dep:nexus-wasm-host", "nexus-spoke-adapter/compute"]
 # Connect-host product cohort (v1.207 P2): the WS accept loop, per-session
 # monitoring and the peer-tools event lane the shipped `nexus-runtime` /

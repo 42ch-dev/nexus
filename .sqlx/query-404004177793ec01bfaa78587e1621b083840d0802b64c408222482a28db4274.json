@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE character_memory_pending_review SET actor_world_binding_id = NULL\n          WHERE actor_world_binding_id = ?\n            AND EXISTS (SELECT 1 FROM memory_candidates c\n                        WHERE c.candidate_id =\n                            'lgc:character_memory_pending_review:' || pending_id)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "404004177793ec01bfaa78587e1621b083840d0802b64c408222482a28db4274"
+}

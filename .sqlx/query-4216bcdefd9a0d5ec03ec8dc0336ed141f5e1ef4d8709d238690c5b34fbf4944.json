@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE character_memory_fragments SET actor_world_binding_id = NULL\n          WHERE actor_world_binding_id = ?\n            AND EXISTS (SELECT 1 FROM memory_records r\n                        WHERE r.record_id =\n                            'lgc:character_memory_fragments:' || fragment_id)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "4216bcdefd9a0d5ec03ec8dc0336ed141f5e1ef4d8709d238690c5b34fbf4944"
+}

@@ -2624,3 +2624,113 @@ async fn journal_migration_applies_once_and_advances_the_version_line() {
         "re-running the migration set neither duplicates nor drops the space"
     );
 }
+
+/// I-000143 (compass D12): the journal-retention policy is *prune applied
+/// shells*, and only them.
+///
+/// A settled intent's file content is scrubbed at settlement, so the row it
+/// leaves behind is bounded diagnostic history and ages out after
+/// `JOURNAL_RETENTION_SECONDS` (30 days). An unsettled intent is the recovery
+/// authority: `pending`, `deferred` and `quarantined` rows are never reclaimed
+/// before settlement, however old they are. One sweep proves all three cases:
+/// applied-old pruned, applied-recent kept, unsettled-old kept with its payload.
+#[tokio::test]
+async fn journal_retention_prunes_only_applied_shells() {
+    /// The policy value the sweep reads (`JOURNAL_RETENTION_SECONDS`).
+    const JOURNAL_RETENTION_SECONDS: i64 = 2_592_000;
+
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    ensure(&provider).await;
+
+    // A settled intent: the record create journals its projection, publishes
+    // it and marks the entry `applied` (content scrubbed).
+    let aged = wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-journal-aged", TEXT))
+            .await,
+    );
+    let aged_receipt = receipt(&aged)["receipt_id"]
+        .as_str()
+        .expect("receipt id")
+        .to_string();
+
+    // An unsettled intent at the same instant: the publish fails, so the entry
+    // is `quarantined` and keeps the payload a recovery pass republishes.
+    provider.inject_file_fault(false);
+    let quarantined = wire(
+        &provider
+            .create_record(
+                &admin(),
+                record_create_request("k-journal-quarantined", THIRD),
+            )
+            .await,
+    );
+    assert!(
+        quarantined.get("error").is_some(),
+        "the injected publish failure is reported: {quarantined}"
+    );
+
+    // Past the window: the next mutating entry's sweep reclaims the applied
+    // shell and must leave the quarantined intent alone.
+    provider.advance_clock(JOURNAL_RETENTION_SECONDS + 1);
+    ensure(&provider).await;
+
+    // A settled intent written after the sweep is inside the window.
+    let recent = wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-journal-recent", UPDATED))
+            .await,
+    );
+    let recent_receipt = receipt(&recent)["receipt_id"]
+        .as_str()
+        .expect("receipt id")
+        .to_string();
+    ensure(&provider).await;
+
+    drop(provider);
+    let pool = nexus_local_db::open_pool(&env.db_path).await.unwrap();
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT receipt_id, state FROM memory_journal ORDER BY receipt_id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        rows.len(),
+        2,
+        "one settled shell (in the window) and one unsettled intent remain: {rows:?}"
+    );
+    assert!(
+        rows.iter().all(|(id, _)| id != &aged_receipt),
+        "the applied shell past the window is gone"
+    );
+    assert!(
+        rows.iter()
+            .any(|(id, state)| id == &recent_receipt && state == "applied"),
+        "the applied shell inside the window is kept"
+    );
+    assert!(
+        rows.iter().any(|(_, state)| state == "quarantined"),
+        "the unsettled intent is never reclaimed before settlement"
+    );
+    let (quarantined_payload,): (String,) =
+        sqlx::query_as("SELECT targets_json FROM memory_journal WHERE state = 'quarantined'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_ne!(
+        quarantined_payload, "[]",
+        "the quarantined intent keeps the payload recovery republishes"
+    );
+    let applied: Vec<(String,)> =
+        sqlx::query_as("SELECT receipt_id FROM memory_journal WHERE state = 'applied'")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        applied,
+        vec![(recent_receipt,)],
+        "the applied shell inside the window is kept"
+    );
+    pool.close().await;
+}

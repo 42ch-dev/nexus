@@ -97,8 +97,8 @@ pub use actor_knowledge_store::{
 };
 pub use actor_world_binding::{
     add_actor_world_binding, count_bindings_for_world_tx, get_actor_world_binding,
-    list_bindings_for_character, mint_binding_id, remove_binding, update_actor_world_binding,
-    ActorWorldBindingRecord, CreateBindingParams,
+    list_bindings_for_character, mint_binding_id, remove_binding, require_valid_provenance_tx,
+    update_actor_world_binding, ActorWorldBindingRecord, CreateBindingParams,
 };
 pub use character::{
     create_character_with_initial_binding, delete_character, get_character, list_characters,
@@ -386,9 +386,94 @@ pub async fn begin_immediate(
     pool: &sqlx::SqlitePool,
 ) -> Result<sqlx::Transaction<'_, sqlx::Sqlite>, LocalDbError> {
     let conn = pool.acquire().await?;
+    #[cfg(feature = "test-hooks")]
+    let conn = match begin_immediate_report::armed() {
+        Some(report) => begin_immediate_report::observe(conn, &report).await?,
+        None => conn,
+    };
     sqlx::Transaction::begin(conn, Some(sqlx::SqlStr::from_static("BEGIN IMMEDIATE")))
         .await
         .map_err(LocalDbError::from)
+}
+
+/// Test-only write-lock observation for [`begin_immediate`].
+///
+/// The report is scoped to the future that arms it, so only the writes that
+/// future awaits report, and a real `BEGIN IMMEDIATE` that finds the lock free
+/// reports nothing. The seam is compiled out of a production build.
+#[cfg(feature = "test-hooks")]
+pub mod begin_immediate_report {
+    use std::future::Future;
+    use std::sync::Arc;
+
+    use sqlx::pool::PoolConnection;
+    use sqlx::Sqlite;
+    use tokio::sync::Notify;
+
+    use crate::LocalDbError;
+
+    tokio::task_local! {
+        static REPORT: Arc<Notify>;
+    }
+
+    /// Arm `report` for every [`super::begin_immediate`] awaited inside `f`:
+    /// it notifies when that attempt is refused by a lock another writer holds
+    /// (SQLite's lock/busy codes 5/6) before the busy-timeout retry.
+    pub async fn scope<F: Future>(report: Arc<Notify>, f: F) -> F::Output {
+        REPORT.scope(report, f).await
+    }
+
+    pub(super) fn armed() -> Option<Arc<Notify>> {
+        REPORT.try_with(Arc::clone).ok()
+    }
+
+    /// Run the removal's own first `BEGIN IMMEDIATE` without a busy wait, so a
+    /// held store refuses it at once instead of parking; the caller then takes
+    /// the transaction on the same connection by the normal busy-timeout retry.
+    pub(super) async fn observe(
+        mut conn: PoolConnection<Sqlite>,
+        report: &Notify,
+    ) -> Result<PoolConnection<Sqlite>, LocalDbError> {
+        let busy_timeout: i64 = sqlx::query_scalar("PRAGMA busy_timeout")
+            .fetch_one(&mut *conn)
+            .await?;
+        sqlx::query("PRAGMA busy_timeout = 0")
+            .execute(&mut *conn)
+            .await?;
+        match sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await {
+            // The lock was free, so nothing contended: the rolled-back attempt
+            // leaves the connection exactly as it found it.
+            Ok(_) => {
+                sqlx::query("ROLLBACK").execute(&mut *conn).await?;
+            }
+            Err(sqlx::Error::Database(error))
+                if matches!(error.code().as_deref(), Some("5" | "6")) =>
+            {
+                report.notify_one();
+            }
+            Err(error) => {
+                restore_busy_timeout(&mut conn, busy_timeout).await?;
+                return Err(error.into());
+            }
+        }
+        restore_busy_timeout(&mut conn, busy_timeout).await?;
+        Ok(conn)
+    }
+
+    /// Put back the busy timeout [`observe`] read off the connection. The value
+    /// is a configured integer, never text from a caller, so the interpolated
+    /// statement is audited and safe.
+    async fn restore_busy_timeout(
+        conn: &mut PoolConnection<Sqlite>,
+        busy_timeout: i64,
+    ) -> Result<(), LocalDbError> {
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "PRAGMA busy_timeout = {busy_timeout}"
+        )))
+        .execute(&mut **conn)
+        .await?;
+        Ok(())
+    }
 }
 
 /// # Errors

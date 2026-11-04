@@ -95,8 +95,13 @@ pub use host::HostHandle;
 pub use knowledge::QueueKbExtractParams;
 pub use memory::{
     CharacterTomBeliefRow, CharacterTomListQuery, CharacterTomPage, CharacterTomRecordInput,
-    CharacterTomService,
+    CharacterTomService, MemoryRevision,
 };
+/// The review-drain step-point a deterministic concurrency regression arms
+/// (NXM-5 Task 2 fix round 2, finding F1). Test builds only.
+#[cfg(feature = "test-hooks")]
+pub use memory::{MemoryReviewPause, MemoryReviewRendezvous};
+pub use memory_provider::{LegacyContentMigration, LegacyMigrationStatus};
 pub use presets::PresetError;
 pub use principal::Principal;
 pub use references::{RegisterReferenceParams, REFERENCE_SOURCE_TYPES};
@@ -105,8 +110,12 @@ pub use references::{RegisterReferenceParams, REFERENCE_SOURCE_TYPES};
 pub use nexus_contracts::core::references::{
     ReferenceGetResponse, ReferenceListResponse, ReferenceSourceInfo,
 };
+// Provider-owned memory contract objects (spoke §6): the E1/E2 direct-core
+// callers name the Creator record and SOUL profile documents through
+// `nexus_core` instead of a second DTO set.
 pub use service::{CoreAccess, CoreOpenOptions, CoreService};
 pub use soul::CoreCharacterMind;
+pub use spoke_operations::spoke_schemas::{ProfileDocument, RetainedRecord};
 pub use storage_status::{CoreStorageStatus, CoreStorageVersions};
 pub use timeline::{CoreTimelineEventsQuery, CoreTimelineOverviewQuery};
 pub use works::{

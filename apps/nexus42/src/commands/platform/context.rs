@@ -7,9 +7,12 @@
 //! with its guidance/exit-2 arm; `assemble-moment` is the only context leaf.
 
 use crate::config::CliConfig;
+use crate::core::{map_core_error, with_read_only_core};
 use crate::errors::Result;
 use clap::Subcommand;
 use nexus_contracts::local::domain::RuntimeMode;
+use nexus_core::RetainedRecord;
+use nexus_creator_memory::soul::SoulDocument;
 use nexus_moment_context_assembly::cloud_stage::AssembleResponse;
 use nexus_moment_context_assembly::{
     assemble_moment_with_directive, build_inspector_packet, GenerationStage, MomentContext,
@@ -358,24 +361,33 @@ async fn build_stage0_from_local(
         )
     })?;
 
-    let home = crate::config::user_home_dir()?;
-
-    let bearer = nexus_creator_memory::MemoryBearerRef::Creator(creator_id);
-
-    // 1. Load SOUL.md
-    let soul = nexus_creator_memory::soul_io::load(&home, bearer)?;
-
-    // 2. List long-term memories (skip personality_core — already in SOUL personality)
-    let slugs = nexus_creator_memory::memory_io::list_memories(&home, bearer)?;
-    let mut long_term_memories = Vec::new();
-    for slug in &slugs {
-        if let Ok(mem) = nexus_creator_memory::memory_io::load_memory(&home, bearer, slug) {
-            if mem.frontmatter.memory_kind == "personality_core" {
-                continue;
-            }
-            long_term_memories.push(mem);
-        }
-    }
+    // 1+2. The SOUL document and the long-term memories are the provider's own
+    // surfaces (NXM-6): one read-only core serves both, so assembly keeps
+    // working beside a running daemon and never opens a bearer file.
+    let (personality, experience, long_term_memories) =
+        with_read_only_core(config, async |core, principal| {
+            let soul = core
+                .get_creator_soul(principal)
+                .await
+                .map_err(map_core_error)?
+                .ok_or_else(|| {
+                    crate::errors::CliError::Other(format!(
+                        "SOUL.md not found for creator '{creator_id}'."
+                    ))
+                })?;
+            let document = SoulDocument::parse(&soul.document.body)
+                .map_err(|error| crate::errors::CliError::Other(format!("SOUL.md: {error}")))?;
+            let records = core
+                .list_creator_memories(principal)
+                .await
+                .map_err(map_core_error)?;
+            Ok((
+                document.personality.unwrap_or_default(),
+                document.experience.unwrap_or_default(),
+                stage0_memories(records),
+            ))
+        })
+        .await?;
 
     // 3. Build fragment keywords (best-effort from daemon, optional)
     let fragment_keywords = if include_fragments {
@@ -386,14 +398,39 @@ async fn build_stage0_from_local(
 
     // 4. Build Stage0Assembly
     Ok(Stage0Assembly {
-        personality: soul.personality.clone().unwrap_or_default(),
-        experience: soul.experience.clone().unwrap_or_default(),
+        personality,
+        experience,
         long_term_memories,
         fragment_keywords,
         system_prefix: String::new(),
         user_prompt: hint.unwrap_or("").to_string(),
         max_tokens,
     })
+}
+
+/// The stage-0 long-term-memory selection: every live Creator record except
+/// `personality_core`, whose body is the SOUL personality section above.
+///
+/// A tombstoned record is a memory the user deleted, so it never enters prompt
+/// assembly: only a live record is assembled, and the sole kind-level exclusion
+/// is `personality_core` — the predicate applies no authored-kind taxonomy, so
+/// a provider kind outside the creator-memory set is admitted exactly as the
+/// assembly renders it (fix round 4, F4 narrowed the claim to what the
+/// predicate enforces; fix round 3, F4 dropped the tombstones). The assembly
+/// renders `memory_id`, `memory_kind`, `updated_at` and the body straight from
+/// the record's `nexus_legacy` block, so the typed records pass through
+/// unchanged (NXM-7's contract DTO).
+fn stage0_memories(records: Vec<RetainedRecord>) -> Vec<RetainedRecord> {
+    records
+        .into_iter()
+        .filter(|record| match record {
+            RetainedRecord::LiveRecord(live) => {
+                crate::commands::creator::memory::memory_kind_label(live.kind.as_str())
+                    != "personality_core"
+            }
+            RetainedRecord::TombstonedRecord(_) => false,
+        })
+        .collect()
 }
 
 /// Try to obtain a platform assemble response (best-effort).
@@ -2184,6 +2221,66 @@ mod tests {
         assert!(
             conflict.is_err(),
             "--inspect + --emit-packet must be rejected by clap"
+        );
+    }
+
+    /// One retained record from its wire JSON (`RetainedRecord` has no literal
+    /// constructor); `tombstoned` adds the audit block that selects the
+    /// tombstoned variant.
+    fn retained(kind: &str, text: &str, tombstoned: bool) -> RetainedRecord {
+        let mut record = serde_json::json!({
+            "record_id": format!("rec_{kind}_{text}"),
+            "space_id": "spc_local_default",
+            "subject_id": "sbj_test",
+            "kind": format!("nexus.{kind}"),
+            "content": { "text": text },
+            "extensions": {},
+            "scope": { "visibility": "shared" },
+            "provenance": {
+                "anchors": [],
+                "captured_at": "2026-01-01T00:00:00Z",
+                "captured_by": "nexus:legacy",
+                "source_context_ids": [],
+            },
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+            "revision": 1,
+            "schema_version": 1,
+        });
+        if tombstoned {
+            record["content"] = serde_json::json!({ "text": "" });
+            record["tombstone"] = serde_json::json!({
+                "deleted_at": "2026-01-02T00:00:00Z",
+                "deleted_by": "ctr_test",
+            });
+        }
+        serde_json::from_value(record).expect("retained record fixture")
+    }
+
+    /// F4 (BUG-01, `context.rs:432`) / fix round 4 F4: a user-deleted memory
+    /// never enters prompt assembly, the SOUL personality record stays out
+    /// because its body is already the personality section, and — as the
+    /// docstring now states — every other live kind is admitted; the predicate
+    /// applies no authored-kind taxonomy.
+    #[test]
+    fn stage0_drops_tombstoned_and_personality_records() {
+        let filtered = stage0_memories(vec![
+            retained("story_summary", "A live memory.", false),
+            retained("story_summary", "A deleted memory.", true),
+            retained("personality_core", "The personality section.", false),
+            retained("event", "A live record of another provider kind.", false),
+        ]);
+        let bodies: Vec<&str> = filtered
+            .iter()
+            .map(|record| match record {
+                RetainedRecord::LiveRecord(live) => live.content.text.as_str(),
+                RetainedRecord::TombstonedRecord(_) => panic!("a stage-0 memory is always live"),
+            })
+            .collect();
+        assert_eq!(
+            bodies,
+            ["A live memory.", "A live record of another provider kind."],
+            "the tombstone and the personality section are out; any other live kind is in"
         );
     }
 }

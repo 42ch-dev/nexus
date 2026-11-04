@@ -24,18 +24,22 @@ use nexus_contracts::daemon_api::memory::review_request::ReviewRequest;
 use nexus_contracts::generated::core::{
     CoreCharacterTransitionRequest, CoreCharacterTransitionRequestTargetStatus,
 };
-use nexus_core::{AdmittedActor, CoreAccess, CoreError, CoreOpenOptions, CoreService};
+use nexus_core::{
+    AdmittedActor, CoreAccess, CoreCharacterMind, CoreError, CoreOpenOptions, CoreService,
+    MemoryReviewPause, MemoryReviewRendezvous,
+};
 use nexus_creator_memory::bearer::MemoryBearerRef;
 use nexus_creator_memory::errors::MemoryError;
 use nexus_creator_memory::soul_narrative::{
     SoulNarrativeDraft, SoulNarrativeSynthesisInput, SoulNarrativeSynthesizer,
 };
-use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
+use nexus_local_db::writer_protocol::{init_engine_pool, init_guarded_pool, GuardedPoolOptions};
 use nexus_local_db::{
     create_character_with_initial_binding, ensure_creator_row, CreateCharacterParams,
 };
 use sqlx::SqlitePool;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tempfile::TempDir;
 
 const CREATOR: &str = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -135,6 +139,38 @@ async fn seed_env() -> Env {
     }
 }
 
+/// Materialize only the workspace shell and an **empty** state database: the
+/// pre-provider lifecycle a read-only core can open before any writer has
+/// migrated or provisioned it (fix round 3, finding F2).
+fn seed_unprovisioned_env() -> Env {
+    let tmp = TempDir::new().unwrap();
+    let user_home = tmp.path().to_path_buf();
+    let nexus_home = user_home.join(".nexus42");
+    std::fs::create_dir_all(&nexus_home).unwrap();
+    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+        &user_home, CREATOR, "default",
+    ))
+    .unwrap();
+    std::fs::write(
+        nexus_home.join("config.toml"),
+        format!(
+            "active_creator_id = \"{CREATOR}\"\n\
+             [active_workspace_slug_by_creator]\n\
+             \"{CREATOR}\" = \"default\""
+        ),
+    )
+    .unwrap();
+    let db_path = nexus_home_layout::workspace_state_db_path(&user_home, CREATOR, "default");
+    std::fs::write(&db_path, b"").unwrap();
+    Env {
+        _tmp: tmp,
+        user_home,
+        db_path,
+        character_id: String::new(),
+        binding_id: String::new(),
+    }
+}
+
 /// Open one engine-owner core against the seeded workspace.
 async fn open_core(env: &Env) -> (CoreService, nexus_core::Principal) {
     let core = CoreService::open(CoreOpenOptions {
@@ -157,6 +193,26 @@ async fn count_where(pool: &SqlitePool, sql: &str) -> i64 {
         .await
         .unwrap();
     n
+}
+
+/// The provider `fact` record bodies of one subject, in insertion order.
+async fn provider_fact_bodies(pool: &SqlitePool, subject_id: &str) -> Vec<String> {
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT content_json FROM memory_records WHERE kind = 'fact' AND subject_id = ? \
+         ORDER BY created_at, record_id",
+    )
+    .bind(subject_id)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    rows.into_iter()
+        .map(|(content,)| {
+            serde_json::from_str::<serde_json::Value>(&content).unwrap()["text"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string()
+        })
+        .collect()
 }
 
 fn dto<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> T {
@@ -403,10 +459,15 @@ async fn review_both_arms_share_classification_and_isolate_storage() {
     assert_eq!(char_out.fragmented, 1);
     assert_eq!(char_out.dropped, 1);
 
+    // Both queues drain through the provider: every candidate is adopted under
+    // the bridge's deterministic id and consumed in place, and the review writes
+    // provider records only — the legacy pending and fragment tables stay
+    // write-idle (compass D6).
     let pool = plain_pool(&env).await;
     assert_eq!(
         count_where(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
-        0
+        3,
+        "the Creator legacy queue is write-idle"
     );
     assert_eq!(
         count_where(
@@ -414,57 +475,65 @@ async fn review_both_arms_share_classification_and_isolate_storage() {
             "SELECT COUNT(*) FROM character_memory_pending_review"
         )
         .await,
+        3,
+        "the Character legacy queue is write-idle"
+    );
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM memory_fragments").await,
+        0,
+        "a review writes provider records, not legacy fragments"
+    );
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM character_memory_fragments").await,
         0
     );
-    assert_eq!(
-        count_where(
-            &pool,
-            &format!("SELECT COUNT(*) FROM memory_fragments WHERE creator_id = '{CREATOR}'")
+    let creator_subject = legacy::creator_subject_id(CREATOR);
+    let character_subject = legacy::character_subject_id(&chr);
+    for subject in [creator_subject.as_str(), character_subject.as_str()] {
+        let facts: Vec<(String,)> = sqlx::query_as(
+            "SELECT content_json FROM memory_records WHERE kind = 'fact' AND subject_id = ?",
         )
-        .await,
-        1
-    );
-    assert_eq!(
-        count_where(
-            &pool,
-            &format!("SELECT COUNT(*) FROM memory_fragments WHERE creator_id = '{OTHER}'")
+        .bind(subject)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            facts.len(),
+            1,
+            "one fragment record per subject ({subject})"
+        );
+        let promoted: Vec<(String,)> = sqlx::query_as(
+            "SELECT content_json FROM memory_records WHERE kind = 'nexus.story_summary' \
+             AND subject_id = ?",
         )
-        .await,
-        0,
-        "no fragment may cross to another creator"
-    );
-    assert_eq!(
-        count_where(
-            &pool,
-            &format!(
-                "SELECT COUNT(*) FROM character_memory_fragments WHERE character_id = '{chr}'"
-            )
-        )
-        .await,
-        1
-    );
+        .bind(subject)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            promoted.len(),
+            1,
+            "one promoted record per subject ({subject})"
+        );
+    }
     pool.close().await;
 
-    // The pipeline composes bearer paths off the nexus root (the same
-    // `state.nexus_home()` the daemon passed), not the raw user home.
-    let nexus_root = nexus_home_layout::nexus_root_from_home(&env.user_home);
-    let cdir = MemoryBearerRef::Creator(CREATOR).long_term_memory_dir(&nexus_root);
-    let hdir = MemoryBearerRef::Character {
-        owner_creator_id: CREATOR,
-        character_id: &chr,
+    // Every queue entry — promoted, fragmented and dropped alike — was consumed
+    // under the bridge's deterministic id on both arms.
+    for pending_id in ["c_p", "c_f", "c_d"] {
+        for candidate_id in [
+            legacy::pending_review_candidate_id(pending_id),
+            legacy::character_pending_review_candidate_id(pending_id),
+        ] {
+            assert_eq!(
+                adopted_candidate(&env, &candidate_id)
+                    .await
+                    .map(|(status, _)| status),
+                Some("consumed".to_string()),
+                "{candidate_id} is consumed by the drain"
+            );
+        }
     }
-    .long_term_memory_dir(&nexus_root);
-    assert_ne!(cdir, hdir);
-    assert_eq!(
-        std::fs::read_dir(&cdir).unwrap().count(),
-        1,
-        "creator memory dir"
-    );
-    assert_eq!(
-        std::fs::read_dir(&hdir).unwrap().count(),
-        1,
-        "character memory dir"
-    );
 }
 
 fn json_req(binding_id: &str, pending_id: &str) -> serde_json::Value {
@@ -815,27 +884,6 @@ async fn seed_creator_fragments(env: &Env, count: usize) {
     pool.close().await;
 }
 
-/// Pre-insert the fragment id a later `FragmentOnly` action mints for
-/// `pending_id` (`frag_{pending_id}`), so that action collides on the primary
-/// key and fails, leaving the pending row in place.
-async fn block_fragment_creation(pool: &SqlitePool, pending_id: &str) {
-    nexus_local_db::memory_fragment::create_fragment(
-        pool,
-        &nexus_local_db::memory_fragment::MemoryFragmentRecord {
-            fragment_id: format!("frag_{pending_id}"),
-            session_id: "sess_block".to_string(),
-            creator_id: CREATOR.to_string(),
-            keywords: "[]".to_string(),
-            summary: "blocker".to_string(),
-            created_at: "2026-01-01T00:00:00Z".to_string(),
-            ttl: None,
-            world_id: None,
-        },
-    )
-    .await
-    .unwrap();
-}
-
 fn creator_review_request() -> ReviewRequest {
     dto::<ReviewRequest>(serde_json::json!({ "creator_id": CREATOR }))
 }
@@ -1020,33 +1068,58 @@ async fn retained_creator_review_drain_is_bounded_and_keeps_remaining_rows() {
     );
     pool.close().await;
 
-    // One bounded call: at most the batch limit, and more rows signalled.
+    // One bounded call: never more than the batch limit, and more rows
+    // signalled. The provider commits a durable record set per row, so a call
+    // can also stop at its own deadline; partial progress is the retained
+    // contract and repeated calls drain the queue.
     let first = core
         .review_memory(&principal, creator_review_request())
         .await
         .unwrap();
-    assert_eq!(
-        first.processed,
-        Some(50),
-        "one call processes the batch bound"
+    let first_processed = first.processed.expect("processed count");
+    assert!(
+        first_processed > 0 && first_processed <= 50,
+        "one call is bounded by the batch bound, got {first_processed}"
     );
     assert_eq!(
         first.has_more,
         Some(true),
         "remaining rows must be signalled"
     );
-    assert_eq!(first.fragmented, 50);
-    assert_eq!(first.promoted, 0);
-    assert_eq!(first.dropped, 0);
+    assert_eq!(first.promoted + first.dropped, 0);
+    assert!(
+        first.fragmented <= first_processed,
+        "an attempt the deadline stopped counts as processed but not completed"
+    );
 
-    // The remainder drains and the drain reports completion.
-    let second = core
-        .review_memory(&principal, creator_review_request())
-        .await
-        .unwrap();
-    assert_eq!(second.processed, Some(5), "the second call drains the tail");
-    assert_eq!(second.has_more, Some(false));
-    assert_eq!(second.fragmented, 5);
+    // Repeated calls drain the remainder; every call stays bounded and the
+    // drain reports completion once the queue is empty. `processed` counts
+    // attempts, so a deadline-stopped row is retried by the next call and
+    // completes exactly once.
+    let mut fragmented = first.fragmented;
+    let mut completed = false;
+    for _ in 0..=DRAIN_TOTAL {
+        let next = core
+            .review_memory(&principal, creator_review_request())
+            .await
+            .unwrap();
+        assert!(
+            next.processed.expect("processed count") <= 50,
+            "every call is bounded"
+        );
+        assert_eq!(next.promoted + next.dropped, 0);
+        fragmented += next.fragmented;
+        if next.has_more == Some(false) {
+            completed = true;
+            break;
+        }
+    }
+    assert!(completed, "the drain must report completion");
+    assert_eq!(
+        fragmented,
+        i64::try_from(DRAIN_TOTAL).unwrap(),
+        "every seeded row completes exactly once"
+    );
 
     // A call on the empty queue reports zero work and completion.
     let third = core
@@ -1057,16 +1130,30 @@ async fn retained_creator_review_drain_is_bounded_and_keeps_remaining_rows() {
     assert_eq!(third.has_more, Some(false));
     assert_eq!(third.promoted + third.fragmented + third.dropped, 0);
 
-    // No row was lost and none was processed twice: the queue is empty and
-    // exactly one fragment exists per seeded row.
+    // No row was lost and none was processed twice: the provider queue is empty,
+    // exactly one fragment record exists per seeded candidate, and the legacy
+    // table never changed (compass D6).
     let pool = plain_pool(&env).await;
     assert_eq!(
         count_where(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
-        0,
-        "the queue is fully drained"
+        i64::try_from(DRAIN_TOTAL).unwrap(),
+        "the legacy queue stays write-idle"
     );
     assert_eq!(
-        count_where(&pool, "SELECT COUNT(*) FROM memory_fragments").await,
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM memory_candidates WHERE status = 'pending'"
+        )
+        .await,
+        0,
+        "every provider candidate was consumed"
+    );
+    assert_eq!(
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM memory_records WHERE kind = 'fact'"
+        )
+        .await,
         i64::try_from(DRAIN_TOTAL).unwrap(),
         "one fragment per seeded row, no duplicate insert"
     );
@@ -1074,91 +1161,91 @@ async fn retained_creator_review_drain_is_bounded_and_keeps_remaining_rows() {
 }
 
 /// Ported from the daemon W-QC3-001 drain-completion regressions
-/// (`memory_review_fragments_api.rs`): `has_more` reflects whether pending rows
-/// REMAIN, not whether rows were attempted. A row whose action fails is not
-/// deleted, so `has_more` stays true (never a false "Review complete") and the
-/// fragment insert that could not consume exactly one pending row is rolled
-/// back rather than duplicated.
+/// (`memory_review_fragments_api.rs`): `has_more` reflects whether candidates
+/// REMAIN, not whether rows were attempted. A row whose decision fails at its
+/// commit boundary stays pending, so `has_more` stays true (never a false
+/// "Review complete"), the other rows still complete, and the retried row is
+/// consumed exactly once.
 #[tokio::test]
 async fn retained_creator_review_row_failure_keeps_has_more_true() {
-    // Only pending row fails: the serialized call re-inspects it, reports
-    // has_more, counts nothing, and never drops it.
     let env = seed_env().await;
     let (core, principal) = open_core(&env).await;
-    seed_creator_pending(&env, "pending_blocked", 1).await;
-    let pool = plain_pool(&env).await;
-    block_fragment_creation(&pool, "pending_blocked_000").await;
-    pool.close().await;
+    seed_creator_pending(&env, "pending_blocked", 2).await;
+    let pinned = core.memory_provider_for_test().expect("pinned provider");
 
-    for call in 1..=3 {
-        let out = core
-            .review_memory(&principal, creator_review_request())
-            .await
-            .unwrap();
-        assert_eq!(
-            out.processed,
-            Some(1),
-            "call {call}: the row is re-inspected"
-        );
-        assert_eq!(
-            out.has_more,
-            Some(true),
-            "call {call}: has_more must stay true while a row remains"
-        );
-        assert_eq!(out.promoted, 0, "call {call}");
-        assert_eq!(out.fragmented, 0, "call {call}: nothing completed");
-        assert_eq!(out.dropped, 0, "call {call}");
-        let pool = plain_pool(&env).await;
-        assert_eq!(
-            count_where(
-                &pool,
-                "SELECT COUNT(*) FROM memory_pending_review WHERE pending_id = 'pending_blocked_000'"
-            )
-            .await,
-            1,
-            "call {call}: the failed row must never be dropped"
-        );
-        assert_eq!(
-            count_where(&pool, "SELECT COUNT(*) FROM memory_fragments").await,
-            1,
-            "call {call}: the blocked fragment is never duplicated"
-        );
-        pool.close().await;
-    }
-
-    // Final-row failure inside a batch: every other row completes, the blocked
-    // row (oldest, therefore processed last) stays pending and has_more is true.
-    let env = seed_env().await;
-    let (core, principal) = open_core(&env).await;
-    seed_creator_pending(&env, "pending_blocked", 4).await;
-    let pool = plain_pool(&env).await;
-    block_fragment_creation(&pool, "pending_blocked_000").await;
-    pool.close().await;
-
-    let out = core
-        .review_memory(&principal, creator_review_request())
+    // Park the drain after its re-check (the adapter is open, the slice is
+    // selected) and arm the §14.3 commit-boundary fault: the next row's decision
+    // fails before its COMMIT and leaves no effect.
+    let (entered, release) = arm_review_pause(&core, MemoryReviewPause::AfterRecheck);
+    let drain = tokio::spawn({
+        let core = core.clone();
+        let principal = principal.clone();
+        async move {
+            core.review_memory(&principal, creator_review_request())
+                .await
+        }
+    });
+    entered.notified().await;
+    pinned.inject_commit_fault(false);
+    release.notify_one();
+    let out = drain
         .await
-        .unwrap();
-    assert_eq!(out.processed, Some(4), "all four rows were inspected");
-    assert_eq!(out.fragmented, 3, "only the blocked row failed");
+        .unwrap()
+        .expect("the batch survives one failed row");
+    assert_eq!(out.processed, Some(2), "both rows were inspected");
+    assert_eq!(out.fragmented, 1, "the other row completed");
     assert_eq!(
         out.has_more,
         Some(true),
-        "has_more must be true when the final row in the batch remains pending"
+        "has_more must stay true while a row remains"
+    );
+    assert_eq!(
+        core.count_pending_reviews(&principal).await.unwrap().count,
+        1,
+        "the failed row is still queued"
     );
     let pool = plain_pool(&env).await;
     assert_eq!(
-        count_where(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
+        count_where(&pool, "SELECT COUNT(*) FROM memory_candidates").await,
         1,
-        "only the failed row remains pending"
+        "only the completed row was adopted and consumed"
     );
     assert_eq!(
         count_where(
             &pool,
-            "SELECT COUNT(*) FROM memory_pending_review WHERE pending_id = 'pending_blocked_000'"
+            "SELECT COUNT(*) FROM memory_records WHERE kind = 'fact'"
         )
         .await,
-        1
+        1,
+        "only the completed row recorded a fragment"
+    );
+    pool.close().await;
+
+    // The retry classifies the remaining row and drains the queue.
+    let retried = core
+        .review_memory(&principal, creator_review_request())
+        .await
+        .expect("the retry drains the remaining row");
+    assert_eq!(retried.processed, Some(1));
+    assert_eq!(
+        retried.fragmented, 1,
+        "the retried row completes exactly once"
+    );
+    assert_eq!(retried.has_more, Some(false));
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM memory_records WHERE kind = 'fact'"
+        )
+        .await,
+        2,
+        "no fragment is duplicated and none is lost"
+    );
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
+        2,
+        "the legacy queue was never written"
     );
     pool.close().await;
 }
@@ -1524,28 +1611,52 @@ async fn retained_character_review_batch_is_bounded_and_reports_remaining() {
         )
         .await
         .unwrap();
-    assert_eq!(
-        first.processed,
-        Some(50),
-        "one call processes the batch bound"
+    let first_processed = first.processed.expect("processed count");
+    assert!(
+        first_processed > 0 && first_processed <= 50,
+        "one call is bounded by the batch bound, got {first_processed}"
     );
     assert_eq!(
         first.has_more,
         Some(true),
         "remaining rows must be signalled"
     );
-    assert_eq!(first.dropped, 50);
+    assert!(
+        first.dropped <= first_processed,
+        "an attempt the deadline stopped counts as processed but not completed"
+    );
 
-    let second = core
-        .review_character_memory(
-            &principal,
-            chr.clone(),
-            dto::<ReviewCharacterMemoryRequest>(serde_json::json!({})),
-        )
-        .await
-        .unwrap();
-    assert_eq!(second.processed, Some(3), "the second call drains the tail");
-    assert_eq!(second.has_more, Some(false));
+    // Repeated calls drain the remainder; every call stays bounded and the
+    // drain reports completion once the queue is empty. `processed` counts
+    // attempts, so a deadline-stopped row is retried by the next call and
+    // completes exactly once.
+    let mut dropped = first.dropped;
+    let mut completed = false;
+    for _ in 0..=TOTAL {
+        let next = core
+            .review_character_memory(
+                &principal,
+                chr.clone(),
+                dto::<ReviewCharacterMemoryRequest>(serde_json::json!({})),
+            )
+            .await
+            .unwrap();
+        assert!(
+            next.processed.expect("processed count") <= 50,
+            "every call is bounded"
+        );
+        dropped += next.dropped;
+        if next.has_more == Some(false) {
+            completed = true;
+            break;
+        }
+    }
+    assert!(completed, "the drain must report completion");
+    assert_eq!(
+        dropped,
+        i64::try_from(TOTAL).unwrap(),
+        "every seeded row completes exactly once"
+    );
 
     let third = core
         .review_character_memory(
@@ -1565,13 +1676,22 @@ async fn retained_character_review_batch_is_bounded_and_reports_remaining() {
             "SELECT COUNT(*) FROM character_memory_pending_review"
         )
         .await,
-        0,
-        "the queue is fully drained"
+        i64::try_from(TOTAL).unwrap(),
+        "the legacy queue stays write-idle"
     );
     assert_eq!(
         count_where(&pool, "SELECT COUNT(*) FROM character_memory_fragments").await,
         0,
         "dropped digests create no fragments"
+    );
+    assert_eq!(
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM memory_candidates WHERE status = 'pending'"
+        )
+        .await,
+        0,
+        "every provider candidate was consumed"
     );
     pool.close().await;
 }
@@ -1696,4 +1816,4788 @@ fn transition_request(
         .target_status(target)
         .try_into()
         .expect("transition request is wire-valid")
+}
+
+// ═══ NXM-5 Task 1: provider-seam legacy read bridge ═══════════════════════
+//
+// The bridge projects the legacy bearer surfaces (tables and files) as
+// provider-native rows, so one `MemoryPort` read path serves both the
+// provider's own content and unmigrated legacy content. These tests pin the
+// merged view: provider-native and projected rows appear through the same
+// read, the projected ids are deterministic, and nothing is written to the
+// legacy surfaces by a read.
+
+use nexus_core::memory_provider::legacy;
+use nexus_core::memory_provider::LocalMemoryProvider;
+use spoke_operations::spoke_schemas as bridge_schemas;
+use spoke_operations::{MemoryPort, SpokeResult};
+
+const BRIDGE_SPACE: &str = "spc_local_default";
+const BRIDGE_CREATOR_SUBJECT: &str = "sbj_bridge_creator";
+const BRIDGE_CHARACTER_SUBJECT: &str = "sbj_bridge_character";
+const BRIDGE_TEXT: &str = "Provider-native record written by the current provider.";
+const BRIDGE_SOUL: &str = "# Soul\n\nA bridge-authored soul document.\n";
+
+fn bridge_principal() -> bridge_schemas::Principal {
+    dto(serde_json::json!({ "principal_id": CREATOR, "extensions": {} }))
+}
+
+/// The success payload of a typed port result; a refusal panics with its code.
+fn bridge_ok<T: serde::Serialize>(result: &SpokeResult<T>) -> serde_json::Value {
+    match result {
+        SpokeResult::Ok(value) => serde_json::to_value(value).expect("serializable response"),
+        SpokeResult::Reject(reject) => panic!(
+            "expected success, got {}: {}",
+            reject.code.as_str(),
+            reject.message
+        ),
+    }
+}
+
+async fn open_bridge_provider(env: &Env) -> LocalMemoryProvider {
+    LocalMemoryProvider::open(env.user_home.clone(), CREATOR, "default")
+        .await
+        .expect("provider open")
+}
+
+/// Opt a provider subject into the legacy projection of one bearer.
+fn bridge_ensure_request(
+    subject: &str,
+    namespace: &str,
+    kind_id: &str,
+) -> bridge_schemas::MemorySubjectsEnsureRequest {
+    bridge_ensure_request_in(BRIDGE_SPACE, subject, namespace, kind_id)
+}
+
+fn bridge_ensure_request_in(
+    space_id: &str,
+    subject: &str,
+    namespace: &str,
+    kind_id: &str,
+) -> bridge_schemas::MemorySubjectsEnsureRequest {
+    dto(serde_json::json!({
+        "space_id": space_id,
+        "subject_id": subject,
+        "kind": { "ns": namespace, "id": kind_id },
+    }))
+}
+
+#[allow(clippy::needless_pass_by_value)] // one request builder per test read
+fn bridge_records_request(
+    subject: &str,
+    selection: serde_json::Value,
+    kinds: serde_json::Value,
+) -> bridge_schemas::MemoryRecordsListRequest {
+    bridge_records_request_in(BRIDGE_SPACE, subject, selection, kinds)
+}
+
+#[allow(clippy::needless_pass_by_value)] // one request builder per test read
+fn bridge_records_request_in(
+    space_id: &str,
+    subject: &str,
+    selection: serde_json::Value,
+    kinds: serde_json::Value,
+) -> bridge_schemas::MemoryRecordsListRequest {
+    dto(serde_json::json!({
+        "space_id": space_id,
+        "subject_id": subject,
+        "selection": selection,
+        "kinds": kinds,
+    }))
+}
+
+fn bridge_recall_request(subject: &str) -> bridge_schemas::MemoryRecallRequest {
+    dto(serde_json::json!({
+        "space_id": BRIDGE_SPACE,
+        "subject_id": subject,
+        "selection": { "mode": "subject_all" },
+        "budget": { "max_items": 50 },
+    }))
+}
+
+fn bridge_record_get_request(record_id: &str) -> bridge_schemas::MemoryRecordsGetRequest {
+    dto(serde_json::json!({ "space_id": BRIDGE_SPACE, "record_id": record_id }))
+}
+
+fn bridge_report_ids(body: &serde_json::Value, field: &str) -> Vec<String> {
+    body[field]
+        .as_array()
+        .unwrap_or_else(|| panic!("expected `{field}` to be an array: {body}"))
+        .iter()
+        .map(|row| {
+            row["record_id"]
+                .as_str()
+                .unwrap_or_else(|| panic!("expected a record id in {row}"))
+                .to_string()
+        })
+        .collect()
+}
+
+/// The wire reject code of a refused port result; a success panics.
+fn bridge_reject_code<T>(result: &SpokeResult<T>) -> String {
+    match result {
+        SpokeResult::Ok(_) => panic!("expected a refusal"),
+        SpokeResult::Reject(reject) => reject.code.as_str().to_string(),
+    }
+}
+
+/// One records page under an explicit limit and cursor.
+fn bridge_records_page_request(
+    subject: &str,
+    limit: u64,
+    cursor: Option<&str>,
+) -> bridge_schemas::MemoryRecordsListRequest {
+    dto(serde_json::json!({
+        "space_id": BRIDGE_SPACE,
+        "subject_id": subject,
+        "selection": { "mode": "subject_all" },
+        "kinds": [],
+        "limit": limit,
+        "cursor": cursor,
+    }))
+}
+
+/// Publish P5's completion marker for one space the way the migration pass
+/// does: a `memory_provider_meta` row written by a registered core writer.
+async fn publish_migration_marker(env: &Env, space_id: &str) {
+    let guarded = init_guarded_pool(&env.db_path, CREATOR).await.unwrap();
+    let pool = guarded.clone_pool();
+    sqlx::query("INSERT INTO memory_provider_meta (key, value, updated_at) VALUES (?, ?, ?)")
+        .bind(legacy::legacy_migration_key(space_id))
+        .bind("2026-11-02T00:00:00Z")
+        .bind("2026-11-02T00:00:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    drop(guarded);
+}
+
+/// Capture one provider-native pending candidate under `subject` and return its
+/// id, so a marker scenario can prove the provider's own state stays readable.
+async fn native_pending_candidate(
+    provider: &LocalMemoryProvider,
+    admin: &bridge_schemas::Principal,
+    subject: &str,
+    idempotency_key: &str,
+) -> String {
+    let captured = bridge_ok(
+        &provider
+            .capture(
+                admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": subject,
+                    "content": { "text": FRAGMENT_DIGEST },
+                    "capture_scope": { "visibility": "shared" },
+                    "source_context_ids": [],
+                    "idempotency_key": idempotency_key,
+                })),
+            )
+            .await,
+    );
+    captured["result"]["candidate_ids"][0]
+        .as_str()
+        .expect("a committed capture names its candidate")
+        .to_string()
+}
+
+/// Seed every Creator legacy surface the bridge projects: one fragment, one
+/// soul narrative, one long-term memory file, `SOUL.md` and one pending-review
+/// row.
+async fn seed_legacy_creator_content(env: &Env) {
+    let pool = plain_pool(env).await;
+    nexus_local_db::memory_fragment::create_fragment(
+        &pool,
+        &nexus_local_db::memory_fragment::MemoryFragmentRecord {
+            fragment_id: "frag_bridge".to_string(),
+            session_id: "sess_bridge".to_string(),
+            creator_id: CREATOR.to_string(),
+            keywords: serde_json::json!(["kw_bridge"]).to_string(),
+            summary: "Legacy creator fragment text.".to_string(),
+            created_at: "2026-03-01T00:00:00Z".to_string(),
+            ttl: None,
+            world_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    nexus_local_db::upsert_soul_narrative(
+        &pool,
+        &nexus_local_db::SoulNarrativeRecord {
+            creator_id: CREATOR.to_string(),
+            world_id: None,
+            narrative: Some("Legacy soul narrative.".to_string()),
+            generated_at: Some("2026-03-01T00:00:01Z".to_string()),
+            fragment_count_at_generation: 1,
+            max_fragment_created_at_at_generation: None,
+            distinct_keyword_count_cache: 1,
+            stats_fingerprint: None,
+            created_at: "2026-03-01T00:00:01Z".to_string(),
+            updated_at: "2026-03-01T00:00:01Z".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    nexus_local_db::create_pending_review(
+        &pool,
+        &nexus_local_db::PendingReviewRecord {
+            pending_id: "pend_bridge".to_string(),
+            session_id: "sess_pend_bridge".to_string(),
+            creator_id: CREATOR.to_string(),
+            world_id: Some(WORLD.to_string()),
+            task_kind: "research".to_string(),
+            raw_digest: FRAGMENT_DIGEST.to_string(),
+            created_at: "2026-03-01T00:00:02Z".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let home = env.user_home.as_path();
+    let bearer = MemoryBearerRef::Creator(CREATOR);
+    let mut memory = nexus_creator_memory::LongTermMemory::new("story_summary");
+    memory.set_body("Legacy long-term body.");
+    nexus_creator_memory::memory_io::save_memory(home, bearer, "bridge-memory", &memory)
+        .expect("long-term memory fixture");
+    std::fs::write(
+        nexus_home_layout::creator_soul_md_path(home, CREATOR),
+        BRIDGE_SOUL,
+    )
+    .expect("SOUL.md fixture");
+}
+
+/// Existing content that still lives only in a bearer file is editable and
+/// deletable before P5's migration (NXM-6 fix round 1, finding F2).
+///
+/// The mutation adopts the projected row under the bridge's deterministic id
+/// inside its own guarded transaction, so the user's write lands on the provider
+/// and the legacy file keeps every byte it had (D6).
+#[tokio::test]
+async fn creator_mutations_adopt_projected_legacy_memories() {
+    let env = seed_env().await;
+    seed_legacy_creator_content(&env).await;
+    let bearer = MemoryBearerRef::Creator(CREATOR);
+    let memory_path = bearer.long_term_memory_path(&env.user_home, "bridge-memory");
+    let projected_bytes = std::fs::read(&memory_path).expect("legacy memory bytes");
+    let mut personality = nexus_creator_memory::LongTermMemory::new("personality_core");
+    personality.set_body("Projected personality body.");
+    nexus_creator_memory::memory_io::save_memory(
+        &env.user_home,
+        bearer,
+        "personality-core",
+        &personality,
+    )
+    .expect("personality memory fixture");
+    let personality_path = bearer.long_term_memory_path(&env.user_home, "personality-core");
+    let personality_bytes = std::fs::read(&personality_path).expect("legacy personality bytes");
+
+    let (core, principal) = open_core(&env).await;
+
+    // The read serves the projection …
+    let listed = serde_json::to_value(
+        core.get_creator_memory(&principal, "bridge-memory")
+            .await
+            .unwrap()
+            .expect("the projected memory is listed"),
+    )
+    .unwrap();
+    assert_eq!(listed["content"]["text"], "Legacy long-term body.");
+
+    // … and the edit replaces it on the provider.
+    assert!(core
+        .update_creator_memory(&principal, "bridge-memory", "Edited body.", None)
+        .await
+        .expect("the edit adopts the projection"));
+    let edited = serde_json::to_value(
+        core.get_creator_memory(&principal, "bridge-memory")
+            .await
+            .unwrap()
+            .expect("the edited memory is listed"),
+    )
+    .unwrap();
+    assert_eq!(edited["content"]["text"], "Edited body.");
+    assert_eq!(
+        std::fs::read(&memory_path).unwrap(),
+        projected_bytes,
+        "the edit never writes the legacy file"
+    );
+
+    // The SOUL push targets the same kind of projected row.
+    let pushed = serde_json::to_value(
+        core.push_creator_personality(&principal, "Pushed personality section.")
+            .await
+            .expect("the push adopts the projection"),
+    )
+    .unwrap();
+    assert_eq!(pushed["content"]["text"], "Pushed personality section.");
+    assert_eq!(
+        std::fs::read(&personality_path).unwrap(),
+        personality_bytes,
+        "the push never writes the legacy file"
+    );
+
+    // The delete tombstones the adopted row while the file stays as it was.
+    assert!(core
+        .delete_creator_memory(&principal, "bridge-memory")
+        .await
+        .expect("the delete adopts the projection"));
+    assert!(core
+        .get_creator_memory(&principal, "bridge-memory")
+        .await
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        std::fs::read(&memory_path).unwrap(),
+        projected_bytes,
+        "the delete never writes the legacy file"
+    );
+}
+
+/// A projected record that was never edited is deleted directly, through the
+/// delete-only adoption route (NXM-6 fix round 2, R2-F2). The record disappears
+/// from reads and the legacy bearer file keeps every byte it had (D6).
+#[tokio::test]
+async fn creator_delete_adopts_an_unmodified_projected_legacy_memory() {
+    let env = seed_env().await;
+    seed_legacy_creator_content(&env).await;
+    let bearer = MemoryBearerRef::Creator(CREATOR);
+    let memory_path = bearer.long_term_memory_path(&env.user_home, "bridge-memory");
+    let projected_bytes = std::fs::read(&memory_path).expect("legacy memory bytes");
+
+    let (core, principal) = open_core(&env).await;
+
+    // Reading the projection is not a mutation, so the delete below is the
+    // first and only write this record ever sees.
+    assert!(core
+        .get_creator_memory(&principal, "bridge-memory")
+        .await
+        .unwrap()
+        .is_some());
+    assert!(core
+        .delete_creator_memory(&principal, "bridge-memory")
+        .await
+        .expect("the delete adopts the untouched projection"));
+    assert!(core
+        .get_creator_memory(&principal, "bridge-memory")
+        .await
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        std::fs::read(&memory_path).unwrap(),
+        projected_bytes,
+        "the delete never writes the legacy file"
+    );
+}
+
+/// An interactive edit's read is the write's precondition, and two different
+/// mutations never share an idempotency key (NXM-6 fix round 1, F3/F4).
+#[tokio::test]
+async fn creator_memory_writes_guard_the_read_revision_and_name_their_mutation() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    assert!(core
+        .create_creator_memory(&principal, "edit-guard", "story_summary", "First body.")
+        .await
+        .unwrap());
+
+    // The editor's read: the identity and revision it carries into the write.
+    let read = serde_json::to_value(
+        core.get_creator_memory(&principal, "edit-guard")
+            .await
+            .unwrap()
+            .expect("the created memory is listed"),
+    )
+    .unwrap();
+    let expected = nexus_core::MemoryRevision {
+        record_id: read["record_id"]
+            .as_str()
+            .expect("the record names itself")
+            .to_string(),
+        revision: read["revision"]
+            .as_u64()
+            .expect("the record carries a revision"),
+    };
+
+    // A concurrent writer commits while the editor is open.
+    assert!(core
+        .update_creator_memory(&principal, "edit-guard", "Concurrent body.", None)
+        .await
+        .unwrap());
+    let error = core
+        .update_creator_memory(
+            &principal,
+            "edit-guard",
+            "Stale editor body.",
+            Some(&expected),
+        )
+        .await
+        .expect_err("a stale editor revision is refused");
+    assert_conflict(error, "version_mismatch");
+    let current = serde_json::to_value(
+        core.get_creator_memory(&principal, "edit-guard")
+            .await
+            .unwrap()
+            .expect("the memory still exists"),
+    )
+    .unwrap();
+    assert_eq!(
+        current["content"]["text"], "Concurrent body.",
+        "the concurrent change survives the stale write"
+    );
+
+    // Repeated edits of one slug are distinct mutations: X, Y, X all land.
+    assert!(core
+        .update_creator_memory(&principal, "edit-guard", "Edited again.", None)
+        .await
+        .unwrap());
+    assert!(core
+        .update_creator_memory(&principal, "edit-guard", "Concurrent body.", None)
+        .await
+        .unwrap());
+    let current = serde_json::to_value(
+        core.get_creator_memory(&principal, "edit-guard")
+            .await
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(current["content"]["text"], "Concurrent body.");
+
+    // delete → recreate → delete is three mutations of the same slug.
+    assert!(core
+        .create_creator_memory(&principal, "recycled", "story_summary", "Recycled body.")
+        .await
+        .unwrap());
+    assert!(core
+        .delete_creator_memory(&principal, "recycled")
+        .await
+        .unwrap());
+    assert!(core
+        .create_creator_memory(&principal, "recycled", "story_summary", "Recycled body.")
+        .await
+        .unwrap());
+    assert!(core
+        .delete_creator_memory(&principal, "recycled")
+        .await
+        .unwrap());
+    assert!(core
+        .get_creator_memory(&principal, "recycled")
+        .await
+        .unwrap()
+        .is_none());
+}
+
+/// Each SOUL refresh is a distinct mutation of the profile revision, so a
+/// second refresh cannot collide with the first one's receipt (NXM-6 fix round
+/// 1, finding F4).
+#[tokio::test]
+async fn creator_experience_refresh_repeats_without_a_key_collision() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    core.set_creator_soul(&principal, "# Soul\n\nAuthored body.\n", None)
+        .await
+        .expect("create the SOUL document");
+    assert!(core
+        .create_creator_memory(
+            &principal,
+            "experience-source",
+            "story_summary",
+            "The alliance holds the harbor."
+        )
+        .await
+        .unwrap());
+
+    let (first, processed) = core
+        .refresh_creator_experience(&principal)
+        .await
+        .expect("first refresh");
+    assert_eq!(processed, 1, "one memory feeds the Experience section");
+    let (second, _) = core
+        .refresh_creator_experience(&principal)
+        .await
+        .expect("a repeated refresh is a new mutation, not a receipt collision");
+    assert_eq!(first, second, "the rendered section is deterministic");
+    let soul = core
+        .get_creator_soul(&principal)
+        .await
+        .unwrap()
+        .expect("the SOUL document exists");
+    assert!(
+        soul.document
+            .body
+            .contains("### Story Summary: experience-source"),
+        "the SOUL carries the rendered Experience section: {}",
+        soul.document.body
+    );
+}
+
+/// Seed the Character legacy surfaces: one binding-local fragment and one run
+/// capture receipt (which also enqueues its own pending row).
+async fn seed_legacy_character_content(env: &Env) {
+    // `character_run_captures` is engine-owned (§5.2 capture lane): its writer
+    // guard admits only an engine-mode writer, unlike the direct-mode surfaces
+    // the other seeds use.
+    let guarded = init_engine_pool(&env.db_path, CREATOR, GuardedPoolOptions::default())
+        .await
+        .unwrap();
+    let pool = guarded.clone_pool();
+    let lifecycle_epoch: i64 =
+        sqlx::query_scalar("SELECT lifecycle_epoch FROM characters WHERE character_id = ?")
+            .bind(&env.character_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    nexus_local_db::create_character_fragment(
+        &pool,
+        CREATOR,
+        &nexus_local_db::NewCharacterMemoryFragment {
+            fragment_id: "hfrag_bridge".to_string(),
+            session_id: "hsess_bridge".to_string(),
+            character_id: env.character_id.clone(),
+            actor_world_binding_id: Some(env.binding_id.clone()),
+            keywords: serde_json::json!(["kw_binding"]).to_string(),
+            summary: "Binding-local character fragment.".to_string(),
+            created_at: "2026-03-02T00:00:00Z".to_string(),
+            ttl: None,
+        },
+    )
+    .await
+    .unwrap();
+    nexus_local_db::capture_character_run(
+        &pool,
+        CREATOR,
+        nexus_local_db::RunCaptureInput {
+            operation_id: "op_bridge",
+            session_id: "sess_run_bridge",
+            character_id: &env.character_id,
+            binding_id: &env.binding_id,
+            pending_id: "pend_char_bridge",
+            raw_digest: FRAGMENT_DIGEST,
+            captured_at: "2026-03-02T00:00:01Z",
+            lifecycle_epoch,
+        },
+    )
+    .await
+    .unwrap();
+    pool.close().await;
+    drop(guarded);
+}
+
+#[tokio::test]
+async fn merged_reads_serve_provider_native_and_projected_legacy_records() {
+    let env = seed_env().await;
+    seed_legacy_creator_content(&env).await;
+    // The read bridge is read-only: the bearer files are the input, never an
+    // output, so their bytes must survive every merged read below.
+    let long_term_path =
+        MemoryBearerRef::Creator(CREATOR).long_term_memory_path(&env.user_home, "bridge-memory");
+    let soul_path = nexus_home_layout::creator_soul_md_path(&env.user_home, CREATOR);
+    let long_term_before = std::fs::read(&long_term_path).expect("long-term file bytes");
+    let soul_before = std::fs::read(&soul_path).expect("SOUL.md bytes");
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    bridge_ok(
+        &provider
+            .ensure_subject(
+                &admin,
+                bridge_ensure_request(BRIDGE_CREATOR_SUBJECT, legacy::CREATOR_KIND_NS, CREATOR),
+            )
+            .await,
+    );
+    let created = bridge_ok(
+        &provider
+            .create_record(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": BRIDGE_CREATOR_SUBJECT,
+                    "kind": "note",
+                    "content": { "text": BRIDGE_TEXT },
+                    "scope": { "visibility": "shared" },
+                    "idempotency_key": "k-bridge-native",
+                })),
+            )
+            .await,
+    );
+    let native_id = created["result"]["record_id"]
+        .as_str()
+        .expect("a created record id")
+        .to_string();
+
+    let listed = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    BRIDGE_CREATOR_SUBJECT,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    let ids = bridge_report_ids(&listed, "records");
+    assert_eq!(
+        listed["total_authorized"], 4,
+        "the provider's own record and the three projected legacy records share one authorized set: {listed}"
+    );
+    assert!(
+        ids.contains(&native_id),
+        "provider-native row missing: {ids:?}"
+    );
+    assert!(
+        ids.contains(&"lgc:memory_fragments:frag_bridge".to_string()),
+        "projected fragment missing: {ids:?}"
+    );
+    assert!(
+        ids.contains(&format!("lgc:memory_long_term:{CREATOR}:bridge-memory")),
+        "projected long-term memory file missing: {ids:?}"
+    );
+    assert!(
+        ids.contains(&"lgc:memory_soul_narratives:%00".to_string()),
+        "projected Creator-level soul narrative missing: {ids:?}"
+    );
+
+    let kinds: Vec<&str> = listed["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["kind"].as_str().unwrap())
+        .collect();
+    assert!(
+        kinds.contains(&"fact"),
+        "legacy fragment projects as a fact: {kinds:?}"
+    );
+    assert!(
+        kinds.contains(&"nexus.story_summary"),
+        "a long-term memory keeps its authored kind: {kinds:?}"
+    );
+    assert!(
+        kinds.contains(&"nexus.soul_narrative"),
+        "a cached soul narrative keeps its own kind: {kinds:?}"
+    );
+
+    // The projected rows are readable by their external id through the same
+    // by-id route, and carry the legacy content they project.
+    let fragment = bridge_ok(
+        &provider
+            .get_record(
+                &admin,
+                bridge_record_get_request("lgc:memory_fragments:frag_bridge"),
+            )
+            .await,
+    );
+    assert_eq!(
+        fragment["record"]["content"]["text"],
+        "Legacy creator fragment text."
+    );
+    assert_eq!(fragment["record"]["revision"], 1);
+    assert_eq!(fragment["record"]["subject_id"], BRIDGE_CREATOR_SUBJECT);
+
+    // Deterministic external ids: the same read twice returns the same ids in
+    // the same order.
+    let again = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    BRIDGE_CREATOR_SUBJECT,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(
+        bridge_report_ids(&again, "records"),
+        ids,
+        "projected ids are stable across repeated reads"
+    );
+
+    // Recall ranks the merged set: every authorized record is a candidate.
+    let recalled = bridge_ok(
+        &provider
+            .recall(&admin, bridge_recall_request(BRIDGE_CREATOR_SUBJECT))
+            .await,
+    );
+    assert_eq!(recalled["total_authorized"], 4, "{recalled}");
+    assert_eq!(
+        bridge_report_ids(&recalled, "records").len(),
+        4,
+        "recall serves the merged set: {recalled}"
+    );
+
+    // A kind filter is applied to the projected rows by the same predicate.
+    let only_narrative = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    BRIDGE_CREATOR_SUBJECT,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!(["nexus.soul_narrative"]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(
+        bridge_report_ids(&only_narrative, "records"),
+        vec!["lgc:memory_soul_narratives:%00".to_string()],
+        "{only_narrative}"
+    );
+
+    // A subject that does not name a legacy bearer projects nothing.
+    bridge_ok(
+        &provider
+            .ensure_subject(
+                &admin,
+                bridge_ensure_request("sbj_bridge_plain", "nexus", "plain"),
+            )
+            .await,
+    );
+    let plain = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    "sbj_bridge_plain",
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(plain["total_authorized"], 0, "{plain}");
+
+    assert_eq!(
+        std::fs::read(&long_term_path).expect("long-term file bytes"),
+        long_term_before,
+        "a merged read never rewrites a legacy bearer file"
+    );
+    assert_eq!(
+        std::fs::read(&soul_path).expect("SOUL.md bytes"),
+        soul_before,
+        "a merged read never rewrites SOUL.md"
+    );
+}
+
+#[tokio::test]
+async fn merged_profile_read_serves_the_legacy_soul_document() {
+    let env = seed_env().await;
+    seed_legacy_creator_content(&env).await;
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    bridge_ok(
+        &provider
+            .ensure_subject(
+                &admin,
+                bridge_ensure_request(BRIDGE_CREATOR_SUBJECT, legacy::CREATOR_KIND_NS, CREATOR),
+            )
+            .await,
+    );
+
+    let profile = bridge_ok(
+        &provider
+            .get_profile(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": BRIDGE_CREATOR_SUBJECT,
+                })),
+            )
+            .await,
+    );
+    let personality = profile["profiles"]
+        .as_array()
+        .expect("profiles array")
+        .iter()
+        .find(|row| row["profile_kind"] == "personality")
+        .unwrap_or_else(|| panic!("SOUL.md projects as the personality profile: {profile}"));
+    assert_eq!(personality["document"]["format"], "markdown");
+    assert_eq!(personality["document"]["body"], BRIDGE_SOUL);
+    assert_eq!(personality["revision"], 1);
+}
+
+#[tokio::test]
+async fn merged_candidate_reads_serve_the_legacy_pending_queue() {
+    let env = seed_env().await;
+    seed_legacy_creator_content(&env).await;
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    bridge_ok(
+        &provider
+            .ensure_subject(
+                &admin,
+                bridge_ensure_request(BRIDGE_CREATOR_SUBJECT, legacy::CREATOR_KIND_NS, CREATOR),
+            )
+            .await,
+    );
+
+    let listed = bridge_ok(
+        &provider
+            .list_candidates(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": BRIDGE_CREATOR_SUBJECT,
+                })),
+            )
+            .await,
+    );
+    let candidate_ids: Vec<&str> = listed["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["candidate_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        candidate_ids,
+        vec!["lgc:memory_pending_review:pend_bridge"],
+        "the legacy queue entry is projected as a pending candidate: {listed}"
+    );
+    let projected = &listed["candidates"][0];
+    assert_eq!(projected["status"], "pending");
+    assert_eq!(projected["capture_scope"]["visibility"], "shared");
+    assert_eq!(
+        projected["proposed"]["content"]["structured"]["nexus_legacy"]["raw_digest"],
+        FRAGMENT_DIGEST
+    );
+
+    let fetched = bridge_ok(
+        &provider
+            .get_candidate(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "candidate_id": "lgc:memory_pending_review:pend_bridge",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(fetched["candidate"]["candidate_id"], candidate_ids[0]);
+
+    // A status-filtered audit query never admits a projected pending entry.
+    let consumed = bridge_ok(
+        &provider
+            .list_candidates(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": BRIDGE_CREATOR_SUBJECT,
+                    "status": "consumed",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(consumed["candidates"], serde_json::json!([]), "{consumed}");
+}
+
+#[tokio::test]
+async fn merged_character_reads_respect_binding_placement_and_ownership() {
+    let env = seed_env().await;
+    seed_legacy_character_content(&env).await;
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    bridge_ok(
+        &provider
+            .ensure_subject(
+                &admin,
+                bridge_ensure_request(
+                    BRIDGE_CHARACTER_SUBJECT,
+                    legacy::CHARACTER_KIND_NS,
+                    &env.character_id,
+                ),
+            )
+            .await,
+    );
+
+    let all = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    BRIDGE_CHARACTER_SUBJECT,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    let ids = bridge_report_ids(&all, "records");
+    assert!(
+        ids.contains(&"lgc:character_memory_fragments:hfrag_bridge".to_string()),
+        "binding-local fragment missing: {ids:?}"
+    );
+    assert!(
+        ids.contains(&"lgc:character_run_captures:op_bridge".to_string()),
+        "run-capture provenance record missing: {ids:?}"
+    );
+    for row in all["records"].as_array().unwrap() {
+        assert_eq!(
+            row["scope"]["visibility"], "context",
+            "a binding-local legacy row keeps its binding placement: {row}"
+        );
+        assert_eq!(row["scope"]["context_id"], env.binding_id.as_str());
+    }
+
+    // A shared-only selection excludes both binding-local projections.
+    let shared = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    BRIDGE_CHARACTER_SUBJECT,
+                    serde_json::json!({ "mode": "shared_only" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(shared["total_authorized"], 0, "{shared}");
+
+    // Naming the binding context selects them back in.
+    let context = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    BRIDGE_CHARACTER_SUBJECT,
+                    serde_json::json!({
+                        "mode": "selected_contexts",
+                        "context_ids": [env.binding_id.clone()],
+                    }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(context["total_authorized"], 2, "{context}");
+
+    // Ownership guard: a Character subject naming a character this workspace
+    // does not own projects nothing.
+    let foreign = "chr_00000000000000000000000000000000";
+    bridge_ok(
+        &provider
+            .ensure_subject(
+                &admin,
+                bridge_ensure_request("sbj_bridge_foreign", legacy::CHARACTER_KIND_NS, foreign),
+            )
+            .await,
+    );
+    let foreign_records = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    "sbj_bridge_foreign",
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(foreign_records["total_authorized"], 0, "{foreign_records}");
+}
+
+/// F1: once P5 publishes the completion marker, the bridge serves nothing —
+/// list, by-id, candidate and profile reads are provider-native only, and the
+/// next read of the already-open provider sees that without a reopen.
+#[tokio::test]
+async fn completion_marker_closes_the_legacy_projection() {
+    let env = seed_env().await;
+    seed_legacy_creator_content(&env).await;
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    bridge_ok(
+        &provider
+            .ensure_subject(
+                &admin,
+                bridge_ensure_request(BRIDGE_CREATOR_SUBJECT, legacy::CREATOR_KIND_NS, CREATOR),
+            )
+            .await,
+    );
+    let before = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    BRIDGE_CREATOR_SUBJECT,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(
+        before["total_authorized"], 3,
+        "pre-migration the bridge projects the fragment, narrative and file: {before}"
+    );
+
+    // A provider-native record alongside the legacy surface: the marker must
+    // close the projection, not the provider.
+    let created = bridge_ok(
+        &provider
+            .create_record(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": BRIDGE_CREATOR_SUBJECT,
+                    "kind": "note",
+                    "content": { "text": BRIDGE_TEXT },
+                    "scope": { "visibility": "shared" },
+                    "idempotency_key": "k-marker-native",
+                })),
+            )
+            .await,
+    );
+    let native_id = created["result"]["record_id"]
+        .as_str()
+        .expect("a created record id")
+        .to_string();
+
+    publish_migration_marker(&env, BRIDGE_SPACE).await;
+
+    let after = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    BRIDGE_CREATOR_SUBJECT,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(
+        bridge_report_ids(&after, "records"),
+        vec![native_id.clone()],
+        "the marker withdraws the legacy projection, never the provider's own row: {after}"
+    );
+
+    let record = provider
+        .get_record(
+            &admin,
+            bridge_record_get_request("lgc:memory_fragments:frag_bridge"),
+        )
+        .await;
+    assert_eq!(bridge_reject_code(&record), "NOT_FOUND");
+    let native = bridge_ok(
+        &provider
+            .get_record(&admin, bridge_record_get_request(&native_id))
+            .await,
+    );
+    assert_eq!(
+        native["record"]["content"]["text"], BRIDGE_TEXT,
+        "the provider-native row is still readable by id: {native}"
+    );
+    let candidate = provider
+        .get_candidate(
+            &admin,
+            dto(serde_json::json!({
+                "space_id": BRIDGE_SPACE,
+                "candidate_id": "lgc:memory_pending_review:pend_bridge",
+            })),
+        )
+        .await;
+    assert_eq!(bridge_reject_code(&candidate), "NOT_FOUND");
+    let candidates = bridge_ok(
+        &provider
+            .list_candidates(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": BRIDGE_CREATOR_SUBJECT,
+                })),
+            )
+            .await,
+    );
+    assert_eq!(
+        candidates["candidates"],
+        serde_json::json!([]),
+        "{candidates}"
+    );
+    let profile = bridge_ok(
+        &provider
+            .get_profile(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": BRIDGE_CREATOR_SUBJECT,
+                })),
+            )
+            .await,
+    );
+    assert_eq!(
+        profile["profiles"],
+        serde_json::json!([]),
+        "an unmigrated SOUL.md stops projecting after the marker: {profile}"
+    );
+}
+
+/// F2: one bearer projects under exactly one canonical subject, so a subject
+/// that lists nothing is a subject that can read nothing by id.
+#[tokio::test]
+async fn legacy_bearer_projects_under_one_canonical_subject() {
+    const CANONICAL: &str = "sbj_bridge_aaa";
+    const SHADOW: &str = "sbj_bridge_zzz";
+    const SHADOW_PRINCIPAL: &str = "prn_bridge_shadow";
+
+    let env = seed_env().await;
+    seed_legacy_creator_content(&env).await;
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    for subject in [CANONICAL, SHADOW] {
+        bridge_ok(
+            &provider
+                .ensure_subject(
+                    &admin,
+                    bridge_ensure_request(subject, legacy::CREATOR_KIND_NS, CREATOR),
+                )
+                .await,
+        );
+    }
+    bridge_ok(
+        &provider
+            .grant(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": SHADOW,
+                    "principal_id": SHADOW_PRINCIPAL,
+                    "capabilities": ["records_read", "recall"],
+                    "idempotency_key": "k-bridge-shadow-grant",
+                })),
+            )
+            .await,
+    );
+    let shadow: bridge_schemas::Principal = dto(serde_json::json!({
+        "principal_id": SHADOW_PRINCIPAL,
+        "extensions": {},
+    }));
+
+    let canonical = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    CANONICAL,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(canonical["total_authorized"], 3, "{canonical}");
+
+    // The second subject naming the same bearer projects nothing even though it
+    // is granted: its listing and its by-id read agree instead of the listing
+    // revealing an object that the by-id read reports absent.
+    let shadow_page = bridge_ok(
+        &provider
+            .list_records(
+                &shadow,
+                bridge_records_request(
+                    SHADOW,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(shadow_page["total_authorized"], 0, "{shadow_page}");
+    assert_eq!(
+        bridge_report_ids(&shadow_page, "records").len(),
+        0,
+        "{shadow_page}"
+    );
+    let absent = provider
+        .get_record(
+            &shadow,
+            bridge_record_get_request("lgc:memory_fragments:frag_bridge"),
+        )
+        .await;
+    assert_eq!(bridge_reject_code(&absent), "NOT_FOUND");
+
+    // The canonical subject serves the same id under its own subject.
+    let served = bridge_ok(
+        &provider
+            .get_record(
+                &admin,
+                bridge_record_get_request("lgc:memory_fragments:frag_bridge"),
+            )
+            .await,
+    );
+    assert_eq!(served["record"]["subject_id"], CANONICAL);
+}
+
+/// F3: a projected record keeps revision 1, so the cursor marker carries a
+/// digest of the projection: rewriting a bearer file between two pages
+/// invalidates the cursor instead of shifting its offset.
+#[tokio::test]
+async fn legacy_file_change_between_pages_invalidates_the_cursor() {
+    let env = seed_env().await;
+    seed_legacy_creator_content(&env).await;
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    bridge_ok(
+        &provider
+            .ensure_subject(
+                &admin,
+                bridge_ensure_request(BRIDGE_CREATOR_SUBJECT, legacy::CREATOR_KIND_NS, CREATOR),
+            )
+            .await,
+    );
+
+    let first = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_page_request(BRIDGE_CREATOR_SUBJECT, 1, None),
+            )
+            .await,
+    );
+    assert_eq!(
+        first["records"].as_array().map(Vec::len),
+        Some(1),
+        "{first}"
+    );
+    let cursor = first["next_cursor"]
+        .as_str()
+        .expect("a first page over three projected records has a next cursor")
+        .to_string();
+
+    // Same slug, same projected id and revision — a new body and timestamp.
+    let bearer = MemoryBearerRef::Creator(CREATOR);
+    let mut memory = nexus_creator_memory::LongTermMemory::new("story_summary");
+    memory.set_body("Rewritten long-term body.");
+    nexus_creator_memory::memory_io::save_memory(
+        env.user_home.as_path(),
+        bearer,
+        "bridge-memory",
+        &memory,
+    )
+    .expect("long-term memory rewrite");
+
+    let stale = provider
+        .list_records(
+            &admin,
+            bridge_records_page_request(BRIDGE_CREATOR_SUBJECT, 1, Some(&cursor)),
+        )
+        .await;
+    assert_eq!(bridge_reject_code(&stale), "CURSOR_INVALID");
+}
+
+// ═══ NXM-5 Task 2: E4 reroute + just-in-time adoption ═════════════════════
+//
+// The E4 read and dismissal handlers serve the memory family through the
+// pinned `MemoryPort`. A dismissal of a legacy-derived row is the architect's
+// just-in-time adoption contract: the row exists only as a projected view, so
+// the handler adopts it under the bridge's deterministic id and then consumes
+// it through the provider — the legacy table stays byte-identical, adoption is
+// idempotent, and nothing is adopted once P5's completion marker is present.
+
+/// One provider candidate row as the store holds it: `(status, capture
+/// context)`.
+async fn adopted_candidate(env: &Env, candidate_id: &str) -> Option<(String, Option<String>)> {
+    let pool = plain_pool(env).await;
+    let row: Option<(String, Option<String>)> = sqlx::query_as(
+        "SELECT status, capture_context_id FROM memory_candidates WHERE candidate_id = ?",
+    )
+    .bind(candidate_id)
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+    row
+}
+
+#[tokio::test]
+async fn dismissal_adopts_the_projected_row_before_consuming_it() {
+    let env = seed_env().await;
+    seed_creator_pending_row(&env, "pend_adopt", Some(WORLD), "2026-01-01T00:00:01Z").await;
+    let (core, principal) = open_core(&env).await;
+    let candidate_id = legacy::pending_review_candidate_id("pend_adopt");
+
+    // The row is served from the bridge's projection, and a read adopts
+    // nothing: adoption belongs to the mutation it precedes.
+    assert_eq!(
+        core.count_pending_reviews(&principal).await.unwrap().count,
+        1
+    );
+    assert_eq!(
+        adopted_candidate(&env, &candidate_id).await,
+        None,
+        "a read must not adopt"
+    );
+
+    let deleted = core
+        .delete_pending_review(&principal, "pend_adopt".to_string())
+        .await
+        .expect("the projected row is adopted, then dismissed");
+    assert!(deleted.success);
+    assert_eq!(deleted.pending_id, "pend_adopt");
+
+    // The provider now owns the same deterministic id, consumed in place.
+    assert_eq!(
+        adopted_candidate(&env, &candidate_id).await,
+        Some(("consumed".to_string(), None)),
+        "the dismissal consumed the adopted row under the bridge's id"
+    );
+    // …and the legacy table was never written (compass D6: write-idle).
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
+        1
+    );
+    pool.close().await;
+
+    // The consumed row is gone from the retained DTO surface, and a repeat
+    // dismissal finds nothing to dismiss.
+    assert_eq!(
+        core.count_pending_reviews(&principal).await.unwrap().count,
+        0
+    );
+    assert!(core
+        .list_pending_reviews(&principal, None, PAGE_SIZE)
+        .await
+        .unwrap()
+        .items
+        .is_empty());
+    let err = core
+        .delete_pending_review(&principal, "pend_adopt".to_string())
+        .await
+        .expect_err("a consumed row is gone");
+    assert!(matches!(err, CoreError::NotFound { .. }), "got {err:?}");
+
+    // Idempotency and no standalone adoption (fix round 3, finding F1): the
+    // repeat dismissal above neither duplicated nor resurrected the row, and
+    // adoption exists only inside the dismissal that consumes it.
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM memory_candidates WHERE candidate_id = 'lgc:memory_pending_review:pend_adopt'"
+        )
+        .await,
+        1,
+        "no adoption path can duplicate the row"
+    );
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn character_dismissal_consumes_the_captured_row_under_its_bridge_id() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let chr = env.character_id.clone();
+    let bind1 = env.binding_id.clone();
+    core.capture_character_pending_review(
+        &principal,
+        chr.clone(),
+        dto(json_capture(
+            "pend_char_adopt",
+            Some(&bind1),
+            "2026-01-01T00:00:01Z",
+        )),
+    )
+    .await
+    .expect("binding-local capture");
+
+    core.delete_character_pending_review(&principal, chr.clone(), "pend_char_adopt".to_string())
+        .await
+        .expect("the captured row is consumed under its bridge id");
+
+    assert_eq!(
+        adopted_candidate(
+            &env,
+            &legacy::character_pending_review_candidate_id("pend_char_adopt")
+        )
+        .await,
+        Some(("consumed".to_string(), Some(bind1.clone()))),
+        "the adopted row keeps its binding placement"
+    );
+    assert_eq!(
+        core.count_character_pending_reviews(&principal, chr, Some(bind1))
+            .await
+            .unwrap()
+            .count,
+        0
+    );
+}
+
+#[tokio::test]
+async fn just_in_time_adoption_is_inert_after_the_completion_marker() {
+    let env = seed_env().await;
+    seed_creator_pending_row(&env, "pend_post_marker", None, "2026-01-01T00:00:01Z").await;
+    // A provider-native candidate alongside the legacy row: the marker closes
+    // the legacy projection only, so this one stays readable.
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    let subject = legacy::creator_subject_id(CREATOR);
+    bridge_ok(
+        &provider
+            .ensure_subject(
+                &admin,
+                bridge_ensure_request(&subject, legacy::CREATOR_KIND_NS, CREATOR),
+            )
+            .await,
+    );
+    let native_candidate =
+        native_pending_candidate(&provider, &admin, &subject, "k-marker-native-candidate").await;
+    publish_migration_marker(&env, BRIDGE_SPACE).await;
+    let (core, principal) = open_core(&env).await;
+
+    // Post-migration reads serve provider-native rows only: the bridge closes.
+    assert_eq!(
+        core.count_pending_reviews(&principal).await.unwrap().count,
+        0
+    );
+    assert!(core
+        .list_pending_reviews(&principal, None, PAGE_SIZE)
+        .await
+        .unwrap()
+        .items
+        .is_empty());
+
+    let err = core
+        .delete_pending_review(&principal, "pend_post_marker".to_string())
+        .await
+        .expect_err("nothing is projected to dismiss");
+    assert!(matches!(err, CoreError::NotFound { .. }), "got {err:?}");
+    assert_eq!(
+        adopted_candidate(
+            &env,
+            &legacy::pending_review_candidate_id("pend_post_marker")
+        )
+        .await,
+        None,
+        "no adoption path runs after the marker"
+    );
+    assert_eq!(
+        provider_candidate_status(&provider, &admin, &native_candidate).await,
+        "pending",
+        "the marker leaves the provider's own candidate alone"
+    );
+    let legacy_candidate = provider
+        .get_candidate(
+            &admin,
+            dto(serde_json::json!({
+                "space_id": BRIDGE_SPACE,
+                "candidate_id": legacy::pending_review_candidate_id("pend_post_marker"),
+            })),
+        )
+        .await;
+    assert_eq!(
+        bridge_reject_code(&legacy_candidate),
+        "NOT_FOUND",
+        "the legacy candidate is no longer projected"
+    );
+}
+
+// ═══ NXM-5 Task 2 fix round 1 ═════════════════════════════════════════════
+//
+// F1: a row a provider dismissal consumed keeps its legacy row (a provider
+// write never touches the legacy surface), so the legacy review drain has to
+// check the provider's state before it classifies a digest the caller rejected.
+// F2: the retained cross-Creator `pending_review` 403. F4: adoption and
+// dismissal are one guarded transaction. F5: no blanket scan cap in the retained
+// list/count/search semantics. F6: a read-only core keeps serving memory reads
+// and still refuses writes.
+
+const REJECTED_DIGEST: &str =
+    "Rejected research summary, long enough to classify as a fragment if a drain ever saw it.";
+
+async fn seed_creator_pending_digest(env: &Env, pending_id: &str, digest: &str, created_at: &str) {
+    let pool = plain_pool(env).await;
+    nexus_local_db::create_pending_review(
+        &pool,
+        &nexus_local_db::PendingReviewRecord {
+            pending_id: pending_id.to_string(),
+            session_id: format!("sess_{pending_id}"),
+            creator_id: CREATOR.to_string(),
+            world_id: None,
+            task_kind: "research".to_string(),
+            raw_digest: digest.to_string(),
+            created_at: created_at.to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    pool.close().await;
+}
+
+async fn seed_foreign_creator_pending_row(env: &Env, pending_id: &str) {
+    let pool = plain_pool(env).await;
+    nexus_local_db::create_pending_review(
+        &pool,
+        &nexus_local_db::PendingReviewRecord {
+            pending_id: pending_id.to_string(),
+            session_id: format!("sess_{pending_id}"),
+            creator_id: OTHER.to_string(),
+            world_id: None,
+            task_kind: "research".to_string(),
+            raw_digest: FRAGMENT_DIGEST.to_string(),
+            created_at: "2026-01-01T00:00:01Z".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    pool.close().await;
+}
+
+/// Seed `count` Creator pending rows whose `created_at` sorts by row index, in
+/// one statement (a fixture past the former 10_000-row scan cap).
+async fn seed_creator_pending_past_former_cap(env: &Env, count: i64) {
+    let pool = plain_pool(env).await;
+    sqlx::query(
+        "WITH RECURSIVE seq(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM seq WHERE i + 1 < ?)
+         INSERT INTO memory_pending_review
+             (pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at)
+         SELECT printf('pending_cap_%06d', i), printf('sess_cap_%06d', i), ?, NULL, 'research', ?,
+                printf('2026-01-01T00:00:00.%06dZ', i)
+         FROM seq",
+    )
+    .bind(count)
+    .bind(CREATOR)
+    .bind(FRAGMENT_DIGEST)
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+}
+
+/// Seed `count` Character-shared pending rows in one statement.
+async fn seed_character_pending_past_former_cap(env: &Env, count: i64) {
+    let pool = plain_pool(env).await;
+    sqlx::query(
+        "WITH RECURSIVE seq(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM seq WHERE i + 1 < ?)
+         INSERT INTO character_memory_pending_review
+             (pending_id, session_id, character_id, actor_world_binding_id, task_kind, raw_digest,
+              created_at)
+         SELECT printf('pending_chr_%06d', i), printf('sess_chr_%06d', i), ?, NULL, 'research', ?,
+                printf('2026-01-01T00:00:00.%06dZ', i)
+         FROM seq",
+    )
+    .bind(count)
+    .bind(&env.character_id)
+    .bind(FRAGMENT_DIGEST)
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+}
+
+/// Seed `count` Character-shared pending rows at one whole-second `created_at`
+/// plus one row a fractional second later — the value SQLite's TEXT order ranks
+/// *below* every `Z` row while the parsed instant ranks it first.
+async fn seed_character_pending_mixed_formats(env: &Env, count: i64) {
+    let pool = plain_pool(env).await;
+    sqlx::query(
+        "WITH RECURSIVE seq(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM seq WHERE i + 1 < ?)
+         INSERT INTO character_memory_pending_review
+             (pending_id, session_id, character_id, actor_world_binding_id, task_kind, raw_digest,
+              created_at)
+         SELECT printf('cpending_z_%02d', i), printf('csess_z_%02d', i), ?, NULL, 'research',
+                'tiny', '2026-02-01T00:00:00Z'
+         FROM seq",
+    )
+    .bind(count)
+    .bind(&env.character_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO character_memory_pending_review
+             (pending_id, session_id, character_id, actor_world_binding_id, task_kind, raw_digest,
+              created_at)
+         VALUES ('cpending_frac', 'csess_frac', ?, NULL, 'research', 'tiny',
+                 '2026-02-01T00:00:00.900Z')",
+    )
+    .bind(&env.character_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+}
+
+/// Seed `count` Creator fragments; only the last one carries `kw_past_cap`.
+async fn seed_creator_fragments_past_former_cap(env: &Env, count: i64) {
+    let pool = plain_pool(env).await;
+    sqlx::query(
+        "WITH RECURSIVE seq(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM seq WHERE i + 1 < ?)
+         INSERT INTO memory_fragments
+             (fragment_id, session_id, creator_id, keywords, summary, created_at, ttl, world_id)
+         SELECT printf('frag_cap_%06d', i), printf('sess_fcap_%06d', i), ?,
+                CASE WHEN i + 1 = ? THEN '[\"kw_past_cap\"]' ELSE '[\"kw_other\"]' END,
+                printf('Seeded fragment %06d.', i),
+                printf('2026-01-01T00:00:00.%06dZ', i), NULL, NULL
+         FROM seq",
+    )
+    .bind(count)
+    .bind(CREATOR)
+    .bind(count)
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+}
+
+/// The provider's merged view of one candidate's status.
+async fn provider_candidate_status(
+    provider: &LocalMemoryProvider,
+    admin: &bridge_schemas::Principal,
+    candidate_id: &str,
+) -> String {
+    let fetched = bridge_ok(
+        &provider
+            .get_candidate(
+                admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "candidate_id": candidate_id,
+                })),
+            )
+            .await,
+    );
+    fetched["candidate"]["status"]
+        .as_str()
+        .expect("candidate status")
+        .to_string()
+}
+
+#[tokio::test]
+async fn dismissed_creator_digest_is_never_classified_by_the_review_drain() {
+    let env = seed_env().await;
+    seed_creator_pending_digest(
+        &env,
+        "pending_keep",
+        FRAGMENT_DIGEST,
+        "2026-01-01T00:00:01Z",
+    )
+    .await;
+    seed_creator_pending_digest(
+        &env,
+        "pending_rejected",
+        REJECTED_DIGEST,
+        "2026-01-01T00:00:02Z",
+    )
+    .await;
+    let (core, principal) = open_core(&env).await;
+
+    core.delete_pending_review(&principal, "pending_rejected".to_string())
+        .await
+        .expect("the rejected row is dismissed");
+
+    let reviewed = core
+        .review_memory(&principal, creator_review_request())
+        .await
+        .expect("review drains what is still queued");
+    assert_eq!(
+        reviewed.processed,
+        Some(1),
+        "the consumed row is not a classification input"
+    );
+    assert_eq!(reviewed.fragmented, 1, "only the kept digest is classified");
+    assert_eq!(
+        reviewed.has_more,
+        Some(false),
+        "a consumed row must not keep the drain reporting work"
+    );
+
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        provider_fact_bodies(&pool, &legacy::creator_subject_id(CREATOR)).await,
+        vec![FRAGMENT_DIGEST.to_string()],
+        "only the kept digest is classified"
+    );
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
+        2,
+        "the drain writes no legacy row; both queued rows stay untouched"
+    );
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn dismissed_character_digest_is_never_classified_by_the_review_drain() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let chr = env.character_id.clone();
+    let bind1 = env.binding_id.clone();
+
+    core.capture_character_pending_review(
+        &principal,
+        chr.clone(),
+        dto(json_capture(
+            "pend_char_keep",
+            Some(&bind1),
+            "2026-01-01T00:00:01Z",
+        )),
+    )
+    .await
+    .expect("kept capture");
+    let mut rejected = json_capture("pend_char_rejected", Some(&bind1), "2026-01-01T00:00:02Z");
+    rejected["raw_digest"] = serde_json::json!(REJECTED_DIGEST);
+    core.capture_character_pending_review(&principal, chr.clone(), dto(rejected))
+        .await
+        .expect("rejected capture");
+
+    core.delete_character_pending_review(&principal, chr.clone(), "pend_char_rejected".to_string())
+        .await
+        .expect("dismissal");
+
+    let reviewed = core
+        .review_character_memory(
+            &principal,
+            chr.clone(),
+            dto::<ReviewCharacterMemoryRequest>(serde_json::json!({ "binding_id": bind1 })),
+        )
+        .await
+        .expect("review drains what is still queued");
+    assert_eq!(reviewed.processed, Some(1), "the consumed row is skipped");
+    assert_eq!(reviewed.fragmented, 1);
+    assert_eq!(reviewed.has_more, Some(false));
+
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        provider_fact_bodies(&pool, &legacy::character_subject_id(&chr)).await,
+        vec![FRAGMENT_DIGEST.to_string()],
+        "only the kept digest is classified"
+    );
+    assert_eq!(
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM character_memory_pending_review"
+        )
+        .await,
+        0,
+        "the captures wrote no legacy row at all; both rows are provider candidates"
+    );
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn cross_creator_dismissal_keeps_the_pending_review_forbidden_reason() {
+    let env = seed_env().await;
+    seed_foreign_creator_pending_row(&env, "pending_foreign").await;
+    let (core, principal) = open_core(&env).await;
+
+    match core
+        .delete_pending_review(&principal, "pending_foreign".to_string())
+        .await
+        .expect_err("another Creator's row must be refused")
+    {
+        CoreError::ForbiddenReason { resource, reason } => {
+            assert_eq!(resource, "pending_review");
+            assert!(
+                reason.contains("does not belong to creator"),
+                "retained reason text, got {reason}"
+            );
+        }
+        other => panic!("expected ForbiddenReason, got {other:?}"),
+    }
+
+    // An id no row carries is still the retained 404.
+    let err = core
+        .delete_pending_review(&principal, "pending_absent".to_string())
+        .await
+        .expect_err("an absent row is not found");
+    assert!(matches!(err, CoreError::NotFound { .. }), "got {err:?}");
+
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM memory_pending_review WHERE pending_id = 'pending_foreign'"
+        )
+        .await,
+        1,
+        "the refused dismissal mutates nothing"
+    );
+    pool.close().await;
+}
+
+/// QC1-F3: a failed ownership re-read is the retained `database_error`
+/// internal, never the 404 an absence answers.
+#[tokio::test]
+async fn dismissal_ownership_lookup_failure_is_a_database_error() {
+    let env = seed_env().await;
+    // Another Creator's row: the provider cannot see it, so the dismissal falls
+    // through to the legacy ownership re-read that distinguishes 403 from 404.
+    seed_foreign_creator_pending_row(&env, "pending_foreign").await;
+    let (core, principal) = open_core(&env).await;
+    // Closing the core pool fails exactly that re-read; the provider keeps its
+    // own pool, so the reads ahead of it still answer.
+    core.pool().close().await;
+
+    let err = core
+        .delete_pending_review(&principal, "pending_foreign".to_string())
+        .await
+        .expect_err("a failed ownership lookup is not an absence");
+    match err {
+        CoreError::Internal { category } => assert!(
+            category.starts_with("database_error"),
+            "the pre-reroute database-error class, got {category}"
+        ),
+        other => panic!("expected the database_error internal, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn legacy_dismissal_and_adoption_commit_together() {
+    let env = seed_env().await;
+    seed_creator_pending_row(&env, "pend_atomic", None, "2026-01-01T00:00:01Z").await;
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    let subject = legacy::creator_subject_id(CREATOR);
+    bridge_ok(
+        &provider
+            .ensure_subject(
+                &admin,
+                bridge_ensure_request(&subject, legacy::CREATOR_KIND_NS, CREATOR),
+            )
+            .await,
+    );
+    let candidate_id = legacy::pending_review_candidate_id("pend_atomic");
+
+    // A commit that never lands leaves neither half: no adopted row, and the
+    // projected row is still pending for the next reader.
+    provider.inject_commit_fault(false);
+    let failed = provider
+        .dismiss_legacy_candidate(&admin, &subject, &candidate_id, None, "atomic-1")
+        .await;
+    assert!(
+        matches!(failed, SpokeResult::Reject(_)),
+        "a failed commit refuses"
+    );
+    assert_eq!(
+        adopted_candidate(&env, &candidate_id).await,
+        None,
+        "the adoption rolled back with the dismissal"
+    );
+    assert_eq!(
+        provider_candidate_status(&provider, &admin, &candidate_id).await,
+        "pending"
+    );
+
+    // A CAS that cannot land rolls the adoption back too: the two effects are
+    // one transaction, so a rejected dismissal leaves no adopted pending row.
+    let stale = provider
+        .dismiss_legacy_candidate(&admin, &subject, &candidate_id, Some(99), "atomic-2")
+        .await;
+    assert_eq!(bridge_reject_code(&stale), "REVISION_CONFLICT");
+    assert_eq!(
+        adopted_candidate(&env, &candidate_id).await,
+        None,
+        "a rejected dismissal leaves no adopted row behind"
+    );
+    assert_eq!(
+        provider_candidate_status(&provider, &admin, &candidate_id).await,
+        "pending"
+    );
+
+    // The same call without a caller CAS adopts and consumes atomically.
+    bridge_ok(
+        &provider
+            .dismiss_legacy_candidate(&admin, &subject, &candidate_id, None, "atomic-3")
+            .await,
+    );
+    assert_eq!(
+        adopted_candidate(&env, &candidate_id).await,
+        Some(("consumed".to_string(), None))
+    );
+}
+
+#[tokio::test]
+async fn pending_listing_serves_rows_past_the_former_scan_cap() {
+    const TOTAL: i64 = 10_001;
+    let env = seed_env().await;
+    seed_creator_pending_past_former_cap(&env, TOTAL).await;
+    let (core, principal) = open_core(&env).await;
+
+    assert_eq!(
+        core.count_pending_reviews(&principal).await.unwrap().count,
+        TOTAL,
+        "a queue past the former 10_000-row cap is counted, not refused"
+    );
+    let first = core
+        .list_pending_reviews(&principal, None, 2)
+        .await
+        .unwrap();
+    assert_eq!(first.items.len(), 2);
+    assert!(
+        first.pagination.has_more,
+        "a first page of a large queue must not report completion"
+    );
+    assert!(first.pagination.next_cursor.is_some());
+}
+
+/// QC1-F1: two rows inside one second whose ids order opposite to their
+/// fractional timestamps keep the retained `created_at DESC` order and serve
+/// their original timestamp values, across a keyset page boundary.
+#[tokio::test]
+async fn pending_pages_keep_sub_second_order_opposite_to_ids() {
+    let env = seed_env().await;
+    // `pending_a` sorts before `pending_z` by id but is the newer row.
+    seed_creator_pending_row(&env, "pending_a", None, "2026-01-01T00:00:00.900000Z").await;
+    seed_creator_pending_row(&env, "pending_z", None, "2026-01-01T00:00:00.100000Z").await;
+    let (core, principal) = open_core(&env).await;
+
+    let first = core
+        .list_pending_reviews(&principal, None, 1)
+        .await
+        .unwrap();
+    assert_eq!(first.items.len(), 1);
+    assert_eq!(
+        first.items[0].pending_id, "pending_a",
+        "the newer fractional timestamp orders first, not the larger id"
+    );
+    assert_eq!(
+        first.items[0].created_at, "2026-01-01T00:00:00.900000Z",
+        "the legacy timestamp is served verbatim, sub-second precision included"
+    );
+    assert!(first.pagination.has_more, "the older row is still queued");
+    let cursor = first
+        .pagination
+        .next_cursor
+        .clone()
+        .expect("a partial page carries a cursor");
+
+    let second = core
+        .list_pending_reviews(&principal, Some(cursor), 1)
+        .await
+        .unwrap();
+    assert_eq!(second.items.len(), 1);
+    assert_eq!(second.items[0].pending_id, "pending_z");
+    assert_eq!(second.items[0].created_at, "2026-01-01T00:00:00.100000Z");
+    assert!(!second.pagination.has_more);
+}
+
+/// PR-F2: one pending queue mixes an RFC 3339 whole second, a fractional
+/// RFC 3339 value and a timezone-less bare-`T` legacy value. The retained query
+/// ordered by its RAW `created_at` TEXT (`ORDER BY created_at DESC`), and the
+/// `Z` row is the textually largest — the parsed instant puts the timezone-less
+/// fractional value first — so the queue and its keyset page boundaries follow
+/// the text order.
+#[tokio::test]
+async fn pending_mixed_timestamp_formats_keep_the_legacy_text_order() {
+    let env = seed_env().await;
+    seed_creator_pending_row(&env, "pending_a", None, "2026-01-01T00:00:00Z").await;
+    seed_creator_pending_row(&env, "pending_b", None, "2026-01-01T00:00:00.900Z").await;
+    seed_creator_pending_row(&env, "pending_c", None, "2026-01-01T00:00:00.950").await;
+    let (core, principal) = open_core(&env).await;
+
+    let first = core
+        .list_pending_reviews(&principal, None, 1)
+        .await
+        .unwrap();
+    assert_eq!(first.items.len(), 1);
+    assert_eq!(
+        first.items[0].pending_id, "pending_a",
+        "the whole-second `Z` value is the textually largest, not newest by instant"
+    );
+    assert_eq!(
+        first.items[0].created_at, "2026-01-01T00:00:00Z",
+        "the legacy value is served verbatim"
+    );
+    assert!(first.pagination.has_more);
+    let cursor = first
+        .pagination
+        .next_cursor
+        .clone()
+        .expect("a partial page carries a cursor");
+
+    let second = core
+        .list_pending_reviews(&principal, Some(cursor), 1)
+        .await
+        .unwrap();
+    assert_eq!(second.items.len(), 1);
+    assert_eq!(second.items[0].pending_id, "pending_c");
+    assert_eq!(second.items[0].created_at, "2026-01-01T00:00:00.950");
+    assert!(second.pagination.has_more);
+    let cursor = second
+        .pagination
+        .next_cursor
+        .clone()
+        .expect("a partial page carries a cursor");
+
+    let third = core
+        .list_pending_reviews(&principal, Some(cursor), 1)
+        .await
+        .unwrap();
+    assert_eq!(third.items.len(), 1);
+    assert_eq!(third.items[0].pending_id, "pending_b");
+    assert_eq!(third.items[0].created_at, "2026-01-01T00:00:00.900Z");
+    assert!(!third.pagination.has_more);
+    assert!(third.pagination.next_cursor.is_none());
+}
+
+#[tokio::test]
+async fn character_offset_window_serves_rows_past_the_former_scan_cap() {
+    const TOTAL: i64 = 10_001;
+    let env = seed_env().await;
+    seed_character_pending_past_former_cap(&env, TOTAL).await;
+    let (core, principal) = open_core(&env).await;
+
+    // The window starts inside what the former clamp hid: it used to answer an
+    // empty page with `has_more = false` although the row existed.
+    let page = core
+        .list_character_pending_reviews(&principal, env.character_id.clone(), None, 5, 10_000)
+        .await
+        .unwrap();
+    assert_eq!(page.items.len(), 1, "the row past the old window is served");
+    assert!(!page.pagination.has_more);
+}
+
+/// PR-F2: the Character pending queue orders by the RAW legacy `created_at`
+/// TEXT (`ORDER BY created_at DESC, pending_id DESC`). A whole-second `Z` row
+/// outranks a fractional-second one as text while the parsed instant puts the
+/// fractional row first, so mixed-format data must keep the legacy text order
+/// on both the offset page and the bounded review batch.
+#[tokio::test]
+async fn character_pending_queue_keeps_the_legacy_text_order_for_mixed_formats() {
+    const Z_ROWS: i64 = 50;
+    let env = seed_env().await;
+    seed_character_pending_mixed_formats(&env, Z_ROWS).await;
+    let (core, principal) = open_core(&env).await;
+    let chr = env.character_id.clone();
+
+    // Offset pagination starts at the textually largest `Z` head.
+    let first = core
+        .list_character_pending_reviews(&principal, chr.clone(), None, 2, 0)
+        .await
+        .unwrap();
+    assert_eq!(first.items.len(), 2);
+    assert_eq!(first.items[0].pending_id.as_str(), "cpending_z_49");
+    assert_eq!(first.items[1].pending_id.as_str(), "cpending_z_48");
+    let tail = core
+        .list_character_pending_reviews(&principal, chr.clone(), None, 2, 50)
+        .await
+        .unwrap();
+    assert_eq!(tail.items.len(), 1);
+    assert_eq!(
+        tail.items[0].pending_id.as_str(),
+        "cpending_frac",
+        "the fractional row is the textually smallest, so it is the queue tail"
+    );
+    assert!(!tail.pagination.has_more);
+
+    // The bounded review batch takes the same head: one call drains at most the
+    // batch bound of the `Z` rows and never reaches the fractional tail.
+    let batch = core
+        .review_character_memory(
+            &principal,
+            chr.clone(),
+            dto::<ReviewCharacterMemoryRequest>(serde_json::json!({})),
+        )
+        .await
+        .unwrap();
+    let processed = batch.processed.expect("processed count");
+    assert!(processed > 0 && processed <= 50, "got {processed}");
+    let remaining = core
+        .list_character_pending_reviews(&principal, chr.clone(), None, 60, 0)
+        .await
+        .unwrap();
+    assert!(
+        remaining
+            .items
+            .iter()
+            .any(|item| item.pending_id.as_str() == "cpending_frac"),
+        "the fractional row ranks last under the legacy text key: {:?}",
+        remaining.items
+    );
+}
+
+#[tokio::test]
+async fn keyword_search_finds_a_fragment_past_the_former_scan_cap() {
+    const TOTAL: i64 = 10_001;
+    let env = seed_env().await;
+    seed_creator_fragments_past_former_cap(&env, TOTAL).await;
+    let (core, principal) = open_core(&env).await;
+
+    let found = core
+        .list_memory_fragments(&principal, Some("kw_past_cap".to_string()), None, 10)
+        .await
+        .unwrap();
+    assert_eq!(
+        found.fragments.len(),
+        1,
+        "a keyword match past the former scan bound is not silently dropped"
+    );
+    assert_eq!(
+        found.fragments[0]
+            .keywords
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        vec!["kw_past_cap"]
+    );
+}
+
+#[tokio::test]
+async fn read_only_core_serves_memory_reads_and_refuses_the_write() {
+    let env = seed_env().await;
+    seed_creator_pending_row(&env, "pend_read_only", None, "2026-01-01T00:00:01Z").await;
+    // A writer open ensures the provider subject the legacy projection needs;
+    // the read-only core below serves the same read without writing anything.
+    {
+        let (core, principal) = open_core(&env).await;
+        assert_eq!(
+            core.count_pending_reviews(&principal).await.unwrap().count,
+            1
+        );
+    }
+
+    let read_only = CoreService::open(CoreOpenOptions {
+        user_home: env.user_home.clone(),
+        access: CoreAccess::ReadOnly,
+    })
+    .await
+    .expect("read-only open");
+    let principal = read_only.active_principal().await.unwrap();
+    assert_eq!(
+        read_only
+            .count_pending_reviews(&principal)
+            .await
+            .unwrap()
+            .count,
+        1,
+        "a read-only core still serves the pending count"
+    );
+    let listed = read_only
+        .list_pending_reviews(&principal, None, PAGE_SIZE)
+        .await
+        .unwrap();
+    assert_eq!(listed.items.len(), 1);
+    assert_eq!(listed.items[0].pending_id, "pend_read_only");
+
+    let err = read_only
+        .delete_pending_review(&principal, "pend_read_only".to_string())
+        .await
+        .expect_err("a read-only core must refuse the dismissal");
+    assert!(
+        matches!(err, CoreError::Forbidden { ref resource } if resource == "memory: read-only core access"),
+        "got {err:?}"
+    );
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
+        1,
+        "the refused dismissal mutates nothing"
+    );
+    pool.close().await;
+}
+
+// ═══ NXM-5 Task 2 fix round 2 ═════════════════════════════════════════════
+//
+// R2-F1: a provider dismissal and a legacy review drain decide the same digest,
+// so the drain holds the bearer's disposition section across its consumed-check,
+// classification and persistence, and a dismissal must hold the same section to
+// consume. Each regression parks the drain at a test-controlled step-point — no
+// sleeps, no timing — and asserts the dismissal cannot enter that window.
+// R2-F2: a read-only open projects the legacy rows of a bearer no writer ever
+// ensured, and answers the space's absence when nothing was ever provisioned.
+
+/// Seed one Character pending row bound to `binding_id`.
+async fn seed_character_pending_binding(env: &Env, pending_id: &str, binding_id: &str) {
+    let pool = plain_pool(env).await;
+    sqlx::query(
+        "INSERT INTO character_memory_pending_review
+             (pending_id, session_id, character_id, actor_world_binding_id, task_kind, raw_digest,
+              created_at)
+         VALUES (?, ?, ?, ?, 'research', ?, '2026-01-01T00:00:01Z')",
+    )
+    .bind(pending_id)
+    .bind(format!("sess_{pending_id}"))
+    .bind(&env.character_id)
+    .bind(binding_id)
+    .bind(FRAGMENT_DIGEST)
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+}
+
+/// Arm one of the drain's step-points.
+fn arm_review_pause(
+    core: &CoreService,
+    at: MemoryReviewPause,
+) -> (Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>) {
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    core.pause_memory_review(MemoryReviewRendezvous {
+        at,
+        entered: Arc::clone(&entered),
+        release: Arc::clone(&release),
+    });
+    (entered, release)
+}
+
+#[tokio::test]
+async fn creator_dismissal_cannot_commit_inside_the_review_decision() {
+    let env = seed_env().await;
+    seed_creator_pending_digest(
+        &env,
+        "pending_window",
+        FRAGMENT_DIGEST,
+        "2026-01-01T00:00:01Z",
+    )
+    .await;
+    let (core, principal) = open_core(&env).await;
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    let subject = legacy::creator_subject_id(CREATOR);
+    let candidate_id = legacy::pending_review_candidate_id("pending_window");
+
+    let (entered, release) = arm_review_pause(&core, MemoryReviewPause::AfterRecheck);
+    let drain_task = tokio::spawn({
+        let core = core.clone();
+        let principal = principal.clone();
+        async move {
+            core.review_memory(&principal, creator_review_request())
+                .await
+        }
+    });
+    entered.notified().await;
+
+    // The drain's check ran and saw the row pending, and the section it holds is
+    // the one a dismissal must take to consume that row: there is no window
+    // between the check and the classification for the dismissal to commit in.
+    assert_eq!(
+        provider_candidate_status(&provider, &admin, &candidate_id).await,
+        "pending",
+        "the checked row was still queued when the drain decided to classify it"
+    );
+    assert!(
+        !provider.disposition_available(&subject),
+        "the review decision is not interleavable with a dismissal"
+    );
+
+    // The dismissal-side wait signal (fix round 4, finding R4-F3): it fires
+    // from inside the lock attempt only after the non-blocking probe failed, so
+    // the test observes a real contended acquisition — not merely that the task
+    // had not finished yet. The drain stays held until that signal arrives.
+    let pinned = core.memory_provider_for_test().expect("pinned provider");
+    let waiting = Arc::new(tokio::sync::Notify::new());
+    pinned.report_disposition_waits(Arc::clone(&waiting));
+
+    let dismissal = tokio::spawn({
+        let core = core.clone();
+        let principal = principal.clone();
+        async move {
+            core.delete_pending_review(&principal, "pending_window".to_string())
+                .await
+        }
+    });
+    waiting.notified().await;
+    assert!(
+        !provider.disposition_available(&subject),
+        "the dismissal found the section held and is blocked on its lock"
+    );
+    assert!(
+        !dismissal.is_finished(),
+        "the dismissal cannot complete while the drain holds the section"
+    );
+
+    release.notify_one();
+    let reviewed = drain_task.await.unwrap().expect("review drains the row");
+    assert_eq!(
+        reviewed.processed,
+        Some(1),
+        "the row the drain checked is still classified"
+    );
+    assert_eq!(reviewed.fragmented, 1);
+    // The drain consumed the row first, so the dismissal that was excluded from
+    // its window is the retained `NotFound` — it never ran inside the decision.
+    let late = dismissal
+        .await
+        .unwrap()
+        .expect_err("the dismissal lost the serialization");
+    assert!(
+        matches!(late, CoreError::NotFound { .. }),
+        "the excluded dismissal finds the row already consumed: {late:?}"
+    );
+    assert!(
+        provider.disposition_available(&subject),
+        "the section is released once the row is persisted"
+    );
+
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        provider_fact_bodies(&pool, &legacy::creator_subject_id(CREATOR)).await,
+        vec![FRAGMENT_DIGEST.to_string()]
+    );
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
+        1,
+        "the drain consumes the provider candidate, never the legacy row"
+    );
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn character_dismissal_cannot_commit_inside_the_review_decision() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let chr = env.character_id.clone();
+    let bind1 = env.binding_id.clone();
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    let subject = legacy::character_subject_id(&chr);
+    let candidate_id = legacy::character_pending_review_candidate_id("pend_window");
+    core.capture_character_pending_review(
+        &principal,
+        chr.clone(),
+        dto(json_capture(
+            "pend_window",
+            Some(&bind1),
+            "2026-01-01T00:00:01Z",
+        )),
+    )
+    .await
+    .expect("capture");
+
+    let (entered, release) = arm_review_pause(&core, MemoryReviewPause::AfterRecheck);
+    let drain_task = tokio::spawn({
+        let core = core.clone();
+        let principal = principal.clone();
+        let chr = chr.clone();
+        let bind = bind1.clone();
+        async move {
+            core.review_character_memory(
+                &principal,
+                chr,
+                dto::<ReviewCharacterMemoryRequest>(serde_json::json!({ "binding_id": bind })),
+            )
+            .await
+        }
+    });
+    entered.notified().await;
+
+    assert_eq!(
+        provider_candidate_status(&provider, &admin, &candidate_id).await,
+        "pending",
+        "the checked row was still queued when the drain decided to classify it"
+    );
+    assert!(
+        !provider.disposition_available(&subject),
+        "the review decision is not interleavable with a dismissal"
+    );
+
+    // Same dismissal-side wait signal as the Creator arm (fix round 4, finding
+    // R4-F3): it fires from inside the contending lock attempt.
+    let pinned = core.memory_provider_for_test().expect("pinned provider");
+    let waiting = Arc::new(tokio::sync::Notify::new());
+    pinned.report_disposition_waits(Arc::clone(&waiting));
+
+    let dismissal = tokio::spawn({
+        let core = core.clone();
+        let principal = principal.clone();
+        let chr = chr.clone();
+        async move {
+            core.delete_character_pending_review(&principal, chr, "pend_window".to_string())
+                .await
+        }
+    });
+    waiting.notified().await;
+    assert!(
+        !provider.disposition_available(&subject),
+        "the dismissal found the section held and is blocked on its lock"
+    );
+    assert!(
+        !dismissal.is_finished(),
+        "the dismissal cannot complete while the drain holds the section"
+    );
+
+    release.notify_one();
+    let reviewed = drain_task.await.unwrap().expect("review drains the row");
+    assert_eq!(reviewed.processed, Some(1));
+    assert_eq!(reviewed.fragmented, 1);
+    // The drain consumed the row first: the excluded dismissal finds nothing.
+    let late = dismissal
+        .await
+        .unwrap()
+        .expect_err("the dismissal lost the serialization");
+    assert!(
+        matches!(late, CoreError::NotFound { .. }),
+        "the excluded dismissal finds the row already consumed: {late:?}"
+    );
+    assert!(provider.disposition_available(&subject));
+
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        provider_fact_bodies(&pool, &legacy::character_subject_id(&chr)).await,
+        vec![FRAGMENT_DIGEST.to_string()]
+    );
+    assert_eq!(
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM character_memory_pending_review"
+        )
+        .await,
+        0,
+        "the capture wrote no legacy row; the drain consumed the provider candidate"
+    );
+    pool.close().await;
+}
+
+/// R2-F1: a dismissal that commits between the fetch-time check and the
+/// disposition section is re-verified inside the section and its row is dropped
+/// — the digest is never classified and no fragment is created.
+#[tokio::test]
+async fn creator_dismissal_between_check_and_classification_is_reverified() {
+    let env = seed_env().await;
+    seed_creator_pending_digest(
+        &env,
+        "pending_window",
+        REJECTED_DIGEST,
+        "2026-01-01T00:00:01Z",
+    )
+    .await;
+    let (core, principal) = open_core(&env).await;
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    let candidate_id = legacy::pending_review_candidate_id("pending_window");
+
+    let (entered, release) = arm_review_pause(&core, MemoryReviewPause::AfterFetchCheck);
+    let drain_task = tokio::spawn({
+        let core = core.clone();
+        let principal = principal.clone();
+        async move {
+            core.review_memory(&principal, creator_review_request())
+                .await
+        }
+    });
+    entered.notified().await;
+
+    // The fetch-time check saw the row pending, and the dismissal commits in the
+    // window before the drain takes the disposition section.
+    assert_eq!(
+        provider_candidate_status(&provider, &admin, &candidate_id).await,
+        "pending"
+    );
+    core.delete_pending_review(&principal, "pending_window".to_string())
+        .await
+        .expect("the dismissal wins the window");
+    assert_eq!(
+        provider_candidate_status(&provider, &admin, &candidate_id).await,
+        "consumed"
+    );
+
+    release.notify_one();
+    let reviewed = drain_task.await.unwrap().expect("review");
+    assert_eq!(
+        reviewed.processed,
+        Some(0),
+        "the re-check drops the consumed row instead of classifying it"
+    );
+    assert_eq!(
+        reviewed.fragmented, 0,
+        "a dismissed digest is never classified"
+    );
+    assert_eq!(reviewed.has_more, Some(false));
+
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM memory_fragments").await,
+        0,
+        "no fragment is created from a dismissed digest"
+    );
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
+        1,
+        "the dismissal wrote no legacy row and the drain never classified it"
+    );
+    pool.close().await;
+}
+
+/// The Character arm of
+/// [`creator_dismissal_between_check_and_classification_is_reverified`].
+#[tokio::test]
+async fn character_dismissal_between_check_and_classification_is_reverified() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let chr = env.character_id.clone();
+    let bind1 = env.binding_id.clone();
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    let candidate_id = legacy::character_pending_review_candidate_id("pend_window");
+    let mut rejected = json_capture("pend_window", Some(&bind1), "2026-01-01T00:00:01Z");
+    rejected["raw_digest"] = serde_json::json!(REJECTED_DIGEST);
+    core.capture_character_pending_review(&principal, chr.clone(), dto(rejected))
+        .await
+        .expect("capture");
+
+    let (entered, release) = arm_review_pause(&core, MemoryReviewPause::AfterFetchCheck);
+    let drain_task = tokio::spawn({
+        let core = core.clone();
+        let principal = principal.clone();
+        let chr = chr.clone();
+        let bind = bind1.clone();
+        async move {
+            core.review_character_memory(
+                &principal,
+                chr,
+                dto::<ReviewCharacterMemoryRequest>(serde_json::json!({ "binding_id": bind })),
+            )
+            .await
+        }
+    });
+    entered.notified().await;
+    assert_eq!(
+        provider_candidate_status(&provider, &admin, &candidate_id).await,
+        "pending"
+    );
+    core.delete_character_pending_review(&principal, chr.clone(), "pend_window".to_string())
+        .await
+        .expect("the dismissal wins the window");
+
+    release.notify_one();
+    let reviewed = drain_task.await.unwrap().expect("review");
+    assert_eq!(reviewed.processed, Some(0));
+    assert_eq!(reviewed.fragmented, 0);
+    assert_eq!(reviewed.has_more, Some(false));
+
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM character_memory_fragments").await,
+        0
+    );
+    assert_eq!(
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM character_memory_pending_review"
+        )
+        .await,
+        0,
+        "the capture wrote no legacy row and the dismissal consumed the provider candidate"
+    );
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn read_only_core_projects_bearers_no_writer_ever_ensured() {
+    let env = seed_env().await;
+    seed_creator_pending_digest(
+        &env,
+        "pending_unensured",
+        FRAGMENT_DIGEST,
+        "2026-01-01T00:00:01Z",
+    )
+    .await;
+    seed_creator_fragments(&env, 1).await;
+    let binding = env.binding_id.clone();
+    seed_character_pending_binding(&env, "pending_chr_unensured", &binding).await;
+    // Provision the space only: a writer open registers the space and the
+    // bootstrap grant and ensures no subject at all.
+    let provider = open_bridge_provider(&env).await;
+    drop(provider);
+
+    let read_only = CoreService::open(CoreOpenOptions {
+        user_home: env.user_home.clone(),
+        access: CoreAccess::ReadOnly,
+    })
+    .await
+    .expect("read-only open");
+    let principal = read_only.active_principal().await.unwrap();
+
+    assert_eq!(
+        read_only
+            .count_pending_reviews(&principal)
+            .await
+            .unwrap()
+            .count,
+        1,
+        "an unensured Creator bearer still serves its legacy pending row"
+    );
+    let listed = read_only
+        .list_pending_reviews(&principal, None, PAGE_SIZE)
+        .await
+        .unwrap();
+    assert_eq!(listed.items.len(), 1);
+    assert_eq!(listed.items[0].pending_id, "pending_unensured");
+    let fragments = read_only
+        .list_memory_fragments(&principal, None, None, PAGE_SIZE)
+        .await
+        .unwrap();
+    assert_eq!(
+        fragments.fragments.len(),
+        1,
+        "an unensured Creator bearer still serves its legacy fragments"
+    );
+
+    let character = read_only
+        .list_character_pending_reviews(
+            &principal,
+            env.character_id.clone(),
+            Some(binding),
+            u32::try_from(PAGE_SIZE).unwrap(),
+            0,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        character.items.len(),
+        1,
+        "an unensured Character bearer still serves its legacy pending row"
+    );
+    assert_eq!(
+        character.items[0].pending_id.as_str(),
+        "pending_chr_unensured"
+    );
+
+    // The projection is a read: no subject, receipt or candidate was created.
+    let pool = plain_pool(&env).await;
+    for table in ["memory_subjects", "memory_receipts", "memory_candidates"] {
+        assert_eq!(
+            count_where(&pool, &format!("SELECT COUNT(*) FROM {table}")).await,
+            0,
+            "{table} stays write-idle on a read-only projection"
+        );
+    }
+    pool.close().await;
+}
+
+/// NXM-5 Task 2 fix round 3 (R3-F2/R3-F3): a read-only core opened before any
+/// writer provisioned the workspace answers the space's absence; once a writer
+/// provisions that same workspace, the SAME read-only instance serves its reads
+/// — no reopen and no persistent write from the read path.
+#[tokio::test]
+async fn read_only_core_over_a_never_provisioned_workspace_answers_not_found() {
+    let env = seed_unprovisioned_env();
+
+    let read_only = CoreService::open(CoreOpenOptions {
+        user_home: env.user_home.clone(),
+        access: CoreAccess::ReadOnly,
+    })
+    .await
+    .expect("read-only open over the pre-provider workspace");
+    let principal = read_only.active_principal().await.unwrap();
+
+    assert!(
+        matches!(
+            read_only.count_pending_reviews(&principal).await,
+            Err(CoreError::NotFound { .. })
+        ),
+        "a workspace with no provider schema answers the space's absence"
+    );
+    assert!(matches!(
+        read_only
+            .list_pending_reviews(&principal, None, PAGE_SIZE)
+            .await,
+        Err(CoreError::NotFound { .. })
+    ));
+    assert!(matches!(
+        read_only
+            .list_memory_fragments(&principal, None, None, PAGE_SIZE)
+            .await,
+        Err(CoreError::NotFound { .. })
+    ));
+
+    // A writer opens the same workspace afterwards: migrations and provisioning
+    // commit while this read-only service stays open.
+    let writer = open_bridge_provider(&env).await;
+    seed_creator_pending_digest(
+        &env,
+        "pending_no_space",
+        FRAGMENT_DIGEST,
+        "2026-01-01T00:00:01Z",
+    )
+    .await;
+
+    assert_eq!(
+        read_only
+            .count_pending_reviews(&principal)
+            .await
+            .unwrap()
+            .count,
+        1,
+        "the pinned read-only provider observes the later provisioning"
+    );
+    let listed = read_only
+        .list_pending_reviews(&principal, None, PAGE_SIZE)
+        .await
+        .unwrap();
+    assert_eq!(listed.items.len(), 1);
+    assert_eq!(listed.items[0].pending_id, "pending_no_space");
+    assert_eq!(
+        read_only
+            .list_memory_fragments(&principal, None, None, PAGE_SIZE)
+            .await
+            .unwrap()
+            .fragments
+            .len(),
+        0,
+        "the read serves the provider/bridge state, not a stale snapshot"
+    );
+
+    // The read path wrote nothing: no subject was ensured and no projection was
+    // persisted by the read-only instance.
+    let pool = plain_pool(&env).await;
+    for table in ["memory_subjects", "memory_receipts", "memory_candidates"] {
+        assert_eq!(
+            count_where(&pool, &format!("SELECT COUNT(*) FROM {table}")).await,
+            0,
+            "{table} stays write-idle across the read-only open and its reads"
+        );
+    }
+    pool.close().await;
+    drop(writer);
+}
+
+/// NXM-5 Task 2 fix round 2/3: a provider schema with no space row still
+/// answers the space's absence on every read entry point (the static case the
+/// open-before-provision regression no longer covers, since it starts from a
+/// database with no schema at all).
+#[tokio::test]
+async fn read_only_core_answers_a_missing_space_row_as_not_found() {
+    let env = seed_env().await;
+
+    let read_only = CoreService::open(CoreOpenOptions {
+        user_home: env.user_home.clone(),
+        access: CoreAccess::ReadOnly,
+    })
+    .await
+    .expect("read-only open");
+    let principal = read_only.active_principal().await.unwrap();
+
+    assert!(
+        matches!(
+            read_only.count_pending_reviews(&principal).await,
+            Err(CoreError::NotFound { .. })
+        ),
+        "an unprovisioned space answers the space's absence"
+    );
+    assert!(matches!(
+        read_only
+            .list_pending_reviews(&principal, None, PAGE_SIZE)
+            .await,
+        Err(CoreError::NotFound { .. })
+    ));
+    assert!(matches!(
+        read_only
+            .list_memory_fragments(&principal, None, None, PAGE_SIZE)
+            .await,
+        Err(CoreError::NotFound { .. })
+    ));
+    assert!(matches!(
+        read_only
+            .list_character_pending_reviews(
+                &principal,
+                env.character_id.clone(),
+                None,
+                u32::try_from(PAGE_SIZE).unwrap(),
+                0,
+            )
+            .await,
+        Err(CoreError::NotFound { .. })
+    ));
+}
+
+// ═══ NXM-5 Task 3: provider-path regression gaps ═══════════════════════════
+//
+// The four families the reroute must keep — pre-migration merged reads,
+// just-in-time adoption, stable external ids, and provider-only reads after
+// P5's completion marker — are pinned by the Task 1/2 suites above. These
+// regressions close what they leave open: the marker is per space, the wire
+// candidate entries are not adoption paths, a record cursor survives an
+// adoption that writes only the candidate family, and a marker published while
+// a dismissal is in flight withdraws the projection that dismissal would adopt.
+
+/// A second space as P5 leaves it after migrating it: a space row plus its
+/// bootstrap admin grant, and no completion marker yet.
+async fn seed_space_with_admin_grant(env: &Env, space_id: &str) {
+    let guarded = init_guarded_pool(&env.db_path, CREATOR).await.unwrap();
+    let pool = guarded.clone_pool();
+    sqlx::query(
+        "INSERT INTO memory_spaces \
+         (space_id, display_name, authority_host_id, authority_generation, status, revision, \
+          created_at) \
+         VALUES (?, ?, 'nexus-local', 1, 'active', 1, '2026-03-01T00:00:00Z')",
+    )
+    .bind(space_id)
+    .bind(space_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO memory_grants \
+         (grant_id, space_id, subject_id, principal_id, capabilities_json, context_ids_json, \
+          shared_access, expires_at, revoked_at, revision, created_at) \
+         VALUES (?, ?, NULL, ?, '[\"admin\"]', '[]', 0, NULL, NULL, 1, '2026-03-01T00:00:00Z')",
+    )
+    .bind(format!("grant_bootstrap_{space_id}"))
+    .bind(space_id)
+    .bind(CREATOR)
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+}
+
+/// P5's completion marker is per space (`legacy_content_migration:<space>`): a
+/// marker published for one space closes every legacy projection of that space
+/// — both bearers — and leaves another space's unmigrated projection serving
+/// the same external ids.
+#[tokio::test]
+async fn completion_marker_closes_only_the_space_it_names() {
+    const SHADOW_SPACE: &str = "spc_bridge_shadow";
+    const SHADOW_SUBJECT: &str = "sbj_bridge_shadow";
+
+    let env = seed_env().await;
+    seed_legacy_creator_content(&env).await;
+    seed_legacy_character_content(&env).await;
+    seed_space_with_admin_grant(&env, SHADOW_SPACE).await;
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    for (space, subject, namespace, kind_id) in [
+        (
+            BRIDGE_SPACE,
+            BRIDGE_CREATOR_SUBJECT,
+            legacy::CREATOR_KIND_NS,
+            CREATOR,
+        ),
+        (
+            BRIDGE_SPACE,
+            BRIDGE_CHARACTER_SUBJECT,
+            legacy::CHARACTER_KIND_NS,
+            env.character_id.as_str(),
+        ),
+        (
+            SHADOW_SPACE,
+            SHADOW_SUBJECT,
+            legacy::CREATOR_KIND_NS,
+            CREATOR,
+        ),
+    ] {
+        bridge_ok(
+            &provider
+                .ensure_subject(
+                    &admin,
+                    bridge_ensure_request_in(space, subject, namespace, kind_id),
+                )
+                .await,
+        );
+    }
+
+    let creator_before = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    BRIDGE_CREATOR_SUBJECT,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(creator_before["total_authorized"], 3, "{creator_before}");
+    let character_before = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    BRIDGE_CHARACTER_SUBJECT,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(
+        character_before["total_authorized"], 2,
+        "{character_before}"
+    );
+    let shadow_before = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request_in(
+                    SHADOW_SPACE,
+                    SHADOW_SUBJECT,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(
+        bridge_report_ids(&shadow_before, "records"),
+        bridge_report_ids(&creator_before, "records"),
+        "the unmigrated space projects the same deterministic external ids: {shadow_before}"
+    );
+    let shadow_candidates_before = bridge_ok(
+        &provider
+            .list_candidates(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": SHADOW_SPACE,
+                    "subject_id": SHADOW_SUBJECT,
+                    "status": "pending",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(
+        shadow_candidates_before["candidates"][0]["candidate_id"],
+        "lgc:memory_pending_review:pend_bridge",
+        "{shadow_candidates_before}"
+    );
+
+    // A provider-native record in the marked space must outlive its marker.
+    let created = bridge_ok(
+        &provider
+            .create_record(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": BRIDGE_CREATOR_SUBJECT,
+                    "kind": "note",
+                    "content": { "text": BRIDGE_TEXT },
+                    "scope": { "visibility": "shared" },
+                    "idempotency_key": "k-space-native",
+                })),
+            )
+            .await,
+    );
+    let native_id = created["result"]["record_id"]
+        .as_str()
+        .expect("a created record id")
+        .to_string();
+
+    // P5 completes the marked space only.
+    publish_migration_marker(&env, BRIDGE_SPACE).await;
+
+    // Every legacy projection entry point of that space closes, for both
+    // bearers; the provider's own record keeps serving.
+    let creator_closed = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    BRIDGE_CREATOR_SUBJECT,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(
+        bridge_report_ids(&creator_closed, "records"),
+        vec![native_id.clone()],
+        "the marker is not subject-scoped and never hides a provider-native row: {creator_closed}"
+    );
+    let character_closed = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request(
+                    BRIDGE_CHARACTER_SUBJECT,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(
+        character_closed["total_authorized"], 0,
+        "the marker is not subject-scoped: {character_closed}"
+    );
+    let closed_candidates = bridge_ok(
+        &provider
+            .list_candidates(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": BRIDGE_CREATOR_SUBJECT,
+                    "status": "pending",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(
+        closed_candidates["candidates"],
+        serde_json::json!([]),
+        "{closed_candidates}"
+    );
+    let closed_profile = bridge_ok(
+        &provider
+            .get_profile(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": BRIDGE_CREATOR_SUBJECT,
+                })),
+            )
+            .await,
+    );
+    assert_eq!(
+        closed_profile["profiles"],
+        serde_json::json!([]),
+        "{closed_profile}"
+    );
+    let closed_by_id = provider
+        .get_record(
+            &admin,
+            dto(serde_json::json!({
+                "space_id": BRIDGE_SPACE,
+                "record_id": "lgc:memory_fragments:frag_bridge",
+            })),
+        )
+        .await;
+    assert_eq!(bridge_reject_code(&closed_by_id), "NOT_FOUND");
+    let native_by_id = bridge_ok(
+        &provider
+            .get_record(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "record_id": native_id,
+                })),
+            )
+            .await,
+    );
+    assert_eq!(
+        native_by_id["record"]["content"]["text"], BRIDGE_TEXT,
+        "the provider-native record is still readable by id: {native_by_id}"
+    );
+
+    // The other space is untouched: same external ids, same queue, same SOUL.
+    let shadow_after = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request_in(
+                    SHADOW_SPACE,
+                    SHADOW_SUBJECT,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(
+        bridge_report_ids(&shadow_after, "records"),
+        bridge_report_ids(&creator_before, "records"),
+        "a marker for another space withdraws nothing here: {shadow_after}"
+    );
+    let shadow_candidates = bridge_ok(
+        &provider
+            .list_candidates(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": SHADOW_SPACE,
+                    "subject_id": SHADOW_SUBJECT,
+                    "status": "pending",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(
+        shadow_candidates["candidates"][0]["candidate_id"], "lgc:memory_pending_review:pend_bridge",
+        "{shadow_candidates}"
+    );
+    let shadow_by_id = bridge_ok(
+        &provider
+            .get_record(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": SHADOW_SPACE,
+                    "record_id": "lgc:memory_fragments:frag_bridge",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(
+        shadow_by_id["record"]["content"]["text"], "Legacy creator fragment text.",
+        "{shadow_by_id}"
+    );
+    let shadow_profile = bridge_ok(
+        &provider
+            .get_profile(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": SHADOW_SPACE,
+                    "subject_id": SHADOW_SUBJECT,
+                })),
+            )
+            .await,
+    );
+    assert_eq!(
+        shadow_profile["profiles"][0]["document"]["body"], BRIDGE_SOUL,
+        "{shadow_profile}"
+    );
+
+    // Once that space completes too, its own marker closes it.
+    publish_migration_marker(&env, SHADOW_SPACE).await;
+    let shadow_closed = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_request_in(
+                    SHADOW_SPACE,
+                    SHADOW_SUBJECT,
+                    serde_json::json!({ "mode": "subject_all" }),
+                    serde_json::json!([]),
+                ),
+            )
+            .await,
+    );
+    assert_eq!(
+        shadow_closed["total_authorized"], 0,
+        "each space has its own completion marker: {shadow_closed}"
+    );
+}
+
+/// Adoption is the E4 dismissal's contract, not the wire's: `dismiss_candidate`
+/// and `review_candidate` reach provider-native rows only. A projected legacy
+/// row is absent to them and stays unadopted; once the dismissal has adopted and
+/// consumed it, the same id is a provider-native consumed row, so the wire
+/// entries refuse it as consumed instead of re-adopting or resurrecting it.
+#[tokio::test]
+async fn wire_candidate_mutations_never_adopt_a_projected_legacy_row() {
+    let env = seed_env().await;
+    seed_creator_pending_row(&env, "pend_wire", None, "2026-01-01T00:00:01Z").await;
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    let projected = legacy::pending_review_candidate_id("pend_wire");
+
+    // A projected id is not a provider row: both mutation entries refuse the
+    // op and, crucially, adopt nothing on the way.
+    let dismissed = provider
+        .dismiss_candidate(
+            &admin,
+            dto(serde_json::json!({
+                "space_id": BRIDGE_SPACE,
+                "candidate_id": projected,
+                "expected_revision": 1,
+                "reason": "not this entry's to adopt",
+                "idempotency_key": "k-wire-dismiss",
+            })),
+        )
+        .await;
+    assert_eq!(bridge_reject_code(&dismissed), "NOT_FOUND");
+    let reviewed = provider
+        .review_candidate(
+            &admin,
+            dto(serde_json::json!({
+                "space_id": BRIDGE_SPACE,
+                "candidate_id": projected,
+                "expected_revision": 1,
+                "decision": { "action": "drop" },
+                "idempotency_key": "k-wire-review",
+            })),
+        )
+        .await;
+    assert_eq!(bridge_reject_code(&reviewed), "NOT_FOUND");
+    assert_eq!(
+        adopted_candidate(&env, &projected).await,
+        None,
+        "neither wire entry has an adoption path"
+    );
+
+    // The E4 dismissal adopts under the projected id and consumes in place; it
+    // is also the path that ensures the bearer's deterministic subject.
+    let (core, principal) = open_core(&env).await;
+    core.delete_pending_review(&principal, "pend_wire".to_string())
+        .await
+        .expect("the E4 dismissal adopts the projected row");
+    assert_eq!(
+        adopted_candidate(&env, &projected).await,
+        Some(("consumed".to_string(), None)),
+        "adoption under the bridge's deterministic id"
+    );
+
+    // The wire now sees that provider-native row and refuses a second decision.
+    assert_eq!(
+        provider_candidate_status(&provider, &admin, &projected).await,
+        "consumed"
+    );
+    let dismissed_again = provider
+        .dismiss_candidate(
+            &admin,
+            dto(serde_json::json!({
+                "space_id": BRIDGE_SPACE,
+                "candidate_id": projected,
+                "expected_revision": 2,
+                "reason": "already decided",
+                "idempotency_key": "k-wire-dismiss-consumed",
+            })),
+        )
+        .await;
+    assert_eq!(bridge_reject_code(&dismissed_again), "CANDIDATE_CONSUMED");
+    let reviewed_again = provider
+        .review_candidate(
+            &admin,
+            dto(serde_json::json!({
+                "space_id": BRIDGE_SPACE,
+                "candidate_id": projected,
+                "expected_revision": 2,
+                "decision": { "action": "drop" },
+                "idempotency_key": "k-wire-review-consumed",
+            })),
+        )
+        .await;
+    assert_eq!(bridge_reject_code(&reviewed_again), "CANDIDATE_CONSUMED");
+
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM memory_candidates WHERE candidate_id = 'lgc:memory_pending_review:pend_wire'"
+        )
+        .await,
+        1,
+        "no wire entry duplicated the adopted row"
+    );
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
+        1,
+        "the legacy queue row is never written by any of these paths"
+    );
+    pool.close().await;
+}
+
+/// A cursor minted over the merged record set stays valid across an adoption:
+/// the dismissal writes candidates, receipts and the journal only, so the
+/// snapshot marker of the record family is unchanged and the walk continues to
+/// every projected row. A candidate cursor is different — the dismissal really
+/// removed a row from that authorized set, so the old snapshot is refused
+/// instead of silently re-filtering (MEM-R026).
+#[tokio::test]
+async fn record_cursor_survives_a_dismissal_that_adopts_a_projected_row() {
+    let env = seed_env().await;
+    seed_legacy_creator_content(&env).await;
+    seed_creator_pending_row(&env, "pend_cursor", None, "2026-03-02T00:00:00Z").await;
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    // The bearer's deterministic subject is the one E4 addresses, so the pages
+    // below are minted against the same subject (and lifecycle status) the
+    // dismissal leaves behind.
+    let subject = legacy::creator_subject_id(CREATOR);
+    bridge_ok(
+        &provider
+            .ensure_subject(
+                &admin,
+                bridge_ensure_request(&subject, legacy::CREATOR_KIND_NS, CREATOR),
+            )
+            .await,
+    );
+
+    let first = bridge_ok(
+        &provider
+            .list_records(&admin, bridge_records_page_request(&subject, 1, None))
+            .await,
+    );
+    assert_eq!(first["total_authorized"], 3, "{first}");
+    let cursor = first["next_cursor"]
+        .as_str()
+        .expect("three projected records have a second page")
+        .to_string();
+    let candidates_first = bridge_ok(
+        &provider
+            .list_candidates(
+                &admin,
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": subject,
+                    "status": "pending",
+                    "limit": 1,
+                })),
+            )
+            .await,
+    );
+    let candidate_cursor = candidates_first["next_cursor"]
+        .as_str()
+        .expect("two pending rows have a second page")
+        .to_string();
+
+    // Adoption through the E4 dismissal, while this same provider stays open.
+    let (core, principal) = open_core(&env).await;
+    core.delete_pending_review(&principal, "pend_bridge".to_string())
+        .await
+        .expect("the projected row is adopted and consumed");
+
+    let second = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_page_request(&subject, 1, Some(&cursor)),
+            )
+            .await,
+    );
+    let second_cursor = second["next_cursor"]
+        .as_str()
+        .expect("the third projected record follows")
+        .to_string();
+    let third = bridge_ok(
+        &provider
+            .list_records(
+                &admin,
+                bridge_records_page_request(&subject, 1, Some(&second_cursor)),
+            )
+            .await,
+    );
+    assert!(
+        third["next_cursor"].is_null(),
+        "the walk ends with the third record: {third}"
+    );
+    let mut walked = bridge_report_ids(&first, "records");
+    walked.extend(bridge_report_ids(&second, "records"));
+    walked.extend(bridge_report_ids(&third, "records"));
+    walked.sort();
+    let mut expected = vec![
+        "lgc:memory_fragments:frag_bridge".to_string(),
+        format!("lgc:memory_long_term:{CREATOR}:bridge-memory"),
+        "lgc:memory_soul_narratives:%00".to_string(),
+    ];
+    expected.sort();
+    assert_eq!(
+        walked, expected,
+        "the walk is exactly the seeded record set: no gap, no duplicate, no extra id"
+    );
+
+    // The candidate snapshot really changed: the adopted row left the queue.
+    let stale = provider
+        .list_candidates(
+            &admin,
+            dto(serde_json::json!({
+                "space_id": BRIDGE_SPACE,
+                "subject_id": subject,
+                "status": "pending",
+                "limit": 1,
+                "cursor": candidate_cursor,
+            })),
+        )
+        .await;
+    assert_eq!(bridge_reject_code(&stale), "CURSOR_INVALID");
+}
+
+/// The completion marker is re-read inside the dismissal's admission
+/// transaction, not cached from the projection read that preceded it: when P5
+/// publishes the marker while a dismissal is parked in its publication section,
+/// the dismissal adopts nothing, consumes nothing, returns the retained
+/// `NotFound` and leaves the legacy row untouched.
+#[tokio::test]
+async fn dismissal_racing_the_completion_marker_adopts_nothing() {
+    let env = seed_env().await;
+    seed_creator_pending_row(&env, "pend_race", None, "2026-01-01T00:00:01Z").await;
+    // A provider-native candidate alongside the legacy row: the marker must
+    // leave the provider's own state readable.
+    let provider = open_bridge_provider(&env).await;
+    let admin = bridge_principal();
+    let subject = legacy::creator_subject_id(CREATOR);
+    bridge_ok(
+        &provider
+            .ensure_subject(
+                &admin,
+                bridge_ensure_request(&subject, legacy::CREATOR_KIND_NS, CREATOR),
+            )
+            .await,
+    );
+    let native_candidate =
+        native_pending_candidate(&provider, &admin, &subject, "k-race-native").await;
+    let (core, principal) = open_core(&env).await;
+    let pinned = core.memory_provider_for_test().expect("pinned provider");
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Barrier::new(2));
+    pinned.park_next_publish(Arc::clone(&entered), Arc::clone(&release));
+
+    let dismissal = tokio::spawn({
+        let core = core.clone();
+        let principal = principal.clone();
+        async move {
+            core.delete_pending_review(&principal, "pend_race".to_string())
+                .await
+        }
+    });
+    // The dismissal has resolved the projection and now holds its publication
+    // section; P5 completes the space before the admission transaction opens.
+    entered.notified().await;
+    publish_migration_marker(&env, BRIDGE_SPACE).await;
+    release.wait().await;
+
+    let late = dismissal
+        .await
+        .unwrap()
+        .expect_err("the marker withdrew the row before the dismissal consumed it");
+    assert!(matches!(late, CoreError::NotFound { .. }), "got {late:?}");
+    assert_eq!(
+        adopted_candidate(&env, &legacy::pending_review_candidate_id("pend_race")).await,
+        None,
+        "the withdrawal is re-read inside the admission transaction"
+    );
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
+        1,
+        "the legacy row is still there and was never written"
+    );
+    assert_eq!(
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM memory_candidates WHERE candidate_id = \
+             'lgc:memory_pending_review:pend_race'"
+        )
+        .await,
+        0,
+        "no adoption was committed"
+    );
+    pool.close().await;
+    assert_eq!(
+        provider_candidate_status(&provider, &admin, &native_candidate).await,
+        "pending",
+        "the marker leaves the provider's own candidate alone"
+    );
+    let legacy_candidate = provider
+        .get_candidate(
+            &admin,
+            dto(serde_json::json!({
+                "space_id": BRIDGE_SPACE,
+                "candidate_id": legacy::pending_review_candidate_id("pend_race"),
+            })),
+        )
+        .await;
+    assert_eq!(
+        bridge_reject_code(&legacy_candidate),
+        "NOT_FOUND",
+        "the legacy candidate closed with the marker"
+    );
+    assert_eq!(
+        core.count_pending_reviews(&principal).await.unwrap().count,
+        0,
+        "post-marker the legacy-derived queue is empty"
+    );
+}
+
+// ═══ NXM-7 fix round 1 ═══════════════════════════════════════════════════
+//
+// P3-F1/P3-F2/P3-F4: the rerouted E6 projection is consumer-visible, so these
+// tests assert the final mind-slot content against provider-seeded fixtures —
+// the Character SOUL, its shared and binding-local fragments, and the promoted
+// memories rendered as the legacy memory files they came from. The fixtures
+// flood three recall pages with newer `event` rows, so the projection must
+// filter per family while it pages rather than let one global cap serve every
+// kind.
+
+const MIND_SOUL: &str = "# Soul\n\nA provider-seeded Character soul.\n";
+
+/// Seed the Character's legacy surfaces below 830 newer `event` records — more
+/// than eight recall pages, the scale at which the round-2 review showed a
+/// global page budget silently evicting memory — and return the exact bytes of
+/// its two promoted memory files.
+async fn seed_mind_projection_fixtures(env: &Env, other_binding: &str) -> (String, String) {
+    let guarded = init_engine_pool(&env.db_path, CREATOR, GuardedPoolOptions::default())
+        .await
+        .unwrap();
+    let pool = guarded.clone_pool();
+    let lifecycle_epoch: i64 =
+        sqlx::query_scalar("SELECT lifecycle_epoch FROM characters WHERE character_id = ?")
+            .bind(&env.character_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    for (fragment_id, summary, keywords, binding, created_at) in [
+        (
+            "mfrag_shared",
+            "Shared Character fragment.",
+            r#"["kw_shared"]"#,
+            None,
+            "2026-01-02T00:00:00Z",
+        ),
+        (
+            "mfrag_binding",
+            "Binding-local Character fragment.",
+            r#"["kw_binding"]"#,
+            Some(env.binding_id.as_str()),
+            "2026-01-03T00:00:00Z",
+        ),
+        (
+            "mfrag_other",
+            "Other-binding Character fragment.",
+            r#"["kw_other"]"#,
+            Some(other_binding),
+            "2026-01-04T00:00:00Z",
+        ),
+    ] {
+        nexus_local_db::create_character_fragment(
+            &pool,
+            CREATOR,
+            &nexus_local_db::NewCharacterMemoryFragment {
+                fragment_id: fragment_id.to_string(),
+                session_id: format!("sess_{fragment_id}"),
+                character_id: env.character_id.clone(),
+                actor_world_binding_id: binding.map(str::to_string),
+                keywords: keywords.to_string(),
+                summary: summary.to_string(),
+                created_at: created_at.to_string(),
+                ttl: None,
+            },
+        )
+        .await
+        .unwrap();
+    }
+    for index in 0..830_u32 {
+        let operation_id = format!("op_mind_{index:03}");
+        let session_id = format!("sess_mind_{index:03}");
+        let pending_id = format!("pend_mind_{index:03}");
+        let captured_at = format!("2026-04-01T{:02}:{:02}:00Z", index / 60, index % 60);
+        nexus_local_db::capture_character_run(
+            &pool,
+            CREATOR,
+            nexus_local_db::RunCaptureInput {
+                operation_id: &operation_id,
+                session_id: &session_id,
+                character_id: &env.character_id,
+                binding_id: &env.binding_id,
+                pending_id: &pending_id,
+                raw_digest: FRAGMENT_DIGEST,
+                captured_at: &captured_at,
+                lifecycle_epoch,
+            },
+        )
+        .await
+        .unwrap();
+    }
+    pool.close().await;
+    drop(guarded);
+
+    let soul_path =
+        nexus_home_layout::character_soul_md_path(&env.user_home, CREATOR, &env.character_id);
+    std::fs::create_dir_all(soul_path.parent().expect("character root")).unwrap();
+    std::fs::write(&soul_path, MIND_SOUL).unwrap();
+    let bearer = MemoryBearerRef::Character {
+        owner_creator_id: CREATOR,
+        character_id: &env.character_id,
+    };
+    for (slug, kind, body, updated_at) in [
+        (
+            "alpha-memory",
+            "story_summary",
+            "Alpha memory body.",
+            "2026-01-05T00:00:00Z",
+        ),
+        (
+            "zeta-memory",
+            "character_note",
+            "Zeta memory body.",
+            "2026-01-06T00:00:00Z",
+        ),
+    ] {
+        let mut memory = nexus_creator_memory::LongTermMemory::new(kind);
+        memory.set_body(body);
+        // Older than every seeded event row: a promoted memory must survive a
+        // flood of newer unrelated records regardless of how large it is.
+        memory.frontmatter.updated_at = updated_at.to_string();
+        nexus_creator_memory::memory_io::save_memory(&env.user_home, bearer, slug, &memory)
+            .expect("promoted memory fixture");
+    }
+    let read = |slug: &str| {
+        std::fs::read_to_string(bearer.long_term_memory_path(&env.user_home, slug))
+            .expect("memory file bytes")
+    };
+    (read("alpha-memory"), read("zeta-memory"))
+}
+
+#[tokio::test]
+async fn character_mind_projection_serves_provider_seeded_soul_fragments_and_memories() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let other_binding = core
+        .add_binding(
+            &principal,
+            env.character_id.clone(),
+            WORLD_B.to_string(),
+            None,
+        )
+        .await
+        .expect("second binding")
+        .binding
+        .binding_id
+        .as_str()
+        .to_string();
+    // Creator-side content of the same workspace: never part of the Character's
+    // mind (a bearer sees its own subject only).
+    seed_legacy_creator_content(&env).await;
+    let (alpha, zeta) = seed_mind_projection_fixtures(&env, &other_binding).await;
+
+    let mind = CoreCharacterMind::new(
+        plain_pool(&env).await,
+        core.memory_provider_for_test().expect("pinned provider"),
+    )
+    .projection(
+        &principal,
+        CREATOR,
+        &env.character_id,
+        Some(&env.binding_id),
+    )
+    .await
+    .expect("the projection serves the seeded Character mind");
+
+    assert_eq!(
+        mind.soul.as_deref(),
+        Some(MIND_SOUL),
+        "the SOUL slot carries the Character's own document"
+    );
+    assert_eq!(
+        mind.memory,
+        vec![
+            "- Binding-local Character fragment. — keywords: [\"kw_binding\"]".to_string(),
+            "- Shared Character fragment. — keywords: [\"kw_shared\"]".to_string(),
+            format!("- {alpha}"),
+            format!("- {zeta}"),
+        ],
+        "830 newer unrelated events never evict the fragments or the promoted \
+         memories, and each promoted memory renders as the legacy memory file \
+         it came from, in slug order"
+    );
+
+    let shared_only = CoreCharacterMind::new(
+        plain_pool(&env).await,
+        core.memory_provider_for_test().expect("pinned provider"),
+    )
+    .projection(&principal, CREATOR, &env.character_id, None)
+    .await
+    .expect("shared-scope projection");
+    assert_eq!(
+        shared_only.memory,
+        vec![
+            "- Shared Character fragment. — keywords: [\"kw_shared\"]".to_string(),
+            format!("- {alpha}"),
+            format!("- {zeta}"),
+        ],
+        "a shared-scope projection keeps shared records and never leaks a binding's"
+    );
+    assert!(
+        !shared_only
+            .memory
+            .iter()
+            .any(|line| line.contains("Legacy long-term body.")),
+        "the Creator's promoted memory is not the Character's"
+    );
+}
+
+/// The legacy projection listed the complete memory directory by slug and then
+/// took the head 20 (`memory_io::list_memories` + `take`). Ranking a recency
+/// window instead drops the slug-first memory whenever 20 newer memories exist,
+/// so this fixture makes recency and slug order disagree: `alpha-memory` is the
+/// oldest file and exactly the memory a recency window would drop.
+#[tokio::test]
+async fn character_mind_projection_ranks_the_complete_memory_set_by_slug_before_capping() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let bearer = MemoryBearerRef::Character {
+        owner_creator_id: CREATOR,
+        character_id: &env.character_id,
+    };
+    let mut slugs = vec!["alpha-memory".to_string()];
+    for index in 0..20_u32 {
+        slugs.push(format!("memory-{index:02}"));
+    }
+    let mut expected: Vec<String> = Vec::new();
+    for (index, slug) in slugs.iter().enumerate() {
+        let mut memory = nexus_creator_memory::LongTermMemory::new("story_summary");
+        memory.set_body(&format!("Memory {slug} body."));
+        // `alpha-memory` is older than every other file, so only the complete
+        // slug ranking keeps it inside the 20-entry selection.
+        memory.frontmatter.updated_at = if index == 0 {
+            "2025-12-01T00:00:00Z".to_string()
+        } else {
+            format!("2026-01-{index:02}T00:00:00Z")
+        };
+        nexus_creator_memory::memory_io::save_memory(&env.user_home, bearer, slug, &memory)
+            .expect("promoted memory fixture");
+        if index < 20 {
+            let bytes = std::fs::read_to_string(bearer.long_term_memory_path(&env.user_home, slug))
+                .expect("memory file bytes");
+            expected.push(format!("- {bytes}"));
+        }
+    }
+
+    let mind = CoreCharacterMind::new(
+        plain_pool(&env).await,
+        core.memory_provider_for_test().expect("pinned provider"),
+    )
+    .projection(&principal, CREATOR, &env.character_id, None)
+    .await
+    .expect("the projection serves the promoted set");
+
+    assert_eq!(
+        mind.memory, expected,
+        "the slug-first 20 of the complete promoted set survive; provider recency \
+         never evicts the legacy selection"
+    );
+    assert!(
+        !mind
+            .memory
+            .iter()
+            .any(|line| line.contains("memory-19 body.")),
+        "the slug-last memory falls outside the 20-entry selection"
+    );
+}
+
+/// The legacy per-scope fragment read took one instant's rows by `fragment_id
+/// DESC` (`list_character_fragments`, `LIMIT 100`), while the provider pages an
+/// equal `created_at` by record id ascending. A read that stops at the 100th row
+/// therefore keeps the wrong rows of a tie group, and the fragment the legacy
+/// selection put first disappears. 101 shared fragments at one instant pin that
+/// selection: the projection's first line is `frag-100` (the member a
+/// provider-ordered prefix drops) and the row that prefix kept instead
+/// (`frag-080`) never renders.
+#[tokio::test]
+async fn character_mind_projection_keeps_the_legacy_tie_break_at_the_scope_cap() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let pool = plain_pool(&env).await;
+    for index in 0..101_u32 {
+        nexus_local_db::create_character_fragment(
+            &pool,
+            CREATOR,
+            &nexus_local_db::NewCharacterMemoryFragment {
+                fragment_id: format!("frag-{index:03}"),
+                session_id: format!("sess_frag_{index:03}"),
+                character_id: env.character_id.clone(),
+                actor_world_binding_id: None,
+                keywords: "[]".to_string(),
+                summary: format!("Fragment frag-{index:03}."),
+                created_at: "2026-02-01T00:00:00Z".to_string(),
+                ttl: None,
+            },
+        )
+        .await
+        .unwrap();
+    }
+    pool.close().await;
+
+    let mind = CoreCharacterMind::new(
+        plain_pool(&env).await,
+        core.memory_provider_for_test().expect("pinned provider"),
+    )
+    .projection(&principal, CREATOR, &env.character_id, None)
+    .await
+    .expect("the projection serves the tie group");
+
+    let expected: Vec<String> = (81..=100)
+        .rev()
+        .map(|index| format!("- Fragment frag-{index:03}."))
+        .collect();
+    assert_eq!(
+        mind.memory, expected,
+        "the legacy `created_at DESC, fragment_id DESC` order picks the rows one \
+         instant keeps at the per-scope bound, before the mind's own 20-line cap"
+    );
+    assert!(
+        !mind.memory.iter().any(|line| line.contains("frag-080")),
+        "the row a provider-ordered prefix kept instead of frag-100 never renders"
+    );
+}
+
+/// The legacy per-scope read ordered the RAW `created_at` column text
+/// (`ORDER BY created_at DESC, fragment_id DESC`), while the provider pages by
+/// parsed instant. With 101 fragments at `2026-02-01T00:00:00Z` and one at
+/// `2026-02-01T00:00:00.900Z`, SQLite ranks every `Z` row above the fractional
+/// one (`.` < `Z`), so the legacy `LIMIT 100` excludes the fractional-second
+/// fragment. Its instant is the newest of the fixture, so an instant-ordered
+/// selection would put it first in the mind's 20 lines and drop a
+/// legacy-selected fragment (fix round 4, finding R4-F1).
+#[tokio::test]
+async fn character_mind_projection_keeps_the_legacy_text_order_across_timestamp_formats() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let pool = plain_pool(&env).await;
+    for index in 0..101_u32 {
+        nexus_local_db::create_character_fragment(
+            &pool,
+            CREATOR,
+            &nexus_local_db::NewCharacterMemoryFragment {
+                fragment_id: format!("frag-{index:03}"),
+                session_id: format!("sess_frag_{index:03}"),
+                character_id: env.character_id.clone(),
+                actor_world_binding_id: None,
+                keywords: "[]".to_string(),
+                summary: format!("Fragment frag-{index:03}."),
+                created_at: "2026-02-01T00:00:00Z".to_string(),
+                ttl: None,
+            },
+        )
+        .await
+        .unwrap();
+    }
+    // The newest instant, but the lowest text key of the fixture: the legacy
+    // selection never reaches it.
+    nexus_local_db::create_character_fragment(
+        &pool,
+        CREATOR,
+        &nexus_local_db::NewCharacterMemoryFragment {
+            fragment_id: "frag-900".to_string(),
+            session_id: "sess_frag_900".to_string(),
+            character_id: env.character_id.clone(),
+            actor_world_binding_id: None,
+            keywords: "[]".to_string(),
+            summary: "Fractional-second fragment.".to_string(),
+            created_at: "2026-02-01T00:00:00.900Z".to_string(),
+            ttl: None,
+        },
+    )
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let mind = CoreCharacterMind::new(
+        plain_pool(&env).await,
+        core.memory_provider_for_test().expect("pinned provider"),
+    )
+    .projection(&principal, CREATOR, &env.character_id, None)
+    .await
+    .expect("the projection serves the mixed-format family");
+
+    let expected: Vec<String> = (81..=100)
+        .rev()
+        .map(|index| format!("- Fragment frag-{index:03}."))
+        .collect();
+    assert_eq!(
+        mind.memory, expected,
+        "the legacy `created_at DESC, fragment_id DESC` TEXT order picks the \
+         whole-second `Z` rows, so the fractional-second row changes neither \
+         the per-scope 100 selection nor the mind's head 20"
+    );
+    assert!(
+        !mind
+            .memory
+            .iter()
+            .any(|line| line.contains("Fractional-second fragment.")),
+        "the fractional-second row is the newest instant but the lowest legacy \
+         text key, so the legacy `LIMIT 100` excludes it"
+    );
+}
+
+/// §7.7: an archived subject's records leave recall. The E6 projection replaces
+/// recall on this read path, and the listing read behind it is the audit route
+/// that keeps serving them — so a read-only core (whose `MemoryAdapter::open`
+/// skips `ensure_subject`) must project no record of an archived subject.
+/// The SOUL slot is a profile, not a record, and is not seeded here.
+#[tokio::test]
+async fn character_mind_projection_excludes_an_archived_subject_like_recall() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let provider = core.memory_provider_for_test().expect("pinned provider");
+
+    let pool = plain_pool(&env).await;
+    nexus_local_db::create_character_fragment(
+        &pool,
+        CREATOR,
+        &nexus_local_db::NewCharacterMemoryFragment {
+            fragment_id: "afrag_shared".to_string(),
+            session_id: "sess_afrag_shared".to_string(),
+            character_id: env.character_id.clone(),
+            actor_world_binding_id: None,
+            keywords: "[]".to_string(),
+            summary: "Archived-scope shared fragment.".to_string(),
+            created_at: "2026-02-01T00:00:00Z".to_string(),
+            ttl: None,
+        },
+    )
+    .await
+    .unwrap();
+    pool.close().await;
+    let bearer = MemoryBearerRef::Character {
+        owner_creator_id: CREATOR,
+        character_id: &env.character_id,
+    };
+    let mut memory = nexus_creator_memory::LongTermMemory::new("story_summary");
+    memory.set_body("Archived-scope memory body.");
+    memory.frontmatter.updated_at = "2026-01-05T00:00:00Z".to_string();
+    nexus_creator_memory::memory_io::save_memory(
+        &env.user_home,
+        bearer,
+        "archived-memory",
+        &memory,
+    )
+    .expect("promoted memory fixture");
+    let document =
+        std::fs::read_to_string(bearer.long_term_memory_path(&env.user_home, "archived-memory"))
+            .expect("memory file bytes");
+
+    // A live subject: the projection serves both record families.
+    let live = CoreCharacterMind::new(plain_pool(&env).await, provider.clone())
+        .projection(&principal, CREATOR, &env.character_id, None)
+        .await
+        .expect("live projection");
+    assert_eq!(
+        live.memory,
+        vec![
+            "- Archived-scope shared fragment.".to_string(),
+            format!("- {document}"),
+        ],
+        "a live subject projects its fragments and promoted memories"
+    );
+
+    // Archive the subject the projection addresses, through the provider's own
+    // terminal transition (§7.7), so the read sees a real archived subject.
+    let subject = legacy::character_subject_id(&env.character_id);
+    let archived = bridge_ok(
+        &provider
+            .fence_subject(
+                &bridge_principal(),
+                dto(serde_json::json!({
+                    "space_id": BRIDGE_SPACE,
+                    "subject_id": subject,
+                    "target": { "type": "subject" },
+                    "action": "archive",
+                    "expected_revision": 1,
+                    "idempotency_key": "k-mind-archive",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(archived["result"]["status"], "archived");
+
+    // A read-only core writes nothing, so the archived state is the one the
+    // provider already holds — and the projection is recall-equivalent.
+    let read_only = CoreService::open(CoreOpenOptions {
+        user_home: env.user_home.clone(),
+        access: CoreAccess::ReadOnly,
+    })
+    .await
+    .expect("read-only open");
+    let principal = read_only.active_principal().await.unwrap();
+    let excluded = CoreCharacterMind::new(
+        plain_pool(&env).await,
+        read_only
+            .memory_provider_for_test()
+            .expect("pinned provider"),
+    )
+    .projection(&principal, CREATOR, &env.character_id, None)
+    .await
+    .expect("an archived subject still projects");
+    assert!(
+        excluded.memory.is_empty(),
+        "recall excludes an archived subject's records, and so does the E6 \
+         projection: {:?}",
+        excluded.memory
+    );
+}
+
+#[tokio::test]
+async fn character_mind_projection_fails_closed_when_the_provider_refuses() {
+    let env = seed_env().await;
+    // A read-only open with no writer behind it: no space or subject exists, so
+    // the projection's first read is refused instead of yielding an empty mind.
+    let read_only = CoreService::open(CoreOpenOptions {
+        user_home: env.user_home.clone(),
+        access: CoreAccess::ReadOnly,
+    })
+    .await
+    .expect("read-only open");
+    let principal = read_only.active_principal().await.unwrap();
+    let provider = read_only
+        .memory_provider_for_test()
+        .expect("pinned provider");
+    let pool = plain_pool(&env).await;
+
+    let refused = CoreCharacterMind::new(pool.clone(), provider.clone())
+        .projection(&principal, CREATOR, &env.character_id, None)
+        .await
+        .expect_err("an absent provider space cannot serve the projection");
+    assert!(
+        matches!(refused, CoreError::NotFound { .. }),
+        "the refusal propagates instead of becoming an empty mind: {refused:?}"
+    );
+
+    let malformed = CoreCharacterMind::new(pool, provider)
+        .projection(&principal, CREATOR, "not-a-character", None)
+        .await
+        .expect_err("a malformed bearer id names no subject");
+    assert!(
+        matches!(malformed, CoreError::InvalidInput { ref field, .. } if field == "character_id"),
+        "got {malformed:?}"
+    );
+}
+
+// ═══ PR #469 fix round 1: Greptile review threads ═════════════════════════
+
+/// Greptile `legacy.rs:318`: a Character capture that arrives after the
+/// one-shot migration must still be served. The capture adopts its own retained
+/// queue row on the provider, so list/count/dismissal/review all keep seeing it
+/// once the marker turned the legacy queue reads off.
+#[tokio::test]
+async fn character_captures_survive_the_migration_marker() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let chr = env.character_id.clone();
+
+    let migrated = core.migrate_legacy_content(&principal).await.unwrap();
+    assert_eq!(migrated.status, nexus_core::LegacyMigrationStatus::Migrated);
+
+    core.capture_character_pending_review(
+        &principal,
+        chr.clone(),
+        dto(json_capture(
+            "pend_after_marker",
+            None,
+            "2026-04-01T00:00:00Z",
+        )),
+    )
+    .await
+    .expect("a post-marker capture");
+
+    let listed = core
+        .list_character_pending_reviews(&principal, chr.clone(), None, 50, 0)
+        .await
+        .unwrap();
+    assert_eq!(listed.items.len(), 1, "the capture is listed: {listed:?}");
+    assert_eq!(listed.items[0].pending_id.as_str(), "pend_after_marker");
+    assert_eq!(
+        core.count_character_pending_reviews(&principal, chr.clone(), None)
+            .await
+            .unwrap()
+            .count,
+        1,
+        "the capture is counted"
+    );
+
+    core.delete_character_pending_review(&principal, chr.clone(), "pend_after_marker".to_string())
+        .await
+        .expect("the capture is dismissible");
+    assert_eq!(
+        core.count_character_pending_reviews(&principal, chr.clone(), None)
+            .await
+            .unwrap()
+            .count,
+        0
+    );
+}
+
+/// Greptile `memory.rs:1923`: a dismissed binding-local pending review must stop
+/// holding its binding. The dismissal consumes the provider candidate and leaves
+/// the retained legacy row (D6), so the removal gate reads the provider's
+/// disposition instead of the historical row.
+#[tokio::test]
+async fn a_dismissed_binding_pending_review_no_longer_holds_its_binding() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let chr = env.character_id.clone();
+    let second = core
+        .add_binding(&principal, chr.clone(), WORLD_B.to_string(), None)
+        .await
+        .expect("second binding")
+        .binding
+        .binding_id
+        .as_str()
+        .to_string();
+
+    core.capture_character_pending_review(
+        &principal,
+        chr.clone(),
+        dto(json_capture(
+            "pend_remove",
+            Some(&second),
+            "2026-01-01T00:00:01Z",
+        )),
+    )
+    .await
+    .expect("binding-local capture");
+
+    // A queued binding-local review still holds the binding.
+    let blocked = core
+        .remove_binding(&principal, chr.clone(), second.clone())
+        .await
+        .expect_err("a queued review holds the binding");
+    assert!(
+        matches!(&blocked, CoreError::ActorConflict { code, .. } if code == "binding_has_local_memory"),
+        "got {blocked:?}"
+    );
+
+    core.delete_character_pending_review(&principal, chr.clone(), "pend_remove".to_string())
+        .await
+        .expect("dismiss the binding-local review");
+
+    core.remove_binding(&principal, chr.clone(), second)
+        .await
+        .expect("the dismissed review no longer holds the binding");
+}
+
+/// Greptile `memory_pipeline.rs:382`: a fragment a review saved on the provider
+/// must count for reflection even though the legacy fragment table stays empty.
+#[tokio::test]
+async fn reflection_counts_reviewed_provider_fragments() {
+    let env = seed_env().await;
+    seed_creator_pending_digest(&env, "pend_soul", FRAGMENT_DIGEST, "2026-01-01T00:00:01Z").await;
+    let (core, principal) = open_core(&env).await;
+
+    let reviewed = core
+        .review_memory(&principal, creator_review_request())
+        .await
+        .expect("creator review batch");
+    assert_eq!(reviewed.fragmented, 1, "one provider `fact` fragment");
+
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM memory_fragments").await,
+        0,
+        "the legacy fragment table stays write-idle (D6)"
+    );
+    pool.close().await;
+
+    let read = core
+        .reflect_creator_soul::<MockSynth>(
+            &principal,
+            dto(serde_json::json!({
+                "creator_id": CREATOR,
+                "force_regenerate": false,
+            })),
+            || None::<MockSynth>,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        read.current_fragment_count, 1,
+        "the served fragment counts for reflection"
+    );
+    assert!(
+        read.current_distinct_keyword_count > 0,
+        "its keywords count too: {read:?}"
+    );
+    assert_eq!(
+        read.state.to_string(),
+        "insufficient_data",
+        "one fragment is still under the retained gate"
+    );
+}
+
+/// Greptile `legacy.rs:270`: one malformed bearer memory file must not break a
+/// read of an unrelated fragment, nor a by-slug read of another memory.
+#[tokio::test]
+async fn a_malformed_memory_file_does_not_break_other_reads() {
+    let env = seed_env().await;
+    seed_legacy_creator_content(&env).await;
+    let bearer = MemoryBearerRef::Creator(CREATOR);
+    let mut memory = nexus_creator_memory::LongTermMemory::new("story_summary");
+    memory.set_body("A readable long-term body.");
+    nexus_creator_memory::memory_io::save_memory(&env.user_home, bearer, "readable", &memory)
+        .expect("valid memory fixture");
+    let dir = bearer
+        .validated_long_term_memory_dir(&env.user_home)
+        .expect("bearer memory dir");
+    std::fs::write(dir.join("broken.md"), "---\n[unclosed: yaml\n---\nbody\n")
+        .expect("malformed memory fixture");
+
+    let (core, principal) = open_core(&env).await;
+
+    // The fragment read asks for `fact` only: no memory file is opened.
+    let fragments = core
+        .list_memory_fragments(&principal, None, None, 50)
+        .await
+        .expect("the fragment list ignores the malformed memory file");
+    assert_eq!(fragments.fragments.len(), 1, "{fragments:?}");
+
+    // A by-slug read opens exactly its own file.
+    let record = serde_json::to_value(
+        core.get_creator_memory(&principal, "readable")
+            .await
+            .expect("the by-slug read ignores the malformed memory file")
+            .expect("the readable memory is served"),
+    )
+    .unwrap();
+    assert_eq!(record["content"]["text"], "A readable long-term body.");
+}
+
+/// Greptile `memory.rs:2570`: the retained keyword filter was a `LIKE` and stayed
+/// case-insensitive, so a mixed-case keyword must still find the fragment.
+#[tokio::test]
+async fn keyword_search_ignores_ascii_case() {
+    let env = seed_env().await;
+    let pool = plain_pool(&env).await;
+    nexus_local_db::memory_fragment::create_fragment(
+        &pool,
+        &nexus_local_db::memory_fragment::MemoryFragmentRecord {
+            fragment_id: "frag_case".to_string(),
+            session_id: "sess_case".to_string(),
+            creator_id: CREATOR.to_string(),
+            keywords: serde_json::json!(["Kw_Legacy"]).to_string(),
+            summary: "A fragment whose keyword is mixed case.".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            ttl: None,
+            world_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let (core, principal) = open_core(&env).await;
+    let found = core
+        .list_memory_fragments(&principal, Some("kw_LEGACY".to_string()), None, 50)
+        .await
+        .unwrap();
+    assert_eq!(
+        found.fragments.len(),
+        1,
+        "a mixed-case keyword matches like the legacy `LIKE`: {found:?}"
+    );
+    assert_eq!(found.fragments[0].fragment_id.as_str(), "frag_case");
+}
+
+/// F3 (Greptile `memory_pipeline.rs:443`): the promoted slug maps the leading
+/// `mem_` prefix only, so two pending ids a global replace folded into one
+/// address stay distinct and each promoted memory resolves by its own slug.
+#[tokio::test]
+async fn promoted_memory_slugs_stay_one_to_one() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let pending_ids = ["a_mem_b", "a_memory-b"];
+    let pool = plain_pool(&env).await;
+    for pending_id in pending_ids {
+        nexus_local_db::create_pending_review(
+            &pool,
+            &nexus_local_db::PendingReviewRecord {
+                pending_id: pending_id.to_string(),
+                session_id: format!("sess_{pending_id}"),
+                creator_id: CREATOR.to_string(),
+                world_id: None,
+                task_kind: "chapter".to_string(),
+                raw_digest: PROMOTE_DIGEST.to_string(),
+                created_at: "2026-01-01T00:00:01Z".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    }
+    pool.close().await;
+
+    let reviewed = core
+        .review_memory(
+            &principal,
+            dto::<ReviewRequest>(serde_json::json!({ "creator_id": CREATOR })),
+        )
+        .await
+        .expect("creator review batch");
+    assert_eq!(reviewed.promoted, 2, "both pending rows promote");
+
+    for pending_id in pending_ids {
+        let slug = format!("memory-{pending_id}");
+        let record = serde_json::to_value(
+            core.get_creator_memory(&principal, &slug)
+                .await
+                .expect("the slug read")
+                .unwrap_or_else(|| panic!("{slug} resolves")),
+        )
+        .unwrap();
+        assert_eq!(
+            record["content"]["structured"]["nexus_legacy"]["memory_id"],
+            format!("mem_{pending_id}"),
+            "{slug} addresses its own promoted memory"
+        );
+    }
+
+    // Both promoted rows are listed under their own slug, so the second
+    // promotion overwrote nothing the first one stored.
+    let mut listed: Vec<String> = core
+        .list_creator_memories(&principal)
+        .await
+        .expect("creator memory list")
+        .iter()
+        .map(|record| serde_json::to_value(record).unwrap())
+        .filter_map(|record| {
+            record["content"]["structured"]["nexus_legacy"]["slug"]
+                .as_str()
+                .map(str::to_string)
+        })
+        .collect();
+    listed.sort();
+    assert_eq!(
+        listed,
+        [
+            "memory-a_mem_b".to_string(),
+            "memory-a_memory-b".to_string()
+        ]
+    );
+}
+
+/// F5 (`legacy.rs:1716`): a malformed stored `keywords` column is the module's
+/// `Corrupt` answer — not a silently empty keyword list that hides the damaged
+/// row behind content nobody wrote.
+#[tokio::test]
+async fn malformed_legacy_keywords_are_a_corrupt_read() {
+    let env = seed_env().await;
+    let pool = plain_pool(&env).await;
+    nexus_local_db::memory_fragment::create_fragment(
+        &pool,
+        &nexus_local_db::memory_fragment::MemoryFragmentRecord {
+            fragment_id: "frag_damaged".to_string(),
+            session_id: "sess_damaged".to_string(),
+            creator_id: CREATOR.to_string(),
+            keywords: "{not a keyword list".to_string(),
+            summary: "A fragment whose stored keyword list is malformed.".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            ttl: None,
+            world_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let (core, principal) = open_core(&env).await;
+    let error = core
+        .list_memory_fragments(&principal, None, None, 50)
+        .await
+        .expect_err("a malformed stored keyword list is a corrupt read");
+    match error {
+        CoreError::Internal { category } => assert!(
+            category.contains("legacy fragment keywords"),
+            "the corrupt answer names the damaged column: {category}"
+        ),
+        other => panic!("expected the corrupt-read internal error, got {other:?}"),
+    }
+}
+
+/// F1 (Greptile P1, `legacy.rs:1717`): the bridge parses a fragment's keywords
+/// only for the row a by-id read returns, so one damaged fragment cannot block
+/// showing, editing or deleting a valid memory of the same bearer.
+#[tokio::test]
+async fn damaged_fragment_does_not_block_unrelated_memory_reads() {
+    let env = seed_env().await;
+    let pool = plain_pool(&env).await;
+    nexus_local_db::memory_fragment::create_fragment(
+        &pool,
+        &nexus_local_db::memory_fragment::MemoryFragmentRecord {
+            fragment_id: "frag_damaged".to_string(),
+            session_id: "sess_damaged".to_string(),
+            creator_id: CREATOR.to_string(),
+            keywords: "{not a keyword list".to_string(),
+            summary: "A fragment whose stored keyword list is malformed.".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            ttl: None,
+            world_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let bearer = MemoryBearerRef::Creator(CREATOR);
+    let mut memory = nexus_creator_memory::LongTermMemory::new("story_summary");
+    memory.set_body("Legacy valid body.");
+    nexus_creator_memory::memory_io::save_memory(&env.user_home, bearer, "valid-memory", &memory)
+        .expect("long-term memory fixture");
+
+    let (core, principal) = open_core(&env).await;
+
+    // Show: the by-id read of the memory family never opens the fragment row.
+    let shown = serde_json::to_value(
+        core.get_creator_memory(&principal, "valid-memory")
+            .await
+            .expect("a damaged sibling fragment must not fail the read")
+            .expect("the valid memory is listed"),
+    )
+    .unwrap();
+    assert_eq!(shown["content"]["text"], "Legacy valid body.");
+
+    // Edit and delete resolve the same by-id projection before mutating.
+    assert!(core
+        .update_creator_memory(&principal, "valid-memory", "Edited body.", None)
+        .await
+        .expect("the edit is not blocked by a damaged sibling fragment"));
+    assert!(core
+        .delete_creator_memory(&principal, "valid-memory")
+        .await
+        .expect("the delete is not blocked by a damaged sibling fragment"));
+
+    // The damaged fragment itself is still a corrupt read: the row a read
+    // genuinely returns is parsed and refused.
+    let error = core
+        .list_memory_fragments(&principal, None, None, 50)
+        .await
+        .expect_err("a malformed stored keyword list is a corrupt read");
+    match error {
+        CoreError::Internal { category } => assert!(
+            category.contains("legacy fragment keywords"),
+            "the corrupt answer names the damaged column: {category}"
+        ),
+        other => panic!("expected the corrupt-read internal error, got {other:?}"),
+    }
+}
+
+// ═══ PR #469 fix round 5: final-review blockers ═════════════════════════════
+
+/// B1 (`memory.rs:1856`): the Character capture is one authoritative provider
+/// write. It never inserts a legacy queue row (so there is no window in which a
+/// legacy row exists without its provider successor), it keeps the bridge's
+/// deterministic candidate id and placement, a re-delivered digest replays
+/// instead of duplicating, and list / count / dismissal / review all serve it.
+#[tokio::test]
+async fn character_capture_is_one_provider_write_served_by_every_reader() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let chr = env.character_id.clone();
+    let bind = env.binding_id.clone();
+
+    // One shared and one binding-local capture, each delivered twice: the
+    // re-delivery replays the stored capture instead of writing a second row.
+    for (pending_id, binding) in [
+        ("pend_shared_write", None),
+        ("pend_local_write", Some(bind.as_str())),
+    ] {
+        for attempt in 0..2 {
+            core.capture_character_pending_review(
+                &principal,
+                chr.clone(),
+                dto(json_capture(pending_id, binding, "2026-05-01T00:00:01Z")),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("capture attempt {attempt}: {error:?}"));
+        }
+    }
+
+    // The legacy queue is never written, and the provider holds exactly the two
+    // candidates under the bridge's deterministic ids and placements.
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM character_memory_pending_review"
+        )
+        .await,
+        0,
+        "the Character capture writes no legacy queue row"
+    );
+    let candidates: Vec<(String, String, Option<String>)> = sqlx::query_as(
+        "SELECT candidate_id, status, capture_context_id FROM memory_candidates \
+         WHERE subject_id = ? ORDER BY candidate_id",
+    )
+    .bind(legacy::character_subject_id(&chr))
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        candidates,
+        vec![
+            (
+                legacy::character_pending_review_candidate_id("pend_local_write"),
+                "pending".to_string(),
+                Some(bind.clone()),
+            ),
+            (
+                legacy::character_pending_review_candidate_id("pend_shared_write"),
+                "pending".to_string(),
+                None,
+            ),
+        ],
+        "one row per capture, under the bridge id and the captured placement"
+    );
+    pool.close().await;
+
+    // The retained readers serve both captures, scope-exactly.
+    let shared = core
+        .list_character_pending_reviews(&principal, chr.clone(), None, 50, 0)
+        .await
+        .expect("list shared");
+    assert_eq!(shared.items.len(), 1);
+    assert_eq!(shared.items[0].pending_id.as_str(), "pend_shared_write");
+    assert!(shared.items[0].binding_id.is_none());
+    let local = core
+        .list_character_pending_reviews(&principal, chr.clone(), Some(bind.clone()), 50, 0)
+        .await
+        .expect("list binding-local");
+    assert_eq!(local.items.len(), 1);
+    assert_eq!(local.items[0].pending_id.as_str(), "pend_local_write");
+    assert_eq!(
+        local.items[0].binding_id.as_ref().map(|id| id.as_str()),
+        Some(bind.as_str())
+    );
+    assert_eq!(
+        core.count_character_pending_reviews(&principal, chr.clone(), None)
+            .await
+            .unwrap()
+            .count,
+        1
+    );
+    assert_eq!(
+        core.count_character_pending_reviews(&principal, chr.clone(), Some(bind.clone()))
+            .await
+            .unwrap()
+            .count,
+        1
+    );
+
+    // Dismissal consumes the shared capture, and the review drain consumes the
+    // binding-local one.
+    core.delete_character_pending_review(&principal, chr.clone(), "pend_shared_write".to_string())
+        .await
+        .expect("dismiss the shared capture");
+    assert_eq!(
+        core.count_character_pending_reviews(&principal, chr.clone(), None)
+            .await
+            .unwrap()
+            .count,
+        0
+    );
+    let reviewed = core
+        .review_character_memory(
+            &principal,
+            chr.clone(),
+            dto::<ReviewCharacterMemoryRequest>(serde_json::json!({ "binding_id": bind.clone() })),
+        )
+        .await
+        .expect("review drains the binding-local capture");
+    assert_eq!(reviewed.processed, Some(1), "the capture reached the drain");
+    assert_eq!(reviewed.fragmented, 1);
+    assert_eq!(
+        core.list_character_memory_fragments(&principal, chr.clone(), Some(bind), 50, 0)
+            .await
+            .unwrap()
+            .fragments
+            .len(),
+        1,
+        "the review saw the capture"
+    );
+}
+
+/// B1 (compass D15, fix round 6): the Character capture's binding provenance is
+/// checked inside the provider's own write transaction. `remove_binding` takes
+/// the same `BEGIN IMMEDIATE` lock and counts the pending candidate, so the two
+/// cannot interleave into a candidate that names a deleted binding.
+///
+/// Both lock orderings are pinned:
+///
+/// * the capture holds the transaction when the removal starts — the removal
+///   waits, then refuses `binding_has_local_memory`, and the candidate and the
+///   binding both survive;
+/// * the binding is already gone when the capture reaches its write
+///   transaction — it refuses with the retained `character_memory` 403 and
+///   inserts nothing.
+#[tokio::test]
+async fn character_capture_binding_never_outlives_the_provenance_check() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let chr = env.character_id.clone();
+    let keep = env.binding_id.clone();
+    // A second active binding, so removing `keep` is not the last-active
+    // refusal and the memory dependency is what the removal is judged by.
+    let removable = core
+        .add_binding(&principal, chr.clone(), WORLD_B.to_string(), None)
+        .await
+        .expect("second binding")
+        .binding
+        .binding_id
+        .as_str()
+        .to_string();
+
+    // Ordering 1: the capture validates its binding, then parks inside the same
+    // write transaction; the removal starts in that window and cannot commit
+    // ahead of it.
+    let pinned = core.memory_provider_for_test().expect("pinned provider");
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Barrier::new(2));
+    pinned.park_next_capture(Arc::clone(&entered), Arc::clone(&release));
+    let capture = tokio::spawn({
+        let core = core.clone();
+        let principal = principal.clone();
+        let chr = chr.clone();
+        let binding = keep.clone();
+        async move {
+            core.capture_character_pending_review(
+                &principal,
+                chr,
+                dto(json_capture(
+                    "pend_race",
+                    Some(&binding),
+                    "2026-05-01T00:00:02Z",
+                )),
+            )
+            .await
+        }
+    });
+    entered.notified().await;
+    // The production `begin_immediate` inside this removal makes its own first
+    // `BEGIN IMMEDIATE` without a busy wait, and that is what reports here: the
+    // capture's held write lock refuses that very attempt, and the removal then
+    // retries on that same lock for its transaction. A sequential execution —
+    // capture committed first — finds the lock free, reports nothing, and never
+    // reaches this release.
+    let attempted = Arc::new(tokio::sync::Notify::new());
+    let removal = tokio::spawn(nexus_local_db::begin_immediate_report::scope(
+        Arc::clone(&attempted),
+        {
+            let core = core.clone();
+            let principal = principal.clone();
+            let chr = chr.clone();
+            let binding = keep.clone();
+            async move { core.remove_binding(&principal, chr, binding).await }
+        },
+    ));
+    // The wait is a deadlock guard, not synchronization: a regression that lets
+    // the capture commit first leaves the lock free, so no report arrives and
+    // this fails instead of hanging the suite.
+    tokio::time::timeout(std::time::Duration::from_secs(10), attempted.notified())
+        .await
+        .expect("the removal must report the write lock the capture holds");
+    release.wait().await;
+
+    capture
+        .await
+        .unwrap()
+        .expect("the capture owns the write lock and commits its candidate");
+    let blocked = removal
+        .await
+        .unwrap()
+        .expect_err("the committed capture now holds the binding");
+    assert!(
+        matches!(&blocked, CoreError::ActorConflict { code, .. } if code == "binding_has_local_memory"),
+        "the removal is refused by the candidate, not by a lock failure: {blocked:?}"
+    );
+
+    let race = legacy::character_pending_review_candidate_id("pend_race");
+    let pool = plain_pool(&env).await;
+    let bound: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM actor_world_bindings WHERE binding_id = ? AND status = 'active'",
+    )
+    .bind(&keep)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(bound, 1, "the refused removal left the binding in place");
+    let queued: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM memory_candidates WHERE candidate_id = ? AND status = 'pending'",
+    )
+    .bind(&race)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        queued, 1,
+        "the committed candidate names the binding the removal could not delete"
+    );
+    pool.close().await;
+
+    // Ordering 2: the binding is removed before the capture, so the check that
+    // now runs inside the write transaction is the one that refuses it.
+    core.remove_binding(&principal, chr.clone(), removable.clone())
+        .await
+        .expect("a binding with no memory is removable");
+    let refused = core
+        .capture_character_pending_review(
+            &principal,
+            chr.clone(),
+            dto(json_capture(
+                "pend_gone",
+                Some(&removable),
+                "2026-05-01T00:00:01Z",
+            )),
+        )
+        .await
+        .expect_err("a capture on a removed binding is refused");
+    match refused {
+        CoreError::ForbiddenReason { resource, .. } => assert_eq!(
+            resource, "character_memory",
+            "the retained provenance envelope is unchanged"
+        ),
+        other => panic!("expected the retained provenance 403, got {other:?}"),
+    }
+    let gone = legacy::character_pending_review_candidate_id("pend_gone");
+    let pool = plain_pool(&env).await;
+    let written: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM memory_candidates WHERE candidate_id = ?")
+            .bind(&gone)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(written, 0, "a refused capture writes no candidate");
+    pool.close().await;
+}
+
+/// B2 (`memory.rs:645`): a provider-native promoted memory resolves by its
+/// authored slug without projecting the legacy long-term directory, so one
+/// damaged unrelated memory file cannot break its show/edit/delete. A read that
+/// genuinely returns the damaged file still refuses.
+#[tokio::test]
+async fn a_damaged_memory_file_does_not_break_a_promoted_memory_by_slug() {
+    let env = seed_env().await;
+    let pool = plain_pool(&env).await;
+    nexus_local_db::create_pending_review(
+        &pool,
+        &nexus_local_db::PendingReviewRecord {
+            pending_id: "a_mem_b".to_string(),
+            session_id: "sess_a_mem_b".to_string(),
+            creator_id: CREATOR.to_string(),
+            world_id: None,
+            task_kind: "chapter".to_string(),
+            raw_digest: PROMOTE_DIGEST.to_string(),
+            created_at: "2026-01-01T00:00:01Z".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let (core, principal) = open_core(&env).await;
+    let reviewed = core
+        .review_memory(
+            &principal,
+            dto::<ReviewRequest>(serde_json::json!({ "creator_id": CREATOR })),
+        )
+        .await
+        .expect("creator review batch");
+    assert_eq!(reviewed.promoted, 1, "one provider-native memory");
+    let slug = "memory-a_mem_b";
+
+    // An unrelated, damaged legacy memory file in the same bearer directory.
+    let bearer = MemoryBearerRef::Creator(CREATOR);
+    let dir = bearer
+        .validated_long_term_memory_dir(&env.user_home)
+        .expect("creator memory dir");
+    std::fs::create_dir_all(&dir).expect("creator memory dir");
+    std::fs::write(dir.join("broken.md"), "---\n[unclosed: yaml\n---\nbody\n")
+        .expect("malformed memory fixture");
+
+    // Show resolves the promoted record by its authored slug.
+    let shown = serde_json::to_value(
+        core.get_creator_memory(&principal, slug)
+            .await
+            .expect("the by-slug read ignores the damaged unrelated file")
+            .expect("the promoted memory is served"),
+    )
+    .unwrap();
+    assert_eq!(shown["content"]["structured"]["nexus_legacy"]["slug"], slug);
+
+    // Edit and delete resolve the same record before mutating.
+    assert!(core
+        .update_creator_memory(&principal, slug, "Edited promoted body.", None)
+        .await
+        .expect("the edit is not blocked by the damaged unrelated file"));
+    let edited = serde_json::to_value(
+        core.get_creator_memory(&principal, slug)
+            .await
+            .expect("the edited record still resolves")
+            .expect("the edited memory is served"),
+    )
+    .unwrap();
+    assert_eq!(edited["content"]["text"], "Edited promoted body.");
+    assert!(core
+        .delete_creator_memory(&principal, slug)
+        .await
+        .expect("the delete is not blocked by the damaged unrelated file"));
+    assert!(core
+        .get_creator_memory(&principal, slug)
+        .await
+        .expect("the deleted slug is absent, not corrupt")
+        .is_none());
+
+    // The damaged file is still refused by the read that returns it.
+    let error = core
+        .list_creator_memories(&principal)
+        .await
+        .expect_err("a read that genuinely returns the damaged file fails");
+    match error {
+        CoreError::Internal { category } => assert!(
+            category.contains("legacy bearer file"),
+            "the corrupt answer names the damaged file: {category}"
+        ),
+        other => panic!("expected the corrupt-read internal error, got {other:?}"),
+    }
 }

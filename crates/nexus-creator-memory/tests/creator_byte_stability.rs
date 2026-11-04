@@ -166,8 +166,10 @@ async fn creator_promote_output_shape_is_stable() {
         "RFC3339 timestamp: {ts}"
     );
 
-    // Slug derivation is pinned: `mem_<id>` → `memory-<id>`.
-    let expected_slug = memory.frontmatter.memory_id.replace("mem_", "memory-");
+    // Slug derivation is pinned by the contract, not by the helper: `mem_<id>`
+    // → `memory-<id>`. Computing the expectation with `slug_from_memory_id`
+    // would assert the function against itself (fix round 3, F2).
+    let expected_slug = format!("memory-{id_suffix}");
     let file = memory_io::memory_path(&home, creator(), &expected_slug);
     assert!(file.exists(), "promoted memory file at {file:?}");
 
