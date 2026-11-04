@@ -391,31 +391,32 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
 }
 
 /// Every writer id registered in this workspace.
+///
+/// The read fails loudly: a swallowed baseline error would make a bootstrap
+/// writer look like the measured one and destroy the attribution this test
+/// exists to prove.
 async fn writer_ids(db_path: &std::path::Path) -> Vec<String> {
-    let Ok(pool) = read_pool(db_path).await else {
-        return Vec::new();
-    };
+    let pool = read_pool(db_path).await.expect("read the writer registry");
     let rows: Vec<(String,)> = sqlx::query_as("SELECT writer_id FROM core_writer_registration")
         .fetch_all(&pool)
         .await
-        .unwrap_or_default();
+        .expect("read the writer registry");
     pool.close().await;
     rows.into_iter().map(|row| row.0).collect()
 }
 
 /// The `workspace_meta` change rows a single writer id produced — the persisted
-/// trace of that writer's own writes.
+/// trace of that writer's own writes. Observation errors are never mistaken for
+/// "not yet written".
 async fn meta_changes_of(db_path: &std::path::Path, writer_id: &str) -> i64 {
-    let Ok(pool) = read_pool(db_path).await else {
-        return 0;
-    };
+    let pool = read_pool(db_path).await.expect("read the change log");
     let count: (i64,) = sqlx::query_as(
         "SELECT COUNT(*) FROM core_changes WHERE resource_kind = 'workspace_meta' AND writer_id = ?",
     )
     .bind(writer_id)
     .fetch_one(&pool)
     .await
-    .unwrap_or((0,));
+    .expect("read the change log");
     pool.close().await;
     count.0
 }

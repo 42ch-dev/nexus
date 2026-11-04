@@ -15,11 +15,13 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use nexus_local_db::writer_protocol::{
-    acquire_store_reset_fence, acquire_writer_guard, init_guarded_pool, open_admitted_pool,
-    open_guarded_pool, release_retained_writer_guards, run_guarded_migrations, WriterMode,
+    acquire_store_reset_fence, acquire_writer_guard, init_guarded_pool, join_live_engine_pool,
+    open_admitted_pool, open_guarded_pool, open_guarded_pool_arc, release_retained_writer_guards,
+    retain_writer_guard, run_guarded_migrations, GuardedPoolOptions, WriterMode,
     BOOTSTRAP_CREATOR_ID,
 };
 use nexus_local_db::{
@@ -1027,7 +1029,7 @@ async fn assert_writer_registration(db: &Path) -> String {
         migration_epoch >= 1,
         "activated migration epoch: {migration_epoch}"
     );
-    assert_eq!(mode, "direct");
+    assert_eq!(mode, "engine");
     assert_eq!(
         engine_epoch, None,
         "a direct writer carries no engine epoch"
@@ -1479,6 +1481,220 @@ async fn raw_clone_close_keeps_both_admissions_until_connection_disposed() {
         child_outcome(dir.path(), &db, "engine_solo", "allowed_engine"),
         "won",
         "after real disposal the engine ownership is free"
+    );
+}
+
+
+/// F13: an OPEN pool keeps its published admission with ZERO current native
+/// connections. The last idle connection is really detached from the pool and
+/// disposed, so its userdata pin is gone; both OS locks must still be held by
+/// the pool itself, a reconnect must reuse the exact published identity through
+/// the existing join path, and the real close must release everything on its
+/// own, even though the closed handle stays referenced here.
+#[tokio::test]
+async fn open_pool_keeps_its_admission_with_zero_connections() {
+    if std::env::var_os(CHILD_ENV).is_some() {
+        return;
+    }
+
+    let dir = TempDir::new().expect("tempdir");
+    let db = dir.path().join("state.db");
+
+    let guarded = init_engine_pool(&db).await.expect("engine owner");
+    let published = {
+        let mut conn = guarded.pool().acquire().await.expect("published connection");
+        probe_scalars(&mut conn).await.0
+    };
+    let clone = guarded.clone_pool();
+    // The original holder is gone: only the pool clone and its own admission
+    // remain.
+    drop(guarded);
+
+    // Real eviction: detach the last connection from the pool, then dispose it
+    // so SQLite drops that connection's userdata pin.
+    // Drain every pooled connection this way: each one is detached from the
+    // pool and then really disposed, so SQLite drops its userdata pin.
+    for _ in 0..8 {
+        if clone.size() == 0 {
+            break;
+        }
+        let conn = clone.acquire().await.expect("pooled connection to drain");
+        drop(conn.detach());
+    }
+    for _ in 0..64 {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(
+        clone.size(),
+        0,
+        "precondition: the pool is open with zero current connections"
+    );
+
+    assert_eq!(
+        child_outcome(dir.path(), &db, "migration_fence", "zero_conn_migration"),
+        "busy",
+        "an open pool with no connections still holds the migration admission"
+    );
+    assert_eq!(
+        child_outcome(dir.path(), &db, "engine_solo", "zero_conn_engine"),
+        "busy",
+        "and the engine ownership"
+    );
+
+    // A reconnect is served under the SAME published admission.
+    let mut reconnected = clone.acquire().await.expect("reconnect on the open pool");
+    let (writer_id, mode, _, _) = probe_scalars(&mut reconnected).await;
+    assert_eq!(
+        writer_id, published,
+        "the reconnect is the published writer, not a new identity"
+    );
+    assert_eq!(mode, "engine");
+    drop(reconnected);
+
+    // The existing in-process join path still resolves the published admission.
+    let joined = join_live_engine_pool(&db, GuardedPoolOptions::default())
+        .await
+        .expect("join lookup")
+        .expect("the open pool's admission is joinable with zero connections");
+    let mut joined_conn = joined.pool().acquire().await.expect("joined connection");
+    assert_eq!(
+        probe_scalars(&mut joined_conn).await.0,
+        published,
+        "a joining open reuses the published identity"
+    );
+    drop(joined_conn);
+    drop(joined);
+
+    // Close-start retirement: the closed handle stays referenced below.
+    clone.close().await;
+    assert_eq!(
+        child_outcome(dir.path(), &db, "migration_fence", "zero_conn_closed_migration"),
+        "won",
+        "the real close released the migration admission with no purge"
+    );
+    assert_eq!(
+        child_outcome(dir.path(), &db, "engine_solo", "zero_conn_closed_engine"),
+        "won",
+        "and freed the engine ownership"
+    );
+    assert_eq!(clone.size(), 0, "the closed handle stays referenced");
+}
+
+/// F14: a raw pool that JOINS an ordinary open must promote the published
+/// admission to process retention — parking the claim alone would let the
+/// admission die with the ordinary holder.
+#[tokio::test]
+async fn joined_raw_open_retains_the_published_admission() {
+    if std::env::var_os(CHILD_ENV).is_some() {
+        return;
+    }
+
+    let dir = TempDir::new().expect("tempdir");
+    let db = dir.path().join("state.db");
+
+    let ordinary = init_guarded_pool(&db, BOOTSTRAP_CREATOR_ID)
+        .await
+        .expect("ordinary direct holder");
+    let raw = open_admitted_pool(&db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
+        .await
+        .expect("raw admitted pool");
+    let (one,): (i64,) = sqlx::query_as("SELECT 1")
+        .fetch_one(&raw)
+        .await
+        .expect("raw pool serves");
+    assert_eq!(one, 1);
+    raw.close().await;
+    drop(raw);
+
+    // The ordinary holder ends: its pool closes and its own claim goes back.
+    ordinary.pool().close().await;
+    ordinary.release_retained_admission();
+    drop(ordinary);
+    for _ in 0..64 {
+        tokio::task::yield_now().await;
+    }
+
+    assert_eq!(
+        child_outcome(dir.path(), &db, "migration_fence", "joined_raw_blocked"),
+        "busy",
+        "the joined raw retention outlives the ordinary holder it joined"
+    );
+
+    release_retained_writer_guards(&db);
+    assert_eq!(
+        child_outcome(dir.path(), &db, "migration_fence", "joined_raw_allowed"),
+        "won",
+        "the documented explicit release frees the joined raw admission"
+    );
+}
+
+/// F14: retaining a guard NEVER installs an identity that is not the published
+/// one. The caller's guard here is a stale identity whose entry was dropped
+/// while the guard stayed alive; the admission a later open published must stay
+/// authoritative, and the next join must carry that published writer id.
+#[tokio::test]
+async fn raw_retention_keeps_the_published_identity() {
+    if std::env::var_os(CHILD_ENV).is_some() {
+        return;
+    }
+
+    let dir = TempDir::new().expect("tempdir");
+    let db = dir.path().join("state.db");
+    run_guarded_migrations(&db).await.expect("migrated workspace");
+
+    // Identity A publishes itself, then its entry is dropped while the guard
+    // itself is still alive.
+    let stale = acquire_writer_guard(&db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
+        .await
+        .expect("stale identity");
+    let stale_pool = open_guarded_pool_arc(Arc::clone(&stale))
+        .await
+        .expect("stale pool publishes its admission");
+    let stale_id = {
+        let mut conn = stale_pool.pool().acquire().await.expect("stale connection");
+        probe_scalars(&mut conn).await.0
+    };
+    release_retained_writer_guards(&db);
+
+    // Identity B is published afterwards.
+    let published = init_guarded_pool(&db, BOOTSTRAP_CREATOR_ID)
+        .await
+        .expect("published holder");
+    let published_id = {
+        let mut conn = published.pool().acquire().await.expect("published connection");
+        probe_scalars(&mut conn).await.0
+    };
+    assert_ne!(
+        stale_id, published_id,
+        "precondition: two different identities exist for this path"
+    );
+
+    // The caller hands over the STALE guard: retention must keep B.
+    retain_writer_guard(stale);
+
+    let joined = acquire_writer_guard(&db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
+        .await
+        .expect("join the published admission");
+    let joined_pool = open_guarded_pool(&joined).await.expect("joined pool");
+    let mut conn = joined_pool.acquire().await.expect("joined connection");
+    assert_eq!(
+        probe_scalars(&mut conn).await.0,
+        published_id,
+        "the retained/joined admission is the published identity, not the caller's"
+    );
+    drop(conn);
+    drop(stale_pool);
+    joined_pool.close().await;
+    published.pool().close().await;
+    published.release_retained_admission();
+    drop(published);
+    drop(joined);
+    release_retained_writer_guards(&db);
+
+    assert_eq!(
+        child_outcome(dir.path(), &db, "migration_fence", "identity_released"),
+        "won",
+        "every identity's locks are released once both are gone"
     );
 }
 

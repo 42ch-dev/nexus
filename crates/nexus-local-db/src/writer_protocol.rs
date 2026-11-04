@@ -416,18 +416,40 @@ fn published_guard(
 /// registration panicked while holding the lock).
 pub fn retain_writer_guard(guard: Arc<WorkspaceWriterGuard>) {
     let claim = reserve_retained_admission(&guard);
-    let key = (canonical_db_path(&guard.db_path), guard.mode);
-    if let Some(entry) = ACTIVE_GUARDS
-        .lock()
-        .expect("writer guard registry poisoned")
-        .get_mut(&key)
-    {
-        // The raw-pool entry point hands back no handle, so the registry is
-        // the owner: the admission survives until an explicit path-wide
-        // release or a guarded migration, exactly as documented.
-        entry.owner = AdmissionOwner::Retained(guard);
-    }
+    // The raw-pool entry point hands back no handle, so the registry is the
+    // owner: the admission survives until an explicit path-wide release or a
+    // guarded migration, exactly as documented.
+    //
+    // Exactly the PUBLISHED admission is retained. A caller-supplied guard that
+    // did not become this entry's identity (it lost a publication race) is
+    // never installed in its place: it is simply dropped here, releasing its
+    // own superseded OS locks.
+    promote_retained_admission(&guard);
     claim.persist();
+}
+
+/// Turn `(path, mode)`'s published admission into a process-retained one,
+/// leaving its identity untouched.
+///
+/// The entry keeps the guard it published: `guard` only selects the entry, it
+/// never replaces that identity, so a claim, a pool context and the retained
+/// owner always name the same admission even when the caller lost a
+/// publication race.
+fn promote_retained_admission(
+    guard: &Arc<WorkspaceWriterGuard>,
+) -> Option<Arc<WorkspaceWriterGuard>> {
+    let key = (canonical_db_path(&guard.db_path), guard.mode);
+    let mut guards = ACTIVE_GUARDS
+        .lock()
+        .expect("writer guard registry poisoned");
+    let entry = guards.get_mut(&key)?;
+    let published = entry.owner.upgrade()?;
+    if published.writer_id != entry.writer_id {
+        // A broken invariant is never papered over by retaining some guard.
+        return None;
+    }
+    entry.owner = AdmissionOwner::Retained(Arc::clone(&published));
+    Some(published)
 }
 
 fn register_pool_handle(guard: &Arc<WorkspaceWriterGuard>, pool: &SqlitePool) -> u64 {
@@ -719,30 +741,143 @@ fn writer_context(
     }
 }
 
+/// The admission one new connection must pin.
+///
+/// Three outcomes, deliberately distinct:
+/// * no slot at all is an intentional internal registration pool (no admission),
+/// * a live slot yields the pool's admission,
+/// * a slot that already retired is a hard error — a guarded pool must never
+///   hand out a connection without the admission it was opened under.
+fn pinned_admission(
+    slot: Option<&Arc<PoolAdmissionSlot>>,
+) -> Result<Option<Arc<WriterAdmission>>, sqlx::Error> {
+    match slot.map(|slot| slot.admission()) {
+        None => Ok(None),
+        Some(Some(pinned)) => Ok(Some(pinned)),
+        Some(None) => Err(sqlx::Error::Protocol(
+            "guarded pool admission was retired while the pool was still open".to_string(),
+        )),
+    }
+}
+
+/// The published admission one cooperative pool keeps for its whole OPEN
+/// lifetime.
+///
+/// The pool owns this slot — the `after_connect` factory lives in the pool's
+/// own options — so the slot's lifetime is exactly the pool's, independent of
+/// how many connections SQLite currently has. The close-event waker holds only
+/// a `Weak` of the slot, so the listener can never keep the slot, or the guard
+/// it owns, alive: the observer graph has no cycle.
+struct PoolAdmissionSlot {
+    /// Taken exactly once: on close-start, or when the slot itself drops.
+    guard: Mutex<Option<Arc<WorkspaceWriterGuard>>>,
+    /// The pool's close listener, kept registered for the slot's whole life.
+    closed: Mutex<Option<Pin<Box<CloseEvent>>>>,
+}
+
+impl PoolAdmissionSlot {
+    /// Own `guard` until this slot retires.
+    fn new(guard: Arc<WorkspaceWriterGuard>) -> Arc<Self> {
+        Arc::new(Self {
+            guard: Mutex::new(Some(guard)),
+            closed: Mutex::new(None),
+        })
+    }
+
+    /// The admission a connection opened under this pool must pin.
+    ///
+    /// `None` only after the slot retired — a guarded pool treats that as a
+    /// hard error rather than serving a connection without its admission.
+    fn admission(&self) -> Option<Arc<WriterAdmission>> {
+        self.guard
+            .lock()
+            .expect("pool admission slot poisoned")
+            .as_ref()
+            .map(|guard| Arc::clone(&guard.admission))
+    }
+
+    /// Give the admission back, exactly once, and drop it outside the lock.
+    ///
+    /// Runs inside `Pool::close()` (from the registered waker) or from the
+    /// slot's own drop; it never awaits and never panics.
+    fn retire(&self) {
+        let retired = self
+            .guard
+            .lock()
+            .expect("pool admission slot poisoned")
+            .take();
+        drop(retired);
+    }
+
+    /// Register the pool's close event against this slot.
+    ///
+    /// The listener is polled once with OUR waker, so SQLx's close-start
+    /// notification calls it synchronously, with no task and no runtime. The
+    /// polled listener is kept in the slot so nothing overwrites that waker.
+    fn watch(self: &Arc<Self>, pool: &SqlitePool) {
+        let waker = Waker::from(Arc::new(PoolCloseWaker(Arc::downgrade(self))));
+        let mut context = Context::from_waker(&waker);
+        let mut event: Pin<Box<CloseEvent>> = Box::pin(pool.close_event());
+        if event.as_mut().poll(&mut context).is_ready() {
+            // The pool was already closed when this slot was attached.
+            self.retire();
+        }
+        *self.closed.lock().expect("pool admission slot poisoned") = Some(event);
+    }
+}
+
+/// The close listener's waker: a weak view of the slot, so the listener never
+/// owns what it notifies.
+struct PoolCloseWaker(Weak<PoolAdmissionSlot>);
+
+impl std::task::Wake for PoolCloseWaker {
+    fn wake(self: Arc<Self>) {
+        if let Some(slot) = self.0.upgrade() {
+            slot.retire();
+        }
+    }
+
+    fn wake_by_ref(self: &Arc<Self>) {
+        if let Some(slot) = self.0.upgrade() {
+            slot.retire();
+        }
+    }
+}
+
 async fn pool_with_context(
     db_path: &Path,
     context: WriterConnectionContext,
-    admission: Option<Arc<WriterAdmission>>,
+    owner: Option<Arc<WorkspaceWriterGuard>>,
     options: GuardedPoolOptions,
 ) -> Result<SqlitePool, LocalDbError> {
     let db_path = db_path.to_path_buf();
-    // The hook keeps only a WEAK view of the admission: pool options live as
-    // long as the pool inner, so a strong reference here would keep the OS
-    // locks after every connection — and every real user — is gone.
-    let admission = admission.map(|admission| Arc::downgrade(&admission));
+    // Two independent owners of the same admission:
+    //
+    // * each connection pins it for as long as SQLite keeps that connection's
+    //   userdata (until real disposal), and
+    // * the pool itself owns the published guard through `PoolAdmissionSlot`,
+    //   which the `after_connect` factory keeps alive for the whole pool, so an
+    //   OPEN pool with zero current connections still holds both OS locks.
+    //
+    // An intentional internal `None` (protocol bookkeeping pools) installs no
+    // admission; a guarded pool that requires one fails closed instead of
+    // silently installing nothing.
+    let slot = owner.map(PoolAdmissionSlot::new);
+    let slot_for_factory = slot.clone();
     let context_for_hook = context;
     let url = sqlite_url(&db_path, false);
     let mut builder = SqlitePoolOptions::new().max_connections(options.max_connections);
     if let Some(timeout) = options.acquire_timeout {
         builder = builder.acquire_timeout(timeout);
     }
-    builder
+    let pool = builder
         .after_connect(move |conn, _meta| {
+            // Holding this slot is what ties the admission to the POOL's
+            // lifetime rather than to any single connection.
+            let slot = slot_for_factory.clone();
             let context = context_for_hook.clone();
-            // Each connection takes its own share for as long as SQLite keeps
-            // this connection's userdata — i.e. until real disposal.
-            let pinned = admission.as_ref().and_then(Weak::upgrade);
             Box::pin(async move {
+                let pinned = pinned_admission(slot.as_ref())?;
                 install_writer_functions(conn, context, pinned).await?;
                 sqlx::query("PRAGMA journal_mode = WAL")
                     .execute(&mut *conn)
@@ -758,7 +893,13 @@ async fn pool_with_context(
         })
         .connect(&url)
         .await
-        .map_err(LocalDbError::from)
+        .map_err(LocalDbError::from)?;
+    if let Some(slot) = slot.as_ref() {
+        // Close-start, not last-drop: a closed handle that is still referenced
+        // must not keep the admission.
+        slot.watch(&pool);
+    }
+    Ok(pool)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1177,7 +1318,7 @@ pub async fn open_guarded_pool_with(
     // Every connection of this pool shares the guard's complete OS admission:
     // the locks outlive the guard until SQLite disposes the last connection.
     let pool =
-        pool_with_context(&guard.db_path, context, Some(Arc::clone(&guard.admission)), options)
+        pool_with_context(&guard.db_path, context, Some(Arc::clone(guard)), options)
             .await?;
     register_pool_handle(guard, &pool);
     Ok(pool)
@@ -1235,10 +1376,9 @@ async fn open_guarded_pool_with_claim(
         guard.engine_epoch,
     );
     // The claim-bearing pool shares the guard's complete OS admission with
-    // every one of its connections.
-    let pool =
-        pool_with_context(&guard.db_path, context, Some(Arc::clone(&guard.admission)), options)
-            .await?;
+    // every one of its connections, and keeps the published guard itself for
+    // as long as the pool is open.
+    let pool = pool_with_context(&guard.db_path, context, Some(Arc::clone(&guard)), options).await?;
     let registration = register_pool_handle(&guard, &pool);
     Ok(GuardedPool {
         guard,
@@ -1409,6 +1549,11 @@ pub async fn open_admitted_pool_with(
     // a concurrent publication race.
     let guard = match joined {
         Some(claim) => {
+            // A joined raw open retains the PUBLISHED admission for the
+            // process, exactly like a fresh one: parking the claim alone would
+            // leave the entry observing a guard that dies with the ordinary
+            // holder.
+            promote_retained_admission(&guard);
             claim.persist();
             guard
         }
@@ -1834,21 +1979,27 @@ mod tests {
         // runs — no close call, no path-wide release.
         drop(opening);
 
-        assert!(
-            retained_guard(&db_path, WriterMode::Direct).is_none(),
-            "an undelivered open leaves no live admission"
-        );
-        // The real OS signal, polled without a purge or helper: sqlx closes the
-        // abandoned connections on the driver, and their admission fds go with
-        // them.
+        // Retirement follows the pool itself: dropping the undelivered handle
+        // drops the pool's owner slot, and SQLx tears the pool inner down on
+        // the driver, so the admission settles promptly rather than instantly.
+        // The OS signal is what matters, and it is polled without a purge or a
+        // helper.
+        let mut admission = retained_guard(&db_path, WriterMode::Direct);
         let mut fence = None;
         for _ in 0..4096 {
-            if let Ok(acquired) = acquire_store_reset_fence(&db_path) {
-                fence = Some(acquired);
-                break;
+            admission = retained_guard(&db_path, WriterMode::Direct);
+            if admission.is_none() {
+                if let Ok(acquired) = acquire_store_reset_fence(&db_path) {
+                    fence = Some(acquired);
+                    break;
+                }
             }
             tokio::task::yield_now().await;
         }
+        assert!(
+            admission.is_none(),
+            "an undelivered open leaves no live admission"
+        );
         drop(fence.expect("the undelivered open's OS admission settles on its own"));
     }
 
@@ -2105,4 +2256,41 @@ mod tests {
             .expect("a failed initialization released its locks");
         drop(fence);
     }
+    /// F13: the per-connection pin decision keeps three outcomes distinct — an
+    /// intentional internal registration pool pins nothing, a live pool pins
+    /// the published admission, and a pool whose admission was already retired
+    /// fails closed instead of silently installing nothing.
+    #[tokio::test]
+    async fn lost_pool_admission_fails_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("state.db");
+        run_guarded_migrations(&db_path).await.unwrap();
+        let guard = acquire_writer_guard(&db_path, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
+            .await
+            .unwrap();
+
+        let slot = PoolAdmissionSlot::new(Arc::clone(&guard));
+        assert!(
+            pinned_admission(Some(&slot)).unwrap().is_some(),
+            "a live pool hands out its own admission"
+        );
+
+        // Close-start retirement is once-only and really gives the admission up.
+        slot.retire();
+        slot.retire();
+        assert!(
+            slot.admission().is_none(),
+            "a retired slot holds no admission"
+        );
+        let error = pinned_admission(Some(&slot)).expect_err("a lost admission fails closed");
+        assert!(
+            format!("{error}").contains("retired while the pool was still open"),
+            "the refusal names the lost admission, got {error}"
+        );
+        assert!(
+            pinned_admission(None).unwrap().is_none(),
+            "an intentional internal registration pool pins nothing"
+        );
+    }
+
 }
