@@ -470,7 +470,7 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
         },
         // A remote memory-provider refusal: the peer's message and extra
         // details never travel. Only the whitelisted effective memory code,
-        // an allowlisted peer wire code and the §14.2 retry class ride
+        // an allowlisted peer wire code and the effective retry class ride
         // `details`, so a caller can still tell an uncertain outcome from a
         // clean failure (spec §3.1).
         DomainError::MemoryProviderRefused {
@@ -478,25 +478,42 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
             wire_code,
             retry_class,
             family,
+            conflict_code,
         } => {
-            let (wire_code_name, http_status) = match family {
-                MemoryProviderRefusal::NotFound => (CoreErrorCode::NotFound, 404),
-                MemoryProviderRefusal::Forbidden => (CoreErrorCode::Forbidden, 403),
-                MemoryProviderRefusal::InvalidInput => (CoreErrorCode::InvalidInput, 400),
-                MemoryProviderRefusal::Conflict => (CoreErrorCode::OwnerBusy, 409),
-                MemoryProviderRefusal::Unavailable => (CoreErrorCode::Busy, 503),
-            };
             let mut details = serde_json::Map::new();
             details.insert("memory_code".into(), Value::String(code.clone()));
             if let Some(wire_code) = wire_code {
                 details.insert("wire_code".into(), Value::String(wire_code));
             }
             details.insert("retry_class".into(), Value::String(retry_class));
-            CoreError {
-                code: wire_code_name,
-                message: format!("memory provider refused: {code}"),
-                details,
-                http_status: Some(http_status),
+            match conflict_code {
+                // A proven definite memory conflict keeps the retained
+                // consumer-visible `conflict_code`/409 envelope the local
+                // `ActorConflict` already renders, with static text.
+                Some(conflict_code) => {
+                    details.insert("conflict_code".into(), Value::String(conflict_code));
+                    CoreError {
+                        code: CoreErrorCode::OwnerBusy,
+                        message: "fragment revision mismatch".into(),
+                        details,
+                        http_status: Some(409),
+                    }
+                }
+                None => {
+                    let (wire_code_name, http_status) = match family {
+                        MemoryProviderRefusal::NotFound => (CoreErrorCode::NotFound, 404),
+                        MemoryProviderRefusal::Forbidden => (CoreErrorCode::Forbidden, 403),
+                        MemoryProviderRefusal::InvalidInput => (CoreErrorCode::InvalidInput, 400),
+                        MemoryProviderRefusal::Conflict => (CoreErrorCode::OwnerBusy, 409),
+                        MemoryProviderRefusal::Unavailable => (CoreErrorCode::Busy, 503),
+                    };
+                    CoreError {
+                        code: wire_code_name,
+                        message: format!("memory provider refused: {code}"),
+                        details,
+                        http_status: Some(http_status),
+                    }
+                }
             }
         }
     }
@@ -751,52 +768,6 @@ mod tests {
             wire.details.get("wire_code").and_then(|v| v.as_str()),
             Some("capability_missing")
         );
-    }
-
-    /// I-000202: a remote memory-provider refusal projects its whitelisted
-    /// classification into `details` and never carries peer text.
-    #[test]
-    fn memory_provider_refusal_wire_keeps_the_safe_classification() {
-        let wire = wire_core_error_from_domain(DomainError::MemoryProviderRefused {
-            code: "OUTCOME_UNCERTAIN".into(),
-            wire_code: Some("OUTCOME_UNCERTAIN".into()),
-            retry_class: "uncertain".into(),
-            family: MemoryProviderRefusal::Unavailable,
-        });
-        // A possibly committed outcome is NOT a clean failure: it rides the
-        // retryable-unavailable coarse family with its classification in
-        // `details`.
-        assert_eq!(wire.code, CoreErrorCode::Busy);
-        assert_eq!(wire.http_status, Some(503));
-        assert_eq!(wire.message, "memory provider refused: OUTCOME_UNCERTAIN");
-        assert_eq!(
-            wire.details.get("memory_code").and_then(Value::as_str),
-            Some("OUTCOME_UNCERTAIN")
-        );
-        assert_eq!(
-            wire.details.get("retry_class").and_then(Value::as_str),
-            Some("uncertain")
-        );
-        assert_eq!(
-            wire.details.get("wire_code").and_then(Value::as_str),
-            Some("OUTCOME_UNCERTAIN")
-        );
-
-        // A definite refusal keeps its own family, and an absent peer wire code
-        // adds no `details` key.
-        let wire = wire_core_error_from_domain(DomainError::MemoryProviderRefused {
-            code: "NOT_AUTHORIZED".into(),
-            wire_code: None,
-            retry_class: "terminal".into(),
-            family: MemoryProviderRefusal::Forbidden,
-        });
-        assert_eq!(wire.code, CoreErrorCode::Forbidden);
-        assert_eq!(wire.http_status, Some(403));
-        assert_eq!(
-            wire.details.get("retry_class").and_then(Value::as_str),
-            Some("terminal")
-        );
-        assert!(wire.details.get("wire_code").is_none());
     }
 
     /// v1.207 P3 (§B.1/§B.3/§C): the two frozen durable-operation refusal

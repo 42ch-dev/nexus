@@ -136,6 +136,11 @@ pub enum CoreError {
         retry_class: String,
         /// The coarse transport family derived from `code`.
         family: MemoryProviderRefusal,
+        /// The retained consumer-visible conflict code (`version_mismatch`)
+        /// when the provider proved a definite stale-revision conflict; absent
+        /// for every other refusal, so an uncertain conflict never reads as a
+        /// definite one.
+        conflict_code: Option<String>,
     },
     /// Workspace-creation exclusivity refusal (409 at HTTP adapters): the slug
     /// is already registered for the creator, the resolved creative root is

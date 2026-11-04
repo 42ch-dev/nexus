@@ -105,31 +105,87 @@ fn now_iso() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 
+/// The effective outcome one remote provider result actually proves.
+///
+/// One decision for every remote-capable path: it governs the caller-visible
+/// class/family, whether a durable admission may be retired, and whether a
+/// retained absence/consumed/conflict shortcut may run. A `terminal` class
+/// alone is not enough: `INTERNAL_ERROR` and the contract's own
+/// `OUTCOME_UNCERTAIN` never prove an outcome, and a missing/unknown class
+/// leaves the attempt unknown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RemoteOutcome {
+    /// The provider proved a definite refusal of the reported code.
+    Definite,
+    /// A transient failure: no effect was proven, but neither is the code's
+    /// own outcome (e.g. a `NOT_FOUND` while the provider is degraded).
+    Retryable,
+    /// The attempt may have committed; nothing may be read as a clean outcome.
+    Uncertain,
+}
+
+/// The §14.2 retry class the provider declared, when it is a known one.
+fn declared_retry_class(reject: &SpokeReject) -> Option<&str> {
+    reject
+        .details
+        .as_ref()
+        .and_then(|details| details.get("retry_class"))
+        .and_then(Value::as_str)
+        .filter(|class| matches!(*class, "terminal" | "retryable" | "uncertain"))
+}
+
+/// The one effective-outcome decision for a remote provider result.
+///
+/// Codes that can never prove an outcome win over the declared class (a
+/// contradictory `terminal` beside them stays unknown), and any missing,
+/// unknown or `uncertain` class stays unknown as well.
+fn remote_outcome(reject: &SpokeReject) -> RemoteOutcome {
+    if matches!(
+        reject.code,
+        SpokeRejectCode::OutcomeUncertain
+            | SpokeRejectCode::InternalError
+            | SpokeRejectCode::CapabilityPortMissing
+    ) {
+        return RemoteOutcome::Uncertain;
+    }
+    match declared_retry_class(reject) {
+        Some("terminal") => RemoteOutcome::Definite,
+        Some("retryable") => RemoteOutcome::Retryable,
+        _ => RemoteOutcome::Uncertain,
+    }
+}
+
+/// Whether one refusal proves the named no-effect outcome.
+///
+/// A local provider is authoritative by code: its in-process refusals carry no
+/// remote retry class and the retained local shortcuts stay unchanged. A remote
+/// provider must prove the outcome through [`remote_outcome`], so a transient or
+/// unknown result never reads as absence, consumption or a definite conflict.
+fn refusal_proves(binding_is_local: bool, reject: &SpokeReject, codes: &[SpokeRejectCode]) -> bool {
+    codes.contains(&reject.code)
+        && (binding_is_local || remote_outcome(reject) == RemoteOutcome::Definite)
+}
+
 /// Whether one capture refusal proves this wire attempt had no effect (D18).
 ///
 /// §14.2 classifies every memory reject in `details.retry_class`, and the
 /// provider documents `OUTCOME_UNCERTAIN` — including a response-projection
 /// failure *after* commit — as an effect that may already exist. Only a
-/// `terminal` class on a pre-effect refusal code proves a clean no-effect
-/// result. A retryable/uncertain class, a missing or unknown class, and any
-/// code whose capture semantics do not prove a pre-effect refusal all keep the
-/// durable admission.
+/// definite (`terminal`) class on a pre-effect refusal code proves a clean
+/// no-effect result. A retryable/uncertain class, a missing or unknown class,
+/// and any code whose capture semantics do not prove a pre-effect refusal all
+/// keep the durable admission.
 fn remote_capture_reject_proves_no_effect(reject: &SpokeReject) -> bool {
-    let retry_class = reject
-        .details
-        .as_ref()
-        .and_then(|details| details.get("retry_class"))
-        .and_then(Value::as_str);
-    if retry_class != Some("terminal") {
-        return false;
-    }
-    matches!(
-        reject.code,
-        SpokeRejectCode::NotAuthorized
-            | SpokeRejectCode::SpaceFrozen
-            | SpokeRejectCode::SubjectFenced
-            | SpokeRejectCode::InvalidInput
-            | SpokeRejectCode::NotFound
+    refusal_proves(
+        false,
+        reject,
+        &[
+            SpokeRejectCode::NotAuthorized,
+            SpokeRejectCode::SpaceFrozen,
+            SpokeRejectCode::SubjectFenced,
+            SpokeRejectCode::InvalidInput,
+            SpokeRejectCode::NotFound,
+        ],
     )
 }
 
@@ -206,22 +262,21 @@ fn memory_reject_for(binding: &MemoryProviderBinding, reject: &SpokeReject) -> C
 ///
 /// The peer controls its own message and extra details, so neither is trusted
 /// or copied: only the whitelisted effective code, the peer's wire code when it
-/// names a known memory code, and the whitelisted §14.2 retry class survive.
-/// That keeps the machine classification a caller needs to tell a possibly
-/// committed outcome from a clean failure while peer text cannot escape.
+/// names a known memory code, the effective outcome and — for a proven definite
+/// stale-revision conflict — the retained consumer-visible conflict code
+/// survive. The class and coarse family come from [`remote_outcome`], the same
+/// decision the admission and shortcut rules use, so a transient or unknown
+/// result is never presented as a definite 400/404/409.
 fn remote_refusal(reject: &SpokeReject) -> CoreError {
-    let declared = reject
-        .details
-        .as_ref()
-        .and_then(|details| details.get("retry_class"))
-        .and_then(Value::as_str)
-        .filter(|class| matches!(*class, "terminal" | "retryable" | "uncertain"));
-    // The effective code is authoritative: a `terminal` class beside an
-    // uncertain outcome must not read as a clean failure.
-    let retry_class = if reject.code == SpokeRejectCode::OutcomeUncertain {
-        "uncertain"
-    } else {
-        declared.unwrap_or("uncertain")
+    let outcome = remote_outcome(reject);
+    let retry_class = match outcome {
+        RemoteOutcome::Definite => "terminal",
+        RemoteOutcome::Retryable => "retryable",
+        RemoteOutcome::Uncertain => "uncertain",
+    };
+    let family = match outcome {
+        RemoteOutcome::Definite => memory_refusal_family(reject.code),
+        RemoteOutcome::Retryable | RemoteOutcome::Uncertain => MemoryProviderRefusal::Unavailable,
     };
     let wire_code = reject
         .details
@@ -231,10 +286,15 @@ fn remote_refusal(reject: &SpokeReject) -> CoreError {
         .filter(|code| SpokeRejectCode::try_from_str(code).is_some())
         .map(str::to_string);
     CoreError::MemoryProviderRefused {
+        // A proven stale-revision conflict keeps the `version_mismatch` code
+        // consumers already match on the local branch (I-000204).
+        conflict_code: (outcome == RemoteOutcome::Definite
+            && reject.code == SpokeRejectCode::RevisionConflict)
+            .then(|| "version_mismatch".to_string()),
         code: reject.code.as_str().to_string(),
         wire_code,
         retry_class: retry_class.to_string(),
-        family: memory_refusal_family(reject.code),
+        family,
     }
 }
 
@@ -474,6 +534,12 @@ impl MemoryAdapter {
     /// Map a port refusal under this binding (see [`memory_reject_for`]).
     fn refuse(&self, reject: &SpokeReject) -> CoreError {
         memory_reject_for(&self.binding, reject)
+    }
+
+    /// Whether this refusal proves the retained no-effect answer for one of
+    /// `codes` (see [`refusal_proves`]).
+    fn proves(&self, reject: &SpokeReject, codes: &[SpokeRejectCode]) -> bool {
+        refusal_proves(self.is_local(), reject, codes)
     }
 
     /// The remote dependency namespace this adapter may record facts under
@@ -811,7 +877,11 @@ impl MemoryAdapter {
                 let body = serde_json::to_value(&body).map_err(wire_err)?;
                 Ok(body["subject"]["status"].as_str() == Some("archived"))
             }
-            SpokeResult::Reject(reject) if reject.code == SpokeRejectCode::NotFound => Ok(false),
+            SpokeResult::Reject(reject)
+                if self.proves(&reject, &[SpokeRejectCode::NotFound]) =>
+            {
+                Ok(false)
+            }
             SpokeResult::Reject(reject) => Err(self.refuse(&reject)),
         }
     }
@@ -856,7 +926,11 @@ impl MemoryAdapter {
                 .map_err(wire_err)?
                 .get("candidate")
                 .cloned()),
-            SpokeResult::Reject(reject) if reject.code == SpokeRejectCode::NotFound => Ok(None),
+            SpokeResult::Reject(reject)
+                if self.proves(&reject, &[SpokeRejectCode::NotFound]) =>
+            {
+                Ok(None)
+            }
             SpokeResult::Reject(reject) => Err(self.refuse(&reject)),
         }
     }
@@ -898,11 +972,13 @@ impl MemoryAdapter {
             // is `RevisionConflict` — all three are the retained not-found
             // answer, never dismissal success (fix round 4, finding F3).
             SpokeResult::Reject(reject)
-                if matches!(
-                    reject.code,
-                    SpokeRejectCode::NotFound
-                        | SpokeRejectCode::CandidateConsumed
-                        | SpokeRejectCode::RevisionConflict
+                if self.proves(
+                    &reject,
+                    &[
+                        SpokeRejectCode::NotFound,
+                        SpokeRejectCode::CandidateConsumed,
+                        SpokeRejectCode::RevisionConflict,
+                    ],
                 ) =>
             {
                 Ok(false)
@@ -952,11 +1028,13 @@ impl MemoryAdapter {
                 Ok(true)
             }
             SpokeResult::Reject(reject)
-                if matches!(
-                    reject.code,
-                    SpokeRejectCode::NotFound
-                        | SpokeRejectCode::CandidateConsumed
-                        | SpokeRejectCode::RevisionConflict
+                if self.proves(
+                    &reject,
+                    &[
+                        SpokeRejectCode::NotFound,
+                        SpokeRejectCode::CandidateConsumed,
+                        SpokeRejectCode::RevisionConflict,
+                    ],
                 ) =>
             {
                 Ok(false)
@@ -1310,7 +1388,11 @@ impl MemoryAdapter {
                 .map_err(wire_err)?
                 .get("record")
                 .cloned()),
-            SpokeResult::Reject(reject) if reject.code == SpokeRejectCode::NotFound => Ok(None),
+            SpokeResult::Reject(reject)
+                if self.proves(&reject, &[SpokeRejectCode::NotFound]) =>
+            {
+                Ok(None)
+            }
             SpokeResult::Reject(reject) => Err(self.refuse(&reject)),
         }
     }
@@ -1393,9 +1475,18 @@ impl MemoryAdapter {
                 Ok(())
             }
             SpokeResult::Reject(reject) => Err(match reject.code {
-                SpokeRejectCode::NotFound => {
+                // Only a proven absence takes the retained not-found answer; a
+                // remote `NotFound` with a missing or unknown outcome stays an
+                // honest unknown failure.
+                SpokeRejectCode::NotFound
+                    if self.proves(&reject, &[SpokeRejectCode::NotFound]) =>
+                {
                     not_found("character memory fragment", &format!("'{record_id}'"))
                 }
+                // The local provider keeps its trusted message; a remote
+                // definite stale-revision conflict reaches the same
+                // `version_mismatch` contract through the safe carrier in
+                // `self.refuse` (static text + classification metadata).
                 SpokeRejectCode::RevisionConflict if self.is_local() => CoreError::ActorConflict {
                     code: "version_mismatch".to_string(),
                     message: format!("fragment revision mismatch: {}", reject.message),
@@ -5579,40 +5670,170 @@ mod tests {
 
     const PEER_MARKER: &str = "PEER_SECRET_MARKER";
 
-    /// I-000202: the shared remote-refusal policy keeps the machine
-    /// classification and never carries peer-controlled text.
-    ///
-    /// The refusals here are hostile: their message and extra details carry a
-    /// marker that must not reach the returned error's fields, `Display` or
-    /// `Debug`. The classification (`code`, allowlisted `wire_code`,
-    /// `retry_class`, coarse family) is what a caller needs to tell a possibly
-    /// committed outcome from a clean failure.
+    /// I-000202: the effective outcome stays unknown whenever the provider did
+    /// not prove one — a raw `INTERNAL_ERROR` beside a contradictory `terminal`
+    /// class, an `uncertain` class on any code, a missing/unknown class, and the
+    /// contract's own uncertain code.
+    #[test]
+    fn remote_outcome_stays_conservative_for_uncertain_or_contradictory_refusals() {
+        assert_eq!(
+            remote_outcome(&hostile_reject(
+                SpokeRejectCode::InternalError,
+                Some("terminal"),
+                None
+            )),
+            RemoteOutcome::Uncertain,
+            "INTERNAL_ERROR never proves an outcome, whatever class rides along"
+        );
+        assert_eq!(
+            remote_outcome(&hostile_reject(
+                SpokeRejectCode::InvalidInput,
+                Some("uncertain"),
+                None
+            )),
+            RemoteOutcome::Uncertain,
+        );
+        assert_eq!(
+            remote_outcome(&hostile_reject(SpokeRejectCode::NotFound, None, None)),
+            RemoteOutcome::Uncertain,
+        );
+        assert_eq!(
+            remote_outcome(&hostile_reject(
+                SpokeRejectCode::NotFound,
+                Some("later"),
+                None
+            )),
+            RemoteOutcome::Uncertain,
+        );
+        assert_eq!(
+            remote_outcome(&hostile_reject(
+                SpokeRejectCode::NotFound,
+                Some("retryable"),
+                None
+            )),
+            RemoteOutcome::Retryable,
+        );
+        assert_eq!(
+            remote_outcome(&hostile_reject(
+                SpokeRejectCode::NotFound,
+                Some("terminal"),
+                None
+            )),
+            RemoteOutcome::Definite,
+        );
+        assert_eq!(
+            remote_outcome(&hostile_reject(
+                SpokeRejectCode::OutcomeUncertain,
+                Some("terminal"),
+                None
+            )),
+            RemoteOutcome::Uncertain,
+            "the contract's own uncertain code wins over a contradictory class"
+        );
+    }
+
+    /// I-000202: a retained absence/consumed/conflict shortcut runs only when
+    /// the remote result proves that outcome; the local provider stays
+    /// authoritative by code. The admission's no-effect proof is the same
+    /// decision, narrowed to its pre-effect codes.
+    #[test]
+    fn remote_shortcuts_require_a_definite_outcome() {
+        let absent_without_class = hostile_reject(SpokeRejectCode::NotFound, None, None);
+        assert!(
+            refusal_proves(true, &absent_without_class, &[SpokeRejectCode::NotFound]),
+            "local refusals carry no remote class and keep the retained answer"
+        );
+        assert!(
+            !refusal_proves(false, &absent_without_class, &[SpokeRejectCode::NotFound]),
+            "an unknown remote NotFound is not an absence"
+        );
+        for class in ["uncertain", "retryable"] {
+            assert!(
+                !refusal_proves(
+                    false,
+                    &hostile_reject(SpokeRejectCode::NotFound, Some(class), None),
+                    &[SpokeRejectCode::NotFound],
+                ),
+                "{class} NotFound must not read as absence"
+            );
+        }
+        assert!(refusal_proves(
+            false,
+            &hostile_reject(SpokeRejectCode::NotFound, Some("terminal"), None),
+            &[SpokeRejectCode::NotFound],
+        ));
+
+        let dismissal = [
+            SpokeRejectCode::CandidateConsumed,
+            SpokeRejectCode::RevisionConflict,
+        ];
+        assert!(refusal_proves(
+            false,
+            &hostile_reject(SpokeRejectCode::CandidateConsumed, Some("terminal"), None),
+            &dismissal,
+        ));
+        assert!(refusal_proves(
+            false,
+            &hostile_reject(SpokeRejectCode::RevisionConflict, Some("terminal"), None),
+            &dismissal,
+        ));
+        for code in dismissal {
+            assert!(
+                !refusal_proves(
+                    false,
+                    &hostile_reject(code, Some("uncertain"), None),
+                    &dismissal,
+                ),
+                "an uncertain {code:?} must not read as the definite not-found answer"
+            );
+        }
+
+        assert!(!remote_capture_reject_proves_no_effect(&hostile_reject(
+            SpokeRejectCode::InternalError,
+            Some("terminal"),
+            None
+        )));
+        assert!(remote_capture_reject_proves_no_effect(&hostile_reject(
+            SpokeRejectCode::InvalidInput,
+            Some("terminal"),
+            None
+        )));
+        assert!(!remote_capture_reject_proves_no_effect(&hostile_reject(
+            SpokeRejectCode::RevisionConflict,
+            Some("terminal"),
+            None
+        )));
+    }
+
+    /// I-000202/I-000204: the safe carrier keeps the effective classification,
+    /// the retained conflict code for a proven stale-revision conflict, and no
+    /// peer-controlled text.
     #[test]
     fn remote_refusal_keeps_classification_and_drops_peer_text() {
-        // An uncertain outcome beside a contradictory `terminal` class: the
-        // effective code wins, so a possibly committed capture never reads as
-        // a clean failure.
+        // An internal failure beside a contradictory `terminal` class is still
+        // an unknown outcome, never a definite failure.
         let error = remote_refusal(&hostile_reject(
-            SpokeRejectCode::OutcomeUncertain,
+            SpokeRejectCode::InternalError,
             Some("terminal"),
-            Some("OUTCOME_UNCERTAIN"),
+            Some("INTERNAL_ERROR"),
         ));
         let CoreError::MemoryProviderRefused {
             code,
             wire_code,
             retry_class,
             family,
+            conflict_code,
         } = &error
         else {
             panic!("a remote refusal keeps its structured carrier: {error:?}");
         };
-        assert_eq!(code, "OUTCOME_UNCERTAIN");
+        assert_eq!(code, "INTERNAL_ERROR");
         assert_eq!(retry_class, "uncertain");
-        assert_eq!(wire_code.as_deref(), Some("OUTCOME_UNCERTAIN"));
+        assert_eq!(wire_code.as_deref(), Some("INTERNAL_ERROR"));
         assert_eq!(*family, MemoryProviderRefusal::Unavailable);
+        assert_eq!(conflict_code.as_deref(), None);
 
-        // A definite refusal keeps its declared class, effective code and a
-        // known peer wire code.
+        // A proven definite refusal keeps its family and a known peer wire code.
         let error = remote_refusal(&hostile_reject(
             SpokeRejectCode::NotAuthorized,
             Some("terminal"),
@@ -5623,6 +5844,7 @@ mod tests {
             wire_code,
             retry_class,
             family,
+            conflict_code,
         } = &error
         else {
             panic!("a remote refusal keeps its structured carrier: {error:?}");
@@ -5631,12 +5853,13 @@ mod tests {
         assert_eq!(retry_class, "terminal");
         assert_eq!(wire_code.as_deref(), Some("NOT_AUTHORIZED"));
         assert_eq!(*family, MemoryProviderRefusal::Forbidden);
+        assert_eq!(conflict_code.as_deref(), None);
 
-        // An unknown class and an unknown peer wire code degrade conservatively
-        // instead of passing arbitrary peer strings through.
+        // An uncertain outcome beside a validation code is not a definite 400,
+        // and unknown peer strings never pass through.
         let error = remote_refusal(&hostile_reject(
             SpokeRejectCode::InvalidInput,
-            Some("bogus"),
+            Some("uncertain"),
             Some("NOT_A_MEMORY_CODE"),
         ));
         let CoreError::MemoryProviderRefused {
@@ -5644,6 +5867,7 @@ mod tests {
             wire_code,
             retry_class,
             family,
+            conflict_code,
         } = &error
         else {
             panic!("a remote refusal keeps its structured carrier: {error:?}");
@@ -5651,27 +5875,49 @@ mod tests {
         assert_eq!(code, "INVALID_INPUT");
         assert_eq!(retry_class, "uncertain");
         assert_eq!(wire_code.as_deref(), None);
-        assert_eq!(*family, MemoryProviderRefusal::InvalidInput);
+        assert_eq!(*family, MemoryProviderRefusal::Unavailable);
+        assert_eq!(conflict_code.as_deref(), None);
 
-        // A refusal with no details at all still classifies conservatively.
-        let error = remote_refusal(&SpokeReject {
-            code: SpokeRejectCode::InternalError,
-            message: PEER_MARKER.to_string(),
-            details: None,
-        });
+        // A proven definite stale-revision conflict retains the consumer-visible
+        // `version_mismatch` code (I-000204) ...
+        let error = remote_refusal(&hostile_reject(
+            SpokeRejectCode::RevisionConflict,
+            Some("terminal"),
+            Some("REVISION_CONFLICT"),
+        ));
         let CoreError::MemoryProviderRefused {
             code,
-            wire_code,
             retry_class,
             family,
+            conflict_code,
+            ..
         } = &error
         else {
             panic!("a remote refusal keeps its structured carrier: {error:?}");
         };
-        assert_eq!(code, "INTERNAL_ERROR");
+        assert_eq!(code, "REVISION_CONFLICT");
+        assert_eq!(retry_class, "terminal");
+        assert_eq!(*family, MemoryProviderRefusal::Conflict);
+        assert_eq!(conflict_code.as_deref(), Some("version_mismatch"));
+
+        // ... while an uncertain conflict never does.
+        let error = remote_refusal(&hostile_reject(
+            SpokeRejectCode::RevisionConflict,
+            Some("uncertain"),
+            None,
+        ));
+        let CoreError::MemoryProviderRefused {
+            retry_class,
+            family,
+            conflict_code,
+            ..
+        } = &error
+        else {
+            panic!("a remote refusal keeps its structured carrier: {error:?}");
+        };
         assert_eq!(retry_class, "uncertain");
-        assert_eq!(wire_code.as_deref(), None);
         assert_eq!(*family, MemoryProviderRefusal::Unavailable);
+        assert_eq!(conflict_code.as_deref(), None);
 
         // Nothing peer-authored survives the rendered or debug form.
         let rendered = format!(
