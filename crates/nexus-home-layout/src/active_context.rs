@@ -10,6 +10,31 @@ use serde::{Deserialize, Serialize};
 
 const DEFAULT_WORKSPACE_SLUG: &str = "default";
 
+/// On-disk `[memory_provider]` table of `~/.nexus42/config.toml`.
+///
+/// Shape contract: `n3-provider-binding.md` §2.2. Remote carries only
+/// references — never an identity seed, token, capability proof or credential
+/// body. Absent table and `kind = "local"` both select the local provider.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum MemoryProviderConfig {
+    /// Built-in local provider.
+    Local,
+    /// Remote Connect provider reference.
+    Remote {
+        /// Provider space the selected authority serves.
+        space_id: String,
+        /// Operator-provisioned credential file id (not the secret itself).
+        credential_id: String,
+        /// `wss://` endpoint, or `ws://` for loopback tests only.
+        connect_endpoint: String,
+        /// Remote Ed25519 public key, 64 lowercase hex characters.
+        remote_pubkey_hex: String,
+        /// Trusted remote peer ids (fail-closed handshake).
+        allowlist: Vec<String>,
+    },
+}
+
 /// Subset of CLI config persisted under `~/.nexus42/config.toml`.
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
 pub struct CliConfigSnapshot {
@@ -17,6 +42,9 @@ pub struct CliConfigSnapshot {
     pub active_creator_id: Option<String>,
     #[serde(default)]
     pub active_workspace_slug_by_creator: HashMap<String, String>,
+    /// Team-selected memory provider; absent means the implicit local default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_provider: Option<MemoryProviderConfig>,
 }
 
 impl CliConfigSnapshot {
