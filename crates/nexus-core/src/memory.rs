@@ -4235,6 +4235,7 @@ mod tests {
         let core = CoreService::open(CoreOpenOptions {
             user_home,
             access: CoreAccess::EngineOwner,
+            memory: None,
         })
         .await
         .unwrap();

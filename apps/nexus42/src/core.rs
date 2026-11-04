@@ -44,6 +44,7 @@ pub async fn open_direct_core(config: &CliConfig) -> Result<CoreService> {
     CoreService::open(CoreOpenOptions {
         user_home,
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .map_err(map_core_error)
@@ -72,6 +73,7 @@ pub async fn open_engine_owned_core(config: &CliConfig) -> Result<CoreService> {
     CoreService::open(CoreOpenOptions {
         user_home,
         access: CoreAccess::EngineOwner,
+        memory: None,
     })
     .await
     .map_err(map_core_error)
@@ -93,6 +95,7 @@ pub async fn open_read_only_core(config: &CliConfig) -> Result<CoreService> {
     CoreService::open(CoreOpenOptions {
         user_home,
         access: CoreAccess::ReadOnly,
+        memory: None,
     })
     .await
     .map_err(map_core_error)
@@ -769,6 +772,7 @@ mod direct_writer_lifetime {
         CoreService::open(CoreOpenOptions {
             user_home: user_home.to_path_buf(),
             access: CoreAccess::DirectWriter,
+            memory: None,
         })
         .await
         .expect("the direct writer opens on the seeded home")

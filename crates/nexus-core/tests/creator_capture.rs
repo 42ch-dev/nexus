@@ -91,6 +91,7 @@ async fn open_core(env: &Env) -> (CoreService, Principal) {
     let core = CoreService::open(CoreOpenOptions {
         user_home: env.user_home.clone(),
         access: CoreAccess::EngineOwner,
+        memory: None,
     })
     .await
     .unwrap();

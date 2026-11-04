@@ -226,6 +226,7 @@ async fn setup() -> Fixture {
     let core = CoreService::open(CoreOpenOptions {
         user_home,
         access: CoreAccess::EngineOwner,
+        memory: None,
     })
     .await
     .unwrap();
@@ -403,6 +404,7 @@ async fn promote_relate_preserves_owner_and_cas() {
     let second = CoreService::open(CoreOpenOptions {
         user_home: fx.tmp.path().to_path_buf(),
         access: CoreAccess::ReadOnly,
+        memory: None,
     })
     .await
     .unwrap();
@@ -578,6 +580,7 @@ async fn world_lifecycle_create_delete_and_binding_guard() {
     let second = CoreService::open(CoreOpenOptions {
         user_home: fx.tmp.path().to_path_buf(),
         access: CoreAccess::ReadOnly,
+        memory: None,
     })
     .await
     .unwrap();

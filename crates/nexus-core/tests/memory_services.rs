@@ -176,6 +176,7 @@ async fn open_core(env: &Env) -> (CoreService, nexus_core::Principal) {
     let core = CoreService::open(CoreOpenOptions {
         user_home: env.user_home.clone(),
         access: CoreAccess::EngineOwner,
+        memory: None,
     })
     .await
     .unwrap();
@@ -4148,6 +4149,7 @@ async fn read_only_core_serves_memory_reads_and_refuses_the_write() {
     let read_only = CoreService::open(CoreOpenOptions {
         user_home: env.user_home.clone(),
         access: CoreAccess::ReadOnly,
+        memory: None,
     })
     .await
     .expect("read-only open");
@@ -4593,6 +4595,7 @@ async fn read_only_core_projects_bearers_no_writer_ever_ensured() {
     let read_only = CoreService::open(CoreOpenOptions {
         user_home: env.user_home.clone(),
         access: CoreAccess::ReadOnly,
+        memory: None,
     })
     .await
     .expect("read-only open");
@@ -4666,6 +4669,7 @@ async fn read_only_core_over_a_never_provisioned_workspace_answers_not_found() {
     let read_only = CoreService::open(CoreOpenOptions {
         user_home: env.user_home.clone(),
         access: CoreAccess::ReadOnly,
+        memory: None,
     })
     .await
     .expect("read-only open over the pre-provider workspace");
@@ -4753,6 +4757,7 @@ async fn read_only_core_answers_a_missing_space_row_as_not_found() {
     let read_only = CoreService::open(CoreOpenOptions {
         user_home: env.user_home.clone(),
         access: CoreAccess::ReadOnly,
+        memory: None,
     })
     .await
     .expect("read-only open");
@@ -5955,6 +5960,7 @@ async fn character_mind_projection_excludes_an_archived_subject_like_recall() {
     let read_only = CoreService::open(CoreOpenOptions {
         user_home: env.user_home.clone(),
         access: CoreAccess::ReadOnly,
+        memory: None,
     })
     .await
     .expect("read-only open");
@@ -5984,6 +5990,7 @@ async fn character_mind_projection_fails_closed_when_the_provider_refuses() {
     let read_only = CoreService::open(CoreOpenOptions {
         user_home: env.user_home.clone(),
         access: CoreAccess::ReadOnly,
+        memory: None,
     })
     .await
     .expect("read-only open");

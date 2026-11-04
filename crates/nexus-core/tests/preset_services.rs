@@ -29,6 +29,7 @@ async fn setup() -> Fixture {
     let core = CoreService::open(CoreOpenOptions {
         user_home: tmp.path().to_path_buf(),
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .unwrap();
@@ -194,6 +195,7 @@ async fn read_only_and_stale_principals_cannot_edit_sources() {
     let reader = CoreService::open(CoreOpenOptions {
         user_home: fixture.tmp.path().to_path_buf(),
         access: CoreAccess::ReadOnly,
+        memory: None,
     })
     .await
     .unwrap();

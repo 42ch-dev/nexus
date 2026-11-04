@@ -24,6 +24,7 @@ use crate::actor_fence::ActorFenceTable;
 use crate::changes::read_changes;
 use crate::error::{local_db_err, CoreError, CoreResult};
 use crate::memory_provider::LocalMemoryProvider;
+use crate::memory_selection::MemoryProviderSelection;
 use crate::principal::Principal;
 use crate::world_kb::{candidates, graph, patch};
 
@@ -64,6 +65,8 @@ pub enum CoreAccess {
 pub struct CoreOpenOptions {
     pub user_home: PathBuf,
     pub access: CoreAccess,
+    /// Open-only provider override (§2.2). `None` reads the on-disk table.
+    pub memory: Option<MemoryProviderSelection>,
 }
 
 pub struct CoreInner {
