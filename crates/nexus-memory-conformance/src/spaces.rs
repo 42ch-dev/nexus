@@ -186,6 +186,14 @@ fn cursor_invalid(message: impl Into<String>) -> SpokeReject {
     }
 }
 
+/// One indistinguishable refusal for a grant id the caller cannot act on: an
+/// absent row and a row outside the caller's coverage must not be
+/// distinguishable through code, details or message (§7.10/MEM-R026, no
+/// existence oracle). The message deliberately names no grant id.
+fn grant_not_revocable() -> SpokeReject {
+    not_authorized("the grant is not revocable by the authenticated principal")
+}
+
 /// Flatten the published validator envelope into the crate's result shape.
 fn checked(result: SpokeResult<()>) -> Result<(), SpokeReject> {
     match result {
@@ -1353,10 +1361,35 @@ impl FixtureMemoryProvider {
                 "revocation requires an admin grant in this space",
             ));
         }
-        let target = grants
+        let grants_wire = grants
+            .iter()
+            .map(grant_to_wire)
+            .collect::<Result<Vec<_>, _>>()?;
+        // A caller holding full space-wide unrestricted admin already sees every
+        // grant through the full `grants.list` view, so an absent id tells it
+        // nothing it could not list. Every narrower admin must not be able to
+        // tell an absent id from a grant outside its coverage, so both answer
+        // the one refusal below.
+        let sees_every_grant = is_authorized(
+            &grants_wire,
+            principal_id,
+            &request.space_id,
+            now,
+            &whole_scope_requirement("admin", None),
+        );
+        let Some(target) = grants
             .iter()
             .find(|grant| grant.grant_id == request.grant_id.as_str())
-            .ok_or_else(|| not_found(format!("grant {} does not exist", request.grant_id.as_str())))?;
+        else {
+            return Err(if sees_every_grant {
+                not_found(format!(
+                    "grant {} does not exist",
+                    request.grant_id.as_str()
+                ))
+            } else {
+                grant_not_revocable()
+            });
+        };
         // Second stage: revocation is grant management inside the admin's own
         // coverage, so the admin grant must cover the target's subject, its
         // placement contexts, its shared-visibility facet and — when the target
@@ -1369,17 +1402,9 @@ impl FixtureMemoryProvider {
             reads_shared: target.shared_access.unwrap_or(false),
             subject_all: target.context_ids.is_empty(),
         };
-        let grants_wire = grants
-            .iter()
-            .map(grant_to_wire)
-            .collect::<Result<Vec<_>, _>>()?;
-        require_authorized(
-            &grants_wire,
-            principal_id,
-            &request.space_id,
-            now,
-            &required,
-        )?;
+        if !is_authorized(&grants_wire, principal_id, &request.space_id, now, &required) {
+            return Err(grant_not_revocable());
+        }
         require_revision(request.expected_revision, target.revision)?;
         if target.revoked_at.is_some() {
             // §7.0.4: revoking an already revoked grant is a no-op success.
@@ -1690,6 +1715,15 @@ mod tests {
         match result {
             Ok(value) => panic!("expected a protocol reject, observed {value:?}"),
             Err(reject) => reject.code,
+        }
+    }
+
+    /// The whole public refusal, for comparing two refusals field by field
+    /// without pinning literal wording.
+    fn refusal<T: std::fmt::Debug>(result: Result<T, SpokeReject>) -> SpokeReject {
+        match result {
+            Ok(value) => panic!("expected a protocol reject, observed {value:?}"),
+            Err(reject) => reject,
         }
     }
 
@@ -3474,6 +3508,174 @@ mod tests {
         assert_eq!(after.grants.len(), 1);
         assert_eq!(grant_id(&after.grants[0]), own_admin_id);
         assert_eq!(grant_state(&after.grants[0]), (2, true));
+    }
+
+    #[tokio::test]
+    async fn scoped_admin_cannot_probe_foreign_grant_existence() {
+        let scenario = Scenario::open().await;
+        let space_id = scenario.space_id.clone();
+        scenario
+            .provider
+            .grants_grant(
+                OPERATOR,
+                &grant_request(&space_id, CLIENT, &["admin"], None, Some(&["ctx-a"])),
+                now(),
+            )
+            .await
+            .expect("operator issues a ctx-a-restricted admin grant");
+        let in_scope = scenario
+            .provider
+            .grants_grant(
+                OPERATOR,
+                &grant_request(&space_id, CLIENT, &["capture"], None, Some(&["ctx-a"])),
+                now(),
+            )
+            .await
+            .expect("operator issues a second in-coverage grant to the admin");
+        let foreign = scenario
+            .provider
+            .grants_grant(
+                OPERATOR,
+                &grant_request(&space_id, OTHER, &["capture"], None, Some(&["ctx-b"])),
+                now(),
+            )
+            .await
+            .expect("operator issues a grant outside the admin's coverage");
+
+        // A cursor issued before the probes proves that refused revokes leave
+        // the provider state, including the snapshot marker, untouched.
+        let first = scenario
+            .provider
+            .grants_list(
+                CLIENT,
+                &grant_list_request(&space_id, None, Some(1), None),
+                now(),
+            )
+            .await
+            .expect("self-view first page");
+        let cursor = first
+            .next_cursor
+            .clone()
+            .expect("a bounded self view issues a cursor");
+
+        // An existing grant outside the caller's coverage and a missing grant
+        // must be indistinguishable through code, details and message.
+        let hidden = refusal(
+            scenario
+                .provider
+                .grants_revoke(CLIENT, &revoke_request(&space_id, &foreign.grant_id, 1), now())
+                .await,
+        );
+        let missing = refusal(
+            scenario
+                .provider
+                .grants_revoke(
+                    CLIENT,
+                    &revoke_request(&space_id, "grt_00000000000000000000000000000000", 1),
+                    now(),
+                )
+                .await,
+        );
+        assert_eq!(hidden.code, SpokeRejectCode::NotAuthorized);
+        assert_eq!(
+            (&hidden.code, &hidden.message, &hidden.details),
+            (&missing.code, &missing.message, &missing.details),
+            "a scoped admin must not be able to tell a foreign grant from a missing one"
+        );
+
+        // Neither probe changed the foreign grant or the snapshot marker.
+        let untouched = scenario
+            .provider
+            .grants_list(
+                OPERATOR,
+                &grant_list_request(&space_id, Some(OTHER), None, None),
+                now(),
+            )
+            .await
+            .expect("operator lists the untouched foreign grant");
+        assert_eq!(untouched.grants.len(), 1);
+        assert_eq!(grant_state(&untouched.grants[0]), (1, false));
+        let resumed = scenario
+            .provider
+            .grants_list(
+                CLIENT,
+                &grant_list_request(&space_id, None, Some(1), Some(&cursor)),
+                now(),
+            )
+            .await
+            .expect("the refused probes leave the cursor valid");
+        assert_eq!(resumed.grants.len(), 1);
+
+        // A non-admin sees the same refusal for both ids too.
+        let non_admin_hidden = refusal(
+            scenario
+                .provider
+                .grants_revoke(
+                    OTHER,
+                    &revoke_request(&space_id, &in_scope.grant_id, 1),
+                    now(),
+                )
+                .await,
+        );
+        let non_admin_missing = refusal(
+            scenario
+                .provider
+                .grants_revoke(
+                    OTHER,
+                    &revoke_request(&space_id, "grt_00000000000000000000000000000000", 1),
+                    now(),
+                )
+                .await,
+        );
+        assert_eq!(
+            (
+                &non_admin_hidden.code,
+                &non_admin_hidden.message,
+                &non_admin_hidden.details
+            ),
+            (
+                &non_admin_missing.code,
+                &non_admin_missing.message,
+                &non_admin_missing.details
+            ),
+            "a non-admin must not be able to tell a real grant id from a missing one"
+        );
+
+        // Legitimate scoped administration still works, including the
+        // already-revoked no-op.
+        let revoked = scenario
+            .provider
+            .grants_revoke(CLIENT, &revoke_request(&space_id, &in_scope.grant_id, 1), now())
+            .await
+            .expect("the ctx-a admin revokes its in-coverage grant");
+        assert_eq!(revoked.revision, 2);
+        assert!(revoked.revoked);
+        let repeated = scenario
+            .provider
+            .grants_revoke(CLIENT, &revoke_request(&space_id, &in_scope.grant_id, 2), now())
+            .await
+            .expect("revoking an already revoked grant is a no-op success");
+        assert_eq!(repeated.revision, 2);
+
+        // A caller that already sees every grant keeps NOT_FOUND for a truly
+        // missing id: it can list the whole set anyway, so nothing new leaks.
+        assert_eq!(
+            reject_code(
+                scenario
+                    .provider
+                    .grants_revoke(
+                        OPERATOR,
+                        &revoke_request(
+                            &space_id,
+                            "grt_00000000000000000000000000000000",
+                            1
+                        ),
+                        now(),
+                    )
+                    .await,
+            ),
+            SpokeRejectCode::NotFound
+        );
     }
 
     #[tokio::test]
