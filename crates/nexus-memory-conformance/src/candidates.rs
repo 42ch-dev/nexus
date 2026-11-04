@@ -1389,15 +1389,22 @@ pub(crate) async fn resolve_replay(
     let Some(row) = row else {
         return Ok(ReplayResolution::Fresh);
     };
-    let digest: String = row.try_get("payload_digest").map_err(internal)?;
-    if digest != admission.payload_digest {
-        return Err(idempotency_conflict());
-    }
     let receipt_id: String = row.try_get("receipt_id").map_err(internal)?;
     let tombstone = StoredTombstone {
         last_known_status: row.try_get("last_known_status").map_err(internal)?,
         tombstone_expires_at: row.try_get("tombstone_expires_at").map_err(internal)?,
     };
+    // §7.0.5/MEM-R021: the whole lifetime is evaluated before the payload is
+    // compared. Once the tombstone window ended, the key is free for either the
+    // same or a changed payload, exactly as after an explicit operator sweep —
+    // an unrelated physical pass must not change the answer.
+    if tombstone.last_known_status != "pending" && now > tombstone.tombstone_end()? {
+        return Ok(ReplayResolution::KeyReusable { receipt_id });
+    }
+    let digest: String = row.try_get("payload_digest").map_err(internal)?;
+    if digest != admission.payload_digest {
+        return Err(idempotency_conflict());
+    }
     let body = fetch_receipt(conn, space_id, &receipt_id, None).await?;
     match ReceiptRetention::of(Some(&tombstone), body.as_ref(), now)? {
         ReceiptRetention::Expired => Ok(ReplayResolution::KeyReusable { receipt_id }),
@@ -6007,23 +6014,50 @@ mod tests {
         );
     }
 
-    /// A deterministic snapshot of every receipt-lifecycle row, so a test can
-    /// prove a read or a refusal changed no persistent state.
+    /// A deterministic dump of every affected row — all columns — so a test can
+    /// prove a read, refusal, cancellation or rollback changed no persistent
+    /// value, including candidate and record effects.
     async fn retention_rows(provider: &FixtureMemoryProvider) -> Vec<String> {
         let mut rows = Vec::new();
         for sql in [
-            "SELECT receipt_id || '|' || status || '|' || COALESCE(completed_at, '') || '|' \
-             || COALESCE(body_expires_at, '') AS row FROM receipts ORDER BY receipt_id",
-            "SELECT receipt_id || '|' || capabilities_json || '|' || COALESCE(subject_id, '') \
-             || '|' || context_ids_json AS row FROM receipt_targets ORDER BY receipt_id",
-            "SELECT idempotency_key || '|' || receipt_id || '|' || last_known_status || '|' \
-             || COALESCE(tombstone_expires_at, '') AS row FROM idempotency_namespace \
-             ORDER BY idempotency_key",
+            "SELECT receipt_id || '|' || space_id || '|' || requester_principal_id || '|' \
+             || op || '|' || COALESCE(idempotency_key, '<null>') || '|' || payload_digest \
+             || '|' || status || '|' || COALESCE(result_json, '<null>') || '|' \
+             || COALESCE(error_json, '<null>') || '|' || created_at || '|' \
+             || COALESCE(completed_at, '<null>') || '|' \
+             || COALESCE(body_expires_at, '<null>') || '|' || extensions_json AS row \
+             FROM receipts ORDER BY receipt_id",
+            "SELECT receipt_id || '|' || capabilities_json || '|' \
+             || COALESCE(subject_id, '<null>') || '|' || context_ids_json || '|' \
+             || reads_shared || '|' || subject_all AS row \
+             FROM receipt_targets ORDER BY receipt_id",
+            "SELECT space_id || '|' || requester_principal_id || '|' || op || '|' \
+             || idempotency_key || '|' || payload_digest || '|' || receipt_id || '|' \
+             || last_known_status || '|' || created_at || '|' \
+             || COALESCE(tombstone_expires_at, '<null>') AS row \
+             FROM idempotency_namespace \
+             ORDER BY space_id, requester_principal_id, op, idempotency_key",
+            "SELECT candidate_id || '|' || space_id || '|' || subject_id || '|' \
+             || capture_visibility || '|' || COALESCE(capture_context_id, '<null>') || '|' \
+             || kind || '|' || COALESCE(content_json, '<null>') || '|' || provenance_json \
+             || '|' || classification_json || '|' || status || '|' \
+             || COALESCE(consumed_by_json, '<null>') || '|' \
+             || COALESCE(content_digest, '<null>') || '|' \
+             || COALESCE(occurred_at, '<null>') || '|' || COALESCE(expires_at, '<null>') \
+             || '|' || revision || '|' || created_at || '|' || extensions_json AS row \
+             FROM candidates ORDER BY candidate_id",
+            "SELECT record_id || '|' || space_id || '|' || subject_id || '|' || kind || '|' \
+             || content_json || '|' || scope_visibility || '|' \
+             || COALESCE(scope_context_id, '<null>') || '|' || provenance_json || '|' \
+             || COALESCE(import_ref_json, '<null>') || '|' \
+             || COALESCE(occurred_at, '<null>') || '|' || COALESCE(tombstone_json, '<null>') \
+             || '|' || revision || '|' || created_at || '|' || updated_at || '|' \
+             || extensions_json AS row FROM records ORDER BY record_id",
         ] {
             let found: Vec<String> = sqlx::query_scalar(sql)
                 .fetch_all(provider.store().pool())
                 .await
-                .expect("lifecycle rows");
+                .expect("state rows");
             rows.extend(found);
         }
         rows
@@ -6189,6 +6223,11 @@ mod tests {
             .code,
             SpokeRejectCode::ReceiptExpired
         );
+        assert_eq!(
+            retention_rows(&scenario.provider).await,
+            before,
+            "the authorized expired read wrote nothing"
+        );
         // Unauthorized principal: no existence oracle, no write.
         assert_eq!(
             refusal(
@@ -6204,6 +6243,11 @@ mod tests {
             .code,
             SpokeRejectCode::NotFound
         );
+        assert_eq!(
+            retention_rows(&scenario.provider).await,
+            before,
+            "the unauthorized read wrote nothing"
+        );
         // Nonexistent receipt.
         assert_eq!(
             refusal(
@@ -6218,6 +6262,11 @@ mod tests {
             )
             .code,
             SpokeRejectCode::NotFound
+        );
+        assert_eq!(
+            retention_rows(&scenario.provider).await,
+            before,
+            "the not-found read wrote nothing"
         );
         // A keyless receipt has no tombstone: its body end is its whole life.
         assert_eq!(
@@ -6238,7 +6287,7 @@ mod tests {
         assert_eq!(
             retention_rows(&scenario.provider).await,
             before,
-            "no receipt read may delete or rewrite rows"
+            "the keyless body-end read wrote nothing"
         );
         assert_eq!(
             read_snapshot_marker(&scenario.provider, &scenario.space_id).await,
@@ -6406,9 +6455,10 @@ mod tests {
         scenario
             .grant(CLIENT, &["capture"], Some(SUBJECT), None, base)
             .await;
+        let secret = "The retained body names the vault code 4417.";
         let keyed = capture_request(
             &scenario.space_id,
-            "The retained body names the vault code 4417.",
+            secret,
             context_scope(CONTEXT_A),
             "retention-1",
         );
@@ -6541,6 +6591,26 @@ mod tests {
             marker_before,
             "maintenance never bumps the snapshot marker"
         );
+
+        // The surviving tombstone and target stay content-free.
+        let tombstone_text: String = sqlx::query_scalar(
+            "SELECT idempotency_key || payload_digest || last_known_status \
+             FROM idempotency_namespace WHERE receipt_id = ?",
+        )
+        .bind(&receipt_id)
+        .fetch_one(scenario.provider.store().pool())
+        .await
+        .expect("surviving tombstone");
+        assert_no_secret(&tombstone_text, secret);
+        let target_text: String = sqlx::query_scalar(
+            "SELECT capabilities_json || COALESCE(subject_id, '') || context_ids_json \
+             FROM receipt_targets WHERE receipt_id = ?",
+        )
+        .bind(&receipt_id)
+        .fetch_one(scenario.provider.store().pool())
+        .await
+        .expect("surviving target");
+        assert_no_secret(&target_text, secret);
 
         // A reopen keeps the tombstone answering.
         let scenario = scenario.reopen().await;
@@ -7009,5 +7079,190 @@ mod tests {
             1
         );
         assert_eq!(count_rows(&scenario.provider, "receipt_targets").await, 1);
+    }
+
+    /// Seed one scenario with two keyed captures at the fixed scenario instant:
+    /// the returned requests are the same payload for the first key and a
+    /// changed payload for the second.
+    async fn seed_two_expiring_captures() -> (
+        Scenario,
+        Admitted<MemoryCaptureRequest>,
+        Admitted<MemoryCaptureRequest>,
+    ) {
+        let scenario = Scenario::open().await;
+        let base = now();
+        scenario.subject(base).await;
+        scenario
+            .grant(CLIENT, &["capture"], Some(SUBJECT), None, base)
+            .await;
+        let same = capture_request(
+            &scenario.space_id,
+            "Retained payload.",
+            context_scope(CONTEXT_A),
+            "expired-same",
+        );
+        scenario
+            .provider
+            .capture(CLIENT, &same, base)
+            .await
+            .expect("first capture commits");
+        let original = capture_request(
+            &scenario.space_id,
+            "Original changed-key payload.",
+            context_scope(CONTEXT_A),
+            "expired-changed",
+        );
+        scenario
+            .provider
+            .capture(CLIENT, &original, base)
+            .await
+            .expect("second capture commits");
+        let changed = capture_request(
+            &scenario.space_id,
+            "Different payload after the final expiry.",
+            context_scope(CONTEXT_A),
+            "expired-changed",
+        );
+        (scenario, same, changed)
+    }
+
+    /// F4/I187: after the full tombstone lifetime an UNSWEPT namespace treats
+    /// both the same and a changed payload as a new operation, exactly like an
+    /// already-swept one. While the tombstone lives, a changed payload is still
+    /// a conflict. A caller rollback restores the released stale binding.
+    #[tokio::test]
+    async fn expired_tombstone_accepts_both_payloads_and_matches_the_swept_state() {
+        let base = now();
+        let boundary =
+            base + Duration::seconds((RECEIPT_RETENTION_SECONDS + DEDUP_RETENTION_SECONDS) as i64);
+        let after = boundary + Duration::seconds(1);
+
+        // Unswept namespace.
+        let (scenario, same, changed) = seed_two_expiring_captures().await;
+        assert_eq!(
+            refusal(scenario.provider.capture(CLIENT, &same, boundary).await).code,
+            SpokeRejectCode::ReceiptExpired,
+            "the same payload is a terminal replay at the live boundary"
+        );
+        assert_eq!(
+            refusal(scenario.provider.capture(CLIENT, &changed, boundary).await).code,
+            SpokeRejectCode::IdempotencyConflict,
+            "a changed payload is still a conflict while the tombstone lives"
+        );
+        let same_fresh = scenario
+            .provider
+            .capture(CLIENT, &same, after)
+            .await
+            .expect("the same payload runs as a new operation after the final expiry");
+        let changed_fresh = scenario
+            .provider
+            .capture(CLIENT, &changed, after)
+            .await
+            .expect("a changed payload runs as a new operation after the final expiry");
+        assert_ne!(receipt_id_of(&same_fresh), receipt_id_of(&changed_fresh));
+        assert_eq!(count_rows(&scenario.provider, "candidates").await, 4);
+        assert_eq!(
+            count_rows(&scenario.provider, "idempotency_namespace").await,
+            2,
+            "the retired bindings were released with the fresh effects"
+        );
+        assert_eq!(count_rows(&scenario.provider, "receipt_targets").await, 2);
+        let unswept_counts = (
+            count_rows(&scenario.provider, "candidates").await,
+            count_rows(&scenario.provider, "receipts").await,
+            count_rows(&scenario.provider, "receipt_targets").await,
+            count_rows(&scenario.provider, "idempotency_namespace").await,
+        );
+
+        // The same requests after an explicit maintenance pass must behave the
+        // same way: expiry never depends on the physical sweep.
+        let (swept, swept_same, swept_changed) = seed_two_expiring_captures().await;
+        let sweep = swept
+            .provider
+            .sweep_retained(&swept.space_id, after)
+            .await
+            .expect("maintenance pass");
+        assert_eq!(sweep.dedup_tombstones_evicted, 2);
+        assert_eq!(sweep.targets_removed, 2);
+        assert_eq!(sweep.receipt_bodies_evicted, 2);
+        let swept_same_fresh = swept
+            .provider
+            .capture(CLIENT, &swept_same, after)
+            .await
+            .expect("the swept state accepts the same payload");
+        let swept_changed_fresh = swept
+            .provider
+            .capture(CLIENT, &swept_changed, after)
+            .await
+            .expect("the swept state accepts a changed payload");
+        assert_ne!(
+            receipt_id_of(&swept_same_fresh),
+            receipt_id_of(&swept_changed_fresh)
+        );
+        assert_eq!(
+            (
+                count_rows(&swept.provider, "candidates").await,
+                count_rows(&swept.provider, "receipts").await,
+                count_rows(&swept.provider, "receipt_targets").await,
+                count_rows(&swept.provider, "idempotency_namespace").await,
+            ),
+            unswept_counts,
+            "the unswept and swept states produce the same observable outcome"
+        );
+
+        // A caller-owned transaction that releases the stale binding and then
+        // rolls back restores every affected row.
+        let (rollback, _rollback_same, rollback_changed) = seed_two_expiring_captures().await;
+        let rows = retention_rows(&rollback.provider).await;
+        let mut transaction = rollback
+            .provider
+            .store()
+            .pool()
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .expect("writer transaction");
+        let fresh = rollback
+            .provider
+            .capture_in_tx(&mut transaction, CLIENT, &rollback_changed, after)
+            .await
+            .expect("the finished key runs fresh inside the caller transaction");
+        assert_ne!(receipt_id_of(&fresh), "rcpt_unbound_probe");
+        transaction.rollback().await.expect("rollback");
+        assert_eq!(
+            retention_rows(&rollback.provider).await,
+            rows,
+            "rollback restores the stale binding and body"
+        );
+        assert_eq!(count_rows(&rollback.provider, "candidates").await, 2);
+    }
+
+    /// F2/I182 + F4/I184: after the full tombstone expiry, a real operation
+    /// first releases the stale binding and then hits a later fence refusal; the
+    /// release must roll back automatically, preserving the complete old rows
+    /// and the candidate effect.
+    #[tokio::test]
+    async fn released_binding_rolls_back_when_a_later_admission_refuses() {
+        let (scenario, same, _changed) = seed_two_expiring_captures().await;
+        let base = now();
+        let after = base
+            + Duration::seconds((RECEIPT_RETENTION_SECONDS + DEDUP_RETENTION_SECONDS) as i64 + 1);
+        // A genuine later refusal: the subject is fenced before the write target
+        // is checked, after replay resolution already released the stale binding.
+        scenario.fence_subject("fence", 1, after).await;
+        let rows = retention_rows(&scenario.provider).await;
+        let refused = refusal(scenario.provider.capture(CLIENT, &same, after).await);
+        assert_eq!(refused.code, SpokeRejectCode::SubjectFenced);
+        assert_eq!(
+            retention_rows(&scenario.provider).await,
+            rows,
+            "the release rolled back with the refusal"
+        );
+        assert_eq!(count_rows(&scenario.provider, "candidates").await, 2);
+        assert_eq!(count_rows(&scenario.provider, "receipts").await, 2);
+        assert_eq!(count_rows(&scenario.provider, "receipt_targets").await, 2);
+        assert_eq!(
+            count_rows(&scenario.provider, "idempotency_namespace").await,
+            2
+        );
     }
 }

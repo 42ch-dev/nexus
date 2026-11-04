@@ -244,12 +244,24 @@ impl FaultHold {
     /// Wait — bounded by this hold's own duration — until the provider reached
     /// the armed point.
     ///
+    /// When this wait ends without a reach (timeout or cancellation) the
+    /// handle's own still-armed entry is retired at once, so keeping the handle
+    /// alive cannot make a later operation inherit the fault.
+    ///
     /// # Errors
     ///
     /// [`FaultHoldLost::Unreached`] when no operation reached the point in time,
     /// [`FaultHoldLost::Disarmed`] when the arm was released, replaced or
     /// dropped first.
     pub async fn wait_reached(&mut self) -> Result<(), FaultHoldLost> {
+        // An observation that ends without a reach — timeout or a cancelled
+        // future — retires this handle's own still-armed entry immediately, so
+        // a retained handle cannot make a later operation inherit the fault. A
+        // replacement (different token) or an already-consumed arm is untouched.
+        let _guard = ReachGuard {
+            control: &self.control,
+            token: self.token,
+        };
         match tokio::time::timeout(self.bound, &mut self.reached).await {
             Ok(Ok(())) => Ok(()),
             Ok(Err(_)) => Err(FaultHoldLost::Disarmed),
@@ -275,6 +287,28 @@ impl FaultHold {
         drop(state);
         if let Some(release) = self.release.take() {
             let _ = release.send(());
+        }
+    }
+}
+
+/// Disarms one still-armed token when its observation ends without a reach.
+struct ReachGuard<'a> {
+    control: &'a Arc<Mutex<FaultState>>,
+    token: u64,
+}
+
+impl Drop for ReachGuard<'_> {
+    fn drop(&mut self) {
+        let mut state = self
+            .control
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state
+            .armed
+            .as_ref()
+            .is_some_and(|armed| armed.token == self.token)
+        {
+            state.armed = None;
         }
     }
 }
@@ -506,6 +540,15 @@ mod tests {
             .expect("the lost response resolves through replay");
         assert_eq!(receipt_status(&replayed), "committed");
         assert_eq!(receipt_id_of(&replayed), stored_receipt);
+        assert_eq!(count_rows(&scenario, "candidates").await, 1);
+
+        // A second replay answers the same receipt again.
+        let again = scenario
+            .provider
+            .capture(CLIENT, &request, now)
+            .await
+            .expect("the replay stays stable");
+        assert_eq!(receipt_id_of(&again), stored_receipt);
         assert_eq!(count_rows(&scenario, "candidates").await, 1);
     }
 
@@ -856,6 +899,137 @@ mod tests {
             .await
             .expect("the bounded post-commit hold resolves by replay");
         assert_eq!(receipt_status(&replayed), "committed");
+        assert_eq!(count_rows(&scenario, "candidates").await, 1);
+    }
+
+    /// F5/I185: an observation timeout or a cancelled observation retires its
+    /// own still-unreached arm at once, so retaining the handle cannot make a
+    /// later operation inherit the fault.
+    #[tokio::test]
+    async fn observation_timeout_or_cancellation_disarms_its_own_arm() {
+        let scenario = Scenario::open().await;
+        let now = now_instant();
+        scenario.subject_and_capture_grant(now).await;
+
+        // Timeout with the handle retained: a later capture proceeds normally.
+        let mut timed_out = scenario
+            .provider
+            .faults()
+            .hold_next_bounded(FaultPoint::AdmissionPause, Duration::from_millis(20));
+        assert_eq!(timed_out.wait_reached().await, Err(FaultHoldLost::Unreached));
+        let first = capture_request(&scenario.space_id, "After an unreached timeout.", "disarm-timeout");
+        scenario
+            .provider
+            .capture(CLIENT, &first, now)
+            .await
+            .expect("a timed-out observation does not affect a later capture");
+        assert_eq!(count_rows(&scenario, "candidates").await, 1);
+        drop(timed_out);
+
+        // The same for a post-commit point: a later capture must commit, not
+        // surprise the caller with an uncertain outcome.
+        let mut timed_out = scenario
+            .provider
+            .faults()
+            .hold_next_bounded(FaultPoint::ResponseDrop, Duration::from_millis(20));
+        assert_eq!(timed_out.wait_reached().await, Err(FaultHoldLost::Unreached));
+        let second = capture_request(&scenario.space_id, "Committed after a stale drop point.", "disarm-drop");
+        assert_eq!(
+            receipt_status(
+                &scenario
+                    .provider
+                    .capture(CLIENT, &second, now)
+                    .await
+                    .expect("a timed-out post-commit observation does not affect a later capture")
+            ),
+            "committed"
+        );
+        assert_eq!(count_rows(&scenario, "candidates").await, 2);
+        drop(timed_out);
+
+        // Cancelling the observation future (without dropping the handle) also
+        // retires its own arm.
+        let mut cancelled = scenario
+            .provider
+            .faults()
+            .hold_next_bounded(FaultPoint::AdmissionPause, Duration::from_millis(50));
+        {
+            let mut observation = Box::pin(cancelled.wait_reached());
+            let raced = tokio::time::timeout(Duration::from_millis(5), &mut observation).await;
+            assert!(raced.is_err(), "the observation is still waiting");
+            // Dropping `observation` cancels the observation future here.
+        }
+        let third = capture_request(&scenario.space_id, "After a cancelled observation.", "disarm-cancel");
+        scenario
+            .provider
+            .capture(CLIENT, &third, now)
+            .await
+            .expect("a cancelled observation does not affect a later capture");
+        assert_eq!(count_rows(&scenario, "candidates").await, 3);
+        drop(cancelled);
+
+        // A reached, still-held operation is not disturbed by another point's
+        // observation timing out: the guard retires only its own token.
+        let mut held = scenario
+            .provider
+            .faults()
+            .hold_next_bounded(FaultPoint::AdmissionPause, Duration::from_millis(300));
+        let fourth = capture_request(&scenario.space_id, "Held once.", "disarm-reached");
+        let mut operation = Box::pin(scenario.provider.capture(CLIENT, &fourth, now));
+        tokio::select! {
+            observation = held.wait_reached() => {
+                observation.expect("the point was reached")
+            }
+            result = operation.as_mut() => {
+                panic!("the admission was not paused: {result:?}")
+            }
+        }
+        let mut unrelated = scenario
+            .provider
+            .faults()
+            .hold_next_bounded(FaultPoint::ResponseDrop, Duration::from_millis(20));
+        assert_eq!(unrelated.wait_reached().await, Err(FaultHoldLost::Unreached));
+        drop(unrelated);
+        held.release();
+        operation
+            .await
+            .expect("the reached operation continues after the unrelated timeout");
+        assert_eq!(count_rows(&scenario, "candidates").await, 4);
+    }
+
+    /// A bounded admission hold that expires before any effect is a clean,
+    /// retryable failure; the same key then commits exactly once.
+    #[tokio::test]
+    async fn admission_hold_expiry_is_clean_and_effect_free() {
+        let scenario = Scenario::open().await;
+        let now = now_instant();
+        scenario.subject_and_capture_grant(now).await;
+        let request = capture_request(
+            &scenario.space_id,
+            "An admission hold that expires.",
+            "admission-bounded",
+        );
+        let _hold = scenario
+            .provider
+            .faults()
+            .hold_next_bounded(FaultPoint::AdmissionPause, Duration::from_millis(20));
+        let rejected = refusal(
+            scenario
+                .provider
+                .capture(CLIENT, &request, now)
+                .await,
+        );
+        assert_eq!(
+            rejected.code,
+            spoke_operations::SpokeRejectCode::InternalError
+        );
+        assert_eq!(count_rows(&scenario, "candidates").await, 0);
+        let committed = scenario
+            .provider
+            .capture(CLIENT, &request, now)
+            .await
+            .expect("the retry after the admission expiry commits once");
+        assert_eq!(receipt_status(&committed), "committed");
         assert_eq!(count_rows(&scenario, "candidates").await, 1);
     }
 }
