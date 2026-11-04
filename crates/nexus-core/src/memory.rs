@@ -166,6 +166,10 @@ fn memory_ok<T: serde::Serialize>(result: SpokeResult<T>) -> CoreResult<Value> {
 /// One pending-review row as the retained DTOs render it.
 struct PendingMemoryRow {
     pending_id: String,
+    /// The provider subject the candidate belongs to: the bearer identity a
+    /// dismissal must match before it may consume the candidate. A candidate
+    /// that shares this id but belongs to another bearer is not this row.
+    subject_id: String,
     session_id: String,
     task_kind: String,
     raw_digest: String,
@@ -183,6 +187,11 @@ struct PendingMemoryRow {
 impl PendingMemoryRow {
     /// Project one provider candidate onto the legacy pending-review row it
     /// stands for; a candidate with no legacy origin is not part of this DTO.
+    ///
+    /// `subject_id` is the provider's own field, not the legacy origin: it is
+    /// the bearer identity the caller must match before acting on the
+    /// candidate, since the provider authorizes the candidate operation by
+    /// grant coverage (a space-wide grant covers every subject).
     fn from_candidate(candidate: &Value) -> Option<Self> {
         let origin = candidate.pointer("/proposed/content/structured/nexus_legacy")?;
         let scope = &candidate["capture_scope"];
@@ -190,6 +199,7 @@ impl PendingMemoryRow {
             candidate_id: candidate["candidate_id"].as_str()?.to_string(),
             revision: candidate["revision"].as_u64().unwrap_or(1),
             pending_id: origin["pending_id"].as_str()?.to_string(),
+            subject_id: candidate["subject_id"].as_str()?.to_string(),
             session_id: origin["session_id"]
                 .as_str()
                 .unwrap_or_default()
@@ -686,23 +696,47 @@ impl MemoryAdapter {
         }
     }
 
-    /// Dismiss one pending provider candidate by id through the standard
-    /// revision-checked operation, reading the revision the provider holds.
+    /// Dismiss the provider candidate the retained `pending_id` addresses by
+    /// its bridge-shaped id, through the standard revision-checked operation.
     ///
     /// The retained `pending_id` can address a candidate by the bridge's
     /// deterministic (legacy-shaped) id on a binding that serves no projection.
     /// There the shape names an ordinary provider candidate, never local
     /// provenance, so the dismissal is the same CAS op every native candidate
-    /// uses. `Ok(false)` folds the outcomes [`Self::dismiss_native`] folds.
-    async fn dismiss_provider_candidate(&self, candidate_id: &str) -> CoreResult<bool> {
+    /// uses — but the provider authorizes that op by grant coverage, which a
+    /// space-wide grant satisfies for **any** subject. The bearer identity and
+    /// the retained pending identity are therefore Nexus-side invariants: the
+    /// fetched candidate must belong to this adapter's subject and map to the
+    /// requested `pending_id`, or it is refused before any CAS (I-000197).
+    /// `Ok(false)` folds the outcomes [`Self::dismiss_native`] folds.
+    async fn dismiss_provider_candidate(
+        &self,
+        candidate_id: &str,
+        pending_id: &str,
+    ) -> CoreResult<bool> {
         let Some(candidate) = self.candidate(candidate_id).await? else {
             return Ok(false);
         };
         if candidate["status"].as_str() != Some("pending") {
             return Ok(false);
         }
-        self.dismiss_native(candidate_id, candidate["revision"].as_u64().unwrap_or(1))
-            .await
+        let Some(row) = self.matched_pending_row(&candidate, pending_id) else {
+            return Ok(false);
+        };
+        self.dismiss_native(&row.candidate_id, row.revision).await
+    }
+
+    /// The retained pending row one fetched provider candidate may be dismissed
+    /// as: it must belong to this adapter's subject and carry the requested
+    /// retained `pending_id`.
+    ///
+    /// A candidate that shares the shaped id but names another bearer (or
+    /// another pending row) is not this row: a space-level provider grant would
+    /// still authorize its candidate-level operation, so this identity check is
+    /// the only thing that keeps one bearer's dismissal off another's item.
+    fn matched_pending_row(&self, candidate: &Value, pending_id: &str) -> Option<PendingMemoryRow> {
+        let row = PendingMemoryRow::from_candidate(candidate)?;
+        (row.subject_id == self.subject_id && row.pending_id == pending_id).then_some(row)
     }
 
     /// Consume one pending candidate with the review decision the drain built.
@@ -2260,7 +2294,8 @@ impl CoreService {
     /// behind (NXM-5 Task 2 fix round 1, finding F4). A nonlocal binding serves
     /// no projection: a candidate the provider really holds under that shaped
     /// id is an ordinary provider candidate, dismissed through the standard
-    /// revision check.
+    /// revision check only after its subject and retained pending identity
+    /// match this bearer (I-000197).
     ///
     /// # Errors
     /// As [`Self::acquire_actor_activity`], plus [`CoreError::NotFound`] when
@@ -2299,10 +2334,15 @@ impl CoreService {
                     "pending_id": pending_id,
                 }));
             }
-        } else if pending && memory.dismiss_provider_candidate(&candidate_id).await? {
+        } else if pending
+            && memory
+                .dismiss_provider_candidate(&candidate_id, &pending_id)
+                .await?
+        {
             // A nonlocal binding serves no projection: a candidate it really
-            // holds under this shaped id is an ordinary provider candidate and
-            // is dismissed through the standard revision check.
+            // holds under this shaped id is an ordinary provider candidate,
+            // and the standard revision check runs only after its subject and
+            // retained pending identity match this bearer (I-000197).
             return map_wire(json!({
                 "success": true,
                 "pending_id": pending_id,
@@ -2859,7 +2899,8 @@ impl CoreService {
     /// pending row behind (NXM-5 Task 2 fix round 1, finding F4). A nonlocal
     /// binding serves no projection: a candidate it really holds under that
     /// shaped id is an ordinary provider candidate, dismissed through the
-    /// standard revision check.
+    /// standard revision check only after its subject and retained pending
+    /// identity match this bearer (I-000197).
     ///
     /// A row that belongs to another Creator keeps the retained
     /// `pending_review` `ForbiddenReason` on a local binding: the provider
@@ -2898,9 +2939,13 @@ impl CoreService {
             }
         } else {
             // A nonlocal binding serves no projection: the shaped id only
-            // addresses an ordinary provider candidate there, so a candidate it
-            // really holds is dismissed through the standard revision check.
-            pending && memory.dismiss_provider_candidate(&candidate_id).await?
+            // addresses an ordinary provider candidate there, and the standard
+            // revision check runs only after its subject and retained pending
+            // identity match this bearer (I-000197).
+            pending
+                && memory
+                    .dismiss_provider_candidate(&candidate_id, &pending_id)
+                    .await?
         };
         if dismissed {
             return Ok(DeletePendingReviewResponse {
@@ -4566,6 +4611,211 @@ mod tests {
                 .len(),
             1,
             "`want` bounds the returned set, not the provider page"
+        );
+    }
+
+    /// I-000197 (Task 4 fix 3): the retained `pending_id` addresses a candidate
+    /// by the bridge's deterministic (opaque) id, and the provider authorizes a
+    /// candidate operation by grant coverage — the bootstrapped space-wide
+    /// `admin` grant satisfies it for **any** subject. The shared dismissal
+    /// therefore verifies the fetched candidate against the adapter's subject
+    /// and the requested retained pending id before the CAS: a candidate that
+    /// shares the id but names another bearer, or another pending row, is
+    /// refused without mutation, while the matched row still dismisses.
+    #[tokio::test]
+    async fn opaque_bridge_id_cannot_dismiss_another_bearers_candidate() {
+        let tmp = TempDir::new().unwrap();
+        let user_home = tmp.path().to_path_buf();
+        let nexus_home = user_home.join(".nexus42");
+        std::fs::create_dir_all(&nexus_home).unwrap();
+        std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+            &user_home,
+            CREATOR_UNDER_TEST,
+            "default",
+        ))
+        .unwrap();
+        std::fs::write(
+            nexus_home.join("config.toml"),
+            format!(
+                "active_creator_id = \"{CREATOR_UNDER_TEST}\"\n\
+                 [active_workspace_slug_by_creator]\n\
+                 \"{CREATOR_UNDER_TEST}\" = \"default\""
+            ),
+        )
+        .unwrap();
+        let db_path =
+            nexus_home_layout::workspace_state_db_path(&user_home, CREATOR_UNDER_TEST, "default");
+        {
+            let guarded =
+                init_engine_pool(&db_path, CREATOR_UNDER_TEST, GuardedPoolOptions::default())
+                    .await
+                    .unwrap();
+            let pool = guarded.clone_pool();
+            ensure_creator_row(&pool, CREATOR_UNDER_TEST, "Owner")
+                .await
+                .unwrap();
+            pool.close().await;
+        }
+        let core = CoreService::open(CoreOpenOptions {
+            user_home,
+            access: CoreAccess::EngineOwner,
+            memory: None,
+        })
+        .await
+        .unwrap();
+        let principal = core.active_principal().await.unwrap();
+        core.create_pending_review(
+            &principal,
+            capture(
+                "pend_identity_own",
+                "The chapter pivots from betrayal to alliance.",
+            ),
+        )
+        .await
+        .unwrap();
+        let memory = core.creator_memory(&principal).await.unwrap();
+        let own = memory
+            .pending_rows()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.pending_id == "pend_identity_own")
+            .expect("the capture is queued under the creator subject");
+        assert_eq!(
+            own.subject_id, memory.subject_id,
+            "the mapped row carries the provider's subject identity"
+        );
+
+        // The same opaque id can address another bearer's candidate; the row is
+        // shared-scope, so the space-wide grant admits the capture and the read.
+        const FOREIGN_CREATOR: &str = "ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let foreign_subject = legacy::creator_subject_id(FOREIGN_CREATOR);
+        // The foreign bearer opt-in subject: capture admits a known subject
+        // (the space-wide grant then covers the candidate operation).
+        memory_ok(
+            memory
+                .binding
+                .port()
+                .ensure_subject(
+                    &memory.principal,
+                    map_wire(json!({
+                        "space_id": memory.binding.space_id(),
+                        "subject_id": foreign_subject,
+                        "kind": { "ns": legacy::CREATOR_KIND_NS, "id": FOREIGN_CREATOR },
+                    }))
+                    .unwrap(),
+                )
+                .await,
+        )
+        .unwrap();
+        let request: spoke_schemas::MemoryCaptureRequest = map_wire(json!({
+            "space_id": memory.binding.space_id(),
+            "subject_id": foreign_subject,
+            "content": {
+                "text": "Foreign bearer pending row.",
+                "structured": { "nexus_legacy": {
+                    "pending_id": "pend_identity_foreign",
+                    "session_id": "sess_identity_foreign",
+                    "creator_id": FOREIGN_CREATOR,
+                    "task_kind": "chapter",
+                    "raw_digest": "Foreign bearer pending row.",
+                }},
+            },
+            "capture_scope": { "visibility": "shared" },
+            "source_context_ids": [],
+            "kind_hint": "story_summary",
+            "idempotency_key": "identity-foreign-capture",
+        }))
+        .unwrap();
+        let captured = memory
+            .binding
+            .port()
+            .capture(&memory.principal, request)
+            .await;
+        assert!(
+            matches!(&captured, SpokeResult::Ok(_)),
+            "the space grant must admit a foreign-subject capture"
+        );
+        let listed = memory_ok(
+            memory
+                .binding
+                .port()
+                .list_candidates(
+                    &memory.principal,
+                    map_wire(json!({
+                        "space_id": memory.binding.space_id(),
+                        "subject_id": foreign_subject,
+                        "status": "pending",
+                        "limit": 10,
+                        "cursor": null,
+                    }))
+                    .unwrap(),
+                )
+                .await,
+        )
+        .unwrap();
+        let foreign = listed["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|candidate| {
+                candidate.pointer("/proposed/content/structured/nexus_legacy/pending_id")
+                    == Some(&json!("pend_identity_foreign"))
+            })
+            .cloned()
+            .expect("the foreign capture is listed under its own subject");
+        let foreign_candidate_id = foreign["candidate_id"].as_str().unwrap().to_string();
+        assert_ne!(
+            PendingMemoryRow::from_candidate(&foreign)
+                .unwrap()
+                .subject_id,
+            memory.subject_id,
+            "the foreign candidate maps to another bearer"
+        );
+
+        // Another bearer's candidate under the opaque id: refused before the
+        // CAS even though the provider grant allows the operation there.
+        assert!(
+            !memory
+                .dismiss_provider_candidate(&foreign_candidate_id, "pend_identity_foreign")
+                .await
+                .unwrap(),
+            "another bearer's candidate is never dismissed"
+        );
+        assert_eq!(
+            memory
+                .candidate(&foreign_candidate_id)
+                .await
+                .unwrap()
+                .unwrap()["status"],
+            "pending",
+            "the refused dismissal mutated nothing"
+        );
+
+        // The adapter's own candidate addressed with a different retained
+        // pending id: refused before the CAS as well.
+        assert!(
+            !memory
+                .dismiss_provider_candidate(&own.candidate_id, "pend_identity_other")
+                .await
+                .unwrap(),
+            "a candidate of another retained pending row is never dismissed"
+        );
+        assert_eq!(
+            memory.candidate(&own.candidate_id).await.unwrap().unwrap()["status"],
+            "pending",
+            "the mismatched pending identity mutated nothing"
+        );
+
+        // Matched subject and retained identity: the standard CAS consumes it.
+        assert!(memory
+            .dismiss_provider_candidate(&own.candidate_id, "pend_identity_own")
+            .await
+            .unwrap());
+        assert_eq!(
+            memory.candidate(&own.candidate_id).await.unwrap().unwrap()["status"],
+            "consumed",
+            "the matched row is dismissed through the standard op"
         );
     }
 }
