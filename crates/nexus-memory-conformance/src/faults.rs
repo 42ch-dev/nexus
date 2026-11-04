@@ -15,6 +15,7 @@
 //! The clock is the `now` parameter every provider operation already takes;
 //! there is no wall-clock sampling and no wrapper clock object.
 
+use std::future::Future;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -244,28 +245,39 @@ impl FaultHold {
     /// Wait — bounded by this hold's own duration — until the provider reached
     /// the armed point.
     ///
-    /// When this wait ends without a reach (timeout or cancellation) the
-    /// handle's own still-armed entry is retired at once, so keeping the handle
-    /// alive cannot make a later operation inherit the fault.
+    /// Cancellation is owned from the call itself: a wait that ends without a
+    /// reach — timeout, a cancelled future, or a future created and dropped
+    /// before its first poll — retires the handle's own still-armed entry at
+    /// once, so keeping the handle alive cannot make a later operation inherit
+    /// the fault.
     ///
     /// # Errors
     ///
     /// [`FaultHoldLost::Unreached`] when no operation reached the point in time,
     /// [`FaultHoldLost::Disarmed`] when the arm was released, replaced or
     /// dropped first.
-    pub async fn wait_reached(&mut self) -> Result<(), FaultHoldLost> {
-        // An observation that ends without a reach — timeout or a cancelled
-        // future — retires this handle's own still-armed entry immediately, so
-        // a retained handle cannot make a later operation inherit the fault. A
-        // replacement (different token) or an already-consumed arm is untouched.
-        let _guard = ReachGuard {
-            control: &self.control,
+    pub fn wait_reached(
+        &mut self,
+    ) -> impl Future<Output = Result<(), FaultHoldLost>> + '_ {
+        // Cancellation ownership is established at the CALL, before the future
+        // can be polled: an observation future that is created and dropped
+        // without a first poll still retires this handle's own still-armed
+        // entry, so a retained handle cannot make a later operation inherit the
+        // fault. A replacement (different token) or an already-consumed arm is
+        // untouched. Native RAII only — no adapter type, allocation or flag.
+        let guard = ReachGuard {
+            control: Arc::clone(&self.control),
             token: self.token,
         };
-        match tokio::time::timeout(self.bound, &mut self.reached).await {
-            Ok(Ok(())) => Ok(()),
-            Ok(Err(_)) => Err(FaultHoldLost::Disarmed),
-            Err(_) => Err(FaultHoldLost::Unreached),
+        let bound = self.bound;
+        let reached = &mut self.reached;
+        async move {
+            let _guard = guard;
+            match tokio::time::timeout(bound, reached).await {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(_)) => Err(FaultHoldLost::Disarmed),
+                Err(_) => Err(FaultHoldLost::Unreached),
+            }
         }
     }
 
@@ -292,12 +304,12 @@ impl FaultHold {
 }
 
 /// Disarms one still-armed token when its observation ends without a reach.
-struct ReachGuard<'a> {
-    control: &'a Arc<Mutex<FaultState>>,
+struct ReachGuard {
+    control: Arc<Mutex<FaultState>>,
     token: u64,
 }
 
-impl Drop for ReachGuard<'_> {
+impl Drop for ReachGuard {
     fn drop(&mut self) {
         let mut state = self
             .control
@@ -1031,5 +1043,64 @@ mod tests {
             .expect("the retry after the admission expiry commits once");
         assert_eq!(receipt_status(&committed), "committed");
         assert_eq!(count_rows(&scenario, "candidates").await, 1);
+    }
+
+    /// I185: a retained handle plus an observation future that is created and
+    /// dropped WITHOUT a first poll must retire its own arm, so a later real
+    /// capture is unaffected at both fault phases.
+    #[tokio::test]
+    async fn zero_poll_dropped_observation_disarms_its_own_arm() {
+        let scenario = Scenario::open().await;
+        let now = now_instant();
+        scenario.subject_and_capture_grant(now).await;
+
+        // Pre-commit point: the retained handle's unpolled future disarms.
+        let mut retained = scenario
+            .provider
+            .faults()
+            .hold_next_bounded(FaultPoint::AdmissionPause, Duration::from_millis(20));
+        {
+            let observation = retained.wait_reached();
+            drop(observation);
+        }
+        let first = capture_request(
+            &scenario.space_id,
+            "Unpolled observation before commit.",
+            "zero-poll-pre",
+        );
+        scenario
+            .provider
+            .capture(CLIENT, &first, now)
+            .await
+            .expect("an unpolled dropped observation leaves no pre-commit fault");
+        assert_eq!(count_rows(&scenario, "candidates").await, 1);
+        drop(retained);
+
+        // Post-commit point: the same, without an unexpected uncertain outcome.
+        let mut retained = scenario
+            .provider
+            .faults()
+            .hold_next_bounded(FaultPoint::ResponseDrop, Duration::from_millis(20));
+        {
+            let observation = retained.wait_reached();
+            drop(observation);
+        }
+        let second = capture_request(
+            &scenario.space_id,
+            "Unpolled observation after commit.",
+            "zero-poll-post",
+        );
+        assert_eq!(
+            receipt_status(
+                &scenario
+                    .provider
+                    .capture(CLIENT, &second, now)
+                    .await
+                    .expect("an unpolled dropped observation leaves no post-commit fault")
+            ),
+            "committed"
+        );
+        assert_eq!(count_rows(&scenario, "candidates").await, 2);
+        drop(retained);
     }
 }
