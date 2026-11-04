@@ -566,6 +566,7 @@ impl Fixture {
             "candidates" => "SELECT COUNT(*) AS total FROM candidates",
             "records" => "SELECT COUNT(*) AS total FROM records",
             "receipts" => "SELECT COUNT(*) AS total FROM receipts",
+            "idempotency_namespace" => "SELECT COUNT(*) AS total FROM idempotency_namespace",
             other => panic!("unknown fixture table {other}"),
         };
         let row = sqlx::query(query)
@@ -2178,4 +2179,318 @@ async fn revoke_keeps_real_replay_errors_and_unserved_spaces_stay_not_found() {
         assert_eq!(retry_class(&refusal).as_deref(), Some("terminal"), "{op}");
     }
     fixture.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------
+// 16. Real commit failures on the three delegated mutation paths (I-000183)
+// ---------------------------------------------------------------------------
+
+/// Install a real deferred-foreign-key trigger in the fixture's own disposable
+/// database: every receipt insert spawns a child row whose parent never exists,
+/// so SQLite accepts the statements and fails the COMMIT itself.
+async fn install_commit_failure(path: &std::path::Path) {
+    let pool = SqlitePool::connect_with(SqliteConnectOptions::new().filename(path))
+        .await
+        .expect("side connection for the commit-failure fixture");
+    for statement in [
+        "CREATE TABLE probe_parent (id INTEGER PRIMARY KEY)",
+        "CREATE TABLE probe_child (id INTEGER PRIMARY KEY, parent_id INTEGER NOT NULL \
+         REFERENCES probe_parent(id) DEFERRABLE INITIALLY DEFERRED)",
+        "CREATE TRIGGER probe_commit_failure AFTER INSERT ON receipts BEGIN \
+         INSERT INTO probe_child (id, parent_id) VALUES (abs(random()), -1); END",
+    ] {
+        sqlx::query(statement)
+            .execute(&pool)
+            .await
+            .expect("install the deferred-constraint fixture");
+    }
+    pool.close().await;
+}
+
+async fn remove_commit_failure(path: &std::path::Path) {
+    let pool = SqlitePool::connect_with(SqliteConnectOptions::new().filename(path))
+        .await
+        .expect("side connection for the commit-failure fixture");
+    sqlx::query("DROP TRIGGER probe_commit_failure")
+        .execute(&pool)
+        .await
+        .expect("remove the deferred-constraint fixture");
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn commit_failures_on_all_three_delegated_mutations_are_uncertain() {
+    let fixture = Fixture::start(None, None).await;
+    fixture.ensure_subject().await;
+    let space = fixture.space_id.clone();
+    // Candidates staged BEFORE the fixture arms: dismiss and review need an
+    // existing pending candidate, and their own commits must be the failures.
+    let for_dismiss = fixture
+        .capture(fixture.capture_request("commit-dismiss", "dismiss material", CONTEXT))
+        .await;
+    let for_review = fixture
+        .capture(fixture.capture_request("commit-review", "review material", CONTEXT))
+        .await;
+    let dismiss_candidate = for_dismiss["result"]["candidate_ids"][0]
+        .as_str()
+        .expect("candidate id")
+        .to_owned();
+    let review_candidate = for_review["result"]["candidate_ids"][0]
+        .as_str()
+        .expect("candidate id")
+        .to_owned();
+    let candidates_before = fixture.count("candidates").await;
+    let receipts_before = fixture.count("receipts").await;
+    let namespace_before = fixture.count("idempotency_namespace").await;
+
+    install_commit_failure(&fixture.db_path).await;
+
+    // capture
+    let capture_refusal = expect_reject(
+        fixture
+            .client
+            .capture(
+                &fixture.principal,
+                from_value(fixture.capture_request("commit-capture", "capture material", CONTEXT))
+                    .expect("capture request"),
+            )
+            .await,
+    );
+    assert_eq!(capture_refusal.code, SpokeRejectCode::OutcomeUncertain);
+    assert_eq!(retry_class(&capture_refusal).as_deref(), Some("uncertain"));
+
+    // dismiss
+    let dismiss_refusal = expect_reject(
+        fixture
+            .client
+            .dismiss_candidate(
+                &fixture.principal,
+                from_value(json!({
+                    "space_id": space,
+                    "candidate_id": dismiss_candidate,
+                    "expected_revision": 1,
+                    "idempotency_key": "commit-dismiss-op",
+                }))
+                .expect("dismiss request"),
+            )
+            .await,
+    );
+    assert_eq!(dismiss_refusal.code, SpokeRejectCode::OutcomeUncertain);
+    assert_eq!(retry_class(&dismiss_refusal).as_deref(), Some("uncertain"));
+
+    // review
+    let review_refusal = expect_reject(
+        fixture
+            .client
+            .review_candidate(
+                &fixture.principal,
+                from_value(json!({
+                    "space_id": space,
+                    "candidate_id": review_candidate,
+                    "expected_revision": 1,
+                    "decision": { "action": "promote" },
+                    "idempotency_key": "commit-review-op",
+                }))
+                .expect("review request"),
+            )
+            .await,
+    );
+    assert_eq!(review_refusal.code, SpokeRejectCode::OutcomeUncertain);
+    assert_eq!(retry_class(&review_refusal).as_deref(), Some("uncertain"));
+
+    // Every failed commit rolled back: no candidate consumed, no record, no new
+    // receipt or dedup row, and no key was burned.
+    assert_eq!(fixture.count("candidates").await, candidates_before);
+    assert_eq!(fixture.count("receipts").await, receipts_before);
+    assert_eq!(fixture.count("records").await, 0);
+    assert_eq!(fixture.count("idempotency_namespace").await, namespace_before);
+
+    // Same keys recover once the real commit failure is removed.
+    remove_commit_failure(&fixture.db_path).await;
+    let dismissed = wire(&expect_ok(
+        fixture
+            .client
+            .dismiss_candidate(
+                &fixture.principal,
+                from_value(json!({
+                    "space_id": space,
+                    "candidate_id": dismiss_candidate,
+                    "expected_revision": 1,
+                    "idempotency_key": "commit-dismiss-op",
+                }))
+                .expect("dismiss retry request"),
+            )
+            .await,
+    ));
+    assert_eq!(dismissed["result"]["outcome"], json!("dismissed"));
+    let reviewed = wire(&expect_ok(
+        fixture
+            .client
+            .review_candidate(
+                &fixture.principal,
+                from_value(json!({
+                    "space_id": space,
+                    "candidate_id": review_candidate,
+                    "expected_revision": 1,
+                    "decision": { "action": "promote" },
+                    "idempotency_key": "commit-review-op",
+                }))
+                .expect("review retry request"),
+            )
+            .await,
+    ));
+    assert_eq!(reviewed["result"]["outcome"], json!("promoted"));
+    assert_eq!(fixture.count("records").await, 1);
+    fixture.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------
+// 17. Numeric content at the exact recall byte budget (I-000193)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn recall_counts_the_emitted_numeric_representation() {
+    let fixture = Fixture::start(None, None).await;
+    fixture.ensure_subject().await;
+    let space = fixture.space_id.clone();
+    let created = wire(&expect_ok(
+        fixture
+            .client
+            .create_record(
+                &fixture.principal,
+                from_value(json!({
+                    "space_id": space,
+                    "subject_id": SUBJECT,
+                    "kind": "note",
+                    "content": { "text": "num", "structured": { "weight": 1.0 } },
+                    "scope": { "visibility": "shared" },
+                    "idempotency_key": "numeric-budget-1",
+                }))
+                .expect("records.create request"),
+            )
+            .await,
+    ));
+    let record_id = created["result"]["record_id"]
+        .as_str()
+        .expect("record id")
+        .to_owned();
+
+    // The bytes the response actually emits for that content: serde_json
+    // spells the float as `1.0`, and the JCS helper would count it as `1`.
+    let emitted = serde_json::to_string(&json!({
+        "text": "num",
+        "structured": { "weight": 1.0 },
+    }))
+    .expect("content serializes")
+    .len();
+    let canonical = match jcs_sha256_hex(&json!({})) {
+        SpokeResult::Ok(_) => (),
+        SpokeResult::Reject(_) => panic!("jcs helper"),
+    };
+    let _ = canonical;
+    let jcs_size = {
+        // What the published canonical helper would budget for the same value.
+        let jcs = serde_json::to_string(&json!({ "weight": 1 })).expect("canonical number");
+        emitted - (serde_json::to_string(&json!({ "weight": 1.0 })).expect("emitted number").len()
+            - jcs.len())
+    };
+    assert!(jcs_size < emitted, "the numeric spelling really differs");
+
+    let recall_with = |max_bytes: u64| {
+        let client = Arc::clone(&fixture.client);
+        let principal = fixture.principal.clone();
+        let space = space.clone();
+        async move {
+            wire(&expect_ok(
+                client
+                    .recall(
+                        &principal,
+                        from_value(json!({
+                            "space_id": space,
+                            "subject_id": SUBJECT,
+                            "selection": { "mode": "shared_only" },
+                            "budget": { "max_items": 5, "max_bytes": max_bytes },
+                        }))
+                        .expect("recall request"),
+                    )
+                    .await,
+            ))
+        }
+    };
+
+    // One byte short of the emitted representation: it cannot fit.
+    let short = recall_with(u64::try_from(emitted - 1).expect("budget")).await;
+    assert_eq!(short["records"].as_array().expect("records").len(), 1);
+    assert_eq!(
+        short["records"][0]["record_id"],
+        json!(record_id),
+        "an oversized first item is surfaced whole"
+    );
+    assert_eq!(short["overflow_record_id"], json!(record_id));
+
+    // Exactly the emitted representation: it fits.
+    let exact = recall_with(u64::try_from(emitted).expect("budget")).await;
+    assert_eq!(exact["records"].as_array().expect("records").len(), 1);
+    assert_eq!(exact["truncated"], json!(false));
+    assert_eq!(
+        exact["records"][0]["content"]["structured"]["weight"],
+        json!(1.0)
+    );
+    fixture.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------
+// 18. Cross-provider, mixed-operation observed overlap (I-000172)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn cross_provider_mixed_operation_overlap_keeps_each_digest() {
+    let first = Fixture::start(None, None).await;
+    let second = Fixture::start(None, None).await;
+    first.ensure_subject().await;
+    second.ensure_subject().await;
+
+    let held_payload = first.capture_request("x-provider-held", "held material", CONTEXT);
+    let mixed_payload = second.record_create_request("x-provider-record", "mixed material", true);
+
+    let mut hold = first
+        .provider
+        .faults()
+        .hold_next(FaultPoint::AdmissionPause);
+    let client = Arc::clone(&first.client);
+    let principal = first.principal.clone();
+    let held_request: MemoryCaptureRequest =
+        from_value(held_payload.clone()).expect("held capture request");
+    let held = tokio::spawn(async move { client.capture(&principal, held_request).await });
+    hold.wait_reached()
+        .await
+        .expect("the first provider's admission is paused inside its scope");
+
+    // While that scope is live, the OTHER provider serves a different operation.
+    let mixed = wire(&expect_ok(
+        second
+            .client
+            .create_record(
+                &second.principal,
+                from_value(mixed_payload.clone()).expect("record create request"),
+            )
+            .await,
+    ));
+    assert_eq!(mixed["op"], json!("memory.records.create"));
+    assert_eq!(mixed["payload_digest"], json!(digest_of(&mixed_payload)));
+    assert_eq!(mixed["space_id"], json!(second.space_id));
+
+    hold.release();
+    let held = wire(&expect_ok(held.await.expect("held invoke joined")));
+    assert_eq!(held["op"], json!("memory.capture"));
+    assert_eq!(held["payload_digest"], json!(digest_of(&held_payload)));
+    assert_eq!(held["space_id"], json!(first.space_id));
+    assert_ne!(held["receipt_id"], mixed["receipt_id"]);
+
+    assert_eq!(first.count("candidates").await, 1);
+    assert_eq!(first.count("records").await, 0);
+    assert_eq!(second.count("candidates").await, 0);
+    assert_eq!(second.count("records").await, 1);
+    first.shutdown().await;
+    second.shutdown().await;
 }

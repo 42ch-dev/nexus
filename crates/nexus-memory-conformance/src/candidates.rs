@@ -1404,11 +1404,26 @@ pub(crate) async fn resolve_replay(
         return Ok(ReplayResolution::Fresh);
     };
     let receipt_id: String = row.try_get("receipt_id").map_err(internal)?;
-    // MEM-R018/R021: an existing binding may only be disclosed to a principal
-    // whose *current* grants still cover the target the receipt recorded — the
-    // same content-free target `memory.receipts.get` rechecks. This runs in the
-    // caller's transaction, before the outcome, the conflict or the retention
-    // state is revealed, and it never looks at the operation's current entity.
+    let tombstone = StoredTombstone {
+        last_known_status: row.try_get("last_known_status").map_err(internal)?,
+        tombstone_expires_at: row.try_get("tombstone_expires_at").map_err(internal)?,
+    };
+    // §7.0.5/MEM-R021: the whole lifetime is classified FIRST, independently of
+    // any authority. A binding that has fully expired is no longer a receipt to
+    // disclose — it is a free key, exactly as after an explicit operator sweep,
+    // so the caller's current authority for the *new* execution decides (the
+    // caller-owned seam authorizes that as a fresh attempt). Requiring the old
+    // target's authority here would make an unswept expired key refuse while the
+    // swept state succeeds.
+    if tombstone.last_known_status != "pending" && now > tombstone.tombstone_end()? {
+        return Ok(ReplayResolution::KeyReusable { receipt_id });
+    }
+    // A live body or a live tombstone IS a receipt to disclose, so it is only
+    // revealed to a principal whose *current* grants still cover the target the
+    // receipt recorded — the same content-free target `memory.receipts.get`
+    // rechecks. This runs in the caller's transaction, before the outcome, the
+    // conflict or the retention state, and never looks at the operation's
+    // current entity.
     let grants = load_grants(conn, space_id).await?;
     let retained = fetch_receipt_target(conn, &receipt_id).await?;
     let authorized = retained
@@ -1416,17 +1431,6 @@ pub(crate) async fn resolve_replay(
         .is_some_and(|target| target.admits(&grants, principal_id, space_id, now));
     if !authorized {
         return Err(not_authorized(RECEIPT_UNAUTHORIZED));
-    }
-    let tombstone = StoredTombstone {
-        last_known_status: row.try_get("last_known_status").map_err(internal)?,
-        tombstone_expires_at: row.try_get("tombstone_expires_at").map_err(internal)?,
-    };
-    // §7.0.5/MEM-R021: the whole lifetime is evaluated before the payload is
-    // compared. Once the tombstone window ended, the key is free for either the
-    // same or a changed payload, exactly as after an explicit operator sweep —
-    // an unrelated physical pass must not change the answer.
-    if tombstone.last_known_status != "pending" && now > tombstone.tombstone_end()? {
-        return Ok(ReplayResolution::KeyReusable { receipt_id });
     }
     let digest: String = row.try_get("payload_digest").map_err(internal)?;
     if digest != admission.payload_digest {
@@ -7157,6 +7161,54 @@ mod tests {
     /// both the same and a changed payload as a new operation, exactly like an
     /// already-swept one. While the tombstone lives, a changed payload is still
     /// a conflict. A caller rollback restores the released stale binding.
+    /// Regression for the expired-binding precedence: the whole lifetime is
+    /// classified before any retained-target authority, so a fully expired key
+    /// is reusable (the caller's authority for the new execution decides)
+    /// exactly as after an operator sweep — while a live binding still requires
+    /// the retained target.
+    #[tokio::test]
+    async fn expired_binding_is_reusable_before_retained_target_authority() {
+        let base = now();
+        let after = base
+            + Duration::seconds((RECEIPT_RETENTION_SECONDS + DEDUP_RETENTION_SECONDS) as i64)
+            + Duration::seconds(1);
+
+        let (scenario, same, _changed) = seed_two_expiring_captures().await;
+        // Simulate a retained target that no longer admits the caller: the
+        // content-free metadata is gone, the binding is not.
+        let mut conn = scenario
+            .provider
+            .store()
+            .pool()
+            .acquire()
+            .await
+            .expect("fixture connection");
+        sqlx::query("DELETE FROM receipt_targets")
+            .execute(&mut *conn)
+            .await
+            .expect("drop retained targets");
+        drop(conn);
+
+        // Live binding: still a receipt to disclose, so the missing retained
+        // target is a refusal, never a silent replay.
+        assert_eq!(
+            refusal(scenario.provider.capture(CLIENT, &same, base).await).code,
+            SpokeRejectCode::NotAuthorized,
+            "a live binding still requires its retained target"
+        );
+
+        // Fully expired binding: the key is free, so the same authorized caller
+        // executes it as a new operation instead of being refused for a target
+        // that no longer exists.
+        let fresh = scenario
+            .provider
+            .capture(CLIENT, &same, after)
+            .await
+            .expect("an expired binding is reusable regardless of the old target");
+        assert!(!receipt_id_of(&fresh).is_empty());
+        assert_eq!(count_rows(&scenario.provider, "receipt_targets").await, 1);
+    }
+
     #[tokio::test]
     async fn expired_tombstone_accepts_both_payloads_and_matches_the_swept_state() {
         let base = now();
