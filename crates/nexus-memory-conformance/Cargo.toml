@@ -24,6 +24,8 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 base64 = "0.22"
+futures-util = { workspace = true }
+tokio-tungstenite = { workspace = true }
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 serde_jcs = "0.2"
 tempfile = { workspace = true }

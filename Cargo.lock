@@ -3941,6 +3941,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "ed25519-dalek 2.2.0",
+ "futures-util",
  "serde",
  "serde_jcs",
  "serde_json",
@@ -3950,6 +3951,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-tungstenite",
  "uuid",
 ]
 

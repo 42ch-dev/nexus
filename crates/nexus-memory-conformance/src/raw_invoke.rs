@@ -144,3 +144,133 @@ pub(crate) fn normalize<T>(result: SpokeResult<T>) -> SpokeResult<T> {
         ok => ok,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scope(op: &str, provider: &str) -> RequestScope {
+        RequestScope {
+            digest: "sha256:test-digest".to_owned(),
+            op: op.to_owned(),
+            provider: provider.to_owned(),
+        }
+    }
+
+    fn missing_kind(reject: &SpokeReject) -> Option<&str> {
+        reject
+            .details
+            .as_ref()
+            .and_then(|details| details.get("kind"))
+            .and_then(Value::as_str)
+    }
+
+    #[test]
+    fn a_request_without_a_scope_fails_closed() {
+        let reject = match admitted::<&str>("memory.capture", "fixture-a", "request") {
+            Ok(_) => panic!("no scope is admitted"),
+            Err(reject) => reject,
+        };
+        assert_eq!(reject.code, SpokeRejectCode::InternalError);
+        assert_eq!(missing_kind(&reject), Some("request_scope_missing"));
+    }
+
+    #[tokio::test]
+    async fn another_operations_scope_is_refused() {
+        let reject = match with_scope(scope("memory.records.create", "fixture-a"), async {
+            admitted::<&str>("memory.capture", "fixture-a", "request")
+        })
+        .await
+        {
+            Ok(_) => panic!("an op may only consume its own scope"),
+            Err(reject) => reject,
+        };
+        assert_eq!(reject.code, SpokeRejectCode::InternalError);
+        assert_eq!(missing_kind(&reject), Some("request_scope_missing"));
+    }
+
+    #[tokio::test]
+    async fn another_providers_scope_is_refused() {
+        let reject = match with_scope(scope("memory.capture", "fixture-b"), async {
+            admitted::<&str>("memory.capture", "fixture-a", "request")
+        })
+        .await
+        {
+            Ok(_) => panic!("a provider may only consume its own scope"),
+            Err(reject) => reject,
+        };
+        assert_eq!(reject.code, SpokeRejectCode::InternalError);
+        assert_eq!(missing_kind(&reject), Some("request_scope_missing"));
+    }
+
+    #[tokio::test]
+    async fn a_matching_scope_carries_its_exact_digest() {
+        let admitted = with_scope(scope("memory.capture", "fixture-a"), async {
+            admitted::<&str>("memory.capture", "fixture-a", "request")
+        })
+        .await
+        .expect("the matching scope is admitted");
+        assert_eq!(admitted.payload_digest(), "sha256:test-digest");
+        assert_eq!(admitted.request(), &"request");
+    }
+
+    #[test]
+    fn only_mutating_ops_carry_a_digest() {
+        let payload = serde_json::json!({
+            "space_id": "spc_a",
+            "subject_id": "sub_a",
+            "idempotency_key": "k",
+        });
+        assert!(admission(&payload, "memory.describe", "fixture-a")
+            .expect("no digest needed")
+            .is_none());
+        let scope = admission(&payload, "memory.capture", "fixture-a")
+            .expect("digest taken")
+            .expect("a mutating op carries a scope");
+        match jcs_sha256_hex(&payload) {
+            SpokeResult::Ok(expected) => assert_eq!(scope.digest, expected),
+            SpokeResult::Reject(reject) => panic!("payload digest: {reject:?}"),
+        }
+    }
+
+    #[test]
+    fn retry_classes_follow_section_14_2() {
+        let uncertain = normalize::<()>(SpokeResult::Reject(SpokeReject {
+            code: SpokeRejectCode::OutcomeUncertain,
+            message: "unknown".to_owned(),
+            details: None,
+        }));
+        let internal = normalize::<()>(SpokeResult::Reject(SpokeReject {
+            code: SpokeRejectCode::InternalError,
+            message: "no effect".to_owned(),
+            details: Some(serde_json::Map::from_iter([(
+                "kind".to_owned(),
+                Value::String("fixture".to_owned()),
+            )])),
+        }));
+        let terminal = normalize::<()>(SpokeResult::Reject(SpokeReject {
+            code: SpokeRejectCode::NotFound,
+            message: "absent".to_owned(),
+            details: None,
+        }));
+        for (result, expected) in [
+            (uncertain, "uncertain"),
+            (internal, "retryable"),
+            (terminal, "terminal"),
+        ] {
+            match result {
+                SpokeResult::Reject(reject) => {
+                    assert_eq!(
+                        reject
+                            .details
+                            .as_ref()
+                            .and_then(|details| details.get("retry_class"))
+                            .and_then(Value::as_str),
+                        Some(expected)
+                    );
+                }
+                SpokeResult::Ok(()) => panic!("expected a reject"),
+            }
+        }
+    }
+}

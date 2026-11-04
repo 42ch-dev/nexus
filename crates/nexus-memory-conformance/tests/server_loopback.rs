@@ -13,24 +13,31 @@
 //! `source_context_ids: []` and an omitted member are the same typed request but
 //! different wire objects, so only a raw signed invoke can send both.
 
-use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use base64::Engine as _;
+use futures_util::stream::{SplitSink, SplitStream};
+use futures_util::{SinkExt, StreamExt};
 use ed25519_dalek::{Signer, SigningKey};
 use serde::Serialize;
 use serde_json::{from_value, json, Value};
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{Row, SqlitePool};
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::net::TcpListener;
+use tokio::sync::{Mutex as AsyncMutex, Notify};
+use tokio_tungstenite::tungstenite::protocol::{Message, WebSocketConfig};
+use tokio_tungstenite::WebSocketStream;
 use spoke_connect::core::{derive_peer_id_from_ed25519_pubkey, sign_hello_ed25519};
 use spoke_connect::remote::{
-    connect_remote_adapter, connect_responder, loopback_transport_pair, ConnectResponder,
-    ConnectResponderOptions, LoopbackTransport, LoopbackTransportPair, RemoteAdapter,
-    RemoteAdapterOptions, RemoteIdentity, RemoteServePorts, RemoteServePortsComposite, Transport,
+    connect_remote_adapter, connect_responder, ConnectResponder,
+    ConnectResponderOptions, RemoteAdapter, RemoteAdapterOptions, RemoteAdapterError,
+    RemoteIdentity, RemoteServePorts, RemoteServePortsComposite, Transport,
 };
 use spoke_operations::spoke_schemas::connect::{ConnectHello, ConnectSession};
 use spoke_operations::spoke_schemas::{
@@ -185,47 +192,205 @@ fn principal(principal_id: &str) -> Principal {
     .expect("valid principal")
 }
 
-/// Start a signed responder serving `provider` for the listed client seeds.
-async fn start_host(
+/// Consumer-side WebSocket transport over a real localhost socket.
+///
+/// The SDK documents product transports as consumer-side and ships only the
+/// in-repo loopback pair, so this adapter follows the project's existing
+/// `WsTransport` convention (`nexus-core::connect::ws_transport`, frozen
+/// contract §2): one connect envelope per Binary WebSocket message, a 2 MiB
+/// inbound cap, `Closed` on connection loss and an idempotent close that wakes
+/// a parked `recv`. Envelope bytes are opaque here — nothing parses or
+/// re-serializes them.
+struct WsTransport<S> {
+    sink: AsyncMutex<Option<SplitSink<WebSocketStream<S>, Message>>>,
+    stream: AsyncMutex<Option<SplitStream<WebSocketStream<S>>>>,
+    closed: AtomicBool,
+    notify: Notify,
+}
+
+const MAX_ENVELOPE_BYTES: usize = 2 * 1024 * 1024;
+
+fn ws_config() -> WebSocketConfig {
+    WebSocketConfig::default()
+        .max_message_size(Some(MAX_ENVELOPE_BYTES))
+        .max_frame_size(Some(MAX_ENVELOPE_BYTES))
+}
+
+fn map_ws_error(error: tokio_tungstenite::tungstenite::Error) -> spoke_connect::remote::TransportError {
+    use tokio_tungstenite::tungstenite::Error as WsError;
+    use spoke_connect::remote::TransportError;
+    match error {
+        WsError::ConnectionClosed | WsError::AlreadyClosed => TransportError::Closed,
+        WsError::Io(io_error) => TransportError::Io(format!("ws io error: {io_error}")),
+        other => TransportError::Io(format!("ws error: {other}")),
+    }
+}
+
+impl<S> WsTransport<S>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send,
+{
+    fn new(stream: WebSocketStream<S>) -> Self {
+        let (sink, stream) = stream.split();
+        Self {
+            sink: AsyncMutex::new(Some(sink)),
+            stream: AsyncMutex::new(Some(stream)),
+            closed: AtomicBool::new(false),
+            notify: Notify::new(),
+        }
+    }
+
+    async fn next_message(&self) -> Result<Message, spoke_connect::remote::TransportError> {
+        use spoke_connect::remote::TransportError;
+        tokio::select! {
+            biased;
+            () = self.notify.notified() => Err(TransportError::Closed),
+            message = async {
+                let mut guard = self.stream.lock().await;
+                let stream = guard.as_mut().ok_or(TransportError::Closed)?;
+                let outcome = match stream.next().await {
+                    Some(Ok(message)) => Ok(message),
+                    Some(Err(error)) => Err(map_ws_error(error)),
+                    None => Err(TransportError::Closed),
+                };
+                drop(guard);
+                outcome
+            } => message,
+        }
+    }
+
+    async fn tear_down(&self) {
+        if self.closed.swap(true, Ordering::Relaxed) {
+            return;
+        }
+        self.notify.notify_waiters();
+        self.stream.lock().await.take();
+        self.sink.lock().await.take();
+    }
+}
+
+#[async_trait]
+impl<S> Transport for WsTransport<S>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
+{
+    async fn send(&self, envelope: &[u8]) -> Result<(), spoke_connect::remote::TransportError> {
+        use spoke_connect::remote::TransportError;
+        if self.closed.load(Ordering::Relaxed) {
+            return Err(TransportError::Closed);
+        }
+        let mut guard = self.sink.lock().await;
+        let sink = guard.as_mut().ok_or(TransportError::Closed)?;
+        let outcome = sink
+            .send(Message::Binary(envelope.to_vec().into()))
+            .await
+            .map_err(map_ws_error);
+        drop(guard);
+        outcome
+    }
+
+    async fn recv(&self) -> Result<Vec<u8>, spoke_connect::remote::TransportError> {
+        use spoke_connect::remote::TransportError;
+        if self.closed.load(Ordering::Relaxed) {
+            return Err(TransportError::Closed);
+        }
+        loop {
+            let message = match self.next_message().await {
+                Ok(message) => message,
+                Err(TransportError::Closed) => return Err(TransportError::Closed),
+                Err(io_error) => {
+                    self.tear_down().await;
+                    return Err(io_error);
+                }
+            };
+            match message {
+                Message::Binary(bytes) => return Ok(bytes.to_vec()),
+                Message::Text(_) => {
+                    self.tear_down().await;
+                    return Err(TransportError::Io(
+                        "non-Binary WS message received; session closed".to_owned(),
+                    ));
+                }
+                Message::Ping(_) | Message::Pong(_) | Message::Close(_) | Message::Frame(_) => {}
+            }
+        }
+    }
+
+    async fn close(&self) -> Result<(), spoke_connect::remote::TransportError> {
+        if self.closed.swap(true, Ordering::Relaxed) {
+            return Ok(());
+        }
+        {
+            let mut guard = self.sink.lock().await;
+            if let Some(sink) = guard.as_mut() {
+                let _ = sink.close().await;
+            }
+        }
+        self.notify.notify_waiters();
+        self.stream.lock().await.take();
+        self.sink.lock().await.take();
+        Ok(())
+    }
+}
+
+/// Bind a real `127.0.0.1:0` listener whose first accepted WebSocket becomes
+/// the signed responder's transport. Dial `addr` first, then await the handle.
+async fn start_listener(
     provider: &Arc<FixtureMemoryProvider>,
     directory: &Arc<PeerDirectory>,
     client_seeds: &[[u8; 32]],
     invoke_timeout_ms: Option<u64>,
-) -> (Arc<ConnectResponder>, LoopbackTransportPair) {
-    let pair = loopback_transport_pair();
-    let mut allowlist = Vec::new();
-    let mut peer_keys = HashMap::new();
-    for seed in client_seeds {
-        let id = peer_id(seed);
-        allowlist.push(id.clone());
-        peer_keys.insert(id, pubkey(seed));
-    }
-    let ports: Arc<dyn RemoteServePorts + Send + Sync> =
-        Arc::new(
+) -> (SocketAddr, tokio::task::JoinHandle<Arc<ConnectResponder>>) {
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind an ephemeral localhost port");
+    let addr = listener.local_addr().expect("listener address");
+    let provider = Arc::clone(provider);
+    let directory = Arc::clone(directory);
+    let seeds = client_seeds.to_vec();
+    let task = tokio::spawn(async move {
+        let (tcp, peer) = tokio::time::timeout(Duration::from_secs(10), listener.accept())
+            .await
+            .expect("a client connects to the localhost listener")
+            .expect("accept the localhost peer");
+        assert!(peer.ip().is_loopback(), "the listener only serves localhost");
+        let ws = tokio_tungstenite::accept_async_with_config(tcp, Some(ws_config()))
+            .await
+            .expect("websocket upgrade");
+        let transport: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+        let ports: Arc<dyn RemoteServePorts + Send + Sync> = Arc::new(
             RemoteServePortsComposite::new(Arc::new(MemoryOnlyHost), None, None)
                 .with_memory(provider.server(directory.admission())),
         );
-    let responder = connect_responder(ConnectResponderOptions {
-        transport: Arc::new(pair.server.clone()),
-        identity: RemoteIdentity { seed: HOST_SEED },
-        manifest: manifest("fixture-conformance-host", &MEMORY_CAPABILITIES),
-        allowlist,
-        peer_keys,
-        ports: Some(ports),
-        invoke_timeout_ms,
-    })
-    .await;
-    (responder, pair)
+        connect_responder(ConnectResponderOptions {
+            transport,
+            identity: RemoteIdentity { seed: HOST_SEED },
+            manifest: manifest("fixture-conformance-host", &MEMORY_CAPABILITIES),
+            allowlist: seeds.iter().map(peer_id).collect(),
+            peer_keys: seeds
+                .iter()
+                .map(|seed| (peer_id(seed), pubkey(seed)))
+                .collect(),
+            ports: Some(ports),
+            invoke_timeout_ms,
+        })
+        .await
+    });
+    (addr, task)
 }
 
-/// Dial the typed `MemoryPort` client over `pair`.
-async fn dial(
-    pair: LoopbackTransportPair,
+/// Dial the typed `MemoryPort` client to `addr` over a real localhost socket.
+async fn dial_localhost(
+    addr: SocketAddr,
     seed: [u8; 32],
     invoke_timeout_ms: Option<u64>,
-) -> Arc<RemoteAdapter> {
+) -> Result<Arc<RemoteAdapter>, RemoteAdapterError> {
+    let (ws, _response) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
+        .await
+        .expect("connect the localhost websocket");
+    let transport: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
     connect_remote_adapter(RemoteAdapterOptions {
-        transport: Arc::new(pair.client),
+        transport,
         local_identity: RemoteIdentity { seed },
         local_manifest: manifest("fixture-conformance-client", &MEMORY_CAPABILITIES),
         remote_pubkey: pubkey(&HOST_SEED),
@@ -234,7 +399,14 @@ async fn dial(
         capability_token: None,
     })
     .await
-    .expect("dial the signed fixture host")
+}
+
+/// A raw signed client end on a real localhost socket.
+async fn raw_connect(addr: SocketAddr) -> WsTransport<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
+    let (ws, _response) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
+        .await
+        .expect("connect the raw localhost websocket");
+    WsTransport::new(ws)
 }
 
 // ---------------------------------------------------------------------------
@@ -272,9 +444,13 @@ impl Fixture {
             PeerDirectory::new().with_peer(peer_id(&CLIENT_SEED), principal_id.clone()),
         );
         let provider = Arc::new(provider);
-        let (responder, pair) =
-            start_host(&provider, &directory, &[CLIENT_SEED], host_budget_ms).await;
-        let client = dial(pair, CLIENT_SEED, client_budget_ms).await;
+        let (addr, host) =
+            start_listener(&provider, &directory, &[CLIENT_SEED], host_budget_ms).await;
+        eprintln!("[sql-log] localhost listener bound at {addr}");
+        let client = dial_localhost(addr, CLIENT_SEED, client_budget_ms)
+            .await
+            .expect("dial the localhost fixture host");
+        let responder = host.await.expect("the localhost host task");
         Self {
             _home: home,
             db_path,
@@ -290,17 +466,15 @@ impl Fixture {
 
     /// Reconnect to the same durable file with a fresh responder and client.
     async fn reconnect(&mut self) {
-        let (responder, pair) = start_host(
-            &self.provider,
-            &self.directory,
-            &[CLIENT_SEED],
-            None,
-        )
-        .await;
         self.client.close();
         self.responder.close();
-        self.responder = responder;
-        self.client = dial(pair, CLIENT_SEED, None).await;
+        let (addr, host) =
+            start_listener(&self.provider, &self.directory, &[CLIENT_SEED], None).await;
+        let client = dial_localhost(addr, CLIENT_SEED, None)
+            .await
+            .expect("redial the localhost fixture host");
+        self.responder = host.await.expect("the localhost host task");
+        self.client = client;
     }
 
     async fn shutdown(self) {
@@ -1053,14 +1227,17 @@ async fn admission_is_the_explicit_peer_principal_table_only() {
     fixture.ensure_subject().await;
 
     // An authenticated peer the operator never mapped holds no principal.
-    let (unmapped_responder, unmapped_pair) = start_host(
+    let (unmapped_addr, unmapped_host) = start_listener(
         &fixture.provider,
         &fixture.directory,
         &[UNMAPPED_SEED],
         None,
     )
     .await;
-    let unmapped_client = dial(unmapped_pair, UNMAPPED_SEED, None).await;
+    let unmapped_client = dial_localhost(unmapped_addr, UNMAPPED_SEED, None)
+        .await
+        .expect("dial with an allowlisted but unmapped peer");
+    let unmapped_responder = unmapped_host.await.expect("the localhost host task");
     let unmapped_refusal = expect_reject(
         unmapped_client
             .describe(
@@ -1075,10 +1252,13 @@ async fn admission_is_the_explicit_peer_principal_table_only() {
     unmapped_responder.close();
 
     // A peer outside the transport allowlist never gets a session at all.
-    let (deny_responder, deny_pair) =
-        start_host(&fixture.provider, &fixture.directory, &[], None).await;
+    let (deny_addr, deny_host) =
+        start_listener(&fixture.provider, &fixture.directory, &[], None).await;
+    let (deny_ws, _) = tokio_tungstenite::connect_async(format!("ws://{deny_addr}"))
+        .await
+        .expect("connect the localhost websocket");
     let unknown = connect_remote_adapter(RemoteAdapterOptions {
-        transport: Arc::new(deny_pair.client),
+        transport: Arc::new(WsTransport::new(deny_ws)),
         local_identity: RemoteIdentity { seed: [0x66; 32] },
         local_manifest: manifest("fixture-conformance-client", &MEMORY_CAPABILITIES),
         remote_pubkey: pubkey(&HOST_SEED),
@@ -1087,6 +1267,7 @@ async fn admission_is_the_explicit_peer_principal_table_only() {
         capability_token: None,
     })
     .await;
+    let deny_responder = deny_host.await.expect("the localhost host task");
     assert!(
         unknown.is_err(),
         "an unallowlisted dialer cannot establish a signed session"
@@ -1181,8 +1362,9 @@ fn signed_invoke(
     Value::Object(envelope)
 }
 
-async fn raw_session(pair: LoopbackTransportPair) -> (LoopbackTransport, String) {
-    let client = pair.client;
+async fn raw_handshake(
+    client: &WsTransport<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+) -> String {
     let hello = sign_hello_ed25519(
         &CLIENT_SEED,
         &format!("fixture-raw-nonce-{:x}", next_nonce()),
@@ -1208,11 +1390,11 @@ async fn raw_session(pair: LoopbackTransportPair) -> (LoopbackTransport, String)
             .expect("session snapshot"),
     )
     .expect("decode the session snapshot");
-    (client, session.session_id.to_string())
+    session.session_id.to_string()
 }
 
 async fn raw_invoke(
-    client: &LoopbackTransport,
+    client: &WsTransport<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
     session_id: &str,
     sequence: i64,
     request_id: &str,
@@ -1234,9 +1416,11 @@ async fn raw_empty_and_omitted_source_context_ids_conflict_at_the_signed_boundar
     fixture.ensure_subject().await;
     // A second signed session on the same provider, driven raw so the exact
     // wire object is under this test's control.
-    let (_responder, pair) =
-        start_host(&fixture.provider, &fixture.directory, &[CLIENT_SEED], None).await;
-    let (transport, session_id) = raw_session(pair).await;
+    let (addr, host) =
+        start_listener(&fixture.provider, &fixture.directory, &[CLIENT_SEED], None).await;
+    let transport = raw_connect(addr).await;
+    let session_id = raw_handshake(&transport).await;
+    let _responder = host.await.expect("the localhost host task");
 
     let mut explicit = fixture.capture_request("d15-raw", "D15 raw digest proof", CONTEXT);
     explicit["source_context_ids"] = json!([]);
@@ -1577,9 +1761,11 @@ async fn reconnect_keeps_identity_authority_and_receipts() {
 async fn unavailable_families_forged_claims_and_unknown_ops_are_refused_on_the_wire() {
     let fixture = Fixture::start(None, None).await;
     fixture.ensure_subject().await;
-    let (_responder, pair) =
-        start_host(&fixture.provider, &fixture.directory, &[CLIENT_SEED], None).await;
-    let (transport, session_id) = raw_session(pair).await;
+    let (addr, host) =
+        start_listener(&fixture.provider, &fixture.directory, &[CLIENT_SEED], None).await;
+    let transport = raw_connect(addr).await;
+    let session_id = raw_handshake(&transport).await;
+    let _responder = host.await.expect("the localhost host task");
 
     // The optional families are not negotiated, so the dispatch gate refuses
     // them before any payload is read.
@@ -1649,4 +1835,63 @@ async fn unavailable_families_forged_claims_and_unknown_ops_are_refused_on_the_w
     assert_eq!(error["code"], json!("INVALID_INPUT"));
     assert_eq!(error["details"]["retry_class"], json!("terminal"));
     assert_eq!(fixture.count("candidates").await, 0);
+}
+
+// ---------------------------------------------------------------------------
+// 12. Cross-provider isolation over two real localhost listeners
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn concurrent_providers_keep_digests_effects_and_keys_isolated() {
+    let first = Fixture::start(None, None).await;
+    let second = Fixture::start(None, None).await;
+    first.ensure_subject().await;
+    second.ensure_subject().await;
+    assert_ne!(
+        first.space_id, second.space_id,
+        "each provider owns its own durable space"
+    );
+
+    let first_payload = first.capture_request("cross-provider", "alpha material", CONTEXT);
+    let second_payload = second.capture_request("cross-provider", "beta material", CONTEXT);
+    let (left, right) = tokio::join!(
+        first.capture(first_payload.clone()),
+        second.capture(second_payload.clone())
+    );
+    assert_eq!(left["payload_digest"], json!(digest_of(&first_payload)));
+    assert_eq!(right["payload_digest"], json!(digest_of(&second_payload)));
+    assert_eq!(left["space_id"], json!(first.space_id));
+    assert_eq!(right["space_id"], json!(second.space_id));
+    assert_ne!(left["receipt_id"], right["receipt_id"]);
+    assert_eq!(first.count("candidates").await, 1);
+    assert_eq!(second.count("candidates").await, 1);
+
+    // A request bound to one provider's space is not served by the other, and
+    // it leaves no effect there.
+    let foreign = expect_reject(
+        second
+            .client
+            .capture(
+                &second.principal,
+                from_value(first_payload.clone()).expect("foreign capture request"),
+            )
+            .await,
+    );
+    assert_eq!(foreign.code, SpokeRejectCode::NotFound);
+    assert_eq!(retry_class(&foreign).as_deref(), Some("terminal"));
+    assert_eq!(second.count("candidates").await, 1);
+
+    // The dedup namespace is per provider: both providers already bound the
+    // same key to their own payload with independent effects, and each replay
+    // returns its own receipt without touching the other authority.
+    let left_replay = first.capture(first_payload).await;
+    let right_replay = second.capture(second_payload).await;
+    assert_eq!(left_replay["receipt_id"], left["receipt_id"]);
+    assert_eq!(right_replay["receipt_id"], right["receipt_id"]);
+    assert_ne!(left_replay["receipt_id"], right_replay["receipt_id"]);
+    assert_eq!(first.count("candidates").await, 1);
+    assert_eq!(second.count("candidates").await, 1);
+
+    first.shutdown().await;
+    second.shutdown().await;
 }

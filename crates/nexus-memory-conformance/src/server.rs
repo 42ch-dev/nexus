@@ -153,6 +153,20 @@ fn respond_receipt<T: DeserializeOwned>(receipt: MemoryReceipt) -> SpokeResult<T
     }
 }
 
+/// A commit that failed may still have taken effect (§14.3): the caller cannot
+/// be told whether anything committed, so it is `OUTCOME_UNCERTAIN` — never a
+/// clean `retryable` internal error.
+fn commit_outcome_unknown(error: sqlx::Error) -> SpokeReject {
+    SpokeReject {
+        code: SpokeRejectCode::OutcomeUncertain,
+        message: format!(
+            "the transaction's commit state is unknown; resolve with the same idempotency \
+             key or memory.receipts.get: {error}"
+        ),
+        details: None,
+    }
+}
+
 fn not_authorized(message: impl Into<String>) -> SpokeReject {
     SpokeReject {
         code: SpokeRejectCode::NotAuthorized,
@@ -557,7 +571,7 @@ impl MemoryPort for FixtureMemoryProvider {
             Err(reject) => return SpokeResult::Reject(reject),
         };
         if let Err(error) = transaction.commit().await {
-            return SpokeResult::Reject(internal(error));
+            return SpokeResult::Reject(commit_outcome_unknown(error));
         }
         respond_receipt(receipt)
     }
@@ -634,7 +648,7 @@ impl MemoryPort for FixtureMemoryProvider {
             Err(reject) => return SpokeResult::Reject(reject),
         };
         if let Err(error) = transaction.commit().await {
-            return SpokeResult::Reject(internal(error));
+            return SpokeResult::Reject(commit_outcome_unknown(error));
         }
         respond_receipt(receipt)
     }
@@ -697,7 +711,7 @@ impl MemoryPort for FixtureMemoryProvider {
             Err(reject) => return SpokeResult::Reject(reject),
         };
         if let Err(error) = transaction.commit().await {
-            return SpokeResult::Reject(internal(error));
+            return SpokeResult::Reject(commit_outcome_unknown(error));
         }
         respond_receipt(receipt)
     }
@@ -798,7 +812,7 @@ impl MemoryPort for FixtureMemoryProvider {
             Err(reject) => return SpokeResult::Reject(reject),
         };
         if let Err(error) = transaction.commit().await {
-            return SpokeResult::Reject(internal(error));
+            return SpokeResult::Reject(commit_outcome_unknown(error));
         }
         respond_receipt(receipt)
     }
@@ -898,7 +912,7 @@ impl MemoryPort for FixtureMemoryProvider {
             Err(reject) => return SpokeResult::Reject(reject),
         };
         if let Err(error) = transaction.commit().await {
-            return SpokeResult::Reject(internal(error));
+            return SpokeResult::Reject(commit_outcome_unknown(error));
         }
         respond_receipt(receipt)
     }
@@ -1019,7 +1033,7 @@ impl MemoryPort for FixtureMemoryProvider {
             Err(reject) => return SpokeResult::Reject(reject),
         };
         if let Err(error) = transaction.commit().await {
-            return SpokeResult::Reject(internal(error));
+            return SpokeResult::Reject(commit_outcome_unknown(error));
         }
         respond_receipt(receipt)
     }
@@ -1192,7 +1206,7 @@ impl MemoryPort for FixtureMemoryProvider {
             Err(reject) => return SpokeResult::Reject(reject),
         };
         if let Err(error) = transaction.commit().await {
-            return SpokeResult::Reject(internal(error));
+            return SpokeResult::Reject(commit_outcome_unknown(error));
         }
         respond_receipt(receipt)
     }
@@ -1306,7 +1320,7 @@ impl MemoryPort for FixtureMemoryProvider {
             Err(reject) => return SpokeResult::Reject(reject),
         };
         if let Err(error) = transaction.commit().await {
-            return SpokeResult::Reject(internal(error));
+            return SpokeResult::Reject(commit_outcome_unknown(error));
         }
         respond_receipt(receipt)
     }
@@ -1404,7 +1418,7 @@ impl MemoryPort for FixtureMemoryProvider {
             Err(reject) => return SpokeResult::Reject(reject),
         };
         if let Err(error) = transaction.commit().await {
-            return SpokeResult::Reject(internal(error));
+            return SpokeResult::Reject(commit_outcome_unknown(error));
         }
         respond_receipt(receipt)
     }
@@ -1542,7 +1556,7 @@ impl MemoryPort for FixtureMemoryProvider {
             Err(reject) => return SpokeResult::Reject(reject),
         };
         if let Err(error) = transaction.commit().await {
-            return SpokeResult::Reject(internal(error));
+            return SpokeResult::Reject(commit_outcome_unknown(error));
         }
         respond_receipt(receipt)
     }
@@ -1655,7 +1669,7 @@ impl MemoryPort for FixtureMemoryProvider {
             Err(reject) => return SpokeResult::Reject(reject),
         };
         if let Err(error) = transaction.commit().await {
-            return SpokeResult::Reject(internal(error));
+            return SpokeResult::Reject(commit_outcome_unknown(error));
         }
         respond_receipt(receipt)
     }
