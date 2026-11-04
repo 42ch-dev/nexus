@@ -529,13 +529,19 @@ impl ReceiptTarget {
     /// capabilities that operation needed plus its complete subject and
     /// placement/selection facets.
     ///
-    /// - `subject_id: None` records a **space-wide** requirement (§6.5), while
+    /// The facets are independent axes, and an **omitted** facet only means
+    /// "this requirement names it" — never "the target is unrestricted":
+    /// - `subject_id: None` names no subject, so any subject scope qualifies;
     ///   `Some(id)` requires coverage of exactly that subject.
-    /// - `context_ids` records the named placement set; it may be empty.
-    /// - `reads_shared` records the shared-visibility facet of a `shared`
-    ///   placement, a `shared_only`/`include_shared` selection or a shared read.
-    /// - `subject_all` records a whole-subject selection, which §6.12 only
-    ///   defines over an unrestricted requirement.
+    /// - `context_ids` names the placement set; an empty set names no context, so
+    ///   a context-restricted grant still covers it (that is legitimate for ops
+    ///   such as `memory.subjects.ensure`, which are not placement-scoped).
+    /// - `reads_shared` records the shared-visibility facet.
+    /// - `subject_all` is the published evaluator's *unrestricted-only* facet
+    ///   (§6.12): it requires a grant with no context restriction. A whole-subject
+    ///   selection needs it, and it is also the only way to require genuinely
+    ///   unrestricted coverage — see [`Self::whole_space`] for the whole-space
+    ///   requirement, which is **not** the same as an empty context list.
     ///
     /// A structurally impossible target is refused instead of stored, so no
     /// caller can stage a receipt with a permissive default: an empty or
@@ -574,6 +580,21 @@ impl ReceiptTarget {
             reads_shared,
             subject_all,
         })
+    }
+
+    /// §6.5 **whole-space** requirement: the complete published
+    /// `whole_scope_requirement` shape — no subject, no named context, and the
+    /// unrestricted-coverage facet — so a context- or shared-restricted grant
+    /// never covers it.
+    ///
+    /// An empty context list on [`Self::new`] is deliberately *not* this: it only
+    /// means the requirement names no context, which a context-restricted grant
+    /// still satisfies. Use this constructor whenever the operation's real target
+    /// is the whole space (whole-space export, space maintenance/admin ops).
+    pub(crate) fn whole_space(
+        capabilities: &'static [&'static str],
+    ) -> Result<Self, SpokeReject> {
+        Self::new(capabilities, None, &[], false, true)
     }
 
     /// Target of an op whose requirement is a placement scope: a `context`
@@ -4861,8 +4882,7 @@ mod tests {
         // selected-contexts export (multi-context).
         let export = required_capabilities("memory.exports.create")
             .expect("memory.exports.create has a capability list");
-        let space_wide =
-            ReceiptTarget::new(export, None, &[], false, false).expect("space-wide target");
+        let space_wide = ReceiptTarget::whole_space(export).expect("whole-space target");
         let whole_subject = ReceiptTarget::new(export, Some(SUBJECT), &[], false, true)
             .expect("whole-subject target");
         let multi_context =
@@ -5415,5 +5435,105 @@ mod tests {
                 .await,
         );
         assert_eq!(unicode_rejection.code, SpokeRejectCode::InvalidInput);
+    }
+
+    #[tokio::test]
+    async fn whole_space_target_requires_unrestricted_coverage_on_body_and_tombstone() {
+        let scenario = Scenario::open().await;
+        let now = now();
+        scenario.subject(now).await;
+        let export = required_capabilities("memory.exports.create")
+            .expect("memory.exports.create has a capability list");
+        let whole_space = ReceiptTarget::whole_space(export).expect("whole-space target");
+        let receipt = scenario
+            .stage_targeted_receipt(
+                "export-whole-space",
+                "memory.exports.create",
+                &whole_space,
+                now,
+            )
+            .await;
+
+        // A space-wide grant that still restricts placement is not whole-space
+        // coverage: the recorded target requires the unrestricted facet.
+        let context_limited = scenario
+            .grant(CLIENT, &["transfer"], None, Some((&[CONTEXT_A], false)), now)
+            .await;
+        let denied_body = refusal(
+            scenario
+                .provider
+                .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &receipt), now)
+                .await,
+        );
+        assert_eq!(denied_body.code, SpokeRejectCode::NotAuthorized);
+
+        // The same context-limited grant still covers a requirement that merely
+        // names no context (§7.5-shaped subject target): nothing normalized the
+        // omitted facet into "unrestricted".
+        let subject_target = ReceiptTarget::new(export, Some(SUBJECT), &[], false, false)
+            .expect("subject-only target");
+        let subject_receipt = scenario
+            .stage_targeted_receipt(
+                "export-subject-only",
+                "memory.exports.create",
+                &subject_target,
+                now,
+            )
+            .await;
+        scenario
+            .provider
+            .receipts_get(
+                CLIENT,
+                &receipts_request(&scenario.space_id, &subject_receipt),
+                now,
+            )
+            .await
+            .expect("a context-limited space-wide grant covers a subject-only requirement");
+
+        // Genuinely unrestricted coverage reads the whole-space receipt.
+        scenario.revoke(&context_limited, now).await;
+        let unrestricted = scenario.grant(CLIENT, &["transfer"], None, None, now).await;
+        scenario
+            .provider
+            .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &receipt), now)
+            .await
+            .expect("unrestricted coverage reads a whole-space receipt");
+
+        // Evicted body, restricted grant again: the tombstone refuses exactly as
+        // the body path did and discloses no terminal status.
+        scenario.revoke(&unrestricted, now).await;
+        let restricted_again = scenario
+            .grant(CLIENT, &["transfer"], None, Some((&[CONTEXT_A], false)), now)
+            .await;
+        sqlx::query("DELETE FROM receipts WHERE receipt_id = ?")
+            .bind(&receipt)
+            .execute(scenario.provider.store().pool())
+            .await
+            .expect("receipt body evicted");
+        let denied_tombstone = refusal(
+            scenario
+                .provider
+                .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &receipt), now)
+                .await,
+        );
+        assert_eq!(
+            denied_tombstone, denied_body,
+            "the evicted path answers exactly like the body path"
+        );
+        scenario.revoke(&restricted_again, now).await;
+        let admin = refusal(
+            scenario
+                .provider
+                .receipts_get(OPERATOR, &receipts_request(&scenario.space_id, &receipt), now)
+                .await,
+        );
+        assert_eq!(admin.code, SpokeRejectCode::ReceiptExpired);
+        assert_eq!(
+            admin
+                .details
+                .as_ref()
+                .and_then(|details| details.get("last_known_status")),
+            Some(&json!("committed"))
+        );
     }
 }
