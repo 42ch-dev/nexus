@@ -15,10 +15,17 @@ use nexus_core::{
     CoreAccess, CoreError, CoreOpenOptions, CoreService, MemoryProviderSelection,
     RemoteMemoryProviderSelection,
 };
-use nexus_local_db::writer_protocol::{join_live_engine_pool, GuardedPoolOptions};
+use nexus_local_db::writer_protocol::{init_guarded_pool, join_live_engine_pool, GuardedPoolOptions};
 use tempfile::TempDir;
 
 const CREATOR: &str = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+/// The provider's private file root and the publication lease inside it, which
+/// every provisioning path must take before it may write. Spelled here because
+/// the provider keeps them private; the stage assertion below fails loudly if
+/// either name ever stops naming the lease the open actually waits on.
+const PROVIDER_FILES_DIR: &str = "memory-store";
+const PUBLISH_LOCK_FILE: &str = ".memory-publish.lock";
 
 fn provider_table(kind: &str) -> String {
     format!("\n[memory_provider]\nkind = \"{kind}\"\n")
@@ -310,9 +317,20 @@ async fn confirmed_close_releases_the_local_providers_direct_admission() {
     }
 }
 
-/// F10: the measured provider open is cancelled in flight after its admission
-/// is registered and *its own* seed write really landed, but before the store is
-/// delivered. Both stage events are attributable to this invocation alone: the
+/// F10/F17: the measured provider open is cancelled at a real stage boundary —
+/// after its own seed write committed and while it is blocked inside
+/// `provision`'s journal-recovery step on the workspace publication lease — so
+/// the required provisioning write has provably not run and the open cannot
+/// have returned.
+///
+/// The barrier is the product's own cross-process publication lease
+/// (`.memory-publish.lock` under the provider file root): the open must take it
+/// before it may open the provisioning transaction, and this test takes it
+/// *before* the spawn and releases it only after the cancellation. A second
+/// descriptor excludes the open exactly like another process does, so the stage
+/// ordering is causal rather than a race won against the scheduler.
+///
+/// Both stage events are attributable to this invocation alone: the
 /// registration row carries a writer id that did not exist before the spawn, and
 /// the seed write is the `core_changes` row that this exact writer id produced.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -321,27 +339,46 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
     let db_path = env.db_path();
     let home = env.user_home.clone();
 
-    // Bootstrap the schema once, then take the set of writer ids that already
-    // exist: only an id outside it can belong to the measured open.
-    let bootstrap = LocalMemoryProvider::open(home.clone(), CREATOR, "default")
+    // Migrate and seed the workspace *without* provisioning it, so whatever is
+    // in `memory_spaces` later is the measured open's own required write.
+    let bootstrap = init_guarded_pool(&db_path, CREATOR)
         .await
-        .expect("bootstrap provider");
+        .expect("bootstrap workspace");
     drop(bootstrap);
+    assert!(
+        eventual_fence(&db_path).await,
+        "the bootstrap admission is fully released before the measured open"
+    );
+    // Only an id outside this set can belong to the measured open.
     let known_writers = writer_ids(&db_path).await;
 
-    // Both observation connections exist before the spawn, so detecting the
-    // stage and taking the write lock cost no pool construction of their own.
+    // The publication lease the open must take inside `provision` before it may
+    // write, held here from before the spawn. Its descriptor conflicts with the
+    // open's exactly as another process's would.
+    let publish_root = db_path
+        .parent()
+        .expect("workspace directory")
+        .join(PROVIDER_FILES_DIR);
+    fs::create_dir_all(&publish_root).expect("provider file root");
+    let lease = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(publish_root.join(PUBLISH_LOCK_FILE))
+        .expect("publication lease file");
+    lease.lock().expect("hold the publication lease");
+
     let observer_pool = read_pool(&db_path).await.expect("observer pool");
     let mut observer = observer_pool.acquire().await.expect("observer connection");
-    let locker_pool = raw_pool(&db_path).await;
-    let mut locker = locker_pool.acquire().await.expect("locker connection");
 
     let opening_home = home.clone();
-    let opening =
+    let mut opening =
         tokio::spawn(async move { LocalMemoryProvider::open(opening_home, CREATOR, "default").await });
 
     // Step 1: the measured open registers a writer id that did not exist before
-    // the spawn, so every following observation is about this invocation.
+    // the spawn, so every following observation is about this invocation. A
+    // finished task here means the lease did not hold it, which must fail.
     let mut measured_writer = None;
     for _ in 0..200_000 {
         let rows: Vec<(String,)> = sqlx::query_as("SELECT writer_id FROM core_writer_registration")
@@ -356,9 +393,10 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
             measured_writer = Some(writer_id);
             break;
         }
-        if opening.is_finished() {
-            break;
-        }
+        assert!(
+            !opening.is_finished(),
+            "the measured open returned while the publication lease was held"
+        );
         tokio::task::yield_now().await;
     }
     let measured_writer = measured_writer.expect("the measured open registered itself");
@@ -378,9 +416,10 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
             seeded = true;
             break;
         }
-        if opening.is_finished() {
-            break;
-        }
+        assert!(
+            !opening.is_finished(),
+            "the measured open returned while the publication lease was held"
+        );
         tokio::task::yield_now().await;
     }
     assert!(
@@ -388,18 +427,35 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
         "the measured open reached its own seed write (writer {measured_writer})"
     );
 
-    // Step 3 — deterministic stage control: this connection takes the
-    // database's write lock, which the open must take again for its
-    // provisioning writes. While it is held the open cannot complete, so the
-    // pending-cancellation assertion does not depend on winning a race.
-    sqlx::query("BEGIN IMMEDIATE")
-        .execute(&mut *locker)
-        .await
-        .expect("hold the write lock");
+    // Step 3 — the stage itself, by construction. The seeded open cannot pass
+    // `provision`'s publication-lease wait while this test holds it, so the
+    // provisioning transaction cannot run. Give it an unambiguous opportunity
+    // to do so anyway: while the lease is held no duration can let it through,
+    // so this window is a fixture check that fails a gate which stopped
+    // covering this open, never the evidence for the ordering.
     assert!(
-        !opening.is_finished(),
-        "the open is still in flight after its own seed write"
+        tokio::time::timeout(std::time::Duration::from_secs(1), &mut opening)
+            .await
+            .is_err(),
+        "the held publication lease did not stop the measured open"
     );
+    let (spaces,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM memory_spaces")
+        .fetch_one(&mut *observer)
+        .await
+        .expect("read the provisioning table");
+    assert_eq!(
+        spaces, 0,
+        "the required provisioning write still sits behind the held publication lease"
+    );
+    let fencing = match nexus_local_db::writer_protocol::acquire_store_reset_fence(&db_path) {
+        Ok(_) => panic!("the parked open still holds its shared admission"),
+        Err(error) => error,
+    };
+    assert!(
+        matches!(fencing, nexus_local_db::LocalDbError::OwnerBusy { .. }),
+        "the only expected refusal is OwnerBusy, got {fencing:?}"
+    );
+
     opening.abort();
     let join_error = match opening.await {
         Ok(_) => panic!("the aborted task must not have completed"),
@@ -409,15 +465,39 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
         join_error.is_cancelled(),
         "the task was really cancelled, not completed"
     );
-    sqlx::query("ROLLBACK")
-        .execute(&mut *locker)
-        .await
-        .expect("release the write lock");
 
-    // Only the cancelled open's own admission ended, and it ended for real.
+    // Releasing the lease lets the abandoned native wait end; it takes the
+    // lease only to give it straight back, so the workspace lease is free again.
+    // The cancelled open's own OS admission ends with it, proved while this
+    // process is still alive.
+    drop(lease);
     assert!(
         eventual_fence(&db_path).await,
         "the cancelled open released its own OS admission"
+    );
+    let (spaces,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM memory_spaces")
+        .fetch_one(&mut *observer)
+        .await
+        .expect("read the provisioning table");
+    assert_eq!(
+        spaces, 0,
+        "the cancelled open never reached its required provisioning write"
+    );
+
+    // The abandoned wait released the workspace publication gate: a fresh open
+    // on the same workspace still completes, so no wait or lease leaked.
+    let reopened = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        LocalMemoryProvider::open(home.clone(), CREATOR, "default"),
+    )
+    .await
+    .expect("the workspace does not stay gated by the cancelled open")
+    .expect("the workspace is still usable after the cancelled open");
+    assert_eq!(reopened.space_id(), DEFAULT_SPACE_ID);
+    drop(reopened);
+    assert!(
+        eventual_fence(&db_path).await,
+        "the reopened provider's admission is released too"
     );
 }
 
