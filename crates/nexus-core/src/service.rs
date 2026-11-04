@@ -15,8 +15,7 @@ use nexus_home_layout::active_context::{
 };
 use nexus_local_db::open_pool_read_only;
 use nexus_local_db::writer_protocol::{
-    init_engine_pool, init_guarded_pool, release_retained_writer_guards, GuardedPool,
-    GuardedPoolOptions,
+    init_engine_pool, init_guarded_pool, GuardedPool, GuardedPoolOptions,
 };
 use sqlx::SqlitePool;
 
@@ -83,14 +82,6 @@ pub struct CoreInner {
     /// pooled connection — or the OS admission lock its `WorkspaceWriterGuard`
     /// carries — alive after the close reported the service released.
     guarded: Mutex<Option<GuardedPool>>,
-    /// Whether THIS open CREATED the process's engine admission over
-    /// `db_path`, rather than joining the one a live in-process engine owner
-    /// already holds.
-    ///
-    /// Only the creator releases the admission on a confirmed close: a
-    /// co-hosted joiner (the daemon's transport pool and its execution core
-    /// over one DB) must never release an admission its creator still owns.
-    owns_engine_admission: bool,
     /// The pinned provider authority serving the memory family for this
     /// open's lifetime (NXM-5 Task 2, v1.229 N3 Task 3).
     ///
@@ -346,7 +337,6 @@ impl CoreService {
             Ok(None)
         };
 
-        let mut owns_engine_admission = false;
         let (pool, guarded) = match options.access {
             CoreAccess::ReadOnly => {
                 let pool = open_pool_read_only(&db_path).await.map_err(local_db_err)?;
@@ -365,7 +355,6 @@ impl CoreService {
                     nexus_local_db::writer_protocol::join_live_engine_pool(&db_path, options)
                         .await
                         .map_err(local_db_err)?;
-                owns_engine_admission = joined.is_none();
                 let guarded = match joined {
                     Some(guarded) => guarded,
                     None => init_engine_pool(&db_path, &creator_id, options)
@@ -396,13 +385,13 @@ impl CoreService {
             Ok(binding) => Some(binding),
             Err(error) => {
                 pool.close().await;
-                // Release only the admission THIS open created: a joined
-                // handle releases nothing, and another mode's (or another
-                // owner's) retained entry is never touched. The pool above is
-                // already closed, so this handle is the last user of its own
-                // entry.
+                // Give up THIS open's claim only: the retained entry (and the
+                // OS admission behind it) survives while another open still
+                // serves it, so a creator's failed pin can never evict a
+                // successful concurrent joiner. The pool above is already
+                // closed, so this claim is the only one this handle holds.
                 if let Some(guarded) = guarded.as_ref() {
-                    guarded.release_owned_retained_admission();
+                    guarded.release_retained_admission();
                 }
                 drop(guarded);
                 return Err(error);
@@ -415,7 +404,6 @@ impl CoreService {
                 db_path: db_path.clone(),
                 guarded: Mutex::new(guarded),
                 memory: Mutex::new(memory),
-                owns_engine_admission,
                 nexus_home,
                 creator_id,
                 workspace_slug,
@@ -890,37 +878,24 @@ async fn close_drain(inner: Arc<CoreInner>) {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .take();
     inner.pool.close().await;
-    // A confirmed close ends the admission THIS open took over the home.
-    // Both halves are needed for the OS lock to actually go away:
-    //
-    // 1. the retained guard is what a later open would otherwise JOIN — and
-    //    joining a settled generation would republish its epoch while
-    //    claiming a fresh owner, so the next owner must take a new
-    //    admission (a new epoch) instead;
-    // 2. this open's own admitted-pool handle is given up, so a closed
-    //    service value that is still referenced cannot keep the guard
-    //    behind `state.db.engine.lock` alive after the close reported the
-    //    service released.
-    //
-    // `owns_engine_admission` keeps the two accesses apart: an
-    // `EngineOwner` that merely JOINED a live in-process admission (the
-    // daemon's co-host shape) releases nothing, because the creator still
-    // owns it. The `DirectWriter` arm is the pre-existing cooperative
-    // rule (`init_guarded_pool` always creates its own admission).
-    if inner.access == CoreAccess::DirectWriter || inner.owns_engine_admission {
-        release_retained_writer_guards(&inner.db_path);
-    }
-    // EVERY closing core gives up its OWN admitted-pool handle, joiner
-    // included: a cooperative joiner holds a clone of the CREATOR's guard, so
-    // a closed-but-still-referenced joiner would otherwise keep
-    // `state.db.engine.lock` open after the creator released the retained
-    // entry — and a fresh open over the same home would fail `OwnerBusy` with
-    // no live owner at all.
-    inner
+    // A confirmed close gives up exactly the admission claim THIS open took
+    // over the home, joiner included. The claim — not who created the entry —
+    // is the lifetime: the retained entry and the OS locks behind it are
+    // dropped only when the LAST live user releases, so closing one user never
+    // erases an admission another live user (same or other mode) still
+    // serves, and a closed-but-still-referenced service cannot keep
+    // `state.db.engine.lock` alive after the close reported the service
+    // released. When this was the last claim the entry is gone, so a later
+    // open takes a new admission (a new epoch) instead of joining a settled
+    // generation.
+    if let Some(guarded) = inner
         .guarded
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .take();
+        .take()
+    {
+        guarded.release_retained_admission();
+    }
     // `take` returned the handle, so ownership is settled; release the
     // per-DB fence so a later open of the same DB can claim it.
     #[cfg(feature = "execution")]

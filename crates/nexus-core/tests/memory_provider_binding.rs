@@ -329,6 +329,88 @@ async fn failed_direct_writer_pin_keeps_a_live_engine_owner_joinable() {
     assert!(engine.close().await.expect("close").cleanup_confirmed);
 }
 
+/// A confirmed `DirectWriter` close ends only that open's claim: the live
+/// `EngineOwner`'s retained admission (and a later creator join) survives.
+#[tokio::test]
+async fn successful_direct_writer_close_keeps_a_live_engine_owner_joinable() {
+    let env = Env::new(None);
+    let engine = CoreService::open(env.options(None))
+        .await
+        .expect("live engine owner");
+    let principal = engine.active_principal().await.expect("principal");
+    assert_eq!(engine.count_pending_reviews(&principal).await.expect("read").count, 0);
+
+    let direct = CoreService::open(CoreOpenOptions {
+        user_home: env.user_home.clone(),
+        access: CoreAccess::DirectWriter,
+        memory: None,
+    })
+    .await
+    .expect("a direct writer opens beside the engine owner");
+    assert!(direct.close().await.expect("close").cleanup_confirmed);
+
+    let joined = CoreService::open(env.options(None))
+        .await
+        .expect("a confirmed direct close must not erase the live engine admission");
+    let joined_principal = joined.active_principal().await.expect("principal");
+    assert_eq!(
+        joined.count_pending_reviews(&joined_principal).await.expect("read").count,
+        0
+    );
+    assert!(joined.close().await.expect("close").cleanup_confirmed);
+    assert_eq!(
+        engine.count_pending_reviews(&principal).await.expect("read").count,
+        0,
+        "the live engine owner still serves memory after the direct close"
+    );
+    assert!(engine.close().await.expect("close").cleanup_confirmed);
+}
+
+/// An engine creator that goes away after another open joined must leave that
+/// adopter's admission — and further joins — intact, and the last claim must
+/// release the registry entry instead of leaking it.
+#[tokio::test]
+async fn creator_close_keeps_a_joined_adopter_and_a_third_join() {
+    let env = Env::new(None);
+    let creator = CoreService::open(env.options(None))
+        .await
+        .expect("engine creator");
+    let adopter = CoreService::open(env.options(None))
+        .await
+        .expect("a second engine open joins the live admission");
+    let adopter_principal = adopter.active_principal().await.expect("principal");
+    assert_eq!(
+        adopter.count_pending_reviews(&adopter_principal).await.expect("read").count,
+        0
+    );
+
+    // The creator's open ends here — a failed pin takes the same release.
+    assert!(creator.close().await.expect("close").cleanup_confirmed);
+
+    let third = CoreService::open(env.options(None))
+        .await
+        .expect("a third open still joins the surviving admission");
+    let third_principal = third.active_principal().await.expect("principal");
+    assert_eq!(
+        third.count_pending_reviews(&third_principal).await.expect("read").count,
+        0
+    );
+
+    assert!(third.close().await.expect("close").cleanup_confirmed);
+    assert!(adopter.close().await.expect("close").cleanup_confirmed);
+    assert!(
+        join_live_engine_pool(&env.db_path(), GuardedPoolOptions::default())
+            .await
+            .expect("retained guard probe")
+            .is_none(),
+        "the last claim released the retained admission"
+    );
+    let reopened = CoreService::open(env.options(None))
+        .await
+        .expect("a later open takes a fresh admission");
+    assert!(reopened.close().await.expect("close").cleanup_confirmed);
+}
+
 /// A failed OPEN THAT JOINED the live engine admission (it owns no retained
 /// entry) must leave the creator joinable as well.
 #[tokio::test]
