@@ -4321,7 +4321,13 @@ impl CoreService {
     /// `admin` grant, because it writes provider objects of every subject the
     /// workspace owns, and it never writes a legacy table or bearer file (D6).
     ///
+    /// A nonlocal binding has no local legacy content to read: it refuses with
+    /// the retained `not_supported` code before any read or write (§5), instead
+    /// of a generic local-accessor error, and never transfers data implicitly.
+    ///
     /// # Errors
+    /// [`CoreError::Coded`] (`not_supported`) when the pinned binding is not the
+    /// local provider (no effects),
     /// [`CoreError::Forbidden`] under read-only core access,
     /// [`CoreError::ForbiddenReason`] when the principal holds no `admin` grant,
     /// [`CoreError::ActorConflict`] (`idempotency_conflict`) when the recorded
@@ -4333,7 +4339,12 @@ impl CoreService {
     ) -> CoreResult<LegacyContentMigration> {
         self.verify_principal(principal)?;
         let binding = self.memory_writer_binding()?;
-        let provider = binding.local()?;
+        let Ok(provider) = binding.local() else {
+            return Err(CoreError::Coded {
+                code: "not_supported".to_string(),
+                message: "legacy migration requires the local provider".to_string(),
+            });
+        };
         let spoke_principal: spoke_schemas::Principal = map_wire(json!({
             "principal_id": principal.creator_id(),
             "extensions": {},
