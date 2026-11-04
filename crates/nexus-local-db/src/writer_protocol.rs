@@ -2,14 +2,18 @@
 
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
+use std::task::{Context, Waker};
 use std::time::{Duration, Instant};
 
 use nexus_storage_guard::{
     install_writer_functions, WriterConnectionContext, WriterMode as GuardMode,
 };
+use sqlx::pool::CloseEvent;
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::SqlitePool;
 use uuid::Uuid;
@@ -20,13 +24,16 @@ const LOCK_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
 const SUPPORTED_PROTOCOL_VERSION: i64 = 1;
 pub const BOOTSTRAP_CREATOR_ID: &str = "bootstrap";
 
-/// One cooperative pool handle this process opened over a database.
+/// One cooperative pool this process opened over a database.
 ///
-/// Kept for migration quiescence: a pending schema change waits until every
-/// handle reports closed, and closes them if it must.
+/// Tracked per POOL, not per handle: clones share one pool and one OS
+/// admission until the last of them is closed. The registry holds no strong
+/// pool handle — only the pool's close event — so a pool whose last handle went
+/// away is not kept alive by this bookkeeping.
 struct RegisteredPool {
     id: u64,
-    handle: SqlitePool,
+    /// Resolves when the pool closes; `None` once it has.
+    close_event: Option<CloseEvent>,
 }
 
 /// One database's live admission: the guard that holds its OS locks and the
@@ -41,17 +48,6 @@ struct RetainedGuardEntry {
 
 static POOL_REG_ID: AtomicU64 = AtomicU64::new(1);
 
-struct CooperativePoolRegistration {
-    path: PathBuf,
-    id: u64,
-}
-
-impl Drop for CooperativePoolRegistration {
-    fn drop(&mut self) {
-        unregister_pool_handle(&self.path, self.id);
-    }
-}
-
 /// This process's live writer admissions, keyed by
 /// `(canonical db path, mode)`.
 ///
@@ -61,12 +57,13 @@ impl Drop for CooperativePoolRegistration {
 static ACTIVE_GUARDS: LazyLock<Mutex<HashMap<(PathBuf, WriterMode), RetainedGuardEntry>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// This process's open cooperative pools, keyed by canonical db path.
+/// This process's cooperative pools, keyed by `(canonical db path, mode)`.
 ///
 /// Deliberately separate from [`ACTIVE_GUARDS`]: a cloned pool handle
 /// ([`GuardedPool::clone_pool`]) can outlive the handle that opened it, so
-/// migration quiescence follows the pool handles, not the admission claims.
-static ACTIVE_POOLS: LazyLock<Mutex<HashMap<PathBuf, Vec<RegisteredPool>>>> =
+/// migration quiescence and admission lifetime follow the pools themselves,
+/// not the handles. No strong pool handle is kept here.
+static ACTIVE_POOLS: LazyLock<Mutex<HashMap<(PathBuf, WriterMode), Vec<RegisteredPool>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -180,7 +177,10 @@ impl RetainedAdmissionClaim {
             return;
         }
         entry.claims = entry.claims.saturating_sub(1);
-        if entry.claims == 0 {
+        // The admission outlives the last claim while a pool opened under it
+        // can still be used: a cloned handle is a real cross-process writer.
+        let released = entry.claims == 0 && admission_pools_quiesced(&self.key);
+        if released {
             guards.remove(&self.key);
         }
     }
@@ -205,8 +205,11 @@ impl Drop for RetainedAdmissionClaim {
 
 pub struct GuardedPool {
     guard: Arc<WorkspaceWriterGuard>,
-    pool: SqlitePool,
-    _pool_registration: CooperativePoolRegistration,
+    /// Present until the handle is dropped: dropping gives it up first, so the
+    /// pool can report itself closed before the claim settles.
+    pool: Option<SqlitePool>,
+    /// This pool's cooperative registration; clones share it.
+    registration: u64,
     /// This handle's live claim on its retained admission entry.
     ///
     /// Declared last so the pool and its registration are dropped before the
@@ -217,8 +220,10 @@ pub struct GuardedPool {
 
 impl GuardedPool {
     #[must_use]
-    pub const fn pool(&self) -> &SqlitePool {
-        &self.pool
+    pub fn pool(&self) -> &SqlitePool {
+        self.pool
+            .as_ref()
+            .expect("the pool is present until the handle is dropped")
     }
 
     #[must_use]
@@ -226,12 +231,36 @@ impl GuardedPool {
         &self.guard
     }
 
-    /// Clone the underlying pool and register the handle for cooperative quiescence.
+    /// Clone the underlying pool.
+    ///
+    /// The clone shares this handle's cooperative registration and admission:
+    /// closing any one of them closes them all, so the OS admission stays held
+    /// until the last clone is closed or dropped.
     #[must_use]
     pub fn clone_pool(&self) -> SqlitePool {
-        let pool = self.pool.clone();
-        register_pool_handle(&self.guard, &pool);
-        pool
+        self.pool().clone()
+    }
+
+    fn pool_key(&self) -> (PathBuf, WriterMode) {
+        (canonical_db_path(&self.guard.db_path), self.guard.mode)
+    }
+
+    /// Withdraw this pool's cooperative registration once it can no longer be
+    /// used, so the admission settles without waiting for a watcher.
+    fn settle_closed_pool(&self) {
+        if self.pool().is_closed() {
+            unregister_pool_handle(&self.pool_key(), self.registration);
+        }
+    }
+
+    /// Withdraw this handle's registration if the pool it just gave up has
+    /// closed — i.e. no clone of it is left usable.
+    fn settle_dropped_pool(&self) {
+        let mut pools = ACTIVE_POOLS.lock().expect("pool registry poisoned");
+        let Some(registered) = pools.get_mut(&self.pool_key()) else {
+            return;
+        };
+        registered.retain_mut(|reg| reg.id != self.registration || registration_open(reg));
     }
 
     /// Give up THIS handle's live claim on its retained admission entry.
@@ -242,6 +271,7 @@ impl GuardedPool {
     /// creator's or a joiner's, in this mode or any other — is never evicted,
     /// and a second call is a no-op.
     pub fn release_retained_admission(&self) {
+        self.settle_closed_pool();
         self.claim.release();
     }
 }
@@ -346,20 +376,31 @@ pub fn retain_writer_guard(guard: Arc<WorkspaceWriterGuard>) {
 
 fn register_pool_handle(guard: &Arc<WorkspaceWriterGuard>, pool: &SqlitePool) -> u64 {
     let id = POOL_REG_ID.fetch_add(1, Ordering::Relaxed);
-    let key = canonical_db_path(&guard.db_path);
+    let key = (canonical_db_path(&guard.db_path), guard.mode);
     ACTIVE_POOLS
         .lock()
         .expect("pool registry poisoned")
-        .entry(key)
+        .entry(key.clone())
         .or_default()
         .push(RegisteredPool {
             id,
-            handle: pool.clone(),
+            close_event: Some(pool.close_event()),
         });
+
+    // Every pool is opened from async code, so a driver is present. The
+    // watcher settles an admission whose last claim is already gone when this
+    // pool finally closes; it holds only the close event, never the pool.
+    if let Ok(driver) = tokio::runtime::Handle::try_current() {
+        let closed = pool.close_event();
+        driver.spawn(async move {
+            closed.await;
+            settle_released_admission(&key);
+        });
+    }
     id
 }
 
-fn unregister_pool_handle(key: &Path, id: u64) {
+fn unregister_pool_handle(key: &(PathBuf, WriterMode), id: u64) {
     let mut pools = ACTIVE_POOLS.lock().expect("pool registry poisoned");
     if let Some(registered) = pools.get_mut(key) {
         registered.retain(|reg| reg.id != id);
@@ -369,20 +410,70 @@ fn unregister_pool_handle(key: &Path, id: u64) {
     }
 }
 
-/// Whether every cooperative pool this process opened on `db_path` reports
-/// closed, dropping the handles that have.
+/// Whether a registration's pool can still be used.
+///
+/// The close event is polled in place, so no strong pool handle is needed: an
+/// explicitly closed pool has fired it, and a pool whose last handle went away
+/// fires it as it is dropped.
+fn registration_open(registered: &mut RegisteredPool) -> bool {
+    let Some(event) = registered.close_event.as_mut() else {
+        return false;
+    };
+    let mut cx = Context::from_waker(Waker::noop());
+    if Pin::new(event).poll(&mut cx).is_ready() {
+        registered.close_event = None;
+        return false;
+    }
+    true
+}
+
+/// Whether the admission `key` has no still-open cooperative pool.
+///
+/// Called while the admission registry lock is held, so the two registries are
+/// always taken in the same order.
+fn admission_pools_quiesced(key: &(PathBuf, WriterMode)) -> bool {
+    let mut pools = ACTIVE_POOLS.lock().expect("pool registry poisoned");
+    let Some(registered) = pools.get_mut(key) else {
+        return true;
+    };
+    registered.retain_mut(registration_open);
+    let quiesced = registered.is_empty();
+    if quiesced {
+        pools.remove(key);
+    }
+    quiesced
+}
+
+/// Whether every cooperative pool this process opened on `db_path` — in any
+/// mode — can no longer be used.
 fn cooperative_pools_quiesced(db_path: &Path) -> bool {
     let target = canonical_db_path(db_path);
     let mut pools = ACTIVE_POOLS.lock().expect("pool registry poisoned");
-    let Some(registered) = pools.get_mut(&target) else {
-        return true;
+    pools.retain(|(path, _), registered| {
+        if path != &target {
+            return true;
+        }
+        registered.retain_mut(registration_open);
+        !registered.is_empty()
+    });
+    pools.keys().all(|(path, _)| path != &target)
+}
+
+/// Release an admission whose last claim and last usable pool are both gone,
+/// dropping the guard and with it the OS locks.
+///
+/// Callers hold the admission registry lock, so the two registries are always
+/// taken in the same order.
+fn settle_released_admission(key: &(PathBuf, WriterMode)) {
+    let mut guards = ACTIVE_GUARDS
+        .lock()
+        .expect("writer guard registry poisoned");
+    let Some(entry) = guards.get(key) else {
+        return;
     };
-    registered.retain(|reg| !reg.handle.is_closed());
-    let quiesced = registered.is_empty();
-    if quiesced {
-        pools.remove(&target);
+    if entry.claims == 0 && admission_pools_quiesced(key) {
+        guards.remove(key);
     }
-    quiesced
 }
 
 /// This process's live guard for `(db_path, mode)`, if any.
@@ -436,19 +527,6 @@ async fn await_cooperative_quiescence(db_path: &Path) -> Result<(), LocalDbError
     Err(LocalDbError::OwnerBusy {
         resource: format!("{}: cooperative pools still active", target.display()),
     })
-}
-
-async fn close_cooperative_pools(db_path: &Path) {
-    let target = canonical_db_path(db_path);
-    let pools: Vec<SqlitePool> = ACTIVE_POOLS
-        .lock()
-        .expect("pool registry poisoned")
-        .get(&target)
-        .map(|registered| registered.iter().map(|reg| reg.handle.clone()).collect())
-        .unwrap_or_default();
-    for pool in pools {
-        pool.close().await;
-    }
 }
 
 fn migration_lock_path(db_path: &Path) -> PathBuf {
@@ -1075,12 +1153,11 @@ async fn open_guarded_pool_with_claim(
         guard.engine_epoch,
     );
     let pool = pool_with_context(&guard.db_path, context, options).await?;
-    let key = canonical_db_path(&guard.db_path);
-    let reg_id = register_pool_handle(&guard, &pool);
+    let registration = register_pool_handle(&guard, &pool);
     Ok(GuardedPool {
         guard,
-        pool,
-        _pool_registration: CooperativePoolRegistration { path: key, id: reg_id },
+        pool: Some(pool),
+        registration,
         claim,
     })
 }
@@ -1122,7 +1199,6 @@ pub async fn run_guarded_migrations(db_path: &Path) -> Result<(), LocalDbError> 
         return Ok(());
     }
     await_cooperative_quiescence(db_path).await?;
-    close_cooperative_pools(db_path).await;
     if !cooperative_pools_quiesced(db_path) {
         return Err(LocalDbError::OwnerBusy {
             resource: format!(
@@ -1307,7 +1383,13 @@ pub async fn init_engine_pool(
     let claim = joined.unwrap_or_else(|| reserve_retained_admission(&guard));
     let guard = published_guard(db_path, WriterMode::Engine, guard);
     let guarded = open_guarded_pool_with_claim(guard, claim, options).await?;
-    crate::seed_versions(guarded.pool()).await?;
+    if let Err(error) = crate::seed_versions(guarded.pool()).await {
+        // A failed seed ends this open: close the pool it just built (no other
+        // holder exists yet) so the claim released below leaves no admission
+        // and no cooperative pool behind.
+        guarded.pool().close().await;
+        return Err(error);
+    }
     Ok(guarded)
 }
 
@@ -1332,8 +1414,24 @@ pub async fn init_guarded_pool(
     let guard = published_guard(db_path, WriterMode::Direct, guard);
     let guarded =
         open_guarded_pool_with_claim(guard, claim, GuardedPoolOptions::default()).await?;
-    crate::seed_versions(guarded.pool()).await?;
+    if let Err(error) = crate::seed_versions(guarded.pool()).await {
+        // See `init_engine_pool`: a failed seed closes the pool it built so the
+        // released claim leaves nothing behind.
+        guarded.pool().close().await;
+        return Err(error);
+    }
     Ok(guarded)
+}
+
+impl Drop for GuardedPool {
+    /// Give up this handle's pool FIRST: if it was the last handle, the pool
+    /// marks itself closed here, so the settlement below already sees a pool no
+    /// other holder can use. A pool a clone still uses is left registered, and
+    /// the admission stays held with it.
+    fn drop(&mut self) {
+        self.pool.take();
+        self.settle_dropped_pool();
+    }
 }
 
 impl WorkspaceWriterGuard {
@@ -1551,11 +1649,12 @@ mod tests {
         drop(fence);
     }
 
-    /// A holder whose lifetime ends by dropping the handle — the local
-    /// provider store, any failed construction — gives its claim back, so the
-    /// last one releases the entry and the OS admission with it.
+    /// The provider-shaped close: closing each holder's own pool releases its
+    /// admission, so the last one frees the OS locks instead of leaving them to
+    /// a dead pool. Dropping a pool without closing keeps the admission, which
+    /// is the same rule that protects a cloned handle.
     #[tokio::test]
-    async fn dropped_handle_releases_the_last_admission() {
+    async fn closed_handles_release_the_last_admission() {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("state.db");
 
@@ -1566,13 +1665,16 @@ mod tests {
         let direct = init_guarded_pool(&db_path, BOOTSTRAP_CREATOR_ID)
             .await
             .unwrap();
-        // Exactly the provider store's shape: no explicit release call.
+        direct.pool().close().await;
         drop(direct);
-        drop(engine);
+        assert!(retained_guard(&db_path, WriterMode::Direct).is_none());
+        assert!(retained_guard(&db_path, WriterMode::Engine).is_some());
 
-        // Both shared migration locks went with their last claims.
+        engine.pool().close().await;
+        drop(engine);
+        assert!(retained_guard(&db_path, WriterMode::Engine).is_none());
         let fence = acquire_store_reset_fence(&db_path)
-            .expect("no writer admission survives the dropped holders");
+            .expect("no writer admission survives the closed holders");
         drop(fence);
     }
 

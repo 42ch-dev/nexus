@@ -1303,6 +1303,64 @@ async fn dropped_guard_holders_release_the_migration_lock() {
     );
 }
 
+/// A usable pool clone keeps the OS migration admission: a second process is
+/// refused while the clone can still run a query, and allowed once the pool is
+/// closed and the admission settled.
+#[tokio::test]
+async fn usable_pool_clone_blocks_another_process_until_settled() {
+    if std::env::var_os(CHILD_ENV).is_some() {
+        return;
+    }
+
+    let dir = TempDir::new().expect("tempdir");
+    let db = dir.path().join("state.db");
+
+    let guarded = init_engine_pool(&db).await.expect("engine owner");
+    let survivor = guarded.clone_pool();
+    drop(guarded);
+
+    // A real query proves the surviving clone is a usable writer.
+    let (one,): (i64,) = sqlx::query_as("SELECT 1")
+        .fetch_one(&survivor)
+        .await
+        .expect("survivor query");
+    assert_eq!(one, 1);
+
+    let blocked = dir.path().join("clone_fence_blocked");
+    let blocked_err = dir.path().join("clone_fence_blocked_err");
+    let mut child = spawn_child(
+        "migration_fence",
+        &db,
+        &[("OUT_PATH", blocked.to_string_lossy().to_string())],
+        &blocked_err,
+    );
+    reap(&mut child, &blocked_err);
+    assert_eq!(
+        fs::read_to_string(&blocked).expect("blocked outcome"),
+        "busy",
+        "a second process must not migrate while the clone is usable"
+    );
+
+    survivor.close().await;
+    release_retained_writer_guards(&db);
+    drop(survivor);
+
+    let allowed = dir.path().join("clone_fence_allowed");
+    let allowed_err = dir.path().join("clone_fence_allowed_err");
+    let mut child = spawn_child(
+        "migration_fence",
+        &db,
+        &[("OUT_PATH", allowed.to_string_lossy().to_string())],
+        &allowed_err,
+    );
+    reap(&mut child, &allowed_err);
+    assert_eq!(
+        fs::read_to_string(&allowed).expect("allowed outcome"),
+        "won",
+        "after the pool closed and its admission settled another process may migrate"
+    );
+}
+
 async fn child_main() {
     let mode = std::env::var(CHILD_ENV).expect("child mode");
     let db = PathBuf::from(std::env::var("DB_PATH").expect("db"));

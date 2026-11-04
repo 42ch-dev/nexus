@@ -867,16 +867,23 @@ async fn close_drain(inner: Arc<CoreInner>) {
         handle.shutdown().await;
     }
     // The pinned binding holds the local provider's OWN guarded pool (and the
-    // writer admission behind it), so a confirmed close must give that handle
-    // up with this open's own pool — otherwise a closed-but-referenced service
-    // would keep the admission it reported released (same rule as `guarded`).
-    // The binding is dropped here; it never chooses another provider and never
-    // transfers data (§4.2).
-    inner
+    // writer admission behind it). A confirmed close settles that pool
+    // explicitly — the provider owns the only handle to its admission — and
+    // only then gives the binding up with this open's own pool. Otherwise a
+    // closed-but-referenced service would keep the admission it reported
+    // released (same rule as `guarded`), and a dropped-but-unclosed provider
+    // pool would keep later migrations waiting on a pool nobody can use.
+    // The binding never chooses another provider and never transfers data
+    // (§4.2).
+    let binding = inner
         .memory
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .take();
+    if let Some(binding) = &binding {
+        binding.close().await;
+    }
+    drop(binding);
     inner.pool.close().await;
     // A confirmed close gives up exactly the admission claim THIS open took
     // over the home, joiner included. The claim — not who created the entry —

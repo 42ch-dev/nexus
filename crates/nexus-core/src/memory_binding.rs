@@ -53,6 +53,17 @@ impl MemoryProviderBinding {
         &self.space_id
     }
 
+    /// Close the provider-local handle this binding pins (§4.1 `close`).
+    ///
+    /// A local binding closes the one provider it owns, so the writer
+    /// admission that provider opened ends with this open. Idempotent; a
+    /// binding that serves no local provider has nothing to close.
+    pub(crate) async fn close(&self) {
+        if let Some(local) = &self.local {
+            local.close().await;
+        }
+    }
+
     /// The provider-local concrete handle, for local-only internals.
     ///
     /// # Errors

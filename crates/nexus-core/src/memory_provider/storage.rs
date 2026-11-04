@@ -635,6 +635,16 @@ const VISIBLE_SPACE_PREDICATE: &str = "EXISTS ( \
      )";
 
 impl MemoryStore {
+    /// Close this provider's own admitted pool.
+    ///
+    /// The provider holds the only handle to its writer admission, so closing
+    /// the pool here — explicitly, at the end of this provider's lifetime — is
+    /// what lets the cooperative admission settle. A read-only store simply
+    /// closes its read-only pool; it never held an admission. Idempotent.
+    pub(super) async fn close(&self) {
+        self.pool.close().await;
+    }
+
     /// Open an effect transaction and read the authorization clock **after** the
     /// write lock is held.
     ///

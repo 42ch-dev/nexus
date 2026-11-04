@@ -310,6 +310,44 @@ async fn confirmed_close_releases_the_local_providers_direct_admission() {
     }
 }
 
+/// A normal provider close settles the provider's own pool, so a genuinely
+/// pending guarded migration runs afterwards instead of waiting on a pool no
+/// one can use.
+#[tokio::test]
+async fn pending_guarded_migration_runs_after_a_normal_provider_close() {
+    let env = Env::new(None);
+    let core = CoreService::open(env.options(None))
+        .await
+        .expect("local default");
+    let principal = core.active_principal().await.expect("principal");
+    assert_eq!(
+        core.count_pending_reviews(&principal).await.expect("read").count,
+        0
+    );
+    assert!(core.close().await.expect("close").cleanup_confirmed);
+
+    // Make a real migration pending: drop one applied row the embedded
+    // migrator re-applies (its SQL is idempotent).
+    let pool = sqlx::SqlitePool::connect(&format!(
+        "sqlite://{}?mode=rwc",
+        env.db_path().display()
+    ))
+    .await
+    .expect("raw pool");
+    let dropped = sqlx::query("DELETE FROM _sqlx_migrations WHERE version = ?")
+        .bind(20_260_914_000_001_i64)
+        .execute(&pool)
+        .await
+        .expect("drop the applied row")
+        .rows_affected();
+    assert_eq!(dropped, 1, "the pinned idempotent migration is applied");
+    pool.close().await;
+
+    nexus_local_db::writer_protocol::run_guarded_migrations(&env.db_path())
+        .await
+        .expect("a pending guarded migration runs after the provider closed");
+}
+
 /// A failed `DirectWriter` pin must release only what that open owned: the
 /// live `EngineOwner`'s retained admission stays in the process registry, so
 /// the creator remains joinable afterwards.
