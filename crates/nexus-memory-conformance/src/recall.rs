@@ -37,7 +37,7 @@ use spoke_operations::{
 
 use crate::provider::FixtureMemoryProvider;
 use crate::spaces::{
-    bump_snapshot, internal, is_authorized, load_grants, requirement, snapshot_marker,
+    bump_snapshot, internal, is_authorized, load_grants, snapshot_marker,
     ENGINE_POLICY_VERSION, MAX_PAGE_SIZE,
 };
 
@@ -836,15 +836,23 @@ impl FixtureMemoryProvider {
         require_op_admitted(conn, "memory.profile.update", space_id).await?;
 
         let grants = load_grants(conn, space_id).await?;
-        if !is_authorized(
-            &grants,
-            principal_id,
-            space_id,
-            now,
-            &requirement("profile_write", Some(subject_id)),
-        ) {
+        // §6.5/§7.24: a profile is one subject-level trusted document, not a
+        // per-context record, so its write must cover shared document access.
+        // `reads_shared` is the published facet for exactly that; the plain
+        // `requirement()` helper (no contexts, no shared facet) would accept a
+        // context-restricted grant without `shared_access`, letting a principal
+        // replace trusted text it cannot even read.
+        let profile_write = GrantRequirement {
+            capability: "profile_write",
+            subject_id: Some(subject_id),
+            context_ids: Vec::new(),
+            reads_shared: true,
+            subject_all: false,
+        };
+        if !is_authorized(&grants, principal_id, space_id, now, &profile_write) {
             return Err(not_authorized(
-                "the authenticated principal holds no profile_write grant on this subject",
+                "the authenticated principal holds no profile_write grant covering shared \
+                 document access on this subject",
             ));
         }
         // A fenced or archived subject rejects every write (§7.7).
@@ -2371,6 +2379,133 @@ mod tests {
             .await
             .expect("authorized update");
         assert_eq!(change.revision, 2);
+
+        // §6.5/§7.24: a profile is a subject-level trusted document, so the
+        // write grant must cover shared document access exactly as the read
+        // does. A context-restricted grant without shared access never reaches
+        // the CAS: no create, no replace, and no bytes, revision or marker
+        // change.
+        scenario
+            .grant(LIMITED, &["profile_write"], Some(&["ctx-a"]), None)
+            .await;
+        let marker = scenario.marker().await;
+        let document = scenario
+            .raw_profile("personality")
+            .await
+            .expect("stored document");
+        let refused = scenario
+            .provider
+            .profile_update(
+                LIMITED,
+                &profile_update_request(
+                    &scenario.space_id,
+                    "personality",
+                    "context-only overwrite",
+                    "markdown",
+                    Some(2),
+                ),
+                now(),
+            )
+            .await;
+        assert_eq!(reject_code(refused), SpokeRejectCode::NotAuthorized);
+        let refused = scenario
+            .provider
+            .profile_update(
+                LIMITED,
+                &profile_update_request(
+                    &scenario.space_id,
+                    "style",
+                    "context-only create",
+                    "markdown",
+                    None,
+                ),
+                now(),
+            )
+            .await;
+        assert_eq!(reject_code(refused), SpokeRejectCode::NotAuthorized);
+        assert_eq!(scenario.marker().await, marker);
+        assert_eq!(
+            scenario.raw_profile("personality").await.as_deref(),
+            Some(document.as_str())
+        );
+        assert!(scenario.raw_profile("style").await.is_none());
+        assert_eq!(
+            scenario
+                .provider
+                .profile_get(CLIENT, &profile_get_request(&scenario.space_id, &[]), now())
+                .await
+                .expect("get after refusals")
+                .profiles
+                .iter()
+                .find(|profile| profile.profile_kind.as_str() == "personality")
+                .expect("personality profile")
+                .revision
+                .get(),
+            2
+        );
+
+        // Two partial grants on disjoint contexts are never unioned into
+        // shared coverage.
+        scenario
+            .grant(LIMITED, &["profile_write"], Some(&["ctx-b"]), None)
+            .await;
+        let union_marker = scenario.marker().await;
+        let refused = scenario
+            .provider
+            .profile_update(
+                LIMITED,
+                &profile_update_request(
+                    &scenario.space_id,
+                    "personality",
+                    "union overwrite",
+                    "markdown",
+                    Some(2),
+                ),
+                now(),
+            )
+            .await;
+        assert_eq!(reject_code(refused), SpokeRejectCode::NotAuthorized);
+        assert_eq!(scenario.marker().await, union_marker);
+        assert_eq!(
+            scenario.raw_profile("personality").await.as_deref(),
+            Some(document.as_str())
+        );
+
+        // The shared facet on the same context restriction is the legal
+        // control: the document is read and written again.
+        scenario
+            .grant(LIMITED, &["profile_write"], Some(&["ctx-a"]), Some(true))
+            .await;
+        let change = scenario
+            .provider
+            .profile_update(
+                LIMITED,
+                &profile_update_request(
+                    &scenario.space_id,
+                    "personality",
+                    "shared context write",
+                    "markdown",
+                    Some(2),
+                ),
+                now(),
+            )
+            .await
+            .expect("shared access admits the write");
+        assert_eq!(change.revision, 3);
+        assert_eq!(
+            scenario
+                .provider
+                .profile_get(LIMITED, &profile_get_request(&scenario.space_id, &[]), now())
+                .await
+                .expect("shared access reads the written document")
+                .profiles
+                .iter()
+                .find(|profile| profile.profile_kind.as_str() == "personality")
+                .expect("personality profile")
+                .document
+                .body,
+            "shared context write"
+        );
     }
 
     #[tokio::test]
