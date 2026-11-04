@@ -3084,7 +3084,7 @@ mod tests {
 
         // Exactly max_content_bytes of JCS-serialized ASCII content is admitted.
         let boundary_text = "a".repeat(MAX_CONTENT_BYTES - text_prefix);
-        let created = scenario
+        let created_ascii = scenario
             .provider
             .records_create(
                 OPERATOR,
@@ -3102,9 +3102,10 @@ mod tests {
             .expect("content at the exact bound is admitted");
         let record = scenario
             .provider
-            .records_get(OPERATOR, &get_request(&space, &created.record_id), now())
+            .records_get(OPERATOR, &get_request(&space, &created_ascii.record_id), now())
             .await
             .expect("boundary record reads back");
+        assert_eq!(live(&record).content.text, boundary_text);
         assert_eq!(
             live(&record).content.text.len(),
             MAX_CONTENT_BYTES - text_prefix
@@ -3148,7 +3149,7 @@ mod tests {
         // count alone is far below the limit.
         let utf8_boundary = format!("{}{}", "é".repeat(32_762), "a");
         assert_eq!(utf8_boundary.len(), MAX_CONTENT_BYTES - text_prefix);
-        scenario
+        let created_utf8 = scenario
             .provider
             .records_create(
                 OPERATOR,
@@ -3164,6 +3165,12 @@ mod tests {
             )
             .await
             .expect("multi-byte content at the exact bound is admitted");
+        let record = scenario
+            .provider
+            .records_get(OPERATOR, &get_request(&space, &created_utf8.record_id), now())
+            .await
+            .expect("multi-byte boundary record reads back");
+        assert_eq!(live(&record).content.text, utf8_boundary);
         let utf8_overflow = "é".repeat(32_763);
         assert_eq!(utf8_overflow.len(), MAX_CONTENT_BYTES - text_prefix + 1);
         assert_eq!(
@@ -3191,7 +3198,7 @@ mod tests {
         let structured_base = "{\"structured\":{\"pad\":\"\"},\"text\":\"\"}";
         let pad = "x".repeat(MAX_CONTENT_BYTES - structured_base.len());
         let structured = json!({ "text": "", "structured": { "pad": pad } });
-        let created = scenario
+        let created_structured = scenario
             .provider
             .records_create(
                 OPERATOR,
@@ -3202,7 +3209,7 @@ mod tests {
             .expect("structured content at the exact bound is admitted");
         let record = scenario
             .provider
-            .records_get(OPERATOR, &get_request(&space, &created.record_id), now())
+            .records_get(OPERATOR, &get_request(&space, &created_structured.record_id), now())
             .await
             .expect("structured record reads back");
         assert_eq!(
@@ -3234,7 +3241,82 @@ mod tests {
             SpokeRejectCode::InvalidInput
         );
 
-        // Update applies the same bound on its content variant.
+        // The update path applies the same serialized-byte bound. Each exact
+        // update uses the record's true current revision and is read back; each
+        // overflow uses that record's *new* current revision, so INVALID_INPUT
+        // cannot be a mislabelled CAS refusal.
+        let before_updates = marker(&scenario).await;
+
+        let ascii_updated = "b".repeat(MAX_CONTENT_BYTES - text_prefix);
+        let updated = scenario
+            .provider
+            .records_update(
+                OPERATOR,
+                &update_content_request(&space, &created_ascii.record_id, 1, &ascii_updated, "update-ascii-exact"),
+                now(),
+            )
+            .await
+            .expect("ASCII update at the exact bound succeeds");
+        assert_eq!(updated.revision, 2);
+        let record = scenario
+            .provider
+            .records_get(OPERATOR, &get_request(&space, &created_ascii.record_id), now())
+            .await
+            .expect("ASCII update reads back");
+        assert_eq!(live(&record).content.text, ascii_updated);
+        assert_eq!(live(&record).content.text.len(), MAX_CONTENT_BYTES - text_prefix);
+        assert_eq!(live(&record).revision.get(), 2);
+        assert_eq!(marker(&scenario).await, before_updates + 1);
+        let overflow = refusal(
+            scenario
+                .provider
+                .records_update(
+                    OPERATOR,
+                    &update_content_request(
+                        &space,
+                        &created_ascii.record_id,
+                        2,
+                        &"c".repeat(MAX_CONTENT_BYTES - text_prefix + 1),
+                        "update-ascii-overflow",
+                    ),
+                    now(),
+                )
+                .await,
+        );
+        assert_eq!(overflow.code, SpokeRejectCode::InvalidInput);
+        let details = overflow.details.expect("limit details");
+        assert_eq!(details["field"], json!("content"));
+        assert_eq!(details["limit"], json!("max_content_bytes"));
+        assert_eq!(marker(&scenario).await, before_updates + 1, "refusal has no effect");
+        let record = scenario
+            .provider
+            .records_get(OPERATOR, &get_request(&space, &created_ascii.record_id), now())
+            .await
+            .expect("ASCII record after refused update");
+        assert_eq!(live(&record).content.text, ascii_updated);
+        assert_eq!(live(&record).revision.get(), 2);
+
+        let utf8_updated = format!("{}{}", "é".repeat(32_762), "b");
+        assert_eq!(utf8_updated.len(), MAX_CONTENT_BYTES - text_prefix);
+        let updated = scenario
+            .provider
+            .records_update(
+                OPERATOR,
+                &update_content_request(&space, &created_utf8.record_id, 1, &utf8_updated, "update-utf8-exact"),
+                now(),
+            )
+            .await
+            .expect("multi-byte update at the exact bound succeeds");
+        assert_eq!(updated.revision, 2);
+        let record = scenario
+            .provider
+            .records_get(OPERATOR, &get_request(&space, &created_utf8.record_id), now())
+            .await
+            .expect("multi-byte update reads back");
+        assert_eq!(live(&record).content.text, utf8_updated);
+        assert_eq!(live(&record).content.text.len(), MAX_CONTENT_BYTES - text_prefix);
+        assert_eq!(live(&record).revision.get(), 2);
+        assert_eq!(marker(&scenario).await, before_updates + 2);
         assert_eq!(
             reject_code(
                 scenario
@@ -3243,10 +3325,10 @@ mod tests {
                         OPERATOR,
                         &update_content_request(
                             &space,
-                            &created.record_id,
-                            1,
-                            &"a".repeat(MAX_CONTENT_BYTES - text_prefix + 1),
-                            "update-overflow",
+                            &created_utf8.record_id,
+                            2,
+                            &"é".repeat(32_763),
+                            "update-utf8-overflow",
                         ),
                         now(),
                     )
@@ -3254,6 +3336,73 @@ mod tests {
             ),
             SpokeRejectCode::InvalidInput
         );
+        assert_eq!(marker(&scenario).await, before_updates + 2, "refusal has no effect");
+        let record = scenario
+            .provider
+            .records_get(OPERATOR, &get_request(&space, &created_utf8.record_id), now())
+            .await
+            .expect("multi-byte record after refused update");
+        assert_eq!(live(&record).content.text, utf8_updated);
+        assert_eq!(live(&record).revision.get(), 2);
+
+        let updated_pad = "y".repeat(MAX_CONTENT_BYTES - structured_base.len());
+        let structured_update: MemoryRecordsUpdateRequest = serde_json::from_value(json!({
+            "space_id": &space,
+            "record_id": &created_structured.record_id,
+            "expected_revision": 1,
+            "content": { "text": "", "structured": { "pad": &updated_pad } },
+            "idempotency_key": "update-structured-exact",
+        }))
+        .expect("valid structured records.update request");
+        let updated = scenario
+            .provider
+            .records_update(OPERATOR, &structured_update, now())
+            .await
+            .expect("structured update at the exact bound succeeds");
+        assert_eq!(updated.revision, 2);
+        let record = scenario
+            .provider
+            .records_get(OPERATOR, &get_request(&space, &created_structured.record_id), now())
+            .await
+            .expect("structured update reads back");
+        assert_eq!(live(&record).content.text, "");
+        assert_eq!(
+            live(&record).content.structured.as_ref(),
+            Some(&json!({ "pad": &updated_pad }))
+        );
+        assert_eq!(live(&record).revision.get(), 2);
+        assert_eq!(marker(&scenario).await, before_updates + 3);
+        let structured_overflow_update: MemoryRecordsUpdateRequest = serde_json::from_value(json!({
+            "space_id": &space,
+            "record_id": &created_structured.record_id,
+            "expected_revision": 2,
+            "content": {
+                "text": "",
+                "structured": { "pad": "z".repeat(MAX_CONTENT_BYTES - structured_base.len() + 1) },
+            },
+            "idempotency_key": "update-structured-overflow",
+        }))
+        .expect("valid structured records.update request");
+        assert_eq!(
+            reject_code(
+                scenario
+                    .provider
+                    .records_update(OPERATOR, &structured_overflow_update, now())
+                    .await
+            ),
+            SpokeRejectCode::InvalidInput
+        );
+        assert_eq!(marker(&scenario).await, before_updates + 3, "refusal has no effect");
+        let record = scenario
+            .provider
+            .records_get(OPERATOR, &get_request(&space, &created_structured.record_id), now())
+            .await
+            .expect("structured record after refused update");
+        assert_eq!(
+            live(&record).content.structured.as_ref(),
+            Some(&json!({ "pad": &updated_pad }))
+        );
+        assert_eq!(live(&record).revision.get(), 2);
     }
 
     #[tokio::test]
