@@ -36,7 +36,8 @@ use tokio_tungstenite::WebSocketStream;
 use spoke_connect::core::{derive_peer_id_from_ed25519_pubkey, sign_hello_ed25519};
 use spoke_connect::remote::{
     connect_remote_adapter, connect_responder, ConnectResponder,
-    ConnectResponderOptions, RemoteAdapter, RemoteAdapterOptions, RemoteAdapterError,
+    ConnectResponderOptions, ConnectResponderState, RemoteAdapter, RemoteAdapterOptions,
+    RemoteAdapterError,
     RemoteIdentity, RemoteServePorts, RemoteServePortsComposite, Transport,
 };
 use spoke_operations::spoke_schemas::connect::{ConnectHello, ConnectSession};
@@ -324,16 +325,21 @@ where
         if self.closed.swap(true, Ordering::Relaxed) {
             return Ok(());
         }
-        // Wake a parked receiver FIRST: a peer that stopped reading must never
-        // hold this end inside the sink close.
-        self.stream.lock().await.take();
+        // Signal BEFORE touching any lock. A genuinely parked receive holds the
+        // stream mutex across its native poll, so acquiring that mutex first
+        // would deadlock against the very receive this close must release.
         self.notify.notify_waiters();
-        let mut guard = self.sink.lock().await;
-        if let Some(sink) = guard.as_mut() {
-            // Bounded: a stalled peer cannot block teardown indefinitely.
-            let _ = tokio::time::timeout(SHUTDOWN_BOUND, sink.close()).await;
+        if let Ok(mut stream) = tokio::time::timeout(SHUTDOWN_BOUND, self.stream.lock()).await {
+            stream.take();
         }
-        drop(guard);
+        self.notify.notify_waiters();
+        if let Ok(mut sink) = tokio::time::timeout(SHUTDOWN_BOUND, self.sink.lock()).await {
+            if let Some(sink) = sink.as_mut() {
+                // Bounded: a stalled peer cannot block teardown indefinitely.
+                let _ = tokio::time::timeout(SHUTDOWN_BOUND, sink.close()).await;
+            }
+            sink.take();
+        }
         Ok(())
     }
 }
@@ -498,12 +504,22 @@ impl Fixture {
         self.client = client;
     }
 
-    /// Release the typed session and the responder, then yield so their tasks
-    /// observe the close — bounded, so teardown can never hang the suite.
+    /// Release the typed session and the responder, then observe that the
+    /// responder actually reached `Closed` — bounded, never a blind yield.
     async fn shutdown(self) {
         self.client.close();
         self.responder.close();
-        let _ = tokio::time::timeout(SHUTDOWN_BOUND, tokio::task::yield_now()).await;
+        let deadline = Instant::now() + SHUTDOWN_BOUND;
+        while self.responder.state() != ConnectResponderState::Closed
+            && Instant::now() < deadline
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert_eq!(
+            self.responder.state(),
+            ConnectResponderState::Closed,
+            "the responder reaches a closed state within the teardown bound"
+        );
     }
 
     /// Ensure the subject every capture/record op places into.
@@ -2030,10 +2046,21 @@ async fn bounded_teardown_releases_a_parked_receiver_and_a_stalled_peer() {
         .expect("the host task is bounded")
         .expect("the localhost host task");
 
-    // A receiver parked on our own end with nothing inbound.
-    let waiting = {
+    // A receiver parked on our own end with nothing inbound. The native poll is
+    // observed as Pending first (a bounded wait on the actual task), so the
+    // close really races a receive that already holds the stream mutex.
+    let parked = Arc::clone(&stalled);
+    let mut waiting = tokio::spawn(async move { parked.recv().await });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(150), &mut waiting)
+            .await
+            .is_err(),
+        "the receive is genuinely parked on the native poll"
+    );
+    // A concurrent blocked-send attempt must also be released by the close.
+    let sender = {
         let stalled = Arc::clone(&stalled);
-        tokio::spawn(async move { stalled.recv().await })
+        tokio::spawn(async move { stalled.send(&[0_u8; 64]).await })
     };
     tokio::time::timeout(SHUTDOWN_BOUND, stalled.close())
         .await
@@ -2050,6 +2077,11 @@ async fn bounded_teardown_releases_a_parked_receiver_and_a_stalled_peer() {
         ),
         "a parked recv wakes with Closed, never hangs: {released:?}"
     );
+    let sent = tokio::time::timeout(SHUTDOWN_BOUND, sender)
+        .await
+        .expect("the blocked send is released")
+        .expect("the sender task joins");
+    assert!(sent.is_err(), "a closed transport refuses the send: {sent:?}");
     responder.close();
     fixture.shutdown().await;
 }
@@ -2305,8 +2337,34 @@ async fn commit_failures_on_all_three_delegated_mutations_are_uncertain() {
     assert_eq!(fixture.count("records").await, 0);
     assert_eq!(fixture.count("idempotency_namespace").await, namespace_before);
 
-    // Same keys recover once the real commit failure is removed.
+    // Same keys recover once the real commit failure is removed — including the
+    // exact capture request that failed, with its original key.
     remove_commit_failure(&fixture.db_path).await;
+    let recovered_capture = wire(&expect_ok(
+        fixture
+            .client
+            .capture(
+                &fixture.principal,
+                from_value(fixture.capture_request("commit-capture", "capture material", CONTEXT))
+                    .expect("capture retry request"),
+            )
+            .await,
+    ));
+    assert_eq!(recovered_capture["status"], json!("committed"));
+    assert_eq!(
+        recovered_capture["result"]["candidate_ids"]
+            .as_array()
+            .expect("candidate ids")
+            .len(),
+        1,
+        "the retried capture commits exactly one effect"
+    );
+    assert_eq!(
+        fixture.count("candidates").await,
+        candidates_before + 1,
+        "the failed attempt contributed nothing and the retry contributed one candidate"
+    );
+    assert_eq!(fixture.count("receipts").await, receipts_before + 1);
     let dismissed = wire(&expect_ok(
         fixture
             .client

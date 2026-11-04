@@ -1915,14 +1915,6 @@ impl FixtureMemoryProvider {
         require_served_space(self, space_id)?;
         let subject_id = request.subject_id.as_str();
         let (visibility, context_id) = placement(&request.capture_scope);
-        let grants = load_grants(conn, space_id).await?;
-        require_one_grant(
-            &grants,
-            principal_id,
-            space_id,
-            now,
-            &[scope_requirement("capture", subject_id, visibility, context_id)],
-        )?;
         let admission =
             Mutation::keyed(OP_CAPTURE, request.idempotency_key.as_str(), admitted);
         let target = ReceiptTarget::for_scope(
@@ -1932,11 +1924,25 @@ impl FixtureMemoryProvider {
             visibility,
             context_id,
         )?;
+        // Resolve and authorize an EXISTING binding first: its retained target
+        // (and the payload digest) decide the replay, conflict or retention
+        // outcome, so a changed request naming a target the caller cannot reach
+        // must still answer `IDEMPOTENCY_CONFLICT` rather than an authorization
+        // refusal. Only a fresh (or fully reusable) key authorizes the request's
+        // current target.
         if let Some(replay) =
             resolve_or_release(conn, space_id, principal_id, &admission, now).await?
         {
             return Ok(replay);
         }
+        let grants = load_grants(conn, space_id).await?;
+        require_one_grant(
+            &grants,
+            principal_id,
+            space_id,
+            now,
+            &[scope_requirement("capture", subject_id, visibility, context_id)],
+        )?;
         require_space_admits(conn, OP_CAPTURE, space_id).await?;
         require_write_target(conn, space_id, subject_id, context_id).await?;
 
