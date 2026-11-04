@@ -107,12 +107,20 @@ async fn seed(pool: &SqlitePool) -> Seed {
 }
 
 fn namespace<'a>(seed: &'a Seed, client_identity: &'a str) -> RemoteBindingNamespace<'a> {
+    namespace_at(seed, client_identity, 3)
+}
+
+fn namespace_at<'a>(
+    seed: &'a Seed,
+    client_identity: &'a str,
+    generation: u64,
+) -> RemoteBindingNamespace<'a> {
     RemoteBindingNamespace {
         owner_creator_id: OWNER,
         character_id: &seed.character_id,
         binding_id: &seed.binding_id,
         authority_host_id: HOST,
-        authority_generation: 3,
+        authority_generation: generation,
         space_id: SPACE,
         client_identity,
     }
@@ -428,3 +436,72 @@ async fn late_acknowledgement_cannot_revive_a_deleted_binding() {
     .unwrap();
     assert_eq!(count, 0, "the deleted binding gains no new dependency");
 }
+
+/// The full `NonZeroU64` generation range is exact identity: two generations at
+/// (and beyond) the signed-integer boundary share no row, so releasing one can
+/// never release the other's live dependency.
+#[tokio::test]
+async fn cross_generation_release_cannot_release_another_generation() {
+    let (pool, _dir) = fresh_pool().await;
+    let seed = seed(&pool).await;
+    const SIGNED_MAX: u64 = i64::MAX as u64;
+    let at_signed_max = namespace_at(&seed, CLIENT, SIGNED_MAX);
+    let just_past = namespace_at(&seed, CLIENT, SIGNED_MAX + 1);
+    let at_unsigned_max = namespace_at(&seed, CLIENT, u64::MAX);
+    for ns in [&at_signed_max, &just_past, &at_unsigned_max] {
+        record(
+            &pool,
+            ns,
+            RemoteBindingObjectKind::Candidate,
+            "cand_cross_generation",
+            RemoteBindingObjectState::Live,
+        )
+        .await;
+    }
+    assert_eq!(
+        dependencies(&pool, &seed.binding_id).await,
+        (0, 3),
+        "three distinct generations are three distinct live facts"
+    );
+
+    record(
+        &pool,
+        &just_past,
+        RemoteBindingObjectKind::Candidate,
+        "cand_cross_generation",
+        RemoteBindingObjectState::Released,
+    )
+    .await;
+    assert_eq!(
+        dependencies(&pool, &seed.binding_id).await,
+        (0, 2),
+        "releasing one generation leaves the others live"
+    );
+    assert_remote_conflict(remove(&seed, &pool).await.unwrap_err());
+
+    record(
+        &pool,
+        &at_unsigned_max,
+        RemoteBindingObjectKind::Candidate,
+        "cand_cross_generation",
+        RemoteBindingObjectState::Released,
+    )
+    .await;
+    assert_eq!(dependencies(&pool, &seed.binding_id).await, (0, 1));
+
+    record(
+        &pool,
+        &at_signed_max,
+        RemoteBindingObjectKind::Candidate,
+        "cand_cross_generation",
+        RemoteBindingObjectState::Released,
+    )
+    .await;
+    assert_eq!(dependencies(&pool, &seed.binding_id).await, (0, 0));
+    remove(&seed, &pool).await.unwrap();
+    assert!(
+        fact_states(&pool, &seed.binding_id).await.is_empty(),
+        "terminal facts are cleared with the binding"
+    );
+}
+

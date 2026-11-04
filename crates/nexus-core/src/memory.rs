@@ -105,6 +105,34 @@ fn now_iso() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 
+/// Whether one capture refusal proves this wire attempt had no effect (D18).
+///
+/// §14.2 classifies every memory reject in `details.retry_class`, and the
+/// provider documents `OUTCOME_UNCERTAIN` — including a response-projection
+/// failure *after* commit — as an effect that may already exist. Only a
+/// `terminal` class on a pre-effect refusal code proves a clean no-effect
+/// result. A retryable/uncertain class, a missing or unknown class, and any
+/// code whose capture semantics do not prove a pre-effect refusal all keep the
+/// durable admission.
+fn remote_capture_reject_proves_no_effect(reject: &SpokeReject) -> bool {
+    let retry_class = reject
+        .details
+        .as_ref()
+        .and_then(|details| details.get("retry_class"))
+        .and_then(Value::as_str);
+    if retry_class != Some("terminal") {
+        return false;
+    }
+    matches!(
+        reject.code,
+        SpokeRejectCode::NotAuthorized
+            | SpokeRejectCode::SpaceFrozen
+            | SpokeRejectCode::SubjectFenced
+            | SpokeRejectCode::InvalidInput
+            | SpokeRejectCode::NotFound
+    )
+}
+
 fn pagination_info(limit: u32, has_more: bool, next_cursor: Option<&str>) -> serde_json::Value {
     serde_json::json!({
         "limit": limit,
@@ -2389,8 +2417,10 @@ impl CoreService {
     /// cancellation, transport failure or uncertain commit cannot leave the
     /// binding removable while the effect may exist. Only this attempt's
     /// definite committed receipt publishes its candidate references and retires
-    /// this admission — together in one local transaction; a definite no-effect
-    /// refusal retires it too. Nothing else clears it: a later attempt, receipt
+    /// this admission — together in one local transaction; a refusal that proves
+    /// no effect (`retry_class = terminal` on a pre-effect code) retires it too,
+    /// while an uncertain/retryable/unknown/contradictory result keeps it
+    /// (I-000196). Nothing else clears it: a later attempt, receipt
     /// or counter never settles an older unknown, so an unprovable attempt keeps
     /// binding non-removable (the supervisor-selected conservative policy;
     /// owner confirmation pending). The provider is never asked to replay or
@@ -2495,21 +2525,55 @@ impl CoreService {
                 Ok(())
             }
             SpokeResult::Reject(reject) => {
-                // A definite refusal proves no effect: retire only this attempt.
-                let mut retired = nexus_local_db::begin_immediate(&self.inner.pool)
+                // D18/I-000196: only a refusal that proves this attempt had no
+                // effect retires its admission. `OUTCOME_UNCERTAIN` (including a
+                // response-projection failure after commit), a retryable class,
+                // a missing/unknown class or a contradictory code all keep it;
+                // a local settlement failure keeps it too. The provider outcome
+                // is surfaced unchanged either way.
+                if let Err(error) = self
+                    .settle_remote_capture_reject(&admission_id, &namespace, &reject)
                     .await
-                    .map_err(map_local_db_error)?;
-                nexus_local_db::retire_remote_binding_admission_tx(
-                    &mut retired,
-                    &admission_id,
-                    &namespace,
-                )
-                .await
-                .map_err(map_local_db_error)?;
-                retired.commit().await.map_err(sqlx_internal)?;
+                {
+                    tracing::warn!(
+                        admission_id = %admission_id,
+                        error = %error,
+                        "capture refusal settlement could not persist; the admission keeps protection"
+                    );
+                }
                 Err(memory_reject(&reject))
             }
         }
+    }
+
+    /// Apply the D18 consequence of one definite capture refusal.
+    ///
+    /// Retire this attempt's admission only when the result proves the attempt
+    /// had no effect. An uncertain, unknown, malformed or contradictory refusal
+    /// — and a local retirement failure — leave it in place, so removal keeps
+    /// refusing until this exact attempt's own definite evidence settles it; no
+    /// later result clears it.
+    async fn settle_remote_capture_reject(
+        &self,
+        admission_id: &str,
+        namespace: &nexus_local_db::RemoteBindingNamespace<'_>,
+        reject: &SpokeReject,
+    ) -> CoreResult<()> {
+        if !remote_capture_reject_proves_no_effect(reject) {
+            return Ok(());
+        }
+        let mut retired = nexus_local_db::begin_immediate(&self.inner.pool)
+            .await
+            .map_err(map_local_db_error)?;
+        nexus_local_db::retire_remote_binding_admission_tx(
+            &mut retired,
+            admission_id,
+            namespace,
+        )
+        .await
+        .map_err(map_local_db_error)?;
+        retired.commit().await.map_err(sqlx_internal)?;
+        Ok(())
     }
 
     #[allow(clippy::significant_drop_tightening)] // the guard deliberately spans the whole operation
@@ -5126,6 +5190,259 @@ mod tests {
             memory.candidate(&own.candidate_id).await.unwrap().unwrap()["status"],
             "consumed",
             "the matched row is dismissed through the standard op"
+        );
+    }
+
+    fn retry_class_reject(code: SpokeRejectCode, retry_class: Option<&str>) -> SpokeReject {
+        SpokeReject {
+            code,
+            message: "capture refused".to_string(),
+            details: retry_class.map(|retry_class| {
+                json!({ "retry_class": retry_class })
+                    .as_object()
+                    .expect("retry-class object")
+                    .clone()
+            }),
+        }
+    }
+
+    async fn open_d18_core() -> (TempDir, CoreService) {
+        let tmp = TempDir::new().unwrap();
+        let user_home = tmp.path().to_path_buf();
+        let nexus_home = user_home.join(".nexus42");
+        std::fs::create_dir_all(&nexus_home).unwrap();
+        std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+            &user_home,
+            CREATOR_UNDER_TEST,
+            "default",
+        ))
+        .unwrap();
+        std::fs::write(
+            nexus_home.join("config.toml"),
+            format!(
+                "active_creator_id = \"{CREATOR_UNDER_TEST}\"\n\
+                 [active_workspace_slug_by_creator]\n\
+                 \"{CREATOR_UNDER_TEST}\" = \"default\""
+            ),
+        )
+        .unwrap();
+        let db_path =
+            nexus_home_layout::workspace_state_db_path(&user_home, CREATOR_UNDER_TEST, "default");
+        {
+            let guarded =
+                init_engine_pool(&db_path, CREATOR_UNDER_TEST, GuardedPoolOptions::default())
+                    .await
+                    .unwrap();
+            let pool = guarded.clone_pool();
+            ensure_creator_row(&pool, CREATOR_UNDER_TEST, "Owner")
+                .await
+                .unwrap();
+            for world in ["wld_d18A", "wld_d18B"] {
+                sqlx::query(
+                    "INSERT INTO narrative_worlds \
+                     (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+                      time_policy, metadata_json, created_at) \
+                     VALUES (?, 'ws', ?, ?, ?, 'active', 'private', 'manual', '{}', \
+                      datetime('now'))",
+                )
+                .bind(world)
+                .bind(CREATOR_UNDER_TEST)
+                .bind(world)
+                .bind(world)
+                .execute(&pool)
+                .await
+                .unwrap();
+            }
+            pool.close().await;
+        }
+        let core = CoreService::open(CoreOpenOptions {
+            user_home,
+            access: CoreAccess::EngineOwner,
+            memory: None,
+        })
+        .await
+        .unwrap();
+        (tmp, core)
+    }
+
+    async fn seed_d18_binding(core: &CoreService) -> (String, String) {
+        let pool = core.pool();
+        let created = nexus_local_db::create_character_with_initial_binding(
+            pool,
+            nexus_local_db::CreateCharacterParams {
+                owner_creator_id: CREATOR_UNDER_TEST,
+                display_name: "Dana",
+                image_uri: None,
+                persona_json: "{}",
+                world_id: "wld_d18A",
+                world_sheet_entry_id: None,
+            },
+        )
+        .await
+        .unwrap();
+        let character_id = created.character.character_id;
+        let binding_id = created.binding.binding_id;
+        nexus_local_db::add_actor_world_binding(
+            pool,
+            nexus_local_db::CreateBindingParams {
+                owner_creator_id: CREATOR_UNDER_TEST,
+                character_id: &character_id,
+                world_id: "wld_d18B",
+                world_sheet_entry_id: None,
+            },
+        )
+        .await
+        .unwrap();
+        (character_id, binding_id)
+    }
+
+    async fn d18_admission_count(core: &CoreService, binding_id: &str) -> i64 {
+        let mut tx = nexus_local_db::begin_immediate(core.pool()).await.unwrap();
+        let counts = nexus_local_db::remote_binding_dependency_counts_tx(&mut tx, binding_id)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        counts.admissions
+    }
+
+    async fn admit_d18(
+        core: &CoreService,
+        admission_id: &str,
+        namespace: &nexus_local_db::RemoteBindingNamespace<'_>,
+    ) {
+        let mut tx = nexus_local_db::begin_immediate(core.pool()).await.unwrap();
+        nexus_local_db::insert_remote_binding_admission_tx(
+            &mut tx,
+            admission_id,
+            namespace,
+            "2026-11-05T00:00:00Z",
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+    }
+
+    /// I-000196: the production capture-refusal settlement retires an admission
+    /// only for a proven no-effect refusal. Uncertain, retryable, missing/
+    /// unknown-class and contradictory results keep it, against real durable
+    /// state; only the `terminal` pre-effect refusal releases it.
+    #[tokio::test]
+    async fn uncertain_capture_reject_keeps_its_durable_admission() {
+        let (_tmp, core) = open_d18_core().await;
+        let (character_id, binding_id) = seed_d18_binding(&core).await;
+        let binding = core.memory_binding().unwrap();
+        let (host, generation) = binding.authority();
+        let namespace = nexus_local_db::RemoteBindingNamespace {
+            owner_creator_id: CREATOR_UNDER_TEST,
+            character_id: &character_id,
+            binding_id: &binding_id,
+            authority_host_id: host,
+            authority_generation: generation.get(),
+            space_id: binding.space_id(),
+            client_identity: "peer_key_d18",
+        };
+        admit_d18(&core, "adm_uncertain", &namespace).await;
+
+        let uncertain = retry_class_reject(SpokeRejectCode::OutcomeUncertain, Some("uncertain"));
+        core.settle_remote_capture_reject("adm_uncertain", &namespace, &uncertain)
+            .await
+            .unwrap();
+        assert_eq!(
+            d18_admission_count(&core, &binding_id).await,
+            1,
+            "OUTCOME_UNCERTAIN may have committed, so the attempt stays protected"
+        );
+
+        let retryable = retry_class_reject(SpokeRejectCode::InternalError, Some("retryable"));
+        core.settle_remote_capture_reject("adm_uncertain", &namespace, &retryable)
+            .await
+            .unwrap();
+        assert_eq!(
+            d18_admission_count(&core, &binding_id).await,
+            1,
+            "a retryable class does not prove absence"
+        );
+
+        let missing_class = retry_class_reject(SpokeRejectCode::InvalidInput, None);
+        core.settle_remote_capture_reject("adm_uncertain", &namespace, &missing_class)
+            .await
+            .unwrap();
+        assert_eq!(
+            d18_admission_count(&core, &binding_id).await,
+            1,
+            "a missing class never proves absence"
+        );
+
+        let unknown_class = retry_class_reject(SpokeRejectCode::InvalidInput, Some("someday"));
+        core.settle_remote_capture_reject("adm_uncertain", &namespace, &unknown_class)
+            .await
+            .unwrap();
+        assert_eq!(
+            d18_admission_count(&core, &binding_id).await,
+            1,
+            "an unknown class never proves absence"
+        );
+
+        let contradictory = retry_class_reject(SpokeRejectCode::OutcomeUncertain, Some("terminal"));
+        core.settle_remote_capture_reject("adm_uncertain", &namespace, &contradictory)
+            .await
+            .unwrap();
+        assert_eq!(
+            d18_admission_count(&core, &binding_id).await,
+            1,
+            "an uncertain code with a terminal class is contradictory, not proof"
+        );
+
+        let terminal = retry_class_reject(SpokeRejectCode::InvalidInput, Some("terminal"));
+        core.settle_remote_capture_reject("adm_uncertain", &namespace, &terminal)
+            .await
+            .unwrap();
+        assert_eq!(
+            d18_admission_count(&core, &binding_id).await,
+            0,
+            "a pre-effect terminal refusal retires exactly this attempt"
+        );
+    }
+
+    /// I-000196: one attempt's definite refusal retires only its own admission;
+    /// an outstanding sibling attempt keeps the binding protected.
+    #[tokio::test]
+    async fn definite_capture_reject_retires_only_its_own_admission() {
+        let (_tmp, core) = open_d18_core().await;
+        let (character_id, binding_id) = seed_d18_binding(&core).await;
+        let binding = core.memory_binding().unwrap();
+        let (host, generation) = binding.authority();
+        let namespace = nexus_local_db::RemoteBindingNamespace {
+            owner_creator_id: CREATOR_UNDER_TEST,
+            character_id: &character_id,
+            binding_id: &binding_id,
+            authority_host_id: host,
+            authority_generation: generation.get(),
+            space_id: binding.space_id(),
+            client_identity: "peer_key_d18",
+        };
+        admit_d18(&core, "adm_first", &namespace).await;
+        admit_d18(&core, "adm_second", &namespace).await;
+        assert_eq!(d18_admission_count(&core, &binding_id).await, 2);
+
+        let terminal = retry_class_reject(SpokeRejectCode::NotAuthorized, Some("terminal"));
+        core.settle_remote_capture_reject("adm_first", &namespace, &terminal)
+            .await
+            .unwrap();
+        assert_eq!(
+            d18_admission_count(&core, &binding_id).await,
+            1,
+            "the sibling attempt is not released by this result"
+        );
+
+        let uncertain = retry_class_reject(SpokeRejectCode::OutcomeUncertain, Some("uncertain"));
+        core.settle_remote_capture_reject("adm_second", &namespace, &uncertain)
+            .await
+            .unwrap();
+        assert_eq!(
+            d18_admission_count(&core, &binding_id).await,
+            1,
+            "an uncertain result keeps its own protection"
         );
     }
 }

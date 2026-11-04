@@ -40,8 +40,8 @@ CREATE TABLE IF NOT EXISTS remote_binding_memory_admissions (
     binding_id TEXT NOT NULL
         REFERENCES actor_world_bindings (binding_id) ON DELETE RESTRICT,
     authority_host_id TEXT NOT NULL,
-    authority_generation INTEGER NOT NULL
-        CHECK (authority_generation >= 1),
+    authority_generation TEXT NOT NULL
+        CHECK (length(authority_generation) BETWEEN 1 AND 20),
     space_id TEXT NOT NULL,
     client_identity TEXT NOT NULL
         CHECK (length(client_identity) BETWEEN 1 AND 256),
@@ -53,8 +53,8 @@ CREATE INDEX IF NOT EXISTS idx_remote_binding_memory_admissions_binding
 
 CREATE TABLE IF NOT EXISTS remote_binding_memory_objects (
     authority_host_id TEXT NOT NULL,
-    authority_generation INTEGER NOT NULL
-        CHECK (authority_generation >= 1),
+    authority_generation TEXT NOT NULL
+        CHECK (length(authority_generation) BETWEEN 1 AND 20),
     space_id TEXT NOT NULL,
     client_identity TEXT NOT NULL
         CHECK (length(client_identity) BETWEEN 1 AND 256),

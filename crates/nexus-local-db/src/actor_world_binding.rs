@@ -849,6 +849,9 @@ pub struct RemoteBindingNamespace<'a> {
     pub character_id: &'a str,
     pub binding_id: &'a str,
     pub authority_host_id: &'a str,
+    /// The provider's `NonZeroU64` authority generation, persisted losslessly
+    /// as its decimal text: every value in the declared range is its own
+    /// identity, so two generations can never alias one row.
     pub authority_generation: u64,
     pub space_id: &'a str,
     pub client_identity: &'a str,
@@ -925,7 +928,7 @@ pub async fn insert_remote_binding_admission_tx(
     .bind(namespace.character_id)
     .bind(namespace.binding_id)
     .bind(namespace.authority_host_id)
-    .bind(i64::try_from(namespace.authority_generation).unwrap_or(i64::MAX))
+    .bind(namespace.authority_generation.to_string())
     .bind(namespace.space_id)
     .bind(namespace.client_identity)
     .bind(now)
@@ -959,7 +962,7 @@ pub async fn retire_remote_binding_admission_tx(
     .bind(namespace.character_id)
     .bind(namespace.binding_id)
     .bind(namespace.authority_host_id)
-    .bind(i64::try_from(namespace.authority_generation).unwrap_or(i64::MAX))
+    .bind(namespace.authority_generation.to_string())
     .bind(namespace.space_id)
     .bind(namespace.client_identity)
     .execute(&mut **tx)
@@ -1000,7 +1003,7 @@ pub async fn record_remote_binding_object_tx(
                       WHEN 'live' THEN 0 WHEN 'consumed' THEN 1 ELSE 2 END)",
     )
     .bind(namespace.authority_host_id)
-    .bind(i64::try_from(namespace.authority_generation).unwrap_or(i64::MAX))
+    .bind(namespace.authority_generation.to_string())
     .bind(namespace.space_id)
     .bind(namespace.client_identity)
     .bind(namespace.character_id)
