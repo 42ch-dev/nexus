@@ -3398,6 +3398,8 @@ mod tests {
             .records_get(OPERATOR, &get_request(&space, &created_structured.record_id), now())
             .await
             .expect("structured record after refused update");
+        // The complete content is unchanged, not only the structured member.
+        assert_eq!(live(&record).content.text, "");
         assert_eq!(
             live(&record).content.structured.as_ref(),
             Some(&json!({ "pad": &updated_pad }))
