@@ -310,29 +310,53 @@ async fn confirmed_close_releases_the_local_providers_direct_admission() {
     }
 }
 
-/// F10: a provider open cancelled in flight after its admission is registered
-/// and its seed write really landed — but before the store is delivered.
+/// F10: the measured provider open is cancelled in flight after its admission
+/// is registered and *its own* seed write really landed, but before the store is
+/// delivered. Both stage events are attributable to this invocation alone: the
+/// registration row carries a writer id that did not exist before the spawn, and
+/// the seed write is the `core_changes` row that this exact writer id produced.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cancelled_provider_open_after_seed_releases_its_admission() {
     let env = Env::new(None);
     let db_path = env.db_path();
     let home = env.user_home.clone();
 
-    // Pre-create the schema so the cancelled open reaches its seed write
-    // quickly and does not spend its window in migrations.
+    // Bootstrap the schema once, then take the set of writer ids that already
+    // exist: only an id outside it can belong to the measured open.
     let bootstrap = LocalMemoryProvider::open(home.clone(), CREATOR, "default")
         .await
         .expect("bootstrap provider");
     drop(bootstrap);
+    let known_writers = writer_ids(&db_path).await;
 
     let opening_home = home.clone();
     let opening =
         tokio::spawn(async move { LocalMemoryProvider::open(opening_home, CREATOR, "default").await });
 
-    // The real persisted stage boundary: the seed write's version rows.
+    // Step 1: the measured open registers a writer id that did not exist before
+    // the spawn, so every following observation is about this invocation.
+    let mut measured_writer = None;
+    for _ in 0..200_000 {
+        if let Some(writer_id) = writer_ids(&db_path)
+            .await
+            .into_iter()
+            .find(|writer_id| !known_writers.contains(writer_id))
+        {
+            measured_writer = Some(writer_id);
+            break;
+        }
+        if opening.is_finished() {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    let measured_writer = measured_writer.expect("the measured open registered itself");
+
+    // Step 2: the seed write, proven by the change row that only this writer id
+    // produces for workspace_meta.
     let mut seeded = false;
     for _ in 0..200_000 {
-        if seed_versions_present(&db_path).await {
+        if meta_changes_of(&db_path, &measured_writer).await > 0 {
             seeded = true;
             break;
         }
@@ -341,10 +365,13 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
         }
         tokio::task::yield_now().await;
     }
-    assert!(seeded, "the open reached its seed write");
+    assert!(
+        seeded,
+        "the measured open reached its own seed write (writer {measured_writer})"
+    );
     assert!(
         !opening.is_finished(),
-        "the open is still in flight after the seed stage"
+        "the open is still in flight when its own seed write is observed"
     );
     opening.abort();
     let join_error = match opening.await {
@@ -356,48 +383,71 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
         "the task was really cancelled, not completed"
     );
 
-    let mut freed = false;
+    // Only the cancelled open's own admission ended, and it ended for real.
+    assert!(
+        eventual_fence(&db_path).await,
+        "the cancelled open released its own OS admission"
+    );
+}
+
+/// Every writer id registered in this workspace.
+async fn writer_ids(db_path: &std::path::Path) -> Vec<String> {
+    let Ok(pool) = read_pool(db_path).await else {
+        return Vec::new();
+    };
+    let rows: Vec<(String,)> = sqlx::query_as("SELECT writer_id FROM core_writer_registration")
+        .fetch_all(&pool)
+        .await
+        .unwrap_or_default();
+    pool.close().await;
+    rows.into_iter().map(|row| row.0).collect()
+}
+
+/// The `workspace_meta` change rows a single writer id produced — the persisted
+/// trace of that writer's own writes.
+async fn meta_changes_of(db_path: &std::path::Path, writer_id: &str) -> i64 {
+    let Ok(pool) = read_pool(db_path).await else {
+        return 0;
+    };
+    let count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM core_changes WHERE resource_kind = 'workspace_meta' AND writer_id = ?",
+    )
+    .bind(writer_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap_or((0,));
+    pool.close().await;
+    count.0
+}
+
+async fn read_pool(db_path: &std::path::Path) -> Result<sqlx::SqlitePool, sqlx::Error> {
+    sqlx::SqlitePool::connect(&format!("sqlite://{}?mode=ro", db_path.display())).await
+}
+
+async fn raw_pool(db_path: &std::path::Path) -> sqlx::SqlitePool {
+    sqlx::SqlitePool::connect(&format!("sqlite://{}?mode=rwc", db_path.display()))
+        .await
+        .expect("raw pool")
+}
+
+/// Bounded wait for the store-reset fence; only the expected contention is
+/// accepted, anything else is a real failure.
+async fn eventual_fence(db_path: &std::path::Path) -> bool {
     for _ in 0..200_000 {
-        match nexus_local_db::writer_protocol::acquire_store_reset_fence(&db_path) {
-            Ok(_) => {
-                freed = true;
-                break;
-            }
-            Err(error) => {
-                assert!(
-                    matches!(error, nexus_local_db::LocalDbError::OwnerBusy { .. }),
-                    "the only expected refusal is OwnerBusy, got {error:?}"
-                );
-            }
+        match nexus_local_db::writer_protocol::acquire_store_reset_fence(db_path) {
+            Ok(_) => return true,
+            Err(error) => assert!(
+                matches!(error, nexus_local_db::LocalDbError::OwnerBusy { .. }),
+                "the only expected refusal is OwnerBusy, got {error:?}"
+            ),
         }
         tokio::task::yield_now().await;
     }
-    assert!(freed, "the cancelled open released its own OS admission");
-}
-
-/// The seed write's persisted rows (the real start-of-write stage).
-async fn seed_versions_present(db_path: &std::path::Path) -> bool {
-    let Ok(pool) = sqlx::SqlitePool::connect(&format!(
-        "sqlite://{}?mode=ro",
-        db_path.display()
-    ))
-    .await
-    else {
-        return false;
-    };
-    let found: Option<(i64,)> = sqlx::query_as(
-        "SELECT 1 FROM workspace_meta WHERE key IN ('db_schema_version', 'schema_version') LIMIT 1",
-    )
-    .fetch_optional(&pool)
-    .await
-    .ok()
-    .flatten();
-    pool.close().await;
-    found.is_some()
+    false
 }
 
 /// F10: a real vision of compose/provision failing after the pool and seed
-/// exist — a valid migrated workspace whose provider grant table was removed
+/// exist — a valid migrated workspace whose provider grant insert is rejected
 /// makes provisioning fail for real, and only its own undelivered claim ends.
 #[tokio::test]
 async fn failed_provisioning_keeps_an_adopted_user_and_releases_its_own_admission() {
@@ -416,10 +466,8 @@ async fn failed_provisioning_keeps_an_adopted_user_and_releases_its_own_admissio
 
     // A valid SQLite fixture that makes the provisioning write fail while every
     // read still works: a trigger on the grant table rejects the bootstrap
-    // grant insert.
-    let raw = sqlx::SqlitePool::connect(&format!("sqlite://{}?mode=rwc", db_path.display()))
-        .await
-        .expect("raw pool");
+    // grant insert. The workspace stays migrated and readable.
+    let raw = raw_pool(&db_path).await;
     sqlx::query(
         "CREATE TRIGGER reject_provider_grants BEFORE INSERT ON memory_grants \
          BEGIN SELECT RAISE(ABORT, 'providing blocked by fixture'); END",
@@ -430,7 +478,7 @@ async fn failed_provisioning_keeps_an_adopted_user_and_releases_its_own_admissio
     raw.close().await;
 
     let error = match LocalMemoryProvider::open(env.user_home.clone(), CREATOR, "default").await {
-        Ok(_) => panic!("provisioning must fail on the removed grant table"),
+        Ok(_) => panic!("provisioning must fail on the rejected grant insert"),
         Err(error) => error,
     };
     let rendered = format!("{error:?}");
@@ -439,8 +487,8 @@ async fn failed_provisioning_keeps_an_adopted_user_and_releases_its_own_admissio
         "the failure is the real provisioning write, got {rendered}"
     );
 
-    // Only the failed open's own admission ended; the adopted user keeps its
-    // admission and keeps serving memory.
+    // The failed open took nothing from the adopted user: it still reads and
+    // still holds its own admission.
     assert_eq!(
         engine.count_pending_reviews(&principal).await.expect("read").count,
         0,
@@ -450,10 +498,17 @@ async fn failed_provisioning_keeps_an_adopted_user_and_releases_its_own_admissio
         nexus_local_db::writer_protocol::acquire_store_reset_fence(&db_path).is_err(),
         "the adopted engine admission is still held"
     );
+
+    // Settle the real user, then the fence must become free: nothing of the
+    // failed open may still hold the workspace.
     assert!(engine.close().await.expect("close").cleanup_confirmed);
+    assert!(
+        eventual_fence(&db_path).await,
+        "after the adopted user ended, the failed open left no claim behind"
+    );
 }
 
-/// A normal provider close settles the provider's own pool, so a genuinely/// A normal provider close settles the provider's own pool, so a genuinely
+/// A normal provider close settles the provider's own pool, so a genuinely
 /// pending guarded migration runs afterwards instead of waiting on a pool no
 /// one can use.
 #[tokio::test]
