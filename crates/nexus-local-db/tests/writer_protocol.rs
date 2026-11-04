@@ -1029,7 +1029,7 @@ async fn assert_writer_registration(db: &Path) -> String {
         migration_epoch >= 1,
         "activated migration epoch: {migration_epoch}"
     );
-    assert_eq!(mode, "engine");
+    assert_eq!(mode, "direct");
     assert_eq!(
         engine_epoch, None,
         "a direct writer carries no engine epoch"

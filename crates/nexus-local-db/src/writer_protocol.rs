@@ -324,32 +324,43 @@ fn canonical_db_path(db_path: &Path) -> PathBuf {
 /// Publish `guard` as this process's live admission for its `(path, mode)`
 /// and reserve one claim on it, atomically under the registry lock.
 ///
+/// Returns the admission the claim belongs to TOGETHER with that claim, both
+/// taken in the same critical section: the caller must keep that `Arc` and hand
+/// it to the pool, its owner slot or the RAW retention, so the admission it
+/// reserved cannot end before it is installed. A weak lookup afterwards would
+/// let a supplied guard whose identity lost the publication race become the
+/// pool's identity, which is exactly the mismatch this shape prevents.
+///
 /// Two acquisitions can both miss the lookup and take their own OS locks
 /// before either publishes. The loser of that race JOINS the published
 /// admission instead of replacing its identity: a claim is never carried
 /// across two `writer_id`s, so the published guard's last release still frees
-/// the OS admission. The caller must open its pool on the published guard
-/// ([`published_guard`]) and let its own superseded guard go.
-fn reserve_retained_admission(guard: &Arc<WorkspaceWriterGuard>) -> RetainedAdmissionClaim {
+/// the OS admission.
+fn reserve_retained_admission(
+    guard: &Arc<WorkspaceWriterGuard>,
+) -> (Arc<WorkspaceWriterGuard>, RetainedAdmissionClaim) {
     let key = (canonical_db_path(&guard.db_path), guard.mode);
     let mut guards = ACTIVE_GUARDS
         .lock()
         .expect("writer guard registry poisoned");
-    let writer_id = match guards.get_mut(&key) {
-        // A live published admission is joined, never replaced (F7/F11).
-        Some(entry) if entry.owner.upgrade().is_some() => {
-            entry.claims += 1;
-            entry.writer_id.clone()
-        }
-        // A dead entry names no admission any more: publish this guard.
-        Some(entry) => {
-            *entry = RetainedGuardEntry {
-                owner: AdmissionOwner::Observed(Arc::downgrade(guard)),
-                writer_id: guard.writer_id.clone(),
-                claims: 1,
-            };
-            guard.writer_id.clone()
-        }
+    let (published, writer_id) = match guards.get_mut(&key) {
+        // A live published admission is joined, never replaced (F7/F11). The
+        // strong `Arc` is held from here on, so it cannot end under the claim.
+        Some(entry) => match entry.owner.upgrade() {
+            Some(published) => {
+                entry.claims += 1;
+                (published, entry.writer_id.clone())
+            }
+            // A dead entry names no admission any more: publish this guard.
+            None => {
+                *entry = RetainedGuardEntry {
+                    owner: AdmissionOwner::Observed(Arc::downgrade(guard)),
+                    writer_id: guard.writer_id.clone(),
+                    claims: 1,
+                };
+                (Arc::clone(guard), guard.writer_id.clone())
+            }
+        },
         None => {
             guards.insert(
                 key.clone(),
@@ -359,11 +370,11 @@ fn reserve_retained_admission(guard: &Arc<WorkspaceWriterGuard>) -> RetainedAdmi
                     claims: 1,
                 },
             );
-            guard.writer_id.clone()
+            (Arc::clone(guard), guard.writer_id.clone())
         }
     };
     drop(guards);
-    RetainedAdmissionClaim::held(key, writer_id)
+    (published, RetainedAdmissionClaim::held(key, writer_id))
 }
 
 /// Claim this process's live admission for `(db_path, mode)` atomically with
@@ -390,20 +401,6 @@ fn claim_live_admission(
     ))
 }
 
-/// The published admission's guard for `(db_path, mode)`, falling back to the
-/// caller's own guard when it published.
-///
-/// Used right after a reservation: a concurrent acquisition may have published
-/// a different `writer_id` first, and the pool must be opened on the admission
-/// the claims belong to.
-fn published_guard(
-    db_path: &Path,
-    mode: WriterMode,
-    own: Arc<WorkspaceWriterGuard>,
-) -> Arc<WorkspaceWriterGuard> {
-    retained_guard(db_path, mode).unwrap_or(own)
-}
-
 /// Retain a live writer guard in this process's registry so published pools
 /// keep their admission after the caller drops its own `Arc`.
 ///
@@ -415,41 +412,53 @@ fn published_guard(
 /// Panics if the writer-guard registry mutex is poisoned (a prior
 /// registration panicked while holding the lock).
 pub fn retain_writer_guard(guard: Arc<WorkspaceWriterGuard>) {
-    let claim = reserve_retained_admission(&guard);
+    let (published, claim) = reserve_retained_admission(&guard);
     // The raw-pool entry point hands back no handle, so the registry is the
     // owner: the admission survives until an explicit path-wide release or a
     // guarded migration, exactly as documented.
     //
-    // Exactly the PUBLISHED admission is retained. A caller-supplied guard that
-    // did not become this entry's identity (it lost a publication race) is
-    // never installed in its place: it is simply dropped here, releasing its
-    // own superseded OS locks.
-    promote_retained_admission(&guard);
-    claim.persist();
+    // Exactly the admission this claim reserved is retained — the strong guard
+    // from the same critical section, never a later weak lookup and never the
+    // supplied guard, which may have lost the publication race.
+    if install_retained_admission(&published, &claim) {
+        claim.persist();
+    }
+    // Otherwise a concurrent explicit release already replaced this entry: the
+    // newer identity stays authoritative, and dropping `guard`/`claim` here
+    // releases the superseded admission instead of installing a second one.
 }
 
-/// Turn `(path, mode)`'s published admission into a process-retained one,
-/// leaving its identity untouched.
+/// Install the reserved admission as the process-retained owner of its entry.
 ///
-/// The entry keeps the guard it published: `guard` only selects the entry, it
-/// never replaces that identity, so a claim, a pool context and the retained
-/// owner always name the same admission even when the caller lost a
-/// publication race.
-fn promote_retained_admission(
-    guard: &Arc<WorkspaceWriterGuard>,
-) -> Option<Arc<WorkspaceWriterGuard>> {
-    let key = (canonical_db_path(&guard.db_path), guard.mode);
+/// Runs on the strong guard the reservation returned, so no weak upgrade can
+/// substitute a different identity. Returns `false` only when a concurrent
+/// explicit release already republished a different identity for this
+/// `(path, mode)`; the caller must then keep its hands off that entry.
+fn install_retained_admission(
+    published: &Arc<WorkspaceWriterGuard>,
+    claim: &RetainedAdmissionClaim,
+) -> bool {
     let mut guards = ACTIVE_GUARDS
         .lock()
         .expect("writer guard registry poisoned");
-    let entry = guards.get_mut(&key)?;
-    let published = entry.owner.upgrade()?;
-    if published.writer_id != entry.writer_id {
-        // A broken invariant is never papered over by retaining some guard.
-        return None;
+    match guards.get_mut(&claim.key) {
+        Some(entry) if entry.writer_id == published.writer_id => {
+            entry.owner = AdmissionOwner::Retained(Arc::clone(published));
+            true
+        }
+        Some(_) => false,
+        None => {
+            guards.insert(
+                claim.key.clone(),
+                RetainedGuardEntry {
+                    owner: AdmissionOwner::Retained(Arc::clone(published)),
+                    writer_id: published.writer_id.clone(),
+                    claims: 1,
+                },
+            );
+            true
+        }
     }
-    entry.owner = AdmissionOwner::Retained(Arc::clone(&published));
-    Some(published)
 }
 
 fn register_pool_handle(guard: &Arc<WorkspaceWriterGuard>, pool: &SqlitePool) -> u64 {
@@ -556,8 +565,9 @@ fn settle_released_admission(key: &(PathBuf, WriterMode)) {
 
 /// This process's live guard for `(db_path, mode)`, if any.
 ///
-/// Production callers use it only right after taking a claim
-/// ([`published_guard`]), so the entry cannot be released under them.
+/// A registry inspection seam for the in-crate tests; production callers never
+/// need a weak re-lookup — they carry the strong guard a reservation returned.
+#[cfg(test)]
 fn retained_guard(db_path: &Path, mode: WriterMode) -> Option<Arc<WorkspaceWriterGuard>> {
     let key = (canonical_db_path(db_path), mode);
     ACTIVE_GUARDS
@@ -1352,10 +1362,10 @@ pub async fn open_guarded_pool_arc_with(
     // another identity's writer context and neither release would line up with
     // the pool it protects. The losing guard is given up here, which releases
     // its own superseded OS locks.
-    let db_path = guard.db_path.clone();
-    let mode = guard.mode;
-    let claim = reserve_retained_admission(&guard);
-    let guard = published_guard(&db_path, mode, guard);
+    // The reservation returns the admission AND its claim together: this pool
+    // is opened on exactly that guard, so its writer context, its claim and the
+    // registry entry can never name different identities.
+    let (guard, claim) = reserve_retained_admission(&guard);
     open_guarded_pool_with_claim(guard, claim, options).await
 }
 
@@ -1542,27 +1552,27 @@ pub async fn open_admitted_pool_with(
     if !protocol_tables_present(db_path).await || needs_activation_recovery(db_path).await? {
         run_guarded_migrations(db_path).await?;
     }
+    // One strong pair for both fresh and joined opens. A joined acquisition
+    // already returns the published guard; a fresh one publishes (or joins a
+    // concurrent winner) inside `reserve_retained_admission`, which hands back
+    // the admission and its claim together. Nothing here re-selects an identity.
     let (guard, joined) = acquire_claimed_guard(db_path, creator_id, mode).await?;
-    // A raw pool keeps its admission for the process: a joined claim is parked,
-    // and a fresh guard gets the same process-lifetime retention. The pool is
-    // opened on the PUBLISHED admission either way, never on a guard that lost
-    // a concurrent publication race.
-    let guard = match joined {
-        Some(claim) => {
-            // A joined raw open retains the PUBLISHED admission for the
-            // process, exactly like a fresh one: parking the claim alone would
-            // leave the entry observing a guard that dies with the ordinary
-            // holder.
-            promote_retained_admission(&guard);
-            claim.persist();
-            guard
-        }
-        None => {
-            retain_writer_guard(Arc::clone(&guard));
-            published_guard(db_path, mode, guard)
-        }
+    let (published, claim) = match joined {
+        Some(claim) => (guard, claim),
+        None => reserve_retained_admission(&guard),
     };
-    open_guarded_pool_with(&guard, options).await
+    // A raw pool keeps its admission for the process: the entry becomes the
+    // retained owner, whether this open published it or joined it.
+    if !install_retained_admission(&published, &claim) {
+        return Err(LocalDbError::OwnerBusy {
+            resource: format!(
+                "{}: a newer admission replaced the one this raw open reserved",
+                canonical_db_path(db_path).display()
+            ),
+        });
+    }
+    claim.persist();
+    open_guarded_pool_with(&published, options).await
 }
 
 /// Open another cooperative pool on a live in-process engine guard when one
@@ -1611,8 +1621,10 @@ pub async fn init_engine_pool(
     // error or a cancelled future drops the claim instead of leaving an
     // ownerless entry and its OS locks behind.
     let (guard, joined) = acquire_claimed_guard(db_path, creator_id, WriterMode::Engine).await?;
-    let claim = joined.unwrap_or_else(|| reserve_retained_admission(&guard));
-    let guard = published_guard(db_path, WriterMode::Engine, guard);
+    let (guard, claim) = match joined {
+        Some(claim) => (guard, claim),
+        None => reserve_retained_admission(&guard),
+    };
     let guarded = open_guarded_pool_with_claim(guard, claim, options).await?;
     if let Err(error) = crate::seed_versions(guarded.pool()).await {
         // A failed seed ends this open: close the pool it just built (no other
@@ -1641,8 +1653,10 @@ pub async fn init_guarded_pool(
 ) -> Result<GuardedPool, LocalDbError> {
     run_guarded_migrations(db_path).await?;
     let (guard, joined) = acquire_claimed_guard(db_path, creator_id, WriterMode::Direct).await?;
-    let claim = joined.unwrap_or_else(|| reserve_retained_admission(&guard));
-    let guard = published_guard(db_path, WriterMode::Direct, guard);
+    let (guard, claim) = match joined {
+        Some(claim) => (guard, claim),
+        None => reserve_retained_admission(&guard),
+    };
     let guarded =
         open_guarded_pool_with_claim(guard, claim, GuardedPoolOptions::default()).await?;
     if let Err(error) = crate::seed_versions(guarded.pool()).await {
@@ -2291,6 +2305,98 @@ mod tests {
             pinned_admission(None).unwrap().is_none(),
             "an intentional internal registration pool pins nothing"
         );
+    }
+
+    /// F15: a reservation hands back the published admission it selected,
+    /// strongly, from the registry critical section through installation.
+    ///
+    /// The window that used to break this: B reserves published A, then A's
+    /// previous final owner really ends before the pool is installed. The
+    /// installed pool must still carry A's identity and context, stay joinable,
+    /// and keep the real OS admission until its own end.
+    #[tokio::test]
+    async fn reservation_keeps_the_published_guard_until_installed() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("state.db");
+
+        // A is published and really owns the OS locks through an open pool.
+        let a_pool = init_guarded_pool(&db_path, BOOTSTRAP_CREATOR_ID)
+            .await
+            .unwrap();
+        let key = (canonical_db_path(&db_path), WriterMode::Direct);
+        let a_guard = retained_guard(&db_path, WriterMode::Direct).expect("A is published");
+        let a_id = a_guard.writer_id().to_string();
+
+        // B is a distinct real guard that has published nothing: take its OS
+        // locks while the entry is out of the way, then restore A's publication
+        // so that B is the loser at reservation time.
+        ACTIVE_GUARDS.lock().unwrap().remove(&key);
+        let b_guard = acquire_writer_guard(&db_path, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
+            .await
+            .unwrap();
+        assert_ne!(b_guard.writer_id(), a_id, "B is a different identity");
+        ACTIVE_GUARDS.lock().unwrap().insert(
+            key.clone(),
+            RetainedGuardEntry {
+                owner: AdmissionOwner::Observed(Arc::downgrade(&a_guard)),
+                writer_id: a_id.clone(),
+                claims: 1,
+            },
+        );
+
+        // The reservation selects A and holds it.
+        let (published, claim) = reserve_retained_admission(&b_guard);
+        assert_eq!(
+            published.writer_id(),
+            a_id,
+            "the reservation selected the published admission"
+        );
+
+        // A's previous final owner REALLY ends here, before any installation —
+        // and so does B's supplied guard, which held its own superseded locks.
+        // From here the reservation is the ONLY thing that can keep the
+        // published admission, so the fence probe is about A alone.
+        a_pool.pool().close().await;
+        a_pool.release_retained_admission();
+        drop(a_pool);
+        drop(a_guard);
+        drop(b_guard);
+        assert!(
+            acquire_store_reset_fence(&db_path).is_err(),
+            "the reservation alone still keeps the published OS locks"
+        );
+
+        // Installation under exactly that admission.
+        let installed =
+            open_guarded_pool_with_claim(published, claim, GuardedPoolOptions::default())
+                .await
+                .expect("installed pool");
+        let mut conn = installed.pool().acquire().await.unwrap();
+        let (writer_id,): (String,) = sqlx::query_as("SELECT nexus_writer_id()")
+            .fetch_one(&mut *conn)
+            .await
+            .unwrap();
+        assert_eq!(writer_id, a_id, "the pool carries A's identity");
+        drop(conn);
+
+        // The existing join path still resolves that same admission.
+        let (joined, joined_claim) =
+            claim_live_admission(&db_path, WriterMode::Direct).expect("joinable while open");
+        assert_eq!(joined.writer_id(), a_id, "the join names the published admission");
+        drop(joined_claim);
+        drop(joined);
+
+        installed.pool().close().await;
+        installed.release_retained_admission();
+        drop(installed);
+        for _ in 0..4096 {
+            if let Ok(fence) = acquire_store_reset_fence(&db_path) {
+                drop(fence);
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+        panic!("the installed admission's OS lock was never released");
     }
 
 }

@@ -329,6 +329,13 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
     drop(bootstrap);
     let known_writers = writer_ids(&db_path).await;
 
+    // Both observation connections exist before the spawn, so detecting the
+    // stage and taking the write lock cost no pool construction of their own.
+    let observer_pool = read_pool(&db_path).await.expect("observer pool");
+    let mut observer = observer_pool.acquire().await.expect("observer connection");
+    let locker_pool = raw_pool(&db_path).await;
+    let mut locker = locker_pool.acquire().await.expect("locker connection");
+
     let opening_home = home.clone();
     let opening =
         tokio::spawn(async move { LocalMemoryProvider::open(opening_home, CREATOR, "default").await });
@@ -337,9 +344,13 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
     // the spawn, so every following observation is about this invocation.
     let mut measured_writer = None;
     for _ in 0..200_000 {
-        if let Some(writer_id) = writer_ids(&db_path)
+        let rows: Vec<(String,)> = sqlx::query_as("SELECT writer_id FROM core_writer_registration")
+            .fetch_all(&mut *observer)
             .await
+            .expect("read the writer registry");
+        if let Some(writer_id) = rows
             .into_iter()
+            .map(|row| row.0)
             .find(|writer_id| !known_writers.contains(writer_id))
         {
             measured_writer = Some(writer_id);
@@ -352,11 +363,18 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
     }
     let measured_writer = measured_writer.expect("the measured open registered itself");
 
-    // Step 2: the seed write, proven by the change row that only this writer id
+    // Step 2: the seed write, proven by the change row only this writer id
     // produces for workspace_meta.
     let mut seeded = false;
     for _ in 0..200_000 {
-        if meta_changes_of(&db_path, &measured_writer).await > 0 {
+        let (changes,): (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM core_changes WHERE resource_kind = 'workspace_meta' AND writer_id = ?",
+        )
+        .bind(&measured_writer)
+        .fetch_one(&mut *observer)
+        .await
+        .expect("read the change log");
+        if changes > 0 {
             seeded = true;
             break;
         }
@@ -369,9 +387,18 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
         seeded,
         "the measured open reached its own seed write (writer {measured_writer})"
     );
+
+    // Step 3 — deterministic stage control: this connection takes the
+    // database's write lock, which the open must take again for its
+    // provisioning writes. While it is held the open cannot complete, so the
+    // pending-cancellation assertion does not depend on winning a race.
+    sqlx::query("BEGIN IMMEDIATE")
+        .execute(&mut *locker)
+        .await
+        .expect("hold the write lock");
     assert!(
         !opening.is_finished(),
-        "the open is still in flight when its own seed write is observed"
+        "the open is still in flight after its own seed write"
     );
     opening.abort();
     let join_error = match opening.await {
@@ -382,6 +409,10 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
         join_error.is_cancelled(),
         "the task was really cancelled, not completed"
     );
+    sqlx::query("ROLLBACK")
+        .execute(&mut *locker)
+        .await
+        .expect("release the write lock");
 
     // Only the cancelled open's own admission ended, and it ended for real.
     assert!(
@@ -403,22 +434,6 @@ async fn writer_ids(db_path: &std::path::Path) -> Vec<String> {
         .expect("read the writer registry");
     pool.close().await;
     rows.into_iter().map(|row| row.0).collect()
-}
-
-/// The `workspace_meta` change rows a single writer id produced — the persisted
-/// trace of that writer's own writes. Observation errors are never mistaken for
-/// "not yet written".
-async fn meta_changes_of(db_path: &std::path::Path, writer_id: &str) -> i64 {
-    let pool = read_pool(db_path).await.expect("read the change log");
-    let count: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM core_changes WHERE resource_kind = 'workspace_meta' AND writer_id = ?",
-    )
-    .bind(writer_id)
-    .fetch_one(&pool)
-    .await
-    .expect("read the change log");
-    pool.close().await;
-    count.0
 }
 
 async fn read_pool(db_path: &std::path::Path) -> Result<sqlx::SqlitePool, sqlx::Error> {
