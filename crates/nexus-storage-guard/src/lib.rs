@@ -48,14 +48,6 @@ pub struct WriterConnectionContext {
     pub mode: WriterMode,
     pub migration_epoch: i64,
     pub engine_epoch: Option<i64>,
-    /// The complete OS admission this connection belongs to, if any.
-    ///
-    /// Held in the connection's UDF userdata, which SQLite destroys when the
-    /// connection is actually disposed — so the admission's OS locks stay held
-    /// for exactly as long as this connection can still run statements. It is
-    /// `None` for protocol-internal short transactions, which are not a real
-    /// user of the admission.
-    pub admission: Option<Arc<WriterAdmission>>,
 }
 
 /// Writer admission mode mirrored in SQL as text.
@@ -81,6 +73,7 @@ impl WriterMode {
 pub async fn install_writer_functions(
     conn: &mut SqliteConnection,
     context: WriterConnectionContext,
+    admission: Option<Arc<WriterAdmission>>,
 ) -> Result<(), sqlx::Error> {
-    sqlite::install_writer_functions(conn, context).await
+    sqlite::install_writer_functions(conn, context, admission).await
 }

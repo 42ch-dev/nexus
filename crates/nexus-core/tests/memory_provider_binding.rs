@@ -310,6 +310,44 @@ async fn confirmed_close_releases_the_local_providers_direct_admission() {
     }
 }
 
+/// F10: a provider open that is really cancelled in flight — after its writer
+/// admission is registered, while compose/provision may still be running —
+/// releases its OS admission on its own.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelled_provider_open_releases_its_admission() {
+    let env = Env::new(None);
+    let db_path = env.db_path();
+    let home = env.user_home.clone();
+
+    let opening = tokio::spawn(async move {
+        LocalMemoryProvider::open(home, CREATOR, "default").await
+    });
+    let mut registered = false;
+    for _ in 0..8192 {
+        if nexus_local_db::writer_protocol::acquire_store_reset_fence(&db_path).is_err() {
+            registered = true;
+            break;
+        }
+        if opening.is_finished() {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert!(registered, "the provider registered its admission before cancel");
+    opening.abort();
+    let _ = opening.await;
+
+    let mut freed = false;
+    for _ in 0..8192 {
+        if nexus_local_db::writer_protocol::acquire_store_reset_fence(&db_path).is_ok() {
+            freed = true;
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert!(freed, "a cancelled provider open releases its OS admission");
+}
+
 /// A normal provider close settles the provider's own pool, so a genuinely
 /// pending guarded migration runs afterwards instead of waiting on a pool no
 /// one can use.

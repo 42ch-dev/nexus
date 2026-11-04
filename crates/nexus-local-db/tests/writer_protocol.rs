@@ -1143,6 +1143,7 @@ async fn assert_re_registration_replaces_live_userdata(db: &Path) {
     install_writer_functions(
         &mut conn,
         probe_context("v1191_first", GuardWriterMode::Direct, 1, None),
+        None,
     )
     .await
     .expect("first install");
@@ -1155,6 +1156,7 @@ async fn assert_re_registration_replaces_live_userdata(db: &Path) {
     install_writer_functions(
         &mut conn,
         probe_context("v1191_second", GuardWriterMode::Engine, 2, Some(7)),
+        None,
     )
     .await
     .expect("re-registration on the same live connection");
@@ -1207,6 +1209,7 @@ async fn assert_registration_ownership(db: &Path) {
     install_writer_functions(
         &mut conn,
         probe_context("v1191_a", GuardWriterMode::Direct, 1, None),
+        None,
     )
     .await
     .expect("install");
@@ -1215,6 +1218,7 @@ async fn assert_registration_ownership(db: &Path) {
     install_writer_functions(
         &mut conn,
         probe_context("v1191_b", GuardWriterMode::Engine, 2, Some(1)),
+        None,
     )
     .await
     .expect("replace");
@@ -1239,6 +1243,7 @@ async fn assert_registration_ownership(db: &Path) {
                 i64::from(cycle) + 1,
                 None,
             ),
+            None,
         )
         .await
         .expect("cycle install");
@@ -1261,7 +1266,6 @@ fn probe_context(
         mode,
         migration_epoch,
         engine_epoch,
-        admission: None,
     }
 }
 
@@ -1315,6 +1319,46 @@ async fn dropped_guard_holders_release_the_migration_lock() {
         fs::read_to_string(&out).expect("fence outcome"),
         "won",
         "a separate process must acquire the exclusive migration lock"
+    );
+}
+
+/// The documented raw-pool retention: an `open_admitted_pool` admission is
+/// owned by this process until an explicit release, even after every pool and
+/// connection the caller held is really closed and dropped.
+#[tokio::test]
+async fn raw_process_retention_holds_until_explicit_release() {
+    if std::env::var_os(CHILD_ENV).is_some() {
+        return;
+    }
+
+    let dir = TempDir::new().expect("tempdir");
+    let db = dir.path().join("state.db");
+
+    let pool = open_admitted_pool(&db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
+        .await
+        .expect("raw admitted pool");
+    let (one,): (i64,) = sqlx::query_as("SELECT 1")
+        .fetch_one(&pool)
+        .await
+        .expect("raw pool serves");
+    assert_eq!(one, 1);
+    pool.close().await;
+    drop(pool);
+    for _ in 0..64 {
+        tokio::task::yield_now().await;
+    }
+
+    assert_eq!(
+        child_outcome(dir.path(), &db, "migration_fence", "raw_blocked"),
+        "busy",
+        "a raw process-retained admission survives its caller's pools"
+    );
+
+    release_retained_writer_guards(&db);
+    assert_eq!(
+        child_outcome(dir.path(), &db, "migration_fence", "raw_allowed"),
+        "won",
+        "the documented explicit release frees the raw admission"
     );
 }
 

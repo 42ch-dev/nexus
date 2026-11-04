@@ -1780,8 +1780,8 @@ async fn out_of_guard_writes_are_writer_fenced() {
             mode: nexus_storage_guard::WriterMode::Direct,
             migration_epoch: 0,
             engine_epoch: None,
-            admission: None,
         },
+        None,
     )
     .await
     .unwrap();

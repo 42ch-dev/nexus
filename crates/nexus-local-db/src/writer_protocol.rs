@@ -38,14 +38,30 @@ struct RegisteredPool {
 
 /// One database's live admission: the guard that holds its OS locks and the
 /// number of holders claiming it.
+/// How the registry relates to one admission's guard.
+enum AdmissionOwner {
+    /// A live handle owns the admission; the registry only observes it. The OS
+    /// locks are shared by the guard and every real connection, so nothing of
+    /// ours keeps them past the last real user.
+    Observed(Weak<WorkspaceWriterGuard>),
+    /// The caller deliberately retained this admission for the process
+    /// (`retain_writer_guard`, the raw-pool entry point). The registry really
+    /// owns it until an explicit path-wide release or a guarded migration
+    /// clears it — that is the documented raw-pool policy, not a leak.
+    Retained(Arc<WorkspaceWriterGuard>),
+}
+
+impl AdmissionOwner {
+    fn upgrade(&self) -> Option<Arc<WorkspaceWriterGuard>> {
+        match self {
+            Self::Observed(weak) => weak.upgrade(),
+            Self::Retained(guard) => Some(Arc::clone(guard)),
+        }
+    }
+}
+
 struct RetainedGuardEntry {
-    /// This admission's guard, held WEAKLY.
-    ///
-    /// The registry must never keep an unused OS admission alive by itself: the
-    /// locks are owned by the guard's shared [`WriterAdmission`], which every
-    /// real guarded connection also holds, so the admission ends with the last
-    /// real user — with or without a runtime left to run bookkeeping.
-    guard: Weak<WorkspaceWriterGuard>,
+    owner: AdmissionOwner,
     /// Identity of the published admission, kept here so a claim can be matched
     /// even after the guard itself is gone.
     writer_id: String,
@@ -321,14 +337,14 @@ fn reserve_retained_admission(guard: &Arc<WorkspaceWriterGuard>) -> RetainedAdmi
         .expect("writer guard registry poisoned");
     let writer_id = match guards.get_mut(&key) {
         // A live published admission is joined, never replaced (F7/F11).
-        Some(entry) if entry.guard.strong_count() > 0 => {
+        Some(entry) if entry.owner.upgrade().is_some() => {
             entry.claims += 1;
             entry.writer_id.clone()
         }
         // A dead entry names no admission any more: publish this guard.
         Some(entry) => {
             *entry = RetainedGuardEntry {
-                guard: Arc::downgrade(guard),
+                owner: AdmissionOwner::Observed(Arc::downgrade(guard)),
                 writer_id: guard.writer_id.clone(),
                 claims: 1,
             };
@@ -338,7 +354,7 @@ fn reserve_retained_admission(guard: &Arc<WorkspaceWriterGuard>) -> RetainedAdmi
             guards.insert(
                 key.clone(),
                 RetainedGuardEntry {
-                    guard: Arc::downgrade(guard),
+                    owner: AdmissionOwner::Observed(Arc::downgrade(guard)),
                     writer_id: guard.writer_id.clone(),
                     claims: 1,
                 },
@@ -361,7 +377,7 @@ fn claim_live_admission(
     let mut guards = ACTIVE_GUARDS
         .lock()
         .expect("writer guard registry poisoned");
-    let Some(published) = guards.get(&key).and_then(|entry| entry.guard.upgrade()) else {
+    let Some(published) = guards.get(&key).and_then(|entry| entry.owner.upgrade()) else {
         // The last real holder is gone: this entry names no live admission.
         guards.remove(&key);
         return None;
@@ -399,7 +415,19 @@ fn published_guard(
 /// Panics if the writer-guard registry mutex is poisoned (a prior
 /// registration panicked while holding the lock).
 pub fn retain_writer_guard(guard: Arc<WorkspaceWriterGuard>) {
-    reserve_retained_admission(&guard).persist();
+    let claim = reserve_retained_admission(&guard);
+    let key = (canonical_db_path(&guard.db_path), guard.mode);
+    if let Some(entry) = ACTIVE_GUARDS
+        .lock()
+        .expect("writer guard registry poisoned")
+        .get_mut(&key)
+    {
+        // The raw-pool entry point hands back no handle, so the registry is
+        // the owner: the admission survives until an explicit path-wide
+        // release or a guarded migration, exactly as documented.
+        entry.owner = AdmissionOwner::Retained(guard);
+    }
+    claim.persist();
 }
 
 fn register_pool_handle(guard: &Arc<WorkspaceWriterGuard>, pool: &SqlitePool) -> u64 {
@@ -514,7 +542,7 @@ fn retained_guard(db_path: &Path, mode: WriterMode) -> Option<Arc<WorkspaceWrite
         .lock()
         .ok()?
         .get(&key)
-        .and_then(|entry| entry.guard.upgrade())
+        .and_then(|entry| entry.owner.upgrade())
 }
 
 /// Drop one retained guard, releasing its OS admission locks.
@@ -688,13 +716,12 @@ fn writer_context(
         mode: mode.to_guard(),
         migration_epoch,
         engine_epoch,
-        admission: None,
     }
 }
 
 async fn pool_with_context(
     db_path: &Path,
-    mut context: WriterConnectionContext,
+    context: WriterConnectionContext,
     admission: Option<Arc<WriterAdmission>>,
     options: GuardedPoolOptions,
 ) -> Result<SqlitePool, LocalDbError> {
@@ -703,7 +730,6 @@ async fn pool_with_context(
     // long as the pool inner, so a strong reference here would keep the OS
     // locks after every connection — and every real user — is gone.
     let admission = admission.map(|admission| Arc::downgrade(&admission));
-    context.admission = None;
     let context_for_hook = context;
     let url = sqlite_url(&db_path, false);
     let mut builder = SqlitePoolOptions::new().max_connections(options.max_connections);
@@ -712,12 +738,12 @@ async fn pool_with_context(
     }
     builder
         .after_connect(move |conn, _meta| {
-            let mut context = context_for_hook.clone();
+            let context = context_for_hook.clone();
             // Each connection takes its own share for as long as SQLite keeps
             // this connection's userdata — i.e. until real disposal.
-            context.admission = admission.as_ref().and_then(Weak::upgrade);
+            let pinned = admission.as_ref().and_then(Weak::upgrade);
             Box::pin(async move {
-                install_writer_functions(conn, context).await?;
+                install_writer_functions(conn, context, pinned).await?;
                 sqlx::query("PRAGMA journal_mode = WAL")
                     .execute(&mut *conn)
                     .await?;
@@ -1707,6 +1733,83 @@ mod tests {
         let fence = acquire_store_reset_fence(&db_path)
             .expect("both shared admissions are gone");
         drop(fence);
+    }
+
+    /// F10: a real in-flight `init_guarded_pool` future is cancelled after its
+    /// admission is registered (and while the seed write may already have run),
+    /// and the OS admission is released on its own.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancelled_open_future_releases_its_admission() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("state.db");
+        let bootstrap = init_guarded_pool(&db_path, BOOTSTRAP_CREATOR_ID)
+            .await
+            .unwrap();
+        bootstrap.pool().close().await;
+        bootstrap.release_retained_admission();
+        drop(bootstrap);
+
+        let opening_path = db_path.clone();
+        let opening = tokio::spawn(async move {
+            init_guarded_pool(&opening_path, BOOTSTRAP_CREATOR_ID).await
+        });
+        let mut registered = false;
+        for _ in 0..500_000 {
+            if retained_guard(&db_path, WriterMode::Direct).is_some() {
+                registered = true;
+                break;
+            }
+            if opening.is_finished() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(registered, "the open published its admission before cancel");
+        opening.abort();
+        let _ = opening.await;
+
+        let mut fence = None;
+        for _ in 0..500_000 {
+            if let Ok(acquired) = acquire_store_reset_fence(&db_path) {
+                fence = Some(acquired);
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(fence.expect("the cancelled open released its own OS admission"));
+        assert!(retained_guard(&db_path, WriterMode::Direct).is_none());
+    }
+
+    /// F10: the OS admission belongs to real resources, not to a driver task. A
+    /// pool built on a runtime and dropped after that runtime is gone releases
+    /// its lock once the native SQLite workers finish disposing.
+    #[test]
+    fn admission_is_released_without_a_driver() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("state.db");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let guarded = runtime
+            .block_on(init_guarded_pool(&db_path, BOOTSTRAP_CREATOR_ID))
+            .unwrap();
+        let clone = guarded.clone_pool();
+        drop(runtime);
+        drop(clone);
+        drop(guarded);
+
+        // No runtime left: wait for the real OS lock with a bounded, non-sleeping
+        // acquire loop while the native SQLite workers dispose asynchronously.
+        let mut fence = None;
+        for _ in 0..200_000 {
+            if let Ok(acquired) = acquire_store_reset_fence(&db_path) {
+                fence = Some(acquired);
+                break;
+            }
+            std::thread::yield_now();
+        }
+        drop(fence.expect("the OS admission is released without a driver"));
     }
 
     /// F10: an open that was registered and seeded but never delivered (the
