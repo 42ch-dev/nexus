@@ -235,16 +235,28 @@ enum PendingSide {
 /// `receive_pending`/`send_pending` are set only when the underlying
 /// tungstenite future returned `Poll::Pending` while the caller held that
 /// half's mutex — the causal fact a spawned task, an entry flag or a timer
-/// cannot supply. `cleanup_started`/`cleanup_finished` bracket the serialized
-/// close, so "did a concurrent close wait for the real cleanup" is observable
-/// instead of timed.
+/// cannot supply. `send_parked` then says that SAME send is held in place
+/// (`park_pending_send`) with the sink mutex still in hand, so it is an active
+/// barrier rather than a stale record; the sequence numbers order the close
+/// against that exact send's cancellation. `cleanup_started`/`cleanup_finished`
+/// bracket the serialized close, and `cleanup_finished` is set only when both
+/// halves were really disposed.
 #[derive(Default)]
 struct PollProbe {
     receive_pending: AtomicBool,
     send_pending: AtomicBool,
+    send_parked: AtomicBool,
+    /// Sequence of the gated send's cancellation, and of the cleanup's sink
+    /// acquisition: the acquisition can only follow that cancellation.
+    send_cancelled: AtomicU64,
+    sink_acquired: AtomicU64,
     cleanup_started: AtomicBool,
     cleanup_finished: AtomicBool,
+    seq: AtomicU64,
     signal: Notify,
+    /// The active-send gate. Nothing opens it on the healthy path: the parked
+    /// send must be cancelled by close while it still holds the sink mutex.
+    send_gate: Notify,
 }
 
 impl PollProbe {
@@ -258,6 +270,35 @@ impl PollProbe {
             PendingSide::Receive => &self.receive_pending,
             PendingSide::Send => &self.send_pending,
         });
+    }
+
+    fn tick(&self) -> u64 {
+        self.seq.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    fn record_send_cancelled(&self) {
+        self.send_cancelled.store(self.tick(), Ordering::SeqCst);
+    }
+
+    fn record_sink_acquired(&self) {
+        self.sink_acquired.store(self.tick(), Ordering::SeqCst);
+    }
+
+    /// Hand the close boundary to the crash-free path: the exact send that just
+    /// reported a real native `Pending` parks here, still holding the sink
+    /// mutex, until close's notification drops it. Only the bound can end it
+    /// otherwise, and that fails loudly instead of hanging or resuming the send.
+    async fn park_pending_send(&self) -> Result<(), spoke_connect::remote::TransportError> {
+        use spoke_connect::remote::TransportError;
+        self.mark(&self.send_parked);
+        match tokio::time::timeout(SETUP_BOUND, self.send_gate.notified()).await {
+            Ok(()) => Err(TransportError::Io(
+                "the pending-send gate opened without a close".to_owned(),
+            )),
+            Err(_) => Err(TransportError::Io(
+                "the pending-send gate expired without a close".to_owned(),
+            )),
+        }
     }
 
     /// Wait, bounded, until the probe recorded `flag`.
@@ -274,6 +315,30 @@ impl PollProbe {
         tokio::time::timeout(SHUTDOWN_BOUND, observed)
             .await
             .unwrap_or_else(|_| panic!("{observation} within the teardown bound"));
+    }
+}
+
+/// Why one cleanup attempt did not leave the transport owning nothing.
+///
+/// `HalvesOwned` means the named halves were never acquired, so they are still
+/// inside this transport: that is a failure, not a completion. `CloseFrame`
+/// means both halves were disposed and only the graceful WebSocket close
+/// failed, so ownership is complete and the error is still surfaced.
+#[derive(Debug, PartialEq, Eq)]
+enum CleanupFailure {
+    HalvesOwned { stream: bool, sink: bool },
+    CloseFrame(spoke_connect::remote::TransportError),
+}
+
+impl CleanupFailure {
+    fn into_transport_error(self) -> spoke_connect::remote::TransportError {
+        use spoke_connect::remote::TransportError;
+        match self {
+            Self::HalvesOwned { stream, sink } => TransportError::Io(format!(
+                "cleanup left owned halves: stream={stream} sink={sink}"
+            )),
+            Self::CloseFrame(error) => error,
+        }
     }
 }
 
@@ -371,8 +436,12 @@ where
     }
 
     /// Failure path: the session is unusable, so run the same real cleanup.
+    ///
+    /// The caller's receive/parse error stays that operation's error. A cleanup
+    /// that keeps a half owned is not turned into success either: `released`
+    /// stays false, so the next close reports it truthfully.
     async fn tear_down(&self) {
-        self.release().await;
+        let _ = self.release().await;
     }
 
     /// The one real cleanup: refuse new I/O, wake every awaited native poll,
@@ -380,13 +449,16 @@ where
     /// included, so the whole close is bounded rather than each step.
     ///
     /// `released` (not `closed`, and not the SDK's `Closed` state, which is set
-    /// before its detached `transport.close()` runs) is the completion fact.
-    /// A concurrent caller waits on the gate, and that wait is bounded too: the
-    /// cleanup it waits for runs against one deadline.
-    async fn release(&self) {
+    /// before its detached `transport.close()` runs) is set only when both
+    /// halves were actually taken and dropped. A half whose mutex the deadline
+    /// could not acquire is NOT disposed: the call fails, completion stays
+    /// unannounced, and a later close retries rather than reporting success.
+    /// A concurrent caller waits on the gate; that wait is covered because the
+    /// cleanup it waits for is deadline-bounded.
+    async fn release(&self) -> Result<(), CleanupFailure> {
         let _gate = self.close_gate.lock().await;
         if self.released.load(Ordering::SeqCst) {
-            return;
+            return Ok(());
         }
         self.closed.store(true, Ordering::SeqCst);
         if let Some(probe) = &self.probe {
@@ -397,22 +469,65 @@ where
         // release would wait for the very I/O it has to cancel.
         self.notify.notify_waiters();
         let deadline = tokio::time::Instant::now() + SHUTDOWN_BOUND;
+        let mut stream_disposed = false;
         if let Ok(mut stream) = tokio::time::timeout_at(deadline, self.stream.lock()).await {
             stream.take();
+            stream_disposed = true;
         }
         self.notify.notify_waiters();
+        let mut sink_disposed = false;
+        let mut close_error = None;
         if let Ok(mut sink) = tokio::time::timeout_at(deadline, self.sink.lock()).await {
+            if let Some(probe) = &self.probe {
+                probe.record_sink_acquired();
+            }
             if let Some(sink) = sink.as_mut() {
-                // Bounded by the same deadline: a stalled peer's unwritten
-                // frames cannot hold teardown open.
-                let _ = tokio::time::timeout_at(deadline, sink.close()).await;
+                match tokio::time::timeout_at(deadline, sink.close()).await {
+                    Ok(Ok(())) => {}
+                    // A failed close frame is surfaced, never discarded; the
+                    // half is still dropped below.
+                    Ok(Err(error)) => close_error = Some(map_ws_error(error)),
+                    // The shared deadline is the forced-disposal path: a peer
+                    // that never drains cannot hold teardown open, and the drop
+                    // below still ends the socket.
+                    Err(_) => {}
+                }
             }
             sink.take();
+            sink_disposed = true;
+        }
+        if !(stream_disposed && sink_disposed) {
+            return Err(CleanupFailure::HalvesOwned {
+                stream: !stream_disposed,
+                sink: !sink_disposed,
+            });
         }
         self.released.store(true, Ordering::SeqCst);
         if let Some(probe) = &self.probe {
             probe.mark(&probe.cleanup_finished);
         }
+        match close_error {
+            Some(error) => Err(CleanupFailure::CloseFrame(error)),
+            None => Ok(()),
+        }
+    }
+
+    /// Fixture-only: take the stream half's mutex and hold it until `release`,
+    /// exactly as a live I/O owner does, without observing the close's
+    /// cancellation. Reports acquisition through `held`, and after the hold
+    /// reports whether the transport still owned the half. Nothing here fakes a
+    /// mutex: the guard is the real one the cleanup must acquire.
+    async fn hold_stream_until(
+        &self,
+        release: Arc<Notify>,
+        held: tokio::sync::oneshot::Sender<()>,
+        owned_after: tokio::sync::oneshot::Sender<bool>,
+    ) {
+        let guard = self.stream.lock().await;
+        let _ = held.send(());
+        release.notified().await;
+        let _ = owned_after.send(guard.as_ref().is_some());
+        drop(guard);
     }
 }
 
@@ -430,7 +545,12 @@ where
             biased;
             // A blocked send is cancellable: the close's notification drops the
             // parked native flush future, which releases the sink mutex.
-            () = self.notify.notified() => Err(TransportError::Closed),
+            () = self.notify.notified() => {
+                if let Some(probe) = &self.probe {
+                    probe.record_send_cancelled();
+                }
+                Err(TransportError::Closed)
+            }
             outcome = async {
                 let mut guard = self.sink.lock().await;
                 if self.closed.load(Ordering::SeqCst) {
@@ -442,9 +562,19 @@ where
                 // observed while this send still holds the sink mutex.
                 let mut sending =
                     Box::pin(sink.send(Message::Binary(envelope.to_vec().into())));
-                if let Some(probe) = &self.probe {
-                    if poll_once_pending(sending.as_mut()) {
+                // Only an observed transport touches the native future twice.
+                let natively_pending =
+                    self.probe.is_some() && poll_once_pending(sending.as_mut());
+                if natively_pending {
+                    if let Some(probe) = &self.probe {
                         probe.record(PendingSide::Send);
+                        // Keep THIS future — the natively pending one — and the
+                        // sink guard alive until close cancels them, so the
+                        // close boundary is this exact send, never a later one.
+                        let parked = probe.park_pending_send().await;
+                        drop(sending);
+                        drop(guard);
+                        return parked;
                     }
                 }
                 let outcome = sending.await.map_err(map_ws_error);
@@ -482,8 +612,7 @@ where
     }
 
     async fn close(&self) -> Result<(), spoke_connect::remote::TransportError> {
-        self.release().await;
-        Ok(())
+        self.release().await.map_err(CleanupFailure::into_transport_error)
     }
 }
 
@@ -650,6 +779,41 @@ async fn silent_peer_listener() -> (
         drop(ws);
     });
     (addr, stop, task)
+}
+
+/// A peer that reads the session like a real remote: it reports the graceful
+/// close frame and then waits for the connection to end. Used where a test must
+/// observe the peer side of a disposal and does not need backpressure.
+async fn watched_peer_listener() -> (
+    SocketAddr,
+    Arc<Notify>,
+    tokio::task::JoinHandle<()>,
+) {
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind an ephemeral localhost port");
+    let addr = listener.local_addr().expect("listener address");
+    let close_frame = Arc::new(Notify::new());
+    let signal = Arc::clone(&close_frame);
+    let task = tokio::spawn(async move {
+        let (tcp, peer) = tokio::time::timeout(SETUP_BOUND, listener.accept())
+            .await
+            .expect("the watched peer is accepted within the bound")
+            .expect("accept the watched peer");
+        assert!(peer.ip().is_loopback(), "the listener only serves localhost");
+        let mut ws = tokio::time::timeout(SETUP_BOUND, tokio_tungstenite::accept_async(tcp))
+            .await
+            .expect("the watched upgrade is bounded")
+            .expect("websocket upgrade");
+        loop {
+            match ws.next().await {
+                Some(Ok(Message::Close(_))) => signal.notify_one(),
+                Some(Ok(_)) => {}
+                Some(Err(_)) | None => break,
+            }
+        }
+    });
+    (addr, close_frame, task)
 }
 
 // ---------------------------------------------------------------------------
@@ -2343,6 +2507,15 @@ async fn bounded_teardown_releases_a_parked_receiver_and_a_stalled_peer() {
             "the blocked send reports a native Pending",
         )
         .await;
+    // ...and that SAME send is now parked on its own native Pending with the
+    // sink mutex still in hand: no later iteration can run, so close is about
+    // to race this live future rather than a finished or different send.
+    probe
+        .wait_for(
+            &probe.send_parked,
+            "the pending send is parked while it still owns the sink half",
+        )
+        .await;
 
     // Close races both real polls. It must finish, and a concurrent close must
     // wait for that cleanup instead of reporting completion while it runs.
@@ -2392,9 +2565,23 @@ async fn bounded_teardown_releases_a_parked_receiver_and_a_stalled_peer() {
         .await
         .expect("the blocked send is released")
         .expect("the sender task joins");
+    assert_eq!(
+        sent,
+        Err(spoke_connect::remote::TransportError::Closed),
+        "the close cancels the send that still owned the sink half"
+    );
+    // The handoff is ordered: that same send recorded its cancellation before
+    // the cleanup could acquire the sink it was holding.
+    let cancelled = probe.send_cancelled.load(Ordering::SeqCst);
+    let acquired = probe.sink_acquired.load(Ordering::SeqCst);
     assert!(
-        sent.is_err(),
-        "a cancelled blocked send surfaces its bounded error: {sent:?}"
+        cancelled > 0,
+        "the gated send recorded its own cancellation at close"
+    );
+    assert!(
+        acquired > cancelled,
+        "the cleanup took the sink only after that send let it go: \
+         cancelled={cancelled} acquired={acquired}"
     );
 
     // Release the stalled peer itself and join it: no fixture-created task is
@@ -2404,6 +2591,80 @@ async fn bounded_teardown_releases_a_parked_receiver_and_a_stalled_peer() {
         .await
         .expect("the stalled peer task ends")
         .expect("the stalled peer task joins");
+}
+
+/// A cleanup that cannot take a half must fail rather than announce completion.
+///
+/// The live owner below holds the real stream mutex, so the bounded acquisition
+/// genuinely cannot succeed. The failed call must report the still-owned half,
+/// must not set the completion fact, and a later bounded close must dispose it
+/// only once that owner lets go.
+#[tokio::test]
+async fn cleanup_that_cannot_take_a_half_fails_and_finishes_later() {
+    let (addr, close_frame, peer) = watched_peer_listener().await;
+    let probe = Arc::new(PollProbe::default());
+    let stalled = Arc::new(observed_connect(addr, Arc::clone(&probe)).await);
+
+    let release = Arc::new(Notify::new());
+    let (held, held_rx) = tokio::sync::oneshot::channel();
+    let (owned_after, owned_rx) = tokio::sync::oneshot::channel();
+    let holder = tokio::spawn({
+        let stalled = Arc::clone(&stalled);
+        let release = Arc::clone(&release);
+        async move {
+            stalled
+                .hold_stream_until(release, held, owned_after)
+                .await
+        }
+    });
+    held_rx.await.expect("a live owner holds the stream half");
+
+    // The cleanup cannot acquire that half: it fails, reports which half it
+    // still owns, and leaves the completion fact unset.
+    assert_eq!(
+        stalled.release().await,
+        Err(CleanupFailure::HalvesOwned {
+            stream: true,
+            sink: false
+        }),
+        "the unacquired half is reported instead of hidden by a completion flag"
+    );
+    assert!(!probe.cleanup_finished.load(Ordering::SeqCst));
+    // The half it *could* take really was disposed: the peer saw its close.
+    tokio::time::timeout(SETUP_BOUND, close_frame.notified())
+        .await
+        .expect("the disposed sink half closed the session toward the peer");
+
+    // A later close cannot claim success while the half is still owned.
+    let later = tokio::time::timeout(SETUP_BOUND, stalled.close())
+        .await
+        .expect("the later close is bounded");
+    assert!(
+        matches!(later, Err(spoke_connect::remote::TransportError::Io(_))),
+        "a later close surfaces the still-owned half instead of success: {later:?}"
+    );
+    assert!(!probe.cleanup_finished.load(Ordering::SeqCst));
+
+    // Once the owner lets go, the bounded retry really disposes it...
+    release.notify_one();
+    assert!(
+        owned_rx
+            .await
+            .expect("the owner reports the half it still sees"),
+        "the transport still owned the stream half after the failed cleanup"
+    );
+    holder.await.expect("the owner joins");
+    tokio::time::timeout(SETUP_BOUND, stalled.close())
+        .await
+        .expect("the retried close is bounded")
+        .expect("the retried close disposes the remaining half");
+    assert!(probe.cleanup_finished.load(Ordering::SeqCst));
+
+    // ...and the peer sees the session end.
+    tokio::time::timeout(SETUP_BOUND, peer)
+        .await
+        .expect("the watched peer task ends")
+        .expect("the watched peer task joins");
 }
 
 // ---------------------------------------------------------------------------
