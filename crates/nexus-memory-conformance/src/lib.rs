@@ -33,7 +33,7 @@ pub use candidates::{
     RetentionSweep, DEDUP_RETENTION_SECONDS, IDEMPOTENCY_RETENTION_SECONDS,
     RECEIPT_RETENTION_SECONDS,
 };
-pub use faults::{FaultHold, FaultPoint, FixtureClock, FixtureFaults};
+pub use faults::{FaultHold, FaultHoldFailure, FaultHoldLost, FaultPoint, FixtureFaults};
 pub use provider::{FixtureIdentity, FixtureMemoryProvider};
 
 /// Failure to open the fixture store or provision its durable bootstrap state.

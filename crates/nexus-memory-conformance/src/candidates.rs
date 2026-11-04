@@ -75,21 +75,42 @@ pub(crate) const MAX_CONTENT_BYTES: usize = 64 * 1024;
 /// this window without being consumed (§6.7 `expires_at`, §8.1).
 const CANDIDATE_TTL_DAYS: i64 = 30;
 
-/// §7.1 `receipt_retention_seconds`: how long a settled receipt *body* is
-/// served. Past it only the content-free dedup tombstone answers (§6.10).
+/// §7.1 `receipt_retention_seconds`: how long a receipt *body* is served once
+/// the receipt became terminal. The window starts at `completed_at`, never at
+/// admission, so work that stayed pending keeps its full body window after it
+/// settles. Past the window only the content-free dedup tombstone answers
+/// (§6.10/MEM-R021).
 pub const RECEIPT_RETENTION_SECONDS: u64 = 2_592_000;
 
 /// §7.1 `idempotency_retention_seconds`: the stored receipt-body window. The
 /// fixture keeps it identical to `receipt_retention_seconds`, as the local
-/// provider does, so there is one body lifetime and one tombstone lifetime.
+/// provider does, so there is one body lifetime for every terminal receipt.
 pub const IDEMPOTENCY_RETENTION_SECONDS: u64 = RECEIPT_RETENTION_SECONDS;
 
 /// §7.1 `dedup_retention_seconds`: how long the dedup tombstone (namespace key,
-/// payload digest, receipt id, last known status) outlives the body. §7.1
-/// requires it to cover the idempotency window.
+/// payload digest, receipt id, last known status) is kept **after the body
+/// retires**, as §6.10 states. It is not counted from admission, so a long
+/// pending period never shortens it.
 pub const DEDUP_RETENTION_SECONDS: u64 = 5_184_000;
 
 const _: () = assert!(DEDUP_RETENTION_SECONDS >= IDEMPOTENCY_RETENTION_SECONDS);
+
+/// One retention window as a signed span, for the deadline arithmetic below.
+fn retention_span(window_seconds: u64) -> Duration {
+    Duration::seconds(i64::try_from(window_seconds).unwrap_or(i64::MAX))
+}
+
+/// The instant a receipt body retires: the terminal completion plus
+/// `receipt_retention_seconds` (§6.10).
+fn body_expiry(completed: DateTime<Utc>) -> DateTime<Utc> {
+    completed + retention_span(RECEIPT_RETENTION_SECONDS)
+}
+
+/// The instant the dedup tombstone retires: the body retirement plus the full
+/// `dedup_retention_seconds` window (§6.10/MEM-R021).
+fn tombstone_expiry(completed: DateTime<Utc>) -> DateTime<Utc> {
+    body_expiry(completed) + retention_span(DEDUP_RETENTION_SECONDS)
+}
 
 /// Advisory kind recorded when the request carries no `kind_hint` (§6.7).
 const DEFAULT_CANDIDATE_KIND: &str = "note";
@@ -287,6 +308,15 @@ fn outcome_uncertain() -> SpokeReject {
         SpokeRejectCode::OutcomeUncertain,
         "the mutation's commit state is unknown; resolve with the same idempotency key \
          or memory.receipts.get",
+    )
+}
+
+/// A fixture fault that ended before this operation committed. §14.2 allows the
+/// retryable internal class only when no effect committed, which holds here.
+fn fault_before_effect(point: FaultPoint) -> SpokeReject {
+    reject(
+        SpokeRejectCode::InternalError,
+        format!("fixture fault hold at {point:?} ended before any effect was committed"),
     )
 }
 
@@ -930,6 +960,23 @@ struct StoredReceipt {
     error: Option<String>,
     created_at: String,
     completed_at: Option<String>,
+    /// §6.10 body deadline; `None` only while the receipt is pending.
+    body_expires_at: Option<String>,
+}
+
+impl StoredReceipt {
+    fn is_pending(&self) -> bool {
+        self.status == "pending"
+    }
+
+    /// Whether the body is still inside its terminal window at `now`.
+    fn inside_body_window(&self, now: DateTime<Utc>) -> Result<bool, SpokeReject> {
+        let raw = self
+            .body_expires_at
+            .as_deref()
+            .ok_or_else(|| internal("a terminal receipt carries no body deadline"))?;
+        Ok(now <= instant(raw)?)
+    }
 }
 
 async fn fetch_receipt(
@@ -942,7 +989,8 @@ async fn fetch_receipt(
         Some(requester) => {
             sqlx::query(
                 "SELECT space_id, receipt_id, requester_principal_id, op, idempotency_key, \
-                 payload_digest, status, result_json, error_json, created_at, completed_at \
+                 payload_digest, status, result_json, error_json, created_at, completed_at, \
+                 body_expires_at \
                  FROM receipts \
                  WHERE space_id = ? AND receipt_id = ? AND requester_principal_id = ?",
             )
@@ -955,7 +1003,8 @@ async fn fetch_receipt(
         None => {
             sqlx::query(
                 "SELECT space_id, receipt_id, requester_principal_id, op, idempotency_key, \
-                 payload_digest, status, result_json, error_json, created_at, completed_at \
+                 payload_digest, status, result_json, error_json, created_at, completed_at, \
+                 body_expires_at \
                  FROM receipts WHERE space_id = ? AND receipt_id = ?",
             )
             .bind(space_id)
@@ -978,9 +1027,120 @@ async fn fetch_receipt(
             error: row.try_get("error_json").map_err(internal)?,
             created_at: row.try_get("created_at").map_err(internal)?,
             completed_at: row.try_get("completed_at").map_err(internal)?,
+            body_expires_at: row.try_get("body_expires_at").map_err(internal)?,
         })
     })
     .transpose()
+}
+
+/// The content-free dedup tombstone metadata that outlives the receipt body
+/// (§6.10/MEM-R021), kept independently of the body row.
+struct StoredTombstone {
+    last_known_status: String,
+    /// §6.10 tombstone deadline; `None` only while the receipt is pending.
+    tombstone_expires_at: Option<String>,
+}
+
+impl StoredTombstone {
+    fn tombstone_end(&self) -> Result<DateTime<Utc>, SpokeReject> {
+        let raw = self
+            .tombstone_expires_at
+            .as_deref()
+            .ok_or_else(|| internal("a terminal dedup tombstone carries no deadline"))?;
+        instant(raw)
+    }
+}
+
+async fn fetch_tombstone(
+    conn: &mut SqliteConnection,
+    space_id: &str,
+    receipt_id: &str,
+    requester: Option<&str>,
+) -> Result<Option<StoredTombstone>, SpokeReject> {
+    let row = match requester {
+        Some(requester) => sqlx::query(
+            "SELECT last_known_status, tombstone_expires_at FROM idempotency_namespace \
+             WHERE space_id = ? AND requester_principal_id = ? AND receipt_id = ?",
+        )
+        .bind(space_id)
+        .bind(requester)
+        .bind(receipt_id)
+        .fetch_optional(&mut *conn)
+        .await,
+        None => sqlx::query(
+            "SELECT last_known_status, tombstone_expires_at FROM idempotency_namespace \
+             WHERE space_id = ? AND receipt_id = ?",
+        )
+        .bind(space_id)
+        .bind(receipt_id)
+        .fetch_optional(&mut *conn)
+        .await,
+    }
+    .map_err(internal)?;
+    row.map(|row| {
+        Ok(StoredTombstone {
+            last_known_status: row.try_get("last_known_status").map_err(internal)?,
+            tombstone_expires_at: row.try_get("tombstone_expires_at").map_err(internal)?,
+        })
+    })
+    .transpose()
+}
+
+/// §6.10/MEM-R021 logical retention of one receipt at one supplied instant.
+///
+/// It is evaluated from the persisted lifecycle deadlines, not from physical
+/// presence, so an old row that no explicit maintenance pass has reclaimed is
+/// still judged by the contract. Nothing here writes.
+enum ReceiptRetention {
+    /// The body is inside its terminal window and is served as stored.
+    Retained,
+    /// The body's window ended; the dedup tombstone still protects the key.
+    Evicted { last_known_status: String },
+    /// The whole lifetime ended (or nothing exists): as good as absent.
+    Expired,
+}
+
+impl ReceiptRetention {
+    fn of(
+        tombstone: Option<&StoredTombstone>,
+        body: Option<&StoredReceipt>,
+        now: DateTime<Utc>,
+    ) -> Result<Self, SpokeReject> {
+        if let Some(tombstone) = tombstone {
+            if tombstone.last_known_status == "pending" {
+                // Live work: never expire it into re-execution, and the body it
+                // belongs to must still exist.
+                return body
+                    .map(|_| Self::Retained)
+                    .ok_or_else(|| internal("a pending dedup tombstone has no receipt body"));
+            }
+            if now > tombstone.tombstone_end()? {
+                return Ok(Self::Expired);
+            }
+            return match body {
+                Some(body) if !body.is_pending() && body.inside_body_window(now)? => {
+                    Ok(Self::Retained)
+                }
+                _ => Ok(Self::Evicted {
+                    last_known_status: tombstone.last_known_status.clone(),
+                }),
+            };
+        }
+        // No dedup namespace: a keyless receipt has no tombstone by design, and
+        // an orphan keyed body has already outlived its namespace.
+        match body {
+            None => Ok(Self::Expired),
+            Some(body) if body.idempotency_key.is_some() => Ok(Self::Expired),
+            Some(body) if body.is_pending() => Ok(Self::Retained),
+            Some(body) => {
+                if body.inside_body_window(now)? {
+                    Ok(Self::Retained)
+                } else {
+                    Ok(Self::Expired)
+                }
+            }
+        }
+    }
 }
 
 fn receipt_to_wire(stored: &StoredReceipt) -> Result<MemoryReceipt, SpokeReject> {
@@ -1035,25 +1195,30 @@ pub(crate) async fn stage_receipt_in_tx(
     state: ReceiptState,
     now: DateTime<Utc>,
 ) -> Result<MemoryReceipt, SpokeReject> {
-    let (status, result, error, completed_at) = match state {
+    let (status, result, error, completed_at, body_expires_at) = match state {
         ReceiptState::Committed(result) => (
             "committed",
             Some(encoded(&result)?),
             None,
             Some(timestamp_text(now)),
+            Some(timestamp_text(body_expiry(now))),
         ),
-        ReceiptState::Pending => ("pending", None, None, None),
+        ReceiptState::Pending => ("pending", None, None, None, None),
         ReceiptState::Failed(reject) => (
             "failed",
             None,
             Some(encoded(&error_envelope(&reject))?),
             Some(timestamp_text(now)),
+            Some(timestamp_text(body_expiry(now))),
         ),
     };
+    // §6.10: the body window starts at terminal completion, so a receipt that
+    // stayed pending is not born already expired.
     sqlx::query(
         "INSERT INTO receipts (receipt_id, space_id, requester_principal_id, op, idempotency_key, \
-         payload_digest, status, result_json, error_json, created_at, completed_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         payload_digest, status, result_json, error_json, created_at, completed_at, \
+         body_expires_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(receipt_id)
     .bind(space_id)
@@ -1066,16 +1231,24 @@ pub(crate) async fn stage_receipt_in_tx(
     .bind(error)
     .bind(timestamp_text(now))
     .bind(completed_at)
+    .bind(&body_expires_at)
     .execute(&mut *conn)
     .await
     .map_err(internal)?;
     // §7.0.5: the keyless mutation is the sole exemption and binds no dedup
     // namespace row, so nothing can ever replay it.
     if let Some(idempotency_key) = admission.idempotency_key.as_deref() {
+        // §6.10/MEM-R021: the tombstone deadline starts when the body retires,
+        // so it is the terminal completion plus both declared windows. A
+        // pending receipt carries no deadline until it settles.
+        let tombstone_expires_at = body_expires_at
+            .as_ref()
+            .map(|_| timestamp_text(tombstone_expiry(now)));
         sqlx::query(
             "INSERT INTO idempotency_namespace (space_id, requester_principal_id, op, \
-             idempotency_key, payload_digest, receipt_id, last_known_status, created_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+             idempotency_key, payload_digest, receipt_id, last_known_status, created_at, \
+             tombstone_expires_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(space_id)
         .bind(principal_id)
@@ -1085,6 +1258,7 @@ pub(crate) async fn stage_receipt_in_tx(
         .bind(receipt_id)
         .bind(status)
         .bind(timestamp_text(now))
+        .bind(tombstone_expires_at)
         .execute(&mut *conn)
         .await
         .map_err(|error| match error.as_database_error() {
@@ -1124,14 +1298,21 @@ pub(crate) async fn settle_receipt_in_tx(
             ))
         }
     };
+    // §6.10/MEM-R021: the body and tombstone windows start at this terminal
+    // completion, so pending work that settles late still gets both full
+    // declared recoverability windows.
+    let body_expires_at = timestamp_text(body_expiry(now));
+    let tombstone_expires_at = timestamp_text(tombstone_expiry(now));
     let settled = sqlx::query(
-        "UPDATE receipts SET status = ?, result_json = ?, error_json = ?, completed_at = ? \
+        "UPDATE receipts SET status = ?, result_json = ?, error_json = ?, completed_at = ?, \
+         body_expires_at = ? \
          WHERE space_id = ? AND receipt_id = ? AND status = 'pending'",
     )
     .bind(status)
     .bind(result)
     .bind(error)
     .bind(timestamp_text(now))
+    .bind(&body_expires_at)
     .bind(space_id)
     .bind(receipt_id)
     .execute(&mut *conn)
@@ -1143,10 +1324,11 @@ pub(crate) async fn settle_receipt_in_tx(
         )));
     }
     sqlx::query(
-        "UPDATE idempotency_namespace SET last_known_status = ? \
+        "UPDATE idempotency_namespace SET last_known_status = ?, tombstone_expires_at = ? \
          WHERE space_id = ? AND receipt_id = ?",
     )
     .bind(status)
+    .bind(&tombstone_expires_at)
     .bind(space_id)
     .bind(receipt_id)
     .execute(&mut *conn)
@@ -1159,22 +1341,42 @@ pub(crate) async fn settle_receipt_in_tx(
     receipt_to_wire(&stored)
 }
 
-/// §7.0.5/MEM-R021: an identical admitted replay returns the stored receipt
-/// without re-executing; a changed payload under the same key is a conflict; an
-/// evicted body leaves only the dedup tombstone.
+/// §7.0.5/MEM-R021 replay resolution at the supplied instant.
+#[derive(Debug)]
+pub(crate) enum ReplayResolution {
+    /// No binding: the operation executes like a first attempt.
+    Fresh,
+    /// The identical admitted replay returns the stored receipt.
+    Replayed(MemoryReceipt),
+    /// The whole namespace lifetime ended. The caller releases this stale
+    /// binding inside its own transaction before staging the new effect, so a
+    /// refusal after this point rolls the release back with the refused effect.
+    KeyReusable { receipt_id: String },
+}
+
+/// An identical admitted replay returns the stored receipt without
+/// re-executing; a changed payload under the same key is a conflict; a retired
+/// body answers `RECEIPT_EXPIRED` while its tombstone lives, and only a
+/// finished lifetime frees the key again.
+///
+/// The decision uses the supplied instant and the persisted lifecycle
+/// deadlines, so the caller-owned seam needs no prior maintenance pass and
+/// writes nothing.
 pub(crate) async fn resolve_replay(
     conn: &mut SqliteConnection,
     space_id: &str,
     principal_id: &str,
     admission: &Mutation,
-) -> Result<Option<MemoryReceipt>, SpokeReject> {
+    now: DateTime<Utc>,
+) -> Result<ReplayResolution, SpokeReject> {
     let Some(idempotency_key) = admission.idempotency_key.as_deref() else {
         // §7.0.5 sole keyless exemption: no namespace row exists, so there is
         // nothing to replay and the op is admitted like a first attempt.
-        return Ok(None);
+        return Ok(ReplayResolution::Fresh);
     };
     let row = sqlx::query(
-        "SELECT payload_digest, receipt_id, last_known_status FROM idempotency_namespace \
+        "SELECT payload_digest, receipt_id, last_known_status, tombstone_expires_at \
+         FROM idempotency_namespace \
          WHERE space_id = ? AND requester_principal_id = ? AND op = ? AND idempotency_key = ?",
     )
     .bind(space_id)
@@ -1185,163 +1387,199 @@ pub(crate) async fn resolve_replay(
     .await
     .map_err(internal)?;
     let Some(row) = row else {
-        return Ok(None);
+        return Ok(ReplayResolution::Fresh);
     };
     let digest: String = row.try_get("payload_digest").map_err(internal)?;
     if digest != admission.payload_digest {
         return Err(idempotency_conflict());
     }
     let receipt_id: String = row.try_get("receipt_id").map_err(internal)?;
-    if let Some(stored) = fetch_receipt(conn, space_id, &receipt_id, None).await? {
-        return Ok(Some(receipt_to_wire(&stored)?));
+    let tombstone = StoredTombstone {
+        last_known_status: row.try_get("last_known_status").map_err(internal)?,
+        tombstone_expires_at: row.try_get("tombstone_expires_at").map_err(internal)?,
+    };
+    let body = fetch_receipt(conn, space_id, &receipt_id, None).await?;
+    match ReceiptRetention::of(Some(&tombstone), body.as_ref(), now)? {
+        ReceiptRetention::Expired => Ok(ReplayResolution::KeyReusable { receipt_id }),
+        ReceiptRetention::Evicted { last_known_status } => {
+            Err(receipt_expired(&last_known_status))
+        }
+        ReceiptRetention::Retained => {
+            let body = body.ok_or_else(|| {
+                internal(format!("retained receipt {receipt_id} is not readable"))
+            })?;
+            Ok(ReplayResolution::Replayed(receipt_to_wire(&body)?))
+        }
     }
-    let last_known_status: String = row.try_get("last_known_status").map_err(internal)?;
-    Err(receipt_expired(&last_known_status))
 }
 
-/// The dedup tombstone that outlives an evicted receipt body (§6.10/MEM-R021):
-/// the terminal status a `RECEIPT_EXPIRED` may report, disclosed only after the
-/// recorded target's authorization recheck has passed.
-async fn tombstone_status(
+/// Resolve replay for a mutation about to execute on the caller's transaction.
+///
+/// A finished key is released here, inside the same transaction, so a refusal
+/// after this point rolls the release back with the refused effect.
+async fn resolve_or_release(
     conn: &mut SqliteConnection,
     space_id: &str,
-    receipt_id: &str,
-    requester: Option<&str>,
-) -> Result<Option<String>, SpokeReject> {
-    let row = match requester {
-        Some(requester) => sqlx::query(
-            "SELECT last_known_status FROM idempotency_namespace \
-             WHERE space_id = ? AND requester_principal_id = ? AND receipt_id = ?",
-        )
-        .bind(space_id)
-        .bind(requester)
-        .bind(receipt_id)
-        .fetch_optional(&mut *conn)
-        .await,
-        None => sqlx::query(
-            "SELECT last_known_status FROM idempotency_namespace \
-             WHERE space_id = ? AND receipt_id = ?",
-        )
-        .bind(space_id)
-        .bind(receipt_id)
-        .fetch_optional(&mut *conn)
-        .await,
+    principal_id: &str,
+    admission: &Mutation,
+    now: DateTime<Utc>,
+) -> Result<Option<MemoryReceipt>, SpokeReject> {
+    match resolve_replay(conn, space_id, principal_id, admission, now).await? {
+        ReplayResolution::Fresh => Ok(None),
+        ReplayResolution::Replayed(receipt) => Ok(Some(receipt)),
+        ReplayResolution::KeyReusable { receipt_id } => {
+            release_expired_binding_in_tx(conn, space_id, principal_id, admission, &receipt_id)
+                .await?;
+            Ok(None)
+        }
     }
-    .map_err(internal)?;
-    row.map(|row| row.try_get("last_known_status").map_err(internal))
-        .transpose()
 }
 
-/// What one §6.10 retention pass reclaimed from the fixture's own rows.
+/// Drop the stale binding of a key whose whole lifetime ended.
 ///
-/// The counts are raised by the sweep statements themselves, so a caller can
-/// assert the exact boundary it observed instead of inferring it from a total.
+/// This is not maintenance ahead of an operation: it is the atomic prerequisite
+/// for reusing the key, executed inside the caller's transaction, so a refusal
+/// after this point rolls it back together with the refused effect. The body is
+/// already past its window and the target past its tombstone.
+pub(crate) async fn release_expired_binding_in_tx(
+    conn: &mut SqliteConnection,
+    space_id: &str,
+    principal_id: &str,
+    admission: &Mutation,
+    receipt_id: &str,
+) -> Result<(), SpokeReject> {
+    let Some(idempotency_key) = admission.idempotency_key.as_deref() else {
+        return Ok(());
+    };
+    sqlx::query("DELETE FROM receipt_targets WHERE receipt_id = ?")
+        .bind(receipt_id)
+        .execute(&mut *conn)
+        .await
+        .map_err(internal)?;
+    sqlx::query("DELETE FROM receipts WHERE space_id = ? AND receipt_id = ?")
+        .bind(space_id)
+        .bind(receipt_id)
+        .execute(&mut *conn)
+        .await
+        .map_err(internal)?;
+    sqlx::query(
+        "DELETE FROM idempotency_namespace \
+         WHERE space_id = ? AND requester_principal_id = ? AND op = ? AND idempotency_key = ?",
+    )
+    .bind(space_id)
+    .bind(principal_id)
+    .bind(admission.op)
+    .bind(idempotency_key)
+    .execute(&mut *conn)
+    .await
+    .map_err(internal)?;
+    Ok(())
+}
+
+/// What one explicit §6.10 retention pass reclaimed from the fixture's rows.
+///
+/// Physical reclamation is operator maintenance only: no read, refusal or
+/// mutation wrapper runs it implicitly, so a refused operation can never commit
+/// an unrelated cleanup. The counts are raised by the statements themselves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct RetentionSweep {
-    /// Keyed receipt bodies evicted past `receipt_retention_seconds`; their
-    /// dedup tombstone and recorded target stay.
+    /// Keyed receipt bodies reclaimed after their terminal body window.
     pub receipt_bodies_evicted: u64,
-    /// Keyless receipt bodies removed at their body end. A keyless receipt binds
-    /// no dedup namespace, so there is no longer window in which a tombstone
-    /// could disclose it.
+    /// Keyless receipt bodies reclaimed at their body end, together with their
+    /// targets (a keyless receipt binds no dedup namespace).
     pub keyless_bodies_evicted: u64,
-    /// Keyed dedup tombstones removed past `dedup_retention_seconds`.
+    /// Keyed dedup tombstones reclaimed after their full post-body window.
     pub dedup_tombstones_evicted: u64,
-    /// Receipt targets removed with a keyed tombstone or a keyless body.
+    /// Receipt targets reclaimed with a keyed tombstone or a keyless body.
     pub targets_removed: u64,
 }
 
-/// The stored-timestamp cutoff for one retention window at `now`, rendered
-/// exactly like [`timestamp_text`], so the range predicate and the boundary
-/// tests cut on the same instant.
-fn retention_cutoff(now: DateTime<Utc>, window_seconds: u64) -> String {
-    let seconds = i64::try_from(window_seconds).unwrap_or(i64::MAX);
-    timestamp_text(now - Duration::seconds(seconds))
-}
-
-/// §6.10/MEM-R021 retention pass on the caller's connection.
+/// §6.10/MEM-R021 physical reclamation on the caller's connection, at one
+/// supplied instant (the explicit operator maintenance pass).
 ///
-/// Origins are each row's `created_at` — the admission instant, never
-/// `completed_at` — so an async settlement does not extend a body's life.
-/// Ordering matters and is enforced here:
+/// Origins are the persisted lifecycle deadlines, so this pass can never shorten
+/// an advertised horizon: a keyed body retires at `body_expires_at`, and its
+/// tombstone (with the original content-free target) retires at
+/// `tombstone_expires_at`, which is the full `dedup_retention_seconds` after the
+/// body. A keyless body and its target retire together at `body_expires_at`
+/// because no dedup row exists. A pending receipt has no deadline and is never
+/// reclaimed: it is live work.
 ///
-/// 1. a keyless body and its target end together (no dedup row exists);
-/// 2. a keyed body ends alone, leaving the tombstone *and* the original
-///    content-free target, so an evicted receipt still rechecks the authority
-///    the recorded operation required before disclosing its status (§7.28);
-/// 3. a keyed tombstone ends together with its target, so the key becomes new
-///    again and nothing can reauthorize a tombstone that no longer exists.
-///
-/// A pending receipt is live work: it is never evicted into re-execution, and
-/// its dedup row is kept as long as the pending body exists.
+/// This only removes rows; it never writes receipt state or the snapshot marker.
 pub(crate) async fn retention_sweep_in_tx(
     conn: &mut SqliteConnection,
     space_id: &str,
     now: DateTime<Utc>,
 ) -> Result<RetentionSweep, SpokeReject> {
-    let receipt_cutoff = retention_cutoff(now, RECEIPT_RETENTION_SECONDS);
-    let dedup_cutoff = retention_cutoff(now, DEDUP_RETENTION_SECONDS);
+    let now_text = timestamp_text(now);
     let mut sweep = RetentionSweep::default();
 
+    // Keyed tombstone end: the target and namespace row end together, so the
+    // key is free again and nothing can reauthorize a tombstone that no longer
+    // exists.
+    let dedup_targets = sqlx::query(
+        "DELETE FROM receipt_targets WHERE receipt_id IN ( \
+             SELECT receipt_id FROM idempotency_namespace \
+             WHERE space_id = ? AND tombstone_expires_at IS NOT NULL \
+               AND tombstone_expires_at < ?)",
+    )
+    .bind(space_id)
+    .bind(&now_text)
+    .execute(&mut *conn)
+    .await
+    .map_err(internal)?;
+    let dedup = sqlx::query(
+        "DELETE FROM idempotency_namespace \
+         WHERE space_id = ? AND tombstone_expires_at IS NOT NULL \
+           AND tombstone_expires_at < ?",
+    )
+    .bind(space_id)
+    .bind(&now_text)
+    .execute(&mut *conn)
+    .await
+    .map_err(internal)?;
+    sweep.targets_removed += dedup_targets.rows_affected();
+    sweep.dedup_tombstones_evicted = dedup.rows_affected();
+
+    // Keyless body end: no dedup row exists, so the body and its target end
+    // together.
     let keyless_targets = sqlx::query(
         "DELETE FROM receipt_targets WHERE receipt_id IN ( \
              SELECT receipt_id FROM receipts \
              WHERE space_id = ? AND idempotency_key IS NULL AND status != 'pending' \
-               AND created_at < ?)",
+               AND body_expires_at IS NOT NULL AND body_expires_at < ?)",
     )
     .bind(space_id)
-    .bind(&receipt_cutoff)
+    .bind(&now_text)
     .execute(&mut *conn)
     .await
     .map_err(internal)?;
     let keyless_bodies = sqlx::query(
         "DELETE FROM receipts \
          WHERE space_id = ? AND idempotency_key IS NULL AND status != 'pending' \
-           AND created_at < ?",
+           AND body_expires_at IS NOT NULL AND body_expires_at < ?",
     )
     .bind(space_id)
-    .bind(&receipt_cutoff)
+    .bind(&now_text)
     .execute(&mut *conn)
     .await
     .map_err(internal)?;
-    sweep.keyless_bodies_evicted = keyless_bodies.rows_affected();
     sweep.targets_removed += keyless_targets.rows_affected();
+    sweep.keyless_bodies_evicted = keyless_bodies.rows_affected();
 
+    // Keyed body end: the body leaves alone; its tombstone and recorded target
+    // stay until the tombstone window ends above.
     let keyed_bodies = sqlx::query(
         "DELETE FROM receipts \
          WHERE space_id = ? AND idempotency_key IS NOT NULL AND status != 'pending' \
-           AND created_at < ?",
+           AND body_expires_at IS NOT NULL AND body_expires_at < ?",
     )
     .bind(space_id)
-    .bind(&receipt_cutoff)
+    .bind(&now_text)
     .execute(&mut *conn)
     .await
     .map_err(internal)?;
     sweep.receipt_bodies_evicted = keyed_bodies.rows_affected();
-
-    let dedup_targets = sqlx::query(
-        "DELETE FROM receipt_targets WHERE receipt_id IN ( \
-             SELECT receipt_id FROM idempotency_namespace \
-             WHERE space_id = ? AND created_at < ? AND receipt_id NOT IN ( \
-                 SELECT receipt_id FROM receipts WHERE status = 'pending'))",
-    )
-    .bind(space_id)
-    .bind(&dedup_cutoff)
-    .execute(&mut *conn)
-    .await
-    .map_err(internal)?;
-    sweep.targets_removed += dedup_targets.rows_affected();
-    let dedup = sqlx::query(
-        "DELETE FROM idempotency_namespace \
-         WHERE space_id = ? AND created_at < ? AND receipt_id NOT IN ( \
-             SELECT receipt_id FROM receipts WHERE status = 'pending')",
-    )
-    .bind(space_id)
-    .bind(&dedup_cutoff)
-    .execute(&mut *conn)
-    .await
-    .map_err(internal)?;
-    sweep.dedup_tombstones_evicted = dedup.rows_affected();
     Ok(sweep)
 }
 
@@ -1547,9 +1785,12 @@ impl FixtureMemoryProvider {
         require_served_space(self, space_id)?;
         // Bounded test-only admission pause: it runs before the writer
         // transaction, so a competing identical retry can commit while this
-        // admission waits and this one then replays that receipt.
-        self.faults().hold(FaultPoint::AdmissionPause).await?;
-        self.sweep_retained(space_id, now).await?;
+        // admission waits and this one then replays that receipt. A hold that
+        // ends early is a clean no-effect failure: nothing was staged yet.
+        self.faults()
+            .hold(FaultPoint::AdmissionPause)
+            .await
+            .map_err(|_| fault_before_effect(FaultPoint::AdmissionPause))?;
         let mut transaction = self
             .store()
             .pool()
@@ -1561,8 +1802,12 @@ impl FixtureMemoryProvider {
             .await?;
         // A cancellation inside the staged-but-uncommitted window: the caller
         // drops this future, so the transaction is never committed and nothing
-        // it staged can become durable.
-        self.faults().hold(FaultPoint::BeforeCommit).await?;
+        // it staged can become durable. An expired control ends the wait with
+        // the same no-effect outcome.
+        self.faults()
+            .hold(FaultPoint::BeforeCommit)
+            .await
+            .map_err(|_| fault_before_effect(FaultPoint::BeforeCommit))?;
         // Loss before commit (§14.3): dropping the staged transaction leaves no
         // candidate, record, receipt, dedup row, target or marker behind.
         if self.faults().trip(FaultPoint::BeforeCommit) {
@@ -1576,26 +1821,31 @@ impl FixtureMemoryProvider {
             return Err(outcome_uncertain());
         }
         // Response drop: the committed answer is held until the caller tears the
-        // connection down (or the bounded gate expires).
-        self.faults().hold(FaultPoint::ResponseDrop).await?;
+        // connection down. The effect is already durable, so a hold that ends
+        // without a release is an uncertain outcome, never a clean failure.
+        self.faults()
+            .hold(FaultPoint::ResponseDrop)
+            .await
+            .map_err(|_| outcome_uncertain())?;
         Ok(receipt)
     }
 
-    /// §6.10/MEM-R021 retention pass at one caller-supplied instant (the C7
-    /// retention seam).
+    /// §6.10/MEM-R021 explicit operator maintenance at one caller-supplied
+    /// instant (the C7 retention seam).
     ///
-    /// Eviction runs in its own committed transaction *before* the operation it
-    /// accompanies, so a later refusal of that operation cannot restore an
-    /// evicted body. It never advances the snapshot marker: retention is
-    /// provider maintenance, not an observable space change, so a read that
-    /// samples the clock must not invalidate outstanding cursors.
+    /// This is the only physical reclamation path: reads, refusals and mutation
+    /// wrappers never call it, because a refused operation must not commit
+    /// unrelated cleanup. It deletes only rows whose persisted lifecycle
+    /// deadline has passed, never a pending receipt, and never advances the
+    /// snapshot marker: retention is provider maintenance, not an observable
+    /// space change, so a read that samples the clock must not invalidate
+    /// outstanding cursors.
     ///
     /// # Errors
     ///
     /// Returns the protocol refusal when the space is not served by this
-    /// fixture or the sweep statements fail. A caller that runs it ahead of an
-    /// operation refuses that operation before its own effect: the retention
-    /// state the operation was about to act on is unknown.
+    /// fixture or the statements fail; the pass is one transaction, so a failure
+    /// leaves every row in place.
     pub async fn sweep_retained(
         &self,
         space_id: &str,
@@ -1644,7 +1894,9 @@ impl FixtureMemoryProvider {
             visibility,
             context_id,
         )?;
-        if let Some(replay) = resolve_replay(conn, space_id, principal_id, &admission).await? {
+        if let Some(replay) =
+            resolve_or_release(conn, space_id, principal_id, &admission, now).await?
+        {
             return Ok(replay);
         }
         require_space_admits(conn, OP_CAPTURE, space_id).await?;
@@ -1932,9 +2184,6 @@ impl FixtureMemoryProvider {
         admitted: &Admitted<MemoryCandidatesDismissRequest>,
         now: DateTime<Utc>,
     ) -> Result<MemoryReceipt, SpokeReject> {
-        let space_id = admitted.request().space_id.as_str();
-        require_served_space(self, space_id)?;
-        self.sweep_retained(space_id, now).await?;
         let mut transaction = self
             .store()
             .pool()
@@ -1991,7 +2240,9 @@ impl FixtureMemoryProvider {
             &candidate.capture_visibility,
             candidate.scope_context(),
         )?;
-        if let Some(replay) = resolve_replay(conn, space_id, principal_id, &admission).await? {
+        if let Some(replay) =
+            resolve_or_release(conn, space_id, principal_id, &admission, now).await?
+        {
             return Ok(replay);
         }
         require_space_admits(conn, OP_CANDIDATES_DISMISS, space_id).await?;
@@ -2046,9 +2297,6 @@ impl FixtureMemoryProvider {
         admitted: &Admitted<MemoryCandidatesReviewRequest>,
         now: DateTime<Utc>,
     ) -> Result<MemoryReceipt, SpokeReject> {
-        let space_id = admitted.request().space_id.as_str();
-        require_served_space(self, space_id)?;
-        self.sweep_retained(space_id, now).await?;
         let mut transaction = self
             .store()
             .pool()
@@ -2117,7 +2365,9 @@ impl FixtureMemoryProvider {
             &visibility,
             context_id.as_deref(),
         )?;
-        if let Some(replay) = resolve_replay(conn, space_id, principal_id, &admission).await? {
+        if let Some(replay) =
+            resolve_or_release(conn, space_id, principal_id, &admission, now).await?
+        {
             return Ok(replay);
         }
         require_space_admits(conn, OP_CANDIDATES_REVIEW, space_id).await?;
@@ -2223,16 +2473,16 @@ impl FixtureMemoryProvider {
     // memory.receipts.get (§7.28)
     // -----------------------------------------------------------------------
 
+    /// A receipt read is persistently read-only (MEM-R011/§7.28): it opens one
+    /// snapshot and never commits a cleanup, whatever the requested receipt or
+    /// the caller's authorization is. Physical reclamation belongs to the
+    /// explicit operator [`Self::sweep_retained`] pass.
     pub(crate) async fn receipts_get(
         &self,
         principal_id: &str,
         request: &MemoryReceiptsGetRequest,
         now: DateTime<Utc>,
     ) -> Result<MemoryReceipt, SpokeReject> {
-        require_served_space(self, request.space_id.as_str())?;
-        // A read may observe the retention boundary: the sweep runs at the same
-        // sampled instant the read authorizes at, and it writes no marker bump.
-        self.sweep_retained(request.space_id.as_str(), now).await?;
         let mut transaction = self.store().pool().begin().await.map_err(internal)?;
         let receipt = self
             .receipts_get_in_tx(&mut transaction, principal_id, request, now)
@@ -2241,8 +2491,11 @@ impl FixtureMemoryProvider {
         Ok(receipt)
     }
 
-    /// Receipt read on the caller's snapshot: current authorization and the
-    /// receipt row are read together (MEM-R018/R026).
+    /// Receipt read on the caller's snapshot: current authorization, the
+    /// receipt row and its dedup tombstone are read together (MEM-R018/R026),
+    /// and the logical retention state is evaluated at the supplied instant, so
+    /// an unswept old row answers exactly like a reclaimed one. Nothing here
+    /// writes.
     pub(crate) async fn receipts_get_in_tx(
         &self,
         conn: &mut SqliteConnection,
@@ -2261,51 +2514,42 @@ impl FixtureMemoryProvider {
             now,
             &whole_scope_requirement("admin", None),
         );
+        let requester = if admin { None } else { Some(principal_id) };
         // §6.5/§7.28 + §7.0.5/MEM-R021: the recorded target is rechecked against
         // current authorization before any body or tombstone status is
-        // disclosed, and it is recorded independently of the body so an evicted
-        // receipt rechecks the same subject and placement. A non-admin can only
+        // disclosed, and it is recorded independently of the body so a retired
+        // body rechecks the same subject and placement. A non-admin can only
         // ever see its own receipts, so another principal's receipt id stays
-        // indistinguishable from a missing one (no existence oracle). A receipt
-        // with no recorded target is refused rather than treated as space-wide.
+        // indistinguishable from a missing one (no existence oracle).
         let target = fetch_receipt_target(conn, receipt_id).await?;
         let caller_covers_target = target
             .as_ref()
             .is_some_and(|target| target.admits(&grants, principal_id, space_id, now));
-        let stored = fetch_receipt(
-            conn,
-            space_id,
-            receipt_id,
-            if admin { None } else { Some(principal_id) },
-        )
-        .await?;
-        if let Some(stored) = stored {
-            if !admin && !caller_covers_target {
-                return Err(not_authorized(RECEIPT_UNAUTHORIZED));
-            }
-            return receipt_to_wire(&stored);
-        }
-        // The body is gone while its dedup tombstone survives: the status is
-        // disclosed only after the recorded target's recheck passes.
-        match tombstone_status(
-            conn,
-            space_id,
-            receipt_id,
-            if admin { None } else { Some(principal_id) },
-        )
-        .await?
-        {
-            Some(last_known_status) => {
+        let tombstone = fetch_tombstone(conn, space_id, receipt_id, requester).await?;
+        let stored = fetch_receipt(conn, space_id, receipt_id, requester).await?;
+        match ReceiptRetention::of(tombstone.as_ref(), stored.as_ref(), now)? {
+            // The whole lifetime ended (or there was never a visible row): a
+            // foreign receipt and a missing one stay indistinguishable.
+            ReceiptRetention::Expired => Err(not_found(
+                "no receipt is visible to the authenticated principal",
+            )),
+            // A retired body's terminal status is disclosed only after the
+            // recorded target's recheck passes.
+            ReceiptRetention::Evicted { last_known_status } => {
                 if !admin && !caller_covers_target {
                     return Err(not_authorized(RECEIPT_UNAUTHORIZED));
                 }
                 Err(receipt_expired(&last_known_status))
             }
-            // Deliberately carries no receipt id: a foreign receipt and a
-            // missing one must be indistinguishable (§7.28, no existence oracle).
-            None => Err(not_found(
-                "no receipt is visible to the authenticated principal",
-            )),
+            ReceiptRetention::Retained => {
+                if !admin && !caller_covers_target {
+                    return Err(not_authorized(RECEIPT_UNAUTHORIZED));
+                }
+                let stored = stored.ok_or_else(|| {
+                    internal(format!("retained receipt {receipt_id} is not readable"))
+                })?;
+                receipt_to_wire(&stored)
+            }
         }
     }
 }
@@ -2414,7 +2658,6 @@ mod tests {
     use std::sync::Arc;
     use tempfile::TempDir;
 
-    use crate::faults::FixtureClock;
 
     use spoke_operations::spoke_schemas::memory_candidate::{ConsumedCandidate, PendingCandidate};
     use spoke_operations::spoke_schemas::{
@@ -3731,10 +3974,19 @@ mod tests {
             .begin()
             .await
             .expect("reader transaction");
-        let replayed = resolve_replay(&mut transaction, &space, CLIENT, &failed_admission)
-            .await
-            .expect("replay resolves")
-            .expect("the failed admission is bound");
+        let replayed = match resolve_replay(
+            &mut transaction,
+            &space,
+            CLIENT,
+            &failed_admission,
+            now,
+        )
+        .await
+        .expect("replay resolves")
+        {
+            ReplayResolution::Replayed(receipt) => receipt,
+            other => panic!("expected the bound receipt, observed {other:?}"),
+        };
         transaction.commit().await.expect("read commits");
         assert_eq!(receipt_id_of(&replayed), "rcpt_failed_probe");
         assert_eq!(receipt_status(&replayed), "failed");
@@ -4548,10 +4800,12 @@ mod tests {
         assert_eq!(count_rows(&scenario.provider, "subjects").await, 1);
         let mut reader = scenario.provider.store().pool().begin().await.expect("reader");
         assert!(
-            resolve_replay(&mut reader, &space, OPERATOR, &admission)
-                .await
-                .expect("replay resolves")
-                .is_none(),
+            matches!(
+                resolve_replay(&mut reader, &space, OPERATOR, &admission, now)
+                    .await
+                    .expect("replay resolves"),
+                ReplayResolution::Fresh
+            ),
             "a keyless mutation is never a replay"
         );
         reader.rollback().await.expect("read transaction closes");
@@ -5753,6 +6007,37 @@ mod tests {
         );
     }
 
+    /// A deterministic snapshot of every receipt-lifecycle row, so a test can
+    /// prove a read or a refusal changed no persistent state.
+    async fn retention_rows(provider: &FixtureMemoryProvider) -> Vec<String> {
+        let mut rows = Vec::new();
+        for sql in [
+            "SELECT receipt_id || '|' || status || '|' || COALESCE(completed_at, '') || '|' \
+             || COALESCE(body_expires_at, '') AS row FROM receipts ORDER BY receipt_id",
+            "SELECT receipt_id || '|' || capabilities_json || '|' || COALESCE(subject_id, '') \
+             || '|' || context_ids_json AS row FROM receipt_targets ORDER BY receipt_id",
+            "SELECT idempotency_key || '|' || receipt_id || '|' || last_known_status || '|' \
+             || COALESCE(tombstone_expires_at, '') AS row FROM idempotency_namespace \
+             ORDER BY idempotency_key",
+        ] {
+            let found: Vec<String> = sqlx::query_scalar(sql)
+                .fetch_all(provider.store().pool())
+                .await
+                .expect("lifecycle rows");
+            rows.extend(found);
+        }
+        rows
+    }
+
+    async fn read_snapshot_marker(provider: &FixtureMemoryProvider, space_id: &str) -> i64 {
+        sqlx::query("SELECT marker FROM provider_snapshot WHERE space_id = ?")
+            .bind(space_id)
+            .fetch_one(provider.store().pool())
+            .await
+            .expect("snapshot marker")
+            .get("marker")
+    }
+
     /// The stored-timestamp snapshot of one receipt-scoped count.
     async fn count_receipt_rows(
         provider: &FixtureMemoryProvider,
@@ -5777,51 +6062,13 @@ mod tests {
             .get("total")
     }
 
-    async fn read_snapshot_marker(provider: &FixtureMemoryProvider, space_id: &str) -> i64 {
-        sqlx::query("SELECT marker FROM provider_snapshot WHERE space_id = ?")
-            .bind(space_id)
-            .fetch_one(provider.store().pool())
-            .await
-            .expect("snapshot marker")
-            .get("marker")
-    }
-
-    /// §6.10/MEM-R021 + C-028: the receipt body, the content-free dedup
-    /// tombstone and the recorded target have separate ends. The boundary is
-    /// exact — a body is served up to and including its window, evicted one
-    /// second later, and the key is new again only at the dedup end. A keyless
-    /// receipt has no tombstone at all, so its body and target end together.
-    #[tokio::test]
-    async fn c_028_receipt_and_dedup_retention_windows() {
-        let scenario = Scenario::open().await;
-        let clock = FixtureClock::at(now());
-        let now = clock.now();
-        scenario.subject(now).await;
-        // The setup issues one keyed `memory.capture` at `now` (the grant and
-        // subject slices stage no receipt) plus one keyless receipt below.
-        scenario
-            .grant(CLIENT, &["capture"], Some(SUBJECT), None, now)
-            .await;
-        let secret = "The retained body names the vault code 4417.";
-        let keyed = capture_request(
-            &scenario.space_id,
-            secret,
-            context_scope(CONTEXT_A),
-            "retention-1",
-        );
-        let committed = scenario
-            .provider
-            .capture(CLIENT, &keyed, now)
-            .await
-            .expect("capture commits");
-        let keyed_receipt = receipt_id_of(&committed).to_owned();
-
-        // A keyless `subjects.ensure` receipt binds no dedup namespace row, so
-        // nothing could disclose it after its body ends.
-        let keyless_subject = "subject-keyless-retention";
+    /// Stage one keyless `subjects.ensure` receipt through the shared producer
+    /// on a caller-owned transaction; the keyless exemption binds no dedup row.
+    async fn stage_keyless_probe(scenario: &Scenario, now: DateTime<Utc>) -> String {
+        let subject_id = "subject-keyless-retention";
         let payload = json!({
             "space_id": scenario.space_id,
-            "subject_id": keyless_subject,
+            "subject_id": subject_id,
         });
         let ensure: MemorySubjectsEnsureRequest = serde_json::from_value(payload.clone())
             .expect("valid subjects.ensure request");
@@ -5842,15 +6089,15 @@ mod tests {
         let target = ReceiptTarget::for_subject(
             required_capabilities("memory.subjects.ensure")
                 .expect("memory.subjects.ensure has a capability list"),
-            keyless_subject,
+            subject_id,
         )
         .expect("valid keyless receipt target");
-        let keyless_receipt = stage_receipt_in_tx(
+        let receipt = stage_receipt_in_tx(
             &mut transaction,
             &scenario.space_id,
             OPERATOR,
             &admission,
-            "rcpt_keyless_retention",
+            &receipt_id(),
             &target,
             ReceiptState::Committed(json!({
                 "subject_id": change.subject_id,
@@ -5863,67 +6110,416 @@ mod tests {
         .await
         .expect("keyless receipt stages");
         transaction.commit().await.expect("one commit");
-        let keyless_receipt = receipt_id_of(&keyless_receipt).to_owned();
+        receipt_id_of(&receipt).to_owned()
+    }
 
-        assert_eq!(count_rows(&scenario.provider, "receipts").await, 2);
-        assert_eq!(count_rows(&scenario.provider, "receipt_targets").await, 2);
+    /// Stage one pending receipt for the same admitted capture request.
+    async fn stage_pending_receipt(
+        scenario: &Scenario,
+        admitted: &Admitted<MemoryCaptureRequest>,
+        receipt_id: &str,
+        now: DateTime<Utc>,
+    ) {
+        let admission =
+            Mutation::keyed(OP_CAPTURE, admitted.request().idempotency_key.as_str(), admitted);
+        let target = capture_receipt_target(CONTEXT_A);
+        let mut transaction = scenario
+            .provider
+            .store()
+            .pool()
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .expect("writer transaction");
+        stage_receipt_in_tx(
+            &mut transaction,
+            &scenario.space_id,
+            CLIENT,
+            &admission,
+            receipt_id,
+            &target,
+            ReceiptState::Pending,
+            now,
+        )
+        .await
+        .expect("pending receipt stages");
+        transaction.commit().await.expect("pending receipt commits");
+    }
+
+    /// F1: every receipt-read outcome — authorized/expired, unauthorized,
+    /// not-found and keyless-expired — leaves every persistent row untouched at
+    /// the retention boundary while returning the correct logical result.
+    #[tokio::test]
+    async fn reads_are_persistently_read_only_at_every_outcome() {
+        let scenario = Scenario::open().await;
+        let base = now();
+        scenario.subject(base).await;
+        scenario
+            .grant(CLIENT, &["capture"], Some(SUBJECT), None, base)
+            .await;
+        let keyed = capture_request(
+            &scenario.space_id,
+            "Read-only at its retention boundary.",
+            context_scope(CONTEXT_A),
+            "read-1",
+        );
+        let committed = scenario
+            .provider
+            .capture(CLIENT, &keyed, base)
+            .await
+            .expect("capture commits");
+        let receipt_id = receipt_id_of(&committed).to_owned();
+        let keyless_id = stage_keyless_probe(&scenario, base).await;
+
+        let after_body = base + Duration::seconds(RECEIPT_RETENTION_SECONDS as i64 + 1);
+        let before = retention_rows(&scenario.provider).await;
+        let marker_before = read_snapshot_marker(&scenario.provider, &scenario.space_id).await;
+
+        // Authorized read of a logically retired body.
+        assert_eq!(
+            refusal(
+                scenario
+                    .provider
+                    .receipts_get(
+                        CLIENT,
+                        &receipts_request(&scenario.space_id, &receipt_id),
+                        after_body,
+                    )
+                    .await
+            )
+            .code,
+            SpokeRejectCode::ReceiptExpired
+        );
+        // Unauthorized principal: no existence oracle, no write.
+        assert_eq!(
+            refusal(
+                scenario
+                    .provider
+                    .receipts_get(
+                        OTHER,
+                        &receipts_request(&scenario.space_id, &receipt_id),
+                        after_body,
+                    )
+                    .await
+            )
+            .code,
+            SpokeRejectCode::NotFound
+        );
+        // Nonexistent receipt.
+        assert_eq!(
+            refusal(
+                scenario
+                    .provider
+                    .receipts_get(
+                        OPERATOR,
+                        &receipts_request(&scenario.space_id, "rcpt_missing"),
+                        after_body,
+                    )
+                    .await
+            )
+            .code,
+            SpokeRejectCode::NotFound
+        );
+        // A keyless receipt has no tombstone: its body end is its whole life.
+        assert_eq!(
+            refusal(
+                scenario
+                    .provider
+                    .receipts_get(
+                        OPERATOR,
+                        &receipts_request(&scenario.space_id, &keyless_id),
+                        after_body,
+                    )
+                    .await
+            )
+            .code,
+            SpokeRejectCode::NotFound
+        );
+
+        assert_eq!(
+            retention_rows(&scenario.provider).await,
+            before,
+            "no receipt read may delete or rewrite rows"
+        );
+        assert_eq!(
+            read_snapshot_marker(&scenario.provider, &scenario.space_id).await,
+            marker_before,
+            "a read never bumps the snapshot marker"
+        );
+    }
+
+    /// F2: refusals and a pre-commit abort never commit maintenance for
+    /// unrelated expired rows; only the explicit operator pass reclaims them.
+    #[tokio::test]
+    async fn refusals_and_precommit_abort_commit_no_maintenance() {
+        let scenario = Scenario::open().await;
+        let base = now();
+        scenario.subject(base).await;
+        scenario
+            .grant(
+                CLIENT,
+                &["capture", "review", "records_write"],
+                Some(SUBJECT),
+                None,
+                base,
+            )
+            .await;
+        let keyed = capture_request(
+            &scenario.space_id,
+            "Expired rows must survive every refusal.",
+            context_scope(CONTEXT_A),
+            "refuse-1",
+        );
+        let committed = scenario
+            .provider
+            .capture(CLIENT, &keyed, base)
+            .await
+            .expect("capture commits");
+        let candidate_id = committed_result(&committed)["candidate_ids"][0]
+            .as_str()
+            .expect("candidate id")
+            .to_owned();
+        let receipt_id = receipt_id_of(&committed).to_owned();
+        stage_keyless_probe(&scenario, base).await;
+
+        let after_body = base + Duration::seconds(RECEIPT_RETENTION_SECONDS as i64 + 1);
+        let expired = retention_rows(&scenario.provider).await;
+        assert!(
+            expired.iter().any(|row| row.contains(&receipt_id)),
+            "the expired rows are present before the refusals"
+        );
+        let marker_before = read_snapshot_marker(&scenario.provider, &scenario.space_id).await;
+
+        // Unauthorized capture.
+        let unauthorized = capture_request(
+            &scenario.space_id,
+            "Someone else's attempt.",
+            context_scope(CONTEXT_A),
+            "refuse-2",
+        );
+        assert_eq!(
+            refusal(scenario.provider.capture(OTHER, &unauthorized, after_body).await).code,
+            SpokeRejectCode::NotAuthorized
+        );
+        assert_eq!(
+            retention_rows(&scenario.provider).await,
+            expired,
+            "an unauthorized capture commits no maintenance"
+        );
+
+        // Idempotency conflict.
+        let conflicting = capture_request(
+            &scenario.space_id,
+            "A different payload under the same key.",
+            context_scope(CONTEXT_A),
+            "refuse-1",
+        );
+        assert_eq!(
+            refusal(scenario.provider.capture(CLIENT, &conflicting, after_body).await).code,
+            SpokeRejectCode::IdempotencyConflict
+        );
+        assert_eq!(retention_rows(&scenario.provider).await, expired);
+
+        // Stale-revision dismissal.
+        let dismiss = admit_candidates_dismiss(json!({
+            "space_id": scenario.space_id,
+            "candidate_id": candidate_id,
+            "expected_revision": 9,
+            "idempotency_key": "refuse-dismiss",
+        }))
+        .expect("valid dismissal request");
+        assert_eq!(
+            refusal(scenario.provider.candidates_dismiss(CLIENT, &dismiss, after_body).await).code,
+            SpokeRejectCode::RevisionConflict
+        );
+        assert_eq!(retention_rows(&scenario.provider).await, expired);
+
+        // Invalid review content: refused before any effect, after replay
+        // resolution and authorization.
+        let review = review_request(
+            &scenario.space_id,
+            &candidate_id,
+            1,
+            json!({
+                "action": "promote",
+                "content_override": { "text": "x".repeat(MAX_CONTENT_BYTES) },
+            }),
+            "refuse-review",
+        );
+        assert_eq!(
+            refusal(scenario.provider.candidates_review(CLIENT, &review, after_body).await).code,
+            SpokeRejectCode::InvalidInput
+        );
+        assert_eq!(retention_rows(&scenario.provider).await, expired);
+
+        // Pre-commit abort: the staged transaction rolls back.
+        let aborted = capture_request(
+            &scenario.space_id,
+            "Aborted before the commit.",
+            context_scope(CONTEXT_A),
+            "refuse-abort",
+        );
+        scenario
+            .provider
+            .faults()
+            .fail_next(FaultPoint::BeforeCommit);
+        assert_eq!(
+            refusal(scenario.provider.capture(CLIENT, &aborted, after_body).await).code,
+            SpokeRejectCode::OutcomeUncertain
+        );
+        assert_eq!(retention_rows(&scenario.provider).await, expired);
+        assert_eq!(
+            read_snapshot_marker(&scenario.provider, &scenario.space_id).await,
+            marker_before
+        );
+
+        // The explicit operator pass is the only reclamation path.
+        let sweep = scenario
+            .provider
+            .sweep_retained(&scenario.space_id, after_body)
+            .await
+            .expect("maintenance pass");
+        assert_eq!(sweep.receipt_bodies_evicted, 1);
+        assert_eq!(sweep.keyless_bodies_evicted, 1);
+        assert_eq!(sweep.targets_removed, 1);
+        assert_eq!(sweep.dedup_tombstones_evicted, 0);
+        assert_eq!(count_rows(&scenario.provider, "receipts").await, 0);
+        assert_eq!(
+            count_rows(&scenario.provider, "receipt_targets").await,
+            1,
+            "the keyed target stays with its tombstone"
+        );
         assert_eq!(
             count_rows(&scenario.provider, "idempotency_namespace").await,
             1
         );
+    }
+
+    /// §6.10/MEM-R021 + C-028: the body window starts at terminal completion and
+    /// the tombstone keeps its full declared window after the body retires. The
+    /// logical state is correct on unswept rows; only the explicit operator pass
+    /// removes them.
+    #[tokio::test]
+    async fn c_028_receipt_and_dedup_retention_windows() {
+        let scenario = Scenario::open().await;
+        let base = now();
+        scenario.subject(base).await;
+        scenario
+            .grant(CLIENT, &["capture"], Some(SUBJECT), None, base)
+            .await;
+        let keyed = capture_request(
+            &scenario.space_id,
+            "The retained body names the vault code 4417.",
+            context_scope(CONTEXT_A),
+            "retention-1",
+        );
+        let committed = scenario
+            .provider
+            .capture(CLIENT, &keyed, base)
+            .await
+            .expect("capture commits");
+        let receipt_id = receipt_id_of(&committed).to_owned();
+        let keyless_id = stage_keyless_probe(&scenario, base).await;
         let marker_before = read_snapshot_marker(&scenario.provider, &scenario.space_id).await;
 
-        // Before the body window nothing ages out.
-        let before = clock
-            .advanced(Duration::seconds(RECEIPT_RETENTION_SECONDS as i64 - 1))
-            .now();
+        let body_end = base + Duration::seconds(RECEIPT_RETENTION_SECONDS as i64);
+
+        // Before the body end, and at the inclusive boundary, the body is served
+        // and nothing is reclaimed.
+        for instant in [body_end - Duration::seconds(1), body_end] {
+            assert_eq!(
+                receipt_status(
+                    &scenario
+                        .provider
+                        .receipts_get(
+                            CLIENT,
+                            &receipts_request(&scenario.space_id, &receipt_id),
+                            instant,
+                        )
+                        .await
+                        .expect("the body is served inside its window")
+                ),
+                "committed"
+            );
+            assert_eq!(
+                scenario
+                    .provider
+                    .sweep_retained(&scenario.space_id, instant)
+                    .await
+                    .expect("sweep"),
+                RetentionSweep::default()
+            );
+        }
+
+        // One second later the unswept rows already answer logically: the key is
+        // protected, the effect never re-runs, the keyless receipt is absent.
+        let after_body = body_end + Duration::seconds(1);
+        let replay = refusal(scenario.provider.capture(CLIENT, &keyed, after_body).await);
+        assert_eq!(replay.code, SpokeRejectCode::ReceiptExpired);
         assert_eq!(
-            scenario
-                .provider
-                .sweep_retained(&scenario.space_id, before)
-                .await
-                .expect("sweep"),
-            RetentionSweep::default()
+            replay
+                .details
+                .as_ref()
+                .and_then(|details| details.get("last_known_status")),
+            Some(&json!("committed"))
         );
         assert_eq!(
-            receipt_status(
-                &scenario
+            count_rows(&scenario.provider, "candidates").await,
+            1,
+            "an evicted receipt is never re-executed"
+        );
+        let conflicting = capture_request(
+            &scenario.space_id,
+            "A different body under the same key.",
+            context_scope(CONTEXT_A),
+            "retention-1",
+        );
+        assert_eq!(
+            refusal(scenario.provider.capture(CLIENT, &conflicting, after_body).await).code,
+            SpokeRejectCode::IdempotencyConflict
+        );
+        assert_eq!(
+            refusal(
+                scenario
                     .provider
                     .receipts_get(
                         CLIENT,
-                        &receipts_request(&scenario.space_id, &keyed_receipt),
-                        before,
+                        &receipts_request(&scenario.space_id, &receipt_id),
+                        after_body,
                     )
                     .await
-                    .expect("the body is served inside its window")
-            ),
-            "committed"
+            )
+            .code,
+            SpokeRejectCode::ReceiptExpired
         );
-
-        // At the window boundary the body is still inside it (`<=`): the sweep
-        // never evicts on equality.
-        let equal = clock
-            .advanced(Duration::seconds(RECEIPT_RETENTION_SECONDS as i64))
-            .now();
         assert_eq!(
-            scenario
-                .provider
-                .sweep_retained(&scenario.space_id, equal)
-                .await
-                .expect("sweep"),
-            RetentionSweep::default()
+            refusal(
+                scenario
+                    .provider
+                    .receipts_get(
+                        OPERATOR,
+                        &receipts_request(&scenario.space_id, &keyless_id),
+                        after_body,
+                    )
+                    .await
+            )
+            .code,
+            SpokeRejectCode::NotFound
         );
-        assert_eq!(count_rows(&scenario.provider, "receipts").await, 2);
+        assert_eq!(
+            count_rows(&scenario.provider, "receipts").await,
+            2,
+            "logical reads reclaim nothing"
+        );
+        assert_eq!(
+            read_snapshot_marker(&scenario.provider, &scenario.space_id).await,
+            marker_before
+        );
 
-        // One second past the body window: the keyed body leaves, its target
-        // and tombstone stay, and the keyless body plus its target go together.
-        // No snapshot marker moves.
-        let after = clock
-            .advanced(Duration::seconds(RECEIPT_RETENTION_SECONDS as i64 + 1))
-            .now();
+        // Explicit maintenance: the keyed body leaves alone, the keyless body
+        // and target leave together.
         let sweep = scenario
             .provider
-            .sweep_retained(&scenario.space_id, after)
+            .sweep_retained(&scenario.space_id, after_body)
             .await
             .expect("sweep");
         assert_eq!(sweep.receipt_bodies_evicted, 1);
@@ -5943,162 +6539,99 @@ mod tests {
         assert_eq!(
             read_snapshot_marker(&scenario.provider, &scenario.space_id).await,
             marker_before,
-            "retention never bumps the snapshot marker"
+            "maintenance never bumps the snapshot marker"
         );
 
-        // The surviving tombstone and target stay content-free.
-        let tombstone_text: String = sqlx::query_scalar(
-            "SELECT idempotency_key || payload_digest || last_known_status \
-             FROM idempotency_namespace WHERE receipt_id = ?",
-        )
-        .bind(&keyed_receipt)
-        .fetch_one(scenario.provider.store().pool())
-        .await
-        .expect("surviving tombstone");
-        assert_no_secret(&tombstone_text, secret);
-        let target_text: String = sqlx::query_scalar(
-            "SELECT capabilities_json || COALESCE(subject_id, '') || context_ids_json \
-             FROM receipt_targets WHERE receipt_id = ?",
-        )
-        .bind(&keyed_receipt)
-        .fetch_one(scenario.provider.store().pool())
-        .await
-        .expect("surviving target");
-        assert_no_secret(&target_text, secret);
-
-        // Same key inside the dedup window: RECEIPT_EXPIRED with the recorded
-        // status, never a second effect.
-        let replay = refusal(scenario.provider.capture(CLIENT, &keyed, after).await);
-        assert_eq!(replay.code, SpokeRejectCode::ReceiptExpired);
-        assert_eq!(
-            replay
-                .details
-                .as_ref()
-                .and_then(|details| details.get("last_known_status")),
-            Some(&json!("committed"))
-        );
-        assert_eq!(
-            count_rows(&scenario.provider, "candidates").await,
-            1,
-            "an evicted receipt is never re-executed"
-        );
-
-        // A different payload under the same key is a conflict, not a new run.
-        let conflicting = capture_request(
-            &scenario.space_id,
-            "A different body under the same key.",
-            context_scope(CONTEXT_A),
-            "retention-1",
-        );
-        assert_eq!(
-            refusal(scenario.provider.capture(CLIENT, &conflicting, after).await).code,
-            SpokeRejectCode::IdempotencyConflict
-        );
-        assert_eq!(count_rows(&scenario.provider, "candidates").await, 1);
-
-        // The evicted keyed body still rechecks the recorded target.
+        // A reopen keeps the tombstone answering.
+        let scenario = scenario.reopen().await;
         assert_eq!(
             refusal(
                 scenario
                     .provider
                     .receipts_get(
                         CLIENT,
-                        &receipts_request(&scenario.space_id, &keyed_receipt),
-                        after,
+                        &receipts_request(&scenario.space_id, &receipt_id),
+                        after_body,
                     )
                     .await
             )
             .code,
             SpokeRejectCode::ReceiptExpired
         );
-        // The keyless receipt left no tombstone to disclose.
+
+        // Tombstone boundary: protected at the exact end, free one second later.
+        let tombstone_end = body_end + Duration::seconds(DEDUP_RETENTION_SECONDS as i64);
         assert_eq!(
             refusal(
                 scenario
                     .provider
                     .receipts_get(
-                        OPERATOR,
-                        &receipts_request(&scenario.space_id, &keyless_receipt),
-                        after,
+                        CLIENT,
+                        &receipts_request(&scenario.space_id, &receipt_id),
+                        tombstone_end,
                     )
                     .await
             )
             .code,
-            SpokeRejectCode::NotFound
+            SpokeRejectCode::ReceiptExpired
+        );
+        assert_eq!(
+            scenario
+                .provider
+                .sweep_retained(&scenario.space_id, tombstone_end)
+                .await
+                .expect("sweep"),
+            RetentionSweep::default()
         );
 
-        // Eviction is a durable file state, not an in-memory filter.
-        let scenario = scenario.reopen().await;
-        assert_eq!(count_rows(&scenario.provider, "receipts").await, 0);
+        let after_all = tombstone_end + Duration::seconds(1);
+        let fresh = scenario
+            .provider
+            .capture(CLIENT, &keyed, after_all)
+            .await
+            .expect("the finished key runs one fresh effect");
+        assert_ne!(receipt_id_of(&fresh), receipt_id);
+        assert_eq!(count_rows(&scenario.provider, "candidates").await, 2);
+        assert_eq!(
+            count_rows(&scenario.provider, "idempotency_namespace").await,
+            1,
+            "the stale binding was released with the fresh effect"
+        );
         assert_eq!(count_rows(&scenario.provider, "receipt_targets").await, 1);
         assert_eq!(
             refusal(
                 scenario
                     .provider
                     .receipts_get(
-                        CLIENT,
-                        &receipts_request(&scenario.space_id, &keyed_receipt),
-                        after,
-                    )
-                    .await
-            )
-            .code,
-            SpokeRejectCode::ReceiptExpired
-        );
-
-        // Past the dedup window the key is new again: the tombstone and its
-        // target are gone, and the same key runs one fresh effect.
-        let dedup_end = clock
-            .advanced(Duration::seconds(DEDUP_RETENTION_SECONDS as i64 + 1))
-            .now();
-        let sweep = scenario
-            .provider
-            .sweep_retained(&scenario.space_id, dedup_end)
-            .await
-            .expect("sweep");
-        assert_eq!(sweep.dedup_tombstones_evicted, 1);
-        assert_eq!(sweep.targets_removed, 1);
-        assert_eq!(count_rows(&scenario.provider, "receipt_targets").await, 0);
-        assert_eq!(
-            count_rows(&scenario.provider, "idempotency_namespace").await,
-            0
-        );
-        let fresh = scenario
-            .provider
-            .capture(CLIENT, &keyed, dedup_end)
-            .await
-            .expect("the expired namespace is new again");
-        assert_ne!(receipt_id_of(&fresh), keyed_receipt);
-        assert_eq!(count_rows(&scenario.provider, "candidates").await, 2);
-        // The old receipt id went with its tombstone and target.
-        assert_eq!(
-            refusal(
-                scenario
-                    .provider
-                    .receipts_get(
                         OPERATOR,
-                        &receipts_request(&scenario.space_id, &keyed_receipt),
-                        dedup_end,
+                        &receipts_request(&scenario.space_id, &receipt_id),
+                        after_all,
                     )
                     .await
             )
             .code,
             SpokeRejectCode::NotFound
         );
+        assert_eq!(
+            scenario
+                .provider
+                .sweep_retained(&scenario.space_id, after_all)
+                .await
+                .expect("sweep"),
+            RetentionSweep::default(),
+            "nothing of the retired lifetime is left to reclaim"
+        );
     }
 
-    /// §7.28/C-104 + §6.10: an evicted body is disclosed only to a caller whose
-    /// *current* grant covers the recorded target. A revoked requester is
-    /// refused exactly as while the body lived, and the tombstone plus target
-    /// that make that refusal possible survive a reopen.
+    /// §7.28/C-104 + §6.10: current authorization gates the retired body, and
+    /// the refusal survives a reopen because nothing was physically reclaimed.
     #[tokio::test]
     async fn c_028_evicted_receipt_refuses_a_revoked_requester() {
         let scenario = Scenario::open().await;
-        let clock = FixtureClock::at(now());
-        let now = clock.now();
-        scenario.subject(now).await;
+        let base = now();
+        scenario.subject(base).await;
         let grant = scenario
-            .grant(CLIENT, &["capture"], Some(SUBJECT), None, now)
+            .grant(CLIENT, &["capture"], Some(SUBJECT), None, base)
             .await;
         let request = capture_request(
             &scenario.space_id,
@@ -6108,72 +6641,71 @@ mod tests {
         );
         let committed = scenario
             .provider
-            .capture(CLIENT, &request, now)
+            .capture(CLIENT, &request, base)
             .await
             .expect("capture commits");
         let receipt_id = receipt_id_of(&committed).to_owned();
 
-        let after = clock
-            .advanced(Duration::seconds(RECEIPT_RETENTION_SECONDS as i64 + 1))
-            .now();
-        let sweep = scenario
-            .provider
-            .sweep_retained(&scenario.space_id, after)
-            .await
-            .expect("sweep");
-        assert_eq!(sweep.receipt_bodies_evicted, 1);
-        assert_eq!(
-            count_receipt_rows(&scenario.provider, "receipts", &receipt_id).await,
-            0
-        );
-        assert_eq!(
-            count_receipt_rows(&scenario.provider, "receipt_targets", &receipt_id).await,
-            1,
-            "the recorded target outlives the body"
-        );
-        assert_eq!(
-            count_receipt_rows(&scenario.provider, "idempotency_namespace", &receipt_id).await,
-            1
-        );
+        let after_body = base + Duration::seconds(RECEIPT_RETENTION_SECONDS as i64 + 1);
+        let rows = retention_rows(&scenario.provider).await;
 
-        // The admin, whose own coverage passes, sees the tombstone status.
+        // The admin and the requester both see the logical tombstone.
+        for principal in [OPERATOR, CLIENT] {
+            assert_eq!(
+                refusal(
+                    scenario
+                        .provider
+                        .receipts_get(
+                            principal,
+                            &receipts_request(&scenario.space_id, &receipt_id),
+                            after_body,
+                        )
+                        .await
+                )
+                .code,
+                SpokeRejectCode::ReceiptExpired
+            );
+        }
+
+        // Current authorization is evaluated before disclosure.
+        scenario.revoke(&grant, after_body).await;
         assert_eq!(
             refusal(
                 scenario
                     .provider
-                    .receipts_get(OPERATOR, &receipts_request(&scenario.space_id, &receipt_id), after)
-                    .await
-            )
-            .code,
-            SpokeRejectCode::ReceiptExpired
-        );
-
-        // Current authorization is evaluated before disclosure: revoking the
-        // requester's only grant turns the same read into NOT_AUTHORIZED.
-        scenario.revoke(&grant, after).await;
-        assert_eq!(
-            refusal(
-                scenario
-                    .provider
-                    .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &receipt_id), after)
+                    .receipts_get(
+                        CLIENT,
+                        &receipts_request(&scenario.space_id, &receipt_id),
+                        after_body,
+                    )
                     .await
             )
             .code,
             SpokeRejectCode::NotAuthorized
         );
         assert_eq!(
-            refusal(scenario.provider.capture(CLIENT, &request, after).await).code,
+            refusal(scenario.provider.capture(CLIENT, &request, after_body).await).code,
             SpokeRejectCode::NotAuthorized,
             "a revoked requester cannot replay either"
         );
+        assert_eq!(
+            retention_rows(&scenario.provider).await,
+            rows,
+            "the reads and the revoked replay wrote nothing"
+        );
 
-        // The refusal survives a reopen: the target and tombstone are durable.
+        // The refusal is durable because the tombstone and target were never
+        // physically reclaimed.
         let scenario = scenario.reopen().await;
         assert_eq!(
             refusal(
                 scenario
                     .provider
-                    .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &receipt_id), after)
+                    .receipts_get(
+                        CLIENT,
+                        &receipts_request(&scenario.space_id, &receipt_id),
+                        after_body,
+                    )
                     .await
             )
             .code,
@@ -6189,84 +6721,61 @@ mod tests {
         );
     }
 
-    /// §6.10/MEM-R021: a pending receipt is live work. Neither window may evict
-    /// it into re-execution: replay and `receipts.get` keep answering the same
-    /// pending receipt until it settles, and only then does its origin age it.
+    /// §6.10/MEM-R021: late settlement gets a full terminal body window and then
+    /// the full post-body tombstone window; the old admission-instant cut is
+    /// never used, and the key frees only after both.
     #[tokio::test]
-    async fn c_028_retention_keeps_live_pending_work_and_expires_it_once_settled() {
+    async fn c_028_retention_keeps_live_pending_work_and_expires_it_after_settlement() {
         let scenario = Scenario::open().await;
-        let clock = FixtureClock::at(now());
-        let now = clock.now();
-        scenario.subject(now).await;
+        let base = now();
+        scenario.subject(base).await;
         scenario
-            .grant(CLIENT, &["capture"], Some(SUBJECT), None, now)
+            .grant(CLIENT, &["capture"], Some(SUBJECT), None, base)
             .await;
-        let space = scenario.space_id.clone();
-        let admitted = admit_capture(capture_payload(
-            &space,
-            "Pending work that outlives both windows.",
+        let request = capture_request(
+            &scenario.space_id,
+            "Pending work that outlives both old cutoffs.",
             context_scope(CONTEXT_A),
             "pending-retention-1",
-        ))
-        .expect("valid capture payload");
-        let admission = Mutation::keyed(OP_CAPTURE, "pending-retention-1", &admitted);
-        let target = capture_receipt_target(CONTEXT_A);
+        );
+        stage_pending_receipt(&scenario, &request, "rcpt_pending_retention", base).await;
 
-        let mut transaction = scenario
-            .provider
-            .store()
-            .pool()
-            .begin_with("BEGIN IMMEDIATE")
-            .await
-            .expect("writer transaction");
-        let staged = stage_receipt_in_tx(
-            &mut transaction,
-            &space,
-            CLIENT,
-            &admission,
-            "rcpt_pending_retention",
-            &target,
-            ReceiptState::Pending,
-            now,
-        )
-        .await
-        .expect("pending receipt stages");
-        transaction.commit().await.expect("pending receipt commits");
-        assert_eq!(receipt_status(&staged), "pending");
-
-        // Far past both windows a live pending receipt is untouched, still
-        // readable, and still the replay answer.
-        let beyond = clock
-            .advanced(Duration::seconds(DEDUP_RETENTION_SECONDS as i64 + 1))
-            .now();
+        // Past both old cutoffs the pending receipt is still live, readable and
+        // the replay answer; maintenance leaves it alone.
+        let stale = base
+            + Duration::seconds((RECEIPT_RETENTION_SECONDS + DEDUP_RETENTION_SECONDS) as i64 + 1);
         assert_eq!(
             scenario
                 .provider
-                .sweep_retained(&space, beyond)
+                .sweep_retained(&scenario.space_id, stale)
                 .await
                 .expect("sweep"),
             RetentionSweep::default()
         );
-        let pending = scenario
-            .provider
-            .receipts_get(
-                CLIENT,
-                &receipts_request(&space, "rcpt_pending_retention"),
-                beyond,
-            )
-            .await
-            .expect("the pending receipt is still served");
-        assert_eq!(receipt_status(&pending), "pending");
+        assert_eq!(
+            receipt_status(
+                &scenario
+                    .provider
+                    .receipts_get(
+                        CLIENT,
+                        &receipts_request(&scenario.space_id, "rcpt_pending_retention"),
+                        stale,
+                    )
+                    .await
+                    .expect("the pending receipt is still served")
+            ),
+            "pending"
+        );
         let replayed = scenario
             .provider
-            .capture(CLIENT, &admitted, beyond)
+            .capture(CLIENT, &request, stale)
             .await
             .expect("live pending work replays");
         assert_eq!(receipt_id_of(&replayed), "rcpt_pending_retention");
-        assert_eq!(receipt_status(&replayed), "pending");
         assert_eq!(count_rows(&scenario.provider, "candidates").await, 0);
 
-        // Once settled the same origin ages it out of both windows.
+        // Settlement starts both terminal windows at that instant.
+        let settle_at = stale + Duration::seconds(1);
         let mut transaction = scenario
             .provider
             .store()
@@ -6274,28 +6783,231 @@ mod tests {
             .begin_with("BEGIN IMMEDIATE")
             .await
             .expect("writer transaction");
-        let settled = settle_receipt_in_tx(
+        settle_receipt_in_tx(
             &mut transaction,
-            &space,
+            &scenario.space_id,
             "rcpt_pending_retention",
             ReceiptState::Committed(json!({ "candidate_ids": [], "classified": 0 })),
-            beyond,
+            settle_at,
         )
         .await
         .expect("pending receipt settles");
         transaction.commit().await.expect("settlement commits");
-        assert_eq!(receipt_status(&settled), "committed");
 
+        let settle_body_end = settle_at + Duration::seconds(RECEIPT_RETENTION_SECONDS as i64);
+        assert_eq!(
+            receipt_status(
+                &scenario
+                    .provider
+                    .receipts_get(
+                        CLIENT,
+                        &receipts_request(&scenario.space_id, "rcpt_pending_retention"),
+                        settle_body_end,
+                    )
+                    .await
+                    .expect("the full terminal body window is served")
+            ),
+            "committed"
+        );
+        assert_eq!(
+            scenario
+                .provider
+                .sweep_retained(&scenario.space_id, settle_body_end)
+                .await
+                .expect("sweep"),
+            RetentionSweep::default()
+        );
+
+        let body_gone = settle_body_end + Duration::seconds(1);
+        assert_eq!(
+            refusal(
+                scenario
+                    .provider
+                    .receipts_get(
+                        CLIENT,
+                        &receipts_request(&scenario.space_id, "rcpt_pending_retention"),
+                        body_gone,
+                    )
+                    .await
+            )
+            .code,
+            SpokeRejectCode::ReceiptExpired
+        );
         let sweep = scenario
             .provider
-            .sweep_retained(&space, beyond)
+            .sweep_retained(&scenario.space_id, body_gone)
             .await
             .expect("sweep");
         assert_eq!(sweep.receipt_bodies_evicted, 1);
+        assert_eq!(sweep.dedup_tombstones_evicted, 0);
+        assert_eq!(count_rows(&scenario.provider, "receipt_targets").await, 1);
+
+        // The full post-body tombstone window still protects the key.
+        let tombstone_end = settle_body_end + Duration::seconds(DEDUP_RETENTION_SECONDS as i64);
+        assert_eq!(
+            refusal(
+                scenario
+                    .provider
+                    .receipts_get(
+                        CLIENT,
+                        &receipts_request(&scenario.space_id, "rcpt_pending_retention"),
+                        tombstone_end,
+                    )
+                    .await
+            )
+            .code,
+            SpokeRejectCode::ReceiptExpired
+        );
+        assert_eq!(
+            scenario
+                .provider
+                .sweep_retained(&scenario.space_id, tombstone_end)
+                .await
+                .expect("sweep"),
+            RetentionSweep::default()
+        );
+
+        let after_all = tombstone_end + Duration::seconds(1);
+        let sweep = scenario
+            .provider
+            .sweep_retained(&scenario.space_id, after_all)
+            .await
+            .expect("sweep");
         assert_eq!(sweep.dedup_tombstones_evicted, 1);
         assert_eq!(sweep.targets_removed, 1);
-        assert_eq!(count_rows(&scenario.provider, "receipts").await, 0);
-        assert_eq!(count_rows(&scenario.provider, "idempotency_namespace").await, 0);
-        assert_eq!(count_rows(&scenario.provider, "receipt_targets").await, 0);
+        assert_eq!(
+            count_rows(&scenario.provider, "idempotency_namespace").await,
+            0
+        );
+        let fresh = scenario
+            .provider
+            .capture(CLIENT, &request, after_all)
+            .await
+            .expect("the finished key is new again");
+        assert_ne!(receipt_id_of(&fresh), "rcpt_pending_retention");
+        assert_eq!(count_rows(&scenario.provider, "candidates").await, 1);
+    }
+
+    /// F7: the caller-owned seams enforce the same logical boundaries at the
+    /// supplied instant with no hidden maintenance commit, and a finished key is
+    /// released only inside the transaction that stages the new effect.
+    #[tokio::test]
+    async fn caller_owned_seams_apply_logical_expiration_without_hidden_writes() {
+        let scenario = Scenario::open().await;
+        let base = now();
+        scenario.subject(base).await;
+        scenario
+            .grant(CLIENT, &["capture"], Some(SUBJECT), None, base)
+            .await;
+        let request = capture_request(
+            &scenario.space_id,
+            "Caller-owned seam retention.",
+            context_scope(CONTEXT_A),
+            "caller-1",
+        );
+        let committed = scenario
+            .provider
+            .capture(CLIENT, &request, base)
+            .await
+            .expect("capture commits");
+        let receipt_id = receipt_id_of(&committed).to_owned();
+        let rows = retention_rows(&scenario.provider).await;
+
+        // A caller-owned read transaction answers the logical boundary and
+        // writes nothing.
+        let after_body = base + Duration::seconds(RECEIPT_RETENTION_SECONDS as i64 + 1);
+        let mut transaction = scenario
+            .provider
+            .store()
+            .pool()
+            .begin()
+            .await
+            .expect("read transaction");
+        assert_eq!(
+            refusal(
+                scenario
+                    .provider
+                    .receipts_get_in_tx(
+                        &mut transaction,
+                        CLIENT,
+                        &receipts_request(&scenario.space_id, &receipt_id),
+                        after_body,
+                    )
+                    .await
+            )
+            .code,
+            SpokeRejectCode::ReceiptExpired
+        );
+        transaction.rollback().await.expect("read rollback");
+        assert_eq!(retention_rows(&scenario.provider).await, rows);
+
+        // A caller-owned mutation transaction answers the retired body without
+        // writing it, then rolls back cleanly.
+        let mut transaction = scenario
+            .provider
+            .store()
+            .pool()
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .expect("writer transaction");
+        assert_eq!(
+            refusal(
+                scenario
+                    .provider
+                    .capture_in_tx(&mut transaction, CLIENT, &request, after_body)
+                    .await
+            )
+            .code,
+            SpokeRejectCode::ReceiptExpired
+        );
+        transaction.rollback().await.expect("rollback");
+        assert_eq!(retention_rows(&scenario.provider).await, rows);
+
+        // Past the tombstone end the same seam releases the finished binding and
+        // stages one fresh effect; a rollback restores the old binding, a commit
+        // keeps exactly the new effect.
+        let after_all =
+            base + Duration::seconds((RECEIPT_RETENTION_SECONDS + DEDUP_RETENTION_SECONDS) as i64 + 1);
+        let mut transaction = scenario
+            .provider
+            .store()
+            .pool()
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .expect("writer transaction");
+        let fresh = scenario
+            .provider
+            .capture_in_tx(&mut transaction, CLIENT, &request, after_all)
+            .await
+            .expect("the finished key runs a fresh effect");
+        assert_ne!(receipt_id_of(&fresh), receipt_id);
+        transaction.rollback().await.expect("rollback");
+        assert_eq!(
+            retention_rows(&scenario.provider).await,
+            rows,
+            "the released stale binding is transactional"
+        );
+        assert_eq!(count_rows(&scenario.provider, "candidates").await, 1);
+
+        let mut transaction = scenario
+            .provider
+            .store()
+            .pool()
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .expect("writer transaction");
+        let fresh = scenario
+            .provider
+            .capture_in_tx(&mut transaction, CLIENT, &request, after_all)
+            .await
+            .expect("the finished key runs one committed effect");
+        transaction.commit().await.expect("commit");
+        assert_ne!(receipt_id_of(&fresh), receipt_id);
+        assert_eq!(count_rows(&scenario.provider, "candidates").await, 2);
+        assert_eq!(
+            count_rows(&scenario.provider, "idempotency_namespace").await,
+            1
+        );
+        assert_eq!(count_rows(&scenario.provider, "receipt_targets").await, 1);
     }
 }

@@ -182,6 +182,11 @@ CREATE TABLE IF NOT EXISTS receipts (
     error_json TEXT,
     created_at TEXT NOT NULL,
     completed_at TEXT,
+    -- §6.10: the end of the receipt-body window. It starts when the receipt
+    -- becomes terminal (`completed_at`), never at admission, so a receipt that
+    -- stayed pending keeps its full body window after settlement. NULL means
+    -- live pending work, which is never retired.
+    body_expires_at TEXT,
     extensions_json TEXT NOT NULL DEFAULT '{}',
     CHECK (
         (status = 'pending' AND result_json IS NULL AND error_json IS NULL AND completed_at IS NULL)
@@ -190,7 +195,8 @@ CREATE TABLE IF NOT EXISTS receipts (
             AND completed_at IS NOT NULL
             AND ((result_json IS NULL) <> (error_json IS NULL))
         )
-    )
+    ),
+    CHECK ((status = 'pending') = (body_expires_at IS NULL))
 ) WITHOUT ROWID;
 
 -- §7.0.5/§6.10: the idempotency namespace `(space_id, requester_principal_id,
@@ -211,7 +217,13 @@ CREATE TABLE IF NOT EXISTS idempotency_namespace (
     receipt_id TEXT NOT NULL,
     last_known_status TEXT NOT NULL CHECK (last_known_status IN ('committed', 'pending', 'failed')),
     created_at TEXT NOT NULL,
-    PRIMARY KEY (space_id, requester_principal_id, op, idempotency_key)
+    -- §6.10/MEM-R021: the end of the dedup-tombstone window. It starts when the
+    -- receipt body retires and lasts the declared dedup window, so the tombstone
+    -- is neither counted from admission nor shortened by a long pending period.
+    -- NULL while the receipt is pending (no terminal outcome yet).
+    tombstone_expires_at TEXT,
+    PRIMARY KEY (space_id, requester_principal_id, op, idempotency_key),
+    CHECK ((last_known_status = 'pending') = (tombstone_expires_at IS NULL))
 ) WITHOUT ROWID;
 
 -- §6.5/§7.28: the content-free authorization target of the operation that
