@@ -28,7 +28,9 @@ pub struct FixtureIdentity {
 /// The independent durable provider the conformance suite exercises.
 pub struct FixtureMemoryProvider {
     store: FixtureStore,
-    identity: FixtureIdentity,
+    /// Crate-private: the operation slices pin every request to the durable
+    /// space/authority pair this provider serves.
+    pub(crate) identity: FixtureIdentity,
 }
 
 impl FixtureMemoryProvider {

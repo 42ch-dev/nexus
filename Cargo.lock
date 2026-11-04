@@ -3938,6 +3938,8 @@ name = "nexus-memory-conformance"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "serde_json",
+ "spoke-operations",
  "sqlx",
  "tempfile",
  "thiserror 2.0.21",
