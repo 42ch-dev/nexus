@@ -1079,6 +1079,12 @@ const fn single_connection() -> GuardedPoolOptions {
 
 /// Open a default-sized pool admitted by `guard`.
 ///
+/// This raw entry point takes no claim, so the pool is opened on exactly the
+/// guard the caller passes and the caller keeps that guard alive; the
+/// claim-bearing constructors ([`open_guarded_pool_arc`] and
+/// [`open_guarded_pool_arc_with`]) are the ones that adopt the published
+/// admission when a concurrent open won it.
+///
 /// # Errors
 ///
 /// Same as [`open_guarded_pool_with`].
@@ -1132,7 +1138,16 @@ pub async fn open_guarded_pool_arc_with(
     guard: Arc<WorkspaceWriterGuard>,
     options: GuardedPoolOptions,
 ) -> Result<GuardedPool, LocalDbError> {
+    // The reservation may have joined an admission a concurrent open published
+    // first: the claim then belongs to THAT identity, so this pool must be
+    // opened on the same guard — otherwise one identity's claim would guard
+    // another identity's writer context and neither release would line up with
+    // the pool it protects. The losing guard is given up here, which releases
+    // its own superseded OS locks.
+    let db_path = guard.db_path.clone();
+    let mode = guard.mode;
     let claim = reserve_retained_admission(&guard);
+    let guard = published_guard(&db_path, mode, guard);
     open_guarded_pool_with_claim(guard, claim, options).await
 }
 
@@ -1646,6 +1661,76 @@ mod tests {
         drop(first);
         let fence = acquire_store_reset_fence(&db_path)
             .expect("both shared admissions are gone");
+        drop(fence);
+    }
+
+    /// The PUBLIC guarded constructor must pair every claim with the admission
+    /// it actually belongs to. Two genuinely fresh same-mode Direct guards are
+    /// taken before either publishes; the second public open used to open a
+    /// pool on its own losing guard while holding a claim on the published one.
+    #[tokio::test]
+    async fn public_guarded_open_uses_the_published_admission() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("state.db");
+        let bootstrap = init_guarded_pool(&db_path, BOOTSTRAP_CREATOR_ID)
+            .await
+            .unwrap();
+        bootstrap.pool().close().await;
+        bootstrap.release_retained_admission();
+        drop(bootstrap);
+
+        let (first, first_joined) =
+            acquire_claimed_guard(&db_path, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
+                .await
+                .unwrap();
+        let (second, second_joined) =
+            acquire_claimed_guard(&db_path, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
+                .await
+                .unwrap();
+        assert!(
+            first_joined.is_none() && second_joined.is_none(),
+            "both guards are fresh: neither saw a published admission"
+        );
+        assert_ne!(
+            first.writer_id(),
+            second.writer_id(),
+            "two separate OS admissions were taken"
+        );
+
+        // The first public open publishes its own identity.
+        let opened = open_guarded_pool_arc(first.clone()).await.unwrap();
+        let published = opened.guard().writer_id().to_string();
+        assert_eq!(published, first.writer_id());
+
+        // The second supplies its losing guard; the returned pool must belong
+        // to the published admission it now holds a claim on.
+        let joined = open_guarded_pool_arc(second.clone()).await.unwrap();
+        assert_eq!(
+            joined.guard().writer_id(),
+            published,
+            "the public constructor adopts the published guard, not the supplied loser"
+        );
+        let (context,): (String,) = sqlx::query_as("SELECT nexus_writer_id()")
+            .fetch_one(joined.pool())
+            .await
+            .unwrap();
+        assert_eq!(
+            context, published,
+            "the pool's real connection context is the published admission"
+        );
+
+        // Both public consumers end; the single admission goes with the last.
+        opened.pool().close().await;
+        opened.release_retained_admission();
+        joined.pool().close().await;
+        joined.release_retained_admission();
+        drop((opened, joined, first, second));
+        assert!(
+            retained_guard(&db_path, WriterMode::Direct).is_none(),
+            "the last claim released the published admission"
+        );
+        let fence = acquire_store_reset_fence(&db_path)
+            .expect("no writer admission survives the public consumers");
         drop(fence);
     }
 
