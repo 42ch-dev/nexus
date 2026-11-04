@@ -494,7 +494,7 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
                     details.insert("conflict_code".into(), Value::String(conflict_code));
                     CoreError {
                         code: CoreErrorCode::OwnerBusy,
-                        message: "fragment revision mismatch".into(),
+                        message: "memory revision mismatch".into(),
                         details,
                         http_status: Some(409),
                     }

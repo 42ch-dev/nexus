@@ -373,7 +373,7 @@ pub fn map_core_error(err: CoreError) -> CliError {
                 Some(conflict_code) => CliError::Api {
                     status: 409,
                     message: format!(
-                        "[{conflict_code}] fragment revision mismatch \
+                        "[{conflict_code}] memory revision mismatch \
                          (retry_class: {retry_class}{wire})"
                     ),
                 },
