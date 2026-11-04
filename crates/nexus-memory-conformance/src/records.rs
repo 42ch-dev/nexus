@@ -107,6 +107,15 @@ fn not_authorized(message: impl Into<String>) -> SpokeReject {
     }
 }
 
+/// The single public refusal for a record the caller cannot see: an absent id,
+/// a placement outside the caller's grants, a deleted record and a tombstone
+/// hidden from non-admin all answer this same `NOT_FOUND`, so by-id probes
+/// cannot distinguish existence (matrix C-102, MEM-R026). The caller-supplied
+/// id is deliberately not echoed back, keeping the refusal byte-identical.
+fn record_absent() -> SpokeReject {
+    not_found("the requested record does not exist in this space")
+}
+
 fn space_frozen(space_id: &str) -> SpokeReject {
     SpokeReject {
         code: SpokeRejectCode::SpaceFrozen,
@@ -288,7 +297,7 @@ async fn fetch_record(
     .fetch_optional(conn)
     .await
     .map_err(internal)?
-    .ok_or_else(|| not_found(format!("record {record_id} does not exist in this space")))?;
+    .ok_or_else(record_absent)?;
     Ok(StoredRecord {
         record_id: row.try_get("record_id").map_err(internal)?,
         space_id: row.try_get("space_id").map_err(internal)?,
@@ -327,6 +336,30 @@ async fn require_active_space(
     let status: String = row.try_get("status").map_err(internal)?;
     if status == "frozen" {
         return Err(space_frozen(space_id));
+    }
+    Ok(())
+}
+
+/// Subject-level write admission for erasure: a fenced or archived subject
+/// rejects every write for that subject (§7.7/MEM-R017). Context fences are
+/// deliberately not consulted here — they gate placement into a context.
+async fn require_subject_live(
+    conn: &mut SqliteConnection,
+    space_id: &str,
+    subject_id: &str,
+) -> Result<(), SpokeReject> {
+    let row = sqlx::query("SELECT status FROM subjects WHERE space_id = ? AND subject_id = ?")
+        .bind(space_id)
+        .bind(subject_id)
+        .fetch_optional(conn)
+        .await
+        .map_err(internal)?;
+    let Some(row) = row else {
+        return Ok(());
+    };
+    let status: String = row.try_get("status").map_err(internal)?;
+    if status != "active" {
+        return Err(subject_fenced(subject_id, "subject"));
     }
     Ok(())
 }
@@ -572,10 +605,7 @@ impl FixtureMemoryProvider {
                 },
             );
             if !admin {
-                return Err(not_found(format!(
-                    "record {} does not exist in this space",
-                    record.record_id
-                )));
+                return Err(record_absent());
             }
         } else if !authorized_for(
             &grants,
@@ -585,9 +615,9 @@ impl FixtureMemoryProvider {
             &placement,
             &["records_read", "recall"],
         ) {
-            return Err(not_authorized(
-                "the authenticated principal holds no read grant covering the record placement",
-            ));
+            // A record outside the caller's coverage answers exactly like an
+            // absent id: the grant check is not an existence oracle.
+            return Err(record_absent());
         }
         record_to_wire(&record)
     }
@@ -663,6 +693,11 @@ impl FixtureMemoryProvider {
         self.require_identity_space(space_id)?;
         require_active_space(conn, space_id).await?;
         let record = fetch_record(conn, space_id, record_id).await?;
+        if record.tombstone_json.is_some() {
+            // A tombstone is audit-only: deleted content can never be
+            // rewritten or regrown (MEM-R014/§6.6).
+            return Err(record_absent());
+        }
         let grants = load_grants(conn, space_id).await?;
         if !authorized_for(
             &grants,
@@ -677,9 +712,7 @@ impl FixtureMemoryProvider {
             ),
             &["records_write"],
         ) {
-            return Err(not_authorized(
-                "the authenticated principal holds no records_write grant covering the placement",
-            ));
+            return Err(record_absent());
         }
         let placement_contexts: Vec<&str> = record.scope_context_id.as_deref().into_iter().collect();
         require_subject_writable(
@@ -786,12 +819,14 @@ impl FixtureMemoryProvider {
             ),
             &["records_write"],
         ) {
-            return Err(not_authorized(
-                "the authenticated principal holds no records_write grant covering the placement",
-            ));
+            return Err(record_absent());
         }
-        // §7.19's error vocabulary does not include SUBJECT_FENCED: an
-        // erasure keeps the audit tombstone and stays available under a fence.
+        // §7.7/MEM-R017: a fenced or archived subject rejects every write for
+        // that subject, so erasure admission obeys the subject lifecycle before
+        // any new effect. A context fence is placement-scoped (§7.7/MEM-R024):
+        // it bans writes *into* that context, not removing a record already
+        // placed there.
+        require_subject_live(conn, space_id, &record.subject_id).await?;
         if request.expected_revision.get() != record.revision {
             return Err(revision_conflict(
                 request.expected_revision,
@@ -878,6 +913,11 @@ impl FixtureMemoryProvider {
         self.require_identity_space(space_id)?;
         require_active_space(conn, space_id).await?;
         let record = fetch_record(conn, space_id, request.record_id.as_str()).await?;
+        if record.tombstone_json.is_some() {
+            // A deleted record keeps its audit placement and can never be
+            // promoted into a new state (MEM-R014).
+            return Err(record_absent());
+        }
         let (target_visibility, target_context) = match &request.target_scope {
             PromoteScope::Shared => ("shared", None),
             PromoteScope::Context(context) => ("context", Some(context.as_str())),
@@ -909,9 +949,7 @@ impl FixtureMemoryProvider {
                 && grant_covers(grant, principal_id, space_id, now, &write_requirement)
         });
         if !authorized {
-            return Err(not_authorized(
-                "promotion needs one grant holding promote and records_write over both placements",
-            ));
+            return Err(record_absent());
         }
         let placement_contexts: Vec<&str> = contexts.iter().map(String::as_str).collect();
         require_subject_writable(
@@ -1198,12 +1236,12 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use chrono::DateTime;
+    use chrono::{DateTime, Duration};
     use tempfile::TempDir;
 
     use spoke_operations::spoke_schemas::{
-        MemoryGrantsGrantRequest, MemorySpacesFreezeRequest, MemorySpacesUnfreezeRequest,
-        MemorySubjectsEnsureRequest, MemorySubjectsFenceRequest,
+        MemoryGrantsGrantRequest, MemoryGrantsRevokeRequest, MemorySpacesFreezeRequest,
+        MemorySpacesUnfreezeRequest, MemorySubjectsEnsureRequest, MemorySubjectsFenceRequest,
     };
     use spoke_operations::spoke_schemas::retained_record::{LiveRecord, TombstonedRecord};
 
@@ -1389,6 +1427,105 @@ mod tests {
             "record_id": record_id,
         }))
         .expect("valid records.get request")
+    }
+
+    fn create_with_content_request(
+        space: &str,
+        subject: &str,
+        kind: &str,
+        content: Value,
+        context: Option<&str>,
+        key: &str,
+    ) -> MemoryRecordsCreateRequest {
+        serde_json::from_value(json!({
+            "space_id": space,
+            "subject_id": subject,
+            "kind": kind,
+            "content": content,
+            "scope": match context {
+                Some(context) => json!({ "visibility": "context", "context_id": context }),
+                None => json!({ "visibility": "shared" }),
+            },
+            "source_context_ids": [],
+            "anchors": [],
+            "idempotency_key": key,
+        }))
+        .expect("valid records.create request")
+    }
+
+    fn expiring_grant_request(
+        space: &str,
+        grantee: &str,
+        capabilities: &[&str],
+        subject: &str,
+        contexts: &[&str],
+        expires_at: DateTime<Utc>,
+    ) -> MemoryGrantsGrantRequest {
+        serde_json::from_value(json!({
+            "space_id": space,
+            "principal_id": grantee,
+            "capabilities": capabilities,
+            "subject_id": subject,
+            "context_ids": contexts,
+            "shared_access": false,
+            "expires_at": timestamp_text(expires_at),
+            "idempotency_key": format!("grant-expiring-{grantee}"),
+        }))
+        .expect("valid expiring grants.grant request")
+    }
+
+    fn revoke_request(space: &str, grant_id: &str, expected: u64) -> MemoryGrantsRevokeRequest {
+        serde_json::from_value(json!({
+            "space_id": space,
+            "grant_id": grant_id,
+            "expected_revision": expected,
+            "idempotency_key": format!("revoke-{grant_id}-{expected}"),
+        }))
+        .expect("valid grants.revoke request")
+    }
+
+    /// The whole public refusal, for comparing two refusals field by field
+    /// without pinning literal wording as the oracle.
+    fn refusal<T: std::fmt::Debug>(result: Result<T, SpokeReject>) -> SpokeReject {
+        match result {
+            Ok(value) => panic!("expected a protocol reject, observed {value:?}"),
+            Err(reject) => reject,
+        }
+    }
+
+    fn assert_same_refusal<T: std::fmt::Debug, U: std::fmt::Debug>(
+        foreign: Result<T, SpokeReject>,
+        absent: Result<U, SpokeReject>,
+    ) {
+        let foreign = refusal(foreign);
+        let absent = refusal(absent);
+        assert_eq!(foreign.code, absent.code);
+        assert_eq!(foreign.message, absent.message);
+        assert_eq!(foreign.details, absent.details);
+    }
+
+    /// The raw stored bytes and CAS/tombstone columns for one record.
+    async fn stored_row(scenario: &Scenario, record_id: &str) -> (String, u64, Option<String>) {
+        let mut conn = scenario
+            .provider
+            .store()
+            .pool()
+            .acquire()
+            .await
+            .expect("scenario connection");
+        let row = sqlx::query(
+            "SELECT content_json, revision, tombstone_json FROM records WHERE record_id = ?",
+        )
+        .bind(record_id)
+        .fetch_one(&mut *conn)
+        .await
+        .expect("stored record row");
+        let revision: i64 = row.try_get("revision").expect("stored revision");
+        (
+            row.try_get("content_json").expect("stored content"),
+            u64::try_from(revision).expect("positive revision"),
+            row.try_get("tombstone_json").expect("stored tombstone"),
+        )
     }
 
     fn delete_request(
@@ -2035,7 +2172,7 @@ mod tests {
                     )
                     .await
             ),
-            SpokeRejectCode::NotAuthorized,
+            SpokeRejectCode::NotFound,
             "records_write without promote cannot move placement"
         );
 
@@ -2059,7 +2196,7 @@ mod tests {
                     )
                     .await
             ),
-            SpokeRejectCode::NotAuthorized,
+            SpokeRejectCode::NotFound,
             "promote without records_write cannot move placement"
         );
 
@@ -2089,7 +2226,7 @@ mod tests {
                     )
                     .await
             ),
-            SpokeRejectCode::NotAuthorized,
+            SpokeRejectCode::NotFound,
             "the target placement is outside the grant"
         );
 
@@ -2136,7 +2273,7 @@ mod tests {
                     )
                     .await
             ),
-            SpokeRejectCode::NotAuthorized,
+            SpokeRejectCode::NotFound,
             "capabilities split across grants are not unioned"
         );
 
@@ -2198,7 +2335,7 @@ mod tests {
                     )
                     .await
             ),
-            SpokeRejectCode::NotAuthorized
+            SpokeRejectCode::NotFound
         );
         let shared = scenario
             .provider
@@ -2539,5 +2676,944 @@ mod tests {
             .expect("durable list");
         assert_eq!(page.total_authorized, 1);
         assert_eq!(live(&page.records[0]).content.text, "after-reopen");
+    }
+
+    fn page_ids(page: &RecordPage) -> Vec<String> {
+        page.records
+            .iter()
+            .map(|record| match record {
+                RetainedRecord::LiveRecord(record) => record.record_id.to_string(),
+                other => panic!("unexpected record variant {other:?}"),
+            })
+            .collect()
+    }
+
+    const FOREIGN: &str = "principal-foreign";
+    const EXPIRING: &str = "principal-expiring";
+
+    #[tokio::test]
+    async fn foreign_and_missing_record_ids_have_no_existence_oracle() {
+        let scenario = Scenario::open().await;
+        let space = scenario.space_id.clone();
+        let subject = "subject-one";
+        scenario
+            .provider
+            .subjects_ensure(OPERATOR, &ensure_request(&space, subject), now())
+            .await
+            .expect("subject exists");
+        let created = scenario
+            .provider
+            .records_create(
+                OPERATOR,
+                &create_request(&space, subject, "note", "private", Some("ctx-a"), "create-1"),
+                now(),
+            )
+            .await
+            .expect("record exists");
+        scenario
+            .provider
+            .grants_grant(
+                OPERATOR,
+                &grant_request(
+                    &space,
+                    FOREIGN,
+                    &["records_read", "records_write"],
+                    Some(subject),
+                    Some(&["ctx-b"]),
+                ),
+                now(),
+            )
+            .await
+            .expect("foreign placement grant");
+        let before = marker(&scenario).await;
+        let missing = "rec_00000000000000000000000000000000";
+        let target_ctx_b = json!({ "visibility": "context", "context_id": "ctx-b" });
+
+        // Every by-id operation answers a foreign placement exactly like an
+        // absent id: same code, message and details.
+        assert_same_refusal(
+            scenario
+                .provider
+                .records_get(FOREIGN, &get_request(&space, &created.record_id), now())
+                .await,
+            scenario
+                .provider
+                .records_get(FOREIGN, &get_request(&space, missing), now())
+                .await,
+        );
+        assert_same_refusal(
+            scenario
+                .provider
+                .records_update(
+                    FOREIGN,
+                    &update_content_request(&space, &created.record_id, 1, "probe", "u-foreign"),
+                    now(),
+                )
+                .await,
+            scenario
+                .provider
+                .records_update(
+                    FOREIGN,
+                    &update_content_request(&space, missing, 1, "probe", "u-missing"),
+                    now(),
+                )
+                .await,
+        );
+        assert_same_refusal(
+            scenario
+                .provider
+                .records_delete(FOREIGN, &delete_request(&space, &created.record_id, 1, "d-foreign"), now())
+                .await,
+            scenario
+                .provider
+                .records_delete(FOREIGN, &delete_request(&space, missing, 1, "d-missing"), now())
+                .await,
+        );
+        assert_same_refusal(
+            scenario
+                .provider
+                .records_promote(
+                    FOREIGN,
+                    &promote_request(&space, &created.record_id, 1, target_ctx_b.clone(), "p-foreign"),
+                    now(),
+                )
+                .await,
+            scenario
+                .provider
+                .records_promote(
+                    FOREIGN,
+                    &promote_request(&space, missing, 1, target_ctx_b.clone(), "p-missing"),
+                    now(),
+                )
+                .await,
+        );
+
+        // A principal with no grants observes the same single refusal.
+        assert_same_refusal(
+            scenario
+                .provider
+                .records_get("principal-outsider", &get_request(&space, &created.record_id), now())
+                .await,
+            scenario
+                .provider
+                .records_get("principal-outsider", &get_request(&space, missing), now())
+                .await,
+        );
+
+        // Refusals leave the record and the private snapshot untouched.
+        assert_eq!(marker(&scenario).await, before);
+        let (_, revision, tombstone) = stored_row(&scenario, &created.record_id).await;
+        assert_eq!(revision, 1);
+        assert!(tombstone.is_none());
+
+        // Legitimate reads and CAS still answer precisely to the admin.
+        let record = scenario
+            .provider
+            .records_get(OPERATOR, &get_request(&space, &created.record_id), now())
+            .await
+            .expect("admin reads the record");
+        assert_eq!(live(&record).content.text, "private");
+        let updated = scenario
+            .provider
+            .records_update(
+                OPERATOR,
+                &update_content_request(&space, &created.record_id, 1, "authorized", "u-admin"),
+                now(),
+            )
+            .await
+            .expect("authorized CAS update");
+        assert_eq!(updated.revision, 2);
+        let stale = refusal(
+            scenario
+                .provider
+                .records_update(
+                    OPERATOR,
+                    &update_content_request(&space, &created.record_id, 1, "lost", "u-stale"),
+                    now(),
+                )
+                .await,
+        );
+        assert_eq!(stale.code, SpokeRejectCode::RevisionConflict);
+    }
+
+    #[tokio::test]
+    async fn tombstoned_records_cannot_regain_content_or_placement() {
+        let scenario = Scenario::open().await;
+        let space = scenario.space_id.clone();
+        let subject = "subject-one";
+        scenario
+            .provider
+            .subjects_ensure(OPERATOR, &ensure_request(&space, subject), now())
+            .await
+            .expect("subject exists");
+        let created = scenario
+            .provider
+            .records_create(
+                OPERATOR,
+                &create_request(&space, subject, "note", "erased", Some("ctx-a"), "create-1"),
+                now(),
+            )
+            .await
+            .expect("record exists");
+        scenario
+            .provider
+            .records_delete(OPERATOR, &delete_request(&space, &created.record_id, 1, "delete-1"), now())
+            .await
+            .expect("record is tombstoned");
+        let after_delete = marker(&scenario).await;
+        let (scrubbed, revision, tombstone) = stored_row(&scenario, &created.record_id).await;
+        assert_eq!(scrubbed, "{\"text\":\"\"}");
+        assert_eq!(revision, 2);
+        assert!(tombstone.is_some());
+
+        // No update can write content back onto a deleted record, and no
+        // promotion can move it, whatever revision the caller claims.
+        assert_eq!(
+            reject_code(
+                scenario
+                    .provider
+                    .records_update(
+                        OPERATOR,
+                        &update_content_request(&space, &created.record_id, 2, "resurrected", "u-1"),
+                        now(),
+                    )
+                    .await
+            ),
+            SpokeRejectCode::NotFound
+        );
+        assert_eq!(
+            reject_code(
+                scenario
+                    .provider
+                    .records_update(
+                        OPERATOR,
+                        &update_content_request(&space, &created.record_id, 1, "resurrected", "u-2"),
+                        now(),
+                    )
+                    .await
+            ),
+            SpokeRejectCode::NotFound
+        );
+        assert_eq!(
+            reject_code(
+                scenario
+                    .provider
+                    .records_promote(
+                        OPERATOR,
+                        &promote_request(
+                            &space,
+                            &created.record_id,
+                            2,
+                            json!({ "visibility": "shared" }),
+                            "p-1",
+                        ),
+                        now(),
+                    )
+                    .await
+            ),
+            SpokeRejectCode::NotFound
+        );
+
+        // Durable scrub, revision and snapshot are preserved.
+        assert_eq!(marker(&scenario).await, after_delete);
+        let (scrubbed, revision, tombstone) = stored_row(&scenario, &created.record_id).await;
+        assert_eq!(scrubbed, "{\"text\":\"\"}");
+        assert_eq!(revision, 2);
+        assert!(tombstone.is_some());
+
+        // The authorized audit view still decodes the tombstone.
+        let record = scenario
+            .provider
+            .records_get(OPERATOR, &get_request(&space, &created.record_id), now())
+            .await
+            .expect("admin audit view");
+        let record = tombstoned(&record);
+        assert_eq!(record.content.text, "");
+        assert_eq!(record.revision.get(), 2);
+        assert_eq!(record.tombstone.deleted_by.as_str(), OPERATOR);
+
+        // Repeat delete at the current revision remains the accepted no-op.
+        let repeated = scenario
+            .provider
+            .records_delete(OPERATOR, &delete_request(&space, &created.record_id, 2, "delete-2"), now())
+            .await
+            .expect("repeat delete is a no-op success");
+        assert!(repeated.tombstoned);
+        assert_eq!(marker(&scenario).await, after_delete);
+    }
+
+    #[tokio::test]
+    async fn delete_obeys_subject_fence_but_not_context_fence() {
+        let scenario = Scenario::open().await;
+        let space = scenario.space_id.clone();
+        let subject = "subject-one";
+        scenario
+            .provider
+            .subjects_ensure(OPERATOR, &ensure_request(&space, subject), now())
+            .await
+            .expect("subject exists");
+        let ctx_a = scenario
+            .provider
+            .records_create(
+                OPERATOR,
+                &create_request(&space, subject, "note", "a", Some("ctx-a"), "create-a"),
+                now(),
+            )
+            .await
+            .expect("ctx-a record");
+        let ctx_b = scenario
+            .provider
+            .records_create(
+                OPERATOR,
+                &create_request(&space, subject, "note", "b", Some("ctx-b"), "create-b"),
+                now(),
+            )
+            .await
+            .expect("ctx-b record");
+
+        scenario
+            .provider
+            .subjects_fence(
+                OPERATOR,
+                &fence_request(&space, subject, "fence", json!({ "type": "subject" }), 1),
+                now(),
+            )
+            .await
+            .expect("subject fences");
+        let fenced_marker = marker(&scenario).await;
+        assert_eq!(
+            reject_code(
+                scenario
+                    .provider
+                    .records_delete(OPERATOR, &delete_request(&space, &ctx_a.record_id, 1, "d-fenced"), now())
+                    .await
+            ),
+            SpokeRejectCode::SubjectFenced
+        );
+        // No tombstone, revision or snapshot change from the refused erase.
+        assert_eq!(marker(&scenario).await, fenced_marker);
+        let (_, revision, tombstone) = stored_row(&scenario, &ctx_a.record_id).await;
+        assert_eq!((revision, tombstone.is_none()), (1, true));
+
+        scenario
+            .provider
+            .subjects_fence(
+                OPERATOR,
+                &fence_request(&space, subject, "unfence", json!({ "type": "subject" }), 2),
+                now(),
+            )
+            .await
+            .expect("subject unfences");
+        scenario
+            .provider
+            .subjects_fence(
+                OPERATOR,
+                &fence_request(
+                    &space,
+                    subject,
+                    "fence",
+                    json!({ "type": "context", "context_id": "ctx-a" }),
+                    3,
+                ),
+                now(),
+            )
+            .await
+            .expect("ctx-a fences");
+
+        // A context fence is placement-scoped: it does not invent an erasure
+        // ban for records already placed in that context.
+        let erased = scenario
+            .provider
+            .records_delete(OPERATOR, &delete_request(&space, &ctx_a.record_id, 1, "d-ctx"), now())
+            .await
+            .expect("context fence does not ban erasure");
+        assert!(erased.tombstoned);
+        let erased = scenario
+            .provider
+            .records_delete(OPERATOR, &delete_request(&space, &ctx_b.record_id, 1, "d-sibling"), now())
+            .await
+            .expect("sibling context erasure");
+        assert!(erased.tombstoned);
+
+        // An archived subject rejects erasure like a fence does.
+        let later = scenario
+            .provider
+            .records_create(
+                OPERATOR,
+                &create_request(&space, subject, "note", "later", Some("ctx-b"), "create-c"),
+                now(),
+            )
+            .await
+            .expect("record before archive");
+        scenario
+            .provider
+            .subjects_fence(
+                OPERATOR,
+                &fence_request(&space, subject, "archive", json!({ "type": "subject" }), 4),
+                now(),
+            )
+            .await
+            .expect("subject archives");
+        let archived_marker = marker(&scenario).await;
+        assert_eq!(
+            reject_code(
+                scenario
+                    .provider
+                    .records_delete(OPERATOR, &delete_request(&space, &later.record_id, 1, "d-archived"), now())
+                    .await
+            ),
+            SpokeRejectCode::SubjectFenced
+        );
+        assert_eq!(marker(&scenario).await, archived_marker);
+        let (_, revision, tombstone) = stored_row(&scenario, &later.record_id).await;
+        assert_eq!((revision, tombstone.is_none()), (1, true));
+    }
+
+    #[tokio::test]
+    async fn content_bound_is_exact_jcs_bytes_with_utf8_and_structured() {
+        assert_eq!(MAX_CONTENT_BYTES, 65_536);
+        let scenario = Scenario::open().await;
+        let space = scenario.space_id.clone();
+        let subject = "subject-one";
+        scenario
+            .provider
+            .subjects_ensure(OPERATOR, &ensure_request(&space, subject), now())
+            .await
+            .expect("subject exists");
+        let text_prefix = "{\"text\":\"\"}".len();
+
+        // Exactly max_content_bytes of JCS-serialized ASCII content is admitted.
+        let boundary_text = "a".repeat(MAX_CONTENT_BYTES - text_prefix);
+        let created = scenario
+            .provider
+            .records_create(
+                OPERATOR,
+                &create_with_content_request(
+                    &space,
+                    subject,
+                    "note",
+                    json!({ "text": boundary_text }),
+                    Some("ctx-a"),
+                    "create-boundary",
+                ),
+                now(),
+            )
+            .await
+            .expect("content at the exact bound is admitted");
+        let record = scenario
+            .provider
+            .records_get(OPERATOR, &get_request(&space, &created.record_id), now())
+            .await
+            .expect("boundary record reads back");
+        assert_eq!(
+            live(&record).content.text.len(),
+            MAX_CONTENT_BYTES - text_prefix
+        );
+
+        // One byte over is refused with the published limit details.
+        let overflow = refusal(
+            scenario
+                .provider
+                .records_create(
+                    OPERATOR,
+                    &create_with_content_request(
+                        &space,
+                        subject,
+                        "note",
+                        json!({ "text": "a".repeat(MAX_CONTENT_BYTES - text_prefix + 1) }),
+                        Some("ctx-a"),
+                        "create-overflow",
+                    ),
+                    now(),
+                )
+                .await,
+        );
+        assert_eq!(overflow.code, SpokeRejectCode::InvalidInput);
+        let details = overflow.details.expect("limit details");
+        assert_eq!(details["field"], json!("content"));
+        assert_eq!(details["limit"], json!("max_content_bytes"));
+        let page = scenario
+            .provider
+            .records_list(
+                OPERATOR,
+                &list_request(&space, subject, json!({ "mode": "subject_all" }), &[], false, None, None),
+                now(),
+            )
+            .await
+            .expect("list after refused create");
+        assert_eq!(page.total_authorized, 1, "the refused create stored nothing");
+
+        // The bound counts UTF-8 bytes, not characters: 32,763 two-byte
+        // characters are 65,526 bytes and overflow even though the scalar
+        // count alone is far below the limit.
+        let utf8_boundary = format!("{}{}", "é".repeat(32_762), "a");
+        assert_eq!(utf8_boundary.len(), MAX_CONTENT_BYTES - text_prefix);
+        scenario
+            .provider
+            .records_create(
+                OPERATOR,
+                &create_with_content_request(
+                    &space,
+                    subject,
+                    "note",
+                    json!({ "text": utf8_boundary }),
+                    Some("ctx-a"),
+                    "create-utf8",
+                ),
+                now(),
+            )
+            .await
+            .expect("multi-byte content at the exact bound is admitted");
+        let utf8_overflow = "é".repeat(32_763);
+        assert_eq!(utf8_overflow.len(), MAX_CONTENT_BYTES - text_prefix + 1);
+        assert_eq!(
+            reject_code(
+                scenario
+                    .provider
+                    .records_create(
+                        OPERATOR,
+                        &create_with_content_request(
+                            &space,
+                            subject,
+                            "note",
+                            json!({ "text": utf8_overflow }),
+                            Some("ctx-a"),
+                            "create-utf8-overflow",
+                        ),
+                        now(),
+                    )
+                    .await
+            ),
+            SpokeRejectCode::InvalidInput
+        );
+
+        // Structured payloads count through canonical (key-sorted) JCS bytes.
+        let structured_base = "{\"structured\":{\"pad\":\"\"},\"text\":\"\"}";
+        let pad = "x".repeat(MAX_CONTENT_BYTES - structured_base.len());
+        let structured = json!({ "text": "", "structured": { "pad": pad } });
+        let created = scenario
+            .provider
+            .records_create(
+                OPERATOR,
+                &create_with_content_request(&space, subject, "note", structured.clone(), Some("ctx-a"), "create-structured"),
+                now(),
+            )
+            .await
+            .expect("structured content at the exact bound is admitted");
+        let record = scenario
+            .provider
+            .records_get(OPERATOR, &get_request(&space, &created.record_id), now())
+            .await
+            .expect("structured record reads back");
+        assert_eq!(
+            live(&record).content.structured.as_ref(),
+            Some(&structured["structured"])
+        );
+        let structured_overflow = json!({
+            "text": "",
+            "structured": { "pad": "x".repeat(MAX_CONTENT_BYTES - structured_base.len() + 1) },
+        });
+        assert_eq!(
+            reject_code(
+                scenario
+                    .provider
+                    .records_create(
+                        OPERATOR,
+                        &create_with_content_request(
+                            &space,
+                            subject,
+                            "note",
+                            structured_overflow,
+                            Some("ctx-a"),
+                            "create-structured-overflow",
+                        ),
+                        now(),
+                    )
+                    .await
+            ),
+            SpokeRejectCode::InvalidInput
+        );
+
+        // Update applies the same bound on its content variant.
+        assert_eq!(
+            reject_code(
+                scenario
+                    .provider
+                    .records_update(
+                        OPERATOR,
+                        &update_content_request(
+                            &space,
+                            &created.record_id,
+                            1,
+                            &"a".repeat(MAX_CONTENT_BYTES - text_prefix + 1),
+                            "update-overflow",
+                        ),
+                        now(),
+                    )
+                    .await
+            ),
+            SpokeRejectCode::InvalidInput
+        );
+    }
+
+    #[tokio::test]
+    async fn by_id_reads_recheck_revocation_and_expiry() {
+        let scenario = Scenario::open().await;
+        let space = scenario.space_id.clone();
+        let subject = "subject-one";
+        scenario
+            .provider
+            .subjects_ensure(OPERATOR, &ensure_request(&space, subject), now())
+            .await
+            .expect("subject exists");
+        let created = scenario
+            .provider
+            .records_create(
+                OPERATOR,
+                &create_request(&space, subject, "note", "guarded", Some("ctx-a"), "create-1"),
+                now(),
+            )
+            .await
+            .expect("record exists");
+
+        let issued = scenario
+            .provider
+            .grants_grant(
+                OPERATOR,
+                &grant_request(&space, CLIENT, &["records_read"], Some(subject), Some(&["ctx-a"])),
+                now(),
+            )
+            .await
+            .expect("reader grant");
+        scenario
+            .provider
+            .records_get(CLIENT, &get_request(&space, &created.record_id), now())
+            .await
+            .expect("reader sees the record before revocation");
+
+        scenario
+            .provider
+            .grants_revoke(OPERATOR, &revoke_request(&space, &issued.grant_id, 1), now())
+            .await
+            .expect("reader grant revokes");
+        let revoked = marker(&scenario).await;
+        assert_eq!(
+            reject_code(
+                scenario
+                    .provider
+                    .records_get(CLIENT, &get_request(&space, &created.record_id), now())
+                    .await
+            ),
+            SpokeRejectCode::NotFound
+        );
+        assert_eq!(marker(&scenario).await, revoked, "refusal has no effect");
+        let (_, revision, _) = stored_row(&scenario, &created.record_id).await;
+        assert_eq!(revision, 1);
+
+        // Expiry is evaluated at the supplied admission instant.
+        let expiry = now() + Duration::hours(1);
+        scenario
+            .provider
+            .grants_grant(
+                OPERATOR,
+                &expiring_grant_request(
+                    &space,
+                    EXPIRING,
+                    &["records_read", "records_write"],
+                    subject,
+                    &["ctx-a"],
+                    expiry,
+                ),
+                now(),
+            )
+            .await
+            .expect("expiring grant");
+        scenario
+            .provider
+            .records_get(EXPIRING, &get_request(&space, &created.record_id), now())
+            .await
+            .expect("grant is valid before its expiry");
+        let updated = scenario
+            .provider
+            .records_update(
+                EXPIRING,
+                &update_content_request(&space, &created.record_id, 1, "before-expiry", "u-1"),
+                now(),
+            )
+            .await
+            .expect("write grant is valid before its expiry");
+        assert_eq!(updated.revision, 2);
+
+        assert_eq!(
+            reject_code(
+                scenario
+                    .provider
+                    .records_get(EXPIRING, &get_request(&space, &created.record_id), expiry)
+                    .await
+            ),
+            SpokeRejectCode::NotFound
+        );
+        assert_eq!(
+            reject_code(
+                scenario
+                    .provider
+                    .records_update(
+                        EXPIRING,
+                        &update_content_request(&space, &created.record_id, 2, "after-expiry", "u-2"),
+                        expiry,
+                    )
+                    .await
+            ),
+            SpokeRejectCode::NotFound
+        );
+        let (_, revision, _) = stored_row(&scenario, &created.record_id).await;
+        assert_eq!(revision, 2, "expired refusals leave the record untouched");
+    }
+
+    #[tokio::test]
+    async fn caller_owned_transactions_compose_or_discard_record_effects() {
+        let scenario = Scenario::open().await;
+        let space = scenario.space_id.clone();
+        let subject = "subject-one";
+        scenario
+            .provider
+            .subjects_ensure(OPERATOR, &ensure_request(&space, subject), now())
+            .await
+            .expect("subject exists");
+        let before = marker(&scenario).await;
+
+        // Rolled back caller transaction: neither record nor snapshot survives.
+        let mut transaction = scenario
+            .provider
+            .store()
+            .pool()
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .expect("caller transaction");
+        let created = scenario
+            .provider
+            .records_create_in_tx(
+                &mut transaction,
+                OPERATOR,
+                &create_request(&space, subject, "note", "staged", Some("ctx-a"), "create-1"),
+                now(),
+            )
+            .await
+            .expect("staged create");
+        assert_eq!(created.revision, 1);
+        let updated = scenario
+            .provider
+            .records_update_in_tx(
+                &mut transaction,
+                OPERATOR,
+                &update_content_request(&space, &created.record_id, 1, "staged-update", "u-1"),
+                now(),
+            )
+            .await
+            .expect("staged update composes in the same transaction");
+        assert_eq!(updated.revision, 2);
+        // Uncommitted effects are invisible to another connection.
+        assert_eq!(
+            reject_code(
+                scenario
+                    .provider
+                    .records_get(OPERATOR, &get_request(&space, &created.record_id), now())
+                    .await
+            ),
+            SpokeRejectCode::NotFound
+        );
+        transaction.rollback().await.expect("caller rollback");
+        assert_eq!(marker(&scenario).await, before);
+        let mut conn = scenario
+            .provider
+            .store()
+            .pool()
+            .acquire()
+            .await
+            .expect("scenario connection");
+        let row = sqlx::query("SELECT revision FROM records WHERE record_id = ?")
+            .bind(&created.record_id)
+            .fetch_optional(&mut *conn)
+            .await
+            .expect("rollback query");
+        assert!(row.is_none(), "rollback discarded the staged record");
+
+        // Committed caller transaction: both owned effects and both snapshot
+        // bumps land in C7's single commit.
+        let mut transaction = scenario
+            .provider
+            .store()
+            .pool()
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .expect("caller transaction");
+        let created = scenario
+            .provider
+            .records_create_in_tx(
+                &mut transaction,
+                OPERATOR,
+                &create_request(&space, subject, "note", "committed", Some("ctx-a"), "create-2"),
+                now(),
+            )
+            .await
+            .expect("staged create");
+        let updated = scenario
+            .provider
+            .records_update_in_tx(
+                &mut transaction,
+                OPERATOR,
+                &update_content_request(&space, &created.record_id, 1, "committed-update", "u-2"),
+                now(),
+            )
+            .await
+            .expect("staged update");
+        assert_eq!(updated.revision, 2);
+        transaction.commit().await.expect("caller commit");
+        assert_eq!(marker(&scenario).await, before + 2);
+        let record = scenario
+            .provider
+            .records_get(OPERATOR, &get_request(&space, &created.record_id), now())
+            .await
+            .expect("committed record reads back");
+        assert_eq!(live(&record).content.text, "committed-update");
+        assert_eq!(live(&record).revision.get(), 2);
+    }
+
+    #[tokio::test]
+    async fn read_snapshot_is_stable_under_committed_state_change() {
+        let scenario = Scenario::open().await;
+        let space = scenario.space_id.clone();
+        let subject = "subject-one";
+        scenario
+            .provider
+            .subjects_ensure(OPERATOR, &ensure_request(&space, subject), now())
+            .await
+            .expect("subject exists");
+        let first = scenario
+            .provider
+            .records_create(
+                OPERATOR,
+                &create_request(&space, subject, "note", "first", Some("ctx-a"), "create-1"),
+                now(),
+            )
+            .await
+            .expect("first record");
+        let issued = scenario
+            .provider
+            .grants_grant(
+                OPERATOR,
+                &grant_request(&space, CLIENT, &["records_read"], Some(subject), Some(&["ctx-a"])),
+                now(),
+            )
+            .await
+            .expect("reader grant");
+        let selection = json!({ "mode": "selected_contexts", "context_ids": ["ctx-a"] });
+
+        let mut transaction = scenario
+            .provider
+            .store()
+            .pool()
+            .begin()
+            .await
+            .expect("read transaction");
+        let before_change = scenario
+            .provider
+            .records_list_in_tx(
+                &mut transaction,
+                CLIENT,
+                &list_request(&space, subject, selection.clone(), &[], false, None, None),
+                now(),
+            )
+            .await
+            .expect("first snapshot page");
+        assert_eq!(page_ids(&before_change), vec![first.record_id.clone()]);
+
+        // A committed write from another connection is invisible to the open
+        // snapshot, including the marker the page is bound to.
+        scenario
+            .provider
+            .records_create(
+                OPERATOR,
+                &create_request(&space, subject, "note", "second", Some("ctx-a"), "create-2"),
+                now(),
+            )
+            .await
+            .expect("concurrent state change");
+        let after_change = scenario
+            .provider
+            .records_list_in_tx(
+                &mut transaction,
+                CLIENT,
+                &list_request(&space, subject, selection.clone(), &[], false, None, None),
+                now(),
+            )
+            .await
+            .expect("same snapshot page");
+        assert_eq!(after_change.total_authorized, 1);
+        assert_eq!(page_ids(&after_change), page_ids(&before_change));
+        transaction.rollback().await.expect("read transaction ends");
+
+        let fresh = scenario
+            .provider
+            .records_list(
+                CLIENT,
+                &list_request(&space, subject, selection.clone(), &[], false, None, None),
+                now(),
+            )
+            .await
+            .expect("fresh read sees the commit");
+        assert_eq!(fresh.total_authorized, 2);
+
+        // The same snapshot also pins the authorization decision: a committed
+        // revoke does not re-filter an already-open page.
+        let mut transaction = scenario
+            .provider
+            .store()
+            .pool()
+            .begin()
+            .await
+            .expect("read transaction");
+        let before_revoke = scenario
+            .provider
+            .records_list_in_tx(
+                &mut transaction,
+                CLIENT,
+                &list_request(&space, subject, selection.clone(), &[], false, None, None),
+                now(),
+            )
+            .await
+            .expect("authorized page before revoke");
+        assert_eq!(before_revoke.total_authorized, 2);
+        scenario
+            .provider
+            .grants_revoke(OPERATOR, &revoke_request(&space, &issued.grant_id, 1), now())
+            .await
+            .expect("reader grant revokes");
+        let after_revoke = scenario
+            .provider
+            .records_list_in_tx(
+                &mut transaction,
+                CLIENT,
+                &list_request(&space, subject, selection.clone(), &[], false, None, None),
+                now(),
+            )
+            .await
+            .expect("same snapshot stays authorized");
+        assert_eq!(after_revoke.total_authorized, 2);
+        transaction.rollback().await.expect("read transaction ends");
+
+        assert_eq!(
+            reject_code(
+                scenario
+                    .provider
+                    .records_list(
+                        CLIENT,
+                        &list_request(&space, subject, selection, &[], false, None, None),
+                        now(),
+                    )
+                    .await
+            ),
+            SpokeRejectCode::NotAuthorized
+        );
     }
 }
