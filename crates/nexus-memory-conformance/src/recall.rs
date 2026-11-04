@@ -31,7 +31,7 @@ use spoke_operations::spoke_schemas::{
     ProfileDocument, RetainedRecord,
 };
 use spoke_operations::{
-    content_serialized_bytes, grant_covers, is_freeze_allowlisted, jcs_sha256_hex,
+    grant_covers, is_freeze_allowlisted, jcs_sha256_hex,
     validate_memory_recall, GrantRequirement, SpokeReject, SpokeRejectCode, SpokeResult,
 };
 
@@ -43,6 +43,37 @@ use crate::spaces::{
 
 /// Wire schema version carried by every fixture-served object (§6.1).
 const SCHEMA_VERSION: u64 = 1;
+
+/// Counts bytes without buffering them, for the §9 budget.
+#[derive(Default)]
+struct ByteCounter(usize);
+
+impl std::io::Write for ByteCounter {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        self.0 += buffer.len();
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// The §9 byte budget of one record's content, measured in the representation
+/// the response actually emits.
+///
+/// The published JCS helper counts canonical ECMAScript number spelling
+/// (`1.0` as `1`), while the served response is serialized by serde_json and
+/// emits `1.0`. Counting JCS bytes would understate the returned material, so
+/// the budget is measured by streaming the *same* `Value` the response carries
+/// through the serving serializer into a counting sink: no content is altered,
+/// no ranking input changes, and no temporary buffer is allocated.
+fn emitted_content_bytes(content: &Value) -> Result<usize, SpokeReject> {
+    let mut counter = ByteCounter::default();
+    serde_json::to_writer(&mut counter, content)
+        .map_err(|error| internal(format!("recalled content is not serializable: {error}")))?;
+    Ok(counter.0)
+}
 
 /// `memory.recall` payload (§7.22/§9).
 #[derive(Debug)]
@@ -702,7 +733,7 @@ impl FixtureMemoryProvider {
             if returned == limit {
                 break;
             }
-            let size = content_serialized_bytes(&row.content);
+            let size = emitted_content_bytes(&row.content)?;
             let fits = max_bytes.is_none_or(|budget| used.saturating_add(size) <= budget);
             if !fits {
                 if returned == 0 {
@@ -967,6 +998,7 @@ fn recall_binding(
 
 #[cfg(test)]
 mod tests {
+    use spoke_operations::content_serialized_bytes;
     use super::*;
     use std::path::PathBuf;
 

@@ -619,7 +619,7 @@ fn require_revision(expected: NonZeroU64, actual: u64) -> Result<(), SpokeReject
 }
 
 impl FixtureMemoryProvider {
-    fn require_served_space(&self, requested: &str) -> Result<(), SpokeReject> {
+    pub(crate) fn require_served_space(&self, requested: &str) -> Result<(), SpokeReject> {
         if requested == self.identity.space_id {
             return Ok(());
         }
@@ -653,18 +653,23 @@ impl FixtureMemoryProvider {
                 "memory.spaces.list serves one space and issues no cursor",
             ));
         }
-        let mut conn = self.store().pool().acquire().await.map_err(internal)?;
-        let space = fetch_space(&mut conn, &self.identity.space_id).await?;
-        let visible = load_grant_rows(&mut conn, &space.space_id)
+        // One read transaction: the space row, the caller's grants, the
+        // visibility decision and the pending count all come from the same
+        // snapshot, so a concurrent revoke or status change cannot be combined
+        // with state it was never authorized against (MEM-R026).
+        let mut transaction = self.store().pool().begin().await.map_err(internal)?;
+        let space = fetch_space(&mut transaction, &self.identity.space_id).await?;
+        let visible = load_grant_rows(&mut transaction, &space.space_id)
             .await?
             .iter()
             .any(|grant| grant_is_valid(grant, principal_id, &space.space_id, now));
         let spaces = if visible {
-            let pending = pending_receipts(&mut conn, &space.space_id).await?;
+            let pending = pending_receipts(&mut transaction, &space.space_id).await?;
             vec![space_to_wire(&space, pending)?]
         } else {
             Vec::new()
         };
+        transaction.commit().await.map_err(internal)?;
         Ok(SpacePage {
             spaces,
             next_cursor: None,
@@ -897,10 +902,14 @@ impl FixtureMemoryProvider {
         now: DateTime<Utc>,
     ) -> Result<Subject, SpokeReject> {
         self.require_served_space(&request.space_id)?;
-        let mut conn = self.store().pool().acquire().await.map_err(internal)?;
-        let space = fetch_space(&mut conn, &request.space_id).await?;
+        // One read transaction: the space row, the caller's grants, the
+        // authorization decision and the returned subject are one snapshot, so
+        // a concurrent revoke cannot pair an old grant with changed state
+        // (MEM-R026).
+        let mut transaction = self.store().pool().begin().await.map_err(internal)?;
+        let space = fetch_space(&mut transaction, &request.space_id).await?;
         require_admitted("memory.subjects.get", &space)?;
-        let grants = load_grant_rows(&mut conn, &request.space_id).await?;
+        let grants = load_grant_rows(&mut transaction, &request.space_id).await?;
         if !any_grant_covers_subject(
             &grants,
             principal_id,
@@ -912,8 +921,10 @@ impl FixtureMemoryProvider {
                 "the authenticated principal holds no grant on this subject",
             ));
         }
-        let subject = fetch_subject(&mut conn, &request.space_id, &request.subject_id).await?;
-        subject_to_wire(&subject)
+        let subject = fetch_subject(&mut transaction, &request.space_id, &request.subject_id).await?;
+        let subject = subject_to_wire(&subject)?;
+        transaction.commit().await.map_err(internal)?;
+        Ok(subject)
     }
 
     /// Provider-enforced subject or placement-context fencing (§7.7).

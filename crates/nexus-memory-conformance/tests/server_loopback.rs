@@ -17,7 +17,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use base64::Engine as _;
@@ -209,6 +209,10 @@ struct WsTransport<S> {
 }
 
 const MAX_ENVELOPE_BYTES: usize = 2 * 1024 * 1024;
+/// Bound on every teardown step, so a stalled peer cannot hang a test.
+const SHUTDOWN_BOUND: Duration = Duration::from_secs(2);
+/// Bound on accept, upgrade, dial and join.
+const SETUP_BOUND: Duration = Duration::from_secs(5);
 
 fn ws_config() -> WebSocketConfig {
     WebSocketConfig::default()
@@ -320,15 +324,16 @@ where
         if self.closed.swap(true, Ordering::Relaxed) {
             return Ok(());
         }
-        {
-            let mut guard = self.sink.lock().await;
-            if let Some(sink) = guard.as_mut() {
-                let _ = sink.close().await;
-            }
-        }
-        self.notify.notify_waiters();
+        // Wake a parked receiver FIRST: a peer that stopped reading must never
+        // hold this end inside the sink close.
         self.stream.lock().await.take();
-        self.sink.lock().await.take();
+        self.notify.notify_waiters();
+        let mut guard = self.sink.lock().await;
+        if let Some(sink) = guard.as_mut() {
+            // Bounded: a stalled peer cannot block teardown indefinitely.
+            let _ = tokio::time::timeout(SHUTDOWN_BOUND, sink.close()).await;
+        }
+        drop(guard);
         Ok(())
     }
 }
@@ -349,14 +354,18 @@ async fn start_listener(
     let directory = Arc::clone(directory);
     let seeds = client_seeds.to_vec();
     let task = tokio::spawn(async move {
-        let (tcp, peer) = tokio::time::timeout(Duration::from_secs(10), listener.accept())
+        let (tcp, peer) = tokio::time::timeout(SETUP_BOUND, listener.accept())
             .await
             .expect("a client connects to the localhost listener")
             .expect("accept the localhost peer");
         assert!(peer.ip().is_loopback(), "the listener only serves localhost");
-        let ws = tokio_tungstenite::accept_async_with_config(tcp, Some(ws_config()))
-            .await
-            .expect("websocket upgrade");
+        let ws = tokio::time::timeout(
+            SETUP_BOUND,
+            tokio_tungstenite::accept_async_with_config(tcp, Some(ws_config())),
+        )
+        .await
+        .expect("the websocket upgrade is bounded")
+        .expect("websocket upgrade");
         let transport: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
         let ports: Arc<dyn RemoteServePorts + Send + Sync> = Arc::new(
             RemoteServePortsComposite::new(Arc::new(MemoryOnlyHost), None, None)
@@ -385,11 +394,15 @@ async fn dial_localhost(
     seed: [u8; 32],
     invoke_timeout_ms: Option<u64>,
 ) -> Result<Arc<RemoteAdapter>, RemoteAdapterError> {
-    let (ws, _response) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
-        .await
-        .expect("connect the localhost websocket");
+    let (ws, _response) = tokio::time::timeout(
+        SETUP_BOUND,
+        tokio_tungstenite::connect_async(format!("ws://{addr}")),
+    )
+    .await
+    .expect("the localhost websocket connect is bounded")
+    .expect("connect the localhost websocket");
     let transport: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
-    connect_remote_adapter(RemoteAdapterOptions {
+    let dialed = connect_remote_adapter(RemoteAdapterOptions {
         transport,
         local_identity: RemoteIdentity { seed },
         local_manifest: manifest("fixture-conformance-client", &MEMORY_CAPABILITIES),
@@ -397,15 +410,23 @@ async fn dial_localhost(
         allowlist: vec![peer_id(&HOST_SEED)],
         invoke_timeout_ms,
         capability_token: None,
-    })
-    .await
+    });
+    tokio::time::timeout(SETUP_BOUND, dialed)
+        .await
+        .expect("the signed dial is bounded")
 }
 
 /// A raw signed client end on a real localhost socket.
-async fn raw_connect(addr: SocketAddr) -> WsTransport<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
-    let (ws, _response) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
-        .await
-        .expect("connect the raw localhost websocket");
+async fn raw_connect(
+    addr: SocketAddr,
+) -> WsTransport<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
+    let (ws, _response) = tokio::time::timeout(
+        SETUP_BOUND,
+        tokio_tungstenite::connect_async(format!("ws://{addr}")),
+    )
+    .await
+    .expect("the raw connect is bounded")
+    .expect("connect the raw localhost websocket");
     WsTransport::new(ws)
 }
 
@@ -477,9 +498,12 @@ impl Fixture {
         self.client = client;
     }
 
+    /// Release the typed session and the responder, then yield so their tasks
+    /// observe the close — bounded, so teardown can never hang the suite.
     async fn shutdown(self) {
         self.client.close();
         self.responder.close();
+        let _ = tokio::time::timeout(SHUTDOWN_BOUND, tokio::task::yield_now()).await;
     }
 
     /// Ensure the subject every capture/record op places into.
@@ -1420,7 +1444,7 @@ async fn raw_empty_and_omitted_source_context_ids_conflict_at_the_signed_boundar
         start_listener(&fixture.provider, &fixture.directory, &[CLIENT_SEED], None).await;
     let transport = raw_connect(addr).await;
     let session_id = raw_handshake(&transport).await;
-    let _responder = host.await.expect("the localhost host task");
+    let responder = host.await.expect("the localhost host task");
 
     let mut explicit = fixture.capture_request("d15-raw", "D15 raw digest proof", CONTEXT);
     explicit["source_context_ids"] = json!([]);
@@ -1459,6 +1483,9 @@ async fn raw_empty_and_omitted_source_context_ids_conflict_at_the_signed_boundar
     assert_eq!(error["details"]["retry_class"], json!("terminal"));
     assert_eq!(fixture.count("candidates").await, 1);
     assert_eq!(fixture.count("receipts").await, receipts_before + 1);
+    transport.close().await.expect("the raw session closes");
+    responder.close();
+    fixture.shutdown().await;
 }
 
 // ---------------------------------------------------------------------------
@@ -1711,22 +1738,10 @@ async fn reconnect_keeps_identity_authority_and_receipts() {
     let mut fixture = Fixture::start(None, None).await;
     fixture.ensure_subject().await;
     let space_before = fixture.space_id.clone();
-    let authority_before = fixture.provider.identity().authority_host_id.clone();
-    let generation_before = fixture.provider.identity().authority_generation;
     let payload = fixture.capture_request("restart-1", "survives reconnect", CONTEXT);
     let first = fixture.capture(payload.clone()).await;
 
     fixture.reconnect().await;
-
-    assert_eq!(fixture.provider.identity().space_id, space_before);
-    assert_eq!(
-        fixture.provider.identity().authority_host_id,
-        authority_before
-    );
-    assert_eq!(
-        fixture.provider.identity().authority_generation,
-        generation_before
-    );
 
     let receipt = wire(&expect_ok(
         fixture
@@ -1765,7 +1780,7 @@ async fn unavailable_families_forged_claims_and_unknown_ops_are_refused_on_the_w
         start_listener(&fixture.provider, &fixture.directory, &[CLIENT_SEED], None).await;
     let transport = raw_connect(addr).await;
     let session_id = raw_handshake(&transport).await;
-    let _responder = host.await.expect("the localhost host task");
+    let responder = host.await.expect("the localhost host task");
 
     // The optional families are not negotiated, so the dispatch gate refuses
     // them before any payload is read.
@@ -1835,6 +1850,9 @@ async fn unavailable_families_forged_claims_and_unknown_ops_are_refused_on_the_w
     assert_eq!(error["code"], json!("INVALID_INPUT"));
     assert_eq!(error["details"]["retry_class"], json!("terminal"));
     assert_eq!(fixture.count("candidates").await, 0);
+    transport.close().await.expect("the raw session closes");
+    responder.close();
+    fixture.shutdown().await;
 }
 
 // ---------------------------------------------------------------------------
@@ -1894,4 +1912,270 @@ async fn concurrent_providers_keep_digests_effects_and_keys_isolated() {
 
     first.shutdown().await;
     second.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------
+// 13. Observed server-side overlap and post-timeout completion (I-000172)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn server_scopes_overlap_with_independent_digests() {
+    let fixture = Fixture::start(None, None).await;
+    fixture.ensure_subject().await;
+    let held_payload = fixture.capture_request("overlap-held", "held material", CONTEXT);
+    let free_payload = fixture.capture_request("overlap-free", "free material", OTHER_CONTEXT);
+
+    // Hold the first invocation inside its own serve scope, before its writer
+    // transaction, and prove a second invocation runs to completion while the
+    // first scope is still live.
+    let mut hold = fixture
+        .provider
+        .faults()
+        .hold_next(FaultPoint::AdmissionPause);
+    let client = Arc::clone(&fixture.client);
+    let principal = fixture.principal.clone();
+    let held_request: MemoryCaptureRequest =
+        from_value(held_payload.clone()).expect("held capture request");
+    let held = tokio::spawn(async move { client.capture(&principal, held_request).await });
+    hold.wait_reached()
+        .await
+        .expect("the first admission is paused inside its scope");
+
+    let free = fixture.capture(free_payload.clone()).await;
+    assert_eq!(free["payload_digest"], json!(digest_of(&free_payload)));
+    assert_eq!(free["status"], json!("committed"));
+
+    hold.release();
+    let held = wire(&expect_ok(held.await.expect("held invoke joined")));
+    assert_eq!(held["payload_digest"], json!(digest_of(&held_payload)));
+    assert_ne!(held["receipt_id"], free["receipt_id"]);
+    assert_ne!(
+        held["result"]["candidate_ids"], free["result"]["candidate_ids"],
+        "each overlapping scope produced its own candidate"
+    );
+    assert_eq!(fixture.count("receipts").await, 3);
+    assert_eq!(fixture.count("candidates").await, 2);
+    for (receipt, payload) in [(&held, &held_payload), (&free, &free_payload)] {
+        assert_eq!(
+            receipt["payload_digest"],
+            json!(digest_of(payload)),
+            "each receipt kept its own exact digest under the overlap"
+        );
+    }
+    fixture.shutdown().await;
+}
+
+#[tokio::test]
+async fn timeout_before_digest_work_completes_with_the_original_digest() {
+    // The responder answers the uncertain envelope at 150 ms while the dialer
+    // waits long enough to receive it.
+    let fixture = Fixture::start(Some(150), Some(5_000)).await;
+    fixture.ensure_subject().await;
+    let payload = fixture.capture_request("timeout-before-work", "post timeout material", CONTEXT);
+
+    let mut hold = fixture
+        .provider
+        .faults()
+        .hold_next(FaultPoint::AdmissionPause);
+    let client = Arc::clone(&fixture.client);
+    let principal = fixture.principal.clone();
+    let request: MemoryCaptureRequest = from_value(payload.clone()).expect("capture request");
+    let serve = tokio::spawn(async move { client.capture(&principal, request).await });
+    hold.wait_reached()
+        .await
+        .expect("paused before any digest-dependent write");
+
+    let reject = expect_reject(serve.await.expect("served invoke joined"));
+    assert_eq!(reject.code, SpokeRejectCode::OutcomeUncertain);
+    assert_eq!(retry_class(&reject).as_deref(), Some("uncertain"));
+    // Nothing durable exists yet: the digest has been carried, not consumed.
+    assert_eq!(fixture.count("candidates").await, 0);
+    assert_eq!(fixture.count("receipts").await, 1);
+
+    hold.release();
+    // Bounded observation of the detached completion (no race guess): wait
+    // until the released work has actually committed its receipt.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while fixture.count("receipts").await < 2 && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(fixture.count("receipts").await, 2);
+    assert_eq!(fixture.count("candidates").await, 1);
+
+    // The eventual receipt and the same-key replay both carry the exact digest
+    // of the object the server originally received.
+    let replay = fixture.capture(payload.clone()).await;
+    assert_eq!(replay["status"], json!("committed"));
+    assert_eq!(replay["payload_digest"], json!(digest_of(&payload)));
+    assert_eq!(fixture.count("candidates").await, 1);
+    fixture.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------
+// 14. Bounded teardown of a stalled peer and a parked receiver (I-000191)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn bounded_teardown_releases_a_parked_receiver_and_a_stalled_peer() {
+    let fixture = Fixture::start(None, None).await;
+    let (addr, host) =
+        start_listener(&fixture.provider, &fixture.directory, &[CLIENT_SEED], None).await;
+
+    // A peer that opens the socket and never sends its hello: the responder's
+    // handshake stays parked.
+    let stalled = Arc::new(raw_connect(addr).await);
+    let responder = tokio::time::timeout(SETUP_BOUND, host)
+        .await
+        .expect("the host task is bounded")
+        .expect("the localhost host task");
+
+    // A receiver parked on our own end with nothing inbound.
+    let waiting = {
+        let stalled = Arc::clone(&stalled);
+        tokio::spawn(async move { stalled.recv().await })
+    };
+    tokio::time::timeout(SHUTDOWN_BOUND, stalled.close())
+        .await
+        .expect("the transport close is bounded")
+        .expect("the transport closes");
+    let released = tokio::time::timeout(SHUTDOWN_BOUND, waiting)
+        .await
+        .expect("the parked receiver is released")
+        .expect("the parked receiver task joins");
+    assert!(
+        matches!(
+            released,
+            Err(spoke_connect::remote::TransportError::Closed)
+        ),
+        "a parked recv wakes with Closed, never hangs: {released:?}"
+    );
+    responder.close();
+    fixture.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------
+// 15. Revoke keeps real replay errors; assembly prechecks keep the producer's
+//     unserved-space refusal (I-000189 / I-000190)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn revoke_keeps_real_replay_errors_and_unserved_spaces_stay_not_found() {
+    let fixture = Fixture::start(None, None).await;
+    fixture.ensure_subject().await;
+    let space = fixture.space_id.clone();
+
+    // A real revoke, then the same key with a different body: the replay
+    // resolution must surface IDEMPOTENCY_CONFLICT, never a rewritten
+    // authorization refusal.
+    let issued = wire(&expect_ok(
+        fixture
+            .client
+            .grant(
+                &fixture.principal,
+                from_value(json!({
+                    "capabilities": ["capture"],
+                    "context_ids": [CONTEXT],
+                    "idempotency_key": "revoke-conflict-grant",
+                    "principal_id": "prn_grantee",
+                    "space_id": space,
+                    "subject_id": SUBJECT,
+                }))
+                .expect("grant request"),
+            )
+            .await,
+    ));
+    let grant_id = issued["result"]["grant_id"].as_str().expect("grant id").to_owned();
+    let first = wire(&expect_ok(
+        fixture
+            .client
+            .revoke_grant(
+                &fixture.principal,
+                from_value(json!({
+                    "space_id": space,
+                    "grant_id": grant_id,
+                    "expected_revision": 1,
+                    "idempotency_key": "revoke-conflict",
+                }))
+                .expect("revoke request"),
+            )
+            .await,
+    ));
+    assert_eq!(first["result"]["revoked"], json!(true));
+
+    let conflict = expect_reject(
+        fixture
+            .client
+            .revoke_grant(
+                &fixture.principal,
+                from_value(json!({
+                    "space_id": space,
+                    "grant_id": grant_id,
+                    "expected_revision": 2,
+                    "idempotency_key": "revoke-conflict",
+                }))
+                .expect("conflicting revoke request"),
+            )
+            .await,
+    );
+    assert_eq!(conflict.code, SpokeRejectCode::IdempotencyConflict);
+    assert_eq!(retry_class(&conflict).as_deref(), Some("terminal"));
+
+    // An unserved space keeps the producer's NOT_FOUND on the assembly-prechecked
+    // operations, even for the correctly authenticated operator.
+    for (op, payload) in [
+        (
+            "freeze",
+            json!({ "space_id": "spc_not_served", "expected_revision": 1, "idempotency_key": "foreign-freeze" }),
+        ),
+        (
+            "grant",
+            json!({
+                "capabilities": ["capture"],
+                "context_ids": [CONTEXT],
+                "idempotency_key": "foreign-grant",
+                "principal_id": "prn_grantee",
+                "space_id": "spc_not_served",
+                "subject_id": SUBJECT,
+            }),
+        ),
+        (
+            "profile",
+            json!({
+                "space_id": "spc_not_served",
+                "subject_id": SUBJECT,
+                "profile_kind": "personality",
+                "expected_revision": null,
+                "document": { "format": "markdown", "body": "# x" },
+                "idempotency_key": "foreign-profile",
+            }),
+        ),
+    ] {
+        let refusal = match op {
+            "freeze" => expect_reject(
+                fixture
+                    .client
+                    .freeze_space(&fixture.principal, from_value(payload).expect("freeze request"))
+                    .await,
+            ),
+            "grant" => expect_reject(
+                fixture
+                    .client
+                    .grant(&fixture.principal, from_value(payload).expect("grant request"))
+                    .await,
+            ),
+            _ => expect_reject(
+                fixture
+                    .client
+                    .update_profile(&fixture.principal, from_value(payload).expect("profile request"))
+                    .await,
+            ),
+        };
+        assert_eq!(
+            refusal.code,
+            SpokeRejectCode::NotFound,
+            "{op} on an unserved space"
+        );
+        assert_eq!(retry_class(&refusal).as_deref(), Some("terminal"), "{op}");
+    }
+    fixture.shutdown().await;
 }

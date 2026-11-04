@@ -311,6 +311,20 @@ fn outcome_uncertain() -> SpokeReject {
     )
 }
 
+/// A commit that failed may still have taken effect (§14.3): the caller cannot
+/// be told whether anything committed, so it is `OUTCOME_UNCERTAIN` — never a
+/// clean retryable internal error.
+fn commit_unknown(error: sqlx::Error) -> SpokeReject {
+    SpokeReject {
+        code: SpokeRejectCode::OutcomeUncertain,
+        message: format!(
+            "the transaction's commit state is unknown; resolve with the same idempotency \
+             key or memory.receipts.get: {error}"
+        ),
+        details: None,
+    }
+}
+
 /// A fixture fault that ended before this operation committed. §14.2 allows the
 /// retryable internal class only when no effect committed, which holds here.
 fn fault_before_effect(point: FaultPoint) -> SpokeReject {
@@ -1390,6 +1404,19 @@ pub(crate) async fn resolve_replay(
         return Ok(ReplayResolution::Fresh);
     };
     let receipt_id: String = row.try_get("receipt_id").map_err(internal)?;
+    // MEM-R018/R021: an existing binding may only be disclosed to a principal
+    // whose *current* grants still cover the target the receipt recorded — the
+    // same content-free target `memory.receipts.get` rechecks. This runs in the
+    // caller's transaction, before the outcome, the conflict or the retention
+    // state is revealed, and it never looks at the operation's current entity.
+    let grants = load_grants(conn, space_id).await?;
+    let retained = fetch_receipt_target(conn, &receipt_id).await?;
+    let authorized = retained
+        .as_ref()
+        .is_some_and(|target| target.admits(&grants, principal_id, space_id, now));
+    if !authorized {
+        return Err(not_authorized(RECEIPT_UNAUTHORIZED));
+    }
     let tombstone = StoredTombstone {
         last_known_status: row.try_get("last_known_status").map_err(internal)?,
         tombstone_expires_at: row.try_get("tombstone_expires_at").map_err(internal)?,
@@ -1821,7 +1848,7 @@ impl FixtureMemoryProvider {
             transaction.rollback().await.map_err(internal)?;
             return Err(outcome_uncertain());
         }
-        transaction.commit().await.map_err(internal)?;
+        transaction.commit().await.map_err(commit_unknown)?;
         // Loss after commit, before the response: the effect is durable and the
         // caller must resolve the uncertainty through replay or receipts.get.
         if self.faults().trip(FaultPoint::AfterCommitBeforeResponse) {
@@ -2200,7 +2227,7 @@ impl FixtureMemoryProvider {
         let receipt = self
             .candidates_dismiss_in_tx(&mut transaction, principal_id, admitted, now)
             .await?;
-        transaction.commit().await.map_err(internal)?;
+        transaction.commit().await.map_err(commit_unknown)?;
         Ok(receipt)
     }
 
@@ -2313,7 +2340,7 @@ impl FixtureMemoryProvider {
         let receipt = self
             .candidates_review_in_tx(&mut transaction, principal_id, admitted, now)
             .await?;
-        transaction.commit().await.map_err(internal)?;
+        transaction.commit().await.map_err(commit_unknown)?;
         Ok(receipt)
     }
 

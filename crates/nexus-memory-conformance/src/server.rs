@@ -370,13 +370,14 @@ impl FixtureMemoryProvider {
         refusal: PrecheckRefusal,
         now: DateTime<Utc>,
     ) -> Result<ReplayStep, SpokeReject> {
-        let grants = load_grants(conn, space_id).await?;
-        if !target.admits(&grants, principal_id, space_id, now) {
-            return Err(refusal.reject());
-        }
+        // The producer's own served-space refusal comes first: an unserved
+        // space is NOT_FOUND, never a grant decision.
+        self.require_served_space(space_id)?;
         let mutation = Mutation::keyed(op, idempotency_key, admitted);
         match resolve_replay(conn, space_id, principal_id, &mutation, now).await? {
-            ReplayResolution::Fresh => Ok(ReplayStep::Execute),
+            // An existing binding authorized against its *retained* target
+            // inside `resolve_replay`, in this same transaction. The operation's
+            // current entity is irrelevant to it and is never re-derived here.
             ReplayResolution::Replayed(receipt) => Ok(ReplayStep::Replayed(receipt)),
             ReplayResolution::KeyReusable { receipt_id } => {
                 release_expired_binding_in_tx(
@@ -387,8 +388,35 @@ impl FixtureMemoryProvider {
                     &receipt_id,
                 )
                 .await?;
+                // A released key is a fresh execution: the current target must
+                // authorize it before the effect.
+                self.require_target_authority(conn, principal_id, space_id, target, refusal, now)
+                    .await?;
                 Ok(ReplayStep::Execute)
             }
+            ReplayResolution::Fresh => {
+                self.require_target_authority(conn, principal_id, space_id, target, refusal, now)
+                    .await?;
+                Ok(ReplayStep::Execute)
+            }
+        }
+    }
+
+    /// The operation's current authority for a genuinely fresh execution.
+    async fn require_target_authority(
+        &self,
+        conn: &mut SqliteConnection,
+        principal_id: &str,
+        space_id: &str,
+        target: &OpTarget,
+        refusal: PrecheckRefusal,
+        now: DateTime<Utc>,
+    ) -> Result<(), SpokeReject> {
+        let grants = load_grants(conn, space_id).await?;
+        if target.admits(&grants, principal_id, space_id, now) {
+            Ok(())
+        } else {
+            Err(refusal.reject())
         }
     }
 
@@ -936,8 +964,12 @@ impl MemoryPort for FixtureMemoryProvider {
             Err(reject) => return SpokeResult::Reject(reject),
         };
         // Revocation authority is admin coverage of the grant being revoked, so
-        // the receipt target is that grant's own facets. The precheck keeps the
-        // revoke slice's own vocabulary: any live admin first (so a non-admin
+        // the receipt target is that grant's own facets. An unserved space is
+        // the producer's NOT_FOUND, not a grant decision.
+        if let Err(reject) = self.require_served_space(&space_id) {
+            return SpokeResult::Reject(reject);
+        }
+        // The precheck keeps the revoke slice's own vocabulary: any live admin first (so a non-admin
         // never learns whether an id exists), then coverage of the target's
         // facets with the one indistinguishable revoke refusal.
         let grants = match load_grants(&mut transaction, &space_id).await {
@@ -996,13 +1028,16 @@ impl MemoryPort for FixtureMemoryProvider {
                 return respond_receipt(receipt);
             }
             Ok(ReplayStep::Execute) => {}
-            // The revoke slice's one indistinguishable refusal, kept identical
-            // to the fresh path so the precheck adds no oracle.
-            Err(_) => {
+            // Only an authorization refusal is translated into the revoke
+            // slice's one indistinguishable wording. A replay conflict, an
+            // expired/retained outcome or a storage failure keeps its real
+            // code and details (§14.2).
+            Err(reject) if reject.code == SpokeRejectCode::NotAuthorized => {
                 return SpokeResult::Reject(not_authorized(
                     "the grant is not revocable by the authenticated principal",
                 ))
             }
+            Err(reject) => return SpokeResult::Reject(reject),
         }
         let revoked = match self
             .grants_revoke_in_tx(&mut transaction, principal_id, admitted.request(), now)
