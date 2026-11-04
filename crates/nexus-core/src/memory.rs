@@ -686,6 +686,25 @@ impl MemoryAdapter {
         }
     }
 
+    /// Dismiss one pending provider candidate by id through the standard
+    /// revision-checked operation, reading the revision the provider holds.
+    ///
+    /// The retained `pending_id` can address a candidate by the bridge's
+    /// deterministic (legacy-shaped) id on a binding that serves no projection.
+    /// There the shape names an ordinary provider candidate, never local
+    /// provenance, so the dismissal is the same CAS op every native candidate
+    /// uses. `Ok(false)` folds the outcomes [`Self::dismiss_native`] folds.
+    async fn dismiss_provider_candidate(&self, candidate_id: &str) -> CoreResult<bool> {
+        let Some(candidate) = self.candidate(candidate_id).await? else {
+            return Ok(false);
+        };
+        if candidate["status"].as_str() != Some("pending") {
+            return Ok(false);
+        }
+        self.dismiss_native(candidate_id, candidate["revision"].as_u64().unwrap_or(1))
+            .await
+    }
+
     /// Consume one pending candidate with the review decision the drain built.
     ///
     /// The decision is the §7.15 wire decision (`promote` / `fragment` /
@@ -1990,13 +2009,18 @@ impl CoreService {
     /// fields the pending-review DTOs render. The legacy queue is never written,
     /// so there is no window in which a legacy row exists without its provider
     /// successor, and the capture stays visible after the one-shot migration
-    /// turns the legacy queue reads off.
+    /// turns the legacy queue reads off. A nonlocal binding has no bridge
+    /// identity, so the candidate is stored under the provider's own minted id
+    /// while the same retained fields still let the pending DTOs address it.
     ///
     /// # Errors
     /// As [`Self::acquire_actor_activity`], plus `invalid_input` for malformed
-    /// capture fields, the binding admission an active binding of this Character
-    /// on an owned active World (`actor_not_found`), and the mapped storage
-    /// error otherwise.
+    /// capture fields, the binding admission (an active binding of this
+    /// Character on an owned active World, `actor_not_found`), and the mapped
+    /// storage error otherwise. The admission holds for every binding: the
+    /// local write runs it inside the provider's own write transaction, and a
+    /// nonlocal write runs it on the workspace writer and holds that lock across
+    /// the remote effect, so a concurrent removal cannot interleave (§5, D15).
     pub async fn capture_character_pending_review(
         &self,
         principal: &Principal,
@@ -2088,14 +2112,41 @@ impl CoreService {
                 }
             }
             // A remote binding serves no local bridge identity: the standard
-            // capture op stores the candidate under its own minted id.
+            // capture op stores the candidate under its own minted id. A
+            // binding-local capture still owes the Nexus provenance admission
+            // the local path gets from the provider's own write transaction
+            // (D15): the binding must be active, belong to this Character and
+            // target an owned active World. No binding-scoped guard exists, so
+            // the admission runs on the workspace writer's own
+            // `BEGIN IMMEDIATE` — the lock `remove_binding` takes — and is held
+            // across the remote write, so a removal cannot commit between the
+            // check and the effect. The admission reads binding/World metadata
+            // only (never legacy memory content), writes nothing, and is rolled
+            // back before the effect is mapped. A shared-scope capture carries
+            // no binding provenance and takes no write lock.
             Err(_) => {
-                if let SpokeResult::Reject(reject) = memory
-                    .binding
-                    .port()
-                    .capture(&memory.principal, capture)
-                    .await
-                {
+                let admission = match binding_id {
+                    Some(binding_id) => {
+                        let mut admission = nexus_local_db::begin_immediate(&self.inner.pool)
+                            .await
+                            .map_err(map_local_db_error)?;
+                        nexus_local_db::require_valid_provenance_tx(
+                            &mut admission,
+                            principal.creator_id(),
+                            &character_id,
+                            Some(binding_id),
+                        )
+                        .await
+                        .map_err(map_local_db_error)?;
+                        Some(admission)
+                    }
+                    None => None,
+                };
+                let outcome = memory.binding.port().capture(&memory.principal, capture).await;
+                if let Some(admission) = admission {
+                    admission.rollback().await.map_err(sqlx_internal)?;
+                }
+                if let SpokeResult::Reject(reject) = outcome {
                     return Err(memory_reject(&reject));
                 }
             }
@@ -2203,10 +2254,13 @@ impl CoreService {
     /// per-Character activity lease; a missing row is `404` and mutates
     /// nothing.
     ///
-    /// Served through the pinned `MemoryPort`: the row is adopted under the
-    /// bridge's deterministic id and consumed in the same guarded transaction,
-    /// so a dismissal can never leave an adopted pending row behind (NXM-5 Task
-    /// 2 fix round 1, finding F4).
+    /// Served through the pinned `MemoryPort`: a local binding adopts the row
+    /// under the bridge's deterministic id and consumes it in the same guarded
+    /// transaction, so a dismissal can never leave an adopted pending row
+    /// behind (NXM-5 Task 2 fix round 1, finding F4). A nonlocal binding serves
+    /// no projection: a candidate the provider really holds under that shaped
+    /// id is an ordinary provider candidate, dismissed through the standard
+    /// revision check.
     ///
     /// # Errors
     /// As [`Self::acquire_actor_activity`], plus [`CoreError::NotFound`] when
@@ -2231,35 +2285,49 @@ impl CoreService {
             .await?;
         let candidate_id = legacy::character_pending_review_candidate_id(&pending_id);
         let missing = || not_found("pending review", &format!("'{pending_id}'"));
-        if !pending_now(&memory, &candidate_id).await? {
-            // A capture the provider owns outright carries a minted candidate
-            // id: address it through the row itself, exactly as the Creator
-            // dismissal does (NXM-16).
-            if let Some(row) = memory
-                .pending_rows()
-                .await?
-                .into_iter()
-                .find(|row| row.pending_id == pending_id)
-            {
-                if memory
-                    .dismiss_native(&row.candidate_id, row.revision)
-                    .await?
-                {
-                    return map_wire(json!({
-                        "success": true,
-                        "pending_id": pending_id,
-                    }));
+        let pending = pending_now(&memory, &candidate_id).await?;
+        if memory.is_local() {
+            // A local binding adopts the row under the bridge's deterministic id
+            // and consumes it in the same guarded transaction, so a row that was
+            // pending can only answer through that dismissal.
+            if pending {
+                if !memory.dismiss_legacy(&candidate_id).await? {
+                    return Err(missing());
                 }
+                return map_wire(json!({
+                    "success": true,
+                    "pending_id": pending_id,
+                }));
             }
-            return Err(missing());
+        } else if pending && memory.dismiss_provider_candidate(&candidate_id).await? {
+            // A nonlocal binding serves no projection: a candidate it really
+            // holds under this shaped id is an ordinary provider candidate and
+            // is dismissed through the standard revision check.
+            return map_wire(json!({
+                "success": true,
+                "pending_id": pending_id,
+            }));
         }
-        if !memory.dismiss_legacy(&candidate_id).await? {
-            return Err(missing());
+        // A capture the provider owns outright carries a minted candidate
+        // id: address it through the row itself, exactly as the Creator
+        // dismissal does (NXM-16).
+        if let Some(row) = memory
+            .pending_rows()
+            .await?
+            .into_iter()
+            .find(|row| row.pending_id == pending_id)
+        {
+            if memory
+                .dismiss_native(&row.candidate_id, row.revision)
+                .await?
+            {
+                return map_wire(json!({
+                    "success": true,
+                    "pending_id": pending_id,
+                }));
+            }
         }
-        map_wire(json!({
-            "success": true,
-            "pending_id": pending_id,
-        }))
+        Err(missing())
     }
 
     #[allow(clippy::significant_drop_tightening)] // the guard deliberately spans the whole operation
@@ -2784,17 +2852,22 @@ impl CoreService {
     /// Delete one of the principal's pending reviews; a missing row is `404`
     /// and mutates nothing.
     ///
-    /// Served through the pinned `MemoryPort`. The row is adopted under the
-    /// bridge's deterministic id and consumed in the same guarded transaction,
-    /// so the legacy table stays write-idle, the id can never resurface through
-    /// the bridge, and a dismissal can never leave an adopted pending row behind
-    /// (NXM-5 Task 2 fix round 1, finding F4).
+    /// Served through the pinned `MemoryPort`. A local binding adopts the row
+    /// under the bridge's deterministic id and consumes it in the same guarded
+    /// transaction, so the legacy table stays write-idle, the id can never
+    /// resurface through the bridge, and a dismissal can never leave an adopted
+    /// pending row behind (NXM-5 Task 2 fix round 1, finding F4). A nonlocal
+    /// binding serves no projection: a candidate it really holds under that
+    /// shaped id is an ordinary provider candidate, dismissed through the
+    /// standard revision check.
     ///
     /// A row that belongs to another Creator keeps the retained
-    /// `pending_review` `ForbiddenReason`: the provider cannot see it, so the
-    /// ownership re-read that distinguishes `403` from `404` is the legacy
-    /// table's — read-only, exactly as before the reroute (fix round 1,
-    /// finding F2).
+    /// `pending_review` `ForbiddenReason` on a local binding: the provider
+    /// cannot see it, so the ownership re-read that distinguishes `403` from
+    /// `404` is the legacy table's — read-only, exactly as before the reroute
+    /// (fix round 1, finding F2). A nonlocal miss is the selected provider's
+    /// own not-found answer; the legacy table is never read for it (Task 4
+    /// fix 2, finding F3).
     ///
     /// # Errors
     /// [`CoreError::NotFound`] when the row is absent,
@@ -2814,9 +2887,22 @@ impl CoreService {
         // (before the reroute the row was deleted, so a repeat dismissal found
         // nothing). The authoritative decision is still the guarded dismissal
         // below; this read only keeps that answer.
-        if pending_now(&memory, &candidate_id).await?
-            && memory.dismiss_legacy(&candidate_id).await?
-        {
+        let pending = pending_now(&memory, &candidate_id).await?;
+        let dismissed = if memory.is_local() {
+            // The local bridge adopts the row under the deterministic id and
+            // consumes it in the same guarded transaction.
+            if pending {
+                memory.dismiss_legacy(&candidate_id).await?
+            } else {
+                false
+            }
+        } else {
+            // A nonlocal binding serves no projection: the shaped id only
+            // addresses an ordinary provider candidate there, so a candidate it
+            // really holds is dismissed through the standard revision check.
+            pending && memory.dismiss_provider_candidate(&candidate_id).await?
+        };
+        if dismissed {
             return Ok(DeletePendingReviewResponse {
                 success: true,
                 pending_id,
@@ -2842,7 +2928,17 @@ impl CoreService {
                 });
             }
         }
-        Err(self.pending_review_refusal(principal, &pending_id).await?)
+        if memory.is_local() {
+            return Err(self.pending_review_refusal(principal, &pending_id).await?);
+        }
+        // A nonlocal binding has no local legacy queue, so the selected
+        // provider's "nothing pending" is the whole answer: the local ownership
+        // lookup is not consulted here, and a remote miss can neither read
+        // legacy rows nor surface an unrelated local ownership 403 or local
+        // storage error.
+        Err(CoreError::NotFound {
+            resource: format!("pending review '{pending_id}' not found"),
+        })
     }
 
     /// The retained refusal for a dismissal that found nothing to consume: a
@@ -2852,6 +2948,9 @@ impl CoreService {
     /// handler performed, so its failure keeps the pre-reroute
     /// `database_error` mapping instead of masquerading as an absence
     /// (NXM-5 QC1-F3).
+    ///
+    /// Called for a **local** binding only: a nonlocal dismissal derives its
+    /// miss from the selected provider and never reads the legacy table (§5).
     async fn pending_review_refusal(
         &self,
         principal: &Principal,
