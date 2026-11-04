@@ -310,22 +310,30 @@ async fn confirmed_close_releases_the_local_providers_direct_admission() {
     }
 }
 
-/// F10: a provider open that is really cancelled in flight — after its writer
-/// admission is registered, while compose/provision may still be running —
-/// releases its OS admission on its own.
+/// F10: a provider open cancelled in flight after its admission is registered
+/// and its seed write really landed — but before the store is delivered.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn cancelled_provider_open_releases_its_admission() {
+async fn cancelled_provider_open_after_seed_releases_its_admission() {
     let env = Env::new(None);
     let db_path = env.db_path();
     let home = env.user_home.clone();
 
-    let opening = tokio::spawn(async move {
-        LocalMemoryProvider::open(home, CREATOR, "default").await
-    });
-    let mut registered = false;
-    for _ in 0..8192 {
-        if nexus_local_db::writer_protocol::acquire_store_reset_fence(&db_path).is_err() {
-            registered = true;
+    // Pre-create the schema so the cancelled open reaches its seed write
+    // quickly and does not spend its window in migrations.
+    let bootstrap = LocalMemoryProvider::open(home.clone(), CREATOR, "default")
+        .await
+        .expect("bootstrap provider");
+    drop(bootstrap);
+
+    let opening_home = home.clone();
+    let opening =
+        tokio::spawn(async move { LocalMemoryProvider::open(opening_home, CREATOR, "default").await });
+
+    // The real persisted stage boundary: the seed write's version rows.
+    let mut seeded = false;
+    for _ in 0..200_000 {
+        if seed_versions_present(&db_path).await {
+            seeded = true;
             break;
         }
         if opening.is_finished() {
@@ -333,22 +341,119 @@ async fn cancelled_provider_open_releases_its_admission() {
         }
         tokio::task::yield_now().await;
     }
-    assert!(registered, "the provider registered its admission before cancel");
+    assert!(seeded, "the open reached its seed write");
+    assert!(
+        !opening.is_finished(),
+        "the open is still in flight after the seed stage"
+    );
     opening.abort();
-    let _ = opening.await;
+    let join_error = match opening.await {
+        Ok(_) => panic!("the aborted task must not have completed"),
+        Err(join_error) => join_error,
+    };
+    assert!(
+        join_error.is_cancelled(),
+        "the task was really cancelled, not completed"
+    );
 
     let mut freed = false;
-    for _ in 0..8192 {
-        if nexus_local_db::writer_protocol::acquire_store_reset_fence(&db_path).is_ok() {
-            freed = true;
-            break;
+    for _ in 0..200_000 {
+        match nexus_local_db::writer_protocol::acquire_store_reset_fence(&db_path) {
+            Ok(_) => {
+                freed = true;
+                break;
+            }
+            Err(error) => {
+                assert!(
+                    matches!(error, nexus_local_db::LocalDbError::OwnerBusy { .. }),
+                    "the only expected refusal is OwnerBusy, got {error:?}"
+                );
+            }
         }
         tokio::task::yield_now().await;
     }
-    assert!(freed, "a cancelled provider open releases its OS admission");
+    assert!(freed, "the cancelled open released its own OS admission");
 }
 
-/// A normal provider close settles the provider's own pool, so a genuinely
+/// The seed write's persisted rows (the real start-of-write stage).
+async fn seed_versions_present(db_path: &std::path::Path) -> bool {
+    let Ok(pool) = sqlx::SqlitePool::connect(&format!(
+        "sqlite://{}?mode=ro",
+        db_path.display()
+    ))
+    .await
+    else {
+        return false;
+    };
+    let found: Option<(i64,)> = sqlx::query_as(
+        "SELECT 1 FROM workspace_meta WHERE key IN ('db_schema_version', 'schema_version') LIMIT 1",
+    )
+    .fetch_optional(&pool)
+    .await
+    .ok()
+    .flatten();
+    pool.close().await;
+    found.is_some()
+}
+
+/// F10: a real vision of compose/provision failing after the pool and seed
+/// exist — a valid migrated workspace whose provider grant table was removed
+/// makes provisioning fail for real, and only its own undelivered claim ends.
+#[tokio::test]
+async fn failed_provisioning_keeps_an_adopted_user_and_releases_its_own_admission() {
+    let env = Env::new(None);
+    let db_path = env.db_path();
+
+    // A live adopted user: the engine owner keeps the workspace and its memory.
+    let engine = CoreService::open(env.options(None))
+        .await
+        .expect("live engine owner");
+    let principal = engine.active_principal().await.expect("principal");
+    assert_eq!(
+        engine.count_pending_reviews(&principal).await.expect("read").count,
+        0
+    );
+
+    // A valid SQLite fixture that makes the provisioning write fail while every
+    // read still works: a trigger on the grant table rejects the bootstrap
+    // grant insert.
+    let raw = sqlx::SqlitePool::connect(&format!("sqlite://{}?mode=rwc", db_path.display()))
+        .await
+        .expect("raw pool");
+    sqlx::query(
+        "CREATE TRIGGER reject_provider_grants BEFORE INSERT ON memory_grants \
+         BEGIN SELECT RAISE(ABORT, 'providing blocked by fixture'); END",
+    )
+    .execute(&raw)
+    .await
+    .expect("reject grants");
+    raw.close().await;
+
+    let error = match LocalMemoryProvider::open(env.user_home.clone(), CREATOR, "default").await {
+        Ok(_) => panic!("provisioning must fail on the removed grant table"),
+        Err(error) => error,
+    };
+    let rendered = format!("{error:?}");
+    assert!(
+        rendered.contains("providing blocked by fixture"),
+        "the failure is the real provisioning write, got {rendered}"
+    );
+
+    // Only the failed open's own admission ended; the adopted user keeps its
+    // admission and keeps serving memory.
+    assert_eq!(
+        engine.count_pending_reviews(&principal).await.expect("read").count,
+        0,
+        "the adopted engine user is untouched"
+    );
+    assert!(
+        nexus_local_db::writer_protocol::acquire_store_reset_fence(&db_path).is_err(),
+        "the adopted engine admission is still held"
+    );
+    assert!(engine.close().await.expect("close").cleanup_confirmed);
+}
+
+/// A normal provider close settles the provider's own pool, so a genuinely/// A normal provider close settles the provider's own pool, so a genuinely
 /// pending guarded migration runs afterwards instead of waiting on a pool no
 /// one can use.
 #[tokio::test]
