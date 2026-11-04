@@ -66,6 +66,25 @@ impl FixtureMemoryProvider {
         &self.identity
     }
 
+    /// Operator provisioning of the space's initial administrator grant
+    /// (§7.0.6).
+    ///
+    /// This is the non-protocol bootstrap path: it runs before any admin exists
+    /// and stays outside `grants.grant`'s non-amplification rule, so the space
+    /// starts from an operator decision rather than an uncallable grant cycle.
+    /// Repeating it for the same principal returns the same grant.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FixtureError`] when the bootstrap transaction fails or the
+    /// stored grant rows cannot be read.
+    pub async fn provision_operator_admin(
+        &self,
+        principal_id: &str,
+    ) -> Result<String, FixtureError> {
+        self.bootstrap_operator_admin(principal_id).await
+    }
+
     /// The operator/test-only fault and clock control for this provider
     /// instance (C7 seam). Arming a point never changes durable state; the
     /// provider's mutation path observes it once.

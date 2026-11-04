@@ -3937,8 +3937,14 @@ dependencies = [
 name = "nexus-memory-conformance"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "base64 0.22.1",
  "chrono",
+ "ed25519-dalek 2.2.0",
+ "serde",
+ "serde_jcs",
  "serde_json",
+ "spoke-connect",
  "spoke-operations",
  "sqlx",
  "tempfile",
