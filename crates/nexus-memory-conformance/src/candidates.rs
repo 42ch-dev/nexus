@@ -52,9 +52,9 @@ use spoke_operations::spoke_schemas::{
     MemoryReceipt, MemoryReceiptsGetRequest,
 };
 use spoke_operations::{
-    grant_covers, is_freeze_allowlisted, jcs_sha256_hex, validate_memory_candidates_list,
-    validate_memory_candidates_review, validate_memory_capture, GrantRequirement, SpokeReject,
-    SpokeRejectCode, SpokeResult,
+    content_serialized_bytes, grant_covers, is_freeze_allowlisted, jcs_sha256_hex,
+    validate_memory_candidates_list, validate_memory_candidates_review, validate_memory_capture,
+    GrantRequirement, SpokeReject, SpokeRejectCode, SpokeResult,
 };
 
 use crate::provider::FixtureMemoryProvider;
@@ -262,6 +262,18 @@ fn receipt_expired(last_known_status: &str) -> SpokeReject {
     )
 }
 
+/// A receipt target that cannot describe a real requirement (§6.5/§6.12).
+fn invalid_target(message: impl Into<String>) -> SpokeReject {
+    reject_with(
+        SpokeRejectCode::InvalidInput,
+        format!("invalid receipt target: {}", message.into()),
+        Map::from_iter([(
+            "field".to_owned(),
+            Value::String("receipt_target".to_owned()),
+        )]),
+    )
+}
+
 fn cursor_invalid(message: impl Into<String>) -> SpokeReject {
     reject(SpokeRejectCode::CursorInvalid, message)
 }
@@ -271,6 +283,27 @@ fn idempotency_conflict() -> SpokeReject {
         SpokeRejectCode::IdempotencyConflict,
         "the idempotency key is bound to a different payload digest",
     )
+}
+
+/// §7.1/§7.15: every content object a review writes to a retained record is
+/// measured with the published `content_serialized_bytes` — the same advertised
+/// `max_content_bytes` measure the capture and record validators use — before
+/// any effect. An oversized object fails `INVALID_INPUT` naming the limit.
+fn require_review_content(field: &str, content: &Value) -> Result<(), SpokeReject> {
+    if content_serialized_bytes(content) <= MAX_CONTENT_BYTES {
+        return Ok(());
+    }
+    Err(reject_with(
+        SpokeRejectCode::InvalidInput,
+        format!("{field} exceeds the provider max_content_bytes ({MAX_CONTENT_BYTES})"),
+        Map::from_iter([
+            ("field".to_owned(), Value::String(field.to_owned())),
+            (
+                "limit".to_owned(),
+                Value::String("max_content_bytes".to_owned()),
+            ),
+        ]),
+    ))
 }
 
 /// Flatten the published validator envelope into the crate's result shape.
@@ -482,6 +515,7 @@ fn require_one_grant(
 /// tombstone read rechecks the *original* target instead of inferring one from
 /// whichever grant happens to survive. It never carries payload, content,
 /// digest, seed or proof material.
+#[derive(Debug)]
 pub(crate) struct ReceiptTarget {
     capabilities: Vec<String>,
     subject_id: Option<String>,
@@ -491,6 +525,57 @@ pub(crate) struct ReceiptTarget {
 }
 
 impl ReceiptTarget {
+    /// Crate-visible construction for any §7 operation requirement: the
+    /// capabilities that operation needed plus its complete subject and
+    /// placement/selection facets.
+    ///
+    /// - `subject_id: None` records a **space-wide** requirement (§6.5), while
+    ///   `Some(id)` requires coverage of exactly that subject.
+    /// - `context_ids` records the named placement set; it may be empty.
+    /// - `reads_shared` records the shared-visibility facet of a `shared`
+    ///   placement, a `shared_only`/`include_shared` selection or a shared read.
+    /// - `subject_all` records a whole-subject selection, which §6.12 only
+    ///   defines over an unrestricted requirement.
+    ///
+    /// A structurally impossible target is refused instead of stored, so no
+    /// caller can stage a receipt with a permissive default: an empty or
+    /// duplicated capability list, duplicated contexts, or a whole-subject
+    /// selection that also names contexts.
+    pub(crate) fn new(
+        capabilities: &'static [&'static str],
+        subject_id: Option<&str>,
+        context_ids: &[&str],
+        reads_shared: bool,
+        subject_all: bool,
+    ) -> Result<Self, SpokeReject> {
+        if capabilities.is_empty() {
+            return Err(invalid_target("at least one capability is required"));
+        }
+        let unique = capabilities.iter().collect::<std::collections::HashSet<_>>();
+        if unique.len() != capabilities.len() {
+            return Err(invalid_target("the capability list must be unique"));
+        }
+        let mut contexts: Vec<String> = Vec::with_capacity(context_ids.len());
+        for context_id in context_ids {
+            if contexts.iter().any(|existing| existing == context_id) {
+                return Err(invalid_target("the context ids must be unique"));
+            }
+            contexts.push((*context_id).to_owned());
+        }
+        if subject_all && !contexts.is_empty() {
+            return Err(invalid_target(
+                "a whole-subject selection cannot name placement contexts",
+            ));
+        }
+        Ok(Self {
+            capabilities: capabilities.iter().map(|value| (*value).to_owned()).collect(),
+            subject_id: subject_id.map(str::to_owned),
+            context_ids: contexts,
+            reads_shared,
+            subject_all,
+        })
+    }
+
     /// Target of an op whose requirement is a placement scope: a `context`
     /// placement needs that context, a `shared` placement needs shared access.
     fn for_scope(
@@ -498,33 +583,23 @@ impl ReceiptTarget {
         subject_id: &str,
         visibility: &str,
         context_id: Option<&str>,
-    ) -> Self {
-        let (context_ids, reads_shared) = match visibility {
-            "context" => (
-                context_id.into_iter().map(str::to_owned).collect(),
-                false,
-            ),
-            _ => (Vec::new(), true),
-        };
-        Self {
-            capabilities: capabilities.iter().map(|value| (*value).to_owned()).collect(),
-            subject_id: Some(subject_id.to_owned()),
-            context_ids,
-            reads_shared,
-            subject_all: false,
+    ) -> Result<Self, SpokeReject> {
+        match visibility {
+            "context" => {
+                let contexts: Vec<&str> = context_id.into_iter().collect();
+                Self::new(capabilities, Some(subject_id), &contexts, false, false)
+            }
+            _ => Self::new(capabilities, Some(subject_id), &[], true, false),
         }
     }
 
     /// Target of an op that names only a subject and no placement facet, such
     /// as §7.5 `memory.subjects.ensure`.
-    fn for_subject(capabilities: &'static [&'static str], subject_id: &str) -> Self {
-        Self {
-            capabilities: capabilities.iter().map(|value| (*value).to_owned()).collect(),
-            subject_id: Some(subject_id.to_owned()),
-            context_ids: Vec::new(),
-            reads_shared: false,
-            subject_all: false,
-        }
+    fn for_subject(
+        capabilities: &'static [&'static str],
+        subject_id: &str,
+    ) -> Result<Self, SpokeReject> {
+        Self::new(capabilities, Some(subject_id), &[], false, false)
     }
 
     /// §6.5/MEM-R006 single-grant coverage of the recorded target: one live
@@ -615,7 +690,7 @@ async fn fetch_receipt_target(
 /// for an op string the published base table does not define. `admin` in a
 /// grant implies every capability within that grant's coverage (§6.5), so a
 /// grant that literally carries `admin` satisfies any requirement here.
-fn required_capabilities(op: &str) -> Option<&'static [&'static str]> {
+pub(crate) fn required_capabilities(op: &str) -> Option<&'static [&'static str]> {
     const ADMIN: &[&str] = &["admin"];
     const CAPTURE: &[&str] = &["capture"];
     const REVIEW: &[&str] = &["review"];
@@ -1343,7 +1418,7 @@ impl FixtureMemoryProvider {
             subject_id,
             visibility,
             context_id,
-        );
+        )?;
         if let Some(replay) = resolve_replay(conn, space_id, principal_id, &admission).await? {
             return Ok(replay);
         }
@@ -1501,6 +1576,20 @@ impl FixtureMemoryProvider {
             }
         }
 
+        // §6.7/§7.0.7: a pending candidate's expiry is time-dependent, so the
+        // cursor also binds the visible set and every entry's expiry boundary at
+        // the supplied instant. An entry that expires after page one changes this
+        // fingerprint with no row or marker changing, so the continuation is
+        // refused instead of silently dropping it.
+        let visible_signature: Vec<Value> = visible
+            .iter()
+            .map(|candidate| {
+                json!({
+                    "candidate_id": candidate.candidate_id,
+                    "expires_at": candidate.expires_at,
+                })
+            })
+            .collect();
         let snapshot = snapshot_marker(conn, space_id).await?;
         // The cursor binds the caller's *effective* authorization at the supplied
         // instant as well as the persistent marker: a grant that expires between
@@ -1514,6 +1603,7 @@ impl FixtureMemoryProvider {
             "status": status_filter,
             "snapshot": snapshot,
             "authorization": authorization,
+            "visible": visible_signature,
             "policy": ENGINE_POLICY_VERSION,
         }))?;
         let start = match request.cursor.as_deref() {
@@ -1672,7 +1762,7 @@ impl FixtureMemoryProvider {
             &candidate.subject_id,
             &candidate.capture_visibility,
             candidate.scope_context(),
-        );
+        )?;
         if let Some(replay) = resolve_replay(conn, space_id, principal_id, &admission).await? {
             return Ok(replay);
         }
@@ -1795,7 +1885,7 @@ impl FixtureMemoryProvider {
             &subject_id,
             &visibility,
             context_id.as_deref(),
-        );
+        )?;
         if let Some(replay) = resolve_replay(conn, space_id, principal_id, &admission).await? {
             return Ok(replay);
         }
@@ -1812,9 +1902,12 @@ impl FixtureMemoryProvider {
         require_write_target(conn, space_id, &subject_id, context_id.as_deref()).await?;
 
         let receipt_id = receipt_id();
-        // The decision carries no placement: created records inherit the
-        // candidate's admitted capture scope verbatim (§7.15/C-034).
-        let (outcome, record_ids) = match &request.decision {
+        // §7.1/§7.15: plan every content object this decision will retain and
+        // bound each one before ANY effect, so an oversized override — or a later
+        // oversized fragment after valid earlier ones — cannot consume the
+        // candidate or leave partial records. The decision carries no placement:
+        // created records inherit the candidate's admitted capture scope (§7.15).
+        let (outcome, planned) = match &request.decision {
             Decision::Promote {
                 content_override,
                 kind,
@@ -1823,46 +1916,53 @@ impl FixtureMemoryProvider {
                     Some(kind) => kind.as_str(),
                     None => candidate.kind.as_str(),
                 };
-                let content = match content_override {
-                    Some(overridden) => serde_json::to_value(overridden).map_err(|error| {
-                        internal(format!("decision content is not encodable: {error}"))
-                    })?,
-                    None => stored_json(
-                        candidate
-                            .content
-                            .as_deref()
-                            .ok_or_else(|| internal("a pending candidate carries no content"))?,
-                        "candidate content",
-                    )?,
+                let (field, content) = match content_override {
+                    Some(overridden) => (
+                        "decision.content_override",
+                        serde_json::to_value(overridden).map_err(|error| {
+                            internal(format!("decision content is not encodable: {error}"))
+                        })?,
+                    ),
+                    None => (
+                        "content",
+                        stored_json(
+                            candidate.content.as_deref().ok_or_else(|| {
+                                internal("a pending candidate carries no content")
+                            })?,
+                            "candidate content",
+                        )?,
+                    ),
                 };
-                let record_id =
-                    insert_record(conn, space_id, &candidate, kind, &content, principal_id, now)
-                        .await?;
-                ("promoted".to_owned(), vec![record_id])
+                (
+                    "promoted".to_owned(),
+                    vec![(field.to_owned(), kind.to_owned(), content)],
+                )
             }
             Decision::Fragment { fragments } => {
-                let mut record_ids = Vec::with_capacity(fragments.len());
-                for fragment in fragments {
+                let mut planned = Vec::with_capacity(fragments.len());
+                for (index, fragment) in fragments.iter().enumerate() {
                     let content = serde_json::to_value(&fragment.content).map_err(|error| {
                         internal(format!("fragment content is not encodable: {error}"))
                     })?;
-                    record_ids.push(
-                        insert_record(
-                            conn,
-                            space_id,
-                            &candidate,
-                            fragment.kind.as_str(),
-                            &content,
-                            principal_id,
-                            now,
-                        )
-                        .await?,
-                    );
+                    planned.push((
+                        format!("decision.fragments[{index}].content"),
+                        fragment.kind.as_str().to_owned(),
+                        content,
+                    ));
                 }
-                ("fragmented".to_owned(), record_ids)
+                ("fragmented".to_owned(), planned)
             }
             Decision::Drop { .. } => ("dropped".to_owned(), Vec::new()),
         };
+        for (field, _, content) in &planned {
+            require_review_content(field, content)?;
+        }
+        let mut record_ids = Vec::with_capacity(planned.len());
+        for (_, kind, content) in &planned {
+            record_ids.push(
+                insert_record(conn, space_id, &candidate, kind, content, principal_id, now).await?,
+            );
+        }
 
         let content_digest = candidate.scrubbed_digest()?;
         let consumed_by = json!({
@@ -2131,6 +2231,65 @@ mod tests {
                 provider,
                 space_id: self.space_id,
             }
+        }
+
+        /// Capture one candidate and return its id.
+        async fn captured_candidate(&self, key: &str, text: &str, captured_at: DateTime<Utc>) -> String {
+            let captured = self
+                .provider
+                .capture(
+                    CLIENT,
+                    &capture_request(
+                        &self.space_id,
+                        text,
+                        context_scope(CONTEXT_A),
+                        key,
+                    ),
+                    captured_at,
+                )
+                .await
+                .expect("capture commits");
+            committed_result(&captured)["candidate_ids"][0]
+                .as_str()
+                .expect("candidate id")
+                .to_owned()
+        }
+
+        /// Stage one receipt through the real producer with an arbitrary target.
+        async fn stage_targeted_receipt(
+            &self,
+            key: &str,
+            op: &'static str,
+            target: &ReceiptTarget,
+            now: DateTime<Utc>,
+        ) -> String {
+            let payload = json!({ "space_id": self.space_id, "probe": key });
+            let admitted = Admitted::from_scope(
+                digest(&payload).expect("payload digest"),
+                (),
+            );
+            let admission = Mutation::keyed(op, key, &admitted);
+            let mut transaction = self
+                .provider
+                .store()
+                .pool()
+                .begin_with("BEGIN IMMEDIATE")
+                .await
+                .expect("writer transaction");
+            let receipt = stage_receipt_in_tx(
+                &mut transaction,
+                &self.space_id,
+                CLIENT,
+                &admission,
+                &receipt_id(),
+                target,
+                ReceiptState::Committed(json!({ "probe": key })),
+                now,
+            )
+            .await
+            .expect("targeted receipt stages");
+            transaction.commit().await.expect("commit");
+            receipt_id_of(&receipt).to_owned()
         }
 
         async fn ensure_named(&self, subject_id: &str, now: DateTime<Utc>) {
@@ -2423,6 +2582,7 @@ mod tests {
             "context",
             Some(context_id),
         )
+        .expect("valid capture receipt target")
     }
 
     fn receipt_payload_digest(receipt: &MemoryReceipt) -> &str {
@@ -4103,7 +4263,8 @@ mod tests {
             required_capabilities("memory.subjects.ensure")
                 .expect("memory.subjects.ensure has a capability list"),
             "subject-keyless",
-        );
+        )
+        .expect("valid keyless receipt target");
         let receipt = stage_receipt_in_tx(
             &mut transaction,
             &space,
@@ -4186,7 +4347,8 @@ mod tests {
             required_capabilities("memory.subjects.ensure")
                 .expect("memory.subjects.ensure has a capability list"),
             "subject-rolled-back",
-        );
+        )
+        .expect("valid keyless receipt target");
         stage_receipt_in_tx(
             &mut transaction,
             &space,
@@ -4686,5 +4848,572 @@ mod tests {
                 context_scope(CONTEXT_A)
             );
         }
+    }
+
+    #[tokio::test]
+    async fn target_families_authorize_space_wide_whole_subject_and_multi_context() {
+        let scenario = Scenario::open().await;
+        let now = now();
+        scenario.subject(now).await;
+
+        // §7.29: one op, three genuinely different requirements — a whole-space
+        // export (space-wide), a whole-subject export (`subject_all`) and a
+        // selected-contexts export (multi-context).
+        let export = required_capabilities("memory.exports.create")
+            .expect("memory.exports.create has a capability list");
+        let space_wide =
+            ReceiptTarget::new(export, None, &[], false, false).expect("space-wide target");
+        let whole_subject = ReceiptTarget::new(export, Some(SUBJECT), &[], false, true)
+            .expect("whole-subject target");
+        let multi_context =
+            ReceiptTarget::new(export, Some(SUBJECT), &[CONTEXT_A, CONTEXT_B], false, false)
+                .expect("multi-context target");
+        let space_wide_receipt = scenario
+            .stage_targeted_receipt("export-wide", "memory.exports.create", &space_wide, now)
+            .await;
+        let whole_subject_receipt = scenario
+            .stage_targeted_receipt(
+                "export-subject",
+                "memory.exports.create",
+                &whole_subject,
+                now,
+            )
+            .await;
+        let multi_context_receipt = scenario
+            .stage_targeted_receipt(
+                "export-contexts",
+                "memory.exports.create",
+                &multi_context,
+                now,
+            )
+            .await;
+
+        // Space-wide: a subject-scoped grant never covers a whole-space target,
+        // and a space-wide grant does.
+        let subject_scoped = scenario
+            .grant(CLIENT, &["transfer"], Some(SUBJECT), None, now)
+            .await;
+        assert_eq!(
+            refusal(
+                scenario
+                    .provider
+                    .receipts_get(
+                        CLIENT,
+                        &receipts_request(&scenario.space_id, &space_wide_receipt),
+                        now,
+                    )
+                    .await
+            )
+            .code,
+            SpokeRejectCode::NotAuthorized
+        );
+        scenario.revoke(&subject_scoped, now).await;
+        let space_grant = scenario.grant(CLIENT, &["transfer"], None, None, now).await;
+        scenario
+            .provider
+            .receipts_get(
+                CLIENT,
+                &receipts_request(&scenario.space_id, &space_wide_receipt),
+                now,
+            )
+            .await
+            .expect("a space-wide grant covers the whole-space target");
+        scenario.revoke(&space_grant, now).await;
+
+        // Whole-subject: a context-restricted grant never obtains `subject_all`,
+        // and an unrestricted one does.
+        let restricted = scenario
+            .grant(
+                CLIENT,
+                &["transfer"],
+                Some(SUBJECT),
+                Some((&[CONTEXT_A], true)),
+                now,
+            )
+            .await;
+        assert_eq!(
+            refusal(
+                scenario
+                    .provider
+                    .receipts_get(
+                        CLIENT,
+                        &receipts_request(&scenario.space_id, &whole_subject_receipt),
+                        now,
+                    )
+                    .await
+            )
+            .code,
+            SpokeRejectCode::NotAuthorized
+        );
+        scenario.revoke(&restricted, now).await;
+        let unrestricted = scenario
+            .grant(CLIENT, &["transfer"], Some(SUBJECT), None, now)
+            .await;
+        scenario
+            .provider
+            .receipts_get(
+                CLIENT,
+                &receipts_request(&scenario.space_id, &whole_subject_receipt),
+                now,
+            )
+            .await
+            .expect("an unrestricted grant covers the whole-subject target");
+        // The same unrestricted grant also covers the multi-context target: an
+        // omitted context restriction is unrestricted, so it names no context.
+        scenario
+            .provider
+            .receipts_get(
+                CLIENT,
+                &receipts_request(&scenario.space_id, &multi_context_receipt),
+                now,
+            )
+            .await
+            .expect("an unrestricted grant covers every recorded context");
+        scenario.revoke(&unrestricted, now).await;
+        let partial = scenario
+            .grant(
+                CLIENT,
+                &["transfer"],
+                Some(SUBJECT),
+                Some((&[CONTEXT_A], false)),
+                now,
+            )
+            .await;
+        assert_eq!(
+            refusal(
+                scenario
+                    .provider
+                    .receipts_get(
+                        CLIENT,
+                        &receipts_request(&scenario.space_id, &multi_context_receipt),
+                        now,
+                    )
+                    .await
+            )
+            .code,
+            SpokeRejectCode::NotAuthorized
+        );
+        scenario.revoke(&partial, now).await;
+        scenario
+            .grant(
+                CLIENT,
+                &["transfer"],
+                Some(SUBJECT),
+                Some((&[CONTEXT_A, CONTEXT_B], false)),
+                now,
+            )
+            .await;
+        scenario
+            .provider
+            .receipts_get(
+                CLIENT,
+                &receipts_request(&scenario.space_id, &multi_context_receipt),
+                now,
+            )
+            .await
+            .expect("a grant covering every recorded context covers the target");
+
+        // A structurally impossible target is refused at construction.
+        for (capabilities, contexts, subject_all) in [
+            (&[][..], &[][..], false),
+            (&["review", "review"][..], &[][..], false),
+            (&["review"][..], &[CONTEXT_A][..], true),
+            (&["review"][..], &[CONTEXT_A, CONTEXT_A][..], false),
+        ] {
+            assert_eq!(
+                refusal(ReceiptTarget::new(
+                    capabilities,
+                    Some(SUBJECT),
+                    contexts,
+                    false,
+                    subject_all
+                ))
+                .code,
+                SpokeRejectCode::InvalidInput
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn candidate_expiry_invalidates_the_cursor_instead_of_dropping_pages() {
+        let scenario = Scenario::open().await;
+        let now = now();
+        scenario.subject(now).await;
+        scenario
+            .grant(CLIENT, &["capture"], Some(SUBJECT), None, now)
+            .await;
+        scenario
+            .grant(
+                CLIENT,
+                &["review"],
+                Some(SUBJECT),
+                Some((&[CONTEXT_A], false)),
+                now,
+            )
+            .await;
+
+        // Two staggered captures: the older one expires two hours before the
+        // newer one, and page one is anchored on the newer entry.
+        let older = scenario
+            .captured_candidate("cap-older", "Older pending item.", now - Duration::hours(2))
+            .await;
+        let newer = scenario
+            .captured_candidate("cap-newer", "Newer pending item.", now)
+            .await;
+
+        let first = scenario
+            .provider
+            .candidates_list(
+                CLIENT,
+                &list_request(&scenario.space_id, None, Some(1), None),
+                now,
+            )
+            .await
+            .expect("first page");
+        assert_eq!(candidate_ids(&first), vec![newer.clone()]);
+        let cursor = first.next_cursor.clone().expect("page one issues a cursor");
+
+        // An unchanged continuation at the same instant still works.
+        let second = scenario
+            .provider
+            .candidates_list(
+                CLIENT,
+                &list_request(&scenario.space_id, None, Some(1), Some(&cursor)),
+                now,
+            )
+            .await
+            .expect("the unchanged continuation is accepted");
+        assert_eq!(candidate_ids(&second), vec![older.clone()]);
+
+        // Much later the older entry has expired while the anchor is still live:
+        // the visible set changed with no row, grant or marker change.
+        let later = now + Duration::days(29) + Duration::hours(23);
+        let marker_before = sqlx::query("SELECT marker FROM provider_snapshot WHERE space_id = ?")
+            .bind(&scenario.space_id)
+            .fetch_one(scenario.provider.store().pool())
+            .await
+            .expect("marker")
+            .get::<i64, _>("marker");
+        let refused = refusal(
+            scenario
+                .provider
+                .candidates_list(
+                    CLIENT,
+                    &list_request(&scenario.space_id, None, Some(1), Some(&cursor)),
+                    later,
+                )
+                .await,
+        );
+        assert_eq!(
+            refused.code,
+            SpokeRejectCode::CursorInvalid,
+            "a candidate expiring after page one invalidates the cursor"
+        );
+        let marker_after = sqlx::query("SELECT marker FROM provider_snapshot WHERE space_id = ?")
+            .bind(&scenario.space_id)
+            .fetch_one(scenario.provider.store().pool())
+            .await
+            .expect("marker")
+            .get::<i64, _>("marker");
+        assert_eq!(
+            marker_before, marker_after,
+            "the invalidation does not fake a marker advance"
+        );
+
+        // A fresh query at that instant applies the expiry filter normally.
+        let fresh = scenario
+            .provider
+            .candidates_list(
+                CLIENT,
+                &list_request(&scenario.space_id, None, None, None),
+                later,
+            )
+            .await
+            .expect("fresh page");
+        assert_eq!(candidate_ids(&fresh), vec![newer]);
+    }
+
+    #[tokio::test]
+    async fn review_content_limit_bounds_override_and_every_fragment_before_any_effect() {
+        let scenario = Scenario::open().await;
+        let now = now();
+        scenario.subject(now).await;
+        scenario
+            .grant(
+                CLIENT,
+                &["capture", "review", "records_write"],
+                Some(SUBJECT),
+                None,
+                now,
+            )
+            .await;
+
+        // The advertised measure is the serialized byte size, not the character
+        // count: `{"text":"…"}` contributes eleven bytes of framing.
+        let at_limit_text = "x".repeat(MAX_CONTENT_BYTES - 11);
+        let over_limit_text = "x".repeat(MAX_CONTENT_BYTES - 10);
+        assert_eq!(
+            content_serialized_bytes(&json!({ "text": at_limit_text })),
+            MAX_CONTENT_BYTES
+        );
+        assert_eq!(
+            content_serialized_bytes(&json!({ "text": over_limit_text })),
+            MAX_CONTENT_BYTES + 1
+        );
+
+        // Promote override over the limit: refused with no effect at all.
+        let override_candidate = scenario
+            .captured_candidate("cap-override", "Small capture.", now)
+            .await;
+        let records_before = count_rows(&scenario.provider, "records").await;
+        let receipts_before = count_rows(&scenario.provider, "receipts").await;
+        let targets_before = count_rows(&scenario.provider, "receipt_targets").await;
+        let marker_before = sqlx::query("SELECT marker FROM provider_snapshot WHERE space_id = ?")
+            .bind(&scenario.space_id)
+            .fetch_one(scenario.provider.store().pool())
+            .await
+            .expect("marker")
+            .get::<i64, _>("marker");
+        let rejected = refusal(
+            scenario
+                .provider
+                .candidates_review(
+                    CLIENT,
+                    &review_request(
+                        &scenario.space_id,
+                        &override_candidate,
+                        1,
+                        json!({
+                            "action": "promote",
+                            "content_override": { "text": over_limit_text },
+                        }),
+                        "rev-override-over",
+                    ),
+                    now,
+                )
+                .await,
+        );
+        assert_eq!(rejected.code, SpokeRejectCode::InvalidInput);
+        assert_eq!(
+            rejected
+                .details
+                .as_ref()
+                .and_then(|details| details.get("limit")),
+            Some(&json!("max_content_bytes"))
+        );
+        assert_eq!(
+            records_before,
+            count_rows(&scenario.provider, "records").await,
+            "a rejected review writes no record"
+        );
+        assert_eq!(
+            receipts_before,
+            count_rows(&scenario.provider, "receipts").await,
+            "a rejected review writes no receipt"
+        );
+        assert_eq!(
+            targets_before,
+            count_rows(&scenario.provider, "receipt_targets").await,
+            "a rejected review records no target"
+        );
+        assert_eq!(
+            marker_before,
+            sqlx::query("SELECT marker FROM provider_snapshot WHERE space_id = ?")
+                .bind(&scenario.space_id)
+                .fetch_one(scenario.provider.store().pool())
+                .await
+                .expect("marker")
+                .get::<i64, _>("marker"),
+            "a rejected review advances nothing"
+        );
+        let untouched = scenario
+            .provider
+            .candidates_get(
+                CLIENT,
+                &get_request(&scenario.space_id, &override_candidate),
+                now,
+            )
+            .await
+            .expect("candidate readable");
+        assert_eq!(pending_candidate(&untouched).status, "pending");
+        assert_eq!(pending_candidate(&untouched).revision.get(), 1);
+
+        // Exactly at the limit is admitted.
+        let at_limit = scenario
+            .provider
+            .candidates_review(
+                CLIENT,
+                &review_request(
+                    &scenario.space_id,
+                    &override_candidate,
+                    1,
+                    json!({
+                        "action": "promote",
+                        "content_override": { "text": at_limit_text },
+                    }),
+                    "rev-override-at",
+                ),
+                now,
+            )
+            .await
+            .expect("an at-limit override commits");
+        let record_ids: Vec<String> = committed_result(&at_limit)["record_ids"]
+            .as_array()
+            .expect("record ids")
+            .iter()
+            .map(|id| id.as_str().expect("string id").to_owned())
+            .collect();
+        assert_eq!(record_ids.len(), 1);
+        let record_content: String =
+            sqlx::query("SELECT content_json FROM records WHERE record_id = ?")
+                .bind(&record_ids[0])
+                .fetch_one(scenario.provider.store().pool())
+                .await
+                .expect("created record")
+                .get("content_json");
+        assert_eq!(
+            content_serialized_bytes(
+                &serde_json::from_str::<Value>(&record_content).expect("record content")
+            ),
+            MAX_CONTENT_BYTES
+        );
+
+        // A later fragment over the limit must leave no earlier fragment record.
+        let fragment_candidate = scenario
+            .captured_candidate("cap-fragment", "Fragmentable capture.", now)
+            .await;
+        let records_before_fragments = count_rows(&scenario.provider, "records").await;
+        let fragment_rejection = refusal(
+            scenario
+                .provider
+                .candidates_review(
+                    CLIENT,
+                    &review_request(
+                        &scenario.space_id,
+                        &fragment_candidate,
+                        1,
+                        json!({
+                            "action": "fragment",
+                            "fragments": [
+                                { "kind": "fact", "content": { "text": "A small fragment." } },
+                                { "kind": "fact", "content": { "text": over_limit_text } },
+                            ],
+                        }),
+                        "rev-fragment-over",
+                    ),
+                    now,
+                )
+                .await,
+        );
+        assert_eq!(fragment_rejection.code, SpokeRejectCode::InvalidInput);
+        assert_eq!(
+            fragment_rejection
+                .details
+                .as_ref()
+                .and_then(|details| details.get("field")),
+            Some(&json!("decision.fragments[1].content"))
+        );
+        assert_eq!(
+            count_rows(&scenario.provider, "records").await,
+            records_before_fragments,
+            "the earlier fragment never reached a record"
+        );
+        let still_pending = scenario
+            .provider
+            .candidates_get(
+                CLIENT,
+                &get_request(&scenario.space_id, &fragment_candidate),
+                now,
+            )
+            .await
+            .expect("candidate readable");
+        assert_eq!(pending_candidate(&still_pending).status, "pending");
+
+        // The same candidate is still reviewable with bounded fragments.
+        let fragmented = scenario
+            .provider
+            .candidates_review(
+                CLIENT,
+                &review_request(
+                    &scenario.space_id,
+                    &fragment_candidate,
+                    1,
+                    json!({
+                        "action": "fragment",
+                        "fragments": [
+                            { "kind": "fact", "content": { "text": "A small fragment." } },
+                            { "kind": "fact", "content": { "text": "Another small fragment." } },
+                        ],
+                    }),
+                    "rev-fragment-ok",
+                ),
+                now,
+            )
+            .await
+            .expect("bounded fragments commit");
+        assert_eq!(
+            committed_result(&fragmented)["record_ids"]
+                .as_array()
+                .expect("record ids")
+                .len(),
+            2
+        );
+
+        // Multibyte content: the measure counts UTF-8 bytes, so the text is filled
+        // with two-byte characters and one ASCII byte to land exactly on the limit
+        // (the `{"text":"…"}` framing is eleven bytes) while the character count
+        // stays far below it.
+        let multibyte_at_limit =
+            format!("{}x", "é".repeat((MAX_CONTENT_BYTES - 12) / 2));
+        assert_eq!(
+            content_serialized_bytes(&json!({ "text": multibyte_at_limit })),
+            MAX_CONTENT_BYTES
+        );
+        let unicode_candidate = scenario
+            .captured_candidate("cap-unicode", "Unicode capture.", now)
+            .await;
+        scenario
+            .provider
+            .candidates_review(
+                CLIENT,
+                &review_request(
+                    &scenario.space_id,
+                    &unicode_candidate,
+                    1,
+                    json!({
+                        "action": "promote",
+                        "content_override": { "text": multibyte_at_limit },
+                    }),
+                    "rev-unicode-at",
+                ),
+                now,
+            )
+            .await
+            .expect("a multibyte at-limit override commits");
+        let over_unicode_candidate = scenario
+            .captured_candidate("cap-unicode-over", "Unicode overflow capture.", now)
+            .await;
+        let unicode_rejection = refusal(
+            scenario
+                .provider
+                .candidates_review(
+                    CLIENT,
+                    &review_request(
+                        &scenario.space_id,
+                        &over_unicode_candidate,
+                        1,
+                        json!({
+                            "action": "promote",
+                            "content_override": {
+                                "text": "é".repeat((MAX_CONTENT_BYTES - 11) / 2 + 1),
+                            },
+                        }),
+                        "rev-unicode-over",
+                    ),
+                    now,
+                )
+                .await,
+        );
+        assert_eq!(unicode_rejection.code, SpokeRejectCode::InvalidInput);
     }
 }
