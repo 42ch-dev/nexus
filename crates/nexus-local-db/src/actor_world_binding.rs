@@ -845,16 +845,52 @@ async fn remove_binding_tx(
 /// that recorded it, so a stale or foreign namespace can neither read nor
 /// erase another namespace's dependency.
 pub struct RemoteBindingNamespace<'a> {
-    pub owner_creator_id: &'a str,
-    pub character_id: &'a str,
-    pub binding_id: &'a str,
-    pub authority_host_id: &'a str,
-    /// The provider's `NonZeroU64` authority generation, persisted losslessly
-    /// as its decimal text: every value in the declared range is its own
-    /// identity, so two generations can never alias one row.
-    pub authority_generation: u64,
-    pub space_id: &'a str,
-    pub client_identity: &'a str,
+    owner_creator_id: &'a str,
+    character_id: &'a str,
+    binding_id: &'a str,
+    authority_host_id: &'a str,
+    /// The provider's `NonZeroU64` authority generation as its canonical
+    /// decimal text, computed once per namespace: every value in the declared
+    /// range is its own identity, so two generations can never alias one row,
+    /// and a multi-object receipt reuses the text instead of reformatting the
+    /// same generation per object write.
+    authority_generation_text: String,
+    space_id: &'a str,
+    client_identity: &'a str,
+}
+
+impl<'a> RemoteBindingNamespace<'a> {
+    /// Build the one namespace an operation's dependency writes share.
+    ///
+    /// The canonical generation text is derived here, from the exact numeric
+    /// identity, so no caller can supply an independently formatted or
+    /// divergent text for the same generation.
+    #[must_use]
+    pub fn new(
+        owner_creator_id: &'a str,
+        character_id: &'a str,
+        binding_id: &'a str,
+        authority_host_id: &'a str,
+        authority_generation: u64,
+        space_id: &'a str,
+        client_identity: &'a str,
+    ) -> Self {
+        Self {
+            owner_creator_id,
+            character_id,
+            binding_id,
+            authority_host_id,
+            authority_generation_text: authority_generation.to_string(),
+            space_id,
+            client_identity,
+        }
+    }
+
+    /// The canonical decimal generation text every dependency row binds.
+    #[must_use]
+    pub fn generation_text(&self) -> &str {
+        &self.authority_generation_text
+    }
 }
 
 /// One known remote provider object a binding depends on.
@@ -928,7 +964,7 @@ pub async fn insert_remote_binding_admission_tx(
     .bind(namespace.character_id)
     .bind(namespace.binding_id)
     .bind(namespace.authority_host_id)
-    .bind(namespace.authority_generation.to_string())
+    .bind(namespace.generation_text())
     .bind(namespace.space_id)
     .bind(namespace.client_identity)
     .bind(now)
@@ -962,7 +998,7 @@ pub async fn retire_remote_binding_admission_tx(
     .bind(namespace.character_id)
     .bind(namespace.binding_id)
     .bind(namespace.authority_host_id)
-    .bind(namespace.authority_generation.to_string())
+    .bind(namespace.generation_text())
     .bind(namespace.space_id)
     .bind(namespace.client_identity)
     .execute(&mut **tx)
@@ -1003,7 +1039,7 @@ pub async fn record_remote_binding_object_tx(
                       WHEN 'live' THEN 0 WHEN 'consumed' THEN 1 ELSE 2 END)",
     )
     .bind(namespace.authority_host_id)
-    .bind(namespace.authority_generation.to_string())
+    .bind(namespace.generation_text())
     .bind(namespace.space_id)
     .bind(namespace.client_identity)
     .bind(namespace.character_id)

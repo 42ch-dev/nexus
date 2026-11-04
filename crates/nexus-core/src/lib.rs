@@ -83,7 +83,7 @@ pub use config_lock::with_config_lock;
 pub use content::{resolve_guarded_path, resolve_guarded_path_async, CoreChapterContentQuery};
 pub use context::{LocalDirectiveStore, ReadOnlyDirectiveStore};
 pub use creators::CREATOR_INTERNAL_CODES;
-pub use error::{CoreError, CoreResult, MEMORY_INTERNAL_CODES};
+pub use error::{CoreError, CoreResult, MemoryProviderRefusal, MEMORY_INTERNAL_CODES};
 #[cfg(feature = "execution")]
 pub use execution::{
     CancelOutcome, DriveDisposition, ExecutionBuildObserver, ExecutionHandle, ExecutionOpenError,

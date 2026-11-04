@@ -351,6 +351,34 @@ pub fn map_core_error(err: CoreError) -> CliError {
             status: coded_status("invalid_input"),
             message,
         },
+        // A remote memory-provider refusal: the peer's message never reaches
+        // the CLI. The whitelisted effective code, the §14.2 retry class and
+        // an allowlisted peer wire code are rendered from the typed fields,
+        // never re-parsed back out of a formatted string.
+        CoreError::MemoryProviderRefused {
+            code,
+            wire_code,
+            retry_class,
+            family,
+        } => {
+            let status = match family {
+                nexus_core::MemoryProviderRefusal::NotFound => 404,
+                nexus_core::MemoryProviderRefusal::Forbidden => 403,
+                nexus_core::MemoryProviderRefusal::InvalidInput => 400,
+                nexus_core::MemoryProviderRefusal::Conflict => 409,
+                nexus_core::MemoryProviderRefusal::Unavailable => 503,
+            };
+            let wire = wire_code
+                .as_deref()
+                .map(|wire_code| format!(", wire code: {wire_code}"))
+                .unwrap_or_default();
+            CliError::Api {
+                status,
+                message: format!(
+                    "[{code}] memory provider refused (retry_class: {retry_class}{wire})"
+                ),
+            }
+        }
         CoreError::Closing | CoreError::Interrupted => CliError::Other(err.to_string()),
         CoreError::Internal { category } => CliError::Other(category),
     }
@@ -591,6 +619,43 @@ mod tests {
         assert_eq!(
             message,
             "workspace_conflict: workspace 'novel' already exists"
+        );
+    }
+
+    /// I-000202: a remote memory-provider refusal renders its whitelisted
+    /// classification from the typed fields — never from a re-parsed message —
+    /// and carries no peer text.
+    #[test]
+    fn memory_provider_refusal_renders_the_safe_classification() {
+        let mapped = map_core_error(CoreError::MemoryProviderRefused {
+            code: "OUTCOME_UNCERTAIN".to_string(),
+            wire_code: Some("OUTCOME_UNCERTAIN".to_string()),
+            retry_class: "uncertain".to_string(),
+            family: nexus_core::MemoryProviderRefusal::Unavailable,
+        });
+        let CliError::Api { status, message } = mapped else {
+            panic!("expected an API error, got {mapped:?}");
+        };
+        assert_eq!(status, 503);
+        assert_eq!(
+            message,
+            "[OUTCOME_UNCERTAIN] memory provider refused \
+             (retry_class: uncertain, wire code: OUTCOME_UNCERTAIN)"
+        );
+
+        let mapped = map_core_error(CoreError::MemoryProviderRefused {
+            code: "NOT_AUTHORIZED".to_string(),
+            wire_code: None,
+            retry_class: "terminal".to_string(),
+            family: nexus_core::MemoryProviderRefusal::Forbidden,
+        });
+        let CliError::Api { status, message } = mapped else {
+            panic!("expected an API error, got {mapped:?}");
+        };
+        assert_eq!(status, 403);
+        assert_eq!(
+            message,
+            "[NOT_AUTHORIZED] memory provider refused (retry_class: terminal)"
         );
     }
 

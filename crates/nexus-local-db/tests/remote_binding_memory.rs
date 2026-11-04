@@ -115,15 +115,15 @@ fn namespace_at<'a>(
     client_identity: &'a str,
     generation: u64,
 ) -> RemoteBindingNamespace<'a> {
-    RemoteBindingNamespace {
-        owner_creator_id: OWNER,
-        character_id: &seed.character_id,
-        binding_id: &seed.binding_id,
-        authority_host_id: HOST,
-        authority_generation: generation,
-        space_id: SPACE,
+    RemoteBindingNamespace::new(
+        OWNER,
+        &seed.character_id,
+        &seed.binding_id,
+        HOST,
+        generation,
+        SPACE,
         client_identity,
-    }
+    )
 }
 
 async fn admit(pool: &SqlitePool, admission_id: &str, ns: &RemoteBindingNamespace<'_>) {

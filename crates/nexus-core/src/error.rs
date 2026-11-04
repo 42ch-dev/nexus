@@ -117,12 +117,46 @@ pub enum CoreError {
     /// attached structured `field` details to these rejections.
     #[error("{0}")]
     ActorInput(String),
+    /// A remote memory-provider refusal, reduced to safe machine classification.
+    ///
+    /// The peer's message and extra details never travel: only the whitelisted
+    /// effective code, a whitelisted peer wire code and the whitelisted §14.2
+    /// retry class survive (§3.1). A local provider keeps its own trusted
+    /// taxonomy and messages and never produces this variant, so this is not a
+    /// transport leak: the adapter renders the coarse family and the retained
+    /// classification from fields it defined.
+    #[error("memory provider refused: {code}")]
+    MemoryProviderRefused {
+        /// The whitelisted effective memory code (`SpokeRejectCode::as_str`).
+        code: String,
+        /// The peer's own wire code, present only when it names a known memory
+        /// code (never arbitrary peer text).
+        wire_code: Option<String>,
+        /// The §14.2 retry class: `terminal`, `retryable` or `uncertain`.
+        retry_class: String,
+        /// The coarse transport family derived from `code`.
+        family: MemoryProviderRefusal,
+    },
     /// Workspace-creation exclusivity refusal (409 at HTTP adapters): the slug
     /// is already registered for the creator, the resolved creative root is
     /// claimed by another workspace, or the target root already holds foreign
     /// content. The message names the concrete collision.
     #[error("workspace conflict: {0}")]
     WorkspaceConflict(String),
+}
+
+/// The coarse transport family a remote memory-provider refusal maps onto.
+///
+/// Derived once from the whitelisted effective memory code in the shared mapper
+/// so every projector renders the same family without a second classification
+/// convention.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryProviderRefusal {
+    NotFound,
+    Forbidden,
+    InvalidInput,
+    Conflict,
+    Unavailable,
 }
 
 /// Structured outline-canvas OCC conflict payload (HTTP 409 at the adapter).

@@ -53,7 +53,7 @@ use serde_json::{json, Value};
 use sqlx::SqlitePool;
 
 use crate::actors::AdmittedActor;
-use crate::error::{CoreError, CoreResult};
+use crate::error::{CoreError, CoreResult, MemoryProviderRefusal};
 use crate::memory_binding::MemoryProviderBinding;
 use crate::memory_pipeline::{
     internal_err, map_local_db_error, process_bearer_review_batch, sqlx_internal,
@@ -188,11 +188,109 @@ fn memory_reject(reject: &SpokeReject) -> CoreError {
     }
 }
 
-/// The success body of a port result as JSON, or its refusal as a core error.
-fn memory_ok<T: serde::Serialize>(result: SpokeResult<T>) -> CoreResult<Value> {
+/// Map one port refusal under the pinned binding.
+///
+/// A local provider is trusted: its retained taxonomy, message and conflict
+/// detection stay exactly as before. A remote provider never contributes peer
+/// text here — only the whitelisted effective code, a wire code that names a
+/// known memory code, and the whitelisted §14.2 retry class survive (§3.1).
+fn memory_reject_for(binding: &MemoryProviderBinding, reject: &SpokeReject) -> CoreError {
+    if binding.local().is_ok() {
+        memory_reject(reject)
+    } else {
+        remote_refusal(reject)
+    }
+}
+
+/// The shared safe policy for one refusal raised by a remote provider (§3.1).
+///
+/// The peer controls its own message and extra details, so neither is trusted
+/// or copied: only the whitelisted effective code, the peer's wire code when it
+/// names a known memory code, and the whitelisted §14.2 retry class survive.
+/// That keeps the machine classification a caller needs to tell a possibly
+/// committed outcome from a clean failure while peer text cannot escape.
+fn remote_refusal(reject: &SpokeReject) -> CoreError {
+    let declared = reject
+        .details
+        .as_ref()
+        .and_then(|details| details.get("retry_class"))
+        .and_then(Value::as_str)
+        .filter(|class| matches!(*class, "terminal" | "retryable" | "uncertain"));
+    // The effective code is authoritative: a `terminal` class beside an
+    // uncertain outcome must not read as a clean failure.
+    let retry_class = if reject.code == SpokeRejectCode::OutcomeUncertain {
+        "uncertain"
+    } else {
+        declared.unwrap_or("uncertain")
+    };
+    let wire_code = reject
+        .details
+        .as_ref()
+        .and_then(|details| details.get("wire_code"))
+        .and_then(Value::as_str)
+        .filter(|code| SpokeRejectCode::try_from_str(code).is_some())
+        .map(str::to_string);
+    CoreError::MemoryProviderRefused {
+        code: reject.code.as_str().to_string(),
+        wire_code,
+        retry_class: retry_class.to_string(),
+        family: memory_refusal_family(reject.code),
+    }
+}
+
+/// The coarse transport family for one whitelisted memory rejection code.
+const fn memory_refusal_family(code: SpokeRejectCode) -> MemoryProviderRefusal {
+    match code {
+        SpokeRejectCode::NotFound
+        | SpokeRejectCode::KnowledgeEntryNotFound
+        | SpokeRejectCode::RelationNotFound => MemoryProviderRefusal::NotFound,
+        SpokeRejectCode::NotAuthorized | SpokeRejectCode::GrantRevoked => {
+            MemoryProviderRefusal::Forbidden
+        }
+        SpokeRejectCode::InvalidInput
+        | SpokeRejectCode::InvalidStatus
+        | SpokeRejectCode::InvalidStatusTransition
+        | SpokeRejectCode::EmptyCanonicalName
+        | SpokeRejectCode::MergeTargetSelf
+        | SpokeRejectCode::MissingRequiredField
+        | SpokeRejectCode::InvalidPacketInput
+        | SpokeRejectCode::InvalidKnowledgeEntryStatus
+        | SpokeRejectCode::InvalidKnowledgeEntryStatusTransition
+        | SpokeRejectCode::RelationSelfEdge
+        | SpokeRejectCode::RelationMissingEndpoint
+        | SpokeRejectCode::ProfileIncomplete
+        | SpokeRejectCode::InsufficientData
+        | SpokeRejectCode::CursorInvalid => MemoryProviderRefusal::InvalidInput,
+        SpokeRejectCode::RevisionConflict
+        | SpokeRejectCode::StoredRevisionStale
+        | SpokeRejectCode::CandidateNotProvisional
+        | SpokeRejectCode::CandidateTerminalStatus
+        | SpokeRejectCode::CandidateConsumed
+        | SpokeRejectCode::DuplicateActiveKnowledgeEntry
+        | SpokeRejectCode::KnowledgeEntryAlreadyExists
+        | SpokeRejectCode::RelationAlreadyExists
+        | SpokeRejectCode::KnowledgeEntryTerminalStatus
+        | SpokeRejectCode::IdempotencyConflict
+        | SpokeRejectCode::ExportExpired
+        | SpokeRejectCode::ReceiptExpired
+        | SpokeRejectCode::ImportConflict
+        | SpokeRejectCode::SpaceFrozen
+        | SpokeRejectCode::SubjectFenced => MemoryProviderRefusal::Conflict,
+        // `OutcomeUncertain`, `InternalError`, `CapabilityPortMissing` and any
+        // code outside the capture contract's clean refusals: the outcome may
+        // not be settled, so callers must not read it as a definite failure.
+        _ => MemoryProviderRefusal::Unavailable,
+    }
+}
+
+/// The success body of a port result as JSON, or its refusal under the binding.
+fn memory_ok_for<T: serde::Serialize>(
+    binding: &MemoryProviderBinding,
+    result: SpokeResult<T>,
+) -> CoreResult<Value> {
     match result {
         SpokeResult::Ok(value) => serde_json::to_value(&value).map_err(wire_err),
-        SpokeResult::Reject(reject) => Err(memory_reject(&reject)),
+        SpokeResult::Reject(reject) => Err(memory_reject_for(binding, &reject)),
     }
 }
 
@@ -329,7 +427,7 @@ impl MemoryAdapter {
                 .ensure_subject(&spoke_principal, request)
                 .await
             {
-                return Err(memory_reject(&reject));
+                return Err(memory_reject_for(&binding, &reject));
             }
         }
         let character_id = (kind_ns == legacy::CHARACTER_KIND_NS).then(|| kind_id.to_string());
@@ -368,6 +466,16 @@ impl MemoryAdapter {
         self.binding.local().is_ok()
     }
 
+    /// Map a port result under this binding (see [`memory_ok_for`]).
+    fn ok<T: serde::Serialize>(&self, result: SpokeResult<T>) -> CoreResult<Value> {
+        memory_ok_for(&self.binding, result)
+    }
+
+    /// Map a port refusal under this binding (see [`memory_reject_for`]).
+    fn refuse(&self, reject: &SpokeReject) -> CoreError {
+        memory_reject_for(&self.binding, reject)
+    }
+
     /// The remote dependency namespace this adapter may record facts under
     /// (D18, §5.1): only a nonlocal binding with a pinned public client
     /// identity and a Character bearer has remote binding-local memory to
@@ -380,15 +488,15 @@ impl MemoryAdapter {
         let character_id = self.character_id.as_deref()?;
         let client_identity = self.binding.client_identity()?;
         let (authority_host_id, authority_generation) = self.binding.authority();
-        Some(nexus_local_db::RemoteBindingNamespace {
-            owner_creator_id: self.principal.principal_id.as_str(),
+        Some(nexus_local_db::RemoteBindingNamespace::new(
+            self.principal.principal_id.as_str(),
             character_id,
             binding_id,
             authority_host_id,
-            authority_generation: authority_generation.get(),
-            space_id: self.binding.space_id(),
+            authority_generation.get(),
+            self.binding.space_id(),
             client_identity,
-        })
+        ))
     }
 
     /// Record one known remote provider-object fact for this binding (D18).
@@ -492,7 +600,7 @@ impl MemoryAdapter {
                 "limit": MEMORY_PAGE_SIZE,
                 "cursor": cursor,
             }))?;
-            let body = memory_ok(
+            let body = self.ok(
                 self.binding
                     .port()
                     .list_candidates(&self.principal, request)
@@ -544,7 +652,7 @@ impl MemoryAdapter {
                 "limit": MEMORY_PAGE_SIZE,
                 "cursor": cursor,
             }))?;
-            let body = memory_ok(
+            let body = self.ok(
                 self.binding
                     .port()
                     .list_candidates(&self.principal, request)
@@ -619,14 +727,14 @@ impl MemoryAdapter {
                 "cursor": cursor,
             }))?;
             let body = match self.binding.local() {
-                Ok(local) => memory_ok(
+                Ok(local) => self.ok(
                     local
                         .list_records_scoped(&self.principal, request, project_legacy)
                         .await,
                 )?,
                 // A remote binding serves its own objects only, so selecting it
                 // never merges the local legacy projection into the read.
-                Err(_) => memory_ok(
+                Err(_) => self.ok(
                     self.binding
                         .port()
                         .list_records(&self.principal, request)
@@ -704,7 +812,7 @@ impl MemoryAdapter {
                 Ok(body["subject"]["status"].as_str() == Some("archived"))
             }
             SpokeResult::Reject(reject) if reject.code == SpokeRejectCode::NotFound => Ok(false),
-            SpokeResult::Reject(reject) => Err(memory_reject(&reject)),
+            SpokeResult::Reject(reject) => Err(self.refuse(&reject)),
         }
     }
 
@@ -716,7 +824,7 @@ impl MemoryAdapter {
             "subject_id": self.subject_id,
             "profile_kinds": [SOUL_PROFILE_KIND],
         }))?;
-        let body = memory_ok(
+        let body = self.ok(
             self.binding
                 .port()
                 .get_profile(&self.principal, request)
@@ -749,7 +857,7 @@ impl MemoryAdapter {
                 .get("candidate")
                 .cloned()),
             SpokeResult::Reject(reject) if reject.code == SpokeRejectCode::NotFound => Ok(None),
-            SpokeResult::Reject(reject) => Err(memory_reject(&reject)),
+            SpokeResult::Reject(reject) => Err(self.refuse(&reject)),
         }
     }
 
@@ -799,7 +907,7 @@ impl MemoryAdapter {
             {
                 Ok(false)
             }
-            SpokeResult::Reject(reject) => Err(memory_reject(&reject)),
+            SpokeResult::Reject(reject) => Err(self.refuse(&reject)),
         }
     }
 
@@ -853,7 +961,7 @@ impl MemoryAdapter {
             {
                 Ok(false)
             }
-            SpokeResult::Reject(reject) => Err(memory_reject(&reject)),
+            SpokeResult::Reject(reject) => Err(self.refuse(&reject)),
         }
     }
 
@@ -980,7 +1088,7 @@ impl MemoryAdapter {
                 }
                 Ok(())
             }
-            SpokeResult::Reject(reject) => Err(memory_reject(&reject)),
+            SpokeResult::Reject(reject) => Err(self.refuse(&reject)),
         }
     }
 
@@ -1029,7 +1137,7 @@ impl MemoryAdapter {
             "subject_id": self.subject_id,
             "profile_kinds": [profile::SOUL_PROFILE_KIND],
         }))?;
-        let body = memory_ok(
+        let body = self.ok(
             self.binding
                 .port()
                 .get_profile(&self.principal, request)
@@ -1057,7 +1165,7 @@ impl MemoryAdapter {
             "source_context_ids": [],
             "idempotency_key": idempotency_key,
         }))?;
-        memory_ok(
+        self.ok(
             self.binding
                 .port()
                 .create_record(&self.principal, request)
@@ -1088,12 +1196,12 @@ impl MemoryAdapter {
             "idempotency_key": idempotency_key,
         }))?;
         match self.binding.local() {
-            Ok(local) => memory_ok(
+            Ok(local) => self.ok(
                 local
                     .update_legacy_record(&self.principal, &self.subject_id, request)
                     .await,
             ),
-            Err(_) => memory_ok(
+            Err(_) => self.ok(
                 self.binding
                     .port()
                     .update_record(&self.principal, request)
@@ -1120,12 +1228,12 @@ impl MemoryAdapter {
             "idempotency_key": idempotency_key,
         }))?;
         match self.binding.local() {
-            Ok(local) => memory_ok(
+            Ok(local) => self.ok(
                 local
                     .delete_legacy_record(&self.principal, &self.subject_id, request)
                     .await,
             ),
-            Err(_) => memory_ok(
+            Err(_) => self.ok(
                 self.binding
                     .port()
                     .delete_record(&self.principal, request)
@@ -1177,7 +1285,7 @@ impl MemoryAdapter {
             "document": { "format": "markdown", "body": body },
             "idempotency_key": idempotency_key,
         }))?;
-        memory_ok(
+        self.ok(
             self.binding
                 .port()
                 .update_profile(&self.principal, request)
@@ -1203,7 +1311,7 @@ impl MemoryAdapter {
                 .get("record")
                 .cloned()),
             SpokeResult::Reject(reject) if reject.code == SpokeRejectCode::NotFound => Ok(None),
-            SpokeResult::Reject(reject) => Err(memory_reject(&reject)),
+            SpokeResult::Reject(reject) => Err(self.refuse(&reject)),
         }
     }
 
@@ -1288,11 +1396,11 @@ impl MemoryAdapter {
                 SpokeRejectCode::NotFound => {
                     not_found("character memory fragment", &format!("'{record_id}'"))
                 }
-                SpokeRejectCode::RevisionConflict => CoreError::ActorConflict {
+                SpokeRejectCode::RevisionConflict if self.is_local() => CoreError::ActorConflict {
                     code: "version_mismatch".to_string(),
                     message: format!("fragment revision mismatch: {}", reject.message),
                 },
-                _ => memory_reject(&reject),
+                _ => self.refuse(&reject),
             }),
         }
     }
@@ -1916,7 +2024,7 @@ impl CoreService {
             "kind_hint": task_kind_to_memory_kind(&task_kind),
             "idempotency_key": format!("e4capture:{digest}"),
         }))?;
-        memory_ok(
+        memory.ok(
             memory
                 .binding
                 .port()
@@ -2370,7 +2478,7 @@ impl CoreService {
                     .await
                 {
                     Ok(SpokeResult::Ok(_)) => {}
-                    Ok(SpokeResult::Reject(reject)) => return Err(memory_reject(&reject)),
+                    Ok(SpokeResult::Reject(reject)) => return Err(memory.refuse(&reject)),
                     Err(error) => return Err(map_local_db_error(error)),
                 }
             }
@@ -2397,7 +2505,7 @@ impl CoreService {
                     if let SpokeResult::Reject(reject) =
                         memory.binding.port().capture(&memory.principal, capture).await
                     {
-                        return Err(memory_reject(&reject));
+                        return Err(memory.refuse(&reject));
                     }
                 }
             },
@@ -2447,15 +2555,15 @@ impl CoreService {
             });
         };
         let (authority_host_id, authority_generation) = binding.authority();
-        let namespace = nexus_local_db::RemoteBindingNamespace {
-            owner_creator_id: principal.creator_id(),
+        let namespace = nexus_local_db::RemoteBindingNamespace::new(
+            principal.creator_id(),
             character_id,
             binding_id,
             authority_host_id,
-            authority_generation: authority_generation.get(),
-            space_id: binding.space_id(),
+            authority_generation.get(),
+            binding.space_id(),
             client_identity,
-        };
+        );
         let admission_id = uuid::Uuid::new_v4().to_string();
         let admitted_at = now_iso();
         let mut admission = nexus_local_db::begin_immediate(&self.inner.pool)
@@ -2530,7 +2638,9 @@ impl CoreService {
                 // response-projection failure after commit), a retryable class,
                 // a missing/unknown class or a contradictory code all keep it;
                 // a local settlement failure keeps it too. The provider outcome
-                // is surfaced unchanged either way.
+                // then surfaces through the shared remote-refusal policy: its
+                // whitelisted code, wire code and retry class survive, its peer
+                // text does not (I-000202).
                 if let Err(error) = self
                     .settle_remote_capture_reject(&admission_id, &namespace, &reject)
                     .await
@@ -2541,7 +2651,7 @@ impl CoreService {
                         "capture refusal settlement could not persist; the admission keeps protection"
                     );
                 }
-                Err(memory_reject(&reject))
+                Err(memory.refuse(&reject))
             }
         }
     }
@@ -5073,7 +5183,7 @@ mod tests {
         let foreign_subject = legacy::creator_subject_id(FOREIGN_CREATOR);
         // The foreign bearer opt-in subject: capture admits a known subject
         // (the space-wide grant then covers the candidate operation).
-        memory_ok(
+        memory.ok(
             memory
                 .binding
                 .port()
@@ -5117,7 +5227,7 @@ mod tests {
             matches!(&captured, SpokeResult::Ok(_)),
             "the space grant must admit a foreign-subject capture"
         );
-        let listed = memory_ok(
+        let listed = memory.ok(
             memory
                 .binding
                 .port()
@@ -5332,15 +5442,15 @@ mod tests {
         let (character_id, binding_id) = seed_d18_binding(&core).await;
         let binding = core.memory_binding().unwrap();
         let (host, generation) = binding.authority();
-        let namespace = nexus_local_db::RemoteBindingNamespace {
-            owner_creator_id: CREATOR_UNDER_TEST,
-            character_id: &character_id,
-            binding_id: &binding_id,
-            authority_host_id: host,
-            authority_generation: generation.get(),
-            space_id: binding.space_id(),
-            client_identity: "peer_key_d18",
-        };
+        let namespace = nexus_local_db::RemoteBindingNamespace::new(
+            CREATOR_UNDER_TEST,
+            &character_id,
+            &binding_id,
+            host,
+            generation.get(),
+            binding.space_id(),
+            "peer_key_d18",
+        );
         admit_d18(&core, "adm_uncertain", &namespace).await;
 
         let uncertain = retry_class_reject(SpokeRejectCode::OutcomeUncertain, Some("uncertain"));
@@ -5412,15 +5522,15 @@ mod tests {
         let (character_id, binding_id) = seed_d18_binding(&core).await;
         let binding = core.memory_binding().unwrap();
         let (host, generation) = binding.authority();
-        let namespace = nexus_local_db::RemoteBindingNamespace {
-            owner_creator_id: CREATOR_UNDER_TEST,
-            character_id: &character_id,
-            binding_id: &binding_id,
-            authority_host_id: host,
-            authority_generation: generation.get(),
-            space_id: binding.space_id(),
-            client_identity: "peer_key_d18",
-        };
+        let namespace = nexus_local_db::RemoteBindingNamespace::new(
+            CREATOR_UNDER_TEST,
+            &character_id,
+            &binding_id,
+            host,
+            generation.get(),
+            binding.space_id(),
+            "peer_key_d18",
+        );
         admit_d18(&core, "adm_first", &namespace).await;
         admit_d18(&core, "adm_second", &namespace).await;
         assert_eq!(d18_admission_count(&core, &binding_id).await, 2);
@@ -5444,5 +5554,138 @@ mod tests {
             1,
             "an uncertain result keeps its own protection"
         );
+    }
+
+    fn hostile_reject(
+        code: SpokeRejectCode,
+        retry_class: Option<&str>,
+        wire_code: Option<&str>,
+    ) -> SpokeReject {
+        SpokeReject {
+            code,
+            message: format!("{PEER_MARKER} token=abc"),
+            details: Some(
+                json!({
+                    "retry_class": retry_class,
+                    "wire_code": wire_code,
+                    "debug": PEER_MARKER,
+                })
+                .as_object()
+                .expect("details object")
+                .clone(),
+            ),
+        }
+    }
+
+    const PEER_MARKER: &str = "PEER_SECRET_MARKER";
+
+    /// I-000202: the shared remote-refusal policy keeps the machine
+    /// classification and never carries peer-controlled text.
+    ///
+    /// The refusals here are hostile: their message and extra details carry a
+    /// marker that must not reach the returned error's fields, `Display` or
+    /// `Debug`. The classification (`code`, allowlisted `wire_code`,
+    /// `retry_class`, coarse family) is what a caller needs to tell a possibly
+    /// committed outcome from a clean failure.
+    #[test]
+    fn remote_refusal_keeps_classification_and_drops_peer_text() {
+        // An uncertain outcome beside a contradictory `terminal` class: the
+        // effective code wins, so a possibly committed capture never reads as
+        // a clean failure.
+        let error = remote_refusal(&hostile_reject(
+            SpokeRejectCode::OutcomeUncertain,
+            Some("terminal"),
+            Some("OUTCOME_UNCERTAIN"),
+        ));
+        let CoreError::MemoryProviderRefused {
+            code,
+            wire_code,
+            retry_class,
+            family,
+        } = &error
+        else {
+            panic!("a remote refusal keeps its structured carrier: {error:?}");
+        };
+        assert_eq!(code, "OUTCOME_UNCERTAIN");
+        assert_eq!(retry_class, "uncertain");
+        assert_eq!(wire_code.as_deref(), Some("OUTCOME_UNCERTAIN"));
+        assert_eq!(*family, MemoryProviderRefusal::Unavailable);
+
+        // A definite refusal keeps its declared class, effective code and a
+        // known peer wire code.
+        let error = remote_refusal(&hostile_reject(
+            SpokeRejectCode::NotAuthorized,
+            Some("terminal"),
+            Some("NOT_AUTHORIZED"),
+        ));
+        let CoreError::MemoryProviderRefused {
+            code,
+            wire_code,
+            retry_class,
+            family,
+        } = &error
+        else {
+            panic!("a remote refusal keeps its structured carrier: {error:?}");
+        };
+        assert_eq!(code, "NOT_AUTHORIZED");
+        assert_eq!(retry_class, "terminal");
+        assert_eq!(wire_code.as_deref(), Some("NOT_AUTHORIZED"));
+        assert_eq!(*family, MemoryProviderRefusal::Forbidden);
+
+        // An unknown class and an unknown peer wire code degrade conservatively
+        // instead of passing arbitrary peer strings through.
+        let error = remote_refusal(&hostile_reject(
+            SpokeRejectCode::InvalidInput,
+            Some("bogus"),
+            Some("NOT_A_MEMORY_CODE"),
+        ));
+        let CoreError::MemoryProviderRefused {
+            code,
+            wire_code,
+            retry_class,
+            family,
+        } = &error
+        else {
+            panic!("a remote refusal keeps its structured carrier: {error:?}");
+        };
+        assert_eq!(code, "INVALID_INPUT");
+        assert_eq!(retry_class, "uncertain");
+        assert_eq!(wire_code.as_deref(), None);
+        assert_eq!(*family, MemoryProviderRefusal::InvalidInput);
+
+        // A refusal with no details at all still classifies conservatively.
+        let error = remote_refusal(&SpokeReject {
+            code: SpokeRejectCode::InternalError,
+            message: PEER_MARKER.to_string(),
+            details: None,
+        });
+        let CoreError::MemoryProviderRefused {
+            code,
+            wire_code,
+            retry_class,
+            family,
+        } = &error
+        else {
+            panic!("a remote refusal keeps its structured carrier: {error:?}");
+        };
+        assert_eq!(code, "INTERNAL_ERROR");
+        assert_eq!(retry_class, "uncertain");
+        assert_eq!(wire_code.as_deref(), None);
+        assert_eq!(*family, MemoryProviderRefusal::Unavailable);
+
+        // Nothing peer-authored survives the rendered or debug form.
+        let rendered = format!(
+            "{} {error:?}",
+            remote_refusal(&hostile_reject(
+                SpokeRejectCode::InvalidInput,
+                Some("terminal"),
+                Some("NOT_AUTHORIZED"),
+            ))
+        );
+        assert!(
+            !rendered.contains(PEER_MARKER),
+            "peer text must not escape: {rendered}"
+        );
+        assert!(!rendered.contains("token=abc"));
     }
 }
