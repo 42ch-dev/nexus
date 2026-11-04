@@ -452,11 +452,13 @@ impl CoreService {
     /// handlers use). Compiled out of a production build.
     ///
     /// # Errors
-    /// [`CoreError::Closing`] after a close began.
+    /// [`CoreError::Closing`] after a close began, or an internal refusal when
+    /// the pinned binding is not local.
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn memory_provider_for_test(&self) -> CoreResult<Arc<LocalMemoryProvider>> {
-        self.memory_provider()
+        let binding = self.memory_binding()?;
+        Ok(Arc::clone(binding.local()?))
     }
 
     /// The provider authority this open pinned for the memory family.
@@ -476,25 +478,6 @@ impl CoreService {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
             .ok_or(CoreError::Closing)
-    }
-
-    /// The local provider handle behind the pinned binding (NXM-5 Task 2).
-    ///
-    /// Local-only internals (the legacy bridge, journals, the Character mind)
-    /// acquire their provider through this accessor, which is the binding's
-    /// own [`MemoryProviderBinding::local`] seam. A read-only open pins a
-    /// read-only provider, so its reads are served too (fix round 1, finding
-    /// F6).
-    ///
-    /// # Errors
-    /// [`CoreError::Closing`] after a close began, or an internal refusal when
-    /// the pinned binding is not local.
-    // The only production caller is the provider-host Character mind; the
-    // test-only accessor below also uses it. Compiled out elsewhere.
-    #[cfg(any(feature = "provider-host", feature = "test-hooks"))]
-    pub(crate) fn memory_provider(&self) -> CoreResult<Arc<LocalMemoryProvider>> {
-        let binding = self.memory_binding()?;
-        Ok(Arc::clone(binding.local()?))
     }
 
     /// The binding a memory **write** handler must use (NXM-5 Task 2 fix round

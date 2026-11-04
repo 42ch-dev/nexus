@@ -54,6 +54,7 @@ use sqlx::SqlitePool;
 
 use crate::actors::AdmittedActor;
 use crate::error::{CoreError, CoreResult};
+use crate::memory_binding::MemoryProviderBinding;
 use crate::memory_pipeline::{
     internal_err, map_local_db_error, process_bearer_review_batch, sqlx_internal,
     MemoryPipelineCtx, ReviewBatchRow, REVIEW_BATCH_LIMIT,
@@ -65,12 +66,10 @@ use std::sync::Arc;
 use crate::memory_provider::legacy;
 use crate::memory_provider::policy;
 use crate::memory_provider::profile;
-use crate::memory_provider::{
-    CaptureBinding, LegacyContentMigration, LocalMemoryProvider, MemoryDisposition,
-};
+use crate::memory_provider::{CaptureBinding, LegacyContentMigration, MemoryDisposition};
 use crate::principal::Principal;
 use crate::service::CoreService;
-use spoke_operations::{spoke_schemas, MemoryPort, SpokeReject, SpokeRejectCode, SpokeResult};
+use spoke_operations::{spoke_schemas, SpokeReject, SpokeRejectCode, SpokeResult};
 
 /// Per-Character review-call budget (mirrors the Creator review handler — the
 /// batch drains at most one bounded slice per call and reports `has_more`).
@@ -112,7 +111,7 @@ fn pagination_info(limit: u32, has_more: bool, next_cursor: Option<&str>) -> ser
 // ── Provider seam (NXM-5 Task 2) ─────────────────────────────────────────
 //
 // The read and dismissal handlers below serve the memory family through the
-// `MemoryPort` the open pinned ([`CoreService::memory_provider`]) instead of
+// `MemoryPort` the open pinned ([`CoreService::memory_binding`]) instead of
 // the legacy tables. This block is the existing-DTO/error adapter: a handler
 // keeps its retained request/response shape (compass D5) while the adapter
 // records the legacy page/keyset/offset semantics on top of provider reads and
@@ -123,9 +122,6 @@ fn pagination_info(limit: u32, has_more: bool, next_cursor: Option<&str>) -> ser
 // content alike. Legacy metadata rides in `content.structured.nexus_legacy`,
 // which is what lets the retained DTOs render the legacy display fields
 // (`pending_id`, `fragment_id`, `world_id`, keywords) rather than provider ids.
-
-/// The provider space this workspace serves (`memory.describe` reports it).
-const MEMORY_SPACE_ID: &str = crate::memory_provider::DEFAULT_SPACE_ID;
 
 /// Rows the adapter asks for per internal provider page: the provider's own
 /// advertised `max_page_size`, so a legacy DTO never names a bigger bound.
@@ -251,8 +247,14 @@ fn pending_row_in_scope(row: &PendingMemoryRow, binding_id: Option<&str>) -> boo
 ///
 /// E6's Character mind projection (`crate::soul`) reads through the same
 /// adapter: one merged-read address for both entry points (NXM-7).
+///
+/// The adapter holds the open's pinned [`MemoryProviderBinding`] (N3 §5):
+/// standard reads and writes run through `binding.port()` in the binding's own
+/// space, while the provider-local internals (the legacy bridge, JIT adoption,
+/// review disposition and the SOUL-invalidation journal) are reached only
+/// through [`MemoryProviderBinding::local`].
 pub struct MemoryAdapter {
-    provider: Arc<LocalMemoryProvider>,
+    binding: Arc<MemoryProviderBinding>,
     principal: spoke_schemas::Principal,
     subject_id: String,
 }
@@ -261,11 +263,11 @@ impl MemoryAdapter {
     /// The adapter for one bearer, get-or-creating its provider subject.
     ///
     /// Ensuring the subject is the write that opts the bearer into the bridge's
-    /// legacy projection, so it runs only on a writable provider: a read-only
+    /// legacy projection, so it runs only on a writable binding: a read-only
     /// core (NXM-5 Task 2 fix round 1, finding F6) serves the projection of the
     /// subject an earlier writer open already ensured, and writes nothing.
     pub async fn open(
-        provider: Arc<LocalMemoryProvider>,
+        binding: Arc<MemoryProviderBinding>,
         principal: &Principal,
         subject_id: String,
         kind_ns: &str,
@@ -273,36 +275,51 @@ impl MemoryAdapter {
     ) -> CoreResult<Self> {
         let spoke_principal: spoke_schemas::Principal =
             map_wire(json!({ "principal_id": principal.creator_id(), "extensions": {} }))?;
-        if provider.is_writable() {
+        if binding.is_writable() {
             let request: spoke_schemas::MemorySubjectsEnsureRequest = map_wire(json!({
-                "space_id": MEMORY_SPACE_ID,
+                "space_id": binding.space_id(),
                 "subject_id": subject_id,
                 "kind": { "ns": kind_ns, "id": kind_id },
             }))?;
-            if let SpokeResult::Reject(reject) =
-                provider.ensure_subject(&spoke_principal, request).await
+            if let SpokeResult::Reject(reject) = binding
+                .port()
+                .ensure_subject(&spoke_principal, request)
+                .await
             {
                 return Err(memory_reject(&reject));
             }
         }
         Ok(Self {
-            provider,
+            binding,
             principal: spoke_principal,
             subject_id,
         })
     }
 
-    /// The bearer's memory-disposition section: a review drain holds it across
-    /// the consumed-check, the classification and the persistence of every row
-    /// it processes (NXM-5 Task 2 fix round 2, finding F1).
-    async fn review_claim(&self) -> CoreResult<MemoryDisposition> {
-        self.provider.review_disposition(&self.subject_id).await
+    /// The bearer's memory-disposition section, when this binding serves the
+    /// local provider: a review drain holds it across the consumed-check, the
+    /// classification and the persistence of every row it processes (NXM-5 Task
+    /// 2 fix round 2, finding F1).
+    ///
+    /// A remote binding has no provider-local section: its candidate CAS and
+    /// atomic review supply the exclusion, so the drain runs without one.
+    async fn review_claim(&self) -> CoreResult<Option<MemoryDisposition>> {
+        match self.binding.local() {
+            Ok(local) => Ok(Some(local.review_disposition(&self.subject_id).await?)),
+            Err(_) => Ok(None),
+        }
     }
 
     /// The provider subject this adapter speaks for: the bearer a write under
     /// this adapter may mutate (R4-F2).
     const fn subject_id(&self) -> &str {
         self.subject_id.as_str()
+    }
+
+    /// Whether the open pinned the local provider. Provider-local internals
+    /// (the narrative-cache invalidation behind a promotion) run only here.
+    pub(crate) fn is_local(&self) -> bool {
+        self.binding.local().is_ok()
     }
 
     /// Every pending candidate of the subject, newest first in the retained
@@ -318,14 +335,15 @@ impl MemoryAdapter {
         let mut cursor: Option<String> = None;
         loop {
             let request: spoke_schemas::MemoryCandidatesListRequest = map_wire(json!({
-                "space_id": MEMORY_SPACE_ID,
+                "space_id": self.binding.space_id(),
                 "subject_id": self.subject_id,
                 "status": "pending",
                 "limit": MEMORY_PAGE_SIZE,
                 "cursor": cursor,
             }))?;
             let body = memory_ok(
-                self.provider
+                self.binding
+                    .port()
                     .list_candidates(&self.principal, request)
                     .await,
             )?;
@@ -369,14 +387,15 @@ impl MemoryAdapter {
         let mut cursor: Option<String> = None;
         loop {
             let request: spoke_schemas::MemoryCandidatesListRequest = map_wire(json!({
-                "space_id": MEMORY_SPACE_ID,
+                "space_id": self.binding.space_id(),
                 "subject_id": self.subject_id,
                 "status": "pending",
                 "limit": MEMORY_PAGE_SIZE,
                 "cursor": cursor,
             }))?;
             let body = memory_ok(
-                self.provider
+                self.binding
+                    .port()
                     .list_candidates(&self.principal, request)
                     .await,
             )?;
@@ -440,7 +459,7 @@ impl MemoryAdapter {
         let mut cursor: Option<String> = None;
         loop {
             let request: spoke_schemas::MemoryRecordsListRequest = map_wire(json!({
-                "space_id": MEMORY_SPACE_ID,
+                "space_id": self.binding.space_id(),
                 "subject_id": self.subject_id,
                 "selection": selection,
                 "kinds": kinds,
@@ -448,11 +467,21 @@ impl MemoryAdapter {
                 "limit": MEMORY_PAGE_SIZE,
                 "cursor": cursor,
             }))?;
-            let body = memory_ok(
-                self.provider
-                    .list_records_scoped(&self.principal, request, project_legacy)
-                    .await,
-            )?;
+            let body = match self.binding.local() {
+                Ok(local) => memory_ok(
+                    local
+                        .list_records_scoped(&self.principal, request, project_legacy)
+                        .await,
+                )?,
+                // A remote binding serves its own objects only, so selecting it
+                // never merges the local legacy projection into the read.
+                Err(_) => memory_ok(
+                    self.binding
+                        .port()
+                        .list_records(&self.principal, request)
+                        .await,
+                )?,
+            };
             rows.extend(body["records"].as_array().cloned().unwrap_or_default());
             if want.is_some_and(|want| rows.len() >= want) {
                 break;
@@ -510,10 +539,15 @@ impl MemoryAdapter {
     /// carries no records either way, so its absence is not an archive.
     async fn subject_archived(&self) -> CoreResult<bool> {
         let request: spoke_schemas::MemorySubjectsGetRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
+            "space_id": self.binding.space_id(),
             "subject_id": self.subject_id,
         }))?;
-        match self.provider.get_subject(&self.principal, request).await {
+        match self
+            .binding
+            .port()
+            .get_subject(&self.principal, request)
+            .await
+        {
             SpokeResult::Ok(body) => {
                 let body = serde_json::to_value(&body).map_err(wire_err)?;
                 Ok(body["subject"]["status"].as_str() == Some("archived"))
@@ -527,11 +561,16 @@ impl MemoryAdapter {
     /// renders it. `None` is the honest-empty answer for an absent document.
     pub(crate) async fn personality(&self) -> CoreResult<Option<String>> {
         let request: spoke_schemas::MemoryProfileGetRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
+            "space_id": self.binding.space_id(),
             "subject_id": self.subject_id,
             "profile_kinds": [SOUL_PROFILE_KIND],
         }))?;
-        let body = memory_ok(self.provider.get_profile(&self.principal, request).await)?;
+        let body = memory_ok(
+            self.binding
+                .port()
+                .get_profile(&self.principal, request)
+                .await,
+        )?;
         Ok(body["profiles"]
             .as_array()
             .into_iter()
@@ -545,10 +584,15 @@ impl MemoryAdapter {
     /// `None` is the retained not-found answer.
     async fn candidate(&self, candidate_id: &str) -> CoreResult<Option<Value>> {
         let request: spoke_schemas::MemoryCandidatesGetRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
+            "space_id": self.binding.space_id(),
             "candidate_id": candidate_id,
         }))?;
-        match self.provider.get_candidate(&self.principal, request).await {
+        match self
+            .binding
+            .port()
+            .get_candidate(&self.principal, request)
+            .await
+        {
             SpokeResult::Ok(body) => Ok(serde_json::to_value(&body)
                 .map_err(wire_err)?
                 .get("candidate")
@@ -565,13 +609,19 @@ impl MemoryAdapter {
     /// `Ok(false)` means nothing was pending under that id — absent, already
     /// consumed, or concurrently dismissed — which the handlers render as their
     /// retained not-found answer.
+    ///
+    /// A remote binding serves no legacy projection, so the bridge's
+    /// deterministic id names nothing there: the same `Ok(false)`, with no
+    /// provider write.
     async fn dismiss_legacy(&self, candidate_id: &str) -> CoreResult<bool> {
+        let Ok(local) = self.binding.local() else {
+            return Ok(false);
+        };
         let digest = match spoke_operations::jcs_sha256_hex(&json!(candidate_id)) {
             SpokeResult::Ok(digest) => digest,
             SpokeResult::Reject(reject) => return Err(memory_reject(&reject)),
         };
-        match self
-            .provider
+        match local
             .dismiss_legacy_candidate(
                 &self.principal,
                 &self.subject_id,
@@ -610,13 +660,14 @@ impl MemoryAdapter {
     /// already consumed, or lost the revision race.
     async fn dismiss_native(&self, candidate_id: &str, revision: u64) -> CoreResult<bool> {
         let request: spoke_schemas::MemoryCandidatesDismissRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
+            "space_id": self.binding.space_id(),
             "candidate_id": candidate_id,
             "expected_revision": revision,
             "idempotency_key": format!("e4dismiss-native:{candidate_id}"),
         }))?;
         match self
-            .provider
+            .binding
+            .port()
             .dismiss_candidate(&self.principal, request)
             .await
         {
@@ -635,32 +686,51 @@ impl MemoryAdapter {
         }
     }
 
-    /// Consume one pending candidate with the review decision the drain built,
-    /// under the bearer's disposition section the caller already holds.
+    /// Consume one pending candidate with the review decision the drain built.
     ///
     /// The decision is the §7.15 wire decision (`promote` / `fragment` /
     /// `drop`). A legacy-derived candidate is adopted under the bridge's
     /// deterministic id inside the same guarded transaction that consumes it
-    /// (NXM-5's mutation-time adoption, reused — not redefined — by NXM-8).
+    /// (NXM-5's mutation-time adoption, reused — not redefined — by NXM-8),
+    /// under the bearer's disposition section the caller holds. A remote
+    /// binding runs the ordinary protocol op, whose candidate CAS and
+    /// transaction supply the exclusion, and carries no local side effect.
     pub(crate) async fn review(
         &self,
         candidate_id: &str,
         expected_revision: u64,
         decision: Value,
-        section: &MemoryDisposition,
+        section: Option<&MemoryDisposition>,
     ) -> CoreResult<()> {
         let request: spoke_schemas::MemoryCandidatesReviewRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
+            "space_id": self.binding.space_id(),
             "candidate_id": candidate_id,
             "expected_revision": expected_revision,
             "decision": decision,
             "idempotency_key": idempotency_key("review", candidate_id)?,
         }))?;
-        match self
-            .provider
-            .review_legacy_candidate(&self.principal, &self.subject_id, request, section)
-            .await
-        {
+        let result = match self.binding.local() {
+            Ok(local) => {
+                // The drain takes the section before it fetches its slice, so a
+                // local review always has one.
+                let section = section.ok_or_else(|| {
+                    internal_err(
+                        "memory_review_section",
+                        "a local review drain requires the disposition section",
+                    )
+                })?;
+                local
+                    .review_legacy_candidate(&self.principal, &self.subject_id, request, section)
+                    .await
+            }
+            Err(_) => {
+                self.binding
+                    .port()
+                    .review_candidate(&self.principal, request)
+                    .await
+            }
+        };
+        match result {
             SpokeResult::Ok(_) => Ok(()),
             SpokeResult::Reject(reject) => Err(memory_reject(&reject)),
         }
@@ -707,11 +777,16 @@ impl MemoryAdapter {
     /// The Creator's `personality` profile (`SOUL.md`), if authored.
     async fn personality_profile(&self) -> CoreResult<Option<Value>> {
         let request: spoke_schemas::MemoryProfileGetRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
+            "space_id": self.binding.space_id(),
             "subject_id": self.subject_id,
             "profile_kinds": [profile::SOUL_PROFILE_KIND],
         }))?;
-        let body = memory_ok(self.provider.get_profile(&self.principal, request).await)?;
+        let body = memory_ok(
+            self.binding
+                .port()
+                .get_profile(&self.principal, request)
+                .await,
+        )?;
         Ok(body["profiles"]
             .as_array()
             .and_then(|profiles| profiles.first())
@@ -726,7 +801,7 @@ impl MemoryAdapter {
         idempotency_key: &str,
     ) -> CoreResult<()> {
         let request: spoke_schemas::MemoryRecordsCreateRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
+            "space_id": self.binding.space_id(),
             "subject_id": self.subject_id,
             "kind": kind,
             "content": content,
@@ -734,7 +809,13 @@ impl MemoryAdapter {
             "source_context_ids": [],
             "idempotency_key": idempotency_key,
         }))?;
-        memory_ok(self.provider.create_record(&self.principal, request).await).map(|_| ())
+        memory_ok(
+            self.binding
+                .port()
+                .create_record(&self.principal, request)
+                .await,
+        )
+        .map(|_| ())
     }
 
     /// Replace one Creator record's content on the expected revision.
@@ -742,7 +823,8 @@ impl MemoryAdapter {
     /// A record the bridge still projects is adopted under its deterministic id
     /// inside this write's guarded transaction (NXM-6 fix round 1, finding F2):
     /// the user edits a memory they can read, and the legacy file is never
-    /// written (D6).
+    /// written (D6). A remote binding has no projection to adopt and runs the
+    /// ordinary `memory.records.update`.
     async fn update_memory_record(
         &self,
         record_id: &str,
@@ -751,17 +833,25 @@ impl MemoryAdapter {
         idempotency_key: &str,
     ) -> CoreResult<()> {
         let request: spoke_schemas::MemoryRecordsUpdateRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
+            "space_id": self.binding.space_id(),
             "record_id": record_id,
             "expected_revision": expected_revision,
             "content": content,
             "idempotency_key": idempotency_key,
         }))?;
-        memory_ok(
-            self.provider
-                .update_legacy_record(&self.principal, &self.subject_id, request)
-                .await,
-        )
+        match self.binding.local() {
+            Ok(local) => memory_ok(
+                local
+                    .update_legacy_record(&self.principal, &self.subject_id, request)
+                    .await,
+            ),
+            Err(_) => memory_ok(
+                self.binding
+                    .port()
+                    .update_record(&self.principal, request)
+                    .await,
+            ),
+        }
         .map(|_| ())
     }
 
@@ -775,17 +865,25 @@ impl MemoryAdapter {
         idempotency_key: &str,
     ) -> CoreResult<()> {
         let request: spoke_schemas::MemoryRecordsDeleteRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
+            "space_id": self.binding.space_id(),
             "record_id": record_id,
             "expected_revision": expected_revision,
             "reason": "deleted through the creator memory CLI",
             "idempotency_key": idempotency_key,
         }))?;
-        memory_ok(
-            self.provider
-                .delete_legacy_record(&self.principal, &self.subject_id, request)
-                .await,
-        )
+        match self.binding.local() {
+            Ok(local) => memory_ok(
+                local
+                    .delete_legacy_record(&self.principal, &self.subject_id, request)
+                    .await,
+            ),
+            Err(_) => memory_ok(
+                self.binding
+                    .port()
+                    .delete_record(&self.principal, request)
+                    .await,
+            ),
+        }
         .map(|_| ())
     }
 
@@ -824,23 +922,34 @@ impl MemoryAdapter {
         idempotency_key: &str,
     ) -> CoreResult<()> {
         let request: spoke_schemas::MemoryProfileUpdateRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
+            "space_id": self.binding.space_id(),
             "subject_id": self.subject_id,
             "profile_kind": profile::SOUL_PROFILE_KIND,
             "expected_revision": expected_revision,
             "document": { "format": "markdown", "body": body },
             "idempotency_key": idempotency_key,
         }))?;
-        memory_ok(self.provider.update_profile(&self.principal, request).await).map(|_| ())
+        memory_ok(
+            self.binding
+                .port()
+                .update_profile(&self.principal, request)
+                .await,
+        )
+        .map(|_| ())
     }
 
     /// One provider record (a projected legacy row included) by id.
     async fn record(&self, record_id: &str) -> CoreResult<Option<Value>> {
         let request: spoke_schemas::MemoryRecordsGetRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
+            "space_id": self.binding.space_id(),
             "record_id": record_id,
         }))?;
-        match self.provider.get_record(&self.principal, request).await {
+        match self
+            .binding
+            .port()
+            .get_record(&self.principal, request)
+            .await
+        {
             SpokeResult::Ok(body) => Ok(serde_json::to_value(&body)
                 .map_err(wire_err)?
                 .get("record")
@@ -867,19 +976,37 @@ impl MemoryAdapter {
     /// §7.21 explicit placement change to shared, revision-checked, adopting a
     /// still-projected legacy row inside the promotion's transaction. A CAS miss
     /// keeps the retained `version_mismatch` conflict; an absent record keeps
-    /// the retained not-found answer.
+    /// the retained not-found answer. A remote binding has no projection to
+    /// adopt and runs the ordinary `memory.records.promote`.
     async fn promote_fragment(&self, record_id: &str, expected_revision: u64) -> CoreResult<()> {
-        match self
-            .provider
-            .promote_character_fragment(
-                &self.principal,
-                &self.subject_id,
-                record_id,
-                expected_revision,
-                &idempotency_key("promote", record_id)?,
-            )
-            .await
-        {
+        let key = idempotency_key("promote", record_id)?;
+        let result = match self.binding.local() {
+            Ok(local) => {
+                local
+                    .promote_character_fragment(
+                        &self.principal,
+                        &self.subject_id,
+                        record_id,
+                        expected_revision,
+                        &key,
+                    )
+                    .await
+            }
+            Err(_) => {
+                let request: spoke_schemas::MemoryRecordsPromoteRequest = map_wire(json!({
+                    "space_id": self.binding.space_id(),
+                    "record_id": record_id,
+                    "target_scope": { "visibility": "shared" },
+                    "expected_revision": expected_revision,
+                    "idempotency_key": key,
+                }))?;
+                self.binding
+                    .port()
+                    .promote_record(&self.principal, request)
+                    .await
+            }
+        };
+        match result {
             SpokeResult::Ok(_) => Ok(()),
             SpokeResult::Reject(reject) => Err(match reject.code {
                 SpokeRejectCode::NotFound => {
@@ -896,13 +1023,23 @@ impl MemoryAdapter {
 
     /// The placement a committed promotion left for one record, while the
     /// SOUL-narrative invalidation it owes has not run (R4-F3 round 2).
+    ///
+    /// The recovery row is provider-local state, so a remote binding reports no
+    /// outstanding invalidation.
     async fn soul_invalidation_binding(&self, record_id: &str) -> CoreResult<Option<String>> {
-        self.provider.soul_invalidation_binding(record_id).await
+        match self.binding.local() {
+            Ok(local) => local.soul_invalidation_binding(record_id).await,
+            Err(_) => Ok(None),
+        }
     }
 
-    /// Clear that recovery row once the invalidation ran.
+    /// Clear that recovery row once the invalidation ran; a remote binding has
+    /// no row to clear.
     async fn finish_soul_invalidation(&self, record_id: &str) -> CoreResult<()> {
-        self.provider.finish_soul_invalidation(record_id).await
+        match self.binding.local() {
+            Ok(local) => local.finish_soul_invalidation(record_id).await,
+            Err(_) => Ok(()),
+        }
     }
 }
 
@@ -1000,12 +1137,11 @@ impl CoreService {
 
 impl CoreService {
     /// The provider adapter for the principal's own Creator bearer, over the
-    /// pinned binding's local handle (a read-only core serves reads from it
-    /// too).
+    /// pinned binding (a read-only core serves reads from its own provider too).
     pub(crate) async fn creator_memory(&self, principal: &Principal) -> CoreResult<MemoryAdapter> {
         let binding = self.memory_binding()?;
         MemoryAdapter::open(
-            Arc::clone(binding.local()?),
+            binding,
             principal,
             legacy::creator_subject_id(principal.creator_id()),
             legacy::CREATOR_KIND_NS,
@@ -1019,7 +1155,7 @@ impl CoreService {
     async fn creator_memory_writer(&self, principal: &Principal) -> CoreResult<MemoryAdapter> {
         let binding = self.memory_writer_binding()?;
         MemoryAdapter::open(
-            Arc::clone(binding.local()?),
+            binding,
             principal,
             legacy::creator_subject_id(principal.creator_id()),
             legacy::CREATOR_KIND_NS,
@@ -1036,7 +1172,7 @@ impl CoreService {
     ) -> CoreResult<MemoryAdapter> {
         let binding = self.memory_binding()?;
         MemoryAdapter::open(
-            Arc::clone(binding.local()?),
+            binding,
             principal,
             legacy::character_subject_id(character_id),
             legacy::CHARACTER_KIND_NS,
@@ -1054,7 +1190,7 @@ impl CoreService {
     ) -> CoreResult<MemoryAdapter> {
         let binding = self.memory_writer_binding()?;
         MemoryAdapter::open(
-            Arc::clone(binding.local()?),
+            binding,
             principal,
             legacy::character_subject_id(character_id),
             legacy::CHARACTER_KIND_NS,
@@ -1484,7 +1620,7 @@ impl CoreService {
             legacy["created_at"] = json!(created_at);
         }
         let capture: spoke_schemas::MemoryCaptureRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
+            "space_id": memory.binding.space_id(),
             "subject_id": memory.subject_id.as_str(),
             "content": {
                 "text": raw_digest.as_str(),
@@ -1500,7 +1636,13 @@ impl CoreService {
             "kind_hint": task_kind_to_memory_kind(&task_kind),
             "idempotency_key": format!("e4capture:{digest}"),
         }))?;
-        memory_ok(memory.provider.capture(&memory.principal, capture).await)?;
+        memory_ok(
+            memory
+                .binding
+                .port()
+                .capture(&memory.principal, capture)
+                .await,
+        )?;
         map_wire(json!({ "success": true, "pending_id": pending_id }))
     }
 
@@ -1914,7 +2056,7 @@ impl CoreService {
             origin["created_at"] = json!(created_at);
         }
         let capture: spoke_schemas::MemoryCaptureRequest = map_wire(json!({
-            "space_id": MEMORY_SPACE_ID,
+            "space_id": memory.binding.space_id(),
             "subject_id": memory.subject_id.as_str(),
             "content": {
                 "text": raw_digest.as_str(),
@@ -1933,15 +2075,30 @@ impl CoreService {
             "kind_hint": task_kind_to_memory_kind(&task_kind),
             "idempotency_key": character_capture_key(&pending_id)?,
         }))?;
-        let candidate_id = legacy::character_pending_review_candidate_id(&pending_id);
-        match memory
-            .provider
-            .capture_identified(&memory.principal, capture, &candidate_id, binding.as_ref())
-            .await
-        {
-            Ok(SpokeResult::Ok(_)) => {}
-            Ok(SpokeResult::Reject(reject)) => return Err(memory_reject(&reject)),
-            Err(error) => return Err(map_local_db_error(error)),
+        match memory.binding.local() {
+            Ok(local) => {
+                let candidate_id = legacy::character_pending_review_candidate_id(&pending_id);
+                match local
+                    .capture_identified(&memory.principal, capture, &candidate_id, binding.as_ref())
+                    .await
+                {
+                    Ok(SpokeResult::Ok(_)) => {}
+                    Ok(SpokeResult::Reject(reject)) => return Err(memory_reject(&reject)),
+                    Err(error) => return Err(map_local_db_error(error)),
+                }
+            }
+            // A remote binding serves no local bridge identity: the standard
+            // capture op stores the candidate under its own minted id.
+            Err(_) => {
+                if let SpokeResult::Reject(reject) = memory
+                    .binding
+                    .port()
+                    .capture(&memory.principal, capture)
+                    .await
+                {
+                    return Err(memory_reject(&reject));
+                }
+            }
         }
 
         map_wire(json!({
@@ -2246,11 +2403,14 @@ impl CoreService {
         else {
             // The promotion already committed and only its invalidation is
             // outstanding: finish it before answering the stable conflict, so a
-            // retry never leaves the shared fragment behind a stale cache.
-            let binding = memory.soul_invalidation_binding(&record_id).await?;
-            self.invalidate_character_soul_narratives(&character_id, binding.as_deref())
-                .await?;
-            memory.finish_soul_invalidation(&record_id).await?;
+            // retry never leaves the shared fragment behind a stale cache. A
+            // remote binding has no local narrative cache or journal to settle.
+            if memory.is_local() {
+                let binding = memory.soul_invalidation_binding(&record_id).await?;
+                self.invalidate_character_soul_narratives(&character_id, binding.as_deref())
+                    .await?;
+                memory.finish_soul_invalidation(&record_id).await?;
+            }
             return Err(CoreError::ActorConflict {
                 code: "character_fragment_already_shared".to_string(),
                 message: "character memory fragment is already shared".to_string(),
@@ -2269,10 +2429,14 @@ impl CoreService {
             )
             .await?;
         // Retained cache semantics: exactly the affected SOUL-narrative scopes
-        // (shared + the old binding) are invalidated.
-        self.invalidate_character_soul_narratives(&character_id, Some(source_binding.as_str()))
-            .await?;
-        memory.finish_soul_invalidation(&record_id).await?;
+        // (shared + the old binding) are invalidated. The cache and the
+        // invalidation journal are local-provider state, so a remote binding
+        // settles neither.
+        if memory.is_local() {
+            self.invalidate_character_soul_narratives(&character_id, Some(source_binding.as_str()))
+                .await?;
+            memory.finish_soul_invalidation(&record_id).await?;
+        }
         let promoted = memory.record(&record_id).await?.ok_or_else(absent)?;
         map_wire(json!({
             "fragment": character_fragment_from_provider(&promoted, &character_id)?,
@@ -2377,7 +2541,8 @@ impl CoreService {
         let mut rows: Vec<PendingMemoryRow> = pending.into_iter().take(batch_limit).collect();
         // The check/use boundary (fix round 2, finding F1): the fetch above only
         // selects the slice. This re-check runs inside the bearer's disposition
-        // section, so a dismissal can neither commit between it and the
+        // section when the binding is local (a remote binding relies on its
+        // candidate CAS), so a dismissal can neither commit between it and the
         // classification below nor be classified after it: one that already
         // committed is observed here and its row is dropped.
         #[cfg(feature = "test-hooks")]
@@ -2406,7 +2571,8 @@ impl CoreService {
         };
         let deadline = tokio::time::Instant::now() + REVIEW_CALL_TIMEOUT;
         let mut outcome =
-            process_bearer_review_batch(&batch_rows, bearer, &memory, &section, deadline).await?;
+            process_bearer_review_batch(&batch_rows, bearer, &memory, section.as_ref(), deadline)
+                .await?;
         drop(section);
         drop(ctx);
         let deadline_stopped = outcome.processed < processing_slice;
@@ -2813,7 +2979,8 @@ impl CoreService {
         let mut rows: Vec<PendingMemoryRow> = pending.into_iter().take(batch_limit).collect();
         // The check/use boundary (fix round 2, finding F1): the fetch above only
         // selects the slice. This re-check runs inside the bearer's disposition
-        // section, so a dismissal can neither commit between it and the
+        // section when the binding is local (a remote binding relies on its
+        // candidate CAS), so a dismissal can neither commit between it and the
         // classification below nor be classified after it: one that already
         // committed is observed here and its row is dropped.
         #[cfg(feature = "test-hooks")]
@@ -2844,7 +3011,7 @@ impl CoreService {
             &batch_rows,
             MemoryBearerRef::Creator(principal.creator_id()),
             &memory,
-            &section,
+            section.as_ref(),
             deadline,
         )
         .await?;

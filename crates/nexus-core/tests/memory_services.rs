@@ -5624,7 +5624,7 @@ async fn character_mind_projection_serves_provider_seeded_soul_fragments_and_mem
     seed_legacy_creator_content(&env).await;
     let (alpha, zeta) = seed_mind_projection_fixtures(&env, &other_binding).await;
 
-    let mind = CoreCharacterMind::new(
+    let mind = CoreCharacterMind::local_for_test(
         plain_pool(&env).await,
         core.memory_provider_for_test().expect("pinned provider"),
     )
@@ -5655,7 +5655,7 @@ async fn character_mind_projection_serves_provider_seeded_soul_fragments_and_mem
          it came from, in slug order"
     );
 
-    let shared_only = CoreCharacterMind::new(
+    let shared_only = CoreCharacterMind::local_for_test(
         plain_pool(&env).await,
         core.memory_provider_for_test().expect("pinned provider"),
     )
@@ -5717,7 +5717,7 @@ async fn character_mind_projection_ranks_the_complete_memory_set_by_slug_before_
         }
     }
 
-    let mind = CoreCharacterMind::new(
+    let mind = CoreCharacterMind::local_for_test(
         plain_pool(&env).await,
         core.memory_provider_for_test().expect("pinned provider"),
     )
@@ -5772,7 +5772,7 @@ async fn character_mind_projection_keeps_the_legacy_tie_break_at_the_scope_cap()
     }
     pool.close().await;
 
-    let mind = CoreCharacterMind::new(
+    let mind = CoreCharacterMind::local_for_test(
         plain_pool(&env).await,
         core.memory_provider_for_test().expect("pinned provider"),
     )
@@ -5846,7 +5846,7 @@ async fn character_mind_projection_keeps_the_legacy_text_order_across_timestamp_
     .unwrap();
     pool.close().await;
 
-    let mind = CoreCharacterMind::new(
+    let mind = CoreCharacterMind::local_for_test(
         plain_pool(&env).await,
         core.memory_provider_for_test().expect("pinned provider"),
     )
@@ -5922,7 +5922,7 @@ async fn character_mind_projection_excludes_an_archived_subject_like_recall() {
             .expect("memory file bytes");
 
     // A live subject: the projection serves both record families.
-    let live = CoreCharacterMind::new(plain_pool(&env).await, provider.clone())
+    let live = CoreCharacterMind::local_for_test(plain_pool(&env).await, provider.clone())
         .projection(&principal, CREATOR, &env.character_id, None)
         .await
         .expect("live projection");
@@ -5965,7 +5965,7 @@ async fn character_mind_projection_excludes_an_archived_subject_like_recall() {
     .await
     .expect("read-only open");
     let principal = read_only.active_principal().await.unwrap();
-    let excluded = CoreCharacterMind::new(
+    let excluded = CoreCharacterMind::local_for_test(
         plain_pool(&env).await,
         read_only
             .memory_provider_for_test()
@@ -6000,7 +6000,7 @@ async fn character_mind_projection_fails_closed_when_the_provider_refuses() {
         .expect("pinned provider");
     let pool = plain_pool(&env).await;
 
-    let refused = CoreCharacterMind::new(pool.clone(), provider.clone())
+    let refused = CoreCharacterMind::local_for_test(pool.clone(), provider.clone())
         .projection(&principal, CREATOR, &env.character_id, None)
         .await
         .expect_err("an absent provider space cannot serve the projection");
@@ -6009,7 +6009,7 @@ async fn character_mind_projection_fails_closed_when_the_provider_refuses() {
         "the refusal propagates instead of becoming an empty mind: {refused:?}"
     );
 
-    let malformed = CoreCharacterMind::new(pool, provider)
+    let malformed = CoreCharacterMind::local_for_test(pool, provider)
         .projection(&principal, CREATOR, "not-a-character", None)
         .await
         .expect_err("a malformed bearer id names no subject");

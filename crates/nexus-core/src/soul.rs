@@ -19,8 +19,11 @@ use std::sync::Arc;
 
 use crate::error::{CoreError, CoreResult};
 use crate::memory::{record_keywords, CharacterTomService, MemoryAdapter};
+use crate::memory_binding::MemoryProviderBinding;
 use crate::memory_pipeline::{internal_err, map_local_db_error, sqlx_internal, MemoryPipelineCtx};
-use crate::memory_provider::{created_at_cmp, legacy, policy, LocalMemoryProvider};
+#[cfg(feature = "test-hooks")]
+use crate::memory_provider::LocalMemoryProvider;
+use crate::memory_provider::{created_at_cmp, legacy, policy};
 use crate::principal::Principal;
 use crate::service::CoreService;
 use nexus_contracts::generated::daemon_api::characters::soul::character_soul_narrative_request::CharacterSoulNarrativeRequest;
@@ -691,7 +694,7 @@ fn format_tom_belief_line(row: &crate::memory::CharacterTomBeliefRow) -> String 
 /// Returns an internal/`DATABASE_ERROR`/validation [`CoreError`] on any
 /// projection read failure other than a recognised absent-data condition.
 pub async fn load_character_mind_projection(
-    memory: Arc<LocalMemoryProvider>,
+    memory: Arc<MemoryProviderBinding>,
     principal: &Principal,
     owner_creator_id: &str,
     character_id: &str,
@@ -853,7 +856,7 @@ fn memory_document_line(record: &RetainedRecord) -> CoreResult<String> {
 /// Load bounded SOUL/Memory plus L1-then-L2 `ToM` for an admitted Character run.
 pub async fn load_character_mind_projection_with_tom(
     pool: &SqlitePool,
-    memory: Arc<LocalMemoryProvider>,
+    memory: Arc<MemoryProviderBinding>,
     principal: &Principal,
     owner_creator_id: &str,
     character_id: &str,
@@ -901,20 +904,33 @@ pub async fn load_character_mind_projection_with_tom(
 /// principal-verified families around it. No admission is performed here —
 /// callers guarantee stored ownership exactly as before the migration.
 ///
-/// The reader holds the open's pinned provider (NXM-7), so E6 reads the same
-/// `MemoryPort` the E4 memory family does; the pool remains only for the
-/// `ToM` family, which N2 does not reroute.
+/// The reader holds the open's pinned [`MemoryProviderBinding`] (NXM-7, N3
+/// §5), so E6 reads the same `MemoryPort` and space the E4 memory family does;
+/// the pool remains only for the `ToM` family, which N2 does not reroute.
 #[derive(Clone)]
 pub struct CoreCharacterMind {
     pool: SqlitePool,
-    memory: Arc<LocalMemoryProvider>,
+    memory: Arc<MemoryProviderBinding>,
 }
 
 impl CoreCharacterMind {
-    /// Bind the projection reader to a workspace pool and the open's provider.
+    /// Bind the projection reader to a workspace pool and the open's pinned
+    /// provider binding (the provider-host composition and the test seam).
+    #[cfg(any(feature = "provider-host", feature = "test-hooks"))]
     #[must_use]
-    pub const fn new(pool: SqlitePool, memory: Arc<LocalMemoryProvider>) -> Self {
+    pub(crate) fn new(pool: SqlitePool, memory: Arc<MemoryProviderBinding>) -> Self {
         Self { pool, memory }
+    }
+
+    /// Test-only: bind the reader to a local provider pinned as its own
+    /// authority. A crate-external target cannot name the crate-private
+    /// binding, and the reader under test must be the same one a local open
+    /// serves. Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn local_for_test(pool: SqlitePool, memory: Arc<LocalMemoryProvider>) -> Self {
+        Self::new(pool, Arc::new(MemoryProviderBinding::pin_local(memory)))
     }
 
     /// Bounded SOUL/Memory projection for one Character scope.

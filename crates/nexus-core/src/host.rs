@@ -1974,7 +1974,7 @@ impl HostHandle {
                         "Character host launch requires an active binding",
                     )
                 })?;
-                let mind = CoreCharacterMind::new(pool.clone(), self.core.memory_provider()?)
+                let mind = CoreCharacterMind::new(pool.clone(), self.core.memory_binding()?)
                     .projection_with_tom(
                         principal,
                         creator_id,

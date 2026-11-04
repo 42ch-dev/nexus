@@ -281,13 +281,15 @@ pub struct ReviewBatchRow {
 /// write-idle (compass D6). The deadline semantics (stop on expiry, partial
 /// progress, `any_row_remained_pending`) are unchanged.
 ///
-/// `section` is the bearer's memory-disposition section, already held by the
-/// caller across the whole batch: every consumption here runs under it.
+/// `section` is the bearer's memory-disposition section when the binding is
+/// local, already held by the caller across the whole batch: every consumption
+/// here runs under it. A remote binding has none (its candidate CAS supplies
+/// the exclusion), so the batch runs without one.
 pub async fn process_bearer_review_batch(
     rows: &[ReviewBatchRow],
     bearer: MemoryBearerRef<'_>,
     memory: &MemoryAdapter,
-    section: &MemoryDisposition,
+    section: Option<&MemoryDisposition>,
     deadline: tokio::time::Instant,
 ) -> CoreResult<ReviewBatchOutcome> {
     let mut outcome = ReviewBatchOutcome::new();
@@ -332,7 +334,7 @@ async fn consume_review_decision(
     row: &ReviewBatchRow,
     bearer: MemoryBearerRef<'_>,
     memory: &MemoryAdapter,
-    section: &MemoryDisposition,
+    section: Option<&MemoryDisposition>,
 ) -> RowActionCounts {
     let mut counts = RowActionCounts {
         promoted: 0,
