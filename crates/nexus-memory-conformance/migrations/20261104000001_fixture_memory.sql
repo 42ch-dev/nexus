@@ -156,9 +156,9 @@ CREATE TABLE IF NOT EXISTS profiles (
     PRIMARY KEY (space_id, subject_id, profile_kind)
 ) WITHOUT ROWID;
 
--- §6.10: operation receipts and their idempotency namespace. A pending receipt
--- carries no payload and no terminal stamp; a settled receipt carries exactly
--- one payload. Receipt results stay content-free for consumed candidates.
+-- §6.10: operation receipt bodies. A pending receipt carries no payload and no
+-- terminal stamp; a settled receipt carries exactly one payload. Receipt
+-- results stay content-free for consumed candidates.
 CREATE TABLE IF NOT EXISTS receipts (
     receipt_id TEXT PRIMARY KEY,
     space_id TEXT NOT NULL,
@@ -182,14 +182,31 @@ CREATE TABLE IF NOT EXISTS receipts (
     )
 ) WITHOUT ROWID;
 
--- The idempotency namespace (§7.0.5): `(space_id, requester_principal_id, op,
--- idempotency_key)`. A unique index IS the namespace, so a same-key replay
--- resolves with one lookup and can never insert a second receipt; the keyless
--- `memory.subjects.ensure` exemption falls outside it instead of needing a
--- second table to stay consistent with the receipt it points at.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_receipts_idempotency_namespace
-    ON receipts (space_id, requester_principal_id, op, idempotency_key)
-    WHERE idempotency_key IS NOT NULL;
+-- §7.0.5/§6.10: the idempotency namespace `(space_id, requester_principal_id,
+-- op, idempotency_key)` is its own durable table, not an index over receipts:
+-- the row keeps the payload binding and the receipt reference after the public
+-- receipt body is evicted, so the dedup identity outlives its receipt for the
+-- longer dedup retention window and a replay within that window can answer
+-- `RECEIPT_EXPIRED` instead of silently re-executing. `last_known_status` is
+-- what that refusal reports. `receipt_id` is deliberately not a foreign key —
+-- the receipt row is the part that gets deleted. The keyless
+-- `memory.subjects.ensure` exemption (§7.0.5) binds no namespace row at all.
+CREATE TABLE IF NOT EXISTS idempotency_namespace (
+    space_id TEXT NOT NULL,
+    requester_principal_id TEXT NOT NULL,
+    op TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    payload_digest TEXT NOT NULL,
+    receipt_id TEXT NOT NULL,
+    last_known_status TEXT NOT NULL CHECK (last_known_status IN ('committed', 'pending', 'failed')),
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (space_id, requester_principal_id, op, idempotency_key)
+) WITHOUT ROWID;
+
+-- Retention sweep (§6.10): the dedup window is a range predicate on the row's
+-- age across every namespace.
+CREATE INDEX IF NOT EXISTS idx_idempotency_namespace_created
+    ON idempotency_namespace (created_at);
 
 CREATE INDEX IF NOT EXISTS idx_receipts_space_status
     ON receipts (space_id, status);

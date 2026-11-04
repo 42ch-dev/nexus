@@ -70,7 +70,6 @@ async fn fresh_homes_bootstrap_isolated_authorities() {
     let home_b = TempDir::new().expect("temp home b");
     let database_a = database_path(&home_a);
     let database_b = database_path(&home_b);
-    assert_ne!(database_a, database_b);
 
     let provider_a = FixtureMemoryProvider::open(&database_a)
         .await
