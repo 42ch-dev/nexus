@@ -283,3 +283,75 @@ async fn explicit_remote_selection_is_refused_without_reading_credentials() {
         "expected the typed refusal, got {error:?}"
     );
 }
+
+/// A failed `DirectWriter` pin must release only what that open owned: the
+/// live `EngineOwner`'s retained admission stays in the process registry, so
+/// the creator remains joinable afterwards.
+#[tokio::test]
+async fn failed_direct_writer_pin_keeps_a_live_engine_owner_joinable() {
+    let env = Env::new(None);
+    let engine = CoreService::open(env.options(None))
+        .await
+        .expect("live engine owner");
+    let principal = engine.active_principal().await.expect("principal");
+    assert_eq!(engine.count_pending_reviews(&principal).await.expect("read").count, 0);
+
+    env.write_config(Some(&remote_table()));
+    let direct = CoreOpenOptions {
+        user_home: env.user_home.clone(),
+        access: CoreAccess::DirectWriter,
+        memory: None,
+    };
+    let error = CoreService::open(direct)
+        .await
+        .err()
+        .expect("the remote pin refuses the direct writer open");
+    assert!(
+        is_remote_disabled(&error),
+        "expected the typed refusal, got {error:?}"
+    );
+
+    env.write_config(None);
+    let joined = CoreService::open(env.options(None))
+        .await
+        .expect("the live engine owner is still joinable after the failed open");
+    let joined_principal = joined.active_principal().await.expect("principal");
+    assert_eq!(
+        joined.count_pending_reviews(&joined_principal).await.expect("read").count,
+        0
+    );
+    assert!(joined.close().await.expect("close").cleanup_confirmed);
+    assert_eq!(
+        engine.count_pending_reviews(&principal).await.expect("read").count,
+        0,
+        "the failed direct open did not disturb the live engine owner"
+    );
+    assert!(engine.close().await.expect("close").cleanup_confirmed);
+}
+
+/// A failed OPEN THAT JOINED the live engine admission (it owns no retained
+/// entry) must leave the creator joinable as well.
+#[tokio::test]
+async fn failed_joined_engine_pin_keeps_the_creator_joinable() {
+    let env = Env::new(None);
+    let engine = CoreService::open(env.options(None))
+        .await
+        .expect("live engine owner");
+
+    env.write_config(Some(&remote_table()));
+    let error = CoreService::open(env.options(None))
+        .await
+        .err()
+        .expect("the joining open refuses the remote pin");
+    assert!(
+        is_remote_disabled(&error),
+        "expected the typed refusal, got {error:?}"
+    );
+
+    env.write_config(None);
+    let joined = CoreService::open(env.options(None))
+        .await
+        .expect("the joined failure released nothing the creator owns");
+    assert!(joined.close().await.expect("close").cleanup_confirmed);
+    assert!(engine.close().await.expect("close").cleanup_confirmed);
+}

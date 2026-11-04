@@ -396,8 +396,13 @@ impl CoreService {
             Ok(binding) => Some(binding),
             Err(error) => {
                 pool.close().await;
-                if options.access == CoreAccess::DirectWriter || owns_engine_admission {
-                    release_retained_writer_guards(&db_path);
+                // Release only the admission THIS open created: a joined
+                // handle releases nothing, and another mode's (or another
+                // owner's) retained entry is never touched. The pool above is
+                // already closed, so this handle is the last user of its own
+                // entry.
+                if let Some(guarded) = guarded.as_ref() {
+                    guarded.release_owned_retained_admission();
                 }
                 drop(guarded);
                 return Err(error);
