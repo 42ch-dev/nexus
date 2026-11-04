@@ -228,6 +228,24 @@ pub(crate) fn requirement<'a>(
     }
 }
 
+/// Requirement for an op whose effect — or whose grant view — covers a whole
+/// subject or, with no subject scope, the whole space: every placement context
+/// and shared visibility. `subject_all` is the published evaluator's only
+/// unrestricted-only facet (§6.5), so a context-limited grant never admits a
+/// whole-target action or a full grant view (MEM-R017/R026).
+pub(crate) fn whole_scope_requirement<'a>(
+    capability: &'a str,
+    subject_id: Option<&'a str>,
+) -> GrantRequirement<'a> {
+    GrantRequirement {
+        capability,
+        subject_id,
+        context_ids: Vec::new(),
+        reads_shared: false,
+        subject_all: true,
+    }
+}
+
 fn require_authorized(
     grants: &[MemoryGrant],
     principal_id: &str,
@@ -749,7 +767,9 @@ impl FixtureMemoryProvider {
             principal_id,
             space_id,
             now,
-            &requirement("admin", None),
+            // A freeze/unfreeze gate covers every placement context of the
+            // space, so a context-limited admin never controls it (§7.3/§7.4).
+            &whole_scope_requirement("admin", None),
         )?;
         require_revision(expected_revision, space.revision)?;
         let revision = if space.status == target_status {
@@ -923,10 +943,14 @@ impl FixtureMemoryProvider {
         let space = fetch_space(conn, &request.space_id).await?;
         require_admitted("memory.subjects.fence", &space)?;
         let grants = load_grants(conn, &request.space_id).await?;
-        // Fence authority covers the real target: the named subject and, for a
-        // context target, that placement context (§6.5/§7.7).
+        // Fence authority covers the real target: a subject target rewrites
+        // every placement context of the subject, so it needs unrestricted
+        // coverage of that subject; a context target needs that one placement
+        // context (§6.5/§7.7).
         let required = match &request.target {
-            Target::Subject => requirement("admin", Some(request.subject_id.as_str())),
+            Target::Subject => {
+                whole_scope_requirement("admin", Some(request.subject_id.as_str()))
+            }
             Target::Context(context_id) => GrantRequirement {
                 capability: "admin",
                 subject_id: Some(request.subject_id.as_str()),
@@ -1018,28 +1042,55 @@ impl FixtureMemoryProvider {
     /// Admin sees every grant in the space (optionally for one principal); any
     /// other principal sees exactly its own grants through the
     /// selector-omitted path (§6.4/§7.8).
+    ///
+    /// The whole read — space row, grants, the authorization decision, the page
+    /// rows and the cursor's snapshot marker — runs inside one read
+    /// transaction, so a change committed by another connection between them
+    /// cannot pair old rows with a new marker (§7.0.7/MEM-R026).
     pub(crate) async fn grants_list(
         &self,
         principal_id: &str,
         request: &MemoryGrantsListRequest,
         now: DateTime<Utc>,
     ) -> Result<GrantPage, SpokeReject> {
+        let mut transaction = self.store().pool().begin().await.map_err(internal)?;
+        let page = self
+            .grants_list_in_tx(&mut transaction, principal_id, request, now)
+            .await?;
+        transaction.commit().await.map_err(internal)?;
+        Ok(page)
+    }
+
+    /// [`Self::grants_list`] on a caller-owned connection: the whole read uses
+    /// the caller's snapshot and never begins or commits a transaction. Later
+    /// read slices that must pair authorization with data use this same seam.
+    pub(crate) async fn grants_list_in_tx(
+        &self,
+        conn: &mut SqliteConnection,
+        principal_id: &str,
+        request: &MemoryGrantsListRequest,
+        now: DateTime<Utc>,
+    ) -> Result<GrantPage, SpokeReject> {
         checked(validate_memory_grants_list(request, MAX_PAGE_SIZE))?;
         self.require_served_space(&request.space_id)?;
-        let mut conn = self.store().pool().acquire().await.map_err(internal)?;
-        let space = fetch_space(&mut conn, &request.space_id).await?;
+        let space = fetch_space(conn, &request.space_id).await?;
         require_admitted("memory.grants.list", &space)?;
-        let rows = load_grant_rows(&mut conn, &request.space_id).await?;
+        let rows = load_grant_rows(conn, &request.space_id).await?;
         let grants = rows
             .iter()
             .map(grant_to_wire)
             .collect::<Result<Vec<_>, _>>()?;
+        // A full view covers the requested subject (or the whole space) across
+        // every placement context, so a context-limited admin never gets one.
         let admin = is_authorized(
             &grants,
             principal_id,
             &request.space_id,
             now,
-            &requirement("admin", None),
+            &whole_scope_requirement(
+                "admin",
+                request.subject_id.as_deref().map(|id| id.as_str()),
+            ),
         );
         // §6.4: the optional principal selector is an admin-only target
         // selector, so a non-admin may not name any principal — not even
@@ -1068,8 +1119,9 @@ impl FixtureMemoryProvider {
         // §7.0.7/MEM-R026: bind the cursor to the provider snapshot marker and
         // engine policy as well as the selection, so any grant or lifecycle
         // change in the space invalidates it even when the page's rows did not
-        // move.
-        let snapshot = snapshot_marker(&mut conn, &request.space_id).await?;
+        // move. The marker is read on the same connection, inside the same
+        // snapshot as the authorization and the rows above.
+        let snapshot = snapshot_marker(conn, &request.space_id).await?;
         let binding_digest = match jcs_sha256_hex(&json!({
             "principal": principal_id,
             "space": request.space_id.as_str(),
@@ -3083,6 +3135,345 @@ mod tests {
             ),
             SpokeRejectCode::CursorInvalid
         );
+    }
+
+    #[tokio::test]
+    async fn whole_target_admin_requires_full_subject_or_space_coverage() {
+        let scenario = Scenario::open().await;
+        let space_id = scenario.space_id.clone();
+        // A space-wide admin grant that covers only the ctx-a placement.
+        scenario
+            .provider
+            .grants_grant(
+                OPERATOR,
+                &grant_request(&space_id, CLIENT, &["admin"], None, Some(&["ctx-a"])),
+                now(),
+            )
+            .await
+            .expect("operator issues a ctx-a-restricted admin grant");
+        // A grant in another placement: it only reaches a full grant view.
+        scenario
+            .provider
+            .grants_grant(
+                OPERATOR,
+                &grant_request(&space_id, OTHER, &["capture"], None, Some(&["ctx-b"])),
+                now(),
+            )
+            .await
+            .expect("operator issues a ctx-b grant");
+        scenario
+            .provider
+            .subjects_ensure(OPERATOR, &ensure_request(&space_id, "subject-one"), now())
+            .await
+            .expect("operator ensures subject-one");
+
+        // Whole-subject fence and archive span every placement context of the
+        // subject, so the ctx-a-only admin is refused both.
+        for action in ["fence", "archive"] {
+            assert_eq!(
+                reject_code(
+                    scenario
+                        .provider
+                        .subjects_fence(
+                            CLIENT,
+                            &fence_request(&space_id, "subject-one", action, without_subject(), 1),
+                            now(),
+                        )
+                        .await,
+                ),
+                SpokeRejectCode::NotAuthorized,
+                "a ctx-a-only admin must not {action} the whole subject"
+            );
+        }
+        let untouched = scenario
+            .provider
+            .subjects_get(OPERATOR, &get_request(&space_id, "subject-one"), now())
+            .await
+            .expect("subject after the refused whole-subject actions");
+        assert_eq!(untouched.status.to_string(), "active");
+        assert!(untouched.fenced_contexts.is_empty());
+        assert_eq!(untouched.revision.get(), 1);
+
+        // The whole-space maintenance gate is closed to the same admin, and
+        // the refusals leave the space untouched.
+        assert_eq!(
+            reject_code(
+                scenario
+                    .provider
+                    .spaces_freeze(CLIENT, &freeze_request(&space_id, 1), now())
+                    .await,
+            ),
+            SpokeRejectCode::NotAuthorized
+        );
+        assert_eq!(
+            reject_code(
+                scenario
+                    .provider
+                    .spaces_unfreeze(CLIENT, &unfreeze_request(&space_id, 1), now())
+                    .await,
+            ),
+            SpokeRejectCode::NotAuthorized
+        );
+        let page = scenario
+            .provider
+            .spaces_list(OPERATOR, &spaces_list_request(None, None), now())
+            .await
+            .expect("space after the refused maintenance gates");
+        assert_eq!(visible_space(&page).status.to_string(), "active");
+        assert_eq!(visible_space(&page).revision.get(), 1);
+
+        // The same admin never obtains a full grant view: the selector-omitted
+        // list is its own self view, and naming the ctx-b grantee is refused.
+        let self_view = scenario
+            .provider
+            .grants_list(CLIENT, &grant_list_request(&space_id, None, None, None), now())
+            .await
+            .expect("the ctx-a admin self view");
+        assert_eq!(self_view.grants.len(), 1);
+        assert_eq!(grant_principal(&self_view.grants[0]), CLIENT);
+        assert_eq!(
+            reject_code(
+                scenario
+                    .provider
+                    .grants_list(
+                        CLIENT,
+                        &grant_list_request(&space_id, Some(OTHER), None, None),
+                        now(),
+                    )
+                    .await,
+            ),
+            SpokeRejectCode::NotAuthorized
+        );
+
+        // Full coverage admits the same operations. An unrestricted but
+        // subject-scoped admin controls its whole subject...
+        scenario
+            .provider
+            .grants_grant(
+                OPERATOR,
+                &grant_request(&space_id, CLIENT, &["admin"], Some("subject-one"), None),
+                now(),
+            )
+            .await
+            .expect("operator issues an unrestricted subject admin grant");
+        let fenced = scenario
+            .provider
+            .subjects_fence(
+                CLIENT,
+                &fence_request(&space_id, "subject-one", "fence", without_subject(), 1),
+                now(),
+            )
+            .await
+            .expect("the whole-subject admin fences its subject");
+        assert_eq!(fenced.status, "fenced");
+        assert_eq!(fenced.revision, 2);
+        let unfenced = scenario
+            .provider
+            .subjects_fence(
+                CLIENT,
+                &fence_request(&space_id, "subject-one", "unfence", without_subject(), 2),
+                now(),
+            )
+            .await
+            .expect("the whole-subject admin unfences its subject");
+        assert_eq!(unfenced.status, "active");
+        assert_eq!(unfenced.revision, 3);
+
+        // ...and the space-wide unrestricted operator admin controls the whole
+        // space and sees every grant.
+        let frozen = scenario
+            .provider
+            .spaces_freeze(OPERATOR, &freeze_request(&space_id, 1), now())
+            .await
+            .expect("the space-wide admin freezes the space");
+        assert_eq!(frozen.status, "frozen");
+        assert_eq!(frozen.revision, 2);
+        let thawed = scenario
+            .provider
+            .spaces_unfreeze(OPERATOR, &unfreeze_request(&space_id, 2), now())
+            .await
+            .expect("the space-wide admin unfreezes the space");
+        assert_eq!(thawed.status, "active");
+        assert_eq!(thawed.revision, 3);
+        let full = scenario
+            .provider
+            .grants_list(OPERATOR, &grant_list_request(&space_id, None, None, None), now())
+            .await
+            .expect("the space-wide admin full view");
+        assert_eq!(full.grants.len(), 4);
+        assert!(full
+            .grants
+            .iter()
+            .any(|grant| grant_principal(grant) == OTHER));
+    }
+
+    #[tokio::test]
+    async fn grant_page_rows_and_marker_share_one_read_snapshot() {
+        let scenario = Scenario::open().await;
+        let space_id = scenario.space_id.clone();
+        let own = scenario
+            .provider
+            .grants_list(
+                OPERATOR,
+                &grant_list_request(&space_id, Some(OPERATOR), None, None),
+                now(),
+            )
+            .await
+            .expect("operator bootstrap grant");
+        assert_eq!(own.grants.len(), 1);
+        let own_admin_id = grant_id(&own.grants[0]).to_owned();
+        let client_grant = scenario
+            .provider
+            .grants_grant(
+                OPERATOR,
+                &grant_request(&space_id, CLIENT, &["capture"], None, None),
+                now(),
+            )
+            .await
+            .expect("a client grant");
+        let other_grant = scenario
+            .provider
+            .grants_grant(
+                OPERATOR,
+                &grant_request(&space_id, OTHER, &["capture"], None, None),
+                now(),
+            )
+            .await
+            .expect("another principal's grant");
+        let other_two_grant = scenario
+            .provider
+            .grants_grant(
+                OPERATOR,
+                &grant_request(&space_id, "principal-other-2", &["capture"], None, None),
+                now(),
+            )
+            .await
+            .expect("a third principal's grant");
+
+        // A caller-owned read transaction pins one snapshot; both pages are
+        // read inside it.
+        let mut snapshot = scenario
+            .provider
+            .store()
+            .pool()
+            .begin()
+            .await
+            .expect("read snapshot");
+        let first = scenario
+            .provider
+            .grants_list_in_tx(
+                &mut snapshot,
+                OPERATOR,
+                &grant_list_request(&space_id, None, Some(2), None),
+                now(),
+            )
+            .await
+            .expect("first page inside the snapshot");
+        assert_eq!(first.grants.len(), 2);
+        let cursor = first
+            .next_cursor
+            .clone()
+            .expect("a bounded full view issues a cursor");
+
+        // Real committed changes land on other connections while the snapshot
+        // stays open: a row change, an insert, and a revoke of the lister's own
+        // admin authority. Each one bumps the provider marker.
+        let revoked = scenario
+            .provider
+            .grants_revoke(OPERATOR, &revoke_request(&space_id, &other_grant.grant_id, 1), now())
+            .await
+            .expect("revoke another principal's grant");
+        assert_eq!(revoked.revision, 2);
+        scenario
+            .provider
+            .grants_grant(
+                OPERATOR,
+                &grant_request(&space_id, "principal-other-3", &["capture"], None, None),
+                now(),
+            )
+            .await
+            .expect("insert a grant after the snapshot");
+        let own_revoked = scenario
+            .provider
+            .grants_revoke(OPERATOR, &revoke_request(&space_id, &own_admin_id, 1), now())
+            .await
+            .expect("revoke the lister's own admin grant");
+        assert_eq!(own_revoked.revision, 2);
+
+        // The second page is authorized, filtered and marked from the snapshot
+        // that produced the cursor, so the committed changes cannot be paired
+        // with it.
+        let second = scenario
+            .provider
+            .grants_list_in_tx(
+                &mut snapshot,
+                OPERATOR,
+                &grant_list_request(&space_id, None, Some(2), Some(&cursor)),
+                now(),
+            )
+            .await
+            .expect("the second page reads the page's own snapshot");
+        assert_eq!(second.grants.len(), 2);
+        assert!(second.next_cursor.is_none());
+        let mut observed = first
+            .grants
+            .iter()
+            .chain(second.grants.iter())
+            .map(|grant| (grant_id(grant).to_owned(), grant_principal(grant).to_owned()))
+            .collect::<Vec<_>>();
+        observed.sort();
+        let mut expected = vec![
+            (own_admin_id.clone(), OPERATOR.to_owned()),
+            (client_grant.grant_id.clone(), CLIENT.to_owned()),
+            (other_grant.grant_id.clone(), OTHER.to_owned()),
+            (other_two_grant.grant_id.clone(), "principal-other-2".to_owned()),
+        ];
+        expected.sort();
+        assert_eq!(
+            observed, expected,
+            "the two pages must cover exactly the snapshot's grants: no skipped row and no post-snapshot insert"
+        );
+        assert!(
+            second
+                .grants
+                .iter()
+                .all(|grant| grant_state(grant) == (1, false)),
+            "a row changed after the snapshot must still read at its snapshot revision"
+        );
+        assert!(
+            second
+                .grants
+                .iter()
+                .any(|grant| grant_principal(grant) == OTHER
+                    || grant_principal(grant) == "principal-other-2"),
+            "the full view authorization must come from the snapshot too"
+        );
+        snapshot.commit().await.expect("close the read snapshot");
+
+        // Outside the snapshot the same cursor is rejected, and the committed
+        // revoke is visible: the lister has lost admin, so the unselected list
+        // degrades to its own self view.
+        assert_eq!(
+            reject_code(
+                scenario
+                    .provider
+                    .grants_list(
+                        OPERATOR,
+                        &grant_list_request(&space_id, None, Some(2), Some(&cursor)),
+                        now(),
+                    )
+                    .await,
+            ),
+            SpokeRejectCode::CursorInvalid
+        );
+        let after = scenario
+            .provider
+            .grants_list(OPERATOR, &grant_list_request(&space_id, None, None, None), now())
+            .await
+            .expect("post-change self view");
+        assert_eq!(after.grants.len(), 1);
+        assert_eq!(grant_id(&after.grants[0]), own_admin_id);
+        assert_eq!(grant_state(&after.grants[0]), (2, true));
     }
 
     #[tokio::test]
