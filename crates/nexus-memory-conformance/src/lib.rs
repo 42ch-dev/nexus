@@ -21,6 +21,10 @@ mod spaces;
 #[allow(dead_code)]
 mod records;
 mod storage;
+// Exercised by its embedded tests until the assembly task implements
+// `MemoryPort` over these slices; the allowance disappears with that consumer.
+#[allow(dead_code)]
+mod recall;
 
 pub use provider::{FixtureIdentity, FixtureMemoryProvider};
 
