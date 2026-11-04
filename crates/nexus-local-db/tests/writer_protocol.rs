@@ -85,6 +85,20 @@ fn reap(child: &mut Child, err_path: &Path) {
     }
 }
 
+/// Run one `migration_fence` / `engine_solo` child and return its outcome.
+fn child_outcome(dir: &Path, db: &Path, mode: &str, tag: &str) -> String {
+    let out = dir.join(format!("{tag}_out"));
+    let err = dir.join(format!("{tag}_err"));
+    let mut child = spawn_child(
+        mode,
+        db,
+        &[("OUT_PATH", out.to_string_lossy().to_string())],
+        &err,
+    );
+    reap(&mut child, &err);
+    fs::read_to_string(out).expect("child outcome")
+}
+
 /// Run one engine-owner race round between two real processes.
 fn engine_race_round(dir: &Path, db: &Path, round: usize) {
     let mut outcomes = Vec::with_capacity(2);
@@ -1247,6 +1261,7 @@ fn probe_context(
         mode,
         migration_epoch,
         engine_epoch,
+        admission: None,
     }
 }
 
@@ -1358,6 +1373,68 @@ async fn usable_pool_clone_blocks_another_process_until_settled() {
         fs::read_to_string(&allowed).expect("allowed outcome"),
         "won",
         "after the pool closed and its admission settled another process may migrate"
+    );
+}
+
+/// The original public raw close: a clone is closed while one of its
+/// connections is still checked out and usable. Both the migration lock and the
+/// engine owner's exclusivity must stay held by that connection's own admission
+/// until SQLite really disposes it — then both release on their own, with no
+/// purge and no helper.
+#[tokio::test]
+async fn raw_clone_close_keeps_both_admissions_until_connection_disposed() {
+    if std::env::var_os(CHILD_ENV).is_some() {
+        return;
+    }
+
+    let dir = TempDir::new().expect("tempdir");
+    let db = dir.path().join("state.db");
+
+    let guarded = init_engine_pool(&db).await.expect("engine owner");
+    let clone = guarded.clone_pool();
+    drop(guarded);
+
+    let mut checked_out = clone.acquire().await.expect("checked-out connection");
+    let (one,): (i64,) = sqlx::query_as("SELECT 1")
+        .fetch_one(&mut *checked_out)
+        .await
+        .expect("the clone's connection is usable");
+    assert_eq!(one, 1);
+
+    // The public raw close starts here and waits for the checked-out connection.
+    let closing = clone.close();
+    // Let any close-start settlement run before probing: the admission must
+    // survive on the checked-out connection's own ownership, not on the
+    // registry's timing.
+    for _ in 0..64 {
+        tokio::task::yield_now().await;
+    }
+
+    assert_eq!(
+        child_outcome(dir.path(), &db, "migration_fence", "blocked_migration"),
+        "busy",
+        "another process must not migrate while a checked-out connection is alive"
+    );
+    assert_eq!(
+        child_outcome(dir.path(), &db, "engine_solo", "blocked_engine"),
+        "busy",
+        "nor may another process become the engine owner"
+    );
+
+    // Real disposal of that connection.
+    drop(checked_out);
+    closing.await;
+    drop(clone);
+
+    assert_eq!(
+        child_outcome(dir.path(), &db, "migration_fence", "allowed_migration"),
+        "won",
+        "after real disposal the migration lock is free"
+    );
+    assert_eq!(
+        child_outcome(dir.path(), &db, "engine_solo", "allowed_engine"),
+        "won",
+        "after real disposal the engine ownership is free"
     );
 }
 
