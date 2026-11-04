@@ -25,8 +25,9 @@ const CREDENTIAL_INVALID_CODE: &str = "memory_credential_invalid";
 #[serde(deny_unknown_fields)]
 struct CredentialFile {
     identity_seed_hex: String,
-    #[serde(default)]
-    capability_token: Option<serde_json::Value>,
+    /// Declared field (§3.1), required: `null` means no proof, and an absent
+    /// field is a malformed document (a plain `Option` would accept absence).
+    capability_token: serde_json::Value,
 }
 
 /// A validated, loaded memory credential.
@@ -55,12 +56,16 @@ impl MemoryCredential {
         let file: CredentialFile = serde_json::from_slice(&bytes)
             .map_err(|_| invalid("credential file is not the declared JSON document"))?;
         let identity_seed = parse_seed(&file.identity_seed_hex)?;
-        if file.capability_token.as_ref().is_some_and(|token| !token.is_object()) {
-            return Err(invalid("capability_token must be an object or null"));
-        }
+        let capability_token = match file.capability_token {
+            serde_json::Value::Null => None,
+            token => {
+                validate_capability_token(&token)?;
+                Some(token)
+            }
+        };
         Ok(Self {
             identity_seed,
-            capability_token: file.capability_token,
+            capability_token,
         })
     }
 
@@ -91,20 +96,38 @@ fn credential_file_path(user_home: &Path, credential_id: &str) -> PathBuf {
         .join(format!("{credential_id}.json"))
 }
 
-fn read_protected_file(path: &Path) -> CoreResult<Vec<u8>> {
+/// Open the credential file so the final component cannot be a symlink and a
+/// substituted special file cannot block the open.
+///
+/// `O_NOFOLLOW` makes the refusal atomic with the open (no lstat-then-open
+/// window) and `O_NONBLOCK` keeps a FIFO/device substitution from blocking
+/// before the descriptor is inspected. Type, size and mode are decided from
+/// the returned descriptor only.
+#[cfg(unix)]
+fn open_credential_file(path: &Path) -> CoreResult<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC)
+        .open(path)
+        .map_err(|_| invalid("credential file is not a regular file reached without a symlink"))
+}
+
+/// Platforms without a no-follow open flag keep a best-effort pathname check;
+/// the descriptor checks below still apply. Unexercised: reported as a limit.
+#[cfg(not(unix))]
+fn open_credential_file(path: &Path) -> CoreResult<std::fs::File> {
     let metadata = std::fs::symlink_metadata(path)
         .map_err(|_| invalid("credential file is missing or unreadable"))?;
     if metadata.file_type().is_symlink() {
         return Err(invalid("credential file must not be a symlink"));
     }
-    if !metadata.is_file() {
-        return Err(invalid("credential path must be a regular file"));
-    }
+    std::fs::File::open(path).map_err(|_| invalid("credential file is missing or unreadable"))
+}
 
-    // shortcut: the symlink refusal above is lstat-then-open, so a writer able
-    // to race this directory could still swap the path; upgrade to O_NOFOLLOW
-    // if credential directories stop being owner-only.
-    let file = std::fs::File::open(path).map_err(|_| invalid("credential file is missing or unreadable"))?;
+fn read_protected_file(path: &Path) -> CoreResult<Vec<u8>> {
+    let file = open_credential_file(path)?;
     let metadata = file
         .metadata()
         .map_err(|_| invalid("credential file is missing or unreadable"))?;
@@ -155,6 +178,32 @@ fn hex_digit(byte: u8) -> u8 {
         b'a'..=b'f' => byte - b'a' + 10,
         _ => 0, // unreachable after the lowercase-hex check above
     }
+}
+
+/// Validate the nullable upstream `CapabilityTokenProof` (`{v, claims, sig}`)
+/// without importing it: `spoke_connect::core::CapabilityTokenProof` is the
+/// published type, but the default core graph carries no Connect edge (§6), so
+/// this loader checks the same serialized shape here and the remote dial path
+/// re-deserializes the value through the published type.
+fn validate_capability_token(token: &serde_json::Value) -> CoreResult<()> {
+    let proof = match token.as_object() {
+        Some(object) if object.len() == 3 => object,
+        _ => return Err(invalid("capability_token must be the {v, claims, sig} proof object")),
+    };
+    if !proof.get("v").is_some_and(serde_json::Value::is_u64) {
+        return Err(invalid("capability_token.v must be the token format version"));
+    }
+    if !proof.get("claims").is_some_and(serde_json::Value::is_object) {
+        return Err(invalid("capability_token.claims must be the signed claims object"));
+    }
+    if !proof
+        .get("sig")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|sig| !sig.is_empty())
+    {
+        return Err(invalid("capability_token.sig must be the signature string"));
+    }
+    Ok(())
 }
 
 /// Static coded refusal: the message never interpolates file contents.

@@ -19,7 +19,6 @@ use nexus_core::{
 };
 use nexus_creator_memory::long_term_memory::slug_is_safe;
 use nexus_creator_memory::memory_item::MemoryKind;
-use nexus_home_layout::active_context::CliConfigSnapshot;
 use std::io::Write;
 use std::path::Path;
 use std::str::FromStr;
@@ -1089,8 +1088,9 @@ fn open_editor_temp(prefix: &str, initial_content: &str) -> Result<String> {
 ///
 /// # Errors
 ///
-/// Returns the home-resolution failure, the config read refusal through
-/// [`CliConfigSnapshot::load`], and the mapped core validation/write refusal.
+/// Returns the home-resolution failure, the `[memory_provider]` read refusal
+/// through [`nexus_home_layout::active_context::read_memory_provider_config`],
+/// and the mapped core validation/write refusal.
 fn provider(command: ProviderCommand) -> Result<()> {
     let user_home = crate::config::user_home_dir()?;
 
@@ -1128,8 +1128,10 @@ fn provider(command: ProviderCommand) -> Result<()> {
 
 /// Read the on-disk selection; a missing table is the implicit local default.
 fn read_provider_selection(user_home: &Path) -> Result<MemoryProviderSelection> {
-    let snapshot = CliConfigSnapshot::load(&nexus_home_layout::nexus_root_from_home(user_home))?;
-    MemoryProviderSelection::from_config(snapshot.memory_provider).map_err(map_core_error)
+    let config = nexus_home_layout::active_context::read_memory_provider_config(
+        &nexus_home_layout::nexus_root_from_home(user_home),
+    )?;
+    MemoryProviderSelection::from_config(config).map_err(map_core_error)
 }
 
 /// Render the selection as non-secret `key: value` lines.

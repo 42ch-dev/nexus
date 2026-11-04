@@ -187,26 +187,25 @@ fn is_valid_space_id(id: &str) -> bool {
 }
 
 fn validate_connect_endpoint(endpoint: &str) -> CoreResult<()> {
-    if endpoint.contains('?') {
-        return Err(invalid("connect_endpoint", "must not carry a query component"));
-    }
-    if endpoint.contains('#') {
-        return Err(invalid("connect_endpoint", "must not carry a fragment component"));
-    }
-    if endpoint.contains('@') {
+    // The house parser decides scheme, host and port validity; string
+    // splitting accepted an empty host or a non-numeric port (§3.2).
+    let url = url::Url::parse(endpoint)
+        .map_err(|_| invalid("connect_endpoint", "must be an absolute ws:// or wss:// URL"))?;
+    if !url.username().is_empty() || url.password().is_some() {
         return Err(invalid("connect_endpoint", "must not carry userinfo"));
     }
-    let Some((scheme, rest)) = endpoint.split_once("://") else {
-        return Err(invalid("connect_endpoint", "must be an absolute ws:// or wss:// URL"));
-    };
-    let authority = rest.split('/').next().unwrap_or_default();
-    if authority.is_empty() {
-        return Err(invalid("connect_endpoint", "must name a host"));
+    if url.query().is_some() {
+        return Err(invalid("connect_endpoint", "must not carry a query component"));
     }
-    let host = host_without_port(authority);
-    match scheme {
+    if url.fragment().is_some() {
+        return Err(invalid(
+            "connect_endpoint",
+            "must not carry a fragment component",
+        ));
+    }
+    match url.scheme() {
         "wss" => Ok(()),
-        "ws" if is_loopback_host(host) => Ok(()),
+        "ws" if is_loopback_host(url.host()) => Ok(()),
         "ws" => Err(invalid(
             "connect_endpoint",
             "ws:// is allowed only for loopback hosts; use wss://",
@@ -215,15 +214,16 @@ fn validate_connect_endpoint(endpoint: &str) -> CoreResult<()> {
     }
 }
 
-fn host_without_port(authority: &str) -> &str {
-    if let Some(bracketed) = authority.strip_prefix('[') {
-        return bracketed.split(']').next().unwrap_or(bracketed);
+/// Loopback as the parser classified the host: IPv4/IPv6 loopback addresses
+/// or the `localhost` domain (IPv6 `host_str` keeps its brackets, so the typed
+/// host is the reliable form).
+fn is_loopback_host(host: Option<url::Host<&str>>) -> bool {
+    match host {
+        Some(url::Host::Ipv4(address)) => address.is_loopback(),
+        Some(url::Host::Ipv6(address)) => address.is_loopback(),
+        Some(url::Host::Domain(domain)) => domain == "localhost",
+        None => false,
     }
-    authority.split(':').next().unwrap_or(authority)
-}
-
-fn is_loopback_host(host: &str) -> bool {
-    matches!(host, "127.0.0.1" | "::1" | "localhost")
 }
 
 /// Drop userinfo, query and fragment so a hand-built invalid value can never

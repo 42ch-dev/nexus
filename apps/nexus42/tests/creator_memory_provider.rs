@@ -182,3 +182,31 @@ fn use_remote_rejects_plain_ws_to_a_non_loopback_host_without_writing() {
         "a refused selection writes nothing"
     );
 }
+
+#[test]
+fn show_refuses_a_malformed_provider_table_without_rewriting_config() {
+    let home = tempfile::tempdir().expect("temp home");
+    std::fs::create_dir_all(home.path().join(".nexus42")).expect("nexus dir");
+    let malformed = concat!(
+        "active_creator_id = \"crt_alpha\"\n",
+        "active_workspace_slug_by_creator = { crt_alpha = \"team-one\" }\n",
+        "\n[memory_provider]\nkind = \"bogus\"\n",
+    );
+    std::fs::write(config_path(&home), malformed).expect("seed config");
+
+    let output = cli(&home)
+        .args(["creator", "memory", "provider", "show"])
+        .output()
+        .expect("run provider show");
+
+    assert!(
+        !output.status.success(),
+        "a malformed provider table must be refused: {}",
+        stdout(&output)
+    );
+    assert_eq!(
+        std::fs::read_to_string(config_path(&home)).expect("config read"),
+        malformed,
+        "a refused read must not rewrite the config"
+    );
+}

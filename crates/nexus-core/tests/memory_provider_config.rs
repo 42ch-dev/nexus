@@ -9,7 +9,9 @@ use nexus_core::{
     CoreError, CoreHomeService, MemoryCredential, MemoryProviderConfig, MemoryProviderSelection,
     RemoteMemoryProviderSelection,
 };
-use nexus_home_layout::active_context::CliConfigSnapshot;
+use nexus_home_layout::active_context::{
+    read_active_creator_id, read_active_workspace_slug, read_memory_provider_config,
+};
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
@@ -38,8 +40,8 @@ fn credentials_dir(home: &Path) -> PathBuf {
 }
 
 fn read_selection(home: &Path) -> MemoryProviderSelection {
-    let snapshot = CliConfigSnapshot::load(&nexus_dir(home)).expect("config loads");
-    MemoryProviderSelection::from_config(snapshot.memory_provider).expect("selection converts")
+    let config = read_memory_provider_config(&nexus_dir(home)).expect("provider table reads");
+    MemoryProviderSelection::from_config(config).expect("selection converts")
 }
 
 fn remote(credential_id: &str, endpoint: &str, pubkey_hex: &str) -> RemoteMemoryProviderSelection {
@@ -68,6 +70,16 @@ fn assert_invalid_field(error: CoreError, expected: &str) {
             assert_eq!(field, expected, "unexpected invalid field");
         }
         other => panic!("expected InvalidInput for {expected}, got {other:?}"),
+    }
+}
+
+#[cfg(unix)]
+fn assert_credential_refused(error: CoreError) {
+    match error {
+        CoreError::Coded { code, .. } => {
+            assert_eq!(code, "memory_credential_invalid", "unexpected refusal code");
+        }
+        other => panic!("expected the coded credential refusal, got {other:?}"),
     }
 }
 
@@ -173,15 +185,37 @@ fn malformed_connect_endpoints_are_rejected() {
         "wss://user:pass@example.com/ws",
         "wss://example.com/ws?token=x",
         "wss://example.com/ws#frag",
-        "wss:///ws",
+        // Malformed authority and port, previously accepted by string splitting.
+        "wss://:8420",
+        "wss://host:bad",
+        "ws://localhost:bad",
+        "wss://[::1/ws",
     ] {
         let error = MemoryProviderSelection::from_config(Some(remote_config(endpoint)))
             .expect_err("malformed endpoint must be refused");
         assert_invalid_field(error, "connect_endpoint");
     }
 
-    // Loopback ws:// (tests) and wss:// remain selectable.
-    for endpoint in ["ws://127.0.0.1:8420/memory", "ws://[::1]:8420", "ws://localhost:1", "wss://memory.example.com/ws"] {
+    // The shared writer refuses the same authorities before persisting them.
+    let home = home();
+    let service = CoreHomeService::open(home.path().to_path_buf()).expect("home entry");
+    for endpoint in ["wss://:8420", "wss://host:bad", "ws://localhost:bad"] {
+        let selection =
+            MemoryProviderSelection::Remote(remote(CREDENTIAL_ID, endpoint, PUBKEY_HEX));
+        let error = service
+            .set_memory_provider_selection(&selection)
+            .expect_err("malformed endpoint must not be written");
+        assert_invalid_field(error, "connect_endpoint");
+    }
+    assert!(
+        !config_path(home.path()).exists(),
+        "a refused selection writes nothing"
+    );
+
+    // Loopback ws:// (tests) and wss:// remain selectable. `wss:///ws` is a
+    // standard URL naming host `ws` (the parser skips the extra slash), so it
+    // is accepted instead of guessed as a typo.
+    for endpoint in ["ws://127.0.0.1:8420/memory", "ws://[::1]:8420", "ws://localhost:1", "wss://memory.example.com/ws", "wss:///ws"] {
         MemoryProviderSelection::from_config(Some(remote_config(endpoint)))
             .unwrap_or_else(|error| panic!("{endpoint} must be accepted: {error:?}"));
     }
@@ -247,6 +281,46 @@ fn clear_restores_implicit_local_and_preserves_other_writers_keys() {
     assert_eq!(read_selection(home.path()), MemoryProviderSelection::Local);
 }
 
+#[test]
+fn malformed_provider_table_does_not_change_creator_or_workspace_resolution() {
+    let home = home();
+    std::fs::create_dir_all(nexus_dir(home.path())).expect("nexus dir");
+
+    // Unknown `kind` and a remote table missing fields: both are malformed for
+    // provider selection, and neither may disturb unrelated readers. The
+    // configured workspace is deliberately non-default so a fallback to
+    // `default` is observable.
+    for malformed in [
+        "\n[memory_provider]\nkind = \"bogus\"\n",
+        "\n[memory_provider]\nkind = \"remote\"\nspace_id = \"space_alpha\"\n",
+    ] {
+        std::fs::write(
+            config_path(home.path()),
+            format!(
+                "active_creator_id = \"crt_alpha\"\n\
+                 active_workspace_slug_by_creator = {{ crt_alpha = \"team-one\" }}\n\
+                 {malformed}"
+            ),
+        )
+        .expect("seed config");
+
+        assert_eq!(
+            read_active_creator_id(&nexus_dir(home.path())).as_deref(),
+            Some("crt_alpha"),
+            "a malformed provider table must not hide the active creator"
+        );
+        assert_eq!(
+            read_active_workspace_slug(&nexus_dir(home.path()), "crt_alpha").as_deref(),
+            Some("team-one"),
+            "a malformed provider table must not fall back to the default workspace"
+        );
+        assert!(
+            read_memory_provider_config(&nexus_dir(home.path())).is_err(),
+            "provider selection itself must refuse the malformed table"
+        );
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn credential_symlink_is_refused() {
@@ -256,10 +330,7 @@ fn credential_symlink_is_refused() {
     std::os::unix::fs::symlink(&target, &link).expect("symlink");
 
     let error = MemoryCredential::load(home.path(), "link").expect_err("symlink must be refused");
-    assert!(
-        error.to_string().contains("symlink"),
-        "expected a symlink refusal, got {error}"
-    );
+    assert_credential_refused(error);
 }
 
 #[cfg(unix)]
@@ -270,10 +341,7 @@ fn credential_with_broader_permissions_is_refused() {
 
     let error =
         MemoryCredential::load(home.path(), CREDENTIAL_ID).expect_err("0644 must be refused");
-    assert!(
-        error.to_string().contains("0600"),
-        "expected a permissions refusal, got {error}"
-    );
+    assert_credential_refused(error);
 }
 
 #[cfg(unix)]
@@ -286,10 +354,7 @@ fn oversized_credential_is_refused() {
 
     let error =
         MemoryCredential::load(home.path(), CREDENTIAL_ID).expect_err("oversize must be refused");
-    assert!(
-        error.to_string().contains("16384"),
-        "expected a size refusal, got {error}"
-    );
+    assert_credential_refused(error);
 }
 
 #[cfg(unix)]
@@ -363,4 +428,76 @@ fn credential_uppercase_seed_hex_is_refused() {
         !error.to_string().contains(&SEED_HEX.to_uppercase()),
         "credential error leaked the seed: {error}"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn non_regular_credential_path_is_refused() {
+    // A socket stands in for a substituted special file: the descriptor decides
+    // the refusal, never a pathname pre-check. A short home keeps the socket
+    // path within `SUN_LEN`.
+    let home = tempfile::Builder::new()
+        .prefix("n3cred")
+        .tempdir_in("/tmp")
+        .expect("temp home");
+    let dir = credentials_dir(home.path());
+    std::fs::create_dir_all(&dir).expect("credential dir");
+    let _listener = std::os::unix::net::UnixListener::bind(dir.join(format!("{CREDENTIAL_ID}.json")))
+        .expect("socket at credential path");
+
+    let error = MemoryCredential::load(home.path(), CREDENTIAL_ID)
+        .expect_err("non-regular credential path must be refused");
+    assert_credential_refused(error);
+}
+
+#[cfg(unix)]
+#[test]
+fn capability_proof_must_be_the_declared_shape() {
+    let home = home();
+
+    // A non-null `capability_token` must be the published
+    // `CapabilityTokenProof` shape `{v, claims, sig}`; anything else is refused.
+    for token in [
+        "{}",
+        "{\"unrelated\": true}",
+        "{\"v\": 1, \"claims\": {}, \"sig\": \"\"}",
+        "{\"v\": 1, \"claims\": {}}",
+        "{\"v\": \"1\", \"claims\": {}, \"sig\": \"c2ln\"}",
+        "{\"v\": 1, \"claims\": [], \"sig\": \"SIGMARKER\"}",
+    ] {
+        let content =
+            format!("{{\"identity_seed_hex\": \"{SEED_HEX}\", \"capability_token\": {token}}}");
+        write_credential(home.path(), CREDENTIAL_ID, &content, 0o600);
+        let error = MemoryCredential::load(home.path(), CREDENTIAL_ID)
+            .expect_err("a non-proof object must be refused");
+        assert!(
+            !error.to_string().contains("SIGMARKER"),
+            "proof error leaked the signature: {error}"
+        );
+        assert_credential_refused(error);
+    }
+
+    // The published shape loads.
+    let proof = "{\"v\": 1, \"claims\": {\"iss\": \"12D3KooWIss\", \
+                 \"sub\": \"12D3KooWSub\", \"aud\": \"12D3KooWAud\", \
+                 \"capabilities\": [\"memory\"], \"exp\": 4102444800}, \
+                 \"sig\": \"c2ln\"}";
+    let content =
+        format!("{{\"identity_seed_hex\": \"{SEED_HEX}\", \"capability_token\": {proof}}}");
+    write_credential(home.path(), CREDENTIAL_ID, &content, 0o600);
+    MemoryCredential::load(home.path(), CREDENTIAL_ID)
+        .expect("the published proof shape must load");
+}
+
+#[cfg(unix)]
+#[test]
+fn missing_capability_token_field_is_refused() {
+    let home = home();
+    // §3.1 declares the field; omitting it is a malformed document, not `null`.
+    let content = format!("{{\"identity_seed_hex\": \"{SEED_HEX}\"}}");
+    write_credential(home.path(), CREDENTIAL_ID, &content, 0o600);
+
+    let error = MemoryCredential::load(home.path(), CREDENTIAL_ID)
+        .expect_err("the declared capability_token field is required");
+    assert_credential_refused(error);
 }
