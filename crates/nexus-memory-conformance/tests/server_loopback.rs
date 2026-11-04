@@ -209,16 +209,18 @@ struct WsTransport<S> {
     stream: AsyncMutex<Option<SplitStream<WebSocketStream<S>>>>,
     /// Refusal flag: set as soon as a close starts, so new I/O says `Closed`.
     closed: AtomicBool,
-    /// The terminal outcome of the one cleanup that disposed both halves.
+    /// The first real close-frame failure this transport observed.
     ///
-    /// `None` until then, so a transient `GateBusy`/`HalvesOwned` never becomes
-    /// terminal while resources are still owned. Stored even when the graceful
-    /// close frame failed, because whichever caller completed the cleanup may be
-    /// the SDK's detached close or the receive-error path, and its result is
-    /// discarded there: a later owned close must still see that failure rather
-    /// than read a bare "released" flag and answer `Ok`. Only touched under the
-    /// close gate, so it never holds across an await.
-    completion: std::sync::Mutex<Option<CleanupCompletion>>,
+    /// Kept apart from physical completion on purpose: an attempt that disposes
+    /// the sink but cannot take the stream still records what the close really
+    /// said, so the failure outlives that partial attempt and a later complete
+    /// one answers it instead of `Graceful`. It is never cleared, and only
+    /// touched under the close gate, so it never holds across an await.
+    close_failure: std::sync::Mutex<Option<spoke_connect::remote::TransportError>>,
+    /// Physical completion: set only once both halves were taken and dropped.
+    /// An attempt that still owns a half leaves this false, so a transient
+    /// `GateBusy`/`HalvesOwned` can never look like a finished cleanup.
+    completed: AtomicBool,
     /// Serializes close, so a concurrent caller waits for the running cleanup
     /// instead of reporting "closed" while it still runs.
     close_gate: AsyncMutex<()>,
@@ -323,29 +325,6 @@ impl PollProbe {
     }
 }
 
-/// The terminal outcome of the cleanup that disposed both halves.
-///
-/// Resource completion and a successful graceful close are different facts: both
-/// halves are gone in either case, but a failed close frame stays reportable.
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum CleanupCompletion {
-    /// Both halves were disposed and the WebSocket close frame was written.
-    Graceful,
-    /// Both halves were disposed; the close frame failed.
-    CloseFrame(spoke_connect::remote::TransportError),
-}
-
-impl CleanupCompletion {
-    /// What a later or concurrent caller must observe for this completion.
-    /// The success path copies no error and allocates nothing.
-    fn outcome(&self) -> Result<(), CleanupFailure> {
-        match self {
-            Self::Graceful => Ok(()),
-            Self::CloseFrame(error) => Err(CleanupFailure::CloseFrame(error.clone())),
-        }
-    }
-}
-
 /// Why one cleanup attempt did not leave the transport owning nothing.
 ///
 /// `HalvesOwned` means the named halves were never acquired, so they are still
@@ -430,7 +409,8 @@ where
             sink: AsyncMutex::new(Some(sink)),
             stream: AsyncMutex::new(Some(stream)),
             closed: AtomicBool::new(false),
-            completion: std::sync::Mutex::new(None),
+            close_failure: std::sync::Mutex::new(None),
+            completed: AtomicBool::new(false),
             close_gate: AsyncMutex::new(()),
             notify: Notify::new(),
             probe,
@@ -503,8 +483,8 @@ where
             Ok(gate) => gate,
             Err(_) => return Err(CleanupFailure::GateBusy),
         };
-        if let Some(completion) = self.completion.lock().expect("completion lock").as_ref() {
-            return completion.outcome();
+        if self.completed.load(Ordering::SeqCst) {
+            return self.completed_outcome();
         }
         self.closed.store(true, Ordering::SeqCst);
         if let Some(probe) = &self.probe {
@@ -521,7 +501,6 @@ where
         }
         self.notify.notify_waiters();
         let mut sink_disposed = false;
-        let mut close_error = None;
         if let Ok(mut sink) = tokio::time::timeout_at(deadline, self.sink.lock()).await {
             if let Some(probe) = &self.probe {
                 probe.record_sink_acquired();
@@ -529,9 +508,15 @@ where
             if let Some(sink) = sink.as_mut() {
                 match tokio::time::timeout_at(deadline, sink.close()).await {
                     Ok(Ok(())) => {}
-                    // A failed close frame is surfaced, never discarded; the
-                    // half is still dropped below.
-                    Ok(Err(error)) => close_error = Some(map_ws_error(error)),
+                    // Recorded the moment it happens: a partial attempt that
+                    // keeps the other half must not erase what the close said.
+                    Ok(Err(error)) => {
+                        let mut failure =
+                            self.close_failure.lock().expect("close failure lock");
+                        if failure.is_none() {
+                            *failure = Some(map_ws_error(error));
+                        }
+                    }
                     // The shared deadline is the forced-disposal path: a peer
                     // that never drains cannot hold teardown open, and the drop
                     // below still ends the socket.
@@ -542,23 +527,33 @@ where
             sink_disposed = true;
         }
         if !(stream_disposed && sink_disposed) {
-            // Transient: nothing is recorded, so a later call retries.
+            // Transient: completion stays unset so a later call retries. Any
+            // close failure this attempt observed is already retained above.
             return Err(CleanupFailure::HalvesOwned {
                 stream: !stream_disposed,
                 sink: !sink_disposed,
             });
         }
+        self.completed.store(true, Ordering::SeqCst);
         if let Some(probe) = &self.probe {
             probe.mark(&probe.cleanup_finished);
         }
-        let completion = match close_error {
-            Some(error) => CleanupCompletion::CloseFrame(error),
-            None => CleanupCompletion::Graceful,
-        };
-        // One clone only on the failure path; the graceful path copies nothing.
-        let outcome = completion.outcome();
-        *self.completion.lock().expect("completion lock") = Some(completion);
-        outcome
+        self.completed_outcome()
+    }
+
+    /// What a later or concurrent caller must observe for a completed transport:
+    /// the first observed close failure if there was one, else graceful. Only the
+    /// failure path copies anything.
+    fn completed_outcome(&self) -> Result<(), CleanupFailure> {
+        match self
+            .close_failure
+            .lock()
+            .expect("close failure lock")
+            .as_ref()
+        {
+            Some(error) => Err(CleanupFailure::CloseFrame(error.clone())),
+            None => Ok(()),
+        }
     }
 
     /// Fixture-only: take the stream half's mutex and hold it until `release`,
@@ -2855,6 +2850,99 @@ async fn failed_cleanup_stays_reportable_after_the_first_caller_discards_it() {
         .await
         .expect("the resetting peer task ends")
         .expect("the resetting peer task joins");
+}
+
+/// A close failure observed by an incomplete cleanup must survive the retry.
+///
+/// The two halves are mixed on purpose: a live owner holds the stream half, so
+/// the first cleanup cannot take it, while the sink half is reached and its close
+/// really fails (the peer aborted the connection). That first caller's result is
+/// discarded, as the SDK's detached close does. Once the owner lets go, the
+/// completed cleanup must report the retained close failure — never `Ok`/graceful
+/// — and repeated callers must keep seeing it.
+#[tokio::test]
+async fn partial_cleanup_keeps_the_close_failure_it_observed() {
+    let (addr, reset, peer) = resetting_peer_listener().await;
+    let probe = Arc::new(PollProbe::default());
+    let stalled = Arc::new(observed_connect(addr, Arc::clone(&probe)).await);
+
+    // A live owner holds the stream half for the whole first cleanup.
+    let release = Arc::new(Notify::new());
+    let (held, held_rx) = tokio::sync::oneshot::channel();
+    let (owned_after, owned_rx) = tokio::sync::oneshot::channel();
+    let holder = tokio::spawn({
+        let stalled = Arc::clone(&stalled);
+        let release = Arc::clone(&release);
+        async move {
+            stalled
+                .hold_stream_until(release, held, owned_after)
+                .await
+        }
+    });
+    held_rx.await.expect("a live owner holds the stream half");
+
+    // Real close-frame failure: the peer aborts the connection with a TCP reset
+    // and its task ends only after the socket is gone.
+    reset.notify_one();
+    tokio::time::timeout(SETUP_BOUND, peer)
+        .await
+        .expect("the resetting peer ends within the bound")
+        .expect("the resetting peer task joins");
+
+    // The first cleanup cannot take the held half, but it does reach the sink and
+    // the close really fails there. That result is this caller's only, and it is
+    // discarded here exactly as the SDK's detached close discards it.
+    let first = tokio::time::timeout(SETUP_BOUND, stalled.release())
+        .await
+        .expect("the partial close is bounded");
+    assert_eq!(
+        first,
+        Err(CleanupFailure::HalvesOwned {
+            stream: true,
+            sink: false
+        }),
+        "the first caller is told the truth about the half it still owns"
+    );
+    assert!(
+        !probe.cleanup_finished.load(Ordering::SeqCst),
+        "a cleanup that still owns a half is not completion"
+    );
+
+    // The owner lets go: the transport really still owned that half, and the
+    // retried cleanup disposes it.
+    release.notify_one();
+    assert!(
+        owned_rx
+            .await
+            .expect("the owner reports the half it still sees"),
+        "the transport still owned the stream half after the partial cleanup"
+    );
+    holder.await.expect("the owner joins");
+    let completed = tokio::time::timeout(SETUP_BOUND, stalled.release())
+        .await
+        .expect("the completed close is bounded");
+    assert!(
+        matches!(
+            completed,
+            Err(CleanupFailure::CloseFrame(
+                spoke_connect::remote::TransportError::Io(_)
+            ))
+        ),
+        "the retained close failure survives the partial attempt: {completed:?}"
+    );
+    assert!(
+        probe.cleanup_finished.load(Ordering::SeqCst),
+        "the retry really disposed the last half"
+    );
+
+    // ...and repeated callers keep observing it, never a graceful completion.
+    let again = tokio::time::timeout(SETUP_BOUND, stalled.close())
+        .await
+        .expect("the repeated close is bounded");
+    assert!(
+        matches!(again, Err(spoke_connect::remote::TransportError::Io(_))),
+        "a repeated close still reports the retained failure: {again:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
