@@ -1,0 +1,21 @@
+[package]
+name = "nexus-memory-conformance"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Independent durable SPOKE memory provider fixture for N3 conformance (test crate, not a server)."
+
+[lints]
+workspace = true
+
+[dependencies]
+chrono = { workspace = true }
+sqlx = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
