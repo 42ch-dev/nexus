@@ -190,6 +190,15 @@ fn malformed_connect_endpoints_are_rejected() {
         "wss://host:bad",
         "ws://localhost:bad",
         "wss://[::1/ws",
+        // Empty authority, empty userinfo, an empty/invalid port and a host
+        // outside the locked loopback set are all refused by the raw
+        // transport grammar.
+        "wss:///ws",
+        "wss://@example.com/ws",
+        "wss://example.com:",
+        "wss://example.com:8420:1",
+        "ws://127.0.0.2:8420",
+        "ws://[::2]:8420",
     ] {
         let error = MemoryProviderSelection::from_config(Some(remote_config(endpoint)))
             .expect_err("malformed endpoint must be refused");
@@ -199,7 +208,13 @@ fn malformed_connect_endpoints_are_rejected() {
     // The shared writer refuses the same authorities before persisting them.
     let home = home();
     let service = CoreHomeService::open(home.path().to_path_buf()).expect("home entry");
-    for endpoint in ["wss://:8420", "wss://host:bad", "ws://localhost:bad"] {
+    for endpoint in [
+        "wss://:8420",
+        "wss://host:bad",
+        "ws://localhost:bad",
+        "wss:///ws",
+        "ws://127.0.0.2:8420",
+    ] {
         let selection =
             MemoryProviderSelection::Remote(remote(CREDENTIAL_ID, endpoint, PUBKEY_HEX));
         let error = service
@@ -212,10 +227,13 @@ fn malformed_connect_endpoints_are_rejected() {
         "a refused selection writes nothing"
     );
 
-    // Loopback ws:// (tests) and wss:// remain selectable. `wss:///ws` is a
-    // standard URL naming host `ws` (the parser skips the extra slash), so it
-    // is accepted instead of guessed as a typo.
-    for endpoint in ["ws://127.0.0.1:8420/memory", "ws://[::1]:8420", "ws://localhost:1", "wss://memory.example.com/ws", "wss:///ws"] {
+    // Loopback ws:// (tests) and wss:// remain selectable, persisted verbatim.
+    for endpoint in [
+        "ws://127.0.0.1:8420/memory",
+        "ws://[::1]:8420",
+        "ws://localhost:1",
+        "wss://memory.example.com/ws",
+    ] {
         MemoryProviderSelection::from_config(Some(remote_config(endpoint)))
             .unwrap_or_else(|error| panic!("{endpoint} must be accepted: {error:?}"));
     }
@@ -452,24 +470,49 @@ fn non_regular_credential_path_is_refused() {
 
 #[cfg(unix)]
 #[test]
-fn capability_proof_must_be_the_declared_shape() {
+fn capability_proof_must_be_the_published_shape() {
     let home = home();
 
-    // A non-null `capability_token` must be the published
-    // `CapabilityTokenProof` shape `{v, claims, sig}`; anything else is refused.
-    for token in [
+    // A non-null `capability_token` must deserialize as the published
+    // `CapabilityTokenProof` (`{v, claims, sig}`) and `CapabilityClaims`:
+    // required `iss`/`sub`/`aud` strings, string-array `capabilities`,
+    // unsigned `exp`, typed optional `iat`/`jti`, unknown fields refused.
+    let mut refused = vec![
+        "{}".to_string(),
+        "{\"unrelated\": true}".to_string(),
+        "{\"v\": 1, \"claims\": {}, \"sig\": \"\"}".to_string(),
+        "{\"v\": 1, \"claims\": {}}".to_string(),
+        "{\"v\": \"1\", \"claims\": {}, \"sig\": \"c2ln\"}".to_string(),
+        "{\"v\": 1, \"claims\": [], \"sig\": \"SIGMARKER\"}".to_string(),
+        "{\"v\": 1, \"claims\": {}, \"sig\": 7}".to_string(),
+        "{\"v\": 1, \"claims\": {}, \"sig\": \"c2ln\", \"extra\": 1}".to_string(),
+    ];
+    for claims in [
         "{}",
-        "{\"unrelated\": true}",
-        "{\"v\": 1, \"claims\": {}, \"sig\": \"\"}",
-        "{\"v\": 1, \"claims\": {}}",
-        "{\"v\": \"1\", \"claims\": {}, \"sig\": \"c2ln\"}",
-        "{\"v\": 1, \"claims\": [], \"sig\": \"SIGMARKER\"}",
+        "{\"iss\": \"i\"}",
+        "{\"iss\": \"i\", \"sub\": \"s\"}",
+        "{\"iss\": \"i\", \"sub\": \"s\", \"aud\": \"a\"}",
+        "{\"iss\": \"i\", \"sub\": \"s\", \"aud\": \"a\", \"capabilities\": []}",
+        "{\"iss\": 1, \"sub\": \"s\", \"aud\": \"a\", \"capabilities\": [], \"exp\": 1}",
+        "{\"iss\": \"i\", \"sub\": \"s\", \"aud\": \"a\", \"capabilities\": \"memory\", \"exp\": 1}",
+        "{\"iss\": \"i\", \"sub\": \"s\", \"aud\": \"a\", \"capabilities\": [1], \"exp\": 1}",
+        "{\"iss\": \"i\", \"sub\": \"s\", \"aud\": \"a\", \"capabilities\": [], \"exp\": -1}",
+        "{\"iss\": \"i\", \"sub\": \"s\", \"aud\": \"a\", \"capabilities\": [], \"exp\": 1.5}",
+        "{\"iss\": \"i\", \"sub\": \"s\", \"aud\": \"a\", \"capabilities\": [], \"exp\": 1, \"iat\": \"x\"}",
+        "{\"iss\": \"i\", \"sub\": \"s\", \"aud\": \"a\", \"capabilities\": [], \"exp\": 1, \"jti\": 7}",
+        "{\"iss\": \"i\", \"sub\": \"s\", \"aud\": \"a\", \"capabilities\": [], \"exp\": 1, \"extra\": true}",
     ] {
+        refused.push(format!(
+            "{{\"v\": 1, \"claims\": {claims}, \"sig\": \"SIGMARKER\"}}"
+        ));
+    }
+
+    for token in refused {
         let content =
             format!("{{\"identity_seed_hex\": \"{SEED_HEX}\", \"capability_token\": {token}}}");
         write_credential(home.path(), CREDENTIAL_ID, &content, 0o600);
         let error = MemoryCredential::load(home.path(), CREDENTIAL_ID)
-            .expect_err("a non-proof object must be refused");
+            .expect_err("a malformed proof must be refused");
         assert!(
             !error.to_string().contains("SIGMARKER"),
             "proof error leaked the signature: {error}"
@@ -477,16 +520,28 @@ fn capability_proof_must_be_the_declared_shape() {
         assert_credential_refused(error);
     }
 
-    // The published shape loads.
-    let proof = "{\"v\": 1, \"claims\": {\"iss\": \"12D3KooWIss\", \
-                 \"sub\": \"12D3KooWSub\", \"aud\": \"12D3KooWAud\", \
-                 \"capabilities\": [\"memory\"], \"exp\": 4102444800}, \
-                 \"sig\": \"c2ln\"}";
-    let content =
-        format!("{{\"identity_seed_hex\": \"{SEED_HEX}\", \"capability_token\": {proof}}}");
-    write_credential(home.path(), CREDENTIAL_ID, &content, 0o600);
-    MemoryCredential::load(home.path(), CREDENTIAL_ID)
-        .expect("the published proof shape must load");
+    // The published shape loads, with and without the optional typed claims.
+    for proof in [
+        concat!(
+            "{\"v\": 1, \"claims\": {\"iss\": \"12D3KooWIss\", ",
+            "\"sub\": \"12D3KooWSub\", \"aud\": \"12D3KooWAud\", ",
+            "\"capabilities\": [\"memory\"], \"exp\": 4102444800}, ",
+            "\"sig\": \"c2ln\"}"
+        ),
+        concat!(
+            "{\"v\": 1, \"claims\": {\"iss\": \"12D3KooWIss\", ",
+            "\"sub\": \"12D3KooWSub\", \"aud\": \"12D3KooWAud\", ",
+            "\"capabilities\": [\"memory\", \"spoke-baseline\"], ",
+            "\"exp\": 4102444800, \"iat\": 4102444700, \"jti\": \"tok-1\"}, ",
+            "\"sig\": \"c2ln\"}"
+        ),
+    ] {
+        let content =
+            format!("{{\"identity_seed_hex\": \"{SEED_HEX}\", \"capability_token\": {proof}}}");
+        write_credential(home.path(), CREDENTIAL_ID, &content, 0o600);
+        MemoryCredential::load(home.path(), CREDENTIAL_ID)
+            .unwrap_or_else(|error| panic!("the published proof shape must load: {error:?}"));
+    }
 }
 
 #[cfg(unix)]

@@ -3766,6 +3766,7 @@ dependencies = [
  "getrandom 0.4.3",
  "graph-flow",
  "hex",
+ "http",
  "libc",
  "nexus-acp-host",
  "nexus-agent-host",
@@ -3802,7 +3803,6 @@ dependencies = [
  "tokio-util",
  "toml",
  "tracing",
- "url",
  "uuid",
  "wat",
 ]

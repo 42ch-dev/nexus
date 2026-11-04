@@ -187,26 +187,53 @@ fn is_valid_space_id(id: &str) -> bool {
 }
 
 fn validate_connect_endpoint(endpoint: &str) -> CoreResult<()> {
-    // The house parser decides scheme, host and port validity; string
-    // splitting accepted an empty host or a non-numeric port (§3.2).
-    let url = url::Url::parse(endpoint)
-        .map_err(|_| invalid("connect_endpoint", "must be an absolute ws:// or wss:// URL"))?;
-    if !url.username().is_empty() || url.password().is_some() {
-        return Err(invalid("connect_endpoint", "must not carry userinfo"));
-    }
-    if url.query().is_some() {
-        return Err(invalid("connect_endpoint", "must not carry a query component"));
-    }
-    if url.fragment().is_some() {
+    // Validate the exact raw string the dial path hands to
+    // `tokio_tungstenite::connect_async`: it parses that text as an
+    // `http::Uri` (`IntoClientRequest for &str`), so this is the transport's
+    // own grammar rather than a second, normalized parser (§3.2).
+    if endpoint.contains('#') {
         return Err(invalid(
             "connect_endpoint",
             "must not carry a fragment component",
         ));
     }
-    match url.scheme() {
-        "wss" => Ok(()),
-        "ws" if is_loopback_host(url.host()) => Ok(()),
-        "ws" => Err(invalid(
+    let uri = endpoint
+        .parse::<http::Uri>()
+        .map_err(|_| invalid("connect_endpoint", "must be an absolute ws:// or wss:// URL"))?;
+    let authority = uri
+        .authority()
+        .ok_or_else(|| invalid("connect_endpoint", "must name a host"))?;
+    // The transport keeps userinfo in the authority it forwards; the raw
+    // component must be rejected even when it is empty (`wss://@host`).
+    if authority.as_str().contains('@') {
+        return Err(invalid("connect_endpoint", "must not carry userinfo"));
+    }
+    if uri.query().is_some() {
+        return Err(invalid(
+            "connect_endpoint",
+            "must not carry a query component",
+        ));
+    }
+    let host = authority.host();
+    if host.is_empty() {
+        return Err(invalid("connect_endpoint", "must name a host"));
+    }
+    // The transport connects to `uri.port_u16()` or the scheme default, so an
+    // unreadable or empty port must not silently become 443/80.
+    let port_suffix = authority.as_str().strip_prefix(host).unwrap_or_default();
+    if !port_suffix.is_empty() {
+        let port = port_suffix.strip_prefix(':').unwrap_or_default();
+        let valid = !port.is_empty()
+            && port.bytes().all(|byte| byte.is_ascii_digit())
+            && port.parse::<u16>().is_ok_and(|port| port != 0);
+        if !valid {
+            return Err(invalid("connect_endpoint", "port must be 1-65535"));
+        }
+    }
+    match uri.scheme_str() {
+        Some("wss") => Ok(()),
+        Some("ws") if is_locked_loopback_host(host) => Ok(()),
+        Some("ws") => Err(invalid(
             "connect_endpoint",
             "ws:// is allowed only for loopback hosts; use wss://",
         )),
@@ -214,16 +241,22 @@ fn validate_connect_endpoint(endpoint: &str) -> CoreResult<()> {
     }
 }
 
-/// Loopback as the parser classified the host: IPv4/IPv6 loopback addresses
-/// or the `localhost` domain (IPv6 `host_str` keeps its brackets, so the typed
-/// host is the reliable form).
-fn is_loopback_host(host: Option<url::Host<&str>>) -> bool {
-    match host {
-        Some(url::Host::Ipv4(address)) => address.is_loopback(),
-        Some(url::Host::Ipv6(address)) => address.is_loopback(),
-        Some(url::Host::Domain(domain)) => domain == "localhost",
-        None => false,
+/// The locked `ws://` host set (§3.2): exactly `127.0.0.1`, `::1` or
+/// `localhost`, not the whole 127/8 range.
+fn is_locked_loopback_host(host: &str) -> bool {
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
     }
+    let address = host
+        .strip_prefix('[')
+        .and_then(|host| host.strip_suffix(']'))
+        .unwrap_or(host);
+    if let Ok(address) = address.parse::<std::net::Ipv4Addr>() {
+        return address == std::net::Ipv4Addr::LOCALHOST;
+    }
+    address
+        .parse::<std::net::Ipv6Addr>()
+        .is_ok_and(|address| address.is_loopback())
 }
 
 /// Drop userinfo, query and fragment so a hand-built invalid value can never

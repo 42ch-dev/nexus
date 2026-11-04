@@ -114,16 +114,38 @@ fn open_credential_file(path: &Path) -> CoreResult<std::fs::File> {
         .map_err(|_| invalid("credential file is not a regular file reached without a symlink"))
 }
 
-/// Platforms without a no-follow open flag keep a best-effort pathname check;
-/// the descriptor checks below still apply. Unexercised: reported as a limit.
-#[cfg(not(unix))]
+/// `FILE_FLAG_OPEN_REPARSE_POINT` opens the reparse point itself instead of
+/// resolving it, so a symlink/junction substitution cannot redirect the open;
+/// the descriptor's reparse attribute then refuses it. A directory needs a
+/// backup-semantics handle and fails the open, which is also a refusal.
+#[cfg(windows)]
 fn open_credential_file(path: &Path) -> CoreResult<std::fs::File> {
-    let metadata = std::fs::symlink_metadata(path)
+    use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+        .map_err(|_| invalid("credential file is not a regular file reached without a symlink"))?;
+    let metadata = file
+        .metadata()
         .map_err(|_| invalid("credential file is missing or unreadable"))?;
-    if metadata.file_type().is_symlink() {
+    if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
         return Err(invalid("credential file must not be a symlink"));
     }
-    std::fs::File::open(path).map_err(|_| invalid("credential file is missing or unreadable"))
+    Ok(file)
+}
+
+/// No race-free no-follow open exists on this target, so the credential path
+/// fails closed instead of keeping a check-then-open credential path.
+#[cfg(not(any(unix, windows)))]
+fn open_credential_file(_path: &Path) -> CoreResult<std::fs::File> {
+    Err(invalid(
+        "credential files cannot be opened without following links on this platform",
+    ))
 }
 
 fn read_protected_file(path: &Path) -> CoreResult<Vec<u8>> {
@@ -180,30 +202,43 @@ fn hex_digit(byte: u8) -> u8 {
     }
 }
 
+/// Borrowed view of the published `spoke_connect::core::CapabilityTokenProof`
+/// wire shape (§3.1): the default core graph carries no Connect edge, so the
+/// value is deserialized against this mirror of the published
+/// `CapabilityTokenProof`/`CapabilityClaims` fields, types and
+/// `deny_unknown_fields` rules; the remote dial path re-deserializes it
+/// through the published type.
+// The fields exist so serde enforces the published shape; none is read.
+#[allow(dead_code)]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProofView<'a> {
+    v: u64,
+    claims: ClaimsView<'a>,
+    sig: &'a str,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ClaimsView<'a> {
+    iss: &'a str,
+    sub: &'a str,
+    aud: &'a str,
+    capabilities: Vec<&'a str>,
+    exp: u64,
+    #[serde(default)]
+    iat: Option<u64>,
+    #[serde(default)]
+    jti: Option<&'a str>,
+}
+
 /// Validate the nullable upstream `CapabilityTokenProof` (`{v, claims, sig}`)
-/// without importing it: `spoke_connect::core::CapabilityTokenProof` is the
-/// published type, but the default core graph carries no Connect edge (§6), so
-/// this loader checks the same serialized shape here and the remote dial path
-/// re-deserializes the value through the published type.
+/// against the published serialized shape without importing it.
 fn validate_capability_token(token: &serde_json::Value) -> CoreResult<()> {
-    let proof = match token.as_object() {
-        Some(object) if object.len() == 3 => object,
-        _ => return Err(invalid("capability_token must be the {v, claims, sig} proof object")),
-    };
-    if !proof.get("v").is_some_and(serde_json::Value::is_u64) {
-        return Err(invalid("capability_token.v must be the token format version"));
-    }
-    if !proof.get("claims").is_some_and(serde_json::Value::is_object) {
-        return Err(invalid("capability_token.claims must be the signed claims object"));
-    }
-    if !proof
-        .get("sig")
-        .and_then(serde_json::Value::as_str)
-        .is_some_and(|sig| !sig.is_empty())
-    {
-        return Err(invalid("capability_token.sig must be the signature string"));
-    }
-    Ok(())
+    ProofView::deserialize(token)
+        .map(|_| ())
+        .map_err(|_| invalid("capability_token must be the published {v, claims, sig} proof shape"))
 }
 
 /// Static coded refusal: the message never interpolates file contents.

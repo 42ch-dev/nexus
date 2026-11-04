@@ -138,9 +138,11 @@ hex = { version = "0.4", optional = true }
 base64 = { version = "0.23", optional = true }
 sha2 = { workspace = true, optional = true }
 serde.workspace = true
-# §3.2 endpoint discipline: the house URL parser decides scheme/host/port
-# validity instead of string splitting. Already in the workspace lock.
-url.workspace = true
+# §3.2 endpoint discipline: the raw endpoint is validated with the same
+# `http::Uri` grammar `tokio_tungstenite::connect_async` consumes, instead of
+# a second parser with a different normalization. Already in the workspace
+# lock through the WS transport.
+http = "1"
 serde_json.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
