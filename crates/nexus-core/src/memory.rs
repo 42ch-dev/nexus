@@ -100,6 +100,11 @@ fn optional_str(value: Option<&impl std::ops::Deref<Target = String>>) -> Option
     value.map(|s| s.as_str())
 }
 
+/// One local metadata timestamp (RFC 3339 UTC) for D18 dependency rows.
+fn now_iso() -> String {
+    chrono::Utc::now().to_rfc3339()
+}
+
 fn pagination_info(limit: u32, has_more: bool, next_cursor: Option<&str>) -> serde_json::Value {
     serde_json::json!({
         "limit": limit,
@@ -254,9 +259,14 @@ fn pending_row_in_scope(row: &PendingMemoryRow, binding_id: Option<&str>) -> boo
 /// review disposition and the SOUL-invalidation journal) are reached only
 /// through [`MemoryProviderBinding::local`].
 pub struct MemoryAdapter {
+    pool: SqlitePool,
     binding: Arc<MemoryProviderBinding>,
     principal: spoke_schemas::Principal,
     subject_id: String,
+    /// The Nexus Character this bearer belongs to (`None` for the Creator
+    /// bearer): the D18 dependency namespace needs the Nexus subject, not only
+    /// the provider subject id.
+    character_id: Option<String>,
 }
 
 impl MemoryAdapter {
@@ -266,7 +276,12 @@ impl MemoryAdapter {
     /// legacy projection, so it runs only on a writable binding: a read-only
     /// core (NXM-5 Task 2 fix round 1, finding F6) serves the projection of the
     /// subject an earlier writer open already ensured, and writes nothing.
+    ///
+    /// `pool` is the workspace pool: D18 dependency facts (admission retirement,
+    /// known-object acknowledgements) are written on it in their own short
+    /// transactions and only for a nonlocal binding.
     pub async fn open(
+        pool: SqlitePool,
         binding: Arc<MemoryProviderBinding>,
         principal: &Principal,
         subject_id: String,
@@ -289,10 +304,13 @@ impl MemoryAdapter {
                 return Err(memory_reject(&reject));
             }
         }
+        let character_id = (kind_ns == legacy::CHARACTER_KIND_NS).then(|| kind_id.to_string());
         Ok(Self {
+            pool,
             binding,
             principal: spoke_principal,
             subject_id,
+            character_id,
         })
     }
 
@@ -320,6 +338,111 @@ impl MemoryAdapter {
     /// (the narrative-cache invalidation behind a promotion) run only here.
     pub(crate) fn is_local(&self) -> bool {
         self.binding.local().is_ok()
+    }
+
+    /// The remote dependency namespace this adapter may record facts under
+    /// (D18, §5.1): only a nonlocal binding with a pinned public client
+    /// identity and a Character bearer has remote binding-local memory to
+    /// protect. A local binding — or a nonlocal one whose identity was not
+    /// pinned — records nothing instead of falling back to another namespace.
+    fn remote_namespace<'a>(
+        &'a self,
+        binding_id: &'a str,
+    ) -> Option<nexus_local_db::RemoteBindingNamespace<'a>> {
+        let character_id = self.character_id.as_deref()?;
+        let client_identity = self.binding.client_identity()?;
+        let (authority_host_id, authority_generation) = self.binding.authority();
+        Some(nexus_local_db::RemoteBindingNamespace {
+            owner_creator_id: self.principal.principal_id.as_str(),
+            character_id,
+            binding_id,
+            authority_host_id,
+            authority_generation: authority_generation.get(),
+            space_id: self.binding.space_id(),
+            client_identity,
+        })
+    }
+
+    /// Record one known remote provider-object fact for this binding (D18).
+    ///
+    /// The write is monotone and conditional on the binding still existing, so
+    /// a late acknowledgement cannot resurrect a terminal fact or a deleted
+    /// binding. Local bindings (and nonlocal ones without a pinned identity)
+    /// record nothing here and keep their existing behavior.
+    async fn record_remote_object(
+        &self,
+        binding_id: Option<&str>,
+        kind: nexus_local_db::RemoteBindingObjectKind,
+        object_id: &str,
+        state: nexus_local_db::RemoteBindingObjectState,
+    ) -> CoreResult<()> {
+        let Some(binding_id) = binding_id else {
+            return Ok(());
+        };
+        let Some(namespace) = self.remote_namespace(binding_id) else {
+            return Ok(());
+        };
+        let mut tx = nexus_local_db::begin_immediate(&self.pool)
+            .await
+            .map_err(map_local_db_error)?;
+        nexus_local_db::record_remote_binding_object_tx(
+            &mut tx,
+            &namespace,
+            kind,
+            object_id,
+            state,
+            &now_iso(),
+        )
+        .await
+        .map_err(map_local_db_error)?;
+        tx.commit().await.map_err(sqlx_internal)?;
+        Ok(())
+    }
+
+    /// Record a committed review outcome (D18) in one local transaction: the
+    /// consumed candidate and the record references the provider's receipt
+    /// returned. A later capture-result publication can then neither resurrect
+    /// the consumed candidate nor overwrite these record references.
+    async fn record_remote_review(
+        &self,
+        binding_id: Option<&str>,
+        candidate_id: &str,
+        record_ids: &[String],
+    ) -> CoreResult<()> {
+        let Some(binding_id) = binding_id else {
+            return Ok(());
+        };
+        let Some(namespace) = self.remote_namespace(binding_id) else {
+            return Ok(());
+        };
+        let now = now_iso();
+        let mut tx = nexus_local_db::begin_immediate(&self.pool)
+            .await
+            .map_err(map_local_db_error)?;
+        nexus_local_db::record_remote_binding_object_tx(
+            &mut tx,
+            &namespace,
+            nexus_local_db::RemoteBindingObjectKind::Candidate,
+            candidate_id,
+            nexus_local_db::RemoteBindingObjectState::Consumed,
+            &now,
+        )
+        .await
+        .map_err(map_local_db_error)?;
+        for record_id in record_ids {
+            nexus_local_db::record_remote_binding_object_tx(
+                &mut tx,
+                &namespace,
+                nexus_local_db::RemoteBindingObjectKind::Record,
+                record_id,
+                nexus_local_db::RemoteBindingObjectState::Live,
+                &now,
+            )
+            .await
+            .map_err(map_local_db_error)?;
+        }
+        tx.commit().await.map_err(sqlx_internal)?;
+        Ok(())
     }
 
     /// Every pending candidate of the subject, newest first in the retained
@@ -658,7 +781,18 @@ impl MemoryAdapter {
     ///
     /// `Ok(false)` folds the same outcomes as [`Self::dismiss_legacy`]: absent,
     /// already consumed, or lost the revision race.
-    async fn dismiss_native(&self, candidate_id: &str, revision: u64) -> CoreResult<bool> {
+    ///
+    /// A committed dismissal is a disposal acknowledgement (D18): the candidate
+    /// fact for `binding_id` moves to `released` in its own local transaction.
+    /// The write is monotone and conditional, so an acknowledgement that lands
+    /// before the capture result is published is durable and a later result
+    /// publication cannot resurrect it.
+    async fn dismiss_native(
+        &self,
+        candidate_id: &str,
+        revision: u64,
+        binding_id: Option<&str>,
+    ) -> CoreResult<bool> {
         let request: spoke_schemas::MemoryCandidatesDismissRequest = map_wire(json!({
             "space_id": self.binding.space_id(),
             "candidate_id": candidate_id,
@@ -671,7 +805,16 @@ impl MemoryAdapter {
             .dismiss_candidate(&self.principal, request)
             .await
         {
-            SpokeResult::Ok(_) => Ok(true),
+            SpokeResult::Ok(_) => {
+                self.record_remote_object(
+                    binding_id,
+                    nexus_local_db::RemoteBindingObjectKind::Candidate,
+                    candidate_id,
+                    nexus_local_db::RemoteBindingObjectState::Released,
+                )
+                .await?;
+                Ok(true)
+            }
             SpokeResult::Reject(reject)
                 if matches!(
                     reject.code,
@@ -713,7 +856,13 @@ impl MemoryAdapter {
         let Some(row) = self.matched_pending_row(&candidate, pending_id) else {
             return Ok(false);
         };
-        self.dismiss_native(&row.candidate_id, row.revision).await
+        // The binding this candidate was captured under is the dependency the
+        // dismissal acknowledges; a shared-scope candidate carries none.
+        let binding_id = candidate
+            .pointer("/capture_scope/context_id")
+            .and_then(Value::as_str);
+        self.dismiss_native(&row.candidate_id, row.revision, binding_id)
+            .await
     }
 
     /// The retained pending row one fetched provider candidate may be dismissed
@@ -750,6 +899,7 @@ impl MemoryAdapter {
         expected_revision: u64,
         decision: Value,
         section: Option<&MemoryDisposition>,
+        binding_id: Option<&str>,
     ) -> CoreResult<()> {
         let request: spoke_schemas::MemoryCandidatesReviewRequest = map_wire(json!({
             "space_id": self.binding.space_id(),
@@ -780,7 +930,28 @@ impl MemoryAdapter {
             }
         };
         match result {
-            SpokeResult::Ok(_) => Ok(()),
+            SpokeResult::Ok(receipt) => {
+                if !self.is_local() {
+                    // D18: bind the real receipt in one local transaction — the
+                    // consumed candidate and the record references it returned.
+                    let body = serde_json::to_value(&receipt).map_err(wire_err)?;
+                    let record_ids: Vec<String> = body
+                        .pointer("/result/record_ids")
+                        .and_then(Value::as_array)
+                        .ok_or_else(|| {
+                            internal_err(
+                                "memory_review_receipt",
+                                "a committed review receipt carries no record_ids",
+                            )
+                        })?
+                        .iter()
+                        .filter_map(|record_id| record_id.as_str().map(str::to_string))
+                        .collect();
+                    self.record_remote_review(binding_id, candidate_id, &record_ids)
+                        .await?;
+                }
+                Ok(())
+            }
             SpokeResult::Reject(reject) => Err(memory_reject(&reject)),
         }
     }
@@ -1027,7 +1198,12 @@ impl MemoryAdapter {
     /// keeps the retained `version_mismatch` conflict; an absent record keeps
     /// the retained not-found answer. A remote binding has no projection to
     /// adopt and runs the ordinary `memory.records.promote`.
-    async fn promote_fragment(&self, record_id: &str, expected_revision: u64) -> CoreResult<()> {
+    async fn promote_fragment(
+        &self,
+        record_id: &str,
+        expected_revision: u64,
+        binding_id: &str,
+    ) -> CoreResult<()> {
         let key = idempotency_key("promote", record_id)?;
         let result = match self.binding.local() {
             Ok(local) => {
@@ -1056,7 +1232,30 @@ impl MemoryAdapter {
             }
         };
         match result {
-            SpokeResult::Ok(_) => Ok(()),
+            SpokeResult::Ok(receipt) => {
+                if !self.is_local() {
+                    // D18: a promotion to shared releases the record's binding
+                    // dependency; the receipt names the record it promoted.
+                    let body = serde_json::to_value(&receipt).map_err(wire_err)?;
+                    let promoted = body
+                        .pointer("/result/record_id")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            internal_err(
+                                "memory_promote_receipt",
+                                "a committed promotion receipt carries no record_id",
+                            )
+                        })?;
+                    self.record_remote_object(
+                        Some(binding_id),
+                        nexus_local_db::RemoteBindingObjectKind::Record,
+                        promoted,
+                        nexus_local_db::RemoteBindingObjectState::Released,
+                    )
+                    .await?;
+                }
+                Ok(())
+            }
             SpokeResult::Reject(reject) => Err(match reject.code {
                 SpokeRejectCode::NotFound => {
                     not_found("character memory fragment", &format!("'{record_id}'"))
@@ -1190,6 +1389,7 @@ impl CoreService {
     pub(crate) async fn creator_memory(&self, principal: &Principal) -> CoreResult<MemoryAdapter> {
         let binding = self.memory_binding()?;
         MemoryAdapter::open(
+            self.inner.pool.clone(),
             binding,
             principal,
             legacy::creator_subject_id(principal.creator_id()),
@@ -1204,6 +1404,7 @@ impl CoreService {
     async fn creator_memory_writer(&self, principal: &Principal) -> CoreResult<MemoryAdapter> {
         let binding = self.memory_writer_binding()?;
         MemoryAdapter::open(
+            self.inner.pool.clone(),
             binding,
             principal,
             legacy::creator_subject_id(principal.creator_id()),
@@ -1221,6 +1422,7 @@ impl CoreService {
     ) -> CoreResult<MemoryAdapter> {
         let binding = self.memory_binding()?;
         MemoryAdapter::open(
+            self.inner.pool.clone(),
             binding,
             principal,
             legacy::character_subject_id(character_id),
@@ -1239,6 +1441,7 @@ impl CoreService {
     ) -> CoreResult<MemoryAdapter> {
         let binding = self.memory_writer_binding()?;
         MemoryAdapter::open(
+            self.inner.pool.clone(),
             binding,
             principal,
             legacy::character_subject_id(character_id),
@@ -2047,10 +2250,11 @@ impl CoreService {
     /// As [`Self::acquire_actor_activity`], plus `invalid_input` for malformed
     /// capture fields, the binding admission (an active binding of this
     /// Character on an owned active World, `actor_not_found`), and the mapped
-    /// storage error otherwise. The admission holds for every binding: the
-    /// local write runs it inside the provider's own write transaction, and a
-    /// nonlocal write runs it on the workspace writer and holds that lock across
-    /// the remote effect, so a concurrent removal cannot interleave (§5, D15).
+    /// storage error otherwise. A local write runs the admission inside the
+    /// provider's own write transaction (D15). A nonlocal write commits its own
+    /// durable admission in the same short writer transaction and before the
+    /// RPC (D18, §5.1): an unprovable attempt keeps the binding non-removable,
+    /// and only that attempt's definite result may retire it.
     pub async fn capture_character_pending_review(
         &self,
         principal: &Principal,
@@ -2088,10 +2292,11 @@ impl CoreService {
         let memory = self
             .character_memory_writer(principal, &character_id)
             .await?;
-        // The binding the legacy insert admitted is still admitted, and the
-        // check now runs inside the provider's own write transaction (D15):
-        // `remove_binding` takes the same write lock, so it cannot delete the
-        // binding between the check and the candidate write.
+        // The binding the legacy insert admitted is still admitted: the local
+        // check runs inside the provider's own write transaction (D15), and a
+        // nonlocal capture commits its own durable admission before the RPC
+        // (D18). `remove_binding` takes the same write lock, so it cannot delete
+        // the binding between the check and the candidate write.
         let binding = binding_id.map(|binding| CaptureBinding {
             owner_creator: principal.creator_id(),
             character: &character_id,
@@ -2143,49 +2348,168 @@ impl CoreService {
             }
             // A remote binding serves no local bridge identity: the standard
             // capture op stores the candidate under its own minted id. A
-            // binding-local capture still owes the Nexus provenance admission
-            // the local path gets from the provider's own write transaction
-            // (D15): the binding must be active, belong to this Character and
-            // target an owned active World. No binding-scoped guard exists, so
-            // the admission runs on the workspace writer's own
-            // `BEGIN IMMEDIATE` — the lock `remove_binding` takes — and is held
-            // across the remote write, so a removal cannot commit between the
-            // check and the effect. The admission reads binding/World metadata
-            // only (never legacy memory content), writes nothing, and is rolled
-            // back before the effect is mapped. A shared-scope capture carries
-            // no binding provenance and takes no write lock.
-            Err(_) => {
-                let admission = match binding_id {
-                    Some(binding_id) => {
-                        let mut admission = nexus_local_db::begin_immediate(&self.inner.pool)
-                            .await
-                            .map_err(map_local_db_error)?;
-                        nexus_local_db::require_valid_provenance_tx(
-                            &mut admission,
-                            principal.creator_id(),
-                            &character_id,
-                            Some(binding_id),
-                        )
-                        .await
-                        .map_err(map_local_db_error)?;
-                        Some(admission)
+            // binding-local capture first commits its own durable admission
+            // (D18, §5.1) in the same short writer transaction as the Nexus
+            // provenance admission, before the RPC; only this attempt's
+            // definite result retires it and publishes the candidate
+            // references the provider returned. A shared-scope capture carries
+            // no binding dependency and takes no admission.
+            Err(_) => match binding_id {
+                Some(binding_id) => {
+                    self.capture_remote_binding_scoped(
+                        principal,
+                        &memory,
+                        &character_id,
+                        binding_id,
+                        capture,
+                    )
+                    .await?;
+                }
+                None => {
+                    if let SpokeResult::Reject(reject) =
+                        memory.binding.port().capture(&memory.principal, capture).await
+                    {
+                        return Err(memory_reject(&reject));
                     }
-                    None => None,
-                };
-                let outcome = memory.binding.port().capture(&memory.principal, capture).await;
-                if let Some(admission) = admission {
-                    admission.rollback().await.map_err(sqlx_internal)?;
                 }
-                if let SpokeResult::Reject(reject) = outcome {
-                    return Err(memory_reject(&reject));
-                }
-            }
+            },
         }
 
         map_wire(json!({
             "success": true,
             "pending_id": pending_id,
         }))
+    }
+
+    /// Send one binding-scoped remote capture under its own durable admission
+    /// (D18, `n3-provider-binding.md` §5.1).
+    ///
+    /// The admission is written in the same short `BEGIN IMMEDIATE` as the
+    /// Nexus provenance check and committed **before** the RPC, so a crash,
+    /// cancellation, transport failure or uncertain commit cannot leave the
+    /// binding removable while the effect may exist. Only this attempt's
+    /// definite committed receipt publishes its candidate references and retires
+    /// this admission — together in one local transaction; a definite no-effect
+    /// refusal retires it too. Nothing else clears it: a later attempt, receipt
+    /// or counter never settles an older unknown, so an unprovable attempt keeps
+    /// the binding non-removable (the owner-selected conservative policy). The
+    /// provider is never asked to replay or roll back, and no memory content or
+    /// request body is stored.
+    ///
+    /// shortcut: an unprovable wire outcome keeps its binding non-removable
+    /// indefinitely (later attempts and concealed/negative provider reads never
+    /// prove absence), until remote-connect's signed runtime provides a real
+    /// remote binding and outcome evidence (R2).
+    async fn capture_remote_binding_scoped(
+        &self,
+        principal: &Principal,
+        memory: &MemoryAdapter,
+        character_id: &str,
+        binding_id: &str,
+        capture: spoke_schemas::MemoryCaptureRequest,
+    ) -> CoreResult<()> {
+        let binding = &memory.binding;
+        // A nonlocal binding without its pinned public client identity cannot
+        // be admitted: fail closed instead of recording under another identity.
+        let Some(client_identity) = binding.client_identity() else {
+            return Err(CoreError::Internal {
+                category: "memory_remote_identity_missing".to_string(),
+            });
+        };
+        let (authority_host_id, authority_generation) = binding.authority();
+        let namespace = nexus_local_db::RemoteBindingNamespace {
+            owner_creator_id: principal.creator_id(),
+            character_id,
+            binding_id,
+            authority_host_id,
+            authority_generation: authority_generation.get(),
+            space_id: binding.space_id(),
+            client_identity,
+        };
+        let admission_id = uuid::Uuid::new_v4().to_string();
+        let admitted_at = now_iso();
+        let mut admission = nexus_local_db::begin_immediate(&self.inner.pool)
+            .await
+            .map_err(map_local_db_error)?;
+        // The local binding must still be this Character's active binding on an
+        // owned active World when the attempt becomes durable — the same
+        // admission the local provider's write transaction performs, in the same
+        // writer transaction that makes the unknown attempt durable.
+        nexus_local_db::require_valid_provenance_tx(
+            &mut admission,
+            principal.creator_id(),
+            character_id,
+            Some(binding_id),
+        )
+        .await
+        .map_err(map_local_db_error)?;
+        nexus_local_db::insert_remote_binding_admission_tx(
+            &mut admission,
+            &admission_id,
+            &namespace,
+            &admitted_at,
+        )
+        .await
+        .map_err(map_local_db_error)?;
+        admission.commit().await.map_err(sqlx_internal)?;
+
+        match binding.port().capture(&memory.principal, capture).await {
+            SpokeResult::Ok(receipt) => {
+                let body = serde_json::to_value(&receipt).map_err(wire_err)?;
+                let candidate_ids: Vec<String> = body
+                    .pointer("/result/candidate_ids")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| {
+                        internal_err(
+                            "memory_capture_receipt",
+                            "a committed capture receipt carries no candidate_ids",
+                        )
+                    })?
+                    .iter()
+                    .filter_map(|candidate_id| candidate_id.as_str().map(str::to_string))
+                    .collect();
+                let published_at = now_iso();
+                let mut published = nexus_local_db::begin_immediate(&self.inner.pool)
+                    .await
+                    .map_err(map_local_db_error)?;
+                for candidate_id in &candidate_ids {
+                    nexus_local_db::record_remote_binding_object_tx(
+                        &mut published,
+                        &namespace,
+                        nexus_local_db::RemoteBindingObjectKind::Candidate,
+                        candidate_id,
+                        nexus_local_db::RemoteBindingObjectState::Live,
+                        &published_at,
+                    )
+                    .await
+                    .map_err(map_local_db_error)?;
+                }
+                nexus_local_db::retire_remote_binding_admission_tx(
+                    &mut published,
+                    &admission_id,
+                    &namespace,
+                )
+                .await
+                .map_err(map_local_db_error)?;
+                published.commit().await.map_err(sqlx_internal)?;
+                Ok(())
+            }
+            SpokeResult::Reject(reject) => {
+                // A definite refusal proves no effect: retire only this attempt.
+                let mut retired = nexus_local_db::begin_immediate(&self.inner.pool)
+                    .await
+                    .map_err(map_local_db_error)?;
+                nexus_local_db::retire_remote_binding_admission_tx(
+                    &mut retired,
+                    &admission_id,
+                    &namespace,
+                )
+                .await
+                .map_err(map_local_db_error)?;
+                retired.commit().await.map_err(sqlx_internal)?;
+                Err(memory_reject(&reject))
+            }
+        }
     }
 
     #[allow(clippy::significant_drop_tightening)] // the guard deliberately spans the whole operation
@@ -2354,7 +2678,7 @@ impl CoreService {
             .find(|row| row.pending_id == pending_id)
         {
             if memory
-                .dismiss_native(&row.candidate_id, row.revision)
+                .dismiss_native(&row.candidate_id, row.revision, row.binding_id.as_deref())
                 .await?
             {
                 return map_wire(json!({
@@ -2530,6 +2854,7 @@ impl CoreService {
             .promote_fragment(
                 &record_id,
                 u64::try_from(provider_revision).unwrap_or(u64::MAX),
+                source_binding.as_str(),
             )
             .await?;
         // Retained cache semantics: exactly the affected SOUL-narrative scopes
@@ -2960,7 +3285,7 @@ impl CoreService {
             .find(|row| row.pending_id == pending_id)
         {
             if memory
-                .dismiss_native(&row.candidate_id, row.revision)
+                .dismiss_native(&row.candidate_id, row.revision, row.binding_id.as_deref())
                 .await?
             {
                 return Ok(DeletePendingReviewResponse {

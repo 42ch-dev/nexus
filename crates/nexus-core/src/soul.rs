@@ -694,6 +694,7 @@ fn format_tom_belief_line(row: &crate::memory::CharacterTomBeliefRow) -> String 
 /// Returns an internal/`DATABASE_ERROR`/validation [`CoreError`] on any
 /// projection read failure other than a recognised absent-data condition.
 pub async fn load_character_mind_projection(
+    pool: &SqlitePool,
     memory: Arc<MemoryProviderBinding>,
     principal: &Principal,
     owner_creator_id: &str,
@@ -712,6 +713,7 @@ pub async fn load_character_mind_projection(
     })?;
 
     let read = MemoryAdapter::open(
+        pool.clone(),
         memory,
         principal,
         legacy::character_subject_id(character_id),
@@ -864,6 +866,7 @@ pub async fn load_character_mind_projection_with_tom(
     binding_id: &str,
 ) -> CoreResult<CharacterMindInput> {
     let mind = load_character_mind_projection(
+        pool,
         memory,
         principal,
         owner_creator_id,
@@ -946,6 +949,7 @@ impl CoreCharacterMind {
         binding_id: Option<&str>,
     ) -> CoreResult<CharacterMindInput> {
         load_character_mind_projection(
+            &self.pool,
             self.memory.clone(),
             principal,
             owner_creator_id,

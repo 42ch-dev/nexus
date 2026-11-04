@@ -374,8 +374,21 @@ async fn consume_review_decision(
         }
     };
 
+    // D18: a binding-local candidate's dependency namespace is its binding; a
+    // shared candidate (Creator arm or shared Character scope) carries none.
+    let binding_id = if row.binding_local {
+        row.input.scope_id.as_deref()
+    } else {
+        None
+    };
     match memory
-        .review(&row.candidate_id, row.expected_revision, decision, section)
+        .review(
+            &row.candidate_id,
+            row.expected_revision,
+            decision,
+            section,
+            binding_id,
+        )
         .await
     {
         Ok(()) => match action {

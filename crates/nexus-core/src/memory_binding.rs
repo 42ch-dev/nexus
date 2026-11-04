@@ -22,6 +22,12 @@ const LOCAL_AUTHORITY_GENERATION: NonZeroU64 = NonZeroU64::MIN;
 pub(crate) struct MemoryProviderBinding {
     port: Arc<dyn MemoryPort + Send + Sync>,
     local: Option<Arc<LocalMemoryProvider>>,
+    /// The loaded public client identity the remote dial authenticated with
+    /// (§5.1/D18): the Ed25519 public peer id, never a credential id,
+    /// profile/path, seed hash or payload principal. `None` for local; R1
+    /// pins it before exposing a remote binding, and a nonlocal binding
+    /// without it fails closed.
+    client_identity: Option<String>,
     space_id: String,
     authority_host_id: String,
     authority_generation: NonZeroU64,
@@ -33,6 +39,7 @@ impl MemoryProviderBinding {
     pub(crate) fn pin_local(provider: Arc<LocalMemoryProvider>) -> Self {
         Self {
             writable: provider.is_writable(),
+            client_identity: None,
             space_id: provider.space_id().to_string(),
             authority_host_id: LOCAL_AUTHORITY_HOST_ID.to_string(),
             authority_generation: LOCAL_AUTHORITY_GENERATION,
@@ -85,8 +92,20 @@ impl MemoryProviderBinding {
 
     /// The pinned `(authority_host_id, authority_generation)` pair.
     #[must_use]
-    #[allow(dead_code)] // exposed for Task 4 assertions and the remote cutover.
     pub(crate) fn authority(&self) -> (&str, NonZeroU64) {
         (&self.authority_host_id, self.authority_generation)
+    }
+
+    /// The actual public client identity the remote dial authenticated with
+    /// (§5.1/D18), or `None` for a local binding.
+    ///
+    /// This is the Ed25519 public peer id R1 derives from the loaded signing
+    /// key's verifying key — not `credential_id`, a profile/path, a seed hash
+    /// or any payload principal. Nexus dependency facts are namespaced by it,
+    /// and a nonlocal binding without one fails closed instead of falling back
+    /// to another identity.
+    #[must_use]
+    pub(crate) fn client_identity(&self) -> Option<&str> {
+        self.client_identity.as_deref()
     }
 }
