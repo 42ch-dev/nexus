@@ -27,6 +27,17 @@ CREATE TABLE IF NOT EXISTS spaces (
     extensions_json TEXT NOT NULL DEFAULT '{}'
 ) WITHOUT ROWID;
 
+-- §7.0.7/MEM-R026: provider-private snapshot marker. A monotonic per-space
+-- counter advanced inside the same transaction as every observable state
+-- change; it is deliberately not the public space `revision` and not
+-- `authority_generation`, because grant and subject changes must invalidate
+-- outstanding cursors without rewriting the public space object. Cursor
+-- bindings carry this value plus the engine policy version.
+CREATE TABLE IF NOT EXISTS provider_snapshot (
+    space_id TEXT PRIMARY KEY,
+    marker INTEGER NOT NULL CHECK (marker >= 1)
+) WITHOUT ROWID;
+
 -- §6.3: subject identity plus lifecycle fence state. `kind` is one optional
 -- pair (a half-populated kind is malformed), and `fenced_contexts_json` holds
 -- the context-scoped fence allowlist.

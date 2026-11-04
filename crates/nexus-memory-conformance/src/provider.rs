@@ -98,6 +98,12 @@ async fn provision_space(store: &FixtureStore) -> Result<FixtureIdentity, Fixtur
             .bind(Utc::now().to_rfc3339_opts(SecondsFormat::Micros, true))
             .execute(&mut *transaction)
             .await?;
+            // The private snapshot marker exists for every provisioned space,
+            // so the mutators can advance it without a lazy-create branch.
+            sqlx::query("INSERT INTO provider_snapshot (space_id, marker) VALUES (?, 1)")
+                .bind(&identity.space_id)
+                .execute(&mut *transaction)
+                .await?;
             identity
         }
         [row] => FixtureIdentity {
