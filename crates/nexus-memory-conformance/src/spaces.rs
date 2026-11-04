@@ -1552,7 +1552,13 @@ fn target_name(target: &spoke_operations::spoke_schemas::memory_subjects_fence_r
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::candidates::{
+        admit_capture, stage_receipt_in_tx, Mutation, ReceiptState, ReceiptTarget,
+    };
     use std::path::PathBuf;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::{mpsc, Arc, Mutex};
+    use std::time::Duration;
     use tempfile::TempDir;
 
     const OPERATOR: &str = "principal-operator";
@@ -3489,8 +3495,7 @@ mod tests {
             second
                 .grants
                 .iter()
-                .any(|grant| grant_principal(grant) == OTHER
-                    || grant_principal(grant) == "principal-other-2"),
+                .any(|grant| grant_principal(grant) != OPERATOR),
             "the full view authorization must come from the snapshot too"
         );
         snapshot.commit().await.expect("close the read snapshot");
@@ -3731,6 +3736,374 @@ mod tests {
                 scenario
                     .provider
                     .subjects_ensure(CLIENT, &ensure_request(&space_id, "subject-two"), expires_at)
+                    .await,
+            ),
+            SpokeRejectCode::NotAuthorized
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Deterministic two-connection interleaving (MEM-R026)
+    // -----------------------------------------------------------------------
+    //
+    // SQLite offers no production pause point between the statements of these
+    // two reads, so the fixture supplies its own. It is test-only and lives on
+    // the reader's own pooled connections: a TEMP view named `grants` shadows
+    // the real table there, and its `grant_id` column carries a custom
+    // collation. Registering that collation is the safe
+    // `LockedSqliteHandle::create_collation` seam, and it returns exactly the
+    // byte ordering the read would have used anyway, so the paused comparison
+    // is the actual native read and not a copy, a fake row or a scheduler
+    // assumption. The writer is a separate real WAL provider over the same
+    // file: while the reader is held inside the grants statement, that second
+    // connection commits the authorization/state transition.
+
+    const READ_MONITOR_COLLATION: &str = "fixture_read_monitor";
+    const READER_CONNECTIONS: usize = 5;
+    const PENDING_CAPTURE_CAPABILITIES: &[&str] = &["capture"];
+    /// Every `load_grant_rows` column, in the table's own order. Only
+    /// `grant_id` is collated, so the outer `ORDER BY grant_id` resolves to
+    /// the monitor while every other comparison stays BINARY.
+    const READER_GRANTS_VIEW: &str = "CREATE TEMP VIEW grants AS \
+        SELECT grant_id COLLATE fixture_read_monitor AS grant_id, space_id, subject_id, \
+        principal_id, capabilities_json, context_ids_json, shared_access, expires_at, \
+        revoked_at, revision, created_at, extensions_json FROM main.grants";
+
+    /// A one-shot native comparison gate. The first `grant_id` comparison in
+    /// the grants statement signals the test and then holds that SQLite worker
+    /// thread until the writer's commit is durable; every later comparison is
+    /// passed through untouched.
+    struct ReadMonitor {
+        fired: AtomicBool,
+        reached: Mutex<Option<mpsc::Sender<()>>>,
+        release: Mutex<mpsc::Receiver<()>>,
+    }
+
+    impl ReadMonitor {
+        fn compare(&self, left: &str, right: &str) -> std::cmp::Ordering {
+            if !self.fired.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                if let Some(sender) = self.reached.lock().expect("monitor signal").take() {
+                    let _ = sender.send(());
+                }
+                let _ = self.release.lock().expect("monitor release").recv();
+            }
+            left.cmp(right)
+        }
+    }
+
+    fn read_monitor() -> (Arc<ReadMonitor>, mpsc::Receiver<()>, mpsc::Sender<()>) {
+        let (reached_tx, reached_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        (
+            Arc::new(ReadMonitor {
+                fired: AtomicBool::new(false),
+                reached: Mutex::new(Some(reached_tx)),
+                release: Mutex::new(release_rx),
+            }),
+            reached_rx,
+            release_tx,
+        )
+    }
+
+    /// Install the monitor on every physical connection the reader's pool can
+    /// hand the read, so whichever connection `begin()` consumes is the
+    /// instrumented one.
+    async fn instrument_reader(provider: &FixtureMemoryProvider, monitor: &Arc<ReadMonitor>) {
+        let mut connections = Vec::with_capacity(READER_CONNECTIONS);
+        for _ in 0..READER_CONNECTIONS {
+            connections.push(
+                provider
+                    .store()
+                    .pool()
+                    .acquire()
+                    .await
+                    .expect("reader connection"),
+            );
+        }
+        for connection in &mut connections {
+            let comparison = Arc::clone(monitor);
+            let mut handle = (&mut **connection)
+                .lock_handle()
+                .await
+                .expect("lock the reader's actual connection");
+            handle
+                .create_collation(READ_MONITOR_COLLATION, move |left, right| {
+                    comparison.compare(left, right)
+                })
+                .expect("install the read monitor collation");
+            drop(handle);
+            sqlx::query(READER_GRANTS_VIEW)
+                .execute(&mut **connection)
+                .await
+                .expect("install the reader grants view");
+        }
+    }
+
+    async fn await_reader_reached(reached: mpsc::Receiver<()>) -> bool {
+        tokio::task::spawn_blocking(move || reached.recv_timeout(Duration::from_secs(10)).is_ok())
+            .await
+            .expect("reader monitor wait")
+    }
+
+    /// Stage a genuine async `memory.capture` receipt in the pending state on
+    /// the caller-owned writer connection. The producer itself commits this
+    /// state when an admitted capture is executed asynchronously, so the page's
+    /// drain barrier counts a real receipt, not a fabricated row.
+    async fn stage_pending_capture(
+        conn: &mut SqliteConnection,
+        space_id: &str,
+        subject_id: &str,
+        receipt_id: &str,
+        idempotency_key: &str,
+    ) -> Result<(), String> {
+        let admitted = admit_capture(json!({
+            "space_id": space_id,
+            "subject_id": subject_id,
+            "content": { "text": "pending receipt probe" },
+            "capture_scope": { "visibility": "shared" },
+            "kind_hint": "fact",
+            "idempotency_key": idempotency_key,
+        }))
+        .map_err(|error| format!("pending capture admission: {error:?}"))?;
+        let mutation = Mutation::keyed("memory.capture", idempotency_key, &admitted);
+        let target = ReceiptTarget::new(
+            PENDING_CAPTURE_CAPABILITIES,
+            Some(subject_id),
+            &[],
+            true,
+            false,
+        )
+        .map_err(|error| format!("pending receipt target: {error:?}"))?;
+        stage_receipt_in_tx(
+            conn,
+            space_id,
+            CLIENT,
+            &mutation,
+            receipt_id,
+            &target,
+            ReceiptState::Pending,
+            now(),
+        )
+        .await
+        .map_err(|error| format!("pending receipt staging: {error:?}"))?;
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn spaces_list_authorization_and_drain_barrier_share_one_snapshot_under_interleave() {
+        let scenario = Scenario::open().await;
+        let space_id = scenario.space_id.clone();
+        let subject_id = "subject-interleaved";
+        scenario
+            .provider
+            .subjects_ensure(OPERATOR, &ensure_request(&space_id, subject_id), now())
+            .await
+            .expect("subject");
+        let client_grant = scenario
+            .provider
+            .grants_grant(
+                OPERATOR,
+                &grant_request(&space_id, CLIENT, &["capture"], None, None),
+                now(),
+            )
+            .await
+            .expect("client grant");
+        // The second provider is a real WAL writer on the same file with its
+        // own pool, so it never sees the reader's TEMP view or collation.
+        let writer = FixtureMemoryProvider::open(&scenario.path)
+            .await
+            .expect("second real WAL provider");
+        let (monitor, reached, release) = read_monitor();
+        instrument_reader(&scenario.provider, &monitor).await;
+
+        let request = spaces_list_request(None, None);
+        let read = scenario.provider.spaces_list(CLIENT, &request, now());
+        tokio::pin!(read);
+        let early = tokio::select! {
+            reached = await_reader_reached(reached) => {
+                assert!(reached, "the grants read never reached its native comparison");
+                None
+            }
+            value = &mut read => Some(value),
+        };
+        if let Some(value) = early {
+            panic!("spaces.list finished before the interleave point: {value:?}");
+        }
+
+        // One atomic producer transition: the pending receipt, the caller's
+        // revoke and the freeze commit together. No committed snapshot ever
+        // combines the old active status with the new pending count.
+        let transition: Result<(), String> = async {
+            let mut transaction = writer
+                .store()
+                .pool()
+                .begin_with("BEGIN IMMEDIATE")
+                .await
+                .map_err(|error| error.to_string())?;
+            stage_pending_capture(
+                &mut transaction,
+                &space_id,
+                subject_id,
+                "rcpt_interleave_probe",
+                "pending-interleave",
+            )
+            .await?;
+            writer
+                .grants_revoke_in_tx(
+                    &mut transaction,
+                    OPERATOR,
+                    &revoke_request(&space_id, &client_grant.grant_id, 1),
+                    now(),
+                )
+                .await
+                .map_err(|error| format!("{error:?}"))?;
+            writer
+                .spaces_freeze_in_tx(&mut transaction, OPERATOR, &freeze_request(&space_id, 1), now())
+                .await
+                .map_err(|error| format!("{error:?}"))?;
+            transaction.commit().await.map_err(|error| error.to_string())
+        }
+        .await;
+        release.send(()).expect("release the paused read");
+        let page = read.await.expect("spaces.list completes");
+        transition.expect("the interleaved commit must succeed");
+
+        // The returned page is wholly the pre-transition snapshot: the caller
+        // was still authorized, the space was still active and the drain
+        // barrier had not yet counted the pending receipt.
+        let space = visible_space(&page);
+        let wire = serde_json::to_value(space).expect("space wire value");
+        assert_eq!(wire["status"], json!("active"), "the page must carry its snapshot's status");
+        assert_eq!(space.revision.get(), 1, "the page must carry its snapshot's revision");
+        assert_eq!(
+            space.pending_receipts, 0,
+            "a pending receipt committed after the snapshot must not be paired with the snapshot's authorization"
+        );
+
+        // The same atomic transition is visible afterwards, so the assertion
+        // above distinguishes the mixed combination from a valid old version.
+        let after = scenario
+            .provider
+            .spaces_list(OPERATOR, &spaces_list_request(None, None), now())
+            .await
+            .expect("post-transition list");
+        let after = visible_space(&after);
+        assert_eq!(
+            serde_json::to_value(after).expect("space wire value")["status"],
+            json!("frozen")
+        );
+        assert_eq!(after.revision.get(), 2);
+        assert_eq!(after.pending_receipts, 1);
+        assert!(
+            scenario
+                .provider
+                .spaces_list(CLIENT, &spaces_list_request(None, None), now())
+                .await
+                .expect("revoked caller list")
+                .spaces
+                .is_empty(),
+            "the revoked caller has no post-transition authority"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn subjects_get_authorization_and_subject_state_share_one_snapshot_under_interleave() {
+        let scenario = Scenario::open().await;
+        let space_id = scenario.space_id.clone();
+        let subject_id = "subject-interleaved";
+        scenario
+            .provider
+            .subjects_ensure(OPERATOR, &ensure_request(&space_id, subject_id), now())
+            .await
+            .expect("subject");
+        let client_grant = scenario
+            .provider
+            .grants_grant(
+                OPERATOR,
+                &grant_request(&space_id, CLIENT, &["capture"], None, None),
+                now(),
+            )
+            .await
+            .expect("client grant");
+        let writer = FixtureMemoryProvider::open(&scenario.path)
+            .await
+            .expect("second real WAL provider");
+        let (monitor, reached, release) = read_monitor();
+        instrument_reader(&scenario.provider, &monitor).await;
+
+        let request = get_request(&space_id, subject_id);
+        let read = scenario.provider.subjects_get(CLIENT, &request, now());
+        tokio::pin!(read);
+        let early = tokio::select! {
+            reached = await_reader_reached(reached) => {
+                assert!(reached, "the grants read never reached its native comparison");
+                None
+            }
+            value = &mut read => Some(value),
+        };
+        if let Some(value) = early {
+            panic!("subjects.get finished before the interleave point: {value:?}");
+        }
+
+        // Revoke followed by a subject state change, committed atomically on
+        // the second connection: no snapshot ever pairs the old grant with the
+        // fenced subject.
+        let transition: Result<(), String> = async {
+            let mut transaction = writer
+                .store()
+                .pool()
+                .begin_with("BEGIN IMMEDIATE")
+                .await
+                .map_err(|error| error.to_string())?;
+            writer
+                .grants_revoke_in_tx(
+                    &mut transaction,
+                    OPERATOR,
+                    &revoke_request(&space_id, &client_grant.grant_id, 1),
+                    now(),
+                )
+                .await
+                .map_err(|error| format!("{error:?}"))?;
+            writer
+                .subjects_fence_in_tx(
+                    &mut transaction,
+                    OPERATOR,
+                    &fence_request(&space_id, subject_id, "fence", without_subject(), 1),
+                    now(),
+                )
+                .await
+                .map_err(|error| format!("{error:?}"))?;
+            transaction.commit().await.map_err(|error| error.to_string())
+        }
+        .await;
+        release.send(()).expect("release the paused read");
+        let subject = read.await.expect("subjects.get completes");
+        transition.expect("the interleaved commit must succeed");
+
+        assert_eq!(
+            serde_json::to_value(&subject).expect("subject wire value")["status"],
+            json!("active"),
+            "the subject body and the authorization must come from one snapshot"
+        );
+        assert_eq!(subject.revision.get(), 1);
+
+        // Afterwards the same atomic transition is visible: the subject is
+        // fenced and the revoked caller is no longer authorized.
+        let after = scenario
+            .provider
+            .subjects_get(OPERATOR, &get_request(&space_id, subject_id), now())
+            .await
+            .expect("operator reads the fenced subject");
+        assert_eq!(
+            serde_json::to_value(&after).expect("subject wire value")["status"],
+            json!("fenced")
+        );
+        assert_eq!(after.revision.get(), 2);
+        assert_eq!(
+            reject_code(
+                scenario
+                    .provider
+                    .subjects_get(CLIENT, &get_request(&space_id, subject_id), now())
                     .await,
             ),
             SpokeRejectCode::NotAuthorized
