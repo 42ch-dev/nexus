@@ -214,6 +214,24 @@ CREATE TABLE IF NOT EXISTS idempotency_namespace (
     PRIMARY KEY (space_id, requester_principal_id, op, idempotency_key)
 ) WITHOUT ROWID;
 
+-- §6.5/§7.28: the content-free authorization target of the operation that
+-- produced a receipt — the capabilities it required plus the subject and
+-- placement/selection facets any current grant must actually cover. It is kept
+-- beside the receipt but independent of the receipt body, so a read of an
+-- evicted body's tombstone rechecks the original target instead of guessing it
+-- from whichever grant survives. It never carries payload, content, digest,
+-- seed or proof material, and its row lives for the longer of the receipt-body
+-- and dedup windows (the retention sweep owns that deletion).
+CREATE TABLE IF NOT EXISTS receipt_targets (
+    receipt_id TEXT PRIMARY KEY,
+    capabilities_json TEXT NOT NULL,
+    subject_id TEXT,
+    context_ids_json TEXT NOT NULL DEFAULT '[]',
+    reads_shared INTEGER NOT NULL CHECK (reads_shared IN (0, 1)),
+    subject_all INTEGER NOT NULL CHECK (subject_all IN (0, 1)),
+    CHECK (json_valid(capabilities_json) AND json_valid(context_ids_json))
+) WITHOUT ROWID;
+
 -- Retention sweep (§6.10): the dedup window is a range predicate on the row's
 -- age across every namespace.
 CREATE INDEX IF NOT EXISTS idx_idempotency_namespace_created

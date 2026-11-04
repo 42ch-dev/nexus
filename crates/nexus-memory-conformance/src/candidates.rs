@@ -109,48 +109,66 @@ pub(crate) struct CandidatePage {
 /// requires. Construction parses the payload, so the typed view can never
 /// describe a different request than the one being digested.
 pub(crate) struct Admitted<Request> {
-    payload: Value,
+    payload_digest: String,
     request: Request,
 }
 
 impl<Request> Admitted<Request> {
-    fn parse(payload: Value, request: Request) -> Self {
-        Self { payload, request }
+    /// The C7 request-scope bridge (D15): `payload_digest` was computed over the
+    /// `Value` the transport actually received, *before* typed decode, under the
+    /// per-request scope's matching op and provider identity. It is never a
+    /// reserialization, a normalized fallback or a client-supplied value, and it
+    /// is crate-private so no untrusted caller can pair a digest with a request
+    /// it did not produce.
+    pub(crate) fn from_scope(payload_digest: String, request: Request) -> Self {
+        Self {
+            payload_digest,
+            request,
+        }
     }
 
-    /// The exact admitted payload object; the dedup digest is taken over this.
-    pub(crate) fn payload(&self) -> &Value {
-        &self.payload
+    /// The canonical `payload_digest` of the admitted object (§6.1/§7.0.5).
+    pub(crate) fn payload_digest(&self) -> &str {
+        &self.payload_digest
     }
 
-    /// The typed view parsed from [`Self::payload`] at admission.
+    /// The typed view parsed from that same object at admission.
     pub(crate) fn request(&self) -> &Request {
         &self.request
     }
+}
+
+/// Admission of one received payload: hash the object once and move it into the
+/// decoder, so the digest input and the executed request are the same bytes and
+/// nothing is cloned or reserialized.
+fn admit<Request>(
+    payload: Value,
+    parse: impl FnOnce(Value) -> Result<Request, serde_json::Error>,
+) -> Result<Admitted<Request>, SpokeReject> {
+    let payload_digest = digest(&payload)?;
+    let request = parse(payload).map_err(invalid_payload)?;
+    Ok(Admitted::from_scope(payload_digest, request))
 }
 
 /// §7.11 `memory.capture` at the boundary.
 pub(crate) fn admit_capture(
     payload: Value,
 ) -> Result<Admitted<MemoryCaptureRequest>, SpokeReject> {
-    let request = serde_json::from_value(payload.clone()).map_err(invalid_payload)?;
-    Ok(Admitted::parse(payload, request))
+    admit(payload, serde_json::from_value)
 }
 
 /// §7.14 `memory.candidates.dismiss` at the boundary.
 pub(crate) fn admit_candidates_dismiss(
     payload: Value,
 ) -> Result<Admitted<MemoryCandidatesDismissRequest>, SpokeReject> {
-    let request = serde_json::from_value(payload.clone()).map_err(invalid_payload)?;
-    Ok(Admitted::parse(payload, request))
+    admit(payload, serde_json::from_value)
 }
 
 /// §7.15 `memory.candidates.review` at the boundary.
 pub(crate) fn admit_candidates_review(
     payload: Value,
 ) -> Result<Admitted<MemoryCandidatesReviewRequest>, SpokeReject> {
-    let request = serde_json::from_value(payload.clone()).map_err(invalid_payload)?;
-    Ok(Admitted::parse(payload, request))
+    admit(payload, serde_json::from_value)
 }
 
 // ---------------------------------------------------------------------------
@@ -456,40 +474,141 @@ fn require_one_grant(
     ))
 }
 
-/// The non-target facets of grant validity (§6.5): same principal and space,
-/// unrevoked and unexpired. Target facets belong to `grant_covers`; this is the
-/// part a receipt can re-evaluate, because a receipt stores no target.
-fn grant_is_live(
-    grant: &MemoryGrant,
-    principal_id: &str,
-    space_id: &str,
-    now: DateTime<Utc>,
-) -> bool {
-    let (grant_principal, grant_space, revoked, expires) = match grant {
-        MemoryGrant::RestrictedGrant(grant) => (
-            grant.principal_id.as_str(),
-            grant.space_id.as_str(),
-            grant.revoked_at.as_deref(),
-            grant.expires_at.as_deref(),
-        ),
-        MemoryGrant::UnrestrictedGrant(grant) => (
-            grant.principal_id.as_str(),
-            grant.space_id.as_str(),
-            grant.revoked_at.as_deref(),
-            grant.expires_at.as_deref(),
-        ),
-    };
-    grant_principal == principal_id
-        && grant_space == space_id
-        && revoked.is_none()
-        && expires.is_none_or(|expires| *expires > now)
+/// The content-free authorization target of the operation that produced a
+/// receipt (§6.5/§7.28): the capabilities it required and the subject and
+/// placement/selection facets a current grant must actually cover.
+///
+/// It is durable beside the receipt and independent of the receipt body, so a
+/// tombstone read rechecks the *original* target instead of inferring one from
+/// whichever grant happens to survive. It never carries payload, content,
+/// digest, seed or proof material.
+pub(crate) struct ReceiptTarget {
+    capabilities: Vec<String>,
+    subject_id: Option<String>,
+    context_ids: Vec<String>,
+    reads_shared: bool,
+    subject_all: bool,
 }
 
-fn grant_capabilities(grant: &MemoryGrant) -> &[String] {
-    match grant {
-        MemoryGrant::RestrictedGrant(grant) => &grant.capabilities,
-        MemoryGrant::UnrestrictedGrant(grant) => &grant.capabilities,
+impl ReceiptTarget {
+    /// Target of an op whose requirement is a placement scope: a `context`
+    /// placement needs that context, a `shared` placement needs shared access.
+    fn for_scope(
+        capabilities: &'static [&'static str],
+        subject_id: &str,
+        visibility: &str,
+        context_id: Option<&str>,
+    ) -> Self {
+        let (context_ids, reads_shared) = match visibility {
+            "context" => (
+                context_id.into_iter().map(str::to_owned).collect(),
+                false,
+            ),
+            _ => (Vec::new(), true),
+        };
+        Self {
+            capabilities: capabilities.iter().map(|value| (*value).to_owned()).collect(),
+            subject_id: Some(subject_id.to_owned()),
+            context_ids,
+            reads_shared,
+            subject_all: false,
+        }
     }
+
+    /// Target of an op that names only a subject and no placement facet, such
+    /// as §7.5 `memory.subjects.ensure`.
+    fn for_subject(capabilities: &'static [&'static str], subject_id: &str) -> Self {
+        Self {
+            capabilities: capabilities.iter().map(|value| (*value).to_owned()).collect(),
+            subject_id: Some(subject_id.to_owned()),
+            context_ids: Vec::new(),
+            reads_shared: false,
+            subject_all: false,
+        }
+    }
+
+    /// §6.5/MEM-R006 single-grant coverage of the recorded target: one live
+    /// grant must carry every required capability *and* cover the recorded
+    /// subject and placement facets. Grants are never unioned, so an unrelated
+    /// same-capability grant never reopens this receipt.
+    fn admits(
+        &self,
+        grants: &[MemoryGrant],
+        principal_id: &str,
+        space_id: &str,
+        now: DateTime<Utc>,
+    ) -> bool {
+        grants.iter().any(|grant| {
+            self.capabilities.iter().all(|capability| {
+                grant_covers(
+                    grant,
+                    principal_id,
+                    space_id,
+                    now,
+                    &GrantRequirement {
+                        capability,
+                        subject_id: self.subject_id.as_deref(),
+                        context_ids: self.context_ids.clone(),
+                        reads_shared: self.reads_shared,
+                        subject_all: self.subject_all,
+                    },
+                )
+            })
+        })
+    }
+}
+
+async fn store_receipt_target_in_tx(
+    conn: &mut SqliteConnection,
+    receipt_id: &str,
+    target: &ReceiptTarget,
+) -> Result<(), SpokeReject> {
+    sqlx::query(
+        "INSERT INTO receipt_targets (receipt_id, capabilities_json, subject_id, \
+         context_ids_json, reads_shared, subject_all) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(receipt_id)
+    .bind(encoded(&json!(target.capabilities))?)
+    .bind(target.subject_id.as_deref())
+    .bind(encoded(&json!(target.context_ids))?)
+    .bind(i64::from(target.reads_shared))
+    .bind(i64::from(target.subject_all))
+    .execute(&mut *conn)
+    .await
+    .map_err(internal)?;
+    Ok(())
+}
+
+async fn fetch_receipt_target(
+    conn: &mut SqliteConnection,
+    receipt_id: &str,
+) -> Result<Option<ReceiptTarget>, SpokeReject> {
+    let row = sqlx::query(
+        "SELECT capabilities_json, subject_id, context_ids_json, reads_shared, subject_all \
+         FROM receipt_targets WHERE receipt_id = ?",
+    )
+    .bind(receipt_id)
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(internal)?;
+    row.map(|row| {
+        let capabilities: String = row.try_get("capabilities_json").map_err(internal)?;
+        let context_ids: String = row.try_get("context_ids_json").map_err(internal)?;
+        let reads_shared: i64 = row.try_get("reads_shared").map_err(internal)?;
+        let subject_all: i64 = row.try_get("subject_all").map_err(internal)?;
+        Ok(ReceiptTarget {
+            capabilities: serde_json::from_str(&capabilities).map_err(|error| {
+                internal(format!("stored receipt capabilities are not JSON: {error}"))
+            })?,
+            subject_id: row.try_get("subject_id").map_err(internal)?,
+            context_ids: serde_json::from_str(&context_ids).map_err(|error| {
+                internal(format!("stored receipt contexts are not JSON: {error}"))
+            })?,
+            reads_shared: reads_shared != 0,
+            subject_all: subject_all != 0,
+        })
+    })
+    .transpose()
 }
 
 /// The capabilities each mutating op required, from the §7 grant tables; `None`
@@ -530,30 +649,67 @@ fn required_capabilities(op: &str) -> Option<&'static [&'static str]> {
     })
 }
 
-/// §7.28 + MEM-R018/R021: receipt disclosure rechecks "current authorization as
-/// the receipt's `requester_principal_id`". The receipt records the op but not
-/// the original target, so the re-evaluable facets are grant validity and the
-/// op's capability set: the requester must still hold one live grant carrying
-/// every capability that op required. An op string outside the published table,
-/// and a principal holding no such grant, are both refused.
-fn admits_receipt_reader(
+/// §6.5 treats an expired grant exactly as a revoked one, so the cursor must
+/// bind the caller's **effective** authorization at the supplied instant, not
+/// only the persistent marker: a grant that expires between two pages changes
+/// this fingerprint without any row changing, and the next page is refused
+/// instead of being silently re-filtered (MEM-R026/§7.0.7).
+fn effective_authorization_digest(
     grants: &[MemoryGrant],
     principal_id: &str,
     space_id: &str,
     now: DateTime<Utc>,
-    op: &str,
-) -> bool {
-    let Some(required) = required_capabilities(op) else {
-        return false;
-    };
-    grants.iter().any(|grant| {
-        grant_is_live(grant, principal_id, space_id, now)
-            && required.iter().all(|capability| {
-                grant_capabilities(grant)
-                    .iter()
-                    .any(|held| held == capability || held == "admin")
-            })
-    })
+) -> Result<String, SpokeReject> {
+    let mut live = Vec::new();
+    for grant in grants {
+        let (grant_id, grant_principal, grant_space, subject_id, capabilities, context_ids, shared_access, expires_at, revoked_at) =
+            match grant {
+                MemoryGrant::RestrictedGrant(grant) => (
+                    grant.grant_id.as_str(),
+                    grant.principal_id.as_str(),
+                    grant.space_id.as_str(),
+                    grant.subject_id.as_deref(),
+                    &grant.capabilities,
+                    Some(&grant.context_ids),
+                    grant.shared_access,
+                    grant.expires_at.as_deref(),
+                    grant.revoked_at.is_some(),
+                ),
+                MemoryGrant::UnrestrictedGrant(grant) => (
+                    grant.grant_id.as_str(),
+                    grant.principal_id.as_str(),
+                    grant.space_id.as_str(),
+                    grant.subject_id.as_deref(),
+                    &grant.capabilities,
+                    None,
+                    None,
+                    grant.expires_at.as_deref(),
+                    grant.revoked_at.is_some(),
+                ),
+            };
+        if grant_principal != principal_id || grant_space != space_id || revoked_at {
+            continue;
+        }
+        if expires_at.is_some_and(|expires| *expires <= now) {
+            continue;
+        }
+        live.push(json!({
+            "grant_id": grant_id,
+            "subject_id": subject_id,
+            "capabilities": capabilities,
+            "context_ids": context_ids,
+            "shared_access": shared_access,
+        }));
+    }
+    // One canonical order: the row order of `load_grants` already sorts by
+    // grant id, but the digest must not depend on it.
+    live.sort_by(|left, right| {
+        left["grant_id"]
+            .as_str()
+            .unwrap_or_default()
+            .cmp(right["grant_id"].as_str().unwrap_or_default())
+    });
+    digest(&Value::Array(live))
 }
 
 // ---------------------------------------------------------------------------
@@ -573,29 +729,30 @@ pub(crate) struct Mutation {
 }
 
 impl Mutation {
-    /// Build the dedup identity from the raw request object the op was called
-    /// with; the digest is taken over that object, never over a typed view.
-    pub(crate) fn new(
+    /// Keyed dedup identity (§7.0.5). The digest is read from the admitted
+    /// request, so it is always the digest of the object the caller actually
+    /// sent — never a typed reserialization.
+    pub(crate) fn keyed<Request>(
         op: &'static str,
         idempotency_key: &str,
-        payload: &Value,
-    ) -> Result<Self, SpokeReject> {
-        Ok(Self {
+        admitted: &Admitted<Request>,
+    ) -> Self {
+        Self {
             op,
             idempotency_key: Some(idempotency_key.to_owned()),
-            payload_digest: digest(payload)?,
-        })
+            payload_digest: admitted.payload_digest().to_owned(),
+        }
     }
 
     /// The §7.0.5 sole keyless mutation (`memory.subjects.ensure`): it binds no
-    /// dedup namespace row, is never a replay, and still carries a
+    /// dedup namespace row, is never a replay, and still carries the admitted
     /// `payload_digest` on its receipt.
-    pub(crate) fn keyless(op: &'static str, payload: &Value) -> Result<Self, SpokeReject> {
-        Ok(Self {
+    pub(crate) fn keyless<Request>(op: &'static str, admitted: &Admitted<Request>) -> Self {
+        Self {
             op,
             idempotency_key: None,
-            payload_digest: digest(payload)?,
-        })
+            payload_digest: admitted.payload_digest().to_owned(),
+        }
     }
 }
 
@@ -741,12 +898,14 @@ fn receipt_to_wire(stored: &StoredReceipt) -> Result<MemoryReceipt, SpokeReject>
 /// Stage one durable receipt plus its dedup row on the caller's connection and
 /// advance the private snapshot marker in the same transaction (§6.10, §8.5).
 /// Never commits, so an effect and its receipt commit together (MEM-R009).
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn stage_receipt_in_tx(
     conn: &mut SqliteConnection,
     space_id: &str,
     principal_id: &str,
     admission: &Mutation,
     receipt_id: &str,
+    target: &ReceiptTarget,
     state: ReceiptState,
     now: DateTime<Utc>,
 ) -> Result<MemoryReceipt, SpokeReject> {
@@ -807,6 +966,9 @@ pub(crate) async fn stage_receipt_in_tx(
             _ => internal(error),
         })?;
     }
+    // The target is written with the receipt and independent of its body, so an
+    // evicted body's tombstone read still rechecks the original scope.
+    store_receipt_target_in_tx(conn, receipt_id, target).await?;
     bump_snapshot(conn, space_id).await?;
     let stored = fetch_receipt(conn, space_id, receipt_id, None)
         .await?
@@ -912,17 +1074,17 @@ pub(crate) async fn resolve_replay(
 }
 
 /// The dedup tombstone that outlives an evicted receipt body (§6.10/MEM-R021):
-/// the op whose authorization a disclosure must recheck, and the terminal status
-/// a `RECEIPT_EXPIRED` may report once that check has passed.
-async fn tombstone(
+/// the terminal status a `RECEIPT_EXPIRED` may report, disclosed only after the
+/// recorded target's authorization recheck has passed.
+async fn tombstone_status(
     conn: &mut SqliteConnection,
     space_id: &str,
     receipt_id: &str,
     requester: Option<&str>,
-) -> Result<Option<(String, String)>, SpokeReject> {
+) -> Result<Option<String>, SpokeReject> {
     let row = match requester {
         Some(requester) => sqlx::query(
-            "SELECT op, last_known_status FROM idempotency_namespace \
+            "SELECT last_known_status FROM idempotency_namespace \
              WHERE space_id = ? AND requester_principal_id = ? AND receipt_id = ?",
         )
         .bind(space_id)
@@ -931,7 +1093,7 @@ async fn tombstone(
         .fetch_optional(&mut *conn)
         .await,
         None => sqlx::query(
-            "SELECT op, last_known_status FROM idempotency_namespace \
+            "SELECT last_known_status FROM idempotency_namespace \
              WHERE space_id = ? AND receipt_id = ?",
         )
         .bind(space_id)
@@ -940,13 +1102,8 @@ async fn tombstone(
         .await,
     }
     .map_err(internal)?;
-    row.map(|row| {
-        Ok((
-            row.try_get("op").map_err(internal)?,
-            row.try_get("last_known_status").map_err(internal)?,
-        ))
-    })
-    .transpose()
+    row.map(|row| row.try_get("last_known_status").map_err(internal))
+        .transpose()
 }
 
 // ---------------------------------------------------------------------------
@@ -1178,11 +1335,15 @@ impl FixtureMemoryProvider {
             now,
             &[scope_requirement("capture", subject_id, visibility, context_id)],
         )?;
-        let admission = Mutation::new(
-            OP_CAPTURE,
-            request.idempotency_key.as_str(),
-            admitted.payload(),
-        )?;
+        let admission =
+            Mutation::keyed(OP_CAPTURE, request.idempotency_key.as_str(), admitted);
+        let target = ReceiptTarget::for_scope(
+            required_capabilities(OP_CAPTURE)
+                .expect("memory.capture has a published capability list"),
+            subject_id,
+            visibility,
+            context_id,
+        );
         if let Some(replay) = resolve_replay(conn, space_id, principal_id, &admission).await? {
             return Ok(replay);
         }
@@ -1253,6 +1414,7 @@ impl FixtureMemoryProvider {
             principal_id,
             &admission,
             &receipt_id(),
+            &target,
             ReceiptState::Committed(result),
             now,
         )
@@ -1340,12 +1502,18 @@ impl FixtureMemoryProvider {
         }
 
         let snapshot = snapshot_marker(conn, space_id).await?;
+        // The cursor binds the caller's *effective* authorization at the supplied
+        // instant as well as the persistent marker: a grant that expires between
+        // two pages changes this fingerprint even though no row changed, so the
+        // next page is refused instead of silently re-filtered (MEM-R026/§6.5).
+        let authorization = effective_authorization_digest(&grants, principal_id, space_id, now)?;
         let binding_digest = digest(&json!({
             "principal": principal_id,
             "space": space_id,
             "subject": subject_id,
             "status": status_filter,
             "snapshot": snapshot,
+            "authorization": authorization,
             "policy": ENGINE_POLICY_VERSION,
         }))?;
         let start = match request.cursor.as_deref() {
@@ -1493,11 +1661,18 @@ impl FixtureMemoryProvider {
             // Indistinguishable from a missing id (C-102).
             return Err(candidate_unavailable());
         }
-        let admission = Mutation::new(
+        let admission = Mutation::keyed(
             OP_CANDIDATES_DISMISS,
             request.idempotency_key.as_str(),
-            admitted.payload(),
-        )?;
+            admitted,
+        );
+        let target = ReceiptTarget::for_scope(
+            required_capabilities(OP_CANDIDATES_DISMISS)
+                .expect("memory.candidates.dismiss has a published capability list"),
+            &candidate.subject_id,
+            &candidate.capture_visibility,
+            candidate.scope_context(),
+        );
         if let Some(replay) = resolve_replay(conn, space_id, principal_id, &admission).await? {
             return Ok(replay);
         }
@@ -1533,6 +1708,7 @@ impl FixtureMemoryProvider {
             principal_id,
             &admission,
             &receipt_id,
+            &target,
             ReceiptState::Committed(json!({
                 "candidate_id": candidate_id,
                 "outcome": "dismissed",
@@ -1608,11 +1784,18 @@ impl FixtureMemoryProvider {
             // partial-coverage case where only one of the two capabilities is held.
             return Err(candidate_unavailable());
         }
-        let admission = Mutation::new(
+        let admission = Mutation::keyed(
             OP_CANDIDATES_REVIEW,
             request.idempotency_key.as_str(),
-            admitted.payload(),
-        )?;
+            admitted,
+        );
+        let target = ReceiptTarget::for_scope(
+            required_capabilities(OP_CANDIDATES_REVIEW)
+                .expect("memory.candidates.review has a published capability list"),
+            &subject_id,
+            &visibility,
+            context_id.as_deref(),
+        );
         if let Some(replay) = resolve_replay(conn, space_id, principal_id, &admission).await? {
             return Ok(replay);
         }
@@ -1695,6 +1878,7 @@ impl FixtureMemoryProvider {
             principal_id,
             &admission,
             &receipt_id,
+            &target,
             ReceiptState::Committed(json!({
                 "outcome": outcome,
                 "record_ids": record_ids,
@@ -1742,10 +1926,17 @@ impl FixtureMemoryProvider {
             now,
             &whole_scope_requirement("admin", None),
         );
-        // §7.28 + §7.0.5/MEM-R021: current authorization is evaluated before
-        // any body or tombstone status is disclosed. A non-admin can only ever
-        // see its own receipts, so another principal's receipt id stays
-        // indistinguishable from a missing one (no existence oracle).
+        // §6.5/§7.28 + §7.0.5/MEM-R021: the recorded target is rechecked against
+        // current authorization before any body or tombstone status is
+        // disclosed, and it is recorded independently of the body so an evicted
+        // receipt rechecks the same subject and placement. A non-admin can only
+        // ever see its own receipts, so another principal's receipt id stays
+        // indistinguishable from a missing one (no existence oracle). A receipt
+        // with no recorded target is refused rather than treated as space-wide.
+        let target = fetch_receipt_target(conn, receipt_id).await?;
+        let caller_covers_target = target
+            .as_ref()
+            .is_some_and(|target| target.admits(&grants, principal_id, space_id, now));
         let stored = fetch_receipt(
             conn,
             space_id,
@@ -1754,18 +1945,14 @@ impl FixtureMemoryProvider {
         )
         .await?;
         if let Some(stored) = stored {
-            if !admin && !admits_receipt_reader(&grants, principal_id, space_id, now, &stored.op)
-            {
+            if !admin && !caller_covers_target {
                 return Err(not_authorized(RECEIPT_UNAUTHORIZED));
             }
             return receipt_to_wire(&stored);
         }
-        // The body is gone while its dedup tombstone survives. The tombstone's
-        // op is what the authorization recheck needs, and its status is
-        // disclosed only after that recheck passes — an evicted receipt must not
-        // reveal existence or terminal status to a principal that has lost the
-        // authority the operation required.
-        match tombstone(
+        // The body is gone while its dedup tombstone survives: the status is
+        // disclosed only after the recorded target's recheck passes.
+        match tombstone_status(
             conn,
             space_id,
             receipt_id,
@@ -1773,8 +1960,8 @@ impl FixtureMemoryProvider {
         )
         .await?
         {
-            Some((op, last_known_status)) => {
-                if !admin && !admits_receipt_reader(&grants, principal_id, space_id, now, &op) {
+            Some(last_known_status) => {
+                if !admin && !caller_covers_target {
                     return Err(not_authorized(RECEIPT_UNAUTHORIZED));
                 }
                 Err(receipt_expired(&last_known_status))
@@ -1946,6 +2133,18 @@ mod tests {
             }
         }
 
+        async fn ensure_named(&self, subject_id: &str, now: DateTime<Utc>) {
+            let request: MemorySubjectsEnsureRequest = serde_json::from_value(json!({
+                "space_id": self.space_id,
+                "subject_id": subject_id,
+            }))
+            .expect("valid subjects.ensure request");
+            self.provider
+                .subjects_ensure(OPERATOR, &request, now)
+                .await
+                .expect("subject ensured");
+        }
+
         async fn subject(&self, now: DateTime<Utc>) {
             let request: MemorySubjectsEnsureRequest = serde_json::from_value(json!({
                 "space_id": self.space_id,
@@ -1985,6 +2184,43 @@ mod tests {
                 .grants_grant(OPERATOR, &request, now)
                 .await
                 .expect("grant issued")
+                .grant_id
+        }
+
+        /// A grant with a natural expiry, for the effective-authorization bound.
+        async fn grant_until(
+            &self,
+            grantee: &str,
+            capabilities: &[&str],
+            subject: Option<&str>,
+            contexts: Option<(&[&str], bool)>,
+            expires_at: DateTime<Utc>,
+            now: DateTime<Utc>,
+        ) -> String {
+            let mut value = json!({
+                "space_id": self.space_id,
+                "principal_id": grantee,
+                "capabilities": capabilities,
+                "expires_at": timestamp_text(expires_at),
+                "idempotency_key": format!(
+                    "grant-until-{grantee}-{}-{}",
+                    capabilities.join("-"),
+                    timestamp_text(expires_at)
+                ),
+            });
+            if let Some(subject) = subject {
+                value["subject_id"] = json!(subject);
+            }
+            if let Some((contexts, shared)) = contexts {
+                value["context_ids"] = json!(contexts);
+                value["shared_access"] = json!(shared);
+            }
+            let request: MemoryGrantsGrantRequest =
+                serde_json::from_value(value).expect("valid grants.grant request");
+            self.provider
+                .grants_grant(OPERATOR, &request, now)
+                .await
+                .expect("expiring grant issued")
                 .grant_id
         }
 
@@ -2180,6 +2416,15 @@ mod tests {
         }
     }
 
+    fn capture_receipt_target(context_id: &str) -> ReceiptTarget {
+        ReceiptTarget::for_scope(
+            required_capabilities(OP_CAPTURE).expect("memory.capture has a capability list"),
+            SUBJECT,
+            "context",
+            Some(context_id),
+        )
+    }
+
     fn receipt_payload_digest(receipt: &MemoryReceipt) -> &str {
         match receipt {
             MemoryReceipt::CommittedReceipt(receipt) => receipt.payload_digest.as_str(),
@@ -2243,6 +2488,7 @@ mod tests {
             "records" => "SELECT COUNT(*) AS total FROM records",
             "receipts" => "SELECT COUNT(*) AS total FROM receipts",
             "subjects" => "SELECT COUNT(*) AS total FROM subjects",
+            "receipt_targets" => "SELECT COUNT(*) AS total FROM receipt_targets",
             "idempotency_namespace" => "SELECT COUNT(*) AS total FROM idempotency_namespace",
             other => panic!("unknown table {other}"),
         };
@@ -2939,12 +3185,17 @@ mod tests {
             .grant(CLIENT, &["capture"], Some(SUBJECT), None, now)
             .await;
         let space = scenario.space_id.clone();
-        let pending_admission = Mutation::new(
-            OP_CAPTURE,
+        // The probe carries a real admitted capture payload, so its receipt
+        // binds a genuine digest and a real recorded target.
+        let pending_admitted = admit_capture(capture_payload(
+            &space,
+            "Pending probe text.",
+            context_scope(CONTEXT_A),
             "async-1",
-            &json!({ "space_id": space, "probe": "pending" }),
-        )
-        .expect("admission");
+        ))
+        .expect("valid capture payload");
+        let pending_admission = Mutation::keyed(OP_CAPTURE, "async-1", &pending_admitted);
+        let probe_target = capture_receipt_target(CONTEXT_A);
 
         let mut transaction = scenario
             .provider
@@ -2959,6 +3210,7 @@ mod tests {
             CLIENT,
             &pending_admission,
             "rcpt_pending_probe",
+            &probe_target,
             ReceiptState::Pending,
             now,
         )
@@ -3022,12 +3274,14 @@ mod tests {
 
         // A failed asynchronous receipt keeps a coded envelope with its retry
         // class and no result at all.
-        let failed_admission = Mutation::new(
-            OP_CAPTURE,
+        let failed_admitted = admit_capture(capture_payload(
+            &space,
+            "Failed probe text.",
+            context_scope(CONTEXT_A),
             "async-2",
-            &json!({ "space_id": space, "probe": "failed" }),
-        )
-        .expect("admission");
+        ))
+        .expect("valid capture payload");
+        let failed_admission = Mutation::keyed(OP_CAPTURE, "async-2", &failed_admitted);
         let mut transaction = scenario
             .provider
             .store()
@@ -3041,6 +3295,7 @@ mod tests {
             CLIENT,
             &failed_admission,
             "rcpt_failed_probe",
+            &probe_target,
             ReceiptState::Pending,
             now,
         )
@@ -3827,8 +4082,6 @@ mod tests {
         });
         let ensure: MemorySubjectsEnsureRequest =
             serde_json::from_value(payload.clone()).expect("valid subjects.ensure request");
-        let admission =
-            Mutation::keyless("memory.subjects.ensure", &payload).expect("keyless admission");
 
         let mut transaction = scenario
             .provider
@@ -3842,12 +4095,22 @@ mod tests {
             .subjects_ensure_in_tx(&mut transaction, OPERATOR, &ensure, now)
             .await
             .expect("ensure commits its row");
+        // Exactly the C7 request-scope bridge: the digest is taken over the
+        // received object before decode, then paired with that typed view.
+        let admitted = Admitted::from_scope(digest(&payload).expect("payload digest"), ensure);
+        let admission = Mutation::keyless("memory.subjects.ensure", &admitted);
+        let target = ReceiptTarget::for_subject(
+            required_capabilities("memory.subjects.ensure")
+                .expect("memory.subjects.ensure has a capability list"),
+            "subject-keyless",
+        );
         let receipt = stage_receipt_in_tx(
             &mut transaction,
             &space,
             OPERATOR,
             &admission,
             &receipt_id(),
+            &target,
             ReceiptState::Committed(json!({
                 "subject_id": change.subject_id,
                 "created": change.created,
@@ -3903,8 +4166,7 @@ mod tests {
         });
         let second: MemorySubjectsEnsureRequest =
             serde_json::from_value(second_payload.clone()).expect("valid subjects.ensure request");
-        let second_admission = Mutation::keyless("memory.subjects.ensure", &second_payload)
-            .expect("keyless admission");
+
         let mut transaction = scenario
             .provider
             .store()
@@ -3917,12 +4179,21 @@ mod tests {
             .subjects_ensure_in_tx(&mut transaction, OPERATOR, &second, now)
             .await
             .expect("ensure stages");
+        let second_admitted =
+            Admitted::from_scope(digest(&second_payload).expect("payload digest"), second);
+        let second_admission = Mutation::keyless("memory.subjects.ensure", &second_admitted);
+        let second_target = ReceiptTarget::for_subject(
+            required_capabilities("memory.subjects.ensure")
+                .expect("memory.subjects.ensure has a capability list"),
+            "subject-rolled-back",
+        );
         stage_receipt_in_tx(
             &mut transaction,
             &space,
             OPERATOR,
             &second_admission,
             &receipt_id(),
+            &second_target,
             ReceiptState::Committed(json!({
                 "subject_id": "subject-rolled-back",
                 "created": true,
@@ -3945,5 +4216,475 @@ mod tests {
             1,
             "the rolled-back receipt left no row"
         );
+    }
+
+    #[tokio::test]
+    async fn receipt_target_refuses_the_wrong_subject_on_body_and_tombstone() {
+        let scenario = Scenario::open().await;
+        let now = now();
+        scenario.subject(now).await;
+        scenario.ensure_named("subject-beta", now).await;
+        let alpha_capture = scenario
+            .grant(CLIENT, &["capture"], Some(SUBJECT), None, now)
+            .await;
+        let captured = scenario
+            .provider
+            .capture(
+                CLIENT,
+                &capture_request(
+                    &scenario.space_id,
+                    "Receipt bound to subject-alpha.",
+                    context_scope(CONTEXT_A),
+                    "cap-1",
+                ),
+                now,
+            )
+            .await
+            .expect("capture commits");
+        let receipt_id = receipt_id_of(&captured).to_owned();
+
+        // The capture authority is revoked and a same-capability grant for
+        // another subject survives: the recorded target is not covered.
+        scenario.revoke(&alpha_capture, now).await;
+        scenario
+            .grant(CLIENT, &["capture"], Some("subject-beta"), None, now)
+            .await;
+        let wrong_subject = refusal(
+            scenario
+                .provider
+                .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &receipt_id), now)
+                .await,
+        );
+        assert_eq!(wrong_subject.code, SpokeRejectCode::NotAuthorized);
+        assert!(wrong_subject.details.is_none());
+
+        // A grant that actually covers the recorded subject and placement is
+        // still enough: the fix is not a blanket denial.
+        let covering = scenario
+            .grant(CLIENT, &["capture"], Some(SUBJECT), None, now)
+            .await;
+        let allowed = scenario
+            .provider
+            .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &receipt_id), now)
+            .await
+            .expect("a covering grant reopens the receipt");
+        assert_eq!(receipt_id_of(&allowed), receipt_id);
+
+        // Revoke again and evict the body: the tombstone must not reveal the
+        // terminal status to the same wrong-target principal.
+        scenario.revoke(&covering, now).await;
+        sqlx::query("DELETE FROM receipts WHERE receipt_id = ?")
+            .bind(&receipt_id)
+            .execute(scenario.provider.store().pool())
+            .await
+            .expect("receipt body evicted");
+        let wrong_subject_tombstone = refusal(
+            scenario
+                .provider
+                .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &receipt_id), now)
+                .await,
+        );
+        assert_eq!(
+            wrong_subject_tombstone, wrong_subject,
+            "the evicted path answers exactly like the body path"
+        );
+
+        // The space admin still resolves the evicted body.
+        let admin = refusal(
+            scenario
+                .provider
+                .receipts_get(OPERATOR, &receipts_request(&scenario.space_id, &receipt_id), now)
+                .await,
+        );
+        assert_eq!(admin.code, SpokeRejectCode::ReceiptExpired);
+        assert_eq!(
+            admin
+                .details
+                .as_ref()
+                .and_then(|details| details.get("last_known_status")),
+            Some(&json!("committed"))
+        );
+    }
+
+    #[tokio::test]
+    async fn receipt_target_refuses_the_wrong_placement() {
+        let scenario = Scenario::open().await;
+        let now = now();
+        scenario.subject(now).await;
+        let unrestricted = scenario
+            .grant(CLIENT, &["capture"], Some(SUBJECT), None, now)
+            .await;
+        let context_receipt = scenario
+            .provider
+            .capture(
+                CLIENT,
+                &capture_request(
+                    &scenario.space_id,
+                    "Context placed receipt.",
+                    context_scope(CONTEXT_A),
+                    "cap-a",
+                ),
+                now,
+            )
+            .await
+            .expect("context capture commits");
+        let shared_receipt = scenario
+            .provider
+            .capture(
+                CLIENT,
+                &capture_request(
+                    &scenario.space_id,
+                    "Shared placed receipt.",
+                    shared_scope(),
+                    "cap-b",
+                ),
+                now,
+            )
+            .await
+            .expect("shared capture commits");
+        let context_id = receipt_id_of(&context_receipt).to_owned();
+        let shared_id = receipt_id_of(&shared_receipt).to_owned();
+        scenario.revoke(&unrestricted, now).await;
+
+        // Same capability, wrong context: neither receipt reopens.
+        scenario
+            .grant(
+                CLIENT,
+                &["capture"],
+                Some(SUBJECT),
+                Some((&[CONTEXT_B], false)),
+                now,
+            )
+            .await;
+        for receipt in [&context_id, &shared_id] {
+            assert_eq!(
+                refusal(
+                    scenario
+                        .provider
+                        .receipts_get(
+                            CLIENT,
+                            &receipts_request(&scenario.space_id, receipt),
+                            now,
+                        )
+                        .await
+                )
+                .code,
+                SpokeRejectCode::NotAuthorized
+            );
+        }
+
+        // The right context covers the context-placed receipt but a restricted
+        // grant without shared access still cannot read the shared placement.
+        scenario
+            .grant(
+                CLIENT,
+                &["capture"],
+                Some(SUBJECT),
+                Some((&[CONTEXT_A], false)),
+                now,
+            )
+            .await;
+        scenario
+            .provider
+            .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &context_id), now)
+            .await
+            .expect("the recorded context is covered");
+        assert_eq!(
+            refusal(
+                scenario
+                    .provider
+                    .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &shared_id), now)
+                    .await
+            )
+            .code,
+            SpokeRejectCode::NotAuthorized
+        );
+
+        // Shared access over the recorded context covers it.
+        scenario
+            .grant(
+                CLIENT,
+                &["capture"],
+                Some(SUBJECT),
+                Some((&[CONTEXT_A], true)),
+                now,
+            )
+            .await;
+        scenario
+            .provider
+            .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &shared_id), now)
+            .await
+            .expect("shared access covers the shared placement");
+    }
+
+    #[tokio::test]
+    async fn scoped_admin_cannot_read_a_foreign_target_receipt() {
+        let scenario = Scenario::open().await;
+        let now = now();
+        scenario.subject(now).await;
+        scenario.ensure_named("subject-beta", now).await;
+        let capture = scenario
+            .grant(CLIENT, &["capture"], Some(SUBJECT), None, now)
+            .await;
+        let captured = scenario
+            .provider
+            .capture(
+                CLIENT,
+                &capture_request(
+                    &scenario.space_id,
+                    "Admin-scoped receipt.",
+                    context_scope(CONTEXT_A),
+                    "cap-1",
+                ),
+                now,
+            )
+            .await
+            .expect("capture commits");
+        let receipt_id = receipt_id_of(&captured).to_owned();
+        scenario.revoke(&capture, now).await;
+
+        // An admin capped to another subject is not the space admin, and its
+        // `admin` capability does not extend to this subject.
+        scenario
+            .grant(CLIENT, &["admin"], Some("subject-beta"), None, now)
+            .await;
+        let scoped_admin = refusal(
+            scenario
+                .provider
+                .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &receipt_id), now)
+                .await,
+        );
+        assert_eq!(scoped_admin.code, SpokeRejectCode::NotAuthorized);
+
+        // A genuine space-wide admin grant still reads it.
+        scenario.grant(CLIENT, &["admin"], None, None, now).await;
+        let read = scenario
+            .provider
+            .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &receipt_id), now)
+            .await
+            .expect("space admin reads the receipt");
+        assert_eq!(receipt_id_of(&read), receipt_id);
+    }
+
+    #[tokio::test]
+    async fn receipt_target_metadata_is_content_free_and_survives_reopen() {
+        let scenario = Scenario::open().await;
+        let now = now();
+        scenario.subject(now).await;
+        let secret = "Only the archivist knows the vault code.";
+        let capture = scenario
+            .grant(CLIENT, &["capture"], Some(SUBJECT), None, now)
+            .await;
+        let captured = scenario
+            .provider
+            .capture(
+                CLIENT,
+                &capture_request(
+                    &scenario.space_id,
+                    secret,
+                    context_scope(CONTEXT_A),
+                    "cap-1",
+                ),
+                now,
+            )
+            .await
+            .expect("capture commits");
+        let receipt_id = receipt_id_of(&captured).to_owned();
+
+        // The recorded target carries the capability list and the subject and
+        // placement facets — never payload, content or a digest of the operation.
+        let row = sqlx::query(
+            "SELECT capabilities_json, subject_id, context_ids_json, reads_shared, subject_all \
+             FROM receipt_targets WHERE receipt_id = ?",
+        )
+        .bind(&receipt_id)
+        .fetch_one(scenario.provider.store().pool())
+        .await
+        .expect("recorded target");
+        assert_eq!(
+            serde_json::from_str::<Value>(&row.get::<String, _>("capabilities_json"))
+                .expect("capabilities json"),
+            json!(["capture"])
+        );
+        assert_eq!(row.get::<String, _>("subject_id"), SUBJECT);
+        assert_eq!(
+            serde_json::from_str::<Value>(&row.get::<String, _>("context_ids_json"))
+                .expect("contexts json"),
+            json!([CONTEXT_A])
+        );
+        assert_eq!(row.get::<i64, _>("reads_shared"), 0);
+        assert_eq!(row.get::<i64, _>("subject_all"), 0);
+        assert_no_secret(&row.get::<String, _>("capabilities_json"), secret);
+        assert_no_secret(&row.get::<String, _>("subject_id"), secret);
+        assert_no_secret(&row.get::<String, _>("context_ids_json"), secret);
+
+        // Durability: the target is read back after a real close/reopen.
+        let scenario = scenario.reopen().await;
+        let reopened = scenario
+            .provider
+            .receipts_get(
+                CLIENT,
+                &receipts_request(&scenario.space_id, &receipt_id),
+                now,
+            )
+            .await
+            .expect("the receipt still resolves after reopen");
+
+        // And it outlives the receipt body: after another reopen the admin still
+        // resolves the tombstone while the losing principal is refused.
+        sqlx::query("DELETE FROM receipts WHERE receipt_id = ?")
+            .bind(receipt_id_of(&reopened))
+            .execute(scenario.provider.store().pool())
+            .await
+            .expect("receipt body evicted");
+        let scenario = scenario.reopen().await;
+        let admin = refusal(
+            scenario
+                .provider
+                .receipts_get(OPERATOR, &receipts_request(&scenario.space_id, &receipt_id), now)
+                .await,
+        );
+        assert_eq!(admin.code, SpokeRejectCode::ReceiptExpired);
+        scenario.revoke(&capture, now).await;
+        assert_eq!(
+            refusal(
+                scenario
+                    .provider
+                    .receipts_get(CLIENT, &receipts_request(&scenario.space_id, &receipt_id), now)
+                    .await
+            )
+            .code,
+            SpokeRejectCode::NotAuthorized
+        );
+    }
+
+    #[tokio::test]
+    async fn grant_expiry_invalidates_the_cursor_instead_of_refiltering() {
+        let scenario = Scenario::open().await;
+        let now = now();
+        scenario.subject(now).await;
+        scenario
+            .grant(CLIENT, &["capture"], Some(SUBJECT), None, now)
+            .await;
+        for (index, context_id) in [CONTEXT_A, CONTEXT_A, CONTEXT_B, CONTEXT_B]
+            .into_iter()
+            .enumerate()
+        {
+            scenario
+                .provider
+                .capture(
+                    CLIENT,
+                    &capture_request(
+                        &scenario.space_id,
+                        &format!("Expiry material {index}"),
+                        context_scope(context_id),
+                        &format!("cap-{index}"),
+                    ),
+                    now,
+                )
+                .await
+                .expect("capture commits");
+        }
+        // A survives every page; B expires an hour after the first page.
+        scenario
+            .grant(
+                CLIENT,
+                &["review"],
+                Some(SUBJECT),
+                Some((&[CONTEXT_A], false)),
+                now,
+            )
+            .await;
+        scenario
+            .grant_until(
+                CLIENT,
+                &["review"],
+                Some(SUBJECT),
+                Some((&[CONTEXT_B], false)),
+                now + Duration::hours(1),
+                now,
+            )
+            .await;
+
+        let first = scenario
+            .provider
+            .candidates_list(
+                CLIENT,
+                &list_request(&scenario.space_id, None, Some(2), None),
+                now,
+            )
+            .await
+            .expect("first page");
+        let cursor = first.next_cursor.clone().expect("page one issues a cursor");
+        // No-change continuation at the same instant keeps working.
+        let second = scenario
+            .provider
+            .candidates_list(
+                CLIENT,
+                &list_request(&scenario.space_id, None, Some(2), Some(&cursor)),
+                now,
+            )
+            .await
+            .expect("the unchanged continuation is accepted");
+        let mut union = candidate_ids(&first);
+        union.extend(candidate_ids(&second));
+        union.sort();
+        union.dedup();
+        assert_eq!(union.len(), 4, "both contexts are visible while B is live");
+
+        // Same cursor, later instant: B has expired and A survives, so the
+        // subject is still authorized but the effectively authorized set moved.
+        let marker_before = sqlx::query("SELECT marker FROM provider_snapshot WHERE space_id = ?")
+            .bind(&scenario.space_id)
+            .fetch_one(scenario.provider.store().pool())
+            .await
+            .expect("marker")
+            .get::<i64, _>("marker");
+        let expired_at = now + Duration::hours(2);
+        let refused = refusal(
+            scenario
+                .provider
+                .candidates_list(
+                    CLIENT,
+                    &list_request(&scenario.space_id, None, Some(2), Some(&cursor)),
+                    expired_at,
+                )
+                .await,
+        );
+        assert_eq!(
+            refused.code,
+            SpokeRejectCode::CursorInvalid,
+            "an expired grant invalidates the cursor instead of re-filtering it"
+        );
+        let marker_after = sqlx::query("SELECT marker FROM provider_snapshot WHERE space_id = ?")
+            .bind(&scenario.space_id)
+            .fetch_one(scenario.provider.store().pool())
+            .await
+            .expect("marker")
+            .get::<i64, _>("marker");
+        assert_eq!(
+            marker_before, marker_after,
+            "the invalidation is not faked by advancing the persistent marker"
+        );
+
+        // A fresh query at that instant performs proper current authorization:
+        // only the surviving context's candidates remain.
+        let fresh = scenario
+            .provider
+            .candidates_list(
+                CLIENT,
+                &list_request(&scenario.space_id, None, None, None),
+                expired_at,
+            )
+            .await
+            .expect("fresh page");
+        assert_eq!(fresh.candidates.len(), 2);
+        for candidate in &fresh.candidates {
+            assert_eq!(
+                serde_json::to_value(&pending_candidate(candidate).capture_scope)
+                    .expect("scope encodes"),
+                context_scope(CONTEXT_A)
+            );
+        }
     }
 }
