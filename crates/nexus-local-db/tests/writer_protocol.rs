@@ -18,8 +18,9 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use nexus_local_db::writer_protocol::{
-    acquire_writer_guard, open_admitted_pool, open_guarded_pool, release_retained_writer_guards,
-    run_guarded_migrations, WriterMode, BOOTSTRAP_CREATOR_ID,
+    acquire_store_reset_fence, acquire_writer_guard, init_guarded_pool, open_admitted_pool,
+    open_guarded_pool, release_retained_writer_guards, run_guarded_migrations, WriterMode,
+    BOOTSTRAP_CREATOR_ID,
 };
 use nexus_local_db::{
     creator_holder_entry_id, ensure_creator_row, init_engine_pool, init_pool, open_pool_read_only,
@@ -1260,6 +1261,48 @@ async fn probe_scalars(conn: &mut SqliteConnection) -> (String, String, i64, Opt
     .expect("probe scalars")
 }
 
+/// A genuine holder's final lifetime end — the local provider store dropping
+/// its own direct admission, a failed initialization — must give the OS
+/// admission back: a real second process can take the exclusive migration lock
+/// afterwards, which it cannot while any shared writer lock survives.
+#[tokio::test]
+async fn dropped_guard_holders_release_the_migration_lock() {
+    if std::env::var_os(CHILD_ENV).is_some() {
+        return;
+    }
+
+    let dir = TempDir::new().expect("tempdir");
+    let db = dir.path().join("state.db");
+
+    let engine = init_engine_pool(&db).await.expect("engine owner");
+    let direct = init_guarded_pool(&db, BOOTSTRAP_CREATOR_ID)
+        .await
+        .expect("direct holder");
+    // The provider store's shape: the handle's final lifetime end is a drop,
+    // with no explicit release call.
+    drop(direct);
+    // The core's shape: an explicit release at a defined drain point, then the
+    // handle is given up.
+    engine.pool().close().await;
+    engine.release_retained_admission();
+    drop(engine);
+
+    let out = dir.path().join("fence_out");
+    let err = dir.path().join("fence_err");
+    let mut child = spawn_child(
+        "migration_fence",
+        &db,
+        &[("OUT_PATH", out.to_string_lossy().to_string())],
+        &err,
+    );
+    reap(&mut child, &err);
+    assert_eq!(
+        fs::read_to_string(&out).expect("fence outcome"),
+        "won",
+        "a separate process must acquire the exclusive migration lock"
+    );
+}
+
 async fn child_main() {
     let mode = std::env::var(CHILD_ENV).expect("child mode");
     let db = PathBuf::from(std::env::var("DB_PATH").expect("db"));
@@ -1293,6 +1336,18 @@ async fn child_main() {
                     Err(err) => panic!("unexpected child error: {err}"),
                 };
             fs::write(out, outcome).expect("write owner outcome");
+        }
+        "migration_fence" => {
+            let out = PathBuf::from(std::env::var("OUT_PATH").expect("out"));
+            let outcome = match acquire_store_reset_fence(&db) {
+                Ok(fence) => {
+                    drop(fence);
+                    "won"
+                }
+                Err(LocalDbError::OwnerBusy { .. }) => "busy",
+                Err(err) => panic!("unexpected child error: {err}"),
+            };
+            fs::write(out, outcome).expect("write fence outcome");
         }
         #[cfg(debug_assertions)]
         "v1191_ownership" => assert_registration_ownership(&db).await,

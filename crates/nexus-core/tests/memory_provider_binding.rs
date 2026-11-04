@@ -284,6 +284,32 @@ async fn explicit_remote_selection_is_refused_without_reading_credentials() {
     );
 }
 
+/// The local provider opens its own direct admission, so a confirmed close must
+/// release it with the binding: no shared writer lock may survive the close, and
+/// repeated opens must not accumulate claimed admissions.
+#[tokio::test]
+async fn confirmed_close_releases_the_local_providers_direct_admission() {
+    let env = Env::new(None);
+    for _ in 0..3 {
+        let core = CoreService::open(env.options(None))
+            .await
+            .expect("local default");
+        let principal = core.active_principal().await.expect("principal");
+        assert_eq!(
+            core.count_pending_reviews(&principal).await.expect("read").count,
+            0
+        );
+        assert!(core.close().await.expect("close").cleanup_confirmed);
+
+        // The exclusive migration fence is the real OS-lock probe: it succeeds
+        // only when no writer admission — the core's or the dropped provider's
+        // — still holds the shared migration lock.
+        let fence = nexus_local_db::writer_protocol::acquire_store_reset_fence(&env.db_path())
+            .expect("a confirmed close releases every writer admission it opened");
+        drop(fence);
+    }
+}
+
 /// A failed `DirectWriter` pin must release only what that open owned: the
 /// live `EngineOwner`'s retained admission stays in the process registry, so
 /// the creator remains joinable afterwards.

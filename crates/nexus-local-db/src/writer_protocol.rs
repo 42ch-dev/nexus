@@ -20,49 +20,53 @@ const LOCK_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
 const SUPPORTED_PROTOCOL_VERSION: i64 = 1;
 pub const BOOTSTRAP_CREATOR_ID: &str = "bootstrap";
 
-/// Live admission guards held by THIS process, keyed by
-/// `(canonical db path, mode)`.
+/// One cooperative pool handle this process opened over a database.
 ///
-/// Held so that already-published pools keep their admission (their
-/// connections carry fixed UDF epochs and cannot re-register) while the OS
-/// locks stay held for the process lifetime. Keyed per mode so retaining a
-/// direct guard never releases the engine owner's lock.
+/// Kept for migration quiescence: a pending schema change waits until every
+/// handle reports closed, and closes them if it must.
 struct RegisteredPool {
     id: u64,
     handle: SqlitePool,
 }
 
+/// One database's live admission: the guard that holds its OS locks and the
+/// number of holders claiming it.
 struct RetainedGuardEntry {
     guard: Arc<WorkspaceWriterGuard>,
-    pools: Arc<Mutex<Vec<RegisteredPool>>>,
-    /// Live handles holding this admission: the creating open and every open
-    /// that joined it. The entry — and the OS locks its guard carries — is
-    /// dropped only when the LAST claim is released.
+    /// Live holders of this admission: the open that published it and every
+    /// open that joined it. The entry — and the OS locks its guard carries —
+    /// is dropped only when the LAST claim is released.
     claims: usize,
-}
-
-impl RetainedGuardEntry {
-    fn pools_quiesced(&self) -> bool {
-        let mut pools = self.pools.lock().expect("pool registry poisoned");
-        pools.retain(|reg| !reg.handle.is_closed());
-        pools.is_empty()
-    }
 }
 
 static POOL_REG_ID: AtomicU64 = AtomicU64::new(1);
 
 struct CooperativePoolRegistration {
-    key: (PathBuf, WriterMode),
+    path: PathBuf,
     id: u64,
 }
 
 impl Drop for CooperativePoolRegistration {
     fn drop(&mut self) {
-        unregister_pool_handle(&self.key, self.id);
+        unregister_pool_handle(&self.path, self.id);
     }
 }
 
+/// This process's live writer admissions, keyed by
+/// `(canonical db path, mode)`.
+///
+/// Keyed per mode so releasing a direct claim never drops the engine owner's
+/// admission, and identity-checked by `writer_id` so a stale holder can never
+/// release an entry a later acquisition replaced.
 static ACTIVE_GUARDS: LazyLock<Mutex<HashMap<(PathBuf, WriterMode), RetainedGuardEntry>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// This process's open cooperative pools, keyed by canonical db path.
+///
+/// Deliberately separate from [`ACTIVE_GUARDS`]: a cloned pool handle
+/// ([`GuardedPool::clone_pool`]) can outlive the handle that opened it, so
+/// migration quiescence follows the pool handles, not the admission claims.
+static ACTIVE_POOLS: LazyLock<Mutex<HashMap<PathBuf, Vec<RegisteredPool>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -133,13 +137,16 @@ impl Default for GuardedPoolOptions {
     }
 }
 
-/// One handle's live claim on the retained admission entry for its
+/// One holder's live claim on the retained admission entry for its
 /// `(path, mode)`.
 ///
-/// The creator and every handle that joined a live admission register their
-/// own claim, so a creator's failure releases only its own use instead of
-/// evicting an admission a successful joiner still serves, and the last
-/// release cleans the registry up instead of leaking it.
+/// A claim is reserved AT THE SAME TIME as the retained guard is obtained or
+/// published, and is held across awaited pool construction and seeding, so a
+/// joiner in flight is protected before its pool exists and an initialization
+/// error or cancellation gives the claim back. The creator and every joining
+/// holder register their own claim, so one holder's failure releases only its
+/// own use; the LAST claim removes the entry, and with it the OS admission the
+/// entry's guard carries.
 struct RetainedAdmissionClaim {
     key: (PathBuf, WriterMode),
     writer_id: String,
@@ -147,11 +154,11 @@ struct RetainedAdmissionClaim {
 }
 
 impl RetainedAdmissionClaim {
-    fn new(guard: &Arc<WorkspaceWriterGuard>) -> Self {
-        claim_retained_admission(guard);
+    /// Wrap an already-registered claim on `guard`'s admission.
+    fn held(key: (PathBuf, WriterMode), writer_id: String) -> Self {
         Self {
-            key: (canonical_db_path(&guard.db_path), guard.mode),
-            writer_id: guard.writer_id.clone(),
+            key,
+            writer_id,
             held: AtomicBool::new(true),
         }
     }
@@ -177,14 +184,34 @@ impl RetainedAdmissionClaim {
             guards.remove(&self.key);
         }
     }
+
+    /// Park this claim for the rest of the process.
+    ///
+    /// The raw-pool entry point (`retain_writer_guard`) hands its caller no
+    /// lifetime handle, so its admission is deliberately retained until an
+    /// explicit path-wide release or a guarded migration clears it.
+    fn persist(self) {
+        self.held.store(false, Ordering::Release);
+    }
+}
+
+impl Drop for RetainedAdmissionClaim {
+    /// Every final lifetime end gives the claim back — a dropped
+    /// [`GuardedPool`], an initialization error, a cancelled construction.
+    fn drop(&mut self) {
+        self.release();
+    }
 }
 
 pub struct GuardedPool {
     guard: Arc<WorkspaceWriterGuard>,
     pool: SqlitePool,
     _pool_registration: CooperativePoolRegistration,
-    /// This handle's live claim on its retained admission entry, given up by
-    /// [`Self::release_retained_admission`].
+    /// This handle's live claim on its retained admission entry.
+    ///
+    /// Declared last so the pool and its registration are dropped before the
+    /// claim can remove the entry that keeps the OS admission alive; dropping
+    /// the handle releases it, whichever holder's lifetime ends.
     claim: RetainedAdmissionClaim,
 }
 
@@ -237,35 +264,56 @@ fn canonical_db_path(db_path: &Path) -> PathBuf {
 }
 
 /// Publish `guard` as this process's live admission for its `(path, mode)`
-/// WITHOUT registering a claim, so a concurrent open can join it before the
-/// awaited pool open finishes.
-fn publish_retained_admission(guard: &Arc<WorkspaceWriterGuard>) {
+/// and reserve one claim on it, atomically under the registry lock.
+///
+/// The entry exists (and is joinable) from the moment the claim is reserved,
+/// and the claim keeps it alive through the awaited pool construction that
+/// follows; the caller releases it when that construction or seeding fails, or
+/// hands it to the constructed handle.
+fn reserve_retained_admission(guard: &Arc<WorkspaceWriterGuard>) -> RetainedAdmissionClaim {
     let key = (canonical_db_path(&guard.db_path), guard.mode);
-    ACTIVE_GUARDS
+    let mut guards = ACTIVE_GUARDS
         .lock()
-        .expect("writer guard registry poisoned")
-        .entry(key)
-        .and_modify(|entry| entry.guard = Arc::clone(guard))
-        .or_insert_with(|| RetainedGuardEntry {
-            guard: Arc::clone(guard),
-            pools: Arc::new(Mutex::new(Vec::new())),
-            claims: 0,
-        });
+        .expect("writer guard registry poisoned");
+    match guards.get_mut(&key) {
+        Some(entry) if entry.guard.writer_id == guard.writer_id => entry.claims += 1,
+        Some(entry) => {
+            // The key names a different admission (a superseding acquisition
+            // replaced it): this guard becomes the live one.
+            entry.guard = Arc::clone(guard);
+            entry.claims += 1;
+        }
+        None => {
+            guards.insert(
+                key.clone(),
+                RetainedGuardEntry {
+                    guard: Arc::clone(guard),
+                    claims: 1,
+                },
+            );
+        }
+    }
+    drop(guards);
+    RetainedAdmissionClaim::held(key, guard.writer_id.clone())
 }
 
-/// Register one live claim on `guard`'s retained admission.
-fn claim_retained_admission(guard: &Arc<WorkspaceWriterGuard>) {
-    let key = (canonical_db_path(&guard.db_path), guard.mode);
-    ACTIVE_GUARDS
+/// Claim this process's live admission for `(db_path, mode)` atomically with
+/// the lookup, so the admission cannot be released between joining it and
+/// owning a claim on it.
+fn claim_live_admission(
+    db_path: &Path,
+    mode: WriterMode,
+) -> Option<(Arc<WorkspaceWriterGuard>, RetainedAdmissionClaim)> {
+    let key = (canonical_db_path(db_path), mode);
+    let mut guards = ACTIVE_GUARDS
         .lock()
-        .expect("writer guard registry poisoned")
-        .entry(key)
-        .and_modify(|entry| entry.claims += 1)
-        .or_insert_with(|| RetainedGuardEntry {
-            guard: Arc::clone(guard),
-            pools: Arc::new(Mutex::new(Vec::new())),
-            claims: 1,
-        });
+        .expect("writer guard registry poisoned");
+    let entry = guards.get_mut(&key)?;
+    entry.claims += 1;
+    Some((
+        Arc::clone(&entry.guard),
+        RetainedAdmissionClaim::held(key, entry.guard.writer_id.clone()),
+    ))
 }
 
 /// Retain a live writer guard in this process's registry so published pools
@@ -279,31 +327,17 @@ fn claim_retained_admission(guard: &Arc<WorkspaceWriterGuard>) {
 /// Panics if the writer-guard registry mutex is poisoned (a prior
 /// registration panicked while holding the lock).
 pub fn retain_writer_guard(guard: Arc<WorkspaceWriterGuard>) {
-    publish_retained_admission(&guard);
-    claim_retained_admission(&guard);
+    reserve_retained_admission(&guard).persist();
 }
 
 fn register_pool_handle(guard: &Arc<WorkspaceWriterGuard>, pool: &SqlitePool) -> u64 {
     let id = POOL_REG_ID.fetch_add(1, Ordering::Relaxed);
-    let key = (canonical_db_path(&guard.db_path), guard.mode);
-    let pools = {
-        let mut guards = ACTIVE_GUARDS
-            .lock()
-            .expect("writer guard registry poisoned");
-        Arc::clone(
-            &guards
-                .entry(key)
-                .or_insert_with(|| RetainedGuardEntry {
-                    guard: Arc::clone(guard),
-                    pools: Arc::new(Mutex::new(Vec::new())),
-                    claims: 0,
-                })
-                .pools,
-        )
-    };
-    pools
+    let key = canonical_db_path(&guard.db_path);
+    ACTIVE_POOLS
         .lock()
         .expect("pool registry poisoned")
+        .entry(key)
+        .or_default()
         .push(RegisteredPool {
             id,
             handle: pool.clone(),
@@ -311,20 +345,38 @@ fn register_pool_handle(guard: &Arc<WorkspaceWriterGuard>, pool: &SqlitePool) ->
     id
 }
 
-fn unregister_pool_handle(key: &(PathBuf, WriterMode), id: u64) {
-    let guards = ACTIVE_GUARDS
-        .lock()
-        .expect("writer guard registry poisoned");
-    if let Some(entry) = guards.get(key) {
-        entry
-            .pools
-            .lock()
-            .expect("pool registry poisoned")
-            .retain(|reg| reg.id != id);
+fn unregister_pool_handle(key: &Path, id: u64) {
+    let mut pools = ACTIVE_POOLS.lock().expect("pool registry poisoned");
+    if let Some(registered) = pools.get_mut(key) {
+        registered.retain(|reg| reg.id != id);
+        if registered.is_empty() {
+            pools.remove(key);
+        }
     }
 }
 
+/// Whether every cooperative pool this process opened on `db_path` reports
+/// closed, dropping the handles that have.
+fn cooperative_pools_quiesced(db_path: &Path) -> bool {
+    let target = canonical_db_path(db_path);
+    let mut pools = ACTIVE_POOLS.lock().expect("pool registry poisoned");
+    let Some(registered) = pools.get_mut(&target) else {
+        return true;
+    };
+    registered.retain(|reg| !reg.handle.is_closed());
+    let quiesced = registered.is_empty();
+    if quiesced {
+        pools.remove(&target);
+    }
+    quiesced
+}
+
 /// This process's live guard for `(db_path, mode)`, if any.
+///
+/// Kept for the lifetime regressions only: production paths must use
+/// [`claim_live_admission`], which cannot observe an admission it does not
+/// own a claim on.
+#[cfg(test)]
 fn retained_guard(db_path: &Path, mode: WriterMode) -> Option<Arc<WorkspaceWriterGuard>> {
     let key = (canonical_db_path(db_path), mode);
     ACTIVE_GUARDS
@@ -364,13 +416,7 @@ async fn await_cooperative_quiescence(db_path: &Path) -> Result<(), LocalDbError
     let target = canonical_db_path(db_path);
     let start = Instant::now();
     while start.elapsed() < LOCK_ACQUIRE_TIMEOUT {
-        let quiesced = ACTIVE_GUARDS
-            .lock()
-            .expect("writer guard registry poisoned")
-            .iter()
-            .filter(|((path, _), _)| path == &target)
-            .all(|(_, entry)| entry.pools_quiesced());
-        if quiesced {
+        if cooperative_pools_quiesced(&target) {
             return Ok(());
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
@@ -380,36 +426,14 @@ async fn await_cooperative_quiescence(db_path: &Path) -> Result<(), LocalDbError
     })
 }
 
-fn cooperative_pools_quiesced(db_path: &Path) -> bool {
-    let target = canonical_db_path(db_path);
-    ACTIVE_GUARDS
-        .lock()
-        .expect("writer guard registry poisoned")
-        .iter()
-        .filter(|((path, _), _)| path == &target)
-        .all(|(_, entry)| entry.pools_quiesced())
-}
-
 async fn close_cooperative_pools(db_path: &Path) {
     let target = canonical_db_path(db_path);
-    let pools: Vec<SqlitePool> = {
-        let guards = ACTIVE_GUARDS
-            .lock()
-            .expect("writer guard registry poisoned");
-        guards
-            .iter()
-            .filter(|((path, _), _)| path == &target)
-            .flat_map(|(_, entry)| {
-                entry
-                    .pools
-                    .lock()
-                    .expect("pool registry poisoned")
-                    .iter()
-                    .map(|reg| reg.handle.clone())
-                    .collect::<Vec<_>>()
-            })
-            .collect()
-    };
+    let pools: Vec<SqlitePool> = ACTIVE_POOLS
+        .lock()
+        .expect("pool registry poisoned")
+        .get(&target)
+        .map(|registered| registered.iter().map(|reg| reg.handle.clone()).collect())
+        .unwrap_or_default();
     for pool in pools {
         pool.close().await;
     }
@@ -873,19 +897,42 @@ pub async fn acquire_writer_guard(
     creator_id: &str,
     mode: WriterMode,
 ) -> Result<Arc<WorkspaceWriterGuard>, LocalDbError> {
+    let (guard, joined) = acquire_claimed_guard(db_path, creator_id, mode).await?;
+    // This entry point hands its caller no lifetime handle for the admission it
+    // joined, so that claim is kept for the process (the raw-pool rule).
+    if let Some(claim) = joined {
+        claim.persist();
+    }
+    Ok(guard)
+}
+
+/// Acquire the OS admission locks for `mode`, joining this process's live
+/// admission when it is current.
+///
+/// A joined admission comes back with a claim already reserved, so the caller
+/// holds the admission from the moment it is resolved and can release it
+/// however its own lifetime ends.
+async fn acquire_claimed_guard(
+    db_path: &Path,
+    creator_id: &str,
+    mode: WriterMode,
+) -> Result<(Arc<WorkspaceWriterGuard>, Option<RetainedAdmissionClaim>), LocalDbError> {
     // Reuse this process's live guard when it is still current: a re-opened
     // pool (the daemon's lazy creator-DB open, a restarted in-process test)
     // must neither deadlock on its own OS lock nor be refused as a second
     // owner. Cross-process contenders have no retained guard and still fail
     // closed. A stale epoch (a migration advanced the gate) releases first.
     if mode != WriterMode::Migration {
-        if let Some(existing) = retained_guard(db_path, mode) {
+        if let Some((existing, claim)) = claim_live_admission(db_path, mode) {
             let (gate_migration, gate_engine) = read_gate_epochs(db_path).await?;
             let still_current = existing.migration_epoch == gate_migration.max(1)
                 && existing.engine_epoch == (mode == WriterMode::Engine).then_some(gate_engine);
             if still_current {
-                return Ok(existing);
+                return Ok((existing, Some(claim)));
             }
+            // The claim held the admission across the gate read; give it back
+            // before publishing the superseding one.
+            drop(claim);
             release_guard(db_path, mode);
         }
     }
@@ -918,15 +965,18 @@ pub async fn acquire_writer_guard(
     let context = writer_context(&writer_id, mode, migration_epoch, engine_epoch);
     register_writer(db_path, &context, creator_id, &workspace_identity).await?;
 
-    Ok(Arc::new(WorkspaceWriterGuard {
-        db_path: db_path.to_path_buf(),
-        writer_id,
-        mode,
-        migration_epoch,
-        engine_epoch,
-        migration_lock,
-        engine_lock,
-    }))
+    Ok((
+        Arc::new(WorkspaceWriterGuard {
+            db_path: db_path.to_path_buf(),
+            writer_id,
+            mode,
+            migration_epoch,
+            engine_epoch,
+            migration_lock,
+            engine_lock,
+        }),
+        None,
+    ))
 }
 
 /// One pooled connection: used by the protocol's own short transactions.
@@ -992,6 +1042,20 @@ pub async fn open_guarded_pool_arc_with(
     guard: Arc<WorkspaceWriterGuard>,
     options: GuardedPoolOptions,
 ) -> Result<GuardedPool, LocalDbError> {
+    let claim = reserve_retained_admission(&guard);
+    open_guarded_pool_with_claim(guard, claim, options).await
+}
+
+/// Open a [`GuardedPool`] while holding an already-reserved claim.
+///
+/// The claim is held across the awaited pool construction, so it keeps the
+/// admission alive while a concurrent holder closes and releases it; a failed
+/// or cancelled construction drops the claim and leaves no orphan entry.
+async fn open_guarded_pool_with_claim(
+    guard: Arc<WorkspaceWriterGuard>,
+    claim: RetainedAdmissionClaim,
+    options: GuardedPoolOptions,
+) -> Result<GuardedPool, LocalDbError> {
     let context = writer_context(
         &guard.writer_id,
         guard.mode,
@@ -999,13 +1063,12 @@ pub async fn open_guarded_pool_arc_with(
         guard.engine_epoch,
     );
     let pool = pool_with_context(&guard.db_path, context, options).await?;
-    let key = (canonical_db_path(&guard.db_path), guard.mode);
+    let key = canonical_db_path(&guard.db_path);
     let reg_id = register_pool_handle(&guard, &pool);
-    let claim = RetainedAdmissionClaim::new(&guard);
     Ok(GuardedPool {
         guard,
         pool,
-        _pool_registration: CooperativePoolRegistration { key, id: reg_id },
+        _pool_registration: CooperativePoolRegistration { path: key, id: reg_id },
         claim,
     })
 }
@@ -1165,8 +1228,13 @@ pub async fn open_admitted_pool_with(
     if !protocol_tables_present(db_path).await || needs_activation_recovery(db_path).await? {
         run_guarded_migrations(db_path).await?;
     }
-    let guard = acquire_writer_guard(db_path, creator_id, mode).await?;
-    retain_writer_guard(Arc::clone(&guard));
+    let (guard, joined) = acquire_claimed_guard(db_path, creator_id, mode).await?;
+    // A raw pool keeps its admission for the process: a joined claim is parked,
+    // and a fresh guard gets the same process-lifetime retention.
+    match joined {
+        Some(claim) => claim.persist(),
+        None => retain_writer_guard(Arc::clone(&guard)),
+    }
     open_guarded_pool_with(&guard, options).await
 }
 
@@ -1181,11 +1249,15 @@ pub async fn join_live_engine_pool(
     db_path: &Path,
     options: GuardedPoolOptions,
 ) -> Result<Option<GuardedPool>, LocalDbError> {
-    if let Some(guard) = retained_guard(db_path, WriterMode::Engine) {
-        let guarded = open_guarded_pool_arc_with(guard, options).await?;
-        return Ok(Some(guarded));
-    }
-    Ok(None)
+    // The claim is reserved in the same registry critical section as the
+    // lookup, so the admission cannot be released between joining it and
+    // owning a claim on it, and it is held across the awaited pool open.
+    let Some((guard, claim)) = claim_live_admission(db_path, WriterMode::Engine) else {
+        return Ok(None);
+    };
+    Ok(Some(
+        open_guarded_pool_with_claim(guard, claim, options).await?,
+    ))
 }
 
 /// Migrate, take the single engine ownership, and open a guarded pool.
@@ -1207,9 +1279,13 @@ pub async fn init_engine_pool(
     options: GuardedPoolOptions,
 ) -> Result<GuardedPool, LocalDbError> {
     run_guarded_migrations(db_path).await?;
-    let guard = acquire_writer_guard(db_path, creator_id, WriterMode::Engine).await?;
-    publish_retained_admission(&guard);
-    let guarded = open_guarded_pool_arc_with(guard, options).await?;
+    // The claim is reserved with the publication, before the awaited pool
+    // open: a concurrent open can join this admission, and an initialization
+    // error or a cancelled future drops the claim instead of leaving an
+    // ownerless entry and its OS locks behind.
+    let (guard, joined) = acquire_claimed_guard(db_path, creator_id, WriterMode::Engine).await?;
+    let claim = joined.unwrap_or_else(|| reserve_retained_admission(&guard));
+    let guarded = open_guarded_pool_with_claim(guard, claim, options).await?;
     crate::seed_versions(guarded.pool()).await?;
     Ok(guarded)
 }
@@ -1230,9 +1306,10 @@ pub async fn init_guarded_pool(
     creator_id: &str,
 ) -> Result<GuardedPool, LocalDbError> {
     run_guarded_migrations(db_path).await?;
-    let guard = acquire_writer_guard(db_path, creator_id, WriterMode::Direct).await?;
-    publish_retained_admission(&guard);
-    let guarded = open_guarded_pool_arc(guard).await?;
+    let (guard, joined) = acquire_claimed_guard(db_path, creator_id, WriterMode::Direct).await?;
+    let claim = joined.unwrap_or_else(|| reserve_retained_admission(&guard));
+    let guarded =
+        open_guarded_pool_with_claim(guard, claim, GuardedPoolOptions::default()).await?;
     crate::seed_versions(guarded.pool()).await?;
     Ok(guarded)
 }
@@ -1251,6 +1328,9 @@ impl WorkspaceWriterGuard {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::future::Future;
+
     use super::*;
 
     /// A creator whose open fails after another open already joined gives up
@@ -1387,5 +1467,212 @@ mod tests {
         third.pool().close().await;
         third.release_retained_admission();
         assert!(retained_guard(&db_path, WriterMode::Direct).is_none());
+    }
+
+    /// A holder whose lifetime ends by dropping the handle — the local
+    /// provider store, any failed construction — gives its claim back, so the
+    /// last one releases the entry and the OS admission with it.
+    #[tokio::test]
+    async fn dropped_handle_releases_the_last_admission() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("state.db");
+
+        let engine =
+            init_engine_pool(&db_path, BOOTSTRAP_CREATOR_ID, GuardedPoolOptions::default())
+                .await
+                .unwrap();
+        let direct = init_guarded_pool(&db_path, BOOTSTRAP_CREATOR_ID)
+            .await
+            .unwrap();
+        // Exactly the provider store's shape: no explicit release call.
+        drop(direct);
+        drop(engine);
+
+        // Both shared migration locks went with their last claims.
+        let fence = acquire_store_reset_fence(&db_path)
+            .expect("no writer admission survives the dropped holders");
+        drop(fence);
+    }
+
+    /// A pool clone may outlive the handle that opened it: the admission claim
+    /// ends with the handle, while migration quiescence keeps following the
+    /// open pool until it is closed.
+    #[tokio::test]
+    async fn surviving_pool_clone_keeps_migration_quiescence() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("state.db");
+
+        let guarded =
+            init_engine_pool(&db_path, BOOTSTRAP_CREATOR_ID, GuardedPoolOptions::default())
+                .await
+                .unwrap();
+        let survivor = guarded.clone_pool();
+        drop(guarded);
+        assert!(
+            retained_guard(&db_path, WriterMode::Engine).is_none(),
+            "the admission ends with its last claim"
+        );
+        assert!(
+            !cooperative_pools_quiesced(&db_path),
+            "the surviving clone is still an active cooperative pool"
+        );
+
+        survivor.close().await;
+        assert!(cooperative_pools_quiesced(&db_path));
+    }
+
+    /// A pool-open failure after the claim was reserved must not leave an
+    /// ownerless admission or its lock behind.
+    #[tokio::test]
+    async fn failed_pool_open_releases_the_reserved_claim() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("state.db");
+        let bootstrap = init_guarded_pool(&db_path, BOOTSTRAP_CREATOR_ID)
+            .await
+            .unwrap();
+        bootstrap.pool().close().await;
+        bootstrap.release_retained_admission();
+        drop(bootstrap);
+
+        let guard = acquire_writer_guard(&db_path, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
+            .await
+            .unwrap();
+        // A directory where the pool expects its database file: the awaited
+        // pool construction fails for real.
+        fs::remove_file(&db_path).unwrap();
+        fs::create_dir(&db_path).unwrap();
+        let error = open_guarded_pool_arc(guard.clone())
+            .await
+            .err()
+            .expect("a pool cannot open a directory");
+        assert!(matches!(error, LocalDbError::Sqlx(_)), "got {error:?}");
+
+        drop(guard);
+        let fence = acquire_store_reset_fence(&db_path)
+            .expect("the failed construction released its claim");
+        drop(fence);
+    }
+
+    /// A cancelled construction — the future dropped after the claim was
+    /// reserved — gives the claim back too.
+    #[tokio::test]
+    async fn cancelled_construction_releases_the_reserved_claim() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("state.db");
+        let bootstrap = init_guarded_pool(&db_path, BOOTSTRAP_CREATOR_ID)
+            .await
+            .unwrap();
+        bootstrap.pool().close().await;
+        bootstrap.release_retained_admission();
+        drop(bootstrap);
+
+        let guard = acquire_writer_guard(&db_path, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
+            .await
+            .unwrap();
+        {
+            let mut opening = std::pin::pin!(open_guarded_pool_arc(guard.clone()));
+            std::future::poll_fn(|cx| {
+                // The first poll reserves the claim and then waits on the
+                // database connect, so the future is cancelled mid-open.
+                assert!(
+                    opening.as_mut().poll(cx).is_pending(),
+                    "the construction must yield at its awaited connect"
+                );
+                std::task::Poll::Ready(())
+            })
+            .await;
+        }
+
+        drop(guard);
+        let fence = acquire_store_reset_fence(&db_path)
+            .expect("the cancelled construction released its claim");
+        drop(fence);
+    }
+
+    /// A joining open reserves its claim with the lookup, so it keeps the
+    /// admission alive while its own pool is still being constructed, and the
+    /// creator going away in that window does not cost a third open the join.
+    #[tokio::test]
+    async fn in_flight_join_survives_the_creators_release() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("state.db");
+
+        let creator =
+            init_engine_pool(&db_path, BOOTSTRAP_CREATOR_ID, GuardedPoolOptions::default())
+                .await
+                .unwrap();
+        let mut joining = std::pin::pin!(join_live_engine_pool(
+            &db_path,
+            GuardedPoolOptions::default()
+        ));
+        std::future::poll_fn(|cx| {
+            assert!(
+                joining.as_mut().poll(cx).is_pending(),
+                "the join must yield at its awaited pool open"
+            );
+            std::task::Poll::Ready(())
+        })
+        .await;
+
+        // The creator's open ends while the joiner is still constructing.
+        creator.pool().close().await;
+        creator.release_retained_admission();
+
+        let third = join_live_engine_pool(&db_path, GuardedPoolOptions::default())
+            .await
+            .unwrap()
+            .expect("a third open still joins the admission");
+        let joined = joining.await.unwrap().expect("the pending join completes");
+        assert_eq!(joined.guard().writer_id(), third.guard().writer_id());
+
+        joined.pool().close().await;
+        joined.release_retained_admission();
+        third.pool().close().await;
+        third.release_retained_admission();
+        assert!(retained_guard(&db_path, WriterMode::Engine).is_none());
+    }
+
+    /// The seed step runs after the pool exists; its failure drops that handle,
+    /// which must give the claim back instead of leaving an ownerless
+    /// admission behind.
+    #[tokio::test]
+    async fn failed_seed_releases_the_constructed_admission() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("state.db");
+        let first = init_engine_pool(&db_path, BOOTSTRAP_CREATOR_ID, GuardedPoolOptions::default())
+            .await
+            .unwrap();
+        first.pool().close().await;
+        first.release_retained_admission();
+        drop(first);
+
+        // A real SQL failure at the seed step: the version table rejects the
+        // value the seeding writes.
+        let pool = SqlitePool::connect(&sqlite_url(&db_path, false))
+            .await
+            .expect("raw pool");
+        sqlx::query("DROP TABLE workspace_meta")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE workspace_meta (\
+                 key TEXT NOT NULL PRIMARY KEY, \
+                 value TEXT NOT NULL CHECK (value = '')\
+             )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+
+        let error = init_engine_pool(&db_path, BOOTSTRAP_CREATOR_ID, GuardedPoolOptions::default())
+            .await
+            .err()
+            .expect("the seed step must fail");
+        assert!(matches!(error, LocalDbError::Sqlx(_)), "got {error:?}");
+        let fence = acquire_store_reset_fence(&db_path)
+            .expect("a failed initialization released its locks");
+        drop(fence);
     }
 }
