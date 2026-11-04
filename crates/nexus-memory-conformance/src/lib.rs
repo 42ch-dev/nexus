@@ -7,6 +7,10 @@
 //! `MemoryPort` implementation and loopback service are assembled only when
 //! every base operation has a real implementation.
 
+// Exercised by its embedded tests until the assembly task implements
+// `MemoryPort` over these slices; the allowance disappears with that consumer.
+#[allow(dead_code)]
+mod candidates;
 mod provider;
 // Exercised by its embedded tests until the assembly task implements
 // `MemoryPort` over these slices; the allowance disappears with that consumer.
