@@ -209,11 +209,16 @@ struct WsTransport<S> {
     stream: AsyncMutex<Option<SplitStream<WebSocketStream<S>>>>,
     /// Refusal flag: set as soon as a close starts, so new I/O says `Closed`.
     closed: AtomicBool,
-    /// Set only once the cleanup below really finished. `closed` is set first —
-    /// that is what the other side must observe — so completion needs its own
-    /// fact, exactly like `ConnectResponder::close_session` setting `Closed`
-    /// before its detached `transport.close()` even starts.
-    released: AtomicBool,
+    /// The terminal outcome of the one cleanup that disposed both halves.
+    ///
+    /// `None` until then, so a transient `GateBusy`/`HalvesOwned` never becomes
+    /// terminal while resources are still owned. Stored even when the graceful
+    /// close frame failed, because whichever caller completed the cleanup may be
+    /// the SDK's detached close or the receive-error path, and its result is
+    /// discarded there: a later owned close must still see that failure rather
+    /// than read a bare "released" flag and answer `Ok`. Only touched under the
+    /// close gate, so it never holds across an await.
+    completion: std::sync::Mutex<Option<CleanupCompletion>>,
     /// Serializes close, so a concurrent caller waits for the running cleanup
     /// instead of reporting "closed" while it still runs.
     close_gate: AsyncMutex<()>,
@@ -318,6 +323,29 @@ impl PollProbe {
     }
 }
 
+/// The terminal outcome of the cleanup that disposed both halves.
+///
+/// Resource completion and a successful graceful close are different facts: both
+/// halves are gone in either case, but a failed close frame stays reportable.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum CleanupCompletion {
+    /// Both halves were disposed and the WebSocket close frame was written.
+    Graceful,
+    /// Both halves were disposed; the close frame failed.
+    CloseFrame(spoke_connect::remote::TransportError),
+}
+
+impl CleanupCompletion {
+    /// What a later or concurrent caller must observe for this completion.
+    /// The success path copies no error and allocates nothing.
+    fn outcome(&self) -> Result<(), CleanupFailure> {
+        match self {
+            Self::Graceful => Ok(()),
+            Self::CloseFrame(error) => Err(CleanupFailure::CloseFrame(error.clone())),
+        }
+    }
+}
+
 /// Why one cleanup attempt did not leave the transport owning nothing.
 ///
 /// `HalvesOwned` means the named halves were never acquired, so they are still
@@ -402,7 +430,7 @@ where
             sink: AsyncMutex::new(Some(sink)),
             stream: AsyncMutex::new(Some(stream)),
             closed: AtomicBool::new(false),
-            released: AtomicBool::new(false),
+            completion: std::sync::Mutex::new(None),
             close_gate: AsyncMutex::new(()),
             notify: Notify::new(),
             probe,
@@ -444,9 +472,12 @@ where
 
     /// Failure path: the session is unusable, so run the same real cleanup.
     ///
-    /// The caller's receive/parse error stays that operation's error. A cleanup
-    /// that keeps a half owned is not turned into success either: `released`
-    /// stays false, so the next close reports it truthfully.
+    /// The caller's receive/parse error stays that operation's error, and this
+    /// call discards the cleanup result — exactly like the SDK's detached
+    /// `transport.close()`. The completed outcome (including a failed close
+    /// frame) is retained in the transport, so the owned or a later close still
+    /// reports it instead of answering `Ok` from a bare completion flag; a
+    /// cleanup that keeps a half owned records nothing and stays retryable.
     async fn tear_down(&self) {
         let _ = self.release().await;
     }
@@ -455,11 +486,12 @@ where
     /// then release both halves against a single deadline — lock acquisition
     /// included, so the whole close is bounded rather than each step.
     ///
-    /// `released` (not `closed`, and not the SDK's `Closed` state, which is set
-    /// before its detached `transport.close()` runs) is set only when both
-    /// halves were actually taken and dropped. A half whose mutex the deadline
-    /// could not acquire is NOT disposed: the call fails, completion stays
-    /// unannounced, and a later close retries rather than reporting success.
+    /// The retained `completion` (not `closed`, and not the SDK's `Closed`
+    /// state, which is set before its detached `transport.close()` runs) is
+    /// recorded only when both halves were actually taken and dropped, and it
+    /// carries the material outcome for every later caller. A half whose mutex
+    /// the deadline could not acquire is NOT disposed: the call fails, nothing
+    /// is recorded, and a later close retries rather than reporting success.
     ///
     /// ONE absolute deadline is taken at entry and the gate wait spends from it
     /// too, so a caller queued behind an unfinished cleanup cannot wait out the
@@ -471,8 +503,8 @@ where
             Ok(gate) => gate,
             Err(_) => return Err(CleanupFailure::GateBusy),
         };
-        if self.released.load(Ordering::SeqCst) {
-            return Ok(());
+        if let Some(completion) = self.completion.lock().expect("completion lock").as_ref() {
+            return completion.outcome();
         }
         self.closed.store(true, Ordering::SeqCst);
         if let Some(probe) = &self.probe {
@@ -510,19 +542,23 @@ where
             sink_disposed = true;
         }
         if !(stream_disposed && sink_disposed) {
+            // Transient: nothing is recorded, so a later call retries.
             return Err(CleanupFailure::HalvesOwned {
                 stream: !stream_disposed,
                 sink: !sink_disposed,
             });
         }
-        self.released.store(true, Ordering::SeqCst);
         if let Some(probe) = &self.probe {
             probe.mark(&probe.cleanup_finished);
         }
-        match close_error {
-            Some(error) => Err(CleanupFailure::CloseFrame(error)),
-            None => Ok(()),
-        }
+        let completion = match close_error {
+            Some(error) => CleanupCompletion::CloseFrame(error),
+            None => CleanupCompletion::Graceful,
+        };
+        // One clone only on the failure path; the graceful path copies nothing.
+        let outcome = completion.outcome();
+        *self.completion.lock().expect("completion lock") = Some(completion);
+        outcome
     }
 
     /// Fixture-only: take the stream half's mutex and hold it until `release`,
@@ -827,6 +863,41 @@ async fn watched_peer_listener() -> (
         }
     });
     (addr, close_frame, task)
+}
+
+/// A peer that completes the upgrade, then aborts the connection with a TCP
+/// reset (zero linger) on request, so this end sees a real socket error on its
+/// next read and a real failure writing the close frame afterwards.
+async fn resetting_peer_listener() -> (
+    SocketAddr,
+    Arc<Notify>,
+    tokio::task::JoinHandle<()>,
+) {
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind an ephemeral localhost port");
+    let addr = listener.local_addr().expect("listener address");
+    let reset = Arc::new(Notify::new());
+    let trigger = Arc::clone(&reset);
+    let task = tokio::spawn(async move {
+        let (tcp, peer) = tokio::time::timeout(SETUP_BOUND, listener.accept())
+            .await
+            .expect("the resetting peer is accepted within the bound")
+            .expect("accept the resetting peer");
+        assert!(peer.ip().is_loopback(), "the listener only serves localhost");
+        let ws = tokio::time::timeout(SETUP_BOUND, tokio_tungstenite::accept_async(tcp))
+            .await
+            .expect("the resetting upgrade is bounded")
+            .expect("websocket upgrade");
+        trigger.notified().await;
+        // Zero linger turns the close into an RST instead of a FIN. The
+        // deprecation warns about a blocking drop for non-zero linger; a zero
+        // timeout discards unsent data immediately and cannot block.
+        #[allow(deprecated)]
+        let _ = ws.get_ref().set_linger(Some(Duration::from_secs(0)));
+        drop(ws);
+    });
+    (addr, reset, task)
 }
 
 // ---------------------------------------------------------------------------
@@ -2726,6 +2797,64 @@ async fn cleanup_that_cannot_take_a_half_fails_and_finishes_later() {
         .await
         .expect("the watched peer task ends")
         .expect("the watched peer task joins");
+}
+
+/// A first, result-discarding close must not hide its failure from the owned leg.
+///
+/// Here the receive-error cleanup is the first caller: a real TCP reset makes the
+/// transport's own close frame fail, `recv` returns the reset error and discards
+/// the cleanup result exactly as the SDK's detached close does. The owned leg and
+/// a repeated close must still observe the failed graceful close, even though both
+/// halves really were disposed inside that first call.
+#[tokio::test]
+async fn failed_cleanup_stays_reportable_after_the_first_caller_discards_it() {
+    let (addr, reset, peer) = resetting_peer_listener().await;
+    let probe = Arc::new(PollProbe::default());
+    let stalled = Arc::new(observed_connect(addr, Arc::clone(&probe)).await);
+
+    // The peer aborts with a real TCP reset, so this end's next read fails.
+    reset.notify_one();
+    let received = tokio::time::timeout(SETUP_BOUND, stalled.recv())
+        .await
+        .expect("the receive is bounded by the peer reset");
+    assert!(
+        matches!(received, Err(spoke_connect::remote::TransportError::Io(_))),
+        "the receive keeps its own socket error: {received:?}"
+    );
+    // That error path already ran the cleanup and disposed both halves; its own
+    // result was discarded by the caller, like the SDK's detached close.
+    assert!(
+        probe.cleanup_finished.load(Ordering::SeqCst),
+        "the receive-error path completed the real cleanup"
+    );
+
+    // The owned leg must not answer `Ok` for that failed graceful close.
+    let owned = tokio::time::timeout(SETUP_BOUND, stalled.release())
+        .await
+        .expect("the owned close is bounded");
+    assert!(
+        matches!(
+            owned,
+            Err(CleanupFailure::CloseFrame(
+                spoke_connect::remote::TransportError::Io(_)
+            ))
+        ),
+        "the owned close observes the failed close frame: {owned:?}"
+    );
+
+    // ...and so must a repeated or concurrent close.
+    let again = tokio::time::timeout(SETUP_BOUND, stalled.close())
+        .await
+        .expect("the repeated close is bounded");
+    assert!(
+        matches!(again, Err(spoke_connect::remote::TransportError::Io(_))),
+        "a repeated close still reports the failed cleanup: {again:?}"
+    );
+
+    tokio::time::timeout(SETUP_BOUND, peer)
+        .await
+        .expect("the resetting peer task ends")
+        .expect("the resetting peer task joins");
 }
 
 // ---------------------------------------------------------------------------
