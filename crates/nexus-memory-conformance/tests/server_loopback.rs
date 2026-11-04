@@ -326,6 +326,10 @@ impl PollProbe {
 /// failed, so ownership is complete and the error is still surfaced.
 #[derive(Debug, PartialEq, Eq)]
 enum CleanupFailure {
+    /// Another cleanup still held the close gate at this call's deadline. This
+    /// call disposed nothing, claims nothing, and must not touch the other
+    /// caller's ownership.
+    GateBusy,
     HalvesOwned { stream: bool, sink: bool },
     CloseFrame(spoke_connect::remote::TransportError),
 }
@@ -334,6 +338,9 @@ impl CleanupFailure {
     fn into_transport_error(self) -> spoke_connect::remote::TransportError {
         use spoke_connect::remote::TransportError;
         match self {
+            Self::GateBusy => TransportError::Io(
+                "another cleanup still held the gate at this call's deadline".to_owned(),
+            ),
             Self::HalvesOwned { stream, sink } => TransportError::Io(format!(
                 "cleanup left owned halves: stream={stream} sink={sink}"
             )),
@@ -453,10 +460,17 @@ where
     /// halves were actually taken and dropped. A half whose mutex the deadline
     /// could not acquire is NOT disposed: the call fails, completion stays
     /// unannounced, and a later close retries rather than reporting success.
-    /// A concurrent caller waits on the gate; that wait is covered because the
-    /// cleanup it waits for is deadline-bounded.
+    ///
+    /// ONE absolute deadline is taken at entry and the gate wait spends from it
+    /// too, so a caller queued behind an unfinished cleanup cannot wait out the
+    /// first bound and then start a fresh one: it fails with `GateBusy` inside
+    /// its own budget and leaves the other caller's ownership untouched.
     async fn release(&self) -> Result<(), CleanupFailure> {
-        let _gate = self.close_gate.lock().await;
+        let deadline = tokio::time::Instant::now() + SHUTDOWN_BOUND;
+        let _gate = match tokio::time::timeout_at(deadline, self.close_gate.lock()).await {
+            Ok(gate) => gate,
+            Err(_) => return Err(CleanupFailure::GateBusy),
+        };
         if self.released.load(Ordering::SeqCst) {
             return Ok(());
         }
@@ -468,7 +482,6 @@ where
         // send each hold their mutex across the native poll, so a lock-first
         // release would wait for the very I/O it has to cancel.
         self.notify.notify_waiters();
-        let deadline = tokio::time::Instant::now() + SHUTDOWN_BOUND;
         let mut stream_disposed = false;
         if let Ok(mut stream) = tokio::time::timeout_at(deadline, self.stream.lock()).await {
             stream.take();
@@ -2530,8 +2543,13 @@ async fn bounded_teardown_releases_a_parked_receiver_and_a_stalled_peer() {
         let stalled = Arc::clone(&stalled);
         let probe = Arc::clone(&probe);
         async move {
-            let outcome = stalled.close().await;
-            (outcome, probe.cleanup_finished.load(Ordering::SeqCst))
+            let entry = Instant::now();
+            let outcome = stalled.release().await;
+            (
+                outcome,
+                entry.elapsed(),
+                probe.cleanup_finished.load(Ordering::SeqCst),
+            )
         }
     });
 
@@ -2540,14 +2558,25 @@ async fn bounded_teardown_releases_a_parked_receiver_and_a_stalled_peer() {
         .expect("the transport close is bounded")
         .expect("the close task joins")
         .expect("the transport closes");
-    let (second, saw_cleanup_finish) = tokio::time::timeout(SETUP_BOUND, concurrent)
+    let (second, waited, saw_cleanup_finish) = tokio::time::timeout(SETUP_BOUND, concurrent)
         .await
         .expect("the concurrent close is bounded")
         .expect("the concurrent close task joins");
-    second.expect("the concurrent close returns ok");
+    match second {
+        // It only got the gate after the first cleanup had really finished.
+        Ok(()) => assert!(
+            saw_cleanup_finish,
+            "a concurrent close must not report completion while the first cleanup is still running"
+        ),
+        // Its own entry budget was spent waiting, so it reports that and claims
+        // nothing about the cleanup it did not run.
+        Err(CleanupFailure::GateBusy) => {}
+        Err(other) => panic!("the concurrent cleanup reported {other:?}"),
+    }
     assert!(
-        saw_cleanup_finish,
-        "a concurrent close must not report completion while the first cleanup is still running"
+        waited <= SHUTDOWN_BOUND + SHUTDOWN_BOUND / 2,
+        "a queued close is bounded from its own entry, not by a fresh bound after \
+         the one it waited for: {waited:?}"
     );
 
     let released = tokio::time::timeout(SETUP_BOUND, waiting)
@@ -2619,10 +2648,42 @@ async fn cleanup_that_cannot_take_a_half_fails_and_finishes_later() {
     });
     held_rx.await.expect("a live owner holds the stream half");
 
-    // The cleanup cannot acquire that half: it fails, reports which half it
-    // still owns, and leaves the completion fact unset.
+    // The first cleanup cannot acquire that half: it fails, reports which half
+    // it still owns, and leaves the completion fact unset.
+    let first = tokio::spawn({
+        let stalled = Arc::clone(&stalled);
+        async move { stalled.release().await }
+    });
+    probe
+        .wait_for(&probe.cleanup_started, "the first cleanup starts")
+        .await;
+
+    // A second closer really queues behind it. Its bound starts at ITS entry, so
+    // it cannot wait out the first cleanup and then spend a fresh one: it either
+    // gets the gate inside its own budget or fails as busy. Either way the total
+    // is bounded from its entry.
+    let entry = Instant::now();
+    let queued = tokio::time::timeout(SETUP_BOUND, stalled.release())
+        .await
+        .expect("the queued close is bounded by the join bound");
+    let waited = entry.elapsed();
+    match queued {
+        Err(CleanupFailure::GateBusy) | Err(CleanupFailure::HalvesOwned { .. }) => {}
+        Err(other) => panic!("the queued cleanup reported {other:?}"),
+        Ok(()) => panic!("a queued cleanup must not report completion for a running one"),
+    }
+    assert!(
+        waited <= SHUTDOWN_BOUND + SHUTDOWN_BOUND / 2,
+        "the queued close is bounded from its own entry, not from a fresh budget: {waited:?}"
+    );
+    assert!(!probe.cleanup_finished.load(Ordering::SeqCst));
+
+    let first = tokio::time::timeout(SETUP_BOUND, first)
+        .await
+        .expect("the first cleanup is bounded")
+        .expect("the first cleanup task joins");
     assert_eq!(
-        stalled.release().await,
+        first,
         Err(CleanupFailure::HalvesOwned {
             stream: true,
             sink: false
