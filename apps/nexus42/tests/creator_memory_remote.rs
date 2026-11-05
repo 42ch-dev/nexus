@@ -13,7 +13,7 @@
 //! (`cargo test -p nexus42 --features memory-remote --test creator_memory_remote`).
 //! Without it the target still runs the local pin and the feature-off refusal.
 
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
@@ -47,60 +47,77 @@ fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
-/// Spawn the real binary and bound the WHOLE child lifetime: exit or `kill`
-/// plus `wait` (reap) on timeout. `output()` is deliberately not used: it
-/// waits forever on a wedged child.
-fn run_cli(home: &Path, args: &[&str]) -> Output {
+/// Spawn the real binary and bound the WHOLE child/output lifecycle.
+///
+/// Child output goes to regular temp files (not inherited pipes), so a
+/// descendant that keeps an inherited pipe open can never block the test after
+/// the direct child exits or is killed. On timeout the direct child is killed
+/// and reaped before the failure is returned; a normal exit is already reaped
+/// by `try_wait`.
+fn run_cli(home: &Path, args: &[&str]) -> Result<Output, String> {
+    let mut out_file = tempfile::tempfile().map_err(|error| format!("stdout temp: {error}"))?;
+    let mut err_file = tempfile::tempfile().map_err(|error| format!("stderr temp: {error}"))?;
+    let child_out = out_file
+        .try_clone()
+        .map_err(|error| format!("stdout clone: {error}"))?;
+    let child_err = err_file
+        .try_clone()
+        .map_err(|error| format!("stderr clone: {error}"))?;
+
     let mut child = Command::new(env!("CARGO_BIN_EXE_nexus42"))
         .args(args)
         .env("HOME", home)
         .env("RUST_LOG", "off")
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stdout(Stdio::from(child_out))
+        .stderr(Stdio::from(child_err))
         .spawn()
-        .expect("spawn nexus42");
-
-    // Drain both pipes on their own threads so a chatty child can never block
-    // on a full pipe while the bounded wait below polls its exit.
-    let mut child_stdout = child.stdout.take().expect("piped stdout");
-    let mut child_stderr = child.stderr.take().expect("piped stderr");
-    let out_reader = std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let _ = child_stdout.read_to_end(&mut bytes);
-        bytes
-    });
-    let err_reader = std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let _ = child_stderr.read_to_end(&mut bytes);
-        bytes
-    });
+        .map_err(|error| format!("spawn nexus42 {args:?}: {error}"))?;
 
     let deadline = Instant::now() + CLI_BOUND;
     let status = loop {
-        if let Some(status) = child.try_wait().expect("wait nexus42") {
-            break status;
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {}
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("wait nexus42 {args:?}: {error} (child killed and reaped)"));
+            }
         }
         if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
-            let _ = out_reader.join();
-            let _ = err_reader.join();
-            panic!("nexus42 {args:?} exceeded {CLI_BOUND:?}; child killed and reaped");
+            return Err(format!(
+                "nexus42 {args:?} exceeded {CLI_BOUND:?}; child killed and reaped"
+            ));
         }
         std::thread::sleep(Duration::from_millis(25));
     };
-    let stdout = out_reader.join().expect("stdout reader");
-    let stderr = err_reader.join().expect("stderr reader");
-    Output {
+
+    let mut stdout = Vec::new();
+    out_file
+        .seek(SeekFrom::Start(0))
+        .map_err(|error| format!("seek stdout: {error}"))?;
+    out_file
+        .read_to_end(&mut stdout)
+        .map_err(|error| format!("read stdout: {error}"))?;
+    let mut stderr = Vec::new();
+    err_file
+        .seek(SeekFrom::Start(0))
+        .map_err(|error| format!("seek stderr: {error}"))?;
+    err_file
+        .read_to_end(&mut stderr)
+        .map_err(|error| format!("read stderr: {error}"))?;
+    Ok(Output {
         status,
         stdout,
         stderr,
-    }
+    })
 }
 
 fn cli_ok(home: &Path, args: &[&str]) -> Output {
-    let output = run_cli(home, args);
+    let output = run_cli(home, args).unwrap_or_else(|error| panic!("{error}"));
     assert!(output.status.success(), "cli {args:?}: {}", stderr(&output));
     output
 }
@@ -221,6 +238,14 @@ mod remote {
     use tokio::net::TcpListener;
 
     const BOUND: Duration = Duration::from_secs(60);
+
+    macro_rules! ensure {
+        ($condition:expr, $($arg:tt)*) => {
+            if !$condition {
+                return Err(format!($($arg)*));
+            }
+        };
+    }
     /// A fixture-only row seeded before the CLI runs; it exists in no local
     /// store, so the CLI can only return it by reading the remote provider.
     const SEED_SLUG: &str = "c111-remote-seeded";
@@ -393,9 +418,9 @@ mod remote {
 
     /// Serve `rounds` sequential CLI opens on the already-bound listener.
     ///
-    /// Returns every responder it created: the caller keeps them alive through
-    /// the final CLI invocation and closes them explicitly afterwards, so no
-    /// session is dropped while a CLI command is still using it.
+    /// Each created responder is appended to the shared list immediately, so
+    /// cleanup can close every session that was actually created, on success
+    /// and on any failed assertion/CLI error/timeout alike.
     fn serve(
         listener: TcpListener,
         memory_service: Arc<dyn RemoteMemoryService>,
@@ -403,25 +428,28 @@ mod remote {
         client_peer: String,
         client_pubkey: [u8; 32],
         rounds: usize,
-    ) -> tokio::task::JoinHandle<Vec<Arc<ConnectResponder>>> {
+        responders: Arc<std::sync::Mutex<Vec<Arc<ConnectResponder>>>>,
+    ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
-            let mut responders = Vec::with_capacity(rounds);
             for _ in 0..rounds {
-                let (tcp, peer) = tokio::time::timeout(BOUND, listener.accept())
-                    .await
-                    .expect("the CLI connects to the listener")
-                    .expect("accept the localhost peer");
-                assert!(peer.ip().is_loopback(), "the fixture serves localhost only");
-                let ws = tokio::time::timeout(
+                let accepted = tokio::time::timeout(BOUND, listener.accept()).await;
+                let Ok(Ok((tcp, peer))) = accepted else {
+                    return;
+                };
+                if !peer.ip().is_loopback() {
+                    return;
+                }
+                let upgraded = tokio::time::timeout(
                     BOUND,
                     tokio_tungstenite::accept_async_with_config(
                         tcp,
                         Some(ws_config(DEFAULT_MAX_ENVELOPE_BYTES)),
                     ),
                 )
-                .await
-                .expect("the websocket upgrade is bounded")
-                .expect("websocket upgrade");
+                .await;
+                let Ok(Ok(ws)) = upgraded else {
+                    return;
+                };
                 let transport: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
                 let ports: Arc<dyn RemoteServePorts + Send + Sync> = Arc::new(
                     RemoteServePortsComposite::new(Arc::new(MemoryOnlyHost), None, None)
@@ -437,29 +465,49 @@ mod remote {
                     invoke_timeout_ms: Some(5_000),
                 })
                 .await;
-                responders.push(responder);
+                responders
+                    .lock()
+                    .expect("responder list")
+                    .push(responder);
             }
-            responders
         })
     }
 
     /// Close every responder through the SDK's supported `close()` and wait,
     /// bounded, for its public state to report `Closed`. The SDK's internal
     /// runner task is not publicly joinable (disclosed in the report).
-    async fn close_responders(responders: &[Arc<ConnectResponder>]) {
+    async fn close_responders(
+        responders: &[Arc<ConnectResponder>],
+    ) -> Result<(), String> {
         for responder in responders {
             responder.close();
         }
         for responder in responders {
             let deadline = Instant::now() + Duration::from_secs(10);
             while responder.state() != ConnectResponderState::Closed {
-                assert!(
-                    Instant::now() < deadline,
-                    "a responder did not reach Closed after close()"
-                );
+                if Instant::now() >= deadline {
+                    return Err("a responder did not reach Closed after close()".to_string());
+                }
                 tokio::time::sleep(Duration::from_millis(25)).await;
             }
         }
+        Ok(())
+    }
+
+    /// Abort and bounded-join the accept task (when still owned), then close
+    /// every responder actually created. Runs on success and on failure so no
+    /// owned fixture resource is detached or left open.
+    async fn teardown(
+        accept: &mut Option<tokio::task::JoinHandle<()>>,
+        responders: &Arc<std::sync::Mutex<Vec<Arc<ConnectResponder>>>>,
+    ) -> Result<(), String> {
+        if let Some(task) = accept.take() {
+            task.abort();
+            let _ = tokio::time::timeout(BOUND, task).await;
+        }
+        let list: Vec<Arc<ConnectResponder>> =
+            responders.lock().expect("responder list").clone();
+        close_responders(&list).await
     }
 
     /// Write the operator-provisioned credential for `seed` at mode 0600.
@@ -484,20 +532,25 @@ mod remote {
     }
 
     /// Run one CLI call without blocking the runtime that serves the fixture.
-    async fn cli(home: PathBuf, args: Vec<String>) -> Output {
+    async fn cli(home: PathBuf, args: Vec<String>) -> Result<Output, String> {
         tokio::task::spawn_blocking(move || {
             let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
             run_cli(&home, &borrowed)
         })
         .await
-        .expect("cli task joins")
+        .map_err(|error| format!("cli task join: {error}"))?
     }
 
-    async fn cli_ok_remote(home: &Path, args: &[&str]) -> Output {
-        let output = cli(home.to_path_buf(), args.iter().map(|arg| (*arg).to_string()).collect())
-            .await;
-        assert!(output.status.success(), "cli {args:?}: {}", stderr(&output));
-        output
+    async fn cli_ok_remote(home: &Path, args: &[&str]) -> Result<Output, String> {
+        let output = cli(
+            home.to_path_buf(),
+            args.iter().map(|arg| (*arg).to_string()).collect(),
+        )
+        .await?;
+        if !output.status.success() {
+            return Err(format!("cli {args:?}: {}", stderr(&output)));
+        }
+        Ok(output)
     }
 
     /// Seed a row that exists ONLY in the remote fixture, through the fixture's
@@ -617,7 +670,8 @@ mod remote {
                 &peer_id(&HOST_SEED),
             ],
         )
-        .await;
+        .await
+        .expect("the CLI selection is written");
 
         // A meaningful conflicting local artifact: its authored body differs
         // from every remote row, so a local fallback would be visible.
@@ -638,73 +692,93 @@ mod remote {
         .expect("seed the local trap");
 
         // list, show, create, list: one signed session each.
-        let server = serve(
+        let responders = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut accept_task = Some(serve(
             listener,
             Arc::clone(&service),
             manifest(&authority_host_id),
             client_peer.clone(),
             pubkey(&CLIENT_SEED),
             4,
-        );
+            Arc::clone(&responders),
+        ));
 
-        let listed = stdout(&cli_ok_remote(&home, &["creator", "memory", "list"]).await);
-        assert!(
-            listed.contains(SEED_SLUG),
-            "the fixture-only row is listed by the real CLI: {listed}"
-        );
-        assert!(
-            listed.contains("story_summary"),
-            "the remote row keeps its authored kind: {listed}"
-        );
-        assert!(
-            counting.lists() > 0,
-            "the CLI's list crossed the remote provider's list boundary"
-        );
+        let outcome: Result<(), String> = async {
+            let listed = stdout(&cli_ok_remote(&home, &["creator", "memory", "list"]).await?);
+            ensure!(
+                listed.contains(SEED_SLUG),
+                "the fixture-only row is listed by the real CLI: {listed}"
+            );
+            ensure!(
+                listed.contains("story_summary"),
+                "the remote row keeps its authored kind: {listed}"
+            );
+            ensure!(
+                counting.lists() > 0,
+                "the CLI's list crossed the remote provider's list boundary"
+            );
 
-        let shown = stdout(&cli_ok_remote(&home, &["creator", "memory", "show", SEED_SLUG]).await);
-        assert!(shown.contains(&format!("slug: {SEED_SLUG}")), "show: {shown}");
-        assert!(shown.contains(&format!("memory_id: {SEED_MEMORY_ID}")), "show: {shown}");
-        assert!(shown.contains(SEED_BODY), "the fixture-only body is served: {shown}");
-        assert!(!shown.contains(TRAP_BODY), "no local trap body is served: {shown}");
-        assert!(
-            counting.gets() > 0 || counting.lists() > 1,
-            "the CLI's show crossed the remote provider's record read boundary"
-        );
+            let shown =
+                stdout(&cli_ok_remote(&home, &["creator", "memory", "show", SEED_SLUG]).await?);
+            ensure!(shown.contains(&format!("slug: {SEED_SLUG}")), "show: {shown}");
+            ensure!(
+                shown.contains(&format!("memory_id: {SEED_MEMORY_ID}")),
+                "show: {shown}"
+            );
+            ensure!(shown.contains(SEED_BODY), "the fixture-only body is served: {shown}");
+            ensure!(!shown.contains(TRAP_BODY), "no local trap body is served: {shown}");
+            ensure!(
+                counting.gets() > 0 || counting.lists() > 1,
+                "the CLI's show crossed the remote provider's record read boundary"
+            );
 
-        // The remote create path is retained: a CLI-authored row reaches the
-        // same pinned provider and is listed with the fixture-only row.
-        cli_ok_remote(
-            &home,
-            &[
-                "creator", "memory", "create", SLUG, "--kind", KIND, "--content", BODY,
-            ],
-        )
+            // The remote create path is retained: a CLI-authored row reaches
+            // the same pinned provider and is listed with the seeded row.
+            cli_ok_remote(
+                &home,
+                &[
+                    "creator", "memory", "create", SLUG, "--kind", KIND, "--content", BODY,
+                ],
+            )
+            .await?;
+            let listed = stdout(&cli_ok_remote(&home, &["creator", "memory", "list"]).await?);
+            ensure!(listed.contains(SEED_SLUG), "the seeded row survives: {listed}");
+            ensure!(listed.contains(SLUG), "the CLI-created remote row is listed: {listed}");
+            ensure!(!listed.contains(TRAP_BODY), "no local trap body in list: {listed}");
+
+            ensure!(
+                !provider_store(&home, &creator).exists(),
+                "a remote-pinned CLI never opens the local provider's store"
+            );
+            ensure!(trap.exists(), "the local trap artifact itself is untouched");
+            ensure!(
+                shown.matches(SEED_MEMORY_ID).count() == 1,
+                "the shown identity stayed the fixture's (seeded {seeded_id})"
+            );
+
+            let task = accept_task.take().expect("accept task present");
+            match tokio::time::timeout(BOUND, task).await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => return Err(format!("accept task failed: {error}")),
+                Err(_) => return Err("accept task did not finish in bound".to_string()),
+            }
+            ensure!(
+                responders.lock().expect("responder list").len() == 4,
+                "every CLI open was served"
+            );
+            Ok(())
+        }
         .await;
-        let listed = stdout(&cli_ok_remote(&home, &["creator", "memory", "list"]).await);
-        assert!(listed.contains(SEED_SLUG), "the seeded row survives: {listed}");
-        assert!(listed.contains(SLUG), "the CLI-created remote row is listed: {listed}");
-        assert!(!listed.contains(TRAP_BODY), "no local trap body in list: {listed}");
 
-        // Pin proof: the remote arm never constructed the local provider.
-        assert!(
-            !provider_store(&home, &creator).exists(),
-            "a remote-pinned CLI never opens the local provider's store"
-        );
-        assert!(trap.exists(), "the local trap artifact itself is untouched");
-        assert_eq!(
-            shown.matches(SEED_MEMORY_ID).count(),
-            1,
-            "the shown identity stayed the fixture's (seeded {seeded_id})"
-        );
-
-        // Retain responders through the final CLI call, then close them through
-        // the supported SDK operation and confirm the public closed state.
-        let responders = tokio::time::timeout(BOUND, server)
-            .await
-            .expect("the accept task finished")
-            .expect("the accept task joined");
-        assert_eq!(responders.len(), 4, "every CLI open was served");
-        close_responders(&responders).await;
+        let cleanup = teardown(&mut accept_task, &responders).await;
+        match (outcome, cleanup) {
+            (Ok(()), Ok(())) => {}
+            (Err(error), Ok(())) => panic!("remote CLI scenario: {error}"),
+            (Ok(()), Err(error)) => panic!("remote CLI cleanup: {error}"),
+            (Err(error), Err(cleanup)) => {
+                panic!("remote CLI scenario: {error}; cleanup: {cleanup}")
+            }
+        }
     }
 }
 
@@ -750,12 +824,14 @@ async fn c_111_remote_selection_without_client_refuses_and_never_reads_local() {
             "12D3KooWPeer",
         ],
     );
-    let refused = run_cli(home, &["creator", "memory", "list"]);
+    let refused = run_cli(home, &["creator", "memory", "list"])
+        .unwrap_or_else(|error| panic!("{error}"));
     assert!(!refused.status.success(), "the remote pin refuses");
     let err = stderr(&refused);
     assert!(err.contains("memory_remote_disabled"), "refusal: {err}");
     assert!(!stdout(&refused).contains(BODY), "no local fallback row");
-    let shown = run_cli(home, &["creator", "memory", "show", SLUG]);
+    let shown = run_cli(home, &["creator", "memory", "show", SLUG])
+        .unwrap_or_else(|error| panic!("{error}"));
     assert!(!shown.status.success(), "the remote pin refuses show too");
     assert!(
         !stdout(&shown).contains(BODY),

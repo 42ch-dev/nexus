@@ -48,7 +48,6 @@ const LEGACY_SLUG: &str = "tide-notes";
 const LEGACY_MEMORY_ID: &str = "mem_legacytidenotes";
 const LEGACY_SESSION: &str = "sess_legacy_tide";
 const LEGACY_BODY: &str = "LEGACYBODY the authored tide notes must survive";
-const PRE_BODY: &str = "C115PRE the provider record that must survive the refused prompts";
 
 struct Env {
     _tmp: TempDir,
@@ -763,8 +762,7 @@ fn execute_prompt(remember: bool) -> ExecuteOperationRequest {
     .expect("wire-valid prompt request")
 }
 
-/// Run `remember:true` once and require the typed refusal, without touching an
-/// agent adapter or any memory state.
+/// Run `remember:true` once and require the typed refusal.
 async fn expect_remember_refusal(
     handle: &nexus_core::HostHandle,
     principal: &Principal,
@@ -783,6 +781,101 @@ async fn expect_remember_refusal(
         }
         other => panic!("expected the typed remember refusal, got {other:?}"),
     }
+}
+
+const CREATOR_BODY: &str = "C115CREATOR the creator memory that must not change";
+const CHARACTER_BODY: &str = "C115CHARACTER the character memory that must not change";
+
+async fn ensure_kind(
+    provider: &LocalMemoryProvider,
+    principal: &schemas::Principal,
+    subject: &str,
+    namespace: &str,
+    kind_id: &str,
+) {
+    let ensured = wire(
+        &provider
+            .ensure_subject(
+                principal,
+                dto(json!({
+                    "space_id": provider.space_id(),
+                    "subject_id": subject,
+                    "kind": { "ns": namespace, "id": kind_id },
+                })),
+            )
+            .await,
+    );
+    assert_eq!(ensured["status"], "committed", "{ensured}");
+    assert_eq!(ensured["result"]["subject_id"], subject, "{ensured}");
+}
+
+fn create_request_for(
+    subject: &str,
+    key: &str,
+    kind: &str,
+    text: &str,
+) -> schemas::MemoryRecordsCreateRequest {
+    dto(json!({
+        "space_id": SPACE,
+        "subject_id": subject,
+        "kind": kind,
+        "content": { "text": text },
+        "scope": { "visibility": "shared" },
+        "idempotency_key": key,
+    }))
+}
+
+/// Observe one admitted subject through the public `MemoryPort`: the read must
+/// SUCCEED, carry exactly the seeded record/body/revision, and report no
+/// pending candidate. A refusal is a failed observation, never an empty set.
+async fn observe_subject(
+    provider: &LocalMemoryProvider,
+    principal: &schemas::Principal,
+    subject: &str,
+    expected_body: &str,
+) {
+    let records = wire(&provider.list_records(principal, list_request(subject)).await);
+    assert!(
+        records["records"].as_array().is_some(),
+        "the record read succeeded for {subject}: {records}"
+    );
+    assert_eq!(records["total_authorized"], 1, "{subject}: {records}");
+    let record = &records["records"][0];
+    assert_eq!(record["subject_id"], subject, "{records}");
+    assert_eq!(record["revision"], 1, "{records}");
+    assert_eq!(record["content"]["text"], expected_body, "{records}");
+
+    let candidates = wire(
+        &provider
+            .list_candidates(principal, candidates_request(subject))
+            .await,
+    );
+    assert!(
+        candidates["candidates"].as_array().is_some(),
+        "the candidate read succeeded for {subject}: {candidates}"
+    );
+    assert_eq!(
+        candidates["candidates"]
+            .as_array()
+            .expect("candidate array")
+            .len(),
+        0,
+        "no capture/candidate effect for {subject}: {candidates}"
+    );
+}
+
+async fn observe_actual_subjects(
+    user_home: &Path,
+    creator: &str,
+    creator_subject: &str,
+    character_subject: &str,
+) {
+    let provider = LocalMemoryProvider::open_read_only(user_home.to_path_buf(), creator, WORKSPACE)
+        .await
+        .expect("read-only provider observation");
+    let principal = principal(creator);
+    observe_subject(&provider, &principal, creator_subject, CREATOR_BODY).await;
+    observe_subject(&provider, &principal, character_subject, CHARACTER_BODY).await;
 }
 
 #[tokio::test]
@@ -808,19 +901,69 @@ async fn c_115_remember_true_refusal_unchanged_local() {
         .await
         .expect("select the fixture workspace");
 
-    // One real provider record before the Host exists; it is the observable
-    // memory state the refused prompts must not change.
+    // Create the real World/Character first, then release the writer so the
+    // provider fixtures can seed the ACTUAL admitted subjects.
+    let core = CoreService::open(CoreOpenOptions {
+        user_home: user_home.clone(),
+        access: CoreAccess::EngineOwner,
+        memory: None,
+    })
+    .await
+    .expect("open the local core");
+    let first_principal = core.active_principal().await.expect("principal");
+    let world = core
+        .create_world(&first_principal, dto(json!({ "title": "N3 remember world" })))
+        .await
+        .expect("create the owned World")
+        .world_id;
+    let character = core
+        .create_character(
+            &first_principal,
+            dto(json!({ "display_name": "Ada", "world_id": world })),
+        )
+        .await
+        .expect("create the owned Character with its initial binding");
+    let character_id = character.character.character_id.as_str().to_string();
+    let binding_id = character.binding.binding_id.as_str().to_string();
+    core.close().await.expect("the seed core releases its writer");
+
+    // Seed one record under each REAL subject the Core memory paths address.
+    let creator_subject = legacy::creator_subject_id(&creator_id);
+    let character_subject = legacy::character_subject_id(&character_id);
     let seeded = LocalMemoryProvider::open(user_home.clone(), &creator_id, WORKSPACE)
         .await
-        .expect("provider open");
+        .expect("provider open for the seed");
     let seed_principal = principal(&creator_id);
-    ensure(&seeded, &seed_principal).await;
-    let seeded_record = wire(
-        &seeded
-            .create_record(&seed_principal, create_request("c115-seed", "nexus.custom", PRE_BODY))
-            .await,
-    );
-    assert_eq!(seeded_record["status"], "committed", "{seeded_record}");
+    ensure_kind(
+        &seeded,
+        &seed_principal,
+        &creator_subject,
+        legacy::CREATOR_KIND_NS,
+        &creator_id,
+    )
+    .await;
+    ensure_kind(
+        &seeded,
+        &seed_principal,
+        &character_subject,
+        legacy::CHARACTER_KIND_NS,
+        &character_id,
+    )
+    .await;
+    for (subject, key, body) in [
+        (&creator_subject, "c115-seed-creator", CREATOR_BODY),
+        (&character_subject, "c115-seed-character", CHARACTER_BODY),
+    ] {
+        let created = wire(
+            &seeded
+                .create_record(
+                    &seed_principal,
+                    create_request_for(subject, key, "nexus.custom", body),
+                )
+                .await,
+        );
+        assert_eq!(created["status"], "committed", "{created}");
+    }
     drop(seeded);
 
     let core = CoreService::open(CoreOpenOptions {
@@ -829,21 +972,8 @@ async fn c_115_remember_true_refusal_unchanged_local() {
         memory: None,
     })
     .await
-    .expect("open the local core");
+    .expect("reopen the local core");
     let principal: Principal = core.active_principal().await.expect("principal");
-
-    let world = core
-        .create_world(&principal, dto(json!({ "title": "N3 remember world" })))
-        .await
-        .expect("create the owned World")
-        .world_id;
-    let character = core
-        .create_character(
-            &principal,
-            dto(json!({ "display_name": "Ada", "world_id": world })),
-        )
-        .await
-        .expect("create the owned Character with its initial binding");
 
     // Deterministic local agent host: no process, no model, no network.
     let adapter = Arc::new(MindFixtureAdapter::default());
@@ -886,8 +1016,8 @@ async fn c_115_remember_true_refusal_unchanged_local() {
             &principal,
             dto::<CreateSessionRequest>(json!({
                 "provider_id": PROVIDER,
-                "actor_ref": { "actor_kind": "character", "character_id": character.character.character_id.as_str() },
-                "viewpoint": { "world_id": world, "binding_id": character.binding.binding_id.as_str() },
+                "actor_ref": { "actor_kind": "character", "character_id": character_id },
+                "viewpoint": { "world_id": world, "binding_id": binding_id },
             })),
         )
         .await
@@ -902,7 +1032,8 @@ async fn c_115_remember_true_refusal_unchanged_local() {
         .await
         .expect("the admitted non-Character session is created");
 
-    // Both typed refusals reach no agent execution.
+    // BEFORE / AFTER each refusal, the REAL admitted subjects are unchanged.
+    observe_actual_subjects(&user_home, &creator_id, &creator_subject, &character_subject).await;
     expect_remember_refusal(
         &handle,
         &principal,
@@ -910,12 +1041,17 @@ async fn c_115_remember_true_refusal_unchanged_local() {
         "not_supported",
     )
     .await;
+    observe_actual_subjects(&user_home, &creator_id, &creator_subject, &character_subject).await;
     expect_remember_refusal(&handle, &principal, legacy_session.session_id.clone(), "invalid_input").await;
+    observe_actual_subjects(&user_home, &creator_id, &creator_subject, &character_subject).await;
+
     assert_eq!(adapter.executions(), 0, "both refusals precede agent execution");
     assert_eq!(adapter.completions(), 0, "no operation completed on a refusal");
 
     // A plain Character prompt is the positive control: the adapter really
-    // executes and completes once.
+    // executes and completes one operation. The Host's public response is
+    // `started`; no per-operation terminal status is claimed beyond the
+    // adapter execution/completion this fixture observes.
     let plain = handle
         .execute(
             &principal,
@@ -934,27 +1070,7 @@ async fn c_115_remember_true_refusal_unchanged_local() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     assert_eq!(adapter.executions(), 1, "exactly one adapter execution");
-    assert_eq!(adapter.completions(), 1, "the execution completed");
+    assert_eq!(adapter.completions(), 1, "the adapter emitted its completion event");
 
-    // Real local memory is unchanged by both refusals and the plain prompt.
-    let observed = LocalMemoryProvider::open_read_only(user_home.clone(), &creator_id, WORKSPACE)
-        .await
-        .expect("read-only provider observation");
-    let records = wire(
-        &observed
-            .list_records(&seed_principal, list_request(SUBJECT))
-            .await,
-    );
-    assert_eq!(records["total_authorized"], 1, "one seeded record: {records}");
-    assert_eq!(records["records"][0]["content"]["text"], PRE_BODY, "{records}");
-    let candidates = wire(
-        &observed
-            .list_candidates(&seed_principal, candidates_request(SUBJECT))
-            .await,
-    );
-    assert_eq!(
-        candidates["candidates"].as_array().map_or(0, Vec::len),
-        0,
-        "no candidate/capture effect: {candidates}"
-    );
+    observe_actual_subjects(&user_home, &creator_id, &creator_subject, &character_subject).await;
 }
