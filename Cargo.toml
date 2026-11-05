@@ -9,6 +9,7 @@ members = [
     "crates/nexus-embedding",
     "crates/nexus-home-layout",
     "crates/nexus-knowledge",
+    "crates/nexus-memory-conformance",
     "crates/nexus-moment-context-assembly",
     "crates/nexus-narrative",
     "crates/nexus-orchestration",

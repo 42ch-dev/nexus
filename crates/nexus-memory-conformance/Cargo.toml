@@ -1,0 +1,31 @@
+[package]
+name = "nexus-memory-conformance"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Independent durable SPOKE memory provider fixture for N3 conformance (test crate, not a server)."
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+spoke-connect = { workspace = true, features = ["remote-adapter"] }
+spoke-operations = { workspace = true }
+sqlx = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+base64 = "0.22"
+futures-util = { workspace = true }
+tokio-tungstenite = { workspace = true }
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+serde_jcs = "0.2"
+tempfile = { workspace = true }
