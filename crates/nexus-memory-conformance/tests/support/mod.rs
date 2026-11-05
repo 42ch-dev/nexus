@@ -266,18 +266,33 @@ impl Endpoint {
     }
 
     pub async fn close(self) {
+        if let Err(error) = self.settle().await {
+            panic!("{error}");
+        }
+    }
+
+    /// [`Self::close`] for an aggregating caller: every failure (transport close
+    /// error or timeout, responder not `Closed`) is returned, and a timeout is
+    /// never reported as a successful close.
+    pub async fn settle(self) -> Result<(), String> {
         self.client.close();
         self.responder.close();
-        let closed = tokio::time::timeout(BOUND, self.socket.close()).await;
-        assert!(
-            matches!(closed, Ok(Ok(()))),
-            "the session transport closes within the bound"
-        );
-        assert_eq!(
-            self.responder.state(),
-            ConnectResponderState::Closed,
-            "the responder session is closed after the real transport cleanup"
-        );
+        match tokio::time::timeout(BOUND, self.socket.close()).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                return Err(format!(
+                    "the session transport close failed within the bound: {error}"
+                ))
+            }
+            Err(_) => return Err("the session transport close did not finish within the bound".to_owned()),
+        }
+        if self.responder.state() != ConnectResponderState::Closed {
+            return Err(format!(
+                "the responder session did not report Closed after the real transport cleanup (state {:?})",
+                self.responder.state()
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -745,6 +760,40 @@ impl Matrix {
             Provider::Fixture(provider) => close_fixture(provider).await,
         }
     }
+
+    /// [`Self::shutdown`] for an aggregating caller: every owned close is
+    /// attempted and its failure returned instead of panicked, so one failure
+    /// can never prevent the remaining owners from being settled.
+    pub async fn settle(self) -> Result<(), String> {
+        let Self {
+            provider,
+            service,
+            admin,
+            peer,
+            ..
+        } = self;
+        let mut failures: Vec<String> = Vec::new();
+        if let Err(error) = admin.settle().await {
+            failures.push(error);
+        }
+        if let Err(error) = peer.settle().await {
+            failures.push(error);
+        }
+        drop(service);
+        match provider {
+            Provider::Local(provider) => drop(provider),
+            Provider::Fixture(provider) => {
+                if let Err(error) = close_fixture_bounded(provider).await {
+                    failures.push(error);
+                }
+            }
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(failures.join("; "))
+        }
+    }
 }
 
 /// Close the fixture's own pool once every session that held it has ended.
@@ -767,6 +816,45 @@ async fn close_fixture(provider: Arc<FixtureMemoryProvider>) {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         }
+    }
+}
+
+/// [`close_fixture`] for an aggregating caller: the ownership wait and the
+/// provider's own close are both bounded and returned, never panicked.
+async fn close_fixture_bounded(provider: Arc<FixtureMemoryProvider>) -> Result<(), String> {
+    let deadline = Instant::now() + BOUND;
+    let mut provider = provider;
+    loop {
+        tokio::task::yield_now().await;
+        match Arc::try_unwrap(provider) {
+            Ok(fixture) => {
+                return match tokio::time::timeout(BOUND, fixture.close()).await {
+                    Ok(()) => Ok(()),
+                    Err(_) => {
+                        Err("the fixture provider close did not finish within the bound".to_owned())
+                    }
+                };
+            }
+            Err(shared) => {
+                if Instant::now() >= deadline {
+                    return Err(
+                        "the fixture provider is still shared after the session teardown".to_owned(),
+                    );
+                }
+                provider = shared;
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+    }
+}
+
+/// [`CoreService::close`] for an aggregating caller: the bound and the inner
+/// result are both reported as a failure string.
+pub async fn close_core_bounded(core: &CoreService) -> Result<(), String> {
+    match tokio::time::timeout(BOUND, core.close()).await {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(error)) => Err(format!("the CoreService close failed: {error}")),
+        Err(_) => Err("the CoreService close did not finish within the bound".to_owned()),
     }
 }
 
@@ -2356,9 +2444,10 @@ pub struct SelectionFixture {
 }
 
 impl SelectionFixture {
-    /// Release the erased service first, then close the provider it served,
-    /// exactly as `Matrix::shutdown` does.
-    pub async fn close(self) {
+    /// Release the erased service first, then close the provider it served
+    /// through the bounded result-returning route, so an aggregating caller can
+    /// finish every other owner before deciding.
+    pub async fn settle(self) -> Result<(), String> {
         let Self {
             service,
             provider,
@@ -2366,7 +2455,7 @@ impl SelectionFixture {
             ..
         } = self;
         drop(service);
-        close_fixture(provider).await;
+        close_fixture_bounded(provider).await
     }
 }
 

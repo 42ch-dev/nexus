@@ -23,10 +23,11 @@ use nexus_core::{CoreAccess, CoreOpenOptions, CoreService};
 use serde_json::{json, Value};
 
 use support::{
-    bootstrap, candidate_ids, capture_body, close_responder, context_scope, core_code, error_code,
-    error_details, is_committed, open_endpoint, open_selected_local, principal, receipt_id,
-    remote_selection, result, retry_class, serve_selection_host, shared_scope, Actor, Kind, Matrix,
-    SelectionHome, CONTEXT, OTHER_CONTEXT, OTHER_SUBJECT, SELECTION_CLIENT_SEED, SUBJECT,
+    bootstrap, candidate_ids, capture_body, close_core_bounded, close_responder, context_scope,
+    error_code, error_details, is_committed, open_endpoint, open_selected_local, principal,
+    receipt_id, remote_selection, result, retry_class, serve_selection_host, shared_scope, Actor,
+    Kind, Matrix, SelectionHome, CONTEXT, OTHER_CONTEXT, OTHER_SUBJECT, SELECTION_CLIENT_SEED,
+    SUBJECT,
 };
 
 // ---------------------------------------------------------------------------
@@ -2925,14 +2926,16 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
     // session ensures the actual Creator subject, so the profile read is a real
     // absent-kind read rather than a missing-subject refusal.
     let before_actor = before_open.actor(&selected_principal, &fixture.space_id);
-    let before_ensured = is_committed(&before_actor.ensure_subject(&creator_subject).await);
+    let before_ensured = before_actor.ensure_subject(&creator_subject).await;
     let before_profiles = before_actor
         .get_profile(json!({
             "subject_id": creator_subject,
             "profile_kinds": capability_kinds,
         }))
         .await;
-    before_open.close().await;
+    if let Err(error) = before_open.settle().await {
+        cleanup_errors.push(error);
+    }
 
     let host = serve_selection_host(
         Arc::clone(&fixture.service),
@@ -2950,21 +2953,21 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
     .await;
     let responder = host.session().await;
     let established = responder.state().as_str().to_owned();
-    // Collect every outcome; assertions wait until all owners are settled.
-    let product_read: Result<i64, String> = match &opened {
-        Ok(core) => match core.active_principal().await {
+    // Collect the full original result without classifying it; the assertion
+    // waits until every owner is settled.
+    let product_read: Option<Result<i64, nexus_core::CoreError>> = match &opened {
+        Ok(core) => Some(match core.active_principal().await {
             Ok(core_principal) => core
                 .count_pending_reviews(&core_principal)
                 .await
-                .map(|value| value.count)
-                .map_err(|error| format!("the pinned remote binding serves memory: {error}")),
-            Err(error) => Err(format!("the remote selection has an active principal: {error}")),
-        },
-        Err(error) => Err(format!("the supported remote selection opens: {error}")),
+                .map(|value| value.count),
+            Err(error) => Err(error),
+        }),
+        Err(_) => None,
     };
     if let Ok(core) = &opened {
-        if let Err(error) = core.close().await {
-            cleanup_errors.push(format!("the remote selection closes: {error}"));
+        if let Err(error) = close_core_bounded(core).await {
+            cleanup_errors.push(error);
         }
     }
     if let Err(error) = close_responder(responder).await {
@@ -2986,11 +2989,13 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
             "profile_kinds": capability_kinds,
         }))
         .await;
-    after_open.close().await;
+    if let Err(error) = after_open.settle().await {
+        cleanup_errors.push(error);
+    }
 
     // (C) A host that negotiates no memory family fails the same selection on
     // capability grounds — the one capability-based selection failure the
-    // existing interface expresses.
+    // existing interface expresses. The full original result is kept.
     let host = serve_selection_host(
         Arc::clone(&fixture.service),
         &fixture.authority_host_id,
@@ -3007,30 +3012,38 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
     .await;
     let responder = host.session().await;
     if let Ok(core) = &refused {
-        if let Err(error) = core.close().await {
-            cleanup_errors.push(format!("a refused selection closes its open handles: {error}"));
+        if let Err(error) = close_core_bounded(core).await {
+            cleanup_errors.push(error);
         }
     }
     if let Err(error) = close_responder(responder).await {
         cleanup_errors.push(error);
     }
-    let refusal = refused
-        .as_ref()
-        .err()
-        .map(|error| core_code(error).to_owned());
 
-    fixture.close().await;
-    matrix.shutdown().await;
+    if let Err(error) = fixture.settle().await {
+        cleanup_errors.push(error);
+    }
+    if let Err(error) = matrix.settle().await {
+        cleanup_errors.push(error);
+    }
 
-    // Every owner is settled; only now is the expected outcome surfaced, with
-    // any cleanup failure preserved beside it.
+    // Every owner is settled; only now is the original outcome classified and
+    // surfaced, beside all cleanup failures.
+    let open_error = opened.as_ref().err();
+    let refusal_error = refused.as_ref().err();
+    let refusal_code = match refused.as_ref() {
+        Ok(_) => Some("unexpected-success"),
+        Err(nexus_core::CoreError::Coded { code, .. }) => Some(code.as_str()),
+        Err(_) => None,
+    };
     assert!(
         cleanup_errors.is_empty(),
-        "every owned session closed cleanly (while the open returned {refusal:?}): {cleanup_errors:?}"
+        "every owned session settled within its bound (open error={open_error:?}, \
+         refusal={refusal_error:?}): {cleanup_errors:?}"
     );
     assert!(
-        before_ensured,
-        "the signed session ensures the actual Creator subject"
+        is_committed(&before_ensured),
+        "the signed session ensures the actual Creator subject: {before_ensured}"
     );
     assert!(
         profiles_of(&before_profiles).is_empty(),
@@ -3040,19 +3053,20 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
         established, "Established",
         "the remote selection really authenticated the signed session"
     );
-    assert_eq!(
-        product_read,
-        Ok(0),
-        "the supported remote selection opened and served a product memory read"
+    assert!(
+        matches!(&product_read, Some(Ok(0))),
+        "the supported remote selection opened and served a product memory read: \
+         observed={product_read:?}, open error={open_error:?}, cleanup={cleanup_errors:?}"
     );
     assert!(
         profiles_of(&after_profiles).is_empty(),
         "the selected fixture created no fabricated profile kind for the Creator subject: {after_profiles}"
     );
     assert_eq!(
-        refusal.as_deref(),
+        refusal_code,
         Some("memory_remote_capability"),
-        "the negotiated family is required even when the space would match"
+        "the negotiated family is required even when the space would match; \
+         original refusal={refusal_error:?}, cleanup={cleanup_errors:?}"
     );
 }
 
