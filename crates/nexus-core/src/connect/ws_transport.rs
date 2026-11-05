@@ -42,7 +42,8 @@
 //! whole-operation `send`/`recv` slots are acquired close-aware as well: a
 //! same-direction call that queued behind a retained holder, or one started
 //! after the close, returns [`TransportError::Closed`] promptly instead of
-//! waiting for that slot. The
+//! waiting for that slot. That wait listens to the close signal only — ordinary
+//! socket readiness in either direction must never evict a queued caller. The
 //! halves and the result are owned by a dedicated teardown task (`Arc`ed slots
 //! only — never the transport itself), which is what keeps the disposal alive
 //! when the initiating caller is cancelled.
@@ -147,6 +148,9 @@ pub struct WsTransport<S> {
     closed: AtomicBool,
     /// Wakes a parked I/O step for a socket event or a close.
     io_wake: Arc<IoWake>,
+    /// Wakes only a close: ordinary socket readiness must never be mistaken
+    /// for one.
+    closed_signal: Notify,
     /// The one physical teardown and its settled result.
     teardown: Arc<Teardown>,
 }
@@ -261,6 +265,7 @@ where
             io_wake: Arc::new(IoWake {
                 notify: Notify::new(),
             }),
+            closed_signal: Notify::new(),
             teardown: Arc::new(Teardown::new()),
         }
     }
@@ -278,28 +283,27 @@ where
         &'a self,
         slot: &'a Mutex<()>,
     ) -> Result<tokio::sync::MutexGuard<'a, ()>, TransportError> {
-        loop {
-            if self.closed.load(Ordering::SeqCst) {
-                return Err(TransportError::Closed);
-            }
-            // Register the wake before the state read so a close between the
-            // check and the wait is never missed.
-            let notified = self.io_wake.notify.notified();
-            tokio::pin!(notified);
-            notified.as_mut().enable();
-            if self.closed.load(Ordering::SeqCst) {
-                return Err(TransportError::Closed);
-            }
-            tokio::select! {
-                biased;
-                () = notified.as_mut() => return Err(TransportError::Closed),
-                guard = slot.lock() => {
-                    // A slot granted at the same moment as the close still
-                    // loses to the close.
-                    if self.closed.load(Ordering::SeqCst) {
-                        return Err(TransportError::Closed);
-                    }
-                    return Ok(guard);
+        if self.closed.load(Ordering::SeqCst) {
+            return Err(TransportError::Closed);
+        }
+        // Subscribe to the close signal ONLY: the I/O notification also fires
+        // for ordinary socket readiness, which must not evict a queued caller.
+        let notified = self.closed_signal.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        if self.closed.load(Ordering::SeqCst) {
+            return Err(TransportError::Closed);
+        }
+        tokio::select! {
+            biased;
+            () = notified.as_mut() => Err(TransportError::Closed),
+            guard = slot.lock() => {
+                // A slot granted at the same moment as the close still loses
+                // to the close.
+                if self.closed.load(Ordering::SeqCst) {
+                    Err(TransportError::Closed)
+                } else {
+                    Ok(guard)
                 }
             }
         }
@@ -433,6 +437,7 @@ where
     /// result once, and never depends on a later caller taking over.
     fn signal(&self) {
         self.closed.store(true, Ordering::SeqCst);
+        self.closed_signal.notify_waiters();
         self.io_wake.notify.notify_waiters();
         let mut state = self.teardown.state.lock().unwrap_or_else(PoisonError::into_inner);
         if !matches!(*state, TeardownState::Idle) {
