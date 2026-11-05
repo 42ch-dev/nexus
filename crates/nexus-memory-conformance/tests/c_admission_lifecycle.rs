@@ -822,6 +822,11 @@ async fn admission_control_is_token_owned(matrix: &Matrix) {
     );
     let read = matrix.admin().get_receipt(&receipt_id(&replay)).await;
     assert_eq!(read["receipt"]["status"], json!("committed"), "{read}");
+    assert_eq!(
+        read["receipt"]["receipt_id"],
+        json!(receipt_id(&replay)),
+        "the terminal receipt read is the replay's own receipt"
+    );
 
     // Controller RETAINED past the provider's own bound (expiry, not loss): the
     // original still reaches its terminal result boundedly; its effect is
@@ -879,6 +884,13 @@ async fn admission_control_is_token_owned(matrix: &Matrix) {
         pending_delta_now(&matrix, &before).await,
         effect,
         "the replay creates no second effect"
+    );
+    let read = matrix.admin().get_receipt(&receipt_id(&replay)).await;
+    assert_eq!(read["receipt"]["status"], json!("committed"), "{read}");
+    assert_eq!(
+        read["receipt"]["receipt_id"],
+        json!(receipt_id(&replay)),
+        "the terminal receipt read is the replay's own receipt"
     );
     tokio::time::timeout(Duration::from_secs(3), expiry.release())
         .await
