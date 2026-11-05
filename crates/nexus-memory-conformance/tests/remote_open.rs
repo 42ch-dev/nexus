@@ -39,7 +39,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::net::{Shutdown, SocketAddr};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -67,7 +66,7 @@ use spoke_connect::core::{
     derive_peer_id_from_ed25519_pubkey, issue_capability_token, verify_capability_token,
     CapabilityClaims, CapabilityTokenProof,
 };
-use spoke_connect::remote::transport::TransportError;
+use spoke_connect::remote::transport::{loopback_transport_pair, TransportError};
 use spoke_connect::remote::{
     connect_remote_adapter, connect_responder, ConnectResponder, ConnectResponderOptions,
     ConnectResponderState, RemoteAdapter, RemoteAdapterOptions, RemoteIdentity, RemoteMemoryService,
@@ -1256,10 +1255,21 @@ fn response_json<T: serde::Serialize>(value: &T) -> Value {
 /// unambiguous. A second observation before the first is consumed marks the
 /// slot ambiguous and every later admission is refused; this is not a
 /// generalized concurrent-request policy.
+/// The single-outstanding observation state.
+///
+/// Every transition happens under ONE lock, so observing and consuming are
+/// atomic and an overlap irreversibly poisons the observer: an overwritten or
+/// ambiguous observation is never kept, and no later observation can revive a
+/// poisoned session.
+enum ObserverState {
+    Empty,
+    Pending(ObservedInvoke),
+    Poisoned,
+}
+
 struct EnvelopeObserver {
     inner: Arc<dyn Transport>,
-    pending: Mutex<Option<ObservedInvoke>>,
-    ambiguous: AtomicBool,
+    state: Mutex<ObserverState>,
 }
 
 struct ObservedInvoke {
@@ -1274,8 +1284,7 @@ impl EnvelopeObserver {
     fn new(inner: Arc<dyn Transport>) -> Self {
         Self {
             inner,
-            pending: Mutex::new(None),
-            ambiguous: AtomicBool::new(false),
+            state: Mutex::new(ObserverState::Empty),
         }
     }
 
@@ -1298,19 +1307,35 @@ impl EnvelopeObserver {
             payload: envelope.get("payload").cloned().unwrap_or(Value::Null),
             auth: envelope.get("auth").filter(|auth| !auth.is_null()).cloned(),
         };
-        let mut slot = self.pending.lock().expect("observer slot");
-        if slot.is_some() {
-            self.ambiguous.store(true, Ordering::SeqCst);
+        let mut state = self.state.lock().expect("observer state");
+        match &*state {
+            ObserverState::Empty => *state = ObserverState::Pending(observed),
+            ObserverState::Pending(_) | ObserverState::Poisoned => {
+                // Two invokes overlapped (or this session was already poisoned):
+                // keep neither observation and stay poisoned forever.
+                *state = ObserverState::Poisoned;
+            }
         }
-        *slot = Some(observed);
     }
 
-    /// Consume the single outstanding observation, failing closed on ambiguity.
-    fn take(&self) -> Result<Option<ObservedInvoke>, &'static str> {
-        if self.ambiguous.swap(false, Ordering::SeqCst) {
-            return Err("more than one outstanding signed invocation");
+    /// Atomically consume the single outstanding observation.
+    ///
+    /// An empty slot or a poisoned session poisons it permanently: the caller can
+    /// never clear the poison by retrying, and a later observation cannot revive
+    /// it.
+    fn take(&self) -> Result<ObservedInvoke, &'static str> {
+        let mut state = self.state.lock().expect("observer state");
+        match std::mem::replace(&mut *state, ObserverState::Empty) {
+            ObserverState::Pending(observed) => Ok(observed),
+            ObserverState::Empty => {
+                *state = ObserverState::Poisoned;
+                Err("no received signed invocation to verify")
+            }
+            ObserverState::Poisoned => {
+                *state = ObserverState::Poisoned;
+                Err("the observed session is poisoned by an overlapping invocation")
+            }
         }
-        Ok(self.pending.lock().expect("observer slot").take())
     }
 }
 
@@ -1363,8 +1388,7 @@ impl TokenGate {
 impl RemoteMemoryService for TokenGate {
     async fn invoke(&self, peer_id: &str, op: &str, payload: Value) -> SpokeResult<Value> {
         let observed = match self.observer.take() {
-            Ok(Some(observed)) => observed,
-            Ok(None) => return Self::deny("no received signed invocation to verify"),
+            Ok(observed) => observed,
             Err(reason) => return Self::deny(reason),
         };
         if observed.session_id.is_empty() || observed.request_id.is_empty() {
@@ -2875,5 +2899,170 @@ async fn capability_token_verification_refuses_expired_and_forged_proofs() {
     assert_eq!(provider_candidates(&pool).await.len(), 1);
     assert!(core.close().await.expect("close").cleanup_confirmed);
     wait_for_closed(&responder).await;
+    pool.close().await;
+}
+
+/// Two DIRECTLY EXERCISED observer events with the same op/payload but different
+/// proofs must irreversibly poison the seam: the first admission denies, and no
+/// later consume or third observation can ever reach the real fixture — while a
+/// fresh observer/session still admits one sequential valid invocation whose
+/// effect is observable.
+///
+/// Scope: these events are test-host observations, not SDK-authenticated wire
+/// evidence; the real signed sequential valid/expired/missing/forged controls
+/// above supply that independent path.
+#[tokio::test]
+async fn overlapping_observations_poison_the_seam_without_provider_effect() {
+    const ISSUER_SEED: [u8; 32] = [0x77; 32];
+    let host_peer = peer_id(&HOST_SEED);
+    let client_peer = peer_id(&CLIENT_SEED);
+    let principal_id = format!("prn_{client_peer}");
+    let issuer_peer = peer_id(&ISSUER_SEED);
+    let now = now_seconds();
+
+    let fixture_home = TempDir::new().expect("fixture home");
+    let provider = Arc::new(
+        FixtureMemoryProvider::open(&provider_database(&fixture_home))
+            .await
+            .expect("open the durable fixture"),
+    );
+    let space = provider.identity().space_id.clone();
+    provider
+        .provision_operator_admin(&principal_id)
+        .await
+        .expect("operator provisions the admin grant");
+    let directory = Arc::new(PeerDirectory::new().with_peer(client_peer.clone(), principal_id));
+    let pool = provider_pool(&fixture_home).await;
+    let effects_before = provider_effect_snapshot(&pool).await;
+
+    let valid = capability_proof_at(&ISSUER_SEED, &client_peer, &host_peer, now + 600, now);
+    let expired = capability_proof_at(&ISSUER_SEED, &client_peer, &host_peer, 1_000, 0);
+    let valid_json = serde_json::to_value(&valid).expect("the proof serializes");
+
+    let capture_payload = json!({
+        "space_id": space,
+        "subject_id": "sbj_observer_regression",
+        "content": { "text": "An ambiguous observation must never commit this capture." },
+        "capture_scope": { "visibility": "shared" },
+        "idempotency_key": "r5-observer-ambiguity",
+    });
+    let envelope = |op: &str, nonce: &str, payload: &Value, proof: &Value| {
+        json!({
+            "op": op,
+            "session_id": "sess_observer_regression",
+            "request_id": nonce,
+            "payload": payload,
+            "auth": proof,
+        })
+    };
+    let loopback = loopback_transport_pair();
+    let observer = Arc::new(EnvelopeObserver::new(
+        Arc::new(loopback.client) as Arc<dyn Transport>
+    ));
+    // The defect under test left the VALID observation behind after the first
+    // refusal, so a later admission could consume it.
+    observer.record(&envelope(
+        "memory.capture",
+        "req_expired",
+        &capture_payload,
+        &serde_json::to_value(&expired).expect("the proof serializes"),
+    ));
+    observer.record(&envelope(
+        "memory.capture",
+        "req_valid",
+        &capture_payload,
+        &valid_json,
+    ));
+    let poisoned = TokenGate {
+        inner: provider.server(directory.admission()),
+        observer: Arc::clone(&observer),
+        trusted: vec![issuer_peer.clone()],
+        host_peer: host_peer.clone(),
+    };
+    for attempt in 0..2 {
+        match poisoned
+            .invoke(&client_peer, "memory.capture", capture_payload.clone())
+            .await
+        {
+            SpokeResult::Reject(reject) => assert_eq!(
+                reject.code,
+                SpokeRejectCode::NotAuthorized,
+                "attempt {attempt} is refused"
+            ),
+            SpokeResult::Ok(_) => panic!("attempt {attempt} reached the provider"),
+        }
+    }
+    // A later observation cannot revive the poisoned session.
+    observer.record(&envelope(
+        "memory.capture",
+        "req_third",
+        &capture_payload,
+        &valid_json,
+    ));
+    match poisoned
+        .invoke(&client_peer, "memory.capture", capture_payload.clone())
+        .await
+    {
+        SpokeResult::Reject(reject) => assert_eq!(reject.code, SpokeRejectCode::NotAuthorized),
+        SpokeResult::Ok(_) => panic!("a later observation revived the poisoned session"),
+    }
+    assert_eq!(
+        provider_effect_snapshot(&pool).await,
+        effects_before,
+        "no ambiguous admission committed a receipt, candidate or record"
+    );
+
+    // A FRESH observer/session still serves one sequential valid invocation,
+    // and the effect the poisoned path did not produce is observable.
+    let loopback = loopback_transport_pair();
+    let fresh = Arc::new(EnvelopeObserver::new(
+        Arc::new(loopback.client) as Arc<dyn Transport>
+    ));
+    let fresh_gate = TokenGate {
+        inner: provider.server(directory.admission()),
+        observer: Arc::clone(&fresh),
+        trusted: vec![issuer_peer],
+        host_peer,
+    };
+    let ensure_payload = json!({
+        "space_id": space,
+        "subject_id": "sbj_observer_regression",
+    });
+    fresh.record(&envelope(
+        "memory.subjects.ensure",
+        "req_ensure",
+        &ensure_payload,
+        &valid_json,
+    ));
+    match fresh_gate
+        .invoke(&client_peer, "memory.subjects.ensure", ensure_payload)
+        .await
+    {
+        SpokeResult::Ok(_) => {}
+        SpokeResult::Reject(reject) => panic!("the sequential ensure is admitted: {reject:?}"),
+    }
+    fresh.record(&envelope(
+        "memory.capture",
+        "req_fresh",
+        &capture_payload,
+        &valid_json,
+    ));
+    match fresh_gate
+        .invoke(&client_peer, "memory.capture", capture_payload)
+        .await
+    {
+        SpokeResult::Ok(_) => {}
+        SpokeResult::Reject(reject) => panic!("the sequential capture is admitted: {reject:?}"),
+    }
+    assert_eq!(
+        provider_receipts(&pool, "memory.capture").await,
+        1,
+        "the fresh sequential capture committed its receipt"
+    );
+    assert_eq!(
+        provider_candidates(&pool).await.len(),
+        1,
+        "the fresh sequential capture produced its candidate"
+    );
     pool.close().await;
 }
