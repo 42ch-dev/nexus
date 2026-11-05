@@ -1083,3 +1083,42 @@ pub async fn remote_binding_dependency_counts_tx(
         live_objects,
     })
 }
+
+/// Whether this namespace recorded any D18 fact for one provider object.
+///
+/// A positive answer is authoritative Nexus origin evidence for that exact
+/// object: only this module writes those facts, and the lookup binds the same
+/// eight identity columns the write's conflict key uses plus the canonical
+/// generation text, so a foreign authority/space/client/bearer cannot answer for
+/// another namespace's object. A negative answer proves nothing about where the
+/// object came from — callers MUST NOT read it as "provider-native".
+///
+/// # Errors
+///
+/// Returns [`LocalDbError`] when the check cannot run.
+pub async fn remote_binding_object_is_known(
+    pool: &SqlitePool,
+    namespace: &RemoteBindingNamespace<'_>,
+    kind: RemoteBindingObjectKind,
+    object_id: &str,
+) -> Result<bool, LocalDbError> {
+    let known: i64 = sqlx::query_scalar(
+        r"SELECT EXISTS (
+              SELECT 1 FROM remote_binding_memory_objects
+              WHERE authority_host_id = ? AND authority_generation = ? AND space_id = ?
+                AND client_identity = ? AND character_id = ? AND binding_id = ?
+                AND object_kind = ? AND object_id = ?
+          )",
+    )
+    .bind(namespace.authority_host_id)
+    .bind(namespace.generation_text())
+    .bind(namespace.space_id)
+    .bind(namespace.client_identity)
+    .bind(namespace.character_id)
+    .bind(namespace.binding_id)
+    .bind(kind.as_str())
+    .bind(object_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(known != 0)
+}
