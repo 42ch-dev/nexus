@@ -3251,3 +3251,114 @@ async fn product_ws_close_settles_a_parked_send_and_releases_the_peer() {
         .expect("the echo peer ends")
         .expect("the echo peer task must not panic");
 }
+
+/// Cancelling the SOLE raw close must not abandon the physical disposal, and the
+/// result a later caller sees must be the real one — never a success cached for
+/// an interrupted flush. Two real windows are covered: the closer waiting for
+/// the half a parked send still holds, and the closer inside a stalled flush.
+#[tokio::test]
+async fn sole_cancelled_close_releases_the_halves_and_keeps_a_truthful_result() {
+    // ── Window 1: the sole closer is cancelled while it waits for the sink
+    // half that the parked send still owns. ──
+    let (addr, probe, peer) = non_reading_peer().await;
+    let (ws, _response) = tokio::time::timeout(
+        SETUP_BOUND,
+        tokio_tungstenite::connect_async(format!("ws://{addr}")),
+    )
+    .await
+    .expect("the dial is bounded")
+    .expect("dial the silent peer");
+    let transport: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+    let payload = vec![0x5a_u8; 8 * 1024 * 1024];
+    let mut sending = transport.send(&payload);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(250), &mut sending)
+            .await
+            .is_err(),
+        "the send must be parked on the non-reading peer before close"
+    );
+    let mut closer = Box::pin(transport.close());
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), &mut closer)
+            .await
+            .is_err(),
+        "the sole close must be waiting for the half the parked send owns"
+    );
+    drop(closer);
+    // The close signal wakes the parked send; its caller then abandons it. Both
+    // halves are still the transport's to release, and no second close runs.
+    drop(sending);
+    probe.notify_one();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), peer)
+            .await
+            .expect("the peer must observe the end without a second close")
+            .expect("the peer task must not panic"),
+        "cancelling the sole close must not strand the socket halves"
+    );
+    // The later caller settles with the real outcome for this ordering: the
+    // peer started draining, so the disposal's flush completes. What matters is
+    // that it waits for the settled result instead of reporting an early flag.
+    let late = tokio::time::timeout(SETUP_BOUND, transport.close())
+        .await
+        .expect("the later close settles");
+    assert!(
+        late.is_ok(),
+        "the later caller sees the settled disposition, got {late:?}"
+    );
+
+    // ── Window 2: the sole closer is cancelled inside a stalled flush. ──
+    let (addr, probe, peer) = non_reading_peer().await;
+    let (ws, _response) = tokio::time::timeout(
+        SETUP_BOUND,
+        tokio_tungstenite::connect_async(format!("ws://{addr}")),
+    )
+    .await
+    .expect("the dial is bounded")
+    .expect("dial the silent peer");
+    let transport: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+    let mut sending = transport.send(&payload);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(250), &mut sending)
+            .await
+            .is_err(),
+        "the send must be parked on the non-reading peer before close"
+    );
+    let closer = tokio::spawn({
+        let transport = Arc::clone(&transport);
+        async move { transport.close().await }
+    });
+    // The close signal releases the parked send, so the closer can take both
+    // halves and start the flush, which cannot finish (8 MiB queued, peer not
+    // reading).
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(5), sending)
+            .await
+            .expect("the parked send settles"),
+        Err(TransportError::Closed)
+    );
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    closer.abort();
+    let _ = closer.await;
+    // The peer stays non-reading, so the disposal's flush cannot complete: the
+    // later caller must see that real terminal error, not a cached success for
+    // the interrupted caller.
+    let late = tokio::time::timeout(SETUP_BOUND, transport.close())
+        .await
+        .expect("the later close settles")
+        .expect_err("an interrupted flush is not a clean close");
+    assert!(
+        matches!(late, TransportError::Io(_)),
+        "an interrupted flush is never cached as success, got {late:?}"
+    );
+    // Only now drain the peer, which observes the physical release the
+    // cancelled closer's teardown already performed.
+    probe.notify_one();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), peer)
+            .await
+            .expect("the peer observes the end after the cancelled flush")
+            .expect("the peer task must not panic"),
+        "the interrupted closer's halves must still be released"
+    );
+}
