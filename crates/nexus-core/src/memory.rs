@@ -173,8 +173,9 @@ fn refusal_proves(binding_is_local: bool, reject: &SpokeReject, codes: &[SpokeRe
 /// failure *after* commit — as an effect that may already exist. Only a
 /// definite (`terminal`) class on a pre-effect refusal code proves a clean
 /// no-effect result. A retryable/uncertain class, a missing or unknown class,
-/// and any code whose capture semantics do not prove a pre-effect refusal all
-/// keep the durable admission.
+/// and any code whose mutation semantics do not prove a pre-effect refusal all
+/// keep the durable admission. The capture and the review entry share this one
+/// policy: neither invents a second retirement rule.
 fn remote_capture_reject_proves_no_effect(reject: &SpokeReject) -> bool {
     refusal_proves(
         false,
@@ -603,11 +604,15 @@ impl MemoryAdapter {
     }
 
     /// Record a committed review outcome (D18) in one local transaction: the
-    /// consumed candidate and the record references the provider's receipt
-    /// returned. A later capture-result publication can then neither resurrect
-    /// the consumed candidate nor overwrite these record references.
+    /// consumed candidate, the record references the provider's receipt
+    /// returned, **and** the retirement of this one attempt. A later
+    /// capture-result publication can then neither resurrect the consumed
+    /// candidate nor overwrite these record references, and a committed review
+    /// can never leave its facts without its own attempt retired (or the
+    /// reverse) — they settle together or not at all.
     async fn record_remote_review(
         &self,
+        attempt: Option<&str>,
         binding_id: Option<&str>,
         candidate_id: &str,
         record_ids: &[String],
@@ -644,6 +649,93 @@ impl MemoryAdapter {
             .await
             .map_err(map_local_db_error)?;
         }
+        // Only this attempt retires, and only together with the facts above.
+        if let Some(attempt) = attempt {
+            nexus_local_db::retire_remote_binding_admission_tx(&mut tx, attempt, &namespace)
+                .await
+                .map_err(map_local_db_error)?;
+        }
+        tx.commit().await.map_err(sqlx_internal)?;
+        Ok(())
+    }
+
+    /// Durably admit one remote binding-local review attempt before the RPC.
+    ///
+    /// The drain can consume a candidate Core did not capture itself — an
+    /// independent signed writer may create it with the legacy pending shape
+    /// and a context scope naming this binding — so such a candidate carries no
+    /// admission and no candidate fact. This commits the same per-attempt
+    /// admission the capture arm uses: the exact dependency namespace, one
+    /// `BEGIN IMMEDIATE` writer transaction and the same owned-provenance gate.
+    /// It lands before the provider call, so an uncertain, cancelled or
+    /// locally-unsettled attempt keeps the binding protected.
+    ///
+    /// Shared/Creator candidates and local bindings own no binding dependency
+    /// and admit nothing (`Ok(None)`).
+    async fn admit_remote_review_attempt(
+        &self,
+        binding_id: Option<&str>,
+    ) -> CoreResult<Option<String>> {
+        let Some(binding_id) = binding_id else {
+            return Ok(None);
+        };
+        let Some(character_id) = self.character_id.as_deref() else {
+            return Ok(None);
+        };
+        let Some(namespace) = self.remote_namespace(binding_id) else {
+            return Ok(None);
+        };
+        let admission_id = uuid::Uuid::new_v4().to_string();
+        let admitted_at = now_iso();
+        let mut tx = nexus_local_db::begin_immediate(&self.pool)
+            .await
+            .map_err(map_local_db_error)?;
+        nexus_local_db::require_valid_provenance_tx(
+            &mut tx,
+            self.principal.principal_id.as_str(),
+            character_id,
+            Some(binding_id),
+        )
+        .await
+        .map_err(map_local_db_error)?;
+        nexus_local_db::insert_remote_binding_admission_tx(
+            &mut tx,
+            &admission_id,
+            &namespace,
+            &admitted_at,
+        )
+        .await
+        .map_err(map_local_db_error)?;
+        tx.commit().await.map_err(sqlx_internal)?;
+        Ok(Some(admission_id))
+    }
+
+    /// Apply the D18 consequence of one review refusal.
+    ///
+    /// Only the shared proven-no-effect policy may retire this attempt: an
+    /// uncertain, retryable, unknown or contradictory outcome keeps it, and a
+    /// local retirement failure keeps it too.
+    async fn settle_remote_review_reject(
+        &self,
+        attempt: Option<&str>,
+        binding_id: Option<&str>,
+        reject: &SpokeReject,
+    ) -> CoreResult<()> {
+        let (Some(attempt), Some(binding_id)) = (attempt, binding_id) else {
+            return Ok(());
+        };
+        if !remote_capture_reject_proves_no_effect(reject) {
+            return Ok(());
+        }
+        let Some(namespace) = self.remote_namespace(binding_id) else {
+            return Ok(());
+        };
+        let mut tx = nexus_local_db::begin_immediate(&self.pool)
+            .await
+            .map_err(map_local_db_error)?;
+        nexus_local_db::retire_remote_binding_admission_tx(&mut tx, attempt, &namespace)
+            .await
+            .map_err(map_local_db_error)?;
         tx.commit().await.map_err(sqlx_internal)?;
         Ok(())
     }
@@ -1131,9 +1223,18 @@ impl MemoryAdapter {
     /// `drop`). A legacy-derived candidate is adopted under the bridge's
     /// deterministic id inside the same guarded transaction that consumes it
     /// (NXM-5's mutation-time adoption, reused — not redefined — by NXM-8),
-    /// under the bearer's disposition section the caller holds. A remote
-    /// binding runs the ordinary protocol op, whose candidate CAS and
-    /// transaction supply the exclusion, and carries no local side effect.
+    /// under the bearer's disposition section the caller holds.
+    ///
+    /// A remote binding-local review durably admits this attempt in the exact
+    /// dependency namespace **before** the provider call, because the candidate
+    /// the drain consumes may have been created by an independent signed writer
+    /// and therefore carry no Core admission or candidate fact. A definite
+    /// committed receipt settles in one local transaction: the consumed
+    /// candidate, the record references it returned, and the retirement of this
+    /// attempt. An uncertain, cancelled, malformed or locally-unsettled attempt
+    /// keeps its admission, so the binding stays unremovable; only the shared
+    /// proven-no-effect refusal policy retires an attempt, and never another
+    /// one.
     pub(crate) async fn review(
         &self,
         candidate_id: &str,
@@ -1149,7 +1250,7 @@ impl MemoryAdapter {
             "decision": decision,
             "idempotency_key": idempotency_key("review", candidate_id)?,
         }))?;
-        let result = if self.is_local() {
+        if self.is_local() {
             let local = self.binding.local()?;
             // The drain takes the section before it fetches its slice, so a
             // local review always has one.
@@ -1159,39 +1260,58 @@ impl MemoryAdapter {
                     "a local review drain requires the disposition section",
                 )
             })?;
-            local
+            return match local
                 .review_legacy_candidate(&self.principal, &self.subject_id, request, section)
                 .await
-        } else {
-            self.binding
-                .port()
-                .review_candidate(&self.principal, request)
-                .await
-        };
-        match result {
+            {
+                SpokeResult::Ok(_) => Ok(()),
+                SpokeResult::Reject(reject) => Err(self.refuse(&reject)),
+            };
+        }
+        // A remote binding-local review consumes a candidate the drain chose to
+        // settle, and that candidate need not carry a Core capture admission or
+        // candidate fact (an independent signed writer can have created it).
+        // Admit this one attempt before the RPC under the same per-attempt
+        // namespace, then settle its facts and its retirement together.
+        let attempt = self.admit_remote_review_attempt(binding_id).await?;
+        match self
+            .binding
+            .port()
+            .review_candidate(&self.principal, request)
+            .await
+        {
             SpokeResult::Ok(receipt) => {
-                if !self.is_local() {
-                    // D18: bind the real receipt in one local transaction — the
-                    // consumed candidate and the record references it returned.
-                    let body = serde_json::to_value(&receipt).map_err(wire_err)?;
-                    let record_ids: Vec<String> = body
-                        .pointer("/result/record_ids")
-                        .and_then(Value::as_array)
-                        .ok_or_else(|| {
-                            internal_err(
-                                "memory_review_receipt",
-                                "a committed review receipt carries no record_ids",
-                            )
-                        })?
-                        .iter()
-                        .filter_map(|record_id| record_id.as_str().map(str::to_string))
-                        .collect();
-                    self.record_remote_review(binding_id, candidate_id, &record_ids)
-                        .await?;
-                }
+                let body = serde_json::to_value(&receipt).map_err(wire_err)?;
+                let record_ids: Vec<String> = body
+                    .pointer("/result/record_ids")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| {
+                        internal_err(
+                            "memory_review_receipt",
+                            "a committed review receipt carries no record_ids",
+                        )
+                    })?
+                    .iter()
+                    .filter_map(|record_id| record_id.as_str().map(str::to_string))
+                    .collect();
+                // A settlement failure returns an error with the attempt still
+                // in place, so the binding stays protected.
+                self.record_remote_review(attempt.as_deref(), binding_id, candidate_id, &record_ids)
+                    .await?;
                 Ok(())
             }
-            SpokeResult::Reject(reject) => Err(self.refuse(&reject)),
+            SpokeResult::Reject(reject) => {
+                if let Err(error) = self
+                    .settle_remote_review_reject(attempt.as_deref(), binding_id, &reject)
+                    .await
+                {
+                    tracing::warn!(
+                        error = %error,
+                        "review refusal settlement could not persist; the attempt keeps protection"
+                    );
+                }
+                Err(self.refuse(&reject))
+            }
         }
     }
 
