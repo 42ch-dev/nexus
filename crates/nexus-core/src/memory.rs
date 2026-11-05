@@ -3004,10 +3004,10 @@ impl CoreService {
     /// `fact` ([`CharacterFragmentFamily`]): a record with no proven Nexus origin
     /// is not served here as if it were a fragment, and a record that lost its
     /// identity while its own metadata or this binding's facts still prove that
-    /// origin fails honestly instead of disappearing.
-    /// The family is decided per row, so the whole candidate set is read before
-    /// the page window: a provider page bound would truncate the family and make
-    /// `offset`/`has_more` describe rows this endpoint does not serve.
+    /// origin fails honestly instead of disappearing. The walk classifies rows as
+    /// it pages and stops at the first family row past the requested page, so
+    /// `offset`/`has_more` describe the family without reading or projecting the
+    /// whole collection.
     ///
     /// # Errors
     /// [`CoreError::NotFound`] for a foreign/missing Character, the honest
@@ -3489,9 +3489,10 @@ fn validate_capture_fields(
 /// that identity (`session_id`, `minLength: 1`):
 ///
 /// - a `fact` carrying it is a fragment this adapter serves;
-/// - a record that lost it while Nexus still holds positive origin evidence — its
-///   own fragment metadata, or the binding's authoritative D18 fact for that
-///   exact record — is damaged and is reported honestly instead of dropped;
+/// - a record that lost it while Nexus still holds positive origin evidence — the
+///   exact Character-fragment producer markers of its own `nexus_legacy` block, or
+///   the binding's authoritative D18 fact for that exact record — is damaged and
+///   is reported honestly instead of dropped;
 /// - anything else is unproven: served as a generic provider record, never as a
 ///   fragment, and its absence of evidence says nothing about where it came from.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -3504,7 +3505,18 @@ enum CharacterFragmentFamily<'a> {
     Unproven,
 }
 
+/// The one `nexus_legacy.family` value that names the Character fragment family
+/// (`memory_provider/legacy.rs`, `FAMILY_CHARACTER_FRAGMENTS`). Any other family
+/// names another Nexus family, so it is not Character-fragment origin.
+const CHARACTER_FRAGMENT_FAMILY: &str = "character_memory_fragments";
+
 /// Classify one provider record from its own retained metadata.
+///
+/// Only an actual Character-fragment producer marker counts as the record's own
+/// origin claim: the legacy bridge's exact `family` identity, or the review
+/// pipeline's `pending_id`. A bare `fragment_id`, an arbitrary `family` (e.g. the
+/// unrelated `memory_long_term` family) or any `kind`/provenance claim is not
+/// Character-fragment origin.
 fn character_fragment_family(record: &Value) -> CharacterFragmentFamily<'_> {
     if record["kind"].as_str() != Some("fact") {
         return CharacterFragmentFamily::Unproven;
@@ -3516,12 +3528,10 @@ fn character_fragment_family(record: &Value) -> CharacterFragmentFamily<'_> {
     {
         return CharacterFragmentFamily::Fragment(session_id);
     }
-    let names_origin = ["family", "fragment_id", "pending_id"].iter().any(|key| {
-        origin
-            .get(*key)
-            .and_then(Value::as_str)
-            .is_some_and(|value| !value.is_empty())
-    });
+    let names_origin = origin["family"].as_str() == Some(CHARACTER_FRAGMENT_FAMILY)
+        || origin["pending_id"]
+            .as_str()
+            .is_some_and(|pending_id| !pending_id.is_empty());
     if names_origin {
         CharacterFragmentFamily::Damaged
     } else {
