@@ -21,13 +21,14 @@ use std::sync::Arc;
 use nexus_core::memory_provider::legacy;
 use nexus_core::{CoreAccess, CoreOpenOptions, CoreService};
 use serde_json::{json, Value};
+use tokio::net::TcpListener;
 
 use support::{
     bootstrap, candidate_ids, capture_body, close_core_bounded, close_responder, context_scope,
     error_code, error_details, is_committed, open_endpoint, open_selected_local, principal,
     receipt_id, remote_selection, result, retry_class, serve_selection_host, shared_scope, Actor,
     Kind, Matrix, SelectionHome, CONTEXT, OTHER_CONTEXT, OTHER_SUBJECT, SELECTION_CLIENT_SEED,
-    SUBJECT,
+    SELECTION_CREDENTIAL_ID, SUBJECT,
 };
 
 // ---------------------------------------------------------------------------
@@ -2951,8 +2952,19 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
         memory: Some(remote_selection(&fixture.space_id, &host)),
     })
     .await;
-    let responder = host.session().await;
-    let established = responder.state().as_str().to_owned();
+    // Acquire the responder through the bounded result route: an open that
+    // failed before dialing aborts and joins its own listener instead of
+    // panicking, and that failure is recorded for the combined report.
+    let responder = if opened.is_ok() {
+        host.session().await.map(Some)
+    } else {
+        host.settle_failed().await
+    };
+    // Observe the authenticated session state before any close runs.
+    let established = match &responder {
+        Ok(Some(responder)) => Some(responder.state().as_str().to_owned()),
+        _ => None,
+    };
     // Collect the full original result without classifying it; the assertion
     // waits until every owner is settled.
     let product_read: Option<Result<i64, nexus_core::CoreError>> = match &opened {
@@ -2970,8 +2982,14 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
             cleanup_errors.push(error);
         }
     }
-    if let Err(error) = close_responder(responder).await {
-        cleanup_errors.push(error);
+    match responder {
+        Ok(Some(responder)) => {
+            if let Err(error) = close_responder(responder).await {
+                cleanup_errors.push(error);
+            }
+        }
+        Ok(None) => {}
+        Err(error) => cleanup_errors.push(error),
     }
 
     // The same fixture and the same Creator subject, now through a new signed
@@ -3010,14 +3028,27 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
         memory: Some(remote_selection(&fixture.space_id, &host)),
     })
     .await;
-    let responder = host.session().await;
+    // Same bounded acquisition on the refusal path: the expected capability
+    // refusal made a connection, so its responder is closed; a pre-connect
+    // failure aborts and joins the listener with the failure recorded.
+    let responder = if refused.is_ok() {
+        host.session().await.map(Some)
+    } else {
+        host.settle_failed().await
+    };
     if let Ok(core) = &refused {
         if let Err(error) = close_core_bounded(core).await {
             cleanup_errors.push(error);
         }
     }
-    if let Err(error) = close_responder(responder).await {
-        cleanup_errors.push(error);
+    match responder {
+        Ok(Some(responder)) => {
+            if let Err(error) = close_responder(responder).await {
+                cleanup_errors.push(error);
+            }
+        }
+        Ok(None) => {}
+        Err(error) => cleanup_errors.push(error),
     }
 
     if let Err(error) = fixture.settle().await {
@@ -3039,6 +3070,7 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
     assert!(
         cleanup_errors.is_empty(),
         "every owned session settled within its bound (open error={open_error:?}, \
+         product read={product_read:?}, established={established:?}, \
          refusal={refusal_error:?}): {cleanup_errors:?}"
     );
     assert!(
@@ -3050,7 +3082,8 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
         "the selected fixture starts with no capability-kind document for the Creator subject: {before_profiles}"
     );
     assert_eq!(
-        established, "Established",
+        established.as_deref(),
+        Some("Established"),
         "the remote selection really authenticated the signed session"
     );
     assert!(
@@ -3078,4 +3111,88 @@ async fn c_064_selection_requires_no_fake_profile_kinds_local() {
 #[tokio::test]
 async fn c_064_selection_requires_no_fake_profile_kinds_remote() {
     selection_requires_no_fake_profile_kinds(Matrix::remote().await).await;
+}
+
+/// I258 self-check: a real public open that fails before any connection (the
+/// operator credential is absent) must settle its owned listener and the
+/// fixture with the original failure retained, instead of panicking while
+/// acquiring the responder.
+#[tokio::test]
+async fn c_064_early_selection_open_failure_settles_listener_and_fixture() {
+    let fixture = support::selection_fixture().await;
+    let host = serve_selection_host(
+        Arc::clone(&fixture.service),
+        &fixture.authority_host_id,
+        &["spoke-memory"],
+        SELECTION_CLIENT_SEED,
+    )
+    .await;
+    let port = host.port();
+
+    // A disposable Core home with the operator credential removed: the public
+    // open fails on the credential before dialing, so nothing ever connects.
+    let home = SelectionHome::new(support::SELECTION_CREATOR, SELECTION_CLIENT_SEED);
+    std::fs::remove_file(
+        home.user_home
+            .join(".nexus42")
+            .join("memory-credentials")
+            .join(format!("{SELECTION_CREDENTIAL_ID}.json")),
+    )
+    .expect("remove the operator credential");
+    let opened = CoreService::open(CoreOpenOptions {
+        user_home: home.user_home.clone(),
+        access: CoreAccess::EngineOwner,
+        memory: Some(remote_selection(&fixture.space_id, &host)),
+    })
+    .await;
+
+    // The listener is owned by this control even though the open never dialed.
+    let session = host.settle_failed().await;
+    let port_released = TcpListener::bind(("127.0.0.1", port)).await.is_ok();
+    // The fixture still serves a real signed session after the early failure.
+    let check = open_endpoint(
+        Arc::clone(&fixture.service),
+        &fixture.authority_host_id,
+        SELECTION_CLIENT_SEED,
+    )
+    .await;
+    let check_principal = principal(&fixture.principal);
+    let check_actor = check.actor(&check_principal, &fixture.space_id);
+    let described = check_actor.describe().await;
+    let check_settle = check.settle().await;
+    let fixture_settle = fixture.settle().await;
+
+    let open_error = opened.as_ref().err();
+    let open_code = match opened.as_ref() {
+        Ok(_) => Some("unexpected-success"),
+        Err(nexus_core::CoreError::Coded { code, .. }) => Some(code.as_str()),
+        Err(_) => None,
+    };
+    assert_eq!(
+        open_code,
+        Some("memory_credential_invalid"),
+        "the public open fails on the missing credential before dialing: {open_error:?}"
+    );
+    assert!(
+        matches!(&session, Ok(None)),
+        "the undelivered listener was aborted and joined; open error={open_error:?}, \
+         session_error={:?}",
+        session.err()
+    );
+    assert!(
+        port_released,
+        "the listener's port was released after the early failure; open error={open_error:?}"
+    );
+    assert!(
+        described["limits"]["max_content_bytes"].as_u64() > Some(0),
+        "the fixture still serves a signed session after the early failure: {described}"
+    );
+    assert!(
+        check_settle.is_ok(),
+        "the follow-up signed session settles: {check_settle:?}"
+    );
+    assert!(
+        fixture_settle.is_ok(),
+        "the fixture settles after the early failure: {fixture_settle:?}"
+    );
 }

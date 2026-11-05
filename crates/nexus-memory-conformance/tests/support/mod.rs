@@ -2213,16 +2213,54 @@ fn hex(bytes: &[u8]) -> String {
 pub struct SelectionHost {
     pub endpoint: String,
     pub host_pubkey: [u8; 32],
-    task: tokio::task::JoinHandle<Arc<ConnectResponder>>,
+    addr: std::net::SocketAddr,
+    task: tokio::task::JoinHandle<Result<Arc<ConnectResponder>, String>>,
 }
 
+/// How long a failed open's listener is given to finish an already-dialed
+/// handshake before its owned task is aborted (loopback handshakes are
+/// immediate).
+const SELECTION_SETTLE_GRACE: Duration = Duration::from_secs(2);
+
 impl SelectionHost {
-    /// Await the responder that served the open's signed session.
-    pub async fn session(self) -> Arc<ConnectResponder> {
-        tokio::time::timeout(BOUND, self.task)
-            .await
-            .expect("the selection responder is bounded")
-            .expect("the selection responder completed")
+    /// Await the responder that served a successful open's signed session. The
+    /// bound, the listener/handshake error and a join failure are all returned
+    /// rather than panicked, so the caller can keep settling its other owners.
+    pub async fn session(self) -> Result<Arc<ConnectResponder>, String> {
+        match tokio::time::timeout(BOUND, self.task).await {
+            Ok(Ok(Ok(responder))) => Ok(responder),
+            Ok(Ok(Err(error))) => Err(error),
+            Ok(Err(join)) => Err(format!("the selection listener task failed: {join}")),
+            Err(_) => Err("the selection session did not establish within the bound".to_owned()),
+        }
+    }
+
+    /// Settle the listener of an open that failed: an already-dialed handshake
+    /// gets a short bounded grace, otherwise the owned task is aborted and
+    /// joined so its port is released. An established responder is returned for
+    /// the caller's own bounded close; nothing here panics or reports a timeout
+    /// as a live session.
+    pub async fn settle_failed(self) -> Result<Option<Arc<ConnectResponder>>, String> {
+        let mut task = self.task;
+        match tokio::time::timeout(SELECTION_SETTLE_GRACE, &mut task).await {
+            Ok(Ok(Ok(responder))) => Ok(Some(responder)),
+            Ok(Ok(Err(error))) => Err(error),
+            Ok(Err(join)) => Err(format!("the selection listener task failed: {join}")),
+            Err(_) => {
+                task.abort();
+                match task.await {
+                    Ok(Ok(responder)) => Ok(Some(responder)),
+                    Ok(Err(error)) => Err(error),
+                    Err(join) if join.is_cancelled() => Ok(None),
+                    Err(join) => Err(format!("the aborted selection listener failed: {join}")),
+                }
+            }
+        }
+    }
+
+    /// The listener's port, so a caller can verify it was released.
+    pub fn port(&self) -> u16 {
+        self.addr.port()
     }
 }
 
@@ -2242,28 +2280,46 @@ pub async fn serve_selection_host(
     let client_peer = peer_id(&client_seed);
     let client_pubkey = pubkey(&client_seed);
     let host_manifest = manifest_with(host_id, capabilities);
+    // The spawned listener returns its own failure instead of panicking; the
+    // `Ok(...)` tail and the `return Err(...)` arms infer
+    // `Result<Arc<ConnectResponder>, String>`.
     let task = tokio::spawn(async move {
-        let (tcp, address) = tokio::time::timeout(BOUND, listener.accept())
-            .await
-            .expect("the open connects to the localhost listener")
-            .expect("accept the open's peer");
-        assert!(address.ip().is_loopback(), "the listener serves localhost only");
-        let ws = tokio::time::timeout(
+        let accepted = tokio::time::timeout(BOUND, listener.accept()).await;
+        let (tcp, address) = match accepted {
+            Ok(Ok(accepted)) => accepted,
+            Ok(Err(error)) => {
+                return Err(format!("the selection listener accepts the open: {error}"))
+            }
+            Err(_) => {
+                return Err(
+                    "the selection listener received no connection within the bound".to_owned(),
+                )
+            }
+        };
+        if !address.ip().is_loopback() {
+            return Err(format!(
+                "the selection listener serves localhost only, got {address}"
+            ));
+        }
+        let upgraded = tokio::time::timeout(
             BOUND,
             tokio_tungstenite::accept_async_with_config(
                 tcp,
                 Some(ws_config(DEFAULT_MAX_ENVELOPE_BYTES)),
             ),
         )
-        .await
-        .expect("the websocket upgrade is bounded")
-        .expect("websocket upgrade");
+        .await;
+        let ws = match upgraded {
+            Ok(Ok(ws)) => ws,
+            Ok(Err(error)) => return Err(format!("the selection handshake completes: {error}")),
+            Err(_) => return Err("the selection handshake is bounded".to_owned()),
+        };
         let socket: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
         let ports: Arc<dyn RemoteServePorts + Send + Sync> = Arc::new(
             RemoteServePortsComposite::new(Arc::new(MemoryOnlyHost), None, None)
                 .with_memory(service),
         );
-        connect_responder(ConnectResponderOptions {
+        Ok(connect_responder(ConnectResponderOptions {
             transport: socket,
             identity: RemoteIdentity { seed: HOST_SEED },
             manifest: host_manifest,
@@ -2272,11 +2328,12 @@ pub async fn serve_selection_host(
             ports: Some(ports),
             invoke_timeout_ms: Some(5_000),
         })
-        .await
+        .await)
     });
     SelectionHost {
         endpoint: format!("ws://{addr}"),
         host_pubkey: pubkey(&HOST_SEED),
+        addr,
         task,
     }
 }
