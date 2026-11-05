@@ -441,6 +441,28 @@ async fn open_provider(home: &Home) -> Provider {
     }
 }
 
+/// The Local provider's existing operator controls, exposed only to let a test
+/// prepare operator-only state on the SAME instance the signed SDK serves.
+///
+/// This is a test-harness arrangement over the provider's own existing
+/// `test-hooks` seams; it invents no product getter, fault or wire behaviour.
+pub struct LocalOperator {
+    provider: Arc<LocalMemoryProvider>,
+    file_root: PathBuf,
+}
+
+impl LocalOperator {
+    /// Arm the provider's existing commit-boundary fault on the next mutation.
+    pub fn arm_commit_fault(&self, after_commit: bool) {
+        self.provider.inject_commit_fault(after_commit);
+    }
+
+    /// The provider's own published projection root (test-hooks control).
+    pub fn file_root(&self) -> &std::path::Path {
+        &self.file_root
+    }
+}
+
 /// One matrix run: the provider, its signed service face and the two real
 /// client sessions.
 pub struct Matrix {
@@ -743,6 +765,18 @@ impl Matrix {
         RawSession::open(Arc::clone(&self.service), &self.host_id, ADMIN_SEED, &[]).await
     }
 
+    /// The operator controls of this run's Local provider, or `None` on the
+    /// fixture leg (which arms its own faults through [`Matrix::park_next_*`]).
+    pub fn local_operator(&self) -> Option<LocalOperator> {
+        match &self.provider {
+            Provider::Local(provider) => Some(LocalOperator {
+                provider: Arc::clone(provider),
+                file_root: provider.file_root(),
+            }),
+            Provider::Fixture(_) => None,
+        }
+    }
+
     /// Release every session and the provider pool.
     pub async fn shutdown(self) {
         let Self {
@@ -855,6 +889,32 @@ pub async fn close_core_bounded(core: &CoreService) -> Result<(), String> {
         Ok(Ok(_)) => Ok(()),
         Ok(Err(error)) => Err(format!("the CoreService close failed: {error}")),
         Err(_) => Err("the CoreService close did not finish within the bound".to_owned()),
+    }
+}
+
+/// Run one scenario body over `matrix`, then settle every owned session and the
+/// provider on BOTH success and failure.
+///
+/// A cleanup failure is reported on its own; a scenario failure is then
+/// re-raised so neither failure masks the other. This is the harness-level
+/// cleanup contract, not a scenario assertion.
+pub async fn run_matrix_scenario<F>(matrix: Matrix, body: F)
+where
+    F: for<'a> FnOnce(&'a Matrix) -> Pin<Box<dyn Future<Output = ()> + 'a>>,
+{
+    use futures_util::FutureExt as _;
+    let scenario = std::panic::AssertUnwindSafe(body(&matrix))
+        .catch_unwind()
+        .await;
+    let cleanup = matrix.settle().await;
+    match (scenario, cleanup) {
+        (Ok(()), Ok(())) => {}
+        (Ok(()), Err(error)) => panic!("cleanup failed after a passing scenario: {error}"),
+        (Err(payload), Ok(())) => std::panic::resume_unwind(payload),
+        (Err(payload), Err(error)) => {
+            eprintln!("cleanup also failed: {error}");
+            std::panic::resume_unwind(payload);
+        }
     }
 }
 
@@ -1508,10 +1568,38 @@ impl RawSession {
         Value::Object(envelope)
     }
 
-    pub async fn close(self) {
-        self.responder.close();
-        let _ = tokio::time::timeout(BOUND, self.socket.close()).await;
-        let _ = tokio::time::timeout(BOUND, self.server_socket.close()).await;
+    /// Close every owned transport and the responder, bounded. Each failure is
+    /// returned instead of discarded, so a caller can settle every owner before
+    /// reporting the original scenario failure; the responder must really reach
+    /// `Closed` (a dropped handle is not a joined listener).
+    pub async fn close(self) -> Result<(), String> {
+        let responder = close_responder(Arc::clone(&self.responder));
+        let client = tokio::time::timeout(BOUND, self.socket.close());
+        let server = tokio::time::timeout(BOUND, self.server_socket.close());
+        let (responder, client, server) = tokio::join!(responder, client, server);
+        let mut failures: Vec<String> = Vec::new();
+        if let Err(error) = responder {
+            failures.push(error);
+        }
+        match client {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => failures.push(format!("the raw client transport close failed: {error}")),
+            Err(_) => failures.push(
+                "the raw client transport close did not finish within the bound".to_owned(),
+            ),
+        }
+        match server {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => failures.push(format!("the raw server transport close failed: {error}")),
+            Err(_) => failures.push(
+                "the raw server transport close did not finish within the bound".to_owned(),
+            ),
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(failures.join("; "))
+        }
     }
 }
 
@@ -2156,6 +2244,30 @@ impl DurableObserver {
             }
             Store::Fixture => None,
         }
+    }
+
+    /// The receipt ids recorded for one op in this space, as the provider's own
+    /// table reports them. Exact ids, never a count heuristic, so a refused op
+    /// can prove it created no receipt while a committed op names the one it
+    /// did.
+    pub async fn receipt_ids_for(&mut self, op: &str) -> Vec<String> {
+        let sql = match self.store {
+            Store::Local => {
+                "SELECT receipt_id FROM memory_receipts WHERE space_id = ? AND op = ? \
+                 ORDER BY receipt_id"
+            }
+            Store::Fixture => {
+                "SELECT receipt_id FROM receipts WHERE space_id = ? AND op = ? ORDER BY receipt_id"
+            }
+        };
+        let space_id = self.space_id.clone();
+        let rows: Vec<(String,)> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+            .bind(space_id)
+            .bind(op)
+            .fetch_all(&mut self.conn)
+            .await
+            .expect("the held connection reads the op's receipt ids");
+        rows.into_iter().map(|(receipt_id,)| receipt_id).collect()
     }
 
     /// Close the held connection explicitly: both the bound and the connection's

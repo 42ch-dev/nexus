@@ -2224,7 +2224,7 @@ async fn missing_or_null_selection_is_invalid_input(matrix: Matrix) {
             "format validation is not an authorization outcome: {response}"
         );
     }
-    raw.close().await;
+    raw.close().await.expect("the raw session settles");
 
     // The typed positive control remains additional, not a replacement.
     let served = admin
@@ -2748,7 +2748,7 @@ async fn profile_and_capability_admission_are_distinct(matrix: Matrix) {
             }),
         )
         .await;
-    raw.close().await;
+    raw.close().await.expect("the raw session settles");
     let error = unavailable
         .get("error")
         .unwrap_or_else(|| panic!("the unavailable capability is refused: {unavailable}"));

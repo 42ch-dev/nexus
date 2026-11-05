@@ -1239,7 +1239,7 @@ async fn merge_review_action_is_explicitly_unsupported(matrix: Matrix) {
     let error = response.get("error").expect("typed-decode refusal envelope");
     assert_eq!(error["code"], json!("INVALID_INPUT"), "{response}");
     assert_eq!(error["details"]["retry_class"], json!("terminal"));
-    raw.close().await;
+    raw.close().await.expect("the raw session settles");
 
     let shell = matrix.admin().get_candidate(&candidate_id).await;
     assert_eq!(
