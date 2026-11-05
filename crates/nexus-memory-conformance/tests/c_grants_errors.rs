@@ -9,20 +9,17 @@
 //! receipt), MEM-R020 (self-contained, non-amplifying grants) and §7.0.6
 //! (operator provisioning of the first space and admin).
 //!
-//! Each scenario body takes `&Matrix` so the `_local` leg runs the real
-//! `nexus_core` `LocalMemoryProvider` and the `_remote` leg runs the
-//! independent durable fixture provider, both behind the published
-//! `spoke-connect` memory service. Assertions read the provider's answers,
-//! refusals and receipts; effect and no-effect claims are checked against the
-//! provider's own durable rows through the shared read-only observer, never a
-//! count proxy. Every scenario is driven by [`run_matrix_scenario`], which
-//! settles both sessions and the provider on success AND on failure and
-//! re-raises the scenario failure after reporting a cleanup failure.
+//! Each scenario body takes `&Matrix` plus the runner-owned task/resource sets
+//! so the `_local` leg runs the real `nexus_core` `LocalMemoryProvider` and the
+//! `_remote` leg runs the independent durable fixture provider, both behind the
+//! published `spoke-connect` memory service. Every spawned operation stays in
+//! the runner's [`TaskSet`] (joined or aborted+joined never detached), every
+//! raw session/observer stays in [`OwnedResources`] and is closed on failure as
+//! well as success, and an admitted operation's result is bound to its actual
+//! durable candidate/receipt rows.
 //!
 //! C-090's reflection/export surfaces and C-096's successful capability
-//! remainders stay N4-R/N4-T. C-091's fixture leg has no grant-revoke
-//! admission-arrival seam in the current fixture server; the report records that
-//! missing seam rather than substituting a spawn/sleep proxy.
+//! remainders stay N4-R/N4-T.
 
 #![allow(clippy::too_many_lines)] // one end-to-end scenario per row
 
@@ -30,6 +27,7 @@ mod support;
 
 use std::sync::Arc;
 
+use futures_util::FutureExt as _;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 
@@ -42,9 +40,10 @@ use spoke_operations::spoke_schemas::Principal;
 use spoke_operations::MemoryPort;
 
 use support::{
-    bootstrap, capture_body, context_scope, error_code, is_committed, principal, receipt_id,
-    record_ids, result, retry_class, run_matrix_scenario, shared_scope, Actor, DurableState, Kind,
-    Matrix, BOUND, CONTEXT, OTHER_CONTEXT, SUBJECT, TEXT,
+    assert_no_receipt_disclosure, bootstrap, capture_body, context_scope, error_code, is_committed,
+    principal, receipt_id, record_ids, result, retry_class, run_matrix_scenario, shared_scope,
+    Actor, DurableState, Kind, Matrix, OwnedResources, TaskSet, CONTEXT, OTHER_CONTEXT, SUBJECT,
+    TEXT,
 };
 
 const OUTSIDE_CONTEXT: &str = "ctx_c090_outside";
@@ -155,54 +154,7 @@ fn assert_receipt_tuple(body: &Value, op: &str, requester: &str) {
     assert_payload_secrecy(body);
 }
 
-/// A refused receipt-read response must not disclose a receipt body anywhere:
-/// no receipt object/field, no committed status/result tuple, and none of the
-/// supplied payload markers (candidate ids, stored text).
-fn assert_no_receipt_disclosure(response: &Value, markers: &[&str]) {
-    fn walk(value: &Value, path: &str) {
-        match value {
-            Value::Object(map) => {
-                for (key, child) in map {
-                    let here = format!("{path}.{key}");
-                    assert_ne!(
-                        key, "receipt",
-                        "a refused response discloses a receipt at {here}: {value}"
-                    );
-                    assert!(
-                        !matches!(key.as_str(), "result" | "payload_digest" | "completed_at"),
-                        "a refused response carries receipt metadata at {here}: {value}"
-                    );
-                    walk(child, &here);
-                }
-            }
-            Value::Array(items) => {
-                for (index, item) in items.iter().enumerate() {
-                    walk(item, &format!("{path}[{index}]"));
-                }
-            }
-            _ => {}
-        }
-    }
-    walk(response, "$");
-    let rendered = response.to_string();
-    for marker in markers {
-        assert!(
-            !rendered.contains(marker),
-            "the refusal leaks the receipt payload marker {marker}: {response}"
-        );
-    }
-}
-
-/// Await one spawned operation with the harness bound, never unbounded.
-async fn joined(handle: tokio::task::JoinHandle<Value>, what: &str) -> Value {
-    match tokio::time::timeout(BOUND, handle).await {
-        Ok(Ok(value)) => value,
-        Ok(Err(error)) => panic!("{what} task failed: {error}"),
-        Err(_) => panic!("{what} did not finish within the harness bound"),
-    }
-}
-
-/// One record update with owned inputs, so the future can be raced.
+/// One record update with owned inputs, so it can be a runner-owned task.
 async fn update_with(
     client: Arc<RemoteAdapter>,
     principal: Principal,
@@ -238,18 +190,18 @@ async fn candidate_after(actor: &Actor<'_>, key: &str, scope: &Value) -> String 
 /// scope; out-of-scope probes are indistinguishable from absence and change
 /// nothing durable.
 ///
-/// The two grants carry the SAME `records_read` capability over disjoint
-/// contexts A and B, so each context is independently readable and the combined
-/// multi-context selection is the real non-union negative. A capture-only
-/// negative uses a context no grant covers, and shared access is its own
-/// negative.
-async fn grant_scope_covers_base_surfaces(matrix: &Matrix) {
+/// The two grants carry the SAME `records_read`/`recall` capabilities over
+/// disjoint contexts A and B, so each context is independently readable and the
+/// combined multi-context selection is the real non-union negative.
+async fn grant_scope_covers_base_surfaces(
+    matrix: &Matrix,
+    resources: &mut OwnedResources,
+    _tasks: TaskSet,
+) {
     bootstrap(matrix, &[]).await;
     let admin = matrix.admin();
     let peer_id = matrix.peer_principal().principal_id.clone();
 
-    // A/B retained records, one ungranted-context record, one shared record,
-    // and one pending candidate per disjoint context.
     let r_a = seed_record(&admin, "k-c090-a", &context_scope(CONTEXT)).await;
     let r_b = seed_record(&admin, "k-c090-b", &context_scope(OTHER_CONTEXT)).await;
     let r_out = seed_record(&admin, "k-c090-out", &context_scope(OUTSIDE_CONTEXT)).await;
@@ -271,8 +223,6 @@ async fn grant_scope_covers_base_surfaces(matrix: &Matrix) {
     let c_a = candidate_after(&admin, "k-c090-pending-a", &context_scope(CONTEXT)).await;
     let c_b = candidate_after(&admin, "k-c090-pending-b", &context_scope(OTHER_CONTEXT)).await;
 
-    // Grant A: full read/capture surface over A. Grant B: the SAME read
-    // capability over B (disjoint). Neither is unrestricted.
     let a = admin
         .grant(json!({
             "subject_id": SUBJECT,
@@ -297,24 +247,18 @@ async fn grant_scope_covers_base_surfaces(matrix: &Matrix) {
     assert!(is_committed(&b), "grant B commits: {b}");
 
     let peer = matrix.peer();
-
-    // The durable window that every denied probe must leave untouched.
-    let mut observer = matrix
-        .durable_observer(
+    let observer = resources
+        .open_observer(
+            matrix,
             SUBJECT,
-            &[
-                r_a.clone(),
-                r_b.clone(),
-                r_out.clone(),
-                r_shared.clone(),
-            ],
+            &[r_a.clone(), r_b.clone(), r_out.clone(), r_shared.clone()],
             Some(&c_a),
             None,
             None,
         )
         .await;
-    let before = observer.observe().await;
-    let captures_before = observer.receipt_ids_for("memory.capture").await;
+    let before = resources.observe(observer).await;
+    let captures_before = resources.receipt_ids_for(observer, "memory.capture").await;
 
     // 1. Independent same-capability reads: each context succeeds.
     assert_eq!(
@@ -326,8 +270,7 @@ async fn grant_scope_covers_base_surfaces(matrix: &Matrix) {
         json!(TEXT)
     );
 
-    // 2. The combined selection needs ONE grant covering both contexts; two
-    //    disjoint `records_read` grants never union into it.
+    // 2. The combined selection needs ONE grant covering both contexts.
     let union = peer
         .list_records(json!({
             "subject_id": SUBJECT,
@@ -386,7 +329,7 @@ async fn grant_scope_covers_base_surfaces(matrix: &Matrix) {
     );
 
     // 3. Real uncovered targets: shared (no shared_access), ungranted context,
-    //    and an absent id all answer the same NOT_FOUND.
+    //    and an absent id all answer the same NOT_FOUND class.
     for record in [&r_shared, &r_out] {
         let refused = peer.get_record(record).await;
         assert_eq!(error_code(&refused), "NOT_FOUND", "{refused}");
@@ -396,8 +339,7 @@ async fn grant_scope_covers_base_surfaces(matrix: &Matrix) {
         "NOT_FOUND"
     );
 
-    // 4. Candidate surface: A's review grant sees only A's candidate; B's
-    //    read-only grant cannot see B's candidate.
+    // 4. Candidate surface.
     assert_eq!(pending_candidates(&peer).await, vec![c_a.clone()]);
     assert_eq!(
         peer.get_candidate(&c_a).await["candidate"]["candidate_id"],
@@ -405,8 +347,7 @@ async fn grant_scope_covers_base_surfaces(matrix: &Matrix) {
     );
     assert_eq!(
         error_code(&peer.get_candidate(&c_b).await),
-        "NOT_FOUND",
-        "an out-of-coverage candidate is absent"
+        "NOT_FOUND"
     );
 
     // 5. Selection counts: one per independently covered context.
@@ -430,8 +371,7 @@ async fn grant_scope_covers_base_surfaces(matrix: &Matrix) {
         assert_eq!(recalled["records"][0]["record_id"], json!(expected));
     }
 
-    // 6. Profile documents are subject-level shared reads: context-limited
-    //    grants are refused, the unrestricted admin reads honest-empty.
+    // 6. Profile documents are subject-level shared reads.
     assert_eq!(
         error_code(&peer.get_profile(json!({ "subject_id": SUBJECT })).await),
         "NOT_AUTHORIZED"
@@ -441,8 +381,7 @@ async fn grant_scope_covers_base_surfaces(matrix: &Matrix) {
         json!([])
     );
 
-    // 7. Capture surface: the covered placement commits; the ungranted context
-    //    and shared placement are refused.
+    // 7. Capture surface: covered commits; ungranted and shared are refused.
     let refused_capture = peer
         .capture(capture_body(
             "k-c090-outside",
@@ -450,19 +389,17 @@ async fn grant_scope_covers_base_surfaces(matrix: &Matrix) {
             &context_scope(OUTSIDE_CONTEXT),
         ))
         .await;
-    assert_eq!(error_code(&refused_capture), "NOT_AUTHORIZED", "{refused_capture}");
+    assert_eq!(error_code(&refused_capture), "NOT_AUTHORIZED");
     let refused_shared = peer
         .capture(capture_body("k-c090-shared-capture", TEXT, &shared_scope()))
         .await;
-    assert_eq!(error_code(&refused_shared), "NOT_AUTHORIZED", "{refused_shared}");
+    assert_eq!(error_code(&refused_shared), "NOT_AUTHORIZED");
 
-    // 8. Durable no-effect: no denied probe produced a capture receipt or
-    //    changed a seeded row. (The local admission path runs its own retention
-    //    sweep transaction, so `data_version` alone would misattribute that
-    //    provider maintenance to the scenario.)
-    let after = observer.observe().await;
+    // 8. Durable no-effect: no capture receipt, no changed seeded row and no
+    //    new visible candidate from the denied probes.
+    let after = resources.observe(observer).await;
     assert_eq!(
-        observer.receipt_ids_for("memory.capture").await,
+        resources.receipt_ids_for(observer, "memory.capture").await,
         captures_before,
         "no denied probe produced a capture receipt"
     );
@@ -472,25 +409,32 @@ async fn grant_scope_covers_base_surfaces(matrix: &Matrix) {
         vec![c_a.clone()],
         "no denied probe added a candidate the holder can see"
     );
-    observer.close().await;
+    resources
+        .close_observer(observer)
+        .await
+        .expect("the denied-probe observer closes");
 
-    // 9. Allowed capture in A: the committed receipt tuple and the durable
-    //    candidate/receipt rows are checked, not a count.
+    // 9. Allowed capture in A: bind the result candidate to its durable row and
+    //    the receipt tuple before any later baseline.
     let allowed = peer
-        .capture(capture_body(
-            "k-c090-allowed",
-            TEXT,
-            &context_scope(CONTEXT),
-        ))
+        .capture(capture_body("k-c090-allowed", TEXT, &context_scope(CONTEXT)))
         .await;
-    assert_receipt_tuple(&allowed, "memory.capture", &peer_id);
+    assert_receipt_tuple(&allowed, "memory.capture", peer_id.as_str());
     let candidate = support::candidate_ids(&allowed)[0].clone();
     let receipt = receipt_id(&allowed).to_owned();
-    let mut effect = matrix
-        .durable_observer(SUBJECT, &[], Some(&candidate), Some(&receipt), None)
+    let effect = resources
+        .open_observer(
+            matrix,
+            SUBJECT,
+            &[],
+            Some(&candidate),
+            Some(&receipt),
+            None,
+        )
         .await;
-    let state = effect.observe().await;
+    let state = resources.observe(effect).await;
     let candidate_row = observed(&state, &format!("candidate:{candidate}"));
+    assert_eq!(column(candidate_row, "subject_id"), format!("text:{SUBJECT}"));
     assert_eq!(column(candidate_row, "capture_visibility"), "text:context");
     assert_eq!(
         column(candidate_row, "capture_context_id"),
@@ -498,10 +442,7 @@ async fn grant_scope_covers_base_surfaces(matrix: &Matrix) {
     );
     assert_eq!(column(candidate_row, "status"), "text:pending");
     assert_eq!(column(candidate_row, "revision"), "int:1");
-    assert!(
-        column(candidate_row, "content_json").contains(TEXT),
-        "the committed candidate stores the requested content: {state:?}"
-    );
+    assert!(column(candidate_row, "content_json").contains(TEXT));
     let receipt_row = observed(&state, &format!("receipt:{receipt}"));
     assert_eq!(column(receipt_row, "status"), "text:committed");
     assert_eq!(column(receipt_row, "op"), "text:memory.capture");
@@ -510,14 +451,17 @@ async fn grant_scope_covers_base_surfaces(matrix: &Matrix) {
         format!("text:{}", peer_id.as_str())
     );
     assert!(
-        !column(receipt_row, "result_json").contains(TEXT),
-        "the durable receipt result is content-free: {state:?}"
+        column(receipt_row, "result_json").contains(&candidate),
+        "the durable receipt result names the actual candidate: {state:?}"
     );
-    effect.close().await;
+    assert!(!column(receipt_row, "result_json").contains(TEXT));
+    resources
+        .close_observer(effect)
+        .await
+        .expect("the effect observer closes");
 
-    // 10. Receipt surface: the holder reads its own receipt; another
-    //     principal's/out-of-coverage receipt is refused with no receipt body
-    //     disclosed anywhere in the response.
+    // 10. Receipt surface: the holder reads its own; another principal's or
+    //     out-of-coverage receipt is refused with no receipt disclosure.
     let own = peer.get_receipt(&receipt).await;
     assert_eq!(own["receipt"]["receipt_id"], json!(receipt));
     let foreign_capture = admin
@@ -528,43 +472,42 @@ async fn grant_scope_covers_base_surfaces(matrix: &Matrix) {
         ))
         .await;
     let foreign_receipt = receipt_id(&foreign_capture).to_owned();
-    let foreign_candidate = support::candidate_ids(&foreign_capture)[0].clone();
     let refused = peer.get_receipt(&foreign_receipt).await;
     assert!(
         matches!(error_code(&refused), "NOT_FOUND" | "NOT_AUTHORIZED"),
         "{refused}"
     );
     assert_eq!(retry_class(&refused), "terminal");
-    assert_no_receipt_disclosure(&refused, &[foreign_candidate.as_str(), TEXT]);
+    assert_no_receipt_disclosure(&refused, &foreign_capture);
     assert_eq!(
         admin.get_receipt(&foreign_receipt).await["receipt"]["receipt_id"],
-        json!(foreign_receipt),
-        "the authorized requester still reads the same receipt"
+        json!(foreign_receipt)
     );
 
     // 11. No retained record was replaced or mutated by any probe.
-    let mut final_observer = matrix
-        .durable_observer(
-            SUBJECT,
-            &[r_a, r_b, r_out, r_shared],
-            None,
-            None,
-            None,
-        )
+    let final_observer = resources
+        .open_observer(matrix, SUBJECT, &[r_a, r_b, r_out, r_shared], None, None, None)
         .await;
-    let final_state = final_observer.observe().await;
+    let final_state = resources.observe(final_observer).await;
     assert_eq!(
         observed_records(&final_state),
         observed_records(&before),
         "the denied probes and the allowed capture changed no retained record"
     );
-    final_observer.close().await;
+    resources
+        .close_observer(final_observer)
+        .await
+        .expect("the final observer closes");
 }
 
 /// C-091: revoking a grant takes effect at the admission boundary. An operation
-/// that already passed admission runs to its durable receipt while the revoke
-/// commits; subsequent operations are refused and persist nothing.
-async fn revoke_applies_at_admission_boundary(matrix: &Matrix) {
+/// that already passed admission runs to its durable candidate/receipt while the
+/// revoke commits; subsequent operations are refused and persist nothing.
+async fn revoke_applies_at_admission_boundary(
+    matrix: &Matrix,
+    resources: &mut OwnedResources,
+    tasks: TaskSet,
+) {
     bootstrap(matrix, &[]).await;
     let admin = matrix.admin();
     let peer_id = matrix.peer_principal().principal_id.clone();
@@ -581,10 +524,8 @@ async fn revoke_applies_at_admission_boundary(matrix: &Matrix) {
         .expect("grant id")
         .to_owned();
 
-    // Park the capture AFTER its admission check and before its commit, then
-    // issue the real revocation while it is held.
     let mut capture_hold = matrix.park_next_capture();
-    let capture = tokio::spawn(support::capture_with(
+    let capture = tasks.spawn(support::capture_with(
         matrix.peer_client(),
         matrix.peer_principal().clone(),
         matrix.space_id().to_owned(),
@@ -597,12 +538,8 @@ async fn revoke_applies_at_admission_boundary(matrix: &Matrix) {
 
     let revoke = match matrix.kind() {
         Kind::Local => {
-            // The local provider's admission gate is an existing control that
-            // signals the revoke has reached the provider's write-admission
-            // machinery, before its own transaction. That is the arrival
-            // evidence: it is observed while the capture is still held.
             let mut arrival = matrix.park_next_admission();
-            let revoke = tokio::spawn(revoke_from(
+            let revoke = tasks.spawn(revoke_from(
                 matrix.admin_client(),
                 matrix.admin_principal().clone(),
                 matrix.space_id().to_owned(),
@@ -612,47 +549,60 @@ async fn revoke_applies_at_admission_boundary(matrix: &Matrix) {
             arrival
                 .wait_reached()
                 .await
-                .expect("the revoke reached the provider admission machinery while the capture was held");
+                .expect("the revoke reached the local admission machinery while the capture was held");
             arrival.release().await;
             revoke
         }
         Kind::Remote => {
-            // The current fixture server arms its handler-entry observation only
-            // for `memory.subjects.fence` and `memory.candidates.review`; the
-            // grant revoke has no equivalent test seam. The real revoke is
-            // still issued while the capture is held and the provider's own
-            // write serialization orders it after the admitted commit; the
-            // missing arrival seam is recorded in the Task 10 report.
-            tokio::spawn(revoke_from(
+            // The fixture's existing handler-entry arm, now also consulted by
+            // `revoke_grant` after authenticated typed admission and before its
+            // writer transaction: a real arrival, not a spawn proxy.
+            let mut arrival = matrix.park_next_target("memory.grants.revoke");
+            let revoke = tasks.spawn(revoke_from(
                 matrix.admin_client(),
                 matrix.admin_principal().clone(),
                 matrix.space_id().to_owned(),
                 grant_id.clone(),
                 "k-c091-revoke",
-            ))
+            ));
+            arrival
+                .wait_reached()
+                .await
+                .expect("the revoke reached the fixture handler while the capture was held");
+            arrival.release().await;
+            revoke
         }
     };
     capture_hold.release().await;
 
-    let admitted = joined(capture, "the admitted capture").await;
+    let admitted = tasks
+        .join(capture, "the admitted capture")
+        .await
+        .expect("the admitted capture settles");
     assert!(is_committed(&admitted), "the admitted op completes: {admitted}");
     let admitted_receipt = receipt_id(&admitted).to_owned();
-    assert_receipt_tuple(&admitted, "memory.capture", &peer_id);
+    let admitted_candidate = support::candidate_ids(&admitted)[0].clone();
+    assert_receipt_tuple(&admitted, "memory.capture", peer_id.as_str());
 
-    let revoked = joined(revoke, "the revoke").await;
-    assert_eq!(result(&revoked)["revoked"], json!(true), "{revoked}");
-    assert_eq!(result(&revoked)["revision"], json!(2));
-
-    // The revoke is visible to the admin's receipt-view positive control and
-    // the admitted effect is durable under its own receipt.
-    let stored = admin.get_receipt(&admitted_receipt).await;
-    assert_eq!(stored["receipt"]["receipt_id"], json!(admitted_receipt));
-    assert_eq!(stored["receipt"]["status"], json!("committed"));
-
-    let mut effect = matrix
-        .durable_observer(SUBJECT, &[], None, Some(&admitted_receipt), None)
+    // The admitted effect is the actual durable candidate, bound before any
+    // later baseline can mask a missing effect.
+    let effect = resources
+        .open_observer(
+            matrix,
+            SUBJECT,
+            &[],
+            Some(&admitted_candidate),
+            Some(&admitted_receipt),
+            None,
+        )
         .await;
-    let effect_state = effect.observe().await;
+    let effect_state = resources.observe(effect).await;
+    let candidate_row = observed(&effect_state, &format!("candidate:{admitted_candidate}"));
+    assert_eq!(column(candidate_row, "subject_id"), format!("text:{SUBJECT}"));
+    assert_eq!(column(candidate_row, "capture_visibility"), "text:shared");
+    assert_eq!(column(candidate_row, "status"), "text:pending");
+    assert_eq!(column(candidate_row, "revision"), "int:1");
+    assert!(column(candidate_row, "content_json").contains(TEXT));
     let receipt_row = observed(&effect_state, &format!("receipt:{admitted_receipt}"));
     assert_eq!(column(receipt_row, "status"), "text:committed");
     assert_eq!(column(receipt_row, "op"), "text:memory.capture");
@@ -660,15 +610,32 @@ async fn revoke_applies_at_admission_boundary(matrix: &Matrix) {
         column(receipt_row, "requester_principal_id"),
         format!("text:{}", peer_id.as_str())
     );
+    assert!(
+        column(receipt_row, "result_json").contains(&admitted_candidate),
+        "the durable receipt result names the actual candidate: {effect_state:?}"
+    );
     assert!(!column(receipt_row, "result_json").contains(TEXT));
-    effect.close().await;
+    resources
+        .close_observer(effect)
+        .await
+        .expect("the effect observer closes");
+
+    let revoked = tasks
+        .join(revoke, "the revoke")
+        .await
+        .expect("the revoke settles");
+    assert_eq!(result(&revoked)["revoked"], json!(true), "{revoked}");
+    assert_eq!(result(&revoked)["revision"], json!(2));
+    let stored = admin.get_receipt(&admitted_receipt).await;
+    assert_eq!(stored["receipt"]["receipt_id"], json!(admitted_receipt));
+    assert_eq!(stored["receipt"]["status"], json!("committed"));
 
     // Subsequent admissions see the revocation: typed refusal, no new effect.
-    let mut refusal_window = matrix
-        .durable_observer(SUBJECT, &[], None, None, None)
+    let window = resources
+        .open_observer(matrix, SUBJECT, &[], None, None, None)
         .await;
-    let refusal_before = refusal_window.observe().await;
-    let captures_before = refusal_window.receipt_ids_for("memory.capture").await;
+    let refusal_before = resources.observe(window).await;
+    let captures_before = resources.receipt_ids_for(window, "memory.capture").await;
     let pending_before = pending_candidates(&admin).await;
     let after_revoke = matrix
         .peer()
@@ -681,9 +648,9 @@ async fn revoke_applies_at_admission_boundary(matrix: &Matrix) {
         .list_candidates(json!({ "subject_id": SUBJECT, "status": "pending" }))
         .await;
     assert_eq!(error_code(&refused_list), "NOT_AUTHORIZED", "{refused_list}");
-    let refusal_after = refusal_window.observe().await;
+    let refusal_after = resources.observe(window).await;
     assert_eq!(
-        refusal_window.receipt_ids_for("memory.capture").await,
+        resources.receipt_ids_for(window, "memory.capture").await,
         captures_before,
         "the refused post-revocation capture produced no receipt"
     );
@@ -693,10 +660,13 @@ async fn revoke_applies_at_admission_boundary(matrix: &Matrix) {
         pending_before,
         "the refused capture added no candidate"
     );
-    refusal_window.close().await;
+    resources
+        .close_observer(window)
+        .await
+        .expect("the refusal observer closes");
 }
 
-/// One revoke with owned inputs so it can be issued while another op is held.
+/// One revoke with owned inputs so it can be a runner-owned task.
 async fn revoke_from(
     client: Arc<RemoteAdapter>,
     principal: Principal,
@@ -723,7 +693,11 @@ async fn revoke_from(
 /// CAS revision with complete, distinguishable content. Exactly one commits; the
 /// other is `REVISION_CONFLICT`, and the final record is the winner's complete
 /// write with every baseline field intact — never a merge or lost update.
-async fn concurrent_record_update_has_one_winner(matrix: &Matrix) {
+async fn concurrent_record_update_has_one_winner(
+    matrix: &Matrix,
+    _resources: &mut OwnedResources,
+    tasks: TaskSet,
+) {
     bootstrap(matrix, &[]).await;
     let admin = matrix.admin();
     let peer_id = matrix.peer_principal().principal_id.clone();
@@ -754,11 +728,8 @@ async fn concurrent_record_update_has_one_winner(matrix: &Matrix) {
         .as_str()
         .expect("record id")
         .to_owned();
-
-    // Positive control: the complete pre-race record is observable.
     let baseline = admin.get_record(&record_id).await["record"].clone();
     assert_eq!(baseline["revision"], json!(1));
-    assert_eq!(baseline["content"]["text"], json!("the original line"));
     assert_eq!(baseline["content"]["structured"]["writer"], json!("baseline"));
 
     let admin_content = json!({
@@ -770,7 +741,7 @@ async fn concurrent_record_update_has_one_winner(matrix: &Matrix) {
         "structured": { "writer": "peer", "phase": 2, "tags": ["c"] },
     });
 
-    let admin_update = tokio::spawn(update_with(
+    let admin_update = tasks.spawn(update_with(
         matrix.admin_client(),
         matrix.admin_principal().clone(),
         matrix.space_id().to_owned(),
@@ -781,7 +752,7 @@ async fn concurrent_record_update_has_one_winner(matrix: &Matrix) {
             "idempotency_key": "k-c092-admin",
         }),
     ));
-    let peer_update = tokio::spawn(update_with(
+    let peer_update = tasks.spawn(update_with(
         matrix.peer_client(),
         matrix.peer_principal().clone(),
         matrix.space_id().to_owned(),
@@ -792,8 +763,11 @@ async fn concurrent_record_update_has_one_winner(matrix: &Matrix) {
             "idempotency_key": "k-c092-peer",
         }),
     ));
-    let admin_result = joined(admin_update, "the admin update").await;
-    let peer_result = joined(peer_update, "the peer update").await;
+    // Both owned tasks are joined before either result is asserted.
+    let admin_outcome = tasks.join(admin_update, "the admin update").await;
+    let peer_outcome = tasks.join(peer_update, "the peer update").await;
+    let admin_result = admin_outcome.expect("the admin update settles");
+    let peer_result = peer_outcome.expect("the peer update settles");
 
     let committed = [&admin_result, &peer_result]
         .into_iter()
@@ -811,9 +785,6 @@ async fn concurrent_record_update_has_one_winner(matrix: &Matrix) {
     assert_eq!(error_code(loser), "REVISION_CONFLICT", "{loser}");
     assert_eq!(retry_class(loser), "terminal");
 
-    // The complete final record must equal the winning write plus the unchanged
-    // baseline fields; only the contract's server-managed `updated_at` is
-    // exempt, and `revision` advanced exactly once.
     let final_record = admin.get_record(&record_id).await["record"].clone();
     let mut expected = baseline.clone();
     expected["content"] = winner_content.clone();
@@ -823,17 +794,14 @@ async fn concurrent_record_update_has_one_winner(matrix: &Matrix) {
         .expect("record object")
         .remove("updated_at");
     let mut actual = final_record.clone();
-    actual.as_object_mut().expect("record object").remove("updated_at");
+    actual
+        .as_object_mut()
+        .expect("record object")
+        .remove("updated_at");
     assert_eq!(
         actual, expected,
         "the final record is exactly the winning write over the untouched baseline"
     );
-    assert_eq!(final_record["record_id"], json!(record_id));
-    assert_eq!(final_record["kind"], baseline["kind"]);
-    assert_eq!(final_record["scope"], baseline["scope"]);
-    assert_eq!(final_record["subject_id"], baseline["subject_id"]);
-    assert_eq!(final_record["created_at"], baseline["created_at"]);
-    assert_eq!(final_record["content"], winner_content);
     assert_ne!(
         final_record["content"]["structured"],
         if final_record["content"] == admin_content {
@@ -849,9 +817,12 @@ async fn concurrent_record_update_has_one_winner(matrix: &Matrix) {
 /// one outcome decided by admission order, and the receipt/durable state agrees
 /// with it. Revoke-first/fence-first admit the control first; write-first holds
 /// the admitted write and proves the control reached the provider boundary
-/// (local admission gate; fixture's existing subject-fence handler arm) before
-/// the write is released.
-async fn revoke_or_fence_race_has_one_outcome(matrix: &Matrix) {
+/// before the write is released.
+async fn revoke_or_fence_race_has_one_outcome(
+    matrix: &Matrix,
+    resources: &mut OwnedResources,
+    tasks: TaskSet,
+) {
     bootstrap(matrix, &[]).await;
     let admin = matrix.admin();
     let peer_id = matrix.peer_principal().principal_id.clone();
@@ -868,10 +839,9 @@ async fn revoke_or_fence_race_has_one_outcome(matrix: &Matrix) {
         .expect("grant id")
         .to_owned();
 
-    // (a) Revoke admitted first: the write is parked before its admission
-    //     decision, the revoke commits, the released write is refused.
+    // (a) Revoke admitted first.
     let mut write_hold = matrix.park_next_admission();
-    let write = tokio::spawn(support::capture_with(
+    let write = tasks.spawn(support::capture_with(
         matrix.peer_client(),
         matrix.peer_principal().clone(),
         matrix.space_id().to_owned(),
@@ -883,28 +853,33 @@ async fn revoke_or_fence_race_has_one_outcome(matrix: &Matrix) {
         .expect("the write entered the admission machinery");
     let revoked = admin.revoke_grant(&grant_id, 1, "k-c093-revoke").await;
     assert_eq!(result(&revoked)["revoked"], json!(true), "{revoked}");
-    let mut window = matrix
-        .durable_observer(SUBJECT, &[], None, None, None)
+    let window = resources
+        .open_observer(matrix, SUBJECT, &[], None, None, None)
         .await;
-    let refusal_before = window.observe().await;
-    let captures_before = window.receipt_ids_for("memory.capture").await;
+    let refusal_before = resources.observe(window).await;
+    let captures_before = resources.receipt_ids_for(window, "memory.capture").await;
     let pending_before = pending_candidates(&admin).await;
     write_hold.release().await;
-    let refused = joined(write, "the revoke-first write").await;
+    let refused = tasks
+        .join(write, "the revoke-first write")
+        .await
+        .expect("the revoke-first write settles");
     assert_eq!(error_code(&refused), "NOT_AUTHORIZED", "{refused}");
     assert_eq!(retry_class(&refused), "terminal");
-    let refusal_after = window.observe().await;
+    let refusal_after = resources.observe(window).await;
     assert_eq!(
-        window.receipt_ids_for("memory.capture").await,
+        resources.receipt_ids_for(window, "memory.capture").await,
         captures_before,
         "the non-admitted write produced no receipt"
     );
     assert_eq!(refusal_after.rows, refusal_before.rows);
     assert_eq!(pending_candidates(&admin).await, pending_before);
-    window.close().await;
+    resources
+        .close_observer(window)
+        .await
+        .expect("the revoke-first observer closes");
 
-    // (b) Fence admitted first: re-grant capture, park the write before its
-    //     admission, commit the real subject fence, release.
+    // (b) Fence admitted first.
     let regranted = admin
         .grant(json!({
             "subject_id": SUBJECT,
@@ -915,7 +890,7 @@ async fn revoke_or_fence_race_has_one_outcome(matrix: &Matrix) {
         .await;
     assert!(is_committed(&regranted), "{regranted}");
     let mut write_hold = matrix.park_next_admission();
-    let write = tokio::spawn(support::capture_with(
+    let write = tasks.spawn(support::capture_with(
         matrix.peer_client(),
         matrix.peer_principal().clone(),
         matrix.space_id().to_owned(),
@@ -935,29 +910,32 @@ async fn revoke_or_fence_race_has_one_outcome(matrix: &Matrix) {
         )
         .await;
     assert_eq!(result(&fenced)["status"], json!("fenced"), "{fenced}");
-    let mut window = matrix
-        .durable_observer(SUBJECT, &[], None, None, None)
+    let window = resources
+        .open_observer(matrix, SUBJECT, &[], None, None, None)
         .await;
-    let refusal_before = window.observe().await;
-    let captures_before = window.receipt_ids_for("memory.capture").await;
+    let refusal_before = resources.observe(window).await;
+    let captures_before = resources.receipt_ids_for(window, "memory.capture").await;
     let pending_before = pending_candidates(&admin).await;
     write_hold.release().await;
-    let refused = joined(write, "the fence-first write").await;
+    let refused = tasks
+        .join(write, "the fence-first write")
+        .await
+        .expect("the fence-first write settles");
     assert_eq!(error_code(&refused), "SUBJECT_FENCED", "{refused}");
-    let refusal_after = window.observe().await;
+    let refusal_after = resources.observe(window).await;
     assert_eq!(
-        window.receipt_ids_for("memory.capture").await,
+        resources.receipt_ids_for(window, "memory.capture").await,
         captures_before,
         "the post-fence write produced no receipt"
     );
     assert_eq!(refusal_after.rows, refusal_before.rows);
     assert_eq!(pending_candidates(&admin).await, pending_before);
-    window.close().await;
+    resources
+        .close_observer(window)
+        .await
+        .expect("the fence-first observer closes");
 
-    // (c) Write admitted first, control arriving while it is held. Unfence,
-    //     park the write after its authorization, prove the real fence reached
-    //     the provider boundary, then release: the admitted write completes
-    //     with its durable receipt and the fence commits after it.
+    // (c) Write admitted first, control arriving while it is held.
     let unfenced = admin
         .fence_subject(
             SUBJECT,
@@ -970,7 +948,7 @@ async fn revoke_or_fence_race_has_one_outcome(matrix: &Matrix) {
     assert_eq!(result(&unfenced)["status"], json!("active"), "{unfenced}");
 
     let mut capture_hold = matrix.park_next_capture();
-    let write = tokio::spawn(support::capture_with(
+    let write = tasks.spawn(support::capture_with(
         matrix.peer_client(),
         matrix.peer_principal().clone(),
         matrix.space_id().to_owned(),
@@ -983,7 +961,7 @@ async fn revoke_or_fence_race_has_one_outcome(matrix: &Matrix) {
     let fence = match matrix.kind() {
         Kind::Local => {
             let mut arrival = matrix.park_next_admission();
-            let fence = tokio::spawn(fence_from(
+            let fence = tasks.spawn(fence_from(
                 matrix.admin_client(),
                 matrix.admin_principal().clone(),
                 matrix.space_id().to_owned(),
@@ -993,16 +971,13 @@ async fn revoke_or_fence_race_has_one_outcome(matrix: &Matrix) {
             arrival
                 .wait_reached()
                 .await
-                .expect("the fence reached the provider admission machinery while the write was held");
+                .expect("the fence reached the local admission machinery while the write was held");
             arrival.release().await;
             fence
         }
         Kind::Remote => {
-            // The fixture's existing handler-entry arm (`wait_target`) is
-            // consulted by `memory.subjects.fence`, so this is a real arrival
-            // observation, not a spawn proxy.
             let mut arrival = matrix.park_next_target("memory.subjects.fence");
-            let fence = tokio::spawn(fence_from(
+            let fence = tasks.spawn(fence_from(
                 matrix.admin_client(),
                 matrix.admin_principal().clone(),
                 matrix.space_id().to_owned(),
@@ -1018,55 +993,76 @@ async fn revoke_or_fence_race_has_one_outcome(matrix: &Matrix) {
         }
     };
     capture_hold.release().await;
-    let admitted = joined(write, "the admitted write").await;
+    let admitted = tasks
+        .join(write, "the admitted write")
+        .await
+        .expect("the admitted write settles");
+    let fenced_late = tasks
+        .join(fence, "the late fence")
+        .await
+        .expect("the late fence settles");
     assert!(is_committed(&admitted), "the admitted write completes: {admitted}");
-    assert_receipt_tuple(&admitted, "memory.capture", &peer_id);
-    let fenced_late = joined(fence, "the late fence").await;
+    assert_receipt_tuple(&admitted, "memory.capture", peer_id.as_str());
+    let candidate = support::candidate_ids(&admitted)[0].clone();
+    let receipt = receipt_id(&admitted).to_owned();
     assert_eq!(result(&fenced_late)["status"], json!("fenced"), "{fenced_late}");
     assert_eq!(result(&fenced_late)["revision"], json!(4));
 
-    // The admitted write's durable candidate/receipt rows are the effect; a
-    // later write is refused and adds nothing.
-    let candidate = support::candidate_ids(&admitted)[0].clone();
-    let receipt = receipt_id(&admitted).to_owned();
-    let mut effect = matrix
-        .durable_observer(SUBJECT, &[], Some(&candidate), Some(&receipt), None)
+    let effect = resources
+        .open_observer(
+            matrix,
+            SUBJECT,
+            &[],
+            Some(&candidate),
+            Some(&receipt),
+            None,
+        )
         .await;
-    let state = effect.observe().await;
-    assert_eq!(
-        column(observed(&state, &format!("candidate:{candidate}")), "status"),
-        "text:pending"
+    let state = resources.observe(effect).await;
+    let candidate_row = observed(&state, &format!("candidate:{candidate}"));
+    assert_eq!(column(candidate_row, "subject_id"), format!("text:{SUBJECT}"));
+    assert_eq!(column(candidate_row, "capture_visibility"), "text:shared");
+    assert_eq!(column(candidate_row, "status"), "text:pending");
+    assert_eq!(column(candidate_row, "revision"), "int:1");
+    assert!(column(candidate_row, "content_json").contains(TEXT));
+    let receipt_row = observed(&state, &format!("receipt:{receipt}"));
+    assert_eq!(column(receipt_row, "status"), "text:committed");
+    assert!(
+        column(receipt_row, "result_json").contains(&candidate),
+        "the durable receipt result names the actual candidate: {state:?}"
     );
-    assert_eq!(
-        column(observed(&state, &format!("receipt:{receipt}")), "status"),
-        "text:committed"
-    );
-    effect.close().await;
+    assert!(!column(receipt_row, "result_json").contains(TEXT));
+    resources
+        .close_observer(effect)
+        .await
+        .expect("the race effect observer closes");
 
-    let mut window = matrix
-        .durable_observer(SUBJECT, &[], None, None, None)
+    let window = resources
+        .open_observer(matrix, SUBJECT, &[], None, None, None)
         .await;
-    let refusal_before = window.observe().await;
-    let captures_before = window.receipt_ids_for("memory.capture").await;
+    let refusal_before = resources.observe(window).await;
+    let captures_before = resources.receipt_ids_for(window, "memory.capture").await;
     let pending_before = pending_candidates(&admin).await;
     let afterwards = matrix
         .peer()
         .capture(capture_body("k-c093-after-fence", TEXT, &shared_scope()))
         .await;
     assert_eq!(error_code(&afterwards), "SUBJECT_FENCED", "{afterwards}");
-    let refusal_after = window.observe().await;
+    let refusal_after = resources.observe(window).await;
     assert_eq!(
-        window.receipt_ids_for("memory.capture").await,
+        resources.receipt_ids_for(window, "memory.capture").await,
         captures_before,
         "the refusals after the race produced no receipt"
     );
     assert_eq!(refusal_after.rows, refusal_before.rows);
     assert_eq!(pending_candidates(&admin).await, pending_before);
-    window.close().await;
+    resources
+        .close_observer(window)
+        .await
+        .expect("the post-race observer closes");
 }
 
-/// One subject fence with owned inputs, so it can be issued while another op is
-/// held.
+/// One subject fence with owned inputs, so it can be a runner-owned task.
 async fn fence_from(
     client: Arc<RemoteAdapter>,
     principal: Principal,
@@ -1093,10 +1089,13 @@ async fn fence_from(
 
 /// C-095: a scoped admin cannot amplify its own coverage. The context-superset
 /// and shared-access probes carry the SAME valid earlier expiry as the
-/// legitimate positive, so only the tested scope facet differs; the
-/// longer-expiry probe is its own isolated negative. Refusals leave the full
-/// effective grant set unchanged.
-async fn scoped_admin_cannot_amplify_grant(matrix: &Matrix) {
+/// legitimate positive; the longer-expiry probe is isolated. Refusals leave the
+/// full effective grant set unchanged.
+async fn scoped_admin_cannot_amplify_grant(
+    matrix: &Matrix,
+    _resources: &mut OwnedResources,
+    _tasks: TaskSet,
+) {
     bootstrap(matrix, &[]).await;
     let admin = matrix.admin();
     let peer_id = matrix.peer_principal().principal_id.clone();
@@ -1117,14 +1116,10 @@ async fn scoped_admin_cannot_amplify_grant(matrix: &Matrix) {
         .await;
     assert!(is_committed(&scoped), "the scoped admin grant commits: {scoped}");
     let peer = matrix.peer();
-
-    // The full effective grant view before any amplification attempt.
     let grants_before = admin.list_grants(json!({})).await["grants"].clone();
     let earlier = (chrono::Utc::now() + chrono::Duration::minutes(30))
         .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
 
-    // 1. Context superset, with a valid earlier expiry (only the context facet
-    //    is invalid).
     let superset = peer
         .grant(json!({
             "subject_id": SUBJECT,
@@ -1139,8 +1134,6 @@ async fn scoped_admin_cannot_amplify_grant(matrix: &Matrix) {
     assert_eq!(error_code(&superset), "NOT_AUTHORIZED", "{superset}");
     assert_eq!(retry_class(&superset), "terminal");
 
-    // 2. shared_access upgrade, same valid earlier expiry (only the shared facet
-    //    is invalid).
     let upgraded = peer
         .grant(json!({
             "subject_id": SUBJECT,
@@ -1154,7 +1147,6 @@ async fn scoped_admin_cannot_amplify_grant(matrix: &Matrix) {
         .await;
     assert_eq!(error_code(&upgraded), "NOT_AUTHORIZED", "{upgraded}");
 
-    // 3. Longer expiry is its own isolated negative.
     let longer = (chrono::Utc::now() + chrono::Duration::hours(6))
         .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let prolonged = peer
@@ -1170,15 +1162,12 @@ async fn scoped_admin_cannot_amplify_grant(matrix: &Matrix) {
         .await;
     assert_eq!(error_code(&prolonged), "NOT_AUTHORIZED", "{prolonged}");
 
-    // The full effective grant set is unchanged by the three refusals.
     assert_eq!(
         admin.list_grants(json!({})).await["grants"],
         grants_before,
         "the refused amplifications changed no effective grant"
     );
 
-    // 4. The legitimate in-scope positive: subset capabilities, same context,
-    //    bounded earlier expiry.
     let legitimate = peer
         .grant(json!({
             "subject_id": SUBJECT,
@@ -1197,11 +1186,7 @@ async fn scoped_admin_cannot_amplify_grant(matrix: &Matrix) {
         .as_array()
         .expect("grant page")
         .clone();
-    assert_eq!(
-        third_grants.len(),
-        1,
-        "exactly the legitimate grant: {third_grants:?}"
-    );
+    assert_eq!(third_grants.len(), 1, "exactly the legitimate grant: {third_grants:?}");
     assert_eq!(third_grants[0]["capabilities"], json!(["capture"]));
     assert_eq!(third_grants[0]["context_ids"], json!([CONTEXT]));
     assert_eq!(third_grants[0]["shared_access"], json!(false));
@@ -1225,27 +1210,21 @@ async fn scoped_admin_cannot_amplify_grant(matrix: &Matrix) {
 /// administrator without any protocol grant cycle, and both are discoverable
 /// through `memory.describe` / `memory.spaces.list`. No protocol space-creation
 /// op exists.
-async fn operator_bootstrap_is_callable_and_visible(matrix: &Matrix) {
+async fn operator_bootstrap_is_callable_and_visible(
+    matrix: &Matrix,
+    resources: &mut OwnedResources,
+    _tasks: TaskSet,
+) {
     let admin = matrix.admin();
     let described = admin.describe().await;
-    assert_eq!(
-        described["capabilities"],
-        json!(["spoke-memory"]),
-        "the provider advertises the memory family: {described}"
-    );
-    assert_eq!(
-        described["required_profile_kinds"],
-        json!([]),
-        "no unsupported capability prerequisite is advertised"
-    );
-
+    assert_eq!(described["capabilities"], json!(["spoke-memory"]), "{described}");
+    assert_eq!(described["required_profile_kinds"], json!([]));
     let spaces = admin.list_spaces().await;
     let rows = spaces["spaces"].as_array().expect("space page");
     assert_eq!(rows.len(), 1, "exactly the provisioned space: {spaces}");
     assert_eq!(rows[0]["space_id"], json!(matrix.space_id()));
     assert_eq!(rows[0]["status"], json!("active"));
     assert_eq!(rows[0]["authority_generation"], json!(1));
-
     let grants = admin.list_grants(json!({})).await;
     assert!(
         grants["grants"]
@@ -1259,32 +1238,33 @@ async fn operator_bootstrap_is_callable_and_visible(matrix: &Matrix) {
         "the operator admin grant is visible: {grants}"
     );
 
-    // No protocol v1 space-creation op was invented; a real re-open proves the
-    // served service survived the raw session's bounded close.
-    let mut raw = matrix.raw_admin().await;
-    let invented = raw
-        .invoke("memory.spaces.create", &json!({ "space_id": matrix.space_id() }))
+    // No protocol v1 space-creation op was invented; the raw session is
+    // runner-owned and closed by the same settle path that owns the matrix.
+    let raw = resources.open_raw_admin(matrix).await;
+    let invented = resources
+        .invoke(raw, "memory.spaces.create", &json!({ "space_id": matrix.space_id() }))
         .await;
     assert_eq!(
         invented["error"]["code"],
         json!("op_unsupported"),
         "space creation is not a protocol op: {invented}"
     );
-    raw.close().await.expect("the raw session settles");
-    let mut reopened = matrix.raw_admin().await;
-    let served = reopened.invoke("memory.describe", &json!({})).await;
+    resources
+        .close_raw(raw)
+        .await
+        .expect("the raw session settles");
     assert_eq!(
-        served["payload"]["capabilities"],
-        json!(["spoke-memory"]),
-        "the service remains usable after the bounded raw close: {served}"
+        matrix.admin().list_spaces().await["spaces"]
+            .as_array()
+            .expect("space page")
+            .len(),
+        1
     );
-    reopened.close().await.expect("the reopened raw session settles");
 }
 
 /// C-096 (`_local` only): the real operator `CoreService` open provisions the
-/// initial space and admin grant. The provider read here is the very instance
-/// that open pinned, so the bootstrap is proved before any test-side provider
-/// helper runs; the Core and the follow-up matrix are both settled on failure.
+/// initial space and admin grant; its close must report a confirmed cleanup.
+/// The served-surface half runs on a fresh local matrix.
 async fn local_operator_bootstrap_through_core() {
     let home = tempfile::TempDir::new().expect("temporary Core home");
     let user_home = home.path().to_path_buf();
@@ -1319,7 +1299,6 @@ async fn local_operator_bootstrap_through_core() {
     .await
     .expect("open Core over the disposable home");
 
-    use futures_util::FutureExt as _;
     let scenario = std::panic::AssertUnwindSafe(async {
         let provider = core
             .memory_provider_for_test()
@@ -1353,11 +1332,15 @@ async fn local_operator_bootstrap_through_core() {
     let cleanup = support::close_core_bounded(&core).await;
     drop(core);
     match (scenario, cleanup) {
-        (Ok(()), Ok(())) => {}
+        (Ok(()), Ok(report)) => {
+            assert!(report.cleanup_confirmed, "the Core close reports a confirmed cleanup");
+            assert!(report.pending_operations.is_empty(), "{report:?}");
+            eprintln!("C-096 local: Core close report state={} confirmed={}", report.state, report.cleanup_confirmed);
+        }
         (Ok(()), Err(error)) => {
             panic!("the operator Core close failed after the bootstrap evidence: {error}")
         }
-        (Err(payload), Ok(())) => std::panic::resume_unwind(payload),
+        (Err(payload), Ok(_)) => std::panic::resume_unwind(payload),
         (Err(payload), Err(error)) => {
             eprintln!("the operator Core close also failed: {error}");
             std::panic::resume_unwind(payload);
@@ -1365,19 +1348,21 @@ async fn local_operator_bootstrap_through_core() {
     }
 }
 
-/// The served-surface half of C-096 on a fresh local matrix: no invented
-/// space-creation op and an unchanged space count.
-async fn local_served_surface_refusal(matrix: &Matrix) {
-    let mut raw = matrix.raw_admin().await;
-    let invented = raw
-        .invoke("memory.spaces.create", &json!({ "space_id": matrix.space_id() }))
+/// The served-surface half of C-096 on a fresh local matrix.
+async fn local_served_surface_refusal(
+    matrix: &Matrix,
+    resources: &mut OwnedResources,
+    _tasks: TaskSet,
+) {
+    let raw = resources.open_raw_admin(matrix).await;
+    let invented = resources
+        .invoke(raw, "memory.spaces.create", &json!({ "space_id": matrix.space_id() }))
         .await;
-    assert_eq!(
-        invented["error"]["code"],
-        json!("op_unsupported"),
-        "{invented}"
-    );
-    raw.close().await.expect("the raw session settles");
+    assert_eq!(invented["error"]["code"], json!("op_unsupported"), "{invented}");
+    resources
+        .close_raw(raw)
+        .await
+        .expect("the raw session settles");
     assert_eq!(
         matrix.admin().list_spaces().await["spaces"]
             .as_array()
@@ -1390,73 +1375,109 @@ async fn local_served_surface_refusal(matrix: &Matrix) {
 #[tokio::test]
 async fn c_090_grant_scope_covers_base_surfaces_local() {
     let matrix = Matrix::local().await;
-    run_matrix_scenario(matrix, |m| Box::pin(async move { grant_scope_covers_base_surfaces(m).await })).await;
+    run_matrix_scenario(matrix, |m, r, t| {
+        Box::pin(async move { grant_scope_covers_base_surfaces(m, r, t).await })
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn c_090_grant_scope_covers_base_surfaces_remote() {
     let matrix = Matrix::remote().await;
-    run_matrix_scenario(matrix, |m| Box::pin(async move { grant_scope_covers_base_surfaces(m).await })).await;
+    run_matrix_scenario(matrix, |m, r, t| {
+        Box::pin(async move { grant_scope_covers_base_surfaces(m, r, t).await })
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn c_091_revoke_applies_at_admission_boundary_local() {
     let matrix = Matrix::local().await;
-    run_matrix_scenario(matrix, |m| Box::pin(async move { revoke_applies_at_admission_boundary(m).await })).await;
+    run_matrix_scenario(matrix, |m, r, t| {
+        Box::pin(async move { revoke_applies_at_admission_boundary(m, r, t).await })
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn c_091_revoke_applies_at_admission_boundary_remote() {
     let matrix = Matrix::remote().await;
-    run_matrix_scenario(matrix, |m| Box::pin(async move { revoke_applies_at_admission_boundary(m).await })).await;
+    run_matrix_scenario(matrix, |m, r, t| {
+        Box::pin(async move { revoke_applies_at_admission_boundary(m, r, t).await })
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn c_092_concurrent_record_update_has_one_winner_local() {
     let matrix = Matrix::local().await;
-    run_matrix_scenario(matrix, |m| Box::pin(async move { concurrent_record_update_has_one_winner(m).await })).await;
+    run_matrix_scenario(matrix, |m, r, t| {
+        Box::pin(async move { concurrent_record_update_has_one_winner(m, r, t).await })
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn c_092_concurrent_record_update_has_one_winner_remote() {
     let matrix = Matrix::remote().await;
-    run_matrix_scenario(matrix, |m| Box::pin(async move { concurrent_record_update_has_one_winner(m).await })).await;
+    run_matrix_scenario(matrix, |m, r, t| {
+        Box::pin(async move { concurrent_record_update_has_one_winner(m, r, t).await })
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn c_093_revoke_or_fence_race_has_one_outcome_local() {
     let matrix = Matrix::local().await;
-    run_matrix_scenario(matrix, |m| Box::pin(async move { revoke_or_fence_race_has_one_outcome(m).await })).await;
+    run_matrix_scenario(matrix, |m, r, t| {
+        Box::pin(async move { revoke_or_fence_race_has_one_outcome(m, r, t).await })
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn c_093_revoke_or_fence_race_has_one_outcome_remote() {
     let matrix = Matrix::remote().await;
-    run_matrix_scenario(matrix, |m| Box::pin(async move { revoke_or_fence_race_has_one_outcome(m).await })).await;
+    run_matrix_scenario(matrix, |m, r, t| {
+        Box::pin(async move { revoke_or_fence_race_has_one_outcome(m, r, t).await })
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn c_095_scoped_admin_cannot_amplify_grant_local() {
     let matrix = Matrix::local().await;
-    run_matrix_scenario(matrix, |m| Box::pin(async move { scoped_admin_cannot_amplify_grant(m).await })).await;
+    run_matrix_scenario(matrix, |m, r, t| {
+        Box::pin(async move { scoped_admin_cannot_amplify_grant(m, r, t).await })
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn c_095_scoped_admin_cannot_amplify_grant_remote() {
     let matrix = Matrix::remote().await;
-    run_matrix_scenario(matrix, |m| Box::pin(async move { scoped_admin_cannot_amplify_grant(m).await })).await;
+    run_matrix_scenario(matrix, |m, r, t| {
+        Box::pin(async move { scoped_admin_cannot_amplify_grant(m, r, t).await })
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn c_096_operator_bootstrap_is_callable_and_visible_local() {
-    eprintln!("C-096 local: proving the real CoreService operator bootstrap before any test provider opener");
+    support::prove_failed_endpoint_settles().await;
     local_operator_bootstrap_through_core().await;
     let matrix = Matrix::local().await;
-    run_matrix_scenario(matrix, |m| Box::pin(async move { local_served_surface_refusal(m).await })).await;
+    run_matrix_scenario(matrix, |m, r, t| {
+        Box::pin(async move { local_served_surface_refusal(m, r, t).await })
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn c_096_operator_bootstrap_is_callable_and_visible_remote() {
     let matrix = Matrix::remote().await;
-    run_matrix_scenario(matrix, |m| Box::pin(async move { operator_bootstrap_is_callable_and_visible(m).await })).await;
+    run_matrix_scenario(matrix, |m, r, t| {
+        Box::pin(async move { operator_bootstrap_is_callable_and_visible(m, r, t).await })
+    })
+    .await;
 }

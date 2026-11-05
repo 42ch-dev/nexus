@@ -35,6 +35,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use futures_util::FutureExt as _;
 use base64::Engine as _;
 use chrono::{Duration as ChronoDuration, Utc};
 use ed25519_dalek::{Signer, SigningKey};
@@ -355,27 +356,43 @@ pub async fn open_endpoint(
         .await;
         (socket, responder)
     });
-    let (ws, _response) = tokio::time::timeout(
-        BOUND,
-        tokio_tungstenite::connect_async(format!("ws://{addr}")),
-    )
-    .await
-    .expect("the localhost websocket connect is bounded")
-    .expect("connect the localhost websocket");
-    let socket: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
-    let dialed = connect_remote_adapter(RemoteAdapterOptions {
-        transport: Arc::clone(&socket),
-        local_identity: RemoteIdentity { seed },
-        local_manifest: manifest(&format!("{host_id}-client")),
-        remote_pubkey: pubkey(&HOST_SEED),
-        allowlist: vec![peer_id(&HOST_SEED)],
-        invoke_timeout_ms: None,
-        capability_token: None,
-    });
-    let client = tokio::time::timeout(BOUND, dialed)
+    // The listener task is owned until the client side succeeds: a connect or
+    // dial failure aborts and bounded-joins it before the original failure is
+    // re-raised, so failed setup never detaches a listener.
+    let client_side = std::panic::AssertUnwindSafe(async {
+        let (ws, _response) = tokio::time::timeout(
+            BOUND,
+            tokio_tungstenite::connect_async(format!("ws://{addr}")),
+        )
         .await
-        .expect("the signed dial is bounded")
-        .expect("the signed dial succeeds");
+        .expect("the localhost websocket connect is bounded")
+        .expect("connect the localhost websocket");
+        let socket: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+        let dialed = connect_remote_adapter(RemoteAdapterOptions {
+            transport: Arc::clone(&socket),
+            local_identity: RemoteIdentity { seed },
+            local_manifest: manifest(&format!("{host_id}-client")),
+            remote_pubkey: pubkey(&HOST_SEED),
+            allowlist: vec![peer_id(&HOST_SEED)],
+            invoke_timeout_ms: None,
+            capability_token: None,
+        });
+        let client = tokio::time::timeout(BOUND, dialed)
+            .await
+            .expect("the signed dial is bounded")
+            .expect("the signed dial succeeds");
+        (socket, client)
+    })
+    .catch_unwind()
+    .await;
+    let (socket, client) = match client_side {
+        Ok(established) => established,
+        Err(payload) => {
+            host.abort();
+            let _ = tokio::time::timeout(BOUND, host).await;
+            std::panic::resume_unwind(payload);
+        }
+    };
     let (_server_socket, responder) = host.await.expect("the listener task");
     Endpoint {
         client,
@@ -884,38 +901,414 @@ async fn close_fixture_bounded(provider: Arc<FixtureMemoryProvider>) -> Result<(
 
 /// [`CoreService::close`] for an aggregating caller: the bound and the inner
 /// result are both reported as a failure string.
-pub async fn close_core_bounded(core: &CoreService) -> Result<(), String> {
+pub async fn close_core_bounded(
+    core: &CoreService,
+) -> Result<nexus_contracts::CoreCloseReport, String> {
     match tokio::time::timeout(BOUND, core.close()).await {
-        Ok(Ok(_)) => Ok(()),
+        Ok(Ok(report)) => {
+            if report.cleanup_confirmed {
+                Ok(report)
+            } else {
+                Err(format!(
+                    "the CoreService close did not confirm cleanup (state {}, pending {:?}, reason {:?})",
+                    report.state, report.pending_operations, report.reason
+                ))
+            }
+        }
         Ok(Err(error)) => Err(format!("the CoreService close failed: {error}")),
         Err(_) => Err("the CoreService close did not finish within the bound".to_owned()),
     }
 }
 
-/// Run one scenario body over `matrix`, then settle every owned session and the
-/// provider on BOTH success and failure.
+/// Owned operation tasks for one scenario, so a deadline or an earlier failure
+/// can never detach live work: every handle stays owned until the scenario
+/// joins it or [`TaskSet::settle`] aborts and bounded-joins it.
+#[derive(Clone, Default)]
+pub struct TaskSet {
+    handles: Arc<std::sync::Mutex<Vec<Option<tokio::task::JoinHandle<Value>>>>>,
+}
+
+impl TaskSet {
+    /// Spawn one owned operation future and return its slot.
+    pub fn spawn<F>(&self, future: F) -> usize
+    where
+        F: Future<Output = Value> + Send + 'static,
+    {
+        let mut handles = self
+            .handles
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        handles.push(Some(tokio::spawn(future)));
+        handles.len() - 1
+    }
+
+    /// Join one owned handle under the harness bound. A timeout aborts and
+    /// still waits for the same handle; it is never detach-by-value.
+    pub async fn join(&self, index: usize, what: &str) -> Result<Value, String> {
+        let mut handle = {
+            let mut handles = self
+                .handles
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            handles
+                .get_mut(index)
+                .and_then(Option::take)
+                .ok_or_else(|| format!("{what} has no owned task"))?
+        };
+        join_owned(&mut handle, what).await
+    }
+
+    /// Abort and bounded-join every still-owned task, attempting all of them.
+    pub async fn settle(&self, what: &str) -> Result<(), String> {
+        let handles: Vec<tokio::task::JoinHandle<Value>> = {
+            let mut handles = self
+                .handles
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            handles.drain(..).flatten().collect()
+        };
+        let mut failures: Vec<String> = Vec::new();
+        for mut handle in handles {
+            handle.abort();
+            match tokio::time::timeout(BOUND, &mut handle).await {
+                Ok(Ok(_)) => {}
+                Ok(Err(error)) if error.is_cancelled() => {}
+                Ok(Err(error)) => {
+                    failures.push(format!("{what}: a task failed during settlement: {error}"));
+                }
+                Err(_) => failures.push(format!(
+                    "{what}: a task did not settle after abort within the bound"
+                )),
+            }
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(failures.join("; "))
+        }
+    }
+}
+
+async fn join_owned(
+    handle: &mut tokio::task::JoinHandle<Value>,
+    what: &str,
+) -> Result<Value, String> {
+    match tokio::time::timeout(BOUND, &mut *handle).await {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(error)) => Err(format!("{what} task failed: {error}")),
+        Err(_) => {
+            handle.abort();
+            match tokio::time::timeout(BOUND, &mut *handle).await {
+                Ok(_) => Err(format!(
+                    "{what} exceeded the harness bound; the owned task was aborted and joined"
+                )),
+                Err(_) => Err(format!(
+                    "{what} exceeded the harness bound and did not settle after abort"
+                )),
+            }
+        }
+    }
+}
+
+/// Raw sessions and durable observers owned by the runner for the whole
+/// scenario, so a failing assertion can never drop them unclosed.
+#[derive(Default)]
+pub struct OwnedResources {
+    raw: Vec<Option<RawSession>>,
+    observers: Vec<Option<DurableObserver>>,
+}
+
+impl OwnedResources {
+    pub async fn open_raw_admin(&mut self, matrix: &Matrix) -> usize {
+        self.push_raw(matrix.raw_admin().await)
+    }
+
+    pub async fn open_raw_without_memory(&mut self, matrix: &Matrix) -> usize {
+        self.push_raw(matrix.raw_admin_without_memory_capability().await)
+    }
+
+    fn push_raw(&mut self, session: RawSession) -> usize {
+        self.raw.push(Some(session));
+        self.raw.len() - 1
+    }
+
+    pub async fn invoke(&mut self, index: usize, op: &str, payload: &Value) -> Value {
+        self.raw
+            .get_mut(index)
+            .and_then(Option::as_mut)
+            .expect("the raw session is owned by the runner")
+            .invoke(op, payload)
+            .await
+    }
+
+    pub async fn close_raw(&mut self, index: usize) -> Result<(), String> {
+        match self.raw.get_mut(index).and_then(Option::take) {
+            Some(session) => session.close().await,
+            None => Ok(()),
+        }
+    }
+
+    pub async fn open_observer(
+        &mut self,
+        matrix: &Matrix,
+        subject_id: &str,
+        record_ids: &[String],
+        candidate_id: Option<&str>,
+        receipt_id: Option<&str>,
+        profile_kind: Option<&str>,
+    ) -> usize {
+        self.observers.push(Some(
+            matrix
+                .durable_observer(subject_id, record_ids, candidate_id, receipt_id, profile_kind)
+                .await,
+        ));
+        self.observers.len() - 1
+    }
+
+    pub async fn observe(&mut self, index: usize) -> DurableState {
+        self.observers
+            .get_mut(index)
+            .and_then(Option::as_mut)
+            .expect("the durable observer is owned by the runner")
+            .observe()
+            .await
+    }
+
+    pub async fn receipt_ids_for(&mut self, index: usize, op: &str) -> Vec<String> {
+        self.observers
+            .get_mut(index)
+            .and_then(Option::as_mut)
+            .expect("the durable observer is owned by the runner")
+            .receipt_ids_for(op)
+            .await
+    }
+
+    pub async fn journal_count(&mut self, index: usize) -> Option<i64> {
+        self.observers
+            .get_mut(index)
+            .and_then(Option::as_mut)
+            .expect("the durable observer is owned by the runner")
+            .journal_count()
+            .await
+    }
+
+    pub async fn close_observer(&mut self, index: usize) -> Result<(), String> {
+        match self.observers.get_mut(index).and_then(Option::take) {
+            Some(observer) => {
+                observer.close().await;
+                Ok(())
+            }
+            None => Ok(()),
+        }
+    }
+
+    /// Attempt every remaining close; one failure never prevents the rest.
+    pub async fn settle(&mut self) -> Result<(), String> {
+        let mut failures: Vec<String> = Vec::new();
+        for slot in &mut self.raw {
+            if let Some(session) = slot.take() {
+                if let Err(error) = session.close().await {
+                    failures.push(format!("raw session close: {error}"));
+                }
+            }
+        }
+        for slot in &mut self.observers {
+            if let Some(observer) = slot.take() {
+                let outcome = std::panic::AssertUnwindSafe(async move { observer.close().await })
+                    .catch_unwind()
+                    .await;
+                if let Err(payload) = outcome {
+                    failures.push(format!(
+                        "durable observer close: {}",
+                        panic_message(payload)
+                    ));
+                }
+            }
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(failures.join("; "))
+        }
+    }
+}
+
+fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(text) = payload.downcast_ref::<&str>() {
+        (*text).to_owned()
+    } else if let Some(text) = payload.downcast_ref::<String>() {
+        text.clone()
+    } else {
+        "non-string panic payload".to_owned()
+    }
+}
+
+/// The one receipt-privacy oracle shared by the grant and error targets.
 ///
-/// A cleanup failure is reported on its own; a scenario failure is then
-/// re-raised so neither failure masks the other. This is the harness-level
-/// cleanup contract, not a scenario assertion.
+/// Compares an actual authorized receipt body against the ENTIRE refusal: no
+/// receipt-shaped object may appear anywhere, and none of the receipt's
+/// sensitive values (payload digest, timestamps, result record/candidate ids)
+/// may be disclosed. The receipt id and requester are caller-known request
+/// values, so their echo is permitted; a receipt-shaped object that embeds the
+/// tuple is still rejected. Unrelated non-sensitive diagnostics stay allowed.
+pub fn assert_no_receipt_disclosure(response: &Value, authorized_receipt: &Value) {
+    fn walk(value: &Value, meaning: &str) {
+        match value {
+            Value::Object(map) => {
+                let receipt_shaped = map.contains_key("receipt_id")
+                    && ["status", "payload_digest", "requester_principal_id", "result"]
+                        .iter()
+                        .any(|key| map.contains_key(*key));
+                assert!(
+                    !receipt_shaped,
+                    "a refusal embeds a receipt-shaped object in {meaning}: {value}"
+                );
+                if let Some(inner) = map.get("receipt") {
+                    assert!(
+                        !inner.is_object(),
+                        "a refusal embeds a receipt body in {meaning}: {value}"
+                    );
+                }
+                for (key, child) in map {
+                    walk(child, &format!("{meaning}.{key}"));
+                }
+            }
+            Value::Array(items) => {
+                for (index, item) in items.iter().enumerate() {
+                    walk(item, &format!("{meaning}[{index}]"));
+                }
+            }
+            _ => {}
+        }
+    }
+    walk(response, "$response");
+
+    let mut sensitive: Vec<String> = Vec::new();
+    for path in ["payload_digest", "created_at", "completed_at"] {
+        if let Some(value) = authorized_receipt.get(path).and_then(Value::as_str) {
+            if !value.is_empty() {
+                sensitive.push(value.to_owned());
+            }
+        }
+    }
+    for collection in ["candidate_ids", "record_ids"] {
+        if let Some(items) = authorized_receipt["result"]
+            .get(collection)
+            .and_then(Value::as_array)
+        {
+            for item in items {
+                if let Some(value) = item.as_str() {
+                    sensitive.push(value.to_owned());
+                }
+            }
+        }
+    }
+    let rendered = response.to_string();
+    for value in sensitive {
+        assert!(
+            !rendered.contains(&value),
+            "the refusal discloses the authorized receipt value {value}: {response}"
+        );
+    }
+}
+
+/// Run one scenario body over `matrix` with runner-owned tasks/resources, then
+/// settle every owner on BOTH success and failure.
+///
+/// Tasks are aborted and bounded-joined, raw sessions and observers are closed,
+/// and the matrix sessions/provider are settled; every cleanup failure is
+/// reported independently and a scenario failure is re-raised afterwards.
 pub async fn run_matrix_scenario<F>(matrix: Matrix, body: F)
 where
-    F: for<'a> FnOnce(&'a Matrix) -> Pin<Box<dyn Future<Output = ()> + 'a>>,
+    F: for<'a> FnOnce(
+        &'a Matrix,
+        &'a mut OwnedResources,
+        TaskSet,
+    ) -> Pin<Box<dyn Future<Output = ()> + 'a>>,
 {
-    use futures_util::FutureExt as _;
-    let scenario = std::panic::AssertUnwindSafe(body(&matrix))
-        .catch_unwind()
-        .await;
-    let cleanup = matrix.settle().await;
-    match (scenario, cleanup) {
-        (Ok(()), Ok(())) => {}
-        (Ok(()), Err(error)) => panic!("cleanup failed after a passing scenario: {error}"),
-        (Err(payload), Ok(())) => std::panic::resume_unwind(payload),
-        (Err(payload), Err(error)) => {
-            eprintln!("cleanup also failed: {error}");
+    let mut resources = OwnedResources::default();
+    let tasks = TaskSet::default();
+    let scenario = std::panic::AssertUnwindSafe(body(
+        &matrix,
+        &mut resources,
+        tasks.clone(),
+    ))
+    .catch_unwind()
+    .await;
+    let mut cleanup: Vec<String> = Vec::new();
+    if let Err(error) = tasks.settle("scenario tasks").await {
+        cleanup.push(error);
+    }
+    if let Err(error) = resources.settle().await {
+        cleanup.push(error);
+    }
+    if let Err(error) = matrix.settle().await {
+        cleanup.push(error);
+    }
+    match (scenario, cleanup.is_empty()) {
+        (Ok(()), true) => {}
+        (Ok(()), false) => panic!("cleanup failed after a passing scenario: {}", cleanup.join("; ")),
+        (Err(payload), true) => std::panic::resume_unwind(payload),
+        (Err(payload), false) => {
+            eprintln!("cleanup also failed: {}", cleanup.join("; "));
             std::panic::resume_unwind(payload);
         }
     }
+}
+
+/// Real early-failure control: a listener task whose signed dial fails is
+/// aborted and bounded-joined, and its listening port is then rebindable —
+/// actual accepted/listening resource evidence, not a fresh session.
+pub async fn prove_failed_endpoint_settles() {
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind the failure-control listener");
+    let addr = listener.local_addr().expect("failure-control address");
+    let port = addr.port();
+    let host = tokio::spawn(async move {
+        let (tcp, _) = listener
+            .accept()
+            .await
+            .expect("the failure-control dial is accepted");
+        let _ = tokio_tungstenite::accept_async_with_config(
+            tcp,
+            Some(ws_config(DEFAULT_MAX_ENVELOPE_BYTES)),
+        )
+        .await;
+    });
+    let (ws, _) = tokio::time::timeout(
+        BOUND,
+        tokio_tungstenite::connect_async(format!("ws://{addr}")),
+    )
+    .await
+    .expect("the failure-control connect is bounded")
+    .expect("connect the failure-control listener");
+    let socket: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+    let dialed = connect_remote_adapter(RemoteAdapterOptions {
+        transport: Arc::clone(&socket),
+        local_identity: RemoteIdentity { seed: ADMIN_SEED },
+        local_manifest: manifest("failure-control-client"),
+        // A wrong host key makes the signed dial fail after the listener accepted.
+        remote_pubkey: pubkey(&PEER_SEED),
+        allowlist: vec![peer_id(&HOST_SEED)],
+        invoke_timeout_ms: None,
+        capability_token: None,
+    });
+    let failed = tokio::time::timeout(BOUND, dialed)
+        .await
+        .expect("the failure-control dial is bounded");
+    assert!(failed.is_err(), "a wrong host key fails the signed dial");
+    host.abort();
+    let joined = tokio::time::timeout(BOUND, host).await;
+    assert!(
+        joined.is_ok(),
+        "the failed listener task is joined within the bound"
+    );
+    let rebind = TcpListener::bind(("127.0.0.1", port)).await;
+    assert!(
+        rebind.is_ok(),
+        "the failed listener's port is released after settlement: {rebind:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1437,6 +1830,8 @@ pub struct RawSession {
     responder: Arc<ConnectResponder>,
     server_socket: Arc<dyn Transport>,
     sequence: i64,
+    /// Ephemeral loopback port the owned listener accepted on.
+    port: u16,
 }
 
 impl RawSession {
@@ -1485,50 +1880,72 @@ impl RawSession {
             .await;
             (socket, responder)
         });
-        let (ws, _response) = tokio::time::timeout(
-            BOUND,
-            tokio_tungstenite::connect_async(format!("ws://{addr}")),
-        )
-        .await
-        .expect("the localhost websocket connect is bounded")
-        .expect("connect the localhost websocket");
-        let socket = Arc::new(WsTransport::new(ws));
-        let hello = sign_hello_ed25519(
-            &seed,
-            &format!("c-matrix-raw-{:x}", std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("system clock")
-                .as_nanos()),
-            &connect_manifest_with(&format!("{host_id}-raw-client"), client_capabilities),
-            None,
-        )
-        .expect("sign the initiator hello");
-        socket
-            .send(&serde_json::to_vec(&hello).expect("hello bytes"))
+        let port = addr.port();
+        // The listener task is owned until the hello/session exchange succeeds;
+        // a failure aborts and bounded-joins it before re-raising.
+        let client_side = std::panic::AssertUnwindSafe(async {
+            let (ws, _response) = tokio::time::timeout(
+                BOUND,
+                tokio_tungstenite::connect_async(format!("ws://{addr}")),
+            )
             .await
-            .expect("hello send");
-        let _responder_hello: ConnectHello = serde_json::from_slice(
-            &tokio::time::timeout(BOUND, socket.recv())
+            .expect("the localhost websocket connect is bounded")
+            .expect("connect the localhost websocket");
+            let socket = Arc::new(WsTransport::new(ws));
+            let hello = sign_hello_ed25519(
+                &seed,
+                &format!("c-matrix-raw-{:x}", std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("system clock")
+                    .as_nanos()),
+                &connect_manifest_with(&format!("{host_id}-raw-client"), client_capabilities),
+                None,
+            )
+            .expect("sign the initiator hello");
+            socket
+                .send(&serde_json::to_vec(&hello).expect("hello bytes"))
                 .await
-                .expect("the responder hello is bounded")
-                .expect("responder hello"),
-        )
-        .expect("decode the responder hello");
-        let session: ConnectSession = serde_json::from_slice(
-            &tokio::time::timeout(BOUND, socket.recv())
-                .await
-                .expect("the session snapshot is bounded")
-                .expect("session snapshot"),
-        )
-        .expect("decode the session snapshot");
+                .expect("hello send");
+            let _responder_hello: ConnectHello = serde_json::from_slice(
+                &tokio::time::timeout(BOUND, socket.recv())
+                    .await
+                    .expect("the responder hello is bounded")
+                    .expect("responder hello"),
+            )
+            .expect("decode the responder hello");
+            let session: ConnectSession = serde_json::from_slice(
+                &tokio::time::timeout(BOUND, socket.recv())
+                    .await
+                    .expect("the session snapshot is bounded")
+                    .expect("session snapshot"),
+            )
+            .expect("decode the session snapshot");
+            (socket, session.session_id.to_string())
+        })
+        .catch_unwind()
+        .await;
+        let (socket, session_id) = match client_side {
+            Ok(established) => established,
+            Err(payload) => {
+                host.abort();
+                let _ = tokio::time::timeout(BOUND, host).await;
+                std::panic::resume_unwind(payload);
+            }
+        };
         let (server_socket, responder) = host.await.expect("the listener task");
         Self {
             socket,
-            session_id: session.session_id.to_string(),
+            session_id,
             responder,
             server_socket,
             sequence: 0,
+            port,
         }
+    }
+
+    /// The ephemeral loopback port this session's listener accepted on.
+    pub fn port(&self) -> u16 {
+        self.port
     }
 
     /// Send one signed invoke envelope and return the response envelope as-is:

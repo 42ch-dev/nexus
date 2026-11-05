@@ -9,20 +9,21 @@
 //! rechecks current authorization; receipts stay content-free) and §14.2/§14.3
 //! (`uncertain` is resolved only through same-key replay or `receipts.get`).
 //!
-//! Each scenario body takes `&Matrix` so the `_local` leg runs the real
-//! `nexus_core` `LocalMemoryProvider` and the `_remote` leg runs the
-//! independent durable fixture provider behind the published `spoke-connect`
-//! memory service. Durable effects/no-effects are read from the provider's own
-//! rows through the shared read-only observer; `pending_receipts` is never used
-//! as an absence proof. Every scenario is driven by [`run_matrix_scenario`],
-//! which settles both sessions and the provider on success AND on failure.
+//! Each scenario body takes `&Matrix` plus the runner-owned task/resource sets,
+//! so durable effects/no-effects are read from the provider's own rows through
+//! the shared read-only observer, raw sessions and observers are closed on
+//! failure as well as success, and every spawned operation is joined or
+//! aborted+joined by the runner. `pending_receipts` is never an absence proof.
 //!
-//! C-100's `retryable` limb on the local leg is prepared through the provider's
-//! existing operator controls but the final refusal is received over the SAME
-//! signed transport the other legs use. C-101's unknown-op envelope is asserted
-//! against protocol §14.2:750–758; the pinned `spoke-connect` 0.15.1 dispatch
-//! attaches no `details` to `op_unsupported` (see the report), so that required
-//! assertion is the known external prerequisite, not a waived criterion.
+//! C-100's local `retryable` limb prepares the journal-predecessor state through
+//! the same served provider's existing operator controls but receives the
+//! refusal over the actual signed transport.
+//!
+//! C-101's unknown-op envelope is asserted against protocol §14.2:750–758; the
+//! pinned `spoke-connect` 0.15.1 dispatch attaches no `details` to
+//! `op_unsupported` (external prerequisite I-000271, recorded in the report), so
+//! that required assertion remains the known external failure. Every reachable
+//! side-effect/cleanup part of C-101 still runs.
 
 #![allow(clippy::too_many_lines)] // one end-to-end scenario per row
 
@@ -31,9 +32,9 @@ mod support;
 use serde_json::{json, Value};
 
 use support::{
-    bootstrap, capture_body, context_scope, error_code, is_committed, receipt_id, result,
-    retry_class, run_matrix_scenario, shared_scope, DurableState, Kind, Matrix, BOUND, CONTEXT,
-    SUBJECT, TEXT,
+    assert_no_receipt_disclosure, bootstrap, capture_body, context_scope, error_code, is_committed,
+    receipt_id, result, retry_class, run_matrix_scenario, shared_scope, DurableState, Kind,
+    Matrix, OwnedResources, TaskSet, CONTEXT, SUBJECT, TEXT,
 };
 
 fn candidates(body: &Value) -> Vec<String> {
@@ -125,66 +126,50 @@ fn assert_receipt_tuple(body: &Value, op: &str, requester: &str) {
     assert_payload_secrecy(body);
 }
 
-/// A refused receipt-read response must not disclose a receipt body anywhere,
-/// and none of the supplied payload markers may appear.
-fn assert_no_receipt_disclosure(response: &Value, markers: &[&str]) {
-    fn walk(value: &Value, path: &str) {
+/// Normalize a refusal for a security-shape comparison: caller-supplied request
+/// identifiers are redacted from every string, so an echo of the requested id is
+/// permitted; every other value (including any existence/ownership marker or a
+/// differing message/detail) still has to match. The concrete probes pass the
+/// exact ids they requested.
+fn normalized_refusal(body: &Value, redactions: &[&str]) -> Value {
+    fn redact(value: &Value, redactions: &[&str]) -> Value {
         match value {
-            Value::Object(map) => {
-                for (key, child) in map {
-                    let here = format!("{path}.{key}");
-                    assert_ne!(
-                        key, "receipt",
-                        "a refused response discloses a receipt at {here}: {value}"
-                    );
-                    assert!(
-                        !matches!(key.as_str(), "result" | "payload_digest" | "completed_at"),
-                        "a refused response carries receipt metadata at {here}: {value}"
-                    );
-                    walk(child, &here);
+            Value::String(text) => {
+                let mut text = text.clone();
+                for marker in redactions {
+                    text = text.replace(marker, "<requested-id>");
                 }
+                Value::String(text)
             }
+            Value::Object(map) => Value::Object(
+                map.iter()
+                    .map(|(key, child)| (key.clone(), redact(child, redactions)))
+                    .collect(),
+            ),
             Value::Array(items) => {
-                for (index, item) in items.iter().enumerate() {
-                    walk(item, &format!("{path}[{index}]"));
-                }
+                Value::Array(items.iter().map(|item| redact(item, redactions)).collect())
             }
-            _ => {}
+            other => other.clone(),
         }
     }
-    walk(response, "$");
-    let rendered = response.to_string();
-    for marker in markers {
-        assert!(
-            !rendered.contains(marker),
-            "the refusal leaks the receipt payload marker {marker}: {response}"
-        );
-    }
-}
-
-async fn joined(handle: tokio::task::JoinHandle<Value>, what: &str) -> Value {
-    match tokio::time::timeout(BOUND, handle).await {
-        Ok(Ok(value)) => value,
-        Ok(Err(error)) => panic!("{what} task failed: {error}"),
-        Err(_) => panic!("{what} did not finish within the harness bound"),
-    }
+    redact(&body["error"], redactions)
 }
 
 // ---------------------------------------------------------------------------
 // K. Error envelope and retry classes
 // ---------------------------------------------------------------------------
 
-/// C-100 (N3 base): a supported terminal refusal, an uncertain commit and a
-/// no-effect retryable failure each carry `details.retry_class` that matches
-/// their actual meaning. The uncertain outcome is resolved only through
-/// same-key replay or `receipts.get`, and the durable effect is checked against
-/// the provider's own candidate/receipt rows.
-async fn supported_error_envelopes_and_retry_classes(matrix: &Matrix) {
+/// C-100 (N3 base): terminal, uncertain and no-effect retryable mechanisms.
+async fn supported_error_envelopes_and_retry_classes(
+    matrix: &Matrix,
+    resources: &mut OwnedResources,
+    tasks: TaskSet,
+) {
     bootstrap(matrix, &[]).await;
     let admin = matrix.admin();
     let peer_id = matrix.peer_principal().principal_id.clone();
 
-    // 1. Terminal: no capture grant; retrying unchanged cannot help.
+    // 1. Terminal.
     let denied = matrix
         .peer()
         .capture(capture_body("k-c100-denied", TEXT, &shared_scope()))
@@ -202,37 +187,35 @@ async fn supported_error_envelopes_and_retry_classes(matrix: &Matrix) {
         .await;
     assert!(is_committed(&granted), "{granted}");
 
-    // 2. Uncertain: the effect commits and the response is lost. Same-key
-    //    replay and `receipts.get` are the only resolution channels.
+    // 2. Uncertain: effect commits, response lost; replay/receipts.get resolve.
     matrix.arm_lost_response();
     let lost = matrix
         .peer()
-        .capture(capture_body(
-            "k-c100-lost",
-            TEXT,
-            &context_scope(CONTEXT),
-        ))
+        .capture(capture_body("k-c100-lost", TEXT, &context_scope(CONTEXT)))
         .await;
     assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN", "{lost}");
     assert_eq!(retry_class(&lost), "uncertain");
 
     let replayed = matrix
         .peer()
-        .capture(capture_body(
-            "k-c100-lost",
-            TEXT,
-            &context_scope(CONTEXT),
-        ))
+        .capture(capture_body("k-c100-lost", TEXT, &context_scope(CONTEXT)))
         .await;
     assert!(is_committed(&replayed), "same-key replay resolves: {replayed}");
-    assert_receipt_tuple(&replayed, "memory.capture", &peer_id);
+    assert_receipt_tuple(&replayed, "memory.capture", peer_id.as_str());
     let candidate = support::candidate_ids(&replayed)[0].clone();
     let receipt = receipt_id(&replayed).to_owned();
 
-    let mut effect = matrix
-        .durable_observer(SUBJECT, &[], Some(&candidate), Some(&receipt), None)
+    let effect = resources
+        .open_observer(
+            matrix,
+            SUBJECT,
+            &[],
+            Some(&candidate),
+            Some(&receipt),
+            None,
+        )
         .await;
-    let state = effect.observe().await;
+    let state = resources.observe(effect).await;
     let candidate_row = observed(&state, &format!("candidate:{candidate}"));
     assert_eq!(column(candidate_row, "capture_visibility"), "text:context");
     assert_eq!(
@@ -250,28 +233,27 @@ async fn supported_error_envelopes_and_retry_classes(matrix: &Matrix) {
         format!("text:{}", peer_id.as_str())
     );
     assert!(!column(receipt_row, "result_json").contains(TEXT));
-    effect.close().await;
+    resources
+        .close_observer(effect)
+        .await
+        .expect("the effect observer closes");
 
     let stored = admin.get_receipt(&receipt).await;
     assert_eq!(stored["receipt"]["receipt_id"], json!(receipt));
     assert_eq!(stored["receipt"]["status"], json!("committed"));
-    assert_eq!(
-        pending_candidates(&admin).await,
-        vec![candidate.clone()],
-        "the lost response applied exactly one effect"
-    );
+    assert_eq!(pending_candidates(&admin).await, vec![candidate.clone()]);
 
     // 3. Retryable: a real no-effect failure before the effect commits.
     match matrix.kind() {
         Kind::Remote => {
-            let mut window = matrix
-                .durable_observer(SUBJECT, &[], None, None, None)
+            let window = resources
+                .open_observer(matrix, SUBJECT, &[], None, None, None)
                 .await;
-            let before = window.observe().await;
-            let before_captures = window.receipt_ids_for("memory.capture").await;
+            let before = resources.observe(window).await;
+            let before_captures = resources.receipt_ids_for(window, "memory.capture").await;
             let before_candidates = pending_candidates(&admin).await;
             let mut hold = matrix.park_next_admission();
-            let capture = tokio::spawn(support::capture_with(
+            let capture = tasks.spawn(support::capture_with(
                 matrix.peer_client(),
                 matrix.peer_principal().clone(),
                 matrix.space_id().to_owned(),
@@ -281,12 +263,15 @@ async fn supported_error_envelopes_and_retry_classes(matrix: &Matrix) {
                 .await
                 .expect("the capture reached the bounded admission point");
             drop(hold);
-            let failed = joined(capture, "the retryable capture").await;
+            let failed = tasks
+                .join(capture, "the retryable capture")
+                .await
+                .expect("the retryable capture settles");
             assert_eq!(error_code(&failed), "INTERNAL_ERROR", "{failed}");
             assert_eq!(retry_class(&failed), "retryable");
-            let after = window.observe().await;
+            let after = resources.observe(window).await;
             assert_eq!(
-                window.receipt_ids_for("memory.capture").await,
+                resources.receipt_ids_for(window, "memory.capture").await,
                 before_captures,
                 "the retryable failure produced no capture receipt"
             );
@@ -296,18 +281,25 @@ async fn supported_error_envelopes_and_retry_classes(matrix: &Matrix) {
                 before_candidates,
                 "the retryable failure added no candidate"
             );
-            window.close().await;
+            resources
+                .close_observer(window)
+                .await
+                .expect("the retryable observer closes");
         }
         Kind::Local => {
-            local_retryable_over_the_same_signed_provider(matrix, &admin).await;
+            local_retryable_over_the_same_signed_provider(matrix, &admin, resources).await;
         }
     }
 }
 
-/// C-100 (`_local`): prepare the local provider's real journal-predecessor
-/// state through its existing operator controls, then receive the retryable
-/// refusal over the SAME signed transport (not a direct-only call).
-async fn local_retryable_over_the_same_signed_provider(matrix: &Matrix, admin: &support::Actor<'_>) {
+/// C-100 (`_local`): the journal-predecessor state is prepared through the same
+/// served provider's operator controls; the retryable refusal is received over
+/// the actual signed transport.
+async fn local_retryable_over_the_same_signed_provider(
+    matrix: &Matrix,
+    admin: &support::Actor<'_>,
+    resources: &mut OwnedResources,
+) {
     let operator = matrix
         .local_operator()
         .expect("the local leg exposes its operator controls");
@@ -326,9 +318,6 @@ async fn local_retryable_over_the_same_signed_provider(matrix: &Matrix, admin: &
         .expect("record id")
         .to_owned();
 
-    // The update commits but its response is lost: the journal intent stays
-    // unsettled. This is operator-only preparation; the final refusal is
-    // observed over the wire below.
     operator.arm_commit_fault(true);
     let lost_update = admin
         .update_record(json!({
@@ -341,18 +330,18 @@ async fn local_retryable_over_the_same_signed_provider(matrix: &Matrix, admin: &
     assert_eq!(error_code(&lost_update), "OUTCOME_UNCERTAIN", "{lost_update}");
     assert_eq!(retry_class(&lost_update), "uncertain");
 
-    // Make the pending projection target unresolvable through the provider's
-    // own file-root control.
     let target = operator.file_root().join(format!("records/{record_id}.md"));
     std::fs::create_dir_all(target.parent().expect("record parent")).expect("record dir");
     let foreign = "foreign bytes this intent never produced";
     std::fs::write(&target, foreign).expect("foreign target bytes");
 
-    let mut window = matrix
-        .durable_observer(SUBJECT, &[record_id.clone()], None, None, None)
+    let window = resources
+        .open_observer(matrix, SUBJECT, &[record_id.clone()], None, None, None)
         .await;
-    let before = window.observe().await;
-    let deletes_before = window.receipt_ids_for("memory.records.delete").await;
+    let before = resources.observe(window).await;
+    let deletes_before = resources
+        .receipt_ids_for(window, "memory.records.delete")
+        .await;
     assert!(deletes_before.is_empty(), "no delete receipt exists yet");
     let refused = admin
         .delete_record(json!({
@@ -371,29 +360,33 @@ async fn local_retryable_over_the_same_signed_provider(matrix: &Matrix, admin: &
         .as_str()
         .expect("the refusal names its unsettled predecessor over the wire")
         .to_owned();
-    let after = window.observe().await;
+    let after = resources.observe(window).await;
     assert_eq!(
         observed(&after, &format!("record:{record_id}")),
         observed(&before, &format!("record:{record_id}")),
         "the refused delete did not tombstone or rewrite the record"
     );
     assert_eq!(
-        window.receipt_ids_for("memory.records.delete").await,
+        resources
+            .receipt_ids_for(window, "memory.records.delete")
+            .await,
         deletes_before,
         "the refused delete created no delete receipt"
     );
-    window.close().await;
+    resources
+        .close_observer(window)
+        .await
+        .expect("the refused-delete observer closes");
     assert_eq!(
         std::fs::read_to_string(&target).expect("target readable"),
         foreign,
         "the refused delete published nothing"
     );
-    // The predecessor's own durable receipt is the quarantined one the refusal
-    // named; that is provider maintenance, not the delete's effect.
-    let mut predecessor_view = matrix
-        .durable_observer(SUBJECT, &[], None, Some(&predecessor), None)
+
+    let predecessor_view = resources
+        .open_observer(matrix, SUBJECT, &[], None, Some(&predecessor), None)
         .await;
-    let predecessor_state = predecessor_view.observe().await;
+    let predecessor_state = resources.observe(predecessor_view).await;
     assert_eq!(
         column(
             observed(&predecessor_state, &format!("receipt:{predecessor}")),
@@ -401,31 +394,32 @@ async fn local_retryable_over_the_same_signed_provider(matrix: &Matrix, admin: &
         ),
         "text:failed"
     );
-    predecessor_view.close().await;
+    resources
+        .close_observer(predecessor_view)
+        .await
+        .expect("the predecessor observer closes");
 }
 
-/// C-101: an unknown wire op is `op_unsupported`; a known op on a session that
-/// never negotiated `spoke-memory` is `capability_missing` at the dispatch
-/// boundary. A valid op on the same boundary succeeds, and neither refusal
-/// creates state.
-///
-/// Protocol §14.2:750–758 requires `details.retry_class = terminal` on EVERY
-/// error envelope, including `op_unsupported`. The pinned `spoke-connect`
-/// 0.15.1 dispatch attaches that class only for `capability_missing`
-/// (`remote/responder.rs:1108-1121`; the envelope inserts `details` only when
-/// supplied, `remote/responder.rs:1687-1714`), so the required assertion below
-/// is the known external prerequisite recorded in the report.
-async fn unknown_op_and_missing_capability_are_distinct(matrix: &Matrix) {
+/// C-101: unknown op vs missing capability, with the positive on the same
+/// session and the capture baseline taken BEFORE the capability-less request.
+/// The final terminal-metadata assertion is the known external SDK prerequisite.
+async fn unknown_op_and_missing_capability_are_distinct(
+    matrix: &Matrix,
+    resources: &mut OwnedResources,
+    _tasks: TaskSet,
+) {
     bootstrap(matrix, &[]).await;
     let admin = matrix.admin();
-    let mut window = matrix
-        .durable_observer(SUBJECT, &[], None, None, None)
+    let window = resources
+        .open_observer(matrix, SUBJECT, &[], None, None, None)
         .await;
-    let before = window.observe().await;
+    let before = resources.observe(window).await;
+    let captures_before = resources.receipt_ids_for(window, "memory.capture").await;
 
-    let mut with_memory = matrix.raw_admin().await;
-    // The valid positive on the same session and boundary.
-    let described = with_memory.invoke("memory.describe", &json!({})).await;
+    let with_memory = resources.open_raw_admin(matrix).await;
+    let described = resources
+        .invoke(with_memory, "memory.describe", &json!({}))
+        .await;
     assert!(
         described.get("error").is_none(),
         "the same signed session serves a real op: {described}"
@@ -436,54 +430,49 @@ async fn unknown_op_and_missing_capability_are_distinct(matrix: &Matrix) {
         "{described}"
     );
 
-    let mut without_memory = matrix.raw_admin_without_memory_capability().await;
-    let missing = without_memory
+    let without_memory = resources.open_raw_without_memory(matrix).await;
+    let missing = resources
         .invoke(
+            without_memory,
             "memory.capture",
             &json!({ "space_id": matrix.space_id(), "idempotency_key": "k-c101" }),
         )
         .await;
-    assert_eq!(
-        missing["error"]["code"],
-        json!("capability_missing"),
-        "{missing}"
-    );
+    assert_eq!(missing["error"]["code"], json!("capability_missing"), "{missing}");
     assert_eq!(missing["error"]["details"]["retry_class"], json!("terminal"));
-    without_memory
-        .close()
+    resources
+        .close_raw(without_memory)
         .await
         .expect("the capability-less raw session settles");
 
-    let captures_before = window.receipt_ids_for("memory.capture").await;
-    let unknown = with_memory.invoke("memory.not_an_op", &json!({})).await;
-    with_memory.close().await.expect("the raw session settles");
+    let unknown = resources
+        .invoke(with_memory, "memory.not_an_op", &json!({}))
+        .await;
+    resources
+        .close_raw(with_memory)
+        .await
+        .expect("the raw session settles");
     assert_ne!(
         unknown["error"]["code"], missing["error"]["code"],
         "unknown op and missing capability are distinct: {unknown} {missing}"
     );
-    assert_eq!(
-        unknown["error"]["code"],
-        json!("op_unsupported"),
-        "{unknown}"
-    );
+    assert_eq!(unknown["error"]["code"], json!("op_unsupported"), "{unknown}");
 
-    // No refusal created provider state.
-    let after = window.observe().await;
+    let after = resources.observe(window).await;
     assert_eq!(after.rows, before.rows);
     assert_eq!(
-        window.receipt_ids_for("memory.capture").await,
+        resources.receipt_ids_for(window, "memory.capture").await,
         captures_before,
-        "neither refusal created a capture receipt"
+        "neither request created a capture receipt"
     );
-    window.close().await;
-    assert!(
-        pending_candidates(&admin).await.is_empty(),
-        "neither refusal created a candidate"
-    );
+    resources
+        .close_observer(window)
+        .await
+        .expect("the C-101 observer closes");
+    assert!(pending_candidates(&admin).await.is_empty());
 
-    // Required by protocol §14.2:750–758; see the module note for the pinned
-    // SDK's current omission. This is the known external prerequisite, not a
-    // waived criterion.
+    // Protocol §14.2:750–758; the pinned SDK currently omits this metadata
+    // (external prerequisite I-000271), so this is the known blocked assertion.
     assert_eq!(
         unknown["error"]["details"]["retry_class"],
         json!("terminal"),
@@ -491,10 +480,13 @@ async fn unknown_op_and_missing_capability_are_distinct(matrix: &Matrix) {
     );
 }
 
-/// C-102: a foreign id and a missing id answer the same permitted refusal; no
-/// content or ownership leaks, and authorization is rechecked before existence.
-/// The refusal class is compared, not whole provider-specific detail objects.
-async fn foreign_and_missing_ids_have_no_existence_oracle(matrix: &Matrix) {
+/// C-102: normalized security-relevant refusal shape across foreign/missing
+/// records and subjects and a revoked read, with no existence/ownership leak.
+async fn foreign_and_missing_ids_have_no_existence_oracle(
+    matrix: &Matrix,
+    resources: &mut OwnedResources,
+    _tasks: TaskSet,
+) {
     bootstrap(matrix, &[]).await;
     let admin = matrix.admin();
     let ensured = admin.ensure_subject(support::OTHER_SUBJECT).await;
@@ -542,8 +534,9 @@ async fn foreign_and_missing_ids_have_no_existence_oracle(matrix: &Matrix) {
         .to_owned();
     let peer = matrix.peer();
 
-    let mut window = matrix
-        .durable_observer(
+    let window = resources
+        .open_observer(
+            matrix,
             SUBJECT,
             &[covered_id.clone(), foreign_id.clone()],
             None,
@@ -551,7 +544,7 @@ async fn foreign_and_missing_ids_have_no_existence_oracle(matrix: &Matrix) {
             None,
         )
         .await;
-    let before = window.observe().await;
+    let before = resources.observe(window).await;
 
     assert_eq!(
         peer.get_record(&covered_id).await["record"]["record_id"],
@@ -560,12 +553,13 @@ async fn foreign_and_missing_ids_have_no_existence_oracle(matrix: &Matrix) {
 
     let foreign_probe = peer.get_record(&foreign_id).await;
     let missing_probe = peer.get_record("rec_c102_missing").await;
+    let redactions = [foreign_id.as_str(), "rec_c102_missing"];
     assert_eq!(error_code(&foreign_probe), "NOT_FOUND", "{foreign_probe}");
     assert_eq!(error_code(&missing_probe), "NOT_FOUND", "{missing_probe}");
     assert_eq!(
-        retry_class(&foreign_probe),
-        retry_class(&missing_probe),
-        "foreign and missing records share one refusal class"
+        normalized_refusal(&foreign_probe, &redactions),
+        normalized_refusal(&missing_probe, &redactions),
+        "foreign and missing records share one normalized security shape"
     );
     let leaked = format!("{foreign_probe}{missing_probe}");
     assert!(!leaked.contains("a secret from another subject"));
@@ -573,32 +567,36 @@ async fn foreign_and_missing_ids_have_no_existence_oracle(matrix: &Matrix) {
 
     let foreign_subject = peer.get_subject(support::OTHER_SUBJECT).await;
     let missing_subject = peer.get_subject("sbj_c102_missing").await;
+    let subject_redactions = [support::OTHER_SUBJECT, "sbj_c102_missing"];
     assert_eq!(
         error_code(&foreign_subject),
         error_code(&missing_subject),
         "a foreign subject and a missing one share one refusal class: {foreign_subject} {missing_subject}"
     );
-    assert!(matches!(
-        error_code(&foreign_subject),
-        "NOT_FOUND" | "NOT_AUTHORIZED"
-    ));
     assert_eq!(
         retry_class(&foreign_subject),
         retry_class(&missing_subject)
     );
+    assert_eq!(
+        normalized_refusal(&foreign_subject, &subject_redactions),
+        normalized_refusal(&missing_subject, &subject_redactions),
+        "foreign and missing subjects share one normalized security shape"
+    );
     let subject_leak = format!("{foreign_subject}{missing_subject}");
     assert!(!subject_leak.contains("a secret from another subject"));
 
-    // Authorization is rechecked before existence: revoking the grant turns the
-    // covered read into the same absence class as a missing id.
-    let after = window.observe().await;
+    let after = resources.observe(window).await;
     assert_eq!(after.rows, before.rows);
-    window.close().await;
+    resources
+        .close_observer(window)
+        .await
+        .expect("the C-102 observer closes");
 
     let revoked = admin.revoke_grant(&grant_id, 1, "k-c102-revoke").await;
     assert_eq!(result(&revoked)["revoked"], json!(true), "{revoked}");
-    let mut revoked_window = matrix
-        .durable_observer(
+    let revoked_window = resources
+        .open_observer(
+            matrix,
             SUBJECT,
             &[covered_id.clone(), foreign_id],
             None,
@@ -606,34 +604,40 @@ async fn foreign_and_missing_ids_have_no_existence_oracle(matrix: &Matrix) {
             None,
         )
         .await;
-    let revoked_before = revoked_window.observe().await;
+    let revoked_before = resources.observe(revoked_window).await;
     let after_revoke = peer.get_record(&covered_id).await;
     assert_eq!(error_code(&after_revoke), "NOT_FOUND", "{after_revoke}");
     assert_eq!(retry_class(&after_revoke), "terminal");
+    let revoked_redactions = [covered_id.as_str(), "rec_c102_missing"];
     assert_eq!(
-        error_code(&after_revoke),
-        error_code(&missing_probe),
-        "a revoked reader gets the same absence as a missing id"
+        normalized_refusal(&after_revoke, &revoked_redactions),
+        normalized_refusal(&missing_probe, &revoked_redactions),
+        "a revoked reader gets the same normalized absence as a missing id"
     );
-    let revoked_after = revoked_window.observe().await;
+    let revoked_after = resources.observe(revoked_window).await;
     assert_eq!(revoked_after.rows, revoked_before.rows);
-    revoked_window.close().await;
+    resources
+        .close_observer(revoked_window)
+        .await
+        .expect("the revoked-read observer closes");
 }
 
-/// C-103: a failure before COMMIT and a loss after COMMIT are reported honestly.
-/// The pre-commit case creates no capture receipt and changes no durable row; the post-commit case's durable candidate and committed
-/// content-free receipt tuple are checked, and replay does not double-apply.
-async fn internal_error_reports_effect_honesty(matrix: &Matrix) {
+/// C-103: pre-COMMIT failure (no capture receipt/row change) and post-COMMIT
+/// loss (durable candidate + content-free receipt tuple, replay not double-applied).
+async fn internal_error_reports_effect_honesty(
+    matrix: &Matrix,
+    resources: &mut OwnedResources,
+    _tasks: TaskSet,
+) {
     bootstrap(matrix, &["capture"]).await;
     let admin = matrix.admin();
     let peer_id = matrix.peer_principal().principal_id.clone();
 
-    // 1. Failure before COMMIT.
-    let mut window = matrix
-        .durable_observer(SUBJECT, &[], None, None, None)
+    let window = resources
+        .open_observer(matrix, SUBJECT, &[], None, None, None)
         .await;
-    let before = window.observe().await;
-    let captures_before = window.receipt_ids_for("memory.capture").await;
+    let before = resources.observe(window).await;
+    let captures_before = resources.receipt_ids_for(window, "memory.capture").await;
     let candidates_before = pending_candidates(&admin).await;
     matrix.arm_commit_boundary_failure();
     let failed = matrix
@@ -642,24 +646,19 @@ async fn internal_error_reports_effect_honesty(matrix: &Matrix) {
         .await;
     assert_eq!(error_code(&failed), "OUTCOME_UNCERTAIN", "{failed}");
     assert_eq!(retry_class(&failed), "uncertain");
-    let after = window.observe().await;
+    let after = resources.observe(window).await;
     assert_eq!(
-        window.receipt_ids_for("memory.capture").await,
+        resources.receipt_ids_for(window, "memory.capture").await,
         captures_before,
         "a failure before COMMIT produced no capture receipt"
     );
-    assert_eq!(
-        after.rows, before.rows,
-        "a failure before COMMIT changed no durable row"
-    );
-    assert_eq!(
-        pending_candidates(&admin).await,
-        candidates_before,
-        "a failure before COMMIT added no candidate"
-    );
-    window.close().await;
+    assert_eq!(after.rows, before.rows);
+    assert_eq!(pending_candidates(&admin).await, candidates_before);
+    resources
+        .close_observer(window)
+        .await
+        .expect("the pre-commit observer closes");
 
-    // 2. Loss after COMMIT.
     matrix.arm_lost_response();
     let lost = matrix
         .peer()
@@ -673,16 +672,23 @@ async fn internal_error_reports_effect_honesty(matrix: &Matrix) {
         .capture(capture_body("k-c103-after", TEXT, &shared_scope()))
         .await;
     assert!(is_committed(&replayed), "{replayed}");
-    assert_receipt_tuple(&replayed, "memory.capture", &peer_id);
+    assert_receipt_tuple(&replayed, "memory.capture", peer_id.as_str());
     let durable = support::candidate_ids(&replayed);
     assert_eq!(durable.len(), 1, "the replay resolves exactly one candidate");
     let candidate = durable[0].clone();
     let receipt = receipt_id(&replayed).to_owned();
 
-    let mut effect = matrix
-        .durable_observer(SUBJECT, &[], Some(&candidate), Some(&receipt), None)
+    let effect = resources
+        .open_observer(
+            matrix,
+            SUBJECT,
+            &[],
+            Some(&candidate),
+            Some(&receipt),
+            None,
+        )
         .await;
-    let state = effect.observe().await;
+    let state = resources.observe(effect).await;
     let candidate_row = observed(&state, &format!("candidate:{candidate}"));
     assert_eq!(column(candidate_row, "status"), "text:pending");
     assert_eq!(column(candidate_row, "capture_visibility"), "text:shared");
@@ -695,18 +701,20 @@ async fn internal_error_reports_effect_honesty(matrix: &Matrix) {
         format!("text:{}", peer_id.as_str())
     );
     assert!(!column(receipt_row, "result_json").contains(TEXT));
-    effect.close().await;
-
-    assert_eq!(
-        pending_candidates(&admin).await,
-        vec![candidate],
-        "the replay did not double-apply"
-    );
+    resources
+        .close_observer(effect)
+        .await
+        .expect("the post-commit observer closes");
+    assert_eq!(pending_candidates(&admin).await, vec![candidate]);
 }
 
-/// C-104: a receipt read rechecks the caller's current authorization. The
-/// refusal discloses no receipt body anywhere; the durable state is unchanged.
-async fn receipt_read_rechecks_revoked_authorization(matrix: &Matrix) {
+/// C-104: a revoked requester's receipt read is refused with no part of the
+/// actual authorized receipt disclosed anywhere.
+async fn receipt_read_rechecks_revoked_authorization(
+    matrix: &Matrix,
+    resources: &mut OwnedResources,
+    _tasks: TaskSet,
+) {
     bootstrap(matrix, &[]).await;
     let admin = matrix.admin();
     let peer_id = matrix.peer_principal().principal_id.clone();
@@ -736,45 +744,65 @@ async fn receipt_read_rechecks_revoked_authorization(matrix: &Matrix) {
     let revoked = admin.revoke_grant(&grant_id, 1, "k-c104-revoke").await;
     assert_eq!(result(&revoked)["revoked"], json!(true), "{revoked}");
 
-    let mut window = matrix
-        .durable_observer(SUBJECT, &[], Some(&candidate), Some(&receipt), None)
+    let window = resources
+        .open_observer(
+            matrix,
+            SUBJECT,
+            &[],
+            Some(&candidate),
+            Some(&receipt),
+            None,
+        )
         .await;
-    let before = window.observe().await;
+    let before = resources.observe(window).await;
     let second = matrix.peer().get_receipt(&receipt).await;
     assert!(
         matches!(error_code(&second), "NOT_AUTHORIZED" | "GRANT_REVOKED"),
         "{second}"
     );
     assert_eq!(retry_class(&second), "terminal");
-    assert_no_receipt_disclosure(&second, &[candidate.as_str(), TEXT]);
-    let after = window.observe().await;
+    assert_no_receipt_disclosure(&second, &first["receipt"]);
+    let after = resources.observe(window).await;
     assert_eq!(after.rows, before.rows);
-    window.close().await;
+    resources
+        .close_observer(window)
+        .await
+        .expect("the C-104 observer closes");
 
     assert_eq!(
         admin.get_receipt(&receipt).await["receipt"]["receipt_id"],
-        json!(receipt),
-        "the authorized principal still reads the same receipt"
+        json!(receipt)
     );
 }
 
-/// C-073 (N3 refusal): the unavailable reflection family's state/list reads are
-/// refused truthfully with zero durable effect and no generation/receipt
-/// mutation. Successful state/list/sufficiency behavior is N4-R and is not
-/// claimed.
-async fn reflection_reads_refuse_without_capability(matrix: &Matrix) {
+/// C-073 (N3 refusal): the unavailable reflection generation effect/receipt is
+/// absent before BOTH state/list reads and after both, checked on the provider's
+/// own durable rows and exact generation receipt ids.
+async fn reflection_reads_refuse_without_capability(
+    matrix: &Matrix,
+    resources: &mut OwnedResources,
+    _tasks: TaskSet,
+) {
     bootstrap(matrix, &[]).await;
     let admin = matrix.admin();
-    let mut window = matrix
-        .durable_observer(SUBJECT, &[], None, None, None)
+    let window = resources
+        .open_observer(matrix, SUBJECT, &[], None, None, None)
         .await;
-    let before = window.observe().await;
+    let before = resources.observe(window).await;
+    let generation_before = resources
+        .receipt_ids_for(window, "memory.reflections.generate")
+        .await;
+    assert!(
+        generation_before.is_empty(),
+        "no reflection generation receipt exists before the read entries"
+    );
     let spaces_before = admin.list_spaces().await;
 
-    let mut raw = matrix.raw_admin().await;
+    let raw = resources.open_raw_admin(matrix).await;
     for op in ["memory.reflections.state", "memory.reflections.list"] {
-        let response = raw
+        let response = resources
             .invoke(
+                raw,
                 op,
                 &json!({
                     "subject_id": SUBJECT,
@@ -793,28 +821,24 @@ async fn reflection_reads_refuse_without_capability(matrix: &Matrix) {
             "{op} never fabricates a reflection payload: {response}"
         );
     }
-    raw.close().await.expect("the raw session settles");
+    resources
+        .close_raw(raw)
+        .await
+        .expect("the raw session settles");
 
-    // A real re-open proves the served session remains usable after the bounded
-    // close (a resource observation, not a bare not-throw).
-    let mut reopened = matrix.raw_admin().await;
-    let served = reopened.invoke("memory.describe", &json!({})).await;
-    assert_eq!(
-        served["payload"]["capabilities"],
-        json!(["spoke-memory"]),
-        "{served}"
-    );
-    reopened.close().await.expect("the reopened raw session settles");
-
-    let after = window.observe().await;
+    let after = resources.observe(window).await;
     assert_eq!(after.rows, before.rows);
-    for op in ["memory.reflections.state", "memory.reflections.list"] {
-        assert!(
-            window.receipt_ids_for(op).await.is_empty(),
-            "{op} created no receipt"
-        );
-    }
-    window.close().await;
+    assert_eq!(
+        resources
+            .receipt_ids_for(window, "memory.reflections.generate")
+            .await,
+        generation_before,
+        "the refused reads created no generation receipt"
+    );
+    resources
+        .close_observer(window)
+        .await
+        .expect("the C-073 observer closes");
     assert_eq!(
         admin.list_spaces().await["spaces"],
         spaces_before["spaces"],
@@ -826,71 +850,107 @@ async fn reflection_reads_refuse_without_capability(matrix: &Matrix) {
 #[tokio::test]
 async fn c_100_supported_error_envelopes_and_retry_classes_local() {
     let matrix = Matrix::local().await;
-    run_matrix_scenario(matrix, |m| Box::pin(async move { supported_error_envelopes_and_retry_classes(m).await })).await;
+    run_matrix_scenario(matrix, |m, r, t| {
+        Box::pin(async move { supported_error_envelopes_and_retry_classes(m, r, t).await })
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn c_100_supported_error_envelopes_and_retry_classes_remote() {
     let matrix = Matrix::remote().await;
-    run_matrix_scenario(matrix, |m| Box::pin(async move { supported_error_envelopes_and_retry_classes(m).await })).await;
+    run_matrix_scenario(matrix, |m, r, t| {
+        Box::pin(async move { supported_error_envelopes_and_retry_classes(m, r, t).await })
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn c_101_unknown_op_and_missing_capability_are_distinct_local() {
     let matrix = Matrix::local().await;
-    run_matrix_scenario(matrix, |m| Box::pin(async move { unknown_op_and_missing_capability_are_distinct(m).await })).await;
+    run_matrix_scenario(matrix, |m, r, t| {
+        Box::pin(async move { unknown_op_and_missing_capability_are_distinct(m, r, t).await })
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn c_101_unknown_op_and_missing_capability_are_distinct_remote() {
     let matrix = Matrix::remote().await;
-    run_matrix_scenario(matrix, |m| Box::pin(async move { unknown_op_and_missing_capability_are_distinct(m).await })).await;
+    run_matrix_scenario(matrix, |m, r, t| {
+        Box::pin(async move { unknown_op_and_missing_capability_are_distinct(m, r, t).await })
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn c_102_foreign_and_missing_ids_have_no_existence_oracle_local() {
     let matrix = Matrix::local().await;
-    run_matrix_scenario(matrix, |m| Box::pin(async move { foreign_and_missing_ids_have_no_existence_oracle(m).await })).await;
+    run_matrix_scenario(matrix, |m, r, t| {
+        Box::pin(async move { foreign_and_missing_ids_have_no_existence_oracle(m, r, t).await })
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn c_102_foreign_and_missing_ids_have_no_existence_oracle_remote() {
     let matrix = Matrix::remote().await;
-    run_matrix_scenario(matrix, |m| Box::pin(async move { foreign_and_missing_ids_have_no_existence_oracle(m).await })).await;
+    run_matrix_scenario(matrix, |m, r, t| {
+        Box::pin(async move { foreign_and_missing_ids_have_no_existence_oracle(m, r, t).await })
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn c_103_internal_error_reports_effect_honesty_local() {
     let matrix = Matrix::local().await;
-    run_matrix_scenario(matrix, |m| Box::pin(async move { internal_error_reports_effect_honesty(m).await })).await;
+    run_matrix_scenario(matrix, |m, r, t| {
+        Box::pin(async move { internal_error_reports_effect_honesty(m, r, t).await })
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn c_103_internal_error_reports_effect_honesty_remote() {
     let matrix = Matrix::remote().await;
-    run_matrix_scenario(matrix, |m| Box::pin(async move { internal_error_reports_effect_honesty(m).await })).await;
+    run_matrix_scenario(matrix, |m, r, t| {
+        Box::pin(async move { internal_error_reports_effect_honesty(m, r, t).await })
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn c_104_receipt_read_rechecks_revoked_authorization_local() {
     let matrix = Matrix::local().await;
-    run_matrix_scenario(matrix, |m| Box::pin(async move { receipt_read_rechecks_revoked_authorization(m).await })).await;
+    run_matrix_scenario(matrix, |m, r, t| {
+        Box::pin(async move { receipt_read_rechecks_revoked_authorization(m, r, t).await })
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn c_104_receipt_read_rechecks_revoked_authorization_remote() {
     let matrix = Matrix::remote().await;
-    run_matrix_scenario(matrix, |m| Box::pin(async move { receipt_read_rechecks_revoked_authorization(m).await })).await;
+    run_matrix_scenario(matrix, |m, r, t| {
+        Box::pin(async move { receipt_read_rechecks_revoked_authorization(m, r, t).await })
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn c_073_reflection_reads_refuse_without_capability_local() {
     let matrix = Matrix::local().await;
-    run_matrix_scenario(matrix, |m| Box::pin(async move { reflection_reads_refuse_without_capability(m).await })).await;
+    run_matrix_scenario(matrix, |m, r, t| {
+        Box::pin(async move { reflection_reads_refuse_without_capability(m, r, t).await })
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn c_073_reflection_reads_refuse_without_capability_remote() {
     let matrix = Matrix::remote().await;
-    run_matrix_scenario(matrix, |m| Box::pin(async move { reflection_reads_refuse_without_capability(m).await })).await;
+    run_matrix_scenario(matrix, |m, r, t| {
+        Box::pin(async move { reflection_reads_refuse_without_capability(m, r, t).await })
+    })
+    .await;
 }
