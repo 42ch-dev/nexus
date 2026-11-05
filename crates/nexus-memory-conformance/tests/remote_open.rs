@@ -44,12 +44,14 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use ed25519_dalek::SigningKey;
+use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{Row, SqlitePool};
 use tempfile::TempDir;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
+use tokio_tungstenite::tungstenite::protocol::Message;
 
 use nexus_contracts::generated::daemon_api::characters::memory::capture_character_pending_review_request::CaptureCharacterPendingReviewRequest;
 use nexus_contracts::generated::daemon_api::memory::create_pending_review_request::CreatePendingReviewRequest;
@@ -3065,4 +3067,678 @@ async fn overlapping_observations_poison_the_seam_without_provider_effect() {
         "the fresh sequential capture produced its candidate"
     );
     pool.close().await;
+}
+
+// ---------------------------------------------------------------------------
+// Shared product WS transport close ownership (I-000259)
+// ---------------------------------------------------------------------------
+
+/// Dial the product transport to a raw peer address.
+async fn raw_ws_transport(addr: SocketAddr) -> Arc<dyn Transport> {
+    let (ws, _response) = tokio::time::timeout(
+        SETUP_BOUND,
+        tokio_tungstenite::connect_async(format!("ws://{addr}")),
+    )
+    .await
+    .expect("the dial is bounded")
+    .expect("dial the raw peer");
+    Arc::new(WsTransport::new(ws))
+}
+
+/// A peer that completes the WS upgrade and then never reads a frame, so the
+/// transport's write path really parks on native backpressure (no sleep or
+/// is-finished proxy). After the test has closed the transport it reads the
+/// buffered frames to the end and reports whether the stream really ended.
+async fn non_reading_peer() -> (SocketAddr, Arc<Notify>, tokio::task::JoinHandle<bool>) {
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind the silent peer");
+    let addr = listener.local_addr().expect("silent peer address");
+    let probe = Arc::new(Notify::new());
+    let peer_probe = Arc::clone(&probe);
+    let peer = tokio::spawn(async move {
+        let (tcp, _) = tokio::time::timeout(SETUP_BOUND, listener.accept())
+            .await
+            .expect("the product transport dials the silent peer")
+            .expect("accept the product transport");
+        let mut ws = tokio::time::timeout(SETUP_BOUND, tokio_tungstenite::accept_async(tcp))
+            .await
+            .expect("the upgrade is bounded")
+            .expect("websocket upgrade");
+        // Stay non-reading until the transport has closed.
+        peer_probe.notified().await;
+        tokio::time::timeout(SETUP_BOUND, async move {
+            loop {
+                match ws.next().await {
+                    None | Some(Err(_)) | Some(Ok(Message::Close(_))) => return true,
+                    Some(Ok(_)) => continue,
+                }
+            }
+        })
+        .await
+        .unwrap_or(false)
+    });
+    (addr, probe, peer)
+}
+
+/// A peer that echoes every binary envelope back, used as an unrelated positive
+/// session while the stalled one is torn down.
+async fn echo_peer() -> (SocketAddr, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind the echo peer");
+    let addr = listener.local_addr().expect("echo peer address");
+    let peer_task = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.expect("accept the echo client");
+        let mut ws = tokio_tungstenite::accept_async(tcp)
+            .await
+            .expect("echo upgrade");
+        while let Some(message) = ws.next().await {
+            match message {
+                Ok(Message::Binary(bytes)) => {
+                    if ws.send(Message::Binary(bytes)).await.is_err() {
+                        break;
+                    }
+                }
+                Ok(Message::Close(_)) | Err(_) => break,
+                Ok(_) => {}
+            }
+        }
+    });
+    (addr, peer_task)
+}
+
+/// The shared product `WsTransport` must not report close as done while a send
+/// is parked on a non-reading peer: the close signal reaches the parked send,
+/// both concurrent closers settle with the same truthful outcome, the send
+/// terminates, and dropping the halves really ends the peer's stream. An
+/// unrelated session keeps its idle receive, send/recv roundtrip and close.
+#[tokio::test]
+async fn product_ws_close_settles_a_parked_send_and_releases_the_peer() {
+    let (addr, probe, peer) = non_reading_peer().await;
+    let (ws, _response) = tokio::time::timeout(
+        SETUP_BOUND,
+        tokio_tungstenite::connect_async(format!("ws://{addr}")),
+    )
+    .await
+    .expect("the dial is bounded")
+    .expect("dial the silent peer");
+    let transport: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+
+    // Far more than any loopback socket buffer, so the write is really parked.
+    let payload = vec![0x5a_u8; 8 * 1024 * 1024];
+    let mut sending = transport.send(&payload);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(250), &mut sending)
+            .await
+            .is_err(),
+        "the send must be parked on the non-reading peer before close"
+    );
+
+    // Close from separate tasks, like the SDK spawns its transport close, while
+    // the caller still awaits the parked send.
+    let closer = Arc::clone(&transport);
+    let first_close = tokio::spawn(async move { closer.close().await });
+    let closer = Arc::clone(&transport);
+    let second_close = tokio::spawn(async move { closer.close().await });
+
+    // The parked send terminates instead of pinning the sink half forever.
+    let settled = tokio::time::timeout(Duration::from_secs(5), sending)
+        .await
+        .expect("the parked send must settle after close");
+    assert_eq!(
+        settled,
+        Err(TransportError::Closed),
+        "a send cancelled by close reports Closed, never success"
+    );
+
+    // Both concurrent closers settle, and neither reports close-start as a
+    // completed clean close: the close frame cannot flush to a peer that
+    // stopped reading, so the terminal error is surfaced.
+    let first = tokio::time::timeout(SETUP_BOUND, first_close)
+        .await
+        .expect("the first close must settle")
+        .expect("the close task must not panic");
+    let second = tokio::time::timeout(SETUP_BOUND, second_close)
+        .await
+        .expect("the second close must settle")
+        .expect("the close task must not panic");
+    assert_eq!(
+        first, second,
+        "concurrent closers report the same settled outcome"
+    );
+    assert!(
+        matches!(first, Err(TransportError::Io(_))),
+        "an unflushed close frame is a surfaced terminal error, got {first:?}"
+    );
+    assert_eq!(
+        transport.close().await,
+        first,
+        "a repeated close keeps the settled outcome"
+    );
+
+    // The physical halves really went away: the peer drains and sees the stream
+    // end instead of the socket staying open.
+    probe.notify_one();
+    assert!(
+        tokio::time::timeout(SETUP_BOUND, peer)
+            .await
+            .expect("the peer observes the end of the stream")
+            .expect("the peer task must not panic"),
+        "dropping both halves must end the peer's stream"
+    );
+
+    // An unrelated session keeps an idle receive, a normal roundtrip and a
+    // normal close while/after the stalled one is torn down.
+    let (echo_addr, echo_peer) = echo_peer().await;
+    let (ws, _response) = tokio::time::timeout(
+        SETUP_BOUND,
+        tokio_tungstenite::connect_async(format!("ws://{echo_addr}")),
+    )
+    .await
+    .expect("the echo dial is bounded")
+    .expect("dial the echo peer");
+    let echo: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+    let mut idle = echo.recv();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), &mut idle)
+            .await
+            .is_err(),
+        "an idle receive parks instead of failing"
+    );
+    echo.send(b"unrelated-session")
+        .await
+        .expect("the unrelated session still sends");
+    assert_eq!(
+        tokio::time::timeout(SETUP_BOUND, idle)
+            .await
+            .expect("the parked receive settles")
+            .expect("the echo arrives"),
+        b"unrelated-session"
+    );
+    echo.close().await.expect("a normal close succeeds");
+    echo.close().await.expect("a repeated normal close succeeds");
+    tokio::time::timeout(SETUP_BOUND, echo_peer)
+        .await
+        .expect("the echo peer ends")
+        .expect("the echo peer task must not panic");
+}
+
+/// Cancelling the SOLE raw close must not abandon the physical disposal, and the
+/// result a later caller sees must be the real one — never a success cached for
+/// an interrupted flush. Two real windows are covered: the closer waiting for
+/// the half a parked send still holds, and the closer inside a stalled flush.
+#[tokio::test]
+async fn sole_cancelled_close_releases_the_halves_and_keeps_a_truthful_result() {
+    // ── Window 1: the sole closer is cancelled while it waits for the sink
+    // half that the parked send still owns. ──
+    let (addr, probe, peer) = non_reading_peer().await;
+    let (ws, _response) = tokio::time::timeout(
+        SETUP_BOUND,
+        tokio_tungstenite::connect_async(format!("ws://{addr}")),
+    )
+    .await
+    .expect("the dial is bounded")
+    .expect("dial the silent peer");
+    let transport: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+    let payload = vec![0x5a_u8; 8 * 1024 * 1024];
+    let mut sending = transport.send(&payload);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(250), &mut sending)
+            .await
+            .is_err(),
+        "the send must be parked on the non-reading peer before close"
+    );
+    let mut closer = Box::pin(transport.close());
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), &mut closer)
+            .await
+            .is_err(),
+        "the sole close must be waiting for the half the parked send owns"
+    );
+    drop(closer);
+    // The close signal wakes the parked send; its caller then abandons it. Both
+    // halves are still the transport's to release, and no second close runs.
+    drop(sending);
+    probe.notify_one();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), peer)
+            .await
+            .expect("the peer must observe the end without a second close")
+            .expect("the peer task must not panic"),
+        "cancelling the sole close must not strand the socket halves"
+    );
+    // The later caller settles with the real outcome for this ordering: the
+    // peer started draining, so the disposal's flush completes. What matters is
+    // that it waits for the settled result instead of reporting an early flag.
+    let late = tokio::time::timeout(SETUP_BOUND, transport.close())
+        .await
+        .expect("the later close settles");
+    assert!(
+        late.is_ok(),
+        "the later caller sees the settled disposition, got {late:?}"
+    );
+
+    // ── Window 2: the sole closer is cancelled inside a stalled flush. ──
+    let (addr, probe, peer) = non_reading_peer().await;
+    let (ws, _response) = tokio::time::timeout(
+        SETUP_BOUND,
+        tokio_tungstenite::connect_async(format!("ws://{addr}")),
+    )
+    .await
+    .expect("the dial is bounded")
+    .expect("dial the silent peer");
+    let transport: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+    let mut sending = transport.send(&payload);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(250), &mut sending)
+            .await
+            .is_err(),
+        "the send must be parked on the non-reading peer before close"
+    );
+    let closer = tokio::spawn({
+        let transport = Arc::clone(&transport);
+        async move { transport.close().await }
+    });
+    // The close signal releases the parked send, so the closer can take both
+    // halves and start the flush, which cannot finish (8 MiB queued, peer not
+    // reading).
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(5), sending)
+            .await
+            .expect("the parked send settles"),
+        Err(TransportError::Closed)
+    );
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    closer.abort();
+    let _ = closer.await;
+    // The peer stays non-reading, so the disposal's flush cannot complete: the
+    // later caller must see that real terminal error, not a cached success for
+    // the interrupted caller.
+    let late = tokio::time::timeout(SETUP_BOUND, transport.close())
+        .await
+        .expect("the later close settles")
+        .expect_err("an interrupted flush is not a clean close");
+    assert!(
+        matches!(late, TransportError::Io(_)),
+        "an interrupted flush is never cached as success, got {late:?}"
+    );
+    // Only now drain the peer, which observes the physical release the
+    // cancelled closer's teardown already performed.
+    probe.notify_one();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), peer)
+            .await
+            .expect("the peer observes the end after the cancelled flush")
+            .expect("the peer task must not panic"),
+        "the interrupted closer's halves must still be released"
+    );
+}
+
+/// A public `send` future that was polled Pending and then RETAINED (never
+/// repolled, never dropped) must not block the close: the physical teardown has
+/// to settle and the same peer must observe the end while that future is still
+/// held. A running ticker proves the runtime is not starved.
+#[tokio::test]
+async fn retained_pending_send_does_not_block_the_close() {
+    let (addr, probe, peer) = non_reading_peer().await;
+    let (ws, _response) = tokio::time::timeout(
+        SETUP_BOUND,
+        tokio_tungstenite::connect_async(format!("ws://{addr}")),
+    )
+    .await
+    .expect("the dial is bounded")
+    .expect("dial the silent peer");
+    let transport: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+    let payload = vec![0x5a_u8; 8 * 1024 * 1024];
+    let mut retained_send = Box::pin(transport.send(&payload));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(250), &mut retained_send)
+            .await
+            .is_err(),
+        "the send must be parked on the non-reading peer before close"
+    );
+
+    // A second same-direction send really queues behind the retained holder
+    // before the close.
+    let queued = tokio::spawn({
+        let transport = Arc::clone(&transport);
+        async move { transport.send(b"queued-before-close").await }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(
+        !queued.is_finished(),
+        "the second send must be queued behind the retained holder"
+    );
+
+    let ticks = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let ticker = tokio::spawn({
+        let ticks = Arc::clone(&ticks);
+        async move {
+            loop {
+                ticks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }
+    });
+
+    // The runtime keeps making progress while the send stays unpolled.
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while ticks.load(std::sync::atomic::Ordering::SeqCst) < 3 {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .expect("the unpolled send must not starve the runtime");
+    let ticks_before_close = ticks.load(std::sync::atomic::Ordering::SeqCst);
+
+    // The retained send is never polled or dropped from here on.
+    let closer = tokio::spawn({
+        let transport = Arc::clone(&transport);
+        async move { transport.close().await }
+    });
+    let report = tokio::time::timeout(Duration::from_secs(10), closer)
+        .await
+        .expect("the close must settle while the send future is retained")
+        .expect("the close task must not panic");
+    assert!(
+        matches!(report, Err(TransportError::Io(_))),
+        "a non-reading peer leaves a real terminal close error, got {report:?}"
+    );
+
+    // The already-queued send and a NEW post-close send both observe Closed
+    // BEFORE the retained holder is released — not a timeout.
+    let queued_outcome = tokio::time::timeout(Duration::from_secs(5), queued)
+        .await
+        .expect("the queued send must settle after close")
+        .expect("the queued task must not panic");
+    assert_eq!(
+        queued_outcome,
+        Err(TransportError::Closed),
+        "a send queued behind the retained holder observes Closed"
+    );
+    let late = tokio::time::timeout(Duration::from_secs(2), transport.send(b"late-after-close"))
+        .await
+        .expect("a new send after close must settle");
+    assert_eq!(
+        late,
+        Err(TransportError::Closed),
+        "a new send after close observes Closed without waiting for the slot"
+    );
+    assert!(
+        ticks.load(std::sync::atomic::Ordering::SeqCst) >= 3,
+        "the runtime kept making progress while the send stayed unpolled"
+    );
+    let _ = ticks_before_close;
+
+    // The peer observes the physical end BEFORE the retained future is dropped.
+    probe.notify_one();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), peer)
+            .await
+            .expect("the peer must observe the end while the send is retained")
+            .expect("the peer task must not panic"),
+        "the retained send must not keep the socket open"
+    );
+    drop(retained_send);
+    ticker.abort();
+    let _ = ticker.await;
+}
+
+/// The same invariant for a public `recv` future polled Pending and retained.
+#[tokio::test]
+async fn retained_pending_recv_does_not_block_the_close() {
+    let (addr, probe, peer) = non_reading_peer().await;
+    let (ws, _response) = tokio::time::timeout(
+        SETUP_BOUND,
+        tokio_tungstenite::connect_async(format!("ws://{addr}")),
+    )
+    .await
+    .expect("the dial is bounded")
+    .expect("dial the silent peer");
+    let transport: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+    let mut retained_recv = Box::pin(transport.recv());
+    assert!(
+        tokio::time::timeout(Duration::from_millis(250), &mut retained_recv)
+            .await
+            .is_err(),
+        "the recv must be parked before close"
+    );
+
+    // A second same-direction receive really queues behind the retained holder
+    // before the close.
+    let queued = tokio::spawn({
+        let transport = Arc::clone(&transport);
+        async move { transport.recv().await }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(
+        !queued.is_finished(),
+        "the second recv must be queued behind the retained holder"
+    );
+
+    let ticks = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let ticker = tokio::spawn({
+        let ticks = Arc::clone(&ticks);
+        async move {
+            loop {
+                ticks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }
+    });
+
+    // The runtime keeps making progress while the recv stays unpolled.
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while ticks.load(std::sync::atomic::Ordering::SeqCst) < 3 {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .expect("the unpolled recv must not starve the runtime");
+    let ticks_before_close = ticks.load(std::sync::atomic::Ordering::SeqCst);
+
+    let closer = tokio::spawn({
+        let transport = Arc::clone(&transport);
+        async move { transport.close().await }
+    });
+    let report = tokio::time::timeout(Duration::from_secs(10), closer)
+        .await
+        .expect("the close must settle while the recv future is retained")
+        .expect("the close task must not panic");
+    assert!(report.is_ok(), "an idle close flushes cleanly, got {report:?}");
+
+    // The already-queued receive and a NEW post-close receive both observe
+    // Closed BEFORE the retained holder is released — not a timeout.
+    let queued_outcome = tokio::time::timeout(Duration::from_secs(5), queued)
+        .await
+        .expect("the queued recv must settle after close")
+        .expect("the queued task must not panic");
+    assert_eq!(
+        queued_outcome,
+        Err(TransportError::Closed),
+        "a recv queued behind the retained holder observes Closed"
+    );
+    let late = tokio::time::timeout(Duration::from_secs(2), transport.recv())
+        .await
+        .expect("a new recv after close must settle");
+    assert_eq!(
+        late,
+        Err(TransportError::Closed),
+        "a new recv after close observes Closed without waiting for the slot"
+    );
+    assert!(
+        ticks.load(std::sync::atomic::Ordering::SeqCst) >= 3,
+        "the runtime kept making progress while the recv stayed unpolled"
+    );
+    let _ = ticks_before_close;
+
+    probe.notify_one();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), peer)
+            .await
+            .expect("the peer must observe the end while the recv is retained")
+            .expect("the peer task must not panic"),
+        "the retained recv must not keep the socket open"
+    );
+    drop(retained_recv);
+    ticker.abort();
+    let _ = ticker.await;
+}
+
+/// A peer that, after `probe`, drains every inbound envelope and records the
+/// first byte of each Binary message, returning that wire order at stream end.
+async fn draining_peer() -> (SocketAddr, Arc<Notify>, tokio::task::JoinHandle<Vec<u8>>) {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let probe = Arc::new(Notify::new());
+    let peer_probe = Arc::clone(&probe);
+    let peer = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.expect("accept");
+        let mut ws = tokio_tungstenite::accept_async(tcp).await.expect("upgrade");
+        peer_probe.notified().await;
+        let mut order = Vec::new();
+        while let Some(message) = ws.next().await {
+            match message {
+                Ok(Message::Binary(bytes)) => {
+                    if let Some(first) = bytes.first() {
+                        order.push(*first);
+                    }
+                }
+                Ok(Message::Close(_)) | Err(_) | Ok(Message::Text(_)) => break,
+                Ok(_) => {}
+            }
+        }
+        order
+    });
+    (addr, probe, peer)
+}
+
+/// A peer that, after `probe`, sends two binary frames and then waits for the
+/// connection to end.
+async fn two_frame_peer() -> (SocketAddr, Arc<Notify>, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let probe = Arc::new(Notify::new());
+    let peer_probe = Arc::clone(&probe);
+    let peer = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.expect("accept");
+        let mut ws = tokio_tungstenite::accept_async(tcp).await.expect("upgrade");
+        peer_probe.notified().await;
+        if ws.send(Message::Binary(b"one".to_vec().into())).await.is_err() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        let _ = ws.send(Message::Binary(b"two".to_vec().into())).await;
+        while let Some(message) = ws.next().await {
+            match message {
+                Ok(Message::Close(_)) | Err(_) => break,
+                Ok(_) => {}
+            }
+        }
+    });
+    (addr, probe, peer)
+}
+
+/// Real socket READINESS without any close must not evict a queued send: the
+/// first operation stays Pending/retained, the second is queued, and draining
+/// the peer (ordinary write readiness) must leave it queued until the first
+/// completes, then it must really succeed in wire order.
+#[tokio::test]
+async fn live_write_readiness_does_not_close_a_queued_send() {
+    let (addr, probe, peer) = draining_peer().await;
+    let transport = raw_ws_transport(addr).await;
+    let payload = vec![0x5a_u8; 8 * 1024 * 1024];
+    let mut first = Box::pin(transport.send(&payload));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(250), &mut first)
+            .await
+            .is_err(),
+        "the first send must be parked before close"
+    );
+    let queued = tokio::spawn({
+        let transport = Arc::clone(&transport);
+        async move { transport.send(b"queued-live").await }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(!queued.is_finished(), "the second send is queued");
+    // Ordinary socket write readiness: the peer starts draining. No close.
+    probe.notify_one();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(
+        !queued.is_finished(),
+        "a live write-readiness wake must not evict a queued send"
+    );
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(10), first)
+            .await
+            .expect("the first send completes"),
+        Ok(())
+    );
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(10), queued)
+            .await
+            .expect("the queued send completes")
+            .expect("queued task"),
+        Ok(()),
+        "the queued send succeeds instead of reporting Closed"
+    );
+    transport.close().await.expect("normal close");
+    let order = tokio::time::timeout(Duration::from_secs(5), peer)
+        .await
+        .expect("the peer ends")
+        .expect("peer task");
+    assert_eq!(
+        order,
+        vec![0x5a, b'q'],
+        "wire order is preserved under live readiness"
+    );
+}
+
+/// The same for real socket READ readiness: a queued receive must not be
+/// evicted as Closed when the peer's frame wakes the shared notifier; the first
+/// receive returns frame one and the queued one frame two, in order.
+#[tokio::test]
+async fn live_read_readiness_does_not_close_a_queued_recv() {
+    let (addr, probe, peer) = two_frame_peer().await;
+    let transport = raw_ws_transport(addr).await;
+    let mut first = Box::pin(transport.recv());
+    assert!(
+        tokio::time::timeout(Duration::from_millis(250), &mut first)
+            .await
+            .is_err(),
+        "the first recv must be parked before close"
+    );
+    let queued = tokio::spawn({
+        let transport = Arc::clone(&transport);
+        async move { transport.recv().await }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(!queued.is_finished(), "the second recv is queued");
+    // Ordinary socket read readiness: the peer sends its first frame. No close.
+    probe.notify_one();
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert!(
+        !queued.is_finished(),
+        "a live read-readiness wake must not evict a queued recv"
+    );
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(5), first)
+            .await
+            .expect("the first recv completes"),
+        Ok(b"one".to_vec())
+    );
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(5), queued)
+            .await
+            .expect("the queued recv completes")
+            .expect("queued task"),
+        Ok(b"two".to_vec()),
+        "the queued recv returns the second frame, in order"
+    );
+    transport.close().await.expect("normal close");
+    tokio::time::timeout(Duration::from_secs(5), peer)
+        .await
+        .expect("the peer ends")
+        .expect("peer task");
 }
