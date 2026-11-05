@@ -173,8 +173,114 @@ fn refusal_proves(binding_is_local: bool, reject: &SpokeReject, codes: &[SpokeRe
 /// failure *after* commit — as an effect that may already exist. Only a
 /// definite (`terminal`) class on a pre-effect refusal code proves a clean
 /// no-effect result. A retryable/uncertain class, a missing or unknown class,
-/// and any code whose capture semantics do not prove a pre-effect refusal all
-/// keep the durable admission.
+/// and any code whose mutation semantics do not prove a pre-effect refusal all
+/// keep the durable admission. The capture and the review entry share this one
+/// policy: neither invents a second retirement rule.
+/// The record ids one committed review must name, validated against the
+/// decision Core actually issued (`spoke-memory-protocol` §7.15).
+///
+/// The committed result is `{ outcome, record_ids }` and a review is atomic, so
+/// a consistent result is exactly: `dropped` with no records (a legitimate
+/// drop), `promoted` with the one promoted record, or `fragmented` with one
+/// record per issued fragment. The peer's schema accepts an empty or short
+/// `record_ids` and any known `outcome`, so shape alone is not proof. Treating
+/// such a receipt as complete would consume the candidate, retire the attempt
+/// and leave the provider's real record unprotected; instead this returns a
+/// coded inconsistency and the caller keeps the attempt's admission.
+///
+/// The receipt must also be *this* request's receipt: its echoed
+/// `idempotency_key` and `space_id` are bound to the issued request and the
+/// pinned space. An older receipt with a matching shape but its own key would
+/// otherwise settle a different attempt — the monotone object facts cannot
+/// revive its already released record — and retire the only protection the new
+/// attempt has. The requester principal is deliberately not compared: the local
+/// principal is not the remote authenticated identity.
+fn review_result_record_ids(
+    decision: &Value,
+    body: &Value,
+    issued_space: &str,
+    issued_key: &str,
+) -> CoreResult<Vec<String>> {
+    // I-272: every mismatch below is static. A forged receipt admits arbitrary
+    // peer-authored bytes (`space_id`, `idempotency_key`, `result.outcome`,
+    // `record_ids`) including private markers and newlines, and the pipeline
+    // logs the very `Display` this helper returns - so no peer field is ever
+    // interpolated into a category or message.
+    let malformed = |reason: &'static str| internal_err("memory_review_receipt", reason);
+    let action = decision
+        .get("action")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the issued review decision carries no action"))?;
+    let space = body
+        .get("space_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the committed review result carries no space"))?;
+    if space != issued_space {
+        return Err(malformed(
+            "the committed result space does not match the issued request",
+        ));
+    }
+    let key = body
+        .get("idempotency_key")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            malformed("the committed review result carries no idempotency key")
+        })?;
+    if key != issued_key {
+        return Err(malformed(
+            "the committed review result echoes a different idempotency key than the issued request",
+        ));
+    }
+    let outcome = body
+        .pointer("/result/outcome")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the committed review result carries no outcome"))?;
+    let ids = body
+        .pointer("/result/record_ids")
+        .and_then(Value::as_array)
+        .ok_or_else(|| malformed("the committed review result carries no record_ids"))?;
+    let mut record_ids = Vec::with_capacity(ids.len());
+    for id in ids {
+        let id = id
+            .as_str()
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| {
+                malformed("the committed review result names an empty or non-string record id")
+            })?;
+        record_ids.push(id.to_string());
+    }
+    let (expected_outcome, expected_records) = match action {
+        "drop" => ("dropped", 0),
+        "promote" => ("promoted", 1),
+        "fragment" => {
+            let fragments = decision
+                .get("fragments")
+                .and_then(Value::as_array)
+                .filter(|fragments| !fragments.is_empty())
+                .ok_or_else(|| {
+                    malformed("the issued fragment decision carries no fragments")
+                })?;
+            ("fragmented", fragments.len())
+        }
+        _ => {
+            return Err(malformed(
+                "the issued decision action is not a review decision",
+            ))
+        }
+    };
+    if outcome != expected_outcome {
+        return Err(malformed(
+            "the committed outcome does not match the issued decision",
+        ));
+    }
+    if record_ids.len() != expected_records {
+        return Err(malformed(
+            "the committed result record count does not match the issued decision",
+        ));
+    }
+    Ok(record_ids)
+}
+
 fn remote_capture_reject_proves_no_effect(reject: &SpokeReject) -> bool {
     refusal_proves(
         false,
@@ -603,11 +709,15 @@ impl MemoryAdapter {
     }
 
     /// Record a committed review outcome (D18) in one local transaction: the
-    /// consumed candidate and the record references the provider's receipt
-    /// returned. A later capture-result publication can then neither resurrect
-    /// the consumed candidate nor overwrite these record references.
+    /// consumed candidate, the record references the provider's receipt
+    /// returned, **and** the retirement of this one attempt. A later
+    /// capture-result publication can then neither resurrect the consumed
+    /// candidate nor overwrite these record references, and a committed review
+    /// can never leave its facts without its own attempt retired (or the
+    /// reverse) — they settle together or not at all.
     async fn record_remote_review(
         &self,
+        attempt: Option<&str>,
         binding_id: Option<&str>,
         candidate_id: &str,
         record_ids: &[String],
@@ -644,6 +754,93 @@ impl MemoryAdapter {
             .await
             .map_err(map_local_db_error)?;
         }
+        // Only this attempt retires, and only together with the facts above.
+        if let Some(attempt) = attempt {
+            nexus_local_db::retire_remote_binding_admission_tx(&mut tx, attempt, &namespace)
+                .await
+                .map_err(map_local_db_error)?;
+        }
+        tx.commit().await.map_err(sqlx_internal)?;
+        Ok(())
+    }
+
+    /// Durably admit one remote binding-local review attempt before the RPC.
+    ///
+    /// The drain can consume a candidate Core did not capture itself — an
+    /// independent signed writer may create it with the legacy pending shape
+    /// and a context scope naming this binding — so such a candidate carries no
+    /// admission and no candidate fact. This commits the same per-attempt
+    /// admission the capture arm uses: the exact dependency namespace, one
+    /// `BEGIN IMMEDIATE` writer transaction and the same owned-provenance gate.
+    /// It lands before the provider call, so an uncertain, cancelled or
+    /// locally-unsettled attempt keeps the binding protected.
+    ///
+    /// Shared/Creator candidates and local bindings own no binding dependency
+    /// and admit nothing (`Ok(None)`).
+    async fn admit_remote_review_attempt(
+        &self,
+        binding_id: Option<&str>,
+    ) -> CoreResult<Option<String>> {
+        let Some(binding_id) = binding_id else {
+            return Ok(None);
+        };
+        let Some(character_id) = self.character_id.as_deref() else {
+            return Ok(None);
+        };
+        let Some(namespace) = self.remote_namespace(binding_id) else {
+            return Ok(None);
+        };
+        let admission_id = uuid::Uuid::new_v4().to_string();
+        let admitted_at = now_iso();
+        let mut tx = nexus_local_db::begin_immediate(&self.pool)
+            .await
+            .map_err(map_local_db_error)?;
+        nexus_local_db::require_valid_provenance_tx(
+            &mut tx,
+            self.principal.principal_id.as_str(),
+            character_id,
+            Some(binding_id),
+        )
+        .await
+        .map_err(map_local_db_error)?;
+        nexus_local_db::insert_remote_binding_admission_tx(
+            &mut tx,
+            &admission_id,
+            &namespace,
+            &admitted_at,
+        )
+        .await
+        .map_err(map_local_db_error)?;
+        tx.commit().await.map_err(sqlx_internal)?;
+        Ok(Some(admission_id))
+    }
+
+    /// Apply the D18 consequence of one review refusal.
+    ///
+    /// Only the shared proven-no-effect policy may retire this attempt: an
+    /// uncertain, retryable, unknown or contradictory outcome keeps it, and a
+    /// local retirement failure keeps it too.
+    async fn settle_remote_review_reject(
+        &self,
+        attempt: Option<&str>,
+        binding_id: Option<&str>,
+        reject: &SpokeReject,
+    ) -> CoreResult<()> {
+        let (Some(attempt), Some(binding_id)) = (attempt, binding_id) else {
+            return Ok(());
+        };
+        if !remote_capture_reject_proves_no_effect(reject) {
+            return Ok(());
+        }
+        let Some(namespace) = self.remote_namespace(binding_id) else {
+            return Ok(());
+        };
+        let mut tx = nexus_local_db::begin_immediate(&self.pool)
+            .await
+            .map_err(map_local_db_error)?;
+        nexus_local_db::retire_remote_binding_admission_tx(&mut tx, attempt, &namespace)
+            .await
+            .map_err(map_local_db_error)?;
         tx.commit().await.map_err(sqlx_internal)?;
         Ok(())
     }
@@ -1131,9 +1328,24 @@ impl MemoryAdapter {
     /// `drop`). A legacy-derived candidate is adopted under the bridge's
     /// deterministic id inside the same guarded transaction that consumes it
     /// (NXM-5's mutation-time adoption, reused — not redefined — by NXM-8),
-    /// under the bearer's disposition section the caller holds. A remote
-    /// binding runs the ordinary protocol op, whose candidate CAS and
-    /// transaction supply the exclusion, and carries no local side effect.
+    /// under the bearer's disposition section the caller holds.
+    ///
+    /// A remote binding-local review durably admits this attempt in the exact
+    /// dependency namespace **before** the provider call, because the candidate
+    /// the drain consumes may have been created by an independent signed writer
+    /// and therefore carry no Core admission or candidate fact. A definite
+    /// committed receipt settles in one local transaction: the consumed
+    /// candidate, the record references it returned, and the retirement of this
+    /// attempt. **Before** settling, the committed result must be consistent
+    /// with the decision Core issued (`drop` → no records, `promote` → one,
+    /// `fragment` → one per issued fragment, with valid ids) **and** must be
+    /// this request's receipt: its echoed idempotency key and space are bound
+    /// to the issued request and the pinned space. A schema-valid but
+    /// inconsistent or stale receipt is refused as malformed, so the attempt
+    /// keeps its admission. An uncertain, cancelled, malformed or locally-unsettled
+    /// attempt therefore keeps its admission, and the binding stays unremovable;
+    /// only the shared proven-no-effect refusal policy retires an attempt, and
+    /// never another one.
     pub(crate) async fn review(
         &self,
         candidate_id: &str,
@@ -1146,10 +1358,12 @@ impl MemoryAdapter {
             "space_id": self.binding.space_id(),
             "candidate_id": candidate_id,
             "expected_revision": expected_revision,
-            "decision": decision,
+            // Kept for the committed-result check: the response must name
+            // exactly the records this decision asked the provider to create.
+            "decision": decision.clone(),
             "idempotency_key": idempotency_key("review", candidate_id)?,
         }))?;
-        let result = if self.is_local() {
+        if self.is_local() {
             let local = self.binding.local()?;
             // The drain takes the section before it fetches its slice, so a
             // local review always has one.
@@ -1159,39 +1373,57 @@ impl MemoryAdapter {
                     "a local review drain requires the disposition section",
                 )
             })?;
-            local
+            return match local
                 .review_legacy_candidate(&self.principal, &self.subject_id, request, section)
                 .await
-        } else {
-            self.binding
-                .port()
-                .review_candidate(&self.principal, request)
-                .await
-        };
-        match result {
+            {
+                SpokeResult::Ok(_) => Ok(()),
+                SpokeResult::Reject(reject) => Err(self.refuse(&reject)),
+            };
+        }
+        // A remote binding-local review consumes a candidate the drain chose to
+        // settle, and that candidate need not carry a Core capture admission or
+        // candidate fact (an independent signed writer can have created it).
+        // Admit this one attempt before the RPC under the same per-attempt
+        // namespace, then settle its facts and its retirement together.
+        let attempt = self.admit_remote_review_attempt(binding_id).await?;
+        // The committed receipt must identify THIS request: a provider can
+        // answer with an older, still schema-valid receipt whose result matches
+        // in shape but belongs to another key (and a different namespace).
+        let issued_space = request.space_id.as_str().to_string();
+        let issued_key = request.idempotency_key.as_str().to_string();
+        match self
+            .binding
+            .port()
+            .review_candidate(&self.principal, request)
+            .await
+        {
             SpokeResult::Ok(receipt) => {
-                if !self.is_local() {
-                    // D18: bind the real receipt in one local transaction — the
-                    // consumed candidate and the record references it returned.
-                    let body = serde_json::to_value(&receipt).map_err(wire_err)?;
-                    let record_ids: Vec<String> = body
-                        .pointer("/result/record_ids")
-                        .and_then(Value::as_array)
-                        .ok_or_else(|| {
-                            internal_err(
-                                "memory_review_receipt",
-                                "a committed review receipt carries no record_ids",
-                            )
-                        })?
-                        .iter()
-                        .filter_map(|record_id| record_id.as_str().map(str::to_string))
-                        .collect();
-                    self.record_remote_review(binding_id, candidate_id, &record_ids)
-                        .await?;
-                }
+                let body = serde_json::to_value(&receipt).map_err(wire_err)?;
+                // An SDK-schema-valid receipt can still be inconsistent with the
+                // decision (no ids, a short id list, a mismatched outcome). Only
+                // a consistent committed result may settle; otherwise the
+                // attempt keeps its admission and the binding stays protected.
+                let record_ids =
+                    review_result_record_ids(&decision, &body, &issued_space, &issued_key)?;
+                // A settlement failure returns an error with the attempt still
+                // in place, so the binding stays protected.
+                self.record_remote_review(attempt.as_deref(), binding_id, candidate_id, &record_ids)
+                    .await?;
                 Ok(())
             }
-            SpokeResult::Reject(reject) => Err(self.refuse(&reject)),
+            SpokeResult::Reject(reject) => {
+                if let Err(error) = self
+                    .settle_remote_review_reject(attempt.as_deref(), binding_id, &reject)
+                    .await
+                {
+                    tracing::warn!(
+                        error = %error,
+                        "review refusal settlement could not persist; the attempt keeps protection"
+                    );
+                }
+                Err(self.refuse(&reject))
+            }
         }
     }
 
@@ -6199,5 +6431,61 @@ mod tests {
             "peer text must not escape: {rendered}"
         );
         assert!(!rendered.contains("token=abc"));
+    }
+
+    /// I-272 (fix round 3): the committed-receipt validation never echoes a
+    /// peer-authored field back into the observable error. `SpaceId` admits
+    /// any nonempty string, so a forged receipt can carry a private marker or
+    /// a newline; the pipeline logs the very `Display` this helper returns, so
+    /// the boundary is the error text itself. `review_result_record_ids` is
+    /// private, which makes this the only place the redacted form is pinnable.
+    #[test]
+    fn receipt_mismatches_never_echo_peer_fields() {
+        const SENTINEL: &str = "spc_forged\nMARKER-R2-PRIVATE token=abc";
+        let decision = json!({ "action": "drop" });
+
+        let forged_space = json!({
+            "space_id": SENTINEL,
+            "idempotency_key": "idem_r2_receipt",
+            "result": { "outcome": "dropped", "record_ids": [] },
+        });
+        let error =
+            review_result_record_ids(&decision, &forged_space, "spc_issued", "idem_r2_receipt")
+                .expect_err("a foreign space must refuse the committed receipt");
+        assert_redacted_receipt_error(&error, "foreign space");
+
+        let forged_outcome = json!({
+            "space_id": "spc_issued",
+            "idempotency_key": "idem_r2_receipt",
+            "result": { "outcome": SENTINEL, "record_ids": [] },
+        });
+        let error =
+            review_result_record_ids(&decision, &forged_outcome, "spc_issued", "idem_r2_receipt")
+                .expect_err("a foreign outcome must refuse the committed receipt");
+        assert_redacted_receipt_error(&error, "foreign outcome");
+    }
+
+    /// The coded carrier survives while every peer-authored byte is dropped.
+    fn assert_redacted_receipt_error(error: &CoreError, branch: &str) {
+        let CoreError::Internal { category } = error else {
+            panic!("{branch}: expected the coded internal receipt error, got {error:?}");
+        };
+        assert!(
+            category.starts_with("memory_review_receipt: "),
+            "{branch}: {category}"
+        );
+        let rendered = format!("{error} {error:?} {category}");
+        assert!(
+            !rendered.contains("MARKER-R2-PRIVATE"),
+            "{branch}: peer marker escaped: {rendered}"
+        );
+        assert!(
+            !rendered.contains("token=abc"),
+            "{branch}: peer secret escaped: {rendered}"
+        );
+        assert!(
+            !rendered.contains('\n'),
+            "{branch}: peer newline escaped: {rendered:?}"
+        );
     }
 }
