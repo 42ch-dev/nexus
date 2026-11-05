@@ -600,10 +600,11 @@ impl Provider {
 
     /// Serve one signed session for an explicitly supplied memory service.
     ///
-    /// The suite's only use is a test-only decorator over this provider's real
-    /// assembled service: it forwards every request unchanged and performs the
-    /// second writer's real `memory.records.update` at one chosen causal
-    /// boundary.
+    /// Every ordinary scenario passes this provider's real assembled service
+    /// here; the causal-window scenarios pass a test-only decorator that
+    /// forwards every request unchanged and holds one response, while the
+    /// independent signed writer performs its own `memory.records.update` on its
+    /// own session. The decorator never writes or manufactures a reply.
     async fn serve_service(
         &self,
         service: Arc<dyn RemoteMemoryService>,
