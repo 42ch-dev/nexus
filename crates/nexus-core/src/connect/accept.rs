@@ -2067,9 +2067,20 @@ mod tests {
             .await
             .expect("the loopback plaintext bind starts");
         assert!(lane.addr.ip().is_loopback(), "the lane bound loopback");
-        shutdown.notify_waiters();
-        lane.task.abort();
-        lane.watch_task.abort();
+        // Cooperative shutdown: `notify_one` retains a permit even when the
+        // spawned relay has not registered yet, and both returned handles are
+        // awaited so a live accept loop or supervised watcher is observed
+        // settling instead of detaching with the test.
+        shutdown.notify_one();
+        let mut accept = lane.task;
+        let mut watch = lane.watch_task;
+        for handle in [&mut accept, &mut watch] {
+            let bounded = tokio::time::timeout(std::time::Duration::from_secs(10), &mut *handle);
+            if bounded.await.is_err() {
+                handle.abort();
+                let _ = handle.await;
+            }
+        }
     }
 
     /// v1.191 P1 T14 (durable §9) — the daemon peer-tools responder is
