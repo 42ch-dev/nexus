@@ -14,27 +14,14 @@
 
 mod support;
 
-use std::future::Future;
-use std::pin::Pin;
-use std::time::Duration;
-
 use serde_json::{json, Value};
 
 use support::{
     bootstrap, candidate_ids, capture_body, context_scope, dismiss_body, error_code, error_details,
     grant_body, is_committed, receipt_id, receipt_windows, record_ids, result,
-    retry_class, review_body, shared_scope, Actor, CharacterFixture, Kind, Matrix, CONTEXT,
+    retry_class, review_body, shared_scope, Actor, CharacterFixture, Matrix, CONTEXT,
     OTHER_CONTEXT, SUBJECT, TEXT,
 };
-
-/// A bounded observation that a request has reached the contested boundary and
-/// has not completed yet.
-async fn still_pending<F: Future>(future: &mut Pin<Box<F>>, what: &str) {
-    match tokio::time::timeout(Duration::from_millis(400), future).await {
-        Err(_) => {}
-        Ok(_) => panic!("{what} completed before the contested boundary was released"),
-    }
-}
 
 async fn pending(actor: &Actor<'_>) -> Value {
     actor
@@ -70,20 +57,6 @@ async fn recalled(actor: &Actor<'_>, selection: Value) -> Value {
             "budget": { "max_items": 50 },
         }))
         .await
-}
-
-async fn hold_writer(matrix: &Matrix) -> (support::CaptureHold, tokio::task::JoinHandle<Value>) {
-    let mut hold = matrix.park_next_capture();
-    let capture = tokio::spawn(support::capture_with(
-        matrix.admin_client(),
-        matrix.admin_principal().clone(),
-        matrix.space_id().to_owned(),
-        capture_body("k-hold-writer", TEXT, &shared_scope()),
-    ));
-    hold.wait_reached()
-        .await
-        .expect("the holding capture reached the writer boundary");
-    (hold, capture)
 }
 
 // ---------------------------------------------------------------------------
@@ -251,81 +224,91 @@ async fn response_loss_replays_one_effect_pipeline(matrix: Matrix) {
     response_loss_replays_one_effect(matrix).await;
 }
 
-/// C-024: a commit-boundary crash answers `OUTCOME_UNCERTAIN`; the uncertain
-/// receipt is resolved to a terminal receipt by same-key replay, `receipts.get`
-/// confirms the terminal state, and a later replay returns the same receipt.
+/// C-024: an uncertain outcome resolves to the ORIGINAL committed receipt.
 ///
-/// The fixture additionally keeps the staged-but-uncommitted cancellation as its
-/// narrower rollback evidence. The local provider exposes no staged-write park
-/// (its capture park sits before any insert), so its commit-boundary seam is the
-/// applicable one there; no process kill is claimed anywhere.
+/// Phase A is the narrower, honestly labelled case: a pre-COMMIT failure rolls
+/// the staged write back, so no effect survives the restart. Phase B is the
+/// required history: the original attempt COMMITTED and only its response was
+/// lost (the provider's after-commit seam), the effect and its terminal receipt
+/// survive the restart, same-key replay resolves that original receipt, and a
+/// later replay returns it again with one unchanged effect. No process kill is
+/// claimed and no receipt-id oracle or third recovery channel is used.
 async fn midcommit_crash_resolves_uncertain_receipt(matrix: Matrix) {
     bootstrap(&matrix, &[]).await;
-    let space_id = matrix.space_id().to_owned();
 
-    // Narrower evidence (fixture): cancellation with the effect staged and not
-    // committed leaves nothing durable after the restart.
-    if matrix.kind() == Kind::Remote {
-        let staged = capture_body("k-c024-staged", TEXT, &shared_scope());
-        let mut hold = matrix.park_next_capture();
-        let capture = tokio::spawn(support::capture_with(
-            matrix.admin_client(),
-            matrix.admin_principal().clone(),
-            space_id.clone(),
-            staged,
-        ));
-        hold.wait_reached()
-            .await
-            .expect("the capture reached the staged, uncommitted point");
-        capture.abort();
-        let _ = capture.await;
-    }
-
-    // The declared uncertainty boundary: the commit does not complete and the
-    // answer is still uncertain.
+    // (A) Pre-COMMIT rollback: uncertain answer, no effect after the restart.
     matrix.arm_commit_boundary_failure();
-    let body = capture_body("k-c024", TEXT, &shared_scope());
-    let lost = matrix.admin().capture(body.clone()).await;
-    assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN", "{lost}");
-    assert_eq!(retry_class(&lost), "uncertain");
-
-    // The crash leaves no committed effect, also across the restart.
+    let staged = matrix
+        .admin()
+        .capture(capture_body("k-c024-precommit", TEXT, &shared_scope()))
+        .await;
+    assert_eq!(error_code(&staged), "OUTCOME_UNCERTAIN", "{staged}");
+    assert_eq!(retry_class(&staged), "uncertain");
     let matrix = matrix.restart().await;
     let admin = matrix.admin();
     assert!(
         ids(&pending(&admin).await).is_empty(),
-        "the crashed attempt committed no candidate"
+        "the rolled-back attempt committed no candidate"
     );
     assert_eq!(
         admin.list_spaces().await["spaces"][0]["pending_receipts"],
         json!(0),
-        "the crashed attempt left no pending receipt"
+        "the rolled-back attempt left no pending receipt"
+    );
+    drop(admin);
+
+    // (B) Original committed uncertainty: the commit happened, the response did
+    // not, so the original receipt and effect are durable before the restart.
+    matrix.arm_lost_response();
+    let original = capture_body("k-c024-original", TEXT, &shared_scope());
+    let lost = matrix.admin().capture(original.clone()).await;
+    assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN", "{lost}");
+    assert_eq!(retry_class(&lost), "uncertain");
+
+    let matrix = matrix.restart().await;
+    let admin = matrix.admin();
+    let committed_effect = ids(&pending(&admin).await);
+    assert_eq!(
+        committed_effect.len(),
+        1,
+        "the original committed effect survived the restart: {committed_effect:?}"
+    );
+    assert_eq!(
+        admin.list_spaces().await["spaces"][0]["pending_receipts"],
+        json!(0),
+        "the original receipt is terminal (committed), not pending"
     );
 
-    // Resolution: same-key replay returns the committed terminal receipt.
-    let resolved = admin.capture(body.clone()).await;
+    // Resolution: same-key replay returns the ORIGINAL receipt and effect.
+    let resolved = admin.capture(original.clone()).await;
     assert!(is_committed(&resolved), "the same key resolves it: {resolved}");
     let resolved_id = receipt_id(&resolved).to_owned();
+    assert_eq!(
+        candidate_ids(&resolved),
+        committed_effect,
+        "the replay returns the original effect's candidate, not a fresh one"
+    );
     let read = admin.get_receipt(&resolved_id).await;
     assert_eq!(
         read["receipt"]["status"], json!("committed"),
         "receipts.get resolves the uncertain key to its terminal receipt: {read}"
     );
     assert_eq!(
-        read["receipt"]["result"]["candidate_ids"][0],
-        json!(candidate_ids(&resolved)[0])
+        read["receipt"]["result"]["candidate_ids"],
+        json!(committed_effect),
+        "the terminal receipt names the original effect"
     );
 
-    let replay = admin.capture(body).await;
+    let replay = admin.capture(original).await;
     assert_eq!(
         receipt_id(&replay),
         resolved_id,
-        "the subsequent replay returns the same terminal receipt"
+        "the subsequent replay returns the same original receipt"
     );
     assert_eq!(
-        ids(&pending(&admin).await).len(),
-        1,
-        "exactly one effect exists after resolution"
+        ids(&pending(&admin).await),
+        committed_effect,
+        "exactly one effect exists and it is unchanged"
     );
     matrix.shutdown().await;
 }
@@ -662,7 +645,11 @@ async fn candidate_pages_are_bounded_and_scoped(matrix: Matrix) {
         .await;
     assert!(is_committed(&granted), "{granted}");
     let scoped = ids(&pending(&matrix.peer()).await);
-    assert_eq!(scoped.len(), 1, "only the covered candidate is listed: {scoped:?}");
+    assert_eq!(
+        scoped,
+        vec![seeded[0].clone()],
+        "the scoped page is exactly the seeded authorized candidate in its context"
+    );
 
     // A real candidate outside that context and an id this store never held are
     // the same NOT_FOUND-class refusal (C-102 anti-oracle).
@@ -706,6 +693,17 @@ async fn review_consumes_and_creates_atomically(matrix: Matrix) {
         json!(TEXT),
         "a pending candidate still carries its proposed body: {captured_shell}"
     );
+    // Authoritative digest: §6.7 pins the JCS SHA-256 of the candidate content,
+    // which the public pending projection exposes. Compute it before the body is
+    // scrubbed; the consumed shell must retain exactly this value.
+    let expected_digest = match spoke_operations::jcs_sha256_hex(
+        &captured_shell["candidate"]["proposed"]["content"],
+    ) {
+        spoke_operations::SpokeResult::Ok(digest) => digest,
+        spoke_operations::SpokeResult::Reject(reject) => {
+            panic!("the public pending content canonicalizes: {}", reject.message)
+        }
+    };
 
     let reviewed = admin
         .review_candidate(review_body(&candidate_id, 1, "k-c031-review"))
@@ -721,10 +719,11 @@ async fn review_consumes_and_creates_atomically(matrix: Matrix) {
         candidate["proposed"].get("content").is_none(),
         "consumption removes the proposed body: {candidate}"
     );
-    let retained_digest = candidate["content_digest"]
-        .as_str()
-        .expect("the consumed shell retains its content digest");
-    assert_eq!(retained_digest.len(), 64, "§6.1 64 lowercase hex chars: {candidate}");
+    assert_eq!(
+        candidate["content_digest"],
+        json!(expected_digest),
+        "the consumed shell retains the authoritative content digest: {candidate}"
+    );
     assert_eq!(
         candidate["consumed_by"]["receipt_id"],
         json!(receipt_id(&reviewed)),
@@ -812,9 +811,10 @@ async fn c_032_dismiss_replay_never_resurrects_remote() {
     dismiss_replay_never_resurrects(Matrix::remote().await).await;
 }
 
-/// C-033: two ACTUAL signed clients review one candidate while the writer lock
-/// is held. Exactly one commits; the competing request is observed in flight at
-/// the contested boundary and gets exactly `CANDIDATE_CONSUMED`.
+/// C-033: two ACTUAL signed clients review one candidate. Both are observed at
+/// the provider's own admission boundary (the seam acknowledges the arrival,
+/// not elapsed client time) while the writer is held; exactly one commits, the
+/// competing request gets exactly `CANDIDATE_CONSUMED`, and one effect remains.
 async fn concurrent_review_has_exactly_one_effect(matrix: Matrix) {
     bootstrap(&matrix, &[]).await;
     let peer_id = matrix.peer_principal().principal_id.clone();
@@ -836,28 +836,31 @@ async fn concurrent_review_has_exactly_one_effect(matrix: Matrix) {
         .await;
     let candidate_id = candidate_ids(&captured)[0].clone();
 
-    // Hold the writer lock so both real clients are issued while the contested
-    // boundary is occupied, and observe both still pending before releasing.
-    let (mut hold, holder) = hold_writer(&matrix).await;
-    let mut admin_review = Box::pin(support::review_with(
+    // Client A is genuinely held at the provider's admission boundary (on the
+    // local leg it already holds the workspace publication section; on the
+    // fixture it is paused at the service entry). Client B — a second real
+    // signed session — is issued while A is held, A is released, and exactly one
+    // of the two admitted requests may commit.
+    let mut arrival = matrix.park_next_admission();
+    let admin_review = tokio::spawn(support::review_with(
         matrix.admin_client(),
         matrix.admin_principal().clone(),
         matrix.space_id().to_owned(),
         review_body(&candidate_id, 1, "k-c033-admin"),
     ));
-    let mut peer_review = Box::pin(support::review_with(
+    arrival
+        .wait_reached()
+        .await
+        .expect("the admin review reached the provider admission boundary");
+    let peer_review = tokio::spawn(support::review_with(
         matrix.peer_client(),
         matrix.peer_principal().clone(),
         matrix.space_id().to_owned(),
         review_body(&candidate_id, 1, "k-c033-peer"),
     ));
-    still_pending(&mut admin_review, "the admin review").await;
-    still_pending(&mut peer_review, "the peer review").await;
-
-    hold.release().await;
-    let _ = holder.await.expect("the holding capture completes");
-    let admin_outcome = admin_review.await;
-    let peer_outcome = peer_review.await;
+    arrival.release().await;
+    let admin_outcome = admin_review.await.expect("the admin review completes");
+    let peer_outcome = peer_review.await.expect("the peer review completes");
 
     let winners = [&admin_outcome, &peer_outcome]
         .into_iter()
@@ -865,7 +868,7 @@ async fn concurrent_review_has_exactly_one_effect(matrix: Matrix) {
         .count();
     assert_eq!(
         winners, 1,
-        "exactly one of the two real clients commits: {admin_outcome} / {peer_outcome}"
+        "exactly one of the two admitted clients commits: {admin_outcome} / {peer_outcome}"
     );
     let (winner, loser) = if is_committed(&admin_outcome) {
         (&admin_outcome, &peer_outcome)

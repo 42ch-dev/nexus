@@ -26,14 +26,36 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use support::{
-    bootstrap, capture_body, context_scope, error_code, error_details, grant_body, is_committed,
-    receipt_id, result, retry_class, shared_scope, Actor, Kind, Matrix, CONTEXT, OTHER_CONTEXT,
-    OTHER_SUBJECT, SUBJECT, TEXT,
+    bootstrap, capture_body, context_scope, error_code, error_details, grant_body,
+    is_committed, receipt_id, result, retry_class, shared_scope, Actor, Kind, Matrix, CONTEXT,
+    OTHER_CONTEXT, OTHER_SUBJECT, SUBJECT, TEXT,
 };
 
 /// A bounded observation that a request has reached the contested boundary and
 /// has not completed yet. It is not a sleep used to order the race: the hold is
 /// released only after this fails to complete.
+/// Wait, bounded, until the local provider reports that the competing mutation
+/// entered its write-admission machinery. The provider holds the writer lock in
+/// the holder, so an entry that reached admission is blocked there: this is the
+/// provider-side arrival acknowledgment, not elapsed client time.
+async fn await_local_admission(matrix: &Matrix, baseline: usize, expected: usize) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let reached = matrix
+            .write_admission_count()
+            .unwrap_or_else(|| panic!("this leg exposes no admission counter"))
+            .saturating_sub(baseline);
+        if reached >= expected {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the competing mutation did not reach the provider admission machinery"
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+}
+
 async fn still_pending<F: Future>(future: &mut Pin<Box<F>>, what: &str) {
     match tokio::time::timeout(Duration::from_millis(400), future).await {
         Err(_) => {}
@@ -488,9 +510,11 @@ async fn c_011_freeze_allowlist_base_operations_remote() {
 /// C-012: a write racing the freeze transition has exactly one admission
 /// outcome, established by the provider's own causal boundary.
 ///
-/// - Local: the parked capture already holds the writer lock, so the freeze
-///   request is observed still pending at the contested boundary; releasing the
-///   capture commits it, and the freeze commits after it.
+/// - Local: the parked capture holds the writer lock. The provider's own
+///   write-admission counter acknowledges that the freeze entered its admission
+///   machinery (a provider entry fact, not an OS lock-wait claim), so the freeze
+///   is established at the contested boundary before the release; the capture
+///   then commits and the freeze commits after it.
 /// - Fixture: the capture is paused before its writer transaction, so the freeze
 ///   is observed committed *before* the capture is released; the released
 ///   capture must then be refused.
@@ -518,7 +542,7 @@ async fn write_racing_freeze_has_one_admission_outcome(matrix: Matrix) {
         .await
         .expect("the capture reached its provider point");
 
-    let mut freeze = Box::pin(support::freeze_with(
+    let freeze_task = tokio::spawn(support::freeze_with(
         matrix.peer_client(),
         matrix.peer_principal().clone(),
         space_id,
@@ -526,25 +550,33 @@ async fn write_racing_freeze_has_one_admission_outcome(matrix: Matrix) {
         1,
     ));
 
+    let baseline = matrix.write_admission_count();
     let capture_outcome = match matrix.kind() {
         Kind::Local => {
-            // The capture holds the writer lock; the freeze request reaches the
-            // contested boundary and cannot pass it before the release.
-            still_pending(&mut freeze, "the freeze request").await;
+            // The capture holds the writer lock; the freeze enters the provider's
+            // write-admission machinery and is blocked there. That arrival is
+            // acknowledged by the provider's own counter, not inferred from a
+            // client timeout.
+            await_local_admission(
+                &matrix,
+                baseline.expect("the local leg exposes its admission counter"),
+                1,
+            )
+            .await;
             hold.release().await;
             let outcome = capture.await.expect("the racing capture completes");
             assert!(
                 is_committed(&outcome),
                 "the transaction-held capture commits: {outcome}"
             );
-            let frozen = freeze.await;
+            let frozen = freeze_task.await.expect("the freeze request completes");
             assert_eq!(result(&frozen)["status"], json!("frozen"));
             outcome
         }
         Kind::Remote => {
             // The admission pause is before the writer transaction: the freeze
             // commits first, and that is observed before the capture is resumed.
-            let frozen = freeze.await;
+            let frozen = freeze_task.await.expect("the freeze request completes");
             assert_eq!(
                 result(&frozen)["status"],
                 json!("frozen"),
@@ -793,9 +825,13 @@ async fn c_016_context_fence_does_not_collateral_fence_remote() {
     context_fence_does_not_collateral_fence(Matrix::remote().await).await;
 }
 
-/// C-017: two clients race the same fence revision while the writer lock is
-/// held. Both reach the contested boundary; exactly one commits, the other gets
-/// `REVISION_CONFLICT`, and the winner's state is not lost-updated.
+/// C-017: the actual fence/unfence transitions and the stale in-flight write,
+/// each ordered by a provider-side admission acknowledgment.
+///
+/// In every phase the first request is genuinely held at the provider's
+/// admission boundary (`wait_reached`), the opposing request is executed by a
+/// real second signed client, and the held request is released afterwards — so
+/// the outcome follows the established order instead of inferred elapsed time.
 async fn stale_fence_revision_cannot_lost_update(matrix: Matrix) {
     bootstrap(&matrix, &[]).await;
     let peer_id = matrix.peer_principal().principal_id.clone();
@@ -804,25 +840,11 @@ async fn stale_fence_revision_cannot_lost_update(matrix: Matrix) {
         .grant(grant_body("admin", &peer_id, "k-c017-admin"))
         .await;
     assert!(is_committed(&granted), "{granted}");
-
-    // Hold the writer lock with a real capture so both fence requests are
-    // issued while the contested boundary is occupied.
-    let mut hold = match matrix.kind() {
-        Kind::Local => matrix.park_next_capture(),
-        Kind::Remote => matrix.park_next_capture(),
-    };
     let space_id = matrix.space_id().to_owned();
-    let capture = tokio::spawn(support::capture_with(
-        matrix.admin_client(),
-        matrix.admin_principal().clone(),
-        space_id.clone(),
-        capture_body("k-c017-hold", TEXT, &shared_scope()),
-    ));
-    hold.wait_reached()
-        .await
-        .expect("the capture reached the writer boundary");
 
-    let mut first = Box::pin(support::fence_with(
+    // Phase 1 (additional): the same-revision fence/fence race.
+    let mut arrival = matrix.park_next_admission();
+    let first = tokio::spawn(support::fence_with(
         matrix.admin_client(),
         matrix.admin_principal().clone(),
         space_id.clone(),
@@ -830,29 +852,32 @@ async fn stale_fence_revision_cannot_lost_update(matrix: Matrix) {
         1,
         SUBJECT,
     ));
-    let mut second = Box::pin(support::fence_with(
+    arrival
+        .wait_reached()
+        .await
+        .expect("the admin fence reached the provider admission boundary");
+    let second = support::fence_with(
         matrix.peer_client(),
         matrix.peer_principal().clone(),
-        space_id,
+        space_id.clone(),
         "k-c017-second",
         1,
         SUBJECT,
-    ));
-    still_pending(&mut first, "the admin fence").await;
-    still_pending(&mut second, "the peer fence").await;
+    )
+    .await;
+    arrival.release().await;
+    let first = first.await.expect("the admin fence completes");
 
-    hold.release().await;
-    let _ = capture.await.expect("the holding capture completes");
-    let first = first.await;
-    let second = second.await;
-
-    let committed = [&first, &second]
-        .into_iter()
-        .filter(|body| is_committed(body))
-        .count();
-    assert_eq!(committed, 1, "exactly one fence commits: {first} / {second}");
-    let loser = if is_committed(&first) { &second } else { &first };
-    assert_eq!(error_code(loser), "REVISION_CONFLICT", "{loser}");
+    assert!(
+        is_committed(&second),
+        "the fence that ran while the other was held commits: {second}"
+    );
+    assert_eq!(
+        error_code(&first),
+        "REVISION_CONFLICT",
+        "the released fence observes the committed revision: {first}"
+    );
+    assert_eq!(retry_class(&first), "terminal");
 
     let admin = matrix.admin();
     let read = admin.get_subject(SUBJECT).await;
@@ -864,11 +889,97 @@ async fn stale_fence_revision_cannot_lost_update(matrix: Matrix) {
         "neither racing request wrote a context fence: {read}"
     );
 
-    let unfenced = admin
-        .fence_subject(SUBJECT, json!({ "type": "subject" }), "unfence", 2, "k-c017-unfence")
+    // Phase 2 (required): concurrent unfence at the current revision and a STALE
+    // fence, with the unfence held at the admission boundary first.
+    let mut arrival = matrix.park_next_admission();
+    let unfence = tokio::spawn(support::fence_action_with(
+        matrix.admin_client(),
+        matrix.admin_principal().clone(),
+        space_id.clone(),
+        "k-c017-unfence",
+        2,
+        "unfence",
+        SUBJECT,
+    ));
+    arrival
+        .wait_reached()
+        .await
+        .expect("the unfence reached the provider admission boundary");
+    let stale = support::fence_with(
+        matrix.peer_client(),
+        matrix.peer_principal().clone(),
+        space_id.clone(),
+        "k-c017-stale",
+        1,
+        SUBJECT,
+    )
+    .await;
+    arrival.release().await;
+    let unfence = unfence.await.expect("the unfence completes");
+
+    assert_eq!(
+        result(&unfence)["status"],
+        json!("active"),
+        "the current-revision unfence commits: {unfence}"
+    );
+    assert_eq!(result(&unfence)["revision"], json!(3));
+    assert_eq!(
+        error_code(&stale),
+        "REVISION_CONFLICT",
+        "the stale fence loses deterministically: {stale}"
+    );
+    assert_eq!(retry_class(&stale), "terminal");
+    let read = matrix.admin().get_subject(SUBJECT).await;
+    assert_eq!(
+        read["subject"]["status"],
+        json!("active"),
+        "the latest transition wins with no lost state: {read}"
+    );
+    assert_eq!(read["subject"]["revision"], json!(3));
+
+    // Phase 3 (required): a write in flight at the provider admission boundary
+    // when the fence commits is refused with no effect.
+    let before = candidate_ids(&candidates(&matrix.admin()).await).len();
+    let mut arrival = matrix.park_next_admission();
+    let write = tokio::spawn(support::capture_with(
+        matrix.admin_client(),
+        matrix.admin_principal().clone(),
+        space_id.clone(),
+        capture_body("k-c017-write", TEXT, &shared_scope()),
+    ));
+    arrival
+        .wait_reached()
+        .await
+        .expect("the write reached the provider admission boundary");
+    let fenced = matrix
+        .admin()
+        .fence_subject(
+            SUBJECT,
+            json!({ "type": "subject" }),
+            "fence",
+            3,
+            "k-c017-fence-late",
+        )
         .await;
-    assert_eq!(result(&unfenced)["status"], json!("active"));
-    assert_eq!(result(&unfenced)["revision"], json!(3));
+    assert_eq!(result(&fenced)["status"], json!("fenced"), "{fenced}");
+    assert_eq!(result(&fenced)["revision"], json!(4));
+    arrival.release().await;
+    let refused = write.await.expect("the in-flight write completes");
+    assert_eq!(
+        error_code(&refused),
+        "SUBJECT_FENCED",
+        "the write admitted after the fence completion is refused: {refused}"
+    );
+    assert_eq!(retry_class(&refused), "terminal");
+    assert_eq!(
+        candidate_ids(&candidates(&matrix.admin()).await).len(),
+        before,
+        "the refused write added no candidate"
+    );
+    assert_eq!(
+        matrix.admin().get_subject(SUBJECT).await["subject"]["status"],
+        json!("fenced")
+    );
     matrix.shutdown().await;
 }
 

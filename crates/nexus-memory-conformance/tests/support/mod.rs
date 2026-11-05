@@ -810,15 +810,33 @@ impl Matrix {
         }
     }
 
-    /// Park the next admission before the writer transaction, so a competing
-    /// mutation can commit first (fixture seam only; the local provider's
-    /// admission is serialized by its write lock).
+    /// Park the next write once it has entered the provider's write-admission
+    /// machinery and before its writer transaction. Local uses its own admission
+    /// park seam; the fixture uses its existing bounded `AdmissionPause` hold.
+    /// Either way `wait_reached` is the provider-side arrival acknowledgment.
     pub fn park_next_admission(&self) -> CaptureHold {
         match &self.provider {
-            Provider::Local(_) => panic!("the local provider exposes no admission pause seam"),
-            Provider::Fixture(provider) => {
-                CaptureHold::Fixture(provider.faults().hold_next(FaultPoint::AdmissionPause))
+            Provider::Local(provider) => {
+                let entered = Arc::new(Notify::new());
+                let release = Arc::new(Barrier::new(2));
+                provider.park_next_admission(Arc::clone(&entered), Arc::clone(&release));
+                CaptureHold::Local { entered, release }
             }
+            Provider::Fixture(provider) => CaptureHold::Fixture(
+                provider
+                    .faults()
+                    .hold_next_bounded(FaultPoint::AdmissionPause, BOUND),
+            ),
+        }
+    }
+
+    /// The local provider's own write-admission counter: how many write entries
+    /// reached its admission machinery. `None` on the fixture, which exposes no
+    /// equivalent counter.
+    pub fn write_admission_count(&self) -> Option<usize> {
+        match &self.provider {
+            Provider::Local(provider) => Some(provider.lock_attempts()),
+            Provider::Fixture(_) => None,
         }
     }
 
@@ -1356,7 +1374,20 @@ pub fn record_ids(body: &Value) -> Vec<String> {
 // Request builders
 // ---------------------------------------------------------------------------
 
-/// A capture body: `scope` is the capture placement (`shared` or a context).
+/// A capture body for an explicit subject: `scope` is the capture placement
+/// (`shared` or a context).
+pub fn capture_body_for(subject: &str, key: &str, text: &str, scope: &Value) -> Value {
+    let context = scope["context_id"].as_str();
+    json!({
+        "subject_id": subject,
+        "content": { "text": text },
+        "capture_scope": scope,
+        "source_context_ids": context.map_or_else(Vec::new, |context| vec![context]),
+        "idempotency_key": key,
+    })
+}
+
+/// A capture body for the matrix subject.
 pub fn capture_body(key: &str, text: &str, scope: &Value) -> Value {
     let context = scope["context_id"].as_str();
     json!({
@@ -1531,6 +1562,28 @@ pub async fn fence_with(
     revision: u64,
     subject_id: &'static str,
 ) -> Value {
+    fence_action_with(
+        client,
+        principal,
+        space_id,
+        key,
+        revision,
+        "fence",
+        subject_id,
+    )
+    .await
+}
+
+/// One subject-target fence transition with owned inputs.
+pub async fn fence_action_with(
+    client: Arc<RemoteAdapter>,
+    principal: Principal,
+    space_id: String,
+    key: &'static str,
+    revision: u64,
+    action: &'static str,
+    subject_id: &'static str,
+) -> Value {
     wire(
         &client
             .fence_subject(
@@ -1539,7 +1592,7 @@ pub async fn fence_with(
                     "space_id": space_id,
                     "subject_id": subject_id,
                     "target": { "type": "subject" },
-                    "action": "fence",
+                    "action": action,
                     "expected_revision": revision,
                     "idempotency_key": key,
                 })),
