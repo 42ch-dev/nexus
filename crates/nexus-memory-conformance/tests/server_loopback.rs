@@ -2345,7 +2345,15 @@ async fn unavailable_families_forged_claims_and_unknown_ops_are_refused_on_the_w
         assert_eq!(error["details"]["retry_class"], json!("terminal"), "{op}");
     }
 
-    // An op with no dispatch row at all stays op_unsupported.
+    // An op with no dispatch row at all stays op_unsupported. Snapshot every
+    // effect surface the fixture exposes immediately around the invoke: a
+    // dispatch denial must not reach the provider at all.
+    let before_unknown = [
+        fixture.count("receipts").await,
+        fixture.count("candidates").await,
+        fixture.count("records").await,
+        fixture.count("idempotency_namespace").await,
+    ];
     let unknown = raw_invoke(
         &transport,
         &session_id,
@@ -2359,6 +2367,16 @@ async fn unavailable_families_forged_claims_and_unknown_ops_are_refused_on_the_w
         unknown["error"]["code"],
         json!("op_unsupported"),
         "an unknown memory op is not silently served"
+    );
+    let after_unknown = [
+        fixture.count("receipts").await,
+        fixture.count("candidates").await,
+        fixture.count("records").await,
+        fixture.count("idempotency_namespace").await,
+    ];
+    assert_eq!(
+        after_unknown, before_unknown,
+        "the unknown invoke committed no receipt, candidate, record or dedup row"
     );
 
     // A payload that claims a principal is not a request field: the service's
