@@ -43,6 +43,8 @@ use tempfile::TempDir;
 use tokio::net::TcpListener;
 use tokio::sync::{Barrier, Notify};
 
+use sqlx::Connection as _;
+
 use nexus_core::connect::ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};
 use nexus_core::memory_provider::LocalMemoryProvider;
 use nexus_core::{CoreAccess, CoreHomeService, CoreOpenOptions, CoreService};
@@ -247,14 +249,23 @@ pub fn principal(principal_id: &str) -> Principal {
 
 /// One signed responder session plus the dialing client and the transport ends,
 /// so a restart awaits the real teardown instead of a state flag.
-struct Endpoint {
+pub struct Endpoint {
     client: Arc<RemoteAdapter>,
     responder: Arc<ConnectResponder>,
     socket: Arc<dyn Transport>,
 }
 
 impl Endpoint {
-    async fn close(self) {
+    /// A typed session on this endpoint's authenticated client.
+    pub fn actor<'a>(&'a self, principal: &'a Principal, space_id: &'a str) -> Actor<'a> {
+        Actor {
+            client: &self.client,
+            principal,
+            space_id,
+        }
+    }
+
+    pub async fn close(self) {
         self.client.close();
         self.responder.close();
         let closed = tokio::time::timeout(BOUND, self.socket.close()).await;
@@ -270,8 +281,22 @@ impl Endpoint {
     }
 }
 
+/// Close one owned responder through its public route and wait, bounded, for
+/// the session to report `Closed`.
+pub async fn close_responder(responder: Arc<ConnectResponder>) {
+    responder.close();
+    let deadline = Instant::now() + BOUND;
+    while responder.state() != ConnectResponderState::Closed {
+        assert!(
+            Instant::now() < deadline,
+            "the responder session reaches Closed within the bound"
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+}
+
 /// Serve one fresh loopback session for `seed` against `service`.
-async fn open_endpoint(
+pub async fn open_endpoint(
     service: Arc<dyn RemoteMemoryService>,
     host_id: &str,
     seed: [u8; 32],
@@ -1801,40 +1826,43 @@ async fn create_character_fixture(user_home: &std::path::Path) -> (CharacterFixt
 // Durable state observation (I253): the provider's own storage, read-only
 // ---------------------------------------------------------------------------
 
-/// The provider's durable state around a read series: the row counts of the
-/// tables that carry the base-read families and, for the local provider, the
-/// exact bytes of the published file projection under its file root.
+/// The provider's durable state around a read series, observed through ONE
+/// read-only connection held for the whole observation: that connection's
+/// `data_version` pragma (SQLite changes it only when *another* connection
+/// commits, so any provider write — insertion or in-place update — moves it),
+/// the exact rows of the seeded objects as the database reports their own
+/// columns, and (local only) the exact bytes published under the provider's
+/// public file root.
 ///
-/// Observed through a read-only SQLite connection and the provider's public
-/// `file_root()`; the protocol surface under test is never the oracle. Private
-/// pages are not claimed — only these rows and these published files.
+/// Private page images and a copied schema are never used; the rows are the
+/// seeded keys the scenario already owns.
 #[derive(Debug, PartialEq, Eq)]
 pub struct DurableState {
-    pub tables: Vec<(String, i64)>,
+    /// `PRAGMA data_version` of the held read-only connection.
+    pub data_version: i64,
+    /// `(label, columns)` per seeded row; an absent row is an empty list.
+    pub rows: Vec<(String, Vec<(String, String)>)>,
     pub publications: Vec<(String, Vec<u8>)>,
 }
 
-const LOCAL_TABLES: [&str; 8] = [
-    "memory_spaces",
-    "memory_subjects",
-    "memory_grants",
-    "memory_candidates",
-    "memory_records",
-    "memory_profiles",
-    "memory_receipts",
-    "memory_journal",
-];
+#[derive(Clone, Copy)]
+enum Store {
+    Local,
+    Fixture,
+}
 
-const FIXTURE_TABLES: [&str; 8] = [
-    "spaces",
-    "subjects",
-    "grants",
-    "candidates",
-    "records",
-    "profiles",
-    "receipts",
-    "idempotency_namespace",
-];
+/// One held read-only connection to the provider's own durable file.
+pub struct DurableObserver {
+    conn: sqlx::sqlite::SqliteConnection,
+    store: Store,
+    space_id: String,
+    subject_id: String,
+    record_ids: Vec<String>,
+    candidate_id: Option<String>,
+    receipt_id: Option<String>,
+    profile_kind: Option<String>,
+    publications_root: Option<PathBuf>,
+}
 
 /// Every file under `root`, as (relative path, exact bytes), sorted.
 fn published_files(root: &std::path::Path) -> Vec<(String, Vec<u8>)> {
@@ -1862,49 +1890,189 @@ fn published_files(root: &std::path::Path) -> Vec<(String, Vec<u8>)> {
     out
 }
 
-async fn table_counts(db: &std::path::Path, tables: &[&str]) -> Vec<(String, i64)> {
-    let options = sqlx::sqlite::SqliteConnectOptions::new()
-        .filename(db)
-        .read_only(true);
-    let pool = sqlx::SqlitePool::connect_with(options)
-        .await
-        .expect("a read-only connection to the provider's own file");
-    let mut counts = Vec::with_capacity(tables.len());
-    for table in tables {
-        let sql = format!("SELECT COUNT(*) FROM {table}");
-        let (count,): (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(sql))
-            .fetch_one(&pool)
-            .await
-            .unwrap_or_else(|error| panic!("{table} is readable: {error}"));
-        counts.push(((*table).to_owned(), count));
-    }
-    pool.close().await;
-    counts
-}
-
 impl Matrix {
-    /// The provider's durable state, read through its own storage.
-    pub async fn durable_state(&self) -> DurableState {
-        match (&self.home, &self.provider) {
-            (Home::Local { user_home, .. }, Provider::Local(provider)) => DurableState {
-                tables: table_counts(
-                    &nexus_home_layout::workspace_state_db_path(
-                        user_home,
-                        self.admin_principal.principal_id.as_str(),
-                        LOCAL_WORKSPACE,
-                    ),
-                    &LOCAL_TABLES,
-                )
-                .await,
-                publications: published_files(&provider.file_root()),
-            },
-            (Home::Remote { db, .. }, Provider::Fixture(_)) => DurableState {
-                tables: table_counts(db, &FIXTURE_TABLES).await,
-                publications: Vec::new(),
-            },
+    /// Open the durable observer **before** the first protocol read, on one
+    /// held read-only connection.
+    pub async fn durable_observer(
+        &self,
+        subject_id: &str,
+        record_ids: &[String],
+        candidate_id: Option<&str>,
+        receipt_id: Option<&str>,
+        profile_kind: Option<&str>,
+    ) -> DurableObserver {
+        let (db, store, publications_root) = match (&self.home, &self.provider) {
+            (Home::Local { user_home, .. }, Provider::Local(provider)) => (
+                nexus_home_layout::workspace_state_db_path(
+                    user_home,
+                    self.admin_principal.principal_id.as_str(),
+                    LOCAL_WORKSPACE,
+                ),
+                Store::Local,
+                Some(provider.file_root()),
+            ),
+            (Home::Remote { db, .. }, Provider::Fixture(_)) => {
+                (db.clone(), Store::Fixture, None)
+            }
             _ => panic!("the provider kind and its durable home must agree"),
+        };
+        let options = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&db)
+            .read_only(true);
+        let conn = sqlx::sqlite::SqliteConnection::connect_with(&options)
+            .await
+            .expect("one read-only connection to the provider's own file");
+        DurableObserver {
+            conn,
+            store,
+            space_id: self.space_id.clone(),
+            subject_id: subject_id.to_owned(),
+            record_ids: record_ids.to_vec(),
+            candidate_id: candidate_id.map(str::to_owned),
+            receipt_id: receipt_id.map(str::to_owned),
+            profile_kind: profile_kind.map(str::to_owned),
+            publications_root,
         }
     }
+}
+
+impl DurableObserver {
+    /// Observe the same held connection: its `data_version`, the seeded rows
+    /// and the published file projection.
+    pub async fn observe(&mut self) -> DurableState {
+        let (data_version,): (i64,) = sqlx::query_as("PRAGMA data_version")
+            .fetch_one(&mut self.conn)
+            .await
+            .expect("the held connection reports its data_version");
+        let mut rows: Vec<(String, Vec<(String, String)>)> = Vec::new();
+        let record_ids = self.record_ids.clone();
+        let candidate_id = self.candidate_id.clone();
+        let receipt_id = self.receipt_id.clone();
+        let profile_kind = self.profile_kind.clone();
+        let space_id = self.space_id.clone();
+        let subject_id = self.subject_id.clone();
+        for record_id in &record_ids {
+            let sql = match self.store {
+                Store::Local => "SELECT * FROM memory_records WHERE record_id = ?",
+                Store::Fixture => "SELECT * FROM records WHERE record_id = ?",
+            };
+            rows.push((
+                format!("record:{record_id}"),
+                self.row(sql, &[record_id.as_str()]).await,
+            ));
+        }
+        if let Some(candidate_id) = candidate_id {
+            let candidate = match self.store {
+                Store::Local => "SELECT * FROM memory_candidates WHERE candidate_id = ?",
+                Store::Fixture => "SELECT * FROM candidates WHERE candidate_id = ?",
+            };
+            rows.push((
+                format!("candidate:{candidate_id}"),
+                self.row(candidate, &[candidate_id.as_str()]).await,
+            ));
+        }
+        if let Some(receipt_id) = receipt_id {
+            let receipt = match self.store {
+                Store::Local => "SELECT * FROM memory_receipts WHERE receipt_id = ?",
+                Store::Fixture => "SELECT * FROM receipts WHERE receipt_id = ?",
+            };
+            rows.push((
+                format!("receipt:{receipt_id}"),
+                self.row(receipt, &[receipt_id.as_str()]).await,
+            ));
+        }
+        if let Some(profile_kind) = profile_kind {
+            let profile = match self.store {
+                Store::Local => {
+                    "SELECT * FROM memory_profiles WHERE space_id = ? AND subject_id = ? \
+                     AND profile_kind = ?"
+                }
+                Store::Fixture => {
+                    "SELECT * FROM profiles WHERE space_id = ? AND subject_id = ? \
+                     AND profile_kind = ?"
+                }
+            };
+            rows.push((
+                format!("profile:{profile_kind}"),
+                self.row(
+                    profile,
+                    &[space_id.as_str(), subject_id.as_str(), profile_kind.as_str()],
+                )
+                .await,
+            ));
+        }
+        let subject = match self.store {
+            Store::Local => "SELECT * FROM memory_subjects WHERE space_id = ? AND subject_id = ?",
+            Store::Fixture => "SELECT * FROM subjects WHERE space_id = ? AND subject_id = ?",
+        };
+        rows.push((
+            format!("subject:{subject_id}"),
+            self.row(subject, &[space_id.as_str(), subject_id.as_str()])
+                .await,
+        ));
+        let space = match self.store {
+            Store::Local => "SELECT * FROM memory_spaces WHERE space_id = ?",
+            Store::Fixture => "SELECT * FROM spaces WHERE space_id = ?",
+        };
+        rows.push((
+            format!("space:{space_id}"),
+            self.row(space, &[space_id.as_str()]).await,
+        ));
+        rows.sort_by(|left, right| left.0.cmp(&right.0));
+        DurableState {
+            data_version,
+            rows,
+            publications: self
+                .publications_root
+                .as_deref()
+                .map(published_files)
+                .unwrap_or_default(),
+        }
+    }
+
+    /// One seeded row, as the database reports its own columns.
+    async fn row(&mut self, sql: &str, binds: &[&str]) -> Vec<(String, String)> {
+        let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
+        for bind in binds {
+            query = query.bind(*bind);
+        }
+        let rows = query
+            .fetch_all(&mut self.conn)
+            .await
+            .unwrap_or_else(|error| panic!("the seeded row is readable: {error}"));
+        rows.first().map(row_columns).unwrap_or_default()
+    }
+
+    /// Close the held connection explicitly, bounded.
+    pub async fn close(self) {
+        let _ = tokio::time::timeout(BOUND, self.conn.close()).await;
+    }
+}
+
+/// Every column of one row as `(name, value)` — the database's own report, not
+/// a copied schema.
+fn row_columns(row: &sqlx::sqlite::SqliteRow) -> Vec<(String, String)> {
+    use sqlx::{Column, Row, ValueRef};
+    let mut out = Vec::with_capacity(row.columns().len());
+    for (index, column) in row.columns().iter().enumerate() {
+        let raw = row.try_get_raw(index).expect("a readable column");
+        let value = if raw.is_null() {
+            "null".to_owned()
+        } else if let Ok(text) = row.try_get::<String, _>(index) {
+            format!("text:{text}")
+        } else if let Ok(number) = row.try_get::<i64, _>(index) {
+            format!("int:{number}")
+        } else if let Ok(number) = row.try_get::<f64, _>(index) {
+            format!("real:{number}")
+        } else {
+            match row.try_get::<Vec<u8>, _>(index) {
+                Ok(bytes) => format!("blob:{}", hex(&bytes)),
+                Err(error) => panic!("an unsupported column value: {error}"),
+            }
+        };
+        out.push((column.name().to_owned(), value));
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -2128,7 +2296,25 @@ pub struct SelectionFixture {
     pub service: Arc<dyn RemoteMemoryService>,
     pub authority_host_id: String,
     pub space_id: String,
+    /// The operator-provisioned principal the signed selection peer maps to.
+    pub principal: String,
+    provider: Arc<FixtureMemoryProvider>,
     _home: TempDir,
+}
+
+impl SelectionFixture {
+    /// Release the erased service first, then close the provider it served,
+    /// exactly as `Matrix::shutdown` does.
+    pub async fn close(self) {
+        let Self {
+            service,
+            provider,
+            _home,
+            ..
+        } = self;
+        drop(service);
+        close_fixture(provider).await;
+    }
 }
 
 pub async fn selection_fixture() -> SelectionFixture {
@@ -2144,11 +2330,14 @@ pub async fn selection_fixture() -> SelectionFixture {
         .provision_operator_admin(&principal_id)
         .await
         .expect("operator provisions the selection principal");
-    let directory = Arc::new(PeerDirectory::new().with_peer(client_peer, principal_id));
+    let directory = Arc::new(PeerDirectory::new().with_peer(client_peer, principal_id.clone()));
+    let service = provider.server(directory.admission());
     SelectionFixture {
-        service: provider.server(directory.admission()),
+        service,
         authority_host_id: provider.identity().authority_host_id.clone(),
         space_id: provider.identity().space_id.clone(),
+        principal: principal_id,
+        provider,
         _home: home,
     }
 }
