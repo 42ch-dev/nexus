@@ -1540,8 +1540,16 @@ impl LocalMemoryProvider {
         &self,
         entered: std::sync::Arc<tokio::sync::Notify>,
         release: std::sync::Arc<tokio::sync::Barrier>,
-    ) {
-        self.store.park_next_admission(entered, release);
+    ) -> u64 {
+        self.store.park_next_admission(entered, release)
+    }
+
+    /// Disarm exactly the admission arm `token` owns; a stale handle cannot clear
+    /// a newer arm. Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn disarm_next_admission(&self, token: u64) {
+        self.store.disarm_next_admission(token);
     }
 
     /// §5.2 step 2 proof seam: park the next publication while it holds the

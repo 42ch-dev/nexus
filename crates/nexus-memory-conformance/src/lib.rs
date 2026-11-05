@@ -60,7 +60,9 @@ pub use candidates::{
     RetentionSweep, DEDUP_RETENTION_SECONDS, IDEMPOTENCY_RETENTION_SECONDS,
     RECEIPT_RETENTION_SECONDS,
 };
-pub use faults::{FaultHold, FaultHoldFailure, FaultHoldLost, FaultPoint, FixtureFaults};
+pub use faults::{
+    FaultHold, FaultHoldFailure, FaultHoldLost, FaultPoint, FixtureFaults, TargetHold,
+};
 pub use policy::PeerDirectory;
 pub use provider::{FixtureIdentity, FixtureMemoryProvider};
 

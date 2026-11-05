@@ -82,7 +82,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU8;
 #[cfg(feature = "test-hooks")]
 use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
 use chrono::{DateTime, SecondsFormat, Utc};
@@ -272,9 +272,19 @@ struct ReadRendezvous {
 /// retention. `entered` reports that arrival; `release` frees it. Test only.
 #[cfg(feature = "test-hooks")]
 struct AdmissionRendezvous {
+    /// Monotonic identity of this arm: a stale test handle can only disarm the
+    /// arm it owns, never a replacement.
+    token: u64,
     entered: Arc<tokio::sync::Notify>,
     release: Arc<tokio::sync::Barrier>,
 }
+
+/// Upper bound on the provider's wait at a parked admission. A test that
+/// disappears, cancels, or never releases cannot leave a write parked forever:
+/// after the bound the write proceeds normally (the pause never changes the
+/// operation's outcome).
+#[cfg(feature = "test-hooks")]
+const ADMISSION_HOLD_BOUND: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// D15 proof seam: the rendezvous a parked capture waits at — `entered` reports
 /// that it holds its write transaction and has already validated the caller's
@@ -596,6 +606,9 @@ pub(super) struct MemoryStore {
     /// transition can be observed at the contested boundary.
     #[cfg(feature = "test-hooks")]
     admission_barrier: std::sync::Mutex<Option<AdmissionRendezvous>>,
+    /// Monotonic token source for admission arms.
+    #[cfg(feature = "test-hooks")]
+    admission_token: AtomicU64,
     /// Test-only rendezvous a capture waits at once its write transaction holds
     /// the lock and has validated the caller's binding — `entered` tells the
     /// test the capture is parked, `release` frees it — so a test can show a
@@ -851,6 +864,8 @@ impl MemoryStore {
             #[cfg(feature = "test-hooks")]
             admission_barrier: std::sync::Mutex::new(None),
             #[cfg(feature = "test-hooks")]
+            admission_token: AtomicU64::new(0),
+            #[cfg(feature = "test-hooks")]
             capture_barrier: std::sync::Mutex::new(None),
             #[cfg(feature = "test-hooks")]
             publish_barrier: std::sync::Mutex::new(None),
@@ -988,9 +1003,27 @@ impl MemoryStore {
         &self,
         entered: Arc<tokio::sync::Notify>,
         release: Arc<tokio::sync::Barrier>,
-    ) {
+    ) -> u64 {
+        let token = self.admission_token.fetch_add(1, Ordering::SeqCst) + 1;
         *self.admission_barrier.lock().expect("admission gate") =
-            Some(AdmissionRendezvous { entered, release });
+            Some(AdmissionRendezvous {
+                token,
+                entered,
+                release,
+            });
+        token
+    }
+
+    /// Disarm exactly the admission arm `token` owns (test control). A stale
+    /// handle cannot clear a newer arm; once the provider has taken an arm it is
+    /// no longer in the slot and this is a no-op (the provider's bounded wait
+    /// covers that case).
+    #[cfg(feature = "test-hooks")]
+    pub(super) fn disarm_next_admission(&self, token: u64) {
+        let mut gate = self.admission_barrier.lock().expect("admission gate");
+        if gate.as_ref().is_some_and(|armed| armed.token == token) {
+            *gate = None;
+        }
     }
 
     /// §5.2 step 2 proof seam: park the next publication once it holds the
@@ -1070,7 +1103,10 @@ impl MemoryStore {
         };
         if let Some(rendezvous) = parked {
             rendezvous.entered.notify_one();
-            rendezvous.release.wait().await;
+            // Bounded: a vanished, cancelled or never-releasing test cannot park
+            // this write forever, and expiry proceeds normally (the pause never
+            // changes the operation's outcome).
+            let _ = tokio::time::timeout(ADMISSION_HOLD_BOUND, rendezvous.release.wait()).await;
         }
     }
 

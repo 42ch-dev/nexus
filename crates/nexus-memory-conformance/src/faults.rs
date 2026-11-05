@@ -83,6 +83,10 @@ struct Armed {
 struct FaultState {
     next_token: u64,
     armed: Option<Armed>,
+    /// The op-targeted admission arm (distinct from the point-based `armed`
+    /// slot, so a capture's legacy `AdmissionPause` arm and a target arm never
+    /// consume each other).
+    target: Option<TargetArm>,
 }
 
 impl Default for FaultState {
@@ -90,6 +94,7 @@ impl Default for FaultState {
         Self {
             next_token: 0,
             armed: None,
+            target: None,
         }
     }
 }
@@ -1102,5 +1107,153 @@ mod tests {
         );
         assert_eq!(count_rows(&scenario, "candidates").await, 2);
         drop(retained);
+    }
+}
+
+/// One op-targeted admission arm: a bounded pause at the exact mutating
+/// handler entry named by `op`. It is test control only and outcome-neutral:
+/// releasing, expiring or losing control always lets the operation proceed.
+struct TargetArm {
+    token: u64,
+    op: String,
+    entered: Option<oneshot::Sender<()>>,
+    release: Option<oneshot::Receiver<()>>,
+    bound: Duration,
+}
+
+/// The test-side handle for one op-targeted admission arm.
+///
+/// Bounded and token-owned: dropping or cancelling the handle can only disarm
+/// its own arm, never a replacement; once the provider has taken the arm the
+/// handle's `release` resumes it, and a vanished handle only costs the provider
+/// its bounded wait.
+pub struct TargetHold {
+    control: Arc<Mutex<FaultState>>,
+    token: u64,
+    reached: oneshot::Receiver<()>,
+    release: Option<oneshot::Sender<()>>,
+    bound: Duration,
+}
+
+impl FixtureFaults {
+    /// Arm one op-targeted admission pause at the exact mutating handler entry
+    /// named by `op` (replacing any previous target arm). Only that op consumes
+    /// it; reads, invalid payloads and every other operation are unaffected.
+    pub fn hold_next_for(&self, op: impl Into<String>) -> TargetHold {
+        self.hold_next_for_bounded(op, FAULT_HOLD_TIMEOUT)
+    }
+
+    /// [`Self::hold_next_for`] with an explicit bound.
+    pub fn hold_next_for_bounded(&self, op: impl Into<String>, bound: Duration) -> TargetHold {
+        let (reached_tx, reached_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        let mut state = self.state();
+        let token = Self::next_token(&mut state);
+        state.target = Some(TargetArm {
+            token,
+            op: op.into(),
+            entered: Some(reached_tx),
+            release: Some(release_rx),
+            bound,
+        });
+        TargetHold {
+            control: Arc::clone(&self.inner),
+            token,
+            reached: reached_rx,
+            release: Some(release_tx),
+            bound,
+        }
+    }
+
+    /// The provider-side admission wait for one exact mutating operation.
+    ///
+    /// Takes the armed target only when it names this op, reports the arrival,
+    /// and waits for the release no longer than the arm's own bound. Every end
+    /// of that wait — release, expiry, a vanished handle — lets the operation
+    /// proceed, so the pause never changes an operation's outcome.
+    pub(crate) async fn wait_target(&self, op: &str) {
+        let arm = {
+            let mut state = self.state();
+            match state.target.take() {
+                Some(arm) if arm.op == op => Some(arm),
+                other => {
+                    state.target = other;
+                    None
+                }
+            }
+        };
+        let Some(mut arm) = arm else {
+            return;
+        };
+        if let Some(entered) = arm.entered.take() {
+            let _ = entered.send(());
+        }
+        if let Some(release) = arm.release.take() {
+            let _ = tokio::time::timeout(arm.bound, release).await;
+        }
+    }
+}
+
+impl TargetHold {
+    /// Wait, bounded, until the provider reached this exact op's admission.
+    pub async fn wait_reached(&mut self) -> Result<(), FaultHoldLost> {
+        let guard = TargetReachGuard {
+            control: Arc::clone(&self.control),
+            token: self.token,
+        };
+        let bound = self.bound;
+        let reached = &mut self.reached;
+        let outcome = async move {
+            let _guard = guard;
+            match tokio::time::timeout(bound, reached).await {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(_)) => Err(FaultHoldLost::Disarmed),
+                Err(_) => Err(FaultHoldLost::Unreached),
+            }
+        };
+        outcome.await
+    }
+
+    /// Resume the held operation; before it is taken this disarms only its own
+    /// arm.
+    pub fn release(&mut self) {
+        let mut state = self
+            .control
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state
+            .target
+            .as_ref()
+            .is_some_and(|arm| arm.token == self.token)
+        {
+            state.target = None;
+            return;
+        }
+        drop(state);
+        if let Some(release) = self.release.take() {
+            let _ = release.send(());
+        }
+    }
+}
+
+/// Disarms one still-armed target arm when its observation ends without a take.
+struct TargetReachGuard {
+    control: Arc<Mutex<FaultState>>,
+    token: u64,
+}
+
+impl Drop for TargetReachGuard {
+    fn drop(&mut self) {
+        let mut state = self
+            .control
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state
+            .target
+            .as_ref()
+            .is_some_and(|arm| arm.token == self.token)
+        {
+            state.target = None;
+        }
     }
 }
