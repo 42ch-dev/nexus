@@ -139,6 +139,10 @@ const MEMORY_CAPABILITIES: [&str; 1] = ["spoke-memory"];
 const WORKSPACE: &str = "default";
 const CREDENTIAL_ID: &str = "cred-r2-subjects";
 const BOUND: Duration = Duration::from_secs(5);
+/// A digest the deterministic classifier drops: shorter than its 50-character
+/// minimum, so the drain issues a legitimate `drop` decision.
+const DROP_DIGEST: &str = "short note";
+
 /// Bytes of the file that occupies a bearer's long-term discovery *directory*.
 ///
 /// `memory_io::list_memories` calls `fs::read_dir` on that directory and only
@@ -2934,6 +2938,8 @@ async fn external_capture(
     subject_id: &str,
     binding_id: &str,
     pending_id: &str,
+    digest: &str,
+    task_kind: &str,
 ) -> String {
     let result = adapter
         .capture(
@@ -2942,13 +2948,13 @@ async fn external_capture(
                 "space_id": space_id,
                 "subject_id": subject_id,
                 "content": {
-                    "text": PROMOTE_DIGEST,
+                    "text": digest,
                     "structured": {
                         "nexus_legacy": {
                             "pending_id": pending_id,
                             "session_id": format!("sess_{pending_id}"),
-                            "task_kind": "brainstorm",
-                            "raw_digest": PROMOTE_DIGEST,
+                            "task_kind": task_kind,
+                            "raw_digest": digest,
                             "actor_world_binding_id": binding_id,
                             "created_at": "2026-03-01T00:00:01Z",
                         },
@@ -2980,10 +2986,23 @@ async fn external_capture(
 /// `OUTCOME_UNCERTAIN`, which is what the caller observes when the reply is lost
 /// after the provider committed (§14.3). It never fabricates provider state; it
 /// only reproduces the loss window at the service boundary.
+/// The verdict-shaped corruptions a committed review response can still carry:
+/// the SDK schema accepts them, but they contradict the decision Core issued.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReviewMangle {
+    /// `outcome = fragmented` with no record ids at all.
+    EmptyIds,
+    /// A `fragmented`/`promoted` result reported as `dropped`.
+    DropOutcome,
+    /// A record id that is the empty string.
+    EmptyIdString,
+}
+
 struct ReviewLossProbe {
     inner: Arc<dyn RemoteMemoryService>,
     candidate: std::sync::Mutex<Option<String>>,
     lose: AtomicBool,
+    mangle: std::sync::Mutex<Option<ReviewMangle>>,
     committed_losses: AtomicUsize,
 }
 
@@ -2993,8 +3012,13 @@ impl ReviewLossProbe {
             inner,
             candidate: std::sync::Mutex::new(None),
             lose: AtomicBool::new(false),
+            mangle: std::sync::Mutex::new(None),
             committed_losses: AtomicUsize::new(0),
         }
+    }
+
+    fn mangle(&self, mode: Option<ReviewMangle>) {
+        *self.mangle.lock().expect("mangle mode") = mode;
     }
 
     fn watch(&self, candidate_id: &str) {
@@ -3013,14 +3037,16 @@ impl ReviewLossProbe {
 #[async_trait]
 impl RemoteMemoryService for ReviewLossProbe {
     async fn invoke(&self, peer_id: &str, op: &str, payload: Value) -> SpokeResult<Value> {
-        let result = self.inner.invoke(peer_id, op, payload.clone()).await;
+        let mut result = self.inner.invoke(peer_id, op, payload.clone()).await;
         let watched = self.candidate.lock().expect("watched candidate").clone();
         let requested = payload.get("candidate_id").and_then(Value::as_str);
-        if op == "memory.candidates.review"
-            && watched.as_deref() == requested
-            && self.lose.load(Ordering::SeqCst)
-            && matches!(result, SpokeResult::Ok(_))
-        {
+        if op != "memory.candidates.review" || watched.as_deref() != requested {
+            return result;
+        }
+        let SpokeResult::Ok(body) = &mut result else {
+            return result;
+        };
+        if self.lose.load(Ordering::SeqCst) {
             self.committed_losses.fetch_add(1, Ordering::SeqCst);
             let mut details = Map::new();
             details.insert("retry_class".to_owned(), json!("uncertain"));
@@ -3029,6 +3055,12 @@ impl RemoteMemoryService for ReviewLossProbe {
                 message: "the review reply was lost after the provider committed".to_owned(),
                 details: Some(details),
             });
+        }
+        match *self.mangle.lock().expect("mangle mode") {
+            Some(ReviewMangle::EmptyIds) => body["result"]["record_ids"] = json!([]),
+            Some(ReviewMangle::DropOutcome) => body["result"]["outcome"] = json!("dropped"),
+            Some(ReviewMangle::EmptyIdString) => body["result"]["record_ids"] = json!([""]),
+            None => {}
         }
         result
     }
@@ -3090,6 +3122,8 @@ async fn external_capture_review_settlement_keeps_binding_protection() {
         &subject,
         &protective,
         "pend_external",
+        PROMOTE_DIGEST,
+        "brainstorm",
     )
     .await;
     let nexus = core_db(&env).await;
@@ -3169,6 +3203,8 @@ async fn external_capture_review_settlement_keeps_binding_protection() {
         &subject,
         &protective,
         "pend_external_two",
+        PROMOTE_DIGEST,
+        "brainstorm",
     )
     .await;
     probe.watch(&second);
@@ -3197,6 +3233,8 @@ async fn external_capture_review_settlement_keeps_binding_protection() {
         &subject,
         &keeper,
         "pend_external_control",
+        PROMOTE_DIGEST,
+        "brainstorm",
     )
     .await;
     probe.watch(&control_candidate);
@@ -3237,6 +3275,171 @@ async fn external_capture_review_settlement_keeps_binding_protection() {
     // The protective binding keeps its older unknown attempt.
     assert_remote_memory_holds(&core, &principal, &character, &protective).await;
 
+    external.close();
+    responder_of(external_responder).await;
+    assert!(
+        core.close().await.expect("close").cleanup_confirmed,
+        "the open releases its own admission"
+    );
+    responder_of(responder).await;
+}
+
+/// A committed review response can be SDK-schema-valid and still contradict the
+/// decision Core issued: no record ids, fewer ids than issued fragments, an
+/// empty id, or a `dropped` outcome for a fragment decision. Treating such a
+/// receipt as complete consumes the candidate, retires the attempt and leaves
+/// the provider's real binding record unprotected. Each shape must fail closed:
+/// the attempt keeps its admission and the binding stays unremovable. A
+/// legitimate `drop` really names no records and must still settle, so the rule
+/// is consistency with the issued decision, not a global non-empty rule.
+#[tokio::test]
+async fn malformed_review_receipt_keeps_binding_protection() {
+    let env = Env::boot("R2 Malformed Review Owner").await;
+    let provider = Provider::open().await;
+    let probe = Arc::new(ReviewLossProbe::over(
+        provider.inner.server(provider.directory.admission()),
+    ));
+    let (core, responder) = provider.open_core_serving(&env, probe.clone()).await;
+    let principal = core.active_principal().await.expect("principal");
+
+    let world = create_world(&core, &principal, "R2 Malformed World").await;
+    let (character, protective, _) =
+        create_character(&core, &principal, "R2 Malformed Ada", &world).await;
+    let keeper_world = create_world(&core, &principal, "R2 Malformed Keeper").await;
+    let keeper = add_binding(&core, &principal, &character, &keeper_world).await;
+    let spare_world = create_world(&core, &principal, "R2 Malformed Spare").await;
+    let _spare = add_binding(&core, &principal, &character, &spare_world).await;
+    let subject = legacy::character_subject_id(&character);
+    assert_eq!(
+        core.count_character_pending_reviews(
+            &principal,
+            character.clone(),
+            Some(protective.clone()),
+        )
+        .await
+        .expect("the Character's provider subject is provisioned")
+        .count,
+        0
+    );
+
+    let (external, external_responder) = provider.sdk_session().await;
+    let memory_principal = provider.memory_principal();
+
+    let mut expected_admissions = 0;
+    for (mode, pending) in [
+        (ReviewMangle::EmptyIds, "pend_malformed_empty"),
+        (ReviewMangle::DropOutcome, "pend_malformed_outcome"),
+        (ReviewMangle::EmptyIdString, "pend_malformed_id"),
+    ] {
+        let candidate = external_capture(
+            &external,
+            &memory_principal,
+            &provider.space_id,
+            &subject,
+            &protective,
+            pending,
+            PROMOTE_DIGEST,
+            "brainstorm",
+        )
+        .await;
+        probe.watch(&candidate);
+        probe.mangle(Some(mode));
+        let response = core
+            .review_character_memory(
+                &principal,
+                character.clone(),
+                dto::<ReviewCharacterMemoryRequest>(json!({ "binding_id": protective })),
+            )
+            .await
+            .expect("the drain reports its bounded batch");
+        probe.mangle(None);
+        assert_eq!(
+            response.processed,
+            Some(1),
+            "the drain consumed the externally captured candidate"
+        );
+
+        // The provider really committed: the candidate is consumed and a
+        // binding-scoped record exists, whatever the returned receipt claims.
+        let pool = provider.pool().await;
+        assert_eq!(
+            sqlx::query("SELECT status FROM candidates WHERE candidate_id = ?")
+                .bind(&candidate)
+                .fetch_one(&pool)
+                .await
+                .expect("candidate row")
+                .get::<String, _>("status"),
+            "consumed",
+            "the provider committed the review"
+        );
+        let records: i64 = sqlx::query(
+            "SELECT COUNT(*) FROM records WHERE subject_id = ? AND scope_context_id = ?",
+        )
+        .bind(&subject)
+        .bind(&protective)
+        .fetch_one(&pool)
+        .await
+        .expect("record count")
+        .get::<i64, _>(0);
+        assert!(records >= 1, "the provider holds a binding-scoped record");
+        pool.close().await;
+
+        expected_admissions += 1;
+        assert_remote_memory_holds(&core, &principal, &character, &protective).await;
+        let nexus = core_db(&env).await;
+        assert_eq!(
+            admission_count(&nexus, &protective).await,
+            expected_admissions,
+            "each malformed attempt keeps its own admission"
+        );
+        assert!(
+            object_facts(&nexus, &protective).await.is_empty(),
+            "an inconsistent receipt publishes no fact and retires nothing"
+        );
+        nexus.close().await;
+    }
+
+    // A legitimate drop names no records: it must still settle, so the rule is
+    // decision-consistency rather than a blanket non-empty requirement.
+    let drop_candidate = external_capture(
+        &external,
+        &memory_principal,
+        &provider.space_id,
+        &subject,
+        &keeper,
+        "pend_drop_control",
+        DROP_DIGEST,
+        "unknown",
+    )
+    .await;
+    probe.watch(&drop_candidate);
+    probe.mangle(None);
+    core.review_character_memory(
+        &principal,
+        character.clone(),
+        dto::<ReviewCharacterMemoryRequest>(json!({ "binding_id": keeper })),
+    )
+    .await
+    .expect("the legitimate drop settles");
+    let nexus = core_db(&env).await;
+    assert_eq!(
+        admission_count(&nexus, &keeper).await,
+        0,
+        "a consistent drop retires its own attempt"
+    );
+    let drop_facts = object_facts(&nexus, &keeper).await;
+    assert!(
+        drop_facts
+            .iter()
+            .all(|(kind, _, state)| kind != "record" || state != "live"),
+        "a drop leaves no live record dependency: {drop_facts:?}"
+    );
+    nexus.close().await;
+    core.remove_binding(&principal, character.clone(), keeper.clone())
+        .await
+        .expect("a settled drop leaves the binding removable");
+
+    assert_remote_memory_holds(&core, &principal, &character, &protective).await;
     external.close();
     responder_of(external_responder).await;
     assert!(
