@@ -18,13 +18,14 @@ mod support;
 
 use std::sync::Arc;
 
+use nexus_core::memory_provider::legacy;
 use nexus_core::{CoreAccess, CoreOpenOptions, CoreService};
 use serde_json::{json, Value};
 
 use support::{
     bootstrap, candidate_ids, capture_body, close_responder, context_scope, core_code, error_code,
     error_details, is_committed, open_endpoint, open_selected_local, principal, receipt_id,
-    remote_selection, result, retry_class, serve_selection_host, shared_scope, Actor, Matrix,
+    remote_selection, result, retry_class, serve_selection_host, shared_scope, Actor, Kind, Matrix,
     SelectionHome, CONTEXT, OTHER_CONTEXT, OTHER_SUBJECT, SELECTION_CLIENT_SEED, SUBJECT,
 };
 
@@ -408,6 +409,7 @@ async fn record_crud_and_stale_cas(matrix: Matrix) {
         )
         .await;
     let before_no_op = observer.observe().await;
+    let journal_before = observer.journal_count().await;
     let no_op = admin
         .update_record(json!({
             "record_id": record_id,
@@ -437,6 +439,7 @@ async fn record_crud_and_stale_cas(matrix: Matrix) {
         "the same key replays the original receipt: {replay}"
     );
     let after_no_op = observer.observe().await;
+    let journal_after = observer.journal_count().await;
     assert_eq!(
         after_no_op.rows, before_no_op.rows,
         "a no-op rewrites no seeded record or receipt row"
@@ -449,6 +452,20 @@ async fn record_crud_and_stale_cas(matrix: Matrix) {
         after_no_op.publications, before_no_op.publications,
         "a no-op publishes no record file"
     );
+    // The legitimate receipt/dedup commit moves `data_version`, so the journal
+    // count is the separate regression that a genuine no-op journals no record
+    // effect. The fixture has no journal table and must not be made to claim one.
+    match matrix.kind() {
+        Kind::Local => assert!(
+            journal_before.is_some() && journal_after == journal_before,
+            "a genuine kind-only/no-content update appends no record journal entry: \
+             {journal_before:?} -> {journal_after:?}"
+        ),
+        Kind::Remote => assert!(
+            journal_before.is_none() && journal_after.is_none(),
+            "the fixture exposes no journal table: {journal_before:?} -> {journal_after:?}"
+        ),
+    }
     observer.close().await;
     let after_no_op_record = record_of(&admin.get_record(&record_id).await).clone();
     assert_eq!(after_no_op_record["revision"], json!(2));
@@ -1226,18 +1243,12 @@ async fn base_read_operations_do_not_mutate(matrix: Matrix) {
     let receipt_id = receipt_id(&captured).to_owned();
     let candidate_id = candidate_ids(&captured)[0].clone();
 
-    // A page cursor minted before the reads is the state fingerprint: a
-    // mutation moves the provider snapshot and invalidates it.
-    let page = list_page(&admin, subject_all(), Some(1), None).await;
-    let cursor = page["next_cursor"]
-        .as_str()
-        .expect("two rows leave a continuation")
-        .to_owned();
-
-    // One read-only connection, opened BEFORE the first read and held for the
-    // whole observation: its `data_version` changes only when another
-    // connection commits, so it also catches an in-place change that leaves
-    // every row count and the protocol snapshot untouched.
+    // One read-only connection, opened AFTER the setup writes and BEFORE any
+    // tested read, then held for the whole observation window: the
+    // cursor-minting page, the read series and the continuation all happen
+    // inside it. Its `data_version` changes only when another connection
+    // commits, so it also catches an in-place change that leaves every row
+    // count and the protocol snapshot untouched.
     let mut observer = matrix
         .durable_observer(
             SUBJECT,
@@ -1249,10 +1260,22 @@ async fn base_read_operations_do_not_mutate(matrix: Matrix) {
         .await;
     let durable_before = observer.observe().await;
 
+    // First tested read: the page whose cursor the continuation reuses.
+    let page = list_page(&admin, subject_all(), Some(1), None).await;
+    let cursor = page["next_cursor"]
+        .as_str()
+        .expect("two rows leave a continuation")
+        .to_owned();
+
     let before = read_state(&admin, &shared, &contextual, &receipt_id, &candidate_id).await;
 
     // The same reads again: nothing may move.
     let after = read_state(&admin, &shared, &contextual, &receipt_id, &candidate_id).await;
+
+    // The continuation is also inside the observed window.
+    let continued = list_page(&admin, subject_all(), Some(1), Some(&cursor)).await;
+    let continued_ids = page_ids(&continued);
+
     let durable_after = observer.observe().await;
     assert_eq!(before.0, after.0, "describe is a pure read");
     assert_eq!(before.1, after.1, "spaces.list is a pure read");
@@ -1270,6 +1293,12 @@ async fn base_read_operations_do_not_mutate(matrix: Matrix) {
         "candidates.get is a pure read: {:?}",
         after.11
     );
+    assert_eq!(
+        continued_ids.len(),
+        1,
+        "the cursor minted inside the window still pages: {continued}"
+    );
+    assert_ne!(continued_ids[0], page_ids(&page)[0]);
 
     // The independent durable observation: the seeded receipt, record,
     // candidate, profile, subject and space rows, the held connection's
@@ -1282,17 +1311,10 @@ async fn base_read_operations_do_not_mutate(matrix: Matrix) {
         "no base read wrote a seeded durable row, advanced another connection's data_version, or published a file"
     );
 
-    // The pre-read snapshot still continues: no read advanced it.
-    let continued = list_page(&admin, subject_all(), Some(1), Some(&cursor)).await;
-    assert_eq!(
-        page_ids(&continued).len(),
-        1,
-        "the cursor minted before the reads still pages: {continued}"
-    );
-    assert_ne!(page_ids(&continued)[0], page_ids(&page)[0]);
-
-    // In-place positive control on an EXISTING row: the record update rewrites
-    // the seeded row (no insertion) and must move the held observation.
+    // A separate baseline for the in-place write control: a legitimate commit
+    // may move `data_version`, so it is measured against its own baseline and
+    // never confused with read purity.
+    let control_before = observer.observe().await;
     let updated = admin
         .update_record(json!({
             "record_id": shared,
@@ -1301,23 +1323,32 @@ async fn base_read_operations_do_not_mutate(matrix: Matrix) {
             "idempotency_key": "k-c046-in-place",
         }))
         .await;
-    assert!(is_committed(&updated), "{updated}");
-    let durable_mutated = observer.observe().await;
+    let updated_committed = is_committed(&updated);
+    let control_after = observer.observe().await;
+    let paths_before: Vec<String> = control_before
+        .publications
+        .iter()
+        .map(|(path, _)| path.clone())
+        .collect();
+    let paths_after: Vec<String> = control_after
+        .publications
+        .iter()
+        .map(|(path, _)| path.clone())
+        .collect();
+    observer.close().await;
+    assert!(updated_committed, "the in-place control write commits: {updated}");
     assert_ne!(
-        durable_mutated.data_version, durable_before.data_version,
+        control_after.data_version, control_before.data_version,
         "an in-place commit on the provider connection moves data_version"
     );
     assert_ne!(
-        durable_mutated.rows, durable_before.rows,
+        control_after.rows, control_before.rows,
         "the seeded record row changed in place"
     );
-    let paths_before: Vec<&String> = durable_before.publications.iter().map(|(path, _)| path).collect();
-    let paths_after: Vec<&String> = durable_mutated.publications.iter().map(|(path, _)| path).collect();
     assert_eq!(
         paths_before, paths_after,
         "an update republishes the existing row file and inserts no new path"
     );
-    observer.close().await;
     matrix.shutdown().await;
 }
 
@@ -2875,12 +2906,15 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
 
     // (B) The real supported REMOTE selection against a fresh fixture served
     // over signed loopback sessions, with the operator-provisioned credential
-    // the selection names. The SAME fixture and subject are observed through a
-    // real signed authorized session BEFORE the open and AFTER it, so a
-    // selection that created or required fake capability-kind documents in the
-    // selected remote provider would be visible.
+    // the selection names. The product read resolves the Creator's own provider
+    // subject through `legacy::creator_subject_id`, so the SAME fixture and that
+    // exact subject are observed through real signed authorized sessions before
+    // and after the open.
     let fixture = support::selection_fixture().await;
     let selected_principal = principal(&fixture.principal);
+    let creator_subject = legacy::creator_subject_id(support::SELECTION_CREATOR);
+    let mut cleanup_errors: Vec<String> = Vec::new();
+
     let before_open = open_endpoint(
         Arc::clone(&fixture.service),
         &fixture.authority_host_id,
@@ -2888,19 +2922,16 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
     )
     .await;
     // The selection fixture starts without the subject; the signed operator
-    // session ensures it, so the profile read is a real absent-kind read.
+    // session ensures the actual Creator subject, so the profile read is a real
+    // absent-kind read rather than a missing-subject refusal.
     let before_actor = before_open.actor(&selected_principal, &fixture.space_id);
-    assert!(
-        is_committed(&before_actor.ensure_subject(SUBJECT).await),
-        "the signed session ensures the observed subject"
-    );
+    let before_ensured = is_committed(&before_actor.ensure_subject(&creator_subject).await);
     let before_profiles = before_actor
-        .get_profile(json!({ "subject_id": SUBJECT, "profile_kinds": capability_kinds }))
+        .get_profile(json!({
+            "subject_id": creator_subject,
+            "profile_kinds": capability_kinds,
+        }))
         .await;
-    assert!(
-        profiles_of(&before_profiles).is_empty(),
-        "the selected fixture starts with no capability-kind document: {before_profiles}"
-    );
     before_open.close().await;
 
     let host = serve_selection_host(
@@ -2918,37 +2949,30 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
     })
     .await;
     let responder = host.session().await;
-    assert_eq!(
-        responder.state().as_str(),
-        "Established",
-        "the remote selection really authenticated the signed session"
-    );
-    // Collect the product-read result, then close every owned handle before an
-    // assertion can panic.
-    let product_read = match &opened {
-        Ok(core) => {
-            let core_principal = core.active_principal().await.expect("active principal");
-            Some(
-                core.count_pending_reviews(&core_principal)
-                    .await
-                    .expect("the pinned remote binding serves the memory family")
-                    .count,
-            )
-        }
-        Err(_) => None,
+    let established = responder.state().as_str().to_owned();
+    // Collect every outcome; assertions wait until all owners are settled.
+    let product_read: Result<i64, String> = match &opened {
+        Ok(core) => match core.active_principal().await {
+            Ok(core_principal) => core
+                .count_pending_reviews(&core_principal)
+                .await
+                .map(|value| value.count)
+                .map_err(|error| format!("the pinned remote binding serves memory: {error}")),
+            Err(error) => Err(format!("the remote selection has an active principal: {error}")),
+        },
+        Err(error) => Err(format!("the supported remote selection opens: {error}")),
     };
     if let Ok(core) = &opened {
-        core.close().await.expect("the remote selection closes");
+        if let Err(error) = core.close().await {
+            cleanup_errors.push(format!("the remote selection closes: {error}"));
+        }
     }
-    close_responder(responder).await;
-    assert_eq!(
-        product_read,
-        Some(0),
-        "the supported remote selection opened and served a product memory read"
-    );
+    if let Err(error) = close_responder(responder).await {
+        cleanup_errors.push(error);
+    }
 
-    // The same fixture and subject, now through a new signed session after the
-    // open: still no capability-kind document.
+    // The same fixture and the same Creator subject, now through a new signed
+    // session after the open: still no capability-kind document.
     let after_open = open_endpoint(
         Arc::clone(&fixture.service),
         &fixture.authority_host_id,
@@ -2957,18 +2981,16 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
     .await;
     let after_profiles = after_open
         .actor(&selected_principal, &fixture.space_id)
-        .get_profile(json!({ "subject_id": SUBJECT, "profile_kinds": capability_kinds }))
+        .get_profile(json!({
+            "subject_id": creator_subject,
+            "profile_kinds": capability_kinds,
+        }))
         .await;
-    assert!(
-        profiles_of(&after_profiles).is_empty(),
-        "the selected fixture created no fabricated profile kind: {after_profiles}"
-    );
     after_open.close().await;
 
     // (C) A host that negotiates no memory family fails the same selection on
     // capability grounds — the one capability-based selection failure the
-    // existing interface expresses. Its responder is closed explicitly and the
-    // refusal is asserted only after cleanup.
+    // existing interface expresses.
     let host = serve_selection_host(
         Arc::clone(&fixture.service),
         &fixture.authority_host_id,
@@ -2985,22 +3007,53 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
     .await;
     let responder = host.session().await;
     if let Ok(core) = &refused {
-        core.close()
-            .await
-            .expect("a refused selection still closes its open handles");
+        if let Err(error) = core.close().await {
+            cleanup_errors.push(format!("a refused selection closes its open handles: {error}"));
+        }
     }
-    close_responder(responder).await;
-    let error = refused
+    if let Err(error) = close_responder(responder).await {
+        cleanup_errors.push(error);
+    }
+    let refusal = refused
+        .as_ref()
         .err()
-        .expect("a host without the memory family fails the open");
-    assert_eq!(
-        core_code(&error),
-        "memory_remote_capability",
-        "the negotiated family is required even when the space would match"
-    );
+        .map(|error| core_code(error).to_owned());
 
     fixture.close().await;
     matrix.shutdown().await;
+
+    // Every owner is settled; only now is the expected outcome surfaced, with
+    // any cleanup failure preserved beside it.
+    assert!(
+        cleanup_errors.is_empty(),
+        "every owned session closed cleanly (while the open returned {refusal:?}): {cleanup_errors:?}"
+    );
+    assert!(
+        before_ensured,
+        "the signed session ensures the actual Creator subject"
+    );
+    assert!(
+        profiles_of(&before_profiles).is_empty(),
+        "the selected fixture starts with no capability-kind document for the Creator subject: {before_profiles}"
+    );
+    assert_eq!(
+        established, "Established",
+        "the remote selection really authenticated the signed session"
+    );
+    assert_eq!(
+        product_read,
+        Ok(0),
+        "the supported remote selection opened and served a product memory read"
+    );
+    assert!(
+        profiles_of(&after_profiles).is_empty(),
+        "the selected fixture created no fabricated profile kind for the Creator subject: {after_profiles}"
+    );
+    assert_eq!(
+        refusal.as_deref(),
+        Some("memory_remote_capability"),
+        "the negotiated family is required even when the space would match"
+    );
 }
 
 #[tokio::test]

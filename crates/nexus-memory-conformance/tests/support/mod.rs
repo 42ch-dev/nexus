@@ -281,18 +281,18 @@ impl Endpoint {
     }
 }
 
-/// Close one owned responder through its public route and wait, bounded, for
-/// the session to report `Closed`.
-pub async fn close_responder(responder: Arc<ConnectResponder>) {
+/// Close one owned responder through its public route, bounded. The failure is
+/// returned (not panicked) so a caller can settle every owner before asserting.
+pub async fn close_responder(responder: Arc<ConnectResponder>) -> Result<(), String> {
     responder.close();
     let deadline = Instant::now() + BOUND;
     while responder.state() != ConnectResponderState::Closed {
-        assert!(
-            Instant::now() < deadline,
-            "the responder session reaches Closed within the bound"
-        );
+        if Instant::now() >= deadline {
+            return Err("the responder session did not reach Closed within the bound".to_owned());
+        }
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
+    Ok(())
 }
 
 /// Serve one fresh loopback session for `seed` against `service`.
@@ -1865,16 +1865,28 @@ pub struct DurableObserver {
 }
 
 /// Every file under `root`, as (relative path, exact bytes), sorted.
+///
+/// The root is the provider's own published projection — its absence or an
+/// unreadable entry/file is an observation failure, never an empty projection.
 fn published_files(root: &std::path::Path) -> Vec<(String, Vec<u8>)> {
     fn walk(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<(String, Vec<u8>)>) {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
+        let entries = std::fs::read_dir(dir).unwrap_or_else(|error| {
+            panic!("the provider projection directory {dir:?} is enumerable: {error}")
+        });
+        for entry in entries {
+            let entry = entry.unwrap_or_else(|error| {
+                panic!("an entry under the provider projection {dir:?} is readable: {error}")
+            });
             let path = entry.path();
-            if path.is_dir() {
+            let file_type = entry.file_type().unwrap_or_else(|error| {
+                panic!("the provider projection entry {path:?} reports its type: {error}")
+            });
+            if file_type.is_dir() {
                 walk(root, &path, out);
-            } else if let Ok(bytes) = std::fs::read(&path) {
+            } else {
+                let bytes = std::fs::read(&path).unwrap_or_else(|error| {
+                    panic!("the published provider file {path:?} is readable: {error}")
+                });
                 let relative = path
                     .strip_prefix(root)
                     .unwrap_or(&path)
@@ -2043,9 +2055,29 @@ impl DurableObserver {
         rows.first().map(row_columns).unwrap_or_default()
     }
 
-    /// Close the held connection explicitly, bounded.
+    /// The local provider's record-journal row count on the SAME held
+    /// connection. `None` for the fixture, which has no journal table.
+    pub async fn journal_count(&mut self) -> Option<i64> {
+        match self.store {
+            Store::Local => {
+                let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM memory_journal")
+                    .fetch_one(&mut self.conn)
+                    .await
+                    .expect("the held connection reads the record journal row count");
+                Some(count)
+            }
+            Store::Fixture => None,
+        }
+    }
+
+    /// Close the held connection explicitly: both the bound and the connection's
+    /// own close result must succeed.
     pub async fn close(self) {
-        let _ = tokio::time::timeout(BOUND, self.conn.close()).await;
+        match tokio::time::timeout(BOUND, self.conn.close()).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => panic!("the held read-only connection closes: {error}"),
+            Err(_) => panic!("the held read-only connection close is bounded"),
+        }
     }
 }
 
@@ -2252,36 +2284,57 @@ pub async fn open_selected_local(subject: &str, profile_kinds: &[&str]) -> Local
     })
     .await
     .expect("the supported local memory selection opens");
-    let core_principal = core.active_principal().await.expect("active principal");
-    let pending = core
-        .count_pending_reviews(&core_principal)
+    // Collect every observation, close the open, THEN surface the outcome: an
+    // assertion must not run while this control still owns the service.
+    let observed: Result<(Value, Value, i64), String> = match core.active_principal().await {
+        Ok(core_principal) => {
+            let pending = core
+                .count_pending_reviews(&core_principal)
+                .await
+                .map(|value| value.count)
+                .map_err(|error| format!("the pinned local binding serves memory: {error}"));
+            match (pending, core.memory_provider_for_test()) {
+                (Ok(pending), Ok(provider)) => {
+                    // The provider's typed port takes the spoke-schema principal
+                    // the admission maps; the Core principal is its
+                    // creator-scoped counterpart.
+                    let principal = principal(core_principal.creator_id());
+                    let described = wire(&provider.describe(&principal, dto(json!({}))).await);
+                    let profiles = wire(
+                        &provider
+                            .get_profile(
+                                &principal,
+                                dto(json!({
+                                    "space_id": provider.space_id(),
+                                    "subject_id": subject,
+                                    "profile_kinds": profile_kinds,
+                                })),
+                            )
+                            .await,
+                    );
+                    Ok((described, profiles, pending))
+                }
+                (Err(error), _) => Err(error),
+                (_, Err(error)) => {
+                    Err(format!("the local selection pins the local provider: {error}"))
+                }
+            }
+        }
+        Err(error) => Err(format!("the local selection has an active principal: {error}")),
+    };
+    let closed = core
+        .close()
         .await
-        .expect("the pinned local binding serves the memory family")
-        .count;
-    // The provider's typed port takes the spoke-schema principal the admission
-    // maps; the Core principal is its creator-scoped counterpart.
-    let principal = principal(core_principal.creator_id());
-    let provider = core
-        .memory_provider_for_test()
-        .expect("a local selection pins the local provider");
-    let described = wire(&provider.describe(&principal, dto(json!({}))).await);
-    let profiles = wire(
-        &provider
-            .get_profile(
-                &principal,
-                dto(json!({
-                    "space_id": provider.space_id(),
-                    "subject_id": subject,
-                    "profile_kinds": profile_kinds,
-                })),
-            )
-            .await,
-    );
-    core.close().await.expect("the local selection closes");
-    LocalSelection {
-        described,
-        profiles,
-        pending,
+        .map_err(|error| format!("the local selection closes: {error}"));
+    match (observed, closed) {
+        (Ok((described, profiles, pending)), Ok(_)) => LocalSelection {
+            described,
+            profiles,
+            pending,
+        },
+        (observed, closed) => panic!(
+            "the local selection control failed before its assertion: observed={observed:?}, closed={closed:?}"
+        ),
     }
 }
 
