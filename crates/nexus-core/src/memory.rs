@@ -784,32 +784,8 @@ impl MemoryAdapter {
         let mut rows: Vec<Value> = Vec::new();
         let mut cursor: Option<String> = None;
         loop {
-            let request: spoke_schemas::MemoryRecordsListRequest = map_wire(json!({
-                "space_id": self.binding.space_id(),
-                "subject_id": self.subject_id,
-                "selection": selection,
-                "kinds": kinds,
-                "filter": filter.map(|ids| json!({ "source_context_ids": ids })),
-                "limit": MEMORY_PAGE_SIZE,
-                "cursor": cursor,
-            }))?;
-            let body = if self.is_local() {
-                let local = self.binding.local()?;
-                self.ok(
-                    local
-                        .list_records_scoped(&self.principal, request, project_legacy)
-                        .await,
-                )?
-            } else {
-                // A remote binding serves its own objects only, so selecting it
-                // never merges the local legacy projection into the read.
-                self.ok(
-                    self.binding
-                        .port()
-                        .list_records(&self.principal, request)
-                        .await,
-                )?
-            };
+            let request = self.records_request(&selection, kinds, filter, cursor.as_deref())?;
+            let body = self.list_page(request, project_legacy).await?;
             rows.extend(body["records"].as_array().cloned().unwrap_or_default());
             if want.is_some_and(|want| rows.len() >= want) {
                 break;
@@ -826,6 +802,53 @@ impl MemoryAdapter {
             rows.truncate(want);
         }
         Ok(rows)
+    }
+
+    /// The `memory.records.list` request one page of a walk sends, in the pinned
+    /// space.
+    fn records_request(
+        &self,
+        selection: &Value,
+        kinds: &[&str],
+        filter: Option<&[String]>,
+        cursor: Option<&str>,
+    ) -> CoreResult<spoke_schemas::MemoryRecordsListRequest> {
+        map_wire(json!({
+            "space_id": self.binding.space_id(),
+            "subject_id": self.subject_id,
+            "selection": selection,
+            "kinds": kinds,
+            "filter": filter.map(|ids| json!({ "source_context_ids": ids })),
+            "limit": MEMORY_PAGE_SIZE,
+            "cursor": cursor,
+        }))
+    }
+
+    /// One mapped `memory.records.list` page in the pinned space.
+    ///
+    /// A local binding serves the same read with the legacy bridge's projection
+    /// applied (per `project_legacy`); a remote binding serves its own objects
+    /// only, so selecting it never merges local legacy content into the read.
+    async fn list_page(
+        &self,
+        request: spoke_schemas::MemoryRecordsListRequest,
+        project_legacy: bool,
+    ) -> CoreResult<Value> {
+        if self.is_local() {
+            let local = self.binding.local()?;
+            self.ok(
+                local
+                    .list_records_scoped(&self.principal, request, project_legacy)
+                    .await,
+            )
+        } else {
+            self.ok(
+                self.binding
+                    .port()
+                    .list_records(&self.principal, request)
+                    .await,
+            )
+        }
     }
 
     /// One kind-filtered family read of the subject's retained records, as the
@@ -1409,6 +1432,12 @@ impl MemoryAdapter {
     /// legacy fragment is addressed by the bridge's deterministic external id
     /// while the DTO serves its legacy `fragment_id` (D5), so the listed id is
     /// resolved through the bridge id before it can name a record (R4-F1).
+    ///
+    /// This resolves *which* record an id names; it does not decide whether that
+    /// record is a Nexus Character fragment. The serving caller classifies the
+    /// resolved record with [`MemoryAdapter::character_fragment_origin`] before
+    /// it uses or mutates it, so a record without proven origin is never served
+    /// as a fragment and known damage is never hidden.
     async fn character_fragment(&self, fragment_id: &str) -> CoreResult<Option<Value>> {
         if let Some(record) = self.record(fragment_id).await? {
             return Ok(Some(record));
@@ -1422,6 +1451,10 @@ impl MemoryAdapter {
     /// keeps the retained `version_mismatch` conflict; an absent record keeps
     /// the retained not-found answer. A remote binding has no projection to
     /// adopt and runs the ordinary `memory.records.promote`.
+    ///
+    /// On success the provider transaction has committed exactly the placement
+    /// change this call requested, so the caller states the outcome from the
+    /// record it already validated instead of reading the record again.
     async fn promote_fragment(
         &self,
         record_id: &str,
@@ -2967,9 +3000,19 @@ impl CoreService {
     /// (`binding_id` present = that binding's local fragments, absent = the
     /// Character-shared ones) becomes the provider's placement selection.
     ///
+    /// The served set is the retained **fragment family**, not every protocol
+    /// `fact` ([`CharacterFragmentFamily`]): a record with no proven Nexus origin
+    /// is not served here as if it were a fragment, and a record that lost its
+    /// identity while its own metadata or this binding's facts still prove that
+    /// origin fails honestly instead of disappearing. The walk classifies rows as
+    /// it pages and stops at the first family row past the requested page, so
+    /// `offset`/`has_more` describe the family without reading or projecting the
+    /// whole collection.
+    ///
     /// # Errors
-    /// [`CoreError::NotFound`] for a foreign/missing Character and the mapped
-    /// storage error otherwise.
+    /// [`CoreError::NotFound`] for a foreign/missing Character, the honest
+    /// damaged-metadata refusal for a fragment-origin record without its
+    /// identity, and the mapped storage error otherwise.
     pub async fn list_character_memory_fragments(
         &self,
         principal: &Principal,
@@ -2993,24 +3036,56 @@ impl CoreService {
         );
         let start = usize::try_from(offset).unwrap_or(usize::MAX);
         let page_size = usize::try_from(limit).unwrap_or(usize::MAX);
-        // One row past the page proves more rows exist (the retained
-        // `limit + 1` overfetch). The page window is served as asked: clamping
-        // it to an internal bound used to answer an empty page with
-        // `has_more = false` while records existed past the window (fix round 1,
-        // finding F5).
-        let want = start.saturating_add(page_size).saturating_add(1);
-        let records = memory
-            .records(selection, &["fact"], None, Some(want))
-            .await?;
-        let page: Vec<&Value> = records.iter().skip(start).take(page_size).collect();
-        let has_more = records.len() > start.saturating_add(page.len());
+        // The retained `limit + 1` overfetch, counted in FAMILY rows: one
+        // classified fragment past the page proves `has_more`. The walk stops
+        // there, so it never reads or converts the whole collection, and a row
+        // it never reaches cannot fail the page.
+        let mut skipped = 0usize;
+        let mut page: Vec<CharacterMemoryFragmentInfo> = Vec::new();
+        let mut has_more = false;
+        let mut cursor: Option<String> = None;
+        'walk: loop {
+            let request = memory.records_request(&selection, &["fact"], None, cursor.as_deref())?;
+            let mut body = memory.list_page(request, true).await?;
+            let rows = body
+                .get_mut("records")
+                .and_then(Value::as_array_mut)
+                .map(std::mem::take)
+                .unwrap_or_default();
+            for record in rows {
+                match memory
+                    .character_fragment_origin(&record, binding_id.as_deref())
+                    .await?
+                {
+                    // No proven Nexus origin: a generic record, not this family's.
+                    CharacterFragmentFamily::Unproven => {}
+                    CharacterFragmentFamily::Damaged => return Err(damaged_character_fragment()),
+                    CharacterFragmentFamily::Fragment(session_id) => {
+                        if skipped < start {
+                            skipped += 1;
+                        } else if page.len() < page_size {
+                            page.push(stored_character_fragment(
+                                &record,
+                                &character_id,
+                                session_id,
+                            )?);
+                        } else {
+                            has_more = true;
+                            break 'walk;
+                        }
+                    }
+                }
+            }
+            match body["next_cursor"].as_str() {
+                Some(next) => cursor = Some(next.to_string()),
+                None => break,
+            }
+        }
+        // The retained page window applies to the family, so `offset` and
+        // `has_more` describe fragments only.
         let next_cursor = has_more.then(|| format!("v1:{}", offset.saturating_add(limit)));
-        let fragments: Vec<CharacterMemoryFragmentInfo> = page
-            .iter()
-            .map(|record| character_fragment_from_provider(record, &character_id))
-            .collect::<CoreResult<_>>()?;
         map_wire(json!({
-            "fragments": fragments,
+            "fragments": page,
             "pagination": pagination_info(limit, has_more, next_cursor.as_deref()),
         }))
     }
@@ -3030,16 +3105,24 @@ impl CoreService {
     ///
     /// The id is the one the fragment DTO served, so a legacy-projected fragment
     /// resolves through the bridge's external id and is adopted inside the
-    /// promotion's own transaction (R4-F1); the record must belong to this
-    /// Character and be a `fact` fragment (R4-F2). The retained SOUL-narrative
-    /// invalidation runs on the already-shared path too, so a retry after a
-    /// failed invalidation reaches one consistent state (R4-F3).
+    /// promotion's own transaction (R4-F1). The record must belong to this
+    /// Character and be a representable Nexus Character fragment
+    /// ([`CharacterFragmentFamily`]): a record without proven Nexus origin keeps
+    /// the retained non-fragment answer, and a record that lost its required
+    /// identity while its own metadata or this binding's facts prove that origin
+    /// is an honest damaged-metadata failure — both before any provider mutation. The complete retained projection is proven on that record at the
+    /// same provider revision the CAS targets, so a concurrent replacement cannot
+    /// promote an unvalidated revision, and the response states the placement the
+    /// provider's own receipt returned instead of re-reading (a later writer
+    /// cannot turn a committed promotion into a projection failure). The retained
+    /// SOUL-narrative invalidation runs on the already-shared path too, so a
+    /// retry after a failed invalidation reaches one consistent state (R4-F3).
     ///
     /// # Errors
     /// As [`Self::acquire_actor_activity`], plus the mapped storage conflicts
-    /// (`version_mismatch`, `character_fragment_already_shared`) and the
-    /// retained not-found answer for an id that names no fragment of this
-    /// Character.
+    /// (`version_mismatch`, `character_fragment_already_shared`), the retained
+    /// non-fragment answer, the damaged-metadata refusal and the retained
+    /// not-found answer for an id that names no fragment of this Character.
     pub async fn promote_character_fragment(
         &self,
         principal: &Principal,
@@ -3076,28 +3159,42 @@ impl CoreService {
             .unwrap_or_default()
             .to_string();
         // R4-F2: the lease above names one Character, so the record must be that
-        // Character's own and a `fact` fragment. The read alone is authorized by
-        // the principal's grants, which also cover every other Character it
-        // owns, so the owner and kind are checked here — before any mutation.
+        // Character's own and a Nexus Character fragment. The read alone is
+        // authorized by the principal's grants, which also cover every other
+        // Character it owns, so the owner and family are checked here — before
+        // any mutation.
         if current["subject_id"].as_str() != Some(memory.subject_id()) {
             return Err(absent());
         }
-        if current["kind"].as_str() != Some("fact") {
-            return Err(invalid_input(
-                "fragment_id must name a Character memory fragment",
-            ));
-        }
+        // The retained family contract, applied at the promotion boundary: a
+        // record with no proven Nexus origin keeps the retained non-fragment
+        // answer, a record whose required identity is gone while Nexus still holds
+        // positive origin evidence (its own metadata, or this binding's fact for
+        // it) fails honestly, and only a representable fragment reaches the
+        // promotion below.
+        let current_binding = current
+            .pointer("/scope/context_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let session_id = match memory
+            .character_fragment_origin(&current, current_binding.as_deref())
+            .await?
+        {
+            CharacterFragmentFamily::Fragment(session_id) => session_id.to_string(),
+            CharacterFragmentFamily::Unproven => {
+                return Err(invalid_input(
+                    "fragment_id must name a Character memory fragment",
+                ));
+            }
+            CharacterFragmentFamily::Damaged => return Err(damaged_character_fragment()),
+        };
         // The placement the promotion leaves. While the record is still
         // binding-local its own scope names it; once the promotion committed it
         // names the target, and its provenance is a client claim that need not
         // name the placement at all — so the promotion's transaction recorded the
         // old binding and a retry reads that recovery row instead of guessing
         // (R4-F3 round 2).
-        let Some(source_binding) = current
-            .pointer("/scope/context_id")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-        else {
+        let Some(source_binding) = current_binding else {
             // The promotion already committed and only its invalidation is
             // outstanding: finish it before answering the stable conflict, so a
             // retry never leaves the shared fragment behind a stale cache. A
@@ -3119,12 +3216,39 @@ impl CoreService {
             .ok_or_else(|| {
                 invalid_input("expected_revision must be a non-negative fragment revision")
             })?;
+        let provider_revision = u64::try_from(provider_revision).unwrap_or(u64::MAX);
+        // The validation below and the CAS above it must name the SAME provider
+        // revision: a caller whose expected revision is not the one this record
+        // was read at would otherwise promote a revision whose content was never
+        // validated (a concurrent replacement could slip through the CAS). That
+        // stale read is the retained `version_mismatch`, written before any
+        // provider call — the provider's own CAS stays the authority for a record
+        // that advances after this read.
+        let stored_revision = current["revision"].as_u64().unwrap_or(1);
+        if stored_revision != provider_revision {
+            return Err(CoreError::ActorConflict {
+                code: "version_mismatch".to_string(),
+                message: format!(
+                    "fragment revision mismatch: expected {expected_revision}, stored {}",
+                    stored_revision.saturating_sub(1)
+                ),
+            });
+        }
+        // The one retained projection: it proves every DTO-relevant value on the
+        // authorized record at the CAS revision, BEFORE the provider mutation,
+        // and it is also the response value. The promotion commits exactly the
+        // placement it requests (shared) and the CAS proves the record was at
+        // `stored_revision`, so the transaction leaves `stored_revision + 1` —
+        // the revision the DTO exposes as `stored_revision`.
+        let fragment = character_fragment_from_provider(
+            &current,
+            &character_id,
+            &session_id,
+            None,
+            provider_revision,
+        )?;
         memory
-            .promote_fragment(
-                &record_id,
-                u64::try_from(provider_revision).unwrap_or(u64::MAX),
-                source_binding.as_str(),
-            )
+            .promote_fragment(&record_id, stored_revision, source_binding.as_str())
             .await?;
         // Retained cache semantics: exactly the affected SOUL-narrative scopes
         // (shared + the old binding) are invalidated. The cache and the
@@ -3135,10 +3259,11 @@ impl CoreService {
                 .await?;
             memory.finish_soul_invalidation(&record_id).await?;
         }
-        let promoted = memory.record(&record_id).await?.ok_or_else(absent)?;
-        map_wire(json!({
-            "fragment": character_fragment_from_provider(&promoted, &character_id)?,
-        }))
+        // The committed response is the value proven above: no second
+        // serialization of the record and no post-commit read remain, so an
+        // intervening writer cannot turn this promotion into a projection
+        // failure.
+        map_wire(json!({ "fragment": fragment }))
     }
 
     /// Retained cache semantics on fragment promotion: exactly the affected
@@ -3352,27 +3477,151 @@ fn validate_capture_fields(
     Ok(())
 }
 
-/// One provider record rendered as the retained Character fragment DTO.
+/// Which provider records this adapter serves as a Nexus Character fragment,
+/// and which it can only report as damaged.
 ///
-/// The bridge stores the legacy display fields in `nexus_legacy` and serves a
-/// Character fragment's legacy revision as `legacy + 1` (so the 0→1 promotion
-/// step survives the seam); the DTO exposes the legacy numbering again. A
-/// provider-native record of another origin falls back to its own id/revision.
+/// N2's adoption maps a reviewed `FragmentOnly` product **to** a core `fact`
+/// record (`spoke-memory-adoption-plan.md` §4.6); it does not make every
+/// protocol `fact` a Nexus Character fragment. Both real producers write the
+/// fragment's session identity into the record's own `nexus_legacy` block — the
+/// review pipeline (`memory_pipeline::fragment_decision`) and the legacy bridge
+/// (`legacy.rs`, `FAMILY_CHARACTER_FRAGMENTS`) — and the retained DTO requires
+/// that identity (`session_id`, `minLength: 1`):
+///
+/// - a `fact` carrying it is a fragment this adapter serves;
+/// - a record that lost it while Nexus still holds positive origin evidence — the
+///   exact Character-fragment producer markers of its own `nexus_legacy` block, or
+///   the binding's authoritative D18 fact for that exact record — is damaged and
+///   is reported honestly instead of dropped;
+/// - anything else is unproven: served as a generic provider record, never as a
+///   fragment, and its absence of evidence says nothing about where it came from.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CharacterFragmentFamily<'a> {
+    /// A representable Character fragment: its retained session identity.
+    Fragment(&'a str),
+    /// Known Nexus fragment origin whose required identity is gone.
+    Damaged,
+    /// No proven Nexus origin: a generic provider record, not a fragment.
+    Unproven,
+}
+
+/// The one `nexus_legacy.family` value that names the Character fragment family
+/// (`memory_provider/legacy.rs`, `FAMILY_CHARACTER_FRAGMENTS`). Any other family
+/// names another Nexus family, so it is not Character-fragment origin.
+const CHARACTER_FRAGMENT_FAMILY: &str = "character_memory_fragments";
+
+/// Classify one provider record from its own retained metadata.
+///
+/// Only an actual Character-fragment producer marker counts as the record's own
+/// origin claim: the legacy bridge's exact `family` identity, or the review
+/// pipeline's `pending_id`. A bare `fragment_id`, an arbitrary `family` (e.g. the
+/// unrelated `memory_long_term` family) or any `kind`/provenance claim is not
+/// Character-fragment origin.
+fn character_fragment_family(record: &Value) -> CharacterFragmentFamily<'_> {
+    if record["kind"].as_str() != Some("fact") {
+        return CharacterFragmentFamily::Unproven;
+    }
+    let origin = nexus_legacy(record);
+    if let Some(session_id) = origin["session_id"]
+        .as_str()
+        .filter(|session_id| !session_id.is_empty())
+    {
+        return CharacterFragmentFamily::Fragment(session_id);
+    }
+    let names_origin = origin["family"].as_str() == Some(CHARACTER_FRAGMENT_FAMILY)
+        || origin["pending_id"]
+            .as_str()
+            .is_some_and(|pending_id| !pending_id.is_empty());
+    if names_origin {
+        CharacterFragmentFamily::Damaged
+    } else {
+        CharacterFragmentFamily::Unproven
+    }
+}
+
+impl MemoryAdapter {
+    /// Whether this binding's authoritative facts prove the record's Nexus
+    /// origin.
+    ///
+    /// `true` is positive origin evidence for this exact object; `false` proves
+    /// nothing about it and is never read as "provider-native". A local binding,
+    /// or a nonlocal one whose public identity was not pinned, records no such
+    /// facts and therefore has no fact-based evidence.
+    async fn known_fragment_origin(&self, binding_id: &str, record_id: &str) -> CoreResult<bool> {
+        let Some(namespace) = self.remote_namespace(binding_id) else {
+            return Ok(false);
+        };
+        nexus_local_db::actor_world_binding::remote_binding_object_is_known(
+            &self.pool,
+            &namespace,
+            nexus_local_db::RemoteBindingObjectKind::Record,
+            record_id,
+        )
+        .await
+        .map_err(map_local_db_error)
+    }
+
+    /// The retained family of one record, with every authoritative origin signal
+    /// this adapter already holds for `binding_id`.
+    ///
+    /// The record's own metadata is authoritative on its own; a record that lost
+    /// it is known to be damaged when that metadata names fragment origin or this
+    /// binding's D18 facts name this exact record. Otherwise it stays unproven.
+    async fn character_fragment_origin<'a>(
+        &self,
+        record: &'a Value,
+        binding_id: Option<&str>,
+    ) -> CoreResult<CharacterFragmentFamily<'a>> {
+        let family = character_fragment_family(record);
+        if family != CharacterFragmentFamily::Unproven {
+            return Ok(family);
+        }
+        let (Some(binding_id), Some(record_id)) = (binding_id, record["record_id"].as_str()) else {
+            return Ok(family);
+        };
+        if self.known_fragment_origin(binding_id, record_id).await? {
+            return Ok(CharacterFragmentFamily::Damaged);
+        }
+        Ok(family)
+    }
+}
+
+/// The one static refusal for a fragment-origin record whose required identity
+/// is missing: stored-state damage, never a caller-input verdict.
+fn damaged_character_fragment() -> CoreError {
+    internal_err(
+        "memory_fragment_metadata",
+        "a Character fragment record is missing its session identity",
+    )
+}
+
+/// One validated provider record rendered as the retained Character fragment
+/// DTO.
+///
+/// The caller passes the session identity [`character_fragment_family`] proved
+/// and the placement/revision the DTO must state, so this projection never
+/// invents a missing value: the retained schema requires a non-empty
+/// `session_id`, and a record without one is not representable as a fragment at
+/// all. The bridge stores the legacy display fields in `nexus_legacy` and its
+/// record revision is the legacy revision `+ 1` (the 0→1 promotion step the DTO
+/// exposes), which is why callers pass the DTO's own `revision`.
 fn character_fragment_from_provider(
     record: &Value,
     character_id: &str,
+    session_id: &str,
+    binding_id: Option<&str>,
+    revision: u64,
 ) -> CoreResult<CharacterMemoryFragmentInfo> {
     let origin = nexus_legacy(record);
     let fragment_id = origin["fragment_id"]
         .as_str()
         .or_else(|| record["record_id"].as_str())
         .unwrap_or_default();
-    let revision = record["revision"].as_u64().unwrap_or(1).saturating_sub(1);
     map_wire(json!({
         "fragment_id": fragment_id,
-        "session_id": origin["session_id"].as_str().unwrap_or_default(),
+        "session_id": session_id,
         "character_id": character_id,
-        "binding_id": record.pointer("/scope/context_id"),
+        "binding_id": binding_id,
         "summary": record.pointer("/content/text").and_then(Value::as_str).unwrap_or_default(),
         "keywords": record_keywords(record),
         "created_at": origin["created_at"]
@@ -3382,6 +3631,18 @@ fn character_fragment_from_provider(
         "ttl": origin["ttl"],
         "revision": revision,
     }))
+}
+
+/// The retained projection of one already-classified fragment record at the
+/// placement and 0-based revision it currently stores.
+fn stored_character_fragment(
+    record: &Value,
+    character_id: &str,
+    session_id: &str,
+) -> CoreResult<CharacterMemoryFragmentInfo> {
+    let binding_id = record.pointer("/scope/context_id").and_then(Value::as_str);
+    let revision = record["revision"].as_u64().unwrap_or(1).saturating_sub(1);
+    character_fragment_from_provider(record, character_id, session_id, binding_id, revision)
 }
 
 /// One provider record rendered as the retained Creator fragment DTO.
