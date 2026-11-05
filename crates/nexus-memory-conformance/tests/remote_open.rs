@@ -3362,3 +3362,150 @@ async fn sole_cancelled_close_releases_the_halves_and_keeps_a_truthful_result() 
         "the interrupted closer's halves must still be released"
     );
 }
+
+/// A public `send` future that was polled Pending and then RETAINED (never
+/// repolled, never dropped) must not block the close: the physical teardown has
+/// to settle and the same peer must observe the end while that future is still
+/// held. A running ticker proves the runtime is not starved.
+#[tokio::test]
+async fn retained_pending_send_does_not_block_the_close() {
+    let (addr, probe, peer) = non_reading_peer().await;
+    let (ws, _response) = tokio::time::timeout(
+        SETUP_BOUND,
+        tokio_tungstenite::connect_async(format!("ws://{addr}")),
+    )
+    .await
+    .expect("the dial is bounded")
+    .expect("dial the silent peer");
+    let transport: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+    let payload = vec![0x5a_u8; 8 * 1024 * 1024];
+    let mut retained_send = Box::pin(transport.send(&payload));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(250), &mut retained_send)
+            .await
+            .is_err(),
+        "the send must be parked on the non-reading peer before close"
+    );
+
+    let ticks = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let ticker = tokio::spawn({
+        let ticks = Arc::clone(&ticks);
+        async move {
+            loop {
+                ticks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }
+    });
+
+    // The runtime keeps making progress while the send stays unpolled.
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while ticks.load(std::sync::atomic::Ordering::SeqCst) < 3 {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .expect("the unpolled send must not starve the runtime");
+    let ticks_before_close = ticks.load(std::sync::atomic::Ordering::SeqCst);
+
+    // The retained send is never polled or dropped from here on.
+    let closer = tokio::spawn({
+        let transport = Arc::clone(&transport);
+        async move { transport.close().await }
+    });
+    let report = tokio::time::timeout(Duration::from_secs(10), closer)
+        .await
+        .expect("the close must settle while the send future is retained")
+        .expect("the close task must not panic");
+    assert!(
+        matches!(report, Err(TransportError::Io(_))),
+        "a non-reading peer leaves a real terminal close error, got {report:?}"
+    );
+    assert!(
+        ticks.load(std::sync::atomic::Ordering::SeqCst) >= 3,
+        "the runtime kept making progress while the send stayed unpolled"
+    );
+    let _ = ticks_before_close;
+
+    // The peer observes the physical end BEFORE the retained future is dropped.
+    probe.notify_one();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), peer)
+            .await
+            .expect("the peer must observe the end while the send is retained")
+            .expect("the peer task must not panic"),
+        "the retained send must not keep the socket open"
+    );
+    drop(retained_send);
+    ticker.abort();
+    let _ = ticker.await;
+}
+
+/// The same invariant for a public `recv` future polled Pending and retained.
+#[tokio::test]
+async fn retained_pending_recv_does_not_block_the_close() {
+    let (addr, probe, peer) = non_reading_peer().await;
+    let (ws, _response) = tokio::time::timeout(
+        SETUP_BOUND,
+        tokio_tungstenite::connect_async(format!("ws://{addr}")),
+    )
+    .await
+    .expect("the dial is bounded")
+    .expect("dial the silent peer");
+    let transport: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+    let mut retained_recv = Box::pin(transport.recv());
+    assert!(
+        tokio::time::timeout(Duration::from_millis(250), &mut retained_recv)
+            .await
+            .is_err(),
+        "the recv must be parked before close"
+    );
+
+    let ticks = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let ticker = tokio::spawn({
+        let ticks = Arc::clone(&ticks);
+        async move {
+            loop {
+                ticks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }
+    });
+
+    // The runtime keeps making progress while the recv stays unpolled.
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while ticks.load(std::sync::atomic::Ordering::SeqCst) < 3 {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .expect("the unpolled recv must not starve the runtime");
+    let ticks_before_close = ticks.load(std::sync::atomic::Ordering::SeqCst);
+
+    let closer = tokio::spawn({
+        let transport = Arc::clone(&transport);
+        async move { transport.close().await }
+    });
+    let report = tokio::time::timeout(Duration::from_secs(10), closer)
+        .await
+        .expect("the close must settle while the recv future is retained")
+        .expect("the close task must not panic");
+    assert!(report.is_ok(), "an idle close flushes cleanly, got {report:?}");
+    assert!(
+        ticks.load(std::sync::atomic::Ordering::SeqCst) >= 3,
+        "the runtime kept making progress while the recv stayed unpolled"
+    );
+    let _ = ticks_before_close;
+
+    probe.notify_one();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), peer)
+            .await
+            .expect("the peer must observe the end while the recv is retained")
+            .expect("the peer task must not panic"),
+        "the retained recv must not keep the socket open"
+    );
+    drop(retained_recv);
+    ticker.abort();
+    let _ = ticker.await;
+}
