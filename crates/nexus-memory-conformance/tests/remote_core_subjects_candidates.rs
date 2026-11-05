@@ -2992,6 +2992,13 @@ async fn external_capture(
 /// only reproduces the loss window at the service boundary.
 /// The verdict-shaped corruptions a committed review response can still carry:
 /// the SDK schema accepts them, but they contradict the decision Core issued.
+/// The forged space is schema-valid on purpose: the SDK `SpaceId` admits any
+/// nonempty string, so a peer can echo a private marker and a newline. It is
+/// never written to the provider - the decorator only rewrites the reply Core
+/// observes.
+const FORGED_SPACE_SENTINEL: &str = "spc_forged\nR2-PRIVATE-MARKER token=abc";
+const FORGED_SPACE_MARKER: &str = "R2-PRIVATE-MARKER";
+
 #[derive(Clone)]
 enum ReviewMangle {
     /// `outcome = fragmented` with no record ids at all.
@@ -3014,6 +3021,7 @@ struct ReviewLossProbe {
     mangle: std::sync::Mutex<Option<ReviewMangle>>,
     captured: std::sync::Mutex<Option<Value>>,
     committed_losses: AtomicUsize,
+    foreign_space_delivered: AtomicBool,
 }
 
 impl ReviewLossProbe {
@@ -3025,6 +3033,7 @@ impl ReviewLossProbe {
             mangle: std::sync::Mutex::new(None),
             captured: std::sync::Mutex::new(None),
             committed_losses: AtomicUsize::new(0),
+            foreign_space_delivered: AtomicBool::new(false),
         }
     }
 
@@ -3047,6 +3056,11 @@ impl ReviewLossProbe {
 
     fn committed_losses(&self) -> usize {
         self.committed_losses.load(Ordering::SeqCst)
+    }
+
+    /// True once the forged-space reply actually crossed the real service.
+    fn foreign_space_delivered(&self) -> bool {
+        self.foreign_space_delivered.load(Ordering::SeqCst)
     }
 }
 
@@ -3078,7 +3092,10 @@ impl RemoteMemoryService for ReviewLossProbe {
             Some(ReviewMangle::DropOutcome) => body["result"]["outcome"] = json!("dropped"),
             Some(ReviewMangle::EmptyIdString) => body["result"]["record_ids"] = json!([""]),
             Some(ReviewMangle::StaleReceipt(stale)) => *body = stale,
-            Some(ReviewMangle::ForeignSpace) => body["space_id"] = json!("spc_foreign"),
+            Some(ReviewMangle::ForeignSpace) => {
+                body["space_id"] = json!(FORGED_SPACE_SENTINEL);
+                self.foreign_space_delivered.store(true, Ordering::SeqCst);
+            }
             None => {}
         }
         result
@@ -3632,8 +3649,18 @@ async fn stale_review_receipt_keeps_binding_protection() {
     .await;
     probe.watch(&foreign_candidate);
     probe.mangle(Some(ReviewMangle::ForeignSpace));
-    review(spare.clone()).await.expect("drain batch");
+    let observed = review(spare.clone()).await.expect("drain batch");
     probe.mangle(None);
+    assert!(
+        probe.foreign_space_delivered(),
+        "the forged space must cross the real review path"
+    );
+    assert!(
+        !serde_json::to_string(&observed)
+            .expect("the drain response serializes")
+            .contains(FORGED_SPACE_MARKER),
+        "the observable review response must not echo the forged space"
+    );
     let nexus = core_db(&env).await;
     assert_eq!(
         admission_count(&nexus, &spare).await,
@@ -3641,7 +3668,18 @@ async fn stale_review_receipt_keeps_binding_protection() {
         "a foreign-space receipt keeps its attempt"
     );
     nexus.close().await;
-    assert_remote_memory_holds(&core, &principal, &character, &spare).await;
+    let refused = core
+        .remove_binding(&principal, character.clone(), spare.clone())
+        .await
+        .expect_err("an open remote dependency keeps the binding");
+    assert!(
+        matches!(&refused, CoreError::ActorConflict { code, .. } if code == "binding_has_remote_memory"),
+        "got {refused:?}"
+    );
+    assert!(
+        !format!("{refused} {refused:?}").contains(FORGED_SPACE_MARKER),
+        "the refusal must not echo the forged space: {refused}"
+    );
 
     // (4) Positive control: a matching receipt settles, and normal disposal
     // releases the binding.
