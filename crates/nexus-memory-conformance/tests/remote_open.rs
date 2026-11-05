@@ -44,12 +44,14 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use ed25519_dalek::SigningKey;
+use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{Row, SqlitePool};
 use tempfile::TempDir;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
+use tokio_tungstenite::tungstenite::protocol::Message;
 
 use nexus_contracts::generated::daemon_api::characters::memory::capture_character_pending_review_request::CaptureCharacterPendingReviewRequest;
 use nexus_contracts::generated::daemon_api::memory::create_pending_review_request::CreatePendingReviewRequest;
@@ -3065,4 +3067,187 @@ async fn overlapping_observations_poison_the_seam_without_provider_effect() {
         "the fresh sequential capture produced its candidate"
     );
     pool.close().await;
+}
+
+// ---------------------------------------------------------------------------
+// Shared product WS transport close ownership (I-000259)
+// ---------------------------------------------------------------------------
+
+/// A peer that completes the WS upgrade and then never reads a frame, so the
+/// transport's write path really parks on native backpressure (no sleep or
+/// is-finished proxy). After the test has closed the transport it reads the
+/// buffered frames to the end and reports whether the stream really ended.
+async fn non_reading_peer() -> (SocketAddr, Arc<Notify>, tokio::task::JoinHandle<bool>) {
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind the silent peer");
+    let addr = listener.local_addr().expect("silent peer address");
+    let probe = Arc::new(Notify::new());
+    let peer_probe = Arc::clone(&probe);
+    let peer = tokio::spawn(async move {
+        let (tcp, _) = tokio::time::timeout(SETUP_BOUND, listener.accept())
+            .await
+            .expect("the product transport dials the silent peer")
+            .expect("accept the product transport");
+        let mut ws = tokio::time::timeout(SETUP_BOUND, tokio_tungstenite::accept_async(tcp))
+            .await
+            .expect("the upgrade is bounded")
+            .expect("websocket upgrade");
+        // Stay non-reading until the transport has closed.
+        peer_probe.notified().await;
+        tokio::time::timeout(SETUP_BOUND, async move {
+            loop {
+                match ws.next().await {
+                    None | Some(Err(_)) | Some(Ok(Message::Close(_))) => return true,
+                    Some(Ok(_)) => continue,
+                }
+            }
+        })
+        .await
+        .unwrap_or(false)
+    });
+    (addr, probe, peer)
+}
+
+/// A peer that echoes every binary envelope back, used as an unrelated positive
+/// session while the stalled one is torn down.
+async fn echo_peer() -> (SocketAddr, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind the echo peer");
+    let addr = listener.local_addr().expect("echo peer address");
+    let peer_task = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.expect("accept the echo client");
+        let mut ws = tokio_tungstenite::accept_async(tcp)
+            .await
+            .expect("echo upgrade");
+        while let Some(message) = ws.next().await {
+            match message {
+                Ok(Message::Binary(bytes)) => {
+                    if ws.send(Message::Binary(bytes)).await.is_err() {
+                        break;
+                    }
+                }
+                Ok(Message::Close(_)) | Err(_) => break,
+                Ok(_) => {}
+            }
+        }
+    });
+    (addr, peer_task)
+}
+
+/// The shared product `WsTransport` must not report close as done while a send
+/// is parked on a non-reading peer: the close signal reaches the parked send,
+/// both concurrent closers settle with the same truthful outcome, the send
+/// terminates, and dropping the halves really ends the peer's stream. An
+/// unrelated session keeps its idle receive, send/recv roundtrip and close.
+#[tokio::test]
+async fn product_ws_close_settles_a_parked_send_and_releases_the_peer() {
+    let (addr, probe, peer) = non_reading_peer().await;
+    let (ws, _response) = tokio::time::timeout(
+        SETUP_BOUND,
+        tokio_tungstenite::connect_async(format!("ws://{addr}")),
+    )
+    .await
+    .expect("the dial is bounded")
+    .expect("dial the silent peer");
+    let transport: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+
+    // Far more than any loopback socket buffer, so the write is really parked.
+    let payload = vec![0x5a_u8; 8 * 1024 * 1024];
+    let mut sending = transport.send(&payload);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(250), &mut sending)
+            .await
+            .is_err(),
+        "the send must be parked on the non-reading peer before close"
+    );
+
+    // Close from separate tasks, like the SDK spawns its transport close, while
+    // the caller still awaits the parked send.
+    let closer = Arc::clone(&transport);
+    let first_close = tokio::spawn(async move { closer.close().await });
+    let closer = Arc::clone(&transport);
+    let second_close = tokio::spawn(async move { closer.close().await });
+
+    // The parked send terminates instead of pinning the sink half forever.
+    let settled = tokio::time::timeout(Duration::from_secs(5), sending)
+        .await
+        .expect("the parked send must settle after close");
+    assert_eq!(
+        settled,
+        Err(TransportError::Closed),
+        "a send cancelled by close reports Closed, never success"
+    );
+
+    // Both concurrent closers settle, and neither reports close-start as a
+    // completed clean close: the close frame cannot flush to a peer that
+    // stopped reading, so the terminal error is surfaced.
+    let first = tokio::time::timeout(SETUP_BOUND, first_close)
+        .await
+        .expect("the first close must settle")
+        .expect("the close task must not panic");
+    let second = tokio::time::timeout(SETUP_BOUND, second_close)
+        .await
+        .expect("the second close must settle")
+        .expect("the close task must not panic");
+    assert_eq!(
+        first, second,
+        "concurrent closers report the same settled outcome"
+    );
+    assert!(
+        matches!(first, Err(TransportError::Io(_))),
+        "an unflushed close frame is a surfaced terminal error, got {first:?}"
+    );
+    assert_eq!(
+        transport.close().await,
+        first,
+        "a repeated close keeps the settled outcome"
+    );
+
+    // The physical halves really went away: the peer drains and sees the stream
+    // end instead of the socket staying open.
+    probe.notify_one();
+    assert!(
+        tokio::time::timeout(SETUP_BOUND, peer)
+            .await
+            .expect("the peer observes the end of the stream")
+            .expect("the peer task must not panic"),
+        "dropping both halves must end the peer's stream"
+    );
+
+    // An unrelated session keeps an idle receive, a normal roundtrip and a
+    // normal close while/after the stalled one is torn down.
+    let (echo_addr, echo_peer) = echo_peer().await;
+    let (ws, _response) = tokio::time::timeout(
+        SETUP_BOUND,
+        tokio_tungstenite::connect_async(format!("ws://{echo_addr}")),
+    )
+    .await
+    .expect("the echo dial is bounded")
+    .expect("dial the echo peer");
+    let echo: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+    let mut idle = echo.recv();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), &mut idle)
+            .await
+            .is_err(),
+        "an idle receive parks instead of failing"
+    );
+    echo.send(b"unrelated-session")
+        .await
+        .expect("the unrelated session still sends");
+    assert_eq!(
+        tokio::time::timeout(SETUP_BOUND, idle)
+            .await
+            .expect("the parked receive settles")
+            .expect("the echo arrives"),
+        b"unrelated-session"
+    );
+    echo.close().await.expect("a normal close succeeds");
+    echo.close().await.expect("a repeated normal close succeeds");
+    tokio::time::timeout(SETUP_BOUND, echo_peer)
+        .await
+        .expect("the echo peer ends")
+        .expect("the echo peer task must not panic");
 }
