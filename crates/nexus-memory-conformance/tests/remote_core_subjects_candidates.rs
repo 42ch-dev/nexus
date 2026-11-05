@@ -2921,6 +2921,332 @@ async fn host_mind_projection_reads_the_remote_subject() {
 }
 
 // ---------------------------------------------------------------------------
+// Review entry: an externally captured candidate must not lose protection
+// ---------------------------------------------------------------------------
+
+/// One genuinely external signed capture of a binding-local, legacy-shaped
+/// pending candidate over the real provider protocol (never through Core's own
+/// capture arm). Returns the committed candidate id.
+async fn external_capture(
+    adapter: &RemoteAdapter,
+    principal: &MemoryPrincipal,
+    space_id: &str,
+    subject_id: &str,
+    binding_id: &str,
+    pending_id: &str,
+) -> String {
+    let result = adapter
+        .capture(
+            principal,
+            dto::<spoke_operations::spoke_schemas::MemoryCaptureRequest>(json!({
+                "space_id": space_id,
+                "subject_id": subject_id,
+                "content": {
+                    "text": PROMOTE_DIGEST,
+                    "structured": {
+                        "nexus_legacy": {
+                            "pending_id": pending_id,
+                            "session_id": format!("sess_{pending_id}"),
+                            "task_kind": "brainstorm",
+                            "raw_digest": PROMOTE_DIGEST,
+                            "actor_world_binding_id": binding_id,
+                            "created_at": "2026-03-01T00:00:01Z",
+                        },
+                    },
+                },
+                "capture_scope": { "visibility": "context", "context_id": binding_id },
+                "source_context_ids": [binding_id],
+                "kind_hint": "story_summary",
+                "idempotency_key": format!("external-capture:{pending_id}"),
+            })),
+        )
+        .await;
+    let receipt = match result {
+        SpokeResult::Ok(receipt) => receipt,
+        SpokeResult::Reject(reject) => panic!("the external capture is served: {reject:?}"),
+    };
+    let body = serde_json::to_value(&receipt).expect("capture receipt");
+    body.pointer("/result/candidate_ids/0")
+        .and_then(Value::as_str)
+        .expect("the committed capture names its candidate")
+        .to_string()
+}
+
+/// Test-only decorator over the REAL fixture service.
+///
+/// It forwards every request unchanged and, for `memory.candidates.review` on
+/// one watched candidate, first delegates the real call — so the provider really
+/// consumes the candidate and creates its records — and then reports
+/// `OUTCOME_UNCERTAIN`, which is what the caller observes when the reply is lost
+/// after the provider committed (§14.3). It never fabricates provider state; it
+/// only reproduces the loss window at the service boundary.
+struct ReviewLossProbe {
+    inner: Arc<dyn RemoteMemoryService>,
+    candidate: std::sync::Mutex<Option<String>>,
+    lose: AtomicBool,
+    committed_losses: AtomicUsize,
+}
+
+impl ReviewLossProbe {
+    fn over(inner: Arc<dyn RemoteMemoryService>) -> Self {
+        Self {
+            inner,
+            candidate: std::sync::Mutex::new(None),
+            lose: AtomicBool::new(false),
+            committed_losses: AtomicUsize::new(0),
+        }
+    }
+
+    fn watch(&self, candidate_id: &str) {
+        *self.candidate.lock().expect("watched candidate") = Some(candidate_id.to_string());
+    }
+
+    fn lose_replies(&self, lose: bool) {
+        self.lose.store(lose, Ordering::SeqCst);
+    }
+
+    fn committed_losses(&self) -> usize {
+        self.committed_losses.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait]
+impl RemoteMemoryService for ReviewLossProbe {
+    async fn invoke(&self, peer_id: &str, op: &str, payload: Value) -> SpokeResult<Value> {
+        let result = self.inner.invoke(peer_id, op, payload.clone()).await;
+        let watched = self.candidate.lock().expect("watched candidate").clone();
+        let requested = payload.get("candidate_id").and_then(Value::as_str);
+        if op == "memory.candidates.review"
+            && watched.as_deref() == requested
+            && self.lose.load(Ordering::SeqCst)
+            && matches!(result, SpokeResult::Ok(_))
+        {
+            self.committed_losses.fetch_add(1, Ordering::SeqCst);
+            let mut details = Map::new();
+            details.insert("retry_class".to_owned(), json!("uncertain"));
+            return SpokeResult::Reject(SpokeReject {
+                code: SpokeRejectCode::OutcomeUncertain,
+                message: "the review reply was lost after the provider committed".to_owned(),
+                details: Some(details),
+            });
+        }
+        result
+    }
+}
+
+/// A genuinely independent signed capture writes a binding-local, legacy-shaped
+/// pending candidate; Core's own capture arm is never involved, so Nexus holds
+/// no admission and no candidate fact for it. The REAL public review drain then
+/// consumes it. A reply lost after the provider committed must not leave the
+/// binding removable, and an older unknown attempt must survive a later
+/// successful one. The normal control shows that a settled review with complete
+/// disposal still releases the binding.
+#[tokio::test]
+async fn external_capture_review_settlement_keeps_binding_protection() {
+    let env = Env::boot("R2 Review Admission Owner").await;
+    let provider = Provider::open().await;
+    let probe = Arc::new(ReviewLossProbe::over(
+        provider.inner.server(provider.directory.admission()),
+    ));
+    let (core, responder) = provider.open_core_serving(&env, probe.clone()).await;
+    let principal = core.active_principal().await.expect("principal");
+
+    let world = create_world(&core, &principal, "R2 Review Admission World").await;
+    let (character, protective, _) =
+        create_character(&core, &principal, "R2 Review Ada", &world).await;
+    let keeper_world = create_world(&core, &principal, "R2 Review Keeper World").await;
+    let keeper = add_binding(&core, &principal, &character, &keeper_world).await;
+    // A third active binding keeps the retained-last-binding rule out of the
+    // way once the keeper is removed, so the final refusal is the remote-memory
+    // gate itself.
+    let spare_world = create_world(&core, &principal, "R2 Review Spare World").await;
+    let _spare = add_binding(&core, &principal, &character, &spare_world).await;
+    let subject = legacy::character_subject_id(&character);
+
+    // The external signed writer: the same authenticated peer, but capturing
+    // directly over the protocol instead of through Core's capture arm.
+    let (external, external_responder) = provider.sdk_session().await;
+    let memory_principal = provider.memory_principal();
+
+    // Core's writable adapter ensures the Character's provider subject; the
+    // external writer then only supplies the candidate, never the subject.
+    assert_eq!(
+        core.count_character_pending_reviews(
+            &principal,
+            character.clone(),
+            Some(protective.clone()),
+        )
+        .await
+        .expect("the Character's provider subject is provisioned")
+        .count,
+        0
+    );
+
+    // (1) The external candidate carries NO Nexus-side admission or fact.
+    let candidate = external_capture(
+        &external,
+        &memory_principal,
+        &provider.space_id,
+        &subject,
+        &protective,
+        "pend_external",
+    )
+    .await;
+    let nexus = core_db(&env).await;
+    assert_eq!(
+        admission_count(&nexus, &protective).await,
+        0,
+        "an external capture takes no Core admission"
+    );
+    assert!(
+        object_facts(&nexus, &protective).await.is_empty(),
+        "an external capture publishes no Core fact"
+    );
+    nexus.close().await;
+
+    // (2) Core's real public drain consumes it, and the reply is lost AFTER the
+    // provider committed: the caller sees the uncertain refusal.
+    probe.watch(&candidate);
+    probe.lose_replies(true);
+    // The drain reports its bounded batch (a per-row settlement failure is a
+    // warned row, not a batch error), so the protection state below is what
+    // decides whether this attempt was safely accounted for.
+    let response = core
+        .review_character_memory(
+            &principal,
+            character.clone(),
+            dto::<ReviewCharacterMemoryRequest>(json!({ "binding_id": protective })),
+        )
+        .await
+        .expect("the drain reports its bounded batch");
+    assert_eq!(response.processed, Some(1), "the drain consumed the candidate");
+    assert_eq!(probe.committed_losses(), 1, "the loss followed a real commit");
+
+    // The provider really holds the consumed candidate and the binding record.
+    let pool = provider.pool().await;
+    assert_eq!(
+        sqlx::query("SELECT status FROM candidates WHERE candidate_id = ?")
+            .bind(&candidate)
+            .fetch_one(&pool)
+            .await
+            .expect("candidate row")
+            .get::<String, _>("status"),
+        "consumed",
+        "the provider committed the review"
+    );
+    assert_eq!(
+        sqlx::query(
+            "SELECT COUNT(*) FROM records WHERE subject_id = ? AND scope_context_id = ?",
+        )
+        .bind(&subject)
+        .bind(&protective)
+        .fetch_one(&pool)
+        .await
+        .expect("record count")
+        .get::<i64, _>(0),
+        1,
+        "the provider holds a binding-scoped record"
+    );
+    pool.close().await;
+
+    // (3) The uncertain attempt keeps the binding unremovable.
+    assert_remote_memory_holds(&core, &principal, &character, &protective).await;
+    let nexus = core_db(&env).await;
+    assert_eq!(
+        admission_count(&nexus, &protective).await,
+        1,
+        "the review attempt was durably admitted before the RPC and stayed"
+    );
+    nexus.close().await;
+
+    // (4) An older unknown attempt survives a later successful review: the new
+    // attempt settles and retires only itself.
+    probe.lose_replies(false);
+    let second = external_capture(
+        &external,
+        &memory_principal,
+        &provider.space_id,
+        &subject,
+        &protective,
+        "pend_external_two",
+    )
+    .await;
+    probe.watch(&second);
+    core.review_character_memory(
+        &principal,
+        character.clone(),
+        dto::<ReviewCharacterMemoryRequest>(json!({ "binding_id": protective })),
+    )
+    .await
+    .expect("the later review settles");
+    let nexus = core_db(&env).await;
+    assert_eq!(
+        admission_count(&nexus, &protective).await,
+        1,
+        "the settled attempt retired only its own admission"
+    );
+    nexus.close().await;
+    assert_remote_memory_holds(&core, &principal, &character, &protective).await;
+
+    // (5) Normal control: an external candidate reviewed with a served reply
+    // settles, and disposal of its record releases the binding.
+    let control_candidate = external_capture(
+        &external,
+        &memory_principal,
+        &provider.space_id,
+        &subject,
+        &keeper,
+        "pend_external_control",
+    )
+    .await;
+    probe.watch(&control_candidate);
+    core.review_character_memory(
+        &principal,
+        character.clone(),
+        dto::<ReviewCharacterMemoryRequest>(json!({ "binding_id": keeper })),
+    )
+    .await
+    .expect("the control review settles");
+    let nexus = core_db(&env).await;
+    assert_eq!(
+        admission_count(&nexus, &keeper).await,
+        0,
+        "a settled review retires its own attempt"
+    );
+    nexus.close().await;
+    let fragment = core
+        .list_character_memory_fragments(&principal, character.clone(), Some(keeper.clone()), 50, 0)
+        .await
+        .expect("control fragments")
+        .fragments
+        .first()
+        .cloned()
+        .expect("the control record");
+    core.promote_character_fragment(
+        &principal,
+        character.clone(),
+        fragment.fragment_id.as_str().to_string(),
+        i64::try_from(fragment.revision).expect("fragment revision"),
+    )
+    .await
+    .expect("promote the control record out of the binding");
+    core.remove_binding(&principal, character.clone(), keeper.clone())
+        .await
+        .expect("a settled, fully disposed binding still removes");
+
+    // The protective binding keeps its older unknown attempt.
+    assert_remote_memory_holds(&core, &principal, &character, &protective).await;
+
+    external.close();
+    responder_of(external_responder).await;
+    assert!(
+        core.close().await.expect("close").cleanup_confirmed,
+        "the open releases its own admission"
+    );
+    responder_of(responder).await;
+}
+
+// ---------------------------------------------------------------------------
 // Static, content-free error contracts
 // ---------------------------------------------------------------------------
 
