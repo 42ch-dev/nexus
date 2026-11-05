@@ -25,6 +25,8 @@ const BODY: &str = "C111MARKER the pinned provider served this row to the real C
 const CREDENTIAL_ID: &str = "cred-c111-remote";
 /// Bound on one spawned CLI child, covering startup, dial and output drain.
 const CLI_BOUND: Duration = Duration::from_secs(180);
+/// Bound on observing a killed/errored child's exit status (never a bare wait).
+const SETTLE_BOUND: Duration = Duration::from_secs(5);
 /// The fixture host's Connect identity (the provider side of the session).
 #[cfg(feature = "memory-remote")]
 const HOST_SEED: [u8; 32] = [0x42; 32];
@@ -55,6 +57,10 @@ fn stderr(output: &Output) -> String {
 /// and reaped before the failure is returned; a normal exit is already reaped
 /// by `try_wait`.
 fn run_cli(home: &Path, args: &[&str]) -> Result<Output, String> {
+    run_cli_with(home, args, CLI_BOUND)
+}
+
+fn run_cli_with(home: &Path, args: &[&str], bound: Duration) -> Result<Output, String> {
     let mut out_file = tempfile::tempfile().map_err(|error| format!("stdout temp: {error}"))?;
     let mut err_file = tempfile::tempfile().map_err(|error| format!("stderr temp: {error}"))?;
     let child_out = out_file
@@ -74,22 +80,22 @@ fn run_cli(home: &Path, args: &[&str]) -> Result<Output, String> {
         .spawn()
         .map_err(|error| format!("spawn nexus42 {args:?}: {error}"))?;
 
-    let deadline = Instant::now() + CLI_BOUND;
+    let deadline = Instant::now() + bound;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) => {}
             Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!("wait nexus42 {args:?}: {error} (child killed and reaped)"));
+                return Err(settle_failed_child(
+                    &mut child,
+                    format!("wait nexus42 {args:?}: {error}"),
+                ));
             }
         }
         if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(format!(
-                "nexus42 {args:?} exceeded {CLI_BOUND:?}; child killed and reaped"
+            return Err(settle_failed_child(
+                &mut child,
+                format!("nexus42 {args:?} exceeded {bound:?}"),
             ));
         }
         std::thread::sleep(Duration::from_millis(25));
@@ -114,6 +120,53 @@ fn run_cli(home: &Path, args: &[&str]) -> Result<Output, String> {
         stdout,
         stderr,
     })
+}
+
+/// Settle an owned child after a wait/timeout failure without an unbounded
+/// `wait()`. `kill` and every later `try_wait` are checked; the message never
+/// claims "reaped" unless an exit status was actually observed, and an OS
+/// failure is preserved verbatim.
+fn settle_failed_child(child: &mut std::process::Child, context: String) -> String {
+    let kill_error = child.kill().err().map(|error| error.to_string());
+    let deadline = Instant::now() + SETTLE_BOUND;
+    let mut exit_seen = false;
+    let mut wait_error = None;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                exit_seen = true;
+                break;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                wait_error = Some(error.to_string());
+                break;
+            }
+        }
+        if Instant::now() >= deadline {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let outcome = match (&kill_error, &wait_error, exit_seen) {
+        (None, None, true) => "child killed and reaped".to_string(),
+        (Some(kill), None, true) => format!(
+            "kill failed ({kill}); the child had already exited and its status was reaped"
+        ),
+        (Some(kill), None, false) => format!(
+            "kill failed ({kill}); no exit observed within {SETTLE_BOUND:?}; child NOT confirmed reaped"
+        ),
+        (None, None, false) => format!(
+            "kill issued, but no exit observed within {SETTLE_BOUND:?}; child NOT confirmed reaped"
+        ),
+        (None, Some(wait), _) => {
+            format!("wait failed ({wait}); child reaped state unknown")
+        }
+        (Some(kill), Some(wait), _) => format!(
+            "kill failed ({kill}) and wait failed ({wait}); child NOT confirmed reaped"
+        ),
+    };
+    format!("{context}; {outcome}")
 }
 
 fn cli_ok(home: &Path, args: &[&str]) -> Output {
@@ -428,11 +481,12 @@ mod remote {
         client_peer: String,
         client_pubkey: [u8; 32],
         rounds: usize,
+        accept_bound: Duration,
         responders: Arc<std::sync::Mutex<Vec<Arc<ConnectResponder>>>>,
     ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             for _ in 0..rounds {
-                let accepted = tokio::time::timeout(BOUND, listener.accept()).await;
+                let accepted = tokio::time::timeout(accept_bound, listener.accept()).await;
                 let Ok(Ok((tcp, peer))) = accepted else {
                     return;
                 };
@@ -501,13 +555,28 @@ mod remote {
         accept: &mut Option<tokio::task::JoinHandle<()>>,
         responders: &Arc<std::sync::Mutex<Vec<Arc<ConnectResponder>>>>,
     ) -> Result<(), String> {
+        let mut failures: Vec<String> = Vec::new();
         if let Some(task) = accept.take() {
             task.abort();
-            let _ = tokio::time::timeout(BOUND, task).await;
+            match tokio::time::timeout(BOUND, task).await {
+                Ok(Ok(())) => {}
+                // Expected after our own abort: a cancelled join is not a
+                // cleanup failure.
+                Ok(Err(error)) if error.is_cancelled() => {}
+                Ok(Err(error)) => failures.push(format!("accept join: {error}")),
+                Err(_) => failures.push("accept task did not settle after abort".to_string()),
+            }
         }
         let list: Vec<Arc<ConnectResponder>> =
             responders.lock().expect("responder list").clone();
-        close_responders(&list).await
+        if let Err(error) = close_responders(&list).await {
+            failures.push(error);
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(failures.join("; "))
+        }
     }
 
     /// Write the operator-provisioned credential for `seed` at mode 0600.
@@ -700,6 +769,7 @@ mod remote {
             client_peer.clone(),
             pubkey(&CLIENT_SEED),
             4,
+            BOUND,
             Arc::clone(&responders),
         ));
 
@@ -756,10 +826,19 @@ mod remote {
                 "the shown identity stayed the fixture's (seeded {seeded_id})"
             );
 
-            let task = accept_task.take().expect("accept task present");
-            match tokio::time::timeout(BOUND, task).await {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => return Err(format!("accept task failed: {error}")),
+            // Poll the owned handle BY REFERENCE: a timeout must leave the
+            // handle owned here so teardown can abort and join the SAME task.
+            let Some(task) = accept_task.as_mut() else {
+                return Err("accept task missing".to_string());
+            };
+            match tokio::time::timeout(BOUND, &mut *task).await {
+                Ok(Ok(())) => {
+                    accept_task.take();
+                }
+                Ok(Err(error)) => {
+                    accept_task.take();
+                    return Err(format!("accept task failed: {error}"));
+                }
                 Err(_) => return Err("accept task did not finish in bound".to_string()),
             }
             ensure!(
@@ -779,6 +858,125 @@ mod remote {
                 panic!("remote CLI scenario: {error}; cleanup: {cleanup}")
             }
         }
+    }
+
+    /// Deterministic small regression for the two failure-only cleanup branches.
+    ///
+    /// (a) a real owned accept task is still listening when the wait expires;
+    /// teardown must abort and bounded-join that SAME task and release the
+    /// listener. (b) the real CLI child dials a local endpoint that accepts TCP
+    /// but never completes the handshake, and a short TEST deadline expires; the
+    /// runner must kill and reap the child and report it truthfully.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn c_111_cleanup_timeout_paths_are_bounded() {
+        // (a) accept-timeout ownership and cancellation.
+        let fixture_home = TempDir::new().expect("fixture home");
+        let provider = Arc::new(
+            FixtureMemoryProvider::open(&fixture_home.path().join("memory.sqlite"))
+                .await
+                .expect("open the cleanup fixture"),
+        );
+        let directory = Arc::new(PeerDirectory::new());
+        let (listener, addr) = bind().await;
+        let responders = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut accept_task = Some(serve(
+            listener,
+            provider.server(directory.admission()),
+            manifest("cleanup-host"),
+            "12D3KooWCleanup".to_string(),
+            [0u8; 32],
+            1,
+            BOUND,
+            Arc::clone(&responders),
+        ));
+
+        let accept_wait = async {
+            let Some(task) = accept_task.as_mut() else {
+                return Err("accept task missing".to_string());
+            };
+            match tokio::time::timeout(Duration::from_millis(20), &mut *task).await {
+                Ok(Ok(())) => {
+                    accept_task.take();
+                    Ok(())
+                }
+                Ok(Err(error)) => {
+                    accept_task.take();
+                    Err(format!("accept task failed: {error}"))
+                }
+                Err(_) => Err("accept wait timed out (expected here)".to_string()),
+            }
+        }
+        .await;
+        assert!(accept_wait.is_err(), "the accept wait must expire");
+        assert!(accept_task.is_some(), "the owned handle survives the timeout");
+        let cleanup = teardown(&mut accept_task, &responders).await;
+        assert!(
+            cleanup.is_ok(),
+            "abort plus join is a clean cancellation: {cleanup:?}"
+        );
+        assert!(accept_task.is_none(), "teardown consumed the owned handle");
+        let rebind = tokio::time::timeout(Duration::from_secs(2), TcpListener::bind(addr)).await;
+        assert!(
+            matches!(rebind, Ok(Ok(_))),
+            "the aborted task released the listener: {rebind:?}"
+        );
+
+        // (b) real-child timeout at a short deterministic test deadline.
+        let actor = DirectActor::new().await;
+        let home = actor.home().to_path_buf();
+        write_credential(&home, &CLIENT_SEED);
+        let holder = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("holder listener");
+        let hold_addr = holder.local_addr().expect("holder addr");
+        let holder_task = tokio::spawn(async move {
+            if let Ok((socket, _)) = holder.accept().await {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                drop(socket);
+            }
+        });
+        cli_ok_remote(
+            &home,
+            &[
+                "creator",
+                "memory",
+                "provider",
+                "use",
+                "remote",
+                "--space-id",
+                "spc_cleanup",
+                "--credential-id",
+                CREDENTIAL_ID,
+                "--connect-endpoint",
+                &format!("ws://{hold_addr}/memory"),
+                "--remote-pubkey-hex",
+                &hex(&pubkey(&HOST_SEED)),
+                "--allowlist",
+                &peer_id(&HOST_SEED),
+            ],
+        )
+        .await
+        .expect("the cleanup selection is written");
+
+        let short_deadline = Duration::from_secs(3);
+        let run_home = home.clone();
+        let started = Instant::now();
+        let timed_out = tokio::task::spawn_blocking(move || {
+            run_cli_with(&run_home, &["creator", "memory", "list"], short_deadline)
+        })
+        .await
+        .expect("the child-timeout task joins");
+        let error = timed_out.expect_err("the real CLI child outlives the short deadline");
+        assert!(
+            error.contains("killed and reaped"),
+            "the timeout path kills and reaps the real child: {error}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(20),
+            "the timeout path settled promptly: {:?}",
+            started.elapsed()
+        );
+        holder_task.abort();
     }
 }
 
