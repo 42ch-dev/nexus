@@ -10,8 +10,15 @@ mod chronology;
 // `connect-host` is the Connect-host product cohort (WS accept loop +
 // peer-tools event lane, no rmcp); `connect-client` is the superset
 // (connect-host + the rmcp reverse-invoke bridge). Either exposes the module.
+// `memory-remote` additionally compiles it for the one WS transport the remote
+// memory client dials through (n3-provider-binding.md §6); the accept/session/
+// peer-control submodules stay behind the two Connect cohorts.
 mod config_lock;
-#[cfg(any(feature = "connect-client", feature = "connect-host"))]
+#[cfg(any(
+    feature = "connect-client",
+    feature = "connect-host",
+    feature = "memory-remote"
+))]
 pub mod connect;
 mod content;
 mod context;
@@ -30,6 +37,9 @@ mod memory;
 mod memory_binding;
 mod memory_credentials;
 mod memory_pipeline;
+// v1.229 N3 Task 1: the signed Connect open of a selected remote provider.
+#[cfg(feature = "memory-remote")]
+mod memory_remote;
 // v1.229 NXM-9: the validated `[memory_provider]` selection an open resolves.
 mod memory_selection;
 // v1.227 NXM-1: the in-process `spoke_operations::MemoryPort` provider.

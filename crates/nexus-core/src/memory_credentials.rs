@@ -16,8 +16,10 @@ use crate::memory_selection::is_valid_credential_id;
 
 /// Maximum accepted credential-file size (§3.1).
 pub const MAX_CREDENTIAL_FILE_BYTES: u64 = 16 * 1024;
-/// Coded refusal category for every credential-file failure (§3.1).
-const CREDENTIAL_INVALID_CODE: &str = "memory_credential_invalid";
+/// Coded refusal category for every credential-file failure (§3.1). Shared with
+/// the remote dial, which refuses a proof that does not decode through the
+/// published type under the same category.
+pub(crate) const CREDENTIAL_INVALID_CODE: &str = "memory_credential_invalid";
 
 /// File shape, verbatim from §3.1. Unknown keys are refused so an ambiguous
 /// document is never half-interpreted.

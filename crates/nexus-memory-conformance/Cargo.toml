@@ -29,3 +29,11 @@ tokio-tungstenite = { workspace = true }
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 serde_jcs = "0.2"
 tempfile = { workspace = true }
+# v1.229 N3 Task 1 (R1): the real public Core open/close surface the remote
+# vertical slice drives over a signed loopback session. The conformance crate
+# depends on Core, never the reverse; `memory-remote` is the feature under test.
+nexus-core = { path = "../nexus-core", features = ["memory-remote"] }
+# The disposable user home the open resolves (workspace dir, state DB and the
+# provider's own file root) through the production layout instead of a
+# hardcoded copy of it.
+nexus-home-layout = { path = "../nexus-home-layout" }

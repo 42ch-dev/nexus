@@ -256,10 +256,10 @@ impl CoreService {
     ///
     /// [`CoreError::InvalidInput`] for a malformed selection,
     /// [`CoreError::Internal`] for an unreadable provider table, the mapped
-    /// local-provider open error, and the static `memory_remote_disabled`
-    /// refusal for a remote selection — the `memory-remote` cohort does not
-    /// exist in this plan, so that refusal is the real current behavior, never
-    /// a silent local fallback or a fake connection.
+    /// local-provider open error, and — for a remote selection — the real
+    /// signed Connect open under `memory-remote`, or the static
+    /// `memory_remote_disabled` refusal when that feature is off. Neither
+    /// branch ever falls back to the local provider.
     async fn pin_memory_provider(
         options: &CoreOpenOptions,
         nexus_home: &Path,
@@ -292,10 +292,33 @@ impl CoreService {
                 };
                 Ok(Arc::new(MemoryProviderBinding::pin_local(Arc::new(provider))))
             }
-            MemoryProviderSelection::Remote(_) => Err(CoreError::Coded {
-                code: "memory_remote_disabled".to_string(),
-                message: "remote memory provider support is not enabled in this build".to_string(),
-            }),
+            MemoryProviderSelection::Remote(selection) => {
+                // Feature off: the static `memory_remote_disabled` refusal IS
+                // the behavior — no credential read, no socket, no fallback.
+                // Feature on: the real signed Connect open (§4.1), which fails
+                // the whole open on any credential/handshake/capability/space/
+                // authority refusal and never substitutes the local provider.
+                #[cfg(feature = "memory-remote")]
+                {
+                    Ok(Arc::new(
+                        crate::memory_remote::open_remote_binding(
+                            &options.user_home,
+                            &selection,
+                            options.access,
+                        )
+                        .await?,
+                    ))
+                }
+                #[cfg(not(feature = "memory-remote"))]
+                {
+                    drop(selection);
+                    Err(CoreError::Coded {
+                        code: "memory_remote_disabled".to_string(),
+                        message: "remote memory provider support is not enabled in this build"
+                            .to_string(),
+                    })
+                }
+            }
         }
     }
 

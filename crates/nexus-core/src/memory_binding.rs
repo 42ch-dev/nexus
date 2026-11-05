@@ -22,6 +22,11 @@ const LOCAL_AUTHORITY_GENERATION: NonZeroU64 = NonZeroU64::MIN;
 pub(crate) struct MemoryProviderBinding {
     port: Arc<dyn MemoryPort + Send + Sync>,
     local: Option<Arc<LocalMemoryProvider>>,
+    /// The established Connect session a remote binding serves through
+    /// (§4.1). Only a successful negotiated, authority-pinned open constructs
+    /// one, so `Some` here always means `port` is that adapter.
+    #[cfg(feature = "memory-remote")]
+    remote: Option<Arc<spoke_connect::remote::RemoteAdapter>>,
     /// The loaded public client identity the remote dial authenticated with
     /// (§5.1/D18): the Ed25519 public peer id, never a credential id,
     /// profile/path, seed hash or payload principal. `None` for local; R1
@@ -45,6 +50,36 @@ impl MemoryProviderBinding {
             authority_generation: LOCAL_AUTHORITY_GENERATION,
             port: Arc::clone(&provider) as Arc<dyn MemoryPort + Send + Sync>,
             local: Some(provider),
+            #[cfg(feature = "memory-remote")]
+            remote: None,
+        }
+    }
+
+    /// Pin one established remote session (`n3-provider-binding.md` §4.1).
+    ///
+    /// The caller ([`crate::memory_remote`]) only reaches this after the signed
+    /// hello, the negotiated `spoke-memory` family, `describe` v1, the exact
+    /// configured space and the authority host all held, so the pinned pair and
+    /// the client identity are the provider's own advertised values rather
+    /// than defaults.
+    #[cfg(feature = "memory-remote")]
+    pub(crate) fn pin_remote(
+        adapter: Arc<spoke_connect::remote::RemoteAdapter>,
+        space_id: String,
+        authority_host_id: String,
+        authority_generation: NonZeroU64,
+        client_identity: String,
+        writable: bool,
+    ) -> Self {
+        Self {
+            writable,
+            client_identity: Some(client_identity),
+            space_id,
+            authority_host_id,
+            authority_generation,
+            port: Arc::clone(&adapter) as Arc<dyn MemoryPort + Send + Sync>,
+            local: None,
+            remote: Some(adapter),
         }
     }
 
@@ -60,14 +95,19 @@ impl MemoryProviderBinding {
         &self.space_id
     }
 
-    /// Close the provider-local handle this binding pins (§4.1 `close`).
+    /// Close the provider handle this binding pins (§4.1 `close`).
     ///
     /// A local binding closes the one provider it owns, so the writer
-    /// admission that provider opened ends with this open. Idempotent; a
-    /// binding that serves no local provider has nothing to close.
+    /// admission that provider opened ends with this open. A remote binding
+    /// closes its established session through the adapter's own idempotent
+    /// `close`; it never chooses another provider. Idempotent either way.
     pub(crate) async fn close(&self) {
         if let Some(local) = &self.local {
             local.close().await;
+        }
+        #[cfg(feature = "memory-remote")]
+        if let Some(remote) = &self.remote {
+            remote.close();
         }
     }
 
