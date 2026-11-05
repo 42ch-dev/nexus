@@ -74,7 +74,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -467,8 +468,22 @@ impl Provider {
 
     /// Serve one signed session over a fresh loopback listener.
     async fn serve(&self) -> (SocketAddr, tokio::task::JoinHandle<Arc<ConnectResponder>>) {
+        self.serve_service(self.inner.server(self.directory.admission()))
+            .await
+    }
+
+    /// Serve one signed session for an explicitly supplied memory service.
+    ///
+    /// The suite's only use is a test-only decorator over this provider's real
+    /// assembled service: it forwards every request unchanged and performs the
+    /// second writer's real `memory.records.update` at one chosen causal
+    /// boundary.
+    async fn serve_service(
+        &self,
+        service: Arc<dyn RemoteMemoryService>,
+    ) -> (SocketAddr, tokio::task::JoinHandle<Arc<ConnectResponder>>) {
         start_listener(
-            self.inner.server(self.directory.admission()),
+            service,
             manifest(self.inner.identity().authority_host_id.as_str()),
             peer_id(&CLIENT_SEED),
             pubkey(&CLIENT_SEED),
@@ -503,7 +518,28 @@ impl Provider {
         env: &Env,
         access: CoreAccess,
     ) -> (CoreService, tokio::task::JoinHandle<Arc<ConnectResponder>>) {
-        let (addr, task) = self.serve().await;
+        self.open_core_service(env, self.inner.server(self.directory.admission()), access)
+            .await
+    }
+
+    /// [`Self::open_core`] over an explicitly supplied memory service (the
+    /// test-only second-writer decorator over this provider's real service).
+    async fn open_core_over(
+        &self,
+        env: &Env,
+        service: Arc<dyn RemoteMemoryService>,
+    ) -> (CoreService, tokio::task::JoinHandle<Arc<ConnectResponder>>) {
+        self.open_core_service(env, service, CoreAccess::EngineOwner)
+            .await
+    }
+
+    async fn open_core_service(
+        &self,
+        env: &Env,
+        service: Arc<dyn RemoteMemoryService>,
+        access: CoreAccess,
+    ) -> (CoreService, tokio::task::JoinHandle<Arc<ConnectResponder>>) {
+        let (addr, task) = self.serve_service(service).await;
         let core = CoreService::open(env.options(self.selection(addr), access))
             .await
             .expect("the selected remote provider opens");
@@ -835,6 +871,26 @@ async fn create_character(
         created.binding.binding_id.as_str().to_string(),
         created.character.revision,
     )
+}
+
+async fn add_binding(
+    core: &CoreService,
+    principal: &Principal,
+    character_id: &str,
+    world_id: &str,
+) -> String {
+    core.add_binding(
+        principal,
+        character_id.to_string(),
+        world_id.to_string(),
+        None,
+    )
+    .await
+    .expect("add an active binding")
+    .binding
+    .binding_id
+    .as_str()
+    .to_string()
 }
 
 async fn capture(
@@ -1461,17 +1517,18 @@ async fn character_fragment_promotion_runs_on_the_remote_provider() {
 // ---------------------------------------------------------------------------
 
 /// N2's adoption maps a reviewed `FragmentOnly` product **to** a `fact` record;
-/// it never makes every protocol `fact` a Nexus Character fragment. This case
-/// drives the real signed public Core against an authenticated second writer
-/// that replaces a fragment's whole content (removing `nexus_legacy`), and
-/// against a provider-native `fact` created straight through the protocol:
+/// it never makes every protocol `fact` a Nexus Character fragment, and it never
+/// lets a user lose a fragment silently. This case drives the real signed public
+/// Core against an authenticated second writer that replaces a *known reviewed*
+/// fragment's whole content (removing `nexus_legacy`) and against a
+/// provider-native `fact` created straight through the protocol:
 ///
-/// - the fragment family follows that contract on LIST (filtered before the page
-///   window) and on by-id promotion;
-/// - promotion refuses both BEFORE any provider mutation — placement, revision,
-///   promote receipts and D18 facts stay exactly as they were — and a
-///   fragment-origin record that lost its identity fails honestly instead of
-///   being dropped or served as a fabricated fragment;
+/// - the known fragment is damaged, not reclassified: LIST and by-id promotion
+///   both fail honestly, while its live D18 fact still proves its origin; the
+///   genuinely unproven native fact stays a generic record that is never served
+///   or promoted as a fragment;
+/// - every refusal happens BEFORE any provider mutation — placement, revision,
+///   promote receipts and D18 facts stay exactly as they were;
 /// - a valid fragment still promotes, and its response is already sound when a
 ///   later writer rewrites the record, so a committed promotion never turns into
 ///   a projection failure.
@@ -1487,7 +1544,7 @@ async fn rewritten_and_provider_native_facts_are_not_character_fragments() {
         create_character(&core, &principal, "R3 Bea", &world).await;
     let subject_id = legacy::character_subject_id(&character_id);
 
-    // Two real reviewed fragments: the control family.
+    // Two real reviewed fragments: the known family.
     for pending_id in ["pend_family_a", "pend_family_b"] {
         capture(&core, &principal, &character_id, &binding_id, pending_id)
             .await
@@ -1543,48 +1600,12 @@ async fn rewritten_and_provider_native_facts_are_not_character_fragments() {
         .map(|fragment| fragment.session_id.as_str().to_string())
         .expect("the control fragment is listed");
 
-    // The family filter runs before the page window: two family rows, one per
-    // page, and the second page proves `has_more` describes fragments only.
-    let first_page = core
-        .list_character_memory_fragments(
-            &principal,
-            character_id.clone(),
-            Some(binding_id.clone()),
-            1,
-            0,
-        )
-        .await
-        .expect("first page");
-    assert_eq!(first_page.fragments.len(), 1);
-    assert!(
-        first_page.pagination.has_more,
-        "the second fragment is past the first page"
-    );
-
     let (adapter, sdk_responder) = provider.sdk_session().await;
     let memory_principal = provider.memory_principal();
 
-    // An authenticated second writer replaces this fragment's WHOLE content: no
-    // `nexus_legacy`, so nothing in the record says it is a Nexus fragment.
-    let whole_rewrite = adapter
-        .update_record(
-            &memory_principal,
-            dto::<MemoryRecordsUpdateRequest>(json!({
-                "space_id": provider.space_id,
-                "record_id": rewritten,
-                "expected_revision": 1,
-                "content": { "text": "A whole-body rewrite that carries no Nexus metadata." },
-                "idempotency_key": "r3-family-rewrite",
-            })),
-        )
-        .await;
-    match whole_rewrite {
-        SpokeResult::Ok(_) => {}
-        SpokeResult::Reject(reject) => panic!("the rewrite commits: {reject:?}"),
-    }
-
-    // A generic provider-native `fact` under the same subject: a protocol
-    // record, not a Nexus Character fragment.
+    // A generic provider-native `fact` under the same subject: a protocol record
+    // with no authoritative Nexus origin. It must never be served or promoted as
+    // a fragment, and its absence of a fact must never be read as proof.
     let native = match adapter
         .create_record(
             &memory_principal,
@@ -1607,8 +1628,7 @@ async fn rewritten_and_provider_native_facts_are_not_character_fragments() {
         .expect("the provider-assigned record id")
         .to_string();
 
-    // The family contract on LIST: neither record is a fragment, so only the
-    // untouched control is served, and `has_more` reflects the family.
+    // The unproven native fact is not a family row; the two known fragments are.
     let listed = core
         .list_character_memory_fragments(
             &principal,
@@ -1618,34 +1638,21 @@ async fn rewritten_and_provider_native_facts_are_not_character_fragments() {
             0,
         )
         .await
-        .expect("list the family after the rewrite");
+        .expect("list the family with the native fact present");
     assert_eq!(
-        listed
+        listed.fragments.len(),
+        2,
+        "the native fact never consumes a family slot"
+    );
+    assert!(
+        !listed
             .fragments
             .iter()
-            .map(|fragment| fragment.fragment_id.as_str().to_string())
-            .collect::<Vec<_>>(),
-        vec![control.clone()],
-        "the rewritten and provider-native facts are not served as fragments"
-    );
-    assert!(!listed.pagination.has_more);
-    let past_the_family = core
-        .list_character_memory_fragments(
-            &principal,
-            character_id.clone(),
-            Some(binding_id.clone()),
-            1,
-            1,
-        )
-        .await
-        .expect("the page past the family");
-    assert!(
-        past_the_family.fragments.is_empty(),
-        "no non-fragment row fills a page"
+            .any(|fragment| fragment.fragment_id.as_str() == native_id),
+        "the native fact is not served as a fragment"
     );
 
-    // The refusals happen BEFORE any provider mutation: capture the provider
-    // placement, revision, promote receipts and D18 facts first.
+    // Capture the provider's own state before the refusals.
     let pool = provider.pool().await;
     let rewritten_before = provider_record(&pool, &rewritten)
         .await
@@ -1658,7 +1665,7 @@ async fn rewritten_and_provider_native_facts_are_not_character_fragments() {
             rewritten_before.visibility.as_str(),
             rewritten_before.revision
         ),
-        ("context", 2)
+        ("context", 1)
     );
     assert_eq!(
         (native_before.visibility.as_str(), native_before.revision),
@@ -1672,15 +1679,11 @@ async fn rewritten_and_provider_native_facts_are_not_character_fragments() {
     let nexus = core_db(&env).await;
     let facts_before = object_facts(&nexus, &binding_id).await;
     nexus.close().await;
-
-    let rewritten_refused = core
-        .promote_character_fragment(&principal, character_id.clone(), rewritten.clone(), 1)
-        .await
-        .expect_err("a whole-body rewrite is not a Character fragment");
     assert!(
-        matches!(&rewritten_refused, CoreError::ActorInput(message) if message.contains("must name a Character memory fragment")),
-        "got {rewritten_refused:?}"
+        facts_before.contains(&("record".to_string(), rewritten.clone(), "live".to_string())),
+        "the review published the known fragment's dependency: {facts_before:?}"
     );
+
     let native_refused = core
         .promote_character_fragment(&principal, character_id.clone(), native_id.clone(), 0)
         .await
@@ -1688,6 +1691,49 @@ async fn rewritten_and_provider_native_facts_are_not_character_fragments() {
     assert!(
         matches!(&native_refused, CoreError::ActorInput(_)),
         "got {native_refused:?}"
+    );
+
+    // The authenticated second writer replaces the KNOWN fragment's whole
+    // content: its required identity is gone, but its live D18 fact still proves
+    // the origin, so it is damaged — not reclassified and hidden.
+    let whole_rewrite = adapter
+        .update_record(
+            &memory_principal,
+            dto::<MemoryRecordsUpdateRequest>(json!({
+                "space_id": provider.space_id,
+                "record_id": rewritten,
+                "expected_revision": 1,
+                "content": { "text": "A whole-body rewrite that carries no Nexus metadata." },
+                "idempotency_key": "r3-family-rewrite",
+            })),
+        )
+        .await;
+    match whole_rewrite {
+        SpokeResult::Ok(_) => {}
+        SpokeResult::Reject(reject) => panic!("the rewrite commits: {reject:?}"),
+    }
+
+    let listed = core
+        .list_character_memory_fragments(
+            &principal,
+            character_id.clone(),
+            Some(binding_id.clone()),
+            50,
+            0,
+        )
+        .await
+        .expect_err("a known fragment that lost its identity is reported, not hidden");
+    assert!(
+        matches!(&listed, CoreError::Internal { category } if category.contains("memory_fragment_metadata")),
+        "got {listed:?}"
+    );
+    let rewritten_refused = core
+        .promote_character_fragment(&principal, character_id.clone(), rewritten.clone(), 1)
+        .await
+        .expect_err("the damaged known fragment refuses the promotion");
+    assert!(
+        matches!(&rewritten_refused, CoreError::Internal { category } if category.contains("memory_fragment_metadata")),
+        "got {rewritten_refused:?}"
     );
 
     let pool = provider.pool().await;
@@ -1700,7 +1746,7 @@ async fn rewritten_and_provider_native_facts_are_not_character_fragments() {
             rewritten_after.revision
         ),
         ("context", 2),
-        "the refused promotion left the rewritten record untouched"
+        "the refused promotion left the damaged record untouched"
     );
     let native_after = provider_record(&pool, &native_id)
         .await
@@ -1728,71 +1774,8 @@ async fn rewritten_and_provider_native_facts_are_not_character_fragments() {
     );
     nexus.close().await;
 
-    // A record that still names fragment origin but lost the required identity is
-    // damaged metadata: reported honestly on both surfaces, never dropped.
-    let damaged = match adapter
-        .create_record(
-            &memory_principal,
-            dto::<MemoryRecordsCreateRequest>(json!({
-                "space_id": provider.space_id,
-                "subject_id": subject_id,
-                "kind": "fact",
-                "content": {
-                    "text": "a fragment-origin record with no session identity",
-                    "structured": { "nexus_legacy": { "fragment_id": "frag_damaged_r3" } },
-                },
-                "scope": { "visibility": "context", "context_id": binding_id },
-                "idempotency_key": "r3-family-damaged",
-            })),
-        )
-        .await
-    {
-        SpokeResult::Ok(body) => serde_json::to_value(&body).expect("create body"),
-        SpokeResult::Reject(reject) => panic!("the damaged record is created: {reject:?}"),
-    };
-    let damaged_id = damaged["result"]["record_id"]
-        .as_str()
-        .expect("the provider-assigned record id")
-        .to_string();
-    let listed = core
-        .list_character_memory_fragments(
-            &principal,
-            character_id.clone(),
-            Some(binding_id.clone()),
-            50,
-            0,
-        )
-        .await
-        .expect_err("damaged fragment metadata is reported, not dropped");
-    assert!(
-        matches!(&listed, CoreError::Internal { category } if category.contains("memory_fragment_metadata")),
-        "got {listed:?}"
-    );
-    let damaged_refused = core
-        .promote_character_fragment(&principal, character_id.clone(), damaged_id.clone(), 0)
-        .await
-        .expect_err("damaged fragment metadata refuses the promotion");
-    assert!(
-        matches!(&damaged_refused, CoreError::Internal { category } if category.contains("memory_fragment_metadata")),
-        "got {damaged_refused:?}"
-    );
-    let pool = provider.pool().await;
-    assert_eq!(
-        provider_record(&pool, &damaged_id)
-            .await
-            .expect("the damaged row")
-            .revision,
-        1,
-        "the damaged-metadata refusal wrote nothing"
-    );
-    assert_eq!(
-        provider_receipts(&pool, "memory.records.promote").await,
-        0
-    );
-    pool.close().await;
-
     // Valid control: the untouched fragment promotes, and its committed response
-    // is already stated from the receipt when a later writer rewrites the record.
+    // is already stated from validated values when a later writer rewrites it.
     let promoted = core
         .promote_character_fragment(&principal, character_id.clone(), control.clone(), 0)
         .await
@@ -1816,6 +1799,8 @@ async fn rewritten_and_provider_native_facts_are_not_character_fragments() {
         SpokeResult::Ok(_) => {}
         SpokeResult::Reject(reject) => panic!("the post-promotion rewrite commits: {reject:?}"),
     }
+    // The promoted record is shared, so no binding scopes its origin facts: it is
+    // unproven rather than falsely claimed as known, and still never an Internal.
     let retried = core
         .promote_character_fragment(&principal, character_id.clone(), control.clone(), 1)
         .await
@@ -1852,6 +1837,571 @@ async fn rewritten_and_provider_native_facts_are_not_character_fragments() {
         core.close().await.expect("close").cleanup_confirmed,
         "the open releases its own admission"
     );
+}
+
+// ---------------------------------------------------------------------------
+// The fragment page window at the real consumer boundary
+// ---------------------------------------------------------------------------
+
+/// The page window is counted in FAMILY rows. An interleaved provider-native
+/// `fact` never shifts `offset` or `has_more`, and the walk stops once the page
+/// and its `has_more` proof are settled: an older damaged row a small first page
+/// never reaches cannot fail it, while a listing wide enough to reach that row
+/// fails honestly. Both scopes are real bindings of one owned Character.
+#[tokio::test]
+async fn fragment_page_windows_count_only_the_family() {
+    let env = Env::boot("R3 Window Owner").await;
+    let provider = Provider::open().await;
+    let (core, responder) = provider.open_core(&env).await;
+    let principal = core.active_principal().await.expect("active principal");
+    let world_a = create_world(&core, &principal, "R3 Window World A").await;
+    let world_b = create_world(&core, &principal, "R3 Window World B").await;
+    let (character_id, binding_a, _) =
+        create_character(&core, &principal, "R3 Fay", &world_a).await;
+    let binding_b = add_binding(&core, &principal, &character_id, &world_b).await;
+    let subject_id = legacy::character_subject_id(&character_id);
+
+    // Binding A: three reviewed fragments, then one NEWER provider-native fact
+    // interleaved at the head of the provider's newest-first order.
+    for pending_id in ["pend_window_a", "pend_window_b", "pend_window_c"] {
+        capture(&core, &principal, &character_id, &binding_a, pending_id)
+            .await
+            .expect("capture into the first binding");
+    }
+    let reviewed = core
+        .review_character_memory(
+            &principal,
+            character_id.clone(),
+            dto::<ReviewCharacterMemoryRequest>(json!({ "binding_id": binding_a })),
+        )
+        .await
+        .expect("review the first binding");
+    assert_eq!(reviewed.fragmented, 3);
+
+    let (adapter, sdk_responder) = provider.sdk_session().await;
+    let memory_principal = provider.memory_principal();
+    let native = match adapter
+        .create_record(
+            &memory_principal,
+            dto::<MemoryRecordsCreateRequest>(json!({
+                "space_id": provider.space_id,
+                "subject_id": subject_id,
+                "kind": "fact",
+                "content": { "text": "a provider-native fact with no Nexus fragment origin" },
+                "scope": { "visibility": "context", "context_id": binding_a },
+                "idempotency_key": "r3-window-native",
+            })),
+        )
+        .await
+    {
+        SpokeResult::Ok(body) => serde_json::to_value(&body).expect("create body"),
+        SpokeResult::Reject(reject) => panic!("the native fact is created: {reject:?}"),
+    };
+    let native_id = native["result"]["record_id"]
+        .as_str()
+        .expect("the provider-assigned record id")
+        .to_string();
+
+    // The page window counts family rows only: the interleaved native fact is
+    // never served and never consumes a slot, so `offset`/`has_more` describe
+    // the three fragments alone.
+    let mut served: Vec<(String, String)> = Vec::new();
+    for (offset, expected_more) in [(0u32, true), (1, true), (2, false)] {
+        let page = core
+            .list_character_memory_fragments(
+                &principal,
+                character_id.clone(),
+                Some(binding_a.clone()),
+                1,
+                offset,
+            )
+            .await
+            .expect("one family page");
+        assert_eq!(
+            page.fragments.len(),
+            1,
+            "offset {offset} serves one family row"
+        );
+        assert_eq!(
+            page.pagination.has_more, expected_more,
+            "offset {offset} reports the family's remainder"
+        );
+        served.push((
+            page.fragments[0].fragment_id.as_str().to_string(),
+            page.fragments[0].session_id.as_str().to_string(),
+        ));
+    }
+    let mut sessions: Vec<String> = served
+        .iter()
+        .map(|(_, session)| session.clone())
+        .collect();
+    sessions.sort();
+    assert_eq!(
+        sessions,
+        vec![
+            "sess_pend_window_a".to_string(),
+            "sess_pend_window_b".to_string(),
+            "sess_pend_window_c".to_string()
+        ],
+        "each page serves a real reviewed fragment"
+    );
+    assert!(
+        !served.iter().any(|(record, _)| record == &native_id),
+        "the provider-native fact is never served as a fragment"
+    );
+
+    // Binding B: a DAMAGED fragment-origin record older than two valid
+    // fragments, so a small first page never reaches it.
+    let damaged = match adapter
+        .create_record(
+            &memory_principal,
+            dto::<MemoryRecordsCreateRequest>(json!({
+                "space_id": provider.space_id,
+                "subject_id": subject_id,
+                "kind": "fact",
+                "content": {
+                    "text": "an older fragment-origin record without its session identity",
+                    "structured": { "nexus_legacy": { "fragment_id": "frag_window_damaged" } },
+                },
+                "scope": { "visibility": "context", "context_id": binding_b },
+                "idempotency_key": "r3-window-damaged",
+            })),
+        )
+        .await
+    {
+        SpokeResult::Ok(body) => serde_json::to_value(&body).expect("create body"),
+        SpokeResult::Reject(reject) => panic!("the damaged record is created: {reject:?}"),
+    };
+    let damaged_id = damaged["result"]["record_id"]
+        .as_str()
+        .expect("the provider-assigned record id")
+        .to_string();
+    for pending_id in ["pend_window_d", "pend_window_e"] {
+        capture(&core, &principal, &character_id, &binding_b, pending_id)
+            .await
+            .expect("capture into the second binding");
+    }
+    let reviewed = core
+        .review_character_memory(
+            &principal,
+            character_id.clone(),
+            dto::<ReviewCharacterMemoryRequest>(json!({ "binding_id": binding_b })),
+        )
+        .await
+        .expect("review the second binding");
+    assert_eq!(reviewed.fragmented, 2);
+
+    let first_page = core
+        .list_character_memory_fragments(
+            &principal,
+            character_id.clone(),
+            Some(binding_b.clone()),
+            1,
+            0,
+        )
+        .await
+        .expect("a first page that never reaches the older damaged row");
+    assert_eq!(first_page.fragments.len(), 1);
+    assert!(
+        first_page.pagination.has_more,
+        "the second fragment is past the first page"
+    );
+
+    let wide = core
+        .list_character_memory_fragments(
+            &principal,
+            character_id.clone(),
+            Some(binding_b.clone()),
+            50,
+            0,
+        )
+        .await
+        .expect_err("a listing that reaches the damaged row is honest");
+    assert!(
+        matches!(&wide, CoreError::Internal { category } if category.contains("memory_fragment_metadata")),
+        "got {wide:?}"
+    );
+    let refused = core
+        .promote_character_fragment(&principal, character_id.clone(), damaged_id.clone(), 0)
+        .await
+        .expect_err("the damaged record cannot be promoted");
+    assert!(
+        matches!(&refused, CoreError::Internal { category } if category.contains("memory_fragment_metadata")),
+        "got {refused:?}"
+    );
+
+    let pool = provider.pool().await;
+    assert_eq!(
+        provider_record(&pool, &damaged_id)
+            .await
+            .expect("the damaged row")
+            .revision,
+        1,
+        "the honest refusals wrote nothing"
+    );
+    assert_eq!(
+        provider_receipts(&pool, "memory.records.promote").await,
+        0,
+        "no promotion receipt exists for the refusals"
+    );
+    pool.close().await;
+
+    adapter.close();
+    responder_of(sdk_responder).await;
+    assert_eq!(
+        responder_of(responder).await.remote_peer_id().as_deref(),
+        Some(peer_id(&CLIENT_SEED).as_str())
+    );
+    assert!(
+        core.close().await.expect("close").cleanup_confirmed,
+        "the open releases its own admission"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Real provider contention and the during-call response history
+// ---------------------------------------------------------------------------
+
+/// Where the second writer acts inside one real Core call.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ProbeBoundary {
+    /// After the returned `memory.records.get` was produced: between Core's
+    /// validated read and the provider CAS.
+    AfterFragmentRead,
+    /// After the `memory.records.promote` committed: between the real commit and
+    /// Core's response.
+    AfterPromoteCommit,
+}
+
+impl ProbeBoundary {
+    const fn op(self) -> &'static str {
+        match self {
+            Self::AfterFragmentRead => "memory.records.get",
+            Self::AfterPromoteCommit => "memory.records.promote",
+        }
+    }
+
+    const fn key(self) -> &'static str {
+        match self {
+            Self::AfterFragmentRead => "during-call-read",
+            Self::AfterPromoteCommit => "during-call-commit",
+        }
+    }
+}
+
+/// The second writer's whole-body replacement, which drops `nexus_legacy`.
+const SECOND_WRITER_TEXT: &str = "a second writer replaced this record during the call";
+
+/// A test-only decorator over the provider's REAL assembled service.
+///
+/// Every request is forwarded unchanged to the inner service, so the
+/// authenticated peer, the payload and the inner producer are the real ones. For
+/// exactly one armed request it then performs a genuine second-writer
+/// `memory.records.update` through that same inner service, at the chosen causal
+/// boundary, and returns the inner response — never a synthetic reply and never
+/// a second `MemoryPort`.
+struct SecondWriterProbe {
+    inner: Arc<dyn RemoteMemoryService>,
+    boundary: ProbeBoundary,
+    target: Mutex<Option<String>>,
+    armed: AtomicBool,
+    fired: AtomicBool,
+    advanced: AtomicBool,
+}
+
+impl SecondWriterProbe {
+    fn over(inner: Arc<dyn RemoteMemoryService>, boundary: ProbeBoundary) -> Self {
+        Self {
+            inner,
+            boundary,
+            target: Mutex::new(None),
+            armed: AtomicBool::new(false),
+            fired: AtomicBool::new(false),
+            advanced: AtomicBool::new(false),
+        }
+    }
+
+    /// Watch exactly this record's boundary request.
+    fn watch(&self, record_id: &str) {
+        *self.target.lock().expect("watched record") = Some(record_id.to_string());
+    }
+
+    fn arm(&self) {
+        self.fired.store(false, Ordering::SeqCst);
+        self.advanced.store(false, Ordering::SeqCst);
+        self.armed.store(true, Ordering::SeqCst);
+    }
+
+    fn fired(&self) -> bool {
+        self.fired.load(Ordering::SeqCst)
+    }
+
+    fn advanced(&self) -> bool {
+        self.advanced.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait]
+impl RemoteMemoryService for SecondWriterProbe {
+    async fn invoke(&self, peer_id: &str, op: &str, payload: Value) -> SpokeResult<Value> {
+        let watched = self.target.lock().expect("watched record").clone();
+        let record_id = payload.get("record_id").and_then(Value::as_str);
+        let armed = op == self.boundary.op() && watched.as_deref() == record_id;
+        let response = self.inner.invoke(peer_id, op, payload.clone()).await;
+        if armed && self.armed.swap(false, Ordering::SeqCst) {
+            let revision = match (&response, self.boundary) {
+                (SpokeResult::Ok(body), ProbeBoundary::AfterFragmentRead) => {
+                    body.pointer("/record/revision").and_then(Value::as_u64)
+                }
+                (SpokeResult::Ok(body), ProbeBoundary::AfterPromoteCommit) => {
+                    body.pointer("/result/revision").and_then(Value::as_u64)
+                }
+                (SpokeResult::Reject(_), _) => None,
+            };
+            if let (Some(revision), Some(record_id)) = (revision, record_id) {
+                let advanced = self
+                    .inner
+                    .invoke(
+                        peer_id,
+                        "memory.records.update",
+                        json!({
+                            "space_id": payload.get("space_id").cloned().unwrap_or(Value::Null),
+                            "record_id": record_id,
+                            "expected_revision": revision,
+                            "content": { "text": SECOND_WRITER_TEXT },
+                            "idempotency_key": self.boundary.key(),
+                        }),
+                    )
+                    .await;
+                self.advanced.store(
+                    matches!(advanced, SpokeResult::Ok(_)),
+                    Ordering::SeqCst,
+                );
+            }
+            self.fired.store(true, Ordering::SeqCst);
+        }
+        response
+    }
+}
+
+/// Two histories the public Core must survive against a real signed provider:
+/// a second writer that advances the record **after** Core's validated read but
+/// **before** the provider CAS (the promotion must lose the real CAS), and a
+/// second writer that rewrites the record **after** the real commit but
+/// **before** the original call returns (the original call must still answer
+/// truthfully, with its receipt and D18 release). The second writer is a genuine
+/// `memory.records.update` through the same authenticated inner service, so the
+/// evidence is provider contention, not a local pre-check or a later retry.
+#[tokio::test]
+async fn a_during_call_second_writer_meets_the_real_cas_and_the_committed_response() {
+    let env = Env::boot("R3 Race Owner").await;
+    let provider = Provider::open().await;
+
+    // A real owned Character with two reviewed binding-local fragments: one per
+    // race, so each history starts from an independent record.
+    let (setup, setup_responder) = provider.open_core(&env).await;
+    let principal = setup.active_principal().await.expect("active principal");
+    let world = create_world(&setup, &principal, "R3 Race World").await;
+    let (character_id, binding_id, _) =
+        create_character(&setup, &principal, "R3 Dee", &world).await;
+    for pending_id in ["pend_race_a", "pend_race_b"] {
+        capture(&setup, &principal, &character_id, &binding_id, pending_id)
+            .await
+            .expect("capture into the binding scope");
+    }
+    setup
+        .review_character_memory(
+            &principal,
+            character_id.clone(),
+            dto::<ReviewCharacterMemoryRequest>(json!({ "binding_id": binding_id })),
+        )
+        .await
+        .expect("review drains the binding scope");
+    let listed = setup
+        .list_character_memory_fragments(
+            &principal,
+            character_id.clone(),
+            Some(binding_id.clone()),
+            50,
+            0,
+        )
+        .await
+        .expect("list the family");
+    assert_eq!(listed.fragments.len(), 2);
+    let mut fragments: Vec<(String, String)> = listed
+        .fragments
+        .iter()
+        .map(|fragment| {
+            (
+                fragment.fragment_id.as_str().to_string(),
+                fragment.session_id.as_str().to_string(),
+            )
+        })
+        .collect();
+    fragments.sort();
+    let (cas_record, _) = fragments[0].clone();
+    let (commit_record, commit_session) = fragments[1].clone();
+    // Both records carry their live binding dependency before either race.
+    let nexus = core_db(&env).await;
+    let facts = object_facts(&nexus, &binding_id).await;
+    nexus.close().await;
+    for record in [&cas_record, &commit_record] {
+        assert!(
+            facts.contains(&("record".to_string(), record.clone(), "live".to_string())),
+            "the review published this record's dependency: {facts:?}"
+        );
+    }
+    assert!(
+        setup.close().await.expect("close").cleanup_confirmed,
+        "the setup open releases its own admission"
+    );
+    responder_of(setup_responder).await;
+
+    // (a) The second writer advances the record between Core's validated read
+    // and the provider CAS: the promotion loses the REAL provider CAS.
+    let cas_probe = Arc::new(SecondWriterProbe::over(
+        provider.inner.server(provider.directory.admission()),
+        ProbeBoundary::AfterFragmentRead,
+    ));
+    cas_probe.watch(&cas_record);
+    cas_probe.arm();
+    let (cas_core, cas_responder) = provider
+        .open_core_over(&env, Arc::clone(&cas_probe) as Arc<dyn RemoteMemoryService>)
+        .await;
+    let cas_principal = cas_core.active_principal().await.expect("principal");
+    let refused = cas_core
+        .promote_character_fragment(
+            &cas_principal,
+            character_id.clone(),
+            cas_record.clone(),
+            0,
+        )
+        .await
+        .expect_err("the advanced record loses the provider CAS");
+    let (code, retry_class, family, wire_code, conflict_code) = classified_refusal(&refused);
+    assert_eq!((code, retry_class), ("REVISION_CONFLICT", "terminal"));
+    assert_eq!(family, MemoryProviderRefusal::Conflict);
+    assert_eq!(wire_code, None);
+    assert_eq!(conflict_code, Some("version_mismatch"));
+    assert!(
+        cas_probe.fired(),
+        "the second writer ran between the validated read and the provider CAS"
+    );
+    assert!(
+        cas_probe.advanced(),
+        "the second writer's real provider update committed"
+    );
+    let pool = provider.pool().await;
+    let cas_row = provider_record(&pool, &cas_record)
+        .await
+        .expect("the raced row");
+    assert_eq!(
+        (cas_row.visibility.as_str(), cas_row.revision),
+        ("context", 2),
+        "the provider CAS refused and the promotion wrote nothing"
+    );
+    assert_eq!(
+        provider_receipts(&pool, "memory.records.promote").await,
+        0,
+        "the refused promotion committed no provider receipt"
+    );
+    pool.close().await;
+    let nexus = core_db(&env).await;
+    let after = object_facts(&nexus, &binding_id).await;
+    nexus.close().await;
+    assert!(
+        after.contains(&("record".to_string(), cas_record.clone(), "live".to_string())),
+        "the refused promotion released nothing: {after:?}"
+    );
+    assert!(
+        !after.contains(&("record".to_string(), cas_record.clone(), "released".to_string())),
+        "no release fact was published for the refused promotion"
+    );
+    assert!(
+        cas_core.close().await.expect("close").cleanup_confirmed,
+        "the raced open releases its own admission"
+    );
+    responder_of(cas_responder).await;
+
+    // (b) The second writer rewrites the record AFTER the real commit but BEFORE
+    // the original call returns: the original response is still truthful.
+    let commit_probe = Arc::new(SecondWriterProbe::over(
+        provider.inner.server(provider.directory.admission()),
+        ProbeBoundary::AfterPromoteCommit,
+    ));
+    commit_probe.watch(&commit_record);
+    commit_probe.arm();
+    let (commit_core, commit_responder) = provider
+        .open_core_over(
+            &env,
+            Arc::clone(&commit_probe) as Arc<dyn RemoteMemoryService>,
+        )
+        .await;
+    let commit_principal = commit_core.active_principal().await.expect("principal");
+    let promoted = commit_core
+        .promote_character_fragment(
+            &commit_principal,
+            character_id.clone(),
+            commit_record.clone(),
+            0,
+        )
+        .await
+        .expect("the promotion commits and answers truthfully");
+    assert!(
+        promoted.fragment.binding_id.is_none(),
+        "the promotion cleared the binding placement"
+    );
+    assert_eq!(promoted.fragment.revision, 1, "the retained 0→1 step");
+    assert_eq!(
+        promoted.fragment.session_id.as_str(),
+        commit_session,
+        "the response states the identity the validated content carried"
+    );
+    assert!(commit_probe.fired());
+    assert!(
+        commit_probe.advanced(),
+        "the second writer's rewrite committed after the promotion"
+    );
+    let pool = provider.pool().await;
+    let commit_row = provider_record(&pool, &commit_record)
+        .await
+        .expect("the committed row");
+    assert_eq!(
+        (commit_row.visibility.as_str(), commit_row.revision),
+        ("shared", 3),
+        "the promotion committed and the later rewrite advanced the same record"
+    );
+    assert_eq!(
+        provider_receipts(&pool, "memory.records.promote").await,
+        1,
+        "the committed promotion kept its single receipt"
+    );
+    assert_eq!(
+        provider_content(&pool, &commit_record).await["text"],
+        json!(SECOND_WRITER_TEXT),
+        "the rewrite landed after the commit, before the response returned"
+    );
+    pool.close().await;
+    let nexus = core_db(&env).await;
+    let after = object_facts(&nexus, &binding_id).await;
+    nexus.close().await;
+    assert!(
+        after.contains(&(
+            "record".to_string(),
+            commit_record.clone(),
+            "released".to_string()
+        )),
+        "the committed promotion released its dependency: {after:?}"
+    );
+    assert!(
+        commit_core
+            .close()
+            .await
+            .expect("close")
+            .cleanup_confirmed,
+        "the committed open releases its own admission"
+    );
+    responder_of(commit_responder).await;
 }
 
 // ---------------------------------------------------------------------------
