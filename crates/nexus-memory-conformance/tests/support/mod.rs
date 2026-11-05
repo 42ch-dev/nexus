@@ -43,13 +43,15 @@ use tokio::sync::{Barrier, Notify};
 
 use nexus_core::connect::ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};
 use nexus_core::memory_provider::LocalMemoryProvider;
+use nexus_core::{CoreAccess, CoreHomeService, CoreOpenOptions, CoreService};
+use nexus_contracts::{CoreRegisterCreatorRequest, SetActiveWorkspaceRequest};
 use nexus_memory_conformance::{
     FaultHold, FaultHoldLost, FaultPoint, FixtureMemoryProvider, PeerDirectory, RetentionSweep,
 };
 use spoke_connect::core::{derive_peer_id_from_ed25519_pubkey, sign_hello_ed25519};
 use spoke_connect::remote::{
     connect_remote_adapter, connect_responder, ConnectResponder, ConnectResponderOptions,
-    MemoryPortService, RemoteAdapter, RemoteAdapterOptions, RemoteIdentity, RemoteMemoryService,
+    ConnectResponderState, MemoryPortService, RemoteAdapter, RemoteAdapterOptions, RemoteIdentity, RemoteMemoryService,
     RemoteServePorts, RemoteServePortsComposite, Transport,
 };
 use spoke_operations::spoke_schemas::connect::{ConnectHello, ConnectSession};
@@ -198,21 +200,27 @@ impl HostManifestPort for MemoryOnlyHost {
 // Session plumbing
 // ---------------------------------------------------------------------------
 
-fn manifest(host_id: &str) -> HostCapabilityManifest {
+fn manifest_with(host_id: &str, capabilities: &[&str]) -> HostCapabilityManifest {
     serde_json::from_value(json!({
         "schema_version": 1,
         "host_id": host_id,
         "roles": ["data-store"],
-        "capabilities": MEMORY_CAPABILITIES,
+        "capabilities": capabilities,
         "namespaces": [],
         "extensions": {},
     }))
     .expect("valid manifest")
 }
 
-fn connect_manifest(host_id: &str) -> ConnectHelloManifest {
-    serde_json::from_value(serde_json::to_value(manifest(host_id)).expect("manifest serializes"))
-        .expect("field-identical connect manifest")
+fn manifest(host_id: &str) -> HostCapabilityManifest {
+    manifest_with(host_id, &MEMORY_CAPABILITIES)
+}
+
+fn connect_manifest_with(host_id: &str, capabilities: &[&str]) -> ConnectHelloManifest {
+    serde_json::from_value(
+        serde_json::to_value(manifest_with(host_id, capabilities)).expect("manifest serializes"),
+    )
+    .expect("field-identical connect manifest")
 }
 
 type ConnectHelloManifest =
@@ -250,6 +258,11 @@ impl Endpoint {
         assert!(
             matches!(closed, Ok(Ok(()))),
             "the session transport closes within the bound"
+        );
+        assert_eq!(
+            self.responder.state(),
+            ConnectResponderState::Closed,
+            "the responder session is closed after the real transport cleanup"
         );
     }
 }
@@ -406,7 +419,37 @@ pub struct Matrix {
 impl Matrix {
     /// A fresh run over the requested provider implementation.
     pub async fn start(kind: Kind) -> Self {
-        let home_dir = TempDir::new().expect("temporary matrix home");
+        Self::assemble(
+            kind,
+            TempDir::new().expect("temporary matrix home"),
+            None,
+        )
+        .await
+    }
+
+    /// A local run whose workspace already holds a real Character and its
+    /// binding, created through the public Core actor surface before the
+    /// provider opens (the same workspace state database the Core open used).
+    pub async fn local_character() -> (Self, CharacterFixture) {
+        let home = TempDir::new().expect("temporary matrix home");
+        let (fixture, creator_id) = create_character_fixture(home.path()).await;
+        let matrix = Self::assemble(Kind::Local, home, Some(creator_id)).await;
+        (matrix, fixture)
+    }
+
+    /// A fixture run exercising the same real Character/binding protocol
+    /// identities. The independent provider has no Nexus actor surface, so the
+    /// Character is created through the public Core actor path once and the
+    /// identical subject/binding ids are driven over the fixture.
+    pub async fn remote_character() -> (Self, CharacterFixture) {
+        let scratch = TempDir::new().expect("character identity home");
+        let (fixture, _creator_id) = create_character_fixture(scratch.path()).await;
+        let matrix = Self::start(Kind::Remote).await;
+        (matrix, fixture)
+    }
+
+    /// Assemble a run over a prepared home.
+    async fn assemble(kind: Kind, home_dir: TempDir, creator_id: Option<String>) -> Self {
         let host_id = match kind {
             Kind::Local => "c-matrix-local",
             Kind::Remote => "c-matrix-remote",
@@ -415,9 +458,10 @@ impl Matrix {
         let (home, provider, space_id, directory, admin_principal, peer_principal) = match kind {
             Kind::Local => {
                 let user_home = home_dir.path().to_path_buf();
+                let admin_id = creator_id.unwrap_or_else(|| LOCAL_ADMIN_ID.to_owned());
                 let provider = LocalMemoryProvider::open(
                     user_home.clone(),
-                    LOCAL_ADMIN_ID,
+                    &admin_id,
                     LOCAL_WORKSPACE,
                 )
                 .await
@@ -425,7 +469,7 @@ impl Matrix {
                 let space_id = provider.space_id().to_owned();
                 let directory = Arc::new(
                     PeerDirectory::new()
-                        .with_peer(peer_id(&ADMIN_SEED), LOCAL_ADMIN_ID)
+                        .with_peer(peer_id(&ADMIN_SEED), admin_id.as_str())
                         .with_peer(peer_id(&PEER_SEED), LOCAL_PEER_ID),
                 );
                 (
@@ -436,7 +480,7 @@ impl Matrix {
                     Provider::Local(Arc::new(provider)),
                     space_id,
                     directory,
-                    principal(LOCAL_ADMIN_ID),
+                    principal(&admin_id),
                     principal(LOCAL_PEER_ID),
                 )
             }
@@ -529,6 +573,12 @@ impl Matrix {
         Arc::clone(&self.admin.client)
     }
 
+    /// The second peer's own signed client handle: a distinct authenticated
+    /// session, not the admin connection with a different principal argument.
+    pub fn peer_client(&self) -> Arc<RemoteAdapter> {
+        Arc::clone(&self.peer.client)
+    }
+
     /// The grant-only second client session.
     pub fn peer(&self) -> Actor<'_> {
         Actor {
@@ -601,7 +651,20 @@ impl Matrix {
     /// A raw signed session for wire-level rows (`op_unsupported`, typed-decode
     /// refusals) that the typed client cannot express.
     pub async fn raw_admin(&self) -> RawSession {
-        RawSession::open(Arc::clone(&self.service), &self.host_id, ADMIN_SEED).await
+        RawSession::open(
+            Arc::clone(&self.service),
+            &self.host_id,
+            ADMIN_SEED,
+            &MEMORY_CAPABILITIES,
+        )
+        .await
+    }
+
+    /// A raw signed session whose client hello does not advertise
+    /// `spoke-memory`, so the Connect dispatch gate answers memory ops with
+    /// `capability_missing` before any handler runs (protocol §13).
+    pub async fn raw_admin_without_memory_capability(&self) -> RawSession {
+        RawSession::open(Arc::clone(&self.service), &self.host_id, ADMIN_SEED, &[]).await
     }
 
     /// Release every session and the provider pool.
@@ -819,6 +882,16 @@ impl Actor<'_> {
 
     pub async fn list_spaces(&self) -> Value {
         wire(&self.client.list_spaces(self.principal, dto(json!({}))).await)
+    }
+
+    /// `memory.spaces.list` with an explicit page bound.
+    pub async fn list_spaces_page(&self, limit: u64) -> Value {
+        wire(
+            &self
+                .client
+                .list_spaces(self.principal, dto(json!({ "limit": limit })))
+                .await,
+        )
     }
 
     pub async fn freeze_space(&self, key: &str, revision: u64) -> Value {
@@ -1065,6 +1138,7 @@ impl RawSession {
         service: Arc<dyn RemoteMemoryService>,
         host_id: &str,
         seed: [u8; 32],
+        client_capabilities: &[&str],
     ) -> Self {
         let listener = TcpListener::bind(("127.0.0.1", 0))
             .await
@@ -1119,7 +1193,7 @@ impl RawSession {
                 .duration_since(std::time::UNIX_EPOCH)
                 .expect("system clock")
                 .as_nanos()),
-            &connect_manifest(&format!("{host_id}-raw-client")),
+            &connect_manifest_with(&format!("{host_id}-raw-client"), client_capabilities),
             None,
         )
         .expect("sign the initiator hello");
@@ -1448,6 +1522,32 @@ pub async fn freeze_with(
     )
 }
 
+/// Fence with owned inputs, so the future can be raced against another client.
+pub async fn fence_with(
+    client: Arc<RemoteAdapter>,
+    principal: Principal,
+    space_id: String,
+    key: &'static str,
+    revision: u64,
+    subject_id: &'static str,
+) -> Value {
+    wire(
+        &client
+            .fence_subject(
+                &principal,
+                dto(json!({
+                    "space_id": space_id,
+                    "subject_id": subject_id,
+                    "target": { "type": "subject" },
+                    "action": "fence",
+                    "expected_revision": revision,
+                    "idempotency_key": key,
+                })),
+            )
+            .await,
+    )
+}
+
 /// Review with owned inputs, so the future can be spawned for a real race.
 pub async fn review_with(
     client: Arc<RemoteAdapter>,
@@ -1460,3 +1560,71 @@ pub async fn review_with(
     wire(&client.review_candidate(&principal, dto(body)).await)
 }
 
+
+// ---------------------------------------------------------------------------
+// The real Character/binding fixture (public Core actor surface)
+// ---------------------------------------------------------------------------
+
+/// A Character created through the public Core actor surface, with its initial
+/// active binding. Both ids are real product identities: the Character subject
+/// and the binding context a capture is placed into.
+pub struct CharacterFixture {
+    pub subject_id: String,
+    pub binding_id: String,
+}
+
+/// Create one owned World with one Character and its initial binding through
+/// the public Core actor path, then release the Core open so the caller can
+/// open the workspace's provider itself.
+async fn create_character_fixture(user_home: &std::path::Path) -> (CharacterFixture, String) {
+    let home = CoreHomeService::open(user_home.to_path_buf()).expect("open the core home");
+    let creator_id = home
+        .register_creator(CoreRegisterCreatorRequest {
+            display_name: Some("C Matrix".parse().expect("valid display name")),
+            platform_creator_id: None,
+        })
+        .await
+        .expect("register the active creator")
+        .creator_id;
+    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+        user_home,
+        &creator_id,
+        LOCAL_WORKSPACE,
+    ))
+    .expect("workspace dir");
+    home.select_workspace(SetActiveWorkspaceRequest {
+        creator_id: None,
+        workspace_slug: LOCAL_WORKSPACE.to_owned(),
+    })
+    .await
+    .expect("select the workspace");
+
+    let core = CoreService::open(CoreOpenOptions {
+        user_home: user_home.to_path_buf(),
+        access: CoreAccess::EngineOwner,
+        memory: None,
+    })
+    .await
+    .expect("open Core over the disposable home");
+    let owner = core.active_principal().await.expect("active principal");
+    let world = core
+        .create_world(&owner, dto(json!({ "title": "C matrix world" })))
+        .await
+        .expect("create an owned World");
+    let created = core
+        .create_character(
+            &owner,
+            dto(json!({
+                "display_name": "Mira",
+                "world_id": world.world_id.as_str(),
+            })),
+        )
+        .await
+        .expect("create an owned Character with its initial binding");
+    let fixture = CharacterFixture {
+        subject_id: created.character.character_id.as_str().to_owned(),
+        binding_id: created.binding.binding_id.as_str().to_owned(),
+    };
+    drop(core);
+    (fixture, creator_id)
+}

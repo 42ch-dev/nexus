@@ -13,17 +13,18 @@
 //! The N3 row matrix (`.mstar/iterations/v1.229-spoke-memory-n3/specs/n3-conformance-matrix.md`
 //! §5 families A–D) runs in the `c_admission_lifecycle` and
 //! `c_capture_candidates` integration targets. Each scenario body is
-//! provider-agnostic and runs twice: `_local` drives the real
-//! `nexus_core::memory_provider::LocalMemoryProvider`, `_remote` drives this
-//! fixture. Both are served through the published `spoke-connect` memory
+//! provider-agnostic: rows scoped to both providers run as `_local` over the real
+//! `nexus_core::memory_provider::LocalMemoryProvider` and as `_remote` over this
+//! fixture, while a remote-only row such as C-029 has only its `_remote`
+//! selector. Both legs are served through the published `spoke-connect` memory
 //! service over a real signed loopback session, so the rows observe the same
 //! protocol boundary and differ only in the provider implementation.
 //!
 //! Every scenario opens its own temporary store, two authenticated peers and
-//! the operator-provisioned admin grant; restarts close the owned pool and
-//! responders and reopen the same file. Fault, clock and retention operators
-//! are test control only — the assertions read the provider's own answers,
-//! refusals and receipts.
+//! the operator-provisioned admin grant; restarts close the harness-owned
+//! responders and transports and reopen the same file. Fault, clock and
+//! retention operators are test control only — the assertions read the
+//! provider's own answers, refusals and receipts.
 
 // The assembled `MemoryPort` in `server` consumes the request-scope bridge
 // (`Admitted::from_scope`), while this slice's own direct-admission entry

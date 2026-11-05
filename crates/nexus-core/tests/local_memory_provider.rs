@@ -2713,13 +2713,16 @@ async fn candidate_reads_and_reviews_are_limited_to_covered_scopes() {
         "an uncovered candidate reads as absent"
     );
 
-    // §7.15 needs `records_write` over the same scope; this principal lacks it.
+    // §7.15 needs `records_write` over the same scope; this principal lacks it,
+    // so the by-ID mutation hides the candidate exactly as an absent id does
+    // (C-102/MEM-R026).
     let refused = wire(
         &provider
             .review_candidate(&scoped, review_request("k-review-scoped", &covered_id, 1))
             .await,
     );
-    assert_eq!(error_code(&refused), "NOT_AUTHORIZED");
+    assert_eq!(error_code(&refused), "NOT_FOUND");
+    assert_eq!(retry_class(&refused), "terminal");
 
     // A reader with no review grant sees nothing at all rather than an empty page.
     let unprivileged = wire(
@@ -2728,6 +2731,117 @@ async fn candidate_reads_and_reviews_are_limited_to_covered_scopes() {
             .await,
     );
     assert_eq!(error_code(&unprivileged), "NOT_AUTHORIZED");
+}
+
+/// §6.5 single-grant rule + C-102 anti-oracle (N3 C8 I217/I226 regression):
+/// `review` and `records_write` issued as two same-scope grants never compose,
+/// one grant carrying both is admitted with the inherited placement, and a
+/// partially covered candidate is indistinguishable from an absent id.
+#[tokio::test]
+async fn review_requires_one_grant_and_hides_partial_coverage() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    let scoped = principal(OTHER);
+    wire(
+        &provider.ensure_subject(&admin, ensure_request(SUBJECT)).await,
+    );
+    let captured = wire(
+        &provider
+            .capture(&admin, capture_request("k-single-grant", Some("bnd_1"), TEXT))
+            .await,
+    );
+    let candidate_id = receipt(&captured)["result"]["candidate_ids"][0]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // `review` alone is not enough.
+    wire(
+        &provider
+            .grant(
+                &admin,
+                restricted_grant("k-sg-review", "review", OTHER, SUBJECT, &["bnd_1"]),
+            )
+            .await,
+    );
+    let review_only = wire(
+        &provider
+            .review_candidate(&scoped, review_request("k-sg-review-only", &candidate_id, 1))
+            .await,
+    );
+    assert_eq!(error_code(&review_only), "NOT_FOUND");
+    assert_eq!(retry_class(&review_only), "terminal");
+
+    // A SECOND same-scope grant carrying `records_write` never unions in.
+    wire(
+        &provider
+            .grant(
+                &admin,
+                restricted_grant("k-sg-write", "records_write", OTHER, SUBJECT, &["bnd_1"]),
+            )
+            .await,
+    );
+    let separate = wire(
+        &provider
+            .review_candidate(&scoped, review_request("k-sg-separate", &candidate_id, 1))
+            .await,
+    );
+    assert_eq!(
+        error_code(&separate),
+        "NOT_FOUND",
+        "two grants each covering one required capability are not an admission"
+    );
+    assert_eq!(retry_class(&separate), "terminal");
+
+    // The refused reviews consumed nothing, and the shell is still pending.
+    let shell = wire(
+        &provider
+            .get_candidate(&scoped, candidate_get_request(&candidate_id))
+            .await,
+    );
+    assert_eq!(shell["candidate"]["status"], "pending");
+    assert_eq!(
+        wire(&provider.recall(&admin, recall_request(10)).await)["total_authorized"],
+        0
+    );
+
+    // The existing-but-partially-covered id and an id this store never held are
+    // the same refusal (C-102): no existence oracle.
+    let missing = wire(
+        &provider
+            .review_candidate(&scoped, review_request("k-sg-missing", "cnd_never_existed", 1))
+            .await,
+    );
+    assert_eq!(error_code(&missing), "NOT_FOUND");
+    assert_eq!(error_code(&separate), error_code(&missing));
+
+    // ONE grant carrying both capabilities over the same scope is admitted, and
+    // the created record inherits the candidate's placement.
+    let dual: schemas::MemoryGrantsGrantRequest = dto(json!({
+        "space_id": SPACE,
+        "subject_id": SUBJECT,
+        "principal_id": OTHER,
+        "capabilities": ["review", "records_write"],
+        "context_ids": ["bnd_1"],
+        "shared_access": false,
+        "idempotency_key": "k-sg-dual",
+    }));
+    wire(&provider.grant(&admin, dual).await);
+    let promoted = wire(
+        &provider
+            .review_candidate(&scoped, review_request("k-sg-promote", &candidate_id, 1))
+            .await,
+    );
+    assert_eq!(receipt(&promoted)["result"]["outcome"], "promoted");
+    let record_id = receipt(&promoted)["result"]["record_ids"][0]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let record = wire(
+        &provider.get_record(&admin, record_get_request(&record_id)).await,
+    );
+    assert_eq!(record["record"]["scope"]["context_id"], "bnd_1");
 }
 
 /// MEM-R006: candidate pages carry authorized candidates only, so a reviewer
