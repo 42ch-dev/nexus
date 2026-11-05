@@ -1,32 +1,36 @@
-//! C-111: the REAL `nexus42` binary's `creator memory list|show` runs on the
+//! C-111: the REAL `nexus42` binary's `creator memory list|show` reads the
 //! PINNED provider selected in `[memory_provider]` — local and remote.
 //!
 //! Both arms spawn the actual binary against a hermetic `HOME`. The remote arm
 //! serves the independent in-repo `FixtureMemoryProvider` through a real signed
-//! `127.0.0.1` Connect session (the same fixture and WS transport the N3 remote
-//! proofs use); nothing is mocked, and the local provider's store is asserted
-//! absent, so the remote effects cannot come from a local fallback.
+//! `127.0.0.1` Connect session. A row that exists ONLY in the remote fixture is
+//! seeded through the fixture's own service before the CLI runs, a test
+//! decorator counts the provider's record list/get operations, and a
+//! conflicting local artifact is present: the CLI must return the remote row's
+//! authored identity and body, not the local one.
 //!
 //! The remote arm is compiled only with the non-default `memory-remote` feature
 //! (`cargo test -p nexus42 --features memory-remote --test creator_memory_remote`).
 //! Without it the target still runs the local pin and the feature-off refusal.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Output;
+use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
 
 const WORKSPACE: &str = "default";
 const SLUG: &str = "c111-pinned-memory";
 const KIND: &str = "story_summary";
 const BODY: &str = "C111MARKER the pinned provider served this row to the real CLI";
 const CREDENTIAL_ID: &str = "cred-c111-remote";
+/// Bound on one spawned CLI child, covering startup, dial and output drain.
+const CLI_BOUND: Duration = Duration::from_secs(180);
 /// The fixture host's Connect identity (the provider side of the session).
 #[cfg(feature = "memory-remote")]
 const HOST_SEED: [u8; 32] = [0x42; 32];
 /// The CLI's Connect identity; the credential file holds exactly this seed.
 #[cfg(feature = "memory-remote")]
 const CLIENT_SEED: [u8; 32] = [0x31; 32];
-#[cfg(feature = "memory-remote")]
-const BOUND: std::time::Duration = std::time::Duration::from_secs(60);
 
 #[path = "common/direct.rs"]
 mod direct;
@@ -43,19 +47,62 @@ fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
-fn cli_ok(home: &Path, args: &[&str]) -> Output {
-    let output = direct_command()
+/// Spawn the real binary and bound the WHOLE child lifetime: exit or `kill`
+/// plus `wait` (reap) on timeout. `output()` is deliberately not used: it
+/// waits forever on a wedged child.
+fn run_cli(home: &Path, args: &[&str]) -> Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_nexus42"))
         .args(args)
         .env("HOME", home)
         .env("RUST_LOG", "off")
-        .output()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .expect("spawn nexus42");
-    assert!(output.status.success(), "cli {args:?}: {}", stderr(&output));
-    output
+
+    // Drain both pipes on their own threads so a chatty child can never block
+    // on a full pipe while the bounded wait below polls its exit.
+    let mut child_stdout = child.stdout.take().expect("piped stdout");
+    let mut child_stderr = child.stderr.take().expect("piped stderr");
+    let out_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = child_stdout.read_to_end(&mut bytes);
+        bytes
+    });
+    let err_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = child_stderr.read_to_end(&mut bytes);
+        bytes
+    });
+
+    let deadline = Instant::now() + CLI_BOUND;
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("wait nexus42") {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = out_reader.join();
+            let _ = err_reader.join();
+            panic!("nexus42 {args:?} exceeded {CLI_BOUND:?}; child killed and reaped");
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    };
+    let stdout = out_reader.join().expect("stdout reader");
+    let stderr = err_reader.join().expect("stderr reader");
+    Output {
+        status,
+        stdout,
+        stderr,
+    }
 }
 
-fn direct_command() -> assert_cmd::Command {
-    assert_cmd::Command::cargo_bin("nexus42").expect("nexus42 binary")
+fn cli_ok(home: &Path, args: &[&str]) -> Output {
+    let output = run_cli(home, args);
+    assert!(output.status.success(), "cli {args:?}: {}", stderr(&output));
+    output
 }
 
 /// The provider's physical markdown projection files for this workspace.
@@ -147,19 +194,22 @@ mod remote {
     use super::*;
     use std::collections::HashMap;
     use std::net::SocketAddr;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
     use async_trait::async_trait;
-    use tempfile::TempDir;
     use ed25519_dalek::SigningKey;
-    use serde_json::json;
+    use serde_json::{json, Value};
+    use tempfile::TempDir;
 
     use nexus_core::connect::ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};
+    use nexus_core::memory_provider::legacy;
     use nexus_memory_conformance::{FixtureMemoryProvider, PeerDirectory};
     use spoke_connect::core::derive_peer_id_from_ed25519_pubkey;
     use spoke_connect::remote::{
-        connect_responder, ConnectResponderOptions, RemoteIdentity, RemoteMemoryService,
-        RemoteServePorts, RemoteServePortsComposite, Transport,
+        connect_responder, ConnectResponder, ConnectResponderOptions, ConnectResponderState,
+        RemoteIdentity, RemoteMemoryService, RemoteServePorts, RemoteServePortsComposite,
+        Transport,
     };
     use spoke_operations::spoke_schemas::{
         Finding, HostCapabilityManifest, KnowledgeEntry, Relation, Rule, Scope, TimelineEvent,
@@ -169,6 +219,64 @@ mod remote {
         ScopeQueryPort, SpokeReject, SpokeRejectCode, SpokeResult,
     };
     use tokio::net::TcpListener;
+
+    const BOUND: Duration = Duration::from_secs(60);
+    /// A fixture-only row seeded before the CLI runs; it exists in no local
+    /// store, so the CLI can only return it by reading the remote provider.
+    const SEED_SLUG: &str = "c111-remote-seeded";
+    const SEED_BODY: &str = "C111REMOTESEED the fixture-only row only the remote provider holds";
+    const SEED_MEMORY_ID: &str = "mem_c111remoteseed";
+    /// A conflicting local artifact: if the CLI fell back to local content it
+    /// would surface this body under this slug.
+    const TRAP_SLUG: &str = "c111-local-trap";
+    const TRAP_BODY: &str = "LEGACYTRAP a local artifact no pinned remote read may serve";
+
+    /// Test decorator over the REAL fixture service: forwards every operation
+    /// unchanged and counts the record list/get boundary the CLI must cross.
+    struct CountingService {
+        inner: Arc<dyn RemoteMemoryService>,
+        lists: AtomicUsize,
+        gets: AtomicUsize,
+    }
+
+    impl CountingService {
+        fn new(inner: Arc<dyn RemoteMemoryService>) -> Self {
+            Self {
+                inner,
+                lists: AtomicUsize::new(0),
+                gets: AtomicUsize::new(0),
+            }
+        }
+
+        fn lists(&self) -> usize {
+            self.lists.load(Ordering::SeqCst)
+        }
+
+        fn gets(&self) -> usize {
+            self.gets.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait]
+    impl RemoteMemoryService for CountingService {
+        async fn invoke(
+            &self,
+            peer_id: &str,
+            op: &str,
+            payload: Value,
+        ) -> SpokeResult<Value> {
+            match op {
+                "memory.records.list" => {
+                    self.lists.fetch_add(1, Ordering::SeqCst);
+                }
+                "memory.records.get" => {
+                    self.gets.fetch_add(1, Ordering::SeqCst);
+                }
+                _ => {}
+            }
+            self.inner.invoke(peer_id, op, payload).await
+        }
+    }
 
     /// The responder's baseline half: `spoke-baseline` is never negotiated, so
     /// every baseline port answers honestly instead of being reached.
@@ -285,8 +393,9 @@ mod remote {
 
     /// Serve `rounds` sequential CLI opens on the already-bound listener.
     ///
-    /// The accept loop starts only after the non-dialing CLI setup, so no
-    /// accept deadline can expire before the first real dial.
+    /// Returns every responder it created: the caller keeps them alive through
+    /// the final CLI invocation and closes them explicitly afterwards, so no
+    /// session is dropped while a CLI command is still using it.
     fn serve(
         listener: TcpListener,
         memory_service: Arc<dyn RemoteMemoryService>,
@@ -294,7 +403,7 @@ mod remote {
         client_peer: String,
         client_pubkey: [u8; 32],
         rounds: usize,
-    ) -> tokio::task::JoinHandle<()> {
+    ) -> tokio::task::JoinHandle<Vec<Arc<ConnectResponder>>> {
         tokio::spawn(async move {
             let mut responders = Vec::with_capacity(rounds);
             for _ in 0..rounds {
@@ -328,11 +437,29 @@ mod remote {
                     invoke_timeout_ms: Some(5_000),
                 })
                 .await;
-                // `connect_responder` spawns its own runner; keeping the
-                // responder alive owns the session until this task ends.
                 responders.push(responder);
             }
+            responders
         })
+    }
+
+    /// Close every responder through the SDK's supported `close()` and wait,
+    /// bounded, for its public state to report `Closed`. The SDK's internal
+    /// runner task is not publicly joinable (disclosed in the report).
+    async fn close_responders(responders: &[Arc<ConnectResponder>]) {
+        for responder in responders {
+            responder.close();
+        }
+        for responder in responders {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while responder.state() != ConnectResponderState::Closed {
+                assert!(
+                    Instant::now() < deadline,
+                    "a responder did not reach Closed after close()"
+                );
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        }
     }
 
     /// Write the operator-provisioned credential for `seed` at mode 0600.
@@ -360,12 +487,7 @@ mod remote {
     async fn cli(home: PathBuf, args: Vec<String>) -> Output {
         tokio::task::spawn_blocking(move || {
             let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
-            direct_command()
-                .args(&borrowed)
-                .env("HOME", &home)
-                .env("RUST_LOG", "off")
-                .output()
-                .expect("spawn nexus42")
+            run_cli(&home, &borrowed)
         })
         .await
         .expect("cli task joins")
@@ -376,6 +498,66 @@ mod remote {
             .await;
         assert!(output.status.success(), "cli {args:?}: {}", stderr(&output));
         output
+    }
+
+    /// Seed a row that exists ONLY in the remote fixture, through the fixture's
+    /// own service (the same operation mapping the signed session uses).
+    async fn seed_fixture_row(
+        service: &Arc<dyn RemoteMemoryService>,
+        client_peer: &str,
+        space_id: &str,
+        creator: &str,
+    ) -> String {
+        let subject = legacy::creator_subject_id(creator);
+        let ensured = service
+            .invoke(
+                client_peer,
+                "memory.subjects.ensure",
+                json!({
+                    "space_id": space_id,
+                    "subject_id": subject,
+                    "kind": { "ns": legacy::CREATOR_KIND_NS, "id": creator },
+                }),
+            )
+            .await;
+        assert!(
+            matches!(ensured, SpokeResult::Ok(_)),
+            "the fixture subject is ensured: {ensured:?}"
+        );
+        let created = service
+            .invoke(
+                client_peer,
+                "memory.records.create",
+                json!({
+                    "space_id": space_id,
+                    "subject_id": subject,
+                    "kind": "nexus.story_summary",
+                    "content": {
+                        "text": SEED_BODY,
+                        "structured": { "nexus_legacy": {
+                            "slug": SEED_SLUG,
+                            "memory_id": SEED_MEMORY_ID,
+                            "memory_kind": "story_summary",
+                            "nexus_memory_version": 1,
+                            "source_session_ids": ["sess_c111_remote"],
+                        }},
+                    },
+                    "scope": { "visibility": "shared" },
+                    "source_context_ids": [],
+                    "idempotency_key": "c111-seed-remote",
+                }),
+            )
+            .await;
+        match created {
+            SpokeResult::Ok(value) => value["result"]["record_id"]
+                .as_str()
+                .or_else(|| value["result"]["record_ids"][0].as_str())
+                .unwrap_or_else(|| panic!("the seeded fixture record id: {value}"))
+                .to_string(),
+            SpokeResult::Reject(reject) => {
+                panic!("the fixture seeds its own row: {} {}", reject.code.as_str(), reject.message)
+            }
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -402,12 +584,18 @@ mod remote {
         let actor = DirectActor::new().await;
         let home = actor.home().to_path_buf();
         let creator = actor.creator_id().to_string();
-
         write_credential(&home, &CLIENT_SEED);
+
+        // The fixture's real service, wrapped only to count its record list/get
+        // boundary. The seeded row exists in no local store.
+        let counting = Arc::new(CountingService::new(
+            provider.server(directory.admission()),
+        ));
+        let service: Arc<dyn RemoteMemoryService> = counting.clone();
+        let seeded_id = seed_fixture_row(&service, &client_peer, &space_id, &creator).await;
 
         let (listener, addr) = bind().await;
         let endpoint = format!("ws://{addr}/memory");
-
 
         cli_ok_remote(
             &home,
@@ -431,29 +619,60 @@ mod remote {
         )
         .await;
 
-        // create + list + show each open one real signed session; the accept
-        // loop starts here, with no deadline over the non-dialing setup.
-        let server = serve(
-            listener,
-            provider.server(directory.admission()),
-            manifest(&authority_host_id),
-            client_peer.clone(),
-            pubkey(&CLIENT_SEED),
-            3,
-        );
-
-        // A local-only trap: a legacy bearer file no pinned remote read may
-        // surface.
-        let legacy = home
+        // A meaningful conflicting local artifact: its authored body differs
+        // from every remote row, so a local fallback would be visible.
+        let trap = home
             .join(".nexus42")
             .join("creators")
             .join(&creator)
             .join("memory")
             .join("long-term")
-            .join("legacy-trap.md");
-        std::fs::create_dir_all(legacy.parent().expect("legacy dir")).expect("legacy dir");
-        std::fs::write(&legacy, "---\nkind: custom\n---\nLEGACYTRAP\n").expect("seed legacy");
+            .join(format!("{TRAP_SLUG}.md"));
+        std::fs::create_dir_all(trap.parent().expect("trap dir")).expect("trap dir");
+        std::fs::write(
+            &trap,
+            format!(
+                "---\nnexus_memory_version: 1\nmemory_id: mem_c111localtrap\nmemory_kind: story_summary\nupdated_at: 2026-01-01T00:00:00Z\nsource_session_ids:\n- sess_local_trap\n---\n## User Notes\n\n{TRAP_BODY}\n\n## Pushed\n\nlocal-only push section\n"
+            ),
+        )
+        .expect("seed the local trap");
 
+        // list, show, create, list: one signed session each.
+        let server = serve(
+            listener,
+            Arc::clone(&service),
+            manifest(&authority_host_id),
+            client_peer.clone(),
+            pubkey(&CLIENT_SEED),
+            4,
+        );
+
+        let listed = stdout(&cli_ok_remote(&home, &["creator", "memory", "list"]).await);
+        assert!(
+            listed.contains(SEED_SLUG),
+            "the fixture-only row is listed by the real CLI: {listed}"
+        );
+        assert!(
+            listed.contains("story_summary"),
+            "the remote row keeps its authored kind: {listed}"
+        );
+        assert!(
+            counting.lists() > 0,
+            "the CLI's list crossed the remote provider's list boundary"
+        );
+
+        let shown = stdout(&cli_ok_remote(&home, &["creator", "memory", "show", SEED_SLUG]).await);
+        assert!(shown.contains(&format!("slug: {SEED_SLUG}")), "show: {shown}");
+        assert!(shown.contains(&format!("memory_id: {SEED_MEMORY_ID}")), "show: {shown}");
+        assert!(shown.contains(SEED_BODY), "the fixture-only body is served: {shown}");
+        assert!(!shown.contains(TRAP_BODY), "no local trap body is served: {shown}");
+        assert!(
+            counting.gets() > 0 || counting.lists() > 1,
+            "the CLI's show crossed the remote provider's record read boundary"
+        );
+
+        // The remote create path is retained: a CLI-authored row reaches the
+        // same pinned provider and is listed with the fixture-only row.
         cli_ok_remote(
             &home,
             &[
@@ -461,27 +680,31 @@ mod remote {
             ],
         )
         .await;
-
-        let list = stdout(&cli_ok_remote(&home, &["creator", "memory", "list"]).await);
-        assert!(list.contains(SLUG), "the remote provider row is listed: {list}");
-        assert!(list.contains(KIND), "the remote row keeps its kind: {list}");
-        assert!(!list.contains("LEGACYTRAP"), "no legacy local row leaks: {list}");
-        assert!(!list.contains("legacy-trap"), "no legacy slug leaks: {list}");
-
-        let show = stdout(&cli_ok_remote(&home, &["creator", "memory", "show", SLUG]).await);
-        assert!(show.contains(&format!("slug: {SLUG}")), "show: {show}");
-        assert!(show.contains(&format!("memory_kind: {KIND}")), "show: {show}");
-        assert!(show.contains(BODY), "the remote body is served: {show}");
-        assert!(!show.contains("LEGACYTRAP"), "no local fallback body: {show}");
+        let listed = stdout(&cli_ok_remote(&home, &["creator", "memory", "list"]).await);
+        assert!(listed.contains(SEED_SLUG), "the seeded row survives: {listed}");
+        assert!(listed.contains(SLUG), "the CLI-created remote row is listed: {listed}");
+        assert!(!listed.contains(TRAP_BODY), "no local trap body in list: {listed}");
 
         // Pin proof: the remote arm never constructed the local provider.
         assert!(
             !provider_store(&home, &creator).exists(),
             "a remote-pinned CLI never opens the local provider's store"
         );
-        assert!(legacy.exists(), "the legacy trap file itself is untouched");
+        assert!(trap.exists(), "the local trap artifact itself is untouched");
+        assert_eq!(
+            shown.matches(SEED_MEMORY_ID).count(),
+            1,
+            "the shown identity stayed the fixture's (seeded {seeded_id})"
+        );
 
-        server.await.expect("the fixture served every CLI open");
+        // Retain responders through the final CLI call, then close them through
+        // the supported SDK operation and confirm the public closed state.
+        let responders = tokio::time::timeout(BOUND, server)
+            .await
+            .expect("the accept task finished")
+            .expect("the accept task joined");
+        assert_eq!(responders.len(), 4, "every CLI open was served");
+        close_responders(&responders).await;
     }
 }
 
@@ -527,22 +750,12 @@ async fn c_111_remote_selection_without_client_refuses_and_never_reads_local() {
             "12D3KooWPeer",
         ],
     );
-    let refused = direct_command()
-        .args(["creator", "memory", "list"])
-        .env("HOME", home)
-        .env("RUST_LOG", "off")
-        .output()
-        .expect("spawn nexus42");
+    let refused = run_cli(home, &["creator", "memory", "list"]);
     assert!(!refused.status.success(), "the remote pin refuses");
     let err = stderr(&refused);
     assert!(err.contains("memory_remote_disabled"), "refusal: {err}");
     assert!(!stdout(&refused).contains(BODY), "no local fallback row");
-    let shown = direct_command()
-        .args(["creator", "memory", "show", SLUG])
-        .env("HOME", home)
-        .env("RUST_LOG", "off")
-        .output()
-        .expect("spawn nexus42");
+    let shown = run_cli(home, &["creator", "memory", "show", SLUG]);
     assert!(!shown.status.success(), "the remote pin refuses show too");
     assert!(
         !stdout(&shown).contains(BODY),
