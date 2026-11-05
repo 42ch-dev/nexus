@@ -16,12 +16,16 @@
 
 mod support;
 
+use std::sync::Arc;
+
+use nexus_core::{CoreAccess, CoreOpenOptions, CoreService};
 use serde_json::{json, Value};
 
 use support::{
-    bootstrap, candidate_ids, capture_body, context_scope, error_code, error_details,
-    grant_body, is_committed, receipt_id, result, retry_class, shared_scope, Actor, Matrix,
-    CONTEXT, OTHER_CONTEXT, OTHER_SUBJECT, SUBJECT,
+    bootstrap, candidate_ids, capture_body, context_scope, core_code, error_code, error_details,
+    is_committed, open_selected_local, receipt_id, remote_selection, result,
+    retry_class, serve_selection_host, shared_scope, Actor, DurableState, Matrix, SelectionHome,
+    CONTEXT, OTHER_CONTEXT, OTHER_SUBJECT, SELECTION_CLIENT_SEED, SUBJECT,
 };
 
 // ---------------------------------------------------------------------------
@@ -230,6 +234,14 @@ fn profile_kinds(body: &Value) -> Vec<String> {
         .collect()
 }
 
+fn table_count_opt(state: &DurableState, table: &str) -> Option<i64> {
+    state
+        .tables
+        .iter()
+        .find(|(name, _)| name == table)
+        .map(|(_, count)| *count)
+}
+
 /// A refusal the protocol documents for this operation; any other code is a
 /// failure, and the retry class is always terminal.
 fn assert_refused_with(body: &Value, allowed: &[&str]) {
@@ -279,6 +291,7 @@ type ReadState = (
     Value,
     Value,
     Value,
+    Value,
 );
 
 /// Every base read of the C-046 surface, in one snapshot observation.
@@ -287,6 +300,7 @@ async fn read_state(
     shared: &str,
     contextual: &str,
     receipt_id: &str,
+    candidate_id: &str,
 ) -> ReadState {
     (
         admin.describe().await,
@@ -306,6 +320,7 @@ async fn read_state(
             .await,
         admin.get_profile(json!({ "subject_id": SUBJECT })).await,
         admin.get_receipt(receipt_id).await,
+        admin.get_candidate(candidate_id).await,
     )
 }
 
@@ -387,6 +402,80 @@ async fn record_crud_and_stale_cas(matrix: Matrix) {
     );
     assert_eq!(after_stale["kind"], json!("fact"));
 
+    // §7.0.4/MEM-R007: an update naming only the already-stored kind and
+    // carrying no content is a genuine no-op — the receipt still commits and
+    // its same-key replay resolves, while revision, kind, content, timestamps
+    // and the record's own durable projection stay untouched.
+    let before_no_op = matrix.durable_state().await;
+    let no_op = admin
+        .update_record(json!({
+            "record_id": record_id,
+            "expected_revision": 2,
+            "kind": "fact",
+            "idempotency_key": "k-c040-noop",
+        }))
+        .await;
+    assert!(is_committed(&no_op), "the no-op still commits a receipt: {no_op}");
+    assert_eq!(result(&no_op)["record_id"], json!(record_id));
+    assert_eq!(
+        result(&no_op)["revision"],
+        json!(2),
+        "a genuine no-op keeps the revision: {no_op}"
+    );
+    let replay = admin
+        .update_record(json!({
+            "record_id": record_id,
+            "expected_revision": 2,
+            "kind": "fact",
+            "idempotency_key": "k-c040-noop",
+        }))
+        .await;
+    assert_eq!(
+        receipt_id(&replay),
+        receipt_id(&no_op),
+        "the same key replays the original receipt: {replay}"
+    );
+    let after_no_op = matrix.durable_state().await;
+    let receipts_before = table_count_opt(&before_no_op, "memory_receipts")
+        .or_else(|| table_count_opt(&before_no_op, "receipts"))
+        .expect("the provider owns a receipt table");
+    let receipts_after = table_count_opt(&after_no_op, "memory_receipts")
+        .or_else(|| table_count_opt(&after_no_op, "receipts"))
+        .expect("the provider owns a receipt table");
+    assert_eq!(
+        receipts_after,
+        receipts_before + 1,
+        "the no-op commits exactly its own receipt"
+    );
+    if let (Some(journal_before), Some(journal_after)) = (
+        table_count_opt(&before_no_op, "memory_journal"),
+        table_count_opt(&after_no_op, "memory_journal"),
+    ) {
+        assert_eq!(
+            journal_after, journal_before,
+            "a no-op journals no record effect"
+        );
+    }
+    assert_eq!(
+        before_no_op.publications, after_no_op.publications,
+        "a no-op publishes no record file"
+    );
+    let after_no_op_record = record_of(&admin.get_record(&record_id).await).clone();
+    assert_eq!(after_no_op_record["revision"], json!(2));
+    assert_eq!(after_no_op_record["kind"], json!("fact"));
+    assert_eq!(
+        after_no_op_record["content"]["text"],
+        json!("second draft of the harbor promise")
+    );
+    assert_eq!(
+        after_no_op_record["created_at"], after_stale["created_at"],
+        "a no-op keeps created_at"
+    );
+    assert_eq!(
+        after_no_op_record["updated_at"], after_stale["updated_at"],
+        "a no-op keeps updated_at"
+    );
+
     let deleted = admin
         .delete_record(json!({
             "record_id": record_id,
@@ -427,8 +516,9 @@ async fn c_040_record_crud_and_stale_cas_remote() {
     record_crud_and_stale_cas(Matrix::remote().await).await;
 }
 
-/// C-041 / MEM-R007: each committed content update advances the revision by
-/// exactly one; revisions are opaque across providers.
+/// C-041 / MEM-R007 + §7.0.4: a changed kind and any explicit content update
+/// advance the revision by exactly one; an unchanged kind with no content is a
+/// genuine no-op that keeps the record and still commits a replayable receipt.
 async fn revision_changes_once_per_real_update(matrix: Matrix) {
     bootstrap(&matrix, &[]).await;
     let admin = matrix.admin();
@@ -437,36 +527,79 @@ async fn revision_changes_once_per_real_update(matrix: Matrix) {
         record_create_body(SUBJECT, "k-c041-create", "note", "revision one", &shared_scope(), &[]),
     )
     .await;
-    let mut previous = record_of(&admin.get_record(&record_id).await).clone()["revision"]
-        .as_u64()
-        .expect("revision");
+    let created = record_of(&admin.get_record(&record_id).await).clone();
+    assert_eq!(created["revision"], json!(1));
 
-    for (index, text) in ["revision two", "revision three", "revision four"]
-        .iter()
-        .enumerate()
-    {
-        let updated = admin
-            .update_record(json!({
-                "record_id": record_id,
-                "expected_revision": previous,
-                "content": { "text": text },
-                "idempotency_key": format!("k-c041-update-{index}"),
-            }))
-            .await;
-        assert!(is_committed(&updated), "update {index} commits: {updated}");
-        let revision = result(&updated)["revision"].as_u64().expect("revision");
-        assert_eq!(
-            revision,
-            previous + 1,
-            "one real update advances the revision by exactly one"
-        );
-        let read = record_of(&admin.get_record(&record_id).await).clone();
-        assert_eq!(read["revision"], json!(revision));
-        assert_eq!(read["content"]["text"], json!(text));
-        previous = revision;
-    }
+    // A changed kind is a real edit: exactly one revision.
+    let kind_changed = admin
+        .update_record(json!({
+            "record_id": record_id,
+            "expected_revision": 1,
+            "kind": "fact",
+            "idempotency_key": "k-c041-kind",
+        }))
+        .await;
+    assert!(is_committed(&kind_changed), "{kind_changed}");
+    assert_eq!(result(&kind_changed)["revision"], json!(2));
+    let after_kind = record_of(&admin.get_record(&record_id).await).clone();
+    assert_eq!(after_kind["revision"], json!(2));
+    assert_eq!(after_kind["kind"], json!("fact"));
+    assert_eq!(after_kind["content"], created["content"]);
 
-    // A stale attempt after three real updates is refused and changes nothing.
+    // An unchanged kind with no content changes nothing observable.
+    let no_op = admin
+        .update_record(json!({
+            "record_id": record_id,
+            "expected_revision": 2,
+            "kind": "fact",
+            "idempotency_key": "k-c041-noop",
+        }))
+        .await;
+    assert!(is_committed(&no_op), "the no-op commits its receipt: {no_op}");
+    assert_eq!(result(&no_op)["revision"], json!(2), "no spurious bump: {no_op}");
+    let no_op_replay = admin
+        .update_record(json!({
+            "record_id": record_id,
+            "expected_revision": 2,
+            "kind": "fact",
+            "idempotency_key": "k-c041-noop",
+        }))
+        .await;
+    assert_eq!(receipt_id(&no_op_replay), receipt_id(&no_op));
+    let after_no_op = record_of(&admin.get_record(&record_id).await).clone();
+    assert_eq!(after_no_op["revision"], json!(2));
+    assert_eq!(after_no_op["kind"], json!("fact"));
+    assert_eq!(after_no_op["content"], after_kind["content"]);
+    assert_eq!(after_no_op["created_at"], after_kind["created_at"]);
+    assert_eq!(after_no_op["updated_at"], after_kind["updated_at"]);
+
+    // Any explicit content update is real, even byte-identical content.
+    let identical = admin
+        .update_record(json!({
+            "record_id": record_id,
+            "expected_revision": 2,
+            "content": { "text": "revision one" },
+            "idempotency_key": "k-c041-identical",
+        }))
+        .await;
+    assert!(is_committed(&identical), "{identical}");
+    assert_eq!(result(&identical)["revision"], json!(3));
+    let after_identical = record_of(&admin.get_record(&record_id).await).clone();
+    assert_eq!(after_identical["revision"], json!(3));
+    assert_eq!(after_identical["content"]["text"], json!("revision one"));
+
+    let changed = admin
+        .update_record(json!({
+            "record_id": record_id,
+            "expected_revision": 3,
+            "content": { "text": "revision four" },
+            "idempotency_key": "k-c041-content",
+        }))
+        .await;
+    assert!(is_committed(&changed), "{changed}");
+    assert_eq!(result(&changed)["revision"], json!(4));
+
+    // A stale precondition changes nothing.
     let stale = admin
         .update_record(json!({
             "record_id": record_id,
@@ -476,9 +609,25 @@ async fn revision_changes_once_per_real_update(matrix: Matrix) {
         }))
         .await;
     assert_eq!(error_code(&stale), "REVISION_CONFLICT", "{stale}");
-    let read = record_of(&admin.get_record(&record_id).await).clone();
-    assert_eq!(read["revision"], json!(previous));
-    assert_eq!(read["content"]["text"], json!("revision four"));
+    assert_eq!(retry_class(&stale), "terminal");
+    let after_stale = record_of(&admin.get_record(&record_id).await).clone();
+    assert_eq!(after_stale["revision"], json!(4));
+    assert_eq!(after_stale["content"]["text"], json!("revision four"));
+
+    // A principal with no grant never reaches the CAS.
+    let denied = matrix
+        .peer()
+        .update_record(json!({
+            "record_id": record_id,
+            "expected_revision": 4,
+            "content": { "text": "unauthorized rewrite" },
+            "idempotency_key": "k-c041-denied",
+        }))
+        .await;
+    assert_refused_with(&denied, &["NOT_AUTHORIZED", "NOT_FOUND"]);
+    let after_denied = record_of(&admin.get_record(&record_id).await).clone();
+    assert_eq!(after_denied["revision"], json!(4));
+    assert_eq!(after_denied["content"]["text"], json!("revision four"));
     matrix.shutdown().await;
 }
 
@@ -492,59 +641,189 @@ async fn c_041_revision_changes_once_per_real_update_remote() {
     revision_changes_once_per_real_update(Matrix::remote().await).await;
 }
 
-/// C-043 / MEM-R015: pages are bounded by the caller's limit, ordered
-/// consistently across a fresh re-read, and end without a cursor.
+/// One bounded page of a restricted listing, with the exact served rows.
+async fn restricted_page(
+    actor: &Actor<'_>,
+    selection: Value,
+    limit: u64,
+    cursor: Option<&str>,
+) -> (Vec<(String, String, Value)>, Option<String>, Value) {
+    let page = actor
+        .list_records(record_list_request(selection, None, Some(limit), cursor))
+        .await;
+    assert!(
+        page.get("error").is_none(),
+        "the authorized page is served: {page}"
+    );
+    let rows = page["records"]
+        .as_array()
+        .expect("a record page names its rows")
+        .iter()
+        .map(|record| {
+            (
+                record["record_id"].as_str().expect("record id").to_owned(),
+                record["content"]["text"].as_str().expect("text").to_owned(),
+                record["scope"].clone(),
+            )
+        })
+        .collect();
+    let next = page["next_cursor"].as_str().map(str::to_owned);
+    (rows, next, page)
+}
+
+/// A full ordered traversal: every page's exact rows, then the flat id order.
+async fn restricted_traversal(
+    actor: &Actor<'_>,
+    selection: Value,
+    limit: u64,
+    expected_total: i64,
+) -> (Vec<Vec<(String, String, Value)>>, Vec<String>) {
+    let mut pages = Vec::new();
+    let mut ids = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let (rows, next, page) =
+            restricted_page(actor, selection.clone(), limit, cursor.as_deref()).await;
+        assert_eq!(page["total_authorized"], json!(expected_total), "{page}");
+        assert!(
+            rows.len() <= usize::try_from(limit).expect("limit fits usize"),
+            "a page never exceeds the requested bound: {page}"
+        );
+        ids.extend(rows.iter().map(|(id, _, _)| id.clone()));
+        pages.push(rows);
+        cursor = next;
+        assert!(pages.len() <= 8, "the traversal terminates: {ids:?}");
+        if cursor.is_none() {
+            break;
+        }
+    }
+    (pages, ids)
+}
+
+/// C-043 / MEM-R015 + MEM-R006: a restricted peer pages only its authorized
+/// rows; every page carries the exact seeded ids, contents and placement, and
+/// the complete ordered traversal repeats identically.
 async fn record_pages_are_bounded_and_stable(matrix: Matrix) {
     bootstrap(&matrix, &[]).await;
     let admin = matrix.admin();
-    let mut expected = Vec::new();
+    let peer_id = matrix.peer_principal().principal_id.as_str().to_owned();
+    assert_eq!(
+        result(&admin.ensure_subject(OTHER_SUBJECT).await)["created"],
+        json!(true)
+    );
+
+    // Independently seeded sets: five allowed rows, plus rows the peer must
+    // never see — another subject's rows, another context, and a shared row.
+    let mut allowed: Vec<(String, String)> = Vec::new();
     for index in 0..5 {
-        expected.push(
+        let text = format!("allowed context row {index}");
+        let id = create_record(
+            &admin,
+            record_create_body(
+                SUBJECT,
+                &format!("k-c043-allowed-{index}"),
+                "note",
+                &text,
+                &context_scope(CONTEXT),
+                &["src-c043"],
+            ),
+        )
+        .await;
+        allowed.push((id, text));
+    }
+    let mut hidden: Vec<String> = Vec::new();
+    for index in 0..2 {
+        hidden.push(
             create_record(
                 &admin,
                 record_create_body(
-                    SUBJECT,
-                    &format!("k-c043-{index}"),
+                    OTHER_SUBJECT,
+                    &format!("k-c043-foreign-{index}"),
                     "note",
-                    &format!("page row {index}"),
-                    &shared_scope(),
+                    &format!("foreign subject row {index}"),
+                    &context_scope(CONTEXT),
                     &[],
                 ),
             )
             .await,
         );
     }
-
-    let mut seen: Vec<String> = Vec::new();
-    let mut cursor: Option<String> = None;
-    let mut pages = 0;
-    loop {
-        let page = list_page(&admin, subject_all(), Some(2), cursor.as_deref()).await;
-        let ids = page_ids(&page);
-        assert!(
-            ids.len() <= 2,
-            "a page never exceeds the requested bound: {page}"
+    for index in 0..2 {
+        hidden.push(
+            create_record(
+                &admin,
+                record_create_body(
+                    SUBJECT,
+                    &format!("k-c043-out-of-scope-{index}"),
+                    "note",
+                    &format!("unselected context row {index}"),
+                    &context_scope(OTHER_CONTEXT),
+                    &[],
+                ),
+            )
+            .await,
         );
-        assert_eq!(page["total_authorized"], json!(5), "{page}");
-        seen.extend(ids);
-        cursor = page["next_cursor"].as_str().map(str::to_owned);
-        pages += 1;
-        assert!(pages <= 4, "the paging terminates: {seen:?}");
-        if cursor.is_none() {
-            break;
+    }
+    hidden.push(
+        create_record(
+            &admin,
+            record_create_body(
+                SUBJECT,
+                "k-c043-shared",
+                "note",
+                "shared row outside the restricted grant",
+                &shared_scope(),
+                &[],
+            ),
+        )
+        .await,
+    );
+
+    let grant = admin
+        .grant(scoped_grant(&["records_read"], &peer_id, SUBJECT, &[CONTEXT], false, "k-c043-grant"))
+        .await;
+    assert!(is_committed(&grant), "{grant}");
+    let selection = || selected_contexts(&[CONTEXT], false);
+
+    let (first_pages, first_ids) = restricted_traversal(&matrix.peer(), selection(), 2, 5).await;
+    assert_eq!(first_pages.len(), 3, "five rows at two per page");
+    assert_eq!(first_pages.iter().map(Vec::len).collect::<Vec<_>>(), vec![2, 2, 1]);
+
+    // Every served row: seeded content, the subject's placement, and the exact
+    // expected id. Later pages are checked as strictly as the first.
+    let expected = |id: &str| {
+        allowed
+            .iter()
+            .find(|(seeded, _)| seeded == id)
+            .map(|(_, text)| text.as_str())
+            .unwrap_or_else(|| panic!("the page served a row outside the authorized set: {id}"))
+    };
+    for page in &first_pages {
+        for (id, text, scope) in page {
+            assert_eq!(text.as_str(), expected(id), "page row {id} carries its seeded content");
+            assert_eq!(scope, &context_scope(CONTEXT), "page row {id} keeps its placement");
         }
     }
-    assert_eq!(pages, 3, "five rows at two per page need three pages");
-    seen.sort();
-    let mut wanted = expected.clone();
-    wanted.sort();
-    assert_eq!(seen, wanted, "pages cover every row exactly once");
 
-    // No state change: the first page is byte-identical on a fresh read.
-    let first = list_page(&admin, subject_all(), Some(2), None).await;
-    let again = list_page(&admin, subject_all(), Some(2), None).await;
-    assert_eq!(first, again, "the page order is stable for unchanged state");
-    assert_eq!(page_ids(&first).len(), 2);
+    // The full traversal covers exactly the seeded authorized ids, once each.
+    let mut seen: Vec<String> = first_ids.clone();
+    let mut wanted: Vec<String> = allowed.iter().map(|(id, _)| id.clone()).collect();
+    seen.sort();
+    wanted.sort();
+    assert_eq!(seen, wanted, "every page is exactly the authorized set");
+
+    // A complete second traversal is identical, not just its first page.
+    let (second_pages, second_ids) = restricted_traversal(&matrix.peer(), selection(), 2, 5).await;
+    assert_eq!(first_pages, second_pages, "the ordered traversal repeats exactly");
+    assert_eq!(first_ids, second_ids);
+
+    let serialized = serde_json::to_string(&first_pages).expect("pages serialize");
+    for id in &hidden {
+        assert!(
+            !serialized.contains(id.as_str()),
+            "a row outside the grant never appears on any page: {id}"
+        );
+    }
     matrix.shutdown().await;
 }
 
@@ -617,7 +896,97 @@ async fn record_promote_checks_grant_and_freeze(matrix: Matrix) {
     let unfrozen = admin.unfreeze_space("k-c044-unfreeze", frozen_revision).await;
     assert!(is_committed(&unfrozen), "{unfrozen}");
 
-    // (c) One grant carrying both capabilities over source and target.
+    // (c) Split capabilities: two individually insufficient grants whose union
+    // carries `promote` and `records_write` must not authorize the promotion —
+    // §6.5/§7.21 admit exactly one grant covering both capabilities and both
+    // placements, never a union.
+    let promote_only = admin
+        .grant(scoped_grant(
+            &["promote"],
+            &peer_id,
+            SUBJECT,
+            &[CONTEXT, OTHER_CONTEXT],
+            false,
+            "k-c044-promote-only",
+        ))
+        .await;
+    assert!(is_committed(&promote_only), "{promote_only}");
+    let write_only = admin
+        .grant(scoped_grant(
+            &["records_write"],
+            &peer_id,
+            SUBJECT,
+            &[CONTEXT, OTHER_CONTEXT],
+            false,
+            "k-c044-write-only",
+        ))
+        .await;
+    assert!(is_committed(&write_only), "{write_only}");
+    let split_capabilities = matrix
+        .peer()
+        .promote_record(json!({
+            "record_id": record_id,
+            "expected_revision": 1,
+            "target_scope": context_scope(OTHER_CONTEXT),
+            "idempotency_key": "k-c044-split-capabilities",
+        }))
+        .await;
+    assert_refused_with(&split_capabilities, &["NOT_AUTHORIZED", "NOT_FOUND"]);
+    let after_split_capabilities = current_record(&matrix, &record_id).await;
+    assert_eq!(
+        after_split_capabilities["scope"],
+        context_scope(CONTEXT),
+        "the union never moved the record: {after_split_capabilities}"
+    );
+    assert_eq!(after_split_capabilities["revision"], json!(1));
+    assert_eq!(
+        after_split_capabilities["provenance"]["source_context_ids"],
+        json!(["src-promotion"])
+    );
+
+    // (d) Split placements: one grant covers the source context, another the
+    // target. Neither alone covers both placements, so the promotion refuses.
+    let source_only = admin
+        .grant(scoped_grant(
+            &["promote", "records_write"],
+            &peer_id,
+            SUBJECT,
+            &[CONTEXT],
+            false,
+            "k-c044-source-only",
+        ))
+        .await;
+    assert!(is_committed(&source_only), "{source_only}");
+    let target_only = admin
+        .grant(scoped_grant(
+            &["promote", "records_write"],
+            &peer_id,
+            SUBJECT,
+            &[OTHER_CONTEXT],
+            false,
+            "k-c044-target-only",
+        ))
+        .await;
+    assert!(is_committed(&target_only), "{target_only}");
+    let split_placements = matrix
+        .peer()
+        .promote_record(json!({
+            "record_id": record_id,
+            "expected_revision": 1,
+            "target_scope": context_scope(OTHER_CONTEXT),
+            "idempotency_key": "k-c044-split-placements",
+        }))
+        .await;
+    assert_refused_with(&split_placements, &["NOT_AUTHORIZED", "NOT_FOUND"]);
+    let after_split_placements = current_record(&matrix, &record_id).await;
+    assert_eq!(after_split_placements["scope"], context_scope(CONTEXT));
+    assert_eq!(after_split_placements["revision"], json!(1));
+    assert_eq!(
+        after_split_placements["content"]["text"],
+        json!("promotion subject")
+    );
+
+    // (e) One grant carrying both capabilities over source and target.
     let granted = admin
         .grant(scoped_grant(
             &["promote", "records_write"],
@@ -713,9 +1082,9 @@ async fn advertised_content_bounds_are_enforced(matrix: Matrix) {
     let record_id = result(&created)["record_id"].as_str().expect("record id").to_owned();
     let stored = record_of(&admin.get_record(&record_id).await).clone();
     assert_eq!(
-        stored["content"]["text"].as_str().expect("stored text").len(),
-        at_bound.len(),
-        "the at-bound write is stored whole, never truncated"
+        stored["content"]["text"].as_str().expect("stored text"),
+        at_bound.as_str(),
+        "the at-bound write is stored whole and byte-identical, never truncated"
     );
 
     // One byte over the advertised bound refuses before any effect.
@@ -733,7 +1102,11 @@ async fn advertised_content_bounds_are_enforced(matrix: Matrix) {
     assert_eq!(error_code(&refused), "INVALID_INPUT", "{refused}");
     assert_eq!(retry_class(&refused), "terminal", "{refused}");
     assert_eq!(error_details(&refused)["field"], json!("content"), "{refused}");
-    assert_bound_reported(&refused, max_content_bytes);
+    assert_eq!(
+        error_details(&refused)["limit"],
+        json!("max_content_bytes"),
+        "§7.0.7 requires the exceeded bound to name itself: {refused}"
+    );
     let listed = admin
         .list_records(record_list_request(subject_all(), None, None, None))
         .await;
@@ -754,29 +1127,24 @@ async fn advertised_content_bounds_are_enforced(matrix: Matrix) {
         .await;
     assert_eq!(error_code(&update_refused), "INVALID_INPUT", "{update_refused}");
     assert_eq!(retry_class(&update_refused), "terminal");
-    assert_bound_reported(&update_refused, max_content_bytes);
+    assert_eq!(
+        error_details(&update_refused)["field"],
+        json!("content"),
+        "{update_refused}"
+    );
+    assert_eq!(
+        error_details(&update_refused)["limit"],
+        json!("max_content_bytes"),
+        "§7.0.7 requires the exceeded bound to name itself: {update_refused}"
+    );
     let unchanged = record_of(&admin.get_record(&record_id).await).clone();
     assert_eq!(unchanged["revision"], json!(1), "no partial update: {unchanged}");
     assert_eq!(
-        unchanged["content"]["text"].as_str().expect("text").len(),
-        at_bound.len()
+        unchanged["content"]["text"].as_str().expect("text"),
+        at_bound.as_str(),
+        "the refused update left the full original content in place"
     );
     matrix.shutdown().await;
-}
-
-/// The exceeded provider bound is reported on the refusal: `details.limit`
-/// where the boundary carries it, otherwise the refusal message names the
-/// advertised value.
-fn assert_bound_reported(refusal: &Value, max_content_bytes: u64) {
-    let details = error_details(refusal);
-    let reported = details["limit"].as_str() == Some("max_content_bytes")
-        || refusal["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains(&max_content_bytes.to_string()));
-    assert!(
-        reported,
-        "the refusal reports the exceeded max_content_bytes ({max_content_bytes}): {refusal}"
-    );
 }
 
 #[tokio::test]
@@ -828,6 +1196,7 @@ async fn base_read_operations_do_not_mutate(matrix: Matrix) {
         .await;
     assert!(is_committed(&captured), "{captured}");
     let receipt_id = receipt_id(&captured).to_owned();
+    let candidate_id = candidate_ids(&captured)[0].clone();
 
     // A page cursor minted before the reads is the state fingerprint: a
     // mutation moves the provider snapshot and invalidates it.
@@ -837,10 +1206,12 @@ async fn base_read_operations_do_not_mutate(matrix: Matrix) {
         .expect("two rows leave a continuation")
         .to_owned();
 
-    let before = read_state(&admin, &shared, &contextual, &receipt_id).await;
+    let durable_before = matrix.durable_state().await;
+    let before = read_state(&admin, &shared, &contextual, &receipt_id, &candidate_id).await;
 
     // The same reads again: nothing may move.
-    let after = read_state(&admin, &shared, &contextual, &receipt_id).await;
+    let after = read_state(&admin, &shared, &contextual, &receipt_id, &candidate_id).await;
+    let durable_after = matrix.durable_state().await;
     assert_eq!(before.0, after.0, "describe is a pure read");
     assert_eq!(before.1, after.1, "spaces.list is a pure read");
     assert_eq!(before.2, after.2, "subjects.get is a pure read");
@@ -852,6 +1223,20 @@ async fn base_read_operations_do_not_mutate(matrix: Matrix) {
     assert_eq!(before.8, after.8, "recall is a pure read: {:?}", after.8);
     assert_eq!(before.9, after.9, "profile.get is a pure read");
     assert_eq!(before.10, after.10, "receipts.get is a pure read");
+    assert_eq!(
+        before.11, after.11,
+        "candidates.get is a pure read: {:?}",
+        after.11
+    );
+
+    // The independent durable observation: the provider's own tables and its
+    // published file projection are unchanged by the whole read series — this
+    // is not the cursor alone, and a hidden receipt or journal write would
+    // move a row count.
+    assert_eq!(
+        durable_before, durable_after,
+        "no base read wrote a durable row or published a file"
+    );
 
     // The pre-read snapshot still continues: no read advanced it.
     let continued = list_page(&admin, subject_all(), Some(1), Some(&cursor)).await;
@@ -861,6 +1246,26 @@ async fn base_read_operations_do_not_mutate(matrix: Matrix) {
         "the cursor minted before the reads still pages: {continued}"
     );
     assert_ne!(page_ids(&continued)[0], page_ids(&page)[0]);
+
+    // Positive control: the same observation detects a real mutation, so the
+    // equality above is discriminating rather than inert.
+    create_record(
+        &admin,
+        record_create_body(
+            SUBJECT,
+            "k-c046-mutation-control",
+            "note",
+            "positive mutation control",
+            &shared_scope(),
+            &[],
+        ),
+    )
+    .await;
+    let durable_mutated = matrix.durable_state().await;
+    assert_ne!(
+        durable_before, durable_mutated,
+        "the durable observation changes after a real write"
+    );
     matrix.shutdown().await;
 }
 
@@ -1270,15 +1675,20 @@ async fn c_054_recall_never_returns_candidates_remote() {
 async fn recall_enforces_utf8_budget_and_overflow(matrix: Matrix) {
     bootstrap(&matrix, &[]).await;
     let admin = matrix.admin();
-    for (index, text) in [
-        "harbor gate log: the dawn watch changed",
-        "market ledger entry: three barrels of salt",
-        "northern road survey: the bridge holds",
+    // Independently seeded rows: the expected id, text and serialized content
+    // bytes are known before any provider answer and never derived from one.
+    let texts: Vec<String> = [
+        "harbor gate log: dawn watch",
+        "market ledger: three barrels",
+        "northern road survey: bridge",
     ]
     .iter()
-    .enumerate()
-    {
-        create_record(
+    .map(|text| format!("{text:<40}"))
+    .collect();
+    let mut size_of: Vec<(String, usize, String)> = Vec::new();
+    for (index, text) in texts.iter().enumerate() {
+        assert_eq!(text.len(), 40, "the fixed corpus rows are equally long");
+        let record_id = create_record(
             &admin,
             record_create_body(
                 SUBJECT,
@@ -1290,9 +1700,15 @@ async fn recall_enforces_utf8_budget_and_overflow(matrix: Matrix) {
             ),
         )
         .await;
+        let size = serde_json::to_vec(&json!({ "text": text }))
+            .expect("independent content serialization")
+            .len();
+        size_of.push((record_id, size, text.clone()));
     }
+    let seeded: Vec<String> = size_of.iter().map(|(id, _, _)| id.clone()).collect();
 
-    // The unbudgeted page establishes the provider's own rank order.
+    // The unbudgeted page establishes the provider's own rank order; its
+    // contents and byte sizes are then checked against the independent seed.
     let full = admin
         .recall(recall_request(SUBJECT, subject_all(), 10, None, None, None, None))
         .await;
@@ -1301,10 +1717,32 @@ async fn recall_enforces_utf8_budget_and_overflow(matrix: Matrix) {
     assert!(full["next_cursor"].as_str().is_none());
     assert!(full["overflow_record_id"].as_str().is_none());
     let order = page_ids(&full);
-    let sizes: Vec<usize> = recalled_records(&full).iter().map(content_bytes).collect();
+    for record in recalled_records(&full) {
+        let record_id = record["record_id"].as_str().expect("record id");
+        let (_, expected_size, expected_text) = size_of
+            .iter()
+            .find(|(id, _, _)| id == record_id)
+            .unwrap_or_else(|| panic!("recall served a row it never seeded: {record_id}"));
+        assert_eq!(
+            record["content"]["text"].as_str().expect("text"),
+            expected_text.as_str(),
+            "the served body is the seeded body"
+        );
+        assert_eq!(
+            content_bytes(record),
+            *expected_size,
+            "the served content is the independently measured size"
+        );
+    }
 
-    // A budget that fits the first row and cannot fit a second one.
-    let budget = u64::try_from(sizes[0]).expect("size fits u64") + 5;
+    // Every row fits individually but no two fit together: the §9.3 hard byte
+    // budget is a page SUM, so each page is exactly one row — a provider that
+    // only checked each row on its own would serve two and pass a weaker test.
+    let budget = u64::try_from(size_of[0].1).expect("size fits u64") * 2 - 1;
+    assert!(
+        size_of.iter().all(|(_, size, _)| *size <= usize::try_from(budget).expect("budget")),
+        "each seeded row fits the budget individually"
+    );
     let mut collected: Vec<String> = Vec::new();
     let mut cursor: Option<String> = None;
     let mut pages = 0;
@@ -1320,30 +1758,52 @@ async fn recall_enforces_utf8_budget_and_overflow(matrix: Matrix) {
                 cursor.as_deref(),
             ))
             .await;
+        let served = recalled_records(&page);
+        assert_eq!(page["total_authorized"], json!(3));
         assert_eq!(
             page["truncated"],
             json!(page["next_cursor"].as_str().is_some()),
             "truncation is reported exactly when more rows remain: {page}"
         );
-        assert_eq!(page["total_authorized"], json!(3));
-        for record in recalled_records(&page) {
-            let overflow = page["overflow_record_id"].as_str()
-                == record["record_id"].as_str();
+        let overflow = page["overflow_record_id"].as_str();
+        if let Some(overflow) = overflow {
+            assert_eq!(
+                served.len(),
+                1,
+                "an overflow flag is only valid on a one-record page: {page}"
+            );
+            assert_eq!(served[0]["record_id"].as_str(), Some(overflow));
             assert!(
-                content_bytes(record) <= usize::try_from(budget).expect("budget fits usize")
-                    || overflow,
-                "no served row silently exceeds the byte budget: {record}"
+                content_bytes(&served[0]) > usize::try_from(budget).expect("budget"),
+                "the flagged row really exceeds the budget: {page}"
+            );
+        } else {
+            let served_bytes: usize = served.iter().map(content_bytes).sum();
+            assert!(
+                served_bytes <= usize::try_from(budget).expect("budget"),
+                "the page's summed content bytes respect the hard budget: {page}"
+            );
+            assert_eq!(
+                served.len(),
+                1,
+                "two individually fitting rows must not share a page over budget: {page}"
             );
         }
         collected.extend(page_ids(&page));
         cursor = page["next_cursor"].as_str().map(str::to_owned);
         pages += 1;
-        assert!(pages <= 5, "paging terminates: {collected:?}");
+        assert!(pages <= 4, "paging terminates: {collected:?}");
         if cursor.is_none() {
             break;
         }
     }
+    assert_eq!(pages, 3, "one row per page under this budget");
     assert_eq!(collected, order, "pages follow the same rank order, once each");
+    let mut served: Vec<String> = collected.clone();
+    served.sort();
+    let mut wanted = seeded.clone();
+    wanted.sort();
+    assert_eq!(served, wanted, "the traversal covers exactly the seeded rows");
 
     // Bytes > budget while characters fit: a single multibyte body larger than
     // the budget is returned WHOLE and flagged, not dropped or truncated.
@@ -1410,36 +1870,77 @@ async fn c_055_recall_enforces_utf8_budget_and_overflow_remote() {
     recall_enforces_utf8_budget_and_overflow(Matrix::remote().await).await;
 }
 
-/// C-056 / MEM-R026: a continuation works unchanged, and a real scope, grant or
-/// state change invalidates the cursor with `CURSOR_INVALID` — never a silently
-/// re-filtered page.
+/// C-056 / MEM-R026: a continuation works unchanged, while a different bound
+/// query, a real change of the peer's effective `records_read` coverage, and a
+/// committed state change each invalidate the cursor with `CURSOR_INVALID` —
+/// never a silently re-filtered page — and a fresh page serves exactly the
+/// authorized rows.
 async fn cursor_invalid_after_grant_or_state_change(matrix: Matrix) {
     bootstrap(&matrix, &[]).await;
     let admin = matrix.admin();
     let peer_id = matrix.peer_principal().principal_id.as_str().to_owned();
-    for index in 0..3 {
-        create_record(
-            &admin,
-            record_create_body(
-                SUBJECT,
-                &format!("k-c056-{index}"),
-                "note",
-                &format!("cursor row {index}"),
-                &context_scope(CONTEXT),
-                &[if index == 0 { "src-first" } else { "src-later" }],
-            ),
-        )
-        .await;
+    assert_eq!(
+        result(&admin.ensure_subject(OTHER_SUBJECT).await)["created"],
+        json!(true)
+    );
+    let mut allowed: Vec<String> = Vec::new();
+    for index in 0..5 {
+        allowed.push(
+            create_record(
+                &admin,
+                record_create_body(
+                    SUBJECT,
+                    &format!("k-c056-{index}"),
+                    "note",
+                    &format!("cursor row {index}"),
+                    &context_scope(CONTEXT),
+                    &[if index == 0 { "src-first" } else { "src-later" }],
+                ),
+            )
+            .await,
+        );
     }
-    let grant = admin
-        .grant(scoped_grant(&["records_read"], &peer_id, SUBJECT, &[CONTEXT], false, "k-c056-grant"))
+    let other_context = create_record(
+        &admin,
+        record_create_body(
+            SUBJECT,
+            "k-c056-other-context",
+            "note",
+            "a placement the narrowed grant will not cover",
+            &context_scope(OTHER_CONTEXT),
+            &[],
+        ),
+    )
+    .await;
+    let foreign = create_record(
+        &admin,
+        record_create_body(
+            OTHER_SUBJECT,
+            "k-c056-foreign",
+            "note",
+            "another subject's cursor row",
+            &context_scope(CONTEXT),
+            &[],
+        ),
+    )
+    .await;
+    let wide = admin
+        .grant(scoped_grant(
+            &["records_read"],
+            &peer_id,
+            SUBJECT,
+            &[CONTEXT, OTHER_CONTEXT],
+            false,
+            "k-c056-grant-wide",
+        ))
         .await;
-    assert!(is_committed(&grant), "{grant}");
+    assert!(is_committed(&wide), "{wide}");
+    let wide_grant = result(&wide)["grant_id"].as_str().expect("grant id").to_owned();
     let selection = || selected_contexts(&[CONTEXT], false);
 
     // Continuation under identical state succeeds.
     let page = list_page(&matrix.peer(), selection(), Some(1), None).await;
-    assert_eq!(page["total_authorized"], json!(3), "{page}");
+    assert_eq!(page["total_authorized"], json!(5), "{page}");
     let cursor = page["next_cursor"].as_str().expect("more rows remain").to_owned();
     let continued = matrix
         .peer()
@@ -1462,27 +1963,59 @@ async fn cursor_invalid_after_grant_or_state_change(matrix: Matrix) {
     assert_eq!(error_code(&scope_changed), "CURSOR_INVALID", "{scope_changed}");
     assert_eq!(retry_class(&scope_changed), "terminal");
 
-    // A grant change moves the provider snapshot: the cursor no longer applies.
-    let before_grant = list_page(&matrix.peer(), selection(), Some(1), None).await;
-    let cursor = before_grant["next_cursor"]
+    // A real change of the peer's effective records_read coverage: the wide
+    // grant is revoked and replaced by a narrower one that still covers the
+    // request, so authorization passes and the changed coverage alone must
+    // invalidate the outstanding cursor.
+    let before_narrowing = list_page(&matrix.peer(), selection(), Some(1), None).await;
+    let cursor = before_narrowing["next_cursor"]
         .as_str()
         .expect("more rows remain")
         .to_owned();
-    let extra = admin
-        .grant(grant_body("capture", &peer_id, "k-c056-extra-grant"))
+    let revoked = admin
+        .revoke_grant(&wide_grant, 1, "k-c056-revoke-wide")
         .await;
-    assert!(is_committed(&extra), "{extra}");
-    let after_grant = matrix
+    assert!(is_committed(&revoked), "{revoked}");
+    let narrow = admin
+        .grant(scoped_grant(
+            &["records_read"],
+            &peer_id,
+            SUBJECT,
+            &[CONTEXT],
+            false,
+            "k-c056-grant-narrow",
+        ))
+        .await;
+    assert!(is_committed(&narrow), "{narrow}");
+    let after_narrowing = matrix
         .peer()
         .list_records(record_list_request(selection(), None, Some(1), Some(&cursor)))
         .await;
-    assert_eq!(error_code(&after_grant), "CURSOR_INVALID", "{after_grant}");
-    // Re-issued from a fresh snapshot the page is served.
-    let reissued = list_page(&matrix.peer(), selection(), Some(1), None).await;
-    assert_eq!(reissued["total_authorized"], json!(3), "{reissued}");
+    assert_eq!(
+        error_code(&after_narrowing),
+        "CURSOR_INVALID",
+        "the effective coverage change invalidates the cursor: {after_narrowing}"
+    );
+    let fresh = list_page(&matrix.peer(), selection(), Some(10), None).await;
+    let mut fresh_ids = page_ids(&fresh);
+    let mut wanted = allowed.clone();
+    fresh_ids.sort();
+    wanted.sort();
+    assert_eq!(
+        fresh_ids, wanted,
+        "the fresh page is exactly the newly authorized set: {fresh}"
+    );
+    assert_eq!(fresh["total_authorized"], json!(5));
+    let serialized = fresh.to_string();
+    assert!(!serialized.contains(&other_context));
+    assert!(!serialized.contains(&foreign));
 
     // A committed state change invalidates the cursor the same way.
-    let cursor = reissued["next_cursor"].as_str().expect("rows remain").to_owned();
+    let before_state = list_page(&matrix.peer(), selection(), Some(1), None).await;
+    let cursor = before_state["next_cursor"]
+        .as_str()
+        .expect("more rows remain")
+        .to_owned();
     create_record(
         &admin,
         record_create_body(
@@ -1500,10 +2033,10 @@ async fn cursor_invalid_after_grant_or_state_change(matrix: Matrix) {
         .list_records(record_list_request(selection(), None, Some(1), Some(&cursor)))
         .await;
     assert_eq!(error_code(&after_state), "CURSOR_INVALID", "{after_state}");
-    let fresh = list_page(&matrix.peer(), selection(), Some(1), None).await;
+    let fresh = list_page(&matrix.peer(), selection(), Some(10), None).await;
     assert_eq!(
         fresh["total_authorized"],
-        json!(4),
+        json!(6),
         "the fresh snapshot sees the new row: {fresh}"
     );
     matrix.shutdown().await;
@@ -1519,25 +2052,47 @@ async fn c_056_cursor_invalid_after_grant_or_state_change_remote() {
     cursor_invalid_after_grant_or_state_change(Matrix::remote().await).await;
 }
 
-/// C-057 / §7.22: `selection` is a required `ReadSelection`; its absence or an
-/// explicit null is a format error, never an authorization outcome.
+/// C-057 / §7.22: `selection` is a required `ReadSelection`. On the SAME raw
+/// signed session and identity, a well-formed recall is served with the seeded
+/// row, while a missing or null selection is a terminal `INVALID_INPUT` — so a
+/// blanket raw refusal cannot satisfy this row.
 async fn missing_or_null_selection_is_invalid_input(matrix: Matrix) {
     bootstrap(&matrix, &[]).await;
     let admin = matrix.admin();
-    create_record(
+    let record_id = create_record(
         &admin,
         record_create_body(SUBJECT, "k-c057-row", "note", "selection shape row", &shared_scope(), &[]),
     )
     .await;
 
-    // Positive control through the typed surface: the same call with a
-    // well-formed selection is served, so the refusals below are about shape.
-    let served = admin
-        .recall(recall_request(SUBJECT, subject_all(), 10, None, None, None, None))
-        .await;
-    assert_eq!(served["total_authorized"], json!(1), "{served}");
-
     let mut raw = matrix.raw_admin().await;
+
+    // The same session and authentication serve a valid recall first: its
+    // payload carries the seeded record, so the raw route is not blanket-fail.
+    let valid = raw
+        .invoke(
+            "memory.recall",
+            &json!({
+                "space_id": matrix.space_id(),
+                "subject_id": SUBJECT,
+                "selection": { "mode": "subject_all" },
+                "budget": { "max_items": 10 },
+            }),
+        )
+        .await;
+    assert!(
+        valid.get("error").is_none(),
+        "a well-formed recall is served on the raw path: {valid}"
+    );
+    let served = &valid["payload"];
+    assert_eq!(served["total_authorized"], json!(1), "{valid}");
+    assert_eq!(served["records"][0]["record_id"], json!(record_id), "{valid}");
+    assert_eq!(
+        served["records"][0]["content"]["text"],
+        json!("selection shape row"),
+        "{valid}"
+    );
+
     for payload in [
         json!({
             "space_id": matrix.space_id(),
@@ -1564,6 +2119,12 @@ async fn missing_or_null_selection_is_invalid_input(matrix: Matrix) {
         );
     }
     raw.close().await;
+
+    // The typed positive control remains additional, not a replacement.
+    let served = admin
+        .recall(recall_request(SUBJECT, subject_all(), 10, None, None, None, None))
+        .await;
+    assert_eq!(served["total_authorized"], json!(1), "{served}");
     matrix.shutdown().await;
 }
 
@@ -2011,44 +2572,55 @@ async fn c_061_profile_update_enforces_cas_remote() {
 }
 
 /// C-062 / MEM-R005: profile admission and capability admission are distinct
-/// outcomes — an absent optional profile is honest-empty success, missing
-/// coverage is `NOT_AUTHORIZED`, and a missing capability is
-/// `capability_missing`. No empty success stands in for a capability.
+/// outcomes. The row reads EVERY kind the provider actually declares as
+/// required, plus an actually non-required absent kind: absence is honest-empty
+/// for a plain profile read, missing coverage is `NOT_AUTHORIZED`, and a
+/// missing capability is `capability_missing`.
 ///
-/// The `PROFILE_INCOMPLETE` branch is the admission-relevant *required* kind,
-/// which only `memory.reflections.generate` consumes (§7.27); that operation is
-/// N4-R, so this N3 row proves the three outcomes the base surface can express
-/// and leaves the required-kind gate to the reflection slice rather than
-/// inventing it here.
+/// The `PROFILE_INCOMPLETE` branch is generation-specific (§4.2/§7.27) and is
+/// consumed only by `memory.reflections.generate`, which is N4-R; this row does
+/// not substitute `NOT_AUTHORIZED` for it and does not claim it.
 async fn profile_and_capability_admission_are_distinct(matrix: Matrix) {
     bootstrap(&matrix, &[]).await;
     let admin = matrix.admin();
 
-    // (1) The provider declares the required authored kinds it would gate on.
     let described = admin.describe().await;
-    let required = described["required_profile_kinds"]
+    let required: Vec<String> = described["required_profile_kinds"]
         .as_array()
         .unwrap_or_else(|| panic!("describe advertises required_profile_kinds: {described}"))
         .iter()
         .map(|kind| kind.as_str().expect("kind").to_owned())
-        .collect::<Vec<_>>();
+        .collect();
     assert!(
         required.iter().all(|kind| !kind.is_empty()),
         "every declared required kind is a name: {described}"
     );
 
-    // (2) A missing optional profile is an honest-empty success — for every
-    // declared kind too: a plain read is not the admission gate.
-    for kind in ["preferences", "personality"] {
-        let page = admin
-            .get_profile(json!({ "subject_id": SUBJECT, "profile_kinds": [kind] }))
-            .await;
-        assert!(
-            page.get("error").is_none(),
-            "an absent kind is honest-empty, never an error: {page}"
-        );
-        assert!(profiles_of(&page).is_empty());
-    }
+    // (1) Every actually declared required kind, read as a profile: absence is
+    // honest-empty, never an error and never an empty *admission* success.
+    let required_page = admin
+        .get_profile(json!({ "subject_id": SUBJECT, "profile_kinds": required }))
+        .await;
+    assert!(
+        required_page.get("error").is_none(),
+        "an absent required kind is honest-empty on a plain read: {required_page}"
+    );
+    assert!(profiles_of(&required_page).is_empty());
+
+    // (2) An actually non-required kind that is also absent — derived from the
+    // provider's own declaration, never a hardcoded name claimed to be all.
+    let non_required = ["preferences", "notes-harbor", "custom"]
+        .into_iter()
+        .find(|kind| !required.iter().any(|declared| declared == kind))
+        .expect("a kind outside the declared required set");
+    let optional_page = admin
+        .get_profile(json!({ "subject_id": SUBJECT, "profile_kinds": [non_required] }))
+        .await;
+    assert!(
+        optional_page.get("error").is_none(),
+        "an absent optional kind is honest-empty: {optional_page}"
+    );
+    assert!(profiles_of(&optional_page).is_empty());
 
     // (3) Missing coverage is a typed authorization refusal, not empty data.
     let denied = matrix
@@ -2077,9 +2649,10 @@ async fn profile_and_capability_admission_are_distinct(matrix: Matrix) {
     assert_eq!(error["code"], json!("capability_missing"), "{unavailable}");
     assert_eq!(error["details"]["retry_class"], json!("terminal"));
 
-    // The three outcomes are three distinct shapes, never collapsed.
+    // The three N3-expressible outcomes are three distinct shapes.
     assert_ne!(error["code"], json!("NOT_AUTHORIZED"));
     assert_ne!(error["code"], json!("PROFILE_INCOMPLETE"));
+    assert!(denied.get("profiles").is_none());
     matrix.shutdown().await;
 }
 
@@ -2152,9 +2725,15 @@ async fn c_063_capture_never_mutates_profile_remote() {
     capture_never_mutates_profile(Matrix::remote().await).await;
 }
 
-/// C-064 / §6.8: capability concepts are never profile document kinds — a
-/// provider with zero `transfer`/`governance`/`reflection` documents reads
-/// honest-empty, and selection fails or succeeds on capability grounds only.
+/// C-064 / §6.8 + §2.2: capability concepts are never profile document kinds,
+/// and a provider is really selected and opened without any fabricated
+/// `transfer`/`governance`/`reflection` document.
+///
+/// Two independent observations: the leg's own provider serves no
+/// capability-named profile kind, and the public `CoreService::open` selection
+/// surface opens the supported local and remote selections with zero such
+/// documents, while a host that negotiates no memory family fails the open on
+/// capability grounds (`memory_remote_capability`).
 async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
     bootstrap(&matrix, &[]).await;
     let admin = matrix.admin();
@@ -2199,31 +2778,89 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
         profiles_of(&after).is_empty(),
         "no fake profile document is fabricated for a capability: {after}"
     );
-
-    // Selection by capability fails on CAPABILITY grounds, independent of any
-    // profile content.
-    let mut raw = matrix.raw_admin().await;
-    let unavailable = raw
-        .invoke(
-            "memory.reflections.list",
-            &json!({
-                "space_id": matrix.space_id(),
-                "subject_id": SUBJECT,
-            }),
-        )
-        .await;
-    raw.close().await;
-    let error = unavailable
-        .get("error")
-        .unwrap_or_else(|| panic!("the unavailable capability is refused: {unavailable}"));
-    assert_eq!(error["code"], json!("capability_missing"), "{unavailable}");
-
     for kind in profile_kinds(&admin.get_profile(json!({ "subject_id": SUBJECT })).await) {
         assert!(
             !capability_kinds.contains(&kind.as_str()),
             "a capability name is never served as a profile kind: {kind}"
         );
     }
+
+    // (A) The real supported LOCAL selection: the public open pins the local
+    // provider, serves a product memory read, and the pinned provider itself
+    // serves no fabricated capability-kind document.
+    let local = open_selected_local(SUBJECT, &capability_kinds).await;
+    assert!(
+        local.described["limits"]["max_content_bytes"].as_u64() > Some(0),
+        "the selected local provider describes its bounds: {:?}",
+        local.described
+    );
+    assert_eq!(local.pending, 0, "the pinned local binding serves memory");
+    assert!(
+        profiles_of(&local.profiles).is_empty(),
+        "the selected local provider serves no fabricated profile kind: {:?}",
+        local.profiles
+    );
+
+    // (B) The real supported REMOTE selection: the same public open against a
+    // fresh fixture served over a signed loopback session, with the
+    // operator-provisioned credential the selection names.
+    let fixture = support::selection_fixture().await;
+    let host = serve_selection_host(
+        Arc::clone(&fixture.service),
+        &fixture.authority_host_id,
+        &["spoke-memory"],
+        SELECTION_CLIENT_SEED,
+    )
+    .await;
+    let home = SelectionHome::new(support::SELECTION_CREATOR, SELECTION_CLIENT_SEED);
+    let core = CoreService::open(CoreOpenOptions {
+        user_home: home.user_home.clone(),
+        access: CoreAccess::EngineOwner,
+        memory: Some(remote_selection(&fixture.space_id, &host)),
+    })
+    .await
+    .expect("the supported remote selection opens the served fixture");
+    let principal = core.active_principal().await.expect("active principal");
+    assert_eq!(
+        core.count_pending_reviews(&principal)
+            .await
+            .expect("the pinned remote binding serves the memory family")
+            .count,
+        0
+    );
+    let responder = host.session().await;
+    assert_eq!(
+        responder.state().as_str(),
+        "Established",
+        "the remote selection really authenticated the signed session"
+    );
+    core.close().await.expect("the remote selection closes");
+
+    // (C) A host that negotiates no memory family fails the same selection on
+    // capability grounds — the one capability-based selection failure the
+    // existing interface expresses.
+    let host = serve_selection_host(
+        Arc::clone(&fixture.service),
+        &fixture.authority_host_id,
+        &[],
+        SELECTION_CLIENT_SEED,
+    )
+    .await;
+    let home = SelectionHome::new(support::SELECTION_CREATOR, SELECTION_CLIENT_SEED);
+    let error = CoreService::open(CoreOpenOptions {
+        user_home: home.user_home.clone(),
+        access: CoreAccess::EngineOwner,
+        memory: Some(remote_selection(&fixture.space_id, &host)),
+    })
+    .await
+    .err()
+    .expect("a host without the memory family fails the open");
+    assert_eq!(
+        core_code(&error),
+        "memory_remote_capability",
+        "the negotiated family is required even when the space would match"
+    );
+    host.session().await;
     matrix.shutdown().await;
 }
 

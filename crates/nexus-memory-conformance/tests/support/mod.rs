@@ -1796,3 +1796,359 @@ async fn create_character_fixture(user_home: &std::path::Path) -> (CharacterFixt
     drop(core);
     (fixture, creator_id)
 }
+
+// ---------------------------------------------------------------------------
+// Durable state observation (I253): the provider's own storage, read-only
+// ---------------------------------------------------------------------------
+
+/// The provider's durable state around a read series: the row counts of the
+/// tables that carry the base-read families and, for the local provider, the
+/// exact bytes of the published file projection under its file root.
+///
+/// Observed through a read-only SQLite connection and the provider's public
+/// `file_root()`; the protocol surface under test is never the oracle. Private
+/// pages are not claimed — only these rows and these published files.
+#[derive(Debug, PartialEq, Eq)]
+pub struct DurableState {
+    pub tables: Vec<(String, i64)>,
+    pub publications: Vec<(String, Vec<u8>)>,
+}
+
+const LOCAL_TABLES: [&str; 8] = [
+    "memory_spaces",
+    "memory_subjects",
+    "memory_grants",
+    "memory_candidates",
+    "memory_records",
+    "memory_profiles",
+    "memory_receipts",
+    "memory_journal",
+];
+
+const FIXTURE_TABLES: [&str; 8] = [
+    "spaces",
+    "subjects",
+    "grants",
+    "candidates",
+    "records",
+    "profiles",
+    "receipts",
+    "idempotency_namespace",
+];
+
+/// Every file under `root`, as (relative path, exact bytes), sorted.
+fn published_files(root: &std::path::Path) -> Vec<(String, Vec<u8>)> {
+    fn walk(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<(String, Vec<u8>)>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(root, &path, out);
+            } else if let Ok(bytes) = std::fs::read(&path) {
+                let relative = path
+                    .strip_prefix(root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .into_owned();
+                out.push((relative, bytes));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, root, &mut out);
+    out.sort_by(|left, right| left.0.cmp(&right.0));
+    out
+}
+
+async fn table_counts(db: &std::path::Path, tables: &[&str]) -> Vec<(String, i64)> {
+    let options = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(db)
+        .read_only(true);
+    let pool = sqlx::SqlitePool::connect_with(options)
+        .await
+        .expect("a read-only connection to the provider's own file");
+    let mut counts = Vec::with_capacity(tables.len());
+    for table in tables {
+        let sql = format!("SELECT COUNT(*) FROM {table}");
+        let (count,): (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+            .fetch_one(&pool)
+            .await
+            .unwrap_or_else(|error| panic!("{table} is readable: {error}"));
+        counts.push(((*table).to_owned(), count));
+    }
+    pool.close().await;
+    counts
+}
+
+impl Matrix {
+    /// The provider's durable state, read through its own storage.
+    pub async fn durable_state(&self) -> DurableState {
+        match (&self.home, &self.provider) {
+            (Home::Local { user_home, .. }, Provider::Local(provider)) => DurableState {
+                tables: table_counts(
+                    &nexus_home_layout::workspace_state_db_path(
+                        user_home,
+                        self.admin_principal.principal_id.as_str(),
+                        LOCAL_WORKSPACE,
+                    ),
+                    &LOCAL_TABLES,
+                )
+                .await,
+                publications: published_files(&provider.file_root()),
+            },
+            (Home::Remote { db, .. }, Provider::Fixture(_)) => DurableState {
+                tables: table_counts(db, &FIXTURE_TABLES).await,
+                publications: Vec::new(),
+            },
+            _ => panic!("the provider kind and its durable home must agree"),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Real provider selection / open controls (I256)
+// ---------------------------------------------------------------------------
+
+/// The dialing identity of a selection control, and the credential id the
+/// disposable home provisions for it.
+pub const SELECTION_CLIENT_SEED: [u8; 32] = [0x61; 32];
+pub const SELECTION_CREDENTIAL_ID: &str = "cred-c-matrix-selection";
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// A one-shot signed host for a real `CoreService` remote open: the endpoint,
+/// the host identity and the dialing peer the open must authenticate.
+pub struct SelectionHost {
+    pub endpoint: String,
+    pub host_pubkey: [u8; 32],
+    task: tokio::task::JoinHandle<Arc<ConnectResponder>>,
+}
+
+impl SelectionHost {
+    /// Await the responder that served the open's signed session.
+    pub async fn session(self) -> Arc<ConnectResponder> {
+        tokio::time::timeout(BOUND, self.task)
+            .await
+            .expect("the selection responder is bounded")
+            .expect("the selection responder completed")
+    }
+}
+
+/// Serve `service` for one real `CoreService::open` over a signed loopback
+/// session. `capabilities` is the host's own signed hello, so an empty list is
+/// a host that negotiates no memory family.
+pub async fn serve_selection_host(
+    service: Arc<dyn RemoteMemoryService>,
+    host_id: &str,
+    capabilities: &[&str],
+    client_seed: [u8; 32],
+) -> SelectionHost {
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind an ephemeral localhost port");
+    let addr = listener.local_addr().expect("listener address");
+    let client_peer = peer_id(&client_seed);
+    let client_pubkey = pubkey(&client_seed);
+    let host_manifest = manifest_with(host_id, capabilities);
+    let task = tokio::spawn(async move {
+        let (tcp, address) = tokio::time::timeout(BOUND, listener.accept())
+            .await
+            .expect("the open connects to the localhost listener")
+            .expect("accept the open's peer");
+        assert!(address.ip().is_loopback(), "the listener serves localhost only");
+        let ws = tokio::time::timeout(
+            BOUND,
+            tokio_tungstenite::accept_async_with_config(
+                tcp,
+                Some(ws_config(DEFAULT_MAX_ENVELOPE_BYTES)),
+            ),
+        )
+        .await
+        .expect("the websocket upgrade is bounded")
+        .expect("websocket upgrade");
+        let socket: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+        let ports: Arc<dyn RemoteServePorts + Send + Sync> = Arc::new(
+            RemoteServePortsComposite::new(Arc::new(MemoryOnlyHost), None, None)
+                .with_memory(service),
+        );
+        connect_responder(ConnectResponderOptions {
+            transport: socket,
+            identity: RemoteIdentity { seed: HOST_SEED },
+            manifest: host_manifest,
+            allowlist: vec![client_peer.clone()],
+            peer_keys: HashMap::from([(client_peer, client_pubkey)]),
+            ports: Some(ports),
+            invoke_timeout_ms: Some(5_000),
+        })
+        .await
+    });
+    SelectionHost {
+        endpoint: format!("ws://{addr}"),
+        host_pubkey: pubkey(&HOST_SEED),
+        task,
+    }
+}
+
+/// A disposable Core home for a selection control: the active creator and
+/// workspace table plus the operator-provisioned credential for `client_seed`.
+pub struct SelectionHome {
+    _home: TempDir,
+    pub user_home: PathBuf,
+}
+
+impl SelectionHome {
+    pub fn new(creator: &str, client_seed: [u8; 32]) -> Self {
+        let home = TempDir::new().expect("selection home");
+        let user_home = home.path().to_path_buf();
+        std::fs::create_dir_all(user_home.join(".nexus42")).expect("nexus home");
+        std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+            &user_home,
+            creator,
+            LOCAL_WORKSPACE,
+        ))
+        .expect("workspace dir");
+        std::fs::write(
+            user_home.join(".nexus42").join("config.toml"),
+            format!(
+                "active_creator_id = \"{creator}\"\n\
+                 [active_workspace_slug_by_creator]\n\
+                 \"{creator}\" = \"{LOCAL_WORKSPACE}\"\n"
+            ),
+        )
+        .expect("seed the selection config");
+        let credentials = user_home.join(".nexus42").join("memory-credentials");
+        std::fs::create_dir_all(&credentials).expect("credential dir");
+        let path = credentials.join(format!("{SELECTION_CREDENTIAL_ID}.json"));
+        std::fs::write(
+            &path,
+            format!(
+                "{{\"identity_seed_hex\":\"{}\",\"capability_token\":null}}",
+                hex(&client_seed)
+            ),
+        )
+        .expect("write the operator credential");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+                .expect("credential mode 0600");
+        }
+        Self {
+            _home: home,
+            user_home,
+        }
+    }
+}
+
+/// The remote selection a Core open would persist for the served fixture.
+pub fn remote_selection(
+    space_id: &str,
+    host: &SelectionHost,
+) -> nexus_core::MemoryProviderSelection {
+    nexus_core::MemoryProviderSelection::Remote(nexus_core::RemoteMemoryProviderSelection {
+        space_id: space_id.to_owned(),
+        credential_id: SELECTION_CREDENTIAL_ID.to_owned(),
+        connect_endpoint: host.endpoint.clone(),
+        remote_pubkey_hex: hex(&host.host_pubkey),
+        allowlist: vec![peer_id(&HOST_SEED)],
+    })
+}
+
+/// The typed code of a `CoreError::Coded` refusal.
+pub fn core_code(error: &nexus_core::CoreError) -> &str {
+    match error {
+        nexus_core::CoreError::Coded { code, .. } => code,
+        other => panic!("expected a coded Core refusal, got {other:?}"),
+    }
+}
+
+/// The real local selection control: `CoreService::open` with the supported
+/// local memory selection, then the pinned provider's own declarations and a
+/// product memory read through the same open.
+pub struct LocalSelection {
+    pub described: Value,
+    pub profiles: Value,
+    pub pending: i64,
+}
+
+pub async fn open_selected_local(subject: &str, profile_kinds: &[&str]) -> LocalSelection {
+    let home = SelectionHome::new(LOCAL_ADMIN_ID, SELECTION_CLIENT_SEED);
+    let core = CoreService::open(CoreOpenOptions {
+        user_home: home.user_home.clone(),
+        access: CoreAccess::EngineOwner,
+        memory: Some(nexus_core::MemoryProviderSelection::Local),
+    })
+    .await
+    .expect("the supported local memory selection opens");
+    let core_principal = core.active_principal().await.expect("active principal");
+    let pending = core
+        .count_pending_reviews(&core_principal)
+        .await
+        .expect("the pinned local binding serves the memory family")
+        .count;
+    // The provider's typed port takes the spoke-schema principal the admission
+    // maps; the Core principal is its creator-scoped counterpart.
+    let principal = principal(core_principal.creator_id());
+    let provider = core
+        .memory_provider_for_test()
+        .expect("a local selection pins the local provider");
+    let described = wire(&provider.describe(&principal, dto(json!({}))).await);
+    let profiles = wire(
+        &provider
+            .get_profile(
+                &principal,
+                dto(json!({
+                    "space_id": provider.space_id(),
+                    "subject_id": subject,
+                    "profile_kinds": profile_kinds,
+                })),
+            )
+            .await,
+    );
+    core.close().await.expect("the local selection closes");
+    LocalSelection {
+        described,
+        profiles,
+        pending,
+    }
+}
+
+/// The Core creator/workspace a selection control opens under (a Core-local
+/// identity; the provider's admission maps the signed peer, not this id).
+pub const SELECTION_CREATOR: &str = "ctr_c_matrix_selection";
+
+/// A fresh durable fixture prepared for a real `CoreService` remote open: its
+/// served service, the authority host label its manifest names, its space and
+/// the operator-provisioned grant for the selection peer.
+pub struct SelectionFixture {
+    pub service: Arc<dyn RemoteMemoryService>,
+    pub authority_host_id: String,
+    pub space_id: String,
+    _home: TempDir,
+}
+
+pub async fn selection_fixture() -> SelectionFixture {
+    let home = TempDir::new().expect("selection fixture home");
+    let provider = Arc::new(
+        FixtureMemoryProvider::open(&home.path().join("selection.sqlite"))
+            .await
+            .expect("open the selection fixture"),
+    );
+    let client_peer = peer_id(&SELECTION_CLIENT_SEED);
+    let principal_id = format!("prn_{client_peer}");
+    provider
+        .provision_operator_admin(&principal_id)
+        .await
+        .expect("operator provisions the selection principal");
+    let directory = Arc::new(PeerDirectory::new().with_peer(client_peer, principal_id));
+    SelectionFixture {
+        service: provider.server(directory.admission()),
+        authority_host_id: provider.identity().authority_host_id.clone(),
+        space_id: provider.identity().space_id.clone(),
+        _home: home,
+    }
+}
