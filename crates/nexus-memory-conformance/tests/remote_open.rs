@@ -1266,6 +1266,7 @@ struct ObservedInvoke {
     op: String,
     session_id: String,
     request_id: String,
+    payload: Value,
     auth: Option<Value>,
 }
 
@@ -1294,6 +1295,7 @@ impl EnvelopeObserver {
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string(),
+            payload: envelope.get("payload").cloned().unwrap_or(Value::Null),
             auth: envelope.get("auth").filter(|auth| !auth.is_null()).cloned(),
         };
         let mut slot = self.pending.lock().expect("observer slot");
@@ -1370,6 +1372,9 @@ impl RemoteMemoryService for TokenGate {
         }
         if observed.op != op {
             return Self::deny("the received op does not match the dispatched op");
+        }
+        if observed.payload != payload {
+            return Self::deny("the received payload does not match the dispatched payload");
         }
         let Some(auth) = observed.auth else {
             return Self::deny("the received invoke carried no auth proof");
