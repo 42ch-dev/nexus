@@ -1480,9 +1480,13 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
     assert_eq!(code, "SUBJECT_FENCED");
     assert_eq!(retry_class, "terminal");
     assert_eq!(family, MemoryProviderRefusal::Conflict);
+    // Scoped to THIS binding: the archived attempt's definite refusal settles
+    // its own admission. Other bindings may legitimately retain conservative
+    // attempts (the concurrent dismiss/review race above keeps the losing
+    // review's admission, which the shared no-effect policy does not retire).
     let nexus = core_db(&env).await;
     assert_eq!(
-        scalar(&nexus, "SELECT COUNT(*) FROM remote_binding_memory_admissions").await,
+        admission_count(&nexus, &binding_b).await,
         0,
         "a definite lifecycle refusal settles this attempt's admission"
     );
@@ -2988,7 +2992,7 @@ async fn external_capture(
 /// only reproduces the loss window at the service boundary.
 /// The verdict-shaped corruptions a committed review response can still carry:
 /// the SDK schema accepts them, but they contradict the decision Core issued.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone)]
 enum ReviewMangle {
     /// `outcome = fragmented` with no record ids at all.
     EmptyIds,
@@ -2996,6 +3000,11 @@ enum ReviewMangle {
     DropOutcome,
     /// A record id that is the empty string.
     EmptyIdString,
+    /// An actually observed earlier review receipt, replayed after this review
+    /// really committed: same outcome/count, but its own (older) key.
+    StaleReceipt(Value),
+    /// The current receipt with a foreign space echoed.
+    ForeignSpace,
 }
 
 struct ReviewLossProbe {
@@ -3003,6 +3012,7 @@ struct ReviewLossProbe {
     candidate: std::sync::Mutex<Option<String>>,
     lose: AtomicBool,
     mangle: std::sync::Mutex<Option<ReviewMangle>>,
+    captured: std::sync::Mutex<Option<Value>>,
     committed_losses: AtomicUsize,
 }
 
@@ -3013,12 +3023,18 @@ impl ReviewLossProbe {
             candidate: std::sync::Mutex::new(None),
             lose: AtomicBool::new(false),
             mangle: std::sync::Mutex::new(None),
+            captured: std::sync::Mutex::new(None),
             committed_losses: AtomicUsize::new(0),
         }
     }
 
     fn mangle(&self, mode: Option<ReviewMangle>) {
         *self.mangle.lock().expect("mangle mode") = mode;
+    }
+
+    /// The last real committed review receipt this decorator observed.
+    fn captured(&self) -> Option<Value> {
+        self.captured.lock().expect("captured receipt").clone()
     }
 
     fn watch(&self, candidate_id: &str) {
@@ -3046,6 +3062,7 @@ impl RemoteMemoryService for ReviewLossProbe {
         let SpokeResult::Ok(body) = &mut result else {
             return result;
         };
+        *self.captured.lock().expect("captured receipt") = Some(body.clone());
         if self.lose.load(Ordering::SeqCst) {
             self.committed_losses.fetch_add(1, Ordering::SeqCst);
             let mut details = Map::new();
@@ -3056,10 +3073,12 @@ impl RemoteMemoryService for ReviewLossProbe {
                 details: Some(details),
             });
         }
-        match *self.mangle.lock().expect("mangle mode") {
+        match self.mangle.lock().expect("mangle mode").clone() {
             Some(ReviewMangle::EmptyIds) => body["result"]["record_ids"] = json!([]),
             Some(ReviewMangle::DropOutcome) => body["result"]["outcome"] = json!("dropped"),
             Some(ReviewMangle::EmptyIdString) => body["result"]["record_ids"] = json!([""]),
+            Some(ReviewMangle::StaleReceipt(stale)) => *body = stale,
+            Some(ReviewMangle::ForeignSpace) => body["space_id"] = json!("spc_foreign"),
             None => {}
         }
         result
@@ -3438,6 +3457,243 @@ async fn malformed_review_receipt_keeps_binding_protection() {
     core.remove_binding(&principal, character.clone(), keeper.clone())
         .await
         .expect("a settled drop leaves the binding removable");
+
+    assert_remote_memory_holds(&core, &principal, &character, &protective).await;
+    external.close();
+    responder_of(external_responder).await;
+    assert!(
+        core.close().await.expect("close").cleanup_confirmed,
+        "the open releases its own admission"
+    );
+    responder_of(responder).await;
+}
+
+/// A committed review can answer with an **actually observed older receipt**:
+/// same outcome and count, but that receipt's own key and (optionally) space.
+/// The decision checks alone accept it, the monotone facts cannot revive the old
+/// record (already released), and the new attempt's only admission would be
+/// retired — so the binding becomes removable while the provider holds the new
+/// record. The receipt's echoed key and space must therefore match the issued
+/// request and the pinned space before anything settles.
+#[tokio::test]
+async fn stale_review_receipt_keeps_binding_protection() {
+    let env = Env::boot("R2 Stale Receipt Owner").await;
+    let provider = Provider::open().await;
+    let probe = Arc::new(ReviewLossProbe::over(
+        provider.inner.server(provider.directory.admission()),
+    ));
+    let (core, responder) = provider.open_core_serving(&env, probe.clone()).await;
+    let principal = core.active_principal().await.expect("principal");
+
+    let world = create_world(&core, &principal, "R2 Stale World").await;
+    let (character, protective, _) =
+        create_character(&core, &principal, "R2 Stale Ada", &world).await;
+    let keeper_world = create_world(&core, &principal, "R2 Stale Keeper").await;
+    let keeper = add_binding(&core, &principal, &character, &keeper_world).await;
+    let spare_world = create_world(&core, &principal, "R2 Stale Spare").await;
+    let spare = add_binding(&core, &principal, &character, &spare_world).await;
+    let subject = legacy::character_subject_id(&character);
+    assert_eq!(
+        core.count_character_pending_reviews(
+            &principal,
+            character.clone(),
+            Some(protective.clone()),
+        )
+        .await
+        .expect("the Character's provider subject is provisioned")
+        .count,
+        0
+    );
+
+    let (external, external_responder) = provider.sdk_session().await;
+    let memory_principal = provider.memory_principal();
+    let review = async |binding: String| {
+        core.review_character_memory(
+            &principal,
+            character.clone(),
+            dto::<ReviewCharacterMemoryRequest>(json!({ "binding_id": binding })),
+        )
+        .await
+    };
+
+    // (1) A genuinely observed older receipt A, whose record is then released
+    // through the normal disposal path.
+    let old_candidate = external_capture(
+        &external,
+        &memory_principal,
+        &provider.space_id,
+        &subject,
+        &protective,
+        "pend_stale_old",
+        PROMOTE_DIGEST,
+        "brainstorm",
+    )
+    .await;
+    probe.watch(&old_candidate);
+    probe.mangle(None);
+    review(protective.clone()).await.expect("the old review settles");
+    let old_receipt = probe.captured().expect("the real review receipt was observed");
+    let old_fragment = core
+        .list_character_memory_fragments(&principal, character.clone(), Some(protective.clone()), 50, 0)
+        .await
+        .expect("old fragments")
+        .fragments
+        .first()
+        .cloned()
+        .expect("the old record");
+    core.promote_character_fragment(
+        &principal,
+        character.clone(),
+        old_fragment.fragment_id.as_str().to_string(),
+        i64::try_from(old_fragment.revision).expect("fragment revision"),
+    )
+    .await
+    .expect("release the old record out of the binding");
+    let nexus = core_db(&env).await;
+    let old_facts = object_facts(&nexus, &protective).await;
+    assert!(
+        old_facts.iter().all(|(_, _, state)| state != "live"),
+        "the old receipt's objects are terminal: {old_facts:?}"
+    );
+    nexus.close().await;
+
+    // (2) The new external candidate really commits, and the reply is the OLD
+    // receipt: same outcome/count, different key.
+    let new_candidate = external_capture(
+        &external,
+        &memory_principal,
+        &provider.space_id,
+        &subject,
+        &protective,
+        "pend_stale_new",
+        PROMOTE_DIGEST,
+        "brainstorm",
+    )
+    .await;
+    probe.watch(&new_candidate);
+    probe.mangle(Some(ReviewMangle::StaleReceipt(old_receipt.clone())));
+    let response = review(protective.clone()).await.expect("drain batch");
+    probe.mangle(None);
+    assert_eq!(response.processed, Some(1));
+    let pool = provider.pool().await;
+    assert_eq!(
+        sqlx::query("SELECT status FROM candidates WHERE candidate_id = ?")
+            .bind(&new_candidate)
+            .fetch_one(&pool)
+            .await
+            .expect("new candidate")
+            .get::<String, _>("status"),
+        "consumed",
+        "the provider really committed the new review"
+    );
+    let live_records: i64 = sqlx::query(
+        "SELECT COUNT(*) FROM records WHERE subject_id = ? AND scope_context_id = ? \
+         AND tombstone_json IS NULL",
+    )
+    .bind(&subject)
+    .bind(&protective)
+    .fetch_one(&pool)
+    .await
+    .expect("live records")
+    .get::<i64, _>(0);
+    assert_eq!(
+        live_records, 1,
+        "the provider holds the new binding-scoped record"
+    );
+    pool.close().await;
+    assert_remote_memory_holds(&core, &principal, &character, &protective).await;
+    let nexus = core_db(&env).await;
+    assert_eq!(
+        admission_count(&nexus, &protective).await,
+        1,
+        "the stale receipt keeps the new attempt"
+    );
+    assert!(
+        object_facts(&nexus, &protective)
+            .await
+            .iter()
+            .all(|(_, _, state)| state != "live"),
+        "the stale receipt publishes no live fact"
+    );
+    nexus.close().await;
+
+    // (3) A different validation branch: the current receipt echoes another
+    // space. It is refused for its own reason, with the attempt retained.
+    let foreign_candidate = external_capture(
+        &external,
+        &memory_principal,
+        &provider.space_id,
+        &subject,
+        &spare,
+        "pend_stale_space",
+        PROMOTE_DIGEST,
+        "brainstorm",
+    )
+    .await;
+    probe.watch(&foreign_candidate);
+    probe.mangle(Some(ReviewMangle::ForeignSpace));
+    review(spare.clone()).await.expect("drain batch");
+    probe.mangle(None);
+    let nexus = core_db(&env).await;
+    assert_eq!(
+        admission_count(&nexus, &spare).await,
+        1,
+        "a foreign-space receipt keeps its attempt"
+    );
+    nexus.close().await;
+    assert_remote_memory_holds(&core, &principal, &character, &spare).await;
+
+    // (4) Positive control: a matching receipt settles, and normal disposal
+    // releases the binding.
+    let control_candidate = external_capture(
+        &external,
+        &memory_principal,
+        &provider.space_id,
+        &subject,
+        &keeper,
+        "pend_stale_control",
+        PROMOTE_DIGEST,
+        "brainstorm",
+    )
+    .await;
+    probe.watch(&control_candidate);
+    probe.mangle(None);
+    review(keeper.clone()).await.expect("the control review settles");
+    let control_receipt = probe.captured().expect("the control receipt");
+    assert_ne!(
+        control_receipt["receipt_id"], old_receipt["receipt_id"],
+        "the control receipt is a genuinely new one"
+    );
+    assert_eq!(
+        control_receipt["space_id"], old_receipt["space_id"],
+        "the control receipt echoes the same pinned space"
+    );
+    let nexus = core_db(&env).await;
+    assert_eq!(
+        admission_count(&nexus, &keeper).await,
+        0,
+        "a matching receipt retires its own attempt"
+    );
+    nexus.close().await;
+    let control_fragment = core
+        .list_character_memory_fragments(&principal, character.clone(), Some(keeper.clone()), 50, 0)
+        .await
+        .expect("control fragments")
+        .fragments
+        .first()
+        .cloned()
+        .expect("the control record");
+    core.promote_character_fragment(
+        &principal,
+        character.clone(),
+        control_fragment.fragment_id.as_str().to_string(),
+        i64::try_from(control_fragment.revision).expect("fragment revision"),
+    )
+    .await
+    .expect("promote the control record");
+    core.remove_binding(&principal, character.clone(), keeper.clone())
+        .await
+        .expect("a matching, fully disposed binding still removes");
 
     assert_remote_memory_holds(&core, &principal, &character, &protective).await;
     external.close();
