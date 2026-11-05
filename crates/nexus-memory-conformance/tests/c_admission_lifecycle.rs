@@ -29,6 +29,69 @@ use support::{
     OTHER_CONTEXT, OTHER_SUBJECT, SUBJECT, TEXT,
 };
 
+/// The pending candidate ids a real listing page names.
+fn pending_ids(page: &Value) -> Vec<String> {
+    page["candidates"]
+        .as_array()
+        .unwrap_or_else(|| panic!("a candidate page names its rows: {page}"))
+        .iter()
+        .map(|row| {
+            row["candidate_id"]
+                .as_str()
+                .expect("a candidate row names its id")
+                .to_owned()
+        })
+        .collect()
+}
+
+/// Wait, bounded, for the pending rows this scenario has not seen yet — the
+/// actual effect an operation produced, not a client-side claim.
+async fn new_pending(matrix: &Matrix, before: &[String]) -> Vec<String> {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let page = matrix
+            .admin()
+            .list_candidates(json!({ "subject_id": SUBJECT, "status": "pending" }))
+            .await;
+        let delta: Vec<String> = pending_ids(&page)
+            .into_iter()
+            .filter(|id| !before.contains(id))
+            .collect();
+        if !delta.is_empty() || std::time::Instant::now() >= deadline {
+            return delta;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// The documented terminal outcomes of the ORIGINAL operation when its
+/// controller is gone: a commit, the protocol's uncertain outcome, or the
+/// client's own bounded invoke timeout (the SDK reports that as an internal
+/// timeout error because the caller stopped waiting, not because the effect
+/// failed). The actual effect is always observed separately.
+fn terminal_after_controller_loss(body: &Value) -> bool {
+    is_committed(body)
+        || error_code(body) == "OUTCOME_UNCERTAIN"
+        || (error_code(body) == "INTERNAL_ERROR" && error_details(body)["kind"] == json!("timeout"))
+}
+
+async fn pending_delta_now(matrix: &Matrix, before: &[String]) -> Vec<String> {
+    pending_now(matrix)
+        .await
+        .into_iter()
+        .filter(|id| !before.contains(id))
+        .collect()
+}
+
+async fn pending_now(matrix: &Matrix) -> Vec<String> {
+    pending_ids(
+        &matrix
+            .admin()
+            .list_candidates(json!({ "subject_id": SUBJECT, "status": "pending" }))
+            .await,
+    )
+}
+
 /// Wait, bounded, until the local provider reports that the competing mutation
 /// entered its write-admission machinery. The provider's own counter acknowledges
 /// the provider entry; it is not an OS/SQLite lock-wait claim and not elapsed
@@ -656,35 +719,42 @@ async fn admission_control_is_token_owned(matrix: &Matrix) {
         "the rearmed write reached the provider: {outcome}"
     );
 
-    // Retained handle, observation timeout: the timed-out observation disarms
-    // its own token, so a later real write is admitted without pausing.
-    let mut timed_out = matrix.park_next_admission();
-    assert!(
-        timed_out
-            .wait_reached_within(Duration::from_millis(150))
-            .await
-            .is_err(),
-        "no write reached the armed observation"
-    );
-    let after_timeout = tokio::time::timeout(
-        Duration::from_secs(2),
-        matrix
-            .admin()
-            .capture(capture_body("k-c012-after-timeout", TEXT, &shared_scope())),
-    )
-    .await
-    .expect("a timed-out observation leaves no stale arm");
-    assert!(is_committed(&after_timeout), "{after_timeout}");
-    drop(timed_out);
+    // Retained handle, observation timeout. The handle stays ALIVE across the
+    // next real write: if the observation did not disarm at its own timeout, the
+    // write would park on the live arm until the provider's bound (a 2 s guard
+    // fails), so a prompt admission is causal evidence of the call-time guard.
+    if matrix.kind() == Kind::Local {
+        let timed_out = matrix.park_next_admission();
+        let mut observation = timed_out;
+        assert!(
+            observation
+                .wait_reached_within(Duration::from_millis(150))
+                .await
+                .is_err(),
+            "no write reached the armed observation"
+        );
+        let after_timeout = tokio::time::timeout(
+            Duration::from_secs(2),
+            matrix
+                .admin()
+                .capture(capture_body("k-c012-after-timeout", TEXT, &shared_scope())),
+        )
+        .await
+        .expect("a timed-out observation leaves no stale arm while its handle lives");
+        assert!(is_committed(&after_timeout), "{after_timeout}");
+        drop(observation);
+    }
 
     // Retained handle, unpolled observation cancelled: ownership is established
-    // at the call, so dropping the unpolled future disarms its own token.
-    let mut unpolled = matrix.park_next_admission();
+    // at the call, so dropping the unpolled future disarms its own token. The
+    // handle stays alive across the real write; dropping it first would hide a
+    // missing call-time guard behind the handle's own `Drop`.
+    let unpolled = matrix.park_next_admission();
+    let mut observation = unpolled;
     {
-        let future = unpolled.wait_reached();
+        let future = observation.wait_reached();
         drop(future);
     }
-    drop(unpolled);
     let after_cancel = tokio::time::timeout(
         Duration::from_secs(2),
         matrix
@@ -692,39 +762,108 @@ async fn admission_control_is_token_owned(matrix: &Matrix) {
             .capture(capture_body("k-c012-after-cancel", TEXT, &shared_scope())),
     )
     .await
-    .expect("a cancelled observation leaves no stale arm");
+    .expect("a cancelled observation leaves no stale arm while its handle lives");
     assert!(is_committed(&after_cancel), "{after_cancel}");
+    drop(observation);
 
-    // Controller gone after the provider took the arm: the provider's bounded
-    // wait expires and the write completes normally; a retained handle's later
-    // release is bounded instead of waiting on an abandoned barrier.
-    let mut abandoned = matrix.park_next_admission();
+    // Controller LOSS after the provider took the arm. The controller is really
+    // dropped, then the original operation is awaited boundedly: its own
+    // terminal result and its actual effect are observed BEFORE any replay, and
+    // the same key must return that same effect, never a fresh second one.
+    let before = pending_now(&matrix).await;
+    let mut loss = matrix.park_next_admission();
     let write = tokio::spawn(support::capture_with(
         matrix.admin_client(),
         matrix.admin_principal().clone(),
         matrix.space_id().to_owned(),
-        capture_body("k-c012-abandoned", TEXT, &shared_scope()),
+        capture_body("k-c012-loss", TEXT, &shared_scope()),
     ));
-    abandoned
+    loss.wait_reached()
+        .await
+        .expect("the original write reached the provider admission boundary");
+    drop(loss);
+    let first = tokio::time::timeout(Duration::from_secs(15), write)
+        .await
+        .expect("the original operation terminates after controller loss")
+        .expect("the original task");
+    let first_committed = is_committed(&first);
+    assert!(
+        terminal_after_controller_loss(&first),
+        "the original operation's terminal result: {first}"
+    );
+    let effect = new_pending(&matrix, &before).await;
+    assert_eq!(effect.len(), 1, "the original operation has exactly one effect");
+    let replay = matrix
+        .admin()
+        .capture(capture_body("k-c012-loss", TEXT, &shared_scope()))
+        .await;
+    assert!(is_committed(&replay), "the same key replays: {replay}");
+    if first_committed {
+        assert_eq!(
+            receipt_id(&first),
+            receipt_id(&replay),
+            "the replay returns the original receipt"
+        );
+    }
+    assert_eq!(
+        pending_delta_now(&matrix, &before).await,
+        effect,
+        "the replay creates no second effect"
+    );
+    let read = matrix.admin().get_receipt(&receipt_id(&replay)).await;
+    assert_eq!(read["receipt"]["status"], json!("committed"), "{read}");
+
+    // Controller RETAINED past the provider's own bound (expiry, not loss): the
+    // original still reaches its terminal result boundedly; its effect is
+    // observed before any replay; and a late release from the retained handle is
+    // bounded instead of waiting on an abandoned barrier. The local provider
+    // bounds this at 5 s; the fixture's own arm bound is exercised through a
+    // real fence in the C-matrix fixture family.
+    if matrix.kind() == Kind::Local {
+    let before = pending_now(&matrix).await;
+    let mut expiry = matrix.park_next_admission();
+    let write = tokio::spawn(support::capture_with(
+        matrix.admin_client(),
+        matrix.admin_principal().clone(),
+        matrix.space_id().to_owned(),
+        capture_body("k-c012-expiry", TEXT, &shared_scope()),
+    ));
+    expiry
         .wait_reached()
         .await
-        .expect("the write reached the provider admission boundary");
-    // The provider's own wait expires, so the write proceeds and commits; the
-    // caller may have observed a client-side timeout, so resolve the SAME key and
-    // require the committed original receipt.
-    tokio::time::sleep(Duration::from_secs(6)).await;
-    let _ = write.await;
-    let resolved = matrix
-        .admin()
-        .capture(capture_body("k-c012-abandoned", TEXT, &shared_scope()))
-        .await;
-    assert!(
-        is_committed(&resolved),
-        "the provider's bounded wait released and committed the write: {resolved}"
-    );
-    tokio::time::timeout(Duration::from_secs(3), abandoned.release())
+        .expect("the original write reached the provider admission boundary");
+    let first = tokio::time::timeout(Duration::from_secs(15), write)
         .await
-        .expect("a later release is bounded after the provider expired");
+        .expect("the original operation terminates after provider expiry")
+        .expect("the original task");
+    let first_committed = is_committed(&first);
+    assert!(
+        terminal_after_controller_loss(&first),
+        "the original operation's terminal result: {first}"
+    );
+    let effect = new_pending(&matrix, &before).await;
+    assert_eq!(effect.len(), 1, "the original operation has exactly one effect");
+    let replay = matrix
+        .admin()
+        .capture(capture_body("k-c012-expiry", TEXT, &shared_scope()))
+        .await;
+    assert!(is_committed(&replay), "the same key replays: {replay}");
+    if first_committed {
+        assert_eq!(
+            receipt_id(&first),
+            receipt_id(&replay),
+            "the replay returns the original receipt"
+        );
+    }
+    assert_eq!(
+        pending_delta_now(&matrix, &before).await,
+        effect,
+        "the replay creates no second effect"
+    );
+    tokio::time::timeout(Duration::from_secs(3), expiry.release())
+        .await
+        .expect("a late release after provider expiry is bounded");
+    }
 }
 
 #[tokio::test]

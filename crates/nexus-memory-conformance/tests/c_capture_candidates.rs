@@ -827,17 +827,19 @@ async fn concurrent_review_has_exactly_one_effect(matrix: Matrix) {
         .await;
     assert!(is_committed(&granted), "{granted}");
 
-    // Fixture control lifecycle: a retained handle whose observation future is
-    // dropped unpolled disarms its own arm (an unpolled future must not leave a
-    // stale interception), and a plainly dropped handle is inert too. A real
-    // stale fence then reaches the provider and refuses normally.
+    // Fixture target-arm lifecycle on real stale fences. The control handle is
+    // kept ALIVE across each fence whenever the case is an observation
+    // cancellation: with a live release sender, a stale arm would park the fence
+    // until the arm bound, so a prompt refusal is causal. A dropped handle's
+    // closed sender would proceed anyway and is therefore never used as proof.
     if matrix.kind() == Kind::Remote {
-        let mut probe = matrix.park_next_target("memory.subjects.fence");
+        // Unpolled observation cancelled, handle retained.
+        let unpolled = matrix.park_next_target("memory.subjects.fence");
+        let mut observation = unpolled;
         {
-            let future = probe.wait_reached();
+            let future = observation.wait_reached();
             drop(future);
         }
-        drop(probe);
         let refused = tokio::time::timeout(
             Duration::from_secs(3),
             matrix.admin().fence_subject(
@@ -845,28 +847,84 @@ async fn concurrent_review_has_exactly_one_effect(matrix: Matrix) {
                 json!({ "type": "subject" }),
                 "fence",
                 99,
-                "k-c033-probe-unpolled",
+                "k-c033-unpolled",
             ),
         )
         .await
-        .expect("a dropped observation leaves no stale target arm");
+        .expect("a cancelled observation leaves no stale arm while its handle lives");
+        assert_eq!(error_code(&refused), "REVISION_CONFLICT", "{refused}");
+        drop(observation);
+
+        // Replacement: dropping the old handle must not clear the newer arm, and
+        // the replacement is the one the fence really pauses on.
+        let admin = matrix.admin();
+        let old = matrix.park_next_target("memory.subjects.fence");
+        let mut replacement = matrix.park_next_target("memory.subjects.fence");
+        drop(old);
+        let fence = admin.fence_subject(
+            SUBJECT,
+            json!({ "type": "subject" }),
+            "fence",
+            99,
+            "k-c033-replaced",
+        );
+        tokio::pin!(fence);
+        tokio::select! {
+            completed = &mut fence => panic!("the replaced fence completed before reaching the arm: {completed:?}"),
+            reached = replacement.wait_reached() => reached.expect("the replacement arm owns the next fence"),
+        }
+        replacement.release().await;
+        let refused = tokio::time::timeout(Duration::from_secs(10), &mut fence)
+            .await
+            .expect("the replaced fence completes");
         assert_eq!(error_code(&refused), "REVISION_CONFLICT", "{refused}");
 
-        let dropped = matrix.park_next_target("memory.subjects.fence");
-        drop(dropped);
-        let refused = tokio::time::timeout(
-            Duration::from_secs(3),
-            matrix.admin().fence_subject(
-                SUBJECT,
-                json!({ "type": "subject" }),
-                "fence",
-                99,
-                "k-c033-probe-dropped",
-            ),
-        )
-        .await
-        .expect("a dropped handle leaves no stale target arm");
+        // Controller LOSS after take: the fence took the arm, the controller is
+        // really dropped, and the fence reaches its ordinary refusal boundedly.
+        let admin = matrix.admin();
+        let mut loss = matrix.park_next_target("memory.subjects.fence");
+        let fence = admin.fence_subject(
+            SUBJECT,
+            json!({ "type": "subject" }),
+            "fence",
+            99,
+            "k-c033-loss",
+        );
+        tokio::pin!(fence);
+        tokio::select! {
+            completed = &mut fence => panic!("the loss fence completed before reaching the arm: {completed:?}"),
+            reached = loss.wait_reached() => reached.expect("the fence took the arm"),
+        }
+        drop(loss);
+        let refused = tokio::time::timeout(Duration::from_secs(15), &mut fence)
+            .await
+            .expect("the fence completes boundedly after controller loss");
         assert_eq!(error_code(&refused), "REVISION_CONFLICT", "{refused}");
+
+        // Controller RETAINED past the arm's own bound (expiry): the fence still
+        // refuses boundedly, and the late release returns instead of hanging.
+        let admin = matrix.admin();
+        let mut expiry =
+            matrix.park_next_target_bounded("memory.subjects.fence", Duration::from_secs(2));
+        let fence = admin.fence_subject(
+            SUBJECT,
+            json!({ "type": "subject" }),
+            "fence",
+            99,
+            "k-c033-expiry",
+        );
+        tokio::pin!(fence);
+        tokio::select! {
+            completed = &mut fence => panic!("the expiry fence completed before reaching the arm: {completed:?}"),
+            reached = expiry.wait_reached() => reached.expect("the fence took the arm"),
+        }
+        let refused = tokio::time::timeout(Duration::from_secs(10), &mut fence)
+            .await
+            .expect("the fence completes after the arm bound expires");
+        assert_eq!(error_code(&refused), "REVISION_CONFLICT", "{refused}");
+        tokio::time::timeout(Duration::from_secs(3), expiry.release())
+            .await
+            .expect("a late release after arm expiry is bounded");
     }
 
     let captured = matrix

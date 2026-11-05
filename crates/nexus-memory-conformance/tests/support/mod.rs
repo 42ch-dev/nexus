@@ -662,6 +662,18 @@ impl Matrix {
         }
     }
 
+    /// [`Self::park_next_target`] with an explicit fixture-side bound, so an
+    /// expiry case can let the provider's own wait end before the client's
+    /// invoke bound and still observe the operation's ordinary refusal.
+    pub fn park_next_target_bounded(&self, op: &str, bound: Duration) -> CaptureHold {
+        match &self.provider {
+            Provider::Local(_) => panic!("use the provider admission seam on the local leg"),
+            Provider::Fixture(provider) => {
+                CaptureHold::FixtureTarget(provider.faults().hold_next_for_bounded(op, bound))
+            }
+        }
+    }
+
     /// Install the local provider's disposition-wait report: it notifies when a
     /// candidate-consuming request is about to block on the owning subject's
     /// disposition section (a real provider-side arrival acknowledgment).
