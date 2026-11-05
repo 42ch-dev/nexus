@@ -176,6 +176,74 @@ fn refusal_proves(binding_is_local: bool, reject: &SpokeReject, codes: &[SpokeRe
 /// and any code whose mutation semantics do not prove a pre-effect refusal all
 /// keep the durable admission. The capture and the review entry share this one
 /// policy: neither invents a second retirement rule.
+/// The record ids one committed review must name, validated against the
+/// decision Core actually issued (`spoke-memory-protocol` §7.15).
+///
+/// The committed result is `{ outcome, record_ids }` and a review is atomic, so
+/// a consistent result is exactly: `dropped` with no records (a legitimate
+/// drop), `promoted` with the one promoted record, or `fragmented` with one
+/// record per issued fragment. The peer's schema accepts an empty or short
+/// `record_ids` and any known `outcome`, so shape alone is not proof. Treating
+/// such a receipt as complete would consume the candidate, retire the attempt
+/// and leave the provider's real record unprotected; instead this returns a
+/// coded inconsistency and the caller keeps the attempt's admission.
+fn review_result_record_ids(decision: &Value, body: &Value) -> CoreResult<Vec<String>> {
+    let malformed = |reason: String| internal_err("memory_review_receipt", reason);
+    let action = decision
+        .get("action")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the issued review decision carries no action".to_string()))?;
+    let outcome = body
+        .pointer("/result/outcome")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the committed review result carries no outcome".to_string()))?;
+    let ids = body
+        .pointer("/result/record_ids")
+        .and_then(Value::as_array)
+        .ok_or_else(|| malformed("the committed review result carries no record_ids".to_string()))?;
+    let mut record_ids = Vec::with_capacity(ids.len());
+    for id in ids {
+        let id = id
+            .as_str()
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| {
+                malformed("the committed review result names an empty or non-string record id".to_string())
+            })?;
+        record_ids.push(id.to_string());
+    }
+    let (expected_outcome, expected_records) = match action {
+        "drop" => ("dropped", 0),
+        "promote" => ("promoted", 1),
+        "fragment" => {
+            let fragments = decision
+                .get("fragments")
+                .and_then(Value::as_array)
+                .filter(|fragments| !fragments.is_empty())
+                .ok_or_else(|| {
+                    malformed("the issued fragment decision carries no fragments".to_string())
+                })?;
+            ("fragmented", fragments.len())
+        }
+        other => {
+            return Err(malformed(format!(
+                "the issued decision action '{other}' is not a review decision"
+            )))
+        }
+    };
+    if outcome != expected_outcome {
+        return Err(malformed(format!(
+            "the committed outcome '{outcome}' does not match the issued '{expected_outcome}'"
+        )));
+    }
+    if record_ids.len() != expected_records {
+        return Err(malformed(format!(
+            "the committed result names {} records where the issued decision requires {expected_records}",
+            record_ids.len()
+        )));
+    }
+    Ok(record_ids)
+}
+
 fn remote_capture_reject_proves_no_effect(reject: &SpokeReject) -> bool {
     refusal_proves(
         false,
@@ -1231,10 +1299,14 @@ impl MemoryAdapter {
     /// and therefore carry no Core admission or candidate fact. A definite
     /// committed receipt settles in one local transaction: the consumed
     /// candidate, the record references it returned, and the retirement of this
-    /// attempt. An uncertain, cancelled, malformed or locally-unsettled attempt
-    /// keeps its admission, so the binding stays unremovable; only the shared
-    /// proven-no-effect refusal policy retires an attempt, and never another
-    /// one.
+    /// attempt. **Before** settling, the committed result must be consistent
+    /// with the decision Core issued (`drop` → no records, `promote` → one,
+    /// `fragment` → one per issued fragment, with valid ids); a schema-valid
+    /// but inconsistent receipt is refused as malformed, so the attempt keeps
+    /// its admission. An uncertain, cancelled, malformed or locally-unsettled
+    /// attempt therefore keeps its admission, and the binding stays unremovable;
+    /// only the shared proven-no-effect refusal policy retires an attempt, and
+    /// never another one.
     pub(crate) async fn review(
         &self,
         candidate_id: &str,
@@ -1247,7 +1319,9 @@ impl MemoryAdapter {
             "space_id": self.binding.space_id(),
             "candidate_id": candidate_id,
             "expected_revision": expected_revision,
-            "decision": decision,
+            // Kept for the committed-result check: the response must name
+            // exactly the records this decision asked the provider to create.
+            "decision": decision.clone(),
             "idempotency_key": idempotency_key("review", candidate_id)?,
         }))?;
         if self.is_local() {
@@ -1282,18 +1356,11 @@ impl MemoryAdapter {
         {
             SpokeResult::Ok(receipt) => {
                 let body = serde_json::to_value(&receipt).map_err(wire_err)?;
-                let record_ids: Vec<String> = body
-                    .pointer("/result/record_ids")
-                    .and_then(Value::as_array)
-                    .ok_or_else(|| {
-                        internal_err(
-                            "memory_review_receipt",
-                            "a committed review receipt carries no record_ids",
-                        )
-                    })?
-                    .iter()
-                    .filter_map(|record_id| record_id.as_str().map(str::to_string))
-                    .collect();
+                // An SDK-schema-valid receipt can still be inconsistent with the
+                // decision (no ids, a short id list, a mismatched outcome). Only
+                // a consistent committed result may settle; otherwise the
+                // attempt keeps its admission and the binding stays protected.
+                let record_ids = review_result_record_ids(&decision, &body)?;
                 // A settlement failure returns an error with the attempt still
                 // in place, so the binding stays protected.
                 self.record_remote_review(attempt.as_deref(), binding_id, candidate_id, &record_ids)
