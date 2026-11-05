@@ -44,9 +44,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use ed25519_dalek::SigningKey;
-use serde_json::json;
+use serde_json::{json, Value};
 use tempfile::TempDir;
 use tokio::net::TcpListener;
+use tokio::sync::Notify;
 
 use nexus_core::connect::ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};
 use nexus_core::{
@@ -56,8 +57,8 @@ use nexus_core::{
 use nexus_memory_conformance::{FixtureMemoryProvider, PeerDirectory};
 use spoke_connect::core::derive_peer_id_from_ed25519_pubkey;
 use spoke_connect::remote::{
-    connect_responder, ConnectResponder, ConnectResponderOptions, RemoteIdentity, RemoteServePorts,
-    RemoteServePortsComposite, Transport,
+    connect_responder, ConnectResponder, ConnectResponderOptions, ConnectResponderState,
+    RemoteIdentity, RemoteMemoryService, RemoteServePorts, RemoteServePortsComposite, Transport,
 };
 use spoke_operations::spoke_schemas::{
     Finding, HostCapabilityManifest, KnowledgeEntry, Relation, Rule, Scope, TimelineEvent,
@@ -204,21 +205,21 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 /// Bind a real `127.0.0.1:0` listener whose first accepted WebSocket becomes
-/// the signed responder's transport. Dial the returned address, then await the
-/// handle for the responder that served the session.
+/// the signed responder's transport. `memory_service` is the served memory face
+/// (the assembled fixture, or that fixture behind a test admission hold). Dial
+/// the returned address, then await the handle for the responder that served
+/// the session.
 async fn start_listener(
-    provider: &Arc<FixtureMemoryProvider>,
-    directory: &Arc<PeerDirectory>,
+    memory_service: Arc<dyn RemoteMemoryService>,
     host_manifest: HostCapabilityManifest,
     client_peer: String,
     client_pubkey: [u8; 32],
+    invoke_timeout_ms: u64,
 ) -> (SocketAddr, tokio::task::JoinHandle<Arc<ConnectResponder>>) {
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .await
         .expect("bind an ephemeral localhost port");
     let addr = listener.local_addr().expect("listener address");
-    let provider = Arc::clone(provider);
-    let directory = Arc::clone(directory);
     let task = tokio::spawn(async move {
         let (tcp, peer) = tokio::time::timeout(BOUND, listener.accept())
             .await
@@ -238,7 +239,7 @@ async fn start_listener(
         let transport: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
         let ports: Arc<dyn RemoteServePorts + Send + Sync> = Arc::new(
             RemoteServePortsComposite::new(Arc::new(MemoryOnlyHost), None, None)
-                .with_memory(provider.server(directory.admission())),
+                .with_memory(memory_service),
         );
         connect_responder(ConnectResponderOptions {
             transport,
@@ -247,7 +248,7 @@ async fn start_listener(
             allowlist: vec![client_peer.clone()],
             peer_keys: HashMap::from([(client_peer, client_pubkey)]),
             ports: Some(ports),
-            invoke_timeout_ms: Some(5_000),
+            invoke_timeout_ms: Some(invoke_timeout_ms),
         })
         .await
     });
@@ -428,11 +429,11 @@ async fn remote_open_pins_space_and_authority() {
     // space is absent from discovery, and the open fails instead of taking the
     // provider's advertised space.
     let (addr, task) = start_listener(
-        &provider,
-        &directory,
+        provider.server(directory.admission()),
         manifest(&authority_host_id),
         client_peer.clone(),
         client_pubkey,
+        5_000,
     )
     .await;
     let error = open(
@@ -455,11 +456,11 @@ async fn remote_open_pins_space_and_authority() {
 
     // The host does not negotiate the memory family at all.
     let (addr, task) = start_listener(
-        &provider,
-        &directory,
+        provider.server(directory.admission()),
         manifest_without_memory(&authority_host_id),
         client_peer.clone(),
         client_pubkey,
+        5_000,
     )
     .await;
     let error = open(&env, selection(&served_space, addr, &host_pubkey))
@@ -479,11 +480,11 @@ async fn remote_open_pins_space_and_authority() {
 
     // The space is discovered, but its authority is not the authenticated host.
     let (addr, task) = start_listener(
-        &provider,
-        &directory,
+        provider.server(directory.admission()),
         manifest("fixture-not-the-space-authority"),
         client_peer.clone(),
         client_pubkey,
+        5_000,
     )
     .await;
     let error = open(&env, selection(&served_space, addr, &host_pubkey))
@@ -504,11 +505,11 @@ async fn remote_open_pins_space_and_authority() {
     // The exact space on its authenticated authority opens, and the binding
     // serves the provider.
     let (addr, task) = start_listener(
-        &provider,
-        &directory,
+        provider.server(directory.admission()),
         manifest(&authority_host_id),
         client_peer.clone(),
         client_pubkey,
+        5_000,
     )
     .await;
     let core = open(&env, selection(&served_space, addr, &host_pubkey))
@@ -578,4 +579,166 @@ async fn remote_open_pins_space_and_authority() {
         "a closed open serves no memory"
     );
     core.close().await.expect("idempotent close");
+}
+
+// ---------------------------------------------------------------------------
+// Cancellation of an open at its established-session admission
+// ---------------------------------------------------------------------------
+
+/// Test-only admission hold in front of the real assembled fixture service.
+///
+/// It parks the first `memory.describe` invoke after the signed session is
+/// already established — exactly the await the owning review names — and then
+/// delegates to the real fixture. It serves no port, changes no protocol object
+/// and fabricates no provider state.
+struct AdmissionHold {
+    inner: Arc<dyn RemoteMemoryService>,
+    reached: Arc<Notify>,
+    release: Arc<Notify>,
+}
+
+#[async_trait]
+impl RemoteMemoryService for AdmissionHold {
+    async fn invoke(&self, peer_id: &str, op: &str, payload: Value) -> SpokeResult<Value> {
+        if op == "memory.describe" {
+            self.reached.notify_one();
+            self.release.notified().await;
+        }
+        self.inner.invoke(peer_id, op, payload).await
+    }
+}
+
+/// Open one remote selection from a home the caller keeps alive, so the future
+/// can be spawned and then cancelled.
+fn open_owned(
+    user_home: PathBuf,
+    selection: MemoryProviderSelection,
+) -> impl std::future::Future<Output = CoreResult<CoreService>> {
+    CoreService::open(CoreOpenOptions {
+        user_home,
+        access: CoreAccess::EngineOwner,
+        memory: Some(selection),
+    })
+}
+
+/// Wait until the host reports the abandoned session closed.
+async fn wait_for_closed(responder: &Arc<ConnectResponder>) {
+    tokio::time::timeout(BOUND, async {
+        loop {
+            if responder.state() == ConnectResponderState::Closed {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the host observed the abandoned established session closing");
+}
+
+/// Cancelling an open while its established-session admission is pending must
+/// close exactly that session: the abandoned peer observes its session closing,
+/// and a second, delivered open against the same provider keeps serving.
+#[tokio::test]
+async fn cancelled_open_closes_only_its_own_established_session() {
+    let host_pubkey = pubkey(&HOST_SEED);
+    let client_pubkey = pubkey(&CLIENT_SEED);
+    let client_peer = peer_id(&CLIENT_SEED);
+
+    let fixture_home = TempDir::new().expect("fixture home");
+    let provider = Arc::new(
+        FixtureMemoryProvider::open(&fixture_home.path().join("memory.sqlite"))
+            .await
+            .expect("open the durable fixture"),
+    );
+    let served_space = provider.identity().space_id.clone();
+    let authority_host_id = provider.identity().authority_host_id.clone();
+    let principal_id = format!("prn_{client_peer}");
+    provider
+        .provision_operator_admin(&principal_id)
+        .await
+        .expect("operator provisions the admin grant");
+    let directory = Arc::new(PeerDirectory::new().with_peer(client_peer.clone(), principal_id));
+
+    // The abandoned open is held inside its established-session admission; the
+    // generous serve budget keeps the held call pending instead of timing out.
+    let reached = Arc::new(Notify::new());
+    let release = Arc::new(Notify::new());
+    let held: Arc<dyn RemoteMemoryService> = Arc::new(AdmissionHold {
+        inner: provider.server(directory.admission()),
+        reached: Arc::clone(&reached),
+        release: Arc::clone(&release),
+    });
+    let (abandoned_addr, abandoned_host) = start_listener(
+        held,
+        manifest(&authority_host_id),
+        client_peer.clone(),
+        client_pubkey,
+        30_000,
+    )
+    .await;
+
+    let abandoned_home = Env::new();
+    abandoned_home.write_credential(&CLIENT_SEED);
+    let abandoned = tokio::spawn(open_owned(
+        abandoned_home.user_home.clone(),
+        selection(&served_space, abandoned_addr, &host_pubkey),
+    ));
+    tokio::time::timeout(BOUND, reached.notified())
+        .await
+        .expect("the abandoned open reached the established-session admission");
+
+    // A separate open is delivered while the first one is still pending.
+    let delivered_home = Env::new();
+    delivered_home.write_credential(&CLIENT_SEED);
+    let (delivered_addr, delivered_host) = start_listener(
+        provider.server(directory.admission()),
+        manifest(&authority_host_id),
+        client_peer.clone(),
+        client_pubkey,
+        5_000,
+    )
+    .await;
+    let delivered = open(
+        &delivered_home,
+        selection(&served_space, delivered_addr, &host_pubkey),
+    )
+    .await
+    .expect("the separate open is delivered while the first one is pending");
+
+    // Cancel exactly at the held admission and observe the real peer closing
+    // the established session it owns.
+    abandoned.abort();
+    let cancelled = match abandoned.await {
+        Ok(_) => panic!("the abandoned open completed instead of being cancelled"),
+        Err(join) => join,
+    };
+    assert!(
+        cancelled.is_cancelled(),
+        "the abandoned open task was cancelled"
+    );
+    let abandoned_responder = responder_of(abandoned_host).await;
+    wait_for_closed(&abandoned_responder).await;
+    release.notify_waiters();
+
+    // The delivered open is untouched: its own session is still established and
+    // its pinned binding still serves the provider's space.
+    let delivered_responder = responder_of(delivered_host).await;
+    assert_eq!(
+        delivered_responder.state().as_str(),
+        "Established",
+        "the other delivered session keeps running"
+    );
+    let principal = delivered.active_principal().await.expect("principal");
+    assert_eq!(
+        delivered
+            .count_pending_reviews(&principal)
+            .await
+            .expect("the delivered binding still serves the memory family")
+            .count,
+        0
+    );
+    assert!(
+        delivered.close().await.expect("close").cleanup_confirmed,
+        "the delivered open closes normally"
+    );
 }

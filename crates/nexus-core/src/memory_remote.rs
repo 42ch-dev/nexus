@@ -16,6 +16,11 @@
 //!
 //! Every failure closes the session this call owns and returns one static coded
 //! refusal: no peer-supplied text, no second provider, and no local fallback.
+//! The same ownership covers cancellation: once the signed session is
+//! established, [`UndeliveredSession`] holds it and closes it on drop until a
+//! binding takes responsibility, so an open cancelled while `describe` or
+//! `spaces.list` is pending releases exactly its own session.
+//!
 //! Nexus serves no memory family — this is a client only.
 
 use std::num::NonZeroU64;
@@ -133,11 +138,15 @@ pub(crate) async fn open_remote_binding(
         }
     };
 
-    let admitted = admit(&adapter, &client_identity, selection).await;
+    // From here the session is established but not yet pinned: the guard owns
+    // its cleanup until a binding takes it (see `UndeliveredSession`).
+    let session = UndeliveredSession::new(adapter);
+
+    let admitted = admit(session.adapter(), &client_identity, selection).await;
     match admitted {
         Ok((space_id, authority_host_id, authority_generation)) => {
             Ok(MemoryProviderBinding::pin_remote(
-                adapter,
+                session.into_adapter(),
                 space_id,
                 authority_host_id,
                 authority_generation,
@@ -145,11 +154,49 @@ pub(crate) async fn open_remote_binding(
                 access != CoreAccess::ReadOnly,
             ))
         }
-        Err(error) => {
-            // Every post-handshake refusal closes the session this open owns;
-            // the caller's failed-open path then releases the pool admission.
+        // The explicit refusal is returned unchanged; the guard closes the
+        // session on the way out, and the caller's failed-open path then
+        // releases the pool admission.
+        Err(error) => Err(error),
+    }
+}
+
+/// Owns one established, not-yet-pinned session.
+///
+/// The admission sequence awaits `memory.describe` and `memory.spaces.list`
+/// after the signed handshake, and a provider can leave either call pending.
+/// If the open future is dropped there, the explicit refusal arm never runs;
+/// dropping this call's `Arc` alone closes nothing, because the SDK's receive
+/// task keeps its own `Arc` and the authenticated session parked on the
+/// transport. The guard therefore runs the adapter's own idempotent `close` on
+/// drop — releasing the socket so that task and its session end — and is
+/// disarmed only when a valid binding takes ownership, whose normal close
+/// semantics then apply.
+struct UndeliveredSession(Option<Arc<RemoteAdapter>>);
+
+impl UndeliveredSession {
+    fn new(adapter: Arc<RemoteAdapter>) -> Self {
+        Self(Some(adapter))
+    }
+
+    fn adapter(&self) -> &RemoteAdapter {
+        self.0
+            .as_deref()
+            .expect("the guard holds its adapter until handed over")
+    }
+
+    /// Hand the session to the binding; cleanup becomes the binding's job.
+    fn into_adapter(mut self) -> Arc<RemoteAdapter> {
+        self.0
+            .take()
+            .expect("the guard holds its adapter until handed over")
+    }
+}
+
+impl Drop for UndeliveredSession {
+    fn drop(&mut self) {
+        if let Some(adapter) = self.0.take() {
             adapter.close();
-            Err(error)
         }
     }
 }

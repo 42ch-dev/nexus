@@ -3,9 +3,9 @@
 //! The binding is crate-private, so these regressions drive it through the
 //! public open surface: the selection precedence (`Some` override, disk table
 //! read once per open, absent table = local), the pin's stability for the whole
-//! open, the real `memory_remote_disabled` refusal while the `memory-remote`
-//! cohort does not exist, close idempotence, and the guard release a failed
-//! open owes the next one.
+//! open, the remote selection's refusal in whichever `memory-remote` mode this
+//! build selects, close idempotence, and the guard release a failed open owes
+//! the next one.
 
 use std::fs;
 use std::path::PathBuf;
@@ -54,8 +54,22 @@ fn remote_selection() -> MemoryProviderSelection {
     })
 }
 
-fn is_remote_disabled(error: &CoreError) -> bool {
-    matches!(error, CoreError::Coded { code, .. } if code == "memory_remote_disabled")
+/// The refusal a remote selection produces in the mode this build selects.
+///
+/// Feature off: the static `memory_remote_disabled` refusal, returned before
+/// any credential access. Feature on: the same factory runs for real, and these
+/// homes hold no credential file, so the mode-correct refusal is the loader's
+/// `memory_credential_invalid`. Both refuse the whole open, and neither falls
+/// back to the local provider.
+fn is_remote_open_refusal(error: &CoreError) -> bool {
+    #[cfg(feature = "memory-remote")]
+    {
+        matches!(error, CoreError::Coded { code, .. } if code == "memory_credential_invalid")
+    }
+    #[cfg(not(feature = "memory-remote"))]
+    {
+        matches!(error, CoreError::Coded { code, .. } if code == "memory_remote_disabled")
+    }
 }
 
 struct Env {
@@ -128,7 +142,7 @@ async fn absent_provider_table_pins_the_local_default() {
 
 /// `Some(Local)` is an open-only override: it beats a remote disk selection for
 /// this open and never writes configuration, so the next open still sees the
-/// disk's real refusal.
+/// disk's refusal for the selected mode.
 #[tokio::test]
 async fn explicit_local_overrides_a_remote_disk_selection() {
     let env = Env::new(Some(&remote_table()));
@@ -143,8 +157,8 @@ async fn explicit_local_overrides_a_remote_disk_selection() {
         .err()
         .expect("the disk selection applies to the next open");
     assert!(
-        is_remote_disabled(&error),
-        "expected the typed refusal, got {error:?}"
+        is_remote_open_refusal(&error),
+        "expected the mode-correct remote refusal, got {error:?}"
     );
 }
 
@@ -187,8 +201,8 @@ async fn provider_selection_is_pinned_for_the_open_and_reread_between_opens() {
         .err()
         .expect("the next open reads the changed table");
     assert!(
-        is_remote_disabled(&error),
-        "expected the typed refusal, got {error:?}"
+        is_remote_open_refusal(&error),
+        "expected the mode-correct remote refusal, got {error:?}"
     );
     assert_eq!(
         core.count_pending_reviews(&principal).await.expect("provider read").count,
@@ -211,13 +225,15 @@ async fn provider_selection_is_pinned_for_the_open_and_reread_between_opens() {
         .err()
         .expect("the reread sees the remote table again");
     assert!(
-        is_remote_disabled(&error),
-        "expected the typed refusal, got {error:?}"
+        is_remote_open_refusal(&error),
+        "expected the mode-correct remote refusal, got {error:?}"
     );
 }
 
-/// A remote selection is refused with the real `memory_remote_disabled` code
-/// and the failed open releases the writer admission it took, so the next open
+/// A remote selection is refused with this mode's real code — the
+/// `memory_remote_disabled` refusal before any credential access when the
+/// feature is off, the loader's `memory_credential_invalid` when it is on — and
+/// the failed open releases the writer admission it took, so the next open
 /// acquires fresh instead of joining a half-open service.
 #[tokio::test]
 async fn remote_selection_is_refused_and_releases_its_own_guards() {
@@ -225,10 +241,10 @@ async fn remote_selection_is_refused_and_releases_its_own_guards() {
     let error = CoreService::open(env.options(None))
         .await
         .err()
-        .expect("a remote selection is refused while the feature does not exist");
+        .expect("a remote selection is refused in either mode");
     assert!(
-        is_remote_disabled(&error),
-        "expected the typed refusal, got {error:?}"
+        is_remote_open_refusal(&error),
+        "expected the mode-correct remote refusal, got {error:?}"
     );
     assert!(
         join_live_engine_pool(&env.db_path(), GuardedPoolOptions::default())
@@ -275,19 +291,21 @@ async fn close_is_idempotent_and_releases_the_binding() {
     reopened.close().await.expect("close");
 }
 
-/// The public `Some(Remote(..))` override is the same typed refusal as the disk
-/// path, before any credential file exists: no fake connection and no silent
-/// local fallback.
+/// The public `Some(Remote(..))` override is refused exactly like the disk path
+/// although no credential file exists: feature-off refuses before any
+/// credential access, feature-on reaches the real loader and refuses its
+/// missing credential — no fake connection and no silent local fallback in
+/// either mode.
 #[tokio::test]
-async fn explicit_remote_selection_is_refused_without_reading_credentials() {
+async fn explicit_remote_selection_is_refused_without_a_local_fallback() {
     let env = Env::new(None);
     let error = CoreService::open(env.options(Some(remote_selection())))
         .await
         .err()
         .expect("an explicit remote selection is refused");
     assert!(
-        is_remote_disabled(&error),
-        "expected the typed refusal, got {error:?}"
+        is_remote_open_refusal(&error),
+        "expected the mode-correct remote refusal, got {error:?}"
     );
 }
 
@@ -665,8 +683,8 @@ async fn failed_direct_writer_pin_keeps_a_live_engine_owner_joinable() {
         .err()
         .expect("the remote pin refuses the direct writer open");
     assert!(
-        is_remote_disabled(&error),
-        "expected the typed refusal, got {error:?}"
+        is_remote_open_refusal(&error),
+        "expected the mode-correct remote refusal, got {error:?}"
     );
 
     env.write_config(None);
@@ -784,8 +802,8 @@ async fn failed_joined_engine_pin_keeps_the_creator_joinable() {
         .err()
         .expect("the joining open refuses the remote pin");
     assert!(
-        is_remote_disabled(&error),
-        "expected the typed refusal, got {error:?}"
+        is_remote_open_refusal(&error),
+        "expected the mode-correct remote refusal, got {error:?}"
     );
 
     env.write_config(None);
