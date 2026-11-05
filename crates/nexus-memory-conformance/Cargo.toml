@@ -40,6 +40,11 @@ nexus-core = { path = "../nexus-core", features = [
     # real `subject_archived`/`family` consumer is reachable only with this
     # existing feature. Test-only; the production/default graph is unchanged.
     "execution",
+    # v1.229 N3 Task 11 (C11, approval 05ED): C-113's recovering-object proof
+    # needs the provider's existing crash/publish seams (`inject_commit_fault`,
+    # `file_root`), which are compiled only under `test-hooks`. Same dev-only
+    # edge C8's amendment1 names; no production feature and no new hook.
+    "test-hooks",
 ] }
 # The disposable user home the open resolves (workspace dir, state DB and the
 # provider's own file root) through the production layout instead of a
