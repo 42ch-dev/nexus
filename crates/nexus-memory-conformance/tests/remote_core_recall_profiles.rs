@@ -171,6 +171,14 @@ const BYTE_SUBJECT: &str = "sub_r4_byte_budget";
 const BYTE_BUDGET: u64 = 512;
 /// A multibyte (UTF-8) body that fits inside `BYTE_BUDGET` whole.
 const SMALL_UTF8: &str = "密码：cipher 北方的关隘在雪后仍然通行。";
+/// A fresh subject whose second record discriminates serialized UTF-8 bytes
+/// from Unicode scalar characters under the same budget.
+const BYTE_CHAR_SUBJECT: &str = "sub_r4_byte_char_budget";
+/// The fitting item of the discriminating case (its query hit ranks it first).
+const FIT_UTF8: &str = "cipher 关隘。";
+/// The discarding item: 200 CJK scalars (600 UTF-8 bytes), so its character
+/// count is inside `BYTE_BUDGET` while its serialized bytes are far outside it.
+const OVER_CHAR_UNDER_CHARS: usize = 200;
 const FIXTURE_PROVIDER: &str = "r4-mind-fixture";
 
 // ---------------------------------------------------------------------------
@@ -1607,7 +1615,7 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         SpokeResult::Ok(_) => {}
         SpokeResult::Reject(reject) => panic!("the byte-budget subject is ensured: {reject:?}"),
     }
-    let create_byte_record = |text: String, key: &str| {
+    let create_byte_record = |subject: String, text: String, key: &str| {
         let adapter = Arc::clone(&adapter);
         let principal = memory_principal.clone();
         let space_id = provider.space_id.clone();
@@ -1618,7 +1626,7 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
                     &principal,
                     dto::<MemoryRecordsCreateRequest>(json!({
                         "space_id": space_id,
-                        "subject_id": BYTE_SUBJECT,
+                        "subject_id": subject,
                         "kind": "fact",
                         "content": { "text": text },
                         "scope": { "visibility": "shared" },
@@ -1632,7 +1640,12 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
             }
         }
     };
-    let small = create_byte_record(SMALL_UTF8.to_string(), "r4-byte-small").await;
+    let small = create_byte_record(
+        BYTE_SUBJECT.to_string(),
+        SMALL_UTF8.to_string(),
+        "r4-byte-small",
+    )
+    .await;
     let small_id = small["result"]["record_id"]
         .as_str()
         .expect("the small record id")
@@ -1643,7 +1656,12 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         large_text.len() > usize::try_from(BYTE_BUDGET).expect("the budget fits usize"),
         "the long body exceeds the byte budget"
     );
-    let large = create_byte_record(large_text.clone(), "r4-byte-large").await;
+    let large = create_byte_record(
+        BYTE_SUBJECT.to_string(),
+        large_text.clone(),
+        "r4-byte-large",
+    )
+    .await;
     let large_id = large["result"]["record_id"]
         .as_str()
         .expect("the large record id")
@@ -1699,6 +1717,127 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
     );
     assert_eq!(second_page["truncated"], json!(false));
     assert_eq!(second_page["next_cursor"], Value::Null);
+
+    // BYTE vs CHARACTER BUDGET (discriminating): a fresh subject with a fitting
+    // multibyte item and an item whose standard serialized UTF-8 form exceeds
+    // the whole budget while its Unicode scalar count does not. A provider that
+    // budgeted characters would serve both on the first page; the real byte
+    // budget defers the second.
+    match adapter
+        .ensure_subject(
+            &memory_principal,
+            dto::<MemorySubjectsEnsureRequest>(json!({
+                "space_id": provider.space_id,
+                "subject_id": BYTE_CHAR_SUBJECT,
+                "kind": { "ns": "r4", "id": "byte-char" },
+            })),
+        )
+        .await
+    {
+        SpokeResult::Ok(_) => {}
+        SpokeResult::Reject(reject) => panic!("the byte/char subject is ensured: {reject:?}"),
+    }
+    let fit = create_byte_record(
+        BYTE_CHAR_SUBJECT.to_string(),
+        FIT_UTF8.to_string(),
+        "r4-byte-char-fit",
+    )
+    .await;
+    let fit_id = fit["result"]["record_id"]
+        .as_str()
+        .expect("the fitting record id")
+        .to_string();
+    let over_char_under = "关".repeat(OVER_CHAR_UNDER_CHARS);
+    let budget = usize::try_from(BYTE_BUDGET).expect("the budget fits usize");
+    // Independent inequalities from the bounded known input: the body is inside
+    // the WHOLE budget by Unicode scalar count, but its standard serialized
+    // UTF-8 form (and even its bare text bytes) are outside it. The fitting item
+    // consumes a positive amount, so no byte-accounting page can admit this body
+    // under the same budget. This is the platform serialization, not the
+    // provider's private budget helper.
+    assert!(
+        over_char_under.chars().count() <= budget,
+        "the body's Unicode scalar count is inside the whole budget"
+    );
+    let serialized =
+        serde_json::to_vec(&json!({ "text": &over_char_under })).expect("serialized content");
+    assert!(
+        serialized.len() > budget,
+        "the body's serialized UTF-8 bytes exceed the whole budget"
+    );
+    assert!(
+        over_char_under.len() > budget,
+        "even the body's bare UTF-8 text exceeds the whole budget"
+    );
+    let over = create_byte_record(
+        BYTE_CHAR_SUBJECT.to_string(),
+        over_char_under.clone(),
+        "r4-byte-char-over",
+    )
+    .await;
+    let over_id = over["result"]["record_id"]
+        .as_str()
+        .expect("the over-budget record id")
+        .to_string();
+
+    let char_recall = |cursor: Option<&str>| {
+        let mut request = json!({
+            "space_id": provider.space_id,
+            "subject_id": BYTE_CHAR_SUBJECT,
+            "selection": { "mode": "shared_only" },
+            "budget": { "max_items": 10, "max_bytes": BYTE_BUDGET },
+            "query": "cipher",
+        });
+        if let Some(cursor) = cursor {
+            request["cursor"] = json!(cursor);
+        }
+        dto::<MemoryRecallRequest>(request)
+    };
+    let chars_first = recall_ok(&adapter, &memory_principal, char_recall(None)).await;
+    assert_eq!(chars_first["total_authorized"], json!(2));
+    assert_eq!(
+        response_triples(&chars_first),
+        sorted_triples(vec![(
+            fit_id.clone(),
+            json!({ "visibility": "shared" }),
+            FIT_UTF8.to_string(),
+        )]),
+        "a character budget would also serve the 200-scalar body; the byte budget keeps only the fitting item"
+    );
+    assert_eq!(
+        chars_first["overflow_record_id"],
+        Value::Null,
+        "the deferred body is not named while the page still has content"
+    );
+    assert_eq!(chars_first["truncated"], json!(true));
+    let chars_cursor = chars_first["next_cursor"]
+        .as_str()
+        .expect("the fitting page carries a cursor")
+        .to_string();
+
+    let chars_second = recall_ok(
+        &adapter,
+        &memory_principal,
+        char_recall(Some(&chars_cursor)),
+    )
+    .await;
+    assert_eq!(chars_second["total_authorized"], json!(2));
+    assert_eq!(
+        response_triples(&chars_second),
+        sorted_triples(vec![(
+            over_id.clone(),
+            json!({ "visibility": "shared" }),
+            over_char_under.clone(),
+        )]),
+        "the body whose chars fit but bytes do not is deferred and then served whole"
+    );
+    assert_eq!(
+        chars_second["overflow_record_id"],
+        json!(over_id),
+        "the deferred body is the named overflow on the resumed page"
+    );
+    assert_eq!(chars_second["truncated"], json!(false));
+    assert_eq!(chars_second["next_cursor"], Value::Null);
 
     // CURSOR BINDING: the cursor continues only the ranking it was minted under.
     let first_page = match adapter
@@ -1944,6 +2083,11 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         provider_records(&pool, BYTE_SUBJECT).await.len(),
         2,
         "the byte-budget subject keeps exactly its two seeded records"
+    );
+    assert_eq!(
+        provider_records(&pool, BYTE_CHAR_SUBJECT).await.len(),
+        2,
+        "the byte/char subject keeps exactly its two seeded records"
     );
     assert_eq!(
         provider_records(&pool, EXCLUDED_SUBJECT).await.len(),
