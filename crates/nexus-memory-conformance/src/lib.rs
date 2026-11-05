@@ -7,6 +7,23 @@
 //! server: the private operation slices implement the protocol duties, and
 //! [`server`] assembles the full `MemoryPort` and the signed Connect memory
 //! service over them.
+//!
+//! # Conformance matrix
+//!
+//! The N3 row matrix (`.mstar/iterations/v1.229-spoke-memory-n3/specs/n3-conformance-matrix.md`
+//! §5 families A–D) runs in the `c_admission_lifecycle` and
+//! `c_capture_candidates` integration targets. Each scenario body is
+//! provider-agnostic and runs twice: `_local` drives the real
+//! `nexus_core::memory_provider::LocalMemoryProvider`, `_remote` drives this
+//! fixture. Both are served through the published `spoke-connect` memory
+//! service over a real signed loopback session, so the rows observe the same
+//! protocol boundary and differ only in the provider implementation.
+//!
+//! Every scenario opens its own temporary store, two authenticated peers and
+//! the operator-provisioned admin grant; restarts close the owned pool and
+//! responders and reopen the same file. Fault, clock and retention operators
+//! are test control only — the assertions read the provider's own answers,
+//! refusals and receipts.
 
 // The assembled `MemoryPort` in `server` consumes the request-scope bridge
 // (`Admitted::from_scope`), while this slice's own direct-admission entry

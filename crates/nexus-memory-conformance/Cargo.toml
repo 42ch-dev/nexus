@@ -40,6 +40,12 @@ nexus-core = { path = "../nexus-core", features = [
     # real `subject_archived`/`family` consumer is reachable only with this
     # existing feature. Test-only; the production/default graph is unchanged.
     "execution",
+    # v1.229 N3 Task 8 (C8, amendment 1): the C-matrix rows C-023, C-024 and
+    # C-028 must be proved on the real local provider too, and its only
+    # operator seams for the commit-boundary loss, the pre-COMMIT abort and the
+    # retention clock are the existing `test-hooks` seams. Test-only and
+    # compiled out of the production build; no new hook, package or feature.
+    "test-hooks",
 ] }
 # The disposable user home the open resolves (workspace dir, state DB and the
 # provider's own file root) through the production layout instead of a
