@@ -39,6 +39,10 @@
 //! the close. `close()` wakes every parked step with [`TransportError::Closed`],
 //! and each step re-checks the flag under its half's lock, so a notification
 //! that races the first check still ends the call instead of parking it. The
+//! whole-operation `send`/`recv` slots are acquired close-aware as well: a
+//! same-direction call that queued behind a retained holder, or one started
+//! after the close, returns [`TransportError::Closed`] promptly instead of
+//! waiting for that slot. The
 //! halves and the result are owned by a dedicated teardown task (`Arc`ed slots
 //! only — never the transport itself), which is what keeps the disposal alive
 //! when the initiating caller is cancelled.
@@ -260,6 +264,46 @@ where
             teardown: Arc::new(Teardown::new()),
         }
     }
+
+    /// Acquire one whole-operation slot, giving up as soon as the transport
+    /// closes.
+    ///
+    /// The slot owns no physical half, but a retained `Pending` holder can keep
+    /// it for an unbounded time. Pre-close callers still serialise behind it
+    /// (wire order is unchanged); a caller already queued when the close lands,
+    /// or one arriving afterwards, returns [`TransportError::Closed`] promptly
+    /// instead of waiting for that slot — the close is what settles it, not a
+    /// timeout.
+    async fn lock_until_closed<'a>(
+        &'a self,
+        slot: &'a Mutex<()>,
+    ) -> Result<tokio::sync::MutexGuard<'a, ()>, TransportError> {
+        loop {
+            if self.closed.load(Ordering::SeqCst) {
+                return Err(TransportError::Closed);
+            }
+            // Register the wake before the state read so a close between the
+            // check and the wait is never missed.
+            let notified = self.io_wake.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.closed.load(Ordering::SeqCst) {
+                return Err(TransportError::Closed);
+            }
+            tokio::select! {
+                biased;
+                () = notified.as_mut() => return Err(TransportError::Closed),
+                guard = slot.lock() => {
+                    // A slot granted at the same moment as the close still
+                    // loses to the close.
+                    if self.closed.load(Ordering::SeqCst) {
+                        return Err(TransportError::Closed);
+                    }
+                    return Ok(guard);
+                }
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -268,8 +312,9 @@ where
     S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
 {
     async fn send(&self, envelope: &[u8]) -> Result<(), TransportError> {
-        // Serialise whole sends without owning a physical half.
-        let _slot = self.send_slot.lock().await;
+        // Serialise whole sends without owning a physical half, and never wait
+        // on that serialisation past a close.
+        let _slot = self.lock_until_closed(&self.send_slot).await?;
         if self.closed.load(Ordering::SeqCst) {
             return Err(TransportError::Closed);
         }
@@ -319,8 +364,9 @@ where
     }
 
     async fn recv(&self) -> Result<Vec<u8>, TransportError> {
-        // Serialise whole receives without owning a physical half.
-        let _slot = self.recv_slot.lock().await;
+        // Serialise whole receives without owning a physical half, and never
+        // wait on that serialisation past a close.
+        let _slot = self.lock_until_closed(&self.recv_slot).await?;
         if self.closed.load(Ordering::SeqCst) {
             return Err(TransportError::Closed);
         }
