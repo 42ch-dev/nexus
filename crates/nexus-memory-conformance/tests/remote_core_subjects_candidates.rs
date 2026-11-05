@@ -22,12 +22,14 @@
 //!   lifecycle the Core reader branches on).
 //! - The legacy Creator queue, the legacy Character queue and the legacy
 //!   Character fragment table are withheld from this disposable state DB for the
-//!   whole remote lifecycle, and the applicable legacy long-term path is a
-//!   pre-existing sentinel directory that cannot be read as a file, so the
-//!   operations above are proof that those reads never happen (a read would fail
-//!   loudly) — not merely that nothing was written. The scope is exactly those
-//!   paths: Nexus actor/world/binding metadata stays readable, and this is not a
-//!   universal no-read claim about unrelated local surfaces.
+//!   whole remote lifecycle, and each applicable bearer's real long-term
+//!   discovery DIRECTORY (`memory_io::list_memories` calls `fs::read_dir` on it)
+//!   is a pre-existing regular file, so that discovery fails with a non-`NotFound`
+//!   error instead of reading anything. The operations above are therefore proof
+//!   that those reads never happen — not merely that nothing was written. The
+//!   scope is exactly those tables and those two discovery paths: Nexus
+//!   actor/world/binding metadata stays readable, and this is not a universal
+//!   no-read claim about unrelated local surfaces.
 //! - The D18 boundary is observed where it is authoritative: the Nexus-side
 //!   `remote_binding_memory_admissions`/`_objects` rows (content-free
 //!   bookkeeping) and the real public `remove_binding` gate. An unknown wire
@@ -137,6 +139,13 @@ const MEMORY_CAPABILITIES: [&str; 1] = ["spoke-memory"];
 const WORKSPACE: &str = "default";
 const CREDENTIAL_ID: &str = "cred-r2-subjects";
 const BOUND: Duration = Duration::from_secs(5);
+/// Bytes of the file that occupies a bearer's long-term discovery *directory*.
+///
+/// `memory_io::list_memories` calls `fs::read_dir` on that directory and only
+/// treats `NotFound` as honest-empty, so a regular file there makes every real
+/// discovery attempt fail loudly — the trap the lifecycle below must not trip.
+const LEGACY_DIR_TRAP_BYTES: &[u8] = b"r2-legacy-long-term-dir-trap";
+
 /// A high-signal digest the deterministic classifier promotes for `brainstorm`.
 const PROMOTE_DIGEST: &str =
     "The chapter pivots from betrayal to alliance, with causal consequences for three factions.";
@@ -394,15 +403,26 @@ impl Env {
             .join("memory-store")
     }
 
-    /// The legacy bearer file the remote binding must never touch.
-    fn legacy_bearer(&self) -> PathBuf {
-        self.user_home
-            .join(".nexus42")
+    /// The Creator bearer's real long-term discovery directory: exactly what
+    /// `MemoryBearerRef::Creator::long_term_memory_dir` resolves
+    /// (`<nexus root>/creators/<creator>/memory/long-term`), which
+    /// `memory_io::list_memories` reads with `fs::read_dir`.
+    fn creator_long_term_dir(&self) -> PathBuf {
+        nexus_home_layout::nexus_root_from_home(&self.user_home)
             .join("creators")
             .join(&self.creator_id)
             .join("memory")
             .join("long-term")
-            .join("pinned.md")
+    }
+
+    /// The Character bearer's real long-term discovery directory, exactly what
+    /// `MemoryBearerRef::Character::long_term_memory_dir` resolves.
+    fn character_long_term_dir(&self, character_id: &str) -> PathBuf {
+        nexus_home_layout::character_long_term_memory_dir(
+            &self.user_home,
+            &self.creator_id,
+            character_id,
+        )
     }
 
     fn state_db(&self) -> PathBuf {
@@ -923,11 +943,18 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
         .await
         .expect("withhold a legacy memory table from the whole lifecycle");
     }
-    let legacy = env.legacy_bearer();
-    fs::create_dir_all(legacy.parent().expect("legacy dir")).expect("legacy dir");
-    fs::create_dir_all(&legacy).expect("the applicable legacy path becomes a sentinel directory");
-    let sentinel = legacy.join("sentinel.txt");
-    fs::write(&sentinel, b"r2-legacy-file-trap-0f1e2d3c").expect("write the file-trap sentinel");
+    // The file trap matches the REAL discovery: `list_memories` does
+    // `fs::read_dir(<long-term>)` and skips non-file *entries*, so a directory
+    // named like a memory file proves nothing. Occupying the long-term
+    // discovery DIRECTORY itself with a regular file makes `read_dir` fail with
+    // `NotADirectory`, which `list_memories` propagates as an error instead of
+    // treating it as empty. Both applicable bearer paths are trapped.
+    let creator_legacy = env.creator_long_term_dir();
+    let character_legacy = env.character_long_term_dir(&character_id);
+    for dir in [&creator_legacy, &character_legacy] {
+        fs::create_dir_all(dir.parent().expect("bearer memory dir")).expect("bearer memory dir");
+        fs::write(dir, LEGACY_DIR_TRAP_BYTES).expect("the long-term discovery dir becomes a file");
+    }
 
     // Two captures: one shared Character scope, one binding-local.
     capture(&core, &principal, &character_id, None, "pend_shared")
@@ -1327,23 +1354,28 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
         !env.local_provider_store().exists(),
         "a remote binding never constructs the local provider"
     );
-    // The pre-existing file trap: the applicable legacy long-term path is still
-    // the sentinel directory with its bytes, and it still cannot be read as a
-    // legacy file. The whole lifecycle above therefore never read it.
-    assert!(
-        legacy.is_dir() && sentinel.is_file(),
-        "the pre-existing legacy path stays the sentinel directory"
-    );
-    assert_eq!(
-        fs::read(&sentinel).expect("file-trap sentinel"),
-        b"r2-legacy-file-trap-0f1e2d3c",
-        "the file-trap sentinel is untouched"
-    );
-    let as_legacy_file = fs::read(&legacy);
-    assert!(
-        as_legacy_file.is_err(),
-        "the applicable legacy path cannot be read as a legacy file, so the trap is live: {as_legacy_file:?}"
-    );
+    // The discovery traps, read back after the whole lifecycle: both bearer
+    // long-term paths are still the pre-existing regular file, and the real
+    // discovery call (`fs::read_dir`, exactly what `list_memories` performs)
+    // still fails with a non-`NotFound` error. Any accidental legacy file
+    // discovery above would therefore have failed loudly instead of passing.
+    for dir in [&creator_legacy, &character_legacy] {
+        assert!(
+            dir.is_file(),
+            "the pre-existing long-term discovery path stays a file trap: {}",
+            dir.display()
+        );
+        assert_eq!(
+            fs::read(dir).expect("trap bytes"),
+            LEGACY_DIR_TRAP_BYTES,
+            "the file trap is untouched"
+        );
+        let discovery = fs::read_dir(dir);
+        assert!(
+            matches!(&discovery, Err(error) if error.kind() != std::io::ErrorKind::NotFound),
+            "the real list_memories discovery fails on this path, so it was never read: {discovery:?}"
+        );
+    }
 
     // I211: the subject *read* itself, over the SDK's own signed session. The
     // durable row asserted above is the effect of `ensure_subject`; this call is
