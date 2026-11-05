@@ -1079,6 +1079,20 @@ fn receipt_privacy_control_uses_actual_receipt_and_request_context() {
     });
     support::assert_no_receipt_disclosure(&permitted, &authorized, &current);
 
+    // H1: a top-level current operation with an ordinary error, and an unrelated
+    // op/result diagnostic, are not protected receipt tuples: recognition uses
+    // the authorized receipt's actual values, not generic field names.
+    let top_level_current_op = json!({
+        "op": "memory.receipts.get",
+        "error": {"code": "NOT_FOUND", "details": {"retry_class": "terminal"}},
+    });
+    support::assert_no_receipt_disclosure(&top_level_current_op, &authorized, &current);
+    let unrelated_diagnostic = json!({
+        "op": "memory.receipts.get",
+        "result": {"health": true},
+    });
+    support::assert_no_receipt_disclosure(&unrelated_diagnostic, &authorized, &current);
+
     let cases: Vec<(&str, Value)> = vec![
         (
             "an old idempotency key",
@@ -1156,5 +1170,50 @@ async fn task_set_join_cancellation_keeps_the_handle_owned() {
     assert!(
         flag.load(Ordering::SeqCst),
         "the retained handle aborted and joined the task instead of detaching it"
+    );
+}
+
+/// H2 (I270) owning-runner cancellation control: cancelling the WHOLE
+/// `run_matrix_scenario` future while a spawned operation is pending drops the
+/// last owning TaskSet, and the abort-on-drop slot aborts the task instead of
+/// detaching it. The abort guard inside the task proves the abort actually
+/// reached it; a plain last JoinHandle would only detach and the guard would
+/// stay unset until the test runtime shut down.
+#[tokio::test]
+async fn runner_cancellation_aborts_pending_owned_tasks() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct AbortFlag(Arc<AtomicBool>);
+    impl Drop for AbortFlag {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    let matrix = Matrix::local().await;
+    let flag = Arc::new(AtomicBool::new(false));
+    let owned_flag = Arc::clone(&flag);
+    let runner = run_matrix_scenario(matrix, move |_m, _r, tasks| {
+        Box::pin(async move {
+            let _ = tasks.spawn(async move {
+                let _guard = AbortFlag(owned_flag);
+                std::future::pending::<()>().await;
+                json!(null)
+            });
+            std::future::pending::<()>().await;
+        })
+    });
+    let cancelled = tokio::time::timeout(std::time::Duration::from_millis(200), runner).await;
+    assert!(
+        cancelled.is_err(),
+        "the whole owning runner future is cancelled while its task is pending"
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !flag.load(Ordering::SeqCst) && std::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(
+        flag.load(Ordering::SeqCst),
+        "dropping the last owning TaskSet aborts the pending task instead of detaching it"
     );
 }

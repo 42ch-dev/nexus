@@ -1490,6 +1490,7 @@ async fn c_095_scoped_admin_cannot_amplify_grant_remote() {
 #[tokio::test]
 async fn c_096_operator_bootstrap_is_callable_and_visible_local() {
     support::prove_failed_endpoint_settles().await;
+    support::prove_raw_setup_failure_settles().await;
     local_operator_bootstrap_through_core().await;
     let matrix = Matrix::local().await;
     run_matrix_scenario(matrix, |m, r, t| {
