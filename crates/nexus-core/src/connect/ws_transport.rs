@@ -32,22 +32,27 @@
 //! `tokio::sync::Mutex` (the [`Transport`] trait is `&self`-based while
 //! `SinkExt`/`StreamExt` need `&mut`), so a pending `recv` never blocks
 //! `send` and vice versa — the same concurrency the loopback pair provides
-//! for free. `close()` signals a [`tokio::sync::Notify`] so any parked
-//! `recv` or `send` wakes with [`TransportError::Closed`] even before the
-//! socket halves are released; both I/O paths re-check the flag under their
-//! half's lock, so a notification that races the first check still ends the
-//! call before it parks. The halves and the result are owned by a dedicated
-//! teardown task (`Arc`ed slots only — never the transport itself), which is
-//! what keeps the disposal alive when the initiating caller is cancelled.
+//! for free. Each I/O step polls its half ONCE inside the lock and then
+//! releases it before awaiting a socket/close wake, so a caller that is polled
+//! `Pending` and then retained without being polled again holds no physical
+//! half: the teardown can still take the halves, release the socket and settle
+//! the close. `close()` wakes every parked step with [`TransportError::Closed`],
+//! and each step re-checks the flag under its half's lock, so a notification
+//! that races the first check still ends the call instead of parking it. The
+//! halves and the result are owned by a dedicated teardown task (`Arc`ed slots
+//! only — never the transport itself), which is what keeps the disposal alive
+//! when the initiating caller is cancelled.
 
 use std::io::ErrorKind;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, PoisonError};
+use std::task::{Context, Poll, Wake, Waker};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use futures_util::stream::{SplitSink, SplitStream};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use spoke_connect::remote::{Transport, TransportError};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Mutex, Notify};
@@ -128,12 +133,38 @@ pub struct WsTransport<S> {
     sink: Arc<Mutex<Option<SinkHalf<S>>>>,
     /// The read half, shared with the teardown task the same way.
     stream: Arc<Mutex<Option<StreamHalf<S>>>>,
+    /// Serialises whole `send` calls. It owns no physical half, so a caller
+    /// that is polled `Pending` and then retained never keeps the teardown
+    /// from taking the socket halves.
+    send_slot: Mutex<()>,
+    /// The same for whole `recv` calls.
+    recv_slot: Mutex<()>,
     /// Idempotent-close guard + fail-fast flag.
     closed: AtomicBool,
-    /// Wakes a parked `recv`/`send` when the transport closes (fail-fast).
-    closed_notify: Notify,
+    /// Wakes a parked I/O step for a socket event or a close.
+    io_wake: Arc<IoWake>,
     /// The one physical teardown and its settled result.
     teardown: Arc<Teardown>,
+}
+
+/// Wakes a parked `send`/`recv` step for a socket event or a close.
+///
+/// Each I/O step holds its half only for one synchronous poll and then parks on
+/// this notification, so a caller that keeps the future alive without polling
+/// it again holds no socket half. The close wakes it so the step can observe the
+/// close instead of staying parked.
+struct IoWake {
+    notify: Notify,
+}
+
+impl Wake for IoWake {
+    fn wake(self: Arc<Self>) {
+        self.notify.notify_waiters();
+    }
+
+    fn wake_by_ref(self: &Arc<Self>) {
+        self.notify.notify_waiters();
+    }
 }
 
 /// The single physical teardown of one transport.
@@ -220,38 +251,13 @@ where
         Self {
             sink: Arc::new(Mutex::new(Some(sink))),
             stream: Arc::new(Mutex::new(Some(stream))),
+            send_slot: Mutex::new(()),
+            recv_slot: Mutex::new(()),
             closed: AtomicBool::new(false),
-            closed_notify: Notify::new(),
+            io_wake: Arc::new(IoWake {
+                notify: Notify::new(),
+            }),
             teardown: Arc::new(Teardown::new()),
-        }
-    }
-
-    /// Pull the next inbound message from the socket half, mapping stream
-    /// end and socket errors per the contract. `None` from the fused stream
-    /// means the peer disconnected (close frame or FIN) ⇒ `Closed`.
-    async fn next_message(&self) -> Result<Message, TransportError> {
-        tokio::select! {
-            biased;
-            // Fail fast when the transport is closed (peer close or local
-            // `close`) even if the socket would otherwise park.
-            () = self.closed_notify.notified() => Err(TransportError::Closed),
-            message = async {
-                let mut stream_guard = self.stream.lock().await;
-                // A close can race the fail-fast check above; the lock is where
-                // the two meet, so re-check it before parking on the socket.
-                if self.closed.load(Ordering::SeqCst) {
-                    return Err(TransportError::Closed);
-                }
-                let stream = stream_guard.as_mut().ok_or(TransportError::Closed)?;
-                let outcome = match stream.next().await {
-                    Some(Ok(message)) => Ok(message),
-                    Some(Err(error)) => Err(map_ws_error(error)),
-                    // Stream fused: peer disconnected.
-                    None => Err(TransportError::Closed),
-                };
-                drop(stream_guard);
-                outcome
-            } => message,
         }
     }
 }
@@ -262,53 +268,80 @@ where
     S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
 {
     async fn send(&self, envelope: &[u8]) -> Result<(), TransportError> {
+        // Serialise whole sends without owning a physical half.
+        let _slot = self.send_slot.lock().await;
         if self.closed.load(Ordering::SeqCst) {
             return Err(TransportError::Closed);
         }
-        tokio::select! {
-            biased;
-            // A close releases this send instead of waiting for the sink: the
-            // cancelled send drops its sink guard, so the teardown can take the
-            // half even while the peer is not reading.
-            () = self.closed_notify.notified() => Err(TransportError::Closed),
-            outcome = async {
+        let mut message = Some(Message::Binary(envelope.to_vec().into()));
+        let mut staged = false;
+        loop {
+            // Register the wake before the poll so a socket wake that lands in
+            // between is never lost.
+            let notified = self.io_wake.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            let outcome = {
+                // The physical half is held only across this one synchronous
+                // poll and released before the await below; a retained caller
+                // therefore never keeps it from the teardown.
                 let mut sink_guard = self.sink.lock().await;
-                // The notification can race the fail-fast check above; the lock
-                // is where the two meet, so re-check it before writing.
                 if self.closed.load(Ordering::SeqCst) {
                     return Err(TransportError::Closed);
                 }
                 let sink = sink_guard.as_mut().ok_or(TransportError::Closed)?;
-                let outcome = sink
-                    .send(Message::Binary(envelope.to_vec().into()))
-                    .await
-                    .map_err(map_ws_error);
-                drop(sink_guard);
-                outcome
-            } => outcome,
+                let waker = Waker::from(Arc::clone(&self.io_wake));
+                let mut context = Context::from_waker(&waker);
+                let mut pinned = Pin::new(sink);
+                if !staged {
+                    match pinned.as_mut().poll_ready(&mut context) {
+                        Poll::Ready(Ok(())) => {
+                            let message = message.take().expect("one message per send");
+                            if let Err(error) = pinned.as_mut().start_send(message) {
+                                Poll::Ready(Err(map_ws_error(error)))
+                            } else {
+                                staged = true;
+                                poll_flush(&mut pinned, &mut context)
+                            }
+                        }
+                        Poll::Ready(Err(error)) => Poll::Ready(Err(map_ws_error(error))),
+                        Poll::Pending => Poll::Pending,
+                    }
+                } else {
+                    poll_flush(&mut pinned, &mut context)
+                }
+            };
+            if let Poll::Ready(outcome) = outcome {
+                return outcome;
+            }
+            notified.await;
         }
     }
 
     async fn recv(&self) -> Result<Vec<u8>, TransportError> {
+        // Serialise whole receives without owning a physical half.
+        let _slot = self.recv_slot.lock().await;
         if self.closed.load(Ordering::SeqCst) {
             return Err(TransportError::Closed);
         }
         loop {
-            let message = match self.next_message().await {
-                Ok(message) => message,
-                // Clean connection loss: fail fast, nothing to tear down.
-                Err(TransportError::Closed) => return Err(TransportError::Closed),
-                // Session poisoned (e.g. inbound envelope over the 2 MiB cap
-                // ⇒ tungstenite Capacity): fail-closed — no further traffic
-                // may flow on this transport.
-                Err(io_error) => {
-                    self.signal();
-                    return Err(io_error);
+            let notified = self.io_wake.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            let polled = {
+                // The read half is held only across this one synchronous poll.
+                let mut stream_guard = self.stream.lock().await;
+                if self.closed.load(Ordering::SeqCst) {
+                    return Err(TransportError::Closed);
                 }
+                let stream = stream_guard.as_mut().ok_or(TransportError::Closed)?;
+                let waker = Waker::from(Arc::clone(&self.io_wake));
+                let mut context = Context::from_waker(&waker);
+                Pin::new(stream).poll_next(&mut context)
             };
-            match message {
-                Message::Binary(bytes) => return Ok(bytes.to_vec()),
-                Message::Text(_) => {
+            match polled {
+                Poll::Ready(Some(Ok(Message::Binary(bytes)))) => return Ok(bytes.to_vec()),
+                Poll::Ready(Some(Ok(Message::Text(_)))) => {
                     // Non-Binary data message: fail-closed (AR-57 #3) —
                     // tear the session down so no further traffic can flow.
                     self.signal();
@@ -318,7 +351,19 @@ where
                 }
                 // Control frames are answered internally by tungstenite
                 // (auto-pong); a close frame surfaces as stream end → Closed.
-                Message::Ping(_) | Message::Pong(_) | Message::Close(_) | Message::Frame(_) => {}
+                Poll::Ready(Some(Ok(
+                    Message::Ping(_) | Message::Pong(_) | Message::Close(_) | Message::Frame(_),
+                ))) => continue,
+                Poll::Ready(Some(Err(error))) => {
+                    // Session poisoned (e.g. inbound envelope over the 2 MiB
+                    // cap ⇒ tungstenite Capacity): fail-closed — no further
+                    // traffic may flow on this transport.
+                    self.signal();
+                    return Err(map_ws_error(error));
+                }
+                // Stream fused: peer disconnected.
+                Poll::Ready(None) => return Err(TransportError::Closed),
+                Poll::Pending => notified.await,
             }
         }
     }
@@ -342,7 +387,7 @@ where
     /// result once, and never depends on a later caller taking over.
     fn signal(&self) {
         self.closed.store(true, Ordering::SeqCst);
-        self.closed_notify.notify_waiters();
+        self.io_wake.notify.notify_waiters();
         let mut state = self.teardown.state.lock().unwrap_or_else(PoisonError::into_inner);
         if !matches!(*state, TeardownState::Idle) {
             return;
@@ -386,6 +431,21 @@ where
             }
             notified.await;
         }
+    }
+}
+
+/// Poll one flush step of a `SplitSink` and map its error.
+fn poll_flush<S>(
+    sink: &mut Pin<&mut S>,
+    context: &mut Context<'_>,
+) -> Poll<Result<(), TransportError>>
+where
+    S: Sink<Message, Error = WsError> + Unpin,
+{
+    match sink.as_mut().poll_flush(context) {
+        Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
+        Poll::Ready(Err(error)) => Poll::Ready(Err(map_ws_error(error))),
+        Poll::Pending => Poll::Pending,
     }
 }
 
