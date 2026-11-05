@@ -9,12 +9,19 @@
 //! them.
 //!
 //! Semantics (AR-57):
-//! - `send`: resolves when the socket has accepted the bytes.
+//! - `send`: resolves when the socket has accepted the bytes. A `close` (or a
+//!   failed receive) cancels a send parked on a peer that stopped reading, and
+//!   that send reports [`TransportError::Closed`] instead of pinning the half.
 //! - `recv`: fails fast with [`TransportError::Closed`] on connection loss
 //!   (never parks past the peer's disconnect).
-//! - `close`: idempotent teardown; both directions close together (the WS
-//!   close frame is flushed, then the socket halves are dropped so the peer
-//!   observes the FIN immediately).
+//! - `close`: signals cancellation BEFORE any lock or flush, so a parked
+//!   `send`/`recv` releases its half; the halves are then moved out of the
+//!   transport, flushed with a bounded best-effort close frame and dropped so
+//!   the peer observes the FIN. Concurrent and repeated callers share the ONE
+//!   settled outcome: a close that cannot flush within the bound is reported as
+//!   an I/O error rather than as success, and a cancelled caller's attempt
+//!   leaves its already-taken halves released while a waiting caller finishes
+//!   the settlement (I-000259).
 //! - Socket/protocol errors → [`TransportError::Io`].
 //! - Max inbound WS message size default **2 MiB** (config-gated); oversized
 //!   or non-Binary message → [`TransportError::Io`] and the session is
@@ -26,23 +33,33 @@
 //! `SinkExt`/`StreamExt` need `&mut`), so a pending `recv` never blocks
 //! `send` and vice versa — the same concurrency the loopback pair provides
 //! for free. `close()` signals a [`tokio::sync::Notify`] so any parked
-//! `recv` wakes with [`TransportError::Closed`] even before the socket
-//! halves are released.
+//! `recv` or `send` wakes with [`TransportError::Closed`] even before the
+//! socket halves are released; both I/O paths re-check the flag under their
+//! half's lock, so a notification that races the first check still ends the
+//! call before it parks. The physical teardown is owned once
+//! ([`tokio::sync::OnceCell`]), which is what makes a cancelled closer safe:
+//! the halves it took drop with it, and a waiting closer carries the attempt.
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use spoke_connect::remote::{Transport, TransportError};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::{Mutex, Notify, OnceCell};
 use tokio_tungstenite::tungstenite::protocol::{Message, WebSocketConfig};
 use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::WebSocketStream;
 
 /// Default maximum inbound WS message size (bytes) — AR-57 #3.
 pub const DEFAULT_MAX_ENVELOPE_BYTES: usize = 2 * 1024 * 1024;
+
+/// Bound on the graceful close-frame flush in [`Transport::close`]. The socket
+/// halves are always released, so a peer that stopped reading cannot hold the
+/// teardown open.
+const CLOSE_BOUND: Duration = Duration::from_secs(2);
 
 /// Build the tungstenite config enforcing the 2 MiB inbound cap.
 #[must_use]
@@ -73,8 +90,14 @@ pub struct WsTransport<S> {
     stream: Mutex<Option<SplitStream<WebSocketStream<S>>>>,
     /// Idempotent-close guard + fail-fast flag.
     closed: AtomicBool,
-    /// Wakes a parked `recv` when the transport closes (fail-fast).
+    /// Wakes a parked `recv`/`send` when the transport closes (fail-fast).
     closed_notify: Notify,
+    /// The settled outcome of the ONE physical teardown. The first `close`
+    /// runs it; concurrent and repeated callers await the same result, so a
+    /// caller never reports a close it merely started, and a cancelled owner
+    /// hands the attempt to a waiting caller. The halves themselves are taken
+    /// out of the slots above, so a cancelled attempt drops (releases) them.
+    teardown: OnceCell<Result<(), TransportError>>,
 }
 
 impl<S> WsTransport<S>
@@ -91,6 +114,7 @@ where
             stream: Mutex::new(Some(stream)),
             closed: AtomicBool::new(false),
             closed_notify: Notify::new(),
+            teardown: OnceCell::new(),
         }
     }
 
@@ -105,6 +129,11 @@ where
             () = self.closed_notify.notified() => Err(TransportError::Closed),
             message = async {
                 let mut stream_guard = self.stream.lock().await;
+                // A close can race the fail-fast check above; the lock is where
+                // the two meet, so re-check it before parking on the socket.
+                if self.closed.load(Ordering::SeqCst) {
+                    return Err(TransportError::Closed);
+                }
                 let stream = stream_guard.as_mut().ok_or(TransportError::Closed)?;
                 let outcome = match stream.next().await {
                     Some(Ok(message)) => Ok(message),
@@ -121,12 +150,51 @@ where
     /// Fail-closed teardown: mark closed, wake any parked `recv`, release
     /// both socket halves. Idempotent.
     async fn tear_down(&self) {
-        if self.closed.swap(true, Ordering::Relaxed) {
+        if self.closed.swap(true, Ordering::SeqCst) {
             return;
         }
+        // Signal BEFORE taking a half: a parked `recv`/`send` holds its half's
+        // mutex across the native poll, so it can only release it after it
+        // observes the close.
         self.closed_notify.notify_waiters();
         self.stream.lock().await.take();
         self.sink.lock().await.take();
+    }
+
+    /// Take both socket halves out of the shared slots and dispose of them.
+    ///
+    /// Taking first is what makes teardown cancellation-safe: the halves move
+    /// into this future, so dropping it (a cancelled `close`) drops them and
+    /// the socket is released; a later attempt finds them gone instead of
+    /// reviving a half another caller already released. The close-frame flush
+    /// is best-effort and bounded — a peer that stopped reading cannot hold the
+    /// teardown open, and that terminal condition is surfaced rather than
+    /// reported as a clean close.
+    async fn dispose(&self) -> Result<(), TransportError> {
+        let sink = self.sink.lock().await.take();
+        let stream = self.stream.lock().await.take();
+        drop(stream);
+        let Some(mut sink) = sink else {
+            // The write half was already taken (and released) by an earlier or
+            // cancelled attempt: there is nothing left for this one to dispose.
+            return Ok(());
+        };
+        let outcome = match tokio::time::timeout(CLOSE_BOUND, sink.close()).await {
+            // The peer completed the handshake, or the write reported a
+            // connection that is already gone. The close frame is best-effort
+            // by this transport's retained contract (a peer that already
+            // closed resets the write, and the existing consumer contract
+            // requires that close to settle as success), while the disposal
+            // below is what this call owes.
+            Ok(Ok(())) | Ok(Err(_)) => Ok(()),
+            // The peer did not accept the close within the bound. The halves
+            // still go away below; the refusal is the close's real outcome.
+            Err(_) => Err(TransportError::Io(format!(
+                "ws close frame was not flushed within {CLOSE_BOUND:?}"
+            ))),
+        };
+        drop(sink);
+        outcome
     }
 }
 
@@ -136,17 +204,31 @@ where
     S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
 {
     async fn send(&self, envelope: &[u8]) -> Result<(), TransportError> {
-        if self.closed.load(Ordering::Relaxed) {
+        if self.closed.load(Ordering::SeqCst) {
             return Err(TransportError::Closed);
         }
-        let mut sink_guard = self.sink.lock().await;
-        let sink = sink_guard.as_mut().ok_or(TransportError::Closed)?;
-        let outcome = sink
-            .send(Message::Binary(envelope.to_vec().into()))
-            .await
-            .map_err(map_ws_error);
-        drop(sink_guard);
-        outcome
+        tokio::select! {
+            biased;
+            // A close releases this send instead of waiting for the sink: the
+            // cancelled send drops its sink guard, so `close` can take the half
+            // even while the peer is not reading.
+            () = self.closed_notify.notified() => Err(TransportError::Closed),
+            outcome = async {
+                let mut sink_guard = self.sink.lock().await;
+                // The notification can race the fail-fast check above; the lock
+                // is where the two meet, so re-check it before writing.
+                if self.closed.load(Ordering::SeqCst) {
+                    return Err(TransportError::Closed);
+                }
+                let sink = sink_guard.as_mut().ok_or(TransportError::Closed)?;
+                let outcome = sink
+                    .send(Message::Binary(envelope.to_vec().into()))
+                    .await
+                    .map_err(map_ws_error);
+                drop(sink_guard);
+                outcome
+            } => outcome,
+        }
     }
 
     async fn recv(&self) -> Result<Vec<u8>, TransportError> {
@@ -184,23 +266,15 @@ where
     }
 
     async fn close(&self) -> Result<(), TransportError> {
-        if self.closed.swap(true, Ordering::Relaxed) {
-            // Already closed: idempotent no-op.
-            return Ok(());
-        }
-        // Best-effort WS close handshake (flush the close frame), then
-        // release both socket halves so the peer observes the FIN and any
-        // parked `recv` on this end wakes with `Closed`.
-        {
-            let mut sink_guard = self.sink.lock().await;
-            if let Some(sink) = sink_guard.as_mut() {
-                let _ = sink.close().await;
-            }
-        }
+        // Cancellation must be visible BEFORE any lock or flush: a parked
+        // `send`/`recv` holds its half's mutex across the native poll, so it can
+        // only release that half once it observes this signal.
+        self.closed.store(true, Ordering::SeqCst);
         self.closed_notify.notify_waiters();
-        self.stream.lock().await.take();
-        self.sink.lock().await.take();
-        Ok(())
+        // One physical teardown per transport: every concurrent or repeated
+        // caller returns this settled outcome, never the fact that a close was
+        // merely started, and a cancelled owner hands the attempt to a waiter.
+        self.teardown.get_or_init(|| self.dispose()).await.clone()
     }
 }
 
