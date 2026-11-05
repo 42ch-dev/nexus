@@ -74,6 +74,7 @@ async fn seed_world_and_entity(home: &Path) -> (String, u64) {
     let core = CoreService::open(CoreOpenOptions {
         user_home: home.to_path_buf(),
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .expect("seed core opens on the isolated home");

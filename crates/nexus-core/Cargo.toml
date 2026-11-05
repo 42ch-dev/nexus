@@ -138,6 +138,11 @@ hex = { version = "0.4", optional = true }
 base64 = { version = "0.23", optional = true }
 sha2 = { workspace = true, optional = true }
 serde.workspace = true
+# §3.2 endpoint discipline: the raw endpoint is validated with the same
+# `http::Uri` grammar `tokio_tungstenite::connect_async` consumes, instead of
+# a second parser with a different normalization. Already in the workspace
+# lock through the WS transport.
+http = "1"
 serde_json.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
@@ -153,6 +158,10 @@ serde_yaml = { workspace = true }
 # advisory workspace-authority lease. Every use site is `cfg(unix)`-gated, so
 # the edge is scoped to Unix rather than linked on every target.
 nix = { version = "0.31.3", features = ["fs"], optional = true }
+# §3.1 credential-file opening: `O_NOFOLLOW | O_NONBLOCK` flags make the
+# symlink/special-file refusal atomic with the open. Constants only; `libc`
+# is already resolved in the workspace lock through `nix`.
+libc = "0.2"
 
 [dev-dependencies]
 # Enable the gated execution test seams for this package's own tests without

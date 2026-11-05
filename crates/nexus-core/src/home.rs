@@ -32,6 +32,7 @@ use nexus_local_db::open_pool_read_only;
 
 use crate::config_lock::with_config_lock;
 use crate::error::{local_db_err, CoreError, CoreResult};
+use crate::memory_selection::MemoryProviderSelection;
 
 /// Maximum length for a creator display name — parity with the CLI identity
 /// front door (`MAX_CREATOR_NAME_LENGTH` in `nexus42`), so both entry points
@@ -82,6 +83,31 @@ impl CoreHomeService {
     #[must_use]
     pub fn user_home(&self) -> &Path {
         &self.user_home
+    }
+
+    /// Persist the memory provider selection in `[memory_provider]`.
+    ///
+    /// The whole document is read and rewritten under the daemon-home
+    /// `config.toml` advisory lock, so keys other writers own survive. A
+    /// remote selection is validated before the lock is taken; a refusal
+    /// writes nothing. Only non-secret references are stored (§2.2).
+    ///
+    /// # Errors
+    /// Returns [`CoreError::InvalidInput`] for a malformed remote reference and
+    /// the mapped carrier when the lock, read or write fails.
+    pub fn set_memory_provider_selection(
+        &self,
+        selection: &MemoryProviderSelection,
+    ) -> CoreResult<()> {
+        write_memory_provider_selection(&self.nexus_home, selection)
+    }
+
+    /// Remove `[memory_provider]`, restoring the implicit local default.
+    ///
+    /// # Errors
+    /// Returns the mapped carrier when the lock, read or write fails.
+    pub fn clear_memory_provider_selection(&self) -> CoreResult<()> {
+        clear_memory_provider_selection(&self.nexus_home)
     }
 
     /// Register a persistent local creator in the global identity store
@@ -1106,23 +1132,7 @@ pub fn write_active_selection(
     workspace_path: Option<&Path>,
 ) -> CoreResult<()> {
     with_config_lock(nexus_home, || {
-        let config_path = nexus_home.join("config.toml");
-
-        let mut config: toml::Table = if config_path.exists() {
-            let content =
-                std::fs::read_to_string(&config_path).map_err(|e| CoreError::Internal {
-                    category: format!("config_read: {e}"),
-                })?;
-            if content.trim().is_empty() {
-                toml::Table::new()
-            } else {
-                content.parse().map_err(|e| CoreError::Internal {
-                    category: format!("config_parse: {e}"),
-                })?
-            }
-        } else {
-            toml::Table::new()
-        };
+        let mut config = read_config_table(nexus_home)?;
 
         config.insert(
             "active_creator_id".to_string(),
@@ -1152,14 +1162,63 @@ pub fn write_active_selection(
             );
         }
 
-        let toml_str = toml::to_string_pretty(&config).map_err(|e| CoreError::Internal {
-            category: format!("config_serialize: {e}"),
-        })?;
-        std::fs::write(&config_path, toml_str).map_err(|e| CoreError::Internal {
-            category: format!("config_write: {e}"),
-        })?;
+        write_config_table(nexus_home, &config)
+    })
+}
 
-        Ok(())
+/// Write `[memory_provider]` — the non-secret provider selection — preserving
+/// every other key. The whole read-modify-write holds the daemon-home
+/// `config.toml` advisory lock.
+fn write_memory_provider_selection(
+    nexus_home: &Path,
+    selection: &MemoryProviderSelection,
+) -> CoreResult<()> {
+    selection.validate()?;
+    let table = toml::Value::try_from(selection.to_config()).map_err(|e| CoreError::Internal {
+        category: format!("config_serialize: memory_provider: {e}"),
+    })?;
+    with_config_lock(nexus_home, || {
+        let mut config = read_config_table(nexus_home)?;
+        config.insert("memory_provider".to_string(), table);
+        write_config_table(nexus_home, &config)
+    })
+}
+
+/// Remove `[memory_provider]`, restoring the implicit local default.
+fn clear_memory_provider_selection(nexus_home: &Path) -> CoreResult<()> {
+    with_config_lock(nexus_home, || {
+        let mut config = read_config_table(nexus_home)?;
+        if config.remove("memory_provider").is_none() {
+            return Ok(());
+        }
+        write_config_table(nexus_home, &config)
+    })
+}
+
+/// Read `config.toml` as a whole TOML table (absent/empty → empty table).
+fn read_config_table(nexus_home: &Path) -> CoreResult<toml::Table> {
+    let config_path = nexus_home.join("config.toml");
+    if !config_path.exists() {
+        return Ok(toml::Table::new());
+    }
+    let content = std::fs::read_to_string(&config_path).map_err(|e| CoreError::Internal {
+        category: format!("config_read: {e}"),
+    })?;
+    if content.trim().is_empty() {
+        return Ok(toml::Table::new());
+    }
+    content.parse().map_err(|e| CoreError::Internal {
+        category: format!("config_parse: {e}"),
+    })
+}
+
+/// Serialize and write the whole `config.toml` document.
+fn write_config_table(nexus_home: &Path, config: &toml::Table) -> CoreResult<()> {
+    let toml_str = toml::to_string_pretty(config).map_err(|e| CoreError::Internal {
+        category: format!("config_serialize: {e}"),
+    })?;
+    std::fs::write(nexus_home.join("config.toml"), toml_str).map_err(|e| CoreError::Internal {
+        category: format!("config_write: {e}"),
     })
 }
 

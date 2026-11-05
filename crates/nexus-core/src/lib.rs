@@ -26,7 +26,12 @@ mod home;
 pub mod host;
 mod knowledge;
 mod memory;
+// v1.229 N3 Task 3: the one provider authority an open pins.
+mod memory_binding;
+mod memory_credentials;
 mod memory_pipeline;
+// v1.229 NXM-9: the validated `[memory_provider]` selection an open resolves.
+mod memory_selection;
 // v1.227 NXM-1: the in-process `spoke_operations::MemoryPort` provider.
 pub mod memory_provider;
 mod operation_receipts;
@@ -78,7 +83,7 @@ pub use config_lock::with_config_lock;
 pub use content::{resolve_guarded_path, resolve_guarded_path_async, CoreChapterContentQuery};
 pub use context::{LocalDirectiveStore, ReadOnlyDirectiveStore};
 pub use creators::CREATOR_INTERNAL_CODES;
-pub use error::{CoreError, CoreResult, MEMORY_INTERNAL_CODES};
+pub use error::{CoreError, CoreResult, MemoryProviderRefusal, MEMORY_INTERNAL_CODES};
 #[cfg(feature = "execution")]
 pub use execution::{
     CancelOutcome, DriveDisposition, ExecutionBuildObserver, ExecutionHandle, ExecutionOpenError,
@@ -101,7 +106,10 @@ pub use memory::{
 /// (NXM-5 Task 2 fix round 2, finding F1). Test builds only.
 #[cfg(feature = "test-hooks")]
 pub use memory::{MemoryReviewPause, MemoryReviewRendezvous};
+pub use memory_credentials::MemoryCredential;
 pub use memory_provider::{LegacyContentMigration, LegacyMigrationStatus};
+pub use memory_selection::{MemoryProviderSelection, RemoteMemoryProviderSelection};
+pub use nexus_home_layout::MemoryProviderConfig;
 pub use presets::PresetError;
 pub use principal::Principal;
 pub use references::{RegisterReferenceParams, REFERENCE_SOURCE_TYPES};

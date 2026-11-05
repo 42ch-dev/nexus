@@ -296,6 +296,7 @@ async fn open_core(env: &Env) -> (CoreService, nexus_core::Principal) {
     let core = CoreService::open(CoreOpenOptions {
         user_home: env.home.clone(),
         access: CoreAccess::EngineOwner,
+        memory: None,
     })
     .await
     .unwrap();

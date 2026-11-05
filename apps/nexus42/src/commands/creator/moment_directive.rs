@@ -585,6 +585,7 @@ mod tests {
             let core = CoreService::open(CoreOpenOptions {
                 user_home,
                 access: CoreAccess::DirectWriter,
+                memory: None,
             })
             .await
             .unwrap();

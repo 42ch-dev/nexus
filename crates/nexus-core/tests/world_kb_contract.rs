@@ -217,6 +217,7 @@ async fn setup() -> Fixture {
     let core = CoreService::open(CoreOpenOptions {
         user_home,
         access: CoreAccess::EngineOwner,
+        memory: None,
     })
     .await
     .unwrap();
@@ -510,6 +511,7 @@ async fn world_kb_contract_legacy_json_open() {
     let core = CoreService::open(CoreOpenOptions {
         user_home,
         access: CoreAccess::EngineOwner,
+        memory: None,
     })
     .await
     .unwrap();
@@ -600,6 +602,7 @@ async fn direct_writer_close_allows_reopen() {
     let core = CoreService::open(CoreOpenOptions {
         user_home: user_home.clone(),
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .unwrap();
@@ -610,6 +613,7 @@ async fn direct_writer_close_allows_reopen() {
     let core2 = CoreService::open(CoreOpenOptions {
         user_home,
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .expect("second DirectWriter open after close must succeed");
@@ -734,6 +738,7 @@ async fn provider_journal_contract_write_read_settle() {
     let ro = CoreService::open(CoreOpenOptions {
         user_home: fx.tmp.path().to_path_buf(),
         access: CoreAccess::ReadOnly,
+        memory: None,
     })
     .await
     .unwrap();
@@ -969,6 +974,7 @@ async fn setup_sheet_fixture() -> SheetFixture {
     let core = CoreService::open(CoreOpenOptions {
         user_home,
         access: CoreAccess::EngineOwner,
+        memory: None,
     })
     .await
     .unwrap();

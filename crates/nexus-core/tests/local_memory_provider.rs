@@ -1781,6 +1781,7 @@ async fn out_of_guard_writes_are_writer_fenced() {
             migration_epoch: 0,
             engine_epoch: None,
         },
+        None,
     )
     .await
     .unwrap();

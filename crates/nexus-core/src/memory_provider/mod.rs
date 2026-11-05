@@ -384,6 +384,7 @@ impl ProviderError {
 fn store_error(error: StoreError) -> ProviderError {
     match error {
         StoreError::NotFound(target) => ProviderError::NotFound(target),
+        StoreError::InvalidInput { field, reason } => ProviderError::InvalidInput { field, reason },
         StoreError::NotAuthorized(reason) => ProviderError::NotAuthorized(reason),
         StoreError::SpaceFrozen(reason) => ProviderError::SpaceFrozen(reason),
         StoreError::SubjectFenced {
@@ -836,6 +837,15 @@ fn disposition_lock_file(subject_id: &str) -> Result<String, ProviderError> {
 }
 
 impl LocalMemoryProvider {
+    /// Close this provider's own pool, and with it its writer admission.
+    ///
+    /// Called by the binding when the open that pinned this provider ends. It
+    /// closes only this provider's pool: any other open's pool, and any raw
+    /// process-retained pool, is untouched. Idempotent.
+    pub(crate) async fn close(&self) {
+        self.store.close().await;
+    }
+
     /// Open (or join) the workspace's admitted writer and provision the local
     /// space plus its first `admin` grant (§7.0.6). Re-opening is a no-op.
     ///

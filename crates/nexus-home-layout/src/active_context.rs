@@ -10,7 +10,37 @@ use serde::{Deserialize, Serialize};
 
 const DEFAULT_WORKSPACE_SLUG: &str = "default";
 
+/// On-disk `[memory_provider]` table of `~/.nexus42/config.toml`.
+///
+/// Shape contract: `n3-provider-binding.md` §2.2. Remote carries only
+/// references — never an identity seed, token, capability proof or credential
+/// body. Absent table and `kind = "local"` both select the local provider.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum MemoryProviderConfig {
+    /// Built-in local provider.
+    Local,
+    /// Remote Connect provider reference.
+    Remote {
+        /// Provider space the selected authority serves.
+        space_id: String,
+        /// Operator-provisioned credential file id (not the secret itself).
+        credential_id: String,
+        /// `wss://` endpoint, or `ws://` for loopback tests only.
+        connect_endpoint: String,
+        /// Remote Ed25519 public key, 64 lowercase hex characters.
+        remote_pubkey_hex: String,
+        /// Trusted remote peer ids (fail-closed handshake).
+        allowlist: Vec<String>,
+    },
+}
+
 /// Subset of CLI config persisted under `~/.nexus42/config.toml`.
+///
+/// The `[memory_provider]` table is deliberately not part of this snapshot:
+/// it is written and read by the memory-provider owner only
+/// ([`read_memory_provider_config`]), so a malformed provider table cannot
+/// change creator or workspace resolution for unrelated readers.
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
 pub struct CliConfigSnapshot {
     #[serde(default)]
@@ -114,6 +144,39 @@ pub fn read_active_workspace_slug(nexus_home: &Path, creator_id: &str) -> Option
             .unwrap_or_default()
             .workspace_slug_for_creator(creator_id),
     )
+}
+
+/// Read the optional `[memory_provider]` table.
+///
+/// Independent of [`CliConfigSnapshot`] so a malformed provider table fails
+/// provider selection only, never creator/workspace resolution. An absent
+/// table is the implicit local default, not an error.
+///
+/// # Errors
+///
+/// Returns an error when `config.toml` cannot be read or parsed, or when the
+/// provider table does not match [`MemoryProviderConfig`].
+pub fn read_memory_provider_config(
+    nexus_root: &Path,
+) -> Result<Option<MemoryProviderConfig>, anyhow::Error> {
+    let path = nexus_root.join("config.toml");
+    if !path.exists() {
+        return Ok(None);
+    }
+    let text = std::fs::read_to_string(&path)?;
+    if text.trim().is_empty() {
+        return Ok(None);
+    }
+    let document: toml::Table = toml::from_str(&text)?;
+    let Some(table) = document.get("memory_provider") else {
+        return Ok(None);
+    };
+    table.clone().try_into().map(Some).map_err(|error| {
+        anyhow::anyhow!(
+            "invalid [memory_provider] in {}: {error}",
+            path.display()
+        )
+    })
 }
 
 /// Read `active_creator_id` without failing on missing config.

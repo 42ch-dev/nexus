@@ -171,6 +171,9 @@ pub enum ActorContractConflict {
     /// subject still has governance references, bindings, or retained owned
     /// rows (durable §2.2).
     ActorInUse,
+    /// v1.229 N3 D18: the binding still owns an unknown remote capture
+    /// admission or a known live remote provider object.
+    BindingHasRemoteMemory,
 }
 
 impl ActorContractConflict {
@@ -199,6 +202,7 @@ impl ActorContractConflict {
             Self::RunCaptureProvenanceConflict => "run_capture_provenance_conflict",
             Self::RunCaptureScopeChanged => "run_capture_scope_changed",
             Self::ActorInUse => "actor_in_use",
+            Self::BindingHasRemoteMemory => "binding_has_remote_memory",
         }
     }
 
@@ -263,6 +267,9 @@ impl ActorContractConflict {
             }
             Self::ActorInUse => {
                 "Actor still has references (governance, bindings or retained owned rows) that prevent deletion"
+            }
+            Self::BindingHasRemoteMemory => {
+                "Cannot remove a binding that still owns remote binding-local memory dependencies"
             }
         }
     }

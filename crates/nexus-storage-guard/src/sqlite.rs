@@ -14,7 +14,7 @@ use libsqlite3_sys::{
 };
 use sqlx::sqlite::SqliteConnection;
 
-use crate::{WriterConnectionContext, WriterMode};
+use crate::{WriterAdmission, WriterConnectionContext, WriterMode};
 
 /// Live FFI userdata boxes in this process — one per registration that supplied
 /// a destructor and has not been destroyed yet.
@@ -37,7 +37,17 @@ impl WriterConnectionContext {
 }
 
 /// Per-registration userdata: one `Arc` clone per successful `sqlite3_create_function_v2`.
-struct UserData(Arc<WriterConnectionContext>);
+///
+/// The optional admission is the pinned OS lock-resource lease. It is kept
+/// here — not in the public, pure-metadata [`WriterConnectionContext`] — so the
+/// legitimate lock handles stay held for exactly as long as SQLite keeps this
+/// registration, i.e. until the connection is really disposed or registration
+/// fails.
+struct UserData {
+    context: Arc<WriterConnectionContext>,
+    /// Pinned only for its Drop: SQLite frees this box at real disposal.
+    _admission: Option<Arc<WriterAdmission>>,
+}
 
 /// Drop one registration's userdata box.
 ///
@@ -59,7 +69,7 @@ fn context_from(ctx: *mut sqlite3_context) -> Option<Arc<WriterConnectionContext
         return None;
     }
     // SAFETY: userdata is a valid `UserData` box until `destroy_userdata` runs.
-    Some(Arc::clone(&unsafe { &*ptr.cast::<UserData>() }.0))
+    Some(Arc::clone(&unsafe { &*ptr.cast::<UserData>() }.context))
 }
 
 extern "C" fn scalar_writer_id(
@@ -161,10 +171,14 @@ fn register_scalar(
     name: &str,
     func: ScalarFn,
     context: Arc<WriterConnectionContext>,
+    admission: Option<Arc<WriterAdmission>>,
 ) -> Result<(), sqlx::Error> {
     let c_name =
         CString::new(name).map_err(|e| sqlx::Error::Configuration(e.to_string().into()))?;
-    let userdata = Box::into_raw(Box::new(UserData(context)));
+    let userdata = Box::into_raw(Box::new(UserData {
+        context,
+        _admission: admission,
+    }));
     #[cfg(debug_assertions)]
     LIVE_REGISTRATIONS.fetch_add(1, Ordering::SeqCst);
     let status = unsafe {
@@ -213,6 +227,7 @@ fn register_scalar(
 pub async fn install_writer_functions(
     conn: &mut SqliteConnection,
     context: WriterConnectionContext,
+    admission: Option<Arc<WriterAdmission>>,
 ) -> Result<(), sqlx::Error> {
     let shared = Arc::new(context);
     let mut handle = conn.lock_handle().await?;
@@ -225,7 +240,7 @@ pub async fn install_writer_functions(
         ("nexus_engine_epoch", scalar_engine_epoch),
     ];
     for (name, func) in functions {
-        register_scalar(db, name, func, Arc::clone(&shared))?;
+        register_scalar(db, name, func, Arc::clone(&shared), admission.clone())?;
     }
     Ok(())
 }

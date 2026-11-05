@@ -27,7 +27,8 @@
 // V1.227 NXM-2: 27 → 28 — memory_receipts rebuilt so a settled receipt may carry no payload at all, the content-free §6.10 dedup tombstone left after body eviction, plus the `created_at` retention-sweep index (migration 20261101000003_memory_receipt_tombstones.sql).
 // V1.227 NXM-2: 28 → 29 — memory_provider_meta key/value table, the provider-owned home of the durable §6.10 retention clock floor, plus its writer-protocol guard/outbox family (migration 20261101000004_memory_provider_meta.sql).
 // V1.227 NXM-3: 29 → 30 — memory_journal durable intent journal for cross-store (SQL + file) writes (§5.2/D-10): the planned file targets are committed with the effect rows, recovery settles or quarantines them, plus its writer-protocol guard/outbox family (migration 20261101000005_memory_journal.sql).
-pub const DB_SCHEMA_VERSION: u32 = 30;
+// V1.229 N3 P4 (D18): 30 → 31 — content-free remote binding-memory dependency metadata: independent per-wire-attempt admissions plus monotone known candidate/record facts, both RESTRICT-bound to the Nexus binding (migration 20261104000001_remote_binding_memory_dependencies.sql).
+pub const DB_SCHEMA_VERSION: u32 = 31;
 
 /// Contract schema version from generated wire types
 ///

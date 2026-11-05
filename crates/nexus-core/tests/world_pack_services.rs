@@ -114,6 +114,7 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
     let core = CoreService::open(CoreOpenOptions {
         user_home: home.clone(),
         access: CoreAccess::EngineOwner,
+        memory: None,
     })
     .await
     .unwrap();
@@ -210,6 +211,7 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
     let readonly = CoreService::open(CoreOpenOptions {
         user_home: home,
         access: CoreAccess::ReadOnly,
+        memory: None,
     })
     .await
     .unwrap();
@@ -322,6 +324,7 @@ async fn bridge_admits_non_bootstrap_owner_on_bootstrap_pool() {
     let reader_core = CoreService::open(CoreOpenOptions {
         user_home: home,
         access: CoreAccess::ReadOnly,
+        memory: None,
     })
     .await
     .unwrap();
@@ -464,6 +467,7 @@ async fn pack_test_core() -> (tempfile::TempDir, sqlx::SqlitePool, CoreService) 
     let core = CoreService::open(CoreOpenOptions {
         user_home: home,
         access: CoreAccess::EngineOwner,
+        memory: None,
     })
     .await
     .unwrap();
