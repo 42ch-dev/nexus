@@ -200,6 +200,17 @@ tokio-tungstenite = { workspace = true }
 # trait — the same `async-trait` the nexus-core connect harness uses. Dev-only
 # again; no runtime dependency.
 async-trait = { workspace = true }
+# v1.229 N3 Task 11 (C11, approval 05ED amendment 2): the C-111 remote CLI leg
+# runs the REAL `nexus42` binary against the independent in-repo fixture served
+# through a signed 127.0.0.1 Connect session. Every edge is an existing
+# workspace pin; the fixture crate is a test crate and depends on no app. No
+# libp2p/rmcp/product edge is added and the default graph stays unchanged.
+nexus-memory-conformance = { path = "../../crates/nexus-memory-conformance" }
+spoke-connect = { workspace = true, features = ["remote-adapter"] }
+spoke-operations = { workspace = true }
+# The host half of the signed session signs with the fixture's Ed25519 identity;
+# the client half's seed lives in the credential file the CLI open loads.
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 
 # v1.193 P2-T13: the final feature lattice is the two real product
 # cohorts from technical contracts §3. `cli` is the ordinary one-shot
@@ -265,3 +276,8 @@ connect-host = [
   "dep:spoke-schemas",
   "dep:libp2p",
 ]
+# v1.229 N3 Task 11 (C11, approval 05ED): the CLI's real remote memory client
+# so `creator memory list|show` can dial the selected remote provider. NON-
+# default on purpose: `cli` and `connect-host` keep their exact graphs, and no
+# default build links the memory client.
+memory-remote = ["nexus-core/memory-remote"]
