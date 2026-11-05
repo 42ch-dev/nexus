@@ -2224,14 +2224,35 @@ const SELECTION_SETTLE_GRACE: Duration = Duration::from_secs(2);
 
 impl SelectionHost {
     /// Await the responder that served a successful open's signed session. The
-    /// bound, the listener/handshake error and a join failure are all returned
-    /// rather than panicked, so the caller can keep settling its other owners.
+    /// handle is retained across the deadline: an expired session aborts and
+    /// boundedly joins its own listener instead of dropping the `JoinHandle`
+    /// and detaching a task that still owns the port and the service.
     pub async fn session(self) -> Result<Arc<ConnectResponder>, String> {
-        match tokio::time::timeout(BOUND, self.task).await {
+        let mut task = self.task;
+        match tokio::time::timeout(BOUND, &mut task).await {
             Ok(Ok(Ok(responder))) => Ok(responder),
             Ok(Ok(Err(error))) => Err(error),
             Ok(Err(join)) => Err(format!("the selection listener task failed: {join}")),
-            Err(_) => Err("the selection session did not establish within the bound".to_owned()),
+            Err(_) => {
+                task.abort();
+                // A task that completed just before the abort still yields its
+                // responder here, so the caller closes it through the public
+                // route instead of losing it.
+                match tokio::time::timeout(BOUND, &mut task).await {
+                    Ok(Ok(Ok(responder))) => Ok(responder),
+                    Ok(Ok(Err(error))) => Err(error),
+                    Ok(Err(join)) if join.is_cancelled() => Err(
+                        "the selection session did not establish within the bound; its listener was aborted and joined"
+                            .to_owned(),
+                    ),
+                    Ok(Err(join)) => Err(format!(
+                        "the timed-out selection listener failed to join: {join}"
+                    )),
+                    Err(_) => Err(
+                        "the timed-out selection listener did not join within the bound".to_owned(),
+                    ),
+                }
+            }
         }
     }
 
@@ -2248,11 +2269,14 @@ impl SelectionHost {
             Ok(Err(join)) => Err(format!("the selection listener task failed: {join}")),
             Err(_) => {
                 task.abort();
-                match task.await {
-                    Ok(Ok(responder)) => Ok(Some(responder)),
-                    Ok(Err(error)) => Err(error),
-                    Err(join) if join.is_cancelled() => Ok(None),
-                    Err(join) => Err(format!("the aborted selection listener failed: {join}")),
+                match tokio::time::timeout(BOUND, &mut task).await {
+                    Ok(Ok(Ok(responder))) => Ok(Some(responder)),
+                    Ok(Ok(Err(error))) => Err(error),
+                    Ok(Err(join)) if join.is_cancelled() => Ok(None),
+                    Ok(Err(join)) => Err(format!("the aborted selection listener failed: {join}")),
+                    Err(_) => Err(
+                        "the aborted selection listener did not join within the bound".to_owned(),
+                    ),
                 }
             }
         }

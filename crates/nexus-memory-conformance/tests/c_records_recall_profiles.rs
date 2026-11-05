@@ -17,11 +17,12 @@
 mod support;
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use nexus_core::memory_provider::legacy;
 use nexus_core::{CoreAccess, CoreOpenOptions, CoreService};
 use serde_json::{json, Value};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 
 use support::{
     bootstrap, candidate_ids, capture_body, close_core_bounded, close_responder, context_scope,
@@ -3194,5 +3195,49 @@ async fn c_064_early_selection_open_failure_settles_listener_and_fixture() {
     assert!(
         fixture_settle.is_ok(),
         "the fixture settles after the early failure: {fixture_settle:?}"
+    );
+}
+
+/// I258 self-check: a session deadline that expires while the owned listener is
+/// still pending must abort and bounded-join that listener (releasing its port
+/// and the fixture ownership) before returning, never detach it.
+#[tokio::test]
+async fn c_064_selection_session_timeout_aborts_and_joins_listener() {
+    let fixture = support::selection_fixture().await;
+    let host = serve_selection_host(
+        Arc::clone(&fixture.service),
+        &fixture.authority_host_id,
+        &["spoke-memory"],
+        SELECTION_CLIENT_SEED,
+    )
+    .await;
+    let port = host.port();
+    let endpoint = host.endpoint.clone();
+    // A real TCP peer that completes the accept but never the websocket
+    // handshake, so the owned listener task outlives the session deadline.
+    let stalled = TcpStream::connect(endpoint.trim_start_matches("ws://"))
+        .await
+        .expect("the stalled peer connects to the selection listener");
+    let started = Instant::now();
+    let session = host.session().await;
+    let elapsed = started.elapsed();
+    // The deadline expired while the task was pending: the session must have
+    // aborted and joined it, so its port is free before any other settlement.
+    let port_released = TcpListener::bind(("127.0.0.1", port)).await.is_ok();
+    let fixture_settle = fixture.settle().await;
+    drop(stalled);
+    assert!(session.is_err(), "the stalled session reports its timeout");
+    assert!(
+        elapsed >= support::BOUND,
+        "the session deadline really expired: {elapsed:?}"
+    );
+    assert!(
+        port_released,
+        "the timed-out listener was aborted and joined, not detached: {}",
+        session.err().unwrap_or_default()
+    );
+    assert!(
+        fixture_settle.is_ok(),
+        "the fixture ownership is released after the listener join: {fixture_settle:?}"
     );
 }
