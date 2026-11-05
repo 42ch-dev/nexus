@@ -2017,7 +2017,7 @@ mod tests {
         drop(fence.expect("the undelivered open's OS admission settles on its own"));
     }
 
-    /// The PUBLIC guarded constructor must pair every claim    /// The PUBLIC guarded constructor must pair every claim with the admission
+    /// The PUBLIC guarded constructor must pair every claim with the admission
     /// it actually belongs to. Two genuinely fresh same-mode Direct guards are
     /// taken before either publishes; the second public open used to open a
     /// pool on its own losing guard while holding a claim on the published one.
