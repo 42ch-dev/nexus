@@ -49,15 +49,16 @@
 //!   refused before any provider call and a concurrent replacement cannot get an
 //!   unvalidated revision promoted.
 //! - The served Character fragment family is the contract's, not every protocol
-//!   `fact`: an authenticated second writer may replace a fragment's whole
-//!   content (removing `nexus_legacy`) and a provider-native `fact` may be
-//!   created straight through the protocol. Neither is served by the fragment
-//!   LIST, and promoting either is refused before any provider mutation —
-//!   placement, revision, promote receipts and D18 facts unchanged — while a
-//!   record that still names fragment origin without its required session
-//!   identity fails honestly as damaged metadata. A valid fragment still
-//!   promotes, and its response is already sound if a later writer rewrites the
-//!   record, so no committed promotion becomes a projection failure.
+//!   `fact`: when an authenticated second writer replaces a *known* fragment's
+//!   whole content (removing `nexus_legacy`), LIST and promotion report that
+//!   damage honestly — its live D18 fact still proves the origin — while a
+//!   provider-native fact (no Character-fragment producer marker and no fact) is
+//!   not served by the fragment LIST and keeps the retained non-fragment refusal
+//!   on promotion. Every refusal happens before any provider mutation
+//!   (placement, revision, promote receipts and D18 facts unchanged). A valid
+//!   fragment still promotes, and its response is already sound if a later
+//!   writer rewrites the record, so no committed promotion becomes a projection
+//!   failure.
 //! - Refusals reach the caller as the static classified `MemoryProviderRefused`
 //!   carrier: the provider's own message text and any request content never
 //!   travel with it.
@@ -112,11 +113,16 @@ use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{Row, SqlitePool};
 use tempfile::TempDir;
 use tokio::net::TcpListener;
+use tokio::sync::oneshot;
 
 /// The host's Connect identity (the provider side of the signed session).
 const HOST_SEED: [u8; 32] = [0x42; 32];
 /// The dialing client's Connect identity; the credential file holds this seed.
 const CLIENT_SEED: [u8; 32] = [0x31; 32];
+/// The competing client's *own* Connect identity: the independent signed session
+/// that writes while Core's request is held. The fixture provisioned it as a
+/// separate operator principal, so its writes are its own authenticated ones.
+const WRITER_SEED: [u8; 32] = [0x5a; 32];
 /// The one capability both ends negotiate: the fixture serves no other family.
 const MEMORY_CAPABILITIES: [&str; 1] = ["spoke-memory"];
 const WORKSPACE: &str = "default";
@@ -261,51 +267,104 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-/// Bind a real `127.0.0.1:0` listener whose first accepted WebSocket becomes
-/// the signed responder's transport.
+/// The signed peers this fixture admits, as `(peer id, public key)` pairs.
+struct Peers(Vec<(String, [u8; 32])>);
+
+impl Peers {
+    fn of(seeds: &[[u8; 32]]) -> Self {
+        Self(
+            seeds
+                .iter()
+                .map(|seed| (peer_id(seed), pubkey(seed)))
+                .collect(),
+        )
+    }
+}
+
+/// Bind a real `127.0.0.1:0` listener whose first `connections` accepted
+/// WebSockets each become one signed responder over the same memory service.
+///
+/// Two connections are what the causal-window histories need: Core's own signed
+/// session and the independent writer's, each with its own socket, hello and
+/// admitted identity.
+async fn start_listener_connections(
+    memory_service: Arc<dyn RemoteMemoryService>,
+    host_manifest: HostCapabilityManifest,
+    peers: Peers,
+    connections: usize,
+) -> (
+    SocketAddr,
+    tokio::task::JoinHandle<Vec<Arc<ConnectResponder>>>,
+) {
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind an ephemeral localhost port");
+    let addr = listener.local_addr().expect("listener address");
+    let task = tokio::spawn(async move {
+        let allowlist: Vec<String> = peers.0.iter().map(|(peer, _)| peer.clone()).collect();
+        let peer_keys: HashMap<String, [u8; 32]> = peers.0.iter().cloned().collect();
+        let mut responders = Vec::with_capacity(connections);
+        for _ in 0..connections {
+            let (tcp, peer) = tokio::time::timeout(BOUND, listener.accept())
+                .await
+                .expect("the client connects to the listener")
+                .expect("accept the localhost peer");
+            assert!(peer.ip().is_loopback(), "the fixture serves localhost only");
+            let ws = tokio::time::timeout(
+                BOUND,
+                tokio_tungstenite::accept_async_with_config(
+                    tcp,
+                    Some(ws_config(DEFAULT_MAX_ENVELOPE_BYTES)),
+                ),
+            )
+            .await
+            .expect("the websocket upgrade is bounded")
+            .expect("websocket upgrade");
+            let transport: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+            let ports: Arc<dyn RemoteServePorts + Send + Sync> = Arc::new(
+                RemoteServePortsComposite::new(Arc::new(MemoryOnlyHost), None, None)
+                    .with_memory(Arc::clone(&memory_service)),
+            );
+            responders.push(
+                connect_responder(ConnectResponderOptions {
+                    transport,
+                    identity: RemoteIdentity { seed: HOST_SEED },
+                    manifest: host_manifest.clone(),
+                    allowlist: allowlist.clone(),
+                    peer_keys: peer_keys.clone(),
+                    ports: Some(ports),
+                    invoke_timeout_ms: Some(5_000),
+                })
+                .await,
+            );
+        }
+        responders
+    });
+    (addr, task)
+}
+
+/// [`start_listener_connections`] for the one-client case every non-race
+/// scenario uses.
 async fn start_listener(
     memory_service: Arc<dyn RemoteMemoryService>,
     host_manifest: HostCapabilityManifest,
     client_peer: String,
     client_pubkey: [u8; 32],
 ) -> (SocketAddr, tokio::task::JoinHandle<Arc<ConnectResponder>>) {
-    let listener = TcpListener::bind(("127.0.0.1", 0))
-        .await
-        .expect("bind an ephemeral localhost port");
-    let addr = listener.local_addr().expect("listener address");
-    let task = tokio::spawn(async move {
-        let (tcp, peer) = tokio::time::timeout(BOUND, listener.accept())
-            .await
-            .expect("the client connects to the listener")
-            .expect("accept the localhost peer");
-        assert!(peer.ip().is_loopback(), "the fixture serves localhost only");
-        let ws = tokio::time::timeout(
-            BOUND,
-            tokio_tungstenite::accept_async_with_config(
-                tcp,
-                Some(ws_config(DEFAULT_MAX_ENVELOPE_BYTES)),
-            ),
-        )
-        .await
-        .expect("the websocket upgrade is bounded")
-        .expect("websocket upgrade");
-        let transport: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
-        let ports: Arc<dyn RemoteServePorts + Send + Sync> = Arc::new(
-            RemoteServePortsComposite::new(Arc::new(MemoryOnlyHost), None, None)
-                .with_memory(memory_service),
-        );
-        connect_responder(ConnectResponderOptions {
-            transport,
-            identity: RemoteIdentity { seed: HOST_SEED },
-            manifest: host_manifest,
-            allowlist: vec![client_peer.clone()],
-            peer_keys: HashMap::from([(client_peer, client_pubkey)]),
-            ports: Some(ports),
-            invoke_timeout_ms: Some(5_000),
-        })
-        .await
+    let (addr, task) = start_listener_connections(
+        memory_service,
+        host_manifest,
+        Peers(vec![(client_peer, client_pubkey)]),
+        1,
+    )
+    .await;
+    let joined = tokio::spawn(async move {
+        task.await
+            .expect("the listener task completed")
+            .pop()
+            .expect("the listener accepted its one connection")
     });
-    (addr, task)
+    (addr, joined)
 }
 
 /// Await one responder task without letting a fixture bug hang the suite.
@@ -439,6 +498,10 @@ struct Provider {
     inner: Arc<FixtureMemoryProvider>,
     directory: Arc<PeerDirectory>,
     space_id: String,
+    /// The competing client's peer id and the operator principal it was
+    /// provisioned as.
+    writer_peer: String,
+    writer_principal: String,
 }
 
 impl Provider {
@@ -452,18 +515,81 @@ impl Provider {
         );
         let client_peer = peer_id(&CLIENT_SEED);
         let principal_id = format!("prn_{client_peer}");
-        inner
-            .provision_operator_admin(&principal_id)
-            .await
-            .expect("operator provisions the admin grant");
+        let writer_peer = peer_id(&WRITER_SEED);
+        let writer_principal = format!("prn_{writer_peer}");
+        for principal in [&principal_id, &writer_principal] {
+            inner
+                .provision_operator_admin(principal)
+                .await
+                .expect("operator provisions the admin grant");
+        }
         let space_id = inner.identity().space_id.clone();
         Self {
             _home: home,
             db,
             inner,
-            directory: Arc::new(PeerDirectory::new().with_peer(client_peer, principal_id)),
+            directory: Arc::new(
+                PeerDirectory::new()
+                    .with_peer(client_peer, principal_id)
+                    .with_peer(writer_peer.clone(), writer_principal.clone()),
+            ),
             space_id,
+            writer_peer,
+            writer_principal,
         }
+    }
+
+    /// Serve `connections` signed sessions over one listener, admitting both the
+    /// Core client and the independent writer.
+    async fn serve_connections(
+        &self,
+        service: Arc<dyn RemoteMemoryService>,
+        connections: usize,
+    ) -> (
+        SocketAddr,
+        tokio::task::JoinHandle<Vec<Arc<ConnectResponder>>>,
+    ) {
+        start_listener_connections(
+            service,
+            manifest(self.inner.identity().authority_host_id.as_str()),
+            Peers::of(&[CLIENT_SEED, WRITER_SEED]),
+            connections,
+        )
+        .await
+    }
+
+    /// Dial one real signed SDK session to this endpoint as `seed`'s identity.
+    async fn dial(&self, addr: SocketAddr, seed: [u8; 32], host_id: &str) -> Arc<RemoteAdapter> {
+        let (ws, _response) = tokio::time::timeout(
+            BOUND,
+            tokio_tungstenite::connect_async(format!("ws://{addr}")),
+        )
+        .await
+        .expect("the localhost websocket connect is bounded")
+        .expect("connect the localhost websocket");
+        let transport: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+        let dialed = connect_remote_adapter(RemoteAdapterOptions {
+            transport,
+            local_identity: RemoteIdentity { seed },
+            local_manifest: manifest(host_id),
+            remote_pubkey: pubkey(&HOST_SEED),
+            allowlist: vec![peer_id(&HOST_SEED)],
+            invoke_timeout_ms: Some(5_000),
+            capability_token: None,
+        });
+        tokio::time::timeout(BOUND, dialed)
+            .await
+            .expect("the signed dial is bounded")
+            .expect("the signed dial succeeds")
+    }
+
+    /// The competing client's own memory principal.
+    fn writer_memory_principal(&self) -> MemoryPrincipal {
+        serde_json::from_value(json!({
+            "principal_id": self.writer_principal,
+            "extensions": {},
+        }))
+        .expect("valid memory principal")
     }
 
     /// Serve one signed session over a fresh loopback listener.
@@ -522,17 +648,6 @@ impl Provider {
             .await
     }
 
-    /// [`Self::open_core`] over an explicitly supplied memory service (the
-    /// test-only second-writer decorator over this provider's real service).
-    async fn open_core_over(
-        &self,
-        env: &Env,
-        service: Arc<dyn RemoteMemoryService>,
-    ) -> (CoreService, tokio::task::JoinHandle<Arc<ConnectResponder>>) {
-        self.open_core_service(env, service, CoreAccess::EngineOwner)
-            .await
-    }
-
     async fn open_core_service(
         &self,
         env: &Env,
@@ -582,27 +697,7 @@ impl Provider {
         tokio::task::JoinHandle<Arc<ConnectResponder>>,
     ) {
         let (addr, task) = self.serve().await;
-        let (ws, _response) = tokio::time::timeout(
-            BOUND,
-            tokio_tungstenite::connect_async(format!("ws://{addr}")),
-        )
-        .await
-        .expect("the localhost websocket connect is bounded")
-        .expect("connect the localhost websocket");
-        let transport: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
-        let dialed = connect_remote_adapter(RemoteAdapterOptions {
-            transport,
-            local_identity: RemoteIdentity { seed: CLIENT_SEED },
-            local_manifest: manifest("r3-records-client"),
-            remote_pubkey: pubkey(&HOST_SEED),
-            allowlist: vec![peer_id(&HOST_SEED)],
-            invoke_timeout_ms: Some(5_000),
-            capability_token: None,
-        });
-        let adapter = tokio::time::timeout(BOUND, dialed)
-            .await
-            .expect("the signed dial is bounded")
-            .expect("the signed dial succeeds");
+        let adapter = self.dial(addr, CLIENT_SEED, "r3-records-client").await;
         (adapter, task)
     }
 }
@@ -1783,6 +1878,19 @@ async fn rewritten_and_provider_native_facts_are_not_character_fragments() {
     assert!(promoted.fragment.binding_id.is_none());
     assert_eq!(promoted.fragment.revision, 1);
     assert_eq!(promoted.fragment.session_id.as_str(), control_session);
+    // A valid shared fragment stays served: its session identity is the
+    // representation, not a binding-scoped fact.
+    let shared = core
+        .list_character_memory_fragments(&principal, character_id.clone(), None, 50, 0)
+        .await
+        .expect("the shared scope serves the promoted fragment");
+    assert!(
+        shared
+            .fragments
+            .iter()
+            .any(|fragment| fragment.fragment_id.as_str() == control),
+        "the promoted fragment is still a fragment on the shared scope"
+    );
     let post_promotion_rewrite = adapter
         .update_record(
             &memory_principal,
@@ -1843,11 +1951,13 @@ async fn rewritten_and_provider_native_facts_are_not_character_fragments() {
 // The fragment page window at the real consumer boundary
 // ---------------------------------------------------------------------------
 
-/// The page window is counted in FAMILY rows. An interleaved provider-native
-/// `fact` never shifts `offset` or `has_more`, and the walk stops once the page
-/// and its `has_more` proof are settled: an older damaged row a small first page
-/// never reaches cannot fail it, while a listing wide enough to reach that row
-/// fails honestly. Both scopes are real bindings of one owned Character.
+/// The page window is counted in FAMILY rows. Interleaved generic records — a
+/// provider-native `fact`, and a `fact` whose own metadata names the *unrelated*
+/// `memory_long_term` family — never shift `offset`, `has_more` or a page, and
+/// the walk stops once the page and its `has_more` proof are settled: an older
+/// genuine Character-fragment damage a small first page never reaches cannot fail
+/// it, while a listing wide enough to reach that row fails honestly. Both scopes
+/// are real bindings of one owned Character.
 #[tokio::test]
 async fn fragment_page_windows_count_only_the_family() {
     let env = Env::boot("R3 Window Owner").await;
@@ -1901,6 +2011,33 @@ async fn fragment_page_windows_count_only_the_family() {
         .as_str()
         .expect("the provider-assigned record id")
         .to_string();
+    // A legal generic `fact` naming the UNRELATED `memory_long_term` family: a
+    // family string that is not the Character one is not Character-fragment
+    // origin, so this must stay a generic record.
+    let unrelated = match adapter
+        .create_record(
+            &memory_principal,
+            dto::<MemoryRecordsCreateRequest>(json!({
+                "space_id": provider.space_id,
+                "subject_id": subject_id,
+                "kind": "fact",
+                "content": {
+                    "text": "a generic fact of the unrelated long-term family",
+                    "structured": { "nexus_legacy": { "family": "memory_long_term" } },
+                },
+                "scope": { "visibility": "context", "context_id": binding_a },
+                "idempotency_key": "r3-window-unrelated-family",
+            })),
+        )
+        .await
+    {
+        SpokeResult::Ok(body) => serde_json::to_value(&body).expect("create body"),
+        SpokeResult::Reject(reject) => panic!("the unrelated-family fact is created: {reject:?}"),
+    };
+    let unrelated_id = unrelated["result"]["record_id"]
+        .as_str()
+        .expect("the provider-assigned record id")
+        .to_string();
 
     // The page window counts family rows only: the interleaved native fact is
     // never served and never consumes a slot, so `offset`/`has_more` describe
@@ -1949,6 +2086,51 @@ async fn fragment_page_windows_count_only_the_family() {
         !served.iter().any(|(record, _)| record == &native_id),
         "the provider-native fact is never served as a fragment"
     );
+    assert!(
+        !served.iter().any(|(record, _)| record == &unrelated_id),
+        "an unrelated legacy family is never served as a fragment"
+    );
+
+    // By id the unrelated-family record keeps the retained non-fragment answer,
+    // before any provider call: an arbitrary family is not Character damage.
+    let pool = provider.pool().await;
+    let unrelated_before = provider_record(&pool, &unrelated_id)
+        .await
+        .expect("the unrelated-family row");
+    assert_eq!(
+        (
+            unrelated_before.visibility.as_str(),
+            unrelated_before.revision
+        ),
+        ("context", 1)
+    );
+    assert_eq!(
+        provider_receipts(&pool, "memory.records.promote").await,
+        0
+    );
+    pool.close().await;
+    let unrelated_refused = core
+        .promote_character_fragment(&principal, character_id.clone(), unrelated_id.clone(), 0)
+        .await
+        .expect_err("an unrelated legacy family is not a Character fragment");
+    assert!(
+        matches!(&unrelated_refused, CoreError::ActorInput(_)),
+        "got {unrelated_refused:?}"
+    );
+    let pool = provider.pool().await;
+    assert_eq!(
+        provider_record(&pool, &unrelated_id)
+            .await
+            .expect("the unrelated-family row")
+            .revision,
+        1,
+        "the retained refusal wrote nothing"
+    );
+    assert_eq!(
+        provider_receipts(&pool, "memory.records.promote").await,
+        0
+    );
+    pool.close().await;
 
     // Binding B: a DAMAGED fragment-origin record older than two valid
     // fragments, so a small first page never reaches it.
@@ -1961,7 +2143,10 @@ async fn fragment_page_windows_count_only_the_family() {
                 "kind": "fact",
                 "content": {
                     "text": "an older fragment-origin record without its session identity",
-                    "structured": { "nexus_legacy": { "fragment_id": "frag_window_damaged" } },
+                    "structured": { "nexus_legacy": {
+                        "family": "character_memory_fragments",
+                        "fragment_id": "frag_window_damaged",
+                    } },
                 },
                 "scope": { "visibility": "context", "context_id": binding_b },
                 "idempotency_key": "r3-window-damaged",
@@ -2062,13 +2247,13 @@ async fn fragment_page_windows_count_only_the_family() {
 // Real provider contention and the during-call response history
 // ---------------------------------------------------------------------------
 
-/// Where the second writer acts inside one real Core call.
+/// One real causal window inside one Core call.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ProbeBoundary {
-    /// After the returned `memory.records.get` was produced: between Core's
-    /// validated read and the provider CAS.
+    /// The returned `memory.records.get`: between Core's validated read and the
+    /// provider promotion CAS.
     AfterFragmentRead,
-    /// After the `memory.records.promote` committed: between the real commit and
+    /// The committed `memory.records.promote`: between the real commit and
     /// Core's response.
     AfterPromoteCommit,
 }
@@ -2081,43 +2266,43 @@ impl ProbeBoundary {
         }
     }
 
-    const fn key(self) -> &'static str {
+    const fn writer_key(self) -> &'static str {
         match self {
-            Self::AfterFragmentRead => "during-call-read",
-            Self::AfterPromoteCommit => "during-call-commit",
+            Self::AfterFragmentRead => "r3-race-writer-read",
+            Self::AfterPromoteCommit => "r3-race-writer-commit",
         }
     }
 }
 
-/// The second writer's whole-body replacement, which drops `nexus_legacy`.
-const SECOND_WRITER_TEXT: &str = "a second writer replaced this record during the call";
-
-/// A test-only decorator over the provider's REAL assembled service.
+/// A test-only decorator over the provider's REAL assembled service that holds
+/// exactly one armed response open.
 ///
-/// Every request is forwarded unchanged to the inner service, so the
-/// authenticated peer, the payload and the inner producer are the real ones. For
-/// exactly one armed request it then performs a genuine second-writer
-/// `memory.records.update` through that same inner service, at the chosen causal
-/// boundary, and returns the inner response — never a synthetic reply and never
-/// a second `MemoryPort`.
-struct SecondWriterProbe {
+/// Every request is forwarded unchanged to the inner service and the inner
+/// response is always the one returned: this decorator never synthesizes a reply
+/// and never writes anything itself. For the one armed request it captures that
+/// response, signals the test and waits for the test's release, so an
+/// independently established SDK session can compete at the actual boundary
+/// while the original request is held.
+struct HeldBoundaryProbe {
     inner: Arc<dyn RemoteMemoryService>,
     boundary: ProbeBoundary,
     target: Mutex<Option<String>>,
     armed: AtomicBool,
-    fired: AtomicBool,
-    advanced: AtomicBool,
+    held: AtomicBool,
+    reached: Mutex<Option<oneshot::Sender<()>>>,
+    release: Mutex<Option<oneshot::Receiver<()>>>,
 }
 
-impl SecondWriterProbe {
+impl HeldBoundaryProbe {
     fn over(inner: Arc<dyn RemoteMemoryService>, boundary: ProbeBoundary) -> Self {
         Self {
             inner,
             boundary,
             target: Mutex::new(None),
             armed: AtomicBool::new(false),
-            fired: AtomicBool::new(false),
-            advanced: AtomicBool::new(false),
+            held: AtomicBool::new(false),
+            reached: Mutex::new(None),
+            release: Mutex::new(None),
         }
     }
 
@@ -2126,79 +2311,82 @@ impl SecondWriterProbe {
         *self.target.lock().expect("watched record") = Some(record_id.to_string());
     }
 
-    fn arm(&self) {
-        self.fired.store(false, Ordering::SeqCst);
-        self.advanced.store(false, Ordering::SeqCst);
+    /// Arm one hold with the channel ends the test observes.
+    fn arm(&self, reached: oneshot::Sender<()>, release: oneshot::Receiver<()>) {
+        *self.reached.lock().expect("reached slot") = Some(reached);
+        *self.release.lock().expect("release slot") = Some(release);
+        self.held.store(false, Ordering::SeqCst);
         self.armed.store(true, Ordering::SeqCst);
     }
 
-    fn fired(&self) -> bool {
-        self.fired.load(Ordering::SeqCst)
-    }
-
-    fn advanced(&self) -> bool {
-        self.advanced.load(Ordering::SeqCst)
+    /// Whether the armed request was actually held for the test.
+    fn held(&self) -> bool {
+        self.held.load(Ordering::SeqCst)
     }
 }
 
 #[async_trait]
-impl RemoteMemoryService for SecondWriterProbe {
+impl RemoteMemoryService for HeldBoundaryProbe {
     async fn invoke(&self, peer_id: &str, op: &str, payload: Value) -> SpokeResult<Value> {
         let watched = self.target.lock().expect("watched record").clone();
-        let record_id = payload.get("record_id").and_then(Value::as_str);
-        let armed = op == self.boundary.op() && watched.as_deref() == record_id;
-        let response = self.inner.invoke(peer_id, op, payload.clone()).await;
+        let record_id = payload
+            .get("record_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let armed = op == self.boundary.op() && watched.as_deref() == record_id.as_deref();
+        let response = self.inner.invoke(peer_id, op, payload).await;
         if armed && self.armed.swap(false, Ordering::SeqCst) {
-            let revision = match (&response, self.boundary) {
-                (SpokeResult::Ok(body), ProbeBoundary::AfterFragmentRead) => {
-                    body.pointer("/record/revision").and_then(Value::as_u64)
-                }
-                (SpokeResult::Ok(body), ProbeBoundary::AfterPromoteCommit) => {
-                    body.pointer("/result/revision").and_then(Value::as_u64)
-                }
-                (SpokeResult::Reject(_), _) => None,
-            };
-            if let (Some(revision), Some(record_id)) = (revision, record_id) {
-                let advanced = self
-                    .inner
-                    .invoke(
-                        peer_id,
-                        "memory.records.update",
-                        json!({
-                            "space_id": payload.get("space_id").cloned().unwrap_or(Value::Null),
-                            "record_id": record_id,
-                            "expected_revision": revision,
-                            "content": { "text": SECOND_WRITER_TEXT },
-                            "idempotency_key": self.boundary.key(),
-                        }),
-                    )
-                    .await;
-                self.advanced.store(
-                    matches!(advanced, SpokeResult::Ok(_)),
-                    Ordering::SeqCst,
-                );
+            self.held.store(true, Ordering::SeqCst);
+            let reached = self.reached.lock().expect("reached slot").take();
+            if let Some(reached) = reached {
+                let _ = reached.send(());
             }
-            self.fired.store(true, Ordering::SeqCst);
+            let release = self.release.lock().expect("release slot").take();
+            if let Some(release) = release {
+                let _ = release.await;
+            }
         }
         response
     }
 }
 
-/// Two histories the public Core must survive against a real signed provider:
-/// a second writer that advances the record **after** Core's validated read but
-/// **before** the provider CAS (the promotion must lose the real CAS), and a
-/// second writer that rewrites the record **after** the real commit but
-/// **before** the original call returns (the original call must still answer
-/// truthfully, with its receipt and D18 release). The second writer is a genuine
-/// `memory.records.update` through the same authenticated inner service, so the
-/// evidence is provider contention, not a local pre-check or a later retry.
+/// The `requester_principal_id` of the fixture's committed receipt for one
+/// writer update, read straight out of the provider's own database.
+async fn writer_receipt_principal(pool: &SqlitePool, idempotency_key: &str) -> String {
+    sqlx::query(
+        "SELECT requester_principal_id FROM receipts \
+         WHERE op = 'memory.records.update' AND idempotency_key = ?",
+    )
+    .bind(idempotency_key)
+    .fetch_one(pool)
+    .await
+    .expect("the writer's committed update receipt")
+    .get(0)
+}
+
+/// Both required competing-client histories, each driven by a **separately
+/// established real signed SDK session** while Core's own signed request is held
+/// at the actual service boundary:
+///
+/// - after Core's validated read and before the provider promotion CAS: the
+///   promotion must lose the real `REVISION_CONFLICT` (whitelisted carrier, no
+///   promotion or D18 effect);
+/// - after the provider commit and before the original response returns: the
+///   original call must still answer truthfully, with its committed receipt and
+///   D18 release.
+///
+/// The writer is a second `RemoteAdapter` on its own socket, handshake and
+/// operator-provisioned admission under a distinct Ed25519 identity; the fixture
+/// records the update under that principal. The decorator only forwards and
+/// holds the real response — no synthetic reply, no reused Core context, no
+/// direct inner write and no timing sleep.
 #[tokio::test]
-async fn a_during_call_second_writer_meets_the_real_cas_and_the_committed_response() {
+async fn an_independently_signed_writer_competes_at_both_causal_windows() {
     let env = Env::boot("R3 Race Owner").await;
     let provider = Provider::open().await;
 
-    // A real owned Character with two reviewed binding-local fragments: one per
-    // race, so each history starts from an independent record.
+    // The dedicated setup session (its own signed connection) creates two
+    // reviewed binding-local fragments.
     let (setup, setup_responder) = provider.open_core(&env).await;
     let principal = setup.active_principal().await.expect("active principal");
     let world = create_world(&setup, &principal, "R3 Race World").await;
@@ -2241,7 +2429,6 @@ async fn a_during_call_second_writer_meets_the_real_cas_and_the_committed_respon
     fragments.sort();
     let (cas_record, _) = fragments[0].clone();
     let (commit_record, commit_session) = fragments[1].clone();
-    // Both records carry their live binding dependency before either race.
     let nexus = core_db(&env).await;
     let facts = object_facts(&nexus, &binding_id).await;
     nexus.close().await;
@@ -2257,39 +2444,74 @@ async fn a_during_call_second_writer_meets_the_real_cas_and_the_committed_respon
     );
     responder_of(setup_responder).await;
 
-    // (a) The second writer advances the record between Core's validated read
-    // and the provider CAS: the promotion loses the REAL provider CAS.
-    let cas_probe = Arc::new(SecondWriterProbe::over(
+    // (a) Pre-CAS window: the writer advances the record after Core's validated
+    // read and before the promotion, so the promotion meets the real provider
+    // CAS.
+    let cas_probe = Arc::new(HeldBoundaryProbe::over(
         provider.inner.server(provider.directory.admission()),
         ProbeBoundary::AfterFragmentRead,
     ));
     cas_probe.watch(&cas_record);
-    cas_probe.arm();
-    let (cas_core, cas_responder) = provider
-        .open_core_over(&env, Arc::clone(&cas_probe) as Arc<dyn RemoteMemoryService>)
-        .await;
-    let cas_principal = cas_core.active_principal().await.expect("principal");
-    let refused = cas_core
-        .promote_character_fragment(
-            &cas_principal,
-            character_id.clone(),
-            cas_record.clone(),
-            0,
+    let (cas_addr, cas_listeners) = provider
+        .serve_connections(
+            Arc::clone(&cas_probe) as Arc<dyn RemoteMemoryService>,
+            2,
         )
+        .await;
+    let cas_core = CoreService::open(env.options(provider.selection(cas_addr), CoreAccess::EngineOwner))
         .await
-        .expect_err("the advanced record loses the provider CAS");
-    let (code, retry_class, family, wire_code, conflict_code) = classified_refusal(&refused);
+        .expect("the selected remote provider opens");
+    let cas_principal = cas_core.active_principal().await.expect("principal");
+    let cas_writer = provider
+        .dial(cas_addr, WRITER_SEED, "r3-race-writer")
+        .await;
+    let writer_principal = provider.writer_memory_principal();
+    let (cas_reached_tx, cas_reached_rx) = oneshot::channel();
+    let (cas_release_tx, cas_release_rx) = oneshot::channel();
+    cas_probe.arm(cas_reached_tx, cas_release_rx);
+    let cas_call = cas_core.promote_character_fragment(
+        &cas_principal,
+        character_id.clone(),
+        cas_record.clone(),
+        0,
+    );
+    let (cas_refused, cas_written) = tokio::join!(cas_call, async {
+        cas_reached_rx
+            .await
+            .expect("Core's validated read reached the armed boundary");
+        let updated = cas_writer
+            .update_record(
+                &writer_principal,
+                dto::<MemoryRecordsUpdateRequest>(json!({
+                    "space_id": provider.space_id,
+                    "record_id": cas_record,
+                    "expected_revision": 1,
+                    "content": { "text": "the independently signed writer advanced this record" },
+                    "idempotency_key": ProbeBoundary::AfterFragmentRead.writer_key(),
+                })),
+            )
+            .await;
+        let committed = matches!(&updated, SpokeResult::Ok(_));
+        let _ = cas_release_tx.send(());
+        committed
+    });
+    assert!(
+        cas_written,
+        "the independently signed writer's update committed"
+    );
+    assert!(
+        cas_probe.held(),
+        "Core's validated read was held for the competing window"
+    );
+    let cas_refused = cas_refused.expect_err("the promotion loses the real provider CAS");
+    let (code, retry_class, family, wire_code, conflict_code) = classified_refusal(&cas_refused);
     assert_eq!((code, retry_class), ("REVISION_CONFLICT", "terminal"));
     assert_eq!(family, MemoryProviderRefusal::Conflict);
     assert_eq!(wire_code, None);
     assert_eq!(conflict_code, Some("version_mismatch"));
     assert!(
-        cas_probe.fired(),
-        "the second writer ran between the validated read and the provider CAS"
-    );
-    assert!(
-        cas_probe.advanced(),
-        "the second writer's real provider update committed"
+        !format!("{cas_refused} {cas_refused:?}").contains("stored revision"),
+        "the provider's own CAS message never travels"
     );
     let pool = provider.pool().await;
     let cas_row = provider_record(&pool, &cas_record)
@@ -2305,6 +2527,11 @@ async fn a_during_call_second_writer_meets_the_real_cas_and_the_committed_respon
         0,
         "the refused promotion committed no provider receipt"
     );
+    assert_eq!(
+        writer_receipt_principal(&pool, ProbeBoundary::AfterFragmentRead.writer_key()).await,
+        provider.writer_principal,
+        "the competing update was authenticated as the writer's own principal"
+    );
     pool.close().await;
     let nexus = core_db(&env).await;
     let after = object_facts(&nexus, &binding_id).await;
@@ -2317,36 +2544,87 @@ async fn a_during_call_second_writer_meets_the_real_cas_and_the_committed_respon
         !after.contains(&("record".to_string(), cas_record.clone(), "released".to_string())),
         "no release fact was published for the refused promotion"
     );
+    cas_writer.close();
     assert!(
         cas_core.close().await.expect("close").cleanup_confirmed,
         "the raced open releases its own admission"
     );
-    responder_of(cas_responder).await;
+    let cas_responders = tokio::time::timeout(BOUND, cas_listeners)
+        .await
+        .expect("the two-connection listener is bounded")
+        .expect("both signed sessions completed");
+    let cas_peers: Vec<String> = cas_responders
+        .iter()
+        .filter_map(|responder| responder.remote_peer_id())
+        .collect();
+    assert!(
+        cas_peers.contains(&peer_id(&CLIENT_SEED)),
+        "Core's own signed session served the call: {cas_peers:?}"
+    );
+    assert!(
+        cas_peers.contains(&provider.writer_peer),
+        "the independently signed writer session served the competing update: {cas_peers:?}"
+    );
 
-    // (b) The second writer rewrites the record AFTER the real commit but BEFORE
-    // the original call returns: the original response is still truthful.
-    let commit_probe = Arc::new(SecondWriterProbe::over(
+    // (b) Post-commit window: the writer rewrites the record after the promotion
+    // committed and before the original response returns.
+    let commit_probe = Arc::new(HeldBoundaryProbe::over(
         provider.inner.server(provider.directory.admission()),
         ProbeBoundary::AfterPromoteCommit,
     ));
     commit_probe.watch(&commit_record);
-    commit_probe.arm();
-    let (commit_core, commit_responder) = provider
-        .open_core_over(
-            &env,
+    let (commit_addr, commit_listeners) = provider
+        .serve_connections(
             Arc::clone(&commit_probe) as Arc<dyn RemoteMemoryService>,
+            2,
         )
         .await;
+    let commit_core =
+        CoreService::open(env.options(provider.selection(commit_addr), CoreAccess::EngineOwner))
+            .await
+            .expect("the selected remote provider opens");
     let commit_principal = commit_core.active_principal().await.expect("principal");
-    let promoted = commit_core
-        .promote_character_fragment(
-            &commit_principal,
-            character_id.clone(),
-            commit_record.clone(),
-            0,
-        )
-        .await
-        .expect("the promotion commits and answers truthfully");
+    let commit_writer = provider
+        .dial(commit_addr, WRITER_SEED, "r3-race-writer")
+        .await;
+    let (commit_reached_tx, commit_reached_rx) = oneshot::channel();
+    let (commit_release_tx, commit_release_rx) = oneshot::channel();
+    commit_probe.arm(commit_reached_tx, commit_release_rx);
+    let commit_call = commit_core.promote_character_fragment(
+        &commit_principal,
+        character_id.clone(),
+        commit_record.clone(),
+        0,
+    );
+    let (commit_result, commit_written) = tokio::join!(commit_call, async {
+        commit_reached_rx
+            .await
+            .expect("the promotion commit reached the armed boundary");
+        let updated = commit_writer
+            .update_record(
+                &writer_principal,
+                dto::<MemoryRecordsUpdateRequest>(json!({
+                    "space_id": provider.space_id,
+                    "record_id": commit_record,
+                    "expected_revision": 2,
+                    "content": { "text": "the independently signed writer rewrote this record" },
+                    "idempotency_key": ProbeBoundary::AfterPromoteCommit.writer_key(),
+                })),
+            )
+            .await;
+        let committed = matches!(&updated, SpokeResult::Ok(_));
+        let _ = commit_release_tx.send(());
+        committed
+    });
+    assert!(
+        commit_written,
+        "the independently signed writer's post-commit rewrite committed"
+    );
+    assert!(
+        commit_probe.held(),
+        "the committed promotion response was held for the competing window"
+    );
+    let promoted = commit_result.expect("the committed promotion answers truthfully");
     assert!(
         promoted.fragment.binding_id.is_none(),
         "the promotion cleared the binding placement"
@@ -2357,11 +2635,6 @@ async fn a_during_call_second_writer_meets_the_real_cas_and_the_committed_respon
         commit_session,
         "the response states the identity the validated content carried"
     );
-    assert!(commit_probe.fired());
-    assert!(
-        commit_probe.advanced(),
-        "the second writer's rewrite committed after the promotion"
-    );
     let pool = provider.pool().await;
     let commit_row = provider_record(&pool, &commit_record)
         .await
@@ -2369,7 +2642,7 @@ async fn a_during_call_second_writer_meets_the_real_cas_and_the_committed_respon
     assert_eq!(
         (commit_row.visibility.as_str(), commit_row.revision),
         ("shared", 3),
-        "the promotion committed and the later rewrite advanced the same record"
+        "the promotion committed and the writer's rewrite advanced the same record"
     );
     assert_eq!(
         provider_receipts(&pool, "memory.records.promote").await,
@@ -2378,8 +2651,13 @@ async fn a_during_call_second_writer_meets_the_real_cas_and_the_committed_respon
     );
     assert_eq!(
         provider_content(&pool, &commit_record).await["text"],
-        json!(SECOND_WRITER_TEXT),
-        "the rewrite landed after the commit, before the response returned"
+        json!("the independently signed writer rewrote this record"),
+        "the writer's rewrite landed after the commit, before the response returned"
+    );
+    assert_eq!(
+        writer_receipt_principal(&pool, ProbeBoundary::AfterPromoteCommit.writer_key()).await,
+        provider.writer_principal,
+        "the post-commit rewrite was authenticated as the writer's own principal"
     );
     pool.close().await;
     let nexus = core_db(&env).await;
@@ -2393,6 +2671,7 @@ async fn a_during_call_second_writer_meets_the_real_cas_and_the_committed_respon
         )),
         "the committed promotion released its dependency: {after:?}"
     );
+    commit_writer.close();
     assert!(
         commit_core
             .close()
@@ -2401,7 +2680,22 @@ async fn a_during_call_second_writer_meets_the_real_cas_and_the_committed_respon
             .cleanup_confirmed,
         "the committed open releases its own admission"
     );
-    responder_of(commit_responder).await;
+    let commit_responders = tokio::time::timeout(BOUND, commit_listeners)
+        .await
+        .expect("the two-connection listener is bounded")
+        .expect("both signed sessions completed");
+    let commit_peers: Vec<String> = commit_responders
+        .iter()
+        .filter_map(|responder| responder.remote_peer_id())
+        .collect();
+    assert!(
+        commit_peers.contains(&peer_id(&CLIENT_SEED)),
+        "Core's own signed session served the call: {commit_peers:?}"
+    );
+    assert!(
+        commit_peers.contains(&provider.writer_peer),
+        "the independently signed writer session served the rewrite: {commit_peers:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
