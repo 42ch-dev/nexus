@@ -3387,6 +3387,18 @@ async fn retained_pending_send_does_not_block_the_close() {
         "the send must be parked on the non-reading peer before close"
     );
 
+    // A second same-direction send really queues behind the retained holder
+    // before the close.
+    let queued = tokio::spawn({
+        let transport = Arc::clone(&transport);
+        async move { transport.send(b"queued-before-close").await }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(
+        !queued.is_finished(),
+        "the second send must be queued behind the retained holder"
+    );
+
     let ticks = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let ticker = tokio::spawn({
         let ticks = Arc::clone(&ticks);
@@ -3420,6 +3432,26 @@ async fn retained_pending_send_does_not_block_the_close() {
     assert!(
         matches!(report, Err(TransportError::Io(_))),
         "a non-reading peer leaves a real terminal close error, got {report:?}"
+    );
+
+    // The already-queued send and a NEW post-close send both observe Closed
+    // BEFORE the retained holder is released — not a timeout.
+    let queued_outcome = tokio::time::timeout(Duration::from_secs(5), queued)
+        .await
+        .expect("the queued send must settle after close")
+        .expect("the queued task must not panic");
+    assert_eq!(
+        queued_outcome,
+        Err(TransportError::Closed),
+        "a send queued behind the retained holder observes Closed"
+    );
+    let late = tokio::time::timeout(Duration::from_secs(2), transport.send(b"late-after-close"))
+        .await
+        .expect("a new send after close must settle");
+    assert_eq!(
+        late,
+        Err(TransportError::Closed),
+        "a new send after close observes Closed without waiting for the slot"
     );
     assert!(
         ticks.load(std::sync::atomic::Ordering::SeqCst) >= 3,
@@ -3461,6 +3493,18 @@ async fn retained_pending_recv_does_not_block_the_close() {
         "the recv must be parked before close"
     );
 
+    // A second same-direction receive really queues behind the retained holder
+    // before the close.
+    let queued = tokio::spawn({
+        let transport = Arc::clone(&transport);
+        async move { transport.recv().await }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(
+        !queued.is_finished(),
+        "the second recv must be queued behind the retained holder"
+    );
+
     let ticks = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let ticker = tokio::spawn({
         let ticks = Arc::clone(&ticks);
@@ -3491,6 +3535,26 @@ async fn retained_pending_recv_does_not_block_the_close() {
         .expect("the close must settle while the recv future is retained")
         .expect("the close task must not panic");
     assert!(report.is_ok(), "an idle close flushes cleanly, got {report:?}");
+
+    // The already-queued receive and a NEW post-close receive both observe
+    // Closed BEFORE the retained holder is released — not a timeout.
+    let queued_outcome = tokio::time::timeout(Duration::from_secs(5), queued)
+        .await
+        .expect("the queued recv must settle after close")
+        .expect("the queued task must not panic");
+    assert_eq!(
+        queued_outcome,
+        Err(TransportError::Closed),
+        "a recv queued behind the retained holder observes Closed"
+    );
+    let late = tokio::time::timeout(Duration::from_secs(2), transport.recv())
+        .await
+        .expect("a new recv after close must settle");
+    assert_eq!(
+        late,
+        Err(TransportError::Closed),
+        "a new recv after close observes Closed without waiting for the slot"
+    );
     assert!(
         ticks.load(std::sync::atomic::Ordering::SeqCst) >= 3,
         "the runtime kept making progress while the recv stayed unpolled"
