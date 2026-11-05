@@ -201,47 +201,51 @@ fn review_result_record_ids(
     issued_space: &str,
     issued_key: &str,
 ) -> CoreResult<Vec<String>> {
-    let malformed = |reason: String| internal_err("memory_review_receipt", reason);
+    // I-272: every mismatch below is static. A forged receipt admits arbitrary
+    // peer-authored bytes (`space_id`, `idempotency_key`, `result.outcome`,
+    // `record_ids`) including private markers and newlines, and the pipeline
+    // logs the very `Display` this helper returns - so no peer field is ever
+    // interpolated into a category or message.
+    let malformed = |reason: &'static str| internal_err("memory_review_receipt", reason);
     let action = decision
         .get("action")
         .and_then(Value::as_str)
-        .ok_or_else(|| malformed("the issued review decision carries no action".to_string()))?;
+        .ok_or_else(|| malformed("the issued review decision carries no action"))?;
     let space = body
         .get("space_id")
         .and_then(Value::as_str)
-        .ok_or_else(|| malformed("the committed review result carries no space".to_string()))?;
+        .ok_or_else(|| malformed("the committed review result carries no space"))?;
     if space != issued_space {
-        return Err(malformed(format!(
-            "the committed result names space '{space}', the issued request bound '{issued_space}'"
-        )));
+        return Err(malformed(
+            "the committed result space does not match the issued request",
+        ));
     }
     let key = body
         .get("idempotency_key")
         .and_then(Value::as_str)
         .ok_or_else(|| {
-            malformed("the committed review result carries no idempotency key".to_string())
+            malformed("the committed review result carries no idempotency key")
         })?;
     if key != issued_key {
         return Err(malformed(
-            "the committed review result echoes a different idempotency key than the issued request"
-                .to_string(),
+            "the committed review result echoes a different idempotency key than the issued request",
         ));
     }
     let outcome = body
         .pointer("/result/outcome")
         .and_then(Value::as_str)
-        .ok_or_else(|| malformed("the committed review result carries no outcome".to_string()))?;
+        .ok_or_else(|| malformed("the committed review result carries no outcome"))?;
     let ids = body
         .pointer("/result/record_ids")
         .and_then(Value::as_array)
-        .ok_or_else(|| malformed("the committed review result carries no record_ids".to_string()))?;
+        .ok_or_else(|| malformed("the committed review result carries no record_ids"))?;
     let mut record_ids = Vec::with_capacity(ids.len());
     for id in ids {
         let id = id
             .as_str()
             .filter(|id| !id.is_empty())
             .ok_or_else(|| {
-                malformed("the committed review result names an empty or non-string record id".to_string())
+                malformed("the committed review result names an empty or non-string record id")
             })?;
         record_ids.push(id.to_string());
     }
@@ -254,26 +258,25 @@ fn review_result_record_ids(
                 .and_then(Value::as_array)
                 .filter(|fragments| !fragments.is_empty())
                 .ok_or_else(|| {
-                    malformed("the issued fragment decision carries no fragments".to_string())
+                    malformed("the issued fragment decision carries no fragments")
                 })?;
             ("fragmented", fragments.len())
         }
-        other => {
-            return Err(malformed(format!(
-                "the issued decision action '{other}' is not a review decision"
-            )))
+        _ => {
+            return Err(malformed(
+                "the issued decision action is not a review decision",
+            ))
         }
     };
     if outcome != expected_outcome {
-        return Err(malformed(format!(
-            "the committed outcome '{outcome}' does not match the issued '{expected_outcome}'"
-        )));
+        return Err(malformed(
+            "the committed outcome does not match the issued decision",
+        ));
     }
     if record_ids.len() != expected_records {
-        return Err(malformed(format!(
-            "the committed result names {} records where the issued decision requires {expected_records}",
-            record_ids.len()
-        )));
+        return Err(malformed(
+            "the committed result record count does not match the issued decision",
+        ));
     }
     Ok(record_ids)
 }
@@ -6428,5 +6431,61 @@ mod tests {
             "peer text must not escape: {rendered}"
         );
         assert!(!rendered.contains("token=abc"));
+    }
+
+    /// I-272 (fix round 3): the committed-receipt validation never echoes a
+    /// peer-authored field back into the observable error. `SpaceId` admits
+    /// any nonempty string, so a forged receipt can carry a private marker or
+    /// a newline; the pipeline logs the very `Display` this helper returns, so
+    /// the boundary is the error text itself. `review_result_record_ids` is
+    /// private, which makes this the only place the redacted form is pinnable.
+    #[test]
+    fn receipt_mismatches_never_echo_peer_fields() {
+        const SENTINEL: &str = "spc_forged\nMARKER-R2-PRIVATE token=abc";
+        let decision = json!({ "action": "drop" });
+
+        let forged_space = json!({
+            "space_id": SENTINEL,
+            "idempotency_key": "idem_r2_receipt",
+            "result": { "outcome": "dropped", "record_ids": [] },
+        });
+        let error =
+            review_result_record_ids(&decision, &forged_space, "spc_issued", "idem_r2_receipt")
+                .expect_err("a foreign space must refuse the committed receipt");
+        assert_redacted_receipt_error(&error, "foreign space");
+
+        let forged_outcome = json!({
+            "space_id": "spc_issued",
+            "idempotency_key": "idem_r2_receipt",
+            "result": { "outcome": SENTINEL, "record_ids": [] },
+        });
+        let error =
+            review_result_record_ids(&decision, &forged_outcome, "spc_issued", "idem_r2_receipt")
+                .expect_err("a foreign outcome must refuse the committed receipt");
+        assert_redacted_receipt_error(&error, "foreign outcome");
+    }
+
+    /// The coded carrier survives while every peer-authored byte is dropped.
+    fn assert_redacted_receipt_error(error: &CoreError, branch: &str) {
+        let CoreError::Internal { category } = error else {
+            panic!("{branch}: expected the coded internal receipt error, got {error:?}");
+        };
+        assert!(
+            category.starts_with("memory_review_receipt: "),
+            "{branch}: {category}"
+        );
+        let rendered = format!("{error} {error:?} {category}");
+        assert!(
+            !rendered.contains("MARKER-R2-PRIVATE"),
+            "{branch}: peer marker escaped: {rendered}"
+        );
+        assert!(
+            !rendered.contains("token=abc"),
+            "{branch}: peer secret escaped: {rendered}"
+        );
+        assert!(
+            !rendered.contains('\n'),
+            "{branch}: peer newline escaped: {rendered:?}"
+        );
     }
 }
