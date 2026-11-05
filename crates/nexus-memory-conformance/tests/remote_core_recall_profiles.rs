@@ -39,15 +39,17 @@
 //!   paths, not a private accessor or a fabricated getter.
 //! - The legacy Creator queue, the legacy Character queue and the legacy
 //!   Character fragment table are withheld from this disposable state DB for the
-//!   whole lifecycle, and each applicable bearer's real long-term discovery
-//!   DIRECTORY (`memory_io::list_memories` calls `fs::read_dir` on it) is a
-//!   pre-existing regular file, so that discovery fails with a non-`NotFound`
-//!   error instead of reading anything. The local provider is never constructed
-//!   (no store root, no journal, no provider tables), and no SOUL-narrative /
-//!   soul-invalidation row is written. The scope is exactly those tables, those
-//!   two discovery paths and the local provider surfaces: Nexus actor/world/
-//!   binding metadata stays readable, and this is not a universal no-read claim
-//!   about unrelated local surfaces.
+//!   exercised interval (armed after the initial Core open and restored before
+//!   close), and each applicable bearer's real long-term discovery DIRECTORY
+//!   (`memory_io::list_memories` calls `fs::read_dir` on it) is a pre-existing
+//!   regular file, so a caller that propagates the non-`NotFound` discovery
+//!   error cannot read anything there — a swallowed error or an unrelated read
+//!   is not excluded. The local provider is never constructed (no store root, no
+//!   journal, no provider tables), and no SOUL-narrative / soul-invalidation row
+//!   is written. The scope is exactly those tables, those two discovery paths
+//!   and the local provider surfaces: Nexus actor/world/binding metadata stays
+//!   readable, and this is neither a whole open-to-close no-I/O proof nor a
+//!   universal no-read claim about unrelated local surfaces.
 //! - Refusals reach the caller as the static classified `MemoryProviderRefused`
 //!   carrier: the provider's own message text and any request content never
 //!   travel with it.
@@ -103,9 +105,9 @@ use spoke_connect::remote::{
     RemoteServePortsComposite, Transport,
 };
 use spoke_operations::spoke_schemas::{
-    Finding, HostCapabilityManifest, KnowledgeEntry, MemoryProfileUpdateRequest,
-    MemoryRecallRequest, MemoryRecordsCreateRequest, Principal as MemoryPrincipal, Relation, Rule,
-    Scope, TimelineEvent,
+    Finding, HostCapabilityManifest, KnowledgeEntry, MemoryGrantsGrantRequest,
+    MemoryProfileUpdateRequest, MemoryRecallRequest, MemoryRecordsCreateRequest,
+    MemorySubjectsEnsureRequest, Principal as MemoryPrincipal, Relation, Rule, Scope, TimelineEvent,
 };
 use spoke_operations::{
     FindingPort, HostManifestPort, KnowledgeEntryPort, MemoryPort, RelationPort, RuleQueryPort,
@@ -142,14 +144,33 @@ const TRAP_SUFFIX: &str = "_r4_trap";
 const SOUL_BODY: &str = "## Identity\nR4 keeps the northern passes and the winter granary.";
 /// The one authored edit the revision-checked profile write applies.
 const EDITED_SOUL_BODY: &str = "## Identity\nR4 keeps four passes after the winter treaty.";
+/// A distinctive request body that a refusal must never echo.
+const REQUEST_SENTINEL_BODY: &str =
+    "r4-request-secret-sentinel: the northern gate word must never travel back.";
+/// The peer-controlled message/details sentinel a real refusal is rewritten with.
+const PEER_SENTINEL: &str = "r4-peer-secret-sentinel";
 /// A high-signal digest the deterministic classifier promotes for `brainstorm`.
 const PROMOTE_DIGEST: &str =
     "The chapter pivots from betrayal to alliance, with causal consequences for three factions.";
-/// The recall corpus: all three carry the query term so ranking is stable.
+/// The recall corpus: every seeded record carries a known text and placement, so
+/// each selection is compared against these independently captured facts.
 const RECALL_ONE: &str = "The northern alliance holds three passes.";
 const RECALL_TWO: &str = "The southern alliance holds a shared granary.";
 const RECALL_CONTEXT: &str = "The binding-local alliance note about the eastern road.";
 const RECALL_CONTEXT_ID: &str = "awb_r4_recall_context";
+const RECALL_OTHER: &str = "The watchtower alliance note about the western road.";
+const RECALL_OTHER_CONTEXT_ID: &str = "awb_r4_recall_other";
+/// A record under a second subject: excluded from every subject-scoped recall.
+const EXCLUDED_SUBJECT: &str = "sub_r4_recall_excluded";
+const EXCLUDED_TEXT: &str = "The excluded alliance note under another subject.";
+/// A second, differently scoped signed client (its own Ed25519 identity/hello).
+const SCOPED_SEED: [u8; 32] = [0x5b; 32];
+/// The fresh subject the UTF-8 byte-budget boundary reads.
+const BYTE_SUBJECT: &str = "sub_r4_byte_budget";
+/// The byte budget that fits the multibyte item whole and defers the long one.
+const BYTE_BUDGET: u64 = 512;
+/// A multibyte (UTF-8) body that fits inside `BYTE_BUDGET` whole.
+const SMALL_UTF8: &str = "密码：cipher 北方的关隘在雪后仍然通行。";
 const FIXTURE_PROVIDER: &str = "r4-mind-fixture";
 
 // ---------------------------------------------------------------------------
@@ -444,6 +465,10 @@ struct Provider {
     inner: Arc<FixtureMemoryProvider>,
     directory: Arc<PeerDirectory>,
     space_id: String,
+    /// The second signed client's peer id and its own provisioned principal, so
+    /// a scoped grant can be issued for it and its own signed session admitted.
+    scoped_peer: String,
+    scoped_principal: String,
 }
 
 impl Provider {
@@ -461,22 +486,22 @@ impl Provider {
             .provision_operator_admin(&principal_id)
             .await
             .expect("operator provisions the admin grant");
+        let scoped_peer = peer_id(&SCOPED_SEED);
+        let scoped_principal = format!("prn_{scoped_peer}");
         let space_id = inner.identity().space_id.clone();
         Self {
             _home: home,
             db,
             inner,
             directory: Arc::new(
-                PeerDirectory::new().with_peer(client_peer, principal_id),
+                PeerDirectory::new()
+                    .with_peer(client_peer, principal_id)
+                    .with_peer(scoped_peer.clone(), scoped_principal.clone()),
             ),
             space_id,
+            scoped_peer,
+            scoped_principal,
         }
-    }
-
-    /// Serve one signed session over a fresh loopback listener.
-    async fn serve(&self) -> (SocketAddr, tokio::task::JoinHandle<Arc<ConnectResponder>>) {
-        self.serve_service(self.inner.server(self.directory.admission()))
-            .await
     }
 
     /// Serve one signed session for an explicitly supplied memory service: the
@@ -486,11 +511,25 @@ impl Provider {
         &self,
         service: Arc<dyn RemoteMemoryService>,
     ) -> (SocketAddr, tokio::task::JoinHandle<Arc<ConnectResponder>>) {
+        self.serve_service_for(
+            service,
+            peer_id(&CLIENT_SEED),
+            pubkey(&CLIENT_SEED),
+        )
+        .await
+    }
+
+    async fn serve_service_for(
+        &self,
+        service: Arc<dyn RemoteMemoryService>,
+        client_peer: String,
+        client_pubkey: [u8; 32],
+    ) -> (SocketAddr, tokio::task::JoinHandle<Arc<ConnectResponder>>) {
         start_listener(
             service,
             manifest(self.inner.identity().authority_host_id.as_str()),
-            peer_id(&CLIENT_SEED),
-            pubkey(&CLIENT_SEED),
+            client_peer,
+            client_pubkey,
         )
         .await
     }
@@ -564,6 +603,15 @@ impl Provider {
         .expect("valid memory principal")
     }
 
+    /// The second signed client's principal, as its own request carrier.
+    fn scoped_memory_principal(&self) -> MemoryPrincipal {
+        serde_json::from_value(json!({
+            "principal_id": self.scoped_principal,
+            "extensions": {},
+        }))
+        .expect("valid scoped memory principal")
+    }
+
     /// Dial the SDK `RemoteAdapter` over its own signed loopback session.
     ///
     /// This is the SDK's own client (the pattern the conformance loopback uses),
@@ -576,7 +624,38 @@ impl Provider {
         Arc<RemoteAdapter>,
         tokio::task::JoinHandle<Arc<ConnectResponder>>,
     ) {
-        let (addr, task) = self.serve().await;
+        self.sdk_session_as(CLIENT_SEED, "r4-profiles-client").await
+    }
+
+    /// A signed SDK session for `seed`'s own identity, on a listener that admits
+    /// exactly that peer: the second client's authority is its authenticated
+    /// hello, never a request field.
+    async fn sdk_session_as(
+        &self,
+        seed: [u8; 32],
+        local_manifest_id: &str,
+    ) -> (
+        Arc<RemoteAdapter>,
+        tokio::task::JoinHandle<Arc<ConnectResponder>>,
+    ) {
+        let (addr, task) = self
+            .serve_service_for(
+                self.inner.server(self.directory.admission()),
+                peer_id(&seed),
+                pubkey(&seed),
+            )
+            .await;
+        let adapter = self.dial_as(addr, seed, local_manifest_id).await;
+        (adapter, task)
+    }
+
+    /// Dial one real signed SDK session to `addr` as `seed`'s identity.
+    async fn dial_as(
+        &self,
+        addr: SocketAddr,
+        seed: [u8; 32],
+        local_manifest_id: &str,
+    ) -> Arc<RemoteAdapter> {
         let (ws, _response) = tokio::time::timeout(
             BOUND,
             tokio_tungstenite::connect_async(format!("ws://{addr}")),
@@ -587,18 +666,17 @@ impl Provider {
         let transport: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
         let dialed = connect_remote_adapter(RemoteAdapterOptions {
             transport,
-            local_identity: RemoteIdentity { seed: CLIENT_SEED },
-            local_manifest: manifest("r4-profiles-client"),
+            local_identity: RemoteIdentity { seed },
+            local_manifest: manifest(local_manifest_id),
             remote_pubkey: pubkey(&HOST_SEED),
             allowlist: vec![peer_id(&HOST_SEED)],
             invoke_timeout_ms: Some(5_000),
             capability_token: None,
         });
-        let adapter = tokio::time::timeout(BOUND, dialed)
+        tokio::time::timeout(BOUND, dialed)
             .await
             .expect("the signed dial is bounded")
-            .expect("the signed dial succeeds");
-        (adapter, task)
+            .expect("the signed dial succeeds")
     }
 }
 
@@ -617,10 +695,16 @@ fn dto<T: serde::de::DeserializeOwned>(value: Value) -> T {
 /// subject-scoped `memory.profile.get` / `memory.records.list` the Character
 /// mind projection must perform. The counters are operative evidence that the
 /// product code really made those calls (a bypass leaves them at zero); no
-/// request or response is altered.
+/// request is altered.
+///
+/// While a sentinel is armed it rewrites only the peer-controlled fields of a
+/// REAL refusal — its message and its `details` — exactly as an untrusted peer
+/// could. The refusal code, its classification and any provider effect stay the
+/// provider's own; the sentinel exists to prove Nexus never copies peer text.
 struct ServiceProbe {
     inner: Arc<dyn RemoteMemoryService>,
     watched_subject: Mutex<Option<String>>,
+    refusal_sentinel: Mutex<Option<String>>,
     profile_updates: AtomicUsize,
     profile_gets: AtomicUsize,
     record_lists: AtomicUsize,
@@ -631,10 +715,18 @@ impl ServiceProbe {
         Self {
             inner,
             watched_subject: Mutex::new(None),
+            refusal_sentinel: Mutex::new(None),
             profile_updates: AtomicUsize::new(0),
             profile_gets: AtomicUsize::new(0),
             record_lists: AtomicUsize::new(0),
         }
+    }
+
+    /// Rewrite the next real refusal's peer-controlled message/details with
+    /// this sentinel; `None` disarms.
+    fn arm_refusal_sentinel(&self, sentinel: Option<&str>) {
+        *self.refusal_sentinel.lock().expect("refusal sentinel") =
+            sentinel.map(str::to_string);
     }
 
     /// Count only reads addressed to this subject.
@@ -673,7 +765,22 @@ impl RemoteMemoryService for ServiceProbe {
             }
             _ => {}
         }
-        self.inner.invoke(peer_id, op, payload).await
+        let result = self.inner.invoke(peer_id, op, payload).await;
+        let result = match result {
+            SpokeResult::Reject(mut reject) => {
+                let sentinel = self.refusal_sentinel.lock().expect("refusal sentinel").clone();
+                if let Some(sentinel) = sentinel {
+                    reject.message = format!("{sentinel}: {}", reject.message);
+                    reject
+                        .details
+                        .get_or_insert_with(serde_json::Map::new)
+                        .insert("peer_note".to_owned(), json!(sentinel));
+                }
+                SpokeResult::Reject(reject)
+            }
+            ok => ok,
+        };
+        result
     }
 }
 
@@ -708,8 +815,9 @@ async fn scalar(pool: &SqlitePool, sql: &str) -> i64 {
 // Legacy no-read traps
 // ---------------------------------------------------------------------------
 
-/// Withhold every legacy memory surface for the rest of the lifecycle and
-/// occupy the real long-term discovery paths with a pre-existing regular file.
+/// Withhold every legacy memory surface for the exercised interval (armed
+/// after the initial Core open and restored before close) and occupy the real
+/// long-term discovery paths with a pre-existing regular file.
 ///
 /// Returns the pool holding the renamed tables and the trapped paths; each test
 /// restores the tables and re-checks the traps at the end.
@@ -721,7 +829,7 @@ async fn arm_legacy_traps(env: &Env, character_id: Option<&str>) -> (SqlitePool,
         )))
         .execute(&trap)
         .await
-        .expect("withhold a legacy memory table from the whole lifecycle");
+        .expect("withhold a legacy memory table for the exercised interval");
     }
     let mut dirs = vec![env.creator_long_term_dir()];
     if let Some(character_id) = character_id {
@@ -748,8 +856,9 @@ async fn restore_legacy_tables(trap: &SqlitePool) {
 
 /// Read the traps back after the lifecycle: each path is still the regular file
 /// it was, and the real discovery call (`fs::read_dir`, exactly what
-/// `list_memories` performs) still fails with a non-`NotFound` error. Any
-/// accidental legacy file discovery above would have failed loudly instead.
+/// `list_memories` performs) still fails with a non-`NotFound` error. A caller
+/// that propagates that error cannot have read the directory; a swallowed error
+/// or an unrelated file read is not excluded by this check.
 fn assert_legacy_dir_traps(dirs: &[PathBuf]) {
     for dir in dirs {
         assert!(
@@ -765,7 +874,7 @@ fn assert_legacy_dir_traps(dirs: &[PathBuf]) {
         let discovery = fs::read_dir(dir);
         assert!(
             matches!(&discovery, Err(error) if error.kind() != std::io::ErrorKind::NotFound),
-            "the real list_memories discovery fails on this path, so it was never read: {discovery:?}"
+            "the real list_memories discovery still fails on this path: {discovery:?}"
         );
     }
 }
@@ -943,6 +1052,60 @@ fn classified_refusal(
     }
 }
 
+/// One record's `(id, placement, exact text)` as the wire renders it.
+fn record_triple(record: &Value) -> (String, Value, String) {
+    (
+        record["record_id"].as_str().expect("record id").to_string(),
+        record["scope"].clone(),
+        record["content"]["text"]
+            .as_str()
+            .expect("record text")
+            .to_string(),
+    )
+}
+
+/// The exact triples a recall response served, sorted by id.
+fn response_triples(response: &Value) -> Vec<(String, Value, String)> {
+    let mut triples: Vec<(String, Value, String)> = response["records"]
+        .as_array()
+        .expect("recall records")
+        .iter()
+        .map(record_triple)
+        .collect();
+    triples.sort_by(|left, right| left.0.cmp(&right.0));
+    triples
+}
+
+/// Sort independently captured triples by id for set comparison.
+fn sorted_triples(mut triples: Vec<(String, Value, String)>) -> Vec<(String, Value, String)> {
+    triples.sort_by(|left, right| left.0.cmp(&right.0));
+    triples
+}
+
+/// One served recall body as JSON.
+async fn recall_ok(
+    adapter: &RemoteAdapter,
+    principal: &MemoryPrincipal,
+    request: MemoryRecallRequest,
+) -> Value {
+    match adapter.recall(principal, request).await {
+        SpokeResult::Ok(body) => serde_json::to_value(&body).expect("recall body"),
+        SpokeResult::Reject(reject) => panic!("the recall is served: {reject:?}"),
+    }
+}
+
+/// One recall refusal.
+async fn recall_reject(
+    adapter: &RemoteAdapter,
+    principal: &MemoryPrincipal,
+    request: MemoryRecallRequest,
+) -> SpokeReject {
+    match adapter.recall(principal, request).await {
+        SpokeResult::Ok(body) => panic!("the recall is refused: {body:?}"),
+        SpokeResult::Reject(reject) => reject,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Profile get/update on the remote provider
 // ---------------------------------------------------------------------------
@@ -959,8 +1122,8 @@ async fn creator_soul_profile_reads_and_writes_run_on_the_remote_provider() {
     let principal = core.active_principal().await.expect("active principal");
     let subject_id = legacy::creator_subject_id(&env.creator_id);
 
-    // The traps are armed BEFORE the first profile operation and stay armed for
-    // the whole lifecycle below.
+    // The traps are armed after the initial Core open and stay armed for the
+    // exercised interval below.
     let (trap, dirs) = arm_legacy_traps(&env, None).await;
 
     // GET: an absent authored document is the honest-empty answer, served by the
@@ -997,12 +1160,17 @@ async fn creator_soul_profile_reads_and_writes_run_on_the_remote_provider() {
     pool.close().await;
 
     // A caller that read another revision keeps the retained conflict class and
-    // writes nothing: exactly ONE provider write attempt (the projected-legacy
-    // adoption retry is local-only and cannot run on a remote binding).
+    // writes nothing. The refusal is the provider's real one; only its
+    // peer-controlled message/details are rewritten an untrusted peer could do
+    // the same. Neither the distinctive request body nor the peer text may
+    // travel back in Display OR Debug.
+    probe.arm_refusal_sentinel(Some(PEER_SENTINEL));
+    let updates_before_stale = probe.profile_updates();
     let stale = core
-        .set_creator_soul(&principal, EDITED_SOUL_BODY, Some(5))
+        .set_creator_soul(&principal, REQUEST_SENTINEL_BODY, Some(5))
         .await
         .expect_err("the stale revision is refused");
+    probe.arm_refusal_sentinel(None);
     let (code, retry_class, family, wire_code, conflict_code) = classified_refusal(&stale);
     assert_eq!((code, retry_class), ("REVISION_CONFLICT", "terminal"));
     assert_eq!(family, MemoryProviderRefusal::Conflict);
@@ -1010,13 +1178,17 @@ async fn creator_soul_profile_reads_and_writes_run_on_the_remote_provider() {
     assert_eq!(conflict_code, Some("version_mismatch"));
     let shown = format!("{stale} | {stale:?}");
     assert!(
-        !shown.contains("does not match the stored revision"),
-        "the provider's own message never travels with a refusal: {shown}"
+        !shown.contains(REQUEST_SENTINEL_BODY),
+        "the request content never travels with a refusal: {shown}"
+    );
+    assert!(
+        !shown.contains(PEER_SENTINEL),
+        "peer-controlled message/details text never travels with a refusal: {shown}"
     );
     assert_eq!(
         probe.profile_updates(),
-        2,
-        "the create plus the refused CAS: no adoption retry for a remote binding"
+        updates_before_stale + 1,
+        "the refused CAS is the only additional provider write attempt"
     );
     let pool = provider.pool().await;
     let (_, unchanged, revision) = provider_personality(&pool, &subject_id)
@@ -1052,8 +1224,11 @@ async fn creator_soul_profile_reads_and_writes_run_on_the_remote_provider() {
     pool.close().await;
 
     // A read-only core keeps serving the profile read and refuses the write
-    // before any provider call.
-    let (read_only, ro_responder) = provider.open_core_as(&env, CoreAccess::ReadOnly).await;
+    // before any provider call. Its own signed connection is served through the
+    // SAME observation decorator, so the counter around the refused call proves
+    // that the actual read-only session sent nothing.
+    let (read_only, ro_responder) =
+        provider.open_core_serving(&env, probe.clone(), CoreAccess::ReadOnly).await;
     let ro_principal = read_only
         .active_principal()
         .await
@@ -1064,6 +1239,7 @@ async fn creator_soul_profile_reads_and_writes_run_on_the_remote_provider() {
         .expect("a read-only core serves the profile read")
         .expect("the authored document is served");
     assert_eq!(served.document.body, EDITED_SOUL_BODY);
+    let updates_before_readonly = probe.profile_updates();
     let refused = read_only
         .set_creator_soul(&ro_principal, SOUL_BODY, None)
         .await
@@ -1074,9 +1250,21 @@ async fn creator_soul_profile_reads_and_writes_run_on_the_remote_provider() {
     );
     assert_eq!(
         probe.profile_updates(),
-        3,
-        "the read-only refusal never reached the provider"
+        updates_before_readonly,
+        "the actual read-only session sent no profile write before its typed refusal"
     );
+    let pool = provider.pool().await;
+    let (_, unchanged, revision) = provider_personality(&pool, &subject_id)
+        .await
+        .expect("the provider still stores the edited document");
+    assert_eq!(unchanged, EDITED_SOUL_BODY, "the read-only refusal wrote nothing");
+    assert_eq!(revision, 2);
+    assert_eq!(
+        provider_receipts(&pool, "memory.profile.update").await,
+        2,
+        "the read-only refusal committed no receipt"
+    );
+    pool.close().await;
 
     restore_legacy_tables(&trap).await;
     assert_no_local_memory(&env).await;
@@ -1087,7 +1275,12 @@ async fn creator_soul_profile_reads_and_writes_run_on_the_remote_provider() {
         Some(peer_id(&CLIENT_SEED).as_str()),
         "every effect above travelled the signed session of the loaded credential"
     );
-    responder_of(ro_responder).await;
+    let ro_host = responder_of(ro_responder).await;
+    assert_eq!(
+        ro_host.remote_peer_id().as_deref(),
+        Some(peer_id(&CLIENT_SEED).as_str()),
+        "the read-only connection is the decorated signed session, not another writer"
+    );
     assert!(
         read_only.close().await.expect("close").cleanup_confirmed,
         "the read-only open releases its own admission"
@@ -1132,6 +1325,27 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
     );
     let (adapter, sdk_responder) = provider.sdk_session().await;
     let memory_principal = provider.memory_principal();
+
+    // Independently captured facts for every seeded record: id, placement and
+    // exact text. Recall is compared against THESE, never against another
+    // recall response.
+    let shared_one = core
+        .get_creator_memory(&principal, "r4-recall-one")
+        .await
+        .expect("read the first shared memory")
+        .expect("the first shared memory exists");
+    let shared_two = core
+        .get_creator_memory(&principal, "r4-recall-two")
+        .await
+        .expect("read the second shared memory")
+        .expect("the second shared memory exists");
+    let shared_one = record_triple(&serde_json::to_value(shared_one).expect("record json"));
+    let shared_two = record_triple(&serde_json::to_value(shared_two).expect("record json"));
+    assert_eq!(shared_one.2, RECALL_ONE);
+    assert_eq!(shared_two.2, RECALL_TWO);
+    assert_eq!(shared_one.1, json!({ "visibility": "shared" }));
+    assert_eq!(shared_two.1, json!({ "visibility": "shared" }));
+
     let context_record = match adapter
         .create_record(
             &memory_principal,
@@ -1153,6 +1367,91 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         .as_str()
         .expect("the provider-assigned context record id")
         .to_string();
+    let context_triple = (
+        context_id.clone(),
+        json!({ "visibility": "context", "context_id": RECALL_CONTEXT_ID }),
+        RECALL_CONTEXT.to_string(),
+    );
+
+    // A second, differently placed record under the same subject: admitted by
+    // `subject_all`, excluded by the selected-context view.
+    let other_record = match adapter
+        .create_record(
+            &memory_principal,
+            dto::<MemoryRecordsCreateRequest>(json!({
+                "space_id": provider.space_id,
+                "subject_id": subject_id,
+                "kind": "fact",
+                "content": { "text": RECALL_OTHER },
+                "scope": { "visibility": "context", "context_id": RECALL_OTHER_CONTEXT_ID },
+                "idempotency_key": "r4-recall-other-context",
+            })),
+        )
+        .await
+    {
+        SpokeResult::Ok(body) => serde_json::to_value(&body).expect("other create body"),
+        SpokeResult::Reject(reject) => panic!("the other-context record is created: {reject:?}"),
+    };
+    let other_id = other_record["result"]["record_id"]
+        .as_str()
+        .expect("the provider-assigned other-context record id")
+        .to_string();
+    let other_triple = (
+        other_id,
+        json!({ "visibility": "context", "context_id": RECALL_OTHER_CONTEXT_ID }),
+        RECALL_OTHER.to_string(),
+    );
+
+    // A record under a DIFFERENT subject: excluded from every subject-scoped
+    // selection, so a subject mix-up cannot pass the set comparison.
+    match adapter
+        .ensure_subject(
+            &memory_principal,
+            dto::<MemorySubjectsEnsureRequest>(json!({
+                "space_id": provider.space_id,
+                "subject_id": EXCLUDED_SUBJECT,
+                "kind": { "ns": "r4", "id": "excluded" },
+            })),
+        )
+        .await
+    {
+        SpokeResult::Ok(_) => {}
+        SpokeResult::Reject(reject) => panic!("the excluded subject is ensured: {reject:?}"),
+    }
+    let excluded_record = match adapter
+        .create_record(
+            &memory_principal,
+            dto::<MemoryRecordsCreateRequest>(json!({
+                "space_id": provider.space_id,
+                "subject_id": EXCLUDED_SUBJECT,
+                "kind": "fact",
+                "content": { "text": EXCLUDED_TEXT },
+                "scope": { "visibility": "shared" },
+                "idempotency_key": "r4-recall-excluded",
+            })),
+        )
+        .await
+    {
+        SpokeResult::Ok(body) => serde_json::to_value(&body).expect("excluded create body"),
+        SpokeResult::Reject(reject) => panic!("the excluded-subject record is created: {reject:?}"),
+    };
+    let excluded_id = excluded_record["result"]["record_id"]
+        .as_str()
+        .expect("the provider-assigned excluded-subject record id")
+        .to_string();
+    let excluded_triple = (
+        excluded_id,
+        json!({ "visibility": "shared" }),
+        EXCLUDED_TEXT.to_string(),
+    );
+
+    let shared_records = [shared_one.clone(), shared_two.clone()];
+    let subject_records = [
+        shared_one.clone(),
+        shared_two.clone(),
+        context_triple.clone(),
+        other_triple.clone(),
+    ];
 
     let recall = |selection: Value, budget: Value, query: Option<&str>, cursor: Option<&str>| {
         let mut request = json!({
@@ -1169,135 +1468,113 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         }
         dto::<MemoryRecallRequest>(request)
     };
-
-    // SELECTION: the subject's whole authorized set, then the shared-only view and
-    // the selected-context view, all in the pinned provider space.
-    let all = match adapter
-        .recall(
-            &memory_principal,
-            recall(
-                json!({ "mode": "subject_all" }),
-                json!({ "max_items": 50 }),
-                Some("alliance"),
-                None,
-            ),
-        )
-        .await
-    {
-        SpokeResult::Ok(body) => serde_json::to_value(&body).expect("recall body"),
-        SpokeResult::Reject(reject) => panic!("the subject's records are recalled: {reject:?}"),
+    let selected = |selection: Value| {
+        recall(selection, json!({ "max_items": 50 }), Some("alliance"), None)
     };
-    assert_eq!(all["total_authorized"], json!(3));
-    assert_eq!(all["truncated"], json!(false));
-    assert_eq!(all["overflow_record_id"], Value::Null);
-    assert_eq!(all["next_cursor"], Value::Null);
-    let all_records = all["records"].as_array().expect("recall records");
-    assert_eq!(all_records.len(), 3);
+
+    // SELECTION: every selection's exact (id, placement, text) triples must equal
+    // the independently captured facts; missing, substituted or extra records
+    // fail even when the count matches.
+    let all = recall_ok(
+        &adapter,
+        &memory_principal,
+        selected(json!({ "mode": "subject_all" })),
+    )
+    .await;
+    assert_eq!(all["total_authorized"], json!(4));
+    assert_eq!(
+        response_triples(&all),
+        sorted_triples(subject_records.to_vec()),
+        "subject_all serves exactly the independently captured subject records"
+    );
     assert!(
-        all_records
+        all["records"]
+            .as_array()
+            .expect("recall records")
             .iter()
             .all(|record| record["space_id"] == json!(provider.space_id)),
         "every recalled record belongs to the pinned provider space"
     );
-
-    let shared_only = match adapter
-        .recall(
-            &memory_principal,
-            recall(
-                json!({ "mode": "shared_only" }),
-                json!({ "max_items": 50 }),
-                Some("alliance"),
-                None,
-            ),
-        )
-        .await
-    {
-        SpokeResult::Ok(body) => serde_json::to_value(&body).expect("shared recall body"),
-        SpokeResult::Reject(reject) => panic!("the shared records are recalled: {reject:?}"),
-    };
-    assert_eq!(shared_only["total_authorized"], json!(2));
-    assert_eq!(shared_only["records"].as_array().expect("shared records").len(), 2);
-
-    let context_only = match adapter
-        .recall(
-            &memory_principal,
-            recall(
-                json!({
-                    "mode": "selected_contexts",
-                    "context_ids": [RECALL_CONTEXT_ID],
-                    "include_shared": false,
-                }),
-                json!({ "max_items": 50 }),
-                Some("alliance"),
-                None,
-            ),
-        )
-        .await
-    {
-        SpokeResult::Ok(body) => serde_json::to_value(&body).expect("context recall body"),
-        SpokeResult::Reject(reject) => panic!("the binding-local record is recalled: {reject:?}"),
-    };
-    assert_eq!(context_only["total_authorized"], json!(1));
-    assert_eq!(
-        context_only["records"][0]["record_id"],
-        json!(context_id),
-        "the selected context is the record the selection admits"
+    assert!(
+        !response_triples(&all).contains(&excluded_triple),
+        "the other subject's record is never served by a subject-scoped selection"
     );
 
-    let context_and_shared = match adapter
-        .recall(
+    let shared_only = recall_ok(
+        &adapter,
+        &memory_principal,
+        selected(json!({ "mode": "shared_only" })),
+    )
+    .await;
+    assert_eq!(shared_only["total_authorized"], json!(2));
+    assert_eq!(
+        response_triples(&shared_only),
+        sorted_triples(shared_records.to_vec()),
+        "shared_only excludes the context-placed records"
+    );
+
+    let context_only = recall_ok(
+        &adapter,
+        &memory_principal,
+        selected(json!({
+            "mode": "selected_contexts",
+            "context_ids": [RECALL_CONTEXT_ID],
+            "include_shared": false,
+        })),
+    )
+    .await;
+    assert_eq!(context_only["total_authorized"], json!(1));
+    assert_eq!(
+        response_triples(&context_only),
+        sorted_triples(vec![context_triple.clone()]),
+        "the selected context admits exactly its own record, not the other context"
+    );
+
+    let context_and_shared = recall_ok(
+        &adapter,
+        &memory_principal,
+        selected(json!({
+            "mode": "selected_contexts",
+            "context_ids": [RECALL_CONTEXT_ID],
+            "include_shared": true,
+        })),
+    )
+    .await;
+    assert_eq!(context_and_shared["total_authorized"], json!(3));
+    assert_eq!(
+        response_triples(&context_and_shared),
+        sorted_triples(vec![
+            shared_one.clone(),
+            shared_two.clone(),
+            context_triple.clone(),
+        ]),
+        "the combined selection is exactly shared plus the selected context"
+    );
+
+    // BUDGET + CURSOR: one item per page over the four subject records until the
+    // authorized set is exhausted; the concatenation must equal the independently
+    // captured subject triples, not another recall response.
+    let page_size = json!({ "max_items": 1 });
+    let mut seen: Vec<(String, Value, String)> = Vec::new();
+    let mut cursor: Option<String> = None;
+    for page_index in 0..4 {
+        let page = recall_ok(
+            &adapter,
             &memory_principal,
             recall(
-                json!({
-                    "mode": "selected_contexts",
-                    "context_ids": [RECALL_CONTEXT_ID],
-                    "include_shared": true,
-                }),
-                json!({ "max_items": 50 }),
+                json!({ "mode": "subject_all" }),
+                page_size.clone(),
                 Some("alliance"),
-                None,
+                cursor.as_deref(),
             ),
         )
-        .await
-    {
-        SpokeResult::Ok(body) => serde_json::to_value(&body).expect("combined recall body"),
-        SpokeResult::Reject(reject) => panic!("the combined selection is recalled: {reject:?}"),
-    };
-    assert_eq!(context_and_shared["total_authorized"], json!(3));
-
-    // BUDGET + CURSOR: one item per page until the authorized set is exhausted;
-    // each page's cursor continues the same ranking and the cursor disappears on
-    // the last page.
-    let page_size = json!({ "max_items": 1 });
-    let mut seen: Vec<String> = Vec::new();
-    let mut cursor: Option<String> = None;
-    for page_index in 0..3 {
-        let page = match adapter
-            .recall(
-                &memory_principal,
-                recall(
-                    json!({ "mode": "subject_all" }),
-                    page_size.clone(),
-                    Some("alliance"),
-                    cursor.as_deref(),
-                ),
-            )
-            .await
-        {
-            SpokeResult::Ok(body) => serde_json::to_value(&body).expect("recall page"),
-            SpokeResult::Reject(reject) => panic!("recall page {page_index}: {reject:?}"),
-        };
-        assert_eq!(page["total_authorized"], json!(3));
+        .await;
+        assert_eq!(page["total_authorized"], json!(4));
         let records = page["records"].as_array().expect("page records");
         assert_eq!(records.len(), 1, "the item budget is a hard cap");
-        seen.push(
-            records[0]["record_id"]
-                .as_str()
-                .expect("page record id")
-                .to_string(),
-        );
+        seen.push(record_triple(&records[0]));
         let next = page["next_cursor"].as_str().map(str::to_string);
-        if page_index == 2 {
+        if page_index == 3 {
             assert_eq!(page["truncated"], json!(false), "the last page ends the set");
             assert_eq!(next, None, "the last page carries no cursor");
         } else {
@@ -1305,38 +1582,123 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
             cursor = Some(next.expect("an unfinished page carries a cursor"));
         }
     }
-    seen.sort_unstable();
-    let mut expected_ids: Vec<String> = all_records
-        .iter()
-        .filter_map(|record| record["record_id"].as_str().map(str::to_string))
-        .collect();
-    expected_ids.sort_unstable();
-    assert_eq!(seen, expected_ids, "the pages partition the authorized set");
+    assert_eq!(
+        sorted_triples(seen),
+        sorted_triples(subject_records.to_vec()),
+        "the pages partition exactly the independently captured subject set"
+    );
 
-    // BUDGET: an oversized first item is surfaced whole and named, not dropped.
-    let overflow = match adapter
-        .recall(
+    // BYTE BUDGET: a fresh subject with exactly two records. The multibyte item
+    // carries the query hit and fits whole; the long item is deferred, then
+    // surfaced whole as the named overflow on the resumed page. Both bodies are
+    // compared to their independently seeded originals, so a truncated or empty
+    // content cannot pass.
+    match adapter
+        .ensure_subject(
             &memory_principal,
-            recall(
-                json!({ "mode": "subject_all" }),
-                json!({ "max_items": 50, "max_bytes": 1 }),
-                Some("alliance"),
-                None,
-            ),
+            dto::<MemorySubjectsEnsureRequest>(json!({
+                "space_id": provider.space_id,
+                "subject_id": BYTE_SUBJECT,
+                "kind": { "ns": "r4", "id": "bytes" },
+            })),
         )
         .await
     {
-        SpokeResult::Ok(body) => serde_json::to_value(&body).expect("overflow body"),
-        SpokeResult::Reject(reject) => panic!("the byte budget is applied: {reject:?}"),
+        SpokeResult::Ok(_) => {}
+        SpokeResult::Reject(reject) => panic!("the byte-budget subject is ensured: {reject:?}"),
+    }
+    let create_byte_record = |text: String, key: &str| {
+        let adapter = Arc::clone(&adapter);
+        let principal = memory_principal.clone();
+        let space_id = provider.space_id.clone();
+        let key = key.to_string();
+        async move {
+            match adapter
+                .create_record(
+                    &principal,
+                    dto::<MemoryRecordsCreateRequest>(json!({
+                        "space_id": space_id,
+                        "subject_id": BYTE_SUBJECT,
+                        "kind": "fact",
+                        "content": { "text": text },
+                        "scope": { "visibility": "shared" },
+                        "idempotency_key": key,
+                    })),
+                )
+                .await
+            {
+                SpokeResult::Ok(body) => serde_json::to_value(&body).expect("byte create body"),
+                SpokeResult::Reject(reject) => panic!("the byte record is created: {reject:?}"),
+            }
+        }
     };
-    let overflow_records = overflow["records"].as_array().expect("overflow records");
-    assert_eq!(overflow_records.len(), 1, "the single oversized item is kept whole");
-    assert_eq!(
-        overflow["overflow_record_id"],
-        overflow_records[0]["record_id"],
-        "the oversized item is named as the overflow"
+    let small = create_byte_record(SMALL_UTF8.to_string(), "r4-byte-small").await;
+    let small_id = small["result"]["record_id"]
+        .as_str()
+        .expect("the small record id")
+        .to_string();
+    // A long multibyte body far beyond the byte budget.
+    let large_text = format!("档案：{}", "北方的关隘在雪后仍然通行，".repeat(120));
+    assert!(
+        large_text.len() > usize::try_from(BYTE_BUDGET).expect("the budget fits usize"),
+        "the long body exceeds the byte budget"
     );
-    assert_eq!(overflow["truncated"], json!(true));
+    let large = create_byte_record(large_text.clone(), "r4-byte-large").await;
+    let large_id = large["result"]["record_id"]
+        .as_str()
+        .expect("the large record id")
+        .to_string();
+
+    let byte_recall = |cursor: Option<&str>| {
+        let mut request = json!({
+            "space_id": provider.space_id,
+            "subject_id": BYTE_SUBJECT,
+            "selection": { "mode": "shared_only" },
+            "budget": { "max_items": 10, "max_bytes": BYTE_BUDGET },
+            "query": "cipher",
+        });
+        if let Some(cursor) = cursor {
+            request["cursor"] = json!(cursor);
+        }
+        dto::<MemoryRecallRequest>(request)
+    };
+    let first = recall_ok(&adapter, &memory_principal, byte_recall(None)).await;
+    let first_records = first["records"].as_array().expect("first byte page");
+    assert_eq!(first["total_authorized"], json!(2));
+    assert_eq!(first_records.len(), 1, "the fitting multibyte item is kept");
+    assert_eq!(first_records[0]["record_id"], json!(small_id));
+    assert_eq!(
+        first_records[0]["content"]["text"],
+        json!(SMALL_UTF8),
+        "the fitting multibyte item is served byte-for-byte"
+    );
+    assert_eq!(
+        first["overflow_record_id"],
+        Value::Null,
+        "the deferred item is not named while the page still has content"
+    );
+    assert_eq!(first["truncated"], json!(true));
+    let byte_cursor = first["next_cursor"]
+        .as_str()
+        .expect("the fitting page carries a cursor")
+        .to_string();
+
+    let second_page = recall_ok(&adapter, &memory_principal, byte_recall(Some(&byte_cursor))).await;
+    let second_records = second_page["records"].as_array().expect("second byte page");
+    assert_eq!(second_records.len(), 1, "the deferred item is surfaced whole");
+    assert_eq!(second_records[0]["record_id"], json!(large_id));
+    assert_eq!(
+        second_records[0]["content"]["text"],
+        json!(large_text),
+        "the deferred item's full content is intact, never truncated"
+    );
+    assert_eq!(
+        second_page["overflow_record_id"],
+        json!(large_id),
+        "the oversized first item on the resumed page is named"
+    );
+    assert_eq!(second_page["truncated"], json!(false));
+    assert_eq!(second_page["next_cursor"], Value::Null);
 
     // CURSOR BINDING: the cursor continues only the ranking it was minted under.
     let first_page = match adapter
@@ -1408,6 +1770,139 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
             panic!("a cursor from before the write is refused: {body:?}")
         }
     }
+    // AUTHORIZED IDENTITY PARTITION: a second, differently scoped signed client.
+    // The admin issues it a subject-scoped, context-restricted `recall` grant;
+    // its own signed session must see exactly the granted context and must be
+    // denied every wider selection. The SDK ignores the client principal
+    // argument, so a deliberately wrong claimed principal proves the server's
+    // authenticated peer is the authority.
+    match adapter
+        .grant(
+            &memory_principal,
+            dto::<MemoryGrantsGrantRequest>(json!({
+                "capabilities": ["recall"],
+                "context_ids": [RECALL_CONTEXT_ID],
+                "idempotency_key": "r4-scoped-recall-grant",
+                "principal_id": provider.scoped_principal.clone(),
+                "space_id": provider.space_id,
+                "subject_id": subject_id,
+            })),
+        )
+        .await
+    {
+        SpokeResult::Ok(_) => {}
+        SpokeResult::Reject(reject) => panic!("the scoped recall grant is issued: {reject:?}"),
+    }
+    let (scoped, scoped_responder) =
+        provider.sdk_session_as(SCOPED_SEED, "r4-scoped-client").await;
+    let scoped_principal = provider.scoped_memory_principal();
+
+    let scoped_only = recall_ok(
+        &scoped,
+        &scoped_principal,
+        recall(
+            json!({
+                "mode": "selected_contexts",
+                "context_ids": [RECALL_CONTEXT_ID],
+                "include_shared": false,
+            }),
+            json!({ "max_items": 50 }),
+            Some("alliance"),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        response_triples(&scoped_only),
+        sorted_triples(vec![context_triple.clone()]),
+        "the scoped identity sees exactly its granted context"
+    );
+
+    for (why, selection) in [
+        ("shared visibility is not granted", json!({ "mode": "shared_only" })),
+        (
+            "subject-wide recall is not granted",
+            json!({ "mode": "subject_all" }),
+        ),
+        (
+            "another context is not granted",
+            json!({
+                "mode": "selected_contexts",
+                "context_ids": [RECALL_OTHER_CONTEXT_ID],
+                "include_shared": false,
+            }),
+        ),
+        (
+            "shared visibility is not granted to the selection",
+            json!({
+                "mode": "selected_contexts",
+                "context_ids": [RECALL_CONTEXT_ID],
+                "include_shared": true,
+            }),
+        ),
+    ] {
+        let reject = recall_reject(
+            &scoped,
+            &scoped_principal,
+            recall(selection, json!({ "max_items": 50 }), Some("alliance"), None),
+        )
+        .await;
+        assert_eq!(reject.code, SpokeRejectCode::NotAuthorized, "{why}");
+    }
+    // A different subject is outside the grant's subject scope.
+    let mut other_subject = json!({
+        "space_id": provider.space_id,
+        "subject_id": EXCLUDED_SUBJECT,
+        "selection": {
+            "mode": "selected_contexts",
+            "context_ids": [RECALL_CONTEXT_ID],
+            "include_shared": false,
+        },
+        "budget": { "max_items": 50 },
+    });
+    other_subject["query"] = json!("alliance");
+    let reject = recall_reject(
+        &scoped,
+        &scoped_principal,
+        dto::<MemoryRecallRequest>(other_subject),
+    )
+    .await;
+    assert_eq!(
+        reject.code,
+        SpokeRejectCode::NotAuthorized,
+        "another subject is outside the grant's subject scope"
+    );
+
+    // The claimed client principal is not authority: the same scoped session
+    // claiming the admin principal still sees only its granted context.
+    let claimed_admin = recall_ok(
+        &scoped,
+        &memory_principal,
+        recall(
+            json!({
+                "mode": "selected_contexts",
+                "context_ids": [RECALL_CONTEXT_ID],
+                "include_shared": false,
+            }),
+            json!({ "max_items": 50 }),
+            Some("alliance"),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        response_triples(&claimed_admin),
+        sorted_triples(vec![context_triple.clone()]),
+        "a payload-claimed principal does not widen the authenticated peer's authority"
+    );
+    scoped.close();
+    let scoped_host = responder_of(scoped_responder).await;
+    assert_eq!(
+        scoped_host.remote_peer_id().as_deref(),
+        Some(provider.scoped_peer.as_str()),
+        "the scoped effects travelled the scoped peer's own signed session"
+    );
+
     // A space this provider does not serve is its definite absence: the pinned
     // space is the provider's own, never a local default that would answer here.
     match adapter
@@ -1442,8 +1937,18 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
     assert_eq!(spaces, vec![provider.space_id.clone()]);
     assert_eq!(
         provider_records(&pool, &subject_id).await.len(),
-        4,
-        "the three seeded records plus the later one; recall wrote nothing"
+        5,
+        "two shared, two context-placed and the later shared record; recall wrote nothing"
+    );
+    assert_eq!(
+        provider_records(&pool, BYTE_SUBJECT).await.len(),
+        2,
+        "the byte-budget subject keeps exactly its two seeded records"
+    );
+    assert_eq!(
+        provider_records(&pool, EXCLUDED_SUBJECT).await.len(),
+        1,
+        "the other subject keeps its own record, unserved by every selection above"
     );
     pool.close().await;
 
@@ -1590,9 +2095,10 @@ impl ProviderPort for QuietPort {
 /// through `CoreCharacterMind`, which reads the Character subject's
 /// `personality` profile with `memory.profile.get` and the two memory families
 /// with kind-filtered `memory.records.list`, both on the real signed provider in
-/// the pinned space. The observed reads are operative evidence (a bypass leaves
-/// the counters at zero) and the prompt carries the provider's SOUL document and
-/// promoted memory — not local file content.
+/// the pinned space. The decorator's counters are subject-scoped totals, so the
+/// deltas measured around the `execute` call are that execution's own reads;
+/// which selection/kinds those reads carried is evidenced by the prompt content
+/// and by the provider's stored objects, not by the counters.
 #[tokio::test]
 async fn host_character_mind_projection_serves_soul_and_memory_from_the_remote_provider() {
     let env = Env::boot("R4 Host Owner").await;
@@ -1702,6 +2208,10 @@ async fn host_character_mind_projection_serves_soul_and_memory_from_the_remote_p
         .await
         .expect("the admitted Character host session is created");
 
+    // The counters are subject-scoped totals that already include session
+    // creation; only the delta across this execution is attributed to it.
+    let profile_gets_before = probe.profile_gets();
+    let record_lists_before = probe.record_lists();
     handle
         .execute(
             &principal,
@@ -1715,12 +2225,12 @@ async fn host_character_mind_projection_serves_soul_and_memory_from_the_remote_p
         .expect("the admitted Character prompt runs");
 
     assert!(
-        probe.profile_gets() >= 1,
-        "the admitted Host projection performs memory.profile.get on the Character subject"
+        probe.profile_gets() > profile_gets_before,
+        "this execution performed memory.profile.get on the Character subject"
     );
     assert!(
-        probe.record_lists() >= 1,
-        "the admitted Host projection performs kind-filtered memory.records.list on the Character subject"
+        probe.record_lists() > record_lists_before,
+        "this execution performed kind-filtered memory.records.list on the Character subject"
     );
     let prompts = mind_adapter.prompts();
     assert_eq!(prompts.len(), 1, "the host assembled one prompt");
