@@ -37,3 +37,7 @@ nexus-core = { path = "../nexus-core", features = ["memory-remote"] }
 # provider's own file root) through the production layout instead of a
 # hardcoded copy of it.
 nexus-home-layout = { path = "../nexus-home-layout" }
+# v1.229 N3 Task 2 (R2): the real public `create_world` / `create_character`
+# request types own the owned-World, two-active-binding fixture the D18 removal
+# gate is proved against. Test-only; already a Core graph dependency.
+nexus-contracts = { path = "../nexus-contracts" }

@@ -3944,6 +3944,7 @@ dependencies = [
  "chrono",
  "ed25519-dalek 2.2.0",
  "futures-util",
+ "nexus-contracts",
  "nexus-core",
  "nexus-home-layout",
  "serde",

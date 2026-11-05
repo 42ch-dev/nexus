@@ -762,9 +762,10 @@ async fn remove_binding_tx(
 
     // D18 (§5.1): a remote binding-local dependency keeps the binding until its
     // own evidence settles. Unknown admissions block even after later retries
-    // succeed (the owner-selected conservative policy); known live references
-    // block until a positive disposal/review/promotion fact closes them. Only
-    // terminal facts remain at that point, so they are cleared with the delete.
+    // succeed (the supervisor-selected conservative policy; owner confirmation
+    // pending); known live references block until a positive
+    // disposal/review/promotion fact closes them. Only terminal facts remain at
+    // that point, so they are cleared with the delete.
     let remote = remote_binding_dependency_counts_tx(tx, binding_id).await?;
     if remote.admissions > 0 || remote.live_objects > 0 {
         return Err(LocalDbError::ActorContractConflict {
