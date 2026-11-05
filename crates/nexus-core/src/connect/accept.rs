@@ -2074,13 +2074,22 @@ mod tests {
         shutdown.notify_one();
         let mut accept = lane.task;
         let mut watch = lane.watch_task;
-        for handle in [&mut accept, &mut watch] {
-            let bounded = tokio::time::timeout(std::time::Duration::from_secs(10), &mut *handle);
-            if bounded.await.is_err() {
-                handle.abort();
-                let _ = handle.await;
+        let mut unsettled = Vec::new();
+        for (label, handle) in [("accept loop", &mut accept), ("supervisor", &mut watch)] {
+            match tokio::time::timeout(std::time::Duration::from_secs(10), &mut *handle).await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => unsettled.push(format!("{label} join failed: {error}")),
+                Err(_) => {
+                    handle.abort();
+                    let _ = handle.await;
+                    unsettled.push(format!("{label} did not settle cooperatively"));
+                }
             }
         }
+        assert!(
+            unsettled.is_empty(),
+            "the loopback lane did not settle cooperatively: {unsettled:?}"
+        );
     }
 
     /// v1.191 P1 T14 (durable §9) — the daemon peer-tools responder is

@@ -39,7 +39,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::net::{Shutdown, SocketAddr};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
@@ -58,7 +59,7 @@ use nexus_core::connect::ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVE
 use nexus_core::memory_provider::legacy;
 use nexus_core::{
     CoreAccess, CoreError, CoreHomeService, CoreOpenOptions, CoreResult, CoreService,
-    MemoryProviderRefusal, MemoryProviderSelection, Principal as CorePrincipal,
+    MemoryCredential, MemoryProviderRefusal, MemoryProviderSelection, Principal as CorePrincipal,
     RemoteMemoryProviderSelection,
 };
 use nexus_memory_conformance::{FixtureMemoryProvider, PeerDirectory};
@@ -66,6 +67,7 @@ use spoke_connect::core::{
     derive_peer_id_from_ed25519_pubkey, issue_capability_token, verify_capability_token,
     CapabilityClaims, CapabilityTokenProof,
 };
+use spoke_connect::remote::transport::TransportError;
 use spoke_connect::remote::{
     connect_remote_adapter, connect_responder, ConnectResponder, ConnectResponderOptions,
     ConnectResponderState, RemoteAdapter, RemoteAdapterOptions, RemoteIdentity, RemoteMemoryService,
@@ -1241,41 +1243,208 @@ fn response_json<T: serde::Serialize>(value: &T) -> Value {
     serde_json::to_value(value).expect("the SDK response serializes")
 }
 
-/// A minimal test-host admission decorator: it runs the pinned SDK's own
-/// capability-token verifier over the proof this host expects, against the
-/// *authenticated* session peer the responder reports and this host's own peer
-/// id. It serves no protocol object; a verification failure is a host-side
-/// refusal before the real fixture sees anything.
+/// Test-only observation of the responder-side transport.
+///
+/// Every received byte sequence is passed through **unmodified** to the product
+/// `WsTransport`; this wrapper only reads an invoke envelope's `op`,
+/// `session_id`, `request_id` and optional `auth` for association. It performs
+/// no handshake, signature, sequence or protocol validation — the pinned SDK
+/// remains the sole validator of those.
+///
+/// SHORTCUT (documented test-only limit): the token scenario drives ONE
+/// outstanding memory invoke at a time, so a single pending observation is
+/// unambiguous. A second observation before the first is consumed marks the
+/// slot ambiguous and every later admission is refused; this is not a
+/// generalized concurrent-request policy.
+struct EnvelopeObserver {
+    inner: Arc<dyn Transport>,
+    pending: Mutex<Option<ObservedInvoke>>,
+    ambiguous: AtomicBool,
+}
+
+struct ObservedInvoke {
+    op: String,
+    session_id: String,
+    request_id: String,
+    auth: Option<Value>,
+}
+
+impl EnvelopeObserver {
+    fn new(inner: Arc<dyn Transport>) -> Self {
+        Self {
+            inner,
+            pending: Mutex::new(None),
+            ambiguous: AtomicBool::new(false),
+        }
+    }
+
+    fn record(&self, envelope: &Value) {
+        let Some(op) = envelope.get("op").and_then(Value::as_str) else {
+            return;
+        };
+        let observed = ObservedInvoke {
+            op: op.to_string(),
+            session_id: envelope
+                .get("session_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            request_id: envelope
+                .get("request_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            auth: envelope.get("auth").filter(|auth| !auth.is_null()).cloned(),
+        };
+        let mut slot = self.pending.lock().expect("observer slot");
+        if slot.is_some() {
+            self.ambiguous.store(true, Ordering::SeqCst);
+        }
+        *slot = Some(observed);
+    }
+
+    /// Consume the single outstanding observation, failing closed on ambiguity.
+    fn take(&self) -> Result<Option<ObservedInvoke>, &'static str> {
+        if self.ambiguous.swap(false, Ordering::SeqCst) {
+            return Err("more than one outstanding signed invocation");
+        }
+        Ok(self.pending.lock().expect("observer slot").take())
+    }
+}
+
+#[async_trait]
+impl Transport for EnvelopeObserver {
+    async fn send(&self, envelope: &[u8]) -> Result<(), TransportError> {
+        self.inner.send(envelope).await
+    }
+
+    async fn recv(&self) -> Result<Vec<u8>, TransportError> {
+        let envelope = self.inner.recv().await?;
+        if let Ok(value) = serde_json::from_slice::<Value>(&envelope) {
+            self.record(&value);
+        }
+        Ok(envelope)
+    }
+
+    async fn close(&self) -> Result<(), TransportError> {
+        self.inner.close().await
+    }
+}
+
+/// The test-host token admission, over the **actually received** proof.
+///
+/// The proof is taken from the envelope the SDK just received (never from test
+/// setup), the op is the dispatched operation, the peer is the
+/// SDK-authenticated session peer, and the destination is this host's peer id.
+/// Missing, mismatched, reused or ambiguous observations are refused before the
+/// fixture sees anything.
 struct TokenGate {
     inner: Arc<dyn RemoteMemoryService>,
-    proof: CapabilityTokenProof,
+    observer: Arc<EnvelopeObserver>,
     trusted: Vec<String>,
     host_peer: String,
+}
+
+impl TokenGate {
+    fn deny(reason: &str) -> SpokeResult<Value> {
+        let mut details = serde_json::Map::new();
+        details.insert("retry_class".to_owned(), json!("terminal"));
+        SpokeResult::Reject(SpokeReject {
+            code: SpokeRejectCode::NotAuthorized,
+            message: format!("capability token refused: {reason}"),
+            details: Some(details),
+        })
+    }
 }
 
 #[async_trait]
 impl RemoteMemoryService for TokenGate {
     async fn invoke(&self, peer_id: &str, op: &str, payload: Value) -> SpokeResult<Value> {
-        match verify_capability_token(
-            &self.proof,
-            &self.trusted,
-            &self.host_peer,
-            peer_id,
-            now_seconds(),
-        ) {
+        let observed = match self.observer.take() {
+            Ok(Some(observed)) => observed,
+            Ok(None) => return Self::deny("no received signed invocation to verify"),
+            Err(reason) => return Self::deny(reason),
+        };
+        if observed.session_id.is_empty() || observed.request_id.is_empty() {
+            return Self::deny("the received invoke carried no authenticated session identity");
+        }
+        if observed.op != op {
+            return Self::deny("the received op does not match the dispatched op");
+        }
+        let Some(auth) = observed.auth else {
+            return Self::deny("the received invoke carried no auth proof");
+        };
+        let proof: CapabilityTokenProof = match serde_json::from_value(auth) {
+            Ok(proof) => proof,
+            Err(_) => return Self::deny("the received auth is not the published proof shape"),
+        };
+        match verify_capability_token(&proof, &self.trusted, &self.host_peer, peer_id, now_seconds())
+        {
             Ok(_capabilities) => self.inner.invoke(peer_id, op, payload).await,
-            Err(error) => {
-                let mut details = serde_json::Map::new();
-                details.insert("retry_class".to_owned(), json!("terminal"));
-                SpokeResult::Reject(SpokeReject {
-                    code: SpokeRejectCode::NotAuthorized,
-                    message: format!("capability token refused: {error}"),
-                    details: Some(details),
-                })
-            }
+            Err(_) => Self::deny("the received proof did not verify"),
         }
     }
 }
+
+/// Serve the token-gated fixture over one loopback listener whose transport is
+/// observed. Every admission decision uses the proof carried by the invocation
+/// the SDK actually received.
+async fn start_listener_token_gated(
+    provider: &Arc<FixtureMemoryProvider>,
+    directory: &Arc<PeerDirectory>,
+    host_manifest: HostCapabilityManifest,
+    peers: HashMap<String, [u8; 32]>,
+    trusted: Vec<String>,
+    host_peer: String,
+) -> (SocketAddr, tokio::task::JoinHandle<Arc<ConnectResponder>>) {
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind an ephemeral localhost port");
+    let addr = listener.local_addr().expect("listener address");
+    let allowlist = peers.keys().cloned().collect();
+    let fixture = provider.server(directory.admission());
+    let task = tokio::spawn(async move {
+        let (tcp, peer) = tokio::time::timeout(SETUP_BOUND, listener.accept())
+            .await
+            .expect("the client connects to the listener")
+            .expect("accept the localhost peer");
+        assert!(peer.ip().is_loopback(), "the fixture serves localhost only");
+        let ws = tokio::time::timeout(
+            SETUP_BOUND,
+            tokio_tungstenite::accept_async_with_config(
+                tcp,
+                Some(ws_config(DEFAULT_MAX_ENVELOPE_BYTES)),
+            ),
+        )
+        .await
+        .expect("the websocket upgrade is bounded")
+        .expect("websocket upgrade");
+        let base: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+        let observer = Arc::new(EnvelopeObserver::new(base));
+        let gate: Arc<dyn RemoteMemoryService> = Arc::new(TokenGate {
+            inner: fixture,
+            observer: Arc::clone(&observer),
+            trusted,
+            host_peer,
+        });
+        let transport: Arc<dyn Transport> = Arc::clone(&observer) as Arc<dyn Transport>;
+        let ports: Arc<dyn RemoteServePorts + Send + Sync> = Arc::new(
+            RemoteServePortsComposite::new(Arc::new(MemoryOnlyHost), None, None).with_memory(gate),
+        );
+        connect_responder(ConnectResponderOptions {
+            transport,
+            identity: RemoteIdentity { seed: HOST_SEED },
+            manifest: host_manifest,
+            allowlist,
+            peer_keys: peers,
+            ports: Some(ports),
+            invoke_timeout_ms: Some(5_000),
+        })
+        .await
+    });
+    (addr, task)
+}
+
 
 // ---------------------------------------------------------------------------
 // Real product actor fixture (owned World, Character and active binding)
@@ -1368,14 +1537,33 @@ async fn assert_home_reopens(
     wait_for_closed(&responder).await;
 }
 
-/// Abort a listener whose handshake the client refused and join it.
-async fn abort_and_join(task: tokio::task::JoinHandle<Arc<ConnectResponder>>) {
-    task.abort();
-    let settled = tokio::time::timeout(SETUP_BOUND, task).await;
-    assert!(
-        settled.is_ok(),
-        "the refused listener task settles within the bound"
-    );
+/// Settle one listener the client refused.
+///
+/// The listener returns as soon as `connect_responder` spawns its own runner,
+/// so a COMPLETED listener is not a closed session: its responder is closed and
+/// its public `Closed` state observed. An expected cancellation is distinct from
+/// a panic, and a task that is still running is aborted and then joined. The SDK
+/// runner has no public join and is never claimed drained.
+async fn settle_listener(mut task: tokio::task::JoinHandle<Arc<ConnectResponder>>) {
+    match tokio::time::timeout(SETUP_BOUND, &mut task).await {
+        Ok(Ok(responder)) => {
+            responder.close();
+            wait_for_closed(&responder).await;
+        }
+        Ok(Err(error)) if error.is_cancelled() => {}
+        Ok(Err(error)) => panic!("the listener task failed: {error}"),
+        Err(_) => {
+            task.abort();
+            match task.await {
+                Ok(responder) => {
+                    responder.close();
+                    wait_for_closed(&responder).await;
+                }
+                Err(error) if error.is_cancelled() => {}
+                Err(error) => panic!("the aborted listener task failed: {error}"),
+            }
+        }
+    }
 }
 
 /// The client-side admission boundaries, stage by stage: a credential that is
@@ -1487,7 +1675,7 @@ async fn connect_admission_refuses_untrusted_credentials_keys_and_families() {
     .err()
     .expect("a mismatched host key fails the handshake");
     assert_eq!(coded(&error), "memory_remote_handshake");
-    abort_and_join(task).await;
+    settle_listener(task).await;
     assert_eq!(provider_effect_snapshot(&pool).await, effects_before);
     assert!(!env.local_provider_store().exists());
     assert_home_reopens(
@@ -1526,7 +1714,7 @@ async fn connect_admission_refuses_untrusted_credentials_keys_and_families() {
     .err()
     .expect("an unlisted host fails the handshake");
     assert_eq!(coded(&error), "memory_remote_handshake");
-    abort_and_join(task).await;
+    settle_listener(task).await;
     assert_eq!(provider_effect_snapshot(&pool).await, effects_before);
     assert_home_reopens(
         &provider,
@@ -1564,7 +1752,7 @@ async fn connect_admission_refuses_untrusted_credentials_keys_and_families() {
     .err()
     .expect("an untrusted dialer fails the handshake");
     assert_eq!(coded(&error), "memory_remote_handshake");
-    abort_and_join(task).await;
+    settle_listener(task).await;
     assert_eq!(provider_effect_snapshot(&pool).await, effects_before);
     assert_home_reopens(
         &provider,
@@ -1858,7 +2046,9 @@ async fn unexpected_transport_loss_and_signed_replay_keep_the_original_receipt()
     )
     .await
     .expect("the binding-scoped capture");
-    let facts_before = binding_object_facts(&core_db(&env).await, &binding_id).await;
+    let facts_db = core_db(&env).await;
+    let facts_before = binding_object_facts(&facts_db, &binding_id).await;
+    facts_db.close().await;
     assert_eq!(facts_before.len(), 1, "one candidate fact");
     assert_eq!(facts_before[0].0, authority_host_id, "pinned authority host");
     assert_eq!(facts_before[0].1, "1", "pinned authority generation");
@@ -1912,7 +2102,9 @@ async fn unexpected_transport_loss_and_signed_replay_keep_the_original_receipt()
         2,
         "one product receipt and one consumer receipt"
     );
-    let admissions_before = binding_admissions(&core_db(&env).await, &binding_id).await;
+    let admissions_db = core_db(&env).await;
+    let admissions_before = binding_admissions(&admissions_db, &binding_id).await;
+    admissions_db.close().await;
     assert!(
         admissions_before.is_empty(),
         "a definite committed capture retires exactly its own admission"
@@ -2070,6 +2262,7 @@ async fn unexpected_transport_loss_and_signed_replay_keep_the_original_receipt()
         admissions_after, admissions_before,
         "the lost attempt's admission is unchanged; no new pin namespace appeared"
     );
+    state.close().await;
     assert!(
         !env.local_provider_store().exists(),
         "no reconnect fell back to the local provider"
@@ -2333,10 +2526,11 @@ async fn scoped_grants_and_payload_identity_cannot_be_amplified() {
 /// back over the signed session, and the provider's durable bodies are all
 /// searched for two distinct sentinels.
 ///
-/// Log applicability: this call path has no tracing/log statement of its own —
-/// `memory_remote.rs` and `memory_credentials.rs` emit none, and the refusal
-/// path returns a static `CoreError` — so there is no applicable production log
-/// sink to capture. Nothing is claimed about unrelated logging elsewhere.
+/// Log applicability: `memory_remote.rs` and `memory_credentials.rs` have no
+/// tracing/log statement of their own and the refusal path returns a static
+/// `CoreError`, so no exercised secret-bearing log sink exists to capture on this
+/// call path. (`service.rs` has an unrelated workspace-path warning.) This is a
+/// scoped statement, not a claim that Core logging is absent everywhere.
 #[tokio::test]
 async fn credential_sentinels_never_reach_config_errors_or_receipts() {
     // Distinct sentinels: the credential seed itself and the token's signature
@@ -2367,6 +2561,15 @@ async fn credential_sentinels_never_reach_config_errors_or_receipts() {
     env.write_credential_with_token(&SEED_SENTINEL, Some(&token));
     let seed_text = hex(&SEED_SENTINEL);
     let pool = provider_pool(&fixture_home).await;
+
+    // The real public credential value, loaded through the public API: its
+    // `Debug` must expose neither secret. This is the actual secret-bearing
+    // value, not a stand-in selection.
+    let credential = MemoryCredential::load(&env.user_home, CREDENTIAL_ID)
+        .expect("the operator credential loads through the public API");
+    let credential_debug = format!("{credential:?}");
+    assert!(!credential_debug.contains(&seed_text));
+    assert!(!credential_debug.contains(SIGNATURE_SENTINEL));
 
     // A real signed refusal *after* the credential was loaded and the signed
     // session established: the discovered space is not authoritative on this
@@ -2519,7 +2722,8 @@ async fn capability_token_verification_refuses_expired_and_forged_proofs() {
         .provision_operator_admin(&principal_id)
         .await
         .expect("operator provisions the admin grant");
-    let directory = Arc::new(PeerDirectory::new().with_peer(client_peer.clone(), principal_id));
+    let directory =
+        Arc::new(PeerDirectory::new().with_peer(client_peer.clone(), principal_id.clone()));
     let pool = provider_pool(&fixture_home).await;
     let effects_before = provider_effect_snapshot(&pool).await;
 
@@ -2551,18 +2755,13 @@ async fn capability_token_verification_refuses_expired_and_forged_proofs() {
         let env = Env::new();
         let proof_json = serde_json::to_value(proof).expect("the proof serializes");
         env.write_credential_with_token(&CLIENT_SEED, Some(&proof_json));
-        let gate: Arc<dyn RemoteMemoryService> = Arc::new(TokenGate {
-            inner: provider.server(directory.admission()),
-            proof: proof.clone(),
-            trusted: vec![issuer_peer.clone()],
-            host_peer: host_peer.clone(),
-        });
-        let (addr, task) = start_listener(
-            gate,
+        let (addr, task) = start_listener_token_gated(
+            &provider,
+            &directory,
             manifest(&authority_host_id),
-            client_peer.clone(),
-            client_pubkey,
-            5_000,
+            HashMap::from([(client_peer.clone(), client_pubkey)]),
+            vec![issuer_peer.clone()],
+            host_peer.clone(),
         )
         .await;
         let error = open(&env, selection(&served_space, addr, &host_pubkey))
@@ -2590,18 +2789,13 @@ async fn capability_token_verification_refuses_expired_and_forged_proofs() {
         // Positive control on the SAME home: the valid proof opens and the
         // signed session proceeds.
         env.write_credential_with_token(&CLIENT_SEED, Some(&valid_json));
-        let gate: Arc<dyn RemoteMemoryService> = Arc::new(TokenGate {
-            inner: provider.server(directory.admission()),
-            proof: valid.clone(),
-            trusted: vec![issuer_peer.clone()],
-            host_peer: host_peer.clone(),
-        });
-        let (addr, task) = start_listener(
-            gate,
+        let (addr, task) = start_listener_token_gated(
+            &provider,
+            &directory,
             manifest(&authority_host_id),
-            client_peer.clone(),
-            client_pubkey,
-            5_000,
+            HashMap::from([(client_peer.clone(), client_pubkey)]),
+            vec![issuer_peer.clone()],
+            host_peer.clone(),
         )
         .await;
         let core = open(&env, selection(&served_space, addr, &host_pubkey))
@@ -2615,22 +2809,53 @@ async fn capability_token_verification_refuses_expired_and_forged_proofs() {
         wait_for_closed(&responder).await;
     }
 
+    // The verifier must see the ACTUAL forwarded proof: an authenticated
+    // session that carries none is refused, so removing or changing client
+    // proof forwarding cannot leave this scenario green.
+    let (addr, task) = start_listener_token_gated(
+        &provider,
+        &directory,
+        manifest(&authority_host_id),
+        HashMap::from([(client_peer.clone(), client_pubkey)]),
+        vec![issuer_peer.clone()],
+        host_peer.clone(),
+    )
+    .await;
+    let no_token = dial_adapter(addr, CLIENT_SEED).await;
+    let responder = responder_of(task).await;
+    match no_token
+        .capture(
+            &principal_label(&principal_id),
+            dto::<MemoryCaptureRequest>(json!({
+                "space_id": served_space,
+                "subject_id": legacy::creator_subject_id(CREATOR),
+                "content": { "text": "A tokenless capture is refused by the host gate." },
+                "capture_scope": { "visibility": "shared" },
+                "idempotency_key": "r5-tokenless-capture",
+            })),
+        )
+        .await
+    {
+        SpokeResult::Reject(reject) => {
+            assert_eq!(reject.code, SpokeRejectCode::NotAuthorized);
+        }
+        SpokeResult::Ok(_) => panic!("a tokenless invocation must be refused"),
+    }
+    assert_eq!(provider_effect_snapshot(&pool).await, effects_before);
+    no_token.close();
+    wait_for_closed(&responder).await;
+
     // The valid proof also admits a real mutation, so "positive" is a served
     // operation rather than a no-throw open.
     let env = Env::new();
     env.write_credential_with_token(&CLIENT_SEED, Some(&valid_json));
-    let gate: Arc<dyn RemoteMemoryService> = Arc::new(TokenGate {
-        inner: provider.server(directory.admission()),
-        proof: valid,
-        trusted: vec![issuer_peer],
-        host_peer,
-    });
-    let (addr, task) = start_listener(
-        gate,
+    let (addr, task) = start_listener_token_gated(
+        &provider,
+        &directory,
         manifest(&authority_host_id),
-        client_peer,
-        client_pubkey,
-        5_000,
+        HashMap::from([(client_peer.clone(), client_pubkey)]),
+        vec![issuer_peer.clone()],
+        host_peer.clone(),
     )
     .await;
     let core = open(&env, selection(&served_space, addr, &host_pubkey))
