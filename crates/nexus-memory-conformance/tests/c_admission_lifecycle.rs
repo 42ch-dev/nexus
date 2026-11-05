@@ -798,7 +798,17 @@ async fn admission_control_is_token_owned(matrix: &Matrix) {
         .capture(capture_body("k-c012-loss", TEXT, &shared_scope()))
         .await;
     assert!(is_committed(&replay), "the same key replays: {replay}");
+    assert_eq!(
+        support::candidate_ids(&replay),
+        effect,
+        "the replay result names exactly the original observed candidate effect"
+    );
     if first_committed {
+        assert_eq!(
+            support::candidate_ids(&first),
+            effect,
+            "the original committed response names that same effect"
+        );
         assert_eq!(
             receipt_id(&first),
             receipt_id(&replay),
@@ -848,7 +858,17 @@ async fn admission_control_is_token_owned(matrix: &Matrix) {
         .capture(capture_body("k-c012-expiry", TEXT, &shared_scope()))
         .await;
     assert!(is_committed(&replay), "the same key replays: {replay}");
+    assert_eq!(
+        support::candidate_ids(&replay),
+        effect,
+        "the replay result names exactly the original observed candidate effect"
+    );
     if first_committed {
+        assert_eq!(
+            support::candidate_ids(&first),
+            effect,
+            "the original committed response names that same effect"
+        );
         assert_eq!(
             receipt_id(&first),
             receipt_id(&replay),
