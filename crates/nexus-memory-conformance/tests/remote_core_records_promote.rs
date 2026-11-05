@@ -43,10 +43,21 @@
 //!   no-read claim about unrelated local surfaces.
 //! - A read-only core keeps serving the record reads while every record write
 //!   keeps its retained typed refusal, before any provider call.
-//! - The provider's own stale-revision CAS is reached: a caller that read a
-//!   revision another writer has since changed keeps the static
-//!   `version_mismatch` classification and writes nothing, and the same call
-//!   with the current revision succeeds.
+//! - A caller that read a revision another writer has since changed keeps the
+//!   retained `version_mismatch` and writes nothing: the promotion validates the
+//!   record at exactly the provider revision its CAS targets, so a stale read is
+//!   refused before any provider call and a concurrent replacement cannot get an
+//!   unvalidated revision promoted.
+//! - The served Character fragment family is the contract's, not every protocol
+//!   `fact`: an authenticated second writer may replace a fragment's whole
+//!   content (removing `nexus_legacy`) and a provider-native `fact` may be
+//!   created straight through the protocol. Neither is served by the fragment
+//!   LIST, and promoting either is refused before any provider mutation —
+//!   placement, revision, promote receipts and D18 facts unchanged — while a
+//!   record that still names fragment origin without its required session
+//!   identity fails honestly as damaged metadata. A valid fragment still
+//!   promotes, and its response is already sound if a later writer rewrites the
+//!   record, so no committed promotion becomes a projection failure.
 //! - Refusals reach the caller as the static classified `MemoryProviderRefused`
 //!   carrier: the provider's own message text and any request content never
 //!   travel with it.
@@ -89,7 +100,8 @@ use spoke_connect::remote::{
 };
 use spoke_operations::spoke_schemas::{
     Finding, HostCapabilityManifest, KnowledgeEntry, MemoryRecallRequest,
-    MemoryRecordsUpdateRequest, Principal as MemoryPrincipal, Relation, Rule, Scope, TimelineEvent,
+    MemoryRecordsCreateRequest, MemoryRecordsUpdateRequest, Principal as MemoryPrincipal,
+    Relation, Rule, Scope, TimelineEvent,
 };
 use spoke_operations::{
     FindingPort, HostManifestPort, KnowledgeEntryPort, MemoryPort, RelationPort, RuleQueryPort,
@@ -906,7 +918,6 @@ async fn creator_record_reads_and_writes_run_on_the_remote_provider() {
     let rows = provider_records(&pool, &subject_id).await;
     assert_eq!(rows.len(), 1, "one provider record, one create: {rows:?}");
     let created = &rows[0];
-    assert_eq!(created.record_id, rows[0].record_id);
     assert_eq!(created.kind, "nexus.story_summary");
     assert_eq!(created.visibility, "shared");
     assert_eq!(created.context_id, None);
@@ -1351,22 +1362,17 @@ async fn character_fragment_promotion_runs_on_the_remote_provider() {
     );
     pool.close().await;
 
-    // The promotion at the stale revision reaches the provider's own CAS and
-    // keeps the static safe classification — no peer message travels.
+    // The caller's read is now stale, so the expected revision no longer names
+    // the revision the CAS would target. The promotion refuses it before any
+    // provider call with the retained `version_mismatch`: validating one revision
+    // and promoting another would let a concurrent replacement slip through.
     let conflict = core
         .promote_character_fragment(&principal, character_id.clone(), second.clone(), 0)
         .await
-        .expect_err("the stale revision is refused by the provider");
-    let (code, retry_class, family, wire_code, conflict_code) = classified_refusal(&conflict);
-    assert_eq!(code, "REVISION_CONFLICT");
-    assert_eq!(retry_class, "terminal");
-    assert_eq!(family, MemoryProviderRefusal::Conflict);
-    assert_eq!(wire_code, None);
-    assert_eq!(conflict_code, Some("version_mismatch"));
-    let shown = format!("{conflict} | {conflict:?}");
+        .expect_err("the stale revision is refused before the provider call");
     assert!(
-        !shown.contains("stored revision"),
-        "the provider's own CAS message never travels: {shown}"
+        matches!(&conflict, CoreError::ActorConflict { code, .. } if code == "version_mismatch"),
+        "got {conflict:?}"
     );
     let pool = provider.pool().await;
     let refused_row = provider_record(&pool, &second).await.expect("the row");
@@ -1378,7 +1384,7 @@ async fn character_fragment_promotion_runs_on_the_remote_provider() {
     assert_eq!(
         provider_receipts(&pool, "memory.records.promote").await,
         1,
-        "the refused promotion committed no receipt"
+        "the refused promotion reached no provider operation"
     );
     pool.close().await;
 
@@ -1438,6 +1444,404 @@ async fn character_fragment_promotion_runs_on_the_remote_provider() {
     restore_legacy_tables(&trap).await;
     assert_no_local_memory(&env).await;
     assert_legacy_dir_traps(&dirs);
+
+    assert_eq!(
+        responder_of(responder).await.remote_peer_id().as_deref(),
+        Some(peer_id(&CLIENT_SEED).as_str()),
+        "every effect above travelled the signed session of the loaded credential"
+    );
+    assert!(
+        core.close().await.expect("close").cleanup_confirmed,
+        "the open releases its own admission"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The Character fragment family under a real whole-body rewrite
+// ---------------------------------------------------------------------------
+
+/// N2's adoption maps a reviewed `FragmentOnly` product **to** a `fact` record;
+/// it never makes every protocol `fact` a Nexus Character fragment. This case
+/// drives the real signed public Core against an authenticated second writer
+/// that replaces a fragment's whole content (removing `nexus_legacy`), and
+/// against a provider-native `fact` created straight through the protocol:
+///
+/// - the fragment family follows that contract on LIST (filtered before the page
+///   window) and on by-id promotion;
+/// - promotion refuses both BEFORE any provider mutation — placement, revision,
+///   promote receipts and D18 facts stay exactly as they were — and a
+///   fragment-origin record that lost its identity fails honestly instead of
+///   being dropped or served as a fabricated fragment;
+/// - a valid fragment still promotes, and its response is already sound when a
+///   later writer rewrites the record, so a committed promotion never turns into
+///   a projection failure.
+#[tokio::test]
+async fn rewritten_and_provider_native_facts_are_not_character_fragments() {
+    let env = Env::boot("R3 Family Owner").await;
+    let provider = Provider::open().await;
+    let (core, responder) = provider.open_core(&env).await;
+    let principal = core.active_principal().await.expect("active principal");
+
+    let world = create_world(&core, &principal, "R3 Family World").await;
+    let (character_id, binding_id, _) =
+        create_character(&core, &principal, "R3 Bea", &world).await;
+    let subject_id = legacy::character_subject_id(&character_id);
+
+    // Two real reviewed fragments: the control family.
+    for pending_id in ["pend_family_a", "pend_family_b"] {
+        capture(&core, &principal, &character_id, &binding_id, pending_id)
+            .await
+            .expect("capture into the binding scope");
+    }
+    let reviewed = core
+        .review_character_memory(
+            &principal,
+            character_id.clone(),
+            dto::<ReviewCharacterMemoryRequest>(json!({ "binding_id": binding_id })),
+        )
+        .await
+        .expect("review drains the binding scope");
+    assert_eq!(reviewed.fragmented, 2);
+
+    let listed = core
+        .list_character_memory_fragments(
+            &principal,
+            character_id.clone(),
+            Some(binding_id.clone()),
+            50,
+            0,
+        )
+        .await
+        .expect("list the family");
+    assert_eq!(listed.fragments.len(), 2);
+    let mut sessions: Vec<String> = listed
+        .fragments
+        .iter()
+        .map(|fragment| fragment.session_id.as_str().to_string())
+        .collect();
+    sessions.sort();
+    assert_eq!(
+        sessions,
+        vec![
+            "sess_pend_family_a".to_string(),
+            "sess_pend_family_b".to_string()
+        ],
+        "both fragments carry the session identity their producer recorded"
+    );
+    let mut fragment_ids: Vec<String> = listed
+        .fragments
+        .iter()
+        .map(|fragment| fragment.fragment_id.as_str().to_string())
+        .collect();
+    fragment_ids.sort();
+    let rewritten = fragment_ids[0].clone();
+    let control = fragment_ids[1].clone();
+    let control_session = listed
+        .fragments
+        .iter()
+        .find(|fragment| fragment.fragment_id.as_str() == control)
+        .map(|fragment| fragment.session_id.as_str().to_string())
+        .expect("the control fragment is listed");
+
+    // The family filter runs before the page window: two family rows, one per
+    // page, and the second page proves `has_more` describes fragments only.
+    let first_page = core
+        .list_character_memory_fragments(
+            &principal,
+            character_id.clone(),
+            Some(binding_id.clone()),
+            1,
+            0,
+        )
+        .await
+        .expect("first page");
+    assert_eq!(first_page.fragments.len(), 1);
+    assert!(
+        first_page.pagination.has_more,
+        "the second fragment is past the first page"
+    );
+
+    let (adapter, sdk_responder) = provider.sdk_session().await;
+    let memory_principal = provider.memory_principal();
+
+    // An authenticated second writer replaces this fragment's WHOLE content: no
+    // `nexus_legacy`, so nothing in the record says it is a Nexus fragment.
+    let whole_rewrite = adapter
+        .update_record(
+            &memory_principal,
+            dto::<MemoryRecordsUpdateRequest>(json!({
+                "space_id": provider.space_id,
+                "record_id": rewritten,
+                "expected_revision": 1,
+                "content": { "text": "A whole-body rewrite that carries no Nexus metadata." },
+                "idempotency_key": "r3-family-rewrite",
+            })),
+        )
+        .await;
+    match whole_rewrite {
+        SpokeResult::Ok(_) => {}
+        SpokeResult::Reject(reject) => panic!("the rewrite commits: {reject:?}"),
+    }
+
+    // A generic provider-native `fact` under the same subject: a protocol
+    // record, not a Nexus Character fragment.
+    let native = match adapter
+        .create_record(
+            &memory_principal,
+            dto::<MemoryRecordsCreateRequest>(json!({
+                "space_id": provider.space_id,
+                "subject_id": subject_id,
+                "kind": "fact",
+                "content": { "text": "A provider-native fact with no Nexus fragment origin." },
+                "scope": { "visibility": "context", "context_id": binding_id },
+                "idempotency_key": "r3-family-native",
+            })),
+        )
+        .await
+    {
+        SpokeResult::Ok(body) => serde_json::to_value(&body).expect("create body"),
+        SpokeResult::Reject(reject) => panic!("the native fact is created: {reject:?}"),
+    };
+    let native_id = native["result"]["record_id"]
+        .as_str()
+        .expect("the provider-assigned record id")
+        .to_string();
+
+    // The family contract on LIST: neither record is a fragment, so only the
+    // untouched control is served, and `has_more` reflects the family.
+    let listed = core
+        .list_character_memory_fragments(
+            &principal,
+            character_id.clone(),
+            Some(binding_id.clone()),
+            50,
+            0,
+        )
+        .await
+        .expect("list the family after the rewrite");
+    assert_eq!(
+        listed
+            .fragments
+            .iter()
+            .map(|fragment| fragment.fragment_id.as_str().to_string())
+            .collect::<Vec<_>>(),
+        vec![control.clone()],
+        "the rewritten and provider-native facts are not served as fragments"
+    );
+    assert!(!listed.pagination.has_more);
+    let past_the_family = core
+        .list_character_memory_fragments(
+            &principal,
+            character_id.clone(),
+            Some(binding_id.clone()),
+            1,
+            1,
+        )
+        .await
+        .expect("the page past the family");
+    assert!(
+        past_the_family.fragments.is_empty(),
+        "no non-fragment row fills a page"
+    );
+
+    // The refusals happen BEFORE any provider mutation: capture the provider
+    // placement, revision, promote receipts and D18 facts first.
+    let pool = provider.pool().await;
+    let rewritten_before = provider_record(&pool, &rewritten)
+        .await
+        .expect("the rewritten row");
+    let native_before = provider_record(&pool, &native_id)
+        .await
+        .expect("the native row");
+    assert_eq!(
+        (
+            rewritten_before.visibility.as_str(),
+            rewritten_before.revision
+        ),
+        ("context", 2)
+    );
+    assert_eq!(
+        (native_before.visibility.as_str(), native_before.revision),
+        ("context", 1)
+    );
+    assert_eq!(
+        provider_receipts(&pool, "memory.records.promote").await,
+        0
+    );
+    pool.close().await;
+    let nexus = core_db(&env).await;
+    let facts_before = object_facts(&nexus, &binding_id).await;
+    nexus.close().await;
+
+    let rewritten_refused = core
+        .promote_character_fragment(&principal, character_id.clone(), rewritten.clone(), 1)
+        .await
+        .expect_err("a whole-body rewrite is not a Character fragment");
+    assert!(
+        matches!(&rewritten_refused, CoreError::ActorInput(message) if message.contains("must name a Character memory fragment")),
+        "got {rewritten_refused:?}"
+    );
+    let native_refused = core
+        .promote_character_fragment(&principal, character_id.clone(), native_id.clone(), 0)
+        .await
+        .expect_err("a provider-native fact is not a Character fragment");
+    assert!(
+        matches!(&native_refused, CoreError::ActorInput(_)),
+        "got {native_refused:?}"
+    );
+
+    let pool = provider.pool().await;
+    let rewritten_after = provider_record(&pool, &rewritten)
+        .await
+        .expect("the rewritten row");
+    assert_eq!(
+        (
+            rewritten_after.visibility.as_str(),
+            rewritten_after.revision
+        ),
+        ("context", 2),
+        "the refused promotion left the rewritten record untouched"
+    );
+    let native_after = provider_record(&pool, &native_id)
+        .await
+        .expect("the native row");
+    assert_eq!(
+        (
+            native_after.visibility.as_str(),
+            native_after.context_id.as_deref(),
+            native_after.revision
+        ),
+        ("context", Some(binding_id.as_str()), 1),
+        "the refused promotion left the provider-native fact untouched"
+    );
+    assert_eq!(
+        provider_receipts(&pool, "memory.records.promote").await,
+        0,
+        "neither refusal reached a provider operation"
+    );
+    pool.close().await;
+    let nexus = core_db(&env).await;
+    assert_eq!(
+        object_facts(&nexus, &binding_id).await,
+        facts_before,
+        "neither refusal changed a D18 dependency fact"
+    );
+    nexus.close().await;
+
+    // A record that still names fragment origin but lost the required identity is
+    // damaged metadata: reported honestly on both surfaces, never dropped.
+    let damaged = match adapter
+        .create_record(
+            &memory_principal,
+            dto::<MemoryRecordsCreateRequest>(json!({
+                "space_id": provider.space_id,
+                "subject_id": subject_id,
+                "kind": "fact",
+                "content": {
+                    "text": "a fragment-origin record with no session identity",
+                    "structured": { "nexus_legacy": { "fragment_id": "frag_damaged_r3" } },
+                },
+                "scope": { "visibility": "context", "context_id": binding_id },
+                "idempotency_key": "r3-family-damaged",
+            })),
+        )
+        .await
+    {
+        SpokeResult::Ok(body) => serde_json::to_value(&body).expect("create body"),
+        SpokeResult::Reject(reject) => panic!("the damaged record is created: {reject:?}"),
+    };
+    let damaged_id = damaged["result"]["record_id"]
+        .as_str()
+        .expect("the provider-assigned record id")
+        .to_string();
+    let listed = core
+        .list_character_memory_fragments(
+            &principal,
+            character_id.clone(),
+            Some(binding_id.clone()),
+            50,
+            0,
+        )
+        .await
+        .expect_err("damaged fragment metadata is reported, not dropped");
+    assert!(
+        matches!(&listed, CoreError::Internal { category } if category.contains("memory_fragment_metadata")),
+        "got {listed:?}"
+    );
+    let damaged_refused = core
+        .promote_character_fragment(&principal, character_id.clone(), damaged_id.clone(), 0)
+        .await
+        .expect_err("damaged fragment metadata refuses the promotion");
+    assert!(
+        matches!(&damaged_refused, CoreError::Internal { category } if category.contains("memory_fragment_metadata")),
+        "got {damaged_refused:?}"
+    );
+    let pool = provider.pool().await;
+    assert_eq!(
+        provider_record(&pool, &damaged_id)
+            .await
+            .expect("the damaged row")
+            .revision,
+        1,
+        "the damaged-metadata refusal wrote nothing"
+    );
+    assert_eq!(
+        provider_receipts(&pool, "memory.records.promote").await,
+        0
+    );
+    pool.close().await;
+
+    // Valid control: the untouched fragment promotes, and its committed response
+    // is already stated from the receipt when a later writer rewrites the record.
+    let promoted = core
+        .promote_character_fragment(&principal, character_id.clone(), control.clone(), 0)
+        .await
+        .expect("the valid fragment promotes");
+    assert!(promoted.fragment.binding_id.is_none());
+    assert_eq!(promoted.fragment.revision, 1);
+    assert_eq!(promoted.fragment.session_id.as_str(), control_session);
+    let post_promotion_rewrite = adapter
+        .update_record(
+            &memory_principal,
+            dto::<MemoryRecordsUpdateRequest>(json!({
+                "space_id": provider.space_id,
+                "record_id": control,
+                "expected_revision": 2,
+                "content": { "text": "a post-promotion whole-body rewrite" },
+                "idempotency_key": "r3-family-post-promotion",
+            })),
+        )
+        .await;
+    match post_promotion_rewrite {
+        SpokeResult::Ok(_) => {}
+        SpokeResult::Reject(reject) => panic!("the post-promotion rewrite commits: {reject:?}"),
+    }
+    let retried = core
+        .promote_character_fragment(&principal, character_id.clone(), control.clone(), 1)
+        .await
+        .expect_err("the rewritten shared record is not a fragment");
+    assert!(
+        matches!(&retried, CoreError::ActorInput(_)),
+        "got {retried:?}"
+    );
+    assert!(
+        !matches!(&retried, CoreError::Internal { .. }),
+        "a committed promotion never becomes a projection failure: {retried:?}"
+    );
+    let pool = provider.pool().await;
+    let control_row = provider_record(&pool, &control).await.expect("the row");
+    assert_eq!(
+        (control_row.visibility.as_str(), control_row.revision),
+        ("shared", 3)
+    );
+    assert_eq!(
+        provider_receipts(&pool, "memory.records.promote").await,
+        1
+    );
+    pool.close().await;
+
+    adapter.close();
+    responder_of(sdk_responder).await;
 
     assert_eq!(
         responder_of(responder).await.remote_peer_id().as_deref(),
