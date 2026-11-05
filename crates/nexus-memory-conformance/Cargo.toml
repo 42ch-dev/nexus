@@ -32,7 +32,15 @@ tempfile = { workspace = true }
 # v1.229 N3 Task 1 (R1): the real public Core open/close surface the remote
 # vertical slice drives over a signed loopback session. The conformance crate
 # depends on Core, never the reverse; `memory-remote` is the feature under test.
-nexus-core = { path = "../nexus-core", features = ["memory-remote"] }
+nexus-core = { path = "../nexus-core", features = [
+    "memory-remote",
+    "provider-host",
+    # v1.229 N3 Task 2 fix 1 (R2, amendment 4): a Character host session needs
+    # the admitted creative-root pin (`host.rs::character_session_cwd`), so the
+    # real `subject_archived`/`family` consumer is reachable only with this
+    # existing feature. Test-only; the production/default graph is unchanged.
+    "execution",
+] }
 # The disposable user home the open resolves (workspace dir, state DB and the
 # provider's own file root) through the production layout instead of a
 # hardcoded copy of it.
@@ -41,3 +49,10 @@ nexus-home-layout = { path = "../nexus-home-layout" }
 # request types own the owned-World, two-active-binding fixture the D18 removal
 # gate is proved against. Test-only; already a Core graph dependency.
 nexus-contracts = { path = "../nexus-contracts" }
+# v1.229 N3 Task 2 fix 1 (R2, amendment 3): the existing admitted Host
+# composition (`open_host`/`attach_host` + `create_session`/`execute`) that owns
+# the real `subject_archived`/`family` consumer, driven with the deterministic
+# local agent-host fixture. Test-only edges; the memory port stays the real
+# signed provider.
+nexus-agent-host = { path = "../nexus-agent-host" }
+nexus-provider-ports = { path = "../nexus-provider-ports" }

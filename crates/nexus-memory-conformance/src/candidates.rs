@@ -59,6 +59,7 @@ use spoke_operations::{
 
 use crate::faults::FaultPoint;
 use crate::provider::FixtureMemoryProvider;
+use crate::FixtureError;
 use crate::spaces::{
     bump_snapshot, internal, is_authorized, load_grants, requirement, snapshot_marker,
     whole_scope_requirement, ENGINE_POLICY_VERSION, MAX_PAGE_SIZE,
@@ -1901,6 +1902,105 @@ impl FixtureMemoryProvider {
         Ok(sweep)
     }
 
+    /// Stage one durable pending candidate under a caller-named identity.
+    ///
+    /// **Privileged fixture operator construction, not a client or wire
+    /// operation.** The protocol's capture op always mints its own candidate
+    /// id, while Nexus addresses a legacy-bridge candidate by the deterministic
+    /// id it derives from a retained pending id. The conformance suite therefore
+    /// cannot create that shape through the wire, and this operator provides the
+    /// durable row the real dismissal then fetches: it reuses this slice's own
+    /// classification, encoding, lifecycle and TTL, writes exactly one row of
+    /// the normal schema at `revision = 1`, and refuses a duplicate id. It is
+    /// never remotely invokable and no other operation changes.
+    ///
+    /// `placement` is `None` for the shared scope or the placement context id
+    /// for a binding-local one; `pending_id` is the retained Nexus identity the
+    /// row's `content.structured.nexus_legacy` block carries.
+    ///
+    /// # Errors
+    ///
+    /// [`FixtureError::Bootstrap`] when the space is not this provider's, the
+    /// row cannot be encoded, or the id already exists;
+    /// [`FixtureError::Storage`] when the insert itself fails.
+    pub async fn stage_pending_candidate(
+        &self,
+        candidate_id: &str,
+        subject_id: &str,
+        placement: Option<&str>,
+        pending_id: &str,
+        text: &str,
+    ) -> Result<(), FixtureError> {
+        let space_id = self.identity.space_id.as_str();
+        require_served_space(self, space_id)
+            .map_err(|reject| stage_error(reject.code.as_str(), candidate_id))?;
+        let content = json!({
+            "text": text,
+            "structured": {
+                "nexus_legacy": {
+                    "pending_id": pending_id,
+                    "session_id": format!("sess_{pending_id}"),
+                    "task_kind": "brainstorm",
+                    "raw_digest": text,
+                },
+            },
+        });
+        let capture_content = CaptureContent {
+            structured: content.get("structured").cloned(),
+            text: text.to_owned(),
+        };
+        let classification = classify(&capture_content);
+        let now = Utc::now();
+        let provenance = json!({
+            "source_context_ids": placement.map(|context| vec![context]).unwrap_or_default(),
+            "anchors": [],
+            "captured_by": "nexus:fixture-operator",
+            "captured_at": timestamp_text(now),
+        });
+        let visibility = if placement.is_some() {
+            "context"
+        } else {
+            "shared"
+        };
+        let encoded_content = encoded(&content)
+            .map_err(|reject| stage_error(reject.code.as_str(), candidate_id))?;
+        let encoded_provenance = encoded(&provenance)
+            .map_err(|reject| stage_error(reject.code.as_str(), candidate_id))?;
+        let encoded_classification = encoded(&classification)
+            .map_err(|reject| stage_error(reject.code.as_str(), candidate_id))?;
+        let insert = sqlx::query(
+            "INSERT INTO candidates (candidate_id, space_id, subject_id, capture_visibility, \
+             capture_context_id, kind, content_json, provenance_json, classification_json, \
+             status, occurred_at, expires_at, revision, created_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, ?, 1, ?)",
+        )
+        .bind(candidate_id)
+        .bind(space_id)
+        .bind(subject_id)
+        .bind(visibility)
+        .bind(placement)
+        .bind(DEFAULT_CANDIDATE_KIND)
+        .bind(encoded_content)
+        .bind(encoded_provenance)
+        .bind(encoded_classification)
+        .bind(timestamp_text(now + Duration::days(CANDIDATE_TTL_DAYS)))
+        .bind(timestamp_text(now))
+        .execute(self.store().pool())
+        .await;
+        match insert {
+            Ok(result) if result.rows_affected() == 1 => Ok(()),
+            Ok(_) => Err(stage_error("staged_candidate_not_inserted", candidate_id)),
+            Err(error)
+                if error
+                    .as_database_error()
+                    .is_some_and(|database| database.is_unique_violation()) =>
+            {
+                Err(stage_error("duplicate_candidate_id", candidate_id))
+            }
+            Err(error) => Err(FixtureError::Storage(error)),
+        }
+    }
+
     /// [`Self::capture`] on a caller-owned connection; never commits.
     pub(crate) async fn capture_in_tx(
         &self,
@@ -2603,6 +2703,13 @@ fn placement(scope: &CapturePlacement) -> (&'static str, Option<&str>) {
         CapturePlacement::Shared => ("shared", None),
         CapturePlacement::Context(context_id) => ("context", Some(context_id.as_str())),
     }
+}
+
+/// One operator-staging failure, reported as fixture construction state.
+fn stage_error(code: &str, candidate_id: &str) -> FixtureError {
+    FixtureError::Bootstrap(format!(
+        "candidate {candidate_id} cannot be staged: {code}"
+    ))
 }
 
 /// Deterministic advisory classification (§6.7): empty material is dropped
