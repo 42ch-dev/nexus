@@ -3073,6 +3073,18 @@ async fn overlapping_observations_poison_the_seam_without_provider_effect() {
 // Shared product WS transport close ownership (I-000259)
 // ---------------------------------------------------------------------------
 
+/// Dial the product transport to a raw peer address.
+async fn raw_ws_transport(addr: SocketAddr) -> Arc<dyn Transport> {
+    let (ws, _response) = tokio::time::timeout(
+        SETUP_BOUND,
+        tokio_tungstenite::connect_async(format!("ws://{addr}")),
+    )
+    .await
+    .expect("the dial is bounded")
+    .expect("dial the raw peer");
+    Arc::new(WsTransport::new(ws))
+}
+
 /// A peer that completes the WS upgrade and then never reads a frame, so the
 /// transport's write path really parks on native backpressure (no sleep or
 /// is-finished proxy). After the test has closed the transport it reads the
@@ -3572,4 +3584,161 @@ async fn retained_pending_recv_does_not_block_the_close() {
     drop(retained_recv);
     ticker.abort();
     let _ = ticker.await;
+}
+
+/// A peer that, after `probe`, drains every inbound envelope and records the
+/// first byte of each Binary message, returning that wire order at stream end.
+async fn draining_peer() -> (SocketAddr, Arc<Notify>, tokio::task::JoinHandle<Vec<u8>>) {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let probe = Arc::new(Notify::new());
+    let peer_probe = Arc::clone(&probe);
+    let peer = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.expect("accept");
+        let mut ws = tokio_tungstenite::accept_async(tcp).await.expect("upgrade");
+        peer_probe.notified().await;
+        let mut order = Vec::new();
+        while let Some(message) = ws.next().await {
+            match message {
+                Ok(Message::Binary(bytes)) => {
+                    if let Some(first) = bytes.first() {
+                        order.push(*first);
+                    }
+                }
+                Ok(Message::Close(_)) | Err(_) | Ok(Message::Text(_)) => break,
+                Ok(_) => {}
+            }
+        }
+        order
+    });
+    (addr, probe, peer)
+}
+
+/// A peer that, after `probe`, sends two binary frames and then waits for the
+/// connection to end.
+async fn two_frame_peer() -> (SocketAddr, Arc<Notify>, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let probe = Arc::new(Notify::new());
+    let peer_probe = Arc::clone(&probe);
+    let peer = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.expect("accept");
+        let mut ws = tokio_tungstenite::accept_async(tcp).await.expect("upgrade");
+        peer_probe.notified().await;
+        if ws.send(Message::Binary(b"one".to_vec().into())).await.is_err() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        let _ = ws.send(Message::Binary(b"two".to_vec().into())).await;
+        while let Some(message) = ws.next().await {
+            match message {
+                Ok(Message::Close(_)) | Err(_) => break,
+                Ok(_) => {}
+            }
+        }
+    });
+    (addr, probe, peer)
+}
+
+/// Real socket READINESS without any close must not evict a queued send: the
+/// first operation stays Pending/retained, the second is queued, and draining
+/// the peer (ordinary write readiness) must leave it queued until the first
+/// completes, then it must really succeed in wire order.
+#[tokio::test]
+async fn live_write_readiness_does_not_close_a_queued_send() {
+    let (addr, probe, peer) = draining_peer().await;
+    let transport = raw_ws_transport(addr).await;
+    let payload = vec![0x5a_u8; 8 * 1024 * 1024];
+    let mut first = Box::pin(transport.send(&payload));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(250), &mut first)
+            .await
+            .is_err(),
+        "the first send must be parked before close"
+    );
+    let queued = tokio::spawn({
+        let transport = Arc::clone(&transport);
+        async move { transport.send(b"queued-live").await }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(!queued.is_finished(), "the second send is queued");
+    // Ordinary socket write readiness: the peer starts draining. No close.
+    probe.notify_one();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(
+        !queued.is_finished(),
+        "a live write-readiness wake must not evict a queued send"
+    );
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(10), first)
+            .await
+            .expect("the first send completes"),
+        Ok(())
+    );
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(10), queued)
+            .await
+            .expect("the queued send completes")
+            .expect("queued task"),
+        Ok(()),
+        "the queued send succeeds instead of reporting Closed"
+    );
+    transport.close().await.expect("normal close");
+    let order = tokio::time::timeout(Duration::from_secs(5), peer)
+        .await
+        .expect("the peer ends")
+        .expect("peer task");
+    assert_eq!(
+        order,
+        vec![0x5a, b'q'],
+        "wire order is preserved under live readiness"
+    );
+}
+
+/// The same for real socket READ readiness: a queued receive must not be
+/// evicted as Closed when the peer's frame wakes the shared notifier; the first
+/// receive returns frame one and the queued one frame two, in order.
+#[tokio::test]
+async fn live_read_readiness_does_not_close_a_queued_recv() {
+    let (addr, probe, peer) = two_frame_peer().await;
+    let transport = raw_ws_transport(addr).await;
+    let mut first = Box::pin(transport.recv());
+    assert!(
+        tokio::time::timeout(Duration::from_millis(250), &mut first)
+            .await
+            .is_err(),
+        "the first recv must be parked before close"
+    );
+    let queued = tokio::spawn({
+        let transport = Arc::clone(&transport);
+        async move { transport.recv().await }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(!queued.is_finished(), "the second recv is queued");
+    // Ordinary socket read readiness: the peer sends its first frame. No close.
+    probe.notify_one();
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert!(
+        !queued.is_finished(),
+        "a live read-readiness wake must not evict a queued recv"
+    );
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(5), first)
+            .await
+            .expect("the first recv completes"),
+        Ok(b"one".to_vec())
+    );
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(5), queued)
+            .await
+            .expect("the queued recv completes")
+            .expect("queued task"),
+        Ok(b"two".to_vec()),
+        "the queued recv returns the second frame, in order"
+    );
+    transport.close().await.expect("normal close");
+    tokio::time::timeout(Duration::from_secs(5), peer)
+        .await
+        .expect("the peer ends")
+        .expect("peer task");
 }
