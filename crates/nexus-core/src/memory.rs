@@ -187,12 +187,46 @@ fn refusal_proves(binding_is_local: bool, reject: &SpokeReject, codes: &[SpokeRe
 /// such a receipt as complete would consume the candidate, retire the attempt
 /// and leave the provider's real record unprotected; instead this returns a
 /// coded inconsistency and the caller keeps the attempt's admission.
-fn review_result_record_ids(decision: &Value, body: &Value) -> CoreResult<Vec<String>> {
+///
+/// The receipt must also be *this* request's receipt: its echoed
+/// `idempotency_key` and `space_id` are bound to the issued request and the
+/// pinned space. An older receipt with a matching shape but its own key would
+/// otherwise settle a different attempt — the monotone object facts cannot
+/// revive its already released record — and retire the only protection the new
+/// attempt has. The requester principal is deliberately not compared: the local
+/// principal is not the remote authenticated identity.
+fn review_result_record_ids(
+    decision: &Value,
+    body: &Value,
+    issued_space: &str,
+    issued_key: &str,
+) -> CoreResult<Vec<String>> {
     let malformed = |reason: String| internal_err("memory_review_receipt", reason);
     let action = decision
         .get("action")
         .and_then(Value::as_str)
         .ok_or_else(|| malformed("the issued review decision carries no action".to_string()))?;
+    let space = body
+        .get("space_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("the committed review result carries no space".to_string()))?;
+    if space != issued_space {
+        return Err(malformed(format!(
+            "the committed result names space '{space}', the issued request bound '{issued_space}'"
+        )));
+    }
+    let key = body
+        .get("idempotency_key")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            malformed("the committed review result carries no idempotency key".to_string())
+        })?;
+    if key != issued_key {
+        return Err(malformed(
+            "the committed review result echoes a different idempotency key than the issued request"
+                .to_string(),
+        ));
+    }
     let outcome = body
         .pointer("/result/outcome")
         .and_then(Value::as_str)
@@ -1301,9 +1335,11 @@ impl MemoryAdapter {
     /// candidate, the record references it returned, and the retirement of this
     /// attempt. **Before** settling, the committed result must be consistent
     /// with the decision Core issued (`drop` → no records, `promote` → one,
-    /// `fragment` → one per issued fragment, with valid ids); a schema-valid
-    /// but inconsistent receipt is refused as malformed, so the attempt keeps
-    /// its admission. An uncertain, cancelled, malformed or locally-unsettled
+    /// `fragment` → one per issued fragment, with valid ids) **and** must be
+    /// this request's receipt: its echoed idempotency key and space are bound
+    /// to the issued request and the pinned space. A schema-valid but
+    /// inconsistent or stale receipt is refused as malformed, so the attempt
+    /// keeps its admission. An uncertain, cancelled, malformed or locally-unsettled
     /// attempt therefore keeps its admission, and the binding stays unremovable;
     /// only the shared proven-no-effect refusal policy retires an attempt, and
     /// never another one.
@@ -1348,6 +1384,11 @@ impl MemoryAdapter {
         // Admit this one attempt before the RPC under the same per-attempt
         // namespace, then settle its facts and its retirement together.
         let attempt = self.admit_remote_review_attempt(binding_id).await?;
+        // The committed receipt must identify THIS request: a provider can
+        // answer with an older, still schema-valid receipt whose result matches
+        // in shape but belongs to another key (and a different namespace).
+        let issued_space = request.space_id.as_str().to_string();
+        let issued_key = request.idempotency_key.as_str().to_string();
         match self
             .binding
             .port()
@@ -1360,7 +1401,8 @@ impl MemoryAdapter {
                 // decision (no ids, a short id list, a mismatched outcome). Only
                 // a consistent committed result may settle; otherwise the
                 // attempt keeps its admission and the binding stays protected.
-                let record_ids = review_result_record_ids(&decision, &body)?;
+                let record_ids =
+                    review_result_record_ids(&decision, &body, &issued_space, &issued_key)?;
                 // A settlement failure returns an error with the attempt still
                 // in place, so the binding stays protected.
                 self.record_remote_review(attempt.as_deref(), binding_id, candidate_id, &record_ids)
