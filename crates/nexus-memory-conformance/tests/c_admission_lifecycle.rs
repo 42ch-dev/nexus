@@ -19,8 +19,6 @@
 
 mod support;
 
-use std::future::Future;
-use std::pin::Pin;
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -31,13 +29,10 @@ use support::{
     OTHER_CONTEXT, OTHER_SUBJECT, SUBJECT, TEXT,
 };
 
-/// A bounded observation that a request has reached the contested boundary and
-/// has not completed yet. It is not a sleep used to order the race: the hold is
-/// released only after this fails to complete.
 /// Wait, bounded, until the local provider reports that the competing mutation
-/// entered its write-admission machinery. The provider holds the writer lock in
-/// the holder, so an entry that reached admission is blocked there: this is the
-/// provider-side arrival acknowledgment, not elapsed client time.
+/// entered its write-admission machinery. The provider's own counter acknowledges
+/// the provider entry; it is not an OS/SQLite lock-wait claim and not elapsed
+/// client time.
 async fn await_local_admission(matrix: &Matrix, baseline: usize, expected: usize) {
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
@@ -53,13 +48,6 @@ async fn await_local_admission(matrix: &Matrix, baseline: usize, expected: usize
             "the competing mutation did not reach the provider admission machinery"
         );
         tokio::time::sleep(Duration::from_millis(5)).await;
-    }
-}
-
-async fn still_pending<F: Future>(future: &mut Pin<Box<F>>, what: &str) {
-    match tokio::time::timeout(Duration::from_millis(400), future).await {
-        Err(_) => {}
-        Ok(_) => panic!("{what} completed before the contested boundary was released"),
     }
 }
 
@@ -526,7 +514,14 @@ async fn write_racing_freeze_has_one_admission_outcome(matrix: Matrix) {
         .grant(grant_body("admin", &peer_id, "k-c012-admin"))
         .await;
     assert!(is_committed(&granted), "{granted}");
+    // Control lifecycle (local test seam): the space is still active here.
+    if matrix.kind() == Kind::Local {
+        admission_control_is_token_owned(&matrix).await;
+    }
 
+    // Candidate count before the race (the local control regression above may
+    // have committed its own probe captures).
+    let before = candidate_ids(&candidates(&matrix.admin()).await).len();
     let space_id = matrix.space_id().to_owned();
     let mut hold = match matrix.kind() {
         Kind::Local => matrix.park_next_capture(),
@@ -542,6 +537,9 @@ async fn write_racing_freeze_has_one_admission_outcome(matrix: Matrix) {
         .await
         .expect("the capture reached its provider point");
 
+    // The baseline is taken BEFORE the freeze is scheduled, so the observed
+    // delta is exactly that request's own provider entries.
+    let baseline = matrix.write_admission_count();
     let freeze_task = tokio::spawn(support::freeze_with(
         matrix.peer_client(),
         matrix.peer_principal().clone(),
@@ -550,13 +548,12 @@ async fn write_racing_freeze_has_one_admission_outcome(matrix: Matrix) {
         1,
     ));
 
-    let baseline = matrix.write_admission_count();
     let capture_outcome = match matrix.kind() {
         Kind::Local => {
-            // The capture holds the writer lock; the freeze enters the provider's
-            // write-admission machinery and is blocked there. That arrival is
-            // acknowledged by the provider's own counter, not inferred from a
-            // client timeout.
+            // The freeze contributes one provider entry (its write-admission
+            // machinery; the freeze path does not publish) and is then blocked on
+            // the writer lock held by the capture. That arrival is acknowledged by
+            // the provider's own counter, not inferred from a client timeout.
             await_local_admission(
                 &matrix,
                 baseline.expect("the local leg exposes its admission counter"),
@@ -596,9 +593,17 @@ async fn write_racing_freeze_has_one_admission_outcome(matrix: Matrix) {
     let admin = matrix.admin();
     let rows = candidate_ids(&candidates(&admin).await);
     if is_committed(&capture_outcome) {
-        assert_eq!(rows.len(), 1, "the committed capture produced one candidate: {rows:?}");
+        assert_eq!(
+            rows.len(),
+            before + 1,
+            "the committed capture produced exactly one new candidate: {rows:?}"
+        );
     } else {
-        assert!(rows.is_empty(), "the refused capture committed no candidate: {rows:?}");
+        assert_eq!(
+            rows.len(),
+            before,
+            "the refused capture committed no candidate: {rows:?}"
+        );
     }
     assert_eq!(
         admin.list_spaces().await["spaces"][0]["status"],
@@ -609,6 +614,47 @@ async fn write_racing_freeze_has_one_admission_outcome(matrix: Matrix) {
         .await;
     assert_eq!(error_code(&after), "SPACE_FROZEN", "{after}");
     matrix.shutdown().await;
+}
+
+/// C-012 control lifecycle (local test seam only): dropping an arm before the
+/// provider takes it disarms only that arm, and an older handle can never clear
+/// a newer arm. Asserted inside the existing C-012 selector, not a new one.
+async fn admission_control_is_token_owned(matrix: &Matrix) {
+    // Drop before take: the stale arm is gone and a later write is admitted
+    // without pausing.
+    let stale = matrix.park_next_admission();
+    drop(stale);
+    let after_drop = tokio::time::timeout(
+        Duration::from_secs(2),
+        matrix
+            .admin()
+            .capture(capture_body("k-c012-after-drop", TEXT, &shared_scope())),
+    )
+    .await
+    .expect("no stale admission arm parks a later write");
+    assert!(is_committed(&after_drop), "{after_drop}");
+
+    // Re-arm: arm A, replace it with arm B, then drop A's handle. A's stale token
+    // must not clear B, and the next write must pause at B.
+    let first = matrix.park_next_admission();
+    let mut second = matrix.park_next_admission();
+    drop(first);
+    let write = tokio::spawn(support::capture_with(
+        matrix.admin_client(),
+        matrix.admin_principal().clone(),
+        matrix.space_id().to_owned(),
+        capture_body("k-c012-rearm", TEXT, &shared_scope()),
+    ));
+    second
+        .wait_reached()
+        .await
+        .expect("the replacement arm owns the next write");
+    second.release().await;
+    let outcome = write.await.expect("the write completes");
+    assert!(
+        is_committed(&outcome) || error_code(&outcome) == "OUTCOME_UNCERTAIN",
+        "the rearmed write reached the provider: {outcome}"
+    );
 }
 
 #[tokio::test]
@@ -843,7 +889,10 @@ async fn stale_fence_revision_cannot_lost_update(matrix: Matrix) {
     let space_id = matrix.space_id().to_owned();
 
     // Phase 1 (additional): the same-revision fence/fence race.
-    let mut arrival = matrix.park_next_admission();
+    let mut arrival = match matrix.kind() {
+        Kind::Local => matrix.park_next_admission(),
+        Kind::Remote => matrix.park_next_target("memory.subjects.fence"),
+    };
     let first = tokio::spawn(support::fence_with(
         matrix.admin_client(),
         matrix.admin_principal().clone(),
@@ -891,7 +940,10 @@ async fn stale_fence_revision_cannot_lost_update(matrix: Matrix) {
 
     // Phase 2 (required): concurrent unfence at the current revision and a STALE
     // fence, with the unfence held at the admission boundary first.
-    let mut arrival = matrix.park_next_admission();
+    let mut arrival = match matrix.kind() {
+        Kind::Local => matrix.park_next_admission(),
+        Kind::Remote => matrix.park_next_target("memory.subjects.fence"),
+    };
     let unfence = tokio::spawn(support::fence_action_with(
         matrix.admin_client(),
         matrix.admin_principal().clone(),
@@ -940,7 +992,11 @@ async fn stale_fence_revision_cannot_lost_update(matrix: Matrix) {
     // Phase 3 (required): a write in flight at the provider admission boundary
     // when the fence commits is refused with no effect.
     let before = candidate_ids(&candidates(&matrix.admin()).await).len();
-    let mut arrival = matrix.park_next_admission();
+    let mut arrival = match matrix.kind() {
+        // The fixture's capture path keeps its own bounded admission point.
+        Kind::Local => matrix.park_next_admission(),
+        Kind::Remote => matrix.park_next_admission(),
+    };
     let write = tokio::spawn(support::capture_with(
         matrix.admin_client(),
         matrix.admin_principal().clone(),

@@ -14,24 +14,20 @@
 
 mod support;
 
+use std::sync::Arc;
+
 use serde_json::{json, Value};
 
 use support::{
     bootstrap, candidate_ids, capture_body, context_scope, dismiss_body, error_code, error_details,
     grant_body, is_committed, receipt_id, receipt_windows, record_ids, result,
-    retry_class, review_body, shared_scope, Actor, CharacterFixture, Matrix, CONTEXT,
+    retry_class, review_body, shared_scope, Actor, CharacterFixture, Kind, Matrix, CONTEXT,
     OTHER_CONTEXT, SUBJECT, TEXT,
 };
 
 async fn pending(actor: &Actor<'_>) -> Value {
     actor
         .list_candidates(json!({ "subject_id": SUBJECT, "status": "pending" }))
-        .await
-}
-
-async fn pending_for(actor: &Actor<'_>, subject: &str) -> Value {
-    actor
-        .list_candidates(json!({ "subject_id": subject, "status": "pending" }))
         .await
 }
 
@@ -836,12 +832,20 @@ async fn concurrent_review_has_exactly_one_effect(matrix: Matrix) {
         .await;
     let candidate_id = candidate_ids(&captured)[0].clone();
 
-    // Client A is genuinely held at the provider's admission boundary (on the
-    // local leg it already holds the workspace publication section; on the
-    // fixture it is paused at the service entry). Client B — a second real
-    // signed session — is issued while A is held, A is released, and exactly one
-    // of the two admitted requests may commit.
-    let mut arrival = matrix.park_next_admission();
+    // Both arrivals are established before the held request is released.
+    // - Local: the held review already owns the workspace publication section.
+    //   The provider's own counter increments once for that review's publication
+    //   entry and once for its admission entry (+2), and once more for the peer
+    //   review's publication entry (+1) — the peer is then blocked on the held
+    //   publication section. baseline+3 therefore acknowledges BOTH signed
+    //   requests at the provider, not elapsed client time and not an OS lock wait.
+    // - Fixture: the held review is acknowledged at its exact op-targeted handler
+    //   admission; the peer review runs to a durable committed receipt before the
+    //   release, which is its real arrival and effect.
+    let mut arrival = match matrix.kind() {
+        Kind::Local => matrix.park_next_admission(),
+        Kind::Remote => matrix.park_next_target("memory.candidates.review"),
+    };
     let admin_review = tokio::spawn(support::review_with(
         matrix.admin_client(),
         matrix.admin_principal().clone(),
@@ -852,15 +856,48 @@ async fn concurrent_review_has_exactly_one_effect(matrix: Matrix) {
         .wait_reached()
         .await
         .expect("the admin review reached the provider admission boundary");
-    let peer_review = tokio::spawn(support::review_with(
-        matrix.peer_client(),
-        matrix.peer_principal().clone(),
-        matrix.space_id().to_owned(),
-        review_body(&candidate_id, 1, "k-c033-peer"),
-    ));
+
+    let mut peer_task = None;
+    let mut peer_completed = None;
+    match matrix.kind() {
+        Kind::Local => {
+            // The held review owns the candidate's disposition section; the peer
+            // review's acquisition reports that it is really about to block on
+            // that section — a provider-side acknowledgment of ITS arrival.
+            let waiter = Arc::new(tokio::sync::Notify::new());
+            matrix.report_disposition_waits(Arc::clone(&waiter));
+            peer_task = Some(tokio::spawn(support::review_with(
+                matrix.peer_client(),
+                matrix.peer_principal().clone(),
+                matrix.space_id().to_owned(),
+                review_body(&candidate_id, 1, "k-c033-peer"),
+            )));
+            tokio::time::timeout(support::BOUND, waiter.notified())
+                .await
+                .expect("the peer review reached the disposition wait");
+        }
+        Kind::Remote => {
+            peer_completed = Some(
+                support::review_with(
+                    matrix.peer_client(),
+                    matrix.peer_principal().clone(),
+                    matrix.space_id().to_owned(),
+                    review_body(&candidate_id, 1, "k-c033-peer"),
+                )
+                .await,
+            );
+        }
+    }
+
     arrival.release().await;
     let admin_outcome = admin_review.await.expect("the admin review completes");
-    let peer_outcome = peer_review.await.expect("the peer review completes");
+    let peer_outcome = match peer_completed {
+        Some(outcome) => outcome,
+        None => peer_task
+            .expect("the peer review was issued")
+            .await
+            .expect("the peer review completes"),
+    };
 
     let winners = [&admin_outcome, &peer_outcome]
         .into_iter()

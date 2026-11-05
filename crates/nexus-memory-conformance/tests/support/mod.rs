@@ -47,6 +47,7 @@ use nexus_core::{CoreAccess, CoreHomeService, CoreOpenOptions, CoreService};
 use nexus_contracts::{CoreRegisterCreatorRequest, SetActiveWorkspaceRequest};
 use nexus_memory_conformance::{
     FaultHold, FaultHoldLost, FaultPoint, FixtureMemoryProvider, PeerDirectory, RetentionSweep,
+    TargetHold,
 };
 use spoke_connect::core::{derive_peer_id_from_ed25519_pubkey, sign_hello_ed25519};
 use spoke_connect::remote::{
@@ -648,6 +649,27 @@ impl Matrix {
         self.peer = open_endpoint(Arc::clone(&self.service), &self.host_id, PEER_SEED).await;
     }
 
+    /// Park the exact mutating handler named by `op` at its admission point
+    /// (fixture only: the local leg exposes the provider admission seam instead).
+    pub fn park_next_target(&self, op: &str) -> CaptureHold {
+        match &self.provider {
+            Provider::Local(_) => panic!("use the provider admission seam on the local leg"),
+            Provider::Fixture(provider) => {
+                CaptureHold::FixtureTarget(provider.faults().hold_next_for_bounded(op, BOUND))
+            }
+        }
+    }
+
+    /// Install the local provider's disposition-wait report: it notifies when a
+    /// candidate-consuming request is about to block on the owning subject's
+    /// disposition section (a real provider-side arrival acknowledgment).
+    pub fn report_disposition_waits(&self, waiter: Arc<Notify>) {
+        match &self.provider {
+            Provider::Local(provider) => provider.report_disposition_waits(waiter),
+            Provider::Fixture(_) => panic!("the fixture has no disposition section"),
+        }
+    }
+
     /// A raw signed session for wire-level rows (`op_unsupported`, typed-decode
     /// refusals) that the typed client cannot express.
     pub async fn raw_admin(&self) -> RawSession {
@@ -737,15 +759,29 @@ pub fn receipt_windows(described: &Value) -> ReceiptWindows {
 
 /// A capture parked at its provider's real capture point.
 pub enum CaptureHold {
-    /// Local: parked after binding validation with the transaction lock, before
-    /// any insert (an admission/cancellation point, not a staged write).
+    /// Local: parked at a provider seam. The token lets the handle disarm only
+    /// its own arm; the provider's wait is bounded, so a dropped handle cannot
+    /// park a write forever.
     Local {
+        provider: Arc<LocalMemoryProvider>,
+        token: u64,
         entered: Arc<Notify>,
         release: Arc<Barrier>,
     },
     /// Fixture: the bounded `BeforeCommit` hold, taken with the effect, receipt,
     /// dedup row and target staged but not committed.
-    Fixture(FaultHold),
+    FixturePoint(FaultHold),
+    /// Fixture: the bounded op-targeted admission arm, taken at the exact
+    /// mutating handler entry named by the op.
+    FixtureTarget(TargetHold),
+}
+
+impl Drop for CaptureHold {
+    fn drop(&mut self) {
+        if let Self::Local { provider, token, .. } = self {
+            provider.disarm_next_admission(*token);
+        }
+    }
 }
 
 impl CaptureHold {
@@ -757,7 +793,8 @@ impl CaptureHold {
                 Ok(()) => Ok(()),
                 Err(_) => Err(FaultHoldLost::Unreached),
             },
-            Self::Fixture(hold) => hold.wait_reached().await,
+            Self::FixturePoint(hold) => hold.wait_reached().await,
+            Self::FixtureTarget(hold) => hold.wait_reached().await,
         }
     }
 
@@ -767,7 +804,8 @@ impl CaptureHold {
             Self::Local { release, .. } => {
                 release.wait().await;
             }
-            Self::Fixture(hold) => hold.release(),
+            Self::FixturePoint(hold) => hold.release(),
+            Self::FixtureTarget(hold) => hold.release(),
         }
     }
 }
@@ -802,10 +840,15 @@ impl Matrix {
                 let entered = Arc::new(Notify::new());
                 let release = Arc::new(Barrier::new(2));
                 provider.park_next_capture(Arc::clone(&entered), Arc::clone(&release));
-                CaptureHold::Local { entered, release }
+                CaptureHold::Local {
+                    provider: Arc::clone(provider),
+                    token: 0,
+                    entered,
+                    release,
+                }
             }
             Provider::Fixture(provider) => {
-                CaptureHold::Fixture(provider.faults().hold_next(FaultPoint::BeforeCommit))
+                CaptureHold::FixturePoint(provider.faults().hold_next(FaultPoint::BeforeCommit))
             }
         }
     }
@@ -819,10 +862,16 @@ impl Matrix {
             Provider::Local(provider) => {
                 let entered = Arc::new(Notify::new());
                 let release = Arc::new(Barrier::new(2));
-                provider.park_next_admission(Arc::clone(&entered), Arc::clone(&release));
-                CaptureHold::Local { entered, release }
+                let token =
+                    provider.park_next_admission(Arc::clone(&entered), Arc::clone(&release));
+                CaptureHold::Local {
+                    provider: Arc::clone(provider),
+                    token,
+                    entered,
+                    release,
+                }
             }
-            Provider::Fixture(provider) => CaptureHold::Fixture(
+            Provider::Fixture(provider) => CaptureHold::FixturePoint(
                 provider
                     .faults()
                     .hold_next_bounded(FaultPoint::AdmissionPause, BOUND),
