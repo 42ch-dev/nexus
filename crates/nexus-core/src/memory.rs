@@ -251,7 +251,7 @@ fn memory_reject(reject: &SpokeReject) -> CoreError {
 /// text here — only the whitelisted effective code, a wire code that names a
 /// known memory code, and the whitelisted §14.2 retry class survive (§3.1).
 fn memory_reject_for(binding: &MemoryProviderBinding, reject: &SpokeReject) -> CoreError {
-    if binding.local().is_ok() {
+    if binding.is_local() {
         memory_reject(reject)
     } else {
         remote_refusal(reject)
@@ -508,10 +508,11 @@ impl MemoryAdapter {
     /// A remote binding has no provider-local section: its candidate CAS and
     /// atomic review supply the exclusion, so the drain runs without one.
     async fn review_claim(&self) -> CoreResult<Option<MemoryDisposition>> {
-        match self.binding.local() {
-            Ok(local) => Ok(Some(local.review_disposition(&self.subject_id).await?)),
-            Err(_) => Ok(None),
+        if !self.is_local() {
+            return Ok(None);
         }
+        let local = self.binding.local()?;
+        Ok(Some(local.review_disposition(&self.subject_id).await?))
     }
 
     /// The provider subject this adapter speaks for: the bearer a write under
@@ -523,7 +524,7 @@ impl MemoryAdapter {
     /// Whether the open pinned the local provider. Provider-local internals
     /// (the narrative-cache invalidation behind a promotion) run only here.
     pub(crate) fn is_local(&self) -> bool {
-        self.binding.local().is_ok()
+        self.binding.is_local()
     }
 
     /// Map a port result under this binding (see [`memory_ok_for`]).
@@ -792,20 +793,22 @@ impl MemoryAdapter {
                 "limit": MEMORY_PAGE_SIZE,
                 "cursor": cursor,
             }))?;
-            let body = match self.binding.local() {
-                Ok(local) => self.ok(
+            let body = if self.is_local() {
+                let local = self.binding.local()?;
+                self.ok(
                     local
                         .list_records_scoped(&self.principal, request, project_legacy)
                         .await,
-                )?,
+                )?
+            } else {
                 // A remote binding serves its own objects only, so selecting it
                 // never merges the local legacy projection into the read.
-                Err(_) => self.ok(
+                self.ok(
                     self.binding
                         .port()
                         .list_records(&self.principal, request)
                         .await,
-                )?,
+                )?
             };
             rows.extend(body["records"].as_array().cloned().unwrap_or_default());
             if want.is_some_and(|want| rows.len() >= want) {
@@ -947,9 +950,10 @@ impl MemoryAdapter {
     /// deterministic id names nothing there: the same `Ok(false)`, with no
     /// provider write.
     async fn dismiss_legacy(&self, candidate_id: &str) -> CoreResult<bool> {
-        let Ok(local) = self.binding.local() else {
+        if !self.is_local() {
             return Ok(false);
-        };
+        }
+        let local = self.binding.local()?;
         let digest = match spoke_operations::jcs_sha256_hex(&json!(candidate_id)) {
             SpokeResult::Ok(digest) => digest,
             SpokeResult::Reject(reject) => return Err(memory_reject(&reject)),
@@ -1122,26 +1126,24 @@ impl MemoryAdapter {
             "decision": decision,
             "idempotency_key": idempotency_key("review", candidate_id)?,
         }))?;
-        let result = match self.binding.local() {
-            Ok(local) => {
-                // The drain takes the section before it fetches its slice, so a
-                // local review always has one.
-                let section = section.ok_or_else(|| {
-                    internal_err(
-                        "memory_review_section",
-                        "a local review drain requires the disposition section",
-                    )
-                })?;
-                local
-                    .review_legacy_candidate(&self.principal, &self.subject_id, request, section)
-                    .await
-            }
-            Err(_) => {
-                self.binding
-                    .port()
-                    .review_candidate(&self.principal, request)
-                    .await
-            }
+        let result = if self.is_local() {
+            let local = self.binding.local()?;
+            // The drain takes the section before it fetches its slice, so a
+            // local review always has one.
+            let section = section.ok_or_else(|| {
+                internal_err(
+                    "memory_review_section",
+                    "a local review drain requires the disposition section",
+                )
+            })?;
+            local
+                .review_legacy_candidate(&self.principal, &self.subject_id, request, section)
+                .await
+        } else {
+            self.binding
+                .port()
+                .review_candidate(&self.principal, request)
+                .await
         };
         match result {
             SpokeResult::Ok(receipt) => {
@@ -1273,18 +1275,20 @@ impl MemoryAdapter {
             "content": content,
             "idempotency_key": idempotency_key,
         }))?;
-        match self.binding.local() {
-            Ok(local) => self.ok(
+        if self.is_local() {
+            let local = self.binding.local()?;
+            self.ok(
                 local
                     .update_legacy_record(&self.principal, &self.subject_id, request)
                     .await,
-            ),
-            Err(_) => self.ok(
+            )
+        } else {
+            self.ok(
                 self.binding
                     .port()
                     .update_record(&self.principal, request)
                     .await,
-            ),
+            )
         }
         .map(|_| ())
     }
@@ -1305,18 +1309,20 @@ impl MemoryAdapter {
             "reason": "deleted through the creator memory CLI",
             "idempotency_key": idempotency_key,
         }))?;
-        match self.binding.local() {
-            Ok(local) => self.ok(
+        if self.is_local() {
+            let local = self.binding.local()?;
+            self.ok(
                 local
                     .delete_legacy_record(&self.principal, &self.subject_id, request)
                     .await,
-            ),
-            Err(_) => self.ok(
+            )
+        } else {
+            self.ok(
                 self.binding
                     .port()
                     .delete_record(&self.principal, request)
                     .await,
-            ),
+            )
         }
         .map(|_| ())
     }
@@ -1423,31 +1429,29 @@ impl MemoryAdapter {
         binding_id: &str,
     ) -> CoreResult<()> {
         let key = idempotency_key("promote", record_id)?;
-        let result = match self.binding.local() {
-            Ok(local) => {
-                local
-                    .promote_character_fragment(
-                        &self.principal,
-                        &self.subject_id,
-                        record_id,
-                        expected_revision,
-                        &key,
-                    )
-                    .await
-            }
-            Err(_) => {
-                let request: spoke_schemas::MemoryRecordsPromoteRequest = map_wire(json!({
-                    "space_id": self.binding.space_id(),
-                    "record_id": record_id,
-                    "target_scope": { "visibility": "shared" },
-                    "expected_revision": expected_revision,
-                    "idempotency_key": key,
-                }))?;
-                self.binding
-                    .port()
-                    .promote_record(&self.principal, request)
-                    .await
-            }
+        let result = if self.is_local() {
+            let local = self.binding.local()?;
+            local
+                .promote_character_fragment(
+                    &self.principal,
+                    &self.subject_id,
+                    record_id,
+                    expected_revision,
+                    &key,
+                )
+                .await
+        } else {
+            let request: spoke_schemas::MemoryRecordsPromoteRequest = map_wire(json!({
+                "space_id": self.binding.space_id(),
+                "record_id": record_id,
+                "target_scope": { "visibility": "shared" },
+                "expected_revision": expected_revision,
+                "idempotency_key": key,
+            }))?;
+            self.binding
+                .port()
+                .promote_record(&self.principal, request)
+                .await
         };
         match result {
             SpokeResult::Ok(receipt) => {
@@ -1502,19 +1506,19 @@ impl MemoryAdapter {
     /// The recovery row is provider-local state, so a remote binding reports no
     /// outstanding invalidation.
     async fn soul_invalidation_binding(&self, record_id: &str) -> CoreResult<Option<String>> {
-        match self.binding.local() {
-            Ok(local) => local.soul_invalidation_binding(record_id).await,
-            Err(_) => Ok(None),
+        if !self.is_local() {
+            return Ok(None);
         }
+        self.binding.local()?.soul_invalidation_binding(record_id).await
     }
 
     /// Clear that recovery row once the invalidation ran; a remote binding has
     /// no row to clear.
     async fn finish_soul_invalidation(&self, record_id: &str) -> CoreResult<()> {
-        match self.binding.local() {
-            Ok(local) => local.finish_soul_invalidation(record_id).await,
-            Err(_) => Ok(()),
+        if !self.is_local() {
+            return Ok(());
         }
+        self.binding.local()?.finish_soul_invalidation(record_id).await
     }
 }
 
@@ -2561,18 +2565,18 @@ impl CoreService {
             "kind_hint": task_kind_to_memory_kind(&task_kind),
             "idempotency_key": character_capture_key(&pending_id)?,
         }))?;
-        match memory.binding.local() {
-            Ok(local) => {
-                let candidate_id = legacy::character_pending_review_candidate_id(&pending_id);
-                match local
-                    .capture_identified(&memory.principal, capture, &candidate_id, binding.as_ref())
-                    .await
-                {
-                    Ok(SpokeResult::Ok(_)) => {}
-                    Ok(SpokeResult::Reject(reject)) => return Err(memory.refuse(&reject)),
-                    Err(error) => return Err(map_local_db_error(error)),
-                }
+        if memory.binding.is_local() {
+            let local = memory.binding.local()?;
+            let candidate_id = legacy::character_pending_review_candidate_id(&pending_id);
+            match local
+                .capture_identified(&memory.principal, capture, &candidate_id, binding.as_ref())
+                .await
+            {
+                Ok(SpokeResult::Ok(_)) => {}
+                Ok(SpokeResult::Reject(reject)) => return Err(memory.refuse(&reject)),
+                Err(error) => return Err(map_local_db_error(error)),
             }
+        } else {
             // A remote binding serves no local bridge identity: the standard
             // capture op stores the candidate under its own minted id. A
             // binding-local capture first commits its own durable admission
@@ -2581,7 +2585,7 @@ impl CoreService {
             // definite result retires it and publishes the candidate
             // references the provider returned. A shared-scope capture carries
             // no binding dependency and takes no admission.
-            Err(_) => match binding_id {
+            match binding_id {
                 Some(binding_id) => {
                     self.capture_remote_binding_scoped(
                         principal,
@@ -2599,7 +2603,7 @@ impl CoreService {
                         return Err(memory.refuse(&reject));
                     }
                 }
-            },
+            }
         }
 
         map_wire(json!({
@@ -5069,12 +5073,13 @@ impl CoreService {
     ) -> CoreResult<LegacyContentMigration> {
         self.verify_principal(principal)?;
         let binding = self.memory_writer_binding()?;
-        let Ok(provider) = binding.local() else {
+        if !binding.is_local() {
             return Err(CoreError::Coded {
                 code: "not_supported".to_string(),
                 message: "legacy migration requires the local provider".to_string(),
             });
-        };
+        }
+        let provider = binding.local()?;
         let spoke_principal: spoke_schemas::Principal = map_wire(json!({
             "principal_id": principal.creator_id(),
             "extensions": {},

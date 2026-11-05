@@ -49,13 +49,11 @@ impl MemoryProviderBinding {
     }
 
     /// The `MemoryPort` every standard operation runs through.
-    #[allow(dead_code)] // Task 4 routes the adapter's generic operations here.
     pub(crate) fn port(&self) -> &(dyn MemoryPort + Send + Sync) {
         self.port.as_ref()
     }
 
     /// The provider space this open serves.
-    #[allow(dead_code)] // Task 4 replaces the local default constant.
     pub(crate) fn space_id(&self) -> &str {
         &self.space_id
     }
@@ -71,7 +69,10 @@ impl MemoryProviderBinding {
         }
     }
 
-    /// The provider-local concrete handle, for local-only internals.
+    /// The provider-local concrete handle, for strict local-only internals.
+    ///
+    /// Ordinary local/remote dispatch must use [`Self::is_local`] instead, so an
+    /// expected remote branch never constructs the refusal below.
     ///
     /// # Errors
     ///
@@ -83,9 +84,20 @@ impl MemoryProviderBinding {
         })
     }
 
+    /// Whether this open pinned the local provider.
+    ///
+    /// The cheap read-only discriminator for ordinary local/remote dispatch: it
+    /// reads the immutable pinned slot, deriving the answer from existing state
+    /// rather than any second flag, so selecting the expected branch allocates
+    /// nothing. Use [`Self::local`] only where a local-only path actually needs
+    /// the provider handle.
+    #[must_use]
+    pub(crate) fn is_local(&self) -> bool {
+        self.local.is_some()
+    }
+
     /// Whether this open may mutate provider state.
     #[must_use]
-    #[allow(dead_code)] // Task 4 gates the local-only branches on it.
     pub(crate) fn is_writable(&self) -> bool {
         self.writable
     }
