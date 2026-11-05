@@ -784,6 +784,10 @@ impl MemoryPort for FixtureMemoryProvider {
             Ok(admitted) => admitted,
             Err(reject) => return SpokeResult::Reject(reject),
         };
+        // Test-only, op-targeted admission pause: after the typed decode and the
+        // authenticated principal, before the operation's clock and its writer
+        // transaction. Outcome-neutral; reads and other ops never reach it.
+        self.faults().wait_target(op).await;
         let now = Utc::now();
         let mut transaction = match self.begin_write().await {
             Ok(transaction) => transaction,
@@ -1151,6 +1155,10 @@ impl MemoryPort for FixtureMemoryProvider {
             Ok(admitted) => admitted,
             Err(reject) => return SpokeResult::Reject(reject),
         };
+        // Test-only, op-targeted admission pause: after the typed decode and the
+        // authenticated principal, before the private slice opens its writer
+        // transaction. Outcome-neutral; reads and other ops never reach it.
+        self.faults().wait_target(op).await;
         match self
             .candidates_review(principal_id(principal), &admitted, Utc::now())
             .await

@@ -55,7 +55,7 @@ use spoke_operations::{
     validate_memory_capture, validate_memory_grants_grant, validate_memory_grants_list,
     validate_memory_recall, validate_memory_records_create, validate_memory_records_list,
     validate_memory_records_update, validate_memory_spaces_list, validate_memory_subjects_fence,
-    GrantRequirement, IssuedGrant, MemoryPort, SpokeRejectCode, SpokeResult,
+    GrantRequirement, IssuedGrant, MemoryPort, SpokeReject, SpokeRejectCode, SpokeResult,
 };
 
 use crate::error::{CoreError, CoreResult};
@@ -201,6 +201,9 @@ enum ProviderError {
     InvalidInput {
         field: String,
         reason: String,
+        /// Structured protocol keys the published validator attached (e.g.
+        /// `limit`); `None` when this refusal comes from the provider itself.
+        details: Option<Map<String, Value>>,
     },
     StatusTransition(String),
     CursorInvalid,
@@ -237,6 +240,21 @@ enum ProviderError {
 }
 
 impl ProviderError {
+    /// The published validator's refusal, keeping its structured `details`.
+    ///
+    /// §7.0.7 requires an exceeded limit to name itself in `details.limit`;
+    /// rebuilding the envelope from `message` alone dropped that key. The
+    /// provider's own `field` stays authoritative and nothing is invented: a
+    /// validator that attaches no `limit` (e.g. a selection-shape refusal)
+    /// carries no limiter key either.
+    fn from_reject(reject: SpokeReject, field: &str) -> Self {
+        Self::InvalidInput {
+            field: field.to_owned(),
+            reason: reject.message,
+            details: reject.details,
+        }
+    }
+
     const fn reject_code(&self) -> SpokeRejectCode {
         match self {
             Self::NotFound(_) => SpokeRejectCode::NotFound,
@@ -319,7 +337,7 @@ impl ProviderError {
             Self::ReceiptExpired { last_known_status } => format!(
                 "this receipt's body was evicted after its retention window and is no longer served; the recorded outcome was {last_known_status}, and the operation is not re-executed — the idempotency_key stays bound to that outcome until its dedup retention window ends, so repeating that key cannot reach a new effect; use a new idempotency_key to perform a new operation"
             ),
-            Self::InvalidInput { field, reason } => format!("{field}: {reason}"),
+            Self::InvalidInput { field, reason, .. } => format!("{field}: {reason}"),
             Self::CursorInvalid => {
                 "the pagination cursor is no longer valid (state or grant change); restart the listing"
                     .to_string()
@@ -334,7 +352,18 @@ impl ProviderError {
             Value::String(self.retry_class().to_string()),
         );
         match self {
-            Self::InvalidInput { field, .. } => {
+            Self::InvalidInput {
+                field,
+                details: carried,
+                ..
+            } => {
+                if let Some(carried) = carried {
+                    for (key, value) in carried {
+                        if key != "retry_class" && key != "field" {
+                            details.insert(key.clone(), value.clone());
+                        }
+                    }
+                }
                 details.insert("field".to_string(), json!(field));
             }
             Self::RevisionConflict { current } => {
@@ -384,7 +413,11 @@ impl ProviderError {
 fn store_error(error: StoreError) -> ProviderError {
     match error {
         StoreError::NotFound(target) => ProviderError::NotFound(target),
-        StoreError::InvalidInput { field, reason } => ProviderError::InvalidInput { field, reason },
+        StoreError::InvalidInput { field, reason } => ProviderError::InvalidInput {
+            field,
+            reason,
+            details: None,
+        },
         StoreError::NotAuthorized(reason) => ProviderError::NotAuthorized(reason),
         StoreError::SpaceFrozen(reason) => ProviderError::SpaceFrozen(reason),
         StoreError::SubjectFenced {
@@ -535,10 +568,7 @@ fn payload_digest<T: Serialize>(op: &str, request: &T) -> Result<String, Provide
         .map_err(|e| ProviderError::Internal(format!("payload encode: {e}")))?;
     match jcs_sha256_hex(&json!({ "op": op, "payload": payload })) {
         SpokeResult::Ok(digest) => Ok(digest),
-        SpokeResult::Reject(reject) => Err(ProviderError::InvalidInput {
-            field: "payload".to_string(),
-            reason: reject.message,
-        }),
+        SpokeResult::Reject(reject) => Err(ProviderError::from_reject(reject, "payload")),
     }
 }
 
@@ -1252,6 +1282,7 @@ impl LocalMemoryProvider {
                     reason: format!(
                         "candidate {candidate_id} belongs to subject {owner}, not {subject_id}"
                     ),
+                    details: None,
                 })
             }
             Some(owner) => owner,
@@ -1337,10 +1368,7 @@ impl LocalMemoryProvider {
         _section: &MemoryDisposition,
     ) -> SpokeResult<schemas::MemoryCandidatesReviewResponse> {
         if let SpokeResult::Reject(reject) = validate_memory_candidates_review(&request) {
-            return deny(&ProviderError::InvalidInput {
-                field: "decision".to_string(),
-                reason: reject.message,
-            });
+            return deny(&ProviderError::from_reject(reject, "decision"));
         }
         self.review_committed(principal_id(principal), &request, Some(subject_id))
             .await
@@ -1528,6 +1556,28 @@ impl LocalMemoryProvider {
         release: std::sync::Arc<tokio::sync::Barrier>,
     ) {
         self.store.park_next_read(entered, release);
+    }
+
+    /// Proof seam: park the next write once it has entered the write-admission
+    /// machinery and before its writer transaction, so a competing transition can
+    /// be observed at the contested boundary. `entered` signals the arrival,
+    /// `release` frees it. Single next use. Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn park_next_admission(
+        &self,
+        entered: std::sync::Arc<tokio::sync::Notify>,
+        release: std::sync::Arc<tokio::sync::Barrier>,
+    ) -> u64 {
+        self.store.park_next_admission(entered, release)
+    }
+
+    /// Disarm exactly the admission arm `token` owns; a stale handle cannot clear
+    /// a newer arm. Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn disarm_next_admission(&self, token: u64) {
+        self.store.disarm_next_admission(token);
     }
 
     /// §5.2 step 2 proof seam: park the next publication while it holds the
@@ -2145,10 +2195,7 @@ impl LocalMemoryProvider {
         if let SpokeResult::Reject(reject) =
             validate_memory_capture(&request, policy::max_content_bytes())
         {
-            return Ok(deny(&ProviderError::InvalidInput {
-                field: "content".to_string(),
-                reason: reject.message,
-            }));
+            return Ok(deny(&ProviderError::from_reject(reject, "content")));
         }
         let op = OP_CAPTURE;
         let digest = match payload_digest(op, &request) {
@@ -2276,10 +2323,7 @@ impl LocalMemoryProvider {
         if let SpokeResult::Reject(reject) =
             validate_memory_records_update(&request, policy::max_content_bytes())
         {
-            return deny(&ProviderError::InvalidInput {
-                field: "content".to_string(),
-                reason: reject.message,
-            });
+            return deny(&ProviderError::from_reject(reject, "content"));
         }
         let (space_id, record_id, expected, content, kind) = match &request {
             UpdateRequest::Variant0 {
@@ -2475,10 +2519,7 @@ impl LocalMemoryProvider {
         if let SpokeResult::Reject(reject) =
             validate_memory_records_list(&request, policy::MAX_PAGE_SIZE_BOUND)
         {
-            return deny(&ProviderError::InvalidInput {
-                field: "selection".to_string(),
-                reason: reject.message,
-            });
+            return deny(&ProviderError::from_reject(reject, "selection"));
         }
         let selection = match &request.selection {
             ReadSelection::SubjectAll => Selection::SubjectAll,
@@ -2574,10 +2615,7 @@ impl MemoryPort for LocalMemoryProvider {
         if let SpokeResult::Reject(reject) =
             validate_memory_spaces_list(&request, policy::MAX_PAGE_SIZE_BOUND)
         {
-            return deny(&ProviderError::InvalidInput {
-                field: "limit".to_string(),
-                reason: reject.message,
-            });
+            return deny(&ProviderError::from_reject(reject, "limit"));
         }
         let (spaces, marker) = match self.store.visible_spaces(principal_id).await {
             Ok(page) => page,
@@ -2716,10 +2754,7 @@ impl MemoryPort for LocalMemoryProvider {
     ) -> SpokeResult<schemas::MemorySubjectsFenceResponse> {
         let principal_id = principal_id(principal);
         if let SpokeResult::Reject(reject) = validate_memory_subjects_fence(&request) {
-            return deny(&ProviderError::InvalidInput {
-                field: "target".to_string(),
-                reason: reject.message,
-            });
+            return deny(&ProviderError::from_reject(reject, "target"));
         }
         let op = OP_FENCE_SUBJECT;
         let target = match &request.target {
@@ -2786,10 +2821,7 @@ impl MemoryPort for LocalMemoryProvider {
         if let SpokeResult::Reject(reject) =
             validate_memory_grants_list(&request, policy::MAX_PAGE_SIZE_BOUND)
         {
-            return deny(&ProviderError::InvalidInput {
-                field: "limit".to_string(),
-                reason: reject.message,
-            });
+            return deny(&ProviderError::from_reject(reject, "limit"));
         }
         let principal_filter = request.principal_id.as_ref().map(|value| value.as_str());
         let subject_filter = request.subject_id.as_ref().map(|value| value.as_str());
@@ -2852,10 +2884,7 @@ impl MemoryPort for LocalMemoryProvider {
     ) -> SpokeResult<schemas::MemoryGrantsGrantResponse> {
         let principal_id = principal_id(principal);
         if let SpokeResult::Reject(reject) = validate_memory_grants_grant(&request) {
-            return deny(&ProviderError::InvalidInput {
-                field: "capabilities".to_string(),
-                reason: reject.message,
-            });
+            return deny(&ProviderError::from_reject(reject, "capabilities"));
         }
         let GrantFacts {
             space_id,
@@ -2995,10 +3024,7 @@ impl MemoryPort for LocalMemoryProvider {
         if let SpokeResult::Reject(reject) =
             validate_memory_candidates_list(&request, policy::MAX_PAGE_SIZE_BOUND)
         {
-            return deny(&ProviderError::InvalidInput {
-                field: "limit".to_string(),
-                reason: reject.message,
-            });
+            return deny(&ProviderError::from_reject(reject, "limit"));
         }
         let status = request.status.map(|status| status.to_string());
         let scope = format!(
@@ -3140,10 +3166,7 @@ impl MemoryPort for LocalMemoryProvider {
         request: schemas::MemoryCandidatesReviewRequest,
     ) -> SpokeResult<schemas::MemoryCandidatesReviewResponse> {
         if let SpokeResult::Reject(reject) = validate_memory_candidates_review(&request) {
-            return deny(&ProviderError::InvalidInput {
-                field: "decision".to_string(),
-                reason: reject.message,
-            });
+            return deny(&ProviderError::from_reject(reject, "decision"));
         }
         // A review consumes the candidate exactly as a dismissal does, so it
         // takes the owning bearer's disposition section too (fix round 3,
@@ -3168,10 +3191,7 @@ impl MemoryPort for LocalMemoryProvider {
         if let SpokeResult::Reject(reject) =
             validate_memory_records_create(&request, policy::max_content_bytes())
         {
-            return deny(&ProviderError::InvalidInput {
-                field: "content".to_string(),
-                reason: reject.message,
-            });
+            return deny(&ProviderError::from_reject(reject, "content"));
         }
         let op = OP_RECORDS_CREATE;
         let digest = match payload_digest(op, &request) {
@@ -3374,10 +3394,7 @@ impl MemoryPort for LocalMemoryProvider {
         if let SpokeResult::Reject(reject) =
             validate_memory_recall(&request, policy::MAX_PAGE_SIZE_BOUND)
         {
-            return deny(&ProviderError::InvalidInput {
-                field: "budget".to_string(),
-                reason: reject.message,
-            });
+            return deny(&ProviderError::from_reject(reject, "budget"));
         }
         let selection = match &request.selection {
             ReadSelection::SubjectAll => Selection::SubjectAll,

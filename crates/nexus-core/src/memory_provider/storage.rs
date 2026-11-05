@@ -82,6 +82,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU8;
 #[cfg(feature = "test-hooks")]
 use std::sync::atomic::AtomicUsize;
+#[cfg(feature = "test-hooks")]
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
@@ -265,6 +267,26 @@ struct ReadRendezvous {
     entered: Arc<tokio::sync::Notify>,
     release: Arc<tokio::sync::Barrier>,
 }
+
+/// Proof seam: the rendezvous a paused write waits at once it has entered the
+/// provider's write-admission machinery (past the read-only gate and the
+/// admission counter) and before it opens its writer transaction or runs
+/// retention. `entered` reports that arrival; `release` frees it. Test only.
+#[cfg(feature = "test-hooks")]
+struct AdmissionRendezvous {
+    /// Monotonic identity of this arm: a stale test handle can only disarm the
+    /// arm it owns, never a replacement.
+    token: u64,
+    entered: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Barrier>,
+}
+
+/// Upper bound on the provider's wait at a parked admission. A test that
+/// disappears, cancels, or never releases cannot leave a write parked forever:
+/// after the bound the write proceeds normally (the pause never changes the
+/// operation's outcome).
+#[cfg(feature = "test-hooks")]
+const ADMISSION_HOLD_BOUND: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// D15 proof seam: the rendezvous a parked capture waits at — `entered` reports
 /// that it holds its write transaction and has already validated the caller's
@@ -580,6 +602,15 @@ pub(super) struct MemoryStore {
     /// test can move the clock while the read is queued.
     #[cfg(feature = "test-hooks")]
     read_barrier: std::sync::Mutex<Option<ReadRendezvous>>,
+    /// Test-only rendezvous a write waits at once it has entered the
+    /// write-admission machinery and before its writer transaction — `entered`
+    /// tells the test the write arrived, `release` frees it — so a competing
+    /// transition can be observed at the contested boundary.
+    #[cfg(feature = "test-hooks")]
+    admission_barrier: std::sync::Mutex<Option<AdmissionRendezvous>>,
+    /// Monotonic token source for admission arms.
+    #[cfg(feature = "test-hooks")]
+    admission_token: AtomicU64,
     /// Test-only rendezvous a capture waits at once its write transaction holds
     /// the lock and has validated the caller's binding — `entered` tells the
     /// test the capture is parked, `release` frees it — so a test can show a
@@ -664,6 +695,8 @@ impl MemoryStore {
         self.require_writable()?;
         #[cfg(feature = "test-hooks")]
         self.lock_attempts.fetch_add(1, Ordering::SeqCst);
+        #[cfg(feature = "test-hooks")]
+        self.admission_gate().await;
         self.reclaim_expired().await;
         let tx = begin_immediate(&self.pool).await?;
         Ok((tx, self.now()))
@@ -831,6 +864,10 @@ impl MemoryStore {
             #[cfg(feature = "test-hooks")]
             read_barrier: std::sync::Mutex::new(None),
             #[cfg(feature = "test-hooks")]
+            admission_barrier: std::sync::Mutex::new(None),
+            #[cfg(feature = "test-hooks")]
+            admission_token: AtomicU64::new(0),
+            #[cfg(feature = "test-hooks")]
             capture_barrier: std::sync::Mutex::new(None),
             #[cfg(feature = "test-hooks")]
             publish_barrier: std::sync::Mutex::new(None),
@@ -960,6 +997,37 @@ impl MemoryStore {
             Some(CaptureRendezvous { entered, release });
     }
 
+    /// Park the next write once it has entered the write-admission machinery and
+    /// before its writer transaction (proof seam). `entered` reports that
+    /// arrival, `release` frees it. Single next use, like the capture seam.
+    #[cfg(feature = "test-hooks")]
+    pub(super) fn park_next_admission(
+        &self,
+        entered: Arc<tokio::sync::Notify>,
+        release: Arc<tokio::sync::Barrier>,
+    ) -> u64 {
+        let token = self.admission_token.fetch_add(1, Ordering::SeqCst) + 1;
+        *self.admission_barrier.lock().expect("admission gate") =
+            Some(AdmissionRendezvous {
+                token,
+                entered,
+                release,
+            });
+        token
+    }
+
+    /// Disarm exactly the admission arm `token` owns (test control). A stale
+    /// handle cannot clear a newer arm; once the provider has taken an arm it is
+    /// no longer in the slot and this is a no-op (the provider's bounded wait
+    /// covers that case).
+    #[cfg(feature = "test-hooks")]
+    pub(super) fn disarm_next_admission(&self, token: u64) {
+        let mut gate = self.admission_barrier.lock().expect("admission gate");
+        if gate.as_ref().is_some_and(|armed| armed.token == token) {
+            *gate = None;
+        }
+    }
+
     /// §5.2 step 2 proof seam: park the next publication once it holds the
     /// workspace publication section and before it settles or stages anything, so
     /// a test can observe another provider instance on the same workspace waiting
@@ -1023,6 +1091,24 @@ impl MemoryStore {
         if let Some(rendezvous) = parked {
             rendezvous.entered.notify_one();
             rendezvous.release.wait().await;
+        }
+    }
+
+    /// The [`Self::park_next_admission`] wait, taken at the same point in every
+    /// write: after the read-only gate and the admission counter, before the
+    /// retention pass and before the writer transaction.
+    #[cfg(feature = "test-hooks")]
+    async fn admission_gate(&self) {
+        let parked = {
+            let mut gate = self.admission_barrier.lock().expect("admission gate");
+            gate.take()
+        };
+        if let Some(rendezvous) = parked {
+            rendezvous.entered.notify_one();
+            // Bounded: a vanished, cancelled or never-releasing test cannot park
+            // this write forever, and expiry proceeds normally (the pause never
+            // changes the operation's outcome).
+            let _ = tokio::time::timeout(ADMISSION_HOLD_BOUND, rendezvous.release.wait()).await;
         }
     }
 
@@ -2636,6 +2722,13 @@ fn describe(error: &StoreError) -> String {
 /// receipt is itself a disclosure that current coverage must still admit
 /// (§7.0.5). §7.9 non-amplification is a fresh-effect rule and lives in
 /// [`authorize_issuance`], behind the probe.
+///
+/// An op is admitted only when **one** grant satisfies every requirement of the
+/// op — its required capabilities and the whole data access it names (§6.5:
+/// "at least one grant that … includes the op's required capability … and
+/// covers the op's data access"; the published `grant_covers` helper evaluates
+/// one grant against one requirement). Two grants that each satisfy a different
+/// requirement never union into an admission.
 async fn authorize(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     admission: &Admission<'_>,
@@ -2644,25 +2737,25 @@ async fn authorize(
     space_in_tx(tx, admission.space_id).await?;
     let rows = grants_in_tx(tx, admission.space_id).await?;
     let grants = wire_grants(&rows)?;
-    let check = |requirement: &GrantRequirement<'_>| -> StoreResult<()> {
-        if covered(
-            &grants,
-            admission.principal_id,
-            admission.space_id,
-            now,
-            requirement,
-        ) {
-            return Ok(());
-        }
-        Err(StoreError::NotAuthorized(format!(
+    let refuse = |requirements: &[GrantRequirement<'_>]| -> StoreError {
+        let capability = requirements
+            .first()
+            .map_or("any", |requirement| requirement.capability);
+        StoreError::NotAuthorized(format!(
             "principal {} holds no grant covering {} in space {}",
-            admission.principal_id, requirement.capability, admission.space_id
-        )))
+            admission.principal_id, capability, admission.space_id
+        ))
     };
     match &admission.coverage {
         Coverage::Requirements(requirements) => {
-            for requirement in *requirements {
-                check(requirement)?;
+            if !one_grant_covers(
+                &grants,
+                admission.principal_id,
+                admission.space_id,
+                now,
+                requirements,
+            ) {
+                return Err(refuse(requirements));
             }
         }
         Coverage::Candidate {
@@ -2672,8 +2765,22 @@ async fn authorize(
             let candidate = candidate_in_tx(tx, admission.space_id, candidate_id)
                 .await?
                 .ok_or_else(|| StoreError::NotFound(format!("candidate {candidate_id}")))?;
-            for capability in *capabilities {
-                check(&candidate.requirement(capability))?;
+            let requirements: Vec<GrantRequirement<'_>> = capabilities
+                .iter()
+                .map(|capability| candidate.requirement(capability))
+                .collect();
+            if !one_grant_covers(
+                &grants,
+                admission.principal_id,
+                admission.space_id,
+                now,
+                &requirements,
+            ) {
+                // C-102/MEM-R026: a by-ID candidate op hides incomplete coverage
+                // exactly as it hides an id this store never held — the same
+                // code AND the same message the absent row produces — so no
+                // caller without coverage can learn that the candidate exists.
+                return Err(StoreError::NotFound(format!("candidate {candidate_id}")));
             }
         }
         Coverage::Record {
@@ -2684,17 +2791,27 @@ async fn authorize(
             let record = record_in_tx(tx, admission.space_id, record_id)
                 .await?
                 .ok_or_else(|| StoreError::NotFound(format!("record {record_id}")))?;
+            let mut requirements: Vec<GrantRequirement<'_>> = Vec::new();
             for capability in *capabilities {
-                check(&record.requirement(capability, false))?;
+                requirements.push(record.requirement(capability, false));
                 if let Some(target) = target {
-                    check(&GrantRequirement {
+                    requirements.push(GrantRequirement {
                         capability,
                         subject_id: Some(record.subject_id.as_str()),
                         context_ids: target.context_id.map(str::to_string).into_iter().collect(),
                         reads_shared: target.visibility == Placement::SHARED,
                         subject_all: false,
-                    })?;
+                    });
                 }
+            }
+            if !one_grant_covers(
+                &grants,
+                admission.principal_id,
+                admission.space_id,
+                now,
+                &requirements,
+            ) {
+                return Err(refuse(&requirements));
             }
         }
     }
@@ -3557,6 +3674,29 @@ fn covered(
     grants
         .iter()
         .any(|grant| grant_covers(grant, principal_id, space_id, now, requirement))
+}
+
+/// §6.5 admission of one op: does ONE grant satisfy every requirement?
+///
+/// The protocol admits an op only if the authenticated principal holds **at
+/// least one** grant that includes the op's required capabilities and covers
+/// the op's whole data access. Requirements are never unioned across grants —
+/// a `review` grant and a separate `records_write` grant do not compose into
+/// `memory.candidates.review` (§7.15), and a promote grant that covers only the
+/// source placement does not compose with one that covers only the target
+/// (§7.21).
+fn one_grant_covers(
+    grants: &[MemoryGrant],
+    principal_id: &str,
+    space_id: &str,
+    now: DateTime<Utc>,
+    requirements: &[GrantRequirement<'_>],
+) -> bool {
+    grants.iter().any(|grant| {
+        requirements
+            .iter()
+            .all(|requirement| grant_covers(grant, principal_id, space_id, now, requirement))
+    })
 }
 
 fn wire_grants(rows: &[GrantRow]) -> StoreResult<Vec<MemoryGrant>> {
@@ -5646,6 +5786,22 @@ impl MemoryStore {
             return Err(StoreError::RevisionConflict {
                 current: record.revision,
             });
+        }
+        // §7.0.4/MEM-R007: an update that carries no content and names only the
+        // kind the row already has changes nothing observable, so the row keeps
+        // its revision, kind, content and timestamps. The operation still
+        // commits its content-free receipt — and therefore its idempotency
+        // binding — through the same no-op publication the promotion path uses,
+        // and journals no record effect because no record byte changes.
+        if let RecordMutation::Update {
+            content: None,
+            kind: Some(kind),
+        } = &step
+        {
+            if *kind == record.kind.as_str() {
+                let result = json!({ "record_id": record_id, "revision": record.revision });
+                return self.commit_receipt(tx, ctx, &result, now).await;
+            }
         }
         // The content-bearing projection this mutation replaces: the provider's
         // own previous version of the row, never whatever bytes sit at the

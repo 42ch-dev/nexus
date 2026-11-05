@@ -2713,13 +2713,16 @@ async fn candidate_reads_and_reviews_are_limited_to_covered_scopes() {
         "an uncovered candidate reads as absent"
     );
 
-    // §7.15 needs `records_write` over the same scope; this principal lacks it.
+    // §7.15 needs `records_write` over the same scope; this principal lacks it,
+    // so the by-ID mutation hides the candidate exactly as an absent id does
+    // (C-102/MEM-R026).
     let refused = wire(
         &provider
             .review_candidate(&scoped, review_request("k-review-scoped", &covered_id, 1))
             .await,
     );
-    assert_eq!(error_code(&refused), "NOT_AUTHORIZED");
+    assert_eq!(error_code(&refused), "NOT_FOUND");
+    assert_eq!(retry_class(&refused), "terminal");
 
     // A reader with no review grant sees nothing at all rather than an empty page.
     let unprivileged = wire(
@@ -2728,6 +2731,117 @@ async fn candidate_reads_and_reviews_are_limited_to_covered_scopes() {
             .await,
     );
     assert_eq!(error_code(&unprivileged), "NOT_AUTHORIZED");
+}
+
+/// §6.5 single-grant rule + C-102 anti-oracle (N3 C8 I217/I226 regression):
+/// `review` and `records_write` issued as two same-scope grants never compose,
+/// one grant carrying both is admitted with the inherited placement, and a
+/// partially covered candidate is indistinguishable from an absent id.
+#[tokio::test]
+async fn review_requires_one_grant_and_hides_partial_coverage() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    let scoped = principal(OTHER);
+    wire(
+        &provider.ensure_subject(&admin, ensure_request(SUBJECT)).await,
+    );
+    let captured = wire(
+        &provider
+            .capture(&admin, capture_request("k-single-grant", Some("bnd_1"), TEXT))
+            .await,
+    );
+    let candidate_id = receipt(&captured)["result"]["candidate_ids"][0]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // `review` alone is not enough.
+    wire(
+        &provider
+            .grant(
+                &admin,
+                restricted_grant("k-sg-review", "review", OTHER, SUBJECT, &["bnd_1"]),
+            )
+            .await,
+    );
+    let review_only = wire(
+        &provider
+            .review_candidate(&scoped, review_request("k-sg-review-only", &candidate_id, 1))
+            .await,
+    );
+    assert_eq!(error_code(&review_only), "NOT_FOUND");
+    assert_eq!(retry_class(&review_only), "terminal");
+
+    // A SECOND same-scope grant carrying `records_write` never unions in.
+    wire(
+        &provider
+            .grant(
+                &admin,
+                restricted_grant("k-sg-write", "records_write", OTHER, SUBJECT, &["bnd_1"]),
+            )
+            .await,
+    );
+    let separate = wire(
+        &provider
+            .review_candidate(&scoped, review_request("k-sg-separate", &candidate_id, 1))
+            .await,
+    );
+    assert_eq!(
+        error_code(&separate),
+        "NOT_FOUND",
+        "two grants each covering one required capability are not an admission"
+    );
+    assert_eq!(retry_class(&separate), "terminal");
+
+    // The refused reviews consumed nothing, and the shell is still pending.
+    let shell = wire(
+        &provider
+            .get_candidate(&scoped, candidate_get_request(&candidate_id))
+            .await,
+    );
+    assert_eq!(shell["candidate"]["status"], "pending");
+    assert_eq!(
+        wire(&provider.recall(&admin, recall_request(10)).await)["total_authorized"],
+        0
+    );
+
+    // The existing-but-partially-covered id and an id this store never held are
+    // the same refusal (C-102): no existence oracle.
+    let missing = wire(
+        &provider
+            .review_candidate(&scoped, review_request("k-sg-missing", "cnd_never_existed", 1))
+            .await,
+    );
+    assert_eq!(error_code(&missing), "NOT_FOUND");
+    assert_eq!(error_code(&separate), error_code(&missing));
+
+    // ONE grant carrying both capabilities over the same scope is admitted, and
+    // the created record inherits the candidate's placement.
+    let dual: schemas::MemoryGrantsGrantRequest = dto(json!({
+        "space_id": SPACE,
+        "subject_id": SUBJECT,
+        "principal_id": OTHER,
+        "capabilities": ["review", "records_write"],
+        "context_ids": ["bnd_1"],
+        "shared_access": false,
+        "idempotency_key": "k-sg-dual",
+    }));
+    wire(&provider.grant(&admin, dual).await);
+    let promoted = wire(
+        &provider
+            .review_candidate(&scoped, review_request("k-sg-promote", &candidate_id, 1))
+            .await,
+    );
+    assert_eq!(receipt(&promoted)["result"]["outcome"], "promoted");
+    let record_id = receipt(&promoted)["result"]["record_ids"][0]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let record = wire(
+        &provider.get_record(&admin, record_get_request(&record_id)).await,
+    );
+    assert_eq!(record["record"]["scope"]["context_id"], "bnd_1");
 }
 
 /// MEM-R006: candidate pages carry authorized candidates only, so a reviewer
@@ -4585,4 +4699,357 @@ async fn case_aliased_and_long_subject_ids_map_to_distinct_bounded_locks() {
             "the digest uses only safe ASCII: {name}"
         );
     }
+}
+
+/// I249: every content-bound refusal carries the published structured bound in
+/// `details.limit` — capture, create and update alike — while a page/budget
+/// bound names `max_page_size` and a shape refusal carries no limiter key at
+/// all (a shape error is not a limit error).
+#[tokio::test]
+async fn content_bound_refusals_name_the_exceeded_limit() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+
+    let described = wire(&provider.describe(&admin, dto(json!({}))).await);
+    let max_content_bytes = described["limits"]["max_content_bytes"]
+        .as_u64()
+        .expect("max_content_bytes");
+    let framing = 11_u64;
+    let at_bound = "a".repeat(
+        usize::try_from(max_content_bytes - framing).expect("bound fits usize"),
+    );
+    let over_bound = "a".repeat(
+        usize::try_from(max_content_bytes - framing).expect("bound fits usize") + 1,
+    );
+
+    // capture
+    let refused = wire(
+        &provider
+            .capture(
+                &admin,
+                capture_request("k-bound-capture", None, &over_bound),
+            )
+            .await,
+    );
+    assert_eq!(error_code(&refused), "INVALID_INPUT");
+    assert_eq!(error_details(&refused)["field"], "content");
+    assert_eq!(
+        error_details(&refused)["limit"],
+        "max_content_bytes",
+        "§7.0.7 names the exceeded bound: {refused}"
+    );
+    assert_eq!(retry_class(&refused), "terminal");
+    let pending = wire(
+        &provider
+            .list_candidates(&admin, candidates_list_request(Some("pending")))
+            .await,
+    );
+    assert_eq!(
+        pending["candidates"].as_array().expect("candidates").len(),
+        0,
+        "the refused oversize capture produced no candidate"
+    );
+
+    // create: the exact bound is admitted and stored whole; one more byte refuses.
+    let created = wire(
+        &provider
+            .create_record(
+                &admin,
+                record_create_request(
+                    "k-bound-create",
+                    "note",
+                    &json!({ "visibility": "shared" }),
+                    &at_bound,
+                ),
+            )
+            .await,
+    );
+    let record_id = receipt(&created)["result"]["record_id"]
+        .as_str()
+        .expect("record id")
+        .to_owned();
+    assert_eq!(receipt(&created)["result"]["revision"], 1);
+    let stored = wire(
+        &provider
+            .get_record(&admin, record_get_request(&record_id))
+            .await,
+    );
+    assert_eq!(
+        stored["record"]["content"]["text"].as_str().expect("text"),
+        at_bound,
+        "at-bound content is stored byte-identically"
+    );
+
+    let update_refused = wire(
+        &provider
+            .update_record(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "record_id": record_id,
+                    "expected_revision": 1,
+                    "content": { "text": over_bound },
+                    "idempotency_key": "k-bound-update",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(error_code(&update_refused), "INVALID_INPUT");
+    assert_eq!(error_details(&update_refused)["field"], "content");
+    assert_eq!(
+        error_details(&update_refused)["limit"],
+        "max_content_bytes",
+        "§7.0.7 names the exceeded bound: {update_refused}"
+    );
+    let unchanged = wire(
+        &provider
+            .get_record(&admin, record_get_request(&record_id))
+            .await,
+    );
+    assert_eq!(unchanged["record"]["revision"], 1);
+    assert_eq!(
+        unchanged["record"]["content"]["text"].as_str().expect("text"),
+        at_bound
+    );
+
+    // A page bound names its own limit.
+    let page_refused = wire(
+        &provider
+            .list_records(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "subject_id": SUBJECT,
+                    "selection": { "mode": "subject_all" },
+                    "limit": 101,
+                })),
+            )
+            .await,
+    );
+    assert_eq!(error_code(&page_refused), "INVALID_INPUT");
+    assert_eq!(error_details(&page_refused)["limit"], "max_page_size");
+
+    // The recall budget cap names the same page limit.
+    let recall_refused = wire(
+        &provider
+            .recall(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "subject_id": SUBJECT,
+                    "selection": { "mode": "subject_all" },
+                    "budget": { "max_items": 101 },
+                })),
+            )
+            .await,
+    );
+    assert_eq!(error_code(&recall_refused), "INVALID_INPUT");
+    assert_eq!(error_details(&recall_refused)["limit"], "max_page_size");
+
+    // A shape refusal is not a limiter error and invents no limiter key.
+    let shape_refused = wire(
+        &provider
+            .grant(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "principal_id": OTHER,
+                    "capabilities": [],
+                    "idempotency_key": "k-shape-grant",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(error_code(&shape_refused), "INVALID_INPUT");
+    assert_eq!(error_details(&shape_refused)["field"], "capabilities");
+    assert!(
+        error_details(&shape_refused).get("limit").is_none(),
+        "a non-limit refusal carries no limiter key: {shape_refused}"
+    );
+}
+
+/// I250: a same-kind/no-content update is a genuine no-op — the row keeps its
+/// revision, kind, content and timestamps and no record file is published —
+/// while the content-free receipt (and its same-key replay) still commits, a
+/// changed kind advances exactly once, and an explicit byte-identical content
+/// update is never a no-op.
+#[tokio::test]
+async fn record_kind_only_update_is_a_replayable_noop() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    let admin = principal(CREATOR);
+    let stranger = principal(OTHER);
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    let created = wire(
+        &provider
+            .create_record(
+                &admin,
+                record_create_request(
+                    "k-noop-create",
+                    "note",
+                    &json!({ "visibility": "shared" }),
+                    TEXT,
+                ),
+            )
+            .await,
+    );
+    let record_id = receipt(&created)["result"]["record_id"]
+        .as_str()
+        .expect("record id")
+        .to_owned();
+    let before = wire(
+        &provider
+            .get_record(&admin, record_get_request(&record_id))
+            .await,
+    )["record"]
+        .clone();
+    let publications_before = files_under(&provider.file_root());
+
+    let no_op = wire(
+        &provider
+            .update_record(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "record_id": record_id,
+                    "expected_revision": 1,
+                    "kind": "note",
+                    "idempotency_key": "k-noop",
+                })),
+            )
+            .await,
+    );
+    receipt(&no_op);
+    assert_eq!(no_op["result"]["record_id"], record_id.as_str());
+    assert_eq!(no_op["result"]["revision"], 1, "a no-op keeps the revision");
+
+    let after = wire(
+        &provider
+            .get_record(&admin, record_get_request(&record_id))
+            .await,
+    )["record"]
+        .clone();
+    assert_eq!(after["revision"], before["revision"]);
+    assert_eq!(after["kind"], before["kind"]);
+    assert_eq!(after["content"], before["content"]);
+    assert_eq!(after["created_at"], before["created_at"]);
+    assert_eq!(after["updated_at"], before["updated_at"]);
+    assert_eq!(
+        files_under(&provider.file_root()),
+        publications_before,
+        "a no-op publishes no record file"
+    );
+
+    // The no-op's receipt is committed and a same-key replay resolves to it.
+    let receipt_id = no_op["receipt_id"].as_str().expect("receipt id").to_owned();
+    let receipt_view = wire(
+        &provider
+            .get_receipt(
+                &admin,
+                dto(json!({ "space_id": SPACE, "receipt_id": receipt_id })),
+            )
+            .await,
+    );
+    assert_eq!(receipt_view["receipt"]["status"], "committed");
+    assert_eq!(receipt_view["receipt"]["result"]["revision"], 1);
+    let replay = wire(
+        &provider
+            .update_record(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "record_id": record_id,
+                    "expected_revision": 1,
+                    "kind": "note",
+                    "idempotency_key": "k-noop",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(replay["receipt_id"], no_op["receipt_id"]);
+
+    // A changed kind is a real edit.
+    let changed = wire(
+        &provider
+            .update_record(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "record_id": record_id,
+                    "expected_revision": 1,
+                    "kind": "fact",
+                    "idempotency_key": "k-noop-kind",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(changed["result"]["revision"], 2);
+
+    // An explicit content update is never a no-op, even byte-identical content.
+    let identical = wire(
+        &provider
+            .update_record(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "record_id": record_id,
+                    "expected_revision": 2,
+                    "content": { "text": TEXT },
+                    "idempotency_key": "k-noop-identical",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(identical["result"]["revision"], 3);
+
+    // A stale CAS and an unauthorized principal both change nothing.
+    let stale = wire(
+        &provider
+            .update_record(
+                &admin,
+                dto(json!({
+                    "space_id": SPACE,
+                    "record_id": record_id,
+                    "expected_revision": 1,
+                    "kind": "fact",
+                    "idempotency_key": "k-noop-stale",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(error_code(&stale), "REVISION_CONFLICT");
+    let denied = wire(
+        &provider
+            .update_record(
+                &stranger,
+                dto(json!({
+                    "space_id": SPACE,
+                    "record_id": record_id,
+                    "expected_revision": 3,
+                    "kind": "fact",
+                    "idempotency_key": "k-noop-denied",
+                })),
+            )
+            .await,
+    );
+    assert_eq!(error_code(&denied), "NOT_AUTHORIZED");
+    let final_state = wire(
+        &provider
+            .get_record(&admin, record_get_request(&record_id))
+            .await,
+    )["record"]
+        .clone();
+    assert_eq!(final_state["revision"], 3);
+    assert_eq!(final_state["kind"], "fact");
+    assert_eq!(final_state["content"]["text"], TEXT);
 }
