@@ -20,9 +20,14 @@
 //!   SDK's own signed session calls `memory.subjects.get` against the subject
 //!   public Core ensured (active identity, unknown subject, and the archived
 //!   lifecycle the Core reader branches on).
-//! - The legacy Creator queue is withheld from this disposable state DB for the
-//!   whole lifecycle, so every operation above is proof that it never reads it
-//!   (a read would fail loudly), not merely that it wrote nothing.
+//! - The legacy Creator queue, the legacy Character queue and the legacy
+//!   Character fragment table are withheld from this disposable state DB for the
+//!   whole remote lifecycle, and the applicable legacy long-term path is a
+//!   pre-existing sentinel directory that cannot be read as a file, so the
+//!   operations above are proof that those reads never happen (a read would fail
+//!   loudly) — not merely that nothing was written. The scope is exactly those
+//!   paths: Nexus actor/world/binding metadata stays readable, and this is not a
+//!   universal no-read claim about unrelated local surfaces.
 //! - The D18 boundary is observed where it is authoritative: the Nexus-side
 //!   `remote_binding_memory_admissions`/`_objects` rows (content-free
 //!   bookkeeping) and the real public `remove_binding` gate. An unknown wire
@@ -51,12 +56,14 @@
 //! The adapter's `get_subject` read (`MemoryAdapter::subject_archived`) is
 //! reached through its real consumer, the admitted Character Host composition:
 //! `CoreService::attach_host` + `HostHandle::create_session`/`execute` build the
-//! prompt through `CoreCharacterMind`, so the prompt handed to the deterministic
-//! provider adapter is the observable that the projection served the
-//! binding-local fact from the real signed provider — and that an archived
-//! provider subject is refused (classified `SUBJECT_FENCED`) instead of being
-//! served silently. The in-memory adapter exists only so that production path
-//! needs no process, model or network; the memory port itself is never mocked.
+//! prompt through `CoreCharacterMind`. A test-only decorator over the real
+//! fixture service forwards every ordinary request and observes/refuses only
+//! `memory.subjects.get` for the Character's subject: the active execution must
+//! make that get (a bypass leaves the counter at zero), and a selected definite
+//! get refusal must abort the execution before any prompt reaches the provider
+//! (a swallowed refusal would still produce one). The in-memory agent adapter
+//! exists only so that production path needs no process, model or network; the
+//! memory port itself is always the real signed provider.
 
 #![allow(clippy::too_many_lines)] // one end-to-end scenario per test
 
@@ -64,11 +71,13 @@ use std::collections::HashMap;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::{Duration as ChronoDuration, Utc};
+use serde_json::Map;
 use ed25519_dalek::SigningKey;
 use serde_json::{json, Value};
 use sqlx::sqlite::SqliteConnectOptions;
@@ -452,8 +461,21 @@ impl Provider {
 
     /// Serve one signed session over a fresh loopback listener.
     async fn serve(&self) -> (SocketAddr, tokio::task::JoinHandle<Arc<ConnectResponder>>) {
+        self.serve_service(self.inner.server(self.directory.admission()))
+            .await
+    }
+
+    /// Serve one signed session for an explicitly supplied memory service.
+    ///
+    /// The suite's only use is the test-only `SubjectGetProbe` decorator, which
+    /// forwards every ordinary request to this provider's real assembled service
+    /// and only observes or refuses the selected `memory.subjects.get`.
+    async fn serve_service(
+        &self,
+        service: Arc<dyn RemoteMemoryService>,
+    ) -> (SocketAddr, tokio::task::JoinHandle<Arc<ConnectResponder>>) {
         start_listener(
-            self.inner.server(self.directory.admission()),
+            service,
             manifest(self.inner.identity().authority_host_id.as_str()),
             peer_id(&CLIENT_SEED),
             pubkey(&CLIENT_SEED),
@@ -477,7 +499,18 @@ impl Provider {
         &self,
         env: &Env,
     ) -> (CoreService, tokio::task::JoinHandle<Arc<ConnectResponder>>) {
-        let (addr, task) = self.serve().await;
+        self.open_core_serving(env, self.inner.server(self.directory.admission()))
+            .await
+    }
+
+    /// [`Self::open_core`] over an explicitly supplied memory service (the
+    /// test-only `SubjectGetProbe` decorator).
+    async fn open_core_serving(
+        &self,
+        env: &Env,
+        service: Arc<dyn RemoteMemoryService>,
+    ) -> (CoreService, tokio::task::JoinHandle<Arc<ConnectResponder>>) {
+        let (addr, task) = self.serve_service(service).await;
         let core = CoreService::open(env.options(self.selection(addr)))
             .await
             .expect("the selected remote provider opens");
@@ -864,17 +897,37 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
     let world_c = create_world(&core, &principal, "R2 World C").await;
     let binding_c = add_binding(&core, &principal, &character_id, &world_c).await;
 
-    // I215: arm the legacy-read trap BEFORE the first remote operation. The
-    // local Creator queue is removed from this disposable state DB for the
-    // whole lifecycle below, so any legacy queue read would fail loudly instead
-    // of going unnoticed; the Nexus provenance/metadata tables the capture path
-    // legitimately reads (actors, worlds, bindings) stay untouched. The table
-    // is restored before the final local-state assertions.
+    // I215: arm the legacy-read traps BEFORE the first remote operation and keep
+    // them armed for the whole lifecycle below.
+    //
+    // - The legacy Creator queue, the legacy Character queue and the legacy
+    //   Character fragment table are removed from this disposable state DB, so
+    //   an unintended read of any of them fails loudly instead of going
+    //   unnoticed. The Nexus provenance/metadata tables the capture path
+    //   legitimately reads (actors, worlds, bindings) stay untouched.
+    // - The applicable legacy long-term path is PRE-EXISTING and poisoned: the
+    //   path a legacy bearer file would occupy is a sentinel directory, so any
+    //   read of it as a file fails. Its readback below shows the trap is live.
+    //
+    // Every trap is restored before the final local-state assertions.
     let trap = core_db(&env).await;
-    sqlx::query("ALTER TABLE memory_pending_review RENAME TO memory_pending_review_r2_trap")
+    for table in [
+        "memory_pending_review",
+        "character_memory_pending_review",
+        "character_memory_fragments",
+    ] {
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "ALTER TABLE {table} RENAME TO {table}_r2_trap"
+        )))
         .execute(&trap)
         .await
-        .expect("withhold the legacy Creator queue from the whole lifecycle");
+        .expect("withhold a legacy memory table from the whole lifecycle");
+    }
+    let legacy = env.legacy_bearer();
+    fs::create_dir_all(legacy.parent().expect("legacy dir")).expect("legacy dir");
+    fs::create_dir_all(&legacy).expect("the applicable legacy path becomes a sentinel directory");
+    let sentinel = legacy.join("sentinel.txt");
+    fs::write(&sentinel, b"r2-legacy-file-trap-0f1e2d3c").expect("write the file-trap sentinel");
 
     // Two captures: one shared Character scope, one binding-local.
     capture(&core, &principal, &character_id, None, "pend_shared")
@@ -1222,12 +1275,6 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
     );
     pool.close().await;
 
-    // No local provider and no local legacy content were touched: the remote
-    // binding never constructs the local provider and never reads or writes the
-    // legacy queue.
-    let legacy = env.legacy_bearer();
-    fs::create_dir_all(legacy.parent().expect("legacy dir")).expect("legacy dir");
-    fs::write(&legacy, b"# local legacy memory\n").expect("seed the legacy bearer");
     // A remote Creator miss must come from the provider alone: the local legacy
     // queue and its cross-Creator ownership re-read (the retained 403) are
     // local-only paths. With the queue withheld for the whole lifecycle, an
@@ -1241,10 +1288,18 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
         matches!(&miss, CoreError::NotFound { .. }),
         "a remote miss never becomes the legacy ownership 403 or a local storage error: {miss:?}"
     );
-    sqlx::query("ALTER TABLE memory_pending_review_r2_trap RENAME TO memory_pending_review")
+    for table in [
+        "character_memory_fragments",
+        "character_memory_pending_review",
+        "memory_pending_review",
+    ] {
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "ALTER TABLE {table}_r2_trap RENAME TO {table}"
+        )))
         .execute(&trap)
         .await
-        .expect("restore the legacy queue");
+        .expect("restore a legacy memory table");
+    }
     trap.close().await;
     let nexus = core_db(&env).await;
     assert_eq!(
@@ -1272,10 +1327,22 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
         !env.local_provider_store().exists(),
         "a remote binding never constructs the local provider"
     );
+    // The pre-existing file trap: the applicable legacy long-term path is still
+    // the sentinel directory with its bytes, and it still cannot be read as a
+    // legacy file. The whole lifecycle above therefore never read it.
+    assert!(
+        legacy.is_dir() && sentinel.is_file(),
+        "the pre-existing legacy path stays the sentinel directory"
+    );
     assert_eq!(
-        fs::read(&legacy).expect("legacy bearer"),
-        b"# local legacy memory\n",
-        "the remote path left the legacy bearer untouched"
+        fs::read(&sentinel).expect("file-trap sentinel"),
+        b"r2-legacy-file-trap-0f1e2d3c",
+        "the file-trap sentinel is untouched"
+    );
+    let as_legacy_file = fs::read(&legacy);
+    assert!(
+        as_legacy_file.is_err(),
+        "the applicable legacy path cannot be read as a legacy file, so the trap is live: {as_legacy_file:?}"
     );
 
     // I211: the subject *read* itself, over the SDK's own signed session. The
@@ -2521,22 +2588,92 @@ impl ProviderPort for QuietPort {
     }
 }
 
+/// Test-only decorator over the REAL fixture memory service.
+///
+/// It forwards every ordinary request unchanged to the assembled fixture service
+/// and only observes — or refuses — `memory.subjects.get` for one selected
+/// subject. That is the operation Core's `MemoryAdapter::subject_archived` must
+/// perform: the cases below prove the admitted Host execution really makes it
+/// (a bypass leaves the counter at zero) and that a selected refusal reaches the
+/// caller without a prompt (a swallowed refusal would still produce one).
+///
+/// The injected refusal is a definite `NOT_AUTHORIZED` (§14.2 terminal), which
+/// `subject_archived` cannot turn into its absent-data `false` shortcut, so the
+/// projection must propagate it.
+struct SubjectGetProbe {
+    inner: Arc<dyn RemoteMemoryService>,
+    subject: std::sync::Mutex<Option<String>>,
+    gets: AtomicUsize,
+    refuse: AtomicBool,
+}
+
+impl SubjectGetProbe {
+    fn over(inner: Arc<dyn RemoteMemoryService>) -> Self {
+        Self {
+            inner,
+            subject: std::sync::Mutex::new(None),
+            gets: AtomicUsize::new(0),
+            refuse: AtomicBool::new(false),
+        }
+    }
+
+    /// Watch exactly this subject's `memory.subjects.get` calls.
+    fn watch(&self, subject_id: &str) {
+        *self.subject.lock().expect("watched subject") = Some(subject_id.to_string());
+    }
+
+    fn gets(&self) -> usize {
+        self.gets.load(Ordering::SeqCst)
+    }
+
+    fn set_refusal(&self, refuse: bool) {
+        self.refuse.store(refuse, Ordering::SeqCst);
+    }
+}
+
+#[async_trait]
+impl RemoteMemoryService for SubjectGetProbe {
+    async fn invoke(&self, peer_id: &str, op: &str, payload: Value) -> SpokeResult<Value> {
+        let watched = self.subject.lock().expect("watched subject").clone();
+        let requested = payload.get("subject_id").and_then(Value::as_str);
+        if op == "memory.subjects.get" && watched.as_deref() == requested {
+            self.gets.fetch_add(1, Ordering::SeqCst);
+            if self.refuse.load(Ordering::SeqCst) {
+                let mut details = Map::new();
+                details.insert("retry_class".to_owned(), json!("terminal"));
+                return SpokeResult::Reject(SpokeReject {
+                    code: SpokeRejectCode::NotAuthorized,
+                    message: "injected subject get refusal".to_owned(),
+                    details: Some(details),
+                });
+            }
+        }
+        self.inner.invoke(peer_id, op, payload).await
+    }
+}
+
 /// The production admitted Host path builds the Character prompt through
 /// `CoreCharacterMind`, whose `family` read calls the provider's `get_subject`
-/// and, only for an active subject, lists the records. Observe that path here:
-/// the same prompt carries the binding-local fact while the provider subject is
-/// active and loses it once the subject is archived — through a real signed
-/// session to the independent durable provider, with no new Core API.
+/// and only then lists the records. These cases prove that dependence
+/// operationally on an ACTIVE subject: the get is observed on the real service,
+/// and a selected get refusal aborts the Host execution before any prompt is
+/// assembled. The archived-subject execution is kept as its own narrower
+/// evidence (the writable projection meets that lifecycle at `ensure_subject`
+/// first), not as a substitute for the get boundary.
 #[tokio::test]
 async fn host_mind_projection_reads_the_remote_subject() {
     let env = Env::boot("R2 Host Owner").await;
     let provider = Provider::open().await;
-    let (core, responder) = provider.open_core(&env).await;
+    let probe = Arc::new(SubjectGetProbe::over(
+        provider.inner.server(provider.directory.admission()),
+    ));
+    let (core, responder) = provider.open_core_serving(&env, probe.clone()).await;
     let principal = core.active_principal().await.expect("principal");
 
     let world = create_world(&core, &principal, "R2 Host World").await;
     let (character_id, binding_id, _) =
         create_character(&core, &principal, "R2 Host Ada", &world).await;
+    let subject_id = legacy::character_subject_id(&character_id);
 
     // One binding-local fact on the real provider: the memory the projection
     // must serve into the Host prompt.
@@ -2556,6 +2693,7 @@ async fn host_mind_projection_reads_the_remote_subject() {
     )
     .await
     .expect("review the binding-local fact");
+    probe.watch(&subject_id);
 
     // Deterministic local agent host: no process, no model, no network.
     let manager = Arc::new(HostManager::new());
@@ -2615,27 +2753,66 @@ async fn host_mind_projection_reads_the_remote_subject() {
             "content": "What do you remember about the alliance?",
         }))
     };
+
+    // (a) The active subject: the Host execution really performs the subject get
+    // and serves the provider's binding-local fact into the prompt.
     handle
         .execute(&principal, session.session_id.clone(), prompt())
         .await
         .expect("the admitted Character prompt runs");
-    let prompts = adapter.prompts();
-    assert_eq!(
-        prompts.len(),
-        1,
-        "the host handed the fixture adapter the assembled prompt"
+    assert!(
+        probe.gets() >= 1,
+        "the admitted Host projection performs memory.subjects.get on its own subject"
     );
+    let prompts = adapter.prompts();
+    assert_eq!(prompts.len(), 1, "the host assembled one prompt");
     assert!(
         prompts[0].contains(PROMOTE_DIGEST),
         "the mind projection served the binding-local fact into the prompt: {}",
         prompts[0]
     );
 
-    // Archive the provider subject through the real admin op: the projection's
-    // `subject_archived`/`family` read is what turns the fact off.
+    // (b) A selected get refusal on the ACTIVE subject aborts the execution
+    // before any prompt: a bypass (no get) or a swallowed refusal would still
+    // produce a prompt and fail here.
+    probe.set_refusal(true);
+    let gets_before = probe.gets();
+    let refused = handle
+        .execute(&principal, session.session_id.clone(), prompt())
+        .await
+        .expect_err("the selected subject get refusal aborts the Host execution");
+    let (code, retry_class, family, _) = provider_refusal(&refused);
+    assert_eq!(code, "NOT_AUTHORIZED");
+    assert_eq!(retry_class, "terminal");
+    assert_eq!(family, MemoryProviderRefusal::Forbidden);
+    assert!(
+        probe.gets() > gets_before,
+        "the aborted execution had asked for the subject"
+    );
+    assert_eq!(
+        adapter.prompts().len(),
+        1,
+        "a refused projection hands the provider no prompt"
+    );
+
+    // (c) Control: the same session runs again once the get answers, so the
+    // stop in (b) was the refusal itself, not a broken session.
+    probe.set_refusal(false);
+    handle
+        .execute(&principal, session.session_id.clone(), prompt())
+        .await
+        .expect("the admitted Character prompt runs again");
+    assert_eq!(
+        adapter.prompts().len(),
+        2,
+        "the same session serves the prompt once the get is answered"
+    );
+
+    // (d) Narrower archived evidence: the provider subject really is archived
+    // (SDK get), and the writable projection meets that lifecycle at
+    // `ensure_subject` and fails closed — no prompt is assembled.
     let (sdk, sdk_responder) = provider.sdk_session().await;
     let memory_principal = provider.memory_principal();
-    let subject_id = legacy::character_subject_id(&character_id);
     let current = match sdk
         .get_subject(
             &memory_principal,
@@ -2666,7 +2843,6 @@ async fn host_mind_projection_reads_the_remote_subject() {
         SpokeResult::Ok(_) => {}
         SpokeResult::Reject(reject) => panic!("the admin archive is served: {reject:?}"),
     }
-    // Read the archived lifecycle back through the same SDK get.
     let archived = match sdk
         .get_subject(
             &memory_principal,
@@ -2685,11 +2861,6 @@ async fn host_mind_projection_reads_the_remote_subject() {
         json!("archived"),
         "the provider subject really is archived"
     );
-
-    // The same admitted Character prompt now fails closed: the projection meets
-    // the archived subject lifecycle on the provider and Core surfaces its
-    // definite refusal instead of serving stale or silently empty memory. No
-    // prompt was assembled from that refused projection.
     let failed = handle
         .execute(&principal, session.session_id.clone(), prompt())
         .await
@@ -2700,7 +2871,7 @@ async fn host_mind_projection_reads_the_remote_subject() {
     assert_eq!(family, MemoryProviderRefusal::Conflict);
     assert_eq!(
         adapter.prompts().len(),
-        1,
+        2,
         "a refused projection hands the provider no prompt"
     );
 
