@@ -27,7 +27,9 @@
 #![allow(dead_code)] // each test target uses a subset of this harness
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -776,6 +778,23 @@ pub enum CaptureHold {
     FixtureTarget(TargetHold),
 }
 
+/// Disarms this handle's own untaken local arm when its observation ends without
+/// a take (timeout, cancellation, unpolled drop).
+struct LocalReachGuard {
+    provider: Arc<LocalMemoryProvider>,
+    token: u64,
+}
+
+impl Drop for LocalReachGuard {
+    fn drop(&mut self) {
+        self.provider.disarm_next_admission(self.token);
+    }
+}
+
+/// How long the harness waits for a peer at a release barrier that the provider
+/// may already have left (its own wait is bounded).
+const RELEASE_BOUND: Duration = Duration::from_secs(1);
+
 impl Drop for CaptureHold {
     fn drop(&mut self) {
         if let Self::Local { provider, token, .. } = self {
@@ -786,15 +805,48 @@ impl Drop for CaptureHold {
 
 impl CaptureHold {
     /// Wait, bounded, until the parked capture reached its point.
-    pub async fn wait_reached(&mut self) -> Result<(), FaultHoldLost> {
+    pub fn wait_reached(
+        &mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<(), FaultHoldLost>> + '_>> {
+        self.wait_reached_within(BOUND)
+    }
+
+    /// [`Self::wait_reached`] with an explicit observation window. Ownership of
+    /// an untaken local arm is established at the call, so a timeout, cancel or
+    /// dropped-unpolled future disarms this handle's own token even when the
+    /// handle is retained.
+    pub fn wait_reached_within(
+        &mut self,
+        window: Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<(), FaultHoldLost>> + '_>> {
         match self {
-            Self::Local { entered, .. } => match tokio::time::timeout(BOUND, entered.notified()).await
-            {
-                Ok(()) => Ok(()),
-                Err(_) => Err(FaultHoldLost::Unreached),
-            },
-            Self::FixturePoint(hold) => hold.wait_reached().await,
-            Self::FixtureTarget(hold) => hold.wait_reached().await,
+            Self::Local {
+                provider,
+                token,
+                entered,
+                ..
+            } => {
+                let guard = LocalReachGuard {
+                    provider: Arc::clone(provider),
+                    token: *token,
+                };
+                let entered = Arc::clone(entered);
+                Box::pin(async move {
+                    let _guard = guard;
+                    match tokio::time::timeout(window, entered.notified()).await {
+                        Ok(()) => Ok(()),
+                        Err(_) => Err(FaultHoldLost::Unreached),
+                    }
+                })
+            }
+            Self::FixturePoint(hold) => {
+                let future = hold.wait_reached();
+                Box::pin(future)
+            }
+            Self::FixtureTarget(hold) => {
+                let future = hold.wait_reached();
+                Box::pin(future)
+            }
         }
     }
 
@@ -802,7 +854,9 @@ impl CaptureHold {
     pub async fn release(&mut self) {
         match self {
             Self::Local { release, .. } => {
-                release.wait().await;
+                // Bounded: the provider's own wait can expire first, leaving no
+                // peer; a later release must not wait forever.
+                let _ = tokio::time::timeout(RELEASE_BOUND, release.wait()).await;
             }
             Self::FixturePoint(hold) => hold.release(),
             Self::FixtureTarget(hold) => hold.release(),

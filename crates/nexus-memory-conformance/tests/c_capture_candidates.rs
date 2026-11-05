@@ -15,6 +15,7 @@
 mod support;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde_json::{json, Value};
 
@@ -826,6 +827,48 @@ async fn concurrent_review_has_exactly_one_effect(matrix: Matrix) {
         .await;
     assert!(is_committed(&granted), "{granted}");
 
+    // Fixture control lifecycle: a retained handle whose observation future is
+    // dropped unpolled disarms its own arm (an unpolled future must not leave a
+    // stale interception), and a plainly dropped handle is inert too. A real
+    // stale fence then reaches the provider and refuses normally.
+    if matrix.kind() == Kind::Remote {
+        let mut probe = matrix.park_next_target("memory.subjects.fence");
+        {
+            let future = probe.wait_reached();
+            drop(future);
+        }
+        drop(probe);
+        let refused = tokio::time::timeout(
+            Duration::from_secs(3),
+            matrix.admin().fence_subject(
+                SUBJECT,
+                json!({ "type": "subject" }),
+                "fence",
+                99,
+                "k-c033-probe-unpolled",
+            ),
+        )
+        .await
+        .expect("a dropped observation leaves no stale target arm");
+        assert_eq!(error_code(&refused), "REVISION_CONFLICT", "{refused}");
+
+        let dropped = matrix.park_next_target("memory.subjects.fence");
+        drop(dropped);
+        let refused = tokio::time::timeout(
+            Duration::from_secs(3),
+            matrix.admin().fence_subject(
+                SUBJECT,
+                json!({ "type": "subject" }),
+                "fence",
+                99,
+                "k-c033-probe-dropped",
+            ),
+        )
+        .await
+        .expect("a dropped handle leaves no stale target arm");
+        assert_eq!(error_code(&refused), "REVISION_CONFLICT", "{refused}");
+    }
+
     let captured = matrix
         .admin()
         .capture(capture_body("k-c033", TEXT, &shared_scope()))
@@ -833,12 +876,10 @@ async fn concurrent_review_has_exactly_one_effect(matrix: Matrix) {
     let candidate_id = candidate_ids(&captured)[0].clone();
 
     // Both arrivals are established before the held request is released.
-    // - Local: the held review already owns the workspace publication section.
-    //   The provider's own counter increments once for that review's publication
-    //   entry and once for its admission entry (+2), and once more for the peer
-    //   review's publication entry (+1) — the peer is then blocked on the held
-    //   publication section. baseline+3 therefore acknowledges BOTH signed
-    //   requests at the provider, not elapsed client time and not an OS lock wait.
+    // - Local: the held review owns the candidate's disposition section. The
+    //   peer review's disposition acquisition reports that it is really about to
+    //   block on that section — a provider-side acknowledgment of ITS arrival,
+    //   not elapsed time and not an OS lock-wait claim.
     // - Fixture: the held review is acknowledged at its exact op-targeted handler
     //   admission; the peer review runs to a durable committed receipt before the
     //   release, which is its real arrival and effect.

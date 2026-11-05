@@ -655,6 +655,76 @@ async fn admission_control_is_token_owned(matrix: &Matrix) {
         is_committed(&outcome) || error_code(&outcome) == "OUTCOME_UNCERTAIN",
         "the rearmed write reached the provider: {outcome}"
     );
+
+    // Retained handle, observation timeout: the timed-out observation disarms
+    // its own token, so a later real write is admitted without pausing.
+    let mut timed_out = matrix.park_next_admission();
+    assert!(
+        timed_out
+            .wait_reached_within(Duration::from_millis(150))
+            .await
+            .is_err(),
+        "no write reached the armed observation"
+    );
+    let after_timeout = tokio::time::timeout(
+        Duration::from_secs(2),
+        matrix
+            .admin()
+            .capture(capture_body("k-c012-after-timeout", TEXT, &shared_scope())),
+    )
+    .await
+    .expect("a timed-out observation leaves no stale arm");
+    assert!(is_committed(&after_timeout), "{after_timeout}");
+    drop(timed_out);
+
+    // Retained handle, unpolled observation cancelled: ownership is established
+    // at the call, so dropping the unpolled future disarms its own token.
+    let mut unpolled = matrix.park_next_admission();
+    {
+        let future = unpolled.wait_reached();
+        drop(future);
+    }
+    drop(unpolled);
+    let after_cancel = tokio::time::timeout(
+        Duration::from_secs(2),
+        matrix
+            .admin()
+            .capture(capture_body("k-c012-after-cancel", TEXT, &shared_scope())),
+    )
+    .await
+    .expect("a cancelled observation leaves no stale arm");
+    assert!(is_committed(&after_cancel), "{after_cancel}");
+
+    // Controller gone after the provider took the arm: the provider's bounded
+    // wait expires and the write completes normally; a retained handle's later
+    // release is bounded instead of waiting on an abandoned barrier.
+    let mut abandoned = matrix.park_next_admission();
+    let write = tokio::spawn(support::capture_with(
+        matrix.admin_client(),
+        matrix.admin_principal().clone(),
+        matrix.space_id().to_owned(),
+        capture_body("k-c012-abandoned", TEXT, &shared_scope()),
+    ));
+    abandoned
+        .wait_reached()
+        .await
+        .expect("the write reached the provider admission boundary");
+    // The provider's own wait expires, so the write proceeds and commits; the
+    // caller may have observed a client-side timeout, so resolve the SAME key and
+    // require the committed original receipt.
+    tokio::time::sleep(Duration::from_secs(6)).await;
+    let _ = write.await;
+    let resolved = matrix
+        .admin()
+        .capture(capture_body("k-c012-abandoned", TEXT, &shared_scope()))
+        .await;
+    assert!(
+        is_committed(&resolved),
+        "the provider's bounded wait released and committed the write: {resolved}"
+    );
+    tokio::time::timeout(Duration::from_secs(3), abandoned.release())
+        .await
+        .expect("a later release is bounded after the provider expired");
 }
 
 #[tokio::test]
