@@ -1136,9 +1136,11 @@ pub struct TargetHold {
 }
 
 impl FixtureFaults {
-    /// Arm one op-targeted admission pause at the exact mutating handler entry
-    /// named by `op` (replacing any previous target arm). Only that op consumes
-    /// it; reads, invalid payloads and every other operation are unaffected.
+    /// Arm one op-targeted admission pause for the exact review/fence handler
+    /// entry (replacing any previous target arm). Only that op consumes
+    /// it. Reads, other operation names and malformed payloads (typed decode
+    /// happens before the gate) never reach it; an unauthorized request of the
+    /// same op is delayed and then still receives its ordinary refusal.
     pub fn hold_next_for(&self, op: impl Into<String>) -> TargetHold {
         self.hold_next_for_bounded(op, FAULT_HOLD_TIMEOUT)
     }
@@ -1196,22 +1198,26 @@ impl FixtureFaults {
 
 impl TargetHold {
     /// Wait, bounded, until the provider reached this exact op's admission.
-    pub async fn wait_reached(&mut self) -> Result<(), FaultHoldLost> {
+    ///
+    /// Ownership is established at the CALL, before the future can be polled, so
+    /// a created-but-unpolled or cancelled observation retires this handle's own
+    /// still-armed entry even if the handle is retained afterwards. A replacement
+    /// arm (different token) or an already-taken arm is untouched.
+    pub fn wait_reached(&mut self) -> impl Future<Output = Result<(), FaultHoldLost>> + '_ {
         let guard = TargetReachGuard {
             control: Arc::clone(&self.control),
             token: self.token,
         };
         let bound = self.bound;
         let reached = &mut self.reached;
-        let outcome = async move {
+        async move {
             let _guard = guard;
             match tokio::time::timeout(bound, reached).await {
                 Ok(Ok(())) => Ok(()),
                 Ok(Err(_)) => Err(FaultHoldLost::Disarmed),
                 Err(_) => Err(FaultHoldLost::Unreached),
             }
-        };
-        outcome.await
+        }
     }
 
     /// Resume the held operation; before it is taken this disarms only its own
@@ -1244,6 +1250,25 @@ struct TargetReachGuard {
 
 impl Drop for TargetReachGuard {
     fn drop(&mut self) {
+        let mut state = self
+            .control
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state
+            .target
+            .as_ref()
+            .is_some_and(|arm| arm.token == self.token)
+        {
+            state.target = None;
+        }
+    }
+}
+
+impl Drop for TargetHold {
+    fn drop(&mut self) {
+        // Dropping an untaken handle disarms exactly its own arm; a taken arm is
+        // no longer in the slot and a replacement carries a different token, so
+        // neither is affected.
         let mut state = self
             .control
             .lock()
