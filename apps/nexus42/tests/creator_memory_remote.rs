@@ -860,6 +860,22 @@ mod remote {
         }
     }
 
+    /// Cancel and bounded-join one owned test task, distinguishing the expected
+    /// cancellation after our own abort from a real join failure.
+    async fn stop_task(task: &mut Option<tokio::task::JoinHandle<()>>) -> Result<(), String> {
+        if let Some(task) = task.take() {
+            task.abort();
+            match tokio::time::timeout(BOUND, task).await {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(error)) if error.is_cancelled() => Ok(()),
+                Ok(Err(error)) => Err(format!("task join: {error}")),
+                Err(_) => Err("task did not settle after abort".to_string()),
+            }
+        } else {
+            Ok(())
+        }
+    }
+
     /// Deterministic small regression for the two failure-only cleanup branches.
     ///
     /// (a) a real owned accept task is still listening when the wait expires;
@@ -921,7 +937,10 @@ mod remote {
             "the aborted task released the listener: {rebind:?}"
         );
 
-        // (b) real-child timeout at a short deterministic test deadline.
+        // (b) real-child timeout at a short deterministic test deadline. The
+        // holder acknowledges an ACTUAL successful TCP accept and retains the
+        // accepted socket until the child is killed and reaped, so a CLI stall
+        // before the dial fails this proof instead of passing it.
         let actor = DirectActor::new().await;
         let home = actor.home().to_path_buf();
         write_credential(&home, &CLIENT_SEED);
@@ -929,12 +948,14 @@ mod remote {
             .await
             .expect("holder listener");
         let hold_addr = holder.local_addr().expect("holder addr");
-        let holder_task = tokio::spawn(async move {
+        let (accepted_tx, accepted_rx) = tokio::sync::oneshot::channel();
+        let mut holder_task = Some(tokio::spawn(async move {
             if let Ok((socket, _)) = holder.accept().await {
-                tokio::time::sleep(Duration::from_secs(30)).await;
+                let _ = accepted_tx.send(());
+                tokio::time::sleep(Duration::from_secs(60)).await;
                 drop(socket);
             }
-        });
+        }));
         cli_ok_remote(
             &home,
             &[
@@ -958,25 +979,61 @@ mod remote {
         .await
         .expect("the cleanup selection is written");
 
-        let short_deadline = Duration::from_secs(3);
+        let short_deadline = Duration::from_secs(6);
         let run_home = home.clone();
         let started = Instant::now();
-        let timed_out = tokio::task::spawn_blocking(move || {
+        let mut run_task = Some(tokio::task::spawn_blocking(move || {
             run_cli_with(&run_home, &["creator", "memory", "list"], short_deadline)
-        })
-        .await
-        .expect("the child-timeout task joins");
-        let error = timed_out.expect_err("the real CLI child outlives the short deadline");
-        assert!(
-            error.contains("killed and reaped"),
-            "the timeout path kills and reaps the real child: {error}"
-        );
-        assert!(
-            started.elapsed() < Duration::from_secs(20),
-            "the timeout path settled promptly: {:?}",
-            started.elapsed()
-        );
-        holder_task.abort();
+        }));
+
+        let accepted = tokio::time::timeout(Duration::from_secs(15), accepted_rx).await;
+        let run = run_task.take().expect("child-timeout task present");
+        let run_outcome = tokio::time::timeout(Duration::from_secs(30), run).await;
+
+        let outcome: Result<(), String> = (|| {
+            match accepted {
+                Ok(Ok(())) => {}
+                Ok(Err(_)) => {
+                    return Err("the holder channel closed before any accepted connection".to_string());
+                }
+                Err(_) => {
+                    return Err("the real CLI never reached the held TCP handshake".to_string());
+                }
+            }
+            if holder_task
+                .as_ref()
+                .expect("holder task present")
+                .is_finished()
+            {
+                return Err("the holder task ended before the child timeout".to_string());
+            }
+            let joined = match run_outcome {
+                Ok(Ok(result)) => result,
+                Ok(Err(error)) => return Err(format!("cli task join: {error}")),
+                Err(_) => return Err("the child-timeout task did not finish".to_string()),
+            };
+            let error = joined.expect_err("the real CLI child outlives the short deadline");
+            if !error.contains("killed and reaped") {
+                return Err(format!("the timeout path did not kill and reap: {error}"));
+            }
+            if started.elapsed() >= Duration::from_secs(25) {
+                return Err(format!(
+                    "the timeout path settled too slowly: {:?}",
+                    started.elapsed()
+                ));
+            }
+            Ok(())
+        })();
+
+        let cleanup = stop_task(&mut holder_task).await;
+        match (outcome, cleanup) {
+            (Ok(()), Ok(())) => {}
+            (Err(error), Ok(())) => panic!("held-handshake timeout proof: {error}"),
+            (Ok(()), Err(error)) => panic!("holder cleanup: {error}"),
+            (Err(error), Err(cleanup)) => {
+                panic!("held-handshake timeout proof: {error}; holder cleanup: {cleanup}")
+            }
+        }
     }
 }
 
