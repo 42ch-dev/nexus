@@ -2636,6 +2636,13 @@ fn describe(error: &StoreError) -> String {
 /// receipt is itself a disclosure that current coverage must still admit
 /// (§7.0.5). §7.9 non-amplification is a fresh-effect rule and lives in
 /// [`authorize_issuance`], behind the probe.
+///
+/// An op is admitted only when **one** grant satisfies every requirement of the
+/// op — its required capabilities and the whole data access it names (§6.5:
+/// "at least one grant that … includes the op's required capability … and
+/// covers the op's data access"; the published `grant_covers` helper evaluates
+/// one grant against one requirement). Two grants that each satisfy a different
+/// requirement never union into an admission.
 async fn authorize(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     admission: &Admission<'_>,
@@ -2644,25 +2651,25 @@ async fn authorize(
     space_in_tx(tx, admission.space_id).await?;
     let rows = grants_in_tx(tx, admission.space_id).await?;
     let grants = wire_grants(&rows)?;
-    let check = |requirement: &GrantRequirement<'_>| -> StoreResult<()> {
-        if covered(
-            &grants,
-            admission.principal_id,
-            admission.space_id,
-            now,
-            requirement,
-        ) {
-            return Ok(());
-        }
-        Err(StoreError::NotAuthorized(format!(
+    let refuse = |requirements: &[GrantRequirement<'_>]| -> StoreError {
+        let capability = requirements
+            .first()
+            .map_or("any", |requirement| requirement.capability);
+        StoreError::NotAuthorized(format!(
             "principal {} holds no grant covering {} in space {}",
-            admission.principal_id, requirement.capability, admission.space_id
-        )))
+            admission.principal_id, capability, admission.space_id
+        ))
     };
     match &admission.coverage {
         Coverage::Requirements(requirements) => {
-            for requirement in *requirements {
-                check(requirement)?;
+            if !one_grant_covers(
+                &grants,
+                admission.principal_id,
+                admission.space_id,
+                now,
+                requirements,
+            ) {
+                return Err(refuse(requirements));
             }
         }
         Coverage::Candidate {
@@ -2672,8 +2679,22 @@ async fn authorize(
             let candidate = candidate_in_tx(tx, admission.space_id, candidate_id)
                 .await?
                 .ok_or_else(|| StoreError::NotFound(format!("candidate {candidate_id}")))?;
-            for capability in *capabilities {
-                check(&candidate.requirement(capability))?;
+            let requirements: Vec<GrantRequirement<'_>> = capabilities
+                .iter()
+                .map(|capability| candidate.requirement(capability))
+                .collect();
+            if !one_grant_covers(
+                &grants,
+                admission.principal_id,
+                admission.space_id,
+                now,
+                &requirements,
+            ) {
+                // C-102/MEM-R026: a by-ID candidate op hides incomplete coverage
+                // exactly as it hides an id this store never held — the same
+                // code AND the same message the absent row produces — so no
+                // caller without coverage can learn that the candidate exists.
+                return Err(StoreError::NotFound(format!("candidate {candidate_id}")));
             }
         }
         Coverage::Record {
@@ -2684,17 +2705,27 @@ async fn authorize(
             let record = record_in_tx(tx, admission.space_id, record_id)
                 .await?
                 .ok_or_else(|| StoreError::NotFound(format!("record {record_id}")))?;
+            let mut requirements: Vec<GrantRequirement<'_>> = Vec::new();
             for capability in *capabilities {
-                check(&record.requirement(capability, false))?;
+                requirements.push(record.requirement(capability, false));
                 if let Some(target) = target {
-                    check(&GrantRequirement {
+                    requirements.push(GrantRequirement {
                         capability,
                         subject_id: Some(record.subject_id.as_str()),
                         context_ids: target.context_id.map(str::to_string).into_iter().collect(),
                         reads_shared: target.visibility == Placement::SHARED,
                         subject_all: false,
-                    })?;
+                    });
                 }
+            }
+            if !one_grant_covers(
+                &grants,
+                admission.principal_id,
+                admission.space_id,
+                now,
+                &requirements,
+            ) {
+                return Err(refuse(&requirements));
             }
         }
     }
@@ -3557,6 +3588,29 @@ fn covered(
     grants
         .iter()
         .any(|grant| grant_covers(grant, principal_id, space_id, now, requirement))
+}
+
+/// §6.5 admission of one op: does ONE grant satisfy every requirement?
+///
+/// The protocol admits an op only if the authenticated principal holds **at
+/// least one** grant that includes the op's required capabilities and covers
+/// the op's whole data access. Requirements are never unioned across grants —
+/// a `review` grant and a separate `records_write` grant do not compose into
+/// `memory.candidates.review` (§7.15), and a promote grant that covers only the
+/// source placement does not compose with one that covers only the target
+/// (§7.21).
+fn one_grant_covers(
+    grants: &[MemoryGrant],
+    principal_id: &str,
+    space_id: &str,
+    now: DateTime<Utc>,
+    requirements: &[GrantRequirement<'_>],
+) -> bool {
+    grants.iter().any(|grant| {
+        requirements
+            .iter()
+            .all(|requirement| grant_covers(grant, principal_id, space_id, now, requirement))
+    })
 }
 
 fn wire_grants(rows: &[GrantRow]) -> StoreResult<Vec<MemoryGrant>> {
