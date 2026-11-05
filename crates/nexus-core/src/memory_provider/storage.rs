@@ -82,7 +82,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU8;
 #[cfg(feature = "test-hooks")]
 use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+#[cfg(feature = "test-hooks")]
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
 use chrono::{DateTime, SecondsFormat, Utc};
@@ -5784,6 +5786,22 @@ impl MemoryStore {
             return Err(StoreError::RevisionConflict {
                 current: record.revision,
             });
+        }
+        // §7.0.4/MEM-R007: an update that carries no content and names only the
+        // kind the row already has changes nothing observable, so the row keeps
+        // its revision, kind, content and timestamps. The operation still
+        // commits its content-free receipt — and therefore its idempotency
+        // binding — through the same no-op publication the promotion path uses,
+        // and journals no record effect because no record byte changes.
+        if let RecordMutation::Update {
+            content: None,
+            kind: Some(kind),
+        } = &step
+        {
+            if *kind == record.kind.as_str() {
+                let result = json!({ "record_id": record_id, "revision": record.revision });
+                return self.commit_receipt(tx, ctx, &result, now).await;
+            }
         }
         // The content-bearing projection this mutation replaces: the provider's
         // own previous version of the row, never whatever bytes sit at the

@@ -43,6 +43,8 @@ use tempfile::TempDir;
 use tokio::net::TcpListener;
 use tokio::sync::{Barrier, Notify};
 
+use sqlx::Connection as _;
+
 use nexus_core::connect::ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};
 use nexus_core::memory_provider::LocalMemoryProvider;
 use nexus_core::{CoreAccess, CoreHomeService, CoreOpenOptions, CoreService};
@@ -247,31 +249,69 @@ pub fn principal(principal_id: &str) -> Principal {
 
 /// One signed responder session plus the dialing client and the transport ends,
 /// so a restart awaits the real teardown instead of a state flag.
-struct Endpoint {
+pub struct Endpoint {
     client: Arc<RemoteAdapter>,
     responder: Arc<ConnectResponder>,
     socket: Arc<dyn Transport>,
 }
 
 impl Endpoint {
-    async fn close(self) {
+    /// A typed session on this endpoint's authenticated client.
+    pub fn actor<'a>(&'a self, principal: &'a Principal, space_id: &'a str) -> Actor<'a> {
+        Actor {
+            client: &self.client,
+            principal,
+            space_id,
+        }
+    }
+
+    pub async fn close(self) {
+        if let Err(error) = self.settle().await {
+            panic!("{error}");
+        }
+    }
+
+    /// [`Self::close`] for an aggregating caller: every failure (transport close
+    /// error or timeout, responder not `Closed`) is returned, and a timeout is
+    /// never reported as a successful close.
+    pub async fn settle(self) -> Result<(), String> {
         self.client.close();
         self.responder.close();
-        let closed = tokio::time::timeout(BOUND, self.socket.close()).await;
-        assert!(
-            matches!(closed, Ok(Ok(()))),
-            "the session transport closes within the bound"
-        );
-        assert_eq!(
-            self.responder.state(),
-            ConnectResponderState::Closed,
-            "the responder session is closed after the real transport cleanup"
-        );
+        match tokio::time::timeout(BOUND, self.socket.close()).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                return Err(format!(
+                    "the session transport close failed within the bound: {error}"
+                ))
+            }
+            Err(_) => return Err("the session transport close did not finish within the bound".to_owned()),
+        }
+        if self.responder.state() != ConnectResponderState::Closed {
+            return Err(format!(
+                "the responder session did not report Closed after the real transport cleanup (state {:?})",
+                self.responder.state()
+            ));
+        }
+        Ok(())
     }
 }
 
+/// Close one owned responder through its public route, bounded. The failure is
+/// returned (not panicked) so a caller can settle every owner before asserting.
+pub async fn close_responder(responder: Arc<ConnectResponder>) -> Result<(), String> {
+    responder.close();
+    let deadline = Instant::now() + BOUND;
+    while responder.state() != ConnectResponderState::Closed {
+        if Instant::now() >= deadline {
+            return Err("the responder session did not reach Closed within the bound".to_owned());
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    Ok(())
+}
+
 /// Serve one fresh loopback session for `seed` against `service`.
-async fn open_endpoint(
+pub async fn open_endpoint(
     service: Arc<dyn RemoteMemoryService>,
     host_id: &str,
     seed: [u8; 32],
@@ -720,6 +760,40 @@ impl Matrix {
             Provider::Fixture(provider) => close_fixture(provider).await,
         }
     }
+
+    /// [`Self::shutdown`] for an aggregating caller: every owned close is
+    /// attempted and its failure returned instead of panicked, so one failure
+    /// can never prevent the remaining owners from being settled.
+    pub async fn settle(self) -> Result<(), String> {
+        let Self {
+            provider,
+            service,
+            admin,
+            peer,
+            ..
+        } = self;
+        let mut failures: Vec<String> = Vec::new();
+        if let Err(error) = admin.settle().await {
+            failures.push(error);
+        }
+        if let Err(error) = peer.settle().await {
+            failures.push(error);
+        }
+        drop(service);
+        match provider {
+            Provider::Local(provider) => drop(provider),
+            Provider::Fixture(provider) => {
+                if let Err(error) = close_fixture_bounded(provider).await {
+                    failures.push(error);
+                }
+            }
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(failures.join("; "))
+        }
+    }
 }
 
 /// Close the fixture's own pool once every session that held it has ended.
@@ -742,6 +816,45 @@ async fn close_fixture(provider: Arc<FixtureMemoryProvider>) {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         }
+    }
+}
+
+/// [`close_fixture`] for an aggregating caller: the ownership wait and the
+/// provider's own close are both bounded and returned, never panicked.
+async fn close_fixture_bounded(provider: Arc<FixtureMemoryProvider>) -> Result<(), String> {
+    let deadline = Instant::now() + BOUND;
+    let mut provider = provider;
+    loop {
+        tokio::task::yield_now().await;
+        match Arc::try_unwrap(provider) {
+            Ok(fixture) => {
+                return match tokio::time::timeout(BOUND, fixture.close()).await {
+                    Ok(()) => Ok(()),
+                    Err(_) => {
+                        Err("the fixture provider close did not finish within the bound".to_owned())
+                    }
+                };
+            }
+            Err(shared) => {
+                if Instant::now() >= deadline {
+                    return Err(
+                        "the fixture provider is still shared after the session teardown".to_owned(),
+                    );
+                }
+                provider = shared;
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+    }
+}
+
+/// [`CoreService::close`] for an aggregating caller: the bound and the inner
+/// result are both reported as a failure string.
+pub async fn close_core_bounded(core: &CoreService) -> Result<(), String> {
+    match tokio::time::timeout(BOUND, core.close()).await {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(error)) => Err(format!("the CoreService close failed: {error}")),
+        Err(_) => Err("the CoreService close did not finish within the bound".to_owned()),
     }
 }
 
@@ -1795,4 +1908,659 @@ async fn create_character_fixture(user_home: &std::path::Path) -> (CharacterFixt
     };
     drop(core);
     (fixture, creator_id)
+}
+
+// ---------------------------------------------------------------------------
+// Durable state observation (I253): the provider's own storage, read-only
+// ---------------------------------------------------------------------------
+
+/// The provider's durable state around a read series, observed through ONE
+/// read-only connection held for the whole observation: that connection's
+/// `data_version` pragma (SQLite changes it only when *another* connection
+/// commits, so any provider write — insertion or in-place update — moves it),
+/// the exact rows of the seeded objects as the database reports their own
+/// columns, and (local only) the exact bytes published under the provider's
+/// public file root.
+///
+/// Private page images and a copied schema are never used; the rows are the
+/// seeded keys the scenario already owns.
+#[derive(Debug, PartialEq, Eq)]
+pub struct DurableState {
+    /// `PRAGMA data_version` of the held read-only connection.
+    pub data_version: i64,
+    /// `(label, columns)` per seeded row; an absent row is an empty list.
+    pub rows: Vec<(String, Vec<(String, String)>)>,
+    pub publications: Vec<(String, Vec<u8>)>,
+}
+
+#[derive(Clone, Copy)]
+enum Store {
+    Local,
+    Fixture,
+}
+
+/// One held read-only connection to the provider's own durable file.
+pub struct DurableObserver {
+    conn: sqlx::sqlite::SqliteConnection,
+    store: Store,
+    space_id: String,
+    subject_id: String,
+    record_ids: Vec<String>,
+    candidate_id: Option<String>,
+    receipt_id: Option<String>,
+    profile_kind: Option<String>,
+    publications_root: Option<PathBuf>,
+}
+
+/// Every file under `root`, as (relative path, exact bytes), sorted.
+///
+/// The root is the provider's own published projection — its absence or an
+/// unreadable entry/file is an observation failure, never an empty projection.
+fn published_files(root: &std::path::Path) -> Vec<(String, Vec<u8>)> {
+    fn walk(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<(String, Vec<u8>)>) {
+        let entries = std::fs::read_dir(dir).unwrap_or_else(|error| {
+            panic!("the provider projection directory {dir:?} is enumerable: {error}")
+        });
+        for entry in entries {
+            let entry = entry.unwrap_or_else(|error| {
+                panic!("an entry under the provider projection {dir:?} is readable: {error}")
+            });
+            let path = entry.path();
+            let file_type = entry.file_type().unwrap_or_else(|error| {
+                panic!("the provider projection entry {path:?} reports its type: {error}")
+            });
+            if file_type.is_dir() {
+                walk(root, &path, out);
+            } else {
+                let bytes = std::fs::read(&path).unwrap_or_else(|error| {
+                    panic!("the published provider file {path:?} is readable: {error}")
+                });
+                let relative = path
+                    .strip_prefix(root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .into_owned();
+                out.push((relative, bytes));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, root, &mut out);
+    out.sort_by(|left, right| left.0.cmp(&right.0));
+    out
+}
+
+impl Matrix {
+    /// Open the durable observer **before** the first protocol read, on one
+    /// held read-only connection.
+    pub async fn durable_observer(
+        &self,
+        subject_id: &str,
+        record_ids: &[String],
+        candidate_id: Option<&str>,
+        receipt_id: Option<&str>,
+        profile_kind: Option<&str>,
+    ) -> DurableObserver {
+        let (db, store, publications_root) = match (&self.home, &self.provider) {
+            (Home::Local { user_home, .. }, Provider::Local(provider)) => (
+                nexus_home_layout::workspace_state_db_path(
+                    user_home,
+                    self.admin_principal.principal_id.as_str(),
+                    LOCAL_WORKSPACE,
+                ),
+                Store::Local,
+                Some(provider.file_root()),
+            ),
+            (Home::Remote { db, .. }, Provider::Fixture(_)) => {
+                (db.clone(), Store::Fixture, None)
+            }
+            _ => panic!("the provider kind and its durable home must agree"),
+        };
+        let options = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&db)
+            .read_only(true);
+        let conn = sqlx::sqlite::SqliteConnection::connect_with(&options)
+            .await
+            .expect("one read-only connection to the provider's own file");
+        DurableObserver {
+            conn,
+            store,
+            space_id: self.space_id.clone(),
+            subject_id: subject_id.to_owned(),
+            record_ids: record_ids.to_vec(),
+            candidate_id: candidate_id.map(str::to_owned),
+            receipt_id: receipt_id.map(str::to_owned),
+            profile_kind: profile_kind.map(str::to_owned),
+            publications_root,
+        }
+    }
+}
+
+impl DurableObserver {
+    /// Observe the same held connection: its `data_version`, the seeded rows
+    /// and the published file projection.
+    pub async fn observe(&mut self) -> DurableState {
+        let (data_version,): (i64,) = sqlx::query_as("PRAGMA data_version")
+            .fetch_one(&mut self.conn)
+            .await
+            .expect("the held connection reports its data_version");
+        let mut rows: Vec<(String, Vec<(String, String)>)> = Vec::new();
+        let record_ids = self.record_ids.clone();
+        let candidate_id = self.candidate_id.clone();
+        let receipt_id = self.receipt_id.clone();
+        let profile_kind = self.profile_kind.clone();
+        let space_id = self.space_id.clone();
+        let subject_id = self.subject_id.clone();
+        for record_id in &record_ids {
+            let sql = match self.store {
+                Store::Local => "SELECT * FROM memory_records WHERE record_id = ?",
+                Store::Fixture => "SELECT * FROM records WHERE record_id = ?",
+            };
+            rows.push((
+                format!("record:{record_id}"),
+                self.row(sql, &[record_id.as_str()]).await,
+            ));
+        }
+        if let Some(candidate_id) = candidate_id {
+            let candidate = match self.store {
+                Store::Local => "SELECT * FROM memory_candidates WHERE candidate_id = ?",
+                Store::Fixture => "SELECT * FROM candidates WHERE candidate_id = ?",
+            };
+            rows.push((
+                format!("candidate:{candidate_id}"),
+                self.row(candidate, &[candidate_id.as_str()]).await,
+            ));
+        }
+        if let Some(receipt_id) = receipt_id {
+            let receipt = match self.store {
+                Store::Local => "SELECT * FROM memory_receipts WHERE receipt_id = ?",
+                Store::Fixture => "SELECT * FROM receipts WHERE receipt_id = ?",
+            };
+            rows.push((
+                format!("receipt:{receipt_id}"),
+                self.row(receipt, &[receipt_id.as_str()]).await,
+            ));
+        }
+        if let Some(profile_kind) = profile_kind {
+            let profile = match self.store {
+                Store::Local => {
+                    "SELECT * FROM memory_profiles WHERE space_id = ? AND subject_id = ? \
+                     AND profile_kind = ?"
+                }
+                Store::Fixture => {
+                    "SELECT * FROM profiles WHERE space_id = ? AND subject_id = ? \
+                     AND profile_kind = ?"
+                }
+            };
+            rows.push((
+                format!("profile:{profile_kind}"),
+                self.row(
+                    profile,
+                    &[space_id.as_str(), subject_id.as_str(), profile_kind.as_str()],
+                )
+                .await,
+            ));
+        }
+        let subject = match self.store {
+            Store::Local => "SELECT * FROM memory_subjects WHERE space_id = ? AND subject_id = ?",
+            Store::Fixture => "SELECT * FROM subjects WHERE space_id = ? AND subject_id = ?",
+        };
+        rows.push((
+            format!("subject:{subject_id}"),
+            self.row(subject, &[space_id.as_str(), subject_id.as_str()])
+                .await,
+        ));
+        let space = match self.store {
+            Store::Local => "SELECT * FROM memory_spaces WHERE space_id = ?",
+            Store::Fixture => "SELECT * FROM spaces WHERE space_id = ?",
+        };
+        rows.push((
+            format!("space:{space_id}"),
+            self.row(space, &[space_id.as_str()]).await,
+        ));
+        rows.sort_by(|left, right| left.0.cmp(&right.0));
+        DurableState {
+            data_version,
+            rows,
+            publications: self
+                .publications_root
+                .as_deref()
+                .map(published_files)
+                .unwrap_or_default(),
+        }
+    }
+
+    /// One seeded row, as the database reports its own columns.
+    async fn row(&mut self, sql: &str, binds: &[&str]) -> Vec<(String, String)> {
+        let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
+        for bind in binds {
+            query = query.bind(*bind);
+        }
+        let rows = query
+            .fetch_all(&mut self.conn)
+            .await
+            .unwrap_or_else(|error| panic!("the seeded row is readable: {error}"));
+        rows.first().map(row_columns).unwrap_or_default()
+    }
+
+    /// The local provider's record-journal row count on the SAME held
+    /// connection. `None` for the fixture, which has no journal table.
+    pub async fn journal_count(&mut self) -> Option<i64> {
+        match self.store {
+            Store::Local => {
+                let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM memory_journal")
+                    .fetch_one(&mut self.conn)
+                    .await
+                    .expect("the held connection reads the record journal row count");
+                Some(count)
+            }
+            Store::Fixture => None,
+        }
+    }
+
+    /// Close the held connection explicitly: both the bound and the connection's
+    /// own close result must succeed.
+    pub async fn close(self) {
+        match tokio::time::timeout(BOUND, self.conn.close()).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => panic!("the held read-only connection closes: {error}"),
+            Err(_) => panic!("the held read-only connection close is bounded"),
+        }
+    }
+}
+
+/// Every column of one row as `(name, value)` — the database's own report, not
+/// a copied schema.
+fn row_columns(row: &sqlx::sqlite::SqliteRow) -> Vec<(String, String)> {
+    use sqlx::{Column, Row, ValueRef};
+    let mut out = Vec::with_capacity(row.columns().len());
+    for (index, column) in row.columns().iter().enumerate() {
+        let raw = row.try_get_raw(index).expect("a readable column");
+        let value = if raw.is_null() {
+            "null".to_owned()
+        } else if let Ok(text) = row.try_get::<String, _>(index) {
+            format!("text:{text}")
+        } else if let Ok(number) = row.try_get::<i64, _>(index) {
+            format!("int:{number}")
+        } else if let Ok(number) = row.try_get::<f64, _>(index) {
+            format!("real:{number}")
+        } else {
+            match row.try_get::<Vec<u8>, _>(index) {
+                Ok(bytes) => format!("blob:{}", hex(&bytes)),
+                Err(error) => panic!("an unsupported column value: {error}"),
+            }
+        };
+        out.push((column.name().to_owned(), value));
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// Real provider selection / open controls (I256)
+// ---------------------------------------------------------------------------
+
+/// The dialing identity of a selection control, and the credential id the
+/// disposable home provisions for it.
+pub const SELECTION_CLIENT_SEED: [u8; 32] = [0x61; 32];
+pub const SELECTION_CREDENTIAL_ID: &str = "cred-c-matrix-selection";
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// A one-shot signed host for a real `CoreService` remote open: the endpoint,
+/// the host identity and the dialing peer the open must authenticate.
+pub struct SelectionHost {
+    pub endpoint: String,
+    pub host_pubkey: [u8; 32],
+    addr: std::net::SocketAddr,
+    task: tokio::task::JoinHandle<Result<Arc<ConnectResponder>, String>>,
+}
+
+/// How long a failed open's listener is given to finish an already-dialed
+/// handshake before its owned task is aborted (loopback handshakes are
+/// immediate).
+const SELECTION_SETTLE_GRACE: Duration = Duration::from_secs(2);
+
+impl SelectionHost {
+    /// Await the responder that served a successful open's signed session. The
+    /// handle is retained across the deadline: an expired session aborts and
+    /// boundedly joins its own listener instead of dropping the `JoinHandle`
+    /// and detaching a task that still owns the port and the service.
+    pub async fn session(self) -> Result<Arc<ConnectResponder>, String> {
+        let mut task = self.task;
+        match tokio::time::timeout(BOUND, &mut task).await {
+            Ok(Ok(Ok(responder))) => Ok(responder),
+            Ok(Ok(Err(error))) => Err(error),
+            Ok(Err(join)) => Err(format!("the selection listener task failed: {join}")),
+            Err(_) => {
+                task.abort();
+                // A task that completed just before the abort still yields its
+                // responder here, so the caller closes it through the public
+                // route instead of losing it.
+                match tokio::time::timeout(BOUND, &mut task).await {
+                    Ok(Ok(Ok(responder))) => Ok(responder),
+                    Ok(Ok(Err(error))) => Err(error),
+                    Ok(Err(join)) if join.is_cancelled() => Err(
+                        "the selection session did not establish within the bound; its listener was aborted and joined"
+                            .to_owned(),
+                    ),
+                    Ok(Err(join)) => Err(format!(
+                        "the timed-out selection listener failed to join: {join}"
+                    )),
+                    Err(_) => Err(
+                        "the timed-out selection listener did not join within the bound".to_owned(),
+                    ),
+                }
+            }
+        }
+    }
+
+    /// Settle the listener of an open that failed: an already-dialed handshake
+    /// gets a short bounded grace, otherwise the owned task is aborted and
+    /// joined so its port is released. An established responder is returned for
+    /// the caller's own bounded close; nothing here panics or reports a timeout
+    /// as a live session.
+    pub async fn settle_failed(self) -> Result<Option<Arc<ConnectResponder>>, String> {
+        let mut task = self.task;
+        match tokio::time::timeout(SELECTION_SETTLE_GRACE, &mut task).await {
+            Ok(Ok(Ok(responder))) => Ok(Some(responder)),
+            Ok(Ok(Err(error))) => Err(error),
+            Ok(Err(join)) => Err(format!("the selection listener task failed: {join}")),
+            Err(_) => {
+                task.abort();
+                match tokio::time::timeout(BOUND, &mut task).await {
+                    Ok(Ok(Ok(responder))) => Ok(Some(responder)),
+                    Ok(Ok(Err(error))) => Err(error),
+                    Ok(Err(join)) if join.is_cancelled() => Ok(None),
+                    Ok(Err(join)) => Err(format!("the aborted selection listener failed: {join}")),
+                    Err(_) => Err(
+                        "the aborted selection listener did not join within the bound".to_owned(),
+                    ),
+                }
+            }
+        }
+    }
+
+    /// The listener's port, so a caller can verify it was released.
+    pub fn port(&self) -> u16 {
+        self.addr.port()
+    }
+}
+
+/// Serve `service` for one real `CoreService::open` over a signed loopback
+/// session. `capabilities` is the host's own signed hello, so an empty list is
+/// a host that negotiates no memory family.
+pub async fn serve_selection_host(
+    service: Arc<dyn RemoteMemoryService>,
+    host_id: &str,
+    capabilities: &[&str],
+    client_seed: [u8; 32],
+) -> SelectionHost {
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind an ephemeral localhost port");
+    let addr = listener.local_addr().expect("listener address");
+    let client_peer = peer_id(&client_seed);
+    let client_pubkey = pubkey(&client_seed);
+    let host_manifest = manifest_with(host_id, capabilities);
+    // The spawned listener returns its own failure instead of panicking; the
+    // `Ok(...)` tail and the `return Err(...)` arms infer
+    // `Result<Arc<ConnectResponder>, String>`.
+    let task = tokio::spawn(async move {
+        let accepted = tokio::time::timeout(BOUND, listener.accept()).await;
+        let (tcp, address) = match accepted {
+            Ok(Ok(accepted)) => accepted,
+            Ok(Err(error)) => {
+                return Err(format!("the selection listener accepts the open: {error}"))
+            }
+            Err(_) => {
+                return Err(
+                    "the selection listener received no connection within the bound".to_owned(),
+                )
+            }
+        };
+        if !address.ip().is_loopback() {
+            return Err(format!(
+                "the selection listener serves localhost only, got {address}"
+            ));
+        }
+        let upgraded = tokio::time::timeout(
+            BOUND,
+            tokio_tungstenite::accept_async_with_config(
+                tcp,
+                Some(ws_config(DEFAULT_MAX_ENVELOPE_BYTES)),
+            ),
+        )
+        .await;
+        let ws = match upgraded {
+            Ok(Ok(ws)) => ws,
+            Ok(Err(error)) => return Err(format!("the selection handshake completes: {error}")),
+            Err(_) => return Err("the selection handshake is bounded".to_owned()),
+        };
+        let socket: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
+        let ports: Arc<dyn RemoteServePorts + Send + Sync> = Arc::new(
+            RemoteServePortsComposite::new(Arc::new(MemoryOnlyHost), None, None)
+                .with_memory(service),
+        );
+        Ok(connect_responder(ConnectResponderOptions {
+            transport: socket,
+            identity: RemoteIdentity { seed: HOST_SEED },
+            manifest: host_manifest,
+            allowlist: vec![client_peer.clone()],
+            peer_keys: HashMap::from([(client_peer, client_pubkey)]),
+            ports: Some(ports),
+            invoke_timeout_ms: Some(5_000),
+        })
+        .await)
+    });
+    SelectionHost {
+        endpoint: format!("ws://{addr}"),
+        host_pubkey: pubkey(&HOST_SEED),
+        addr,
+        task,
+    }
+}
+
+/// A disposable Core home for a selection control: the active creator and
+/// workspace table plus the operator-provisioned credential for `client_seed`.
+pub struct SelectionHome {
+    _home: TempDir,
+    pub user_home: PathBuf,
+}
+
+impl SelectionHome {
+    pub fn new(creator: &str, client_seed: [u8; 32]) -> Self {
+        let home = TempDir::new().expect("selection home");
+        let user_home = home.path().to_path_buf();
+        std::fs::create_dir_all(user_home.join(".nexus42")).expect("nexus home");
+        std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+            &user_home,
+            creator,
+            LOCAL_WORKSPACE,
+        ))
+        .expect("workspace dir");
+        std::fs::write(
+            user_home.join(".nexus42").join("config.toml"),
+            format!(
+                "active_creator_id = \"{creator}\"\n\
+                 [active_workspace_slug_by_creator]\n\
+                 \"{creator}\" = \"{LOCAL_WORKSPACE}\"\n"
+            ),
+        )
+        .expect("seed the selection config");
+        let credentials = user_home.join(".nexus42").join("memory-credentials");
+        std::fs::create_dir_all(&credentials).expect("credential dir");
+        let path = credentials.join(format!("{SELECTION_CREDENTIAL_ID}.json"));
+        std::fs::write(
+            &path,
+            format!(
+                "{{\"identity_seed_hex\":\"{}\",\"capability_token\":null}}",
+                hex(&client_seed)
+            ),
+        )
+        .expect("write the operator credential");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+                .expect("credential mode 0600");
+        }
+        Self {
+            _home: home,
+            user_home,
+        }
+    }
+}
+
+/// The remote selection a Core open would persist for the served fixture.
+pub fn remote_selection(
+    space_id: &str,
+    host: &SelectionHost,
+) -> nexus_core::MemoryProviderSelection {
+    nexus_core::MemoryProviderSelection::Remote(nexus_core::RemoteMemoryProviderSelection {
+        space_id: space_id.to_owned(),
+        credential_id: SELECTION_CREDENTIAL_ID.to_owned(),
+        connect_endpoint: host.endpoint.clone(),
+        remote_pubkey_hex: hex(&host.host_pubkey),
+        allowlist: vec![peer_id(&HOST_SEED)],
+    })
+}
+
+/// The typed code of a `CoreError::Coded` refusal.
+pub fn core_code(error: &nexus_core::CoreError) -> &str {
+    match error {
+        nexus_core::CoreError::Coded { code, .. } => code,
+        other => panic!("expected a coded Core refusal, got {other:?}"),
+    }
+}
+
+/// The real local selection control: `CoreService::open` with the supported
+/// local memory selection, then the pinned provider's own declarations and a
+/// product memory read through the same open.
+pub struct LocalSelection {
+    pub described: Value,
+    pub profiles: Value,
+    pub pending: i64,
+}
+
+pub async fn open_selected_local(subject: &str, profile_kinds: &[&str]) -> LocalSelection {
+    let home = SelectionHome::new(LOCAL_ADMIN_ID, SELECTION_CLIENT_SEED);
+    let core = CoreService::open(CoreOpenOptions {
+        user_home: home.user_home.clone(),
+        access: CoreAccess::EngineOwner,
+        memory: Some(nexus_core::MemoryProviderSelection::Local),
+    })
+    .await
+    .expect("the supported local memory selection opens");
+    // Collect every observation, close the open, THEN surface the outcome: an
+    // assertion must not run while this control still owns the service.
+    let observed: Result<(Value, Value, i64), String> = match core.active_principal().await {
+        Ok(core_principal) => {
+            let pending = core
+                .count_pending_reviews(&core_principal)
+                .await
+                .map(|value| value.count)
+                .map_err(|error| format!("the pinned local binding serves memory: {error}"));
+            match (pending, core.memory_provider_for_test()) {
+                (Ok(pending), Ok(provider)) => {
+                    // The provider's typed port takes the spoke-schema principal
+                    // the admission maps; the Core principal is its
+                    // creator-scoped counterpart.
+                    let principal = principal(core_principal.creator_id());
+                    let described = wire(&provider.describe(&principal, dto(json!({}))).await);
+                    let profiles = wire(
+                        &provider
+                            .get_profile(
+                                &principal,
+                                dto(json!({
+                                    "space_id": provider.space_id(),
+                                    "subject_id": subject,
+                                    "profile_kinds": profile_kinds,
+                                })),
+                            )
+                            .await,
+                    );
+                    Ok((described, profiles, pending))
+                }
+                (Err(error), _) => Err(error),
+                (_, Err(error)) => {
+                    Err(format!("the local selection pins the local provider: {error}"))
+                }
+            }
+        }
+        Err(error) => Err(format!("the local selection has an active principal: {error}")),
+    };
+    let closed = core
+        .close()
+        .await
+        .map_err(|error| format!("the local selection closes: {error}"));
+    match (observed, closed) {
+        (Ok((described, profiles, pending)), Ok(_)) => LocalSelection {
+            described,
+            profiles,
+            pending,
+        },
+        (observed, closed) => panic!(
+            "the local selection control failed before its assertion: observed={observed:?}, closed={closed:?}"
+        ),
+    }
+}
+
+/// The Core creator/workspace a selection control opens under (a Core-local
+/// identity; the provider's admission maps the signed peer, not this id).
+pub const SELECTION_CREATOR: &str = "ctr_c_matrix_selection";
+
+/// A fresh durable fixture prepared for a real `CoreService` remote open: its
+/// served service, the authority host label its manifest names, its space and
+/// the operator-provisioned grant for the selection peer.
+pub struct SelectionFixture {
+    pub service: Arc<dyn RemoteMemoryService>,
+    pub authority_host_id: String,
+    pub space_id: String,
+    /// The operator-provisioned principal the signed selection peer maps to.
+    pub principal: String,
+    provider: Arc<FixtureMemoryProvider>,
+    _home: TempDir,
+}
+
+impl SelectionFixture {
+    /// Release the erased service first, then close the provider it served
+    /// through the bounded result-returning route, so an aggregating caller can
+    /// finish every other owner before deciding.
+    pub async fn settle(self) -> Result<(), String> {
+        let Self {
+            service,
+            provider,
+            _home,
+            ..
+        } = self;
+        drop(service);
+        close_fixture_bounded(provider).await
+    }
+}
+
+pub async fn selection_fixture() -> SelectionFixture {
+    let home = TempDir::new().expect("selection fixture home");
+    let provider = Arc::new(
+        FixtureMemoryProvider::open(&home.path().join("selection.sqlite"))
+            .await
+            .expect("open the selection fixture"),
+    );
+    let client_peer = peer_id(&SELECTION_CLIENT_SEED);
+    let principal_id = format!("prn_{client_peer}");
+    provider
+        .provision_operator_admin(&principal_id)
+        .await
+        .expect("operator provisions the selection principal");
+    let directory = Arc::new(PeerDirectory::new().with_peer(client_peer, principal_id.clone()));
+    let service = provider.server(directory.admission());
+    SelectionFixture {
+        service,
+        authority_host_id: provider.identity().authority_host_id.clone(),
+        space_id: provider.identity().space_id.clone(),
+        principal: principal_id,
+        provider,
+        _home: home,
+    }
 }
