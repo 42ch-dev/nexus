@@ -266,6 +266,16 @@ struct ReadRendezvous {
     release: Arc<tokio::sync::Barrier>,
 }
 
+/// Proof seam: the rendezvous a paused write waits at once it has entered the
+/// provider's write-admission machinery (past the read-only gate and the
+/// admission counter) and before it opens its writer transaction or runs
+/// retention. `entered` reports that arrival; `release` frees it. Test only.
+#[cfg(feature = "test-hooks")]
+struct AdmissionRendezvous {
+    entered: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Barrier>,
+}
+
 /// D15 proof seam: the rendezvous a parked capture waits at — `entered` reports
 /// that it holds its write transaction and has already validated the caller's
 /// binding, `release` frees it. Test only.
@@ -580,6 +590,12 @@ pub(super) struct MemoryStore {
     /// test can move the clock while the read is queued.
     #[cfg(feature = "test-hooks")]
     read_barrier: std::sync::Mutex<Option<ReadRendezvous>>,
+    /// Test-only rendezvous a write waits at once it has entered the
+    /// write-admission machinery and before its writer transaction — `entered`
+    /// tells the test the write arrived, `release` frees it — so a competing
+    /// transition can be observed at the contested boundary.
+    #[cfg(feature = "test-hooks")]
+    admission_barrier: std::sync::Mutex<Option<AdmissionRendezvous>>,
     /// Test-only rendezvous a capture waits at once its write transaction holds
     /// the lock and has validated the caller's binding — `entered` tells the
     /// test the capture is parked, `release` frees it — so a test can show a
@@ -664,6 +680,8 @@ impl MemoryStore {
         self.require_writable()?;
         #[cfg(feature = "test-hooks")]
         self.lock_attempts.fetch_add(1, Ordering::SeqCst);
+        #[cfg(feature = "test-hooks")]
+        self.admission_gate().await;
         self.reclaim_expired().await;
         let tx = begin_immediate(&self.pool).await?;
         Ok((tx, self.now()))
@@ -831,6 +849,8 @@ impl MemoryStore {
             #[cfg(feature = "test-hooks")]
             read_barrier: std::sync::Mutex::new(None),
             #[cfg(feature = "test-hooks")]
+            admission_barrier: std::sync::Mutex::new(None),
+            #[cfg(feature = "test-hooks")]
             capture_barrier: std::sync::Mutex::new(None),
             #[cfg(feature = "test-hooks")]
             publish_barrier: std::sync::Mutex::new(None),
@@ -960,6 +980,19 @@ impl MemoryStore {
             Some(CaptureRendezvous { entered, release });
     }
 
+    /// Park the next write once it has entered the write-admission machinery and
+    /// before its writer transaction (proof seam). `entered` reports that
+    /// arrival, `release` frees it. Single next use, like the capture seam.
+    #[cfg(feature = "test-hooks")]
+    pub(super) fn park_next_admission(
+        &self,
+        entered: Arc<tokio::sync::Notify>,
+        release: Arc<tokio::sync::Barrier>,
+    ) {
+        *self.admission_barrier.lock().expect("admission gate") =
+            Some(AdmissionRendezvous { entered, release });
+    }
+
     /// §5.2 step 2 proof seam: park the next publication once it holds the
     /// workspace publication section and before it settles or stages anything, so
     /// a test can observe another provider instance on the same workspace waiting
@@ -1018,6 +1051,21 @@ impl MemoryStore {
     async fn read_gate(&self) {
         let parked = {
             let mut gate = self.read_barrier.lock().expect("read gate");
+            gate.take()
+        };
+        if let Some(rendezvous) = parked {
+            rendezvous.entered.notify_one();
+            rendezvous.release.wait().await;
+        }
+    }
+
+    /// The [`Self::park_next_admission`] wait, taken at the same point in every
+    /// write: after the read-only gate and the admission counter, before the
+    /// retention pass and before the writer transaction.
+    #[cfg(feature = "test-hooks")]
+    async fn admission_gate(&self) {
+        let parked = {
+            let mut gate = self.admission_barrier.lock().expect("admission gate");
             gate.take()
         };
         if let Some(rendezvous) = parked {

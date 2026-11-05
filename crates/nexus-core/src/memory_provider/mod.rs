@@ -1530,6 +1530,20 @@ impl LocalMemoryProvider {
         self.store.park_next_read(entered, release);
     }
 
+    /// Proof seam: park the next write once it has entered the write-admission
+    /// machinery and before its writer transaction, so a competing transition can
+    /// be observed at the contested boundary. `entered` signals the arrival,
+    /// `release` frees it. Single next use. Compiled out of a production build.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn park_next_admission(
+        &self,
+        entered: std::sync::Arc<tokio::sync::Notify>,
+        release: std::sync::Arc<tokio::sync::Barrier>,
+    ) {
+        self.store.park_next_admission(entered, release);
+    }
+
     /// §5.2 step 2 proof seam: park the next publication while it holds the
     /// workspace publication section — cross-process flock and in-process gate —
     /// (`entered` signals it, `release` frees it). Test only.

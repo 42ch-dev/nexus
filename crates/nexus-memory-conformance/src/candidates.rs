@@ -328,7 +328,7 @@ fn commit_unknown(error: sqlx::Error) -> SpokeReject {
 
 /// A fixture fault that ended before this operation committed. §14.2 allows the
 /// retryable internal class only when no effect committed, which holds here.
-fn fault_before_effect(point: FaultPoint) -> SpokeReject {
+pub(crate) fn fault_before_effect(point: FaultPoint) -> SpokeReject {
     reject(
         SpokeRejectCode::InternalError,
         format!("fixture fault hold at {point:?} ended before any effect was committed"),

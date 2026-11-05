@@ -69,9 +69,11 @@ use spoke_operations::{
 };
 
 use crate::candidates::{
-    receipt_id, release_expired_binding_in_tx, required_capabilities, resolve_replay,
-    stage_receipt_in_tx, Admitted, Mutation, ReceiptState, ReceiptTarget, ReplayResolution,
+    fault_before_effect, receipt_id, release_expired_binding_in_tx, required_capabilities,
+    resolve_replay, stage_receipt_in_tx, Admitted, Mutation, ReceiptState, ReceiptTarget,
+    ReplayResolution,
 };
+use crate::faults::FaultPoint;
 use crate::policy::describe_body;
 use crate::provider::FixtureMemoryProvider;
 use crate::raw_invoke;
@@ -90,6 +92,7 @@ impl FixtureMemoryProvider {
         Arc::new(FixtureMemoryService {
             inner: MemoryPortService::new(port, admission),
             provider: self.identity.authority_host_id.clone(),
+            faults: self.faults().clone(),
         })
     }
 }
@@ -101,6 +104,10 @@ struct FixtureMemoryService {
     inner: MemoryPortService,
     /// The provider identity a request scope must name to be trusted.
     provider: String,
+    /// The provider's operator/test-only fault control, so the existing bounded
+    /// `AdmissionPause` point can acknowledge a request's arrival at the memory
+    /// service before any handler runs. Test control only, never authority.
+    faults: crate::faults::FixtureFaults,
 }
 
 #[async_trait]
@@ -111,6 +118,17 @@ impl RemoteMemoryService for FixtureMemoryService {
         op: &str,
         payload: Value,
     ) -> SpokeResult<Value> {
+        // The provider's existing bounded `AdmissionPause` fault point is
+        // consulted at the memory-service entry: before the request scope is
+        // taken, before the typed decode and before any handler or transaction.
+        // An armed hold acknowledges this request's arrival to the test and waits
+        // for release; an expired or lost hold is a clean no-effect refusal
+        // because nothing was staged. Unarmed, it is a no-op.
+        if self.faults.hold(FaultPoint::AdmissionPause).await.is_err() {
+            return raw_invoke::normalize(SpokeResult::Reject(fault_before_effect(
+                FaultPoint::AdmissionPause,
+            )));
+        }
         let scope = match raw_invoke::admission(&payload, op, &self.provider) {
             Ok(scope) => scope,
             // The digest could not be taken over the received object, so no
