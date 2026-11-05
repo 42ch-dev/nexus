@@ -1494,13 +1494,19 @@ pub fn assert_no_receipt_disclosure(
             Value::Object(map) => {
                 // A protected tuple/body is recognized by its relationship to
                 // the ACTUAL authorized receipt (and what this request already
-                // supplied), never by a generic key count.
+                // supplied), never by a generic key count. A bare echo of the
+                // caller's requested receipt id is legal, but that same id
+                // bound to any actual protected receipt field is a disclosure
+                // association, not mere echo.
+                let authorized_id = receipt.get("receipt_id").and_then(Value::as_str);
+                let carries_authorized_id = authorized_id
+                    .is_some_and(|id| map.values().any(|field| field.as_str() == Some(id)));
                 let protected = map
                     .iter()
                     .filter(|(key, field)| matches_receipt(key, field, receipt, allowed))
                     .count();
                 assert!(
-                    protected < 2,
+                    protected < 2 && !(carries_authorized_id && protected >= 1),
                     "a refusal embeds protected authorized-receipt values in {meaning}: {value}"
                 );
                 for (key, child) in map {

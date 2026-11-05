@@ -1093,7 +1093,29 @@ fn receipt_privacy_control_uses_actual_receipt_and_request_context() {
     });
     support::assert_no_receipt_disclosure(&unrelated_diagnostic, &authorized, &current);
 
+    // J1: a bare requested-receipt-id echo is legal, but the SAME id paired
+    // with the actual committed status is a receipt disclosure even though the
+    // caller already supplied the id.
+    let bare_requested_id = json!({
+        "error": {"details": {"receipt_id": "rcpt_authorized"}},
+    });
+    support::assert_no_receipt_disclosure(&bare_requested_id, &authorized, &current);
+
     let cases: Vec<(&str, Value)> = vec![
+        (
+            "the requested receipt id paired with the actual committed status",
+            json!({"error": {"details": {
+                "receipt_id": "rcpt_authorized",
+                "status": "committed",
+            }}}),
+        ),
+        (
+            "the requested receipt id paired with the actual payload digest",
+            json!({"error": {"details": {
+                "receipt_id": "rcpt_authorized",
+                "payload_digest": "ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34",
+            }}}),
+        ),
         (
             "an old idempotency key",
             json!({"error": {"details": {"note": "k-old-request"}}}),
