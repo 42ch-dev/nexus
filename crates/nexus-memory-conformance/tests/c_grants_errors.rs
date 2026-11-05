@@ -94,6 +94,14 @@ fn column<'a>(row: &'a [(String, String)], name: &str) -> &'a str {
         .as_str()
 }
 
+/// The receipt row's `result_json` column, parsed as the provider's own JSON:
+/// the durable result is compared as the actual structure, never by substring.
+fn parsed_result_json(row: &[(String, String)]) -> Value {
+    let raw = column(row, "result_json");
+    let text = raw.strip_prefix("text:").unwrap_or(raw);
+    serde_json::from_str(text).expect("the durable receipt result_json is valid JSON")
+}
+
 fn observed_records(state: &DurableState) -> Vec<(String, Vec<(String, String)>)> {
     state
         .rows
@@ -450,9 +458,11 @@ async fn grant_scope_covers_base_surfaces(
         column(receipt_row, "requester_principal_id"),
         format!("text:{}", peer_id.as_str())
     );
-    assert!(
-        column(receipt_row, "result_json").contains(&candidate),
-        "the durable receipt result names the actual candidate: {state:?}"
+    let durable_result = parsed_result_json(receipt_row);
+    assert_eq!(
+        durable_result,
+        allowed["result"],
+        "the durable receipt result is the returned committed result structure: {state:?}"
     );
     assert!(!column(receipt_row, "result_json").contains(TEXT));
     resources
@@ -478,7 +488,15 @@ async fn grant_scope_covers_base_surfaces(
         "{refused}"
     );
     assert_eq!(retry_class(&refused), "terminal");
-    assert_no_receipt_disclosure(&refused, &foreign_capture);
+    assert_no_receipt_disclosure(
+        &refused,
+        &foreign_capture,
+        &json!({
+            "op": "memory.receipts.get",
+            "space_id": matrix.space_id(),
+            "receipt_id": foreign_receipt,
+        }),
+    );
     assert_eq!(
         admin.get_receipt(&foreign_receipt).await["receipt"]["receipt_id"],
         json!(foreign_receipt)
@@ -610,9 +628,10 @@ async fn revoke_applies_at_admission_boundary(
         column(receipt_row, "requester_principal_id"),
         format!("text:{}", peer_id.as_str())
     );
-    assert!(
-        column(receipt_row, "result_json").contains(&admitted_candidate),
-        "the durable receipt result names the actual candidate: {effect_state:?}"
+    assert_eq!(
+        parsed_result_json(receipt_row),
+        admitted["result"],
+        "the durable receipt result is the returned committed capture result: {effect_state:?}"
     );
     assert!(!column(receipt_row, "result_json").contains(TEXT));
     resources
@@ -1027,9 +1046,15 @@ async fn revoke_or_fence_race_has_one_outcome(
     assert!(column(candidate_row, "content_json").contains(TEXT));
     let receipt_row = observed(&state, &format!("receipt:{receipt}"));
     assert_eq!(column(receipt_row, "status"), "text:committed");
-    assert!(
-        column(receipt_row, "result_json").contains(&candidate),
-        "the durable receipt result names the actual candidate: {state:?}"
+    assert_eq!(column(receipt_row, "op"), "text:memory.capture");
+    assert_eq!(
+        column(receipt_row, "requester_principal_id"),
+        format!("text:{}", peer_id.as_str())
+    );
+    assert_eq!(
+        parsed_result_json(receipt_row),
+        admitted["result"],
+        "the durable receipt result is the returned committed result structure: {state:?}"
     );
     assert!(!column(receipt_row, "result_json").contains(TEXT));
     resources

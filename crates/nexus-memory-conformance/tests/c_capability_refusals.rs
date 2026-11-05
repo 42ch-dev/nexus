@@ -29,6 +29,8 @@
 
 mod support;
 
+use std::sync::Arc;
+
 use serde_json::{json, Value};
 
 use support::{
@@ -126,33 +128,69 @@ fn assert_receipt_tuple(body: &Value, op: &str, requester: &str) {
     assert_payload_secrecy(body);
 }
 
-/// Normalize a refusal for a security-shape comparison: caller-supplied request
-/// identifiers are redacted from every string, so an echo of the requested id is
-/// permitted; every other value (including any existence/ownership marker or a
-/// differing message/detail) still has to match. The concrete probes pass the
-/// exact ids they requested.
-fn normalized_refusal(body: &Value, redactions: &[&str]) -> Value {
-    fn redact(value: &Value, redactions: &[&str]) -> Value {
+/// Per-request/transport keys that carry no existence evidence: the caller
+/// itself supplied or already saw them. The projection drops exactly these.
+const PER_REQUEST_KEYS: [&str; 6] = [
+    "request_id",
+    "trace_id",
+    "correlation_id",
+    "session_id",
+    "sequence",
+    "signature",
+];
+
+/// Project a refusal to its security-relevant shape: known per-request keys are
+/// dropped and the caller-supplied requested ids are normalized. What remains
+/// (code, details, message, extensions) must be equal for a foreign and a
+/// missing target from the SAME provider, so a deterministic
+/// existence/ownership-correlated difference (`exists: true/false`, a distinct
+/// message or marker) is caught, while legitimate request/correlation
+/// diagnostics do not overpin provider wording.
+fn security_projection(body: &Value, requested_ids: &[&str]) -> Value {
+    fn project(value: &Value, requested_ids: &[&str]) -> Value {
         match value {
+            Value::Object(map) => Value::Object(
+                map.iter()
+                    .filter(|(key, _)| !PER_REQUEST_KEYS.contains(&key.as_str()))
+                    .map(|(key, child)| (key.clone(), project(child, requested_ids)))
+                    .collect(),
+            ),
+            Value::Array(items) => Value::Array(
+                items
+                    .iter()
+                    .map(|item| project(item, requested_ids))
+                    .collect(),
+            ),
             Value::String(text) => {
                 let mut text = text.clone();
-                for marker in redactions {
+                for marker in requested_ids {
                     text = text.replace(marker, "<requested-id>");
                 }
                 Value::String(text)
             }
-            Value::Object(map) => Value::Object(
-                map.iter()
-                    .map(|(key, child)| (key.clone(), redact(child, redactions)))
-                    .collect(),
-            ),
-            Value::Array(items) => {
-                Value::Array(items.iter().map(|item| redact(item, redactions)).collect())
-            }
             other => other.clone(),
         }
     }
-    redact(&body["error"], redactions)
+    project(body, requested_ids)
+}
+
+/// A permitted record/subject refusal: one of the two terminal absence codes,
+/// with the required `details.retry_class == "terminal"`. A pair of equal
+/// `INTERNAL_ERROR`/`retryable` bodies is rejected by this predicate even
+/// though their projected shapes are equal.
+fn assert_terminal_refusal(body: &Value, what: &str) {
+    let code = body["error"]["code"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{what} is a refusal envelope: {body}"));
+    assert!(
+        matches!(code, "NOT_FOUND" | "NOT_AUTHORIZED"),
+        "{what} uses a permitted terminal absence class, got {code}: {body}"
+    );
+    assert_eq!(
+        retry_class(body),
+        "terminal",
+        "{what} is a terminal refusal: {body}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -553,12 +591,11 @@ async fn foreign_and_missing_ids_have_no_existence_oracle(
 
     let foreign_probe = peer.get_record(&foreign_id).await;
     let missing_probe = peer.get_record("rec_c102_missing").await;
-    let redactions = [foreign_id.as_str(), "rec_c102_missing"];
-    assert_eq!(error_code(&foreign_probe), "NOT_FOUND", "{foreign_probe}");
-    assert_eq!(error_code(&missing_probe), "NOT_FOUND", "{missing_probe}");
+    assert_terminal_refusal(&foreign_probe, "a foreign record read");
+    assert_terminal_refusal(&missing_probe, "a missing record read");
     assert_eq!(
-        normalized_refusal(&foreign_probe, &redactions),
-        normalized_refusal(&missing_probe, &redactions),
+        security_projection(&foreign_probe, &[foreign_id.as_str()]),
+        security_projection(&missing_probe, &["rec_c102_missing"]),
         "foreign and missing records share one normalized security shape"
     );
     let leaked = format!("{foreign_probe}{missing_probe}");
@@ -567,19 +604,16 @@ async fn foreign_and_missing_ids_have_no_existence_oracle(
 
     let foreign_subject = peer.get_subject(support::OTHER_SUBJECT).await;
     let missing_subject = peer.get_subject("sbj_c102_missing").await;
-    let subject_redactions = [support::OTHER_SUBJECT, "sbj_c102_missing"];
+    assert_terminal_refusal(&foreign_subject, "a foreign subject read");
+    assert_terminal_refusal(&missing_subject, "a missing subject read");
     assert_eq!(
         error_code(&foreign_subject),
         error_code(&missing_subject),
         "a foreign subject and a missing one share one refusal class: {foreign_subject} {missing_subject}"
     );
     assert_eq!(
-        retry_class(&foreign_subject),
-        retry_class(&missing_subject)
-    );
-    assert_eq!(
-        normalized_refusal(&foreign_subject, &subject_redactions),
-        normalized_refusal(&missing_subject, &subject_redactions),
+        security_projection(&foreign_subject, &[support::OTHER_SUBJECT]),
+        security_projection(&missing_subject, &["sbj_c102_missing"]),
         "foreign and missing subjects share one normalized security shape"
     );
     let subject_leak = format!("{foreign_subject}{missing_subject}");
@@ -606,12 +640,10 @@ async fn foreign_and_missing_ids_have_no_existence_oracle(
         .await;
     let revoked_before = resources.observe(revoked_window).await;
     let after_revoke = peer.get_record(&covered_id).await;
-    assert_eq!(error_code(&after_revoke), "NOT_FOUND", "{after_revoke}");
-    assert_eq!(retry_class(&after_revoke), "terminal");
-    let revoked_redactions = [covered_id.as_str(), "rec_c102_missing"];
+    assert_terminal_refusal(&after_revoke, "a revoked reader's record read");
     assert_eq!(
-        normalized_refusal(&after_revoke, &revoked_redactions),
-        normalized_refusal(&missing_probe, &revoked_redactions),
+        security_projection(&after_revoke, &[covered_id.as_str()]),
+        security_projection(&missing_probe, &["rec_c102_missing"]),
         "a revoked reader gets the same normalized absence as a missing id"
     );
     let revoked_after = resources.observe(revoked_window).await;
@@ -761,7 +793,15 @@ async fn receipt_read_rechecks_revoked_authorization(
         "{second}"
     );
     assert_eq!(retry_class(&second), "terminal");
-    assert_no_receipt_disclosure(&second, &first["receipt"]);
+    assert_no_receipt_disclosure(
+        &second,
+        &first["receipt"],
+        &json!({
+            "op": "memory.receipts.get",
+            "space_id": matrix.space_id(),
+            "receipt_id": receipt,
+        }),
+    );
     let after = resources.observe(window).await;
     assert_eq!(after.rows, before.rows);
     resources
@@ -953,4 +993,168 @@ async fn c_073_reflection_reads_refuse_without_capability_remote() {
         Box::pin(async move { reflection_reads_refuse_without_capability(m, r, t).await })
     })
     .await;
+}
+
+/// G2 (I268) policy control: the security projection tolerates genuine
+/// per-request diagnostics, rejects an existence-correlated difference, and the
+/// terminal predicate rejects equal `INTERNAL_ERROR`/`retryable` pairs.
+#[test]
+fn refusal_projection_control_separates_existence_from_request_diagnostics() {
+    let trusted = ["rec_requested"];
+    let diagnostic_a = json!({
+        "request_id": "req-a",
+        "trace_id": "trace-a",
+        "error": {"code": "NOT_FOUND", "message": "record rec_requested not found",
+                  "details": {"retry_class": "terminal", "health": true}},
+    });
+    let diagnostic_b = json!({
+        "request_id": "req-b",
+        "trace_id": "trace-b",
+        "error": {"code": "NOT_FOUND", "message": "record rec_requested not found",
+                  "details": {"retry_class": "terminal", "health": true}},
+    });
+    assert_eq!(
+        security_projection(&diagnostic_a, &trusted),
+        security_projection(&diagnostic_b, &trusted),
+        "per-request ids/messages are not existence evidence"
+    );
+
+    let absent = json!({"error": {"code": "NOT_FOUND",
+        "details": {"retry_class": "terminal", "exists": false}}});
+    let present = json!({"error": {"code": "NOT_FOUND",
+        "details": {"retry_class": "terminal", "exists": true}}});
+    assert_ne!(
+        security_projection(&absent, &trusted),
+        security_projection(&present, &trusted),
+        "exists true/false is an existence oracle"
+    );
+
+    let retryable = json!({"error": {"code": "INTERNAL_ERROR",
+        "details": {"retry_class": "retryable"}}});
+    assert_eq!(
+        security_projection(&retryable, &trusted),
+        security_projection(&retryable, &trusted)
+    );
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        assert_terminal_refusal(&retryable, "control")
+    }));
+    assert!(
+        outcome.is_err(),
+        "two equal INTERNAL_ERROR/retryable refusals must fail the terminal class check"
+    );
+}
+
+/// G3 (I269) policy control: the one receipt-privacy oracle accepts legitimate
+/// current-request echoes and unrelated booleans, and rejects an old
+/// idempotency key, an operation-specific result id, a nested receipt tuple
+/// without `receipt_id`, and a receipt-shaped object.
+#[test]
+fn receipt_privacy_control_uses_actual_receipt_and_request_context() {
+    let authorized = json!({
+        "receipt_id": "rcpt_authorized",
+        "status": "committed",
+        "op": "memory.capture",
+        "requester_principal_id": "prn_admin",
+        "payload_digest": "ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34",
+        "idempotency_key": "k-old-request",
+        "result": {"candidate_ids": ["cand_actual_0001"]},
+        "created_at": "2026-01-01T00:00:00Z",
+        "completed_at": "2026-01-01T00:00:01Z",
+    });
+    let current = json!({
+        "op": "memory.receipts.get",
+        "space_id": "spc_control",
+        "receipt_id": "rcpt_authorized",
+        "request_id": "req-current",
+    });
+
+    let permitted = json!({
+        "request_id": "req-current",
+        "error": {
+            "code": "NOT_FOUND",
+            "message": "receipt not found",
+            "details": {"retry_class": "terminal", "health": true,
+                        "receipt_id": "rcpt_authorized", "op": "memory.receipts.get"},
+        },
+    });
+    support::assert_no_receipt_disclosure(&permitted, &authorized, &current);
+
+    let cases: Vec<(&str, Value)> = vec![
+        (
+            "an old idempotency key",
+            json!({"error": {"details": {"note": "k-old-request"}}}),
+        ),
+        (
+            "an operation-specific result id",
+            json!({"error": {"details": {"x": "cand_actual_0001"}}}),
+        ),
+        (
+            "a nested receipt tuple without receipt_id",
+            json!({"error": {"details": {"nested": {
+                "op": "memory.capture",
+                "payload_digest": "ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34",
+            }}}}),
+        ),
+        (
+            "a receipt-shaped object",
+            json!({"error": {"details": {
+                "receipt_id": "rcpt_authorized",
+                "status": "committed",
+                "payload_digest": "ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34",
+            }}}),
+        ),
+    ];
+    for (what, response) in cases {
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            support::assert_no_receipt_disclosure(&response, &authorized, &current);
+        }));
+        assert!(
+            outcome.is_err(),
+            "the privacy oracle rejects {what}: {response}"
+        );
+    }
+}
+
+/// G4 (I270) cancellation control: a join future cancelled while its task is
+/// still pending leaves the same handle owned, and the owner can abort and
+/// bounded-join it afterwards. The task's abort guard proves the retained
+/// handle really settled it; a take-before-await owner would have detached it
+/// and the guard would never run.
+#[tokio::test]
+async fn task_set_join_cancellation_keeps_the_handle_owned() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct AbortFlag(Arc<AtomicBool>);
+    impl Drop for AbortFlag {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    let flag = Arc::new(AtomicBool::new(false));
+    let tasks = TaskSet::default();
+    let owned_flag = Arc::clone(&flag);
+    let index = tasks.spawn(async move {
+        let _guard = AbortFlag(owned_flag);
+        std::future::pending::<()>().await;
+        json!(null)
+    });
+
+    let cancelled = tokio::time::timeout(
+        std::time::Duration::from_millis(20),
+        tasks.join(index, "the cancelled join"),
+    )
+    .await;
+    assert!(
+        cancelled.is_err(),
+        "the join future is cancelled while its task is still pending"
+    );
+    tasks
+        .settle("the retained task")
+        .await
+        .expect("the same owner still settles the retained task");
+    assert!(
+        flag.load(Ordering::SeqCst),
+        "the retained handle aborted and joined the task instead of detaching it"
+    );
 }

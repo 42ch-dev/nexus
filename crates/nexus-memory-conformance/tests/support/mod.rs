@@ -317,10 +317,25 @@ pub async fn open_endpoint(
     host_id: &str,
     seed: [u8; 32],
 ) -> Endpoint {
+    open_endpoint_expecting(service, host_id, seed, pubkey(&HOST_SEED)).await
+}
+
+/// The real setup primitive behind [`open_endpoint`]: the same listener,
+/// responder, dial and failure-settlement path, parameterised by the host key
+/// the signed dial expects. The setup-failure control drives THIS primitive
+/// with a wrong key (a deterministic genuine dial failure), so it exercises
+/// the real listener/responder ownership instead of a lookalike.
+async fn open_endpoint_expecting(
+    service: Arc<dyn RemoteMemoryService>,
+    host_id: &str,
+    seed: [u8; 32],
+    expected_host_pubkey: [u8; 32],
+) -> Endpoint {
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .await
         .expect("bind an ephemeral localhost port");
     let addr = listener.local_addr().expect("listener address");
+    let port = addr.port();
     let peer = peer_id(&seed);
     let host_manifest = manifest(host_id);
     let host = tokio::spawn(async move {
@@ -356,9 +371,11 @@ pub async fn open_endpoint(
         .await;
         (socket, responder)
     });
-    // The listener task is owned until the client side succeeds: a connect or
-    // dial failure aborts and bounded-joins it before the original failure is
-    // re-raised, so failed setup never detaches a listener.
+    // The listener task is owned until the client side succeeds. A connect or
+    // dial failure settles that exact task (abort + bounded join, closing a
+    // responder/socket it already returned) and confirms the port release
+    // before the original failure is re-raised; a join the bound did not
+    // confirm is reported, never claimed.
     let client_side = std::panic::AssertUnwindSafe(async {
         let (ws, _response) = tokio::time::timeout(
             BOUND,
@@ -372,7 +389,7 @@ pub async fn open_endpoint(
             transport: Arc::clone(&socket),
             local_identity: RemoteIdentity { seed },
             local_manifest: manifest(&format!("{host_id}-client")),
-            remote_pubkey: pubkey(&HOST_SEED),
+            remote_pubkey: expected_host_pubkey,
             allowlist: vec![peer_id(&HOST_SEED)],
             invoke_timeout_ms: None,
             capability_token: None,
@@ -387,17 +404,64 @@ pub async fn open_endpoint(
     .await;
     let (socket, client) = match client_side {
         Ok(established) => established,
-        Err(payload) => {
-            host.abort();
-            let _ = tokio::time::timeout(BOUND, host).await;
-            std::panic::resume_unwind(payload);
-        }
+        Err(payload) => match settle_endpoint_listener(host, port).await {
+            Ok(()) => std::panic::resume_unwind(payload),
+            Err(problem) => {
+                let original = panic_message(payload);
+                panic!(
+                    "the endpoint setup failed ({original}) and its listener settlement also failed: {problem}"
+                );
+            }
+        },
     };
     let (_server_socket, responder) = host.await.expect("the listener task");
     Endpoint {
         client,
         responder,
         socket,
+    }
+}
+
+/// Settle the exact endpoint listener task after a client-side setup failure:
+/// abort it, bounded-join it, close any responder/socket it already returned,
+/// and confirm the listening port is released. An unconfirmed join is an
+/// error, never a claimed join.
+async fn settle_endpoint_listener(
+    host: tokio::task::JoinHandle<(Arc<dyn Transport>, Arc<ConnectResponder>)>,
+    port: u16,
+) -> Result<(), String> {
+    host.abort();
+    match tokio::time::timeout(BOUND, host).await {
+        Ok(Ok((socket, responder))) => {
+            // The listener completed before the abort: close both owners it
+            // created, rather than discarding them or relying on abort.
+            close_responder(responder).await?;
+            match tokio::time::timeout(BOUND, socket.close()).await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    return Err(format!("the setup listener socket close failed: {error}"))
+                }
+                Err(_) => {
+                    return Err(
+                        "the setup listener socket close did not finish within the bound".to_owned(),
+                    )
+                }
+            }
+        }
+        Ok(Err(error)) if error.is_cancelled() => {}
+        Ok(Err(error)) => return Err(format!("the setup listener task failed: {error}")),
+        Err(_) => {
+            return Err(
+                "the setup listener task did not join within the bound; settlement unconfirmed"
+                    .to_owned(),
+            )
+        }
+    }
+    match TcpListener::bind(("127.0.0.1", port)).await {
+        Ok(_) => Ok(()),
+        Err(error) => Err(format!(
+            "the setup listener's port is not rebindable after settlement: {error}"
+        )),
     }
 }
 
@@ -455,6 +519,16 @@ async fn open_provider(home: &Home) -> Provider {
                     .expect("open the durable fixture provider"),
             ))
         }
+    }
+}
+
+/// Settle a provider owner after a failed setup step. The local pool drops with
+/// its owner; the fixture's own pool close and its ownership wait are bounded
+/// and returned, never panicked.
+async fn settle_provider_setup(provider: Provider) -> Result<(), String> {
+    match provider {
+        Provider::Local(_provider) => Ok(()),
+        Provider::Fixture(provider) => close_fixture_bounded(provider).await,
     }
 }
 
@@ -597,8 +671,55 @@ impl Matrix {
             }
         };
         let service = build_service(&provider, &directory);
-        let admin = open_endpoint(Arc::clone(&service), &host_id, ADMIN_SEED).await;
-        let peer = open_endpoint(Arc::clone(&service), &host_id, PEER_SEED).await;
+        // One owner at a time: if the admin endpoint fails, the provider is
+        // settled; if the peer fails, the admin endpoint AND the provider are
+        // settled, with both errors preserved on the re-raised failure.
+        let admin = match std::panic::AssertUnwindSafe(open_endpoint(
+            Arc::clone(&service),
+            &host_id,
+            ADMIN_SEED,
+        ))
+        .catch_unwind()
+        .await
+        {
+            Ok(endpoint) => endpoint,
+            Err(payload) => match settle_provider_setup(provider).await {
+                Ok(()) => std::panic::resume_unwind(payload),
+                Err(problem) => {
+                    let original = panic_message(payload);
+                    panic!(
+                        "the admin endpoint setup failed ({original}) and the provider settlement also failed: {problem}"
+                    );
+                }
+            },
+        };
+        let peer = match std::panic::AssertUnwindSafe(open_endpoint(
+            Arc::clone(&service),
+            &host_id,
+            PEER_SEED,
+        ))
+        .catch_unwind()
+        .await
+        {
+            Ok(endpoint) => endpoint,
+            Err(payload) => {
+                let mut problems: Vec<String> = Vec::new();
+                if let Err(error) = admin.settle().await {
+                    problems.push(format!("the admin session did not settle: {error}"));
+                }
+                if let Err(error) = settle_provider_setup(provider).await {
+                    problems.push(format!("the provider did not settle: {error}"));
+                }
+                if problems.is_empty() {
+                    std::panic::resume_unwind(payload);
+                }
+                let original = panic_message(payload);
+                panic!(
+                    "the peer endpoint setup failed ({original}) and cleanup also failed: {}",
+                    problems.join("; ")
+                );
+            }
+        };
         Self {
             kind,
             home,
@@ -697,8 +818,54 @@ impl Matrix {
         }
         let provider = open_provider(&home).await;
         let service = build_service(&provider, &directory);
-        let admin = open_endpoint(Arc::clone(&service), &host_id, ADMIN_SEED).await;
-        let peer = open_endpoint(Arc::clone(&service), &host_id, PEER_SEED).await;
+        // The reopened provider is settled if either fresh session fails to
+        // set up; the admin endpoint is settled before the provider.
+        let admin = match std::panic::AssertUnwindSafe(open_endpoint(
+            Arc::clone(&service),
+            &host_id,
+            ADMIN_SEED,
+        ))
+        .catch_unwind()
+        .await
+        {
+            Ok(endpoint) => endpoint,
+            Err(payload) => match settle_provider_setup(provider).await {
+                Ok(()) => std::panic::resume_unwind(payload),
+                Err(problem) => {
+                    let original = panic_message(payload);
+                    panic!(
+                        "the restarted admin endpoint setup failed ({original}) and the provider settlement also failed: {problem}"
+                    );
+                }
+            },
+        };
+        let peer = match std::panic::AssertUnwindSafe(open_endpoint(
+            Arc::clone(&service),
+            &host_id,
+            PEER_SEED,
+        ))
+        .catch_unwind()
+        .await
+        {
+            Ok(endpoint) => endpoint,
+            Err(payload) => {
+                let mut problems: Vec<String> = Vec::new();
+                if let Err(error) = admin.settle().await {
+                    problems.push(format!("the admin session did not settle: {error}"));
+                }
+                if let Err(error) = settle_provider_setup(provider).await {
+                    problems.push(format!("the provider did not settle: {error}"));
+                }
+                if problems.is_empty() {
+                    std::panic::resume_unwind(payload);
+                }
+                let original = panic_message(payload);
+                panic!(
+                    "the restarted peer endpoint setup failed ({original}) and cleanup also failed: {}",
+                    problems.join("; ")
+                );
+            }
+        };
         Self {
             kind,
             home,
@@ -923,10 +1090,19 @@ pub async fn close_core_bounded(
 /// Owned operation tasks for one scenario, so a deadline or an earlier failure
 /// can never detach live work: every handle stays owned until the scenario
 /// joins it or [`TaskSet::settle`] aborts and bounded-joins it.
+///
+/// Each task lives in its own async slot owned by the set. A join awaits that
+/// slot's handle **in place**, so cancelling the join future (an assertion, a
+/// test timeout, the runner) leaves the same handle owned for the later
+/// settlement instead of dropping it detach-by-value. A deadline aborts and
+/// bounded-joins the same handle; an unconfirmed settlement is reported and the
+/// handle stays owned, never claimed as joined.
 #[derive(Clone, Default)]
 pub struct TaskSet {
-    handles: Arc<std::sync::Mutex<Vec<Option<tokio::task::JoinHandle<Value>>>>>,
+    slots: Arc<std::sync::Mutex<Vec<TaskSlot>>>,
 }
+
+type TaskSlot = Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<Value>>>>;
 
 impl TaskSet {
     /// Spawn one owned operation future and return its slot.
@@ -934,50 +1110,104 @@ impl TaskSet {
     where
         F: Future<Output = Value> + Send + 'static,
     {
-        let mut handles = self
-            .handles
+        let mut slots = self
+            .slots
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        handles.push(Some(tokio::spawn(future)));
-        handles.len() - 1
+        slots.push(Arc::new(tokio::sync::Mutex::new(Some(tokio::spawn(
+            future,
+        )))));
+        slots.len() - 1
     }
 
-    /// Join one owned handle under the harness bound. A timeout aborts and
-    /// still waits for the same handle; it is never detach-by-value.
+    fn slot(&self, index: usize, what: &str) -> Result<TaskSlot, String> {
+        self.slots
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(index)
+            .cloned()
+            .ok_or_else(|| format!("{what} has no owned task"))
+    }
+
+    /// Join one owned handle under the harness bound, keeping it in its slot
+    /// for the whole await. A deadline aborts and bounded-joins the same
+    /// handle; if that settlement is unconfirmed the handle stays owned for
+    /// the runner's final `settle`, and the error says so.
     pub async fn join(&self, index: usize, what: &str) -> Result<Value, String> {
-        let mut handle = {
-            let mut handles = self
-                .handles
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            handles
-                .get_mut(index)
-                .and_then(Option::take)
-                .ok_or_else(|| format!("{what} has no owned task"))?
-        };
-        join_owned(&mut handle, what).await
+        let slot = self.slot(index, what)?;
+        let mut guard = slot.lock().await;
+        let handle = guard
+            .as_mut()
+            .ok_or_else(|| format!("{what} has no owned task"))?;
+        match tokio::time::timeout(BOUND, &mut *handle).await {
+            Ok(Ok(value)) => {
+                *guard = None;
+                Ok(value)
+            }
+            Ok(Err(error)) => {
+                *guard = None;
+                Err(format!("{what} task failed: {error}"))
+            }
+            Err(_) => {
+                handle.abort();
+                match tokio::time::timeout(BOUND, &mut *handle).await {
+                    Ok(Ok(_)) => {
+                        *guard = None;
+                        Err(format!(
+                            "{what} exceeded the harness bound; the owned task was aborted and joined"
+                        ))
+                    }
+                    Ok(Err(error)) if error.is_cancelled() => {
+                        *guard = None;
+                        Err(format!(
+                            "{what} exceeded the harness bound; the owned task was aborted and joined"
+                        ))
+                    }
+                    Ok(Err(error)) => {
+                        *guard = None;
+                        Err(format!(
+                            "{what} exceeded the harness bound and its task failed while being aborted: {error}"
+                        ))
+                    }
+                    Err(_) => Err(format!(
+                        "{what} exceeded the harness bound and did not settle after abort; settlement unconfirmed and the handle is still owned"
+                    )),
+                }
+            }
+        }
     }
 
     /// Abort and bounded-join every still-owned task, attempting all of them.
     pub async fn settle(&self, what: &str) -> Result<(), String> {
-        let handles: Vec<tokio::task::JoinHandle<Value>> = {
-            let mut handles = self
-                .handles
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            handles.drain(..).flatten().collect()
-        };
+        let slots: Vec<TaskSlot> = self
+            .slots
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .cloned()
+            .collect();
         let mut failures: Vec<String> = Vec::new();
-        for mut handle in handles {
+        for (index, slot) in slots.iter().enumerate() {
+            let mut guard = slot.lock().await;
+            let Some(handle) = guard.as_mut() else {
+                continue;
+            };
             handle.abort();
-            match tokio::time::timeout(BOUND, &mut handle).await {
-                Ok(Ok(_)) => {}
-                Ok(Err(error)) if error.is_cancelled() => {}
+            match tokio::time::timeout(BOUND, &mut *handle).await {
+                Ok(Ok(_)) => {
+                    *guard = None;
+                }
+                Ok(Err(error)) if error.is_cancelled() => {
+                    *guard = None;
+                }
                 Ok(Err(error)) => {
-                    failures.push(format!("{what}: a task failed during settlement: {error}"));
+                    *guard = None;
+                    failures.push(format!(
+                        "{what}: a task ({index}) failed during settlement: {error}"
+                    ));
                 }
                 Err(_) => failures.push(format!(
-                    "{what}: a task did not settle after abort within the bound"
+                    "{what}: a task ({index}) did not settle after abort within the bound; settlement unconfirmed"
                 )),
             }
         }
@@ -985,27 +1215,6 @@ impl TaskSet {
             Ok(())
         } else {
             Err(failures.join("; "))
-        }
-    }
-}
-
-async fn join_owned(
-    handle: &mut tokio::task::JoinHandle<Value>,
-    what: &str,
-) -> Result<Value, String> {
-    match tokio::time::timeout(BOUND, &mut *handle).await {
-        Ok(Ok(value)) => Ok(value),
-        Ok(Err(error)) => Err(format!("{what} task failed: {error}")),
-        Err(_) => {
-            handle.abort();
-            match tokio::time::timeout(BOUND, &mut *handle).await {
-                Ok(_) => Err(format!(
-                    "{what} exceeded the harness bound; the owned task was aborted and joined"
-                )),
-                Err(_) => Err(format!(
-                    "{what} exceeded the harness bound and did not settle after abort"
-                )),
-            }
         }
     }
 }
@@ -1145,23 +1354,50 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
 
 /// The one receipt-privacy oracle shared by the grant and error targets.
 ///
-/// Compares an actual authorized receipt body against the ENTIRE refusal: no
-/// receipt-shaped object may appear anywhere, and none of the receipt's
-/// sensitive values (payload digest, timestamps, result record/candidate ids)
-/// may be disclosed. The receipt id and requester are caller-known request
-/// values, so their echo is permitted; a receipt-shaped object that embeds the
-/// tuple is still rejected. Unrelated non-sensitive diagnostics stay allowed.
-pub fn assert_no_receipt_disclosure(response: &Value, authorized_receipt: &Value) {
+/// Compares an actual authorized receipt body against the ENTIRE refusal. It
+/// rejects: a receipt-shaped object (a `receipt_id` next to another receipt
+/// field), a nested receipt tuple without `receipt_id` (two or more receipt
+/// fields under any key), and any of the receipt's sensitive identifying values
+/// (payload digest, timestamps, old idempotency key, result `*_id` values).
+///
+/// `current_request` is what the caller itself supplied for THIS request (op,
+/// space, requested ids, correlation ids). Those values are legitimate echoes
+/// and are allowed; so are unrelated non-sensitive diagnostics such as a
+/// `health: true` boolean. The oracle does not ban generic keys, bare scalars
+/// or provider wording.
+pub fn assert_no_receipt_disclosure(
+    response: &Value,
+    authorized_receipt: &Value,
+    current_request: &Value,
+) {
+    const RECEIPT_ID_SHAPE: [&str; 4] =
+        ["status", "payload_digest", "requester_principal_id", "result"];
+    const RECEIPT_TUPLE: [&str; 7] = [
+        "op",
+        "requester_principal_id",
+        "payload_digest",
+        "result",
+        "error",
+        "created_at",
+        "completed_at",
+    ];
+
     fn walk(value: &Value, meaning: &str) {
         match value {
             Value::Object(map) => {
                 let receipt_shaped = map.contains_key("receipt_id")
-                    && ["status", "payload_digest", "requester_principal_id", "result"]
-                        .iter()
-                        .any(|key| map.contains_key(*key));
+                    && RECEIPT_ID_SHAPE.iter().any(|key| map.contains_key(*key));
                 assert!(
                     !receipt_shaped,
                     "a refusal embeds a receipt-shaped object in {meaning}: {value}"
+                );
+                let tuple_fields = RECEIPT_TUPLE
+                    .iter()
+                    .filter(|key| map.contains_key(**key))
+                    .count();
+                assert!(
+                    tuple_fields < 2,
+                    "a refusal embeds a nested receipt tuple without receipt_id in {meaning}: {value}"
                 );
                 if let Some(inner) = map.get("receipt") {
                     assert!(
@@ -1183,28 +1419,74 @@ pub fn assert_no_receipt_disclosure(response: &Value, authorized_receipt: &Value
     }
     walk(response, "$response");
 
+    fn collect_strings(value: &Value, out: &mut Vec<String>) {
+        match value {
+            Value::String(text) => {
+                if text.len() >= 4 {
+                    out.push(text.clone());
+                }
+            }
+            Value::Object(map) => {
+                for child in map.values() {
+                    collect_strings(child, out);
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    collect_strings(item, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn collect_result_identifiers(value: &Value, out: &mut Vec<String>) {
+        match value {
+            Value::Object(map) => {
+                for (key, child) in map {
+                    if key.ends_with("_id") || key.ends_with("_ids") {
+                        collect_strings(child, out);
+                    } else if child.is_object() || child.is_array() {
+                        collect_result_identifiers(child, out);
+                    }
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    collect_result_identifiers(item, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
     let mut sensitive: Vec<String> = Vec::new();
-    for path in ["payload_digest", "created_at", "completed_at"] {
+    for path in [
+        "payload_digest",
+        "created_at",
+        "completed_at",
+        "idempotency_key",
+    ] {
         if let Some(value) = authorized_receipt.get(path).and_then(Value::as_str) {
-            if !value.is_empty() {
+            if value.len() >= 4 {
                 sensitive.push(value.to_owned());
             }
         }
     }
-    for collection in ["candidate_ids", "record_ids"] {
-        if let Some(items) = authorized_receipt["result"]
-            .get(collection)
-            .and_then(Value::as_array)
-        {
-            for item in items {
-                if let Some(value) = item.as_str() {
-                    sensitive.push(value.to_owned());
-                }
-            }
-        }
+    // The result is op-specific: its identifiers are sensitive values even under
+    // another key, while its booleans/enums are not banned as such.
+    if let Some(result) = authorized_receipt.get("result") {
+        collect_result_identifiers(result, &mut sensitive);
     }
+
+    let mut allowed: Vec<String> = Vec::new();
+    collect_strings(current_request, &mut allowed);
+
     let rendered = response.to_string();
     for value in sensitive {
+        if allowed.iter().any(|permitted| permitted == &value) {
+            continue;
+        }
         assert!(
             !rendered.contains(&value),
             "the refusal discloses the authorized receipt value {value}: {response}"
@@ -1256,59 +1538,43 @@ where
     }
 }
 
-/// Real early-failure control: a listener task whose signed dial fails is
-/// aborted and bounded-joined, and its listening port is then rebindable —
-/// actual accepted/listening resource evidence, not a fresh session.
+/// Real early-failure control over the ACTUAL endpoint setup helper: a wrong
+/// host key makes the primitive's genuine signed dial fail after its real
+/// listener accepted and started a responder. The primitive itself settles the
+/// same listener task (abort, bounded join, close returned owners, port release),
+/// and this control then proves the real fixture provider it served is still
+/// closeable. No lookalike listener/abort code is introduced.
 pub async fn prove_failed_endpoint_settles() {
-    let listener = TcpListener::bind(("127.0.0.1", 0))
-        .await
-        .expect("bind the failure-control listener");
-    let addr = listener.local_addr().expect("failure-control address");
-    let port = addr.port();
-    let host = tokio::spawn(async move {
-        let (tcp, _) = listener
-            .accept()
+    let home = TempDir::new().expect("the setup-control fixture home");
+    let provider = Arc::new(
+        FixtureMemoryProvider::open(&home.path().join("control.sqlite"))
             .await
-            .expect("the failure-control dial is accepted");
-        let _ = tokio_tungstenite::accept_async_with_config(
-            tcp,
-            Some(ws_config(DEFAULT_MAX_ENVELOPE_BYTES)),
-        )
-        .await;
-    });
-    let (ws, _) = tokio::time::timeout(
-        BOUND,
-        tokio_tungstenite::connect_async(format!("ws://{addr}")),
-    )
-    .await
-    .expect("the failure-control connect is bounded")
-    .expect("connect the failure-control listener");
-    let socket: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
-    let dialed = connect_remote_adapter(RemoteAdapterOptions {
-        transport: Arc::clone(&socket),
-        local_identity: RemoteIdentity { seed: ADMIN_SEED },
-        local_manifest: manifest("failure-control-client"),
-        // A wrong host key makes the signed dial fail after the listener accepted.
-        remote_pubkey: pubkey(&PEER_SEED),
-        allowlist: vec![peer_id(&HOST_SEED)],
-        invoke_timeout_ms: None,
-        capability_token: None,
-    });
-    let failed = tokio::time::timeout(BOUND, dialed)
+            .expect("open the setup-control fixture"),
+    );
+    let directory = Arc::new(PeerDirectory::new());
+    let service = build_service(&Provider::Fixture(Arc::clone(&provider)), &directory);
+    let outcome = std::panic::AssertUnwindSafe(open_endpoint_expecting(
+        Arc::clone(&service),
+        "c-matrix-setup-control",
+        ADMIN_SEED,
+        // A wrong host key: a deterministic genuine dial failure after the
+        // real listener accepted and its responder started.
+        pubkey(&PEER_SEED),
+    ))
+    .catch_unwind()
+    .await;
+    let failure = match outcome {
+        Err(payload) => panic_message(payload),
+        Ok(_) => panic!("the wrong host key must fail the real signed dial"),
+    };
+    assert!(
+        failure.contains("the signed dial succeeds"),
+        "the observed failure is the genuine wrong-key dial, not another setup step: {failure}"
+    );
+    drop(service);
+    close_fixture_bounded(provider)
         .await
-        .expect("the failure-control dial is bounded");
-    assert!(failed.is_err(), "a wrong host key fails the signed dial");
-    host.abort();
-    let joined = tokio::time::timeout(BOUND, host).await;
-    assert!(
-        joined.is_ok(),
-        "the failed listener task is joined within the bound"
-    );
-    let rebind = TcpListener::bind(("127.0.0.1", port)).await;
-    assert!(
-        rebind.is_ok(),
-        "the failed listener's port is released after settlement: {rebind:?}"
-    );
+        .expect("the failed setup leaves the real fixture provider closeable");
 }
 
 // ---------------------------------------------------------------------------
