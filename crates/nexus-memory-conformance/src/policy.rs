@@ -111,7 +111,10 @@ impl PeerDirectory {
     ///
     /// # Errors
     ///
-    /// Returns `NOT_AUTHORIZED` for a peer the operator never mapped.
+    /// Returns `NOT_AUTHORIZED` for a peer the operator never mapped, and
+    /// `INTERNAL_ERROR` when the stored principal id is not protocol-shaped.
+    /// That refusal carries static text only: the operator-supplied value and
+    /// the decoder's own message never reach the wire.
     pub fn principal_for(&self, peer_id: &str) -> Result<Principal, SpokeReject> {
         let Some(principal_id) = self.principals.get(peer_id) else {
             return Err(SpokeReject {
@@ -124,9 +127,9 @@ impl PeerDirectory {
             "principal_id": principal_id,
             "extensions": {},
         }))
-        .map_err(|error| SpokeReject {
+        .map_err(|_| SpokeReject {
             code: SpokeRejectCode::InternalError,
-            message: format!("stored principal {principal_id} is not protocol-shaped: {error}"),
+            message: "the stored memory principal is not protocol-shaped; refusing".to_owned(),
             details: None,
         })
     }
@@ -139,5 +142,28 @@ impl PeerDirectory {
             Ok(principal) => SpokeResult::Ok(principal),
             Err(reject) => SpokeResult::Reject(reject),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use spoke_operations::{SpokeRejectCode, SpokeResult};
+
+    use super::PeerDirectory;
+
+    /// `with_peer` stores operator input verbatim, and the protocol requires a
+    /// nonempty `principal_id`, so an empty stored principal is a malformed row
+    /// an operator can really produce. It must refuse through the SDK's
+    /// admission face — never admit a principal, never widen into a default.
+    #[test]
+    fn an_empty_stored_principal_is_refused_through_the_admission_face() {
+        let directory = Arc::new(PeerDirectory::new().with_peer("peer-a", ""));
+        let reject = match directory.admission()("peer-a") {
+            SpokeResult::Reject(reject) => reject,
+            SpokeResult::Ok(_) => panic!("a malformed stored principal must not be admitted"),
+        };
+        assert_eq!(reject.code, SpokeRejectCode::InternalError);
     }
 }
