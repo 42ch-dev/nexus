@@ -5,7 +5,7 @@
 > **Holder amendment:** [holder-governance.md](holder-governance.md) owns the complete Actor-holder registry, native disclosure, trusted read policies, cutover and production extraction contract. The package pins move together to the pinned upstream lockstep release (version SSOT: the manifest pins; compass D17 records the adoption decision). `creator_only` is removed only by that complete migration, not by a wire-only version bump.
 > **Document class:** Master
 > **Scope:** The `nexus-spoke-adapter` crate boundary, `extensions.nexus` namespace contract, spoke-operations delegation rules, daemon-api envelope strategy, drift detection adaptation, the `/kb/` HTTP route stability decision, the opt-in Connect Host N-C0 surface (DF-72), lore emission hygiene (DF-79), and Narrative Knowledge Pack I/O including the clean-room SillyTavern importer (DF-77/DF-80).
-> **Related:** [entity-scope-model.md](entity-scope-model.md), [actor-product-model.md](actor-product-model.md), [holder-governance.md](holder-governance.md), [local-db-schema.md](../runtime/local-db-schema.md), [schemas-directory-layout.md](schemas-directory-layout.md), and upstream SPOKE data/operations/Connect specifications.
+> **Related:** [entity-scope-model.md](entity-scope-model.md), [actor-product-model.md](actor-product-model.md), [holder-governance.md](holder-governance.md), [local-db-schema.md](../runtime/local-db-schema.md), [schemas-directory-layout.md](schemas-directory-layout.md), [spoke-memory-provider-binding.md](spoke-memory-provider-binding.md), [spoke-memory-conformance-staging.md](spoke-memory-conformance-staging.md), and upstream SPOKE data/operations/Connect specifications.
 
 ## 0. Document Position
 
@@ -20,7 +20,7 @@ These are the architecture bedrock — do not re-litigate.
 nexus depends on spoke's published packages directly:
 - **Rust:** `spoke-schemas` + `spoke-operations` (crates.io, lockstep exact pin on the **pinned upstream lockstep release** — version SSOT: the workspace manifest)
 - **TypeScript:** `@42ch/spoke-schemas` + `@42ch/spoke-operations` (npm, lockstep exact pin on the same release — the two root `package.json` pins)
-- **Rust (opt-in Connect Host only):** `spoke-connect` (crates.io, lockstep exact pin on the same release) — workspace dep consumed **only** behind cargo feature `connect-host` on `apps/nexus42`. The ordinary `nexus42` (`cli`) build MUST NOT link `spoke-connect`. See §10.
+- **Rust (opt-in Connect Host and Memory Client):** `spoke-connect` (crates.io, lockstep exact pin on the same release) is consumed behind `connect-host` on `apps/nexus42` and behind the independent `memory-remote` client feature on `nexus-core`. The ordinary `nexus42` (`cli`) build and default `nexus-core` build MUST NOT link `spoke-connect`; `memory-remote` enables no host, execution, peer-control, rmcp, or cloud cohort. See §10 and [spoke-memory-provider-binding.md](spoke-memory-provider-binding.md#7-feature-and-dependency-boundary).
 
 **Lockstep cutover:** all three Rust and both root npm pins, `tooling/check-wire-drift.sh::SPOKE_PIN`, and the strategy sample pin references move together in one custodian checkpoint. The `libp2p` companion pin sits at `=0.57.1`, moving with the `spoke-connect` 0.15.2 lockstep and verified against the integrated lock graph. Both `connect-host` and `connect-client` feature consumers are covered; no default-build linkage expansion is introduced.
 
