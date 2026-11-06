@@ -44,6 +44,7 @@ pub async fn open_direct_core(config: &CliConfig) -> Result<CoreService> {
     CoreService::open(CoreOpenOptions {
         user_home,
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .map_err(map_core_error)
@@ -72,6 +73,7 @@ pub async fn open_engine_owned_core(config: &CliConfig) -> Result<CoreService> {
     CoreService::open(CoreOpenOptions {
         user_home,
         access: CoreAccess::EngineOwner,
+        memory: None,
     })
     .await
     .map_err(map_core_error)
@@ -93,6 +95,7 @@ pub async fn open_read_only_core(config: &CliConfig) -> Result<CoreService> {
     CoreService::open(CoreOpenOptions {
         user_home,
         access: CoreAccess::ReadOnly,
+        memory: None,
     })
     .await
     .map_err(map_core_error)
@@ -348,6 +351,49 @@ pub fn map_core_error(err: CoreError) -> CliError {
             status: coded_status("invalid_input"),
             message,
         },
+        // A remote memory-provider refusal: the peer's message never reaches
+        // the CLI. The whitelisted effective code, the effective retry class
+        // and an allowlisted peer wire code are rendered from the typed
+        // fields, never re-parsed back out of a formatted string.
+        CoreError::MemoryProviderRefused {
+            code,
+            wire_code,
+            retry_class,
+            family,
+            conflict_code,
+        } => {
+            let wire = wire_code
+                .as_deref()
+                .map(|wire_code| format!(", wire code: {wire_code}"))
+                .unwrap_or_default();
+            match conflict_code {
+                // A proven definite memory conflict keeps the retained
+                // consumer-visible `version_mismatch` contract (409) with static
+                // text; the effective classification rides along.
+                Some(conflict_code) => CliError::Api {
+                    status: 409,
+                    message: format!(
+                        "[{conflict_code}] memory revision mismatch \
+                         (retry_class: {retry_class}{wire})"
+                    ),
+                },
+                None => {
+                    let status = match family {
+                        nexus_core::MemoryProviderRefusal::NotFound => 404,
+                        nexus_core::MemoryProviderRefusal::Forbidden => 403,
+                        nexus_core::MemoryProviderRefusal::InvalidInput => 400,
+                        nexus_core::MemoryProviderRefusal::Conflict => 409,
+                        nexus_core::MemoryProviderRefusal::Unavailable => 503,
+                    };
+                    CliError::Api {
+                        status,
+                        message: format!(
+                            "[{code}] memory provider refused (retry_class: {retry_class}{wire})"
+                        ),
+                    }
+                }
+            }
+        }
         CoreError::Closing | CoreError::Interrupted => CliError::Other(err.to_string()),
         CoreError::Internal { category } => CliError::Other(category),
     }
@@ -769,6 +815,7 @@ mod direct_writer_lifetime {
         CoreService::open(CoreOpenOptions {
             user_home: user_home.to_path_buf(),
             access: CoreAccess::DirectWriter,
+            memory: None,
         })
         .await
         .expect("the direct writer opens on the seeded home")

@@ -488,6 +488,7 @@ async fn owner_fixture() -> OwnerFixture {
     let core = CoreService::open(CoreOpenOptions {
         user_home: home.into(),
         access: CoreAccess::EngineOwner,
+        memory: None,
     })
     .await
     .expect("engine-owner core open");
@@ -1854,6 +1855,7 @@ async fn reconcile_fixture(work_ref: &str) -> ReconcileFixture {
     let core = CoreService::open(CoreOpenOptions {
         user_home: home.into(),
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .unwrap();
@@ -2695,6 +2697,7 @@ async fn open_hosted_owner(home: &Path) -> (CoreService, Arc<ParkedHost>, Arc<Ex
     let core = CoreService::open(CoreOpenOptions {
         user_home: home.into(),
         access: CoreAccess::EngineOwner,
+        memory: None,
     })
     .await
     .expect("engine-owner core open");
@@ -6177,6 +6180,7 @@ async fn subscribe_racing_owner_close_never_leaks_a_token_or_ring_permit() {
     let core = CoreService::open(CoreOpenOptions {
         user_home: home.into(),
         access: CoreAccess::EngineOwner,
+        memory: None,
     })
     .await
     .expect("engine-owner core open");

@@ -62,6 +62,7 @@ async fn fixture() -> Fixture {
     let core = CoreService::open(CoreOpenOptions {
         user_home: home,
         access: CoreAccess::EngineOwner,
+        memory: None,
     })
     .await
     .expect("core service");

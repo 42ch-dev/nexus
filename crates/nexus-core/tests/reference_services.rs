@@ -45,6 +45,7 @@ async fn open_core(home: &std::path::Path) -> (CoreService, Principal) {
     let core = CoreService::open(CoreOpenOptions {
         user_home: home.into(),
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .unwrap();
@@ -221,6 +222,7 @@ async fn read_only_access_refuses_register_without_writes() {
     let core = CoreService::open(CoreOpenOptions {
         user_home: temp.path().into(),
         access: CoreAccess::ReadOnly,
+        memory: None,
     })
     .await
     .unwrap();

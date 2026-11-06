@@ -1343,6 +1343,7 @@ mod tests {
         let core = nexus_core::CoreService::open(nexus_core::CoreOpenOptions {
             user_home,
             access: nexus_core::CoreAccess::EngineOwner,
+            memory: None,
         })
         .await
         .expect("core open");

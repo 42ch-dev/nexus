@@ -9,6 +9,7 @@ members = [
     "crates/nexus-embedding",
     "crates/nexus-home-layout",
     "crates/nexus-knowledge",
+    "crates/nexus-memory-conformance",
     "crates/nexus-moment-context-assembly",
     "crates/nexus-narrative",
     "crates/nexus-orchestration",
@@ -271,8 +272,11 @@ libp2p = { version = "=0.57.0", features = ["ed25519"] }
 # feature (the daemon-runtime consumer retired with v1.193 P2-T13) — the
 # default CLI/domain graph stays tungstenite-free (only the feature-on
 # build links it). 0.30 = the tokio-tungstenite line current at lock time;
-# the lockfile pins the exact patch.
-tokio-tungstenite = "0.30"
+# the lockfile pins the exact patch. `rustls-tls-webpki-roots` is the declared
+# `wss://` edge (n3-provider-binding.md §3.2): the remote memory client dials
+# non-loopback providers over TLS, and tungstenite only compiles a TLS
+# connector when a roots feature is selected.
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
 # V1.168 P1 (native claude/codex replace): typed Rust SDKs for the Claude Code
 # CLI stream-json protocol and the Codex app-server JSON-RPC protocol (PD-2).
 # Exact pins: the T1 mapper tests lock the decode contract against these exact

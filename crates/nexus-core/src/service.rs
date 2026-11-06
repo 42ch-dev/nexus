@@ -10,20 +10,21 @@ use nexus_contracts::{
     WorldKbGraphResponse, WorldKbPatchEntityRequest, WorldKbPatchEntityResponse,
 };
 use nexus_home_layout::active_context::{
-    read_active_creator_id, read_active_workspace_slug, try_resolve_state_db_path,
-    CliConfigSnapshot,
+    read_active_creator_id, read_active_workspace_slug, read_memory_provider_config,
+    try_resolve_state_db_path, CliConfigSnapshot,
 };
 use nexus_local_db::open_pool_read_only;
 use nexus_local_db::writer_protocol::{
-    init_engine_pool, init_guarded_pool, release_retained_writer_guards, GuardedPool,
-    GuardedPoolOptions,
+    init_engine_pool, init_guarded_pool, GuardedPool, GuardedPoolOptions,
 };
 use sqlx::SqlitePool;
 
 use crate::actor_fence::ActorFenceTable;
 use crate::changes::read_changes;
 use crate::error::{local_db_err, CoreError, CoreResult};
+use crate::memory_binding::MemoryProviderBinding;
 use crate::memory_provider::LocalMemoryProvider;
+use crate::memory_selection::MemoryProviderSelection;
 use crate::principal::Principal;
 use crate::world_kb::{candidates, graph, patch};
 
@@ -64,6 +65,8 @@ pub enum CoreAccess {
 pub struct CoreOpenOptions {
     pub user_home: PathBuf,
     pub access: CoreAccess,
+    /// Open-only provider override (§2.2). `None` reads the on-disk table.
+    pub memory: Option<MemoryProviderSelection>,
 }
 
 pub struct CoreInner {
@@ -79,29 +82,22 @@ pub struct CoreInner {
     /// pooled connection — or the OS admission lock its `WorkspaceWriterGuard`
     /// carries — alive after the close reported the service released.
     guarded: Mutex<Option<GuardedPool>>,
-    /// Whether THIS open CREATED the process's engine admission over
-    /// `db_path`, rather than joining the one a live in-process engine owner
-    /// already holds.
-    ///
-    /// Only the creator releases the admission on a confirmed close: a
-    /// co-hosted joiner (the daemon's transport pool and its execution core
-    /// over one DB) must never release an admission its creator still owns.
-    owns_engine_admission: bool,
-    /// The pinned `MemoryPort` implementation serving the memory family for
-    /// this open's lifetime (NXM-5 Task 2).
+    /// The pinned provider authority serving the memory family for this
+    /// open's lifetime (NXM-5 Task 2, v1.229 N3 Task 3).
     ///
     /// Pinned where the open already assembles core state, so every E4 handler
     /// reaches the provider the open admitted instead of opening a second one.
-    /// It keeps its own guarded writer pool, so a confirmed close must give the
-    /// handle up with [`Self::guarded`] — otherwise a closed-but-referenced
-    /// service would still hold the writer admission it reported released.
+    /// The binding keeps its own guarded writer pool, so a confirmed close
+    /// must give the handle up with [`Self::guarded`] — otherwise a
+    /// closed-but-referenced service would still hold the writer admission it
+    /// reported released.
     ///
     /// `None` only after a confirmed close gives the handle up (and until an
     /// open stores it); every open pins one. A read-only open pins the
-    /// read-only provider, so a read-only core serves memory reads through it
-    /// while its write handlers refuse via [`Self::memory_writer`] (NXM-5 Task 2
-    /// fix round 1, finding F6).
-    memory: Mutex<Option<Arc<LocalMemoryProvider>>>,
+    /// read-only binding, so a read-only core serves memory reads through it
+    /// while its write handlers refuse via [`Self::memory_writer_binding`]
+    /// (NXM-5 Task 2 fix round 1, finding F6).
+    memory: Mutex<Option<Arc<MemoryProviderBinding>>>,
     /// Active creator this service was opened against (open-scoped).
     pub(crate) nexus_home: PathBuf,
     creator_id: String,
@@ -249,26 +245,81 @@ impl CoreService {
         Self::open_impl(options, Some(expected)).await
     }
 
-    /// Build the `MemoryPort` this open pins for the memory family.
+    /// Resolve this open's provider selection and pin its binding (§2.2, §4.1).
     ///
-    /// A read-only open pins the read-only provider: it must keep serving memory
-    /// reads, and it takes no writer admission, provisions nothing and runs no
-    /// recovery (NXM-5 Task 2 fix round 1, finding F6). Its write handlers refuse
-    /// before they reach it.
+    /// `Some(selection)` is an open-only override and NEVER reads the disk;
+    /// `None` reads the `[memory_provider]` table exactly once. The pinned
+    /// binding is never re-read or retargeted: changing the table affects only
+    /// a later open.
+    ///
+    /// # Errors
+    ///
+    /// [`CoreError::InvalidInput`] for a malformed selection,
+    /// [`CoreError::Internal`] for an unreadable provider table, the mapped
+    /// local-provider open error, and — for a remote selection — the real
+    /// signed Connect open under `memory-remote`, or the static
+    /// `memory_remote_disabled` refusal when that feature is off. Neither
+    /// branch ever falls back to the local provider.
     async fn pin_memory_provider(
         options: &CoreOpenOptions,
+        nexus_home: &Path,
         creator_id: &str,
         workspace_slug: &str,
-    ) -> CoreResult<Arc<LocalMemoryProvider>> {
-        let user_home = options.user_home.clone();
-        Ok(Arc::new(match options.access {
-            CoreAccess::ReadOnly => {
-                LocalMemoryProvider::open_read_only(user_home, creator_id, workspace_slug).await?
+    ) -> CoreResult<Arc<MemoryProviderBinding>> {
+        let selection = match &options.memory {
+            Some(selection) => selection.clone(),
+            None => {
+                let config = read_memory_provider_config(nexus_home).map_err(|error| {
+                    CoreError::Internal {
+                        category: format!("config_load: {error}"),
+                    }
+                })?;
+                MemoryProviderSelection::from_config(config)?
             }
-            CoreAccess::DirectWriter | CoreAccess::EngineOwner => {
-                LocalMemoryProvider::open(user_home, creator_id, workspace_slug).await?
+        };
+        selection.validate()?;
+        match selection {
+            MemoryProviderSelection::Local => {
+                let user_home = options.user_home.clone();
+                let provider = match options.access {
+                    CoreAccess::ReadOnly => {
+                        LocalMemoryProvider::open_read_only(user_home, creator_id, workspace_slug)
+                            .await?
+                    }
+                    CoreAccess::DirectWriter | CoreAccess::EngineOwner => {
+                        LocalMemoryProvider::open(user_home, creator_id, workspace_slug).await?
+                    }
+                };
+                Ok(Arc::new(MemoryProviderBinding::pin_local(Arc::new(provider))))
             }
-        }))
+            MemoryProviderSelection::Remote(selection) => {
+                // Feature off: the static `memory_remote_disabled` refusal IS
+                // the behavior — no credential read, no socket, no fallback.
+                // Feature on: the real signed Connect open (§4.1), which fails
+                // the whole open on any credential/handshake/capability/space/
+                // authority refusal and never substitutes the local provider.
+                #[cfg(feature = "memory-remote")]
+                {
+                    Ok(Arc::new(
+                        crate::memory_remote::open_remote_binding(
+                            &options.user_home,
+                            &selection,
+                            options.access,
+                        )
+                        .await?,
+                    ))
+                }
+                #[cfg(not(feature = "memory-remote"))]
+                {
+                    drop(selection);
+                    Err(CoreError::Coded {
+                        code: "memory_remote_disabled".to_string(),
+                        message: "remote memory provider support is not enabled in this build"
+                            .to_string(),
+                    })
+                }
+            }
+        }
     }
 
     async fn open_impl(options: CoreOpenOptions, expected: Option<&Path>) -> CoreResult<Self> {
@@ -309,7 +360,6 @@ impl CoreService {
             Ok(None)
         };
 
-        let mut owns_engine_admission = false;
         let (pool, guarded) = match options.access {
             CoreAccess::ReadOnly => {
                 let pool = open_pool_read_only(&db_path).await.map_err(local_db_err)?;
@@ -328,7 +378,6 @@ impl CoreService {
                     nexus_local_db::writer_protocol::join_live_engine_pool(&db_path, options)
                         .await
                         .map_err(local_db_err)?;
-                owns_engine_admission = joined.is_none();
                 let guarded = match joined {
                     Some(guarded) => guarded,
                     None => init_engine_pool(&db_path, &creator_id, options)
@@ -340,10 +389,37 @@ impl CoreService {
             }
         };
 
-        // Pin the one `MemoryPort` this open serves the memory family from
-        // (NXM-5 Task 2), built HERE beside the pool admission so an E4 handler
-        // can never mint a second provider instance behind the service.
-        let memory = Some(Self::pin_memory_provider(&options, &creator_id, &workspace_slug).await?);
+        // Pin the one provider authority this open serves the memory family
+        // from (NXM-5 Task 2, N3 Task 3), built HERE beside the pool admission
+        // so an E4 handler can never mint a second provider instance behind
+        // the service. A failed pin (the real `memory_remote_disabled`
+        // refusal, or a local-provider open error) releases exactly the
+        // admissions THIS open took — the same two halves the close drain
+        // gives up — so the next open can acquire them instead of joining a
+        // half-open service.
+        let memory = match Self::pin_memory_provider(
+            &options,
+            &nexus_home,
+            &creator_id,
+            &workspace_slug,
+        )
+        .await
+        {
+            Ok(binding) => Some(binding),
+            Err(error) => {
+                pool.close().await;
+                // Give up THIS open's claim only: the retained entry (and the
+                // OS admission behind it) survives while another open still
+                // serves it, so a creator's failed pin can never evict a
+                // successful concurrent joiner. The pool above is already
+                // closed, so this claim is the only one this handle holds.
+                if let Some(guarded) = guarded.as_ref() {
+                    guarded.release_retained_admission();
+                }
+                drop(guarded);
+                return Err(error);
+            }
+        };
 
         Ok(Self {
             inner: Arc::new(CoreInner {
@@ -351,7 +427,6 @@ impl CoreService {
                 db_path: db_path.clone(),
                 guarded: Mutex::new(guarded),
                 memory: Mutex::new(memory),
-                owns_engine_admission,
                 nexus_home,
                 creator_id,
                 workspace_slug,
@@ -400,24 +475,25 @@ impl CoreService {
     /// handlers use). Compiled out of a production build.
     ///
     /// # Errors
-    /// [`CoreError::Closing`] after a close began.
+    /// [`CoreError::Closing`] after a close began, or an internal refusal when
+    /// the pinned binding is not local.
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn memory_provider_for_test(&self) -> CoreResult<Arc<LocalMemoryProvider>> {
-        self.memory_provider()
+        let binding = self.memory_binding()?;
+        Ok(Arc::clone(binding.local()?))
     }
 
-    /// The `MemoryPort` this open pinned for the memory family (NXM-5 Task 2).
+    /// The provider authority this open pinned for the memory family.
     ///
     /// The handle is shared, not copied: every E4 handler runs against the one
-    /// provider (and therefore the one guarded pool) this open admitted, and a
-    /// close that already gave it up refuses here instead of serving a released
-    /// service. A read-only open pins a read-only provider, so its reads are
-    /// served too (fix round 1, finding F6).
+    /// binding (and therefore the one provider and guarded pool) this open
+    /// admitted, and a close that already gave it up refuses here instead of
+    /// serving a released service.
     ///
     /// # Errors
     /// [`CoreError::Closing`] after a close began.
-    pub(crate) fn memory_provider(&self) -> CoreResult<Arc<LocalMemoryProvider>> {
+    pub(crate) fn memory_binding(&self) -> CoreResult<Arc<MemoryProviderBinding>> {
         self.ensure_open()?;
         self.inner
             .memory
@@ -427,8 +503,8 @@ impl CoreService {
             .ok_or(CoreError::Closing)
     }
 
-    /// The `MemoryPort` a memory **write** handler must use (NXM-5 Task 2 fix
-    /// round 1, finding F6).
+    /// The binding a memory **write** handler must use (NXM-5 Task 2 fix round
+    /// 1, finding F6).
     ///
     /// A read-only core serves reads, not writes: a dismissal attempted through
     /// it keeps its typed refusal instead of reaching a write on a read-only
@@ -437,13 +513,13 @@ impl CoreService {
     /// # Errors
     /// [`CoreError::Closing`] after a close began, and [`CoreError::Forbidden`]
     /// under read-only core access.
-    pub(crate) fn memory_writer(&self) -> CoreResult<Arc<LocalMemoryProvider>> {
+    pub(crate) fn memory_writer_binding(&self) -> CoreResult<Arc<MemoryProviderBinding>> {
         if self.inner.access == CoreAccess::ReadOnly {
             return Err(CoreError::Forbidden {
                 resource: "memory: read-only core access".to_string(),
             });
         }
-        self.memory_provider()
+        self.memory_binding()
     }
 
     #[must_use]
@@ -796,47 +872,43 @@ async fn close_drain(inner: Arc<CoreInner>) {
     if let Some(handle) = &execution_handle {
         handle.shutdown().await;
     }
-    // The pinned memory provider holds its OWN guarded pool (and the writer
-    // admission behind it), so a confirmed close must give that handle up with
-    // this open's own pool — otherwise a closed-but-referenced service would
-    // keep the admission it reported released (same rule as `guarded`).
-    inner
+    // The pinned binding holds the local provider's OWN guarded pool (and the
+    // writer admission behind it). A confirmed close settles that pool
+    // explicitly — the provider owns the only handle to its admission — and
+    // only then gives the binding up with this open's own pool. Otherwise a
+    // closed-but-referenced service would keep the admission it reported
+    // released (same rule as `guarded`), and a dropped-but-unclosed provider
+    // pool would keep later migrations waiting on a pool nobody can use.
+    // The binding never chooses another provider and never transfers data
+    // (§4.2).
+    let binding = inner
         .memory
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .take();
-    inner.pool.close().await;
-    // A confirmed close ends the admission THIS open took over the home.
-    // Both halves are needed for the OS lock to actually go away:
-    //
-    // 1. the retained guard is what a later open would otherwise JOIN — and
-    //    joining a settled generation would republish its epoch while
-    //    claiming a fresh owner, so the next owner must take a new
-    //    admission (a new epoch) instead;
-    // 2. this open's own admitted-pool handle is given up, so a closed
-    //    service value that is still referenced cannot keep the guard
-    //    behind `state.db.engine.lock` alive after the close reported the
-    //    service released.
-    //
-    // `owns_engine_admission` keeps the two accesses apart: an
-    // `EngineOwner` that merely JOINED a live in-process admission (the
-    // daemon's co-host shape) releases nothing, because the creator still
-    // owns it. The `DirectWriter` arm is the pre-existing cooperative
-    // rule (`init_guarded_pool` always creates its own admission).
-    if inner.access == CoreAccess::DirectWriter || inner.owns_engine_admission {
-        release_retained_writer_guards(&inner.db_path);
+    if let Some(binding) = &binding {
+        binding.close().await;
     }
-    // EVERY closing core gives up its OWN admitted-pool handle, joiner
-    // included: a cooperative joiner holds a clone of the CREATOR's guard, so
-    // a closed-but-still-referenced joiner would otherwise keep
-    // `state.db.engine.lock` open after the creator released the retained
-    // entry — and a fresh open over the same home would fail `OwnerBusy` with
-    // no live owner at all.
-    inner
+    drop(binding);
+    inner.pool.close().await;
+    // A confirmed close gives up exactly the admission claim THIS open took
+    // over the home, joiner included. The claim — not who created the entry —
+    // is the lifetime: the retained entry and the OS locks behind it are
+    // dropped only when the LAST live user releases, so closing one user never
+    // erases an admission another live user (same or other mode) still
+    // serves, and a closed-but-still-referenced service cannot keep
+    // `state.db.engine.lock` alive after the close reported the service
+    // released. When this was the last claim the entry is gone, so a later
+    // open takes a new admission (a new epoch) instead of joining a settled
+    // generation.
+    if let Some(guarded) = inner
         .guarded
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .take();
+        .take()
+    {
+        guarded.release_retained_admission();
+    }
     // `take` returned the handle, so ownership is settled; release the
     // per-DB fence so a later open of the same DB can claim it.
     #[cfg(feature = "execution")]

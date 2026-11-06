@@ -244,6 +244,7 @@ impl DirectActor {
         let core = CoreService::open(CoreOpenOptions {
             user_home: self.home().to_path_buf(),
             access: CoreAccess::DirectWriter,
+            memory: None,
         })
         .await
         .expect("seed core opens on the actor home");
