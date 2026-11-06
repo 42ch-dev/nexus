@@ -19,11 +19,11 @@
 //! the same served provider's existing operator controls but receives the
 //! refusal over the actual signed transport.
 //!
-//! C-101's unknown-op envelope is asserted against protocol §14.2:750–758; the
-//! pinned `spoke-connect` 0.15.1 dispatch attaches no `details` to
-//! `op_unsupported` (external prerequisite I-000271, recorded in the report), so
-//! that required assertion remains the known external failure. Every reachable
-//! side-effect/cleanup part of C-101 still runs.
+//! C-101's unknown-op envelope is asserted against protocol §14.2:750–758 over
+//! the real signed transport: the pinned `spoke-connect` 0.15.2 dispatch
+//! attaches the terminal retry metadata to memory-boundary denials including
+//! `op_unsupported` (upstream #149 / I-000271), so the row checks the published
+//! wire result rather than a provider-local projection.
 
 #![allow(clippy::too_many_lines)] // one end-to-end scenario per row
 
@@ -440,7 +440,8 @@ async fn local_retryable_over_the_same_signed_provider(
 
 /// C-101: unknown op vs missing capability, with the positive on the same
 /// session and the capture baseline taken BEFORE the capability-less request.
-/// The final terminal-metadata assertion is the known external SDK prerequisite.
+/// The final assertion pins the terminal retry metadata `spoke-connect` 0.15.2
+/// attaches to the unknown-op denial.
 async fn unknown_op_and_missing_capability_are_distinct(
     matrix: &Matrix,
     resources: &mut OwnedResources,
@@ -509,8 +510,8 @@ async fn unknown_op_and_missing_capability_are_distinct(
         .expect("the C-101 observer closes");
     assert!(pending_candidates(&admin).await.is_empty());
 
-    // Protocol §14.2:750–758; the pinned SDK currently omits this metadata
-    // (external prerequisite I-000271), so this is the known blocked assertion.
+    // Protocol §14.2:750–758; spoke-connect 0.15.2 attaches this metadata to
+    // the unknown-op denial (upstream #149, I-000271).
     assert_eq!(
         unknown["error"]["details"]["retry_class"],
         json!("terminal"),
