@@ -1136,11 +1136,12 @@ pub struct TargetHold {
 }
 
 impl FixtureFaults {
-    /// Arm one op-targeted admission pause for the exact review/fence handler
-    /// entry (replacing any previous target arm). Only that op consumes
-    /// it. Reads, other operation names and malformed payloads (typed decode
-    /// happens before the gate) never reach it; an unauthorized request of the
-    /// same op is delayed and then still receives its ordinary refusal.
+    /// Arm one op-targeted admission pause for the exact
+    /// review/fence/grant-revoke handler entry (replacing any previous target
+    /// arm). Only that op consumes it. Reads, other operation names and
+    /// malformed payloads (typed decode happens before the gate) never reach it;
+    /// an unauthorized request of the same op is delayed and then still
+    /// receives its ordinary refusal.
     pub fn hold_next_for(&self, op: impl Into<String>) -> TargetHold {
         self.hold_next_for_bounded(op, FAULT_HOLD_TIMEOUT)
     }

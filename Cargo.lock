@@ -2987,9 +2987,9 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "libp2p"
-version = "0.57.0"
+version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54f17d9972941cedec62309d4a8ff52c05beb20550d6f1f961625eda0aae1e37"
+checksum = "9bd752f66522780daa3acfd0103a2dccb3921e4c09db5f777bfca98227c8e74d"
 dependencies = [
  "bytes",
  "either",
@@ -5844,9 +5844,9 @@ dependencies = [
 
 [[package]]
 name = "spoke-connect"
-version = "0.15.1"
+version = "0.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19d579657aab2e08543334b815e53943d125ed60cf71dabe294e65baaad6a385"
+checksum = "0f4699c65eb1a4ccef3dcbe5bcf91f2e12218e1a73fb75a95597b44f0dad6842"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -5867,9 +5867,9 @@ dependencies = [
 
 [[package]]
 name = "spoke-operations"
-version = "0.15.1"
+version = "0.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6fc0884485abb0736aad5d6d9b1569a740a0a20e621906ba601d9f23dba7e31c"
+checksum = "f773d4fe01da3f3f4101827a91dfcdefe3e70c6164d5fd4f120f0f832bc97105"
 dependencies = [
  "async-trait",
  "chrono",
@@ -5883,9 +5883,9 @@ dependencies = [
 
 [[package]]
 name = "spoke-schemas"
-version = "0.15.1"
+version = "0.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a25ecf69eb824273fa60353dc9759bb0541ccda2bf040dda3540a0ee7c8834a"
+checksum = "fc253fc92ada87e8f775e8aebb034ed91f2e3309d901a6681e6e54e2bb58ea6f"
 dependencies = [
  "chrono",
  "regress",

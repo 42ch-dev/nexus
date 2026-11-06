@@ -238,9 +238,16 @@ regress = "0.12"
 # SQLite provider live in upstream fixtures
 # (`spoke-fixture-memory-engine`, path-only, never published) and are NOT part
 # of the protocol surface (schemas + operations + Connect arbitration only).
-# libp2p does NOT move: upstream 0.15.1 still requires `libp2p =0.57.0`.
-spoke-schemas = "=0.15.1"
-spoke-operations = "=0.15.1"
+# Lockstep round 0.15.1 → 0.15.2: the release carries the fix tracked as
+# I-000271 (upstream #149) — `spoke-connect`'s remote responder now attaches
+# the §14.2 terminal metadata to EVERY memory-boundary denial, including an op
+# with no dispatch row (`op_unsupported`), not only `capability_missing`.
+# Rust schema/operation surfaces are unchanged (no regeneration): only the
+# Connect responder, the TS generated union formatting and the bindings/CI
+# drift tooling moved. libp2p DOES move with this round: upstream 0.15.2
+# requires `libp2p =0.57.1`.
+spoke-schemas = "=0.15.2"
+spoke-operations = "=0.15.2"
 # V1.148 P3 N-C0 (DF-72): spoke-connect — Connect Host facade (signed
 # hello, allowlist, capability-token gate). V1.153 P0: 0.8.2 → 0.9.1
 # (dial-bound hello + envelope-auth v2 are internal to spoke-connect;
@@ -258,12 +265,15 @@ spoke-operations = "=0.15.1"
 # never compiled. 0.14.1 → 0.15.1: additive memory dispatch rows +
 # `RemoteMemoryService` responder arms upstream; nexus serves none of them —
 # the served-op set is unchanged and `memory.*` refusal is pinned in interop.
-spoke-connect = "=0.15.1"
+# 0.15.1 → 0.15.2: remote-responder-only fix (see the round note above);
+# nexus's served-op set and refusal expectations are unchanged.
+spoke-connect = "=0.15.2"
 # V1.148 P3 N-C0: libp2p — identity/PeerId/Multiaddr types for the
 # `nexus42 connect` CLI (ed25519 keypair + protobuf key serialization only).
 # V1.195 P4: 0.56.0 → 0.57.0 — lockstep with spoke-connect 0.14.1 (see the
 # SPOKE pin lineage above); `ed25519` remains the only feature nexus enables.
-libp2p = { version = "=0.57.0", features = ["ed25519"] }
+# 0.57.0 → 0.57.1 — lockstep with spoke-connect 0.15.2 (upstream patch pin).
+libp2p = { version = "=0.57.1", features = ["ed25519"] }
 # Pinned exactly to spoke-connect's transport so the feature-on graph shares
 # ONE libp2p build. Consumed behind feature `connect-host` on `apps/nexus42`;
 # the DEFAULT daemon graph stays libp2p-free.

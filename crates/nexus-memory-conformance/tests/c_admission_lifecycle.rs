@@ -222,7 +222,10 @@ async fn known_and_unknown_ops_fail_closed(matrix: Matrix) {
         );
         assert_eq!(error["details"]["retry_class"], json!("terminal"), "{op}");
     }
-    capabilityless.close().await;
+    capabilityless
+        .close()
+        .await
+        .expect("the raw session settles");
 
     // An op name with no dispatch row is not silently served.
     let mut raw = matrix.raw_admin().await;
@@ -232,7 +235,7 @@ async fn known_and_unknown_ops_fail_closed(matrix: Matrix) {
         json!("op_unsupported"),
         "an unknown memory op is refused: {unknown}"
     );
-    raw.close().await;
+    raw.close().await.expect("the raw session settles");
 
     // None of the refusals created work.
     assert!(
@@ -299,7 +302,7 @@ async fn reflection_requires_subcapability(matrix: Matrix) {
         );
         assert_eq!(error["details"]["retry_class"], json!("terminal"), "{op}");
     }
-    raw.close().await;
+    raw.close().await.expect("the raw session settles");
     let admin = matrix.admin();
     assert_eq!(
         admin
@@ -346,7 +349,7 @@ async fn transfer_requires_subcapability(matrix: Matrix) {
         );
         assert_eq!(error["details"]["retry_class"], json!("terminal"), "{op}");
     }
-    raw.close().await;
+    raw.close().await.expect("the raw session settles");
     let admin = matrix.admin();
     assert_eq!(
         admin.list_spaces().await["spaces"][0]["pending_receipts"],
