@@ -37,7 +37,7 @@ nexus-contracts = { path = "../nexus-contracts" }
 # Unix signal handling for graceful shutdown (only on Unix platforms)
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31.3", features = ["signal", "process"] }
-sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
+sysinfo = { version = "0.40.1", default-features = false, features = ["system"] }
 
 # v1.193 P2-T13: the `connect-client` feature retired with the Model A
 # `nexus_mcp_stdio_server` factory (deleted in P1-T6). The generic ACP
