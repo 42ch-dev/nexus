@@ -520,7 +520,7 @@ async fn responder_of(
 /// dialer maps to.
 struct Fixture {
     /// Keeps the provider database file alive for the whole scenario.
-    fixture_home: TempDir,
+    provider_home: TempDir,
     provider: Arc<FixtureMemoryProvider>,
     directory: Arc<PeerDirectory>,
     served_space: String,
@@ -562,7 +562,7 @@ impl Fixture {
             client_pubkey: pubkey(seed),
             host_pubkey: pubkey(&HOST_SEED),
             host_peer: peer_id(&HOST_SEED),
-            fixture_home,
+            provider_home: fixture_home,
             provider,
             directory,
             principal_id,
@@ -572,7 +572,7 @@ impl Fixture {
 
     /// A pool on this fixture's own provider database.
     async fn pool(&self) -> SqlitePool {
-        provider_pool(&self.fixture_home).await
+        provider_pool(&self.provider_home).await
     }
 
     /// One listener serving this fixture's durable service under `host_manifest`
@@ -641,7 +641,8 @@ async fn assert_credential_refusal(env: &Env, host_pubkey: &[u8; 32]) {
     let dead_endpoint: SocketAddr = "127.0.0.1:9".parse().expect("dead endpoint");
     let error = open(env, selection("spc_unserved", dead_endpoint, host_pubkey))
         .await
-        .expect_err("a missing credential fails the open");
+        .err()
+        .expect("a missing credential fails the open");
     assert_eq!(
         coded(&error),
         "memory_credential_invalid",
@@ -667,7 +668,8 @@ async fn assert_refused_open(
     let (addr, task) = fixture.listener(host_manifest).await;
     let error = open(env, fixture.selection(space_id, addr))
         .await
-        .expect_err(context);
+        .err()
+        .expect(context);
     assert_eq!(coded(&error), expected_code, "{context}");
     let responder = responder_of(task).await;
     wait_for_closed(&responder).await;
@@ -1046,6 +1048,14 @@ const SCOPED_SEED: [u8; 32] = [0x52; 32];
 const OTHER_SEED: [u8; 32] = [0x63; 32];
 /// The capability proof issuer's Connect identity in the token scenarios.
 const ISSUER_SEED: [u8; 32] = [0x77; 32];
+/// Distinct sentinels for the credential-redaction scenario: the credential seed
+/// itself and the token's signature material. Both are unique text no incidental
+/// value can reproduce.
+const SEED_SENTINEL: [u8; 32] = [0xA7; 32];
+const SIGNATURE_SENTINEL: &str = "sig-sentinel-0f3c9a-never-public";
+/// The sentinel a corrupt stored document carries: it must never appear on the
+/// wire.
+const WIRE_CANARY: &str = "NEXUS-CANARY-3f9a";
 const SCOPED_CREDENTIAL_ID: &str = "cred-remote-scoped";
 const CAPTURE_PENDING: &str = "pend_remote_open";
 const CAPTURE_SESSION: &str = "sess_remote_open";
@@ -1829,7 +1839,8 @@ impl Admission {
                 .selection(&self.fixture.served_space, dead_endpoint),
         )
         .await
-        .expect_err(context);
+        .err()
+        .expect(context);
         assert_eq!(coded(&error), expected_code, "{context}");
         self.assert_untouched(context).await;
         assert!(
@@ -1859,10 +1870,9 @@ impl Admission {
             5_000,
         )
         .await;
-        let error = open(env, build_selection(addr))
-            .await
-            .expect_err(refusal.context);
-        assert_eq!(coded(&error), refusal.code, "{refusal.context}");
+        let context = refusal.context;
+        let error = open(env, build_selection(addr)).await.err().expect(context);
+        assert_eq!(coded(&error), refusal.code, "{context}");
         match refusal.settle {
             Settle::Handshake => settle_listener(task).await,
             Settle::Established => {
@@ -1870,10 +1880,10 @@ impl Admission {
                 wait_for_closed(&responder).await;
             }
         }
-        self.assert_untouched(refusal.context).await;
+        self.assert_untouched(context).await;
         assert!(
             !env.local_provider_store().exists(),
-            "{refusal.context}: no refusal falls back to the local provider"
+            "{context}: no refusal falls back to the local provider"
         );
         assert_home_reopens(&self.fixture, env).await;
     }
@@ -2377,7 +2387,7 @@ impl Loss {
     /// Tear the provider's accepted sockets down under the still-open client
     /// bindings. The test never calls a client close here, so both live bindings
     /// have to observe a broken transport instead of a graceful shutdown.
-    async fn break_the_transport(&mut self) {
+    async fn break_the_transport(&self) {
         assert!(
             !self.product.core.is_closing(),
             "the client did not begin closing"
@@ -2549,7 +2559,7 @@ async fn unexpected_transport_loss_and_signed_replay_keep_the_original_receipt()
         "a definite committed capture retires exactly its own admission"
     );
 
-    let mut loss = Loss {
+    let loss = Loss {
         fixture,
         env,
         pool,
@@ -2661,7 +2671,7 @@ impl Grants {
             "the scoped open serves the selected creator; provider identity comes from the authenticated peer"
         );
         Self {
-            _provider_home: fixture.fixture_home,
+            _provider_home: fixture.provider_home,
             admin_principal: fixture.principal_id.clone(),
             space: fixture.served_space.clone(),
             env,
@@ -2870,7 +2880,8 @@ async fn assert_signed_refusal_is_clean(
         .await;
     let error = open(env, fixture.selection(&fixture.served_space, addr))
         .await
-        .expect_err("an authority mismatch fails the open");
+        .err()
+        .expect("an authority mismatch fails the open");
     assert_eq!(coded(&error), "memory_remote_authority");
     let rendered = format!("{error} {error:?}");
     assert!(!rendered.contains(seed_text));
@@ -2996,11 +3007,6 @@ async fn assert_provider_sinks_are_clean(
 /// scoped statement, not a claim that Core logging is absent everywhere.
 #[tokio::test]
 async fn credential_sentinels_never_reach_config_errors_or_receipts() {
-    // Distinct sentinels: the credential seed itself and the token's signature
-    // material. Both are unique text no incidental value can reproduce.
-    const SEED_SENTINEL: [u8; 32] = [0xA7; 32];
-    const SIGNATURE_SENTINEL: &str = "sig-sentinel-0f3c9a-never-public";
-
     let fixture = Fixture::for_seed(&SEED_SENTINEL).await;
     let env = Env::new();
     let mut token = expired_token(&fixture.client_peer, &fixture.host_peer);
@@ -3048,7 +3054,8 @@ async fn assert_proof_refused(
     let (addr, task) = token_gated_listener(fixture, issuer_peer).await;
     let error = open(env, fixture.selection(&fixture.served_space, addr))
         .await
-        .expect_err("the host verifier refuses the proof");
+        .err()
+        .expect("the host verifier refuses the proof");
     assert_eq!(
         coded(&error),
         "memory_remote_capability",
@@ -4328,12 +4335,60 @@ async fn a_mismatched_capture_receipt_keeps_the_binding_protected() {
     settle_listener(task).await;
 }
 
+/// Corrupt one stored document so the provider cannot decode it, then prove the
+/// signed client's refusal is a static `INTERNAL_ERROR` that carries no provider
+/// storage or decoder text.
+async fn assert_decoder_failure_is_opaque(
+    consumer: &RemoteAdapter,
+    principal: &Principal,
+    pool: &SqlitePool,
+    space: &str,
+    subject: &str,
+    request: MemoryCaptureRequest,
+) {
+    sqlx::query(
+        "UPDATE subjects SET fenced_contexts_json = ? WHERE space_id = ? AND subject_id = ?",
+    )
+    .bind(format!("{{\"sentinel\":\"{WIRE_CANARY}\"}}"))
+    .bind(space)
+    .bind(subject)
+    .execute(pool)
+    .await
+    .expect("corrupt one stored document");
+    let reject = match consumer.capture(principal, request).await {
+        SpokeResult::Reject(reject) => reject,
+        SpokeResult::Ok(body) => panic!("a decoder failure must not commit: {body:?}"),
+    };
+    let wire = json!({
+        "code": reject.code.as_str(),
+        "message": reject.message,
+        "details": reject.details,
+    })
+    .to_string();
+    assert_eq!(
+        reject.code.as_str(),
+        "INTERNAL_ERROR",
+        "a decoder failure is the fixture's retryable internal"
+    );
+    for leaked in [
+        WIRE_CANARY,
+        "sqlx",
+        "serde",
+        "invalid type",
+        "expected value",
+    ] {
+        assert!(
+            !wire.contains(leaked),
+            "the wire answer leaked provider internals ({leaked}): {wire}"
+        );
+    }
+}
+
 /// A reachable decoder failure becomes a static wire refusal: the signed client
 /// sees `INTERNAL_ERROR` with no provider storage or decoder text, while a
 /// legitimate capture on the same subject still commits.
 #[tokio::test]
 async fn a_malformed_stored_document_never_reaches_the_wire() {
-    const CANARY: &str = "NEXUS-CANARY-3f9a";
     let admin_peer = peer_id(&CLIENT_SEED);
     let fixture_home = TempDir::new().expect("fixture home");
     let provider = Arc::new(
@@ -4407,42 +4462,15 @@ async fn a_malformed_stored_document_never_reaches_the_wire() {
 
     // A stored document the provider cannot decode, carrying a sentinel that
     // must never appear on the wire.
-    sqlx::query(
-        "UPDATE subjects SET fenced_contexts_json = ? WHERE space_id = ? AND subject_id = ?",
+    assert_decoder_failure_is_opaque(
+        &consumer,
+        &consumer_principal,
+        &pool,
+        &space,
+        &subject,
+        capture("canary-corrupt", "This request reaches the decoder."),
     )
-    .bind(format!("{{\"sentinel\":\"{CANARY}\"}}"))
-    .bind(&space)
-    .bind(&subject)
-    .execute(&pool)
-    .await
-    .expect("corrupt one stored document");
-    let reject = match consumer
-        .capture(
-            &consumer_principal,
-            capture("canary-corrupt", "This request reaches the decoder."),
-        )
-        .await
-    {
-        SpokeResult::Reject(reject) => reject,
-        SpokeResult::Ok(body) => panic!("a decoder failure must not commit: {body:?}"),
-    };
-    let wire = json!({
-        "code": reject.code.as_str(),
-        "message": reject.message.clone(),
-        "details": reject.details.clone(),
-    })
-    .to_string();
-    assert_eq!(
-        reject.code.as_str(),
-        "INTERNAL_ERROR",
-        "a decoder failure is the fixture's retryable internal"
-    );
-    for leaked in [CANARY, "sqlx", "serde", "invalid type", "expected value"] {
-        assert!(
-            !wire.contains(leaked),
-            "the wire answer leaked provider internals ({leaked}): {wire}"
-        );
-    }
+    .await;
 
     pool.close().await;
     assert!(core.close().await.expect("close").cleanup_confirmed);

@@ -1477,7 +1477,7 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         dto::<MemoryRecallRequest>(request)
     };
     let selected = |selection: Value| {
-        recall(selection, json!({ "max_items": 50 }), Some("alliance"), None)
+        recall(selection, json!({ "max_items": 10 }), Some("alliance"), None)
     };
 
     // SELECTION: every selection's exact (id, placement, text) triples must equal
@@ -1945,7 +1945,7 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
                 "context_ids": [RECALL_CONTEXT_ID],
                 "include_shared": false,
             }),
-            json!({ "max_items": 50 }),
+            json!({ "max_items": 10 }),
             Some("alliance"),
             None,
         ),
@@ -1983,7 +1983,7 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         let reject = recall_reject(
             &scoped,
             &scoped_principal,
-            recall(selection, json!({ "max_items": 50 }), Some("alliance"), None),
+            recall(selection, json!({ "max_items": 10 }), Some("alliance"), None),
         )
         .await;
         assert_eq!(reject.code, SpokeRejectCode::NotAuthorized, "{why}");
@@ -1997,7 +1997,7 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
             "context_ids": [RECALL_CONTEXT_ID],
             "include_shared": false,
         },
-        "budget": { "max_items": 50 },
+        "budget": { "max_items": 10 },
     });
     other_subject["query"] = json!("alliance");
     let reject = recall_reject(
@@ -2023,7 +2023,7 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
                 "context_ids": [RECALL_CONTEXT_ID],
                 "include_shared": false,
             }),
-            json!({ "max_items": 50 }),
+            json!({ "max_items": 10 }),
             Some("alliance"),
             None,
         ),
