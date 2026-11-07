@@ -272,13 +272,10 @@ pub fn map_core_error(err: CoreError) -> CliError {
             conflicting_path: conflict.conflicting_path,
             recovery_hint: conflict.recovery_hint,
         },
-        CoreError::WorldKbValidation(v) => CliError::Api {
-            status: 422,
-            message: format!(
-                "world_kb_validation_failed: {}",
-                v.validation_summary.errors.join("; ")
-            ),
-        },
+        CoreError::WorldKbValidation(v) => map_validation_refusal(
+            "world_kb_validation_failed",
+            &v.validation_summary.errors,
+        ),
         CoreError::WorkspaceConflict(conflict) => map_workspace_conflict(conflict),
         CoreError::OutlineConflict(conflict) => CliError::Api {
             status: 409,
@@ -287,13 +284,9 @@ pub fn map_core_error(err: CoreError) -> CliError {
                 conflict.current_revision, conflict.node_id, conflict.conflicting_path, conflict.recovery_hint
             ),
         },
-        CoreError::OutlineValidation(v) => CliError::Api {
-            status: 422,
-            message: format!(
-                "outline_validation_failed: {}",
-                v.errors.join("; ")
-            ),
-        },
+        CoreError::OutlineValidation(v) => {
+            map_validation_refusal("outline_validation_failed", &v.errors)
+        }
         CoreError::OwnerBusy | CoreError::Busy => CliError::Locked {
             holder_pid: 0,
             holder_name: "workspace writer".to_string(),
@@ -302,10 +295,7 @@ pub fn map_core_error(err: CoreError) -> CliError {
         // A coded refusal carries the transport-retained lowercase code. The
         // daemon adapter renders it at the status its own table assigns; a
         // direct-core caller sees the same code and family.
-        CoreError::Coded { code, message } => CliError::Api {
-            status: coded_status(&code),
-            message: format!("[{code}] {message}"),
-        },
+        CoreError::Coded { code, message } => map_coded_refusal(&code, &message),
         // A peer's refusal: the daemon renders it through its own
         // `PeerToolDenied` variant at 400, with the peer's finer wire code in
         // `details.wire_code`. A direct-core caller gets the same public code
@@ -315,10 +305,7 @@ pub fn map_core_error(err: CoreError) -> CliError {
             code,
             wire_code,
             message,
-        } => CliError::Api {
-            status: 400,
-            message: format!("[{code}] {message} (peer code: {wire_code})"),
-        },
+        } => map_peer_denied(&code, &wire_code, &message),
         CoreError::WriterFenced | CoreError::SchemaMismatch => CliError::Config(
             "workspace writer protocol mismatch — upgrade or restart host".to_string(),
         ),
@@ -361,41 +348,83 @@ pub fn map_core_error(err: CoreError) -> CliError {
             retry_class,
             family,
             conflict_code,
-        } => {
-            let wire = wire_code
-                .as_deref()
-                .map(|wire_code| format!(", wire code: {wire_code}"))
-                .unwrap_or_default();
-            match conflict_code {
-                // A proven definite memory conflict keeps the retained
-                // consumer-visible `version_mismatch` contract (409) with static
-                // text; the effective classification rides along.
-                Some(conflict_code) => CliError::Api {
-                    status: 409,
-                    message: format!(
-                        "[{conflict_code}] memory revision mismatch \
-                         (retry_class: {retry_class}{wire})"
-                    ),
-                },
-                None => {
-                    let status = match family {
-                        nexus_core::MemoryProviderRefusal::NotFound => 404,
-                        nexus_core::MemoryProviderRefusal::Forbidden => 403,
-                        nexus_core::MemoryProviderRefusal::InvalidInput => 400,
-                        nexus_core::MemoryProviderRefusal::Conflict => 409,
-                        nexus_core::MemoryProviderRefusal::Unavailable => 503,
-                    };
-                    CliError::Api {
-                        status,
-                        message: format!(
-                            "[{code}] memory provider refused (retry_class: {retry_class}{wire})"
-                        ),
-                    }
-                }
-            }
-        }
+        } => map_memory_provider_refusal(
+            &code,
+            wire_code.as_deref(),
+            &retry_class,
+            family,
+            conflict_code.as_deref(),
+        ),
         CoreError::Closing | CoreError::Interrupted => CliError::Other(err.to_string()),
         CoreError::Internal { category } => CliError::Other(category),
+    }
+}
+
+/// Map a remote memory-provider refusal to the retained consumer envelope.
+///
+/// A proven definite conflict keeps the retained `version_mismatch` contract
+/// (409) with static text; every other refusal keeps its family status. The
+/// effective code, retry class and allowlisted peer wire code always come from
+/// the typed fields.
+fn map_memory_provider_refusal(
+    code: &str,
+    wire_code: Option<&str>,
+    retry_class: &str,
+    family: nexus_core::MemoryProviderRefusal,
+    conflict_code: Option<&str>,
+) -> CliError {
+    let wire = wire_code
+        .map(|wire_code| format!(", wire code: {wire_code}"))
+        .unwrap_or_default();
+    conflict_code.map_or_else(
+        || {
+            let status = match family {
+                nexus_core::MemoryProviderRefusal::NotFound => 404,
+                nexus_core::MemoryProviderRefusal::Forbidden => 403,
+                nexus_core::MemoryProviderRefusal::InvalidInput => 400,
+                nexus_core::MemoryProviderRefusal::Conflict => 409,
+                nexus_core::MemoryProviderRefusal::Unavailable => 503,
+            };
+            CliError::Api {
+                status,
+                message: format!(
+                    "[{code}] memory provider refused (retry_class: {retry_class}{wire})"
+                ),
+            }
+        },
+        |conflict_code| CliError::Api {
+            status: 409,
+            message: format!(
+                "[{conflict_code}] memory revision mismatch \
+                 (retry_class: {retry_class}{wire})"
+            ),
+        },
+    )
+}
+
+/// Map a coded refusal to the retained `[code] message` envelope at the status
+/// the family table assigns.
+fn map_coded_refusal(code: &str, message: &str) -> CliError {
+    CliError::Api {
+        status: coded_status(code),
+        message: format!("[{code}] {message}"),
+    }
+}
+
+/// Map a peer refusal to the retained 400 envelope, keeping the peer's finer
+/// wire code beside the public code.
+fn map_peer_denied(code: &str, wire_code: &str, message: &str) -> CliError {
+    CliError::Api {
+        status: 400,
+        message: format!("[{code}] {message} (peer code: {wire_code})"),
+    }
+}
+
+/// Map a semantic-validation refusal to the retained 422 envelope.
+fn map_validation_refusal(prefix: &str, errors: &[String]) -> CliError {
+    CliError::Api {
+        status: 422,
+        message: format!("{prefix}: {}", errors.join("; ")),
     }
 }
 

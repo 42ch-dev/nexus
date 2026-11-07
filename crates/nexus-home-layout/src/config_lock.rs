@@ -89,45 +89,108 @@ fn release(path: &Path, token: &str) {
 /// the previous complete version or the new one, never a truncated document
 /// that would read as "no `[memory_provider]`" (the implicit local default).
 ///
-/// The temporary file lives in the same directory (same filesystem, so the
-/// rename cannot degrade into a copy) and inherits the current document's mode
-/// when one exists, so an existing owner/mode is preserved instead of being
-/// silently loosened. The caller still holds [`acquire`]: publication replaces
-/// in-place truncation, it does not replace writer exclusion (read-modify-write
+/// The caller still holds [`acquire`]: publication replaces in-place
+/// truncation, it does not replace writer exclusion (read-modify-write
 /// lost-update safety).
 ///
+/// # Authorization and metadata
+///
+/// A rename is authorized by the containing directory, not by the file, so
+/// atomic replacement alone would let a write-denied document be replaced. To
+/// retain the previous `std::fs::write` boundary, publication opens an existing
+/// target for writing (without truncating) before the rename and returns that
+/// error — a `0444` document stays unwritable. A missing target is created the
+/// same way the in-place write created it; metadata errors other than "not
+/// found" are propagated instead of masked. A symlinked `config.toml` is
+/// followed (the link survives and the document it points at is replaced),
+/// matching the in-place write this replaces. Unix mode bits of an existing
+/// document are preserved; ACLs, extended attributes and hard-link identity are
+/// not copied — no repository writer or reader sets or depends on them, and the
+/// two Node publishers already replace the inode the same way.
+///
 /// # Errors
-/// The I/O error that prevented the write, sync or rename. The temporary file
-/// is removed on every failure path.
+/// The I/O error that prevented the authorization check, the write, the sync or
+/// the rename. The temporary file is removed on every failure path; when that
+/// cleanup also fails, the returned error keeps the original kind and names the
+/// leftover temporary file instead of discarding the cleanup failure.
 pub fn publish_document(nexus_home: &Path, contents: &str) -> std::io::Result<()> {
-    let target = nexus_home.join("config.toml");
-    let temp = nexus_home.join(format!(".config.toml.{}.tmp", uuid::Uuid::new_v4()));
-    // A new document keeps `std::fs::write`'s creation mode (0666 under the
-    // umask); an existing document keeps its own mode.
-    let existing_mode = std::fs::metadata(&target)
-        .ok()
-        .map(|meta| meta.permissions());
+    let target = resolve_publication_target(&nexus_home.join("config.toml"))?;
+    // The temporary file must share the target's directory: a symlinked
+    // document can live outside the nexus home, and a cross-filesystem rename
+    // would not be atomic (or would fail outright).
+    let temp_directory = target.parent().unwrap_or(nexus_home);
+    let temp = temp_directory.join(format!(".config.toml.{}.tmp", uuid::Uuid::new_v4()));
 
     let result = (|| {
         let mut file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&temp)?;
-        if let Some(mode) = existing_mode {
-            std::fs::set_permissions(&temp, mode)?;
-        }
         file.write_all(contents.as_bytes())?;
         // Complete the bytes before the rename publishes them: a crash after
         // the rename must not leave a shorter, empty-looking document.
         file.sync_all()?;
         drop(file);
+
+        // Retain the previous write boundary: the rename is authorized by the
+        // directory and must not replace a document this process may not write.
+        match std::fs::OpenOptions::new().write(true).open(&target) {
+            Ok(handle) => drop(handle),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+
+        // A new document keeps `std::fs::write`'s creation mode (0666 under the
+        // umask); an existing document keeps its own mode.
+        match std::fs::metadata(&target) {
+            Ok(meta) => std::fs::set_permissions(&temp, meta.permissions())?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+
         std::fs::rename(&temp, &target)
     })();
 
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temp);
+    let error = match result {
+        Ok(()) => return Ok(()),
+        Err(error) => error,
+    };
+    match std::fs::remove_file(&temp) {
+        Ok(()) => {}
+        // Nothing was written at this path (e.g. the directory is gone).
+        Err(cleanup) if cleanup.kind() == std::io::ErrorKind::NotFound => {}
+        Err(cleanup) => {
+            tracing::warn!(
+                %error,
+                %cleanup,
+                path = %temp.display(),
+                "config.toml publication failed and its temporary file could not be removed"
+            );
+            return Err(std::io::Error::new(
+                error.kind(),
+                format!(
+                    "{error}; the temporary file {} could not be removed: {cleanup}",
+                    temp.display()
+                ),
+            ));
+        }
     }
-    result
+    Err(error)
+}
+
+/// Resolve the document a publication replaces.
+///
+/// A symlinked `config.toml` is followed like the in-place write did, so the
+/// link keeps pointing at the real document and the real document is replaced.
+/// A missing document stays at its requested path; every other metadata error
+/// is propagated rather than treated as "absent".
+fn resolve_publication_target(requested: &Path) -> std::io::Result<PathBuf> {
+    match std::fs::symlink_metadata(requested) {
+        Ok(meta) if meta.file_type().is_symlink() => std::fs::canonicalize(requested),
+        Ok(_) => Ok(requested.to_path_buf()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(requested.to_path_buf()),
+        Err(error) => Err(error),
+    }
 }
 
 #[cfg(test)]
@@ -528,5 +591,108 @@ mod tests {
             ["config.toml"],
             "only the published document remains"
         );
+    }
+
+    /// A symlinked `config.toml` is followed like the in-place write was: the
+    /// link survives, the document it points at is replaced atomically, and the
+    /// temporary file is created beside that document.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_document_is_replaced_through_its_link() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = tempfile::tempdir().expect("temp home");
+        let home = tmp.path().join("home");
+        let real_dir = tmp.path().join("real");
+        std::fs::create_dir_all(&home).expect("home");
+        std::fs::create_dir_all(&real_dir).expect("real directory");
+        let real = real_dir.join("config.toml");
+        std::fs::write(&real, "active_creator_id = \"ctr_old\"\n").expect("document");
+        symlink(&real, config_path(&home)).expect("link");
+
+        super::publish_document(&home, "active_creator_id = \"ctr_new\"\n").expect("publish");
+
+        assert!(
+            std::fs::symlink_metadata(config_path(&home))
+                .expect("link metadata")
+                .file_type()
+                .is_symlink(),
+            "the symlink survives publication"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&real).expect("real document"),
+            "active_creator_id = \"ctr_new\"\n"
+        );
+        let mut entries: Vec<_> = std::fs::read_dir(&real_dir)
+            .expect("real directory listing")
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        entries.sort();
+        assert_eq!(
+            entries,
+            ["config.toml"],
+            "the temporary file lives beside the real document"
+        );
+    }
+
+    /// SEC-01: a rename is authorized by the directory, so publishing a
+    /// write-denied document would bypass the in-place write boundary. The
+    /// publication must refuse it and leave the document (and no temporary
+    /// file) behind.
+    #[cfg(unix)]
+    #[test]
+    fn a_write_denied_document_is_not_replaced_by_publication() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let tmp = tempfile::tempdir().expect("temp home");
+        let home = tmp.path().to_path_buf();
+        std::fs::create_dir_all(&home).expect("home");
+        let path = config_path(&home);
+        std::fs::write(&path, "active_creator_id = \"ctr_locked\"\n").expect("document");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444)).expect("seal");
+
+        let error = super::publish_document(&home, "active_creator_id = \"ctr_new\"\n")
+            .expect_err("a write-denied document is not replaced");
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).expect("unseal");
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("document"),
+            "active_creator_id = \"ctr_locked\"\n",
+            "the refused document keeps its content"
+        );
+        let mut entries: Vec<_> = std::fs::read_dir(&home)
+            .expect("home listing")
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        entries.sort();
+        assert_eq!(entries, ["config.toml"], "the temporary file was removed");
+    }
+
+    /// BUG-03: a failure after the temporary file exists still removes it and
+    /// preserves the primary error. A directory at the document path makes the
+    /// authorization probe fail after the write.
+    #[test]
+    fn a_failed_publication_removes_its_temporary_file() {
+        let tmp = tempfile::tempdir().expect("temp home");
+        let home = tmp.path().to_path_buf();
+        std::fs::create_dir_all(config_path(&home)).expect("directory at the document path");
+
+        let error = super::publish_document(&home, "active_creator_id = \"ctr_new\"\n")
+            .expect_err("a directory cannot be published over");
+
+        assert!(
+            !error.to_string().is_empty(),
+            "the primary failure is reported"
+        );
+        let mut entries: Vec<_> = std::fs::read_dir(&home)
+            .expect("home listing")
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        entries.sort();
+        assert_eq!(entries, ["config.toml"], "the temporary file was removed");
     }
 }

@@ -4,14 +4,18 @@
 //! coordination. That coordination used to be an unconditional exclusive
 //! create inside `.nexus42`, so an already-provisioned but read-only home made
 //! a read-only open fail with a lock error even though it has nothing to write.
-//! These targets drive the real `CoreService::open` surface: the read-only
-//! home, the malformed-table refusal and a legitimate writer/open overlap.
+//! These targets drive the real `CoreService::open` and real public writer
+//! surfaces: the read-only home, the malformed-table and explicit-override
+//! refusals, the publication boundary of both converted writers, and the
+//! release of a failed writer admission.
 #![cfg(unix)]
 
 use std::fs;
+use std::io::Read as _;
 use std::os::unix::fs::PermissionsExt as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use nexus_contracts::generated::daemon_api::creators::set_active_creator_request::SetActiveCreatorRequest;
 use nexus_core::{
     CoreAccess, CoreError, CoreHomeService, CoreOpenOptions, CoreService, MemoryProviderSelection,
     RemoteMemoryProviderSelection,
@@ -19,7 +23,23 @@ use nexus_core::{
 use tempfile::TempDir;
 
 const CREATOR: &str = "ctr_readonly0000000000000000000000";
+const OTHER_CREATOR: &str = "ctr_readonly0000000000000000000001";
 const SLUG: &str = "default";
+
+/// Seed profile membership: `use_creator` accepts a creator present in the
+/// identity cache or the auth store.
+fn seed_creator(nexus_home: &Path, creator_id: &str) {
+    let cache = serde_json::json!({
+        "creators": {
+            creator_id: { "creator_id": creator_id, "handle": null, "display_name": null }
+        }
+    });
+    fs::write(
+        nexus_home.join("creator_identity_cache.json"),
+        serde_json::to_string(&cache).expect("cache json"),
+    )
+    .expect("seed identity cache");
+}
 
 /// A `[memory_provider]` table that does not match the typed layout: the
 /// provider snapshot must fail closed on it instead of reading "no table".
@@ -223,49 +243,143 @@ async fn an_explicit_override_never_reads_the_provider_table_on_a_read_only_home
     core.close().await.expect("close");
 }
 
-/// A legitimate writer/open overlap never pins the local default while the disk
-/// document keeps the remote table: every publication is a whole document, so
-/// the open reads the stored remote selection instead of a truncated rewrite
-/// that would look like "no table".
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_writer_overlap_never_pins_the_local_default() {
+/// The publication boundary: a reader snapshot opened before a provider
+/// selection publish reads one whole document, the published path reads the
+/// other, and real opens on each side pin the authority that document selects.
+#[tokio::test]
+async fn a_provider_selection_publish_never_exposes_a_partial_document() {
     let home = Home::new(None);
     home.provision().await;
-    let writer = CoreHomeService::open(home.user_home.clone()).expect("home service");
-    writer
+    let service = CoreHomeService::open(home.user_home.clone()).expect("home service");
+    service
+        .set_memory_provider_selection(&remote_selection())
+        .expect("seed the remote selection");
+    let path = home.nexus_home().join("config.toml");
+
+    // Authority before: a real open pins the stored remote selection.
+    assert_remote_open_refusal(
+        &CoreService::open(home.options(CoreAccess::ReadOnly))
+            .await
+            .err()
+            .expect("the stored remote selection is pinned"),
+    );
+
+    // This reader opened the document before the publish.
+    let mut before = fs::File::open(&path).expect("pre-publication reader");
+
+    service
+        .set_memory_provider_selection(&MemoryProviderSelection::Local)
+        .expect("publish the local default");
+
+    let mut older = String::new();
+    before
+        .read_to_string(&mut older)
+        .expect("read the pre-publication document");
+    assert!(
+        older.contains("kind = \"remote\"") && !older.contains("kind = \"local\""),
+        "the pre-publication snapshot keeps the whole stored table: {older}"
+    );
+    older
+        .parse::<toml::Table>()
+        .expect("the pre-publication snapshot is complete TOML");
+
+    let published = fs::read_to_string(&path).expect("published document");
+    assert!(
+        published.contains("kind = \"local\"") && !published.contains("kind = \"remote\""),
+        "the published path holds the whole new version: {published}"
+    );
+    published
+        .parse::<toml::Table>()
+        .expect("the published document is complete TOML");
+
+    // Authority after: the same real open now pins the published local default.
+    let core = CoreService::open(home.options(CoreAccess::ReadOnly))
+        .await
+        .expect("the published local default opens");
+    assert!(
+        !core
+            .memory_provider_for_test()
+            .expect("local provider")
+            .is_writable(),
+        "a read-only open pins a read-only provider"
+    );
+    core.close().await.expect("close");
+}
+
+/// BUG-01: the real creator writer (`use_creator`) publishes whole documents
+/// too. A reader snapshot opened before the switch keeps the old selection, the
+/// path holds the new one, and a key another writer owns survives.
+#[test]
+fn a_creator_switch_never_exposes_a_partial_document() {
+    let home = Home::new(Some("\n[agent_profile]\nname = \"kept\"\n"));
+    seed_creator(&home.nexus_home(), OTHER_CREATOR);
+    let path = home.nexus_home().join("config.toml");
+    let mut before = fs::File::open(&path).expect("pre-publication reader");
+
+    CoreHomeService::open(home.user_home)
+        .expect("home service")
+        .use_creator(SetActiveCreatorRequest {
+            creator_id: OTHER_CREATOR.to_string(),
+        })
+        .expect("creator switch");
+
+    let mut older = String::new();
+    before
+        .read_to_string(&mut older)
+        .expect("read the pre-publication document");
+    let old_document: toml::Table = older
+        .parse()
+        .expect("the pre-publication snapshot is complete TOML");
+    assert_eq!(
+        old_document
+            .get("active_creator_id")
+            .and_then(toml::Value::as_str),
+        Some(CREATOR),
+        "the pre-publication snapshot keeps the whole old selection: {older}"
+    );
+
+    let published = fs::read_to_string(&path).expect("published document");
+    let new_document: toml::Table = published
+        .parse()
+        .expect("the published document is complete TOML");
+    assert_eq!(
+        new_document
+            .get("active_creator_id")
+            .and_then(toml::Value::as_str),
+        Some(OTHER_CREATOR),
+        "the published path holds the whole new selection: {published}"
+    );
+    assert!(
+        new_document.contains_key("agent_profile"),
+        "the key another writer owns survives: {published}"
+    );
+}
+
+/// TEST-01: a failed writer open releases the guarded writer admission it took,
+/// so a legitimate writer open can acquire it afterwards.
+#[tokio::test]
+async fn a_failed_writer_open_releases_its_admission() {
+    let home = Home::new(None);
+    home.provision().await;
+    let service = CoreHomeService::open(home.user_home.clone()).expect("home service");
+    service
         .set_memory_provider_selection(&remote_selection())
         .expect("seed the remote selection");
 
-    for round in 0..40 {
-        let writer_home = home.user_home.clone();
-        let rewrite = std::thread::spawn(move || {
-            let service = CoreHomeService::open(writer_home).expect("home service");
-            service
-                .set_memory_provider_selection(&remote_selection())
-                .expect("concurrent rewrite");
-        });
-        let opened = CoreService::open(home.options(CoreAccess::ReadOnly)).await;
-        rewrite.join().expect("rewrite thread");
+    let failed = CoreService::open(home.options(CoreAccess::EngineOwner)).await;
+    assert_remote_open_refusal(
+        &failed
+            .err()
+            .expect("the stored remote selection refuses the writer open"),
+    );
 
-        match opened {
-            Ok(core) => {
-                core.close().await.expect("close");
-                panic!(
-                    "round {round}: the open pinned the local default, not the stored remote table"
-                );
-            }
-            Err(error) => assert_remote_open_refusal(&error),
-        }
-    }
-
-    // Every failed open above released its own claim: after the overlap the home
-    // still serves a plain local open, so a leaked admission cannot hide an
-    // accidental Local pin either.
-    writer
+    // The refused open took a guarded writer admission before the pin failed;
+    // a real writer open now proves that admission was released.
+    service
         .clear_memory_provider_selection()
-        .expect("clear the stored selection");
-    let core = CoreService::open(home.options(CoreAccess::ReadOnly))
+        .expect("restore the local default");
+    let writer = CoreService::open(home.options(CoreAccess::DirectWriter))
         .await
-        .expect("a clean local open after the overlap");
-    core.close().await.expect("close");
+        .expect("the failed open released its writer admission");
+    writer.close().await.expect("close");
 }

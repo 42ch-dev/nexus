@@ -52,45 +52,77 @@ pub struct CliConfigSnapshot {
 impl CliConfigSnapshot {
     /// Load from `config.toml` with automatic migration from legacy `config.json`.
     ///
+    /// A provisioned `config.toml` is read without any write or lock. The legacy
+    /// migration publishes `config.toml`, so it takes the shared writer lock and
+    /// re-checks the TOML inside it — a writer that committed while the
+    /// acquisition waited wins over the stale legacy snapshot (the CLI's own
+    /// migration has always done this, `apps/nexus42/src/config.rs`).
+    ///
     /// # Errors
     ///
     /// Returns an error when reading `config.toml` or the legacy `config.json`
     /// fails, when `config.toml` contains invalid TOML, or when migrating a
-    /// valid `config.json` fails to write `config.toml` or rename the legacy
-    /// file to `config.json.migrated`. Missing config files are not errors.
+    /// valid `config.json` fails to take the writer lock, write `config.toml` or
+    /// rename the legacy file to `config.json.migrated`. Missing config files
+    /// are not errors.
     pub fn load(nexus_root: &Path) -> Result<Self, anyhow::Error> {
         let toml_path = nexus_root.join("config.toml");
         let json_path = nexus_root.join("config.json");
 
         if toml_path.exists() {
-            let text = std::fs::read_to_string(&toml_path)?;
-            if text.trim().is_empty() {
-                return Ok(Self::default());
-            }
-            return Ok(toml::from_str(&text)?);
+            return Self::read_document(&toml_path);
         }
 
         if json_path.exists() {
-            let text = std::fs::read_to_string(&json_path)?;
-            if text.trim().is_empty() {
-                std::fs::rename(&json_path, nexus_root.join("config.json.migrated"))?;
-                return Ok(Self::default());
-            }
-            match serde_json::from_str::<Self>(&text) {
-                Ok(cfg) => {
-                    let toml_str = toml::to_string_pretty(&cfg)?;
-                    // Publish atomically: a concurrent reader (including the
-                    // lock-free `ReadOnly` snapshot, I-000291) must never see a
-                    // truncated `config.toml` from this legacy migration.
-                    crate::config_lock::publish_document(nexus_root, &toml_str)?;
-                    std::fs::rename(&json_path, nexus_root.join("config.json.migrated"))?;
-                    return Ok(cfg);
-                }
-                Err(_) => return Ok(Self::default()),
-            }
+            return Self::migrate_legacy_json(nexus_root, &toml_path, &json_path);
         }
 
         Ok(Self::default())
+    }
+
+    /// Read `config.toml` (absent/empty → defaults).
+    fn read_document(toml_path: &Path) -> Result<Self, anyhow::Error> {
+        let text = std::fs::read_to_string(toml_path)?;
+        if text.trim().is_empty() {
+            return Ok(Self::default());
+        }
+        Ok(toml::from_str(&text)?)
+    }
+
+    /// Migrate legacy `config.json` under the shared writer lock.
+    ///
+    /// The migration replaces the whole shared document, so it must not run
+    /// beside a locked writer: it acquires the same lock and re-checks the TOML
+    /// inside it, and a concurrent commit that landed first is returned instead
+    /// of overwritten.
+    fn migrate_legacy_json(
+        nexus_root: &Path,
+        toml_path: &Path,
+        json_path: &Path,
+    ) -> Result<Self, anyhow::Error> {
+        #[cfg(test)]
+        migration_rendezvous::hold(nexus_root);
+        let _lock = crate::config_lock::acquire(nexus_root)?;
+        if toml_path.exists() {
+            return Self::read_document(toml_path);
+        }
+        let text = std::fs::read_to_string(json_path)?;
+        if text.trim().is_empty() {
+            std::fs::rename(json_path, nexus_root.join("config.json.migrated"))?;
+            return Ok(Self::default());
+        }
+        match serde_json::from_str::<Self>(&text) {
+            Ok(cfg) => {
+                let toml_str = toml::to_string_pretty(&cfg)?;
+                // Publish atomically: a concurrent reader (including the
+                // lock-free `ReadOnly` snapshot, I-000291) must never see a
+                // truncated `config.toml` from this legacy migration.
+                crate::config_lock::publish_document(nexus_root, &toml_str)?;
+                std::fs::rename(json_path, nexus_root.join("config.json.migrated"))?;
+                Ok(cfg)
+            }
+            Err(_) => Ok(Self::default()),
+        }
     }
 
     #[must_use]
@@ -194,4 +226,118 @@ pub fn try_resolve_state_db_path(user_home: &Path, nexus_root: &Path) -> Option<
     let cid = cfg.active_creator_id.as_deref()?;
     let slug = cfg.workspace_slug_for_creator(cid);
     Some(crate::workspace_state_db_path(user_home, cid, &slug))
+}
+
+/// Test-only ordering rendezvous for the legacy migration.
+///
+/// The migration must be past its pre-lock existence check and still held before
+/// it acquires the writer lock, so a test can commit a newer document into that
+/// exact window without a fixed wait. Compiled out of every non-test build.
+#[cfg(test)]
+mod migration_rendezvous {
+    use std::path::{Path, PathBuf};
+    use std::sync::mpsc::{Receiver, Sender};
+    use std::sync::Mutex;
+
+    type Pause = (PathBuf, Sender<()>, Receiver<()>);
+
+    static PAUSE: Mutex<Option<Pause>> = Mutex::new(None);
+
+    /// Arm the rendezvous for one home. Returns the arrival receiver and the
+    /// release sender; the caller observes the hold and then releases it.
+    pub(super) fn arm(home: &Path) -> (Receiver<()>, Sender<()>) {
+        let (arrived_tx, arrived_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        *PAUSE.lock().expect("rendezvous") = Some((home.to_path_buf(), arrived_tx, release_rx));
+        (arrived_rx, release_tx)
+    }
+
+    /// Hold the migration until the test that armed this home releases it.
+    pub(super) fn hold(home: &Path) {
+        let armed = {
+            let mut slot = PAUSE.lock().expect("rendezvous");
+            match slot.as_ref() {
+                Some((path, _, _)) if path == home => slot.take(),
+                _ => None,
+            }
+        };
+        if let Some((_, arrived, release)) = armed {
+            arrived.send(()).expect("rendezvous arrival");
+            release.recv().expect("rendezvous release");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// BUG-02: a legacy migration must not overwrite a newer document that a
+    /// locked writer committed while the migration waited. The migration is
+    /// held deterministically between its pre-lock check and the acquisition.
+    #[test]
+    fn a_legacy_migration_does_not_overwrite_a_newer_committed_document() {
+        let tmp = tempfile::tempdir().expect("temp home");
+        let root = tmp.path().to_path_buf();
+        std::fs::write(
+            root.join("config.json"),
+            "{\"active_creator_id\":\"ctr_legacy\"}",
+        )
+        .expect("legacy json");
+
+        let (arrived, release) = migration_rendezvous::arm(&root);
+        let loader_root = root.clone();
+        let loader = std::thread::spawn(move || CliConfigSnapshot::load(&loader_root));
+
+        // The migration passed its pre-check and is held before the lock.
+        arrived.recv().expect("the migration reached the hold");
+
+        // A writer commits a newer document while the migration cannot run.
+        crate::config_lock::publish_document(
+            &root,
+            "active_creator_id = \"ctr_new\"\n\n[agent_profile]\nname = \"kept\"\n",
+        )
+        .expect("newer commit");
+        release.send(()).expect("release the migration");
+
+        let snapshot = loader
+            .join()
+            .expect("loader thread")
+            .expect("the migration succeeds");
+        assert_eq!(snapshot.active_creator_id.as_deref(), Some("ctr_new"));
+
+        let stored = std::fs::read_to_string(root.join("config.toml")).expect("config");
+        assert!(
+            stored.contains("ctr_new"),
+            "the newer commit wins the document: {stored}"
+        );
+        assert!(
+            !stored.contains("ctr_legacy"),
+            "the stale legacy snapshot is not published: {stored}"
+        );
+        assert!(
+            stored.contains("agent_profile"),
+            "the newer commit's other fields survive: {stored}"
+        );
+    }
+
+    /// A provisioned `config.toml` is read without taking the writer lock or
+    /// writing anything, so an unwritable home still resolves its selection.
+    #[test]
+    fn a_provisioned_document_is_read_without_the_lock() {
+        let tmp = tempfile::tempdir().expect("temp home");
+        let root = tmp.path().to_path_buf();
+        std::fs::write(
+            root.join("config.toml"),
+            "active_creator_id = \"ctr_kept\"\n",
+        )
+        .expect("config");
+
+        let snapshot = CliConfigSnapshot::load(&root).expect("the provisioned document reads");
+        assert_eq!(snapshot.active_creator_id.as_deref(), Some("ctr_kept"));
+        assert!(
+            !root.join("config.toml.lock").exists(),
+            "reading a provisioned document takes no lock"
+        );
+    }
 }
