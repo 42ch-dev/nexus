@@ -25,6 +25,9 @@ anyhow = { workspace = true }
 # I-000113: the shared `config.toml` lock lives here (also used by nexus-core).
 chrono = { workspace = true }
 tracing = { workspace = true }
+# I-000299 (D36): the audited native bridge that carries the replaced
+# document's access policy onto the atomic replacement.
+nexus-config-metadata = { path = "../nexus-config-metadata" }
 
 [dev-dependencies]
 tempfile = "3"

@@ -14,8 +14,8 @@ use nexus_contracts::daemon_api::memory::create_pending_review_request::CreatePe
 use nexus_contracts::daemon_api::memory::create_pending_review_response::CreatePendingReviewResponse;
 use nexus_contracts::daemon_api::memory::{ReviewRequest, ReviewResponse};
 use nexus_core::{
-    CoreHomeService, CoreService, LegacyMigrationStatus, MemoryProviderSelection,
-    MemoryRevision, Principal, RemoteMemoryProviderSelection, RetainedRecord,
+    CoreHomeService, CoreService, LegacyMigrationStatus, MemoryProviderSelection, MemoryRevision,
+    Principal, RemoteMemoryProviderSelection, RetainedRecord,
 };
 use nexus_creator_memory::long_term_memory::slug_is_safe;
 use nexus_creator_memory::memory_item::MemoryKind;

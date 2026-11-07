@@ -1212,13 +1212,19 @@ fn read_config_table(nexus_home: &Path) -> CoreResult<toml::Table> {
     })
 }
 
-/// Serialize and write the whole `config.toml` document.
+/// Serialize and publish the whole `config.toml` document.
+///
+/// The caller holds the writer lock; the rename makes the replacement atomic so
+/// a reader (including a `ReadOnly` open that cannot take the lock) always sees
+/// one complete document (I-000291).
 fn write_config_table(nexus_home: &Path, config: &toml::Table) -> CoreResult<()> {
     let toml_str = toml::to_string_pretty(config).map_err(|e| CoreError::Internal {
         category: format!("config_serialize: {e}"),
     })?;
-    std::fs::write(nexus_home.join("config.toml"), toml_str).map_err(|e| CoreError::Internal {
-        category: format!("config_write: {e}"),
+    nexus_home_layout::config_lock::publish_document(nexus_home, &toml_str).map_err(|e| {
+        CoreError::Internal {
+            category: format!("config_write: {e}"),
+        }
     })
 }
 

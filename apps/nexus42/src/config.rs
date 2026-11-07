@@ -267,7 +267,10 @@ impl CliConfig {
         }
         match serde_json::from_str::<Self>(&content) {
             Ok(config) => {
-                std::fs::write(&config_path, toml::to_string_pretty(&config)?)?;
+                nexus_home_layout::config_lock::publish_document(
+                    nexus,
+                    &toml::to_string_pretty(&config)?,
+                )?;
                 std::fs::rename(&json_path, nexus.join("config.json.migrated"))?;
                 tracing::info!("Migrated config.json → config.toml");
             }
@@ -320,10 +323,15 @@ impl CliConfig {
         let nexus = nexus_home()?;
         Self::with_writer_lock(&nexus, || {
             Self::migrate_legacy_json_locked(&nexus)?;
-            let config_path = nexus.join("config.toml");
             let mut config = Self::read_document(&nexus)?;
             let outcome = run(&mut config)?;
-            std::fs::write(&config_path, toml::to_string_pretty(&config)?)?;
+            // Atomic publication: a concurrent lock-free reader (the Core
+            // `ReadOnly` snapshot, I-000291) must never see a truncated
+            // document and read "no `[memory_provider]`" as the local default.
+            nexus_home_layout::config_lock::publish_document(
+                &nexus,
+                &toml::to_string_pretty(&config)?,
+            )?;
             Ok(outcome)
         })
     }
