@@ -6732,6 +6732,7 @@ mod tests {
     #[test]
     fn dismissal_receipts_prove_only_their_own_request() {
         const KEY: &str = "e4dismiss-native:cand_issued";
+        const SENTINEL: &str = "cand_forged\nMARKER-I303 token=abc";
         let receipt = |space: &str, key: &str, candidate: &str, outcome: &str| {
             json!({
                 "space_id": space,
@@ -6745,7 +6746,6 @@ mod tests {
                 .expect("this request's own dismissal"),
             "cand_issued",
         );
-        const SENTINEL: &str = "cand_forged\nMARKER-I303 token=abc";
         for (body, what) in [
             (receipt("spc_b", KEY, "cand_issued", "dismissed"), "space"),
             (
