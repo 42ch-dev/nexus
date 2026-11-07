@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO remote_binding_memory_objects\n          (authority_host_id, authority_generation, space_id, client_identity, character_id,\n           binding_id, object_kind, object_id, state, created_at, updated_at)\n          SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?\n          WHERE EXISTS (SELECT 1 FROM actor_world_bindings WHERE binding_id = ?)\n          ON CONFLICT (authority_host_id, authority_generation, space_id, client_identity,\n                       character_id, binding_id, object_kind, object_id)\n          DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at\n          WHERE (CASE excluded.state WHEN 'live' THEN 0 WHEN 'consumed' THEN 1 ELSE 2 END)\n              > (CASE remote_binding_memory_objects.state\n                      WHEN 'live' THEN 0 WHEN 'consumed' THEN 1 ELSE 2 END)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 12
+    },
+    "nullable": []
+  },
+  "hash": "34d479b558cdf96e2ae3ec9fdda516eb0af3de8a1b178e091d7f4ee1afc57c68"
+}

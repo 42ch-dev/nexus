@@ -248,6 +248,12 @@ pub const CREATOR_SCOPE_HANDLED_ELSEWHERE: &[(&str, &str)] = &[
         "quarantine atoms are pre-counted on controlling_creator_id",
     ),
     (
+        "remote_binding_memory_admissions",
+        "D18 remote-attempt rows are pre-counted on owner_creator_id; each one also names a \
+         Character whose FK is ON DELETE RESTRICT, so an admission cannot outlive its subject \
+         and binding removal keeps refusing until it is settled",
+    ),
+    (
         "core_writer_registration",
         "per-connection writer bookkeeping, not retained owned data",
     ),
@@ -258,9 +264,9 @@ pub const CREATOR_SCOPE_HANDLED_ELSEWHERE: &[(&str, &str)] = &[
 ];
 
 /// Count every row that still references a Creator subject: governance
-/// references (rows governed by its holder), owned Worlds/Characters and the
-/// quarantine atoms naming it, and the retained creator-owned rows declared in
-/// [`CREATOR_RETAINED_TABLES`].
+/// references (rows governed by its holder), owned Worlds/Characters, the
+/// quarantine atoms and the D18 remote-binding admission attempts naming it,
+/// and the retained creator-owned rows declared in [`CREATOR_RETAINED_TABLES`].
 ///
 /// Only `narrative_worlds` is foreign-key-`CASCADE`d (and `knowledge_holders`
 /// `RESTRICT`ed); the rest carry no Creator FK, so an incomplete inventory
@@ -276,6 +282,7 @@ async fn creator_reference_count(
          SELECT \
              (SELECT COUNT(*) FROM narrative_worlds r JOIN subject s ON r.owner_creator_id = s.creator_id) \
            + (SELECT COUNT(*) FROM characters r JOIN subject s ON r.owner_creator_id = s.creator_id) \
+           + (SELECT COUNT(*) FROM remote_binding_memory_admissions r JOIN subject s ON r.owner_creator_id = s.creator_id) \
            + (SELECT COUNT(*) FROM kb_key_blocks r JOIN subject s ON r.holder_entry_id = s.holder_entry_id) \
            + (SELECT COUNT(*) FROM knowledge_import_quarantine r JOIN subject s ON r.controlling_creator_id = s.creator_id)",
     );

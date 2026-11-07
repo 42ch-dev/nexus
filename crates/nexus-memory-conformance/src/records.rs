@@ -45,8 +45,8 @@ use spoke_operations::{
 
 use crate::provider::FixtureMemoryProvider;
 use crate::spaces::{
-    bump_snapshot, internal, is_authorized, load_grants, snapshot_marker, whole_scope_requirement,
-    ENGINE_POLICY_VERSION, MAX_PAGE_SIZE,
+    bump_snapshot, internal, internal_failure, is_authorized, load_grants, snapshot_marker,
+    whole_scope_requirement, ENGINE_POLICY_VERSION, MAX_PAGE_SIZE,
 };
 
 /// Wire schema version carried by every fixture-served object (§6.1).
@@ -54,26 +54,26 @@ const SCHEMA_VERSION: u64 = 1;
 
 /// Provider content bound (`memory.describe.limits.max_content_bytes`, §7.1);
 /// the assembly task advertises this same value.
-pub(crate) const MAX_CONTENT_BYTES: usize = 65_536;
+pub const MAX_CONTENT_BYTES: usize = 65_536;
 
 /// Content-free result of `memory.records.create` / `memory.records.update`
 /// (§7.16/§7.18).
 #[derive(Debug)]
-pub(crate) struct RecordRevision {
+pub struct RecordRevision {
     pub(crate) record_id: String,
     pub(crate) revision: u64,
 }
 
 /// Content-free result of `memory.records.delete` (§7.19).
 #[derive(Debug)]
-pub(crate) struct RecordDeleted {
+pub struct RecordDeleted {
     pub(crate) record_id: String,
     pub(crate) tombstoned: bool,
 }
 
 /// Content-free result of `memory.records.promote` (§7.21).
 #[derive(Debug)]
-pub(crate) struct RecordPromoted {
+pub struct RecordPromoted {
     pub(crate) record_id: String,
     pub(crate) revision: u64,
     pub(crate) scope: PlacementScope,
@@ -81,7 +81,7 @@ pub(crate) struct RecordPromoted {
 
 /// `memory.records.list` payload (§7.20).
 #[derive(Debug)]
-pub(crate) struct RecordPage {
+pub struct RecordPage {
     pub(crate) records: Vec<RetainedRecord>,
     pub(crate) total_authorized: u64,
     pub(crate) next_cursor: Option<String>,
@@ -119,7 +119,9 @@ fn record_absent() -> SpokeReject {
 fn space_frozen(space_id: &str) -> SpokeReject {
     SpokeReject {
         code: SpokeRejectCode::SpaceFrozen,
-        message: format!("space {space_id} is frozen; record mutations are outside the §8.2 allowlist"),
+        message: format!(
+            "space {space_id} is frozen; record mutations are outside the §8.2 allowlist"
+        ),
         details: None,
     }
 }
@@ -189,7 +191,7 @@ struct StoredRecord {
 fn timestamp(raw: &str) -> Result<DateTime<Utc>, SpokeReject> {
     DateTime::parse_from_rfc3339(raw)
         .map(|parsed| parsed.with_timezone(&Utc))
-        .map_err(|error| internal(format!("stored timestamp {raw} is not RFC 3339: {error}")))
+        .map_err(internal_failure)
 }
 
 fn timestamp_text(value: DateTime<Utc>) -> String {
@@ -201,17 +203,16 @@ fn optional_timestamp(raw: Option<String>) -> Result<Option<DateTime<Utc>>, Spok
 }
 
 fn json_field(raw: &str, field: &str) -> Result<Value, SpokeReject> {
-    serde_json::from_str(raw)
-        .map_err(|error| internal(format!("stored {field} is not valid JSON: {error}")))
+    serde_json::from_str(raw).map_err(|_| internal(format!("stored {field} is not valid JSON")))
 }
 
 fn row_u64(row: &sqlx::sqlite::SqliteRow, column: &str) -> Result<u64, SpokeReject> {
-    let raw: i64 = row.try_get(column).map_err(internal)?;
-    u64::try_from(raw).map_err(internal)
+    let raw: i64 = row.try_get(column).map_err(internal_failure)?;
+    u64::try_from(raw).map_err(internal_failure)
 }
 
 fn row_i64(value: u64) -> Result<i64, SpokeReject> {
-    i64::try_from(value).map_err(internal)
+    i64::try_from(value).map_err(internal_failure)
 }
 
 fn scope_json(visibility: &str, context_id: Option<&str>) -> Value {
@@ -231,7 +232,7 @@ fn wire_placement(
     match (visibility, context_id) {
         ("shared", None) => Ok(PlacementScope::Shared),
         ("context", Some(context_id)) => Ok(PlacementScope::Context(
-            ContextId::try_from(context_id).map_err(internal)?,
+            ContextId::try_from(context_id).map_err(internal_failure)?,
         )),
         _ => Err(internal(format!(
             "stored record placement {visibility}/{context_id:?} is not protocol-shaped"
@@ -269,8 +270,7 @@ fn record_to_wire(record: &StoredRecord) -> Result<RetainedRecord, SpokeReject> 
             }
         }
     }
-    serde_json::from_value(value)
-        .map_err(|error| internal(format!("stored record row is not protocol-shaped: {error}")))
+    serde_json::from_value(value).map_err(internal_failure)
 }
 
 fn content_json(text: &str, structured: Option<&Value>) -> Result<String, SpokeReject> {
@@ -278,7 +278,7 @@ fn content_json(text: &str, structured: Option<&Value>) -> Result<String, SpokeR
     if let Some(structured) = structured {
         value["structured"] = structured.clone();
     }
-    serde_json::to_string(&value).map_err(internal)
+    serde_json::to_string(&value).map_err(internal_failure)
 }
 
 async fn fetch_record(
@@ -296,24 +296,30 @@ async fn fetch_record(
     .bind(record_id)
     .fetch_optional(conn)
     .await
-    .map_err(internal)?
+    .map_err(internal_failure)?
     .ok_or_else(record_absent)?;
     Ok(StoredRecord {
-        record_id: row.try_get("record_id").map_err(internal)?,
-        space_id: row.try_get("space_id").map_err(internal)?,
-        subject_id: row.try_get("subject_id").map_err(internal)?,
-        kind: row.try_get("kind").map_err(internal)?,
-        content_json: row.try_get("content_json").map_err(internal)?,
-        scope_visibility: row.try_get("scope_visibility").map_err(internal)?,
-        scope_context_id: row.try_get("scope_context_id").map_err(internal)?,
-        provenance_json: row.try_get("provenance_json").map_err(internal)?,
-        import_ref_json: row.try_get("import_ref_json").map_err(internal)?,
-        occurred_at: optional_timestamp(row.try_get("occurred_at").map_err(internal)?)?,
-        tombstone_json: row.try_get("tombstone_json").map_err(internal)?,
+        record_id: row.try_get("record_id").map_err(internal_failure)?,
+        space_id: row.try_get("space_id").map_err(internal_failure)?,
+        subject_id: row.try_get("subject_id").map_err(internal_failure)?,
+        kind: row.try_get("kind").map_err(internal_failure)?,
+        content_json: row.try_get("content_json").map_err(internal_failure)?,
+        scope_visibility: row.try_get("scope_visibility").map_err(internal_failure)?,
+        scope_context_id: row.try_get("scope_context_id").map_err(internal_failure)?,
+        provenance_json: row.try_get("provenance_json").map_err(internal_failure)?,
+        import_ref_json: row.try_get("import_ref_json").map_err(internal_failure)?,
+        occurred_at: optional_timestamp(row.try_get("occurred_at").map_err(internal_failure)?)?,
+        tombstone_json: row.try_get("tombstone_json").map_err(internal_failure)?,
         revision: row_u64(&row, "revision")?,
-        created_at: timestamp(&row.try_get::<String, _>("created_at").map_err(internal)?)?,
-        updated_at: timestamp(&row.try_get::<String, _>("updated_at").map_err(internal)?)?,
-        extensions_json: row.try_get("extensions_json").map_err(internal)?,
+        created_at: timestamp(
+            &row.try_get::<String, _>("created_at")
+                .map_err(internal_failure)?,
+        )?,
+        updated_at: timestamp(
+            &row.try_get::<String, _>("updated_at")
+                .map_err(internal_failure)?,
+        )?,
+        extensions_json: row.try_get("extensions_json").map_err(internal_failure)?,
     })
 }
 
@@ -331,9 +337,9 @@ async fn require_active_space(
         .bind(space_id)
         .fetch_optional(conn)
         .await
-        .map_err(internal)?
+        .map_err(internal_failure)?
         .ok_or_else(|| not_found(format!("space {space_id} is not served by this fixture")))?;
-    let status: String = row.try_get("status").map_err(internal)?;
+    let status: String = row.try_get("status").map_err(internal_failure)?;
     if status == "frozen" {
         return Err(space_frozen(space_id));
     }
@@ -353,11 +359,11 @@ async fn require_subject_live(
         .bind(subject_id)
         .fetch_optional(conn)
         .await
-        .map_err(internal)?;
+        .map_err(internal_failure)?;
     let Some(row) = row else {
         return Ok(());
     };
-    let status: String = row.try_get("status").map_err(internal)?;
+    let status: String = row.try_get("status").map_err(internal_failure)?;
     if status != "active" {
         return Err(subject_fenced(subject_id, "subject"));
     }
@@ -381,17 +387,18 @@ async fn require_subject_writable(
     .bind(subject_id)
     .fetch_optional(conn)
     .await
-    .map_err(internal)?;
+    .map_err(internal_failure)?;
     let Some(row) = row else {
         return Ok(());
     };
-    let status: String = row.try_get("status").map_err(internal)?;
+    let status: String = row.try_get("status").map_err(internal_failure)?;
     if status != "active" {
         return Err(subject_fenced(subject_id, "subject"));
     }
-    let fenced_raw: String = row.try_get("fenced_contexts_json").map_err(internal)?;
-    let fenced: Vec<String> = serde_json::from_str(&fenced_raw)
-        .map_err(|error| internal(format!("stored fenced contexts are not JSON: {error}")))?;
+    let fenced_raw: String = row
+        .try_get("fenced_contexts_json")
+        .map_err(internal_failure)?;
+    let fenced: Vec<String> = serde_json::from_str(&fenced_raw).map_err(internal_failure)?;
     if contexts
         .iter()
         .any(|context| fenced.iter().any(|fenced| fenced == context))
@@ -444,6 +451,185 @@ fn authorized_for(
     })
 }
 
+/// The read requirement one list selection must be covered by.
+fn selection_requirement(request: &MemoryRecordsListRequest) -> GrantRequirement<'_> {
+    let subject_id = request.subject_id.as_str();
+    match &request.selection {
+        ReadSelection::SubjectAll => whole_scope_requirement("records_read", Some(subject_id)),
+        ReadSelection::SharedOnly => GrantRequirement {
+            capability: "records_read",
+            subject_id: Some(subject_id),
+            context_ids: Vec::new(),
+            reads_shared: true,
+            subject_all: false,
+        },
+        ReadSelection::SelectedContexts {
+            context_ids,
+            include_shared,
+        } => GrantRequirement {
+            capability: "records_read",
+            subject_id: Some(subject_id),
+            context_ids: context_ids.clone(),
+            reads_shared: include_shared.unwrap_or(false),
+            subject_all: false,
+        },
+    }
+}
+
+/// The records this caller may see in the current snapshot, ordered and decoded
+/// before any placement, kind, provenance or tombstone filtering.
+async fn list_records_snapshot(
+    conn: &mut SqliteConnection,
+    request: &MemoryRecordsListRequest,
+    sees_tombstones: bool,
+) -> Result<Vec<StoredRecord>, SpokeReject> {
+    let space_id = request.space_id.as_str();
+    let subject_id = request.subject_id.as_str();
+    let rows = sqlx::query(
+        "SELECT record_id, space_id, subject_id, kind, content_json, scope_visibility, \
+         scope_context_id, provenance_json, import_ref_json, occurred_at, tombstone_json, \
+         revision, created_at, updated_at, extensions_json \
+         FROM records WHERE space_id = ? AND subject_id = ? \
+         ORDER BY created_at DESC, record_id ASC",
+    )
+    .bind(space_id)
+    .bind(subject_id)
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(internal_failure)?;
+    let mut records = Vec::with_capacity(rows.len());
+    for row in rows {
+        let record = StoredRecord {
+            record_id: row.try_get("record_id").map_err(internal_failure)?,
+            space_id: row.try_get("space_id").map_err(internal_failure)?,
+            subject_id: row.try_get("subject_id").map_err(internal_failure)?,
+            kind: row.try_get("kind").map_err(internal_failure)?,
+            content_json: row.try_get("content_json").map_err(internal_failure)?,
+            scope_visibility: row.try_get("scope_visibility").map_err(internal_failure)?,
+            scope_context_id: row.try_get("scope_context_id").map_err(internal_failure)?,
+            provenance_json: row.try_get("provenance_json").map_err(internal_failure)?,
+            import_ref_json: row.try_get("import_ref_json").map_err(internal_failure)?,
+            occurred_at: optional_timestamp(row.try_get("occurred_at").map_err(internal_failure)?)?,
+            tombstone_json: row.try_get("tombstone_json").map_err(internal_failure)?,
+            revision: row_u64(&row, "revision")?,
+            created_at: timestamp(
+                &row.try_get::<String, _>("created_at")
+                    .map_err(internal_failure)?,
+            )?,
+            updated_at: timestamp(
+                &row.try_get::<String, _>("updated_at")
+                    .map_err(internal_failure)?,
+            )?,
+            extensions_json: row.try_get("extensions_json").map_err(internal_failure)?,
+        };
+        if !placement_matches(&request.selection, &record) {
+            continue;
+        }
+        if !request.kinds.is_empty() && !request.kinds.iter().any(|kind| kind == &record.kind) {
+            continue;
+        }
+        if let Some(filter) = &request.filter {
+            let provenance = json_field(&record.provenance_json, "record provenance")?;
+            let claims = provenance["source_context_ids"].as_array();
+            let matches = claims.is_some_and(|claims| {
+                claims.iter().any(|claim| {
+                    claim.as_str().is_some_and(|claim| {
+                        filter
+                            .source_context_ids
+                            .iter()
+                            .any(|context| context == claim)
+                    })
+                })
+            });
+            if !matches {
+                continue;
+            }
+        }
+        if record.tombstone_json.is_some() && !sees_tombstones {
+            continue;
+        }
+        records.push(record);
+    }
+    Ok(records)
+}
+
+/// The resume index a continuation cursor names on exactly this record set.
+fn list_cursor_start(
+    binding_digest: &str,
+    records: &[StoredRecord],
+    cursor: Option<&str>,
+) -> Result<usize, SpokeReject> {
+    let Some(cursor) = cursor else {
+        return Ok(0);
+    };
+    let (digest, last_id) = cursor
+        .split_once(':')
+        .ok_or_else(|| cursor_invalid("cursor is malformed"))?;
+    if digest != binding_digest {
+        return Err(cursor_invalid(
+            "cursor was issued for a different query or provider state",
+        ));
+    }
+    let position = records
+        .iter()
+        .position(|record| record.record_id == last_id)
+        .ok_or_else(|| cursor_invalid("cursor no longer matches the record set"))?;
+    Ok(position + 1)
+}
+
+/// Refuse unless the caller's one grant covers `records_write` over the
+/// record's current placement; the refusal is the uniform absent answer.
+async fn require_record_write(
+    conn: &mut SqliteConnection,
+    principal_id: &str,
+    space_id: &str,
+    record: &StoredRecord,
+    now: DateTime<Utc>,
+) -> Result<(), SpokeReject> {
+    let grants = load_grants(conn, space_id).await?;
+    let covered = authorized_for(
+        &grants,
+        principal_id,
+        space_id,
+        now,
+        &placement_requirement(
+            "records_write",
+            &record.subject_id,
+            &record.scope_visibility,
+            record.scope_context_id.as_deref(),
+        ),
+        &["records_write"],
+    );
+    if covered {
+        return Ok(());
+    }
+    Err(record_absent())
+}
+
+/// The record's next `(content_json, kind)` when this update changes something
+/// observable, or `None` when it names only the already-stored identity
+/// (§7.0.4: an update is never a no-op, but this one would change nothing).
+fn next_record_state(
+    record: &StoredRecord,
+    content_text: Option<String>,
+    content_structured: Option<&Value>,
+    kind: Option<&str>,
+) -> Result<Option<(String, String)>, SpokeReject> {
+    let changes_content = content_text.is_some();
+    let changes_kind = kind.is_some_and(|kind| kind != record.kind);
+    if !changes_content && !changes_kind {
+        return Ok(None);
+    }
+    let next_content = match content_text {
+        Some(text) => content_json(&text, content_structured)?,
+        None => record.content_json.clone(),
+    };
+    Ok(Some((
+        next_content,
+        kind.unwrap_or(&record.kind).to_owned(),
+    )))
+}
+
 impl FixtureMemoryProvider {
     fn require_identity_space(&self, requested: &str) -> Result<(), SpokeReject> {
         if requested == self.identity.space_id {
@@ -471,11 +657,11 @@ impl FixtureMemoryProvider {
             .pool()
             .begin_with("BEGIN IMMEDIATE")
             .await
-            .map_err(internal)?;
+            .map_err(internal_failure)?;
         let created = self
             .records_create_in_tx(&mut transaction, principal_id, request, now)
             .await?;
-        transaction.commit().await.map_err(internal)?;
+        transaction.commit().await.map_err(internal_failure)?;
         Ok(created)
     }
 
@@ -520,9 +706,9 @@ impl FixtureMemoryProvider {
             "captured_by": principal_id,
             "captured_at": timestamp_text(now),
         });
-        let provenance_json = serde_json::to_string(&provenance).map_err(internal)?;
+        let provenance_json = serde_json::to_string(&provenance).map_err(internal_failure)?;
         let extensions_json = match &request.extensions {
-            Some(extensions) => serde_json::to_string(extensions).map_err(internal)?,
+            Some(extensions) => serde_json::to_string(extensions).map_err(internal_failure)?,
             None => "{}".to_owned(),
         };
         sqlx::query(
@@ -544,7 +730,7 @@ impl FixtureMemoryProvider {
         .bind(extensions_json)
         .execute(&mut *conn)
         .await
-        .map_err(internal)?;
+        .map_err(internal_failure)?;
         bump_snapshot(conn, space_id).await?;
         Ok(RecordRevision {
             record_id,
@@ -564,11 +750,16 @@ impl FixtureMemoryProvider {
         request: &MemoryRecordsGetRequest,
         now: DateTime<Utc>,
     ) -> Result<RetainedRecord, SpokeReject> {
-        let mut transaction = self.store().pool().begin().await.map_err(internal)?;
+        let mut transaction = self
+            .store()
+            .pool()
+            .begin()
+            .await
+            .map_err(internal_failure)?;
         let record = self
             .records_get_in_tx(&mut transaction, principal_id, request, now)
             .await?;
-        transaction.commit().await.map_err(internal)?;
+        transaction.commit().await.map_err(internal_failure)?;
         Ok(record)
     }
 
@@ -639,11 +830,11 @@ impl FixtureMemoryProvider {
             .pool()
             .begin_with("BEGIN IMMEDIATE")
             .await
-            .map_err(internal)?;
+            .map_err(internal_failure)?;
         let updated = self
             .records_update_in_tx(&mut transaction, principal_id, request, now)
             .await?;
-        transaction.commit().await.map_err(internal)?;
+        transaction.commit().await.map_err(internal_failure)?;
         Ok(updated)
     }
 
@@ -698,56 +889,29 @@ impl FixtureMemoryProvider {
             // rewritten or regrown (MEM-R014/§6.6).
             return Err(record_absent());
         }
-        let grants = load_grants(conn, space_id).await?;
-        if !authorized_for(
-            &grants,
-            principal_id,
-            space_id,
-            now,
-            &placement_requirement(
-                "records_write",
-                &record.subject_id,
-                &record.scope_visibility,
-                record.scope_context_id.as_deref(),
-            ),
-            &["records_write"],
-        ) {
-            return Err(record_absent());
-        }
-        let placement_contexts: Vec<&str> = record.scope_context_id.as_deref().into_iter().collect();
-        require_subject_writable(
-            conn,
-            space_id,
-            &record.subject_id,
-            &placement_contexts,
-        )
-        .await?;
+        require_record_write(conn, principal_id, space_id, &record, now).await?;
+        let placement_contexts: Vec<&str> =
+            record.scope_context_id.as_deref().into_iter().collect();
+        require_subject_writable(conn, space_id, &record.subject_id, &placement_contexts).await?;
         if expected_revision.get() != record.revision {
             return Err(revision_conflict(expected_revision, record.revision));
         }
 
-        // §7.0.4: content updates are never no-ops, but an update that names
-        // only the already-stored kind changes nothing observable.
-        let changes_content = content_text.is_some();
-        let changes_kind = kind.is_some_and(|kind| kind != record.kind);
-        if !changes_content && !changes_kind {
+        let Some((next_content, next_kind)) =
+            next_record_state(&record, content_text, content_structured.as_ref(), kind)?
+        else {
             return Ok(RecordRevision {
                 record_id: record.record_id,
                 revision: record.revision,
             });
-        }
-        let next_content = match content_text {
-            Some(text) => content_json(&text, content_structured.as_ref())?,
-            None => record.content_json.clone(),
         };
-        let next_kind = kind.unwrap_or(&record.kind);
         let revision = record.revision + 1;
         let updated = sqlx::query(
             "UPDATE records SET content_json = ?, kind = ?, updated_at = ?, revision = ? \
              WHERE space_id = ? AND record_id = ? AND revision = ?",
         )
         .bind(&next_content)
-        .bind(next_kind)
+        .bind(next_kind.as_str())
         .bind(timestamp_text(now))
         .bind(row_i64(revision)?)
         .bind(space_id)
@@ -755,7 +919,7 @@ impl FixtureMemoryProvider {
         .bind(row_i64(record.revision)?)
         .execute(&mut *conn)
         .await
-        .map_err(internal)?;
+        .map_err(internal_failure)?;
         if updated.rows_affected() != 1 {
             return Err(internal(format!(
                 "record {record_id} changed under its revision-CAS write"
@@ -785,11 +949,11 @@ impl FixtureMemoryProvider {
             .pool()
             .begin_with("BEGIN IMMEDIATE")
             .await
-            .map_err(internal)?;
+            .map_err(internal_failure)?;
         let deleted = self
             .records_delete_in_tx(&mut transaction, principal_id, request, now)
             .await?;
-        transaction.commit().await.map_err(internal)?;
+        transaction.commit().await.map_err(internal_failure)?;
         Ok(deleted)
     }
 
@@ -846,7 +1010,7 @@ impl FixtureMemoryProvider {
             "deleted_by": principal_id,
             "reason": request.reason,
         });
-        let tombstone_json = serde_json::to_string(&tombstone).map_err(internal)?;
+        let tombstone_json = serde_json::to_string(&tombstone).map_err(internal_failure)?;
         let revision = record.revision + 1;
         let updated = sqlx::query(
             "UPDATE records SET content_json = '{\"text\":\"\"}', tombstone_json = ?, \
@@ -861,7 +1025,7 @@ impl FixtureMemoryProvider {
         .bind(row_i64(record.revision)?)
         .execute(&mut *conn)
         .await
-        .map_err(internal)?;
+        .map_err(internal_failure)?;
         if updated.rows_affected() != 1 {
             return Err(internal(format!(
                 "record {} changed under its revision-CAS delete",
@@ -893,11 +1057,11 @@ impl FixtureMemoryProvider {
             .pool()
             .begin_with("BEGIN IMMEDIATE")
             .await
-            .map_err(internal)?;
+            .map_err(internal_failure)?;
         let promoted = self
             .records_promote_in_tx(&mut transaction, principal_id, request, now)
             .await?;
-        transaction.commit().await.map_err(internal)?;
+        transaction.commit().await.map_err(internal_failure)?;
         Ok(promoted)
     }
 
@@ -952,13 +1116,7 @@ impl FixtureMemoryProvider {
             return Err(record_absent());
         }
         let placement_contexts: Vec<&str> = contexts.iter().map(String::as_str).collect();
-        require_subject_writable(
-            conn,
-            space_id,
-            &record.subject_id,
-            &placement_contexts,
-        )
-        .await?;
+        require_subject_writable(conn, space_id, &record.subject_id, &placement_contexts).await?;
         if request.expected_revision.get() != record.revision {
             return Err(revision_conflict(
                 request.expected_revision,
@@ -991,7 +1149,7 @@ impl FixtureMemoryProvider {
         .bind(row_i64(record.revision)?)
         .execute(&mut *conn)
         .await
-        .map_err(internal)?;
+        .map_err(internal_failure)?;
         if updated.rows_affected() != 1 {
             return Err(internal(format!(
                 "record {} changed under its revision-CAS promotion",
@@ -1017,11 +1175,16 @@ impl FixtureMemoryProvider {
         request: &MemoryRecordsListRequest,
         now: DateTime<Utc>,
     ) -> Result<RecordPage, SpokeReject> {
-        let mut transaction = self.store().pool().begin().await.map_err(internal)?;
+        let mut transaction = self
+            .store()
+            .pool()
+            .begin()
+            .await
+            .map_err(internal_failure)?;
         let page = self
             .records_list_in_tx(&mut transaction, principal_id, request, now)
             .await?;
-        transaction.commit().await.map_err(internal)?;
+        transaction.commit().await.map_err(internal_failure)?;
         Ok(page)
     }
 
@@ -1038,26 +1201,7 @@ impl FixtureMemoryProvider {
         let space_id = request.space_id.as_str();
         self.require_identity_space(space_id)?;
         let subject_id = request.subject_id.as_str();
-        let selection_requirement = match &request.selection {
-            ReadSelection::SubjectAll => whole_scope_requirement("records_read", Some(subject_id)),
-            ReadSelection::SharedOnly => GrantRequirement {
-                capability: "records_read",
-                subject_id: Some(subject_id),
-                context_ids: Vec::new(),
-                reads_shared: true,
-                subject_all: false,
-            },
-            ReadSelection::SelectedContexts {
-                context_ids,
-                include_shared,
-            } => GrantRequirement {
-                capability: "records_read",
-                subject_id: Some(subject_id),
-                context_ids: context_ids.clone(),
-                reads_shared: include_shared.unwrap_or(false),
-                subject_all: false,
-            },
-        };
+        let selection_requirement = selection_requirement(request);
         let grants = load_grants(conn, space_id).await?;
         if !authorized_for(
             &grants,
@@ -1088,69 +1232,8 @@ impl FixtureMemoryProvider {
             ));
         }
 
-        let rows = sqlx::query(
-            "SELECT record_id, space_id, subject_id, kind, content_json, scope_visibility, \
-             scope_context_id, provenance_json, import_ref_json, occurred_at, tombstone_json, \
-             revision, created_at, updated_at, extensions_json \
-             FROM records WHERE space_id = ? AND subject_id = ? \
-             ORDER BY created_at DESC, record_id ASC",
-        )
-        .bind(space_id)
-        .bind(subject_id)
-        .fetch_all(&mut *conn)
-        .await
-        .map_err(internal)?;
-        let mut records = Vec::with_capacity(rows.len());
-        for row in rows {
-            let record = StoredRecord {
-                record_id: row.try_get("record_id").map_err(internal)?,
-                space_id: row.try_get("space_id").map_err(internal)?,
-                subject_id: row.try_get("subject_id").map_err(internal)?,
-                kind: row.try_get("kind").map_err(internal)?,
-                content_json: row.try_get("content_json").map_err(internal)?,
-                scope_visibility: row.try_get("scope_visibility").map_err(internal)?,
-                scope_context_id: row.try_get("scope_context_id").map_err(internal)?,
-                provenance_json: row.try_get("provenance_json").map_err(internal)?,
-                import_ref_json: row.try_get("import_ref_json").map_err(internal)?,
-                occurred_at: optional_timestamp(row.try_get("occurred_at").map_err(internal)?)?,
-                tombstone_json: row.try_get("tombstone_json").map_err(internal)?,
-                revision: row_u64(&row, "revision")?,
-                created_at: timestamp(&row.try_get::<String, _>("created_at").map_err(internal)?)?,
-                updated_at: timestamp(&row.try_get::<String, _>("updated_at").map_err(internal)?)?,
-                extensions_json: row.try_get("extensions_json").map_err(internal)?,
-            };
-            if !placement_matches(&request.selection, &record) {
-                continue;
-            }
-            if !request.kinds.is_empty()
-                && !request.kinds.iter().any(|kind| kind == &record.kind)
-            {
-                continue;
-            }
-            if let Some(filter) = &request.filter {
-                let provenance =
-                    json_field(&record.provenance_json, "record provenance")?;
-                let claims = provenance["source_context_ids"].as_array();
-                let matches = claims.is_some_and(|claims| {
-                    claims.iter().any(|claim| {
-                        claim.as_str().is_some_and(|claim| {
-                            filter
-                                .source_context_ids
-                                .iter()
-                                .any(|context| context == claim)
-                        })
-                    })
-                });
-                if !matches {
-                    continue;
-                }
-            }
-            if record.tombstone_json.is_some() && !sees_tombstones {
-                continue;
-            }
-            records.push(record);
-        }
-        let total_authorized = u64::try_from(records.len()).map_err(internal)?;
+        let records = list_records_snapshot(conn, request, sees_tombstones).await?;
+        let total_authorized = u64::try_from(records.len()).map_err(internal_failure)?;
 
         // §7.0.7/MEM-R026: the cursor is bound to the provider snapshot marker,
         // the policy identity and the query itself, and the marker is read in
@@ -1171,26 +1254,9 @@ impl FixtureMemoryProvider {
             SpokeResult::Ok(digest) => digest,
             SpokeResult::Reject(reject) => return Err(reject),
         };
-        let start = match request.cursor.as_deref() {
-            None => 0,
-            Some(cursor) => {
-                let (digest, last_id) = cursor
-                    .split_once(':')
-                    .ok_or_else(|| cursor_invalid("cursor is malformed"))?;
-                if digest != binding_digest {
-                    return Err(cursor_invalid(
-                        "cursor was issued for a different query or provider state",
-                    ));
-                }
-                let position = records
-                    .iter()
-                    .position(|record| record.record_id == last_id)
-                    .ok_or_else(|| cursor_invalid("cursor no longer matches the record set"))?;
-                position + 1
-            }
-        };
+        let start = list_cursor_start(&binding_digest, &records, request.cursor.as_ref().map(|cursor| cursor.as_str()))?;
         let limit = usize::try_from(request.limit.map_or(MAX_PAGE_SIZE.get(), NonZeroU64::get))
-            .map_err(internal)?;
+            .map_err(internal_failure)?;
         let remaining = &records[start..];
         let page = &remaining[..remaining.len().min(limit)];
         let next_cursor = if remaining.len() > limit {
@@ -1239,11 +1305,11 @@ mod tests {
     use chrono::{DateTime, Duration};
     use tempfile::TempDir;
 
+    use spoke_operations::spoke_schemas::retained_record::{LiveRecord, TombstonedRecord};
     use spoke_operations::spoke_schemas::{
         MemoryGrantsGrantRequest, MemoryGrantsRevokeRequest, MemorySpacesFreezeRequest,
         MemorySpacesUnfreezeRequest, MemorySubjectsEnsureRequest, MemorySubjectsFenceRequest,
     };
-    use spoke_operations::spoke_schemas::retained_record::{LiveRecord, TombstonedRecord};
 
     const OPERATOR: &str = "principal-operator";
     const CLIENT: &str = "principal-client-b";
@@ -1727,7 +1793,11 @@ mod tests {
 
         let deleted = scenario
             .provider
-            .records_delete(OPERATOR, &delete_request(&space, &created.record_id, 2, "delete-1"), now())
+            .records_delete(
+                OPERATOR,
+                &delete_request(&space, &created.record_id, 2, "delete-1"),
+                now(),
+            )
             .await
             .expect("authorized delete");
         assert!(deleted.tombstoned);
@@ -1751,7 +1821,13 @@ mod tests {
             .provider
             .grants_grant(
                 OPERATOR,
-                &grant_request(&space, CLIENT, &["records_read"], Some(subject), Some(&["ctx-a"])),
+                &grant_request(
+                    &space,
+                    CLIENT,
+                    &["records_read"],
+                    Some(subject),
+                    Some(&["ctx-a"]),
+                ),
                 now(),
             )
             .await
@@ -1780,7 +1856,10 @@ mod tests {
             .await
             .expect("admin lists tombstones");
         assert_eq!(page.total_authorized, 1);
-        assert_eq!(tombstoned(&page.records[0]).record_id.as_str(), created.record_id);
+        assert_eq!(
+            tombstoned(&page.records[0]).record_id.as_str(),
+            created.record_id
+        );
     }
 
     #[tokio::test]
@@ -1863,7 +1942,11 @@ mod tests {
 
         let deleted = scenario
             .provider
-            .records_delete(OPERATOR, &delete_request(&space, &created.record_id, 3, "delete-1"), now())
+            .records_delete(
+                OPERATOR,
+                &delete_request(&space, &created.record_id, 3, "delete-1"),
+                now(),
+            )
             .await
             .expect("first delete tombstones");
         assert!(deleted.tombstoned);
@@ -1874,7 +1957,11 @@ mod tests {
         // tombstone and advances neither revision nor the private snapshot.
         let repeated = scenario
             .provider
-            .records_delete(OPERATOR, &delete_request(&space, &created.record_id, 4, "delete-2"), now())
+            .records_delete(
+                OPERATOR,
+                &delete_request(&space, &created.record_id, 4, "delete-2"),
+                now(),
+            )
             .await
             .expect("repeat delete is a no-op success");
         assert!(repeated.tombstoned);
@@ -1927,7 +2014,13 @@ mod tests {
             .provider
             .grants_grant(
                 OPERATOR,
-                &grant_request(&space, CLIENT, &["records_read"], Some(subject), Some(&["ctx-a"])),
+                &grant_request(
+                    &space,
+                    CLIENT,
+                    &["records_read"],
+                    Some(subject),
+                    Some(&["ctx-a"]),
+                ),
                 now(),
             )
             .await
@@ -1938,19 +2031,38 @@ mod tests {
             .provider
             .records_list(
                 CLIENT,
-                &list_request(&space, subject, selection.clone(), &[], false, Some(2), None),
+                &list_request(
+                    &space,
+                    subject,
+                    selection.clone(),
+                    &[],
+                    false,
+                    Some(2),
+                    None,
+                ),
                 now(),
             )
             .await
             .expect("scoped first page");
         assert_eq!(first_page.records.len(), 2);
         assert_eq!(first_page.total_authorized, 3);
-        let cursor = first_page.next_cursor.clone().expect("a second page exists");
+        let cursor = first_page
+            .next_cursor
+            .clone()
+            .expect("a second page exists");
         let second_page = scenario
             .provider
             .records_list(
                 CLIENT,
-                &list_request(&space, subject, selection.clone(), &[], false, Some(2), Some(&cursor)),
+                &list_request(
+                    &space,
+                    subject,
+                    selection.clone(),
+                    &[],
+                    false,
+                    Some(2),
+                    Some(&cursor),
+                ),
                 now(),
             )
             .await
@@ -1970,7 +2082,10 @@ mod tests {
         paged.sort_unstable();
         let mut expected = ctx_a.clone();
         expected.sort_unstable();
-        assert_eq!(paged, expected, "authorized rows are exact and no other placement leaks");
+        assert_eq!(
+            paged, expected,
+            "authorized rows are exact and no other placement leaks"
+        );
 
         // The same query started again yields the same order and totals.
         let replay = scenario
@@ -2085,7 +2200,15 @@ mod tests {
                     .provider
                     .records_list(
                         CLIENT,
-                        &list_request(&space, subject, selection.clone(), &[], false, Some(2), Some(&cursor)),
+                        &list_request(
+                            &space,
+                            subject,
+                            selection.clone(),
+                            &[],
+                            false,
+                            Some(2),
+                            Some(&cursor)
+                        ),
                         now(),
                     )
                     .await
@@ -2145,7 +2268,14 @@ mod tests {
             .provider
             .records_create(
                 OPERATOR,
-                &create_request(&space, subject, "note", "movable", Some("ctx-a"), "create-1"),
+                &create_request(
+                    &space,
+                    subject,
+                    "note",
+                    "movable",
+                    Some("ctx-a"),
+                    "create-1",
+                ),
                 now(),
             )
             .await
@@ -2156,7 +2286,13 @@ mod tests {
             .provider
             .grants_grant(
                 OPERATOR,
-                &grant_request(&space, CLIENT, &["records_write"], Some(subject), Some(&["ctx-a"])),
+                &grant_request(
+                    &space,
+                    CLIENT,
+                    &["records_write"],
+                    Some(subject),
+                    Some(&["ctx-a"]),
+                ),
                 now(),
             )
             .await
@@ -2180,7 +2316,13 @@ mod tests {
             .provider
             .grants_grant(
                 OPERATOR,
-                &grant_request(&space, PROMOTER, &["promote"], Some(subject), Some(&["ctx-a", "ctx-b"])),
+                &grant_request(
+                    &space,
+                    PROMOTER,
+                    &["promote"],
+                    Some(subject),
+                    Some(&["ctx-a", "ctx-b"]),
+                ),
                 now(),
             )
             .await
@@ -2387,7 +2529,14 @@ mod tests {
                     .provider
                     .records_create(
                         OPERATOR,
-                        &create_request(&space, subject, "note", "blocked", Some("ctx-a"), "create-2"),
+                        &create_request(
+                            &space,
+                            subject,
+                            "note",
+                            "blocked",
+                            Some("ctx-a"),
+                            "create-2"
+                        ),
                         now(),
                     )
                     .await
@@ -2400,7 +2549,13 @@ mod tests {
                     .provider
                     .records_update(
                         OPERATOR,
-                        &update_content_request(&space, &created.record_id, 1, "blocked", "update-1"),
+                        &update_content_request(
+                            &space,
+                            &created.record_id,
+                            1,
+                            "blocked",
+                            "update-1"
+                        ),
                         now(),
                     )
                     .await
@@ -2430,7 +2585,11 @@ mod tests {
             reject_code(
                 scenario
                     .provider
-                    .records_delete(OPERATOR, &delete_request(&space, &created.record_id, 1, "delete-1"), now())
+                    .records_delete(
+                        OPERATOR,
+                        &delete_request(&space, &created.record_id, 1, "delete-1"),
+                        now()
+                    )
                     .await
             ),
             SpokeRejectCode::SpaceFrozen
@@ -2447,7 +2606,15 @@ mod tests {
             .provider
             .records_list(
                 OPERATOR,
-                &list_request(&space, subject, json!({ "mode": "subject_all" }), &[], false, None, None),
+                &list_request(
+                    &space,
+                    subject,
+                    json!({ "mode": "subject_all" }),
+                    &[],
+                    false,
+                    None,
+                    None,
+                ),
                 now(),
             )
             .await
@@ -2515,7 +2682,14 @@ mod tests {
                     .provider
                     .records_create(
                         OPERATOR,
-                        &create_request(&space, subject, "note", "blocked", Some("ctx-b"), "create-c"),
+                        &create_request(
+                            &space,
+                            subject,
+                            "note",
+                            "blocked",
+                            Some("ctx-b"),
+                            "create-c"
+                        ),
                         now(),
                     )
                     .await
@@ -2626,7 +2800,14 @@ mod tests {
             .provider
             .records_create(
                 OPERATOR,
-                &create_request(&space, subject, "note", "durable", Some("ctx-a"), "create-1"),
+                &create_request(
+                    &space,
+                    subject,
+                    "note",
+                    "durable",
+                    Some("ctx-a"),
+                    "create-1",
+                ),
                 now(),
             )
             .await
@@ -2669,7 +2850,15 @@ mod tests {
             .provider
             .records_list(
                 OPERATOR,
-                &list_request(&space, subject, json!({ "mode": "subject_all" }), &[], false, None, None),
+                &list_request(
+                    &space,
+                    subject,
+                    json!({ "mode": "subject_all" }),
+                    &[],
+                    false,
+                    None,
+                    None,
+                ),
                 now(),
             )
             .await
@@ -2705,7 +2894,14 @@ mod tests {
             .provider
             .records_create(
                 OPERATOR,
-                &create_request(&space, subject, "note", "private", Some("ctx-a"), "create-1"),
+                &create_request(
+                    &space,
+                    subject,
+                    "note",
+                    "private",
+                    Some("ctx-a"),
+                    "create-1",
+                ),
                 now(),
             )
             .await
@@ -2762,11 +2958,19 @@ mod tests {
         assert_same_refusal(
             scenario
                 .provider
-                .records_delete(FOREIGN, &delete_request(&space, &created.record_id, 1, "d-foreign"), now())
+                .records_delete(
+                    FOREIGN,
+                    &delete_request(&space, &created.record_id, 1, "d-foreign"),
+                    now(),
+                )
                 .await,
             scenario
                 .provider
-                .records_delete(FOREIGN, &delete_request(&space, missing, 1, "d-missing"), now())
+                .records_delete(
+                    FOREIGN,
+                    &delete_request(&space, missing, 1, "d-missing"),
+                    now(),
+                )
                 .await,
         );
         assert_same_refusal(
@@ -2774,7 +2978,13 @@ mod tests {
                 .provider
                 .records_promote(
                     FOREIGN,
-                    &promote_request(&space, &created.record_id, 1, target_ctx_b.clone(), "p-foreign"),
+                    &promote_request(
+                        &space,
+                        &created.record_id,
+                        1,
+                        target_ctx_b.clone(),
+                        "p-foreign",
+                    ),
                     now(),
                 )
                 .await,
@@ -2792,7 +3002,11 @@ mod tests {
         assert_same_refusal(
             scenario
                 .provider
-                .records_get("principal-outsider", &get_request(&space, &created.record_id), now())
+                .records_get(
+                    "principal-outsider",
+                    &get_request(&space, &created.record_id),
+                    now(),
+                )
                 .await,
             scenario
                 .provider
@@ -2857,7 +3071,11 @@ mod tests {
             .expect("record exists");
         scenario
             .provider
-            .records_delete(OPERATOR, &delete_request(&space, &created.record_id, 1, "delete-1"), now())
+            .records_delete(
+                OPERATOR,
+                &delete_request(&space, &created.record_id, 1, "delete-1"),
+                now(),
+            )
             .await
             .expect("record is tombstoned");
         let after_delete = marker(&scenario).await;
@@ -2874,7 +3092,13 @@ mod tests {
                     .provider
                     .records_update(
                         OPERATOR,
-                        &update_content_request(&space, &created.record_id, 2, "resurrected", "u-1"),
+                        &update_content_request(
+                            &space,
+                            &created.record_id,
+                            2,
+                            "resurrected",
+                            "u-1"
+                        ),
                         now(),
                     )
                     .await
@@ -2887,7 +3111,13 @@ mod tests {
                     .provider
                     .records_update(
                         OPERATOR,
-                        &update_content_request(&space, &created.record_id, 1, "resurrected", "u-2"),
+                        &update_content_request(
+                            &space,
+                            &created.record_id,
+                            1,
+                            "resurrected",
+                            "u-2"
+                        ),
                         now(),
                     )
                     .await
@@ -2935,7 +3165,11 @@ mod tests {
         // Repeat delete at the current revision remains the accepted no-op.
         let repeated = scenario
             .provider
-            .records_delete(OPERATOR, &delete_request(&space, &created.record_id, 2, "delete-2"), now())
+            .records_delete(
+                OPERATOR,
+                &delete_request(&space, &created.record_id, 2, "delete-2"),
+                now(),
+            )
             .await
             .expect("repeat delete is a no-op success");
         assert!(repeated.tombstoned);
@@ -2985,7 +3219,11 @@ mod tests {
             reject_code(
                 scenario
                     .provider
-                    .records_delete(OPERATOR, &delete_request(&space, &ctx_a.record_id, 1, "d-fenced"), now())
+                    .records_delete(
+                        OPERATOR,
+                        &delete_request(&space, &ctx_a.record_id, 1, "d-fenced"),
+                        now()
+                    )
                     .await
             ),
             SpokeRejectCode::SubjectFenced
@@ -3024,13 +3262,21 @@ mod tests {
         // ban for records already placed in that context.
         let erased = scenario
             .provider
-            .records_delete(OPERATOR, &delete_request(&space, &ctx_a.record_id, 1, "d-ctx"), now())
+            .records_delete(
+                OPERATOR,
+                &delete_request(&space, &ctx_a.record_id, 1, "d-ctx"),
+                now(),
+            )
             .await
             .expect("context fence does not ban erasure");
         assert!(erased.tombstoned);
         let erased = scenario
             .provider
-            .records_delete(OPERATOR, &delete_request(&space, &ctx_b.record_id, 1, "d-sibling"), now())
+            .records_delete(
+                OPERATOR,
+                &delete_request(&space, &ctx_b.record_id, 1, "d-sibling"),
+                now(),
+            )
             .await
             .expect("sibling context erasure");
         assert!(erased.tombstoned);
@@ -3059,7 +3305,11 @@ mod tests {
             reject_code(
                 scenario
                     .provider
-                    .records_delete(OPERATOR, &delete_request(&space, &later.record_id, 1, "d-archived"), now())
+                    .records_delete(
+                        OPERATOR,
+                        &delete_request(&space, &later.record_id, 1, "d-archived"),
+                        now()
+                    )
                     .await
             ),
             SpokeRejectCode::SubjectFenced
@@ -3102,7 +3352,11 @@ mod tests {
             .expect("content at the exact bound is admitted");
         let record = scenario
             .provider
-            .records_get(OPERATOR, &get_request(&space, &created_ascii.record_id), now())
+            .records_get(
+                OPERATOR,
+                &get_request(&space, &created_ascii.record_id),
+                now(),
+            )
             .await
             .expect("boundary record reads back");
         assert_eq!(live(&record).content.text, boundary_text);
@@ -3137,12 +3391,23 @@ mod tests {
             .provider
             .records_list(
                 OPERATOR,
-                &list_request(&space, subject, json!({ "mode": "subject_all" }), &[], false, None, None),
+                &list_request(
+                    &space,
+                    subject,
+                    json!({ "mode": "subject_all" }),
+                    &[],
+                    false,
+                    None,
+                    None,
+                ),
                 now(),
             )
             .await
             .expect("list after refused create");
-        assert_eq!(page.total_authorized, 1, "the refused create stored nothing");
+        assert_eq!(
+            page.total_authorized, 1,
+            "the refused create stored nothing"
+        );
 
         // The bound counts UTF-8 bytes, not characters: 32,763 two-byte
         // characters are 65,526 bytes and overflow even though the scalar
@@ -3167,7 +3432,11 @@ mod tests {
             .expect("multi-byte content at the exact bound is admitted");
         let record = scenario
             .provider
-            .records_get(OPERATOR, &get_request(&space, &created_utf8.record_id), now())
+            .records_get(
+                OPERATOR,
+                &get_request(&space, &created_utf8.record_id),
+                now(),
+            )
             .await
             .expect("multi-byte boundary record reads back");
         assert_eq!(live(&record).content.text, utf8_boundary);
@@ -3202,14 +3471,25 @@ mod tests {
             .provider
             .records_create(
                 OPERATOR,
-                &create_with_content_request(&space, subject, "note", structured.clone(), Some("ctx-a"), "create-structured"),
+                &create_with_content_request(
+                    &space,
+                    subject,
+                    "note",
+                    structured.clone(),
+                    Some("ctx-a"),
+                    "create-structured",
+                ),
                 now(),
             )
             .await
             .expect("structured content at the exact bound is admitted");
         let record = scenario
             .provider
-            .records_get(OPERATOR, &get_request(&space, &created_structured.record_id), now())
+            .records_get(
+                OPERATOR,
+                &get_request(&space, &created_structured.record_id),
+                now(),
+            )
             .await
             .expect("structured record reads back");
         assert_eq!(
@@ -3252,7 +3532,13 @@ mod tests {
             .provider
             .records_update(
                 OPERATOR,
-                &update_content_request(&space, &created_ascii.record_id, 1, &ascii_updated, "update-ascii-exact"),
+                &update_content_request(
+                    &space,
+                    &created_ascii.record_id,
+                    1,
+                    &ascii_updated,
+                    "update-ascii-exact",
+                ),
                 now(),
             )
             .await
@@ -3260,11 +3546,18 @@ mod tests {
         assert_eq!(updated.revision, 2);
         let record = scenario
             .provider
-            .records_get(OPERATOR, &get_request(&space, &created_ascii.record_id), now())
+            .records_get(
+                OPERATOR,
+                &get_request(&space, &created_ascii.record_id),
+                now(),
+            )
             .await
             .expect("ASCII update reads back");
         assert_eq!(live(&record).content.text, ascii_updated);
-        assert_eq!(live(&record).content.text.len(), MAX_CONTENT_BYTES - text_prefix);
+        assert_eq!(
+            live(&record).content.text.len(),
+            MAX_CONTENT_BYTES - text_prefix
+        );
         assert_eq!(live(&record).revision.get(), 2);
         assert_eq!(marker(&scenario).await, before_updates + 1);
         let overflow = refusal(
@@ -3287,10 +3580,18 @@ mod tests {
         let details = overflow.details.expect("limit details");
         assert_eq!(details["field"], json!("content"));
         assert_eq!(details["limit"], json!("max_content_bytes"));
-        assert_eq!(marker(&scenario).await, before_updates + 1, "refusal has no effect");
+        assert_eq!(
+            marker(&scenario).await,
+            before_updates + 1,
+            "refusal has no effect"
+        );
         let record = scenario
             .provider
-            .records_get(OPERATOR, &get_request(&space, &created_ascii.record_id), now())
+            .records_get(
+                OPERATOR,
+                &get_request(&space, &created_ascii.record_id),
+                now(),
+            )
             .await
             .expect("ASCII record after refused update");
         assert_eq!(live(&record).content.text, ascii_updated);
@@ -3302,7 +3603,13 @@ mod tests {
             .provider
             .records_update(
                 OPERATOR,
-                &update_content_request(&space, &created_utf8.record_id, 1, &utf8_updated, "update-utf8-exact"),
+                &update_content_request(
+                    &space,
+                    &created_utf8.record_id,
+                    1,
+                    &utf8_updated,
+                    "update-utf8-exact",
+                ),
                 now(),
             )
             .await
@@ -3310,11 +3617,18 @@ mod tests {
         assert_eq!(updated.revision, 2);
         let record = scenario
             .provider
-            .records_get(OPERATOR, &get_request(&space, &created_utf8.record_id), now())
+            .records_get(
+                OPERATOR,
+                &get_request(&space, &created_utf8.record_id),
+                now(),
+            )
             .await
             .expect("multi-byte update reads back");
         assert_eq!(live(&record).content.text, utf8_updated);
-        assert_eq!(live(&record).content.text.len(), MAX_CONTENT_BYTES - text_prefix);
+        assert_eq!(
+            live(&record).content.text.len(),
+            MAX_CONTENT_BYTES - text_prefix
+        );
         assert_eq!(live(&record).revision.get(), 2);
         assert_eq!(marker(&scenario).await, before_updates + 2);
         assert_eq!(
@@ -3336,10 +3650,18 @@ mod tests {
             ),
             SpokeRejectCode::InvalidInput
         );
-        assert_eq!(marker(&scenario).await, before_updates + 2, "refusal has no effect");
+        assert_eq!(
+            marker(&scenario).await,
+            before_updates + 2,
+            "refusal has no effect"
+        );
         let record = scenario
             .provider
-            .records_get(OPERATOR, &get_request(&space, &created_utf8.record_id), now())
+            .records_get(
+                OPERATOR,
+                &get_request(&space, &created_utf8.record_id),
+                now(),
+            )
             .await
             .expect("multi-byte record after refused update");
         assert_eq!(live(&record).content.text, utf8_updated);
@@ -3362,7 +3684,11 @@ mod tests {
         assert_eq!(updated.revision, 2);
         let record = scenario
             .provider
-            .records_get(OPERATOR, &get_request(&space, &created_structured.record_id), now())
+            .records_get(
+                OPERATOR,
+                &get_request(&space, &created_structured.record_id),
+                now(),
+            )
             .await
             .expect("structured update reads back");
         assert_eq!(live(&record).content.text, "");
@@ -3392,10 +3718,18 @@ mod tests {
             ),
             SpokeRejectCode::InvalidInput
         );
-        assert_eq!(marker(&scenario).await, before_updates + 3, "refusal has no effect");
+        assert_eq!(
+            marker(&scenario).await,
+            before_updates + 3,
+            "refusal has no effect"
+        );
         let record = scenario
             .provider
-            .records_get(OPERATOR, &get_request(&space, &created_structured.record_id), now())
+            .records_get(
+                OPERATOR,
+                &get_request(&space, &created_structured.record_id),
+                now(),
+            )
             .await
             .expect("structured record after refused update");
         // The complete content is unchanged, not only the structured member.
@@ -3421,7 +3755,14 @@ mod tests {
             .provider
             .records_create(
                 OPERATOR,
-                &create_request(&space, subject, "note", "guarded", Some("ctx-a"), "create-1"),
+                &create_request(
+                    &space,
+                    subject,
+                    "note",
+                    "guarded",
+                    Some("ctx-a"),
+                    "create-1",
+                ),
                 now(),
             )
             .await
@@ -3431,7 +3772,13 @@ mod tests {
             .provider
             .grants_grant(
                 OPERATOR,
-                &grant_request(&space, CLIENT, &["records_read"], Some(subject), Some(&["ctx-a"])),
+                &grant_request(
+                    &space,
+                    CLIENT,
+                    &["records_read"],
+                    Some(subject),
+                    Some(&["ctx-a"]),
+                ),
                 now(),
             )
             .await
@@ -3444,7 +3791,11 @@ mod tests {
 
         scenario
             .provider
-            .grants_revoke(OPERATOR, &revoke_request(&space, &issued.grant_id, 1), now())
+            .grants_revoke(
+                OPERATOR,
+                &revoke_request(&space, &issued.grant_id, 1),
+                now(),
+            )
             .await
             .expect("reader grant revokes");
         let revoked = marker(&scenario).await;
@@ -3510,7 +3861,13 @@ mod tests {
                     .provider
                     .records_update(
                         EXPIRING,
-                        &update_content_request(&space, &created.record_id, 2, "after-expiry", "u-2"),
+                        &update_content_request(
+                            &space,
+                            &created.record_id,
+                            2,
+                            "after-expiry",
+                            "u-2"
+                        ),
                         expiry,
                     )
                     .await
@@ -3603,7 +3960,14 @@ mod tests {
             .records_create_in_tx(
                 &mut transaction,
                 OPERATOR,
-                &create_request(&space, subject, "note", "committed", Some("ctx-a"), "create-2"),
+                &create_request(
+                    &space,
+                    subject,
+                    "note",
+                    "committed",
+                    Some("ctx-a"),
+                    "create-2",
+                ),
                 now(),
             )
             .await
@@ -3653,7 +4017,13 @@ mod tests {
             .provider
             .grants_grant(
                 OPERATOR,
-                &grant_request(&space, CLIENT, &["records_read"], Some(subject), Some(&["ctx-a"])),
+                &grant_request(
+                    &space,
+                    CLIENT,
+                    &["records_read"],
+                    Some(subject),
+                    Some(&["ctx-a"]),
+                ),
                 now(),
             )
             .await
@@ -3737,7 +4107,11 @@ mod tests {
         assert_eq!(before_revoke.total_authorized, 2);
         scenario
             .provider
-            .grants_revoke(OPERATOR, &revoke_request(&space, &issued.grant_id, 1), now())
+            .grants_revoke(
+                OPERATOR,
+                &revoke_request(&space, &issued.grant_id, 1),
+                now(),
+            )
             .await
             .expect("reader grant revokes");
         let after_revoke = scenario

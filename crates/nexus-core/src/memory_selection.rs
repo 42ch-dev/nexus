@@ -55,7 +55,10 @@ impl std::fmt::Debug for RemoteMemoryProviderSelection {
             .debug_struct("RemoteMemoryProviderSelection")
             .field("space_id", &self.space_id)
             .field("credential_id", &self.credential_id)
-            .field("connect_endpoint", &sanitized_endpoint(&self.connect_endpoint))
+            .field(
+                "connect_endpoint",
+                &sanitized_endpoint(&self.connect_endpoint),
+            )
             .field("remote_pubkey_hex", &self.remote_pubkey_hex)
             .field("allowlist", &self.allowlist)
             .finish()
@@ -146,7 +149,10 @@ impl RemoteMemoryProviderSelection {
         }
         validate_connect_endpoint(&self.connect_endpoint)?;
         if self.remote_pubkey_hex.len() != PUBKEY_HEX_LEN
-            || !self.remote_pubkey_hex.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+            || !self
+                .remote_pubkey_hex
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
         {
             return Err(invalid(
                 "remote_pubkey_hex",
@@ -170,7 +176,7 @@ impl RemoteMemoryProviderSelection {
 
 /// Whether `id` is a valid credential-file stem (§3.1).
 #[must_use]
-pub(crate) fn is_valid_credential_id(id: &str) -> bool {
+pub fn is_valid_credential_id(id: &str) -> bool {
     let mut characters = id.chars();
     match characters.next() {
         Some(first) if first.is_ascii_alphanumeric() => {}
@@ -197,9 +203,12 @@ fn validate_connect_endpoint(endpoint: &str) -> CoreResult<()> {
             "must not carry a fragment component",
         ));
     }
-    let uri = endpoint
-        .parse::<http::Uri>()
-        .map_err(|_| invalid("connect_endpoint", "must be an absolute ws:// or wss:// URL"))?;
+    let uri = endpoint.parse::<http::Uri>().map_err(|_| {
+        invalid(
+            "connect_endpoint",
+            "must be an absolute ws:// or wss:// URL",
+        )
+    })?;
     let authority = uri
         .authority()
         .ok_or_else(|| invalid("connect_endpoint", "must name a host"))?;

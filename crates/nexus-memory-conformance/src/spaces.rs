@@ -42,18 +42,22 @@ const SCHEMA_VERSION: u64 = 1;
 
 /// Provider page bound (`memory.describe.limits.max_page_size`, §7.0.7); the
 /// assembly task advertises this same value.
-pub(crate) const MAX_PAGE_SIZE: NonZeroU64 = match NonZeroU64::new(100) {
+///
+/// Deliberately narrower than a typical provider bound: a consumer must take
+/// the advertised bound from `memory.describe` instead of assuming its own, so
+/// every remote page read over this fixture proves that.
+pub const MAX_PAGE_SIZE: NonZeroU64 = match NonZeroU64::new(25) {
     Some(size) => size,
     None => panic!("the fixture page bound is non-zero"),
 };
 
 /// Algorithm-policy identity bound into every cursor (§7.0.7/MEM-R026) and
 /// advertised by `memory.describe` when the assembly slice lands.
-pub(crate) const ENGINE_POLICY_VERSION: &str = "nexus-fixture-spoke-memory/0.15.1";
+pub const ENGINE_POLICY_VERSION: &str = "nexus-fixture-spoke-memory/0.15.1";
 
 /// `memory.spaces.list` payload (§7.2).
 #[derive(Debug)]
-pub(crate) struct SpacePage {
+pub struct SpacePage {
     pub(crate) spaces: Vec<MemorySpace>,
     pub(crate) next_cursor: Option<String>,
 }
@@ -61,7 +65,7 @@ pub(crate) struct SpacePage {
 /// Content-free result of `memory.spaces.freeze` / `memory.spaces.unfreeze`
 /// (§7.3/§7.4).
 #[derive(Debug)]
-pub(crate) struct SpaceChange {
+pub struct SpaceChange {
     pub(crate) status: String,
     pub(crate) pending_receipts: u64,
     pub(crate) revision: u64,
@@ -69,7 +73,7 @@ pub(crate) struct SpaceChange {
 
 /// Content-free result of `memory.subjects.ensure` (§7.5).
 #[derive(Debug)]
-pub(crate) struct SubjectChange {
+pub struct SubjectChange {
     pub(crate) subject_id: String,
     pub(crate) created: bool,
     pub(crate) status: String,
@@ -78,7 +82,7 @@ pub(crate) struct SubjectChange {
 
 /// Content-free result of `memory.subjects.fence` (§7.7).
 #[derive(Debug)]
-pub(crate) struct SubjectFenceChange {
+pub struct SubjectFenceChange {
     pub(crate) subject_id: String,
     pub(crate) status: String,
     pub(crate) fenced_contexts: Vec<String>,
@@ -87,21 +91,21 @@ pub(crate) struct SubjectFenceChange {
 
 /// `memory.grants.list` payload (§7.8).
 #[derive(Debug)]
-pub(crate) struct GrantPage {
+pub struct GrantPage {
     pub(crate) grants: Vec<MemoryGrant>,
     pub(crate) next_cursor: Option<String>,
 }
 
 /// Content-free result of `memory.grants.grant` (§7.9).
 #[derive(Debug)]
-pub(crate) struct GrantIssued {
+pub struct GrantIssued {
     pub(crate) grant_id: String,
     pub(crate) revision: u64,
 }
 
 /// Content-free result of `memory.grants.revoke` (§7.10).
 #[derive(Debug)]
-pub(crate) struct GrantRevoked {
+pub struct GrantRevoked {
     pub(crate) grant_id: String,
     pub(crate) revoked: bool,
     pub(crate) revision: u64,
@@ -111,13 +115,90 @@ pub(crate) struct GrantRevoked {
 // Protocol errors
 // ---------------------------------------------------------------------------
 
+/// The grant one request asks for, projected off either wire variant.
+struct GrantFields {
+    space_id: String,
+    grantee: String,
+    capabilities: Vec<String>,
+    context_ids: Vec<String>,
+    shared_access: bool,
+    expires_at: Option<DateTime<Utc>>,
+    subject_id: Option<String>,
+}
+
+/// Project one grant request onto [`GrantFields`].
+fn grant_fields(request: &MemoryGrantsGrantRequest) -> GrantFields {
+    use spoke_operations::spoke_schemas::MemoryGrantsGrantRequest::{
+        Variant0 as Restricted, Variant1 as Unrestricted,
+    };
+
+    let (space_id, grantee, capabilities, context_ids, shared_access, expires_at, subject_id) =
+        match request {
+            Restricted {
+                capabilities,
+                context_ids,
+                expires_at,
+                shared_access,
+                principal_id,
+                space_id,
+                subject_id,
+                ..
+            } => (
+                space_id.as_str().to_owned(),
+                principal_id.as_str().to_owned(),
+                capabilities.clone(),
+                context_ids.clone(),
+                shared_access.unwrap_or(false),
+                *expires_at,
+                subject_id.as_ref().map(|id| id.as_str().to_owned()),
+            ),
+            Unrestricted {
+                capabilities,
+                expires_at,
+                principal_id,
+                space_id,
+                subject_id,
+                ..
+            } => (
+                space_id.as_str().to_owned(),
+                principal_id.as_str().to_owned(),
+                capabilities.clone(),
+                Vec::new(),
+                false,
+                expires_at.as_deref().copied(),
+                subject_id.as_ref().map(|id| id.as_str().to_owned()),
+            ),
+        };
+    GrantFields {
+        space_id,
+        grantee,
+        capabilities,
+        context_ids,
+        shared_access,
+        expires_at,
+        subject_id,
+    }
+}
+
 /// A storage or serialization failure: the caller's request was not at fault.
-pub(crate) fn internal(error: impl std::fmt::Display) -> SpokeReject {
+///
+/// The message is the fixture's own static text; it never interpolates an
+/// `sqlx`/`serde_json` message (see [`internal_failure`]).
+pub fn internal(message: impl Into<String>) -> SpokeReject {
     SpokeReject {
         code: SpokeRejectCode::InternalError,
-        message: format!("fixture storage failure: {error}"),
+        message: message.into(),
         details: None,
     }
+}
+
+/// One underlying storage or decode failure as the `INTERNAL_ERROR` refusal.
+///
+/// Refusal text stays static (AGENTS.md): a decoder or driver message describes
+/// provider internals and is never published on the wire. The cause remains with
+/// the caller for its own control flow.
+pub fn internal_failure(_error: impl std::fmt::Display) -> SpokeReject {
+    internal("the fixture could not complete this request")
 }
 
 fn not_found(message: impl Into<String>) -> SpokeReject {
@@ -209,7 +290,7 @@ fn checked(result: SpokeResult<()>) -> Result<(), SpokeReject> {
 /// §6.5 evaluation: one grant must admit the whole requirement; disjoint
 /// grants are never unioned. Delegates to the published pure helper so every
 /// slice evaluates coverage identically.
-pub(crate) fn is_authorized(
+pub fn is_authorized(
     grants: &[MemoryGrant],
     principal_id: &str,
     space_id: &str,
@@ -223,7 +304,7 @@ pub(crate) fn is_authorized(
 
 /// Requirement for an op that names no placement context and reads no shared
 /// visibility; `capability` and the subject scope are the only facets.
-pub(crate) fn requirement<'a>(
+pub const fn requirement<'a>(
     capability: &'a str,
     subject_id: Option<&'a str>,
 ) -> GrantRequirement<'a> {
@@ -241,7 +322,7 @@ pub(crate) fn requirement<'a>(
 /// and shared visibility. `subject_all` is the published evaluator's only
 /// unrestricted-only facet (§6.5), so a context-limited grant never admits a
 /// whole-target action or a full grant view (MEM-R017/R026).
-pub(crate) fn whole_scope_requirement<'a>(
+pub const fn whole_scope_requirement<'a>(
     capability: &'a str,
     subject_id: Option<&'a str>,
 ) -> GrantRequirement<'a> {
@@ -314,7 +395,7 @@ struct StoredGrant {
 fn timestamp(raw: &str) -> Result<DateTime<Utc>, SpokeReject> {
     DateTime::parse_from_rfc3339(raw)
         .map(|parsed| parsed.with_timezone(&Utc))
-        .map_err(|error| internal(format!("stored timestamp {raw} is not RFC 3339: {error}")))
+        .map_err(internal_failure)
 }
 
 fn timestamp_text(value: DateTime<Utc>) -> String {
@@ -322,13 +403,11 @@ fn timestamp_text(value: DateTime<Utc>) -> String {
 }
 
 fn json_field(raw: &str, field: &str) -> Result<Value, SpokeReject> {
-    serde_json::from_str(raw)
-        .map_err(|error| internal(format!("stored {field} is not valid JSON: {error}")))
+    serde_json::from_str(raw).map_err(|_| internal(format!("stored {field} is not valid JSON")))
 }
 
 fn string_list_field(raw: &str, field: &str) -> Result<Vec<String>, SpokeReject> {
-    serde_json::from_str(raw)
-        .map_err(|error| internal(format!("stored {field} is not a string array: {error}")))
+    serde_json::from_str(raw).map_err(|_| internal(format!("stored {field} is not a string array")))
 }
 
 fn optional_timestamp(raw: Option<String>) -> Result<Option<DateTime<Utc>>, SpokeReject> {
@@ -336,12 +415,12 @@ fn optional_timestamp(raw: Option<String>) -> Result<Option<DateTime<Utc>>, Spok
 }
 
 fn row_u64(row: &sqlx::sqlite::SqliteRow, column: &str) -> Result<u64, SpokeReject> {
-    let raw: i64 = row.try_get(column).map_err(internal)?;
-    u64::try_from(raw).map_err(internal)
+    let raw: i64 = row.try_get(column).map_err(internal_failure)?;
+    u64::try_from(raw).map_err(internal_failure)
 }
 
 fn row_i64(value: u64) -> Result<i64, SpokeReject> {
-    i64::try_from(value).map_err(internal)
+    i64::try_from(value).map_err(internal_failure)
 }
 
 // ---------------------------------------------------------------------------
@@ -359,18 +438,22 @@ async fn fetch_space(
     .bind(space_id)
     .fetch_optional(conn)
     .await
-    .map_err(internal)?
+    .map_err(internal_failure)?
     .ok_or_else(|| not_found(format!("space {space_id} is not served by this fixture")))?;
     Ok(StoredSpace {
-        space_id: row.try_get("space_id").map_err(internal)?,
-        display_name: row.try_get("display_name").map_err(internal)?,
-        authority_host_id: row.try_get("authority_host_id").map_err(internal)?,
+        space_id: row.try_get("space_id").map_err(internal_failure)?,
+        display_name: row.try_get("display_name").map_err(internal_failure)?,
+        authority_host_id: row.try_get("authority_host_id").map_err(internal_failure)?,
         authority_generation: row_u64(&row, "authority_generation")?,
-        status: row.try_get("status").map_err(internal)?,
+        status: row.try_get("status").map_err(internal_failure)?,
         revision: row_u64(&row, "revision")?,
-        created_at: timestamp(&row.try_get::<String, _>("created_at").map_err(internal)?)?,
+        created_at: timestamp(
+            &row.try_get::<String, _>("created_at")
+                .map_err(internal_failure)?,
+        )?,
         extensions: json_field(
-            &row.try_get::<String, _>("extensions_json").map_err(internal)?,
+            &row.try_get::<String, _>("extensions_json")
+                .map_err(internal_failure)?,
             "space extensions",
         )?,
     })
@@ -389,23 +472,27 @@ async fn fetch_subject(
     .bind(subject_id)
     .fetch_optional(conn)
     .await
-    .map_err(internal)?
+    .map_err(internal_failure)?
     .ok_or_else(|| not_found(format!("subject {subject_id} does not exist in this space")))?;
     Ok(StoredSubject {
-        space_id: row.try_get("space_id").map_err(internal)?,
-        subject_id: row.try_get("subject_id").map_err(internal)?,
-        kind_ns: row.try_get("kind_ns").map_err(internal)?,
-        kind_id: row.try_get("kind_id").map_err(internal)?,
-        status: row.try_get("status").map_err(internal)?,
+        space_id: row.try_get("space_id").map_err(internal_failure)?,
+        subject_id: row.try_get("subject_id").map_err(internal_failure)?,
+        kind_ns: row.try_get("kind_ns").map_err(internal_failure)?,
+        kind_id: row.try_get("kind_id").map_err(internal_failure)?,
+        status: row.try_get("status").map_err(internal_failure)?,
         fenced_contexts: string_list_field(
             &row.try_get::<String, _>("fenced_contexts_json")
-                .map_err(internal)?,
+                .map_err(internal_failure)?,
             "subject fenced contexts",
         )?,
         revision: row_u64(&row, "revision")?,
-        created_at: timestamp(&row.try_get::<String, _>("created_at").map_err(internal)?)?,
+        created_at: timestamp(
+            &row.try_get::<String, _>("created_at")
+                .map_err(internal_failure)?,
+        )?,
         extensions: json_field(
-            &row.try_get::<String, _>("extensions_json").map_err(internal)?,
+            &row.try_get::<String, _>("extensions_json")
+                .map_err(internal_failure)?,
             "subject extensions",
         )?,
     })
@@ -423,32 +510,41 @@ async fn load_grant_rows(
     .bind(space_id)
     .fetch_all(conn)
     .await
-    .map_err(internal)?;
+    .map_err(internal_failure)?;
     rows.into_iter()
         .map(|row| {
-            let shared_access: Option<i64> = row.try_get("shared_access").map_err(internal)?;
+            let shared_access: Option<i64> =
+                row.try_get("shared_access").map_err(internal_failure)?;
             Ok(StoredGrant {
-                grant_id: row.try_get("grant_id").map_err(internal)?,
-                space_id: row.try_get("space_id").map_err(internal)?,
-                subject_id: row.try_get("subject_id").map_err(internal)?,
-                principal_id: row.try_get("principal_id").map_err(internal)?,
+                grant_id: row.try_get("grant_id").map_err(internal_failure)?,
+                space_id: row.try_get("space_id").map_err(internal_failure)?,
+                subject_id: row.try_get("subject_id").map_err(internal_failure)?,
+                principal_id: row.try_get("principal_id").map_err(internal_failure)?,
                 capabilities: string_list_field(
                     &row.try_get::<String, _>("capabilities_json")
-                        .map_err(internal)?,
+                        .map_err(internal_failure)?,
                     "grant capabilities",
                 )?,
                 context_ids: string_list_field(
                     &row.try_get::<String, _>("context_ids_json")
-                        .map_err(internal)?,
+                        .map_err(internal_failure)?,
                     "grant contexts",
                 )?,
                 shared_access: shared_access.map(|flag| flag != 0),
-                expires_at: optional_timestamp(row.try_get("expires_at").map_err(internal)?)?,
-                revoked_at: optional_timestamp(row.try_get("revoked_at").map_err(internal)?)?,
+                expires_at: optional_timestamp(
+                    row.try_get("expires_at").map_err(internal_failure)?,
+                )?,
+                revoked_at: optional_timestamp(
+                    row.try_get("revoked_at").map_err(internal_failure)?,
+                )?,
                 revision: row_u64(&row, "revision")?,
-                created_at: timestamp(&row.try_get::<String, _>("created_at").map_err(internal)?)?,
+                created_at: timestamp(
+                    &row.try_get::<String, _>("created_at")
+                        .map_err(internal_failure)?,
+                )?,
                 extensions: json_field(
-                    &row.try_get::<String, _>("extensions_json").map_err(internal)?,
+                    &row.try_get::<String, _>("extensions_json")
+                        .map_err(internal_failure)?,
                     "grant extensions",
                 )?,
             })
@@ -460,7 +556,7 @@ async fn load_grant_rows(
 ///
 /// Crate-visible on purpose: the candidate/record/recall slices authorize
 /// through this same loader, so the shared seam is the reviewed one.
-pub(crate) async fn load_grants(
+pub async fn load_grants(
     conn: &mut SqliteConnection,
     space_id: &str,
 ) -> Result<Vec<MemoryGrant>, SpokeReject> {
@@ -474,7 +570,7 @@ pub(crate) async fn load_grants(
 /// The provider-private snapshot marker this space's cursors are bound to
 /// (§7.0.7/MEM-R026). It is advanced by every committed observable change, so
 /// it invalidates cursors even when the paged rows themselves did not move.
-pub(crate) async fn snapshot_marker(
+pub async fn snapshot_marker(
     conn: &mut SqliteConnection,
     space_id: &str,
 ) -> Result<u64, SpokeReject> {
@@ -482,7 +578,7 @@ pub(crate) async fn snapshot_marker(
         .bind(space_id)
         .fetch_optional(conn)
         .await
-        .map_err(internal)?
+        .map_err(internal_failure)?
         .ok_or_else(|| internal(format!("space {space_id} has no snapshot marker")))?;
     row_u64(&row, "marker")
 }
@@ -490,15 +586,13 @@ pub(crate) async fn snapshot_marker(
 /// Advance the snapshot marker inside the caller's transaction. Every mutator
 /// that changes observable state calls this in the same transaction as its own
 /// write, so a rollback discards the marker bump with the effect.
-pub(crate) async fn bump_snapshot(
-    conn: &mut SqliteConnection,
-    space_id: &str,
-) -> Result<(), SpokeReject> {
-    let updated = sqlx::query("UPDATE provider_snapshot SET marker = marker + 1 WHERE space_id = ?")
-        .bind(space_id)
-        .execute(conn)
-        .await
-        .map_err(internal)?;
+pub async fn bump_snapshot(conn: &mut SqliteConnection, space_id: &str) -> Result<(), SpokeReject> {
+    let updated =
+        sqlx::query("UPDATE provider_snapshot SET marker = marker + 1 WHERE space_id = ?")
+            .bind(space_id)
+            .execute(conn)
+            .await
+            .map_err(internal_failure)?;
     if updated.rows_affected() != 1 {
         return Err(internal(format!(
             "space {space_id} has no snapshot marker to advance"
@@ -507,19 +601,16 @@ pub(crate) async fn bump_snapshot(
     Ok(())
 }
 
-async fn pending_receipts(
-    conn: &mut SqliteConnection,
-    space_id: &str,
-) -> Result<u64, SpokeReject> {
+async fn pending_receipts(conn: &mut SqliteConnection, space_id: &str) -> Result<u64, SpokeReject> {
     let row = sqlx::query(
         "SELECT COUNT(*) AS pending FROM receipts WHERE space_id = ? AND status = 'pending'",
     )
     .bind(space_id)
     .fetch_one(conn)
     .await
-    .map_err(internal)?;
-    let pending: i64 = row.try_get("pending").map_err(internal)?;
-    u64::try_from(pending).map_err(internal)
+    .map_err(internal_failure)?;
+    let pending: i64 = row.try_get("pending").map_err(internal_failure)?;
+    u64::try_from(pending).map_err(internal_failure)
 }
 
 // ---------------------------------------------------------------------------
@@ -539,7 +630,7 @@ fn space_to_wire(space: &StoredSpace, pending: u64) -> Result<MemorySpace, Spoke
         "revision": space.revision,
         "extensions": space.extensions,
     }))
-    .map_err(|error| internal(format!("stored space row is not protocol-shaped: {error}")))
+    .map_err(internal_failure)
 }
 
 fn subject_to_wire(subject: &StoredSubject) -> Result<Subject, SpokeReject> {
@@ -558,7 +649,7 @@ fn subject_to_wire(subject: &StoredSubject) -> Result<Subject, SpokeReject> {
         "revision": subject.revision,
         "extensions": subject.extensions,
     }))
-    .map_err(|error| internal(format!("stored subject row is not protocol-shaped: {error}")))
+    .map_err(internal_failure)
 }
 
 fn grant_to_wire(grant: &StoredGrant) -> Result<MemoryGrant, SpokeReject> {
@@ -590,8 +681,7 @@ fn grant_to_wire(grant: &StoredGrant) -> Result<MemoryGrant, SpokeReject> {
             }
         }
     }
-    serde_json::from_value(object)
-        .map_err(|error| internal(format!("stored grant row is not protocol-shaped: {error}")))
+    serde_json::from_value(object).map_err(internal_failure)
 }
 
 // ---------------------------------------------------------------------------
@@ -606,7 +696,10 @@ fn require_admitted(op: &str, space: &StoredSpace) -> Result<(), SpokeReject> {
     }
     Err(SpokeReject {
         code: SpokeRejectCode::SpaceFrozen,
-        message: format!("space {} is frozen; {op} is outside the §8.2 allowlist", space.space_id),
+        message: format!(
+            "space {} is frozen; {op} is outside the §8.2 allowlist",
+            space.space_id
+        ),
         details: None,
     })
 }
@@ -657,7 +750,12 @@ impl FixtureMemoryProvider {
         // visibility decision and the pending count all come from the same
         // snapshot, so a concurrent revoke or status change cannot be combined
         // with state it was never authorized against (MEM-R026).
-        let mut transaction = self.store().pool().begin().await.map_err(internal)?;
+        let mut transaction = self
+            .store()
+            .pool()
+            .begin()
+            .await
+            .map_err(internal_failure)?;
         let space = fetch_space(&mut transaction, &self.identity.space_id).await?;
         let visible = load_grant_rows(&mut transaction, &space.space_id)
             .await?
@@ -669,7 +767,7 @@ impl FixtureMemoryProvider {
         } else {
             Vec::new()
         };
-        transaction.commit().await.map_err(internal)?;
+        transaction.commit().await.map_err(internal_failure)?;
         Ok(SpacePage {
             spaces,
             next_cursor: None,
@@ -694,11 +792,11 @@ impl FixtureMemoryProvider {
             .pool()
             .begin_with("BEGIN IMMEDIATE")
             .await
-            .map_err(internal)?;
+            .map_err(internal_failure)?;
         let change = self
             .spaces_freeze_in_tx(&mut transaction, principal_id, request, now)
             .await?;
-        transaction.commit().await.map_err(internal)?;
+        transaction.commit().await.map_err(internal_failure)?;
         Ok(change)
     }
 
@@ -736,11 +834,11 @@ impl FixtureMemoryProvider {
             .pool()
             .begin_with("BEGIN IMMEDIATE")
             .await
-            .map_err(internal)?;
+            .map_err(internal_failure)?;
         let change = self
             .spaces_unfreeze_in_tx(&mut transaction, principal_id, request, now)
             .await?;
-        transaction.commit().await.map_err(internal)?;
+        transaction.commit().await.map_err(internal_failure)?;
         Ok(change)
     }
 
@@ -797,7 +895,7 @@ impl FixtureMemoryProvider {
             .bind(row_i64(space.revision)?)
             .execute(&mut *conn)
             .await
-            .map_err(internal)?;
+            .map_err(internal_failure)?;
             bump_snapshot(conn, space_id).await?;
             space.revision + 1
         };
@@ -826,11 +924,11 @@ impl FixtureMemoryProvider {
             .pool()
             .begin_with("BEGIN IMMEDIATE")
             .await
-            .map_err(internal)?;
+            .map_err(internal_failure)?;
         let change = self
             .subjects_ensure_in_tx(&mut transaction, principal_id, request, now)
             .await?;
-        transaction.commit().await.map_err(internal)?;
+        transaction.commit().await.map_err(internal_failure)?;
         Ok(change)
     }
 
@@ -874,7 +972,7 @@ impl FixtureMemoryProvider {
                 "kind",
                 "a subject with this kind already exists in the space",
             ),
-            _ => internal(error),
+            _ => internal_failure(error),
         })?;
         let created = inserted.rows_affected() == 1;
         let subject = fetch_subject(conn, &request.space_id, &request.subject_id).await?;
@@ -906,7 +1004,12 @@ impl FixtureMemoryProvider {
         // authorization decision and the returned subject are one snapshot, so
         // a concurrent revoke cannot pair an old grant with changed state
         // (MEM-R026).
-        let mut transaction = self.store().pool().begin().await.map_err(internal)?;
+        let mut transaction = self
+            .store()
+            .pool()
+            .begin()
+            .await
+            .map_err(internal_failure)?;
         let space = fetch_space(&mut transaction, &request.space_id).await?;
         require_admitted("memory.subjects.get", &space)?;
         let grants = load_grant_rows(&mut transaction, &request.space_id).await?;
@@ -921,9 +1024,10 @@ impl FixtureMemoryProvider {
                 "the authenticated principal holds no grant on this subject",
             ));
         }
-        let subject = fetch_subject(&mut transaction, &request.space_id, &request.subject_id).await?;
+        let subject =
+            fetch_subject(&mut transaction, &request.space_id, &request.subject_id).await?;
         let subject = subject_to_wire(&subject)?;
-        transaction.commit().await.map_err(internal)?;
+        transaction.commit().await.map_err(internal_failure)?;
         Ok(subject)
     }
 
@@ -939,11 +1043,11 @@ impl FixtureMemoryProvider {
             .pool()
             .begin_with("BEGIN IMMEDIATE")
             .await
-            .map_err(internal)?;
+            .map_err(internal_failure)?;
         let change = self
             .subjects_fence_in_tx(&mut transaction, principal_id, request, now)
             .await?;
-        transaction.commit().await.map_err(internal)?;
+        transaction.commit().await.map_err(internal_failure)?;
         Ok(change)
     }
 
@@ -967,9 +1071,7 @@ impl FixtureMemoryProvider {
         // coverage of that subject; a context target needs that one placement
         // context (§6.5/§7.7).
         let required = match &request.target {
-            Target::Subject => {
-                whole_scope_requirement("admin", Some(request.subject_id.as_str()))
-            }
+            Target::Subject => whole_scope_requirement("admin", Some(request.subject_id.as_str())),
             Target::Context(context_id) => GrantRequirement {
                 capability: "admin",
                 subject_id: Some(request.subject_id.as_str()),
@@ -982,7 +1084,8 @@ impl FixtureMemoryProvider {
         let subject = fetch_subject(conn, &request.space_id, &request.subject_id).await?;
         require_revision(request.expected_revision, subject.revision)?;
 
-        let (status, mut fenced_contexts) = (subject.status.clone(), subject.fenced_contexts.clone());
+        let (status, mut fenced_contexts) =
+            (subject.status.clone(), subject.fenced_contexts.clone());
         let next_status = match (&request.target, &request.action) {
             (Target::Subject, Action::Fence) => match status.as_str() {
                 "active" => Some("fenced"),
@@ -997,7 +1100,8 @@ impl FixtureMemoryProvider {
                 _ => None,
             },
             (Target::Context(context_id), Action::Fence) => {
-                if status == "archived" || fenced_contexts.iter().any(|id| id == context_id.as_str())
+                if status == "archived"
+                    || fenced_contexts.iter().any(|id| id == context_id.as_str())
                 {
                     None
                 } else {
@@ -1028,7 +1132,7 @@ impl FixtureMemoryProvider {
             return Err(invalid_transition(format!(
                 "subject {} cannot apply {} to {}",
                 subject.subject_id,
-                action_name(&request.action),
+                action_name(request.action),
                 target_name(&request.target)
             )));
         };
@@ -1038,13 +1142,13 @@ impl FixtureMemoryProvider {
              WHERE space_id = ? AND subject_id = ? AND revision = ?",
         )
         .bind(next_status)
-        .bind(serde_json::to_string(&fenced_contexts).map_err(internal)?)
+        .bind(serde_json::to_string(&fenced_contexts).map_err(internal_failure)?)
         .bind(request.space_id.as_str())
         .bind(request.subject_id.as_str())
         .bind(row_i64(subject.revision)?)
         .execute(&mut *conn)
         .await
-        .map_err(internal)?;
+        .map_err(internal_failure)?;
         bump_snapshot(conn, &request.space_id).await?;
         Ok(SubjectFenceChange {
             subject_id: subject.subject_id,
@@ -1072,11 +1176,16 @@ impl FixtureMemoryProvider {
         request: &MemoryGrantsListRequest,
         now: DateTime<Utc>,
     ) -> Result<GrantPage, SpokeReject> {
-        let mut transaction = self.store().pool().begin().await.map_err(internal)?;
+        let mut transaction = self
+            .store()
+            .pool()
+            .begin()
+            .await
+            .map_err(internal_failure)?;
         let page = self
             .grants_list_in_tx(&mut transaction, principal_id, request, now)
             .await?;
-        transaction.commit().await.map_err(internal)?;
+        transaction.commit().await.map_err(internal_failure)?;
         Ok(page)
     }
 
@@ -1106,10 +1215,7 @@ impl FixtureMemoryProvider {
             principal_id,
             &request.space_id,
             now,
-            &whole_scope_requirement(
-                "admin",
-                request.subject_id.as_deref().map(|id| id.as_str()),
-            ),
+            &whole_scope_requirement("admin", request.subject_id.as_deref().map(String::as_str)),
         );
         // §6.4: the optional principal selector is an admin-only target
         // selector, so a non-admin may not name any principal — not even
@@ -1131,7 +1237,8 @@ impl FixtureMemoryProvider {
             .into_iter()
             .filter(|grant| {
                 scoped_principal.is_none_or(|target| grant.principal_id == target)
-                    && subject_filter.is_none_or(|filter| grant.subject_id.as_deref() == Some(filter))
+                    && subject_filter
+                        .is_none_or(|filter| grant.subject_id.as_deref() == Some(filter))
             })
             .collect();
 
@@ -1172,12 +1279,8 @@ impl FixtureMemoryProvider {
             }
         };
 
-        let limit = usize::try_from(
-            request
-                .limit
-                .map_or(MAX_PAGE_SIZE.get(), NonZeroU64::get),
-        )
-        .map_err(internal)?;
+        let limit = usize::try_from(request.limit.map_or(MAX_PAGE_SIZE.get(), NonZeroU64::get))
+            .map_err(internal_failure)?;
         let remaining = &filtered[start..];
         let page = &remaining[..remaining.len().min(limit)];
         let next_cursor = if remaining.len() > limit {
@@ -1208,11 +1311,11 @@ impl FixtureMemoryProvider {
             .pool()
             .begin_with("BEGIN IMMEDIATE")
             .await
-            .map_err(internal)?;
+            .map_err(internal_failure)?;
         let issued = self
             .grants_grant_in_tx(&mut transaction, principal_id, request, now)
             .await?;
-        transaction.commit().await.map_err(internal)?;
+        transaction.commit().await.map_err(internal_failure)?;
         Ok(issued)
     }
 
@@ -1224,56 +1327,21 @@ impl FixtureMemoryProvider {
         request: &MemoryGrantsGrantRequest,
         now: DateTime<Utc>,
     ) -> Result<GrantIssued, SpokeReject> {
-        use spoke_operations::spoke_schemas::MemoryGrantsGrantRequest::{
-            Variant0 as Restricted, Variant1 as Unrestricted,
-        };
-
         checked(validate_memory_grants_grant(request))?;
-        let (space_id, grantee, capabilities, context_ids, shared_access, expires_at, subject_id) =
-            match request {
-                Restricted {
-                    capabilities,
-                    context_ids,
-                    expires_at,
-                    shared_access,
-                    principal_id,
-                    space_id,
-                    subject_id,
-                    ..
-                } => (
-                    space_id.as_str().to_owned(),
-                    principal_id.as_str().to_owned(),
-                    capabilities.clone(),
-                    context_ids.clone(),
-                    shared_access.unwrap_or(false),
-                    *expires_at,
-                    subject_id.as_ref().map(|id| id.as_str().to_owned()),
-                ),
-                Unrestricted {
-                    capabilities,
-                    expires_at,
-                    principal_id,
-                    space_id,
-                    subject_id,
-                    ..
-                } => (
-                    space_id.as_str().to_owned(),
-                    principal_id.as_str().to_owned(),
-                    capabilities.clone(),
-                    Vec::new(),
-                    false,
-                    expires_at.as_deref().copied(),
-                    subject_id.as_ref().map(|id| id.as_str().to_owned()),
-                ),
-            };
+        let GrantFields {
+            space_id,
+            grantee,
+            capabilities,
+            context_ids,
+            shared_access,
+            expires_at,
+            subject_id,
+        } = grant_fields(request);
         self.require_served_space(&space_id)?;
         let space = fetch_space(conn, &space_id).await?;
         require_admitted("memory.grants.grant", &space)?;
         let granter_grants = load_grants(conn, &space_id).await?;
-        let capability_refs = capabilities
-            .iter()
-            .map(String::as_str)
-            .collect::<Vec<_>>();
+        let capability_refs = capabilities.iter().map(String::as_str).collect::<Vec<_>>();
         checked(validate_grant_issuance(
             &granter_grants,
             principal_id,
@@ -1300,8 +1368,8 @@ impl FixtureMemoryProvider {
             }
         }
         let grant_id = format!("grt_{}", Uuid::new_v4().simple());
-        let capabilities_json = serde_json::to_string(&capabilities).map_err(internal)?;
-        let context_ids_json = serde_json::to_string(&context_ids).map_err(internal)?;
+        let capabilities_json = serde_json::to_string(&capabilities).map_err(internal_failure)?;
+        let context_ids_json = serde_json::to_string(&context_ids).map_err(internal_failure)?;
         sqlx::query(
             "INSERT INTO grants (grant_id, space_id, subject_id, principal_id, \
              capabilities_json, context_ids_json, shared_access, expires_at, revoked_at, \
@@ -1319,7 +1387,7 @@ impl FixtureMemoryProvider {
         .bind(timestamp_text(now))
         .execute(&mut *conn)
         .await
-        .map_err(internal)?;
+        .map_err(internal_failure)?;
         bump_snapshot(conn, &space_id).await?;
         Ok(GrantIssued {
             grant_id,
@@ -1339,11 +1407,11 @@ impl FixtureMemoryProvider {
             .pool()
             .begin_with("BEGIN IMMEDIATE")
             .await
-            .map_err(internal)?;
+            .map_err(internal_failure)?;
         let revoked = self
             .grants_revoke_in_tx(&mut transaction, principal_id, request, now)
             .await?;
-        transaction.commit().await.map_err(internal)?;
+        transaction.commit().await.map_err(internal_failure)?;
         Ok(revoked)
     }
 
@@ -1413,7 +1481,13 @@ impl FixtureMemoryProvider {
             reads_shared: target.shared_access.unwrap_or(false),
             subject_all: target.context_ids.is_empty(),
         };
-        if !is_authorized(&grants_wire, principal_id, &request.space_id, now, &required) {
+        if !is_authorized(
+            &grants_wire,
+            principal_id,
+            &request.space_id,
+            now,
+            &required,
+        ) {
             return Err(grant_not_revocable());
         }
         require_revision(request.expected_revision, target.revision)?;
@@ -1434,7 +1508,7 @@ impl FixtureMemoryProvider {
         .bind(row_i64(target.revision)?)
         .execute(&mut *conn)
         .await
-        .map_err(internal)?;
+        .map_err(internal_failure)?;
         bump_snapshot(conn, &request.space_id).await?;
         Ok(GrantRevoked {
             grant_id: target.grant_id.clone(),
@@ -1460,11 +1534,7 @@ impl FixtureMemoryProvider {
         &self,
         principal_id: &str,
     ) -> Result<String, FixtureError> {
-        let mut transaction = self
-            .store()
-            .pool()
-            .begin_with("BEGIN IMMEDIATE")
-            .await?;
+        let mut transaction = self.store().pool().begin_with("BEGIN IMMEDIATE").await?;
         let rows = sqlx::query(
             "SELECT grant_id, capabilities_json FROM grants \
              WHERE space_id = ? AND principal_id = ? AND subject_id IS NULL \
@@ -1475,9 +1545,10 @@ impl FixtureMemoryProvider {
         .fetch_all(&mut *transaction)
         .await?;
         for row in &rows {
-            let capabilities: Vec<String> =
-                serde_json::from_str(&row.try_get::<String, _>("capabilities_json")?)
-                    .map_err(|error| FixtureError::Bootstrap(format!("grant capabilities: {error}")))?;
+            let capabilities: Vec<String> = serde_json::from_str(
+                &row.try_get::<String, _>("capabilities_json")?,
+            )
+            .map_err(|error| FixtureError::Bootstrap(format!("grant capabilities: {error}")))?;
             if capabilities.iter().any(|capability| capability == "admin") {
                 let grant_id: String = row.try_get("grant_id")?;
                 transaction.commit().await?;
@@ -1532,7 +1603,9 @@ fn grant_is_valid(
         && grant.expires_at.is_none_or(|expires_at| expires_at > now)
 }
 
-fn action_name(action: &spoke_operations::spoke_schemas::memory_subjects_fence_request::Action) -> &'static str {
+const fn action_name(
+    action: spoke_operations::spoke_schemas::memory_subjects_fence_request::Action,
+) -> &'static str {
     use spoke_operations::spoke_schemas::memory_subjects_fence_request::Action;
     match action {
         Action::Fence => "fence",
@@ -1541,7 +1614,9 @@ fn action_name(action: &spoke_operations::spoke_schemas::memory_subjects_fence_r
     }
 }
 
-fn target_name(target: &spoke_operations::spoke_schemas::memory_subjects_fence_request::Target) -> &'static str {
+const fn target_name(
+    target: &spoke_operations::spoke_schemas::memory_subjects_fence_request::Target,
+) -> &'static str {
     use spoke_operations::spoke_schemas::memory_subjects_fence_request::Target;
     match target {
         Target::Subject => "the subject target",
@@ -1806,7 +1881,10 @@ mod tests {
             .expect("operator lists spaces");
         let space = visible_space(&page);
         assert_eq!(space.space_id.as_str(), space_id);
-        assert_eq!(space.authority_host_id.as_str(), scenario.provider.identity().authority_host_id);
+        assert_eq!(
+            space.authority_host_id.as_str(),
+            scenario.provider.identity().authority_host_id
+        );
         assert_eq!(space.authority_generation.get(), generation);
         assert_eq!(space.status.to_string(), "active");
         assert_eq!(space.revision.get(), 1);
@@ -1917,14 +1995,22 @@ mod tests {
             .expect("subjects.get is allowlisted while frozen");
         scenario
             .provider
-            .grants_list(OPERATOR, &grant_list_request(&space_id, None, None, None), now())
+            .grants_list(
+                OPERATOR,
+                &grant_list_request(&space_id, None, None, None),
+                now(),
+            )
             .await
             .expect("grants.list is allowlisted while frozen");
 
         // Revoke is the one mutation on the allowlist (§8.2).
         let revoked = scenario
             .provider
-            .grants_revoke(OPERATOR, &revoke_request(&space_id, &issued.grant_id, 1), now())
+            .grants_revoke(
+                OPERATOR,
+                &revoke_request(&space_id, &issued.grant_id, 1),
+                now(),
+            )
             .await
             .expect("revoke is allowlisted while frozen");
         assert!(revoked.revoked);
@@ -2081,7 +2167,13 @@ mod tests {
             .provider
             .subjects_fence(
                 OPERATOR,
-                &fence_request(&space_id, "subject-one", "fence", context_target("ctx-x"), 2),
+                &fence_request(
+                    &space_id,
+                    "subject-one",
+                    "fence",
+                    context_target("ctx-x"),
+                    2,
+                ),
                 now(),
             )
             .await
@@ -2198,7 +2290,11 @@ mod tests {
 
         let revoked = scenario
             .provider
-            .grants_revoke(OPERATOR, &revoke_request(&space_id, &issued.grant_id, 1), now())
+            .grants_revoke(
+                OPERATOR,
+                &revoke_request(&space_id, &issued.grant_id, 1),
+                now(),
+            )
             .await
             .expect("operator revokes the grant");
         assert!(revoked.revoked);
@@ -2227,7 +2323,11 @@ mod tests {
         // The revoked grant is still visible to its holder, marked revoked.
         let page = scenario
             .provider
-            .grants_list(CLIENT, &grant_list_request(&space_id, None, None, None), now())
+            .grants_list(
+                CLIENT,
+                &grant_list_request(&space_id, None, None, None),
+                now(),
+            )
             .await
             .expect("holders keep their own grant view");
         assert_eq!(page.grants.len(), 1);
@@ -2245,14 +2345,22 @@ mod tests {
             reject_code(
                 scenario
                     .provider
-                    .grants_revoke(OPERATOR, &revoke_request(&space_id, &issued.grant_id, 1), now())
+                    .grants_revoke(
+                        OPERATOR,
+                        &revoke_request(&space_id, &issued.grant_id, 1),
+                        now()
+                    )
                     .await,
             ),
             SpokeRejectCode::RevisionConflict
         );
         let repeated = scenario
             .provider
-            .grants_revoke(OPERATOR, &revoke_request(&space_id, &issued.grant_id, 2), now())
+            .grants_revoke(
+                OPERATOR,
+                &revoke_request(&space_id, &issued.grant_id, 2),
+                now(),
+            )
             .await
             .expect("re-revoking at the current revision is a no-op success");
         assert_eq!(repeated.revision, 2);
@@ -2277,13 +2385,7 @@ mod tests {
             .provider
             .grants_grant(
                 OPERATOR,
-                &grant_request(
-                    &space_id,
-                    CLIENT,
-                    &["admin"],
-                    None,
-                    Some(&["ctx-a"]),
-                ),
+                &grant_request(&space_id, CLIENT, &["admin"], None, Some(&["ctx-a"])),
                 now(),
             )
             .await
@@ -2310,13 +2412,7 @@ mod tests {
                     .provider
                     .grants_grant(
                         CLIENT,
-                        &grant_request(
-                            &space_id,
-                            OTHER,
-                            &["capture"],
-                            None,
-                            Some(&["ctx-b"]),
-                        ),
+                        &grant_request(&space_id, OTHER, &["capture"], None, Some(&["ctx-b"]),),
                         now(),
                     )
                     .await,
@@ -2328,13 +2424,7 @@ mod tests {
             .provider
             .grants_grant(
                 CLIENT,
-                &grant_request(
-                    &space_id,
-                    OTHER,
-                    &["capture"],
-                    None,
-                    Some(&["ctx-a"]),
-                ),
+                &grant_request(&space_id, OTHER, &["capture"], None, Some(&["ctx-a"])),
                 now(),
             )
             .await
@@ -2491,7 +2581,11 @@ mod tests {
         // still rejects writes.
         let grants = reopened
             .provider
-            .grants_list(OPERATOR, &grant_list_request(&space_id, Some(CLIENT), None, None), now())
+            .grants_list(
+                OPERATOR,
+                &grant_list_request(&space_id, Some(CLIENT), None, None),
+                now(),
+            )
             .await
             .expect("grants survive the reopen");
         assert_eq!(grants.grants.len(), 1);
@@ -2600,7 +2694,11 @@ mod tests {
 
         let first = scenario
             .provider
-            .grants_list(OPERATOR, &grant_list_request(&space_id, None, Some(2), None), now())
+            .grants_list(
+                OPERATOR,
+                &grant_list_request(&space_id, None, Some(2), None),
+                now(),
+            )
             .await
             .expect("first page");
         assert_eq!(first.grants.len(), 2);
@@ -2608,7 +2706,11 @@ mod tests {
 
         let second = scenario
             .provider
-            .grants_list(OPERATOR, &grant_list_request(&space_id, None, Some(2), Some(&cursor)), now())
+            .grants_list(
+                OPERATOR,
+                &grant_list_request(&space_id, None, Some(2), Some(&cursor)),
+                now(),
+            )
             .await
             .expect("second page");
         assert_eq!(second.grants.len(), 2);
@@ -2620,7 +2722,11 @@ mod tests {
             reject_code(
                 scenario
                     .provider
-                    .grants_list(CLIENT, &grant_list_request(&space_id, Some(OTHER), None, None), now())
+                    .grants_list(
+                        CLIENT,
+                        &grant_list_request(&space_id, Some(OTHER), None, None),
+                        now()
+                    )
                     .await,
             ),
             SpokeRejectCode::NotAuthorized
@@ -2629,7 +2735,11 @@ mod tests {
             reject_code(
                 scenario
                     .provider
-                    .grants_list(CLIENT, &grant_list_request(&space_id, Some(CLIENT), None, None), now())
+                    .grants_list(
+                        CLIENT,
+                        &grant_list_request(&space_id, Some(CLIENT), None, None),
+                        now()
+                    )
                     .await,
             ),
             SpokeRejectCode::NotAuthorized
@@ -2647,7 +2757,11 @@ mod tests {
             .expect("the client holds one grant");
         let self_view = scenario
             .provider
-            .grants_list(CLIENT, &grant_list_request(&space_id, None, None, None), now())
+            .grants_list(
+                CLIENT,
+                &grant_list_request(&space_id, None, None, None),
+                now(),
+            )
             .await
             .expect("self view");
         assert_eq!(self_view.grants.len(), 1);
@@ -2656,7 +2770,11 @@ mod tests {
         // Any grant change invalidates an outstanding cursor (MEM-R026).
         let outstanding = scenario
             .provider
-            .grants_list(OPERATOR, &grant_list_request(&space_id, None, Some(2), None), now())
+            .grants_list(
+                OPERATOR,
+                &grant_list_request(&space_id, None, Some(2), None),
+                now(),
+            )
             .await
             .expect("first page over the current state");
         let cursor = outstanding
@@ -2664,7 +2782,11 @@ mod tests {
             .expect("a bounded page issues a cursor");
         scenario
             .provider
-            .grants_revoke(OPERATOR, &revoke_request(&space_id, &issued[0].grant_id, 1), now())
+            .grants_revoke(
+                OPERATOR,
+                &revoke_request(&space_id, &issued[0].grant_id, 1),
+                now(),
+            )
             .await
             .expect("revoke one grant");
         assert_eq!(
@@ -2787,7 +2909,13 @@ mod tests {
             .provider
             .subjects_fence(
                 OPERATOR,
-                &fence_request(&space_id, "subject-one", "fence", context_target("ctx-b"), 1),
+                &fence_request(
+                    &space_id,
+                    "subject-one",
+                    "fence",
+                    context_target("ctx-b"),
+                    1,
+                ),
                 now(),
             )
             .await
@@ -2824,7 +2952,13 @@ mod tests {
             .provider
             .subjects_fence(
                 CLIENT,
-                &fence_request(&space_id, "subject-one", "fence", context_target("ctx-a"), 2),
+                &fence_request(
+                    &space_id,
+                    "subject-one",
+                    "fence",
+                    context_target("ctx-a"),
+                    2,
+                ),
                 now(),
             )
             .await
@@ -2880,7 +3014,11 @@ mod tests {
         }
         let untouched_grants = scenario
             .provider
-            .grants_list(OPERATOR, &grant_list_request(&space_id, Some(OTHER), None, None), now())
+            .grants_list(
+                OPERATOR,
+                &grant_list_request(&space_id, Some(OTHER), None, None),
+                now(),
+            )
             .await
             .expect("operator lists the untouched grants");
         assert_eq!(untouched_grants.grants.len(), 3);
@@ -2965,7 +3103,11 @@ mod tests {
         }
         let first = scenario
             .provider
-            .grants_list(OPERATOR, &grant_list_request(&space_id, None, Some(1), None), now())
+            .grants_list(
+                OPERATOR,
+                &grant_list_request(&space_id, None, Some(1), None),
+                now(),
+            )
             .await
             .expect("first page");
         let cursor = first.next_cursor.expect("a bounded page issues a cursor");
@@ -3003,7 +3145,11 @@ mod tests {
         assert_eq!(resumed.grants.len(), 1);
         let client_grants = scenario
             .provider
-            .grants_list(OPERATOR, &grant_list_request(&space_id, Some(CLIENT), None, None), now())
+            .grants_list(
+                OPERATOR,
+                &grant_list_request(&space_id, Some(CLIENT), None, None),
+                now(),
+            )
             .await
             .expect("no client grant survived the rollback");
         assert!(client_grants.grants.is_empty());
@@ -3020,7 +3166,11 @@ mod tests {
             reject_code(
                 scenario
                     .provider
-                    .grants_revoke(OPERATOR, &revoke_request(&space_id, &staged.grant_id, 1), now())
+                    .grants_revoke(
+                        OPERATOR,
+                        &revoke_request(&space_id, &staged.grant_id, 1),
+                        now()
+                    )
                     .await,
             ),
             SpokeRejectCode::NotFound
@@ -3036,7 +3186,12 @@ mod tests {
             .expect("caller transaction");
         scenario
             .provider
-            .spaces_freeze_in_tx(&mut transaction, OPERATOR, &freeze_request(&space_id, 1), now())
+            .spaces_freeze_in_tx(
+                &mut transaction,
+                OPERATOR,
+                &freeze_request(&space_id, 1),
+                now(),
+            )
             .await
             .expect("stage the freeze");
         transaction.rollback().await.expect("caller rollback");
@@ -3083,7 +3238,12 @@ mod tests {
             .expect("caller transaction");
         scenario
             .provider
-            .spaces_freeze_in_tx(&mut transaction, OPERATOR, &freeze_request(&space_id, 1), now())
+            .spaces_freeze_in_tx(
+                &mut transaction,
+                OPERATOR,
+                &freeze_request(&space_id, 1),
+                now(),
+            )
             .await
             .expect("stage the freeze");
         transaction.commit().await.expect("caller commit");
@@ -3130,11 +3290,17 @@ mod tests {
 
         let first = scenario
             .provider
-            .grants_list(CLIENT, &grant_list_request(&space_id, None, Some(1), None), now())
+            .grants_list(
+                CLIENT,
+                &grant_list_request(&space_id, None, Some(1), None),
+                now(),
+            )
             .await
             .expect("self-view first page");
         assert_eq!(first.grants.len(), 1);
-        let cursor = first.next_cursor.expect("a bounded self view issues a cursor");
+        let cursor = first
+            .next_cursor
+            .expect("a bounded self view issues a cursor");
 
         // A grant to another principal never appears in this view, yet the
         // outstanding cursor is invalidated.
@@ -3164,10 +3330,16 @@ mod tests {
         // A lifecycle change with identical grant rows invalidates it too.
         let fresh = scenario
             .provider
-            .grants_list(CLIENT, &grant_list_request(&space_id, None, Some(1), None), now())
+            .grants_list(
+                CLIENT,
+                &grant_list_request(&space_id, None, Some(1), None),
+                now(),
+            )
             .await
             .expect("fresh self-view first page");
-        let cursor = fresh.next_cursor.expect("a bounded self view issues a cursor");
+        let cursor = fresh
+            .next_cursor
+            .expect("a bounded self view issues a cursor");
         scenario
             .provider
             .spaces_freeze(OPERATOR, &freeze_request(&space_id, 1), now())
@@ -3277,7 +3449,11 @@ mod tests {
         // list is its own self view, and naming the ctx-b grantee is refused.
         let self_view = scenario
             .provider
-            .grants_list(CLIENT, &grant_list_request(&space_id, None, None, None), now())
+            .grants_list(
+                CLIENT,
+                &grant_list_request(&space_id, None, None, None),
+                now(),
+            )
             .await
             .expect("the ctx-a admin self view");
         assert_eq!(self_view.grants.len(), 1);
@@ -3348,7 +3524,11 @@ mod tests {
         assert_eq!(thawed.revision, 3);
         let full = scenario
             .provider
-            .grants_list(OPERATOR, &grant_list_request(&space_id, None, None, None), now())
+            .grants_list(
+                OPERATOR,
+                &grant_list_request(&space_id, None, None, None),
+                now(),
+            )
             .await
             .expect("the space-wide admin full view");
         assert_eq!(full.grants.len(), 4);
@@ -3431,7 +3611,11 @@ mod tests {
         // admin authority. Each one bumps the provider marker.
         let revoked = scenario
             .provider
-            .grants_revoke(OPERATOR, &revoke_request(&space_id, &other_grant.grant_id, 1), now())
+            .grants_revoke(
+                OPERATOR,
+                &revoke_request(&space_id, &other_grant.grant_id, 1),
+                now(),
+            )
             .await
             .expect("revoke another principal's grant");
         assert_eq!(revoked.revision, 2);
@@ -3446,7 +3630,11 @@ mod tests {
             .expect("insert a grant after the snapshot");
         let own_revoked = scenario
             .provider
-            .grants_revoke(OPERATOR, &revoke_request(&space_id, &own_admin_id, 1), now())
+            .grants_revoke(
+                OPERATOR,
+                &revoke_request(&space_id, &own_admin_id, 1),
+                now(),
+            )
             .await
             .expect("revoke the lister's own admin grant");
         assert_eq!(own_revoked.revision, 2);
@@ -3470,14 +3658,22 @@ mod tests {
             .grants
             .iter()
             .chain(second.grants.iter())
-            .map(|grant| (grant_id(grant).to_owned(), grant_principal(grant).to_owned()))
+            .map(|grant| {
+                (
+                    grant_id(grant).to_owned(),
+                    grant_principal(grant).to_owned(),
+                )
+            })
             .collect::<Vec<_>>();
         observed.sort();
         let mut expected = vec![
             (own_admin_id.clone(), OPERATOR.to_owned()),
             (client_grant.grant_id.clone(), CLIENT.to_owned()),
             (other_grant.grant_id.clone(), OTHER.to_owned()),
-            (other_two_grant.grant_id.clone(), "principal-other-2".to_owned()),
+            (
+                other_two_grant.grant_id.clone(),
+                "principal-other-2".to_owned(),
+            ),
         ];
         expected.sort();
         assert_eq!(
@@ -3518,7 +3714,11 @@ mod tests {
         );
         let after = scenario
             .provider
-            .grants_list(OPERATOR, &grant_list_request(&space_id, None, None, None), now())
+            .grants_list(
+                OPERATOR,
+                &grant_list_request(&space_id, None, None, None),
+                now(),
+            )
             .await
             .expect("post-change self view");
         assert_eq!(after.grants.len(), 1);
@@ -3579,7 +3779,11 @@ mod tests {
         let hidden = refusal(
             scenario
                 .provider
-                .grants_revoke(CLIENT, &revoke_request(&space_id, &foreign.grant_id, 1), now())
+                .grants_revoke(
+                    CLIENT,
+                    &revoke_request(&space_id, &foreign.grant_id, 1),
+                    now(),
+                )
                 .await,
         );
         let missing = refusal(
@@ -3661,14 +3865,22 @@ mod tests {
         // already-revoked no-op.
         let revoked = scenario
             .provider
-            .grants_revoke(CLIENT, &revoke_request(&space_id, &in_scope.grant_id, 1), now())
+            .grants_revoke(
+                CLIENT,
+                &revoke_request(&space_id, &in_scope.grant_id, 1),
+                now(),
+            )
             .await
             .expect("the ctx-a admin revokes its in-coverage grant");
         assert_eq!(revoked.revision, 2);
         assert!(revoked.revoked);
         let repeated = scenario
             .provider
-            .grants_revoke(CLIENT, &revoke_request(&space_id, &in_scope.grant_id, 2), now())
+            .grants_revoke(
+                CLIENT,
+                &revoke_request(&space_id, &in_scope.grant_id, 2),
+                now(),
+            )
             .await
             .expect("revoking an already revoked grant is a no-op success");
         assert_eq!(repeated.revision, 2);
@@ -3681,11 +3893,7 @@ mod tests {
                     .provider
                     .grants_revoke(
                         OPERATOR,
-                        &revoke_request(
-                            &space_id,
-                            "grt_00000000000000000000000000000000",
-                            1
-                        ),
+                        &revoke_request(&space_id, "grt_00000000000000000000000000000000", 1),
                         now(),
                     )
                     .await,
@@ -3712,7 +3920,11 @@ mod tests {
 
         let grants = scenario
             .provider
-            .grants_list(OPERATOR, &grant_list_request(&space_id, Some(CLIENT), None, None), now())
+            .grants_list(
+                OPERATOR,
+                &grant_list_request(&space_id, Some(CLIENT), None, None),
+                now(),
+            )
             .await
             .expect("the issued grant is listed");
         assert_eq!(grants.grants.len(), 1);
@@ -3735,7 +3947,11 @@ mod tests {
             reject_code(
                 scenario
                     .provider
-                    .subjects_ensure(CLIENT, &ensure_request(&space_id, "subject-two"), expires_at)
+                    .subjects_ensure(
+                        CLIENT,
+                        &ensure_request(&space_id, "subject-two"),
+                        expires_at
+                    )
                     .await,
             ),
             SpokeRejectCode::NotAuthorized
@@ -3958,10 +4174,18 @@ mod tests {
                 .await
                 .map_err(|error| format!("{error:?}"))?;
             writer
-                .spaces_freeze_in_tx(&mut transaction, OPERATOR, &freeze_request(&space_id, 1), now())
+                .spaces_freeze_in_tx(
+                    &mut transaction,
+                    OPERATOR,
+                    &freeze_request(&space_id, 1),
+                    now(),
+                )
                 .await
                 .map_err(|error| format!("{error:?}"))?;
-            transaction.commit().await.map_err(|error| error.to_string())
+            transaction
+                .commit()
+                .await
+                .map_err(|error| error.to_string())
         }
         .await;
         release.send(()).expect("release the paused read");
@@ -3973,8 +4197,16 @@ mod tests {
         // barrier had not yet counted the pending receipt.
         let space = visible_space(&page);
         let wire = serde_json::to_value(space).expect("space wire value");
-        assert_eq!(wire["status"], json!("active"), "the page must carry its snapshot's status");
-        assert_eq!(space.revision.get(), 1, "the page must carry its snapshot's revision");
+        assert_eq!(
+            wire["status"],
+            json!("active"),
+            "the page must carry its snapshot's status"
+        );
+        assert_eq!(
+            space.revision.get(),
+            1,
+            "the page must carry its snapshot's revision"
+        );
         assert_eq!(
             space.pending_receipts, 0,
             "a pending receipt committed after the snapshot must not be paired with the snapshot's authorization"
@@ -4073,7 +4305,10 @@ mod tests {
                 )
                 .await
                 .map_err(|error| format!("{error:?}"))?;
-            transaction.commit().await.map_err(|error| error.to_string())
+            transaction
+                .commit()
+                .await
+                .map_err(|error| error.to_string())
         }
         .await;
         release.send(()).expect("release the paused read");

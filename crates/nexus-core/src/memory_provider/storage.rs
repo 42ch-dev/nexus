@@ -79,11 +79,11 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 #[cfg(feature = "test-hooks")]
+use std::sync::atomic::AtomicU64;
+#[cfg(feature = "test-hooks")]
 use std::sync::atomic::AtomicU8;
 #[cfg(feature = "test-hooks")]
 use std::sync::atomic::AtomicUsize;
-#[cfg(feature = "test-hooks")]
-use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
@@ -1007,12 +1007,11 @@ impl MemoryStore {
         release: Arc<tokio::sync::Barrier>,
     ) -> u64 {
         let token = self.admission_token.fetch_add(1, Ordering::SeqCst) + 1;
-        *self.admission_barrier.lock().expect("admission gate") =
-            Some(AdmissionRendezvous {
-                token,
-                entered,
-                release,
-            });
+        *self.admission_barrier.lock().expect("admission gate") = Some(AdmissionRendezvous {
+            token,
+            entered,
+            release,
+        });
         token
     }
 
@@ -4148,7 +4147,7 @@ async fn adopt_records_in_tx(
 /// What one legacy-content migration pass did.
 pub(super) enum MigrationOutcome {
     /// The pass committed its objects, its journal intent and the manifest.
-    Migrated(ReceiptRow),
+    Migrated(Box<ReceiptRow>),
     /// The space was already migrated and its manifest still matches the source.
     Verified(Value),
 }
@@ -6198,7 +6197,7 @@ impl MemoryStore {
             now,
         )
         .await
-        .map(MigrationOutcome::Migrated)
+        .map(|receipt| MigrationOutcome::Migrated(Box::new(receipt)))
     }
 
     /// §7.23 profile read: every present profile, or the requested kinds that

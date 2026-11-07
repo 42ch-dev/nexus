@@ -44,9 +44,9 @@ mod raw_invoke;
 // entry points, while the assembled port commits through the caller-owned
 // `*_in_tx` siblings so effect, receipt and dedup share one transaction.
 #[allow(dead_code)]
-mod records;
-#[allow(dead_code)]
 mod recall;
+#[allow(dead_code)]
+mod records;
 // The assembled `MemoryPort`, its admission wrapper and the signed service.
 mod server;
 // The same split as `records`: the assembly needs this slice's authorization,
@@ -65,6 +65,7 @@ pub use faults::{
 };
 pub use policy::PeerDirectory;
 pub use provider::{FixtureIdentity, FixtureMemoryProvider};
+pub use spaces::MAX_PAGE_SIZE;
 
 /// Failure to open the fixture store or provision its durable bootstrap state.
 #[derive(Debug, thiserror::Error)]

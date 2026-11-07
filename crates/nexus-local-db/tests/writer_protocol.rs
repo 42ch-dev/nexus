@@ -1484,7 +1484,6 @@ async fn raw_clone_close_keeps_both_admissions_until_connection_disposed() {
     );
 }
 
-
 /// F13: an OPEN pool keeps its published admission with ZERO current native
 /// connections. The last idle connection is really detached from the pool and
 /// disposed, so its userdata pin is gone; both OS locks must still be held by
@@ -1502,7 +1501,11 @@ async fn open_pool_keeps_its_admission_with_zero_connections() {
 
     let guarded = init_engine_pool(&db).await.expect("engine owner");
     let published = {
-        let mut conn = guarded.pool().acquire().await.expect("published connection");
+        let mut conn = guarded
+            .pool()
+            .acquire()
+            .await
+            .expect("published connection");
         probe_scalars(&mut conn).await.0
     };
     let clone = guarded.clone_pool();
@@ -1568,7 +1571,12 @@ async fn open_pool_keeps_its_admission_with_zero_connections() {
     // Close-start retirement: the closed handle stays referenced below.
     clone.close().await;
     assert_eq!(
-        child_outcome(dir.path(), &db, "migration_fence", "zero_conn_closed_migration"),
+        child_outcome(
+            dir.path(),
+            &db,
+            "migration_fence",
+            "zero_conn_closed_migration"
+        ),
         "won",
         "the real close released the migration admission with no purge"
     );
@@ -1640,7 +1648,9 @@ async fn raw_retention_keeps_the_published_identity() {
 
     let dir = TempDir::new().expect("tempdir");
     let db = dir.path().join("state.db");
-    run_guarded_migrations(&db).await.expect("migrated workspace");
+    run_guarded_migrations(&db)
+        .await
+        .expect("migrated workspace");
 
     // Identity A publishes itself, then its entry is dropped while the guard
     // itself is still alive.
@@ -1661,7 +1671,11 @@ async fn raw_retention_keeps_the_published_identity() {
         .await
         .expect("published holder");
     let published_id = {
-        let mut conn = published.pool().acquire().await.expect("published connection");
+        let mut conn = published
+            .pool()
+            .acquire()
+            .await
+            .expect("published connection");
         probe_scalars(&mut conn).await.0
     };
     assert_ne!(
@@ -1670,7 +1684,7 @@ async fn raw_retention_keeps_the_published_identity() {
     );
 
     // The caller hands over the STALE guard: retention must keep B.
-    retain_writer_guard(stale);
+    retain_writer_guard(&stale);
 
     let joined = acquire_writer_guard(&db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
         .await

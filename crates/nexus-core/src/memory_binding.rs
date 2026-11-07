@@ -19,7 +19,7 @@ use crate::memory_provider::{LocalMemoryProvider, LOCAL_AUTHORITY_HOST_ID};
 const LOCAL_AUTHORITY_GENERATION: NonZeroU64 = NonZeroU64::MIN;
 
 /// The single provider authority one `CoreService` open serves memory from.
-pub(crate) struct MemoryProviderBinding {
+pub struct MemoryProviderBinding {
     port: Arc<dyn MemoryPort + Send + Sync>,
     local: Option<Arc<LocalMemoryProvider>>,
     /// The established Connect session a remote binding serves through
@@ -36,6 +36,10 @@ pub(crate) struct MemoryProviderBinding {
     space_id: String,
     authority_host_id: String,
     authority_generation: NonZeroU64,
+    /// The page bound this provider advertised in `memory.describe`
+    /// (§7.0.7). Every page request names it, so a provider narrower than the
+    /// adapter's former constant never refuses an over-large read.
+    max_page_size: NonZeroU64,
     writable: bool,
 }
 
@@ -48,6 +52,7 @@ impl MemoryProviderBinding {
             space_id: provider.space_id().to_string(),
             authority_host_id: LOCAL_AUTHORITY_HOST_ID.to_string(),
             authority_generation: LOCAL_AUTHORITY_GENERATION,
+            max_page_size: crate::memory_provider::policy::MAX_PAGE_SIZE_BOUND,
             port: Arc::clone(&provider) as Arc<dyn MemoryPort + Send + Sync>,
             local: Some(provider),
             #[cfg(feature = "memory-remote")]
@@ -68,6 +73,7 @@ impl MemoryProviderBinding {
         space_id: String,
         authority_host_id: String,
         authority_generation: NonZeroU64,
+        max_page_size: NonZeroU64,
         client_identity: String,
         writable: bool,
     ) -> Self {
@@ -77,6 +83,10 @@ impl MemoryProviderBinding {
             space_id,
             authority_host_id,
             authority_generation,
+            // The advertised value is a maximum, not permission to enlarge a
+            // request: the original client ceiling still bounds every page, so
+            // a wider provider never makes this client ask for more.
+            max_page_size: max_page_size.min(crate::memory_provider::policy::MAX_PAGE_SIZE_BOUND),
             port: Arc::clone(&adapter) as Arc<dyn MemoryPort + Send + Sync>,
             local: None,
             remote: Some(adapter),
@@ -91,6 +101,12 @@ impl MemoryProviderBinding {
     /// The provider space this open serves.
     pub(crate) fn space_id(&self) -> &str {
         &self.space_id
+    }
+
+    /// The page bound this binding serves: the smaller of the client's own
+    /// ceiling and the provider's advertised maximum (§7.0.7).
+    pub(crate) const fn page_size(&self) -> NonZeroU64 {
+        self.max_page_size
     }
 
     /// Close the provider handle this binding pins (§4.1 `close`).
@@ -132,13 +148,13 @@ impl MemoryProviderBinding {
     /// nothing. Use [`Self::local`] only where a local-only path actually needs
     /// the provider handle.
     #[must_use]
-    pub(crate) fn is_local(&self) -> bool {
+    pub(crate) const fn is_local(&self) -> bool {
         self.local.is_some()
     }
 
     /// Whether this open may mutate provider state.
     #[must_use]
-    pub(crate) fn is_writable(&self) -> bool {
+    pub(crate) const fn is_writable(&self) -> bool {
         self.writable
     }
 
@@ -159,5 +175,23 @@ impl MemoryProviderBinding {
     #[must_use]
     pub(crate) fn client_identity(&self) -> Option<&str> {
         self.client_identity.as_deref()
+    }
+}
+
+/// A dropped binding releases an established remote session.
+///
+/// [`MemoryProviderBinding::close`] stays the normal path — it also closes the
+/// local provider. Nothing else ends a *delivered* remote session: the SDK's
+/// receive task keeps its own `Arc` on the adapter, so dropping the last handle
+/// alone would leave the authenticated socket and that task running after an
+/// error. The adapter's `close` is idempotent, so a binding already closed
+/// explicitly is unaffected; a local binding owns no session, and its provider
+/// close is async, so it is left to `close`.
+impl Drop for MemoryProviderBinding {
+    fn drop(&mut self) {
+        #[cfg(feature = "memory-remote")]
+        if let Some(remote) = &self.remote {
+            remote.close();
+        }
     }
 }

@@ -54,7 +54,9 @@ impl std::fmt::Display for FaultHoldLost {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Unreached => formatter.write_str("the fault point was never reached in time"),
-            Self::Disarmed => formatter.write_str("the fault arm was disarmed before it was reached"),
+            Self::Disarmed => {
+                formatter.write_str("the fault arm was disarmed before it was reached")
+            }
         }
     }
 }
@@ -80,6 +82,7 @@ struct Armed {
     bound: Duration,
 }
 
+#[derive(Default)]
 struct FaultState {
     next_token: u64,
     armed: Option<Armed>,
@@ -87,16 +90,6 @@ struct FaultState {
     /// slot, so a capture's legacy `AdmissionPause` arm and a target arm never
     /// consume each other).
     target: Option<TargetArm>,
-}
-
-impl Default for FaultState {
-    fn default() -> Self {
-        Self {
-            next_token: 0,
-            armed: None,
-            target: None,
-        }
-    }
 }
 
 /// Operator/test-only fault control attached to one provider instance.
@@ -121,10 +114,10 @@ impl FixtureFaults {
     fn state(&self) -> MutexGuard<'_, FaultState> {
         self.inner
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    fn next_token(state: &mut FaultState) -> u64 {
+    const fn next_token(state: &mut FaultState) -> u64 {
         state.next_token = state.next_token.wrapping_add(1);
         state.next_token
     }
@@ -148,12 +141,14 @@ impl FixtureFaults {
 
     /// Arm a holding point (`BeforeCommit`, `AdmissionPause` or `ResponseDrop`)
     /// with the default bound and return the test handle.
+    #[must_use]
     pub fn hold_next(&self, point: FaultPoint) -> FaultHold {
         self.hold_next_bounded(point, FAULT_HOLD_TIMEOUT)
     }
 
     /// Arm a holding point (`BeforeCommit`, `AdmissionPause` or `ResponseDrop`)
     /// bounded by `bound` and return the test handle.
+    #[must_use]
     pub fn hold_next_bounded(&self, point: FaultPoint, bound: Duration) -> FaultHold {
         let (reached_tx, reached_rx) = oneshot::channel();
         let (release_tx, release_rx) = oneshot::channel();
@@ -167,6 +162,7 @@ impl FixtureFaults {
             release: Some(release_rx),
             bound,
         });
+        drop(state);
         FaultHold {
             control: Arc::clone(&self.inner),
             token,
@@ -180,15 +176,15 @@ impl FixtureFaults {
     /// mutation path may trip a point.
     pub(crate) fn trip(&self, point: FaultPoint) -> bool {
         let mut state = self.state();
-        if state
+        let tripped = state
             .armed
             .as_ref()
-            .is_some_and(|armed| armed.point == point && !armed.holding)
-        {
+            .is_some_and(|armed| armed.point == point && !armed.holding);
+        if tripped {
             state.armed = None;
-            return true;
         }
-        false
+        drop(state);
+        tripped
     }
 
     /// Block a holding point until the test releases it, or end the wait when
@@ -261,9 +257,7 @@ impl FaultHold {
     /// [`FaultHoldLost::Unreached`] when no operation reached the point in time,
     /// [`FaultHoldLost::Disarmed`] when the arm was released, replaced or
     /// dropped first.
-    pub fn wait_reached(
-        &mut self,
-    ) -> impl Future<Output = Result<(), FaultHoldLost>> + '_ {
+    pub fn wait_reached(&mut self) -> impl Future<Output = Result<(), FaultHoldLost>> + Send + '_ {
         // Cancellation ownership is established at the CALL, before the future
         // can be polled: an observation future that is created and dropped
         // without a first poll still retires this handle's own still-armed
@@ -292,7 +286,7 @@ impl FaultHold {
         let mut state = self
             .control
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if state
             .armed
             .as_ref()
@@ -319,7 +313,7 @@ impl Drop for ReachGuard {
         let mut state = self
             .control
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if state
             .armed
             .as_ref()
@@ -335,7 +329,7 @@ impl Drop for FaultHold {
         let mut state = self
             .control
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if state
             .armed
             .as_ref()
@@ -479,7 +473,9 @@ mod tests {
         }
     }
 
-    fn refusal<T: std::fmt::Debug>(result: Result<T, spoke_operations::SpokeReject>) -> spoke_operations::SpokeReject {
+    fn refusal<T: std::fmt::Debug>(
+        result: Result<T, spoke_operations::SpokeReject>,
+    ) -> spoke_operations::SpokeReject {
         match result {
             Ok(value) => panic!("expected a protocol reject, observed {value:?}"),
             Err(reject) => reject,
@@ -525,7 +521,10 @@ mod tests {
         // The response is held after the commit and the caller tears the
         // connection down instead of waiting for it: no receipt is returned and
         // the operation future is cancelled.
-        let mut hold = scenario.provider.faults().hold_next(FaultPoint::ResponseDrop);
+        let mut hold = scenario
+            .provider
+            .faults()
+            .hold_next(FaultPoint::ResponseDrop);
         let mut operation = Box::pin(scenario.provider.capture(CLIENT, &request, now));
         tokio::select! {
             reached = hold.wait_reached() => {
@@ -585,7 +584,10 @@ mod tests {
             "Staged inside an open transaction.",
             "crash-mid-commit",
         );
-        let mut hold = scenario.provider.faults().hold_next(FaultPoint::BeforeCommit);
+        let mut hold = scenario
+            .provider
+            .faults()
+            .hold_next(FaultPoint::BeforeCommit);
         let mut operation = Box::pin(scenario.provider.capture(CLIENT, &mid_commit, now));
         tokio::select! {
             reached = hold.wait_reached() => {
@@ -619,14 +621,15 @@ mod tests {
             "Staged but never committed.",
             "crash-before",
         );
-        scenario.provider.faults().fail_next(FaultPoint::BeforeCommit);
-        let rejected = refusal(
-            scenario
-                .provider
-                .capture(CLIENT, &before_commit, now)
-                .await,
+        scenario
+            .provider
+            .faults()
+            .fail_next(FaultPoint::BeforeCommit);
+        let rejected = refusal(scenario.provider.capture(CLIENT, &before_commit, now).await);
+        assert_eq!(
+            rejected.code,
+            spoke_operations::SpokeRejectCode::OutcomeUncertain
         );
-        assert_eq!(rejected.code, spoke_operations::SpokeRejectCode::OutcomeUncertain);
         assert_eq!(count_rows(&scenario, "candidates").await, 0);
         assert_eq!(marker(&scenario).await, marker_before);
         let committed = scenario
@@ -654,13 +657,11 @@ mod tests {
             .provider
             .faults()
             .fail_next(FaultPoint::AfterCommitBeforeResponse);
-        let rejected = refusal(
-            scenario
-                .provider
-                .capture(CLIENT, &after_commit, now)
-                .await,
+        let rejected = refusal(scenario.provider.capture(CLIENT, &after_commit, now).await);
+        assert_eq!(
+            rejected.code,
+            spoke_operations::SpokeRejectCode::OutcomeUncertain
         );
-        assert_eq!(rejected.code, spoke_operations::SpokeRejectCode::OutcomeUncertain);
         assert_eq!(count_rows(&scenario, "candidates").await, 2);
         let stored_receipt: String =
             sqlx::query("SELECT receipt_id FROM receipts WHERE idempotency_key = 'crash-after'")
@@ -679,11 +680,8 @@ mod tests {
 
         // Phase 3 — a paused admission replays the effect a competing identical
         // retry committed while it was parked.
-        let paused_request = capture_request(
-            &scenario.space_id,
-            "Two admissions, one effect.",
-            "pause-1",
-        );
+        let paused_request =
+            capture_request(&scenario.space_id, "Two admissions, one effect.", "pause-1");
         let mut hold = scenario
             .provider
             .faults()
@@ -737,7 +735,10 @@ mod tests {
                 .capture(CLIENT, &timeout_request, now)
                 .await,
         );
-        assert_eq!(rejected.code, spoke_operations::SpokeRejectCode::OutcomeUncertain);
+        assert_eq!(
+            rejected.code,
+            spoke_operations::SpokeRejectCode::OutcomeUncertain
+        );
         assert_eq!(count_rows(&scenario, "candidates").await, 1);
         assert_eq!(count_rows(&scenario, "receipts").await, 1);
         let replayed = scenario
@@ -755,7 +756,10 @@ mod tests {
             "Committed before the control was dropped.",
             "post-control-lost",
         );
-        let mut hold = scenario.provider.faults().hold_next(FaultPoint::ResponseDrop);
+        let mut hold = scenario
+            .provider
+            .faults()
+            .hold_next(FaultPoint::ResponseDrop);
         let mut operation = Box::pin(scenario.provider.capture(CLIENT, &dropped_request, now));
         tokio::select! {
             reached = hold.wait_reached() => {
@@ -772,7 +776,9 @@ mod tests {
                 spoke_operations::SpokeRejectCode::OutcomeUncertain,
                 "a lost post-commit control is uncertain"
             ),
-            Ok(receipt) => panic!("a dropped post-commit control must not return success: {receipt:?}"),
+            Ok(receipt) => {
+                panic!("a dropped post-commit control must not return success: {receipt:?}")
+            }
         }
         assert_eq!(count_rows(&scenario, "candidates").await, 2);
         assert_eq!(count_rows(&scenario, "receipts").await, 2);
@@ -801,7 +807,10 @@ mod tests {
                 .capture(CLIENT, &precommit_request, now)
                 .await,
         );
-        assert_eq!(rejected.code, spoke_operations::SpokeRejectCode::InternalError);
+        assert_eq!(
+            rejected.code,
+            spoke_operations::SpokeRejectCode::InternalError
+        );
         assert_eq!(count_rows(&scenario, "candidates").await, 2);
         let committed = scenario
             .provider
@@ -933,8 +942,15 @@ mod tests {
             .provider
             .faults()
             .hold_next_bounded(FaultPoint::AdmissionPause, Duration::from_millis(20));
-        assert_eq!(timed_out.wait_reached().await, Err(FaultHoldLost::Unreached));
-        let first = capture_request(&scenario.space_id, "After an unreached timeout.", "disarm-timeout");
+        assert_eq!(
+            timed_out.wait_reached().await,
+            Err(FaultHoldLost::Unreached)
+        );
+        let first = capture_request(
+            &scenario.space_id,
+            "After an unreached timeout.",
+            "disarm-timeout",
+        );
         scenario
             .provider
             .capture(CLIENT, &first, now)
@@ -949,8 +965,15 @@ mod tests {
             .provider
             .faults()
             .hold_next_bounded(FaultPoint::ResponseDrop, Duration::from_millis(20));
-        assert_eq!(timed_out.wait_reached().await, Err(FaultHoldLost::Unreached));
-        let second = capture_request(&scenario.space_id, "Committed after a stale drop point.", "disarm-drop");
+        assert_eq!(
+            timed_out.wait_reached().await,
+            Err(FaultHoldLost::Unreached)
+        );
+        let second = capture_request(
+            &scenario.space_id,
+            "Committed after a stale drop point.",
+            "disarm-drop",
+        );
         assert_eq!(
             receipt_status(
                 &scenario
@@ -976,7 +999,11 @@ mod tests {
             assert!(raced.is_err(), "the observation is still waiting");
             // Dropping `observation` cancels the observation future here.
         }
-        let third = capture_request(&scenario.space_id, "After a cancelled observation.", "disarm-cancel");
+        let third = capture_request(
+            &scenario.space_id,
+            "After a cancelled observation.",
+            "disarm-cancel",
+        );
         scenario
             .provider
             .capture(CLIENT, &third, now)
@@ -1005,7 +1032,10 @@ mod tests {
             .provider
             .faults()
             .hold_next_bounded(FaultPoint::ResponseDrop, Duration::from_millis(20));
-        assert_eq!(unrelated.wait_reached().await, Err(FaultHoldLost::Unreached));
+        assert_eq!(
+            unrelated.wait_reached().await,
+            Err(FaultHoldLost::Unreached)
+        );
         drop(unrelated);
         held.release();
         operation
@@ -1030,12 +1060,7 @@ mod tests {
             .provider
             .faults()
             .hold_next_bounded(FaultPoint::AdmissionPause, Duration::from_millis(20));
-        let rejected = refusal(
-            scenario
-                .provider
-                .capture(CLIENT, &request, now)
-                .await,
-        );
+        let rejected = refusal(scenario.provider.capture(CLIENT, &request, now).await);
         assert_eq!(
             rejected.code,
             spoke_operations::SpokeRejectCode::InternalError
@@ -1159,6 +1184,7 @@ impl FixtureFaults {
             release: Some(release_rx),
             bound,
         });
+        drop(state);
         TargetHold {
             control: Arc::clone(&self.inner),
             token,
@@ -1204,7 +1230,13 @@ impl TargetHold {
     /// a created-but-unpolled or cancelled observation retires this handle's own
     /// still-armed entry even if the handle is retained afterwards. A replacement
     /// arm (different token) or an already-taken arm is untouched.
-    pub fn wait_reached(&mut self) -> impl Future<Output = Result<(), FaultHoldLost>> + '_ {
+    ///
+    /// # Errors
+    ///
+    /// The returned future yields [`FaultHoldLost::Disarmed`] when the arm was
+    /// retired before this handle observed it, and [`FaultHoldLost::Unreached`]
+    /// when the bound elapsed first.
+    pub fn wait_reached(&mut self) -> impl Future<Output = Result<(), FaultHoldLost>> + Send + '_ {
         let guard = TargetReachGuard {
             control: Arc::clone(&self.control),
             token: self.token,
@@ -1227,7 +1259,7 @@ impl TargetHold {
         let mut state = self
             .control
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if state
             .target
             .as_ref()
@@ -1254,7 +1286,7 @@ impl Drop for TargetReachGuard {
         let mut state = self
             .control
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if state
             .target
             .as_ref()
@@ -1273,7 +1305,7 @@ impl Drop for TargetHold {
         let mut state = self
             .control
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if state
             .target
             .as_ref()
