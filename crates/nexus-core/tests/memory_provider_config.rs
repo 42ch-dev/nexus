@@ -12,6 +12,8 @@ use nexus_core::{
 use nexus_home_layout::active_context::{
     read_active_creator_id, read_active_workspace_slug, read_memory_provider_config,
 };
+#[cfg(unix)]
+use std::future::Future as _;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
@@ -163,9 +165,10 @@ fn unreadable_provider_config_is_an_error_not_the_local_default() {
 /// provider. Before the fix `Path::exists()` folded the ELOOP into "absent",
 /// so the open succeeded on Local.
 ///
-/// The swap is ordered by the open's own first database touch: the workspace
-/// snapshot has been read by then, and the provider table is only read after
-/// the admissions (and their migrations) complete.
+/// The swap is ordered by this test, not by the scheduler: the fresh store's
+/// public migration fence is held while the open is polled exactly once, so
+/// the open must park in its fenced migration admission after the workspace
+/// snapshot and before the provider selection reads the same document again.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_uninspectable_provider_table_fails_the_open_instead_of_selecting_local() {
@@ -194,22 +197,32 @@ async fn an_uninspectable_provider_table_fails_the_open_instead_of_selecting_loc
         memory: None,
     };
 
-    let opened = tokio::spawn(CoreService::open(open(CoreAccess::EngineOwner)));
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-    while !db_path.exists() {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the open never reached its database admission"
-        );
-        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
-    }
+    // Hold the fresh store's public migration fence before the open runs: the
+    // open's first admission must take this exclusive lock, so a single poll
+    // can only reach that wait — it can neither migrate, open a writer nor
+    // select a provider while this test owns the lock.
+    let fence = nexus_local_db::writer_protocol::acquire_store_reset_fence(&db_path)
+        .expect("the fresh store has no live writer");
+    let mut opened = Box::pin(CoreService::open(open(CoreAccess::EngineOwner)));
+    // One poll runs the synchronous workspace discovery and parks on the
+    // fenced admission, so the workspace snapshot has been read and the
+    // provider selection has provably not run yet.
+    let mut poll_once = std::task::Context::from_waker(std::task::Waker::noop());
+    assert!(
+        matches!(
+            opened.as_mut().poll(&mut poll_once),
+            std::task::Poll::Pending
+        ),
+        "the held migration fence keeps the open from finishing"
+    );
     // The window: the same `config.toml` turns uninspectable — a
     // self-referential symlink answers ELOOP, a non-`NotFound` metadata error —
     // between the workspace snapshot and the provider selection.
     std::fs::remove_file(&config).expect("drop the readable document");
     std::os::unix::fs::symlink("config.toml", &config).expect("self-referential config symlink");
+    drop(fence);
 
-    let Err(error) = opened.await.expect("the open task") else {
+    let Err(error) = opened.await else {
         panic!("an uninspectable provider table must not select the local default");
     };
     let CoreError::Internal { category } = &error else {
