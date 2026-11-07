@@ -1598,10 +1598,7 @@ async fn open_pool_keeps_its_admission_with_zero_connections() {
         "a joining open reuses the published identity"
     );
     drop(joined_conn);
-    // The joined handle is its own real pool, not a clone: the dropped
-    // connection's return-to-pool keeps that pool (and its native SQLite
-    // handle) alive until the pool's own close finishes. Await it so the
-    // published admission is actually disposed before asserting the release.
+    // Drain the independent joined pool's native pins before closing the original pool.
     joined.pool().close().await;
     drop(joined);
 
