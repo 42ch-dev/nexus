@@ -21,7 +21,6 @@ use sqlx::SqlitePool;
 
 use crate::actor_fence::ActorFenceTable;
 use crate::changes::read_changes;
-use crate::config_lock::with_config_lock;
 use crate::error::{local_db_err, CoreError, CoreResult};
 use crate::memory_binding::MemoryProviderBinding;
 use crate::memory_provider::LocalMemoryProvider;
@@ -207,24 +206,28 @@ pub struct CoreService {
 
 /// The one disk snapshot of `[memory_provider]` an open takes.
 ///
-/// The read runs under the same daemon-home `config.toml` advisory lock every
-/// writer holds: a read-modify-write truncated by `std::fs::write` can otherwise
-/// be observed as an empty document, which the layout reports as "no
-/// `[memory_provider]`" — the implicit local default — silently replacing a
-/// stored remote selection. The lock is taken and released synchronously here,
-/// before the open awaits anything (its own residual stale-steal heuristic is
-/// unchanged).
+/// It reads the document without taking the writer lock, because every
+/// whole-document writer publishes through
+/// [`nexus_home_layout::config_lock::publish_document`] — an atomic rename — so
+/// this open always sees one complete version, never a truncated document that
+/// the layout would report as "no `[memory_provider]`", the implicit local
+/// default. Writer exclusion (read-modify-write lost-update safety) is
+/// unchanged; it just no longer gates readers.
+///
+/// I-000291: the read performs no directory write, so a `ReadOnly` open still
+/// serves an already-provisioned home whose `.nexus42` is readable but not
+/// writable. A writer that publishes in place instead (an older binary, or a
+/// differently privileged process) is not covered by that atomicity, exactly as
+/// it is outside the lock protocol.
 ///
 /// # Errors
 ///
-/// [`CoreError::Internal`] for an unreadable document or an unavailable lock,
-/// and the mapped [`CoreError::InvalidInput`] of a stored remote reference that
-/// fails validation — a malformed table never degrades to local silently.
+/// [`CoreError::Internal`] for an unreadable document and the mapped
+/// [`CoreError::InvalidInput`] of a stored remote reference that fails
+/// validation — a malformed table never degrades to local silently.
 fn selection_snapshot(nexus_home: &Path) -> CoreResult<MemoryProviderSelection> {
-    let config = with_config_lock(nexus_home, || {
-        read_memory_provider_config(nexus_home).map_err(|error| CoreError::Internal {
-            category: format!("config_load: {error}"),
-        })
+    let config = read_memory_provider_config(nexus_home).map_err(|error| CoreError::Internal {
+        category: format!("config_load: {error}"),
     })?;
     MemoryProviderSelection::from_config(config)
 }
@@ -982,9 +985,6 @@ const fn interrupted_close_report() -> CoreCloseReport {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc;
-    use std::time::Duration;
-
     use super::*;
     use crate::memory_selection::RemoteMemoryProviderSelection;
 
@@ -1010,51 +1010,38 @@ mod tests {
         toml::to_string(&table).expect("config document")
     }
 
-    /// A config writer truncates `config.toml` before it writes the replacement,
-    /// so a snapshot read that does not take the writer's lock can observe an
-    /// empty document — which the layout reports as the implicit local default,
-    /// silently replacing the stored remote selection. The open's snapshot takes
-    /// that lock, so it waits for the writer instead of accepting the torn read.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn the_selection_snapshot_does_not_observe_a_truncated_config() {
+    /// The snapshot reads the whole stored document, so a disk-selected remote
+    /// provider is not replaced by the implicit local default.
+    #[test]
+    fn the_snapshot_reads_the_whole_stored_selection() {
         let home = tempfile::tempdir().expect("home");
-        let nexus_home = home.path().to_path_buf();
-        let document = config_document(&remote_selection());
-        std::fs::write(nexus_home.join("config.toml"), &document).expect("initial config");
-        // Positive control: the un-contended snapshot reads the stored selection.
+        std::fs::write(
+            home.path().join("config.toml"),
+            config_document(&remote_selection()),
+        )
+        .expect("config");
+
         assert_eq!(
-            selection_snapshot(&nexus_home).expect("the stored selection is readable"),
+            selection_snapshot(home.path()).expect("the stored selection is readable"),
             remote_selection()
         );
+    }
 
-        let (held_tx, held_rx) = mpsc::channel();
-        let (release_tx, release_rx) = mpsc::channel();
-        let writer_home = nexus_home.clone();
-        let writer_document = document;
-        let writer = tokio::task::spawn_blocking(move || {
-            let _lock = nexus_home_layout::config_lock::acquire(&writer_home).expect("writer lock");
-            std::fs::write(writer_home.join("config.toml"), "").expect("truncate");
-            held_tx.send(()).expect("signal the hold");
-            release_rx.recv().expect("release signal");
-            std::fs::write(writer_home.join("config.toml"), writer_document).expect("rewrite");
-        });
-        held_rx.recv().expect("the writer holds the lock");
+    /// A table that does not match the layout fails the snapshot instead of
+    /// reading as "no table" (the implicit local default).
+    #[test]
+    fn a_malformed_provider_table_is_refused_not_read_as_local() {
+        let home = tempfile::tempdir().expect("home");
+        std::fs::write(
+            home.path().join("config.toml"),
+            "[memory_provider]\nkind = \"remote\"\nspace_id = 5\n",
+        )
+        .expect("config");
 
-        let read_home = nexus_home.clone();
-        let mut snapshot = tokio::task::spawn_blocking(move || selection_snapshot(&read_home));
+        let error = selection_snapshot(home.path()).err().expect("refused");
         assert!(
-            tokio::time::timeout(Duration::from_millis(250), &mut snapshot)
-                .await
-                .is_err(),
-            "the snapshot read ran while a config writer held the lock",
+            matches!(error, CoreError::Internal { .. }),
+            "the malformed table is refused, not read as local: {error:?}"
         );
-        release_tx.send(()).expect("release the writer");
-        writer.await.expect("writer task");
-
-        let selection = snapshot
-            .await
-            .expect("reader task")
-            .expect("the stored selection is readable");
-        assert_eq!(selection, remote_selection());
     }
 }

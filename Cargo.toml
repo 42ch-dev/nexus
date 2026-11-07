@@ -2,6 +2,7 @@
 members = [
     "crates/nexus-acp-host",
     "crates/nexus-agent-host",
+    "crates/nexus-config-metadata",
     "crates/nexus-contracts",
     "crates/nexus-core",
     "crates/nexus-creator",
@@ -43,7 +44,10 @@ license = "Apache-2.0"
 repository = "https://github.com/42ch/nexus"
 
 # --- Lint configuration ---
-# All workspace crates inherit these via [lints] workspace = true.
+# All workspace crates inherit these via [lints] workspace = true, with one
+# deliberate exception: `crates/nexus-config-metadata` (the audited native
+# access-policy bridge) cannot inherit the table and declares its own copy with
+# `unsafe_code = "allow"`. Every other crate keeps this `forbid`.
 # Enable pedantic + nursery groups; selectively allow overly noisy lints.
 [workspace.lints.rust]
 unsafe_code = "forbid"

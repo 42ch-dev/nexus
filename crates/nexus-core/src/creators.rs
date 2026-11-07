@@ -704,12 +704,16 @@ pub fn read_cli_config(nexus_home: &Path) -> CoreResult<toml::Value> {
     toml::from_str(&content).map_err(|e| internal("CONFIG_PARSE_ERROR", e))
 }
 
-/// Write the CLI config to `nexus_home`.
+/// Publish the CLI config for `nexus_home`.
+///
+/// Every caller (`use_creator`, `logout_creator`) already holds the shared
+/// writer lock; the publication replaces the whole document atomically so the
+/// lock-free provider snapshot can never read a truncated file (I-000288).
 pub fn write_cli_config(nexus_home: &Path, config: &toml::Value) -> CoreResult<()> {
-    let config_path = nexus_home.join("config.toml");
     let toml_str =
         toml::to_string_pretty(config).map_err(|e| internal("CONFIG_SERIALIZE_ERROR", e))?;
-    std::fs::write(&config_path, toml_str).map_err(|e| internal("CONFIG_WRITE_ERROR", e))
+    nexus_home_layout::config_lock::publish_document(nexus_home, &toml_str)
+        .map_err(|e| internal("CONFIG_WRITE_ERROR", e))
 }
 
 /// Commit the active-creator selection and its `default` workspace slug into
