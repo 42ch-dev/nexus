@@ -27,7 +27,7 @@ use windows_sys::Win32::Security::{
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, CREATE_NEW,
-    FILE_ATTRIBUTE_NORMAL, READ_CONTROL, WRITE_DAC,
+    FILE_ATTRIBUTE_NORMAL, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
 };
 
 /// Owner, group and DACL is the access policy this writer reproduces; the
@@ -195,6 +195,10 @@ pub fn link_count(target: &Path) -> io::Result<u64> {
 
 /// Create the staged document file with no sharing, so no other principal can
 /// open it between creation and the policy transition.
+///
+/// The handle also carries `WRITE_OWNER`, which the owner/group components of
+/// the later `SetSecurityInfo` transition require; without it that documented
+/// call fails on the handle this file was just created with.
 pub fn open_staging_file(path: &Path) -> io::Result<File> {
     let path = wide_path(path);
     // SAFETY: the path is NUL-terminated, the security attributes are absent (the
@@ -203,7 +207,7 @@ pub fn open_staging_file(path: &Path) -> io::Result<File> {
     let handle = unsafe {
         CreateFileW(
             path.as_ptr(),
-            GENERIC_WRITE | WRITE_DAC | READ_CONTROL,
+            GENERIC_WRITE | WRITE_DAC | WRITE_OWNER | READ_CONTROL,
             0,
             ptr::null(),
             CREATE_NEW,
