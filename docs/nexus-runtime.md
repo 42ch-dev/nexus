@@ -263,6 +263,9 @@ Electron/TS service may run while the runtime serves invokes.
 Workspace mutations, including remote-binding admission and object metadata,
 require registered writer-protocol authority. Forward migrations add missing
 fences without rewriting already-applied migrations.
+Exclusive migration-lock contention yields the async runtime so pending cleanup
+can progress. The existing acquisition timeout and native-disposal fencing are
+unchanged.
 
 ## Optional web UI serve (`apps/nexus-service`)
 
