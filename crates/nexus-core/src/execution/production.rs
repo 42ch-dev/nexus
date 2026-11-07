@@ -555,6 +555,7 @@ mod tests {
         CoreService::open(CoreOpenOptions {
             user_home: fixture.tmp.path().to_path_buf(),
             access: CoreAccess::EngineOwner,
+            memory: None,
         })
         .await
         .expect("engine-owner core open")

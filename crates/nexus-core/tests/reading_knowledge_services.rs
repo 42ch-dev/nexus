@@ -23,6 +23,7 @@ async fn service(home: &std::path::Path) -> CoreService {
     CoreService::open(CoreOpenOptions {
         user_home: home.into(),
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .unwrap()
@@ -549,6 +550,7 @@ async fn prune_findings_requires_work_write_access() {
     let read_only = CoreService::open(CoreOpenOptions {
         user_home: temp.path().into(),
         access: CoreAccess::ReadOnly,
+        memory: None,
     })
     .await
     .unwrap();

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM remote_binding_memory_admissions\n          WHERE admission_id = ? AND owner_creator_id = ? AND character_id = ?\n            AND binding_id = ? AND authority_host_id = ? AND authority_generation = ?\n            AND space_id = ? AND client_identity = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "7c7706ea2c3ee02a825ca7ca8e8dfe616b11ebf6a970e88df4e8cbb7bf616da0"
+}

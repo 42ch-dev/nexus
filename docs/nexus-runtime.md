@@ -243,12 +243,29 @@ All state lives under `~/.nexus42/` (path helpers in `nexus-home-layout`):
 The runtime boots against the active workspace selected in `config.toml`;
 `connect dial` / `connect peers list` resolve the same DB.
 
+Rust configuration writers serialize the complete read-modify-write with
+`config.toml.lock` and publish whole documents atomically. Readers of an already
+provisioned home do not need to create that lock, including read-only opens.
+An existing document's effective access policy is preserved or the update is
+refused without changing its bytes. Hard-linked documents, unsupported security
+policies and paths that cannot be updated atomically are refused; safe existing
+or creatable symlink targets remain supported without replacing the link.
+New Unix configuration documents use owner-only mode `0600`.
+On Windows, nonempty mandatory-label, resource-attribute or scoped-policy data is
+refused rather than discarded; ACL entry counts use the Win32 information API.
+
 ## Coexistence with the creator app
 
 `nexus-runtime` and the creator-facing `nexus42` app share the home and the
 workspace DB. Concurrency is governed by SQLite WAL (1 writer + N readers,
 `DbPool` busy timeout); the per-work `runtime_lock` is a Rust-host artifact and the Connect invoke path never acquires it. The
 Electron/TS service may run while the runtime serves invokes.
+Workspace mutations, including remote-binding admission and object metadata,
+require registered writer-protocol authority. Forward migrations add missing
+fences without rewriting already-applied migrations.
+Exclusive migration-lock contention yields the async runtime so pending cleanup
+can progress. The existing acquisition timeout and native-disposal fencing are
+unchanged.
 
 ## Optional web UI serve (`apps/nexus-service`)
 

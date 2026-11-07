@@ -12,6 +12,8 @@ pub mod active_context;
 pub mod config_lock;
 pub mod device_id;
 
+pub use active_context::MemoryProviderConfig;
+
 const NEXUS_DIR: &str = ".nexus42";
 
 /// Create the `~/.nexus42/` system directory layout and config skeleton if they

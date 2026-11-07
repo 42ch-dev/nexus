@@ -13,10 +13,14 @@ use clap::Subcommand;
 use nexus_contracts::daemon_api::memory::create_pending_review_request::CreatePendingReviewRequest;
 use nexus_contracts::daemon_api::memory::create_pending_review_response::CreatePendingReviewResponse;
 use nexus_contracts::daemon_api::memory::{ReviewRequest, ReviewResponse};
-use nexus_core::{CoreService, LegacyMigrationStatus, MemoryRevision, Principal, RetainedRecord};
+use nexus_core::{
+    CoreHomeService, CoreService, LegacyMigrationStatus, MemoryProviderSelection, MemoryRevision,
+    Principal, RemoteMemoryProviderSelection, RetainedRecord,
+};
 use nexus_creator_memory::long_term_memory::slug_is_safe;
 use nexus_creator_memory::memory_item::MemoryKind;
 use std::io::Write;
+use std::path::Path;
 use std::str::FromStr;
 
 #[derive(Debug, Subcommand)]
@@ -144,6 +148,58 @@ pub enum MemoryCommand {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
+
+    /// Show or change the selected memory provider
+    Provider {
+        #[command(subcommand)]
+        command: ProviderCommand,
+    },
+}
+
+/// `creator memory provider` subcommands.
+///
+/// The surface is selection-only: `use remote` accepts ids, endpoint, peer key
+/// and allowlist, never a seed, token or credential body (§2.2).
+#[derive(Debug, Subcommand)]
+pub enum ProviderCommand {
+    /// Show the selected provider (implicit local when unset)
+    Show,
+
+    /// Select the memory provider written to `[memory_provider]`
+    Use {
+        #[command(subcommand)]
+        command: ProviderUseCommand,
+    },
+}
+
+/// `creator memory provider use` targets.
+#[derive(Debug, Subcommand)]
+pub enum ProviderUseCommand {
+    /// Select the built-in local provider
+    Local,
+
+    /// Select a remote Connect provider (non-secret references only)
+    Remote {
+        /// Provider space the remote authority serves
+        #[arg(long)]
+        space_id: String,
+
+        /// Operator-provisioned credential file id (not the secret)
+        #[arg(long)]
+        credential_id: String,
+
+        /// `wss://` endpoint (`ws://` is accepted for loopback tests only)
+        #[arg(long)]
+        connect_endpoint: String,
+
+        /// Remote Ed25519 public key, 64 lowercase hex characters
+        #[arg(long)]
+        remote_pubkey_hex: String,
+
+        /// Trusted remote peer id (repeat or space-separate; at least one)
+        #[arg(long = "allowlist", required = true, num_args = 1..)]
+        allowlist: Vec<String>,
+    },
 }
 
 /// `creator memory pending` subcommands (AR-86).
@@ -171,6 +227,12 @@ pub enum PendingCommand {
 /// - The mapped core refusal (admission, `[not_found]` / `[forbidden]`,
 ///   storage) reaches the leaf
 pub async fn run(command: MemoryCommand, config: &CliConfig) -> Result<()> {
+    // Selection is home-level: it needs no active creator and opens no core.
+    let command = match command {
+        MemoryCommand::Provider { command } => return provider(command),
+        other => other,
+    };
+
     let creator_id = config.active_creator_id.as_deref().ok_or_else(|| {
         crate::errors::CliError::Other(
             "No active creator set. Run `nexus42 system identity use <id>` first.".to_string(),
@@ -251,13 +313,15 @@ async fn run_direct(command: MemoryCommand, config: &CliConfig, creator_id: &str
                 )
                 .await
             }
-            // `run` routes the E1/E2 leaves before this seam is opened.
+            // `run` routes the E1/E2 leaves and `provider` before this seam is
+            // opened.
             MemoryCommand::List
             | MemoryCommand::Create { .. }
             | MemoryCommand::Show { .. }
             | MemoryCommand::Edit { .. }
-            | MemoryCommand::Delete { .. } => {
-                unreachable!("the crud leaves are routed before the direct core opens")
+            | MemoryCommand::Delete { .. }
+            | MemoryCommand::Provider { .. } => {
+                unreachable!("the crud leaves and provider are routed before the direct core opens")
             }
         }
     }
@@ -1014,6 +1078,75 @@ fn open_editor_temp(prefix: &str, initial_content: &str) -> Result<String> {
     let content = std::fs::read_to_string(&temp_path)?;
     // NamedTempFile auto-deletes on drop — no manual cleanup needed
     Ok(content)
+}
+
+/// `creator memory provider show|use` — selection only.
+///
+/// No secret argument, stdin or environment value is read: `use remote` takes
+/// ids, endpoint, peer key and allowlist, and the shared core writer rejects a
+/// malformed reference before anything is persisted.
+///
+/// # Errors
+///
+/// Returns the home-resolution failure, the `[memory_provider]` read refusal
+/// through [`nexus_home_layout::active_context::read_memory_provider_config`],
+/// and the mapped core validation/write refusal.
+fn provider(command: ProviderCommand) -> Result<()> {
+    let user_home = crate::config::user_home_dir()?;
+
+    match command {
+        ProviderCommand::Show => {
+            let selection = read_provider_selection(&user_home)?;
+            println!("{}", render_provider_selection(&selection));
+        }
+        ProviderCommand::Use { command } => {
+            let selection = match command {
+                ProviderUseCommand::Local => MemoryProviderSelection::Local,
+                ProviderUseCommand::Remote {
+                    space_id,
+                    credential_id,
+                    connect_endpoint,
+                    remote_pubkey_hex,
+                    allowlist,
+                } => MemoryProviderSelection::Remote(RemoteMemoryProviderSelection {
+                    space_id,
+                    credential_id,
+                    connect_endpoint,
+                    remote_pubkey_hex,
+                    allowlist,
+                }),
+            };
+            CoreHomeService::open(user_home)
+                .map_err(map_core_error)?
+                .set_memory_provider_selection(&selection)
+                .map_err(map_core_error)?;
+            println!("{}", render_provider_selection(&selection));
+        }
+    }
+    Ok(())
+}
+
+/// Read the on-disk selection; a missing table is the implicit local default.
+fn read_provider_selection(user_home: &Path) -> Result<MemoryProviderSelection> {
+    let config = nexus_home_layout::active_context::read_memory_provider_config(
+        &nexus_home_layout::nexus_root_from_home(user_home),
+    )?;
+    MemoryProviderSelection::from_config(config).map_err(map_core_error)
+}
+
+/// Render the selection as non-secret `key: value` lines.
+fn render_provider_selection(selection: &MemoryProviderSelection) -> String {
+    match selection {
+        MemoryProviderSelection::Local => "memory_provider: local".to_string(),
+        MemoryProviderSelection::Remote(remote) => format!(
+            "memory_provider: remote\nspace_id: {}\ncredential_id: {}\nconnect_endpoint: {}\nremote_pubkey_hex: {}\nallowlist: {}",
+            remote.space_id,
+            remote.credential_id,
+            remote.connect_endpoint,
+            remote.remote_pubkey_hex,
+            remote.allowlist.join(", "),
+        ),
+    }
 }
 
 #[cfg(test)]

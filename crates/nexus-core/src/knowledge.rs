@@ -1085,6 +1085,7 @@ mod kb_ownership_tests {
         let core = CoreService::open(crate::CoreOpenOptions {
             user_home: home.to_path_buf(),
             access: crate::CoreAccess::DirectWriter,
+            memory: None,
         })
         .await
         .unwrap();

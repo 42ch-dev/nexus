@@ -681,7 +681,8 @@ async fn commit_binding_removal(
     }
 }
 
-async fn remove_binding_tx(
+/// Every dependency gate one active binding must pass before removal.
+async fn require_binding_removable_tx(
     tx: &mut Transaction<'_, Sqlite>,
     owner_creator_id: &str,
     character_id: &str,
@@ -760,6 +761,35 @@ async fn remove_binding_tx(
         });
     }
 
+    // D18 (§5.1): a remote binding-local dependency keeps the binding until its
+    // own evidence settles. Unknown admissions block even after later retries
+    // succeed (the supervisor-selected conservative policy; owner confirmation
+    // pending); known live references block until a positive
+    // disposal/review/promotion fact closes them. Only terminal facts remain at
+    // that point, so they are cleared with the delete.
+    let remote = remote_binding_dependency_counts_tx(tx, binding_id).await?;
+    if remote.admissions > 0 || remote.live_objects > 0 {
+        return Err(LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::BindingHasRemoteMemory,
+        });
+    }
+    Ok(())
+}
+
+/// Release the dependencies the removal gate proved settleable: the
+/// binding's terminal remote facts, then the legacy provenance the gate
+/// proved the provider already owns.
+async fn release_binding_dependencies_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    binding_id: &str,
+) -> Result<(), LocalDbError> {
+    sqlx::query!(
+        "DELETE FROM remote_binding_memory_objects WHERE binding_id = ?",
+        binding_id
+    )
+    .execute(&mut **tx)
+    .await?;
+
     // The legacy rows the gate proved are no longer served still name this
     // binding in their foreign key (`ON DELETE RESTRICT`), so removal releases
     // that provenance the way the legacy local→shared promotion does: the row
@@ -799,6 +829,19 @@ async fn remove_binding_tx(
     .execute(&mut **tx)
     .await?;
 
+    Ok(())
+}
+
+/// Apply every removal gate, release what it proved settleable, then drop
+/// the binding row itself.
+async fn remove_binding_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    owner_creator_id: &str,
+    character_id: &str,
+    binding_id: &str,
+) -> Result<(), LocalDbError> {
+    require_binding_removable_tx(tx, owner_creator_id, character_id, binding_id).await?;
+    release_binding_dependencies_tx(tx, binding_id).await?;
     let deleted = sqlx::query!(
         r#"DELETE FROM actor_world_bindings WHERE binding_id = ? AND character_id = ? AND status = 'active'"#,
         binding_id,
@@ -814,4 +857,294 @@ async fn remove_binding_tx(
         });
     }
     Ok(())
+}
+
+// ── Remote binding-memory dependency metadata (D18, binding spec §5.1) ─────
+//
+// Content-free Nexus bookkeeping for remote binding-local memory: the tables
+// carry provider-object identity plus the namespace it was recorded under,
+// never memory text, request bodies or credentials.
+
+/// The namespace one remote binding-memory dependency belongs to.
+///
+/// A fact is only visible to — and only clearable by — the exact provider
+/// authority, space, loaded public client identity and Nexus bearer/binding
+/// that recorded it, so a stale or foreign namespace can neither read nor
+/// erase another namespace's dependency.
+pub struct RemoteBindingNamespace<'a> {
+    owner_creator_id: &'a str,
+    character_id: &'a str,
+    binding_id: &'a str,
+    authority_host_id: &'a str,
+    /// The provider's `NonZeroU64` authority generation as its canonical
+    /// decimal text, computed once per namespace: every value in the declared
+    /// range is its own identity, so two generations can never alias one row,
+    /// and a multi-object receipt reuses the text instead of reformatting the
+    /// same generation per object write.
+    authority_generation_text: String,
+    space_id: &'a str,
+    client_identity: &'a str,
+}
+
+impl<'a> RemoteBindingNamespace<'a> {
+    /// Build the one namespace an operation's dependency writes share.
+    ///
+    /// The canonical generation text is derived here, from the exact numeric
+    /// identity, so no caller can supply an independently formatted or
+    /// divergent text for the same generation.
+    #[must_use]
+    pub fn new(
+        owner_creator_id: &'a str,
+        character_id: &'a str,
+        binding_id: &'a str,
+        authority_host_id: &'a str,
+        authority_generation: u64,
+        space_id: &'a str,
+        client_identity: &'a str,
+    ) -> Self {
+        Self {
+            owner_creator_id,
+            character_id,
+            binding_id,
+            authority_host_id,
+            authority_generation_text: authority_generation.to_string(),
+            space_id,
+            client_identity,
+        }
+    }
+
+    /// The canonical decimal generation text every dependency row binds.
+    #[must_use]
+    pub fn generation_text(&self) -> &str {
+        &self.authority_generation_text
+    }
+}
+
+/// One known remote provider object a binding depends on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoteBindingObjectKind {
+    Candidate,
+    Record,
+}
+
+impl RemoteBindingObjectKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Candidate => "candidate",
+            Self::Record => "record",
+        }
+    }
+}
+
+/// One monotone known-object state (D18): `live → consumed → released`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoteBindingObjectState {
+    Live,
+    Consumed,
+    Released,
+}
+
+impl RemoteBindingObjectState {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Live => "live",
+            Self::Consumed => "consumed",
+            Self::Released => "released",
+        }
+    }
+}
+
+/// The binding's open remote dependencies: unknown wire attempts and known
+/// live object references. Terminal (consumed/released) facts are evidence,
+/// not dependencies, and never appear here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RemoteBindingDependencyCounts {
+    pub admissions: i64,
+    pub live_objects: i64,
+}
+
+/// Record one independently identified remote capture admission (D18).
+///
+/// The caller commits it in the same writer transaction as the provenance
+/// check and before the RPC; only the definite result of this exact wire
+/// attempt may retire it.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError`] when the row cannot be written.
+pub async fn insert_remote_binding_admission_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    admission_id: &str,
+    namespace: &RemoteBindingNamespace<'_>,
+    now: &str,
+) -> Result<(), LocalDbError> {
+    sqlx::query!(
+        r"INSERT INTO remote_binding_memory_admissions
+          (admission_id, owner_creator_id, character_id, binding_id, authority_host_id,
+           authority_generation, space_id, client_identity, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        admission_id,
+        namespace.owner_creator_id,
+        namespace.character_id,
+        namespace.binding_id,
+        namespace.authority_host_id,
+        namespace.generation_text(),
+        namespace.space_id,
+        namespace.client_identity,
+        now
+    )
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+/// Retire exactly the named admission of this namespace.
+///
+/// Returns `false` when no row of that identity exists (already retired, or a
+/// foreign namespace), in which case nothing changed. No later attempt,
+/// receipt or counter can retire another admission through this helper.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError`] when the delete cannot run.
+pub async fn retire_remote_binding_admission_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    admission_id: &str,
+    namespace: &RemoteBindingNamespace<'_>,
+) -> Result<bool, LocalDbError> {
+    let retired = sqlx::query!(
+        r"DELETE FROM remote_binding_memory_admissions
+          WHERE admission_id = ? AND owner_creator_id = ? AND character_id = ?
+            AND binding_id = ? AND authority_host_id = ? AND authority_generation = ?
+            AND space_id = ? AND client_identity = ?",
+        admission_id,
+        namespace.owner_creator_id,
+        namespace.character_id,
+        namespace.binding_id,
+        namespace.authority_host_id,
+        namespace.generation_text(),
+        namespace.space_id,
+        namespace.client_identity
+    )
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    Ok(retired > 0)
+}
+
+/// Record one known provider-object fact for this binding (D18).
+///
+/// The write is monotone (`live → consumed → released`) and conditional on the
+/// binding still existing, so a late acknowledgement can neither resurrect a
+/// terminal fact nor revive a deleted binding. A fact recorded under one
+/// namespace is never rewritten by another.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError`] when the write cannot run.
+pub async fn record_remote_binding_object_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    namespace: &RemoteBindingNamespace<'_>,
+    kind: RemoteBindingObjectKind,
+    object_id: &str,
+    state: RemoteBindingObjectState,
+    now: &str,
+) -> Result<(), LocalDbError> {
+    sqlx::query!(
+        r"INSERT INTO remote_binding_memory_objects
+          (authority_host_id, authority_generation, space_id, client_identity, character_id,
+           binding_id, object_kind, object_id, state, created_at, updated_at)
+          SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          WHERE EXISTS (SELECT 1 FROM actor_world_bindings WHERE binding_id = ?)
+          ON CONFLICT (authority_host_id, authority_generation, space_id, client_identity,
+                       character_id, binding_id, object_kind, object_id)
+          DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at
+          WHERE (CASE excluded.state WHEN 'live' THEN 0 WHEN 'consumed' THEN 1 ELSE 2 END)
+              > (CASE remote_binding_memory_objects.state
+                      WHEN 'live' THEN 0 WHEN 'consumed' THEN 1 ELSE 2 END)",
+        namespace.authority_host_id,
+        namespace.generation_text(),
+        namespace.space_id,
+        namespace.client_identity,
+        namespace.character_id,
+        namespace.binding_id,
+        kind.as_str(),
+        object_id,
+        state.as_str(),
+        now,
+        now,
+        namespace.binding_id
+    )
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+/// The binding's open remote dependencies for the removal gate.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError`] when the counts cannot be read.
+pub async fn remote_binding_dependency_counts_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    binding_id: &str,
+) -> Result<RemoteBindingDependencyCounts, LocalDbError> {
+    let admissions = sqlx::query_scalar!(
+        r#"SELECT COUNT(*) as "count!" FROM remote_binding_memory_admissions WHERE binding_id = ?"#,
+        binding_id
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+    let live_objects = sqlx::query_scalar!(
+        r#"SELECT COUNT(*) as "count!" FROM remote_binding_memory_objects
+           WHERE binding_id = ? AND state = 'live'"#,
+        binding_id
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(RemoteBindingDependencyCounts {
+        admissions,
+        live_objects,
+    })
+}
+
+/// Whether this namespace recorded any D18 fact for one provider object.
+///
+/// A positive answer is authoritative Nexus origin evidence for that exact
+/// object: only this module writes those facts, and the lookup binds the same
+/// eight identity columns the write's conflict key uses plus the canonical
+/// generation text, so a foreign authority/space/client/bearer cannot answer for
+/// another namespace's object. A negative answer proves nothing about where the
+/// object came from — callers MUST NOT read it as "provider-native".
+///
+/// # Errors
+///
+/// Returns [`LocalDbError`] when the check cannot run.
+pub async fn remote_binding_object_is_known(
+    pool: &SqlitePool,
+    namespace: &RemoteBindingNamespace<'_>,
+    kind: RemoteBindingObjectKind,
+    object_id: &str,
+) -> Result<bool, LocalDbError> {
+    let known = sqlx::query_scalar!(
+        r#"SELECT EXISTS (
+              SELECT 1 FROM remote_binding_memory_objects
+              WHERE authority_host_id = ? AND authority_generation = ? AND space_id = ?
+                AND client_identity = ? AND character_id = ? AND binding_id = ?
+                AND object_kind = ? AND object_id = ?
+          ) as "known!""#,
+        namespace.authority_host_id,
+        namespace.generation_text(),
+        namespace.space_id,
+        namespace.client_identity,
+        namespace.character_id,
+        namespace.binding_id,
+        kind.as_str(),
+        object_id
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok(known != 0)
 }

@@ -59,6 +59,7 @@ async fn fresh_env() -> InspectorEnv {
     let core = CoreService::open(CoreOpenOptions {
         user_home: fixture.home.path().to_path_buf(),
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .expect("seed core opens on the isolated home");
@@ -106,6 +107,7 @@ async fn seed_bound_work(env: &InspectorEnv) -> String {
     let core = CoreService::open(CoreOpenOptions {
         user_home: env.fixture.home.path().to_path_buf(),
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .expect("seed core opens on the isolated home");

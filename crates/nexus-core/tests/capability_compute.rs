@@ -141,6 +141,7 @@ async fn fixture_with_compute(
     let core = CoreService::open(CoreOpenOptions {
         user_home: user_home.clone(),
         access: CoreAccess::EngineOwner,
+        memory: None,
     })
     .await
     .expect("engine-owner core open");
@@ -832,6 +833,7 @@ async fn execute_tool_refuses_a_principal_from_another_core() {
     let other_core = CoreService::open(CoreOpenOptions {
         user_home: other_home,
         access: CoreAccess::EngineOwner,
+        memory: None,
     })
     .await
     .expect("second core opens");

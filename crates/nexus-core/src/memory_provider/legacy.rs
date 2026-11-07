@@ -32,7 +32,9 @@
 //! subject, so a caller can list a projected id only when it can also read that
 //! id by id; another subject naming the same bearer projects nothing. Task 2's
 //! adoption and P5's migration pass derive each legacy row's subject from this
-//! rule, never from whichever subject a draft happens to name.
+//! rule, never from whichever subject a draft happens to name. `ensure_subject`
+//! refuses a second naming in its own transaction (§7/I-000149), so the rule
+//! now only arbitrates rows written before that refusal existed.
 //!
 //! **Completion marker.** P5 publishes [`legacy_migration_key`] in
 //! `memory_provider_meta` — any non-empty value — once every legacy object of

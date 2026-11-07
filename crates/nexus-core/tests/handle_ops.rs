@@ -141,6 +141,7 @@ async fn open_handle_bare(f: &Fixture) -> (CoreService, Arc<ExecutionHandle>) {
     let core = CoreService::open(CoreOpenOptions {
         user_home: f.tmp.path().to_path_buf(),
         access: CoreAccess::EngineOwner,
+        memory: None,
     })
     .await
     .expect("engine-owner core open");
@@ -669,6 +670,7 @@ mod compute_seam {
         let core = CoreService::open(CoreOpenOptions {
             user_home: f.tmp.path().to_path_buf(),
             access: CoreAccess::EngineOwner,
+            memory: None,
         })
         .await
         .expect("engine-owner core open");
@@ -737,6 +739,7 @@ mod compute_seam {
         let other_core = CoreService::open(CoreOpenOptions {
             user_home: other_home,
             access: CoreAccess::EngineOwner,
+            memory: None,
         })
         .await
         .expect("second core opens");

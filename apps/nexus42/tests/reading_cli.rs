@@ -59,6 +59,7 @@ async fn fresh_env() -> ReadingEnv {
     let core = CoreService::open(CoreOpenOptions {
         user_home: fixture.home.path().to_path_buf(),
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .expect("seed core opens on the isolated home");

@@ -247,6 +247,7 @@ async fn stale_old_selection_cannot_mutate() {
     let core = CoreService::open(CoreOpenOptions {
         user_home: user_home.clone(),
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .expect("open core");
@@ -291,6 +292,7 @@ async fn outbox_status_and_resolve_operate_on_the_workspace_outbox() {
     let core = CoreService::open(CoreOpenOptions {
         user_home: user_home.clone(),
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .expect("open core");
@@ -495,6 +497,7 @@ async fn select_workspace_failure_keeps_previous_selection_and_principal() {
     let core = CoreService::open(CoreOpenOptions {
         user_home: user_home.clone(),
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .expect("open core");
@@ -560,6 +563,7 @@ async fn stale_principal_after_workspace_and_identity_switch_recovers_on_reopen(
     let core = CoreService::open(CoreOpenOptions {
         user_home: user_home.clone(),
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .expect("open core");
@@ -586,6 +590,7 @@ async fn stale_principal_after_workspace_and_identity_switch_recovers_on_reopen(
     let core = CoreService::open(CoreOpenOptions {
         user_home: user_home.clone(),
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .expect("reopen core");
@@ -623,6 +628,7 @@ async fn stale_principal_after_workspace_and_identity_switch_recovers_on_reopen(
     let core = CoreService::open(CoreOpenOptions {
         user_home: user_home.clone(),
         access: CoreAccess::DirectWriter,
+        memory: None,
     })
     .await
     .expect("reopen core as b");
